@@ -9,6 +9,7 @@ members = [
     "crates/umicraft-client",
     "crates/umicraft-net",
     "crates/umicraft-testkit",
+    "crates/umicraft-game",
 ]
 
 [workspace.package]
@@ -36,6 +37,7 @@ umicraft-protocol = { path = "crates/umicraft-protocol", version = "0.1.0" }
 umicraft-world = { path = "crates/umicraft-world", version = "0.1.0" }
 umicraft-mesh = { path = "crates/umicraft-mesh", version = "0.1.0" }
 umicraft-render = { path = "crates/umicraft-render", version = "0.1.0" }
+umicraft-game = { path = "crates/umicraft-game", version = "0.1.0" }
 
 [workspace.lints.rust]
 missing_docs = "deny"

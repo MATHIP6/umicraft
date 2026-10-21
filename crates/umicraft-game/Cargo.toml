@@ -1,0 +1,15 @@
+[package]
+name = "umicraft-game"
+description = "Umicraft game logic: 1.8 movement rules, block collision, prediction and reconciliation, tick and ray cast."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+glam = "0.34"
+umicraft-world.workspace = true
+
+[lints]
+workspace = true
