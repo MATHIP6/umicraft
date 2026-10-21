@@ -1,0 +1,138 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Block states and the coarse shape/opacity classes the M2 mesher needs.
+//!
+//! A 1.8 wire block state is `block id << 4 | metadata`
+//! (`Block.BLOCK_STATE_IDS` in MCP), which fits in 16 bits. M6 replaces this
+//! with a real block registry; M2 only needs to tell air, full opaque cubes,
+//! see-through cubes, liquids, and non-cube decorations apart.
+
+/// A 1.8 global block state: 12-bit block id plus 4-bit metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct BlockState(u16);
+
+/// Coarse rendering class of a block state.
+///
+/// The classes drive the naive mesher's face culling. Shapes and per-state
+/// models arrive with the block registry in M6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockKind {
+    /// No geometry and does not occlude neighbours.
+    Air,
+    /// Full cube that hides the neighbouring face.
+    Opaque,
+    /// Full cube that is see-through (glass, leaves, ice) and does not hide
+    /// neighbouring faces, but hides faces against an identical state.
+    Transparent,
+    /// Full-cube liquid (water/lava), treated like [`BlockKind::Transparent`]
+    /// for culling.
+    Liquid,
+    /// Non-cube decoration (plants, torches, slabs, fences, …). The M2 mesher
+    /// skips these; M6 adds models.
+    Flat,
+}
+
+impl BlockState {
+    /// Air (`block id 0`, metadata 0).
+    pub const AIR: Self = Self(0);
+
+    /// Wraps a raw wire state (`block id << 4 | metadata`).
+    #[must_use]
+    pub const fn from_wire(raw: u16) -> Self {
+        Self(raw)
+    }
+
+    /// Creates a state from a block id and metadata; metadata is truncated to
+    /// four bits.
+    #[must_use]
+    pub const fn new(id: u16, metadata: u8) -> Self {
+        Self((id << 4) | (metadata as u16 & 0x0F))
+    }
+
+    /// Raw wire representation (`block id << 4 | metadata`).
+    #[must_use]
+    pub const fn wire(self) -> u16 {
+        self.0
+    }
+
+    /// 12-bit block id.
+    #[must_use]
+    pub const fn id(self) -> u16 {
+        self.0 >> 4
+    }
+
+    /// 4-bit metadata.
+    #[must_use]
+    pub const fn metadata(self) -> u8 {
+        (self.0 & 0x0F) as u8
+    }
+
+    /// True for air.
+    #[must_use]
+    pub const fn is_air(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Coarse rendering class, see [`BlockKind`].
+    #[must_use]
+    pub const fn kind(self) -> BlockKind {
+        match self.id() {
+            0 => BlockKind::Air,
+            // Water and lava are full cubes that do not cull neighbours.
+            8..=11 => BlockKind::Liquid,
+            // See-through full cubes.
+            18 | 20 | 79 | 95 => BlockKind::Transparent,
+            // Non-cube decorations. Unknown blocks default to opaque cubes so
+            // a missing registry entry never opens holes in the terrain.
+            6 | 26 | 31 | 32 | 34 | 36 | 37 | 38 | 39 | 40 | 50 | 51 | 55 | 59 | 63 | 65 | 68
+            | 70 | 72 | 75 | 76 | 77 | 78 | 83 | 90 | 93 | 94 | 96 | 101 | 102 | 104 | 105
+            | 106 | 111 | 113 | 115 | 116 | 117 | 118 | 119 | 127 | 131 | 132 | 140 | 141 | 142
+            | 143 | 144 | 145 | 146 | 147 | 148 | 149 | 150 | 151 | 154 | 157 | 167 | 171 | 175
+            | 176 | 177 | 178 | 188 | 189 | 190 | 191 | 192 | 198 | 199 | 200 | 201 | 202 | 203
+            | 204 | 205 => BlockKind::Flat,
+            _ => BlockKind::Opaque,
+        }
+    }
+
+    /// True when the block is a full cube that hides the face of its
+    /// neighbour.
+    #[must_use]
+    pub const fn is_opaque(self) -> bool {
+        matches!(self.kind(), BlockKind::Opaque)
+    }
+
+    /// True when the M2 mesher emits geometry for this state.
+    #[must_use]
+    pub const fn is_renderable(self) -> bool {
+        !matches!(self.kind(), BlockKind::Air | BlockKind::Flat)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wire_layout_matches_1_8_block_state_ids() {
+        let grass = BlockState::new(2, 0);
+        assert_eq!(grass.wire(), 0x20);
+        assert_eq!(grass.id(), 2);
+        assert_eq!(grass.metadata(), 0);
+        assert_eq!(BlockState::from_wire(0x70), BlockState::new(7, 0));
+
+        let log_axis_x = BlockState::new(17, 4);
+        assert_eq!(log_axis_x.wire(), 0x114);
+        assert_eq!(log_axis_x.metadata(), 4);
+    }
+
+    #[test]
+    fn coarse_classes() {
+        assert_eq!(BlockState::AIR.kind(), BlockKind::Air);
+        assert!(!BlockState::AIR.is_renderable());
+        assert!(BlockState::new(1, 0).is_opaque());
+        assert!(BlockState::new(8, 0).is_renderable());
+        assert!(!BlockState::new(8, 0).is_opaque());
+        assert!(!BlockState::new(31, 0).is_renderable());
+        assert_eq!(BlockState::new(20, 0).kind(), BlockKind::Transparent);
+    }
+}

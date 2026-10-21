@@ -1,0 +1,22 @@
+[package]
+name = "umicraft-world"
+description = "Umicraft world model: 1.8 chunk columns, compact paletted section storage, and block updates."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+umicraft-protocol.workspace = true
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "world"
+harness = false
+
+[lints]
+workspace = true
