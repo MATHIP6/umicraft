@@ -9,7 +9,7 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use umicraft_mesh::ChunkSnapshot;
-use umicraft_render::{Camera, Overlay, Renderer};
+use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
 use umicraft_world::{ChunkPos, World};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -328,8 +328,6 @@ impl App {
         if !self.show_overlay {
             return;
         }
-        let scale = (height as f32 / 360.0).floor().clamp(1.0, 3.0);
-        let line_height = 8.0 * scale;
         let chunks = self.scene.world.as_ref().map_or(0, World::chunk_count);
         let meshes = self.renderer.as_ref().map_or(0, Renderer::mesh_count);
         let faces: usize = self.faces.values().sum();
@@ -354,23 +352,14 @@ impl App {
             "RIGHT-DRAG LOOK  ARROWS LOOK  F1 OVERLAY".to_string(),
             "R RESET  ESC RELEASE CURSOR / QUIT".to_string(),
         ];
-        let panel_width = lines
-            .iter()
-            .map(|line| Overlay::text_width(line, scale))
-            .fold(0.0_f32, f32::max)
-            + 20.0;
-        let panel_height = lines.len() as f32 * line_height + 12.0;
-        self.overlay
-            .rect(4.0, 4.0, panel_width, panel_height, [0.0, 0.0, 0.0, 0.55]);
-        for (index, line) in lines.iter().enumerate() {
-            self.overlay.text(
-                10.0,
-                10.0 + index as f32 * line_height,
-                scale,
-                [1.0, 1.0, 1.0, 1.0],
-                line,
-            );
-        }
+        // The HUD owns the debug block, the crosshair, and the bottom stack;
+        // the client only feeds it the lines it already tracks.
+        let hud = HudState {
+            debug_lines: lines.to_vec(),
+            chat_lines: self.scene.chat_history.iter().cloned().collect(),
+            ..HudState::default()
+        };
+        draw_hud(&mut self.overlay, &hud, width, height);
         let graph_width = 240.0_f32.min(width as f32 - 20.0);
         let graph_height = 40.0_f32.min(height as f32 - 70.0);
         if graph_width > 0.0 && graph_height > 0.0 {

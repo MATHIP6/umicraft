@@ -6,12 +6,15 @@
 //! taken without locking and the mesher only ever sees immutable `Arc` column
 //! versions.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 
 use umicraft_net::client::{JoinGameInfo, PlayerPlacement};
 use umicraft_world::{ChunkPos, World};
 
 use crate::network::NetEvent;
+
+/// Number of chat lines kept for the HUD.
+const CHAT_HISTORY: usize = 10;
 
 /// World plus connection/status fields shown in the debug overlay.
 #[derive(Debug, Default)]
@@ -26,6 +29,11 @@ pub struct SessionWorld {
     pub status: String,
     /// Chat/system messages observed.
     pub chat_messages: u64,
+    /// The most recent chat/system messages, oldest first.
+    ///
+    /// Bounded to [`CHAT_HISTORY`] entries; the HUD renders them above the
+    /// hotbar.
+    pub chat_history: VecDeque<String>,
     /// Chunk packets applied (0x21/0x26).
     pub chunk_packets: u64,
     /// Individual block updates applied (0x22/0x23 records).
@@ -62,8 +70,12 @@ impl SessionWorld {
                 self.placement = Some(placement);
                 false
             }
-            NetEvent::Chat(_) => {
+            NetEvent::Chat(message) => {
                 self.chat_messages += 1;
+                self.chat_history.push_back(message);
+                while self.chat_history.len() > CHAT_HISTORY {
+                    self.chat_history.pop_front();
+                }
                 false
             }
             NetEvent::ChunkData(packet) => {

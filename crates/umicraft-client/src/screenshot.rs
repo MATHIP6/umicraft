@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use umicraft_mesh::ChunkSnapshot;
-use umicraft_render::{Camera, Overlay, Renderer};
+use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
 use umicraft_world::ChunkPos;
 
 use crate::args::Args;
@@ -89,8 +89,6 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let mut camera = camera_for(&scene, args.width, args.height);
     camera.set_aspect(args.width, args.height);
     let mut overlay = Overlay::new(args.width, args.height);
-    let scale = ((args.height as f32 / 360.0).floor()).clamp(1.0, 3.0);
-    let line_height = 8.0 * scale;
     let lines = [
         "UMICRAFT M2 SCREENSHOT".to_string(),
         format!(
@@ -109,22 +107,14 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         ),
         format!("COLLECTED {:.1}S", args.collect.as_secs_f32()),
     ];
-    let panel_width = lines
-        .iter()
-        .map(|line| Overlay::text_width(line, scale))
-        .fold(0.0_f32, f32::max)
-        + 20.0;
-    let panel_height = lines.len() as f32 * line_height + 12.0;
-    overlay.rect(4.0, 4.0, panel_width, panel_height, [0.0, 0.0, 0.0, 0.55]);
-    for (index, line) in lines.iter().enumerate() {
-        overlay.text(
-            10.0,
-            10.0 + index as f32 * line_height,
-            scale,
-            [1.0, 1.0, 1.0, 1.0],
-            line,
-        );
-    }
+    // The offscreen path draws the same HUD as the window, so the acceptance
+    // screenshot shows the in-game layout.
+    let hud = HudState {
+        debug_lines: lines.to_vec(),
+        chat_lines: scene.chat_history.iter().cloned().collect(),
+        ..HudState::default()
+    };
+    draw_hud(&mut overlay, &hud, args.width, args.height);
 
     renderer.render(&camera, &overlay)?;
     let image = renderer.read_pixels()?;
