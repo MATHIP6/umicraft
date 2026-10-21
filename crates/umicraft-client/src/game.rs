@@ -965,22 +965,36 @@ fn unstick(game: &mut Game) {
     let Some(world) = game.world.as_ref() else {
         return;
     };
-    let bounds = state.player().bounding_box();
-    let mut top: Option<i32> = None;
-    for x in (bounds.min.x.floor() as i32)..=(bounds.max.x.floor() as i32) {
-        for z in (bounds.min.z.floor() as i32)..=(bounds.max.z.floor() as i32) {
-            for y in (bounds.min.y.floor() as i32)..=(bounds.max.y.floor() as i32) {
-                if !world.block(BlockPos::new(x, y, z)).is_air() {
-                    top = Some(top.map_or(y + 1, |current: i32| current.max(y + 1)));
+    let position = state.position();
+    let half = umicraft_game::physics::PLAYER_HALF_WIDTH;
+    let height = umicraft_game::physics::PLAYER_HEIGHT;
+    // The lift may still leave the player inside another block, so the search
+    // repeats until the box of the player is free.
+    let mut feet = position.y;
+    for _ in 0..8 {
+        let bounds = Aabb::new(
+            DVec3::new(position.x - half, feet, position.z - half),
+            DVec3::new(position.x + half, feet + height, position.z + half),
+        );
+        let mut top: Option<i32> = None;
+        for x in (bounds.min.x.floor() as i32)..=(bounds.max.x.floor() as i32) {
+            for z in (bounds.min.z.floor() as i32)..=(bounds.max.z.floor() as i32) {
+                for y in (bounds.min.y.floor() as i32)..=(bounds.max.y.floor() as i32) {
+                    if !world.block(BlockPos::new(x, y, z)).is_air() {
+                        top = Some(top.map_or(y + 1, |current: i32| current.max(y + 1)));
+                    }
                 }
             }
         }
+        let Some(top) = top else {
+            break;
+        };
+        feet = f64::from(top);
     }
-    let Some(top) = top else {
+    if (feet - position.y).abs() < 1e-6 {
         return;
-    };
-    let position = state.position();
-    let lifted = DVec3::new(position.x, f64::from(top), position.z);
+    }
+    let lifted = DVec3::new(position.x, feet, position.z);
     tracing::info!(?position, ?lifted, "the player stands inside a block");
     let correction =
         ServerCorrection::new(lifted.x, lifted.y, lifted.z, game.yaw, game.pitch, true);
