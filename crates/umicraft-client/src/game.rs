@@ -651,11 +651,15 @@ fn handle_event(
 }
 
 /// Publishes the current player state as a frame.
+///
+/// The frame queue is polled by the render thread, so the game thread never
+/// blocks on it: a full queue drops the frame and the render thread keeps the
+/// one it has.
 fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Instant) {
     let Some(state) = game.state.as_ref() else {
         return;
     };
-    let _ = frames.send(RenderEvent::Frame(Frame {
+    let _ = frames.try_send(RenderEvent::Frame(Frame {
         state: state.interpolated(1.0),
         tick_time,
     }));
@@ -678,7 +682,7 @@ fn handle_net(
             game.playing = true;
             game.status = "PLAYING".to_string();
             game.status_data.status = game.status.clone();
-            let _ = frames.send(RenderEvent::Reset);
+            let _ = frames.try_send(RenderEvent::Reset);
             publish_status(game, frames);
         }
         NetEvent::Placement(placement) => {
@@ -764,7 +768,7 @@ fn handle_net(
             if changed {
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
-                let _ = frames.send(RenderEvent::Reset);
+                let _ = frames.try_send(RenderEvent::Reset);
             }
             game.state = None;
             game.status = "RESPAWN".to_string();
@@ -1131,8 +1135,14 @@ fn tick(
 
     publish_frame(game, frames, tick_time);
     if game.hud_dirty {
-        game.hud_dirty = false;
-        let _ = frames.send(RenderEvent::Hud(Box::new(game.hud())));
+        // The HUD is only published again when the last one was accepted, so
+        // a full queue does not lose a change.
+        if frames
+            .try_send(RenderEvent::Hud(Box::new(game.hud())))
+            .is_ok()
+        {
+            game.hud_dirty = false;
+        }
     }
     if game.status_data.ticks.is_multiple_of(STATUS_PERIOD) {
         publish_status(game, frames);
@@ -1250,7 +1260,7 @@ fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
 fn publish_status(game: &mut Game, frames: &SyncSender<RenderEvent>) {
     game.status_data.status = game.status.clone();
     game.status_data.chunks = game.world.as_ref().map_or(0, World::chunk_count);
-    let _ = frames.send(RenderEvent::Status(Box::new(game.status_data.clone())));
+    let _ = frames.try_send(RenderEvent::Status(Box::new(game.status_data.clone())));
 }
 
 #[cfg(test)]
