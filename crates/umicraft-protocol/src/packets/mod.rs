@@ -20,6 +20,11 @@
 //! length/compression layers live in [`crate::framing`].
 //!
 //! [`packet_id`]: EncodablePacket::packet_id
+//!
+//! Adding a packet: create the struct file under
+//! `{state}/{clientbound,serverbound}/`, give it `ID`, `decode`, an
+//! [`EncodablePacket`] impl, and a wire-shape test, then add one variant and
+//! one dispatch arm to that state's enum (see ADR-0003).
 
 use std::io::Write;
 
