@@ -1,0 +1,20 @@
+[package]
+name = "umicraft-protocol"
+description = "Minecraft 1.8 (protocol 47) wire protocol: VarInt, framing, compression, encryption, packets."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+aes.workspace = true
+cfb8.workspace = true
+flate2.workspace = true
+rsa.workspace = true
+sha1.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

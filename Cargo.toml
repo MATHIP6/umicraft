@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/umicraft-core"]
+members = ["crates/umicraft-core", "crates/umicraft-protocol"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,8 +9,13 @@ authors = ["Umicraft contributors"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-thiserror = "2.0"
+aes = "0.8"
+cfb8 = "0.8"
+flate2 = "1.0"
+rsa = "0.9"
 serde = { version = "1.0", features = ["derive"] }
+sha1 = "0.10"
+thiserror = "2.0"
 toml = "0.8"
 tracing = "0.1"
 
