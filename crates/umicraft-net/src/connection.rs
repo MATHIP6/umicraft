@@ -42,8 +42,16 @@ impl Connection {
     /// [`NetError::Io`] on connect failure.
     pub async fn connect(host: &str, port: u16) -> Result<Self, NetError> {
         let stream = TcpStream::connect((host, port)).await?;
+        Ok(Self::adopt(stream, host, port))
+    }
+
+    /// Wraps an already-connected stream — the fake servers in
+    /// `umicraft-testkit` use this on their accept side to share the exact
+    /// production framing logic from both ends of a test socket.
+    #[must_use]
+    pub fn adopt(stream: TcpStream, host: &str, port: u16) -> Self {
         let (read_half, write_half) = stream.into_split();
-        Ok(Self {
+        Self {
             host: host.to_string(),
             port,
             read_half,
@@ -53,7 +61,7 @@ impl Connection {
             write_cipher: None,
             pending: Vec::new(),
             recv_buf: vec![0u8; 8192],
-        })
+        }
     }
 
     /// The host part of the connect target (handshake default address).

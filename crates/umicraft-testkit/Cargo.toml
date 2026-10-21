@@ -1,0 +1,21 @@
+[package]
+name = "umicraft-testkit"
+description = "Fake 1.8 server, packet capture format, and decoder fuzz targets for testing Umicraft."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+umicraft-net.workspace = true
+umicraft-protocol.workspace = true
+
+[[bin]]
+name = "umicraft-packet-logger"
+path = "src/bin/packet_logger.rs"
+
+[lints]
+workspace = true

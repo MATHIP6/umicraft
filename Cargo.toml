@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/umicraft-core", "crates/umicraft-protocol", "crates/umicraft-net"]
+members = ["crates/umicraft-core", "crates/umicraft-protocol", "crates/umicraft-net", "crates/umicraft-testkit"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,9 +17,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha1 = "0.10"
 thiserror = "2.0"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "macros", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "macros", "sync", "signal"] }
 toml = "0.8"
 tracing = "0.1"
+umicraft-net = { path = "crates/umicraft-net", version = "0.1.0" }
 umicraft-protocol = { path = "crates/umicraft-protocol", version = "0.1.0" }
 
 [workspace.lints.rust]

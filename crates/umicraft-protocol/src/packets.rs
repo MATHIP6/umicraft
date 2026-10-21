@@ -232,6 +232,25 @@ impl StatusServerbound {
         }
     }
 
+    /// Reads a body for the given packet id.
+    ///
+    /// # Errors
+    /// [`ProtocolError::UnknownPacket`] for unrecognized ids.
+    pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
+        Ok(match id {
+            0x00 => Self::StatusRequest,
+            0x01 => Self::Ping {
+                time: read_i64(reader)?,
+            },
+            _ => {
+                return Err(ProtocolError::UnknownPacket {
+                    id,
+                    state: crate::State::Status,
+                })
+            }
+        })
+    }
+
     /// Writes the body.
     ///
     /// # Errors
@@ -373,6 +392,28 @@ impl LoginServerbound {
             Self::LoginStart { .. } => 0x00,
             Self::EncryptionResponse { .. } => 0x01,
         }
+    }
+
+    /// Reads a body for the given packet id.
+    ///
+    /// # Errors
+    /// [`ProtocolError::UnknownPacket`] for unrecognized ids.
+    pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
+        Ok(match id {
+            0x00 => Self::LoginStart {
+                username: crate::types::read_string(reader, 16)?,
+            },
+            0x01 => Self::EncryptionResponse {
+                shared_secret: read_byte_array(reader, 256)?,
+                nonce: read_byte_array(reader, 256)?,
+            },
+            _ => {
+                return Err(ProtocolError::UnknownPacket {
+                    id,
+                    state: crate::State::Login,
+                })
+            }
+        })
     }
 
     /// Writes the body.
@@ -611,6 +652,46 @@ impl PlayServerbound {
             Self::ClientSettings { .. } => 0x15,
             Self::Brand { .. } => 0x17,
         }
+    }
+
+    /// Reads a body for the given packet id (M1 serverbound subset only).
+    ///
+    /// # Errors
+    /// [`ProtocolError::UnknownPacket`] for ids outside the M1 subset.
+    pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
+        Ok(match id {
+            0x00 => Self::KeepAlive {
+                id: read_i64(reader)?,
+            },
+            0x01 => Self::Chat {
+                message: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
+            },
+            0x06 => Self::PositionLook {
+                x: read_f64(reader)?,
+                y: read_f64(reader)?,
+                z: read_f64(reader)?,
+                yaw: read_f32(reader)?,
+                pitch: read_f32(reader)?,
+                on_ground: read_bool(reader)?,
+            },
+            0x15 => Self::ClientSettings {
+                locale: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
+                view_distance: read_u8(reader)?,
+                chat_mode: read_var_i32(reader)?,
+                chat_colors: read_bool(reader)?,
+                skin_parts: read_u8(reader)?,
+            },
+            0x17 => Self::Brand {
+                channel: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
+                data: read_byte_array(reader, 1024)?,
+            },
+            _ => {
+                return Err(ProtocolError::UnknownPacket {
+                    id,
+                    state: crate::State::Play,
+                })
+            }
+        })
     }
 
     /// Writes the body.
@@ -894,5 +975,97 @@ mod tests {
         let mut empty: &[u8] = &[];
         let err = StatusClientbound::decode(0x42, &mut empty).unwrap_err();
         assert!(matches!(err, ProtocolError::UnknownPacket { id: 0x42, .. }));
+    }
+
+    /// Serverbound packets must decode back from their own encodings
+    /// (symmetry contract the fake server depends on).
+    #[test]
+    fn serverbound_round_trip_symmetry() {
+        let packets: Vec<(u8, StatusServerbound)> = vec![
+            (0x00, StatusServerbound::StatusRequest),
+            (0x01, StatusServerbound::Ping { time: 123_456_789 }),
+        ];
+        for (id, packet) in packets {
+            let mut buffer = Vec::new();
+            packet.encode_body(&mut buffer).unwrap();
+            assert_eq!(
+                StatusServerbound::decode(id, &mut &buffer[..]).unwrap(),
+                packet
+            );
+        }
+
+        let mut buffer = Vec::new();
+        LoginServerbound::LoginStart {
+            username: "Alice".to_string(),
+        }
+        .encode_body(&mut buffer)
+        .unwrap();
+        assert_eq!(
+            LoginServerbound::decode(0x00, &mut &buffer[..]).unwrap(),
+            LoginServerbound::LoginStart {
+                username: "Alice".to_string()
+            }
+        );
+
+        let mut buffer = Vec::new();
+        LoginServerbound::EncryptionResponse {
+            shared_secret: vec![9u8; 16],
+            nonce: vec![7u8; 128],
+        }
+        .encode_body(&mut buffer)
+        .unwrap();
+        assert_eq!(
+            LoginServerbound::decode(0x01, &mut &buffer[..]).unwrap(),
+            LoginServerbound::EncryptionResponse {
+                shared_secret: vec![9u8; 16],
+                nonce: vec![7u8; 128],
+            }
+        );
+
+        let play = vec![
+            (0x00, PlayServerbound::KeepAlive { id: -7 }),
+            (
+                0x01,
+                PlayServerbound::Chat {
+                    message: "msg".to_string(),
+                },
+            ),
+            (
+                0x06,
+                PlayServerbound::PositionLook {
+                    x: 1.5,
+                    y: -2.5,
+                    z: 300.0,
+                    yaw: -90.0,
+                    pitch: 12.0,
+                    on_ground: false,
+                },
+            ),
+            (
+                0x15,
+                PlayServerbound::ClientSettings {
+                    locale: "de_de".to_string(),
+                    view_distance: 12,
+                    chat_mode: 2,
+                    chat_colors: false,
+                    skin_parts: 0b0101,
+                },
+            ),
+            (
+                0x17,
+                PlayServerbound::Brand {
+                    channel: "MC|Brand".to_string(),
+                    data: vec![8, b'u', b'm', b'i'],
+                },
+            ),
+        ];
+        for (id, packet) in play {
+            let mut buffer = Vec::new();
+            packet.encode_body(&mut buffer).unwrap();
+            assert_eq!(
+                PlayServerbound::decode(id, &mut &buffer[..]).unwrap(),
+                packet
+            );
+        }
     }
 }
