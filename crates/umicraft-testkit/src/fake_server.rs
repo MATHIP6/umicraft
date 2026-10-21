@@ -18,6 +18,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use umicraft_net::Connection;
 use umicraft_protocol::packets::login::clientbound as login_clientbound;
+use umicraft_protocol::packets::play::clientbound as play_clientbound;
 use umicraft_protocol::packets::status::clientbound as status_clientbound;
 use umicraft_protocol::{
     EncodablePacket, Handshake, LoginClientbound, LoginServerbound, PlayClientbound,
@@ -403,7 +404,7 @@ async fn run_play(
     capture: &Option<Arc<Mutex<Capture>>>,
     observed: &Shared,
 ) {
-    let join = PlayClientbound::JoinGame {
+    let join = PlayClientbound::JoinGame(play_clientbound::JoinGame {
         entity_id: config.join.entity_id,
         gamemode: config.join.gamemode,
         dimension: config.join.dimension,
@@ -411,20 +412,22 @@ async fn run_play(
         max_players: config.join.max_players,
         level_type: config.join.level_type.clone(),
         reduced_debug_info: config.join.reduced_debug_info,
-    };
-    let placement = config
-        .placement
-        .map(|(x, y, z, yaw, pitch)| PlayClientbound::PositionLook {
+    });
+    let placement = config.placement.map(|(x, y, z, yaw, pitch)| {
+        PlayClientbound::PositionLook(play_clientbound::PositionLook {
             x,
             y,
             z,
             yaw,
             pitch,
             flags: 0,
-        });
-    let chat = config.chat_json.as_ref().map(|json| PlayClientbound::Chat {
-        json: json.clone(),
-        position: 0,
+        })
+    });
+    let chat = config.chat_json.as_ref().map(|json| {
+        PlayClientbound::Chat(play_clientbound::Chat {
+            json: json.clone(),
+            position: 0,
+        })
     });
 
     observe(observed, |state| state.play_started = true);
@@ -452,31 +455,37 @@ async fn run_play(
                 };
                 record(capture, Direction::ClientToServer, id, &body);
                 match PlayServerbound::decode(id, &mut body.as_slice()) {
-                    Ok(PlayServerbound::KeepAlive { id }) => {
-                        observe(observed, |state| state.keepalive_echoes.push(id));
+                    Ok(PlayServerbound::KeepAlive(packet)) => {
+                        observe(observed, |state| state.keepalive_echoes.push(packet.id));
                     }
-                    Ok(PlayServerbound::Chat { message }) => {
-                        observe(observed, |state| state.chat_messages.push(message));
+                    Ok(PlayServerbound::Chat(packet)) => {
+                        observe(observed, |state| state.chat_messages.push(packet.message));
                     }
-                    Ok(PlayServerbound::PositionLook { x, y, z, yaw, pitch, on_ground }) => {
+                    Ok(PlayServerbound::PositionLook(packet)) => {
                         observe(observed, |state| {
-                            state.placements.push((x, y, z, yaw, pitch, on_ground));
+                            state.placements.push((
+                                packet.x,
+                                packet.y,
+                                packet.z,
+                                packet.yaw,
+                                packet.pitch,
+                                packet.on_ground,
+                            ));
                         });
                     }
-                    Ok(PlayServerbound::ClientSettings {
-                        locale,
-                        view_distance,
-                        chat_mode,
-                        chat_colors,
-                        skin_parts,
-                    }) => {
+                    Ok(PlayServerbound::ClientSettings(packet)) => {
                         observe(observed, |state| {
-                            state.client_settings =
-                                Some((locale, view_distance, chat_mode, chat_colors, skin_parts));
+                            state.client_settings = Some((
+                                packet.locale,
+                                packet.view_distance,
+                                packet.chat_mode,
+                                packet.chat_colors,
+                                packet.skin_parts,
+                            ));
                         });
                     }
-                    Ok(PlayServerbound::Brand { data, .. }) => {
-                        observe(observed, |state| state.brand = Some(data));
+                    Ok(PlayServerbound::Brand(packet)) => {
+                        observe(observed, |state| state.brand = Some(packet.data));
                     }
                     Err(err) => {
                         // Play state is full of packets outside the M1 set;
@@ -488,7 +497,9 @@ async fn run_play(
             _ = tokio::time::sleep_until(next_keepalive.unwrap_or(
                 tokio::time::Instant::now(),
             )), if next_keepalive.is_some() => {
-                if !send_packet(conn, capture, &PlayClientbound::KeepAlive { id: keepalive_id }).await {
+                let probe =
+                    PlayClientbound::KeepAlive(play_clientbound::KeepAlive { id: keepalive_id });
+                if !send_packet(conn, capture, &probe).await {
                     return;
                 }
                 keepalive_id += 1;
@@ -501,7 +512,8 @@ async fn run_play(
                     .kick_after_play
                     .as_ref()
                     .map_or("timed kick".to_string(), |(_, why)| why.clone());
-                let kick = PlayClientbound::Disconnect { reason };
+                let kick =
+                    PlayClientbound::Disconnect(play_clientbound::Disconnect { reason });
                 let _ = send_packet(conn, capture, &kick).await;
                 return;
             }

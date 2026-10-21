@@ -7,6 +7,7 @@
 use std::time::{Duration, Instant};
 
 use tokio::time;
+use umicraft_protocol::packets::play::serverbound;
 use umicraft_protocol::{varint::write_var_u32, PlayClientbound, PlayServerbound, State};
 
 use crate::connection::Connection;
@@ -146,8 +147,9 @@ impl Connection {
 
             match id {
                 0x00 => match decode_play(id, &body)? {
-                    PlayClientbound::KeepAlive { id: keepalive_id } => {
-                        self.write_packet(&PlayServerbound::KeepAlive { id: keepalive_id })
+                    PlayClientbound::KeepAlive(packet) => {
+                        let answer = serverbound::KeepAlive { id: packet.id };
+                        self.write_packet(&PlayServerbound::KeepAlive(answer))
                             .await?;
                         summary.keepalives_answered += 1;
                     }
@@ -159,23 +161,15 @@ impl Connection {
                     }
                 },
                 0x01 => match decode_play(id, &body)? {
-                    PlayClientbound::JoinGame {
-                        entity_id,
-                        gamemode,
-                        dimension,
-                        difficulty,
-                        max_players,
-                        level_type,
-                        reduced_debug_info,
-                    } => {
+                    PlayClientbound::JoinGame(packet) => {
                         summary.join = Some(JoinGameInfo {
-                            entity_id,
-                            gamemode,
-                            dimension,
-                            difficulty,
-                            max_players,
-                            level_type,
-                            reduced_debug_info,
+                            entity_id: packet.entity_id,
+                            gamemode: packet.gamemode,
+                            dimension: packet.dimension,
+                            difficulty: packet.difficulty,
+                            max_players: packet.max_players,
+                            level_type: packet.level_type,
+                            reduced_debug_info: packet.reduced_debug_info,
                         });
                         // Vanilla sends Client Settings + brand after the
                         // server's own `Join Game`; doing so right after
@@ -194,8 +188,8 @@ impl Connection {
                     }
                 },
                 0x02 => match decode_play(id, &body)? {
-                    PlayClientbound::Chat { json, .. } => {
-                        tracing::trace!(json = %json, "server chat");
+                    PlayClientbound::Chat(packet) => {
+                        tracing::trace!(json = %packet.json, "server chat");
                         summary.chat_messages += 1;
                     }
                     _ => {
@@ -206,33 +200,27 @@ impl Connection {
                     }
                 },
                 0x08 => match decode_play(id, &body)? {
-                    PlayClientbound::PositionLook {
-                        x,
-                        y,
-                        z,
-                        yaw,
-                        pitch,
-                        ..
-                    } => {
+                    PlayClientbound::PositionLook(packet) => {
                         // 1.8 has no teleport confirm packet; the vanilla
                         // client answers with `Player Position and Look`,
                         // which we echo (with absolute values, matching the
                         // flags-0 spawn packet 1.8 servers send first).
-                        self.write_packet(&PlayServerbound::PositionLook {
-                            x,
-                            y,
-                            z,
-                            yaw,
-                            pitch,
+                        let answer = serverbound::PositionLook {
+                            x: packet.x,
+                            y: packet.y,
+                            z: packet.z,
+                            yaw: packet.yaw,
+                            pitch: packet.pitch,
                             on_ground: true,
-                        })
-                        .await?;
+                        };
+                        self.write_packet(&PlayServerbound::PositionLook(answer))
+                            .await?;
                         summary.placement = Some(PlayerPlacement {
-                            x,
-                            y,
-                            z,
-                            yaw,
-                            pitch,
+                            x: packet.x,
+                            y: packet.y,
+                            z: packet.z,
+                            yaw: packet.yaw,
+                            pitch: packet.pitch,
                         });
                     }
                     _ => {
@@ -243,10 +231,10 @@ impl Connection {
                     }
                 },
                 0x40 => match decode_play(id, &body)? {
-                    PlayClientbound::Disconnect { reason } => {
+                    PlayClientbound::Disconnect(packet) => {
                         summary.stayed = started.elapsed();
                         return Err(NetError::KickedAtPlay {
-                            reason: disconnect_reason(&reason),
+                            reason: disconnect_reason(&packet.reason),
                         });
                     }
                     _ => {
@@ -269,24 +257,25 @@ impl Connection {
     }
 
     async fn send_entry_packets(&mut self, options: &PlayOptions) -> Result<(), NetError> {
-        self.write_packet(&PlayServerbound::ClientSettings {
+        let settings = serverbound::ClientSettings {
             locale: options.locale.clone(),
             view_distance: options.view_distance,
             chat_mode: 0,
             chat_colors: options.chat_colors,
             skin_parts: 0b0111_1111,
-        })
-        .await?;
+        };
+        self.write_packet(&PlayServerbound::ClientSettings(settings))
+            .await?;
 
         let brand_payload = "umicraft".as_bytes();
         let mut brand = Vec::with_capacity(brand_payload.len() + 2);
         write_var_u32(&mut brand, brand_payload.len() as u32)?;
         brand.extend_from_slice(brand_payload);
-        self.write_packet(&PlayServerbound::Brand {
+        let brand = serverbound::Brand {
             channel: "MC|Brand".to_string(),
             data: brand,
-        })
-        .await?;
+        };
+        self.write_packet(&PlayServerbound::Brand(brand)).await?;
         Ok(())
     }
 }
