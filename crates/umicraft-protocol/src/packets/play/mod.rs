@@ -1,24 +1,49 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Play state (`State::Play`): the packet set needed to join a 1.8 server, stay
-//! connected, and receive world data (M2).
+//! Play state (`State::Play`): the packet set needed to join a 1.8 server,
+//! stay connected, receive world data (M2), and move and interact in the
+//! world (M3).
 //!
 //! Direction convention: `clientbound` flows server → client (inbound on a
 //! client), `serverbound` flows client → server (outbound on a client).
 //!
+//! The wire id of a play packet is its **registration index** in
+//! `mcp:net/minecraft/network/EnumConnectionState.java` (the `PLAY`
+//! constant), not the MCP class-name prefix — `S19PacketEntityStatus` is
+//! registered at 0x1A, while 0x19 belongs to `S19PacketEntityHeadLook`
+//! (ADR-0005 §A.4).
+//!
 //! Clientbound: `Keep Alive` (0x00), `Join Game` (0x01), `Chat Message`
-//! (0x02), `Player Position and Look` (0x08), `Chunk Data` (0x21),
-//! `Multi Block Change` (0x22), `Block Change` (0x23), `Map Chunk Bulk`
-//! (0x26), `Disconnect` (0x40).
-//! Serverbound: `Keep Alive` (0x00), `Chat Message` (0x01), `Player Position
-//! and Look` (0x06), `Client Settings` (0x15), `Plugin Message` (0x17).
+//! (0x02), `Time Update` (0x03), `Entity Equipment` (0x04), `Spawn
+//! Position` (0x05), `Update Health` (0x06), `Respawn` (0x07), `Player
+//! Position and Look` (0x08), `Held Item Change` (0x09), `Animation`
+//! (0x0B), `Spawn Player` (0x0C), `Destroy Entities` (0x13), `Entity`
+//! (0x14), `Entity Relative Move` (0x15), `Entity Look` (0x16), `Entity
+//! Look and Move` (0x17), `Entity Teleport` (0x18), `Entity Status`
+//! (0x1A), `Set Experience` (0x1F), `Chunk Data` (0x21), `Multi Block
+//! Change` (0x22), `Block Change` (0x23), `Block Action` (0x24), `Block
+//! Break Animation` (0x25), `Map Chunk Bulk` (0x26), `Change Game State`
+//! (0x2B), `Disconnect` (0x40).
+//!
+//! Serverbound: `Keep Alive` (0x00), `Chat Message` (0x01), `Use Entity`
+//! (0x02), `Player Position` (0x04), `Player Look` (0x05), `Player
+//! Position and Look` (0x06), `Player Digging` (0x07), `Player Block
+//! Placement` (0x08), `Held Item Change` (0x09), `Animation` (0x0A),
+//! `Entity Action` (0x0B), `Input` (0x0C), `Client Settings` (0x15),
+//! `Plugin Message` (0x17).
 //!
 //! Ids outside this subset are rejected as [`ProtocolError::UnknownPacket`]
-//! and skipped by the caller (see `umicraft-net`'s play loop).
+//! and skipped by the caller (see `umicraft-net`'s play loop). `Entity
+//! Metadata` (0x1C) and `Entity Properties` (0x1D) are out of scope for M3
+//! (ADR-0005 §A.4).
 
 pub mod clientbound;
+pub mod facing;
+pub mod item_stack;
+pub mod metadata;
 mod position;
 pub mod serverbound;
+mod wire;
 
 use std::io::{Read, Write};
 
@@ -26,6 +51,9 @@ use crate::error::ProtocolError;
 
 use super::EncodablePacket;
 
+pub use facing::Facing;
+pub use item_stack::ItemStack;
+pub use metadata::Metadata;
 pub use position::{pack_block_position, unpack_block_position};
 
 /// Clientbound play-state packets (inbound for a client).
@@ -37,16 +65,54 @@ pub enum PlayClientbound {
     JoinGame(clientbound::JoinGame),
     /// `Chat Message` (0x02): chat/system JSON.
     Chat(clientbound::Chat),
+    /// `Time Update` (0x03): world age and time of day.
+    TimeUpdate(clientbound::TimeUpdate),
+    /// `Entity Equipment` (0x04): one equipped item of one entity.
+    EntityEquipment(clientbound::EntityEquipment),
+    /// `Spawn Position` (0x05): the world spawn point.
+    SpawnPosition(clientbound::SpawnPosition),
+    /// `Update Health` (0x06): health, food and saturation.
+    UpdateHealth(clientbound::UpdateHealth),
+    /// `Respawn` (0x07): the player moves to another world.
+    Respawn(clientbound::Respawn),
     /// `Player Position and Look` (0x08): teleport / initial placement.
     PositionLook(clientbound::PositionLook),
+    /// `Held Item Change` (0x09): the server changed the selected slot.
+    HeldItemChange(clientbound::HeldItemChange),
+    /// `Animation` (0x0B): an entity swung its arm or turned.
+    Animation(clientbound::Animation),
+    /// `Spawn Player` (0x0C): another player entered the world.
+    SpawnPlayer(clientbound::SpawnPlayer),
+    /// `Destroy Entities` (0x13): entities left the world.
+    DestroyEntities(clientbound::DestroyEntities),
+    /// `Entity` (0x14): the legacy entity id packet.
+    Entity(clientbound::Entity),
+    /// `Entity Relative Move` (0x15): an entity moved by a delta.
+    EntityRelativeMove(clientbound::EntityRelativeMove),
+    /// `Entity Look` (0x16): an entity turned.
+    EntityLook(clientbound::EntityLook),
+    /// `Entity Look and Move` (0x17): an entity moved and turned.
+    EntityLookMove(clientbound::EntityLookMove),
+    /// `Entity Teleport` (0x18): an entity was placed absolutely.
+    EntityTeleport(clientbound::EntityTeleport),
+    /// `Entity Status` (0x1A): an entity triggered a status event.
+    EntityStatus(clientbound::EntityStatus),
+    /// `Set Experience` (0x1F): the experience bar changed.
+    SetExperience(clientbound::SetExperience),
     /// `Chunk Data` (0x21): one chunk column, full or partial.
     ChunkData(clientbound::ChunkData),
     /// `Multi Block Change` (0x22): batched block updates in one chunk.
     MultiBlockChange(clientbound::MultiBlockChange),
     /// `Block Change` (0x23): one block update.
     BlockChange(clientbound::BlockChange),
+    /// `Block Action` (0x24): a block was used.
+    BlockAction(clientbound::BlockAction),
+    /// `Block Break Animation` (0x25): someone is breaking a block.
+    BlockBreakAnim(clientbound::BlockBreakAnim),
     /// `Map Chunk Bulk` (0x26): initial chunk batch.
     MapChunkBulk(clientbound::MapChunkBulk),
+    /// `Change Game State` (0x2B): a global game-state value changed.
+    ChangeGameState(clientbound::ChangeGameState),
     /// `Disconnect` (0x40): reason as chat JSON; the socket closes after.
     Disconnect(clientbound::Disconnect),
 }
@@ -59,11 +125,30 @@ impl PlayClientbound {
             Self::KeepAlive(_) => clientbound::KeepAlive::ID,
             Self::JoinGame(_) => clientbound::JoinGame::ID,
             Self::Chat(_) => clientbound::Chat::ID,
+            Self::TimeUpdate(_) => clientbound::TimeUpdate::ID,
+            Self::EntityEquipment(_) => clientbound::EntityEquipment::ID,
+            Self::SpawnPosition(_) => clientbound::SpawnPosition::ID,
+            Self::UpdateHealth(_) => clientbound::UpdateHealth::ID,
+            Self::Respawn(_) => clientbound::Respawn::ID,
             Self::PositionLook(_) => clientbound::PositionLook::ID,
+            Self::HeldItemChange(_) => clientbound::HeldItemChange::ID,
+            Self::Animation(_) => clientbound::Animation::ID,
+            Self::SpawnPlayer(_) => clientbound::SpawnPlayer::ID,
+            Self::DestroyEntities(_) => clientbound::DestroyEntities::ID,
+            Self::Entity(_) => clientbound::Entity::ID,
+            Self::EntityRelativeMove(_) => clientbound::EntityRelativeMove::ID,
+            Self::EntityLook(_) => clientbound::EntityLook::ID,
+            Self::EntityLookMove(_) => clientbound::EntityLookMove::ID,
+            Self::EntityTeleport(_) => clientbound::EntityTeleport::ID,
+            Self::EntityStatus(_) => clientbound::EntityStatus::ID,
+            Self::SetExperience(_) => clientbound::SetExperience::ID,
             Self::ChunkData(_) => clientbound::ChunkData::ID,
             Self::MultiBlockChange(_) => clientbound::MultiBlockChange::ID,
             Self::BlockChange(_) => clientbound::BlockChange::ID,
+            Self::BlockAction(_) => clientbound::BlockAction::ID,
+            Self::BlockBreakAnim(_) => clientbound::BlockBreakAnim::ID,
             Self::MapChunkBulk(_) => clientbound::MapChunkBulk::ID,
+            Self::ChangeGameState(_) => clientbound::ChangeGameState::ID,
             Self::Disconnect(_) => clientbound::Disconnect::ID,
         }
     }
@@ -77,11 +162,30 @@ impl PlayClientbound {
             Self::KeepAlive(packet) => packet.encode_body(writer),
             Self::JoinGame(packet) => packet.encode_body(writer),
             Self::Chat(packet) => packet.encode_body(writer),
+            Self::TimeUpdate(packet) => packet.encode_body(writer),
+            Self::EntityEquipment(packet) => packet.encode_body(writer),
+            Self::SpawnPosition(packet) => packet.encode_body(writer),
+            Self::UpdateHealth(packet) => packet.encode_body(writer),
+            Self::Respawn(packet) => packet.encode_body(writer),
             Self::PositionLook(packet) => packet.encode_body(writer),
+            Self::HeldItemChange(packet) => packet.encode_body(writer),
+            Self::Animation(packet) => packet.encode_body(writer),
+            Self::SpawnPlayer(packet) => packet.encode_body(writer),
+            Self::DestroyEntities(packet) => packet.encode_body(writer),
+            Self::Entity(packet) => packet.encode_body(writer),
+            Self::EntityRelativeMove(packet) => packet.encode_body(writer),
+            Self::EntityLook(packet) => packet.encode_body(writer),
+            Self::EntityLookMove(packet) => packet.encode_body(writer),
+            Self::EntityTeleport(packet) => packet.encode_body(writer),
+            Self::EntityStatus(packet) => packet.encode_body(writer),
+            Self::SetExperience(packet) => packet.encode_body(writer),
             Self::ChunkData(packet) => packet.encode_body(writer),
             Self::MultiBlockChange(packet) => packet.encode_body(writer),
             Self::BlockChange(packet) => packet.encode_body(writer),
+            Self::BlockAction(packet) => packet.encode_body(writer),
+            Self::BlockBreakAnim(packet) => packet.encode_body(writer),
             Self::MapChunkBulk(packet) => packet.encode_body(writer),
+            Self::ChangeGameState(packet) => packet.encode_body(writer),
             Self::Disconnect(packet) => packet.encode_body(writer),
         }
     }
@@ -95,8 +199,50 @@ impl PlayClientbound {
             clientbound::KeepAlive::ID => Self::KeepAlive(clientbound::KeepAlive::decode(reader)?),
             clientbound::JoinGame::ID => Self::JoinGame(clientbound::JoinGame::decode(reader)?),
             clientbound::Chat::ID => Self::Chat(clientbound::Chat::decode(reader)?),
+            clientbound::TimeUpdate::ID => {
+                Self::TimeUpdate(clientbound::TimeUpdate::decode(reader)?)
+            }
+            clientbound::EntityEquipment::ID => {
+                Self::EntityEquipment(clientbound::EntityEquipment::decode(reader)?)
+            }
+            clientbound::SpawnPosition::ID => {
+                Self::SpawnPosition(clientbound::SpawnPosition::decode(reader)?)
+            }
+            clientbound::UpdateHealth::ID => {
+                Self::UpdateHealth(clientbound::UpdateHealth::decode(reader)?)
+            }
+            clientbound::Respawn::ID => Self::Respawn(clientbound::Respawn::decode(reader)?),
             clientbound::PositionLook::ID => {
                 Self::PositionLook(clientbound::PositionLook::decode(reader)?)
+            }
+            clientbound::HeldItemChange::ID => {
+                Self::HeldItemChange(clientbound::HeldItemChange::decode(reader)?)
+            }
+            clientbound::Animation::ID => Self::Animation(clientbound::Animation::decode(reader)?),
+            clientbound::SpawnPlayer::ID => {
+                Self::SpawnPlayer(clientbound::SpawnPlayer::decode(reader)?)
+            }
+            clientbound::DestroyEntities::ID => {
+                Self::DestroyEntities(clientbound::DestroyEntities::decode(reader)?)
+            }
+            clientbound::Entity::ID => Self::Entity(clientbound::Entity::decode(reader)?),
+            clientbound::EntityRelativeMove::ID => {
+                Self::EntityRelativeMove(clientbound::EntityRelativeMove::decode(reader)?)
+            }
+            clientbound::EntityLook::ID => {
+                Self::EntityLook(clientbound::EntityLook::decode(reader)?)
+            }
+            clientbound::EntityLookMove::ID => {
+                Self::EntityLookMove(clientbound::EntityLookMove::decode(reader)?)
+            }
+            clientbound::EntityTeleport::ID => {
+                Self::EntityTeleport(clientbound::EntityTeleport::decode(reader)?)
+            }
+            clientbound::EntityStatus::ID => {
+                Self::EntityStatus(clientbound::EntityStatus::decode(reader)?)
+            }
+            clientbound::SetExperience::ID => {
+                Self::SetExperience(clientbound::SetExperience::decode(reader)?)
             }
             clientbound::ChunkData::ID => Self::ChunkData(clientbound::ChunkData::decode(reader)?),
             clientbound::MultiBlockChange::ID => {
@@ -105,8 +251,17 @@ impl PlayClientbound {
             clientbound::BlockChange::ID => {
                 Self::BlockChange(clientbound::BlockChange::decode(reader)?)
             }
+            clientbound::BlockAction::ID => {
+                Self::BlockAction(clientbound::BlockAction::decode(reader)?)
+            }
+            clientbound::BlockBreakAnim::ID => {
+                Self::BlockBreakAnim(clientbound::BlockBreakAnim::decode(reader)?)
+            }
             clientbound::MapChunkBulk::ID => {
                 Self::MapChunkBulk(clientbound::MapChunkBulk::decode(reader)?)
+            }
+            clientbound::ChangeGameState::ID => {
+                Self::ChangeGameState(clientbound::ChangeGameState::decode(reader)?)
             }
             clientbound::Disconnect::ID => {
                 Self::Disconnect(clientbound::Disconnect::decode(reader)?)
@@ -121,15 +276,33 @@ impl PlayClientbound {
     }
 }
 
-/// Serverbound play-state packets needed for the M1 acceptance criteria.
+/// Serverbound play-state packets (outbound for a client).
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlayServerbound {
     /// `Keep Alive` (0x00): echo of the server's id.
     KeepAlive(serverbound::KeepAlive),
     /// `Chat Message` (0x01): user-typed text (includes leading slash commands).
     Chat(serverbound::Chat),
+    /// `Use Entity` (0x02): interact with or attack an entity.
+    UseEntity(serverbound::UseEntity),
+    /// `Player Position` (0x04): the player moved.
+    PlayerPosition(serverbound::PlayerPosition),
+    /// `Player Look` (0x05): the player turned.
+    PlayerLook(serverbound::PlayerLook),
     /// `Player Position and Look` (0x06): vanilla's standard teleport answer.
     PositionLook(serverbound::PositionLook),
+    /// `Player Digging` (0x07): the player breaks a block.
+    PlayerDigging(serverbound::PlayerDigging),
+    /// `Player Block Placement` (0x08): the player places a block.
+    PlayerBlockPlacement(serverbound::PlayerBlockPlacement),
+    /// `Held Item Change` (0x09): the player selected another hotbar slot.
+    HeldItemChange(serverbound::HeldItemChange),
+    /// `Animation` (0x0A): the player swung their arm.
+    Animation(serverbound::Animation),
+    /// `Entity Action` (0x0B): sneak, sprint or sleep state changed.
+    EntityAction(serverbound::EntityAction),
+    /// `Input` (0x0C): the player's movement keys.
+    Input(serverbound::Input),
     /// `Client Settings` (0x15): required before some servers release content.
     ClientSettings(serverbound::ClientSettings),
     /// `Plugin Message` (0x17): client brand channel payload.
@@ -143,23 +316,53 @@ impl PlayServerbound {
         match self {
             Self::KeepAlive(_) => serverbound::KeepAlive::ID,
             Self::Chat(_) => serverbound::Chat::ID,
+            Self::UseEntity(_) => serverbound::UseEntity::ID,
+            Self::PlayerPosition(_) => serverbound::PlayerPosition::ID,
+            Self::PlayerLook(_) => serverbound::PlayerLook::ID,
             Self::PositionLook(_) => serverbound::PositionLook::ID,
+            Self::PlayerDigging(_) => serverbound::PlayerDigging::ID,
+            Self::PlayerBlockPlacement(_) => serverbound::PlayerBlockPlacement::ID,
+            Self::HeldItemChange(_) => serverbound::HeldItemChange::ID,
+            Self::Animation(_) => serverbound::Animation::ID,
+            Self::EntityAction(_) => serverbound::EntityAction::ID,
+            Self::Input(_) => serverbound::Input::ID,
             Self::ClientSettings(_) => serverbound::ClientSettings::ID,
             Self::Brand(_) => serverbound::Brand::ID,
         }
     }
 
-    /// Reads a body for the given packet id (M1 serverbound subset only).
+    /// Reads a body for the given packet id.
     ///
     /// # Errors
-    /// [`ProtocolError::UnknownPacket`] for ids outside the M1 subset.
+    /// [`ProtocolError::UnknownPacket`] for ids outside the supported subset.
     pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
         Ok(match id {
             serverbound::KeepAlive::ID => Self::KeepAlive(serverbound::KeepAlive::decode(reader)?),
             serverbound::Chat::ID => Self::Chat(serverbound::Chat::decode(reader)?),
+            serverbound::UseEntity::ID => Self::UseEntity(serverbound::UseEntity::decode(reader)?),
+            serverbound::PlayerPosition::ID => {
+                Self::PlayerPosition(serverbound::PlayerPosition::decode(reader)?)
+            }
+            serverbound::PlayerLook::ID => {
+                Self::PlayerLook(serverbound::PlayerLook::decode(reader)?)
+            }
             serverbound::PositionLook::ID => {
                 Self::PositionLook(serverbound::PositionLook::decode(reader)?)
             }
+            serverbound::PlayerDigging::ID => {
+                Self::PlayerDigging(serverbound::PlayerDigging::decode(reader)?)
+            }
+            serverbound::PlayerBlockPlacement::ID => {
+                Self::PlayerBlockPlacement(serverbound::PlayerBlockPlacement::decode(reader)?)
+            }
+            serverbound::HeldItemChange::ID => {
+                Self::HeldItemChange(serverbound::HeldItemChange::decode(reader)?)
+            }
+            serverbound::Animation::ID => Self::Animation(serverbound::Animation::decode(reader)?),
+            serverbound::EntityAction::ID => {
+                Self::EntityAction(serverbound::EntityAction::decode(reader)?)
+            }
+            serverbound::Input::ID => Self::Input(serverbound::Input::decode(reader)?),
             serverbound::ClientSettings::ID => {
                 Self::ClientSettings(serverbound::ClientSettings::decode(reader)?)
             }
@@ -181,7 +384,16 @@ impl PlayServerbound {
         match self {
             Self::KeepAlive(packet) => packet.encode_body(writer),
             Self::Chat(packet) => packet.encode_body(writer),
+            Self::UseEntity(packet) => packet.encode_body(writer),
+            Self::PlayerPosition(packet) => packet.encode_body(writer),
+            Self::PlayerLook(packet) => packet.encode_body(writer),
             Self::PositionLook(packet) => packet.encode_body(writer),
+            Self::PlayerDigging(packet) => packet.encode_body(writer),
+            Self::PlayerBlockPlacement(packet) => packet.encode_body(writer),
+            Self::HeldItemChange(packet) => packet.encode_body(writer),
+            Self::Animation(packet) => packet.encode_body(writer),
+            Self::EntityAction(packet) => packet.encode_body(writer),
+            Self::Input(packet) => packet.encode_body(writer),
             Self::ClientSettings(packet) => packet.encode_body(writer),
             Self::Brand(packet) => packet.encode_body(writer),
         }
@@ -357,5 +569,281 @@ mod tests {
                 packet
             );
         }
+    }
+
+    /// The M3 movement and interaction packets round-trip through the
+    /// serverbound dispatch table.
+    #[test]
+    fn m3_serverbound_packets_round_trip() {
+        let play = vec![
+            (
+                serverbound::UseEntity::ID,
+                PlayServerbound::UseEntity(serverbound::UseEntity {
+                    target: 42,
+                    action: serverbound::UseEntityAction::Attack,
+                }),
+            ),
+            (
+                serverbound::PlayerPosition::ID,
+                PlayServerbound::PlayerPosition(serverbound::PlayerPosition {
+                    x: -1707.5,
+                    y: 4.0,
+                    z: 103.25,
+                    on_ground: true,
+                }),
+            ),
+            (
+                serverbound::PlayerLook::ID,
+                PlayServerbound::PlayerLook(serverbound::PlayerLook {
+                    yaw: 90.0,
+                    pitch: -12.5,
+                    on_ground: false,
+                }),
+            ),
+            (
+                serverbound::PlayerDigging::ID,
+                PlayServerbound::PlayerDigging(serverbound::PlayerDigging {
+                    status: serverbound::DiggingStatus::StartDestroyBlock,
+                    x: 1,
+                    y: 64,
+                    z: -2,
+                    face: Facing::Up,
+                }),
+            ),
+            (
+                serverbound::PlayerBlockPlacement::ID,
+                PlayServerbound::PlayerBlockPlacement(serverbound::PlayerBlockPlacement {
+                    x: 1,
+                    y: 64,
+                    z: -2,
+                    face: Facing::North,
+                    item: ItemStack {
+                        item_id: 1,
+                        stack_size: 64,
+                        damage: 0,
+                        nbt: None,
+                    },
+                    cursor_x: 8,
+                    cursor_y: 8,
+                    cursor_z: 0,
+                }),
+            ),
+            (
+                serverbound::HeldItemChange::ID,
+                PlayServerbound::HeldItemChange(serverbound::HeldItemChange { slot: 3 }),
+            ),
+            (
+                serverbound::Animation::ID,
+                PlayServerbound::Animation(serverbound::Animation),
+            ),
+            (
+                serverbound::EntityAction::ID,
+                PlayServerbound::EntityAction(serverbound::EntityAction {
+                    entity_id: 42,
+                    action: serverbound::EntityActionKind::StartSprinting,
+                    aux_data: 0,
+                }),
+            ),
+            (
+                serverbound::Input::ID,
+                PlayServerbound::Input(serverbound::Input {
+                    strafe: 0.0,
+                    forward: 0.98,
+                    jumping: true,
+                    sneaking: false,
+                }),
+            ),
+        ];
+        for (id, packet) in play {
+            let mut buffer = Vec::new();
+            packet.encode_body(&mut buffer).unwrap();
+            assert_eq!(
+                PlayServerbound::decode(id, &mut &buffer[..]).unwrap(),
+                packet
+            );
+        }
+    }
+
+    /// The M3 world packets round-trip through the clientbound dispatch
+    /// table.
+    #[test]
+    fn m3_clientbound_packets_round_trip() {
+        let play = vec![
+            PlayClientbound::TimeUpdate(clientbound::TimeUpdate {
+                world_age: 1,
+                time_of_day: -2,
+            }),
+            PlayClientbound::EntityEquipment(clientbound::EntityEquipment {
+                entity_id: 42,
+                slot: 0,
+                item: ItemStack {
+                    item_id: 276,
+                    stack_size: 1,
+                    damage: 5,
+                    nbt: None,
+                },
+            }),
+            PlayClientbound::SpawnPosition(clientbound::SpawnPosition {
+                x: -1707,
+                y: 4,
+                z: 103,
+            }),
+            PlayClientbound::UpdateHealth(clientbound::UpdateHealth {
+                health: 20.0,
+                food: 20,
+                saturation: 5.0,
+            }),
+            PlayClientbound::Respawn(clientbound::Respawn {
+                dimension: 0,
+                difficulty: 1,
+                game_mode: 0,
+                world_type: "flat".to_string(),
+            }),
+            PlayClientbound::HeldItemChange(clientbound::HeldItemChange { slot: 2 }),
+            PlayClientbound::Animation(clientbound::Animation {
+                entity_id: 42,
+                animation: 0,
+            }),
+            PlayClientbound::SpawnPlayer(clientbound::SpawnPlayer {
+                entity_id: 42,
+                uuid: [7u8; 16],
+                x: -100,
+                y: 64,
+                z: 200,
+                yaw: 12,
+                pitch: -3,
+                held_item: -1,
+                metadata: Metadata::default(),
+            }),
+            PlayClientbound::DestroyEntities(clientbound::DestroyEntities {
+                entity_ids: vec![1, 2, 3],
+            }),
+            PlayClientbound::Entity(clientbound::Entity { entity_id: 42 }),
+            PlayClientbound::EntityRelativeMove(clientbound::EntityRelativeMove {
+                entity_id: 42,
+                dx: -6,
+                dy: 11,
+                dz: -2,
+                on_ground: true,
+            }),
+            PlayClientbound::EntityLook(clientbound::EntityLook {
+                entity_id: 42,
+                yaw: -40,
+                pitch: 0,
+                on_ground: false,
+            }),
+            PlayClientbound::EntityLookMove(clientbound::EntityLookMove {
+                entity_id: 42,
+                dx: 6,
+                dy: 5,
+                dz: -1,
+                yaw: -59,
+                pitch: 0,
+                on_ground: false,
+            }),
+            PlayClientbound::EntityTeleport(clientbound::EntityTeleport {
+                entity_id: 42,
+                x: -54_953,
+                y: 128,
+                z: 3715,
+                yaw: 81,
+                pitch: 0,
+                on_ground: true,
+            }),
+            PlayClientbound::EntityStatus(clientbound::EntityStatus {
+                entity_id: 42,
+                status: 2,
+            }),
+            PlayClientbound::SetExperience(clientbound::SetExperience {
+                experience: 0.25,
+                level: 3,
+                total: 44,
+            }),
+            PlayClientbound::BlockAction(clientbound::BlockAction {
+                x: 10,
+                y: 64,
+                z: -3,
+                instrument: 1,
+                pitch: 12,
+                block_id: 54,
+            }),
+            PlayClientbound::BlockBreakAnim(clientbound::BlockBreakAnim {
+                entity_id: 42,
+                x: -5,
+                y: 70,
+                z: 12,
+                stage: 4,
+            }),
+            PlayClientbound::ChangeGameState(clientbound::ChangeGameState {
+                reason: 3,
+                value: 1.0,
+            }),
+        ];
+        for packet in play {
+            let id = packet.packet_id();
+            let mut buffer = Vec::new();
+            packet.encode_body(&mut buffer).unwrap();
+            assert_eq!(
+                PlayClientbound::decode(id, &mut &buffer[..]).unwrap(),
+                packet
+            );
+        }
+    }
+
+    /// The M3 ids are the registration indices of `EnumConnectionState`, not
+    /// the MCP class-name prefixes (ADR-0005 §A.4).
+    #[test]
+    fn the_m3_wire_ids_match_the_registration_index() {
+        assert_eq!(
+            PlayClientbound::TimeUpdate(clientbound::TimeUpdate {
+                world_age: 0,
+                time_of_day: 0,
+            })
+            .packet_id(),
+            0x03
+        );
+        assert_eq!(
+            PlayClientbound::EntityStatus(clientbound::EntityStatus {
+                entity_id: 0,
+                status: 0,
+            })
+            .packet_id(),
+            0x1A
+        );
+        assert_eq!(
+            PlayClientbound::SetExperience(clientbound::SetExperience {
+                experience: 0.0,
+                level: 0,
+                total: 0,
+            })
+            .packet_id(),
+            0x1F
+        );
+        assert_eq!(
+            PlayClientbound::ChangeGameState(clientbound::ChangeGameState {
+                reason: 0,
+                value: 0.0,
+            })
+            .packet_id(),
+            0x2B
+        );
+        assert_eq!(
+            PlayServerbound::UseEntity(serverbound::UseEntity {
+                target: 0,
+                action: serverbound::UseEntityAction::Interact,
+            })
+            .packet_id(),
+            0x02
+        );
+        assert_eq!(
+            PlayServerbound::Input(serverbound::Input {
+                strafe: 0.0,
+                forward: 0.0,
+                jumping: false,
+                sneaking: false,
+            })
+            .packet_id(),
+            0x0C
+        );
     }
 }

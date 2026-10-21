@@ -255,6 +255,13 @@ impl PlaySession {
                         reason: disconnect_reason(&packet.reason),
                     });
                 }
+                _ => {
+                    // The M3 play packets (movement, entities, interaction)
+                    // are decoded by `umicraft-protocol` but not consumed by
+                    // this session yet: the game thread picks them up in a
+                    // later milestone. They are skipped here on purpose.
+                    tracing::trace!("ignored play packet");
+                }
             }
         }
     }
