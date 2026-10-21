@@ -9,8 +9,8 @@ publish = false
 
 [dependencies]
 aes.workspace = true
-cfb8.workspace = true
 flate2.workspace = true
+num-bigint.workspace = true
 rsa.workspace = true
 sha1.workspace = true
 thiserror.workspace = true
