@@ -893,6 +893,7 @@ fn apply_placement(
             );
         }
     }
+    unstick(game);
 
     // The server expects the acknowledgement of the placement.
     //
@@ -931,6 +932,7 @@ fn apply_correction(game: &mut Game, correction: &ServerCorrection, queue: &mut 
         game.yaw = state.player().yaw;
         game.pitch = state.player().pitch;
     }
+    unstick(game);
     queue.push(ClientCommand::AckPosition {
         x: correction.x,
         y: correction.y,
@@ -940,6 +942,50 @@ fn apply_correction(game: &mut Game, correction: &ServerCorrection, queue: &mut 
         on_ground: correction.on_ground,
     });
     game.last_position = None;
+}
+
+/// Moves the player out of the blocks it stands in.
+///
+/// The server places a dead player at the position it died in, and that
+/// position may be inside a block. A player that stands inside a block is
+/// resynchronised by the server with *every* position report (MCP
+/// `NetHandlerPlayServer.handlePlayerPosition` checks the collision boxes of
+/// the player), so the client lifts the player onto the top of the block.
+/// The server applies the same movement through its own collision code, so
+/// both agree again.
+fn unstick(game: &mut Game) {
+    let Some(state) = game.state.as_ref() else {
+        return;
+    };
+    let Some(world) = game.world.as_ref() else {
+        return;
+    };
+    let bounds = state.player().bounding_box();
+    let mut top: Option<i32> = None;
+    for x in (bounds.min.x.floor() as i32)..=(bounds.max.x.floor() as i32) {
+        for z in (bounds.min.z.floor() as i32)..=(bounds.max.z.floor() as i32) {
+            for y in (bounds.min.y.floor() as i32)..=(bounds.max.y.floor() as i32) {
+                if !world.block(BlockPos::new(x, y, z)).is_air() {
+                    top = Some(top.map_or(y + 1, |current: i32| current.max(y + 1)));
+                }
+            }
+        }
+    }
+    let Some(top) = top else {
+        return;
+    };
+    let position = state.position();
+    let lifted = DVec3::new(position.x, f64::from(top), position.z);
+    tracing::info!(?position, ?lifted, "the player stands inside a block");
+    let correction =
+        ServerCorrection::new(lifted.x, lifted.y, lifted.z, game.yaw, game.pitch, true);
+    if let Some(state) = game.state.as_mut() {
+        if let Some(world) = game.world.as_ref() {
+            state.apply_correction(&correction, world);
+        }
+        game.yaw = state.player().yaw;
+        game.pitch = state.player().pitch;
+    }
 }
 
 /// Handles one input update.
