@@ -365,6 +365,8 @@ struct Game {
     ticks_since_report: u32,
     /// The block that is being broken.
     digging: Option<Digging>,
+    /// The last position the client acknowledged to the server.
+    last_acknowledged: Option<(f64, f64, f64)>,
     /// The block whose break the server is expected to confirm.
     expected_break: Option<BlockPos>,
     /// The block whose placement the server is expected to confirm.
@@ -402,6 +404,7 @@ impl Game {
             last_rotation: (0.0, 0.0),
             ticks_since_report: 0,
             digging: None,
+            last_acknowledged: None,
             expected_break: None,
             expected_placement: None,
             status_data: GameStatus::default(),
@@ -888,14 +891,30 @@ fn apply_placement(
     }
 
     // The server expects the acknowledgement of the placement.
-    queue.push(ClientCommand::AckPosition {
-        x: placement.x,
-        y: placement.y,
-        z: placement.z,
-        yaw: placement.yaw,
-        pitch: placement.pitch,
-        on_ground: true,
+    //
+    // The acknowledgement is a position packet itself, and the server
+    // answers every position packet it does not accept with a resync. A
+    // server that keeps resyncing the same position (for example because the
+    // player stands inside a block) would therefore get an acknowledgement
+    // per resync, and the two would feed each other until the packet limiter
+    // of the server kicks the client. The client acknowledges a position only
+    // once.
+    let acknowledged = game.last_acknowledged.is_some_and(|(x, y, z)| {
+        (x - placement.x).abs() < 1e-6
+            && (y - placement.y).abs() < 1e-6
+            && (z - placement.z).abs() < 1e-6
     });
+    if !acknowledged {
+        game.last_acknowledged = Some((placement.x, placement.y, placement.z));
+        queue.push(ClientCommand::AckPosition {
+            x: placement.x,
+            y: placement.y,
+            z: placement.z,
+            yaw: placement.yaw,
+            pitch: placement.pitch,
+            on_ground: true,
+        });
+    }
     game.last_position = None;
 }
 
