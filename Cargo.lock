@@ -3385,10 +3385,14 @@ dependencies = [
 name = "umicraft-testkit"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "tokio",
  "tracing",
+ "tracing-subscriber",
+ "umicraft-game",
  "umicraft-net",
  "umicraft-protocol",
+ "umicraft-world",
 ]
 
 [[package]]

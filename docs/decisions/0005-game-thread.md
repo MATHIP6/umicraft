@@ -309,14 +309,61 @@ Player`), but the typed metadata model is not.
 ## A.5 M3 acceptance
 
 Spec §12: *"can walk, jump, sprint, place/break blocks on a Paper 1.8 server
-without rubber-banding or kicks over a 30-minute session."* Made checkable:
+without rubber-banding or kicks over a 30-minute session."*
+
+> **Rewritten 2026-10-21** after reading the 1.8 server's position handling
+> (`mcp:net/minecraft/network/NetHandlerPlayServer.java`,
+> `handlePlayerPosition`) and measuring a live session. The first draft of
+> this section assumed the server simulates the player independently and
+> corrects the client when the prediction drifts. **It does not**: in 1.8 the
+> client is authoritative for its own position, and the server's checks are
+> different from what the first draft assumed.
+
+### What the 1.8 server actually checks
+
+Per client position report, the server (MCP `NetHandlerPlayServer`):
+
+1. resets the entity to the last **accepted client position** (`lastPos`),
+2. computes the client's claimed delta `d11..d13` and the server's own
+   motion `d14`; `d15 - d14 > 100` means *moved too quickly!* — this is a
+   **teleport** check, not a speed check,
+3. applies the client's delta through **its own** collision code
+   (`moveEntity(d11, d12, d13)`),
+4. compares the server's result with the client's claim: a difference above
+   **0.25 block** (`d15 > 0.0625`) logs *moved wrongly!* and resynchronises
+   the client with `Player Position and Look` (0x08) — this is the check
+   that validates the **collision model**, not the speed,
+5. counts 80 ticks of vertical disagreement and then kicks with *floating
+   too long*.
+
+**Consequences for the client:**
+
+- The client's position is authoritative. A speed error does not resync it.
+- The 0.98 input damping (ADR §A.2) therefore has **no effect on the
+  server's acceptance**; it only affects the quality of the client's own
+  prediction and interpolation.
+- What makes a client rubber-band in 1.8 is a **collision disagreement**
+  above 0.25 block, a position report that is too rare (the vanilla client
+  reports whenever it moved more than 0.1 block, and at least every 20
+  ticks), or a vertical/`onGround` disagreement.
+
+### The checkable criteria
 
 1. A 30-minute session against the local Paper 1.8 server with movement
-   enabled: **no kick** and no server-side anti-cheat complaint
-   (*"moved too quickly"*, *"moved wrongly"*, *"flying"*).
-2. The prediction error (distance between the predicted position and the
-   server's correction) stays below **0.05 block** during normal movement.
-3. Block breaking and placing are acknowledged by the server: the block
+   enabled: **no kick** in the server log — no *moved wrongly!*, no *moved
+   too quickly!*, no *floating too long* — and no `Player Position and
+   Look` resync (0x08) outside the initial placement.
+2. The client reports its position at least every tick while moving, so
+   that the per-report delta stays below the 0.25-block threshold.
+3. The client's collision resolution agrees with the server's: after a walk
+   over varied terrain, the server accepts every reported position.
+4. Block breaking and placing are acknowledged by the server: the block
    state in `World` matches the server's `Block Change` (0x23).
-4. The same scenario runs headless (no window), as spec §11 requires for the
+5. The same scenario runs headless (no window), as spec §11 requires for the
    integration suite.
+
+`umicraft-movement-probe` (in `umicraft-testkit`) automates criterion 3: it
+drives the client model and the live server at the same time, reports the
+model's positions, and the server log then states whether the two agree. A
+30-second walk (600 ticks, ~130 blocks) currently produces no complaint
+from the server.
