@@ -772,6 +772,11 @@ fn handle_net(
             }
             game.state = None;
             game.status = "RESPAWN".to_string();
+            // The player comes back with a full health (MCP
+            // `NetHandlerPlayClient.handleRespawn`).
+            game.health = 20.0;
+            game.food = 20.0;
+            game.hud_dirty = true;
             game.status_data.status = game.status.clone();
             publish_status(game, frames);
         }
