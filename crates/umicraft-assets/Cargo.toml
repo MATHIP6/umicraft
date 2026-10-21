@@ -1,0 +1,21 @@
+[package]
+name = "umicraft-assets"
+description = "Transport layer for the official 1.8 assets: version manifest, asset index, verified downloads, and local cache."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+flate2.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "rt"] }
+tracing.workspace = true
+
+[lints]
+workspace = true
