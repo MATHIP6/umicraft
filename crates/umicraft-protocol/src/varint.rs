@@ -90,6 +90,34 @@ pub fn var_u32_len(value: u32) -> usize {
     len
 }
 
+/// Reads a VarInt from a byte slice starting at `*consumed`, advancing
+/// `*consumed` past it.
+///
+/// Returns `Ok(None)` when more bytes are needed — the streaming variant of
+/// [`read_var_u32`] for pending-buffer readers that must not false-positive on
+/// truncated TCP reads.
+///
+/// # Errors
+/// [`ProtocolError::VarIntTooLong`] on the same conditions as [`read_var_u32`].
+pub fn take_var_u32(bytes: &[u8], consumed: &mut usize) -> Result<Option<u32>, ProtocolError> {
+    let mut result = 0u32;
+    for shift in 0..VAR_INT_32_MAX {
+        let Some(&byte) = bytes.get(*consumed) else {
+            return Ok(None);
+        };
+        *consumed += 1;
+        let payload = u32::from(byte & 0x7F);
+        if shift == VAR_INT_32_MAX - 1 && payload > 0x0F {
+            return Err(ProtocolError::VarIntTooLong);
+        }
+        result |= payload << (shift * 7);
+        if byte & 0x80 == 0 {
+            return Ok(Some(result));
+        }
+    }
+    Err(ProtocolError::VarIntTooLong)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +168,22 @@ mod tests {
 
         // Truncated streams are io errors, not panics.
         assert!(read_var_u32(&mut &[0x80, 0x80][..]).is_err());
+    }
+
+    #[test]
+    fn take_var_u32_streams_without_false_positives() {
+        let bytes = [0x80, 0x01, 0xFF, 0xFF];
+        let mut consumed = 0usize;
+        assert_eq!(take_var_u32(&bytes, &mut consumed).unwrap(), Some(128));
+        assert_eq!(consumed, 2);
+
+        // Incomplete tail: no value, no error, no advance beyond available.
+        let mut consumed = 0usize;
+        assert_eq!(take_var_u32(&[0x80, 0x80], &mut consumed).unwrap(), None);
+        assert_eq!(consumed, 2);
+
+        // Malformed six-byte run errors.
+        let mut consumed = 0usize;
+        assert!(take_var_u32(&[0x80u8; 6], &mut consumed).is_err());
     }
 }

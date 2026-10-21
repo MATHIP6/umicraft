@@ -23,7 +23,7 @@ pub mod varint;
 pub use error::ProtocolError;
 pub use framing::Framing;
 pub use packets::{
-    Handshake, LoginClientbound, LoginServerbound, PlayClientbound, PlayServerbound,
-    StatusClientbound, StatusServerbound,
+    EncodablePacket, Handshake, LoginClientbound, LoginServerbound, PlayClientbound,
+    PlayServerbound, StatusClientbound, StatusServerbound,
 };
 pub use state::{State, PROTOCOL_VERSION_1_8};

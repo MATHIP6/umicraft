@@ -290,6 +290,33 @@ impl LoginClientbound {
         }
     }
 
+    /// Writes the body.
+    ///
+    /// # Errors
+    /// [`ProtocolError`] on invalid fields or stream errors.
+    pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
+        match self {
+            Self::Disconnect { reason } => write_string_capped(writer, reason),
+            Self::EncryptionRequest {
+                server_id,
+                public_key,
+                verify_token,
+            } => {
+                crate::types::write_string(writer, server_id, 20)?;
+                crate::varint::write_var_u32(writer, public_key.len() as u32)?;
+                writer.write_all(public_key)?;
+                crate::varint::write_var_u32(writer, verify_token.len() as u32)?;
+                writer.write_all(verify_token)?;
+                Ok(())
+            }
+            Self::LoginSuccess { uuid, username } => {
+                crate::types::write_string(writer, uuid, 36)?;
+                crate::types::write_string(writer, username, 16)
+            }
+            Self::SetCompression { threshold } => write_var_u32(writer, *threshold as u32),
+        }
+    }
+
     /// Reads a body for the given packet id.
     ///
     /// # Errors
@@ -431,6 +458,53 @@ impl PlayClientbound {
             Self::Chat { .. } => 0x02,
             Self::PositionLook { .. } => 0x08,
             Self::Disconnect { .. } => 0x40,
+        }
+    }
+
+    /// Writes the body.
+    ///
+    /// # Errors
+    /// [`ProtocolError`] on invalid fields or stream errors.
+    pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
+        match self {
+            Self::KeepAlive { id } => {
+                writer.write_all(&id.to_be_bytes())?;
+                Ok(())
+            }
+            Self::JoinGame {
+                entity_id,
+                gamemode,
+                dimension,
+                difficulty,
+                max_players,
+                level_type,
+            } => {
+                write_var_u32(writer, *entity_id as u32)?;
+                writer.write_all(&[*gamemode, *dimension as u8, *difficulty, *max_players])?;
+                crate::types::write_string(writer, level_type, 16)
+            }
+            Self::Chat { json, position } => {
+                write_string_capped(writer, json)?;
+                writer.write_all(&[*position])?;
+                Ok(())
+            }
+            Self::PositionLook {
+                x,
+                y,
+                z,
+                yaw,
+                pitch,
+                flags,
+            } => {
+                writer.write_all(&x.to_be_bytes())?;
+                writer.write_all(&y.to_be_bytes())?;
+                writer.write_all(&z.to_be_bytes())?;
+                writer.write_all(&yaw.to_be_bytes())?;
+                writer.write_all(&pitch.to_be_bytes())?;
+                writer.write_all(&[*flags])?;
+                Ok(())
+            }
+            Self::Disconnect { reason } => write_string_capped(writer, reason),
         }
     }
 
@@ -587,6 +661,92 @@ impl PlayServerbound {
                 Ok(())
             }
         }
+    }
+}
+
+/// Unified write side shared by packet types across states and directions.
+///
+/// Framing layers ([`crate::Framing`]) and the connection write path only need
+/// these two pieces plus a fresh body buffer per packet.
+pub trait EncodablePacket {
+    /// Wire packet id for the packet's own direction and state.
+    fn packet_id(&self) -> u8;
+
+    /// Writes the body only; the caller writes the id via [`Self::packet_id`]
+    /// and wraps the bytes in the outer length/compression layers.
+    ///
+    /// # Errors
+    /// [`ProtocolError`] on oversized fields or stream errors.
+    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError>;
+}
+
+impl EncodablePacket for Handshake {
+    fn packet_id(&self) -> u8 {
+        Handshake::packet_id(self)
+    }
+
+    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
+        Handshake::encode_body(self, writer)
+    }
+}
+
+impl EncodablePacket for StatusClientbound {
+    fn packet_id(&self) -> u8 {
+        StatusClientbound::packet_id(self)
+    }
+
+    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
+        StatusClientbound::encode_body(self, writer)
+    }
+}
+
+impl EncodablePacket for StatusServerbound {
+    fn packet_id(&self) -> u8 {
+        StatusServerbound::packet_id(self)
+    }
+
+    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
+        StatusServerbound::encode_body(self, writer)
+    }
+}
+
+impl EncodablePacket for LoginClientbound {
+    fn packet_id(&self) -> u8 {
+        LoginClientbound::packet_id(self)
+    }
+
+    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
+        LoginClientbound::encode_body(self, writer)
+    }
+}
+
+impl EncodablePacket for LoginServerbound {
+    fn packet_id(&self) -> u8 {
+        LoginServerbound::packet_id(self)
+    }
+
+    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
+        LoginServerbound::encode_body(self, writer)
+    }
+}
+
+impl EncodablePacket for PlayClientbound {
+    fn packet_id(&self) -> u8 {
+        PlayClientbound::packet_id(self)
+    }
+
+    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
+        PlayClientbound::encode_body(self, writer)
+    }
+}
+
+impl EncodablePacket for PlayServerbound {
+    fn packet_id(&self) -> u8 {
+        PlayServerbound::packet_id(self)
+    }
+
+    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
+        PlayServerbound::encode_body(self, writer)
     }
 }
 

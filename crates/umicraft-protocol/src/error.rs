@@ -43,7 +43,7 @@ pub enum ProtocolError {
     Zlib(#[from] flate2::DecompressError),
 
     /// A packet id was not recognized for its protocol state.
-    #[error("unknown packet id {id} for {state:?} state")]
+    #[error("unknown packet id {id:#04x} for {state:?} state")]
     UnknownPacket {
         /// Raw packet id from the wire.
         id: u8,

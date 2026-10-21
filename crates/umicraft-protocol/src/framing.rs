@@ -20,7 +20,7 @@ use flate2::Compression;
 use tracing::debug;
 
 use crate::error::ProtocolError;
-use crate::varint::{read_var_u32, var_u32_len, write_var_u32};
+use crate::varint::{read_var_u32, write_var_u32};
 
 /// Vanilla-sized cap on a single packet body (2^21 - 1). Enforced on both
 /// declared lengths so a hostile server cannot make us allocate gigabytes.
@@ -62,14 +62,27 @@ impl Framing {
             // packet id. Refuse rather than loop; the caller decides to close.
             return Err(ProtocolError::Invariant("zero-length packet".to_string()));
         }
-        let mut body = vec![0u8; packet_len];
-        reader.read_exact(&mut body)?;
+        let mut packet = vec![0u8; packet_len];
+        reader.read_exact(&mut packet)?;
+        self.unwrap_body(&packet)
+    }
 
+    /// Splits one fully-buffered framed packet into its (uncompressed) body.
+    ///
+    /// Connection-oriented readers use this on an accumulated pending buffer,
+    /// so a truncated TCP read is simply "wait for more bytes" instead of an
+    /// error; only genuinely malformed frames error here.
+    ///
+    /// # Errors
+    /// [`ProtocolError::PacketTooLarge`] on oversized declarations,
+    /// [`ProtocolError::Zlib`] on corrupt compressed streams,
+    /// [`ProtocolError::Invariant`] on length mismatches.
+    pub fn unwrap_body(&self, packet: &[u8]) -> Result<Vec<u8>, ProtocolError> {
         match self {
-            Framing::Raw => Ok(body),
+            Framing::Raw => Ok(packet.to_vec()),
             Framing::Compressed { .. } => {
-                // The uncompressed-length varint lives at the front of `body`.
-                let mut inner = &body[..];
+                // The uncompressed-length varint lives at the front.
+                let mut inner = packet;
                 let uncompressed_len = read_var_u32(&mut inner)? as usize;
                 if uncompressed_len > MAX_PACKET_LEN {
                     return Err(ProtocolError::PacketTooLarge {
@@ -79,7 +92,7 @@ impl Framing {
                 }
                 if uncompressed_len == 0 {
                     // Uncompressed packet: strip the zero-varint and pass through.
-                    Ok(body[var_u32_len(0)..].to_vec())
+                    Ok(inner.to_vec())
                 } else {
                     let mut inflated = Vec::with_capacity(uncompressed_len);
                     {

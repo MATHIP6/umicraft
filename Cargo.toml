@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/umicraft-core", "crates/umicraft-protocol"]
+members = ["crates/umicraft-core", "crates/umicraft-protocol", "crates/umicraft-net"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,10 +14,13 @@ flate2 = "1.0"
 num-bigint = "0.4"
 rsa = "0.9"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 sha1 = "0.10"
 thiserror = "2.0"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "macros", "sync"] }
 toml = "0.8"
 tracing = "0.1"
+umicraft-protocol = { path = "crates/umicraft-protocol", version = "0.1.0" }
 
 [workspace.lints.rust]
 missing_docs = "deny"
