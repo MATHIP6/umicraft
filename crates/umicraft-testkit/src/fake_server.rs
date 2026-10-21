@@ -487,6 +487,12 @@ async fn run_play(
                     Ok(PlayServerbound::Brand(packet)) => {
                         observe(observed, |state| state.brand = Some(packet.data));
                     }
+                    Ok(_other) => {
+                        // The M3 serverbound packets (movement, interaction)
+                        // are decoded by `umicraft-protocol`, but the fake
+                        // server only observes the M1 subset so far.
+                        tracing::trace!(packet_id = id, "fake server: ignored play packet");
+                    }
                     Err(err) => {
                         // Play state is full of packets outside the M1 set;
                         // tolerate and trace rather than end the connection.
