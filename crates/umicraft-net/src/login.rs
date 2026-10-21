@@ -9,6 +9,7 @@
 //! - login-state `Disconnect` ⇒ [`NetError::KickedAtLogin`] with readable text.
 //! - Any other login-state packet ⇒ [`NetError::UnexpectedPacket`].
 
+use umicraft_protocol::packets::login::serverbound;
 use umicraft_protocol::{
     Handshake, LoginClientbound, LoginServerbound, ProtocolError, State, PROTOCOL_VERSION_1_8,
 };
@@ -46,34 +47,34 @@ pub async fn login_offline(
         next_state: 2,
     })
     .await?;
-    conn.write_packet(&LoginServerbound::LoginStart {
+    let start = serverbound::LoginStart {
         username: username.to_string(),
-    })
-    .await?;
+    };
+    conn.write_packet(&LoginServerbound::LoginStart(start))
+        .await?;
 
     loop {
         let (id, body) = conn.read_packet().await?;
         match LoginClientbound::decode(id, &mut body.as_slice()) {
-            Ok(LoginClientbound::SetCompression { threshold }) => {
-                conn.set_compression_threshold(threshold);
+            Ok(LoginClientbound::SetCompression(packet)) => {
+                conn.set_compression_threshold(packet.threshold);
             }
-            Ok(LoginClientbound::LoginSuccess { uuid, username }) => {
-                return Ok(LoginProfile { uuid, username });
-            }
-            Ok(LoginClientbound::Disconnect { reason }) => {
-                return Err(NetError::KickedAtLogin {
-                    reason: disconnect_reason(&reason),
+            Ok(LoginClientbound::LoginSuccess(packet)) => {
+                return Ok(LoginProfile {
+                    uuid: packet.uuid,
+                    username: packet.username,
                 });
             }
-            Ok(LoginClientbound::EncryptionRequest {
-                server_id,
-                public_key,
-                verify_token,
-            }) => {
+            Ok(LoginClientbound::Disconnect(packet)) => {
+                return Err(NetError::KickedAtLogin {
+                    reason: disconnect_reason(&packet.reason),
+                });
+            }
+            Ok(LoginClientbound::EncryptionRequest(packet)) => {
                 return Err(NetError::OnlineModeRequired {
-                    server_id,
-                    public_key,
-                    verify_token,
+                    server_id: packet.server_id,
+                    public_key: packet.public_key,
+                    verify_token: packet.verify_token,
                 });
             }
             Err(ProtocolError::UnknownPacket { .. }) => {

@@ -17,7 +17,8 @@ use std::time::Duration;
 
 use tokio::net::TcpListener;
 use umicraft_net::Connection;
-use umicraft_protocol::packets::status::clientbound;
+use umicraft_protocol::packets::login::clientbound as login_clientbound;
+use umicraft_protocol::packets::status::clientbound as status_clientbound;
 use umicraft_protocol::{
     EncodablePacket, Handshake, LoginClientbound, LoginServerbound, PlayClientbound,
     PlayServerbound, StatusClientbound, StatusServerbound,
@@ -307,7 +308,7 @@ async fn run_status(
         match StatusServerbound::decode(id, &mut body.as_slice()) {
             Ok(StatusServerbound::StatusRequest(_)) => {
                 observe(observed, |state| state.status_requests += 1);
-                let response = StatusClientbound::Response(clientbound::Response {
+                let response = StatusClientbound::Response(status_clientbound::Response {
                     json: config.status_json.clone(),
                 });
                 if !send_packet(conn, capture, &response).await {
@@ -316,7 +317,7 @@ async fn run_status(
             }
             Ok(StatusServerbound::Ping(ping)) => {
                 observe(observed, |state| state.pings += 1);
-                let pong = StatusClientbound::Pong(clientbound::Pong { time: ping.time });
+                let pong = StatusClientbound::Pong(status_clientbound::Pong { time: ping.time });
                 if !send_packet(conn, capture, &pong).await {
                     return;
                 }
@@ -341,30 +342,30 @@ async fn run_login_then_play(
     let Some((id, body)) = read_packet(conn, capture).await else {
         return;
     };
-    let Ok(LoginServerbound::LoginStart { username }) =
+    let Ok(LoginServerbound::LoginStart(start)) =
         LoginServerbound::decode(id, &mut body.as_slice())
     else {
         tracing::trace!(packet_id = id, "fake server: odd login packet");
         return;
     };
     observe(observed, |state| {
-        state.login_usernames.push(username.clone())
+        state.login_usernames.push(start.username.clone())
     });
 
     // Scripted login outcomes.
     if config.online_mode {
-        let request = LoginClientbound::EncryptionRequest {
+        let request = LoginClientbound::EncryptionRequest(login_clientbound::EncryptionRequest {
             server_id: String::new(),
             public_key: vec![0x55; 162],
             verify_token: vec![0x77; 4],
-        };
+        });
         let _ = send_packet(conn, capture, &request).await;
         return;
     }
     if let Some(reason) = &config.kick_at_login {
-        let kick = LoginClientbound::Disconnect {
+        let kick = LoginClientbound::Disconnect(login_clientbound::Disconnect {
             reason: reason.clone(),
-        };
+        });
         let _ = send_packet(conn, capture, &kick).await;
         return;
     }
@@ -375,7 +376,7 @@ async fn run_login_then_play(
         if !send_packet(
             conn,
             capture,
-            &LoginClientbound::SetCompression { threshold },
+            &LoginClientbound::SetCompression(login_clientbound::SetCompression { threshold }),
         )
         .await
         {
@@ -383,10 +384,10 @@ async fn run_login_then_play(
         }
         conn.set_compression_threshold(threshold);
     }
-    let success = LoginClientbound::LoginSuccess {
+    let success = LoginClientbound::LoginSuccess(login_clientbound::LoginSuccess {
         uuid: FAKE_UUID.to_string(),
-        username: username.clone(),
-    };
+        username: start.username,
+    });
     if !send_packet(conn, capture, &success).await {
         return;
     }

@@ -5,7 +5,7 @@
 //!
 //! - `handshake` — [`Handshake`] (state selector)
 //! - [`status`] — server-list request/response and ping/pong
-//! - `login` — login start/success, encryption request/response, disconnect,
+//! - [`login`] — login start/success, encryption request/response, disconnect,
 //!   set compression
 //! - `play` — the minimal join + keep-alive subset
 //!
@@ -29,184 +29,15 @@ use crate::varint::{read_var_i32, write_var_u32};
 
 pub mod codec;
 pub mod handshake;
+pub mod login;
 pub mod status;
 
 pub use codec::{
     read_bool, read_byte_array, read_f32, read_f64, read_i32, read_i64, read_rest, read_u8,
 };
 pub use handshake::Handshake;
+pub use login::{LoginClientbound, LoginServerbound};
 pub use status::{StatusClientbound, StatusServerbound};
-
-/// Clientbound login-state packets.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LoginClientbound {
-    /// `Disconnect` (0x00): kick reason as chat JSON.
-    Disconnect {
-        /// Chat JSON body of the kick reason.
-        reason: String,
-    },
-    /// `Encryption Request` (0x01): signals an online-mode server.
-    EncryptionRequest {
-        /// Usually empty since 1.7; authenticates the request token narrative.
-        server_id: String,
-        /// DER-encoded X.509 SubjectPublicKeyInfo of the server's RSA key.
-        public_key: Vec<u8>,
-        /// Verify token to be returned unmodified after encryption.
-        verify_token: Vec<u8>,
-    },
-    /// `Login Success` (0x02): authentication completed.
-    LoginSuccess {
-        /// Canonical string form of the player UUID.
-        uuid: String,
-        /// Profile username used for the session.
-        username: String,
-    },
-    /// `Set Compression` (0x03): enables zlib framing from now on.
-    SetCompression {
-        /// Threshold in bytes; 0 disables compression entirely.
-        threshold: i32,
-    },
-}
-
-impl LoginClientbound {
-    /// Wire packet id.
-    #[must_use]
-    pub const fn packet_id(&self) -> u8 {
-        match self {
-            Self::Disconnect { .. } => 0x00,
-            Self::EncryptionRequest { .. } => 0x01,
-            Self::LoginSuccess { .. } => 0x02,
-            Self::SetCompression { .. } => 0x03,
-        }
-    }
-
-    /// Writes the body.
-    ///
-    /// # Errors
-    /// [`ProtocolError`] on invalid fields or stream errors.
-    pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
-        match self {
-            Self::Disconnect { reason } => write_string_capped(writer, reason),
-            Self::EncryptionRequest {
-                server_id,
-                public_key,
-                verify_token,
-            } => {
-                crate::types::write_string(writer, server_id, 20)?;
-                crate::varint::write_var_u32(writer, public_key.len() as u32)?;
-                writer.write_all(public_key)?;
-                crate::varint::write_var_u32(writer, verify_token.len() as u32)?;
-                writer.write_all(verify_token)?;
-                Ok(())
-            }
-            Self::LoginSuccess { uuid, username } => {
-                crate::types::write_string(writer, uuid, 36)?;
-                crate::types::write_string(writer, username, 16)
-            }
-            Self::SetCompression { threshold } => write_var_u32(writer, *threshold as u32),
-        }
-    }
-
-    /// Reads a body for the given packet id.
-    ///
-    /// # Errors
-    /// [`ProtocolError::UnknownPacket`] for unrecognized ids.
-    pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        Ok(match id {
-            0x00 => Self::Disconnect {
-                reason: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
-            },
-            0x01 => Self::EncryptionRequest {
-                server_id: crate::types::read_string(reader, 20)?,
-                public_key: read_byte_array(reader, 8192)?,
-                verify_token: read_byte_array(reader, 128)?,
-            },
-            0x02 => Self::LoginSuccess {
-                uuid: crate::types::read_string(reader, 36)?,
-                username: crate::types::read_string(reader, 16)?,
-            },
-            0x03 => Self::SetCompression {
-                threshold: read_var_i32(reader)?,
-            },
-            _ => {
-                return Err(ProtocolError::UnknownPacket {
-                    id,
-                    state: crate::State::Login,
-                })
-            }
-        })
-    }
-}
-
-/// Serverbound login-state packets.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LoginServerbound {
-    /// `Login Start` (0x00): the chosen username.
-    LoginStart {
-        /// Profile username.
-        username: String,
-    },
-    /// `Encryption Response` (0x01): RSA-wrapped shared secret + verify token.
-    EncryptionResponse {
-        /// Shared secret encrypted with the server's public key (128 bytes).
-        shared_secret: Vec<u8>,
-        /// Verify token encrypted with the same key (16 bytes vanilla).
-        nonce: Vec<u8>,
-    },
-}
-
-impl LoginServerbound {
-    /// Wire packet id.
-    #[must_use]
-    pub const fn packet_id(&self) -> u8 {
-        match self {
-            Self::LoginStart { .. } => 0x00,
-            Self::EncryptionResponse { .. } => 0x01,
-        }
-    }
-
-    /// Reads a body for the given packet id.
-    ///
-    /// # Errors
-    /// [`ProtocolError::UnknownPacket`] for unrecognized ids.
-    pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        Ok(match id {
-            0x00 => Self::LoginStart {
-                username: crate::types::read_string(reader, 16)?,
-            },
-            0x01 => Self::EncryptionResponse {
-                shared_secret: read_byte_array(reader, 256)?,
-                nonce: read_byte_array(reader, 256)?,
-            },
-            _ => {
-                return Err(ProtocolError::UnknownPacket {
-                    id,
-                    state: crate::State::Login,
-                })
-            }
-        })
-    }
-
-    /// Writes the body.
-    ///
-    /// # Errors
-    /// [`ProtocolError`] on invalid fields or stream errors.
-    pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
-        match self {
-            Self::LoginStart { username } => write_string_capped(writer, username),
-            Self::EncryptionResponse {
-                shared_secret,
-                nonce,
-            } => {
-                crate::varint::write_var_u32(writer, shared_secret.len() as u32)?;
-                writer.write_all(shared_secret)?;
-                crate::varint::write_var_u32(writer, nonce.len() as u32)?;
-                writer.write_all(nonce)?;
-                Ok(())
-            }
-        }
-    }
-}
 
 /// Minimal play-state packets needed to join a server and stay connected.
 #[derive(Debug, Clone, PartialEq)]
@@ -539,26 +370,6 @@ pub trait EncodablePacket {
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError>;
 }
 
-impl EncodablePacket for LoginClientbound {
-    fn packet_id(&self) -> u8 {
-        LoginClientbound::packet_id(self)
-    }
-
-    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        LoginClientbound::encode_body(self, writer)
-    }
-}
-
-impl EncodablePacket for LoginServerbound {
-    fn packet_id(&self) -> u8 {
-        LoginServerbound::packet_id(self)
-    }
-
-    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        LoginServerbound::encode_body(self, writer)
-    }
-}
-
 impl EncodablePacket for PlayClientbound {
     fn packet_id(&self) -> u8 {
         PlayClientbound::packet_id(self)
@@ -582,39 +393,6 @@ impl EncodablePacket for PlayServerbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn login_success_parse() {
-        let mut buffer = Vec::new();
-        crate::types::write_string_capped(&mut buffer, "00000000-0000-0000-0000-000000000001")
-            .unwrap();
-        crate::types::write_string_capped(&mut buffer, "Player").unwrap();
-        let decoded = LoginClientbound::decode(0x02, &mut &buffer[..]).unwrap();
-        match decoded {
-            LoginClientbound::LoginSuccess { uuid, username } => {
-                assert_eq!(uuid, "00000000-0000-0000-0000-000000000001");
-                assert_eq!(username, "Player");
-            }
-            other => panic!("unexpected decode {other:?}"),
-        }
-    }
-
-    #[test]
-    fn set_compression_and_disconnect_parse() {
-        let mut buffer = Vec::new();
-        crate::varint::write_var_u32(&mut buffer, 256).unwrap();
-        assert!(matches!(
-            LoginClientbound::decode(0x03, &mut &buffer[..]).unwrap(),
-            LoginClientbound::SetCompression { threshold: 256 }
-        ));
-
-        let mut buffer = Vec::new();
-        crate::types::write_string_capped(&mut buffer, "{\"text\":\"bye\"}").unwrap();
-        assert!(matches!(
-            LoginClientbound::decode(0x00, &mut &buffer[..]).unwrap(),
-            LoginClientbound::Disconnect { .. }
-        ));
-    }
 
     #[test]
     fn keepalive_round_trip() {
@@ -746,34 +524,6 @@ mod tests {
     /// (symmetry contract the fake server depends on).
     #[test]
     fn serverbound_round_trip_symmetry() {
-        let mut buffer = Vec::new();
-        LoginServerbound::LoginStart {
-            username: "Alice".to_string(),
-        }
-        .encode_body(&mut buffer)
-        .unwrap();
-        assert_eq!(
-            LoginServerbound::decode(0x00, &mut &buffer[..]).unwrap(),
-            LoginServerbound::LoginStart {
-                username: "Alice".to_string()
-            }
-        );
-
-        let mut buffer = Vec::new();
-        LoginServerbound::EncryptionResponse {
-            shared_secret: vec![9u8; 16],
-            nonce: vec![7u8; 128],
-        }
-        .encode_body(&mut buffer)
-        .unwrap();
-        assert_eq!(
-            LoginServerbound::decode(0x01, &mut &buffer[..]).unwrap(),
-            LoginServerbound::EncryptionResponse {
-                shared_secret: vec![9u8; 16],
-                nonce: vec![7u8; 128],
-            }
-        );
-
         let play = vec![
             (0x00, PlayServerbound::KeepAlive { id: -7 }),
             (
