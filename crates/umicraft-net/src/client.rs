@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Play-state runner for the M1 acceptance profile: respond to keepalives,
-//! record the join/teleport facts, answer teleports, and surface a
-//! play-state `Disconnect` as a clean, readable failure (spec NET-6).
+//! Play-state runner: respond to keepalives, send entry packets, echo
+//! teleports, and stream decoded world packets to a caller (spec NET-6).
+//!
+//! [`PlaySession`] is the shared state machine behind the M1 headless client
+//! (which discards events) and the M2 graphical client (which feeds them into
+//! `umicraft-world`).
 
 use std::time::{Duration, Instant};
 
 use tokio::time;
-use umicraft_protocol::packets::play::serverbound;
-use umicraft_protocol::{varint::write_var_u32, PlayClientbound, PlayServerbound, State};
+use umicraft_protocol::packets::play::clientbound::{
+    BlockChange, ChunkData, MapChunkBulk, MultiBlockChange, PositionLook,
+};
+use umicraft_protocol::packets::play::{clientbound, serverbound};
+use umicraft_protocol::{varint::write_var_u32, PlayClientbound, PlayServerbound};
 
 use crate::connection::Connection;
 use crate::error::NetError;
@@ -97,16 +103,204 @@ fn decode_play(id: u8, body: &[u8]) -> Result<PlayClientbound, NetError> {
     result.map_err(NetError::from)
 }
 
+/// One event surfaced by [`PlaySession::next`].
+///
+/// Keepalives are answered inside the session and never become events; chat is
+/// surfaced as raw JSON for callers that want to display or inspect it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayEvent {
+    /// The server entered play state and described the world.
+    JoinGame(JoinGameInfo),
+    /// Absolute player placement after resolving the 1.8 relative flags.
+    Placement(PlayerPlacement),
+    /// Chat/system JSON.
+    Chat(String),
+    /// One chunk column, complete or a section update.
+    ChunkData(ChunkData),
+    /// Initial bulk chunk batch.
+    MapChunkBulk(MapChunkBulk),
+    /// One block update.
+    BlockChange(BlockChange),
+    /// Batched block updates in one chunk.
+    MultiBlockChange(MultiBlockChange),
+}
+
+/// Streaming play-state state machine.
+///
+/// Handles the mandatory client behavior (keepalive echoes, entry packets after
+/// `Join Game`, teleport answers) and returns every packet the caller needs for
+/// world building. Packet ids outside the supported M2 subset are skipped.
+#[derive(Debug)]
+pub struct PlaySession {
+    options: PlayOptions,
+    started: Instant,
+    entry_sent: bool,
+    join: Option<JoinGameInfo>,
+    placement: Option<PlayerPlacement>,
+    keepalives_answered: u64,
+    chat_messages: u64,
+}
+
+impl PlaySession {
+    /// Creates a session; the stay timer starts immediately.
+    #[must_use]
+    pub fn new(options: PlayOptions) -> Self {
+        Self {
+            options,
+            started: Instant::now(),
+            entry_sent: false,
+            join: None,
+            placement: None,
+            keepalives_answered: 0,
+            chat_messages: 0,
+        }
+    }
+
+    /// Snapshot of what the session has observed so far.
+    #[must_use]
+    pub fn summary(&self) -> PlaySummary {
+        PlaySummary {
+            join: self.join.clone(),
+            placement: self.placement.clone(),
+            keepalives_answered: self.keepalives_answered,
+            chat_messages: self.chat_messages,
+            stayed: self.started.elapsed(),
+        }
+    }
+
+    /// Reads and handles packets until one world/chat/join event is produced.
+    ///
+    /// # Errors
+    /// [`NetError::KickedAtPlay`] on a play `Disconnect`, transport/protocol
+    /// errors on malformed packets or socket failures.
+    pub async fn next(&mut self, connection: &mut Connection) -> Result<PlayEvent, NetError> {
+        loop {
+            let (id, body) = connection.read_packet().await?;
+            let packet = match id {
+                clientbound::KeepAlive::ID
+                | clientbound::JoinGame::ID
+                | clientbound::Chat::ID
+                | clientbound::PositionLook::ID
+                | clientbound::ChunkData::ID
+                | clientbound::MultiBlockChange::ID
+                | clientbound::BlockChange::ID
+                | clientbound::MapChunkBulk::ID
+                | clientbound::Disconnect::ID => decode_play(id, &body)?,
+                _ => {
+                    tracing::trace!(id, bytes = body.len(), "skipped play packet");
+                    continue;
+                }
+            };
+
+            match packet {
+                PlayClientbound::KeepAlive(packet) => {
+                    let answer = serverbound::KeepAlive { id: packet.id };
+                    connection
+                        .write_packet(&PlayServerbound::KeepAlive(answer))
+                        .await?;
+                    self.keepalives_answered += 1;
+                }
+                PlayClientbound::JoinGame(packet) => {
+                    let info = JoinGameInfo {
+                        entity_id: packet.entity_id,
+                        gamemode: packet.gamemode,
+                        dimension: packet.dimension,
+                        difficulty: packet.difficulty,
+                        max_players: packet.max_players,
+                        level_type: packet.level_type,
+                        reduced_debug_info: packet.reduced_debug_info,
+                    };
+                    if !self.entry_sent {
+                        connection.send_entry_packets(&self.options).await?;
+                        self.entry_sent = true;
+                    }
+                    self.join = Some(info.clone());
+                    return Ok(PlayEvent::JoinGame(info));
+                }
+                PlayClientbound::Chat(packet) => {
+                    tracing::trace!(json = %packet.json, "server chat");
+                    self.chat_messages += 1;
+                    return Ok(PlayEvent::Chat(packet.json));
+                }
+                PlayClientbound::PositionLook(packet) => {
+                    let placement = self.resolve_placement(&packet);
+                    let answer = serverbound::PositionLook {
+                        x: placement.x,
+                        y: placement.y,
+                        z: placement.z,
+                        yaw: placement.yaw,
+                        pitch: placement.pitch,
+                        on_ground: true,
+                    };
+                    connection
+                        .write_packet(&PlayServerbound::PositionLook(answer))
+                        .await?;
+                    self.placement = Some(placement.clone());
+                    return Ok(PlayEvent::Placement(placement));
+                }
+                PlayClientbound::ChunkData(packet) => {
+                    return Ok(PlayEvent::ChunkData(packet));
+                }
+                PlayClientbound::MapChunkBulk(packet) => {
+                    return Ok(PlayEvent::MapChunkBulk(packet));
+                }
+                PlayClientbound::BlockChange(packet) => {
+                    return Ok(PlayEvent::BlockChange(packet));
+                }
+                PlayClientbound::MultiBlockChange(packet) => {
+                    return Ok(PlayEvent::MultiBlockChange(packet));
+                }
+                PlayClientbound::Disconnect(packet) => {
+                    return Err(NetError::KickedAtPlay {
+                        reason: disconnect_reason(&packet.reason),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Applies the 1.8 relative-position flag bits to the previous placement.
+    ///
+    /// Flags: X, Y, Z, yaw, pitch (bits 0–4); vanilla accumulates relative
+    /// components on the last accepted position.
+    fn resolve_placement(&self, packet: &PositionLook) -> PlayerPlacement {
+        let previous = self.placement.clone().unwrap_or_default();
+        PlayerPlacement {
+            x: if packet.flags & 0x01 != 0 {
+                previous.x + packet.x
+            } else {
+                packet.x
+            },
+            y: if packet.flags & 0x02 != 0 {
+                previous.y + packet.y
+            } else {
+                packet.y
+            },
+            z: if packet.flags & 0x04 != 0 {
+                previous.z + packet.z
+            } else {
+                packet.z
+            },
+            yaw: if packet.flags & 0x08 != 0 {
+                previous.yaw + packet.yaw
+            } else {
+                packet.yaw
+            },
+            pitch: if packet.flags & 0x10 != 0 {
+                previous.pitch + packet.pitch
+            } else {
+                packet.pitch
+            },
+        }
+    }
+}
+
 impl Connection {
     /// Enters play state behavior until `stay_for` elapses (when given) or the
-    /// server disconnects.
+    /// server disconnects, discarding world events.
     ///
-    /// Sends `Client Settings` and the `MC|Brand` plugin message once the
-    /// server's `Join Game` arrives — the vanilla client ordering; sending
-    /// them right after `Login Success` raced the server's login→play state
-    /// switch on a real 1.8.8 server ("Bad packet id 21" in its decoder).
-    /// Then reacts to the M1 packet subset and silently tolerates (traces)
-    /// everything else so real server chatter cannot kill the connection.
+    /// This is the M1 headless acceptance path; [`PlaySession`] exposes the
+    /// same state machine to clients that build a world.
     ///
     /// # Errors
     /// [`NetError::KickedAtPlay`] on a play `Disconnect`, transport/protocol
@@ -116,144 +310,31 @@ impl Connection {
         stay_for: Option<Duration>,
         options: &PlayOptions,
     ) -> Result<PlaySummary, NetError> {
-        let started = Instant::now();
-        let mut entry_sent = false;
-
-        let mut summary = PlaySummary::default();
+        let mut session = PlaySession::new(options.clone());
         let deadline = stay_for.map(|span| time::Instant::now() + span);
 
         loop {
             if let Some(deadline) = deadline {
                 if time::Instant::now() >= deadline {
-                    summary.stayed = started.elapsed();
-                    return Ok(summary);
+                    break;
                 }
             }
 
             let read = match deadline {
-                Some(deadline) => time::timeout_at(deadline, self.read_packet()).await,
-                None => Ok(self.read_packet().await),
+                Some(deadline) => time::timeout_at(deadline, session.next(self)).await,
+                None => Ok(session.next(self).await),
             };
-            // Log read failures with context before propagating; deadline
-            // expiry (the quiet exit path) must not log.
-            let (id, body) = match read {
-                Ok(Ok(packet)) => packet,
+            match read {
+                Ok(Ok(_event)) => {}
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "play: read failed");
                     return Err(err);
                 }
                 Err(_elapsed) => break,
-            };
-
-            match id {
-                0x00 => match decode_play(id, &body)? {
-                    PlayClientbound::KeepAlive(packet) => {
-                        let answer = serverbound::KeepAlive { id: packet.id };
-                        self.write_packet(&PlayServerbound::KeepAlive(answer))
-                            .await?;
-                        summary.keepalives_answered += 1;
-                    }
-                    _ => {
-                        return Err(NetError::UnexpectedPacket {
-                            state: State::Play,
-                            id,
-                        });
-                    }
-                },
-                0x01 => match decode_play(id, &body)? {
-                    PlayClientbound::JoinGame(packet) => {
-                        summary.join = Some(JoinGameInfo {
-                            entity_id: packet.entity_id,
-                            gamemode: packet.gamemode,
-                            dimension: packet.dimension,
-                            difficulty: packet.difficulty,
-                            max_players: packet.max_players,
-                            level_type: packet.level_type,
-                            reduced_debug_info: packet.reduced_debug_info,
-                        });
-                        // Vanilla sends Client Settings + brand after the
-                        // server's own `Join Game`; doing so right after
-                        // `Login Success` raced the server's login→play
-                        // state switch (real PandaSpigot 1.8.8 observation).
-                        if !entry_sent {
-                            self.send_entry_packets(options).await?;
-                            entry_sent = true;
-                        }
-                    }
-                    _ => {
-                        return Err(NetError::UnexpectedPacket {
-                            state: State::Play,
-                            id,
-                        });
-                    }
-                },
-                0x02 => match decode_play(id, &body)? {
-                    PlayClientbound::Chat(packet) => {
-                        tracing::trace!(json = %packet.json, "server chat");
-                        summary.chat_messages += 1;
-                    }
-                    _ => {
-                        return Err(NetError::UnexpectedPacket {
-                            state: State::Play,
-                            id,
-                        });
-                    }
-                },
-                0x08 => match decode_play(id, &body)? {
-                    PlayClientbound::PositionLook(packet) => {
-                        // 1.8 has no teleport confirm packet; the vanilla
-                        // client answers with `Player Position and Look`,
-                        // which we echo (with absolute values, matching the
-                        // flags-0 spawn packet 1.8 servers send first).
-                        let answer = serverbound::PositionLook {
-                            x: packet.x,
-                            y: packet.y,
-                            z: packet.z,
-                            yaw: packet.yaw,
-                            pitch: packet.pitch,
-                            on_ground: true,
-                        };
-                        self.write_packet(&PlayServerbound::PositionLook(answer))
-                            .await?;
-                        summary.placement = Some(PlayerPlacement {
-                            x: packet.x,
-                            y: packet.y,
-                            z: packet.z,
-                            yaw: packet.yaw,
-                            pitch: packet.pitch,
-                        });
-                    }
-                    _ => {
-                        return Err(NetError::UnexpectedPacket {
-                            state: State::Play,
-                            id,
-                        });
-                    }
-                },
-                0x40 => match decode_play(id, &body)? {
-                    PlayClientbound::Disconnect(packet) => {
-                        summary.stayed = started.elapsed();
-                        return Err(NetError::KickedAtPlay {
-                            reason: disconnect_reason(&packet.reason),
-                        });
-                    }
-                    _ => {
-                        return Err(NetError::UnexpectedPacket {
-                            state: State::Play,
-                            id,
-                        });
-                    }
-                },
-                _ => {
-                    // Tolerant skip: servers stream dozens of play packet
-                    // kinds (chunks, entities, particles) outside the M1 set.
-                    tracing::trace!(id, bytes = body.len(), "skipped play packet");
-                }
             }
         }
 
-        summary.stayed = started.elapsed();
-        Ok(summary)
+        Ok(session.summary())
     }
 
     async fn send_entry_packets(&mut self, options: &PlayOptions) -> Result<(), NetError> {
@@ -277,5 +358,58 @@ impl Connection {
         };
         self.write_packet(&PlayServerbound::Brand(brand)).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn packet(flags: u8) -> PositionLook {
+        PositionLook {
+            x: 1.5,
+            y: 70.0,
+            z: -2.5,
+            yaw: 15.0,
+            pitch: -20.0,
+            flags,
+        }
+    }
+
+    #[test]
+    fn relative_flags_accumulate_independently() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        session.placement = Some(PlayerPlacement {
+            x: 10.0,
+            y: 64.0,
+            z: -5.0,
+            yaw: 90.0,
+            pitch: 10.0,
+        });
+        // X, Z and yaw are deltas; Y and pitch stay absolute.
+        let placement = session.resolve_placement(&packet(0x01 | 0x04 | 0x08));
+        assert_eq!(placement.x, 11.5);
+        assert_eq!(placement.y, 70.0);
+        assert_eq!(placement.z, -7.5);
+        assert_eq!(placement.yaw, 105.0);
+        assert_eq!(placement.pitch, -20.0);
+    }
+
+    #[test]
+    fn clear_flags_replace_with_absolute_values() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        session.placement = Some(PlayerPlacement {
+            x: 10.0,
+            y: 64.0,
+            z: -5.0,
+            yaw: 90.0,
+            pitch: 10.0,
+        });
+        let placement = session.resolve_placement(&packet(0));
+        assert_eq!(placement.x, 1.5);
+        assert_eq!(placement.y, 70.0);
+        assert_eq!(placement.z, -2.5);
+        assert_eq!(placement.yaw, 15.0);
+        assert_eq!(placement.pitch, -20.0);
     }
 }

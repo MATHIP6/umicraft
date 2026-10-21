@@ -4,7 +4,7 @@
 //!
 //! Async networking on top of [`umicraft_protocol`] (spec NET-1/2/6):
 //! - [`ping`] — 1.8 server list ping with latency and MOTD parsing.
-//! - [`login`] — offline-mode login ending in a [`LoginProfile`].
+//! - [`login`] — offline-mode login ending in a [`login::LoginProfile`].
 //! - [`client`] — play-state runner handling keepalives, teleports, and
 //!   clean disconnects.
 //! - the `umicraft-headless` binary drives all three from the CLI.

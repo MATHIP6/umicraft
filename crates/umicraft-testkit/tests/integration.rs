@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use umicraft_net::client::PlayOptions;
+use umicraft_net::client::{PlayEvent, PlayOptions, PlaySession};
 use umicraft_net::login::login_offline;
 use umicraft_net::{ping::ping, Connection, NetError};
 use umicraft_protocol::framing::MAX_PACKET_LEN;
@@ -116,6 +116,59 @@ async fn full_offline_session_ping_login_play() {
     assert!(entries
         .iter()
         .any(|e| e.direction == Direction::ServerToClient));
+}
+
+#[tokio::test]
+async fn play_session_streams_join_placement_chat() {
+    let config = FakeServerConfig {
+        keepalive_interval: Some(Duration::from_millis(100)),
+        ..FakeServerConfig::default()
+    };
+    let server = start(config).await.expect("fake server binds");
+    let mut conn = Connection::connect("127.0.0.1", server.addr.port())
+        .await
+        .expect("connect works");
+    login_offline(&mut conn, "Streamer", None)
+        .await
+        .expect("login works");
+    let mut session = PlaySession::new(PlayOptions::default());
+
+    let join = tokio::time::timeout(Duration::from_secs(2), session.next(&mut conn))
+        .await
+        .expect("join event before timeout")
+        .expect("join event");
+    match join {
+        PlayEvent::JoinGame(info) => assert_eq!(info.entity_id, 42),
+        other => panic!("expected JoinGame, got {other:?}"),
+    }
+
+    let placement = tokio::time::timeout(Duration::from_secs(2), session.next(&mut conn))
+        .await
+        .expect("placement event before timeout")
+        .expect("placement event");
+    match placement {
+        PlayEvent::Placement(p) => assert!((p.y - 64.0).abs() < 1e-9),
+        other => panic!("expected Placement, got {other:?}"),
+    }
+
+    let chat = tokio::time::timeout(Duration::from_secs(2), session.next(&mut conn))
+        .await
+        .expect("chat event before timeout")
+        .expect("chat event");
+    match chat {
+        PlayEvent::Chat(json) => assert!(json.contains("welcome")),
+        other => panic!("expected Chat, got {other:?}"),
+    }
+
+    // Keepalives are consumed inside `next`; let one interval elapse, then
+    // verify the session summary and the server-side echo.
+    let _ = tokio::time::timeout(Duration::from_millis(350), session.next(&mut conn)).await;
+    let summary = session.summary();
+    assert!(summary.keepalives_answered >= 1);
+    assert!(!server.observed().snapshot().keepalive_echoes.is_empty());
+    let observed = server.observed().snapshot();
+    let (locale, view, _, _, _) = observed.client_settings.expect("entry packets");
+    assert_eq!((locale.as_str(), view), ("en_us", 8));
 }
 
 #[tokio::test]
