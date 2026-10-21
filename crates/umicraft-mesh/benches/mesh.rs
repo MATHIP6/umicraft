@@ -32,6 +32,43 @@ fn mesh_flat_chunk(criterion: &mut Criterion) {
     });
 }
 
+fn mesh_flat_view(criterion: &mut Criterion) {
+    const VIEW_CHUNKS: i32 = 13; // PandaSpigot view-distance 6
+    let columns = (0..VIEW_CHUNKS)
+        .flat_map(|z| {
+            (0..VIEW_CHUNKS).map(move |x| {
+                (
+                    ChunkPos::new(x, z),
+                    Arc::new(flat_column(ChunkPos::new(x, z))),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let by_pos = columns
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashMap<_, _>>();
+    let snapshots = columns
+        .iter()
+        .map(|(pos, _)| {
+            let neighbours = (-1..=1)
+                .flat_map(|dz| (-1..=1).map(move |dx| ChunkPos::new(pos.x + dx, pos.z + dz)))
+                .filter_map(|neighbour| by_pos.get(&neighbour).cloned())
+                .collect::<Vec<_>>();
+            (*pos, ChunkSnapshot::from_columns(*pos, neighbours))
+        })
+        .collect::<Vec<_>>();
+    criterion.bench_function("mesh/flat_view_169_chunks", |bencher| {
+        bencher.iter(|| {
+            let mut faces = 0;
+            for (pos, snapshot) in &snapshots {
+                faces += black_box(mesh_chunk(*pos, black_box(snapshot))).face_count();
+            }
+            black_box(faces)
+        });
+    });
+}
+
 fn mesh_dense_section(criterion: &mut Criterion) {
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     for y in 0..16 {
@@ -47,5 +84,5 @@ fn mesh_dense_section(criterion: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, mesh_flat_chunk, mesh_dense_section);
+criterion_group!(benches, mesh_flat_chunk, mesh_flat_view, mesh_dense_section);
 criterion_main!(benches);
