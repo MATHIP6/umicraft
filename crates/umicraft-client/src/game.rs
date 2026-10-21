@@ -968,13 +968,26 @@ fn unstick(game: &mut Game) {
     let position = state.position();
     let half = umicraft_game::physics::PLAYER_HALF_WIDTH;
     let height = umicraft_game::physics::PLAYER_HEIGHT;
+    // The test uses the box shrunk by a sixteenth of a block, the same margin
+    // the server uses (MCP `NetHandlerPlayServer.handlePlayerPosition` asks
+    // for the collision boxes of the box shrunk by 0.0625). A player that only
+    // touches a block is not inside it.
+    let margin = 0.0625;
     // The lift may still leave the player inside another block, so the search
     // repeats until the box of the player is free.
     let mut feet = position.y;
     for _ in 0..8 {
         let bounds = Aabb::new(
-            DVec3::new(position.x - half, feet, position.z - half),
-            DVec3::new(position.x + half, feet + height, position.z + half),
+            DVec3::new(
+                position.x - half + margin,
+                feet + margin,
+                position.z - half + margin,
+            ),
+            DVec3::new(
+                position.x + half - margin,
+                feet + height - margin,
+                position.z + half - margin,
+            ),
         );
         let mut top: Option<i32> = None;
         for x in (bounds.min.x.floor() as i32)..=(bounds.max.x.floor() as i32) {
