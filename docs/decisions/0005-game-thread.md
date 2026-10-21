@@ -256,44 +256,53 @@ this table for the M1/M2 packets; it is the authority, not the class name.
 
 ### Clientbound (server → client), to add
 
-| Id | Struct | MCP source | Fields (verify against the source) |
+> **Corrected 2026-10-21.** The first draft of this table described the 1.19+
+> layouts (the agent A workstream checked every field against the MCP source
+> and found twelve packets where the draft was wrong). The column below now
+> holds the **1.8** layouts, each verified against the MCP `readPacketData`
+> named in the third column. The packet **ids** of the first draft were all
+> correct.
+
+| Id | Struct | MCP source | 1.8 layout |
 |---|---|---|---|
-| 0x03 | `TimeUpdate` | `S03PacketTimeUpdate` | i64 world age, i64 time of day |
-| 0x04 | `EntityEquipment` | `S04PacketEntityEquipment` | varint entity id, i16 slot, i16 item |
+| 0x03 | `TimeUpdate` | `S03PacketTimeUpdate` | i64 total world time, i64 world time |
+| 0x04 | `EntityEquipment` | `S04PacketEntityEquipment` | varint entity id, i16 slot, **item stack** |
 | 0x05 | `SpawnPosition` | `S05PacketSpawnPosition` | block position |
-| 0x06 | `UpdateHealth` | `S06PacketUpdateHealth` | f32 health, f32 food, f32 saturation |
-| 0x07 | `Respawn` | `S07PacketRespawn` | i32 dimension, u8 difficulty, u8 world type, u16 game mode, bool hardcore |
-| 0x09 | `HeldItemChange` | `S09PacketHeldItemChange` | u8 slot |
+| 0x06 | `UpdateHealth` | `S06PacketUpdateHealth` | f32 health, **varint** food, f32 saturation |
+| 0x07 | `Respawn` | `S07PacketRespawn` | i32 dimension, u8 difficulty, u8 game type, **string** world type (cap 16) — no hardcore flag |
+| 0x09 | `HeldItemChange` | `S09PacketHeldItemChange` | i8 slot |
 | 0x0B | `Animation` | `S0BPacketAnimation` | varint entity id, u8 animation |
-| 0x0C | `SpawnPlayer` | `S0CPacketSpawnPlayer` | varint entity id, uuid, string name, ... |
+| 0x0C | `SpawnPlayer` | `S0CPacketSpawnPlayer` | varint entity id, uuid (16 raw bytes), i32 x/y/z, i8 yaw, i8 pitch, i16 held item, watcher list — **no name string** |
 | 0x13 | `DestroyEntities` | `S13PacketDestroyEntities` | varint count, varint entity ids |
-| 0x14 | `Entity` | `S14PacketEntity` | varint entity id, u8 type, i32 x/y/z, ... |
-| 0x15 | `EntityRelativeMove` | `S14PacketEntity.S15PacketEntityRelMove` | varint entity id, i16 dx/dy/dz, bool on ground, u8 yaw, u8 pitch |
-| 0x16 | `EntityLook` | `S14PacketEntity.S16PacketEntityLook` | varint entity id, u8 yaw, u8 pitch, bool on ground |
-| 0x17 | `EntityLookMove` | `S14PacketEntity.S17PacketEntityLookMove` | varint entity id, i16 dx/dy/dz, bool on ground, u8 yaw, u8 pitch |
-| 0x18 | `EntityTeleport` | `S18PacketEntityTeleport` | varint entity id, i32 x/y/z, u8 yaw, u8 pitch, bool on ground, bool relative |
-| 0x1A | `EntityStatus` | `S19PacketEntityStatus` | varint entity id, u8 status |
+| 0x14 | `Entity` | `S14PacketEntity` | varint entity id **only**; the movement is in the nested packets below |
+| 0x15 | `EntityRelativeMove` | `S14PacketEntity.S15PacketEntityRelMove` | varint entity id, **i8** dx/dy/dz, bool on ground — no yaw/pitch |
+| 0x16 | `EntityLook` | `S14PacketEntity.S16PacketEntityLook` | varint entity id, i8 yaw, i8 pitch, bool on ground |
+| 0x17 | `EntityLookMove` | `S14PacketEntity.S17PacketEntityLookMove` | varint entity id, **i8** dx/dy/dz, i8 yaw, i8 pitch, bool on ground |
+| 0x18 | `EntityTeleport` | `S18PacketEntityTeleport` | varint entity id, i32 x/y/z, i8 yaw, i8 pitch, bool on ground — **no relative flag** |
+| 0x1A | `EntityStatus` | `S19PacketEntityStatus` | **plain i32** entity id, u8 status |
 | 0x1F | `SetExperience` | `S1FPacketSetExperience` | f32 experience, varint level, varint total |
-| 0x24 | `BlockAction` | `S24PacketBlockAction` | i32 x/y/z, u8 action, u8 type, varint entity id |
-| 0x25 | `BlockBreakAnim` | `S25PacketBlockBreakAnim` | varint entity id, i32 x/y/z, u8 stage |
-| 0x2B | `ChangeGameState` | `S2BPacketChangeGameState` | u8 reason, f32 value |
+| 0x24 | `BlockAction` | `S24PacketBlockAction` | block position, u8 instrument, u8 pitch, **varint** block id |
+| 0x25 | `BlockBreakAnim` | `S25PacketBlockBreakAnim` | varint breaker id, block position, u8 progress |
+| 0x2B | `ChangeGameState` | `S2BPacketChangeGameState` | u8 state, f32 value |
 
 `Entity Metadata` (0x1C) and `Entity Properties` (0x1D) are **out of scope
-for M3**: their terminator-based format needs its own decision.
+for M3**: their terminator-based format needs its own decision. The
+**framing** of the watcher list is implemented (it is needed by `Spawn
+Player`), but the typed metadata model is not.
 
 ### Serverbound (client → server), to add
 
-| Id | Struct | MCP source | Fields (verify against the source) |
+| Id | Struct | MCP source | 1.8 layout |
 |---|---|---|---|
-| 0x02 | `UseEntity` | `C02PacketUseEntity` | varint target, u8 mouse button, ... |
-| 0x04 | `PlayerPosition` | `C03PacketPlayer.C04PacketPlayerPosition` | f64 x, f64 y (feet), f64 z, bool on ground |
-| 0x05 | `PlayerLook` | `C03PacketPlayer.C05PacketPlayerLook` | f32 yaw, f32 pitch, bool on ground |
+| 0x02 | `UseEntity` | `C02PacketUseEntity` | varint target, u8 action ordinal, f32 x/y/z when the action is *interact at* |
+| 0x04 | `PlayerPosition` | `C03PacketPlayer.C04PacketPlayerPosition` | f64 x, f64 y (feet), f64 z, u8 on ground |
+| 0x05 | `PlayerLook` | `C03PacketPlayer.C05PacketPlayerLook` | f32 yaw, f32 pitch, u8 on ground |
 | 0x07 | `PlayerDigging` | `C07PacketPlayerDigging` | u8 status, block position, u8 face |
-| 0x08 | `PlayerBlockPlacement` | `C08PacketPlayerBlockPlacement` | block position, u8 face, varint held item, i16 cursor x/y/z |
-| 0x09 | `HeldItemChange` | `C09PacketHeldItemChange` | u8 slot |
-| 0x0A | `Animation` | `C0APacketAnimation` | u8 hand |
-| 0x0B | `EntityAction` | `C0BPacketEntityAction` | varint entity id, u8 action, u8 param, i32 x/y/z |
-| 0x0C | `Input` | `C0CPacketInput` | bool forward, back, left, right, jump, sneak |
+| 0x08 | `PlayerBlockPlacement` | `C08PacketPlayerBlockPlacement` | block position, u8 face, **item stack**, u8 cursor x/y/z (in sixteenths) |
+| 0x09 | `HeldItemChange` | `C09PacketHeldItemChange` | **i16** slot |
+| 0x0A | `Animation` | `C0APacketAnimation` | **empty body** in 1.8 |
+| 0x0B | `EntityAction` | `C0BPacketEntityAction` | varint entity id, u8 action, **varint** aux data |
+| 0x0C | `Input` | `C0CPacketInput` | **f32 strafe, f32 forward, u8 flags** (bit 0 = jump, bit 1 = sneak) — not six booleans |
 
 `Player Position and Look` (0x06) already exists.
 
