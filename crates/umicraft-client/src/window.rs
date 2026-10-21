@@ -505,6 +505,12 @@ impl App {
         self.update_camera(now);
         self.build_overlay();
 
+        if self.exit_error.is_some() {
+            // The session ended (the server disconnected): leave the loop.
+            event_loop.exit();
+            return;
+        }
+
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
