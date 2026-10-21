@@ -64,9 +64,13 @@ const STATUS_PERIOD: u64 = 20;
 
 /// The number of ticks between the start and the stop of a block break.
 ///
-/// The server breaks the block when `hardness * (ticks + 1) >= 0.7`
-/// (MCP `ItemInWorldManager.func_180785_a`); the softest vanilla block needs
-/// five ticks, so six are waited for.
+/// The server destroys the block when the stop packet arrives and the
+/// accumulated break progress `hardness * (ticks + 1)` reaches `0.7`
+/// (MCP `ItemInWorldManager.func_180785_a`). The effective hardness of the
+/// softest block is 0.054 for a player without the right tool, so the stop
+/// needs about thirteen server ticks. **Measured** against the local 1.8
+/// server: a stop after six ticks did not destroy the block, a stop after
+/// twelve ticks did (see `docs/sources.md`).
 const BREAK_TICKS: u64 = 12;
 
 /// The largest pitch the view may reach, in radians.
@@ -584,7 +588,13 @@ fn handle_event(
     match event {
         GameEvent::Net(event) => handle_net(game, event, queue, frames),
         GameEvent::Input(update) => {
+            let before = (game.yaw, game.pitch);
             handle_input(game, update, queue);
+            if (game.yaw, game.pitch) != before {
+                // The view changed between two ticks: publish the frame right
+                // away, so the mouse look does not wait for the next tick.
+                publish_frame(game, frames, Instant::now());
+            }
             false
         }
         GameEvent::Chat(message) => {
@@ -594,6 +604,17 @@ fn handle_event(
             false
         }
     }
+}
+
+/// Publishes the current player state as a frame.
+fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Instant) {
+    let Some(state) = game.state.as_ref() else {
+        return;
+    };
+    let _ = frames.send(RenderEvent::Frame(Frame {
+        state: state.interpolated(1.0),
+        tick_time,
+    }));
 }
 
 /// Handles one decoded clientbound packet.
@@ -664,6 +685,17 @@ fn handle_net(
             game.status_data.block_updates += packet.records.len() as u64;
             if let Some(world) = game.world.as_mut() {
                 game.dirty.extend(world.apply_multi_block_change(&packet));
+            }
+            // The server confirms a dig or a placement with a single block
+            // change, but a batch carries the same information.
+            for record in &packet.records {
+                let (x, y, z) = record.local_position();
+                let position = BlockPos::new(
+                    packet.chunk_x * 16 + i32::from(x),
+                    i32::from(y),
+                    packet.chunk_z * 16 + i32::from(z),
+                );
+                acknowledge_block(game, position, record.block_state);
             }
         }
         NetEvent::UpdateHealth(packet) => {
@@ -1007,12 +1039,7 @@ fn tick(
     finish_break(game, queue);
     publish_chunks(game, chunks);
 
-    if let Some(state) = game.state.as_ref() {
-        let _ = frames.send(RenderEvent::Frame(Frame {
-            state: state.interpolated(1.0),
-            tick_time,
-        }));
-    }
+    publish_frame(game, frames, tick_time);
     if game.hud_dirty {
         game.hud_dirty = false;
         let _ = frames.send(RenderEvent::Hud(Box::new(game.hud())));

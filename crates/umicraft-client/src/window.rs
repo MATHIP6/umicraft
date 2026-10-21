@@ -179,7 +179,7 @@ impl App {
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
         if self.chat_open {
-            self.handle_chat_key(event_loop, event);
+            self.handle_chat_key(event);
             return;
         }
         let PhysicalKey::Code(code) = event.physical_key else {
@@ -217,7 +217,7 @@ impl App {
     }
 
     /// Handles a key press while the chat input is open.
-    fn handle_chat_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
+    fn handle_chat_key(&mut self, event: KeyEvent) {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
@@ -249,7 +249,6 @@ impl App {
             },
             ElementState::Released => {}
         }
-        let _ = event_loop;
     }
 
     fn capture_mouse(&mut self, capture: bool) {
@@ -314,7 +313,7 @@ impl App {
             state,
             look_yaw: self.look.0,
             look_pitch: self.look.1,
-            select_slot: self.select_slot.take(),
+            select_slot: self.select_slot,
             break_block: self.break_block,
             place_block: self.place_block,
         };
@@ -326,6 +325,7 @@ impl App {
         {
             self.last_input = state;
             self.look = (0.0, 0.0);
+            self.select_slot = None;
             self.break_block = false;
             self.place_block = false;
         }

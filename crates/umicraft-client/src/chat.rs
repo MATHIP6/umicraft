@@ -25,7 +25,10 @@ const TRANSLATIONS: [(&str, &str); 8] = [
     ("chat.type.announcement", "[%s] %s"),
     ("multiplayer.disconnect.generic", "Disconnected"),
     ("multiplayer.disconnect.kicked", "Kicked by an operator: %s"),
-    ("commands.generic.notFound", "Unknown command. Type /help for help."),
+    (
+        "commands.generic.notFound",
+        "Unknown command. Type /help for help.",
+    ),
     ("death.attack.player", "%s was slain by %s"),
 ];
 
@@ -118,7 +121,8 @@ mod tests {
 
     #[test]
     fn a_chat_line_keeps_the_player_and_the_message() {
-        let json = "{\"translate\":\"chat.type.text\",\"with\":[{\"text\":\"Steve\"},{\"text\":\"hi\"}]}";
+        let json =
+            "{\"translate\":\"chat.type.text\",\"with\":[{\"text\":\"Steve\"},{\"text\":\"hi\"}]}";
         assert_eq!(plain_text(json), "Steve: hi");
     }
 

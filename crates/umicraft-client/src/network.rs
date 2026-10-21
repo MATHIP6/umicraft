@@ -535,13 +535,8 @@ async fn handle_packet(
         }
         clientbound::Disconnect::ID => {
             let packet = clientbound::Disconnect::decode(&mut &body[..])?;
-            send(
-                events,
-                NetEvent::Error(umicraft_net::status::disconnect_reason(&packet.reason)),
-            );
-            return Err(umicraft_net::NetError::KickedAtPlay {
-                reason: umicraft_net::status::disconnect_reason(&packet.reason),
-            });
+            let reason = umicraft_net::status::disconnect_reason(&packet.reason);
+            return Err(umicraft_net::NetError::KickedAtPlay { reason });
         }
         other => {
             tracing::trace!(id = other, bytes = body.len(), "skipped play packet");
