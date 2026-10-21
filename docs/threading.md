@@ -40,7 +40,13 @@ ADR-0005).
 - The serverbound packets the game thread produces cross a bounded
   `tokio::sync::mpsc` queue of 64 commands (game thread → network thread).
   The queue is polled with `try_send` by the game thread: a full queue keeps
-  the command for the next tick instead of blocking the simulation.
+  the command for the next tick instead of blocking the simulation. The input
+  packet and the position report are *coalesced* — only the newest one of
+  each is kept — because a backlog of them would burst on the socket, and the
+  1.8 server counts the packets of a player (PandaSpigot kicks above 500
+  packets in seven seconds). The commands that keep their order (the
+  acknowledgement of a placement, the dig, the placement, the chat) are never
+  dropped.
 - The network thread selects between the socket and the command queue, so a
   command is written even while the server is silent. Keepalives are
   answered inside the play loop and never reach the game thread.
@@ -52,8 +58,9 @@ ADR-0005).
 - Two bounded channels leave the game thread:
   - the **frames** (`sync_channel(32)`): the interpolated camera state, the
     HUD state and the session statistics. The render thread polls them with
-    `try_recv`; a full queue drops the frame, and the render thread keeps
-    the previous one.
+    `try_recv`; the game thread publishes them with `try_send`, so a full
+    queue drops the message instead of stalling the simulation (the HUD is
+    published again when the last one was accepted, so a change is not lost).
   - the **chunk snapshots** (`sync_channel(64)`): the columns whose geometry
     changed. A snapshot that does not fit stays in the dirty set of the game
     thread and is derived again on a later tick, so the game thread never
