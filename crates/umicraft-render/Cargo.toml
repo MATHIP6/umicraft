@@ -1,0 +1,21 @@
+[package]
+name = "umicraft-render"
+description = "Umicraft renderer: wgpu window/offscreen targets, terrain pipeline, fallback textures, and debug overlay."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+bytemuck.workspace = true
+glam = "0.34"
+pollster = "1"
+thiserror.workspace = true
+umicraft-mesh.workspace = true
+umicraft-world.workspace = true
+wgpu = "30.0.1"
+winit = "0.30.8"
+
+[lints]
+workspace = true
