@@ -10,12 +10,17 @@
 mod camera;
 mod error;
 mod font;
+mod hud;
 mod overlay;
 mod renderer;
 mod texture;
 
 pub use camera::Camera;
 pub use error::RenderError;
+pub use hud::{
+    draw as draw_hud, selected_index, status_fills, Fill, HudLayout, HudState, ItemStack, Rect,
+    StatusRow,
+};
 pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};
