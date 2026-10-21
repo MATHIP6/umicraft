@@ -18,3 +18,91 @@ jobs:
       - run: cargo test --workspace
       - uses: taiki-e/install-action@cargo-deny
       - run: cargo deny check licenses bans
+
+  # Spec §3 rule 3: no Mojang assets in the repository or in the releases.
+  # The assets are downloaded by the user at first run (spec AST-1) or read
+  # from an existing official installation (spec AST-2); they must never be
+  # committed. This job is read-only: it reports and fails, it never deletes.
+  assets-guard:
+    name: no Mojang assets in the repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if a Mojang asset is committed
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          status=0
+          tracked="$(git ls-files)"
+
+          # Original assets (spec AST-4: a minimal fallback texture set and
+          # the UI font under a free license) are allowed, but only when they
+          # are listed here together with their license. Every entry is
+          # reviewed on every pull request.
+          allowed=(
+            # "crates/umicraft-render/assets/fallback.png CC0-1.0, Umicraft contributors"
+          )
+
+          is_allowed() {
+            local path="$1"
+            local entry
+            for entry in "${allowed[@]}"; do
+              [ -n "$entry" ] || continue
+              if [ "$path" = "${entry%% *}" ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          fail() {
+            echo "::error::$1"
+            echo "$2"
+            status=1
+          }
+
+          # 1. The client jar (and any other Minecraft archive).
+          hits=""
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            if printf '%s' "$path" | grep -Eqi '(^|/)(client|server)[^/]*\.jar$'; then
+              hits+="$path"$'\n'
+            fi
+          done <<< "$tracked"
+          [ -z "$hits" ] || fail "a Minecraft jar is committed (spec §3 rule 3):" "$hits"
+
+          # 2. An extracted asset tree.
+          hits=""
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            if printf '%s' "$path" | grep -Eq '(^|/)assets/minecraft/'; then
+              hits+="$path"$'\n'
+            fi
+          done <<< "$tracked"
+          [ -z "$hits" ] || fail "an extracted asset tree is committed (spec §3 rule 3):" "$hits"
+
+          # 3. Binary asset files under crates/ (textures, sounds, fonts).
+          hits=""
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            case "$path" in
+              crates/*) ;;
+              *) continue ;;
+            esac
+            if printf '%s' "$path" | grep -Eqi '\.(png|jpg|jpeg|gif|bmp|tga|ogg|mp3|wav|flac|ttf|otf|zip|mcmeta)$'; then
+              if is_allowed "$path"; then
+                continue
+              fi
+              hits+="$path"$'\n'
+            fi
+          done <<< "$tracked"
+          [ -z "$hits" ] || fail "a binary asset file is committed under crates/ (spec §3 rule 3):" "$hits"
+
+          if [ "$status" -ne 0 ]; then
+            echo "Mojang assets must never be committed: they are downloaded by the"
+            echo "user at first run (spec AST-1) or read from an existing official"
+            echo "installation (spec AST-2)."
+            exit 1
+          fi
+          echo "No Mojang assets are committed."
