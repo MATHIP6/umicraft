@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Play state (`State::Play`): the minimal packet set needed to join a 1.8
-//! server and stay connected, plus the M1 acceptance traffic.
+//! Play state (`State::Play`): the packet set needed to join a 1.8 server, stay
+//! connected, and receive world data (M2).
 //!
 //! Direction convention: `clientbound` flows server → client (inbound on a
 //! client), `serverbound` flows client → server (outbound on a client).
 //!
 //! Clientbound: `Keep Alive` (0x00), `Join Game` (0x01), `Chat Message`
-//! (0x02), `Player Position and Look` (0x08), `Disconnect` (0x40).
+//! (0x02), `Player Position and Look` (0x08), `Chunk Data` (0x21),
+//! `Multi Block Change` (0x22), `Block Change` (0x23), `Map Chunk Bulk`
+//! (0x26), `Disconnect` (0x40).
 //! Serverbound: `Keep Alive` (0x00), `Chat Message` (0x01), `Player Position
 //! and Look` (0x06), `Client Settings` (0x15), `Plugin Message` (0x17).
 //!
@@ -15,6 +17,7 @@
 //! and skipped by the caller (see `umicraft-net`'s play loop).
 
 pub mod clientbound;
+mod position;
 pub mod serverbound;
 
 use std::io::{Read, Write};
@@ -22,6 +25,8 @@ use std::io::{Read, Write};
 use crate::error::ProtocolError;
 
 use super::EncodablePacket;
+
+pub use position::{pack_block_position, unpack_block_position};
 
 /// Clientbound play-state packets (inbound for a client).
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +39,14 @@ pub enum PlayClientbound {
     Chat(clientbound::Chat),
     /// `Player Position and Look` (0x08): teleport / initial placement.
     PositionLook(clientbound::PositionLook),
+    /// `Chunk Data` (0x21): one chunk column, full or partial.
+    ChunkData(clientbound::ChunkData),
+    /// `Multi Block Change` (0x22): batched block updates in one chunk.
+    MultiBlockChange(clientbound::MultiBlockChange),
+    /// `Block Change` (0x23): one block update.
+    BlockChange(clientbound::BlockChange),
+    /// `Map Chunk Bulk` (0x26): initial chunk batch.
+    MapChunkBulk(clientbound::MapChunkBulk),
     /// `Disconnect` (0x40): reason as chat JSON; the socket closes after.
     Disconnect(clientbound::Disconnect),
 }
@@ -47,6 +60,10 @@ impl PlayClientbound {
             Self::JoinGame(_) => clientbound::JoinGame::ID,
             Self::Chat(_) => clientbound::Chat::ID,
             Self::PositionLook(_) => clientbound::PositionLook::ID,
+            Self::ChunkData(_) => clientbound::ChunkData::ID,
+            Self::MultiBlockChange(_) => clientbound::MultiBlockChange::ID,
+            Self::BlockChange(_) => clientbound::BlockChange::ID,
+            Self::MapChunkBulk(_) => clientbound::MapChunkBulk::ID,
             Self::Disconnect(_) => clientbound::Disconnect::ID,
         }
     }
@@ -61,6 +78,10 @@ impl PlayClientbound {
             Self::JoinGame(packet) => packet.encode_body(writer),
             Self::Chat(packet) => packet.encode_body(writer),
             Self::PositionLook(packet) => packet.encode_body(writer),
+            Self::ChunkData(packet) => packet.encode_body(writer),
+            Self::MultiBlockChange(packet) => packet.encode_body(writer),
+            Self::BlockChange(packet) => packet.encode_body(writer),
+            Self::MapChunkBulk(packet) => packet.encode_body(writer),
             Self::Disconnect(packet) => packet.encode_body(writer),
         }
     }
@@ -68,7 +89,7 @@ impl PlayClientbound {
     /// Reads a body for the given packet id.
     ///
     /// # Errors
-    /// [`ProtocolError::UnknownPacket`] for ids outside the M1 subset.
+    /// [`ProtocolError::UnknownPacket`] for ids outside the supported subset.
     pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
         Ok(match id {
             clientbound::KeepAlive::ID => Self::KeepAlive(clientbound::KeepAlive::decode(reader)?),
@@ -76,6 +97,16 @@ impl PlayClientbound {
             clientbound::Chat::ID => Self::Chat(clientbound::Chat::decode(reader)?),
             clientbound::PositionLook::ID => {
                 Self::PositionLook(clientbound::PositionLook::decode(reader)?)
+            }
+            clientbound::ChunkData::ID => Self::ChunkData(clientbound::ChunkData::decode(reader)?),
+            clientbound::MultiBlockChange::ID => {
+                Self::MultiBlockChange(clientbound::MultiBlockChange::decode(reader)?)
+            }
+            clientbound::BlockChange::ID => {
+                Self::BlockChange(clientbound::BlockChange::decode(reader)?)
+            }
+            clientbound::MapChunkBulk::ID => {
+                Self::MapChunkBulk(clientbound::MapChunkBulk::decode(reader)?)
             }
             clientbound::Disconnect::ID => {
                 Self::Disconnect(clientbound::Disconnect::decode(reader)?)
@@ -222,6 +253,45 @@ mod tests {
         raw.push(0);
         let decoded = PlayClientbound::decode(0x08, &mut &raw[..]).unwrap();
         assert_eq!(decoded, inbound);
+    }
+
+    #[test]
+    fn world_packets_round_trip_through_the_enum() {
+        let chunk_data = clientbound::ChunkData {
+            chunk_x: -107,
+            chunk_z: 6,
+            ground_up: true,
+            primary_bit_mask: 1,
+            data: vec![0; clientbound::chunk_data::chunk_payload_len(1, true, true)],
+        };
+        let bulk = clientbound::MapChunkBulk {
+            sky_light: true,
+            chunks: vec![clientbound::BulkChunk {
+                chunk_x: -107,
+                chunk_z: 6,
+                primary_bit_mask: 1,
+                data: vec![0; clientbound::chunk_data::chunk_payload_len(1, true, true)],
+            }],
+        };
+        let play = vec![
+            PlayClientbound::ChunkData(chunk_data),
+            PlayClientbound::MultiBlockChange(clientbound::MultiBlockChange {
+                chunk_x: -107,
+                chunk_z: 6,
+                records: vec![clientbound::BlockUpdate::at(1, 4, 2, 0x20)],
+            }),
+            PlayClientbound::BlockChange(clientbound::BlockChange::at(-1698, 4, 111, 0x20)),
+            PlayClientbound::MapChunkBulk(bulk),
+        ];
+        for packet in play {
+            let id = packet.packet_id();
+            let mut buffer = Vec::new();
+            packet.encode_body(&mut buffer).unwrap();
+            assert_eq!(
+                PlayClientbound::decode(id, &mut &buffer[..]).unwrap(),
+                packet
+            );
+        }
     }
 
     #[test]

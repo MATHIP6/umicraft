@@ -8,10 +8,10 @@
 //! are total over hostile input — truncation surfaces as
 //! [`ProtocolError::Io`], never a panic.
 
-use std::io::Read;
+use std::io::{Read, Write};
 
 use crate::error::ProtocolError;
-use crate::varint::read_var_i32;
+use crate::varint::{read_var_i32, write_var_u32};
 
 /// Reads a boolean byte (any non-zero value is true).
 ///
@@ -105,4 +105,35 @@ pub fn read_byte_array<R: Read>(reader: &mut R, max: usize) -> Result<Vec<u8>, P
     let mut data = vec![0u8; len];
     reader.read_exact(&mut data)?;
     Ok(data)
+}
+
+/// Writes a byte array with a VarInt length prefix (the 1.8 `writeByteArray`).
+///
+/// # Errors
+/// [`ProtocolError`] on stream failure.
+pub fn write_byte_array<W: Write>(writer: &mut W, data: &[u8]) -> Result<(), ProtocolError> {
+    write_var_u32(writer, data.len() as u32)?;
+    writer.write_all(data)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_array_round_trip() {
+        let mut buffer = Vec::new();
+        write_byte_array(&mut buffer, &[1, 2, 3, 4]).unwrap();
+        assert_eq!(buffer, [4, 1, 2, 3, 4]);
+        assert_eq!(read_byte_array(&mut &buffer[..], 16).unwrap(), [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn byte_array_budget_is_enforced() {
+        let mut buffer = Vec::new();
+        write_byte_array(&mut buffer, &[0; 8]).unwrap();
+        let err = read_byte_array(&mut &buffer[..], 4).unwrap_err();
+        assert!(matches!(err, ProtocolError::Invariant(_)));
+    }
 }
