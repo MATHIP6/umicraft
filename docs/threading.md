@@ -9,8 +9,18 @@ Rules (restated):
    no shared locks on hot paths.
 3. Every cross-thread boundary is documented here as it is introduced.
 
-Current state (M0):
+Current state (M1):
 
-- Single-threaded core runtime only: module loading, service registry, event bus,
-  fixed-timestep tick scheduler. Multi-threaded boundaries (tokio network runtime,
-  mesh workers) are introduced in M1/M2 with their channels documented here.
+- Core runtime remains single-threaded per module instance.
+- `umicraft-net` adds the first multi-thread boundary: a tokio runtime owns
+  all TCP I/O inside `Connection` (one read task loop per socket; no shared
+  locks — each `Connection` owns read/write halves plus its private
+  pending/scratch buffers). Higher layers await sequentially on a
+  `Connection` and never share it across tasks; timed awaits only (no
+  blocking std calls on the runtime).
+- `umicraft-testkit` fake servers run as extra tokio tasks on the *same*
+  runtime the tests already use, one task per accepted connection; shared
+  observation state is snapshot-read via a mutex at assertion time (cold
+  path, never on the hot framing path).
+- Capture writing is synchronous in-memory accumulation + file save at
+  process exit (logger tool), never per-byte async I/O.

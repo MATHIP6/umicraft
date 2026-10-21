@@ -42,6 +42,8 @@ pub struct JoinScript {
     pub max_players: u8,
     /// World type string.
     pub level_type: String,
+    /// 1.8 trailing reduced-debug flag.
+    pub reduced_debug_info: bool,
 }
 
 impl Default for JoinScript {
@@ -53,6 +55,7 @@ impl Default for JoinScript {
             difficulty: 1,
             max_players: 20,
             level_type: "flat".to_string(),
+            reduced_debug_info: false,
         }
     }
 }
@@ -112,17 +115,16 @@ pub struct Observed {
     /// Any player reached the play state.
     pub play_started: bool,
     /// Keepalive ids echoed back by the client.
-    pub keepalive_echoes: Vec<i64>,
+    pub keepalive_echoes: Vec<i32>,
     /// Chat messages the client sent.
     pub chat_messages: Vec<String>,
     /// Client settings (locale, view distance, chat mode, colors, skin parts).
-    pub client_settings: Option<(String, u8, i32, bool, u8)>,
+    pub client_settings: Option<(String, u8, u8, bool, u8)>,
     /// `MC|Brand` payload without the channel.
     pub brand: Option<Vec<u8>>,
     /// Teleport answers as `(x, y, z, yaw, pitch, on_ground)`.
     pub placements: Vec<(f64, f64, f64, f32, f32, bool)>,
 }
-
 /// Shared observation state handed to tests.
 #[derive(Clone, Debug)]
 pub struct ObservedHandle {
@@ -405,6 +407,7 @@ async fn run_play(
         difficulty: config.join.difficulty,
         max_players: config.join.max_players,
         level_type: config.join.level_type.clone(),
+        reduced_debug_info: config.join.reduced_debug_info,
     };
     let placement = config
         .placement
@@ -435,7 +438,7 @@ async fn run_play(
         .kick_after_play
         .as_ref()
         .map(|(delay, _)| tokio::time::Instant::now() + *delay);
-    let mut keepalive_id: i64 = 90_000;
+    let mut keepalive_id: i32 = 90_000;
 
     loop {
         tokio::select! {

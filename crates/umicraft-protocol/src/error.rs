@@ -35,7 +35,7 @@ pub enum ProtocolError {
     InvalidUtf8(#[from] std::string::FromUtf8Error),
 
     /// Underlying I/O failed (short reads, socket errors).
-    #[error("io error")]
+    #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
     /// Zlib inflate/deflate failed; the stream bitstream is damaged.

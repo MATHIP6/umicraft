@@ -12,6 +12,7 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
+use tracing_subscriber::EnvFilter;
 use umicraft_net::client::PlayOptions;
 use umicraft_net::login::login_offline;
 use umicraft_net::ping::ping;
@@ -158,6 +159,11 @@ async fn execute(args: &Args) -> Result<(), SessionError> {
 }
 
 fn main() -> ExitCode {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .try_init();
+
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(args_error) => {

@@ -94,10 +94,21 @@ impl Framing {
                     // Uncompressed packet: strip the zero-varint and pass through.
                     Ok(inner.to_vec())
                 } else {
+                    let wire_len = inner.len();
                     let mut inflated = Vec::with_capacity(uncompressed_len);
                     {
                         let mut decoder = ZlibDecoder::new(&mut inner);
-                        decoder.read_to_end(&mut inflated)?;
+                        match decoder.read_to_end(&mut inflated) {
+                            Ok(_) => {}
+                            Err(err) => {
+                                let consumed = wire_len - inner.len();
+                                return Err(ProtocolError::Invariant(format!(
+                                    "zlib inflate failed ({err}): claimed {uncompressed_len} bytes, \
+                                     wire had {wire_len}, consumed {consumed}, inflated {}",
+                                    inflated.len()
+                                )));
+                            }
+                        }
                     }
                     if inflated.len() == uncompressed_len {
                         Ok(inflated)

@@ -20,6 +20,7 @@ thiserror = "2.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "macros", "sync", "signal"] }
 toml = "0.8"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "std", "tracing-log"] }
 umicraft-net = { path = "crates/umicraft-net", version = "0.1.0" }
 umicraft-protocol = { path = "crates/umicraft-protocol", version = "0.1.0" }
 

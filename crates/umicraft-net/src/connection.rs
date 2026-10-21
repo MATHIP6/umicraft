@@ -140,7 +140,12 @@ impl Connection {
 
     async fn read_framed_packet(&mut self) -> Result<Vec<u8>, NetError> {
         loop {
-            if let Some(packet) = take_framed_packet(&mut self.pending, self.framing)? {
+            let previous_pending = self.pending.len();
+            let peeled = take_framed_packet(&mut self.pending, self.framing).map_err(|err| {
+                tracing::warn!(pending_len = previous_pending, framing = ?self.framing, %err, "frame split failed");
+                err
+            })?;
+            if let Some(packet) = peeled {
                 return Ok(packet);
             }
             let n = self.read_half.read(self.recv_buf.as_mut_slice()).await?;

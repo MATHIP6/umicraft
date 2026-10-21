@@ -50,6 +50,27 @@ pub fn read_i64<R: Read>(reader: &mut R) -> Result<i64, ProtocolError> {
     Ok(i64::from_be_bytes(bytes))
 }
 
+/// Reads a big-endian i32.
+///
+/// # Errors
+/// [`ProtocolError::Io`] on stream truncation.
+pub fn read_i32<R: Read>(reader: &mut R) -> Result<i32, ProtocolError> {
+    let mut bytes = [0u8; 4];
+    reader.read_exact(&mut bytes)?;
+    Ok(i32::from_be_bytes(bytes))
+}
+
+/// Reads every remaining byte of the body (used by 1.8 `Plugin Message`,
+/// whose payload is "everything after the channel string").
+///
+/// # Errors
+/// [`ProtocolError::Io`] on stream failure.
+pub fn read_rest<R: Read>(reader: &mut R) -> Result<Vec<u8>, ProtocolError> {
+    let mut rest = Vec::new();
+    reader.read_to_end(&mut rest)?;
+    Ok(rest)
+}
+
 /// Reads a big-endian f64.
 ///
 /// # Errors
@@ -440,18 +461,19 @@ impl LoginServerbound {
 /// Minimal play-state packets needed to join a server and stay connected.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlayClientbound {
-    /// `Keep Alive` (0x00): must be echoed verbatim by the client.
+    /// `Keep Alive` (0x00): must be echoed with the same id.
     KeepAlive {
-        /// 1.8 carries a 64-bit id.
-        id: i64,
+        /// Id as a VarInt int in 1.8 (`S00PacketKeepAlive` reads it via
+        /// `readVarIntFromBuffer`); the 64-bit id is a 1.12.2+ change.
+        id: i32,
     },
     /// `Join Game` (0x01): entry into the world.
     JoinGame {
-        /// The player's entity id for later entity packets.
+        /// The player's entity id (plain 4-byte Int in 1.8).
         entity_id: i32,
-        /// Raw gamemode byte (hardcore bit folded in by 1.8).
+        /// Raw gamemode byte (hardcore bit 8 folded in by 1.8).
         gamemode: u8,
-        /// Dimension id (0 overworld in 1.8 counts; server-defined).
+        /// Dimension id (0 overworld; 1.8 sends it as a signed byte).
         dimension: i8,
         /// Difficulty level byte.
         difficulty: u8,
@@ -459,6 +481,8 @@ pub enum PlayClientbound {
         max_players: u8,
         /// World generator name, e.g. `flat` on test worlds.
         level_type: String,
+        /// 1.8 trailing flag disabling the debug F3 pie chart overlay.
+        reduced_debug_info: bool,
     },
     /// `Chat Message` (0x02): chat/system JSON.
     Chat {
@@ -509,7 +533,7 @@ impl PlayClientbound {
     pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
         match self {
             Self::KeepAlive { id } => {
-                writer.write_all(&id.to_be_bytes())?;
+                write_var_u32(writer, *id as u32)?;
                 Ok(())
             }
             Self::JoinGame {
@@ -519,10 +543,14 @@ impl PlayClientbound {
                 difficulty,
                 max_players,
                 level_type,
+                reduced_debug_info,
             } => {
-                write_var_u32(writer, *entity_id as u32)?;
+                // Entity id is a plain big-endian Int in 1.8 (not a VarInt).
+                writer.write_all(&entity_id.to_be_bytes())?;
                 writer.write_all(&[*gamemode, *dimension as u8, *difficulty, *max_players])?;
-                crate::types::write_string(writer, level_type, 16)
+                crate::types::write_string(writer, level_type, 16)?;
+                writer.write_all(&[u8::from(*reduced_debug_info)])?;
+                Ok(())
             }
             Self::Chat { json, position } => {
                 write_string_capped(writer, json)?;
@@ -556,15 +584,16 @@ impl PlayClientbound {
     pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
         Ok(match id {
             0x00 => Self::KeepAlive {
-                id: read_i64(reader)?,
+                id: read_var_i32(reader)?,
             },
             0x01 => Self::JoinGame {
-                entity_id: read_var_i32(reader)?,
+                entity_id: read_i32(reader)?,
                 gamemode: read_u8(reader)?,
                 dimension: read_u8(reader)? as i8,
                 difficulty: read_u8(reader)?,
                 max_players: read_u8(reader)?,
                 level_type: crate::types::read_string(reader, 16)?,
+                reduced_debug_info: read_bool(reader)?,
             },
             0x02 => Self::Chat {
                 json: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
@@ -596,8 +625,8 @@ impl PlayClientbound {
 pub enum PlayServerbound {
     /// `Keep Alive` (0x00): echo of the server's id.
     KeepAlive {
-        /// Id copied from the server's packet.
-        id: i64,
+        /// Id copied from the server's packet (VarInt in 1.8).
+        id: i32,
     },
     /// `Chat Message` (0x01): user-typed text (includes leading slash commands).
     Chat {
@@ -621,12 +650,12 @@ pub enum PlayServerbound {
     },
     /// `Client Settings` (0x15): required before some servers release content.
     ClientSettings {
-        /// e.g. `en_us`.
+        /// e.g. `en_us` (server reads at most 7 chars in 1.8).
         locale: String,
         /// Render distance the client accepts (chunks).
         view_distance: u8,
-        /// Raw chat-mode varint.
-        chat_mode: i32,
+        /// Raw chat-visibility byte (`C15PacketClientSettings` reads a byte).
+        chat_mode: u8,
         /// Whether colors are enabled in chat.
         chat_colors: bool,
         /// Raw displayed-skin-part mask.
@@ -636,7 +665,8 @@ pub enum PlayServerbound {
     Brand {
         /// Channel name, normally `MC|Brand`.
         channel: String,
-        /// Raw channel payload.
+        /// Raw channel payload (everything after the channel string; the
+        /// 1.8 packet does not carry an inner length prefix itself).
         data: Vec<u8>,
     },
 }
@@ -661,7 +691,7 @@ impl PlayServerbound {
     pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
         Ok(match id {
             0x00 => Self::KeepAlive {
-                id: read_i64(reader)?,
+                id: read_var_i32(reader)?,
             },
             0x01 => Self::Chat {
                 message: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
@@ -675,15 +705,17 @@ impl PlayServerbound {
                 on_ground: read_bool(reader)?,
             },
             0x15 => Self::ClientSettings {
-                locale: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
+                locale: crate::types::read_string(reader, 7)?,
                 view_distance: read_u8(reader)?,
-                chat_mode: read_var_i32(reader)?,
+                chat_mode: read_u8(reader)?,
                 chat_colors: read_bool(reader)?,
                 skin_parts: read_u8(reader)?,
             },
             0x17 => Self::Brand {
-                channel: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
-                data: read_byte_array(reader, 1024)?,
+                // 1.8 caps the channel at 20 chars; the data is simply the
+                // rest of the body (`readBytes(readableBytes)` in MCP).
+                channel: crate::types::read_string(reader, 20)?,
+                data: read_rest(reader)?,
             },
             _ => {
                 return Err(ProtocolError::UnknownPacket {
@@ -700,9 +732,7 @@ impl PlayServerbound {
     /// [`ProtocolError`] on invalid fields or stream errors.
     pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
         match self {
-            Self::KeepAlive { id } => writer
-                .write_all(&id.to_be_bytes())
-                .map_err(ProtocolError::from),
+            Self::KeepAlive { id } => write_var_u32(writer, *id as u32),
             Self::Chat { message } => write_string_capped(writer, message),
             Self::PositionLook {
                 x,
@@ -728,16 +758,14 @@ impl PlayServerbound {
                 skin_parts,
             } => {
                 write_string_capped(writer, locale)?;
-                writer.write_all(&[*view_distance])?;
-                write_var_u32(writer, *chat_mode as u32)?;
-                writer.write_all(&[u8::from(*chat_colors)])?;
-                writer.write_all(&[*skin_parts])?;
+                writer.write_all(&[*view_distance, *chat_mode])?;
+                writer.write_all(&[u8::from(*chat_colors), *skin_parts])?;
                 Ok(())
             }
             Self::Brand { channel, data } => {
                 write_string_capped(writer, channel)?;
-                // 1.8 wraps the plugin payload with a length prefix itself.
-                crate::varint::write_var_u32(writer, data.len() as u32)?;
+                // 1.8 sends the payload raw; MC|Brand's own content is a
+                // length-prefixed string built by the caller.
                 writer.write_all(data)?;
                 Ok(())
             }
@@ -901,10 +929,59 @@ mod tests {
         let mut buffer = Vec::new();
         let packet = PlayServerbound::KeepAlive { id: 424_242 };
         packet.encode_body(&mut buffer).unwrap();
+        // 1.8 keepalive ids are VarInts (MCP S00PacketKeepAlive), so this id
+        // takes 3 bytes, not 8.
+        assert_eq!(buffer, [0xB2, 0xF2, 0x19]);
         let mut slice = &buffer[..];
         assert_eq!(
             PlayClientbound::decode(0x00, &mut slice).unwrap(),
             PlayClientbound::KeepAlive { id: 424_242 }
+        );
+    }
+
+    #[test]
+    fn join_game_wire_shape_matches_1_8() {
+        // Layout pinned to S01PacketJoinGame (MCP): Int entity id, gamemode
+        // byte (hardcore bit 8), byte dimension, u8 difficulty, u8 cap,
+        // 16-cap world string, trailing reduced-debug bool.
+        let packet = PlayClientbound::JoinGame {
+            entity_id: 26,
+            gamemode: 0,
+            dimension: 0,
+            difficulty: 1,
+            max_players: 20,
+            level_type: "flat".to_string(),
+            reduced_debug_info: false,
+        };
+        let mut expected = Vec::new();
+        expected.extend(26i32.to_be_bytes());
+        expected.extend([0, 0, 1, 20]);
+        crate::types::write_string(&mut expected, "flat", 16).unwrap();
+        expected.push(0);
+
+        let mut buffer = Vec::new();
+        packet.encode_body(&mut buffer).unwrap();
+        assert_eq!(buffer, expected);
+        assert_eq!(
+            PlayClientbound::decode(0x01, &mut &expected[..]).unwrap(),
+            packet
+        );
+
+        // Wide and negative values survive the fixed-width Int read.
+        let packet = PlayClientbound::JoinGame {
+            entity_id: -123_456_789,
+            gamemode: 1,
+            dimension: -1,
+            difficulty: 2,
+            max_players: 5,
+            level_type: "default".to_string(),
+            reduced_debug_info: true,
+        };
+        let mut buffer = Vec::new();
+        packet.encode_body(&mut buffer).unwrap();
+        assert_eq!(
+            PlayClientbound::decode(0x01, &mut &buffer[..]).unwrap(),
+            packet
         );
     }
 

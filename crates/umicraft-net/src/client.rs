@@ -28,6 +28,8 @@ pub struct JoinGameInfo {
     pub max_players: u8,
     /// World type string, e.g. `flat`.
     pub level_type: String,
+    /// 1.8 trailing reduced-debug flag from `Join Game`.
+    pub reduced_debug_info: bool,
 }
 
 /// Position from the latest `Player Position and Look`.
@@ -81,12 +83,28 @@ impl Default for PlayOptions {
     }
 }
 
+/// Decodes one clientbound play packet body, tracing packet id and body
+/// length on failure. The framing layer peeled a complete packet, so a
+/// decode error means the body shape/length assumptions are wrong — the
+/// context pinpoints which managed id disagrees with reality.
+fn decode_play(id: u8, body: &[u8]) -> Result<PlayClientbound, NetError> {
+    let body_len = body.len();
+    let result = PlayClientbound::decode(id, &mut &body[..]);
+    if let Err(err) = &result {
+        tracing::warn!(packet_id = id, body_len, %err, "play packet decode failed");
+    }
+    result.map_err(NetError::from)
+}
+
 impl Connection {
     /// Enters play state behavior until `stay_for` elapses (when given) or the
     /// server disconnects.
     ///
-    /// Sends `Client Settings` and the `MC|Brand` plugin message on entry,
-    /// then reacts to the M1 packet subset and silently tolerates (traces)
+    /// Sends `Client Settings` and the `MC|Brand` plugin message once the
+    /// server's `Join Game` arrives — the vanilla client ordering; sending
+    /// them right after `Login Success` raced the server's login→play state
+    /// switch on a real 1.8.8 server ("Bad packet id 21" in its decoder).
+    /// Then reacts to the M1 packet subset and silently tolerates (traces)
     /// everything else so real server chatter cannot kill the connection.
     ///
     /// # Errors
@@ -98,7 +116,7 @@ impl Connection {
         options: &PlayOptions,
     ) -> Result<PlaySummary, NetError> {
         let started = Instant::now();
-        self.send_entry_packets(options).await?;
+        let mut entry_sent = false;
 
         let mut summary = PlaySummary::default();
         let deadline = stay_for.map(|span| time::Instant::now() + span);
@@ -111,16 +129,23 @@ impl Connection {
                 }
             }
 
-            let (id, body) = match deadline {
-                Some(deadline) => match time::timeout_at(deadline, self.read_packet()).await {
-                    Ok(result) => result?,
-                    Err(_elapsed) => break,
-                },
-                None => self.read_packet().await?,
+            let read = match deadline {
+                Some(deadline) => time::timeout_at(deadline, self.read_packet()).await,
+                None => Ok(self.read_packet().await),
+            };
+            // Log read failures with context before propagating; deadline
+            // expiry (the quiet exit path) must not log.
+            let (id, body) = match read {
+                Ok(Ok(packet)) => packet,
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "play: read failed");
+                    return Err(err);
+                }
+                Err(_elapsed) => break,
             };
 
             match id {
-                0x00 => match PlayClientbound::decode(id, &mut body.as_slice())? {
+                0x00 => match decode_play(id, &body)? {
                     PlayClientbound::KeepAlive { id: keepalive_id } => {
                         self.write_packet(&PlayServerbound::KeepAlive { id: keepalive_id })
                             .await?;
@@ -133,7 +158,7 @@ impl Connection {
                         });
                     }
                 },
-                0x01 => match PlayClientbound::decode(id, &mut body.as_slice())? {
+                0x01 => match decode_play(id, &body)? {
                     PlayClientbound::JoinGame {
                         entity_id,
                         gamemode,
@@ -141,6 +166,7 @@ impl Connection {
                         difficulty,
                         max_players,
                         level_type,
+                        reduced_debug_info,
                     } => {
                         summary.join = Some(JoinGameInfo {
                             entity_id,
@@ -149,7 +175,16 @@ impl Connection {
                             difficulty,
                             max_players,
                             level_type,
+                            reduced_debug_info,
                         });
+                        // Vanilla sends Client Settings + brand after the
+                        // server's own `Join Game`; doing so right after
+                        // `Login Success` raced the server's login→play
+                        // state switch (real PandaSpigot 1.8.8 observation).
+                        if !entry_sent {
+                            self.send_entry_packets(options).await?;
+                            entry_sent = true;
+                        }
                     }
                     _ => {
                         return Err(NetError::UnexpectedPacket {
@@ -158,7 +193,7 @@ impl Connection {
                         });
                     }
                 },
-                0x02 => match PlayClientbound::decode(id, &mut body.as_slice())? {
+                0x02 => match decode_play(id, &body)? {
                     PlayClientbound::Chat { json, .. } => {
                         tracing::trace!(json = %json, "server chat");
                         summary.chat_messages += 1;
@@ -170,7 +205,7 @@ impl Connection {
                         });
                     }
                 },
-                0x08 => match PlayClientbound::decode(id, &mut body.as_slice())? {
+                0x08 => match decode_play(id, &body)? {
                     PlayClientbound::PositionLook {
                         x,
                         y,
@@ -207,7 +242,7 @@ impl Connection {
                         });
                     }
                 },
-                0x40 => match PlayClientbound::decode(id, &mut body.as_slice())? {
+                0x40 => match decode_play(id, &body)? {
                     PlayClientbound::Disconnect { reason } => {
                         summary.stayed = started.elapsed();
                         return Err(NetError::KickedAtPlay {
