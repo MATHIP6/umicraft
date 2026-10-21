@@ -1179,6 +1179,9 @@ fn tick(
             state.tick(&intent, world);
         }
     }
+    // The player must not stand inside a block: the server resynchronises a
+    // player that does with every position report.
+    unstick(game);
 
     // The input packet carries the raw wire values; the 0.98 damping of
     // `EntityLivingBase.java:2020` is applied by the game logic and by the
