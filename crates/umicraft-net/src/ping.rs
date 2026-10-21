@@ -6,6 +6,7 @@
 use std::time::{Duration, Instant};
 
 use tokio::time;
+use umicraft_protocol::packets::status::serverbound;
 use umicraft_protocol::{
     Handshake, State, StatusClientbound, StatusServerbound, PROTOCOL_VERSION_1_8,
 };
@@ -51,12 +52,13 @@ pub async fn ping(host: &str, port: u16, budget: Duration) -> Result<PingResult,
         next_state: 1,
     })
     .await?;
-    conn.write_packet(&StatusServerbound::StatusRequest).await?;
+    conn.write_packet(&StatusServerbound::StatusRequest(serverbound::Request))
+        .await?;
 
     let (id, body) = time_budget(budget, "status response", conn.read_packet()).await?;
     let json = match StatusClientbound::decode(id, &mut body.as_slice())? {
-        StatusClientbound::Response { json } => json,
-        StatusClientbound::Pong { .. } => {
+        StatusClientbound::Response(response) => response.json,
+        StatusClientbound::Pong(_) => {
             return Err(NetError::UnexpectedPacket {
                 state: State::Status,
                 id,
@@ -65,21 +67,21 @@ pub async fn ping(host: &str, port: u16, budget: Duration) -> Result<PingResult,
     };
     let status: ServerStatus = serde_json::from_str(&json)?;
 
-    conn.write_packet(&StatusServerbound::Ping {
+    conn.write_packet(&StatusServerbound::Ping(serverbound::Ping {
         time: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since_epoch| since_epoch.as_millis() as i64),
-    })
+    }))
     .await?;
 
     let started = Instant::now();
     let (id, body) = time_budget(budget, "pong", conn.read_packet()).await?;
     match StatusClientbound::decode(id, &mut body.as_slice())? {
-        StatusClientbound::Pong { .. } => Ok(PingResult {
+        StatusClientbound::Pong(_) => Ok(PingResult {
             status,
             latency: started.elapsed(),
         }),
-        StatusClientbound::Response { .. } => Err(NetError::UnexpectedPacket {
+        StatusClientbound::Response(_) => Err(NetError::UnexpectedPacket {
             state: State::Status,
             id,
         }),

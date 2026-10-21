@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use tokio::net::TcpListener;
 use umicraft_net::Connection;
+use umicraft_protocol::packets::status::clientbound;
 use umicraft_protocol::{
     EncodablePacket, Handshake, LoginClientbound, LoginServerbound, PlayClientbound,
     PlayServerbound, StatusClientbound, StatusServerbound,
@@ -304,18 +305,19 @@ async fn run_status(
             return;
         };
         match StatusServerbound::decode(id, &mut body.as_slice()) {
-            Ok(StatusServerbound::StatusRequest) => {
+            Ok(StatusServerbound::StatusRequest(_)) => {
                 observe(observed, |state| state.status_requests += 1);
-                let response = StatusClientbound::Response {
+                let response = StatusClientbound::Response(clientbound::Response {
                     json: config.status_json.clone(),
-                };
+                });
                 if !send_packet(conn, capture, &response).await {
                     return;
                 }
             }
-            Ok(StatusServerbound::Ping { time }) => {
+            Ok(StatusServerbound::Ping(ping)) => {
                 observe(observed, |state| state.pings += 1);
-                if !send_packet(conn, capture, &StatusClientbound::Pong { time }).await {
+                let pong = StatusClientbound::Pong(clientbound::Pong { time: ping.time });
+                if !send_packet(conn, capture, &pong).await {
                     return;
                 }
             }

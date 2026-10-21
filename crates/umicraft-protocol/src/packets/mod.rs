@@ -1,203 +1,41 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Packet definitions and codecs for the M1 protocol subset.
+//! Packet definitions and codecs for the M1 protocol subset, organized by
+//! state and direction:
 //!
-//! Covers the full handshake/status flow, offline login, and the minimal play
-//! packet set required to join a 1.8 server and stay alive: `Keep Alive`,
-//! `Join Game`, `Disconnect`, `Player Position and Look`, chat, client
-//! settings, and the brand plugin message.
+//! - `handshake` — [`Handshake`] (state selector)
+//! - [`status`] — server-list request/response and ping/pong
+//! - `login` — login start/success, encryption request/response, disconnect,
+//!   set compression
+//! - `play` — the minimal join + keep-alive subset
 //!
-//! Packet ids follow the 1.8 (protocol 47) numbering from the community
-//! protocol docs; directions differ (there are two tables per state).
+//! Direction convention: `clientbound` packets flow server → client (inbound
+//! on a client); `serverbound` packets flow client → server (outbound on a
+//! client). The names follow the wiki.vg tables and the state enums.
 //!
-//! Encoding contract: `encode_body` writes the id's *body* only — the id itself
-//! travels via [`packet_id`], and the outer length/compression layers live in
-//! [`crate::framing`].
+//! Every packet is a standalone struct owning its wire layout (`ID`,
+//! `decode`, [`EncodablePacket`], and tests); the state enums are dispatch
+//! tables over those structs. Encoding contract: `encode_body` writes the
+//! id's *body* only — the id itself travels via [`packet_id`], and the outer
+//! length/compression layers live in [`crate::framing`].
+//!
+//! [`packet_id`]: EncodablePacket::packet_id
 
 use std::io::{Read, Write};
 
 use crate::error::ProtocolError;
-use crate::types::{read_string_capped, write_string_capped};
+use crate::types::write_string_capped;
 use crate::varint::{read_var_i32, write_var_u32};
 
 pub mod codec;
+pub mod handshake;
+pub mod status;
 
 pub use codec::{
     read_bool, read_byte_array, read_f32, read_f64, read_i32, read_i64, read_rest, read_u8,
 };
-
-/// Handshake packet (`Handshake`, id 0x00) sent during state `Handshake`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Handshake {
-    /// Intended protocol version; 1.8 clients send 47.
-    pub protocol_version: i32,
-    /// Server address as typed by the player (empty on dedicated proxies).
-    pub server_address: String,
-    /// Server port.
-    pub server_port: u16,
-    /// Next protocol state: 1 = status, 2 = login.
-    pub next_state: i32,
-}
-
-impl Handshake {
-    /// Id of the Handshake packet.
-    #[must_use]
-    pub const fn packet_id(&self) -> u8 {
-        0x00
-    }
-
-    /// Writes the body.
-    ///
-    /// # Errors
-    /// [`ProtocolError`] on invalid fields or stream errors.
-    pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
-        write_var_u32(writer, self.protocol_version as u32)?;
-        write_string_capped(writer, &self.server_address)?;
-        writer.write_all(&self.server_port.to_be_bytes())?;
-        write_var_u32(writer, self.next_state as u32)?;
-        Ok(())
-    }
-
-    /// Reads the body.
-    ///
-    /// # Errors
-    /// [`ProtocolError`] on invalid fields or truncation.
-    pub fn decode<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
-        let protocol_version = read_var_i32(reader)?;
-        let server_address = read_string_capped(reader)?;
-        let mut port = [0u8; 2];
-        reader.read_exact(&mut port)?;
-        let next_state = read_var_i32(reader)?;
-        if !matches!(next_state, 1 | 2) {
-            return Err(ProtocolError::Invariant(format!(
-                "handshake next_state {next_state}"
-            )));
-        }
-        Ok(Self {
-            protocol_version,
-            server_address,
-            server_port: u16::from_be_bytes(port),
-            next_state,
-        })
-    }
-}
-
-/// Clientbound status-state packets.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StatusClientbound {
-    /// `Status Response` (0x00): the server list payload as compact JSON.
-    Response {
-        /// Raw JSON body (`version`, `players`, `description`, ...).
-        json: String,
-    },
-    /// `Pong` (0x01): echoes the `Ping` payload.
-    Pong {
-        /// Value copied from the ping packet.
-        time: i64,
-    },
-}
-
-impl StatusClientbound {
-    /// Wire packet id.
-    #[must_use]
-    pub const fn packet_id(&self) -> u8 {
-        match self {
-            Self::Response { .. } => 0x00,
-            Self::Pong { .. } => 0x01,
-        }
-    }
-
-    /// Writes the body.
-    ///
-    /// # Errors
-    /// [`ProtocolError`] on invalid fields or stream errors.
-    pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
-        match self {
-            Self::Response { json } => write_string_capped(writer, json),
-            Self::Pong { time } => {
-                writer.write_all(&time.to_be_bytes())?;
-                Ok(())
-            }
-        }
-    }
-
-    /// Reads a body for the given packet id.
-    ///
-    /// # Errors
-    /// [`ProtocolError::UnknownPacket`] for unrecognized ids.
-    pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        Ok(match id {
-            0x00 => Self::Response {
-                json: crate::types::read_string(reader, crate::types::MAX_STRING_CHARS)?,
-            },
-            0x01 => Self::Pong {
-                time: read_i64(reader)?,
-            },
-            _ => {
-                return Err(ProtocolError::UnknownPacket {
-                    id,
-                    state: crate::State::Status,
-                })
-            }
-        })
-    }
-}
-
-/// Serverbound status-state packets.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StatusServerbound {
-    /// `Status Request` (0x00): empty body.
-    StatusRequest,
-    /// `Ping` (0x01): latency probe payload, echoed by `Pong`.
-    Ping {
-        /// Arbitrary payload the server must copy into the pong.
-        time: i64,
-    },
-}
-
-impl StatusServerbound {
-    /// Wire packet id.
-    #[must_use]
-    pub const fn packet_id(&self) -> u8 {
-        match self {
-            Self::StatusRequest => 0x00,
-            Self::Ping { .. } => 0x01,
-        }
-    }
-
-    /// Reads a body for the given packet id.
-    ///
-    /// # Errors
-    /// [`ProtocolError::UnknownPacket`] for unrecognized ids.
-    pub fn decode(id: u8, reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        Ok(match id {
-            0x00 => Self::StatusRequest,
-            0x01 => Self::Ping {
-                time: read_i64(reader)?,
-            },
-            _ => {
-                return Err(ProtocolError::UnknownPacket {
-                    id,
-                    state: crate::State::Status,
-                })
-            }
-        })
-    }
-
-    /// Writes the body.
-    ///
-    /// # Errors
-    /// [`ProtocolError`] on stream errors.
-    pub fn encode_body<W: Write>(&self, writer: &mut W) -> Result<(), ProtocolError> {
-        match self {
-            Self::StatusRequest => Ok(()),
-            Self::Ping { time } => {
-                writer.write_all(&time.to_be_bytes())?;
-                Ok(())
-            }
-        }
-    }
-}
+pub use handshake::Handshake;
+pub use status::{StatusClientbound, StatusServerbound};
 
 /// Clientbound login-state packets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -701,36 +539,6 @@ pub trait EncodablePacket {
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError>;
 }
 
-impl EncodablePacket for Handshake {
-    fn packet_id(&self) -> u8 {
-        Handshake::packet_id(self)
-    }
-
-    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        Handshake::encode_body(self, writer)
-    }
-}
-
-impl EncodablePacket for StatusClientbound {
-    fn packet_id(&self) -> u8 {
-        StatusClientbound::packet_id(self)
-    }
-
-    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        StatusClientbound::encode_body(self, writer)
-    }
-}
-
-impl EncodablePacket for StatusServerbound {
-    fn packet_id(&self) -> u8 {
-        StatusServerbound::packet_id(self)
-    }
-
-    fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        StatusServerbound::encode_body(self, writer)
-    }
-}
-
 impl EncodablePacket for LoginClientbound {
     fn packet_id(&self) -> u8 {
         LoginClientbound::packet_id(self)
@@ -774,34 +582,6 @@ impl EncodablePacket for PlayServerbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn handshake_round_trip() {
-        let packet = Handshake {
-            protocol_version: crate::state::PROTOCOL_VERSION_1_8,
-            server_address: "localhost".to_string(),
-            server_port: 25565,
-            next_state: 2,
-        };
-        let mut buffer = Vec::new();
-        packet.encode_body(&mut buffer).unwrap();
-
-        let mut reader = &buffer[..];
-        let decoded = Handshake::decode(&mut reader).unwrap();
-        assert_eq!(decoded, packet);
-        assert!(reader.is_empty());
-        assert_eq!(packet.packet_id(), 0x00);
-    }
-
-    #[test]
-    fn invalid_next_state_is_rejected() {
-        let mut buffer = Vec::new();
-        write_var_u32(&mut buffer, crate::state::PROTOCOL_VERSION_1_8 as u32).unwrap();
-        write_string_capped(&mut buffer, "x").unwrap();
-        buffer.extend_from_slice(&25565u16.to_be_bytes());
-        write_var_u32(&mut buffer, 7).unwrap();
-        assert!(Handshake::decode(&mut &buffer[..]).is_err());
-    }
 
     #[test]
     fn login_success_parse() {
@@ -960,29 +740,12 @@ mod tests {
         let mut empty: &[u8] = &[];
         let err = PlayClientbound::decode(0x42, &mut empty).unwrap_err();
         assert!(matches!(err, ProtocolError::UnknownPacket { id: 0x42, .. }));
-
-        let mut empty: &[u8] = &[];
-        let err = StatusClientbound::decode(0x42, &mut empty).unwrap_err();
-        assert!(matches!(err, ProtocolError::UnknownPacket { id: 0x42, .. }));
     }
 
     /// Serverbound packets must decode back from their own encodings
     /// (symmetry contract the fake server depends on).
     #[test]
     fn serverbound_round_trip_symmetry() {
-        let packets: Vec<(u8, StatusServerbound)> = vec![
-            (0x00, StatusServerbound::StatusRequest),
-            (0x01, StatusServerbound::Ping { time: 123_456_789 }),
-        ];
-        for (id, packet) in packets {
-            let mut buffer = Vec::new();
-            packet.encode_body(&mut buffer).unwrap();
-            assert_eq!(
-                StatusServerbound::decode(id, &mut &buffer[..]).unwrap(),
-                packet
-            );
-        }
-
         let mut buffer = Vec::new();
         LoginServerbound::LoginStart {
             username: "Alice".to_string(),
