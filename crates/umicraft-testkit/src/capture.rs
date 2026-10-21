@@ -61,6 +61,12 @@ impl Capture {
         });
     }
 
+    /// Records one pre-built frame (used by the replay tool, which hands
+    /// captured entries back as frames).
+    pub fn add_entry(&mut self, entry: CaptureEntry) {
+        self.entries.push(entry);
+    }
+
     /// Serializes to the capture byte format.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -153,6 +159,88 @@ impl Capture {
     pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
         Self::from_bytes(&std::fs::read(path)?)
     }
+}
+
+/// One-line description of a captured frame, advancing
+/// `compression_active` when a login-state `Set Compression` body passes
+/// by (compression applies from the packet *after* that frame). Frames
+/// that cannot be interpreted are still described by size.
+///
+/// The threshold of the temporary `Framing` value does not matter here:
+/// `unwrap_body` only consults the frame's own uncompressed-length varint.
+#[must_use]
+pub fn describe_frame(entry: &CaptureEntry, compression_active: &mut bool) -> String {
+    use umicraft_protocol::framing::Framing;
+    use umicraft_protocol::varint::take_var_u32;
+
+    let mut payload = entry.data.as_slice();
+    let mut consumed = 0usize;
+    let Some(declared_len) = take_var_u32(payload, &mut consumed).ok().flatten() else {
+        return format!("{} bytes (framing unreadable)", entry.data.len());
+    };
+    payload = &payload[consumed..];
+    if declared_len as usize != payload.len() {
+        return format!(
+            "{} bytes, declared {declared_len} (len mismatch)",
+            entry.data.len()
+        );
+    }
+
+    // Try the compression-framed layout first once the session switched;
+    // fall back to the raw layout when inflation fails on a boundary frame.
+    let body = if *compression_active {
+        Framing::Compressed { threshold: 1 }
+            .unwrap_body(payload)
+            .ok()
+            .or_else(|| Framing::Raw.unwrap_body(payload).ok())
+    } else {
+        Framing::Raw.unwrap_body(payload).ok()
+    };
+
+    let Some(body) = body else {
+        return format!(
+            "{payload_len} framed bytes (payload unreadable)",
+            payload_len = payload.len()
+        );
+    };
+
+    // A login-state Set Compression body starts with packet id 0x03 and
+    // carries exactly one threshold varint.
+    if !*compression_active && body.first() == Some(&0x03) {
+        if let Some(threshold) = read_trailing_var(&body) {
+            *compression_active = true;
+            return format!(
+                "Set Compression: threshold={threshold} body_len={} \
+                 [compression on from the next frame]",
+                body.len()
+            );
+        }
+    }
+
+    // Small varint-only keepalive bodies are the acceptance metric; longer
+    // 0x00 bodies are handshake/status shapes that must not read as ids.
+    if body.first() == Some(&0x00) {
+        if let Some(keepalive_id) = read_trailing_var(&body) {
+            return format!("Keep Alive: id={keepalive_id} body_len={}", body.len());
+        }
+    }
+
+    match body.first().copied() {
+        Some(id) => format!("packet id=0x{id:02x} body_len={}", body.len()),
+        None => "empty body".to_string(),
+    }
+}
+
+/// Reads the VarInt that trails a one-byte body prefix (keepalive id after
+/// `0x00`, Set Compression threshold after `0x03`); `None` when the rest is
+/// not exactly one VarInt.
+fn read_trailing_var(body: &[u8]) -> Option<i64> {
+    use umicraft_protocol::varint::take_var_u32;
+
+    let rest = body.get(1..)?;
+    let mut consumed = 0usize;
+    let value = take_var_u32(rest, &mut consumed).ok().flatten()?;
+    (consumed == rest.len()).then(|| i64::from(value))
 }
 
 /// Peels the next complete *raw* frame (length prefix included) off `buffer`.
@@ -250,5 +338,98 @@ mod tests {
             take_raw_frame(&mut buffer).unwrap().unwrap(),
             vec![0x05, b'a', b'b', b'c', b'd', b'e']
         );
+    }
+
+    #[test]
+    fn describe_reads_raw_keepalive_ids() {
+        use umicraft_protocol::varint::write_var_u32;
+
+        let mut body = vec![0x00];
+        write_var_u32(&mut body, 424_242).unwrap();
+        let mut frame = Vec::new();
+        write_var_u32(&mut frame, body.len() as u32).unwrap();
+        frame.extend(&body);
+
+        let mut compressed = false;
+        assert_eq!(
+            describe_frame(
+                &CaptureEntry {
+                    direction: Direction::ServerToClient,
+                    timestamp_ms: 1,
+                    data: frame,
+                },
+                &mut compressed
+            ),
+            "Keep Alive: id=424242 body_len=4"
+        );
+        assert!(!compressed);
+    }
+
+    #[test]
+    fn describe_keeps_handshakes_out_of_the_keepalive_slot() {
+        // Handshake body starts with 0x00 too, but continues beyond one varint.
+        let mut body = vec![0x00, 0x2F, 0x09];
+        body.extend(*b"127.0.0.1");
+        body.extend([0x63, 0xDD, 0x02]); // port 25597, next state 2
+        let mut frame = Vec::new();
+        umicraft_protocol::varint::write_var_u32(&mut frame, body.len() as u32).unwrap();
+        frame.extend(&body);
+
+        let mut compressed = false;
+        assert_eq!(
+            describe_frame(
+                &CaptureEntry {
+                    direction: Direction::ClientToServer,
+                    timestamp_ms: 1,
+                    data: frame,
+                },
+                &mut compressed
+            ),
+            "packet id=0x00 body_len=15"
+        );
+        assert!(!compressed);
+    }
+
+    #[test]
+    fn describe_flips_to_compression_after_set_compression() {
+        use umicraft_protocol::framing::Framing;
+
+        // Set Compression with threshold 256 (two-byte varint), raw framing:
+        // [len 3][0x03 id][0x80 0x02 threshold].
+        let frame = vec![0x03, 0x03, 0x80, 0x02];
+        let mut compressed = false;
+        assert_eq!(
+            describe_frame(
+                &CaptureEntry {
+                    direction: Direction::ServerToClient,
+                    timestamp_ms: 1,
+                    data: frame.clone(),
+                },
+                &mut compressed
+            ),
+            "Set Compression: threshold=256 body_len=3 [compression on from the next frame]"
+        );
+        assert!(compressed);
+
+        // Following frames carry the compression-framed layout; write one
+        // through the framing layer (threshold 1 compresses even tiny
+        // bodies) and check the inflated packet id surfaces.
+        let mut framed = Vec::new();
+        Framing::Compressed { threshold: 1 }
+            .write_frame(&mut framed, &[0x08])
+            .unwrap();
+        let frame = framed;
+        assert_eq!(
+            describe_frame(
+                &CaptureEntry {
+                    direction: Direction::ServerToClient,
+                    timestamp_ms: 2,
+                    data: frame,
+                },
+                &mut compressed
+            ),
+            "packet id=0x08 body_len=1"
+        );
+        assert!(compressed);
     }
 }

@@ -17,5 +17,13 @@ umicraft-protocol.workspace = true
 name = "umicraft-packet-logger"
 path = "src/bin/packet_logger.rs"
 
+[[bin]]
+name = "umicraft-capture-inspect"
+path = "src/bin/capture_inspect.rs"
+
+[[bin]]
+name = "umicraft-capture-replay"
+path = "src/bin/capture_replay.rs"
+
 [lints]
 workspace = true
