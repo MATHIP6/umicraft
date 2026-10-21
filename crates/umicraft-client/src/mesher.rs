@@ -84,12 +84,20 @@ impl MeshPool {
         self.workers.len()
     }
 
-    /// Queues a chunk for meshing. Returns `false` when the job queue is full
-    /// or all workers have gone; the caller should retry later.
-    pub fn submit(&self, pos: ChunkPos, snapshot: ChunkSnapshot) -> bool {
-        self.jobs
-            .as_ref()
-            .is_some_and(|sender| sender.try_send(MeshJob { pos, snapshot }).is_ok())
+    /// Queues a chunk for meshing.
+    ///
+    /// The snapshot is returned when the job queue is full or when all
+    /// workers have gone, so the caller can retry it on a later frame
+    /// instead of losing the work.
+    pub fn submit(&self, pos: ChunkPos, snapshot: ChunkSnapshot) -> Result<(), ChunkSnapshot> {
+        let Some(sender) = self.jobs.as_ref() else {
+            return Err(snapshot);
+        };
+        match sender.try_send(MeshJob { pos, snapshot }) {
+            Ok(()) => Ok(()),
+            Err(mpsc::TrySendError::Full(job)) => Err(job.snapshot),
+            Err(mpsc::TrySendError::Disconnected(job)) => Err(job.snapshot),
+        }
     }
 
     /// Non-blocking result poll for the render loop.
@@ -157,7 +165,9 @@ mod tests {
         assert_eq!(pool.worker_count(), 2);
         for x in 0..2 {
             let pos = ChunkPos::new(x, 0);
-            assert!(pool.submit(pos, ChunkSnapshot::from_world(&world, pos)));
+            assert!(pool
+                .submit(pos, ChunkSnapshot::from_world(&world, pos))
+                .is_ok());
         }
         let mut positions = Vec::new();
         while positions.len() < 2 {

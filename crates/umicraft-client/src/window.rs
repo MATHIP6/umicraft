@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Windowed client: winit event loop, free camera, chunk upload, debug overlay.
+//! Windowed client: the winit event loop, the player camera, the chunk
+//! upload and the HUD.
+//!
+//! The render thread owns the window, the GPU resources and the mesh pool.
+//! It never mutates the world and never blocks: the camera, the HUD and the
+//! chunk snapshots arrive over the bounded channels of the game thread
+//! (ADR-0005).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::Instant;
 
-use umicraft_mesh::ChunkSnapshot;
+use umicraft_game::RenderState;
 use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
-use umicraft_world::{ChunkPos, World};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -20,15 +23,56 @@ use winit::window::{CursorGrabMode, Window};
 
 use crate::args::Args;
 use crate::error::ClientError;
+use crate::game::{camera_angles, ChunkEvent, Frame, GameEvent, RenderEvent, Session, TICK};
+use crate::input::{InputState, InputUpdate};
 use crate::mesher::{default_worker_count, MeshPool};
-use crate::network::{self, NetEvent, NetworkConfig};
-use crate::scene::SessionWorld;
+use crate::network::NetworkConfig;
 
 const MOUSE_SENSITIVITY: f32 = 0.0022;
-const MOVE_SPEED: f32 = 16.0;
-const FAST_SPEED: f32 = 48.0;
-const LOOK_SPEED: f32 = 1.6;
 const FRAME_HISTORY: usize = 120;
+
+/// The camera of the player, interpolated between the two newest frames.
+#[derive(Debug, Default)]
+struct View {
+    /// The state of the previous tick.
+    previous: Option<RenderState>,
+    /// The state of the newest tick.
+    current: Option<RenderState>,
+    /// The instant of the newest tick.
+    tick_time: Option<Instant>,
+}
+
+impl View {
+    /// Stores a new frame.
+    fn push(&mut self, frame: Frame) {
+        self.previous = self.current;
+        self.current = Some(frame.state);
+        self.tick_time = Some(frame.tick_time);
+    }
+
+    /// The interpolated state for `now`.
+    ///
+    /// The renderer shows the simulation one tick behind and interpolates
+    /// between the two newest ticks, so the motion is smooth and independent
+    /// of the frame rate (GAM-8).
+    fn sample(&self, now: Instant) -> Option<RenderState> {
+        let current = self.current?;
+        let Some(previous) = self.previous else {
+            return Some(current);
+        };
+        let Some(tick_time) = self.tick_time else {
+            return Some(current);
+        };
+        let elapsed = now.saturating_duration_since(tick_time).as_secs_f32();
+        let alpha = (elapsed / TICK.as_secs_f32()).clamp(0.0, 1.0);
+        Some(RenderState {
+            position: previous.position.lerp(current.position, alpha),
+            yaw: current.yaw,
+            pitch: current.pitch,
+            on_ground: current.on_ground,
+        })
+    }
+}
 
 /// Runs the windowed client until the user closes the window.
 ///
@@ -37,7 +81,7 @@ const FRAME_HISTORY: usize = 120;
 /// initialization failure. Runtime draw failures are surfaced the same way
 /// after the event loop returns.
 pub fn run(args: Args) -> Result<(), ClientError> {
-    let (network, receiver) = network::spawn(NetworkConfig {
+    let session = Session::start(NetworkConfig {
         host: args.host.clone(),
         port: args.port,
         name: args.name.clone(),
@@ -45,7 +89,7 @@ pub fn run(args: Args) -> Result<(), ClientError> {
     })?;
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new(args, receiver, network)?;
+    let mut app = App::new(args, session)?;
     event_loop
         .run_app(&mut app)
         .map_err(|error| ClientError::Window(error.to_string()))?;
@@ -60,57 +104,65 @@ struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     camera: Camera,
-    camera_initialized: bool,
-    awaiting_spawn: bool,
+    view: View,
     overlay: Overlay,
     show_overlay: bool,
     mouse_captured: bool,
     keys: HashSet<KeyCode>,
-    scene: SessionWorld,
     pool: MeshPool,
-    pending: HashSet<ChunkPos>,
-    deferred: HashSet<ChunkPos>,
-    faces: HashMap<ChunkPos, usize>,
-    net_rx: Receiver<NetEvent>,
-    _network: JoinHandle<()>,
+    /// The chunks that are being meshed.
+    pending: HashSet<umicraft_world::ChunkPos>,
+    /// The chunks whose snapshot could not be queued yet.
+    waiting: Vec<(umicraft_world::ChunkPos, umicraft_mesh::ChunkSnapshot)>,
+    faces: HashMap<umicraft_world::ChunkPos, usize>,
+    session: Session,
+    hud: HudState,
+    last_input: InputState,
+    look: (f32, f32),
+    select_slot: Option<u8>,
+    break_block: bool,
+    place_block: bool,
+    /// Whether the chat input is open.
+    chat_open: bool,
+    /// The line the player is typing.
+    chat_input: String,
     last_frame: Instant,
     frame_times: Vec<f32>,
     frame_ms: f32,
     fps: f32,
-    packets_seen: u64,
     exit_error: Option<String>,
 }
 
 impl App {
-    fn new(
-        args: Args,
-        net_rx: Receiver<NetEvent>,
-        network: JoinHandle<()>,
-    ) -> Result<Self, ClientError> {
+    fn new(args: Args, session: Session) -> Result<Self, ClientError> {
         let pool = MeshPool::new(default_worker_count())?;
         Ok(Self {
             args,
             window: None,
             renderer: None,
             camera: Camera::default(),
-            camera_initialized: false,
-            awaiting_spawn: false,
+            view: View::default(),
             overlay: Overlay::new(1280, 720),
             show_overlay: true,
             mouse_captured: false,
             keys: HashSet::new(),
-            scene: SessionWorld::new(),
             pool,
             pending: HashSet::new(),
-            deferred: HashSet::new(),
+            waiting: Vec::new(),
             faces: HashMap::new(),
-            net_rx,
-            _network: network,
+            session,
+            hud: HudState::default(),
+            last_input: InputState::default(),
+            look: (0.0, 0.0),
+            select_slot: None,
+            break_block: false,
+            place_block: false,
+            chat_open: false,
+            chat_input: String::new(),
             last_frame: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
             fps: 0.0,
-            packets_seen: 0,
             exit_error: None,
         })
     }
@@ -126,6 +178,10 @@ impl App {
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
+        if self.chat_open {
+            self.handle_chat_key(event_loop, event);
+            return;
+        }
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
@@ -141,8 +197,15 @@ impl App {
                             }
                         }
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
-                        KeyCode::KeyR => self.reset_camera(),
+                        KeyCode::KeyT => {
+                            self.chat_open = true;
+                            self.chat_input.clear();
+                            self.capture_mouse(false);
+                        }
                         _ => {}
+                    }
+                    if let Some(slot) = hotbar_slot(code) {
+                        self.select_slot = Some(slot);
                     }
                 }
                 self.keys.insert(code);
@@ -151,6 +214,42 @@ impl App {
                 self.keys.remove(&code);
             }
         }
+    }
+
+    /// Handles a key press while the chat input is open.
+    fn handle_chat_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return;
+        };
+        match event.state {
+            ElementState::Pressed => match code {
+                KeyCode::Escape => {
+                    self.chat_open = false;
+                    self.chat_input.clear();
+                }
+                KeyCode::Enter => {
+                    let message = std::mem::take(&mut self.chat_input);
+                    self.chat_open = false;
+                    if !message.is_empty() {
+                        let _ = self.session.events().try_send(GameEvent::Chat(message));
+                    }
+                }
+                KeyCode::Backspace => {
+                    self.chat_input.pop();
+                }
+                _ => {
+                    if let Some(text) = event.text.as_ref() {
+                        for character in text.chars() {
+                            if !character.is_control() && self.chat_input.len() < 100 {
+                                self.chat_input.push(character);
+                            }
+                        }
+                    }
+                }
+            },
+            ElementState::Released => {}
+        }
+        let _ = event_loop;
     }
 
     fn capture_mouse(&mut self, capture: bool) {
@@ -169,89 +268,123 @@ impl App {
         }
     }
 
-    fn reset_camera(&mut self) {
-        let mut camera = self
-            .scene
-            .placement
-            .as_ref()
-            .map_or_else(Camera::default, |placement| {
-                Camera::from_minecraft(
-                    placement.x,
-                    placement.y,
-                    placement.z,
-                    placement.yaw,
-                    placement.pitch,
-                )
-            });
-        if let Some(renderer) = &self.renderer {
-            let (width, height) = renderer.size();
-            camera.set_aspect(width, height);
+    /// The key state of the window.
+    fn key_state(&self) -> InputState {
+        if self.chat_open {
+            // While the chat is open the movement keys do not steer the
+            // player.
+            return InputState::default();
         }
-        self.camera = camera;
-        self.camera_initialized = true;
+        let mut state = InputState::default();
+        if self.keys.contains(&KeyCode::KeyW) {
+            state.forward += 1.0;
+        }
+        if self.keys.contains(&KeyCode::KeyS) {
+            state.forward -= 1.0;
+        }
+        if self.keys.contains(&KeyCode::KeyA) {
+            state.strafe += 1.0;
+        }
+        if self.keys.contains(&KeyCode::KeyD) {
+            state.strafe -= 1.0;
+        }
+        state.jump = self.keys.contains(&KeyCode::Space);
+        state.sneak =
+            self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
+        state.sprint =
+            self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
+        state
     }
 
-    fn drain_network(&mut self) {
-        while let Ok(event) = self.net_rx.try_recv() {
-            let joined = matches!(event, NetEvent::JoinGame(_));
-            if joined {
-                self.reset_world_state();
-            }
-            self.packets_seen += 1;
-            self.scene.apply(event);
-            if joined {
-                self.awaiting_spawn = true;
-            }
-        }
-        if (self.awaiting_spawn || !self.camera_initialized) && self.scene.placement.is_some() {
-            self.reset_camera();
-            self.awaiting_spawn = false;
-        }
-    }
-
-    fn reset_world_state(&mut self) {
-        if let Some(renderer) = self.renderer.as_mut() {
-            renderer.clear_meshes();
-        }
-        self.pending.clear();
-        self.deferred.clear();
-        self.faces.clear();
-        // Replacing the pool drops in-flight results from the previous world.
-        match MeshPool::new(default_worker_count()) {
-            Ok(pool) => self.pool = pool,
-            Err(error) => self.exit_error = Some(error.to_string()),
-        }
-    }
-
-    fn dispatch_dirty(&mut self) {
-        let Some(renderer) = self.renderer.as_mut() else {
+    /// Sends the input of the window to the game thread.
+    ///
+    /// The send never blocks: when the inbox is full the input is repeated
+    /// on the next frame.
+    fn publish_input(&mut self) {
+        let state = self.key_state();
+        let changed = state != self.last_input
+            || self.look != (0.0, 0.0)
+            || self.select_slot.is_some()
+            || self.break_block
+            || self.place_block;
+        if !changed {
             return;
+        }
+        let update = InputUpdate {
+            state,
+            look_yaw: self.look.0,
+            look_pitch: self.look.1,
+            select_slot: self.select_slot.take(),
+            break_block: self.break_block,
+            place_block: self.place_block,
         };
-        let Some(world) = self.scene.world.as_ref() else {
-            return;
-        };
-        let dirty = std::mem::take(&mut self.scene.dirty);
-        for pos in dirty {
+        if self
+            .session
+            .events()
+            .try_send(GameEvent::Input(update))
+            .is_ok()
+        {
+            self.last_input = state;
+            self.look = (0.0, 0.0);
+            self.break_block = false;
+            self.place_block = false;
+        }
+    }
+
+    /// Reads the frames of the game thread.
+    fn drain_frames(&mut self) {
+        while let Ok(event) = self.session.frames().try_recv() {
+            match event {
+                RenderEvent::Frame(frame) => self.view.push(frame),
+                RenderEvent::Hud(hud) => self.hud = *hud,
+                RenderEvent::Status(status) => {
+                    tracing::debug!(status = %status.status, "session status");
+                }
+                RenderEvent::Ended(reason) => {
+                    self.exit_error = Some(reason);
+                }
+                RenderEvent::Reset => {
+                    self.reset_world();
+                }
+            }
+        }
+    }
+
+    /// Takes the chunk snapshots of the game thread.
+    fn drain_chunks(&mut self) {
+        while let Ok(ChunkEvent { pos, snapshot }) = self.session.chunks().try_recv() {
+            self.waiting.push((pos, snapshot));
+        }
+    }
+
+    /// Submits the queued snapshots to the mesh pool.
+    ///
+    /// A chunk that is still being meshed stays in the queue and is
+    /// submitted as soon as the worker finished it; the render thread never
+    /// waits for a worker.
+    fn dispatch_chunks(&mut self) {
+        let mut index = 0;
+        while index < self.waiting.len() {
+            let (pos, snapshot) = self.waiting[index].clone();
             if self.pending.contains(&pos) {
-                self.deferred.insert(pos);
+                index += 1;
                 continue;
             }
-            if world.chunk(pos).is_some() {
-                let snapshot = ChunkSnapshot::from_world(world, pos);
-                if self.pool.submit(pos, snapshot) {
+            match self.pool.submit(pos, snapshot) {
+                Ok(()) => {
                     self.pending.insert(pos);
-                } else {
-                    // Queue full (or workers gone): keep the chunk dirty and
-                    // retry on a later frame instead of blocking the renderer.
-                    self.scene.dirty.insert(pos);
+                    self.waiting.remove(index);
                 }
-            } else {
-                renderer.remove_chunk(pos);
-                self.faces.remove(&pos);
+                Err(_snapshot) => {
+                    // The job queue is full: the render thread never waits
+                    // for a worker, the chunk is retried on a later frame.
+                    break;
+                }
             }
         }
     }
 
+    /// Uploads the meshes the workers finished.
     fn collect_meshes(&mut self) {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -259,66 +392,38 @@ impl App {
         while let Some(result) = self.pool.try_recv() {
             let pos = result.pos;
             self.pending.remove(&pos);
-            let loaded = self
-                .scene
-                .world
-                .as_ref()
-                .is_some_and(|world| world.chunk(pos).is_some());
-            if loaded && !result.mesh.is_empty() {
+            if !result.mesh.is_empty() {
                 self.faces.insert(pos, result.mesh.face_count());
                 renderer.upload_mesh(pos, &result.mesh);
             } else {
                 self.faces.remove(&pos);
                 renderer.remove_chunk(pos);
             }
-            if self.deferred.remove(&pos) {
-                self.scene.dirty.insert(pos);
-            }
         }
     }
 
-    fn update_camera(&mut self, dt: f32) {
-        let mut forward = 0.0;
-        let mut right = 0.0;
-        let mut up = 0.0;
-        if self.keys.contains(&KeyCode::KeyW) {
-            forward += 1.0;
+    /// Drops the meshes of a world that was replaced.
+    fn reset_world(&mut self) {
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.clear_meshes();
         }
-        if self.keys.contains(&KeyCode::KeyS) {
-            forward -= 1.0;
-        }
-        if self.keys.contains(&KeyCode::KeyD) {
-            right += 1.0;
-        }
-        if self.keys.contains(&KeyCode::KeyA) {
-            right -= 1.0;
-        }
-        if self.keys.contains(&KeyCode::Space) {
-            up += 1.0;
-        }
-        if self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight) {
-            up -= 1.0;
-        }
-        let fast =
-            self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
-        let speed = if fast { FAST_SPEED } else { MOVE_SPEED };
-        self.camera.move_local(forward, right, up, speed, dt);
-
-        let turn = LOOK_SPEED * dt;
-        if self.keys.contains(&KeyCode::ArrowLeft) {
-            self.camera.look(-turn, 0.0);
-        }
-        if self.keys.contains(&KeyCode::ArrowRight) {
-            self.camera.look(turn, 0.0);
-        }
-        if self.keys.contains(&KeyCode::ArrowUp) {
-            self.camera.look(0.0, turn);
-        }
-        if self.keys.contains(&KeyCode::ArrowDown) {
-            self.camera.look(0.0, -turn);
-        }
+        self.pending.clear();
+        self.waiting.clear();
+        self.faces.clear();
     }
 
+    /// Moves the camera onto the player.
+    fn update_camera(&mut self, now: Instant) {
+        let Some(state) = self.view.sample(now) else {
+            return;
+        };
+        self.camera.position = state.position;
+        let (yaw, pitch) = camera_angles(&state);
+        self.camera.yaw = yaw;
+        self.camera.pitch = pitch;
+    }
+
+    /// Builds the HUD and the debug block.
     fn build_overlay(&mut self) {
         let (width, height) = self
             .renderer
@@ -328,36 +433,34 @@ impl App {
         if !self.show_overlay {
             return;
         }
-        let chunks = self.scene.world.as_ref().map_or(0, World::chunk_count);
         let meshes = self.renderer.as_ref().map_or(0, Renderer::mesh_count);
         let faces: usize = self.faces.values().sum();
         let position = self.camera.position;
         let yaw = self.camera.yaw.to_degrees();
         let pitch = self.camera.pitch.to_degrees();
-        let status: String = self.scene.status.chars().take(64).collect();
         let lines = [
-            "UMICRAFT M2 // PROTOCOL 47".to_string(),
-            status,
-            format!("FPS {:.1}  FRAME {:.1} MS", self.fps, self.frame_ms),
+            "UMICRAFT M3 // PROTOCOL 47".to_string(),
+            format!(
+                "FPS {:.1}  FRAME {:.1} MS  MESHES {}  FACES {}",
+                self.fps, self.frame_ms, meshes, faces
+            ),
             format!(
                 "XYZ {:.1} {:.1} {:.1}  YAW {:.0} PITCH {:.0}",
                 position.x, position.y, position.z, yaw, pitch
             ),
-            format!("CHUNKS {}  MESHES {}  FACES {}", chunks, meshes, faces),
-            format!(
-                "CHAT {}  BLOCK UPDATES {}  PACKETS {}",
-                self.scene.chat_messages, self.scene.block_updates, self.packets_seen
-            ),
-            "WASD MOVE  SPACE/SHIFT VERTICAL  CTRL FAST".to_string(),
-            "RIGHT-DRAG LOOK  ARROWS LOOK  F1 OVERLAY".to_string(),
-            "R RESET  ESC RELEASE CURSOR / QUIT".to_string(),
+            "WASD MOVE  SPACE JUMP  SHIFT SNEAK  CTRL SPRINT".to_string(),
+            "LEFT BREAK  RIGHT PLACE  1-9 HOTBAR  ESC RELEASE CURSOR".to_string(),
         ];
-        // The HUD owns the debug block, the crosshair, and the bottom stack;
+        // The HUD owns the debug block, the crosshair and the bottom stack;
         // the client only feeds it the lines it already tracks.
+        let mut chat_lines = self.hud.chat_lines.clone();
+        if self.chat_open {
+            chat_lines.push(format!("> {}", self.chat_input));
+        }
         let hud = HudState {
             debug_lines: lines.to_vec(),
-            chat_lines: self.scene.chat_history.iter().cloned().collect(),
-            ..HudState::default()
+            chat_lines,
+            ..self.hud.clone()
         };
         draw_hud(&mut self.overlay, &hud, width, height);
         let graph_width = 240.0_f32.min(width as f32 - 20.0);
@@ -377,7 +480,6 @@ impl App {
         let now = Instant::now();
         let elapsed = (now - self.last_frame).as_secs_f32();
         self.last_frame = now;
-        let dt = elapsed.min(0.1);
         let frame_ms = elapsed * 1000.0;
         self.frame_ms = if self.frame_ms == 0.0 {
             frame_ms
@@ -395,10 +497,12 @@ impl App {
             self.frame_times.remove(0);
         }
 
-        self.drain_network();
-        self.dispatch_dirty();
+        self.drain_frames();
+        self.drain_chunks();
+        self.dispatch_chunks();
         self.collect_meshes();
-        self.update_camera(dt);
+        self.publish_input();
+        self.update_camera(now);
         self.build_overlay();
 
         let Some(renderer) = self.renderer.as_mut() else {
@@ -415,13 +519,29 @@ impl App {
     }
 }
 
+/// The hotbar slot of a number key.
+fn hotbar_slot(code: KeyCode) -> Option<u8> {
+    match code {
+        KeyCode::Digit1 => Some(0),
+        KeyCode::Digit2 => Some(1),
+        KeyCode::Digit3 => Some(2),
+        KeyCode::Digit4 => Some(3),
+        KeyCode::Digit5 => Some(4),
+        KeyCode::Digit6 => Some(5),
+        KeyCode::Digit7 => Some(6),
+        KeyCode::Digit8 => Some(7),
+        KeyCode::Digit9 => Some(8),
+        _ => None,
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.renderer.is_some() {
             return;
         }
         let attributes = Window::default_attributes()
-            .with_title("Umicraft M2")
+            .with_title("Umicraft M3")
             .with_inner_size(LogicalSize::new(
                 f64::from(self.args.width),
                 f64::from(self.args.height),
@@ -464,11 +584,21 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => self.resize(size.width, size.height),
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, event),
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Right,
-                ..
-            } => self.capture_mouse(state == ElementState::Pressed),
+            WindowEvent::MouseInput { state, button, .. } => match button {
+                MouseButton::Left => {
+                    if state == ElementState::Pressed {
+                        if self.mouse_captured {
+                            self.break_block = true;
+                        } else {
+                            self.capture_mouse(true);
+                        }
+                    }
+                }
+                MouseButton::Right if state == ElementState::Pressed && self.mouse_captured => {
+                    self.place_block = true;
+                }
+                _ => {}
+            },
             WindowEvent::Focused(false) => {
                 self.keys.clear();
                 self.capture_mouse(false);
@@ -486,10 +616,10 @@ impl ApplicationHandler for App {
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
             if self.mouse_captured {
-                self.camera.look(
-                    delta.0 as f32 * MOUSE_SENSITIVITY,
-                    -(delta.1 as f32) * MOUSE_SENSITIVITY,
-                );
+                // A positive delta moves the mouse to the right and down; the
+                // game logic turns right and looks down with it.
+                self.look.0 += delta.0 as f32 * MOUSE_SENSITIVITY;
+                self.look.1 += delta.1 as f32 * MOUSE_SENSITIVITY;
             }
         }
     }

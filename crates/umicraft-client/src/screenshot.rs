@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Offscreen screenshot pipeline: collect world packets, mesh chunks, render
-//! with wgpu, and write a PNG. Used by M2 acceptance and by CI-like smoke
-//! checks where no window is available.
+//! Offscreen screenshot pipeline: collect the world through the game thread,
+//! mesh the chunk snapshots, render with wgpu and write a PNG.
+//!
+//! The path shares the network thread, the game thread and the mesh pool
+//! with the windowed client, so a screenshot shows exactly what the player
+//! would see — including the HUD of the real session.
 
 use std::fs::File;
 use std::io::BufWriter;
@@ -11,13 +14,12 @@ use std::time::Instant;
 
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
-use umicraft_world::ChunkPos;
 
 use crate::args::Args;
 use crate::error::ClientError;
+use crate::game::{camera_angles, ChunkEvent, GameStatus, RenderEvent, Session};
 use crate::mesher::{default_worker_count, MeshPool};
-use crate::network::{spawn, NetEvent, NetworkConfig};
-use crate::scene::SessionWorld;
+use crate::network::NetworkConfig;
 
 /// Runs the screenshot path and writes `args.screenshot`.
 ///
@@ -29,74 +31,106 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         .screenshot
         .as_deref()
         .ok_or_else(|| ClientError::Screenshot("no output path".to_string()))?;
-    let (_network, receiver) = spawn(NetworkConfig {
+    let session = Session::start(NetworkConfig {
         host: args.host.clone(),
         port: args.port,
         name: args.name.clone(),
         view_distance: args.view_distance,
     })?;
 
-    let mut scene = SessionWorld::new();
     let deadline = Instant::now() + args.collect;
+    let mut renderer: Option<Renderer> = None;
+    let pool = MeshPool::new(default_worker_count())?;
+    let mut queued: Vec<(umicraft_world::ChunkPos, ChunkSnapshot)> = Vec::new();
+    let mut pending = std::collections::HashSet::new();
+    let mut camera = Camera::default();
+    let mut hud = HudState::default();
+    let mut status = GameStatus::default();
+    let mut meshes = 0_usize;
+    let mut faces = 0_usize;
+    let mut frames = 0_usize;
+    let mut chunks = 0_usize;
+
     while Instant::now() < deadline {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        match receiver.recv_timeout(remaining) {
-            Ok(event) => {
-                let error = matches!(event, NetEvent::Error(_));
-                scene.apply(event);
-                if error {
-                    break;
+        while let Ok(event) = session.frames().try_recv() {
+            match event {
+                RenderEvent::Frame(frame) => {
+                    frames += 1;
+                    camera.position = frame.state.position;
+                    let (yaw, pitch) = camera_angles(&frame.state);
+                    camera.yaw = yaw;
+                    camera.pitch = pitch;
+                }
+                RenderEvent::Hud(new_hud) => hud = *new_hud,
+                RenderEvent::Status(new_status) => status = *new_status,
+                RenderEvent::Reset => {
+                    if let Some(renderer) = renderer.as_mut() {
+                        renderer.clear_meshes();
+                    }
+                }
+                RenderEvent::Ended(reason) => {
+                    return Err(ClientError::Network(reason));
                 }
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
-    }
-    drop(receiver);
+        while let Ok(ChunkEvent { pos, snapshot }) = session.chunks().try_recv() {
+            queued.push((pos, snapshot));
+        }
 
-    if let Some(message) = scene.status.strip_prefix("ERROR ") {
-        return Err(ClientError::Network(message.to_string()));
+        // Mesh the snapshots the game thread delivered.
+        let mut index = 0;
+        while index < queued.len() {
+            let (pos, snapshot) = queued[index].clone();
+            if pending.contains(&pos) {
+                index += 1;
+                continue;
+            }
+            match pool.submit(pos, snapshot) {
+                Ok(()) => {
+                    pending.insert(pos);
+                    queued.remove(index);
+                }
+                Err(_) => break,
+            }
+        }
+        while let Some(result) = pool.try_recv() {
+            pending.remove(&result.pos);
+            if result.mesh.is_empty() {
+                continue;
+            }
+            faces += result.mesh.face_count();
+            meshes += 1;
+            chunks += 1;
+            if renderer.is_none() {
+                renderer = Some(Renderer::new_offscreen(args.width, args.height)?);
+            }
+            if let Some(renderer) = renderer.as_mut() {
+                renderer.upload_mesh(result.pos, &result.mesh);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    let world = scene.world.as_ref().ok_or(ClientError::NoWorld)?;
-    if world.chunk_count() == 0 {
+
+    drop(session);
+
+    if status.status.starts_with("ERROR ") {
+        return Err(ClientError::Network(
+            status.status["ERROR ".len()..].to_string(),
+        ));
+    }
+    if chunks == 0 {
         return Err(ClientError::NoChunks);
     }
 
-    let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
-    let positions: Vec<ChunkPos> = world.chunks().map(|(pos, _)| pos).collect();
-    let pool = MeshPool::new(default_worker_count())?;
-    let mut submitted = 0_usize;
-    for pos in &positions {
-        if pool.submit(*pos, ChunkSnapshot::from_world(world, *pos)) {
-            submitted += 1;
-        }
-    }
-
-    let mut meshes = 0_usize;
-    let mut faces = 0_usize;
-    for _ in 0..submitted {
-        let Some(result) = pool.recv() else {
-            break;
-        };
-        if result.mesh.is_empty() {
-            continue;
-        }
-        faces += result.mesh.face_count();
-        meshes += 1;
-        renderer.upload_mesh(result.pos, &result.mesh);
-    }
-
-    let mut camera = camera_for(&scene, args.width, args.height);
+    let mut renderer = match renderer {
+        Some(renderer) => renderer,
+        None => Renderer::new_offscreen(args.width, args.height)?,
+    };
     camera.set_aspect(args.width, args.height);
     let mut overlay = Overlay::new(args.width, args.height);
     let lines = [
-        "UMICRAFT M2 SCREENSHOT".to_string(),
-        format!(
-            "CHUNKS {}  MESHES {}  FACES {}",
-            world.chunk_count(),
-            meshes,
-            faces
-        ),
+        "UMICRAFT M3 SCREENSHOT".to_string(),
+        format!("CHUNKS {}  MESHES {}  FACES {}", chunks, meshes, faces),
         format!(
             "XYZ {:.1} {:.1} {:.1}",
             camera.position.x, camera.position.y, camera.position.z
@@ -111,8 +145,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     // screenshot shows the in-game layout.
     let hud = HudState {
         debug_lines: lines.to_vec(),
-        chat_lines: scene.chat_history.iter().cloned().collect(),
-        ..HudState::default()
+        ..hud
     };
     draw_hud(&mut overlay, &hud, args.width, args.height);
 
@@ -121,30 +154,17 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     write_png(path, &image.rgba, image.width, image.height)?;
 
     println!(
-        "screenshot written: {} ({}x{}, {} chunks, {} meshes, {} faces, collected {:.1}s)",
+        "screenshot written: {} ({}x{}, {} chunks, {} meshes, {} faces, {} frames, collected {:.1}s)",
         path.display(),
         image.width,
         image.height,
-        world.chunk_count(),
+        chunks,
         meshes,
         faces,
+        frames,
         args.collect.as_secs_f32()
     );
     Ok(())
-}
-
-fn camera_for(scene: &SessionWorld, width: u32, height: u32) -> Camera {
-    let mut camera = scene.placement.as_ref().map_or_else(Camera::default, |p| {
-        Camera::from_minecraft(p.x, p.y, p.z, p.yaw, p.pitch)
-    });
-    if scene.placement.is_some() {
-        // A slightly elevated, downward view shows the spawn terrain rather
-        // than only the horizon at eye level.
-        camera.position.y += 8.0;
-        camera.pitch = (-18.0_f32).to_radians();
-    }
-    camera.set_aspect(width, height);
-    camera
 }
 
 fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> Result<(), ClientError> {
@@ -173,26 +193,6 @@ fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> Result<(), Cl
 #[cfg(test)]
 mod tests {
     use super::*;
-    use umicraft_net::client::PlayerPlacement;
-    use umicraft_world::World;
-
-    #[test]
-    fn camera_uses_placement_and_eye_height() {
-        let mut scene = SessionWorld::new();
-        scene.world = Some(World::new(0));
-        scene.placement = Some(PlayerPlacement {
-            x: 10.0,
-            y: 4.0,
-            z: -3.0,
-            yaw: 0.0,
-            pitch: 0.0,
-        });
-        let camera = camera_for(&scene, 800, 600);
-        assert!((camera.position.x - 10.0).abs() < 1e-5);
-        assert!((camera.position.y - 13.62).abs() < 1e-5);
-        assert!((camera.position.z + 3.0).abs() < 1e-5);
-        assert!((camera.aspect() - 800.0 / 600.0).abs() < 1e-6);
-    }
 
     #[test]
     fn png_round_trip_dimensions() {
