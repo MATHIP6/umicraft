@@ -203,6 +203,10 @@ impl Player {
 ///
 /// The function is pure with respect to the world: it only reads blocks, and
 /// the same intent sequence always produces the same trajectory.
+///
+/// The step allocates nothing: the player state is a plain `Copy` struct and
+/// the collision solver only ever holds a few boxes on the stack (see
+/// [`crate::collision`]).
 pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, world: &S) {
     player.yaw = intent.yaw;
     player.pitch = intent.pitch;

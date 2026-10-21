@@ -142,6 +142,9 @@ impl GameState {
     ///
     /// The function is deterministic: it reads no clock and uses no
     /// randomness.
+    ///
+    /// The tick allocates nothing: the pending-input history is a fixed
+    /// capacity ring buffer and the physics only uses stack values.
     pub fn tick<S: BlockSource + ?Sized>(&mut self, intent: &InputIntent, world: &S) {
         self.previous_position = self.player.position;
         physics::step(&mut self.player, intent, world);
