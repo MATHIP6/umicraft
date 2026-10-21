@@ -18,7 +18,7 @@
 //! fit into the queue stays in the dirty set and is derived again later.
 
 use std::collections::{BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -29,6 +29,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
 use umicraft_game::input::RawInput;
 use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SURVIVAL_REACH};
+use umicraft_game::shapes::Aabb;
 use umicraft_game::{GameState, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
@@ -202,6 +203,8 @@ pub struct Session {
     chunks: Receiver<ChunkEvent>,
     /// The stop flag of the session.
     stop: Arc<AtomicBool>,
+    /// The number of serverbound packets the socket thread wrote.
+    sent: Arc<AtomicU64>,
     network: Option<JoinHandle<()>>,
     game: Option<JoinHandle<()>>,
 }
@@ -218,8 +221,9 @@ impl Session {
         let (chunks_tx, chunks_rx) = mpsc::sync_channel(CHUNK_CAPACITY);
         let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(network::COMMAND_CAPACITY);
         let stop = Arc::new(AtomicBool::new(false));
+        let sent = Arc::new(AtomicU64::new(0));
 
-        let network = network::spawn(config, events_tx.clone(), commands_rx)?;
+        let network = network::spawn(config, events_tx.clone(), commands_rx, Arc::clone(&sent))?;
         let game = spawn_game_thread(
             events_rx,
             frames_tx,
@@ -233,9 +237,20 @@ impl Session {
             frames: frames_rx,
             chunks: chunks_rx,
             stop,
+            sent,
             network: Some(network),
             game: Some(game),
         })
+    }
+
+    /// The number of serverbound packets the socket thread wrote.
+    ///
+    /// The 1.8 server limits the packets a player may send (PandaSpigot
+    /// kicks above 500 packets in seven seconds), so the rate belongs into
+    /// the acceptance report.
+    #[must_use]
+    pub fn packets_sent(&self) -> u64 {
+        self.sent.load(Ordering::Relaxed)
     }
 
     /// The sender for the events the front end produces.
@@ -478,23 +493,33 @@ impl Game {
 }
 
 /// The commands that could not be handed to the network thread yet.
+///
+/// The input packet and the position report are *coalesced*: only the newest
+/// one of each matters, and a backlog of them would burst on the socket.
+/// The 1.8 server counts the packets of a player and kicks above 500 in
+/// seven seconds (PandaSpigot), so a burst of a few hundred position
+/// reports would end the session.
 #[derive(Default)]
 struct CommandQueue {
-    pending: VecDeque<ClientCommand>,
+    /// The commands that keep their order (the acknowledgement of a
+    /// placement, the dig, the placement, the chat).
+    ordered: VecDeque<ClientCommand>,
+    /// The newest input packet.
+    input: Option<ClientCommand>,
+    /// The newest position report.
+    position: Option<ClientCommand>,
     sender: Option<CommandSender<ClientCommand>>,
 }
 
 impl CommandQueue {
     /// Queues a command; the socket thread picks it up.
     fn push(&mut self, command: ClientCommand) {
-        let Some(sender) = self.sender.as_ref() else {
-            self.pending.push_back(command);
-            return;
-        };
-        match sender.try_send(command) {
-            Ok(()) => {}
-            Err(TrySendError::Full(command)) => self.pending.push_back(command),
-            Err(TrySendError::Closed(_)) => {}
+        match command {
+            ClientCommand::Input { .. } => self.input = Some(command),
+            ClientCommand::PlayerPosition { .. }
+            | ClientCommand::PlayerLook { .. }
+            | ClientCommand::PositionLook { .. } => self.position = Some(command),
+            other => self.ordered.push_back(other),
         }
     }
 
@@ -503,14 +528,28 @@ impl CommandQueue {
         let Some(sender) = self.sender.as_ref() else {
             return;
         };
-        while let Some(command) = self.pending.pop_front() {
+        while let Some(command) = self.ordered.pop_front() {
             match sender.try_send(command) {
                 Ok(()) => {}
                 Err(TrySendError::Full(command)) => {
-                    self.pending.push_front(command);
+                    self.ordered.push_front(command);
                     break;
                 }
                 Err(TrySendError::Closed(_)) => break,
+            }
+        }
+        if let Some(command) = self.position.take() {
+            match sender.try_send(command) {
+                Ok(()) => {}
+                Err(TrySendError::Full(command)) => self.position = Some(command),
+                Err(TrySendError::Closed(_)) => {}
+            }
+        }
+        if let Some(command) = self.input.take() {
+            match sender.try_send(command) {
+                Ok(()) => {}
+                Err(TrySendError::Full(command)) => self.input = Some(command),
+                Err(TrySendError::Closed(_)) => {}
             }
         }
     }
@@ -526,7 +565,9 @@ fn run(
 ) {
     let mut game = Game::new();
     let mut queue = CommandQueue {
-        pending: VecDeque::new(),
+        ordered: VecDeque::new(),
+        input: None,
+        position: None,
         sender: Some(commands),
     };
     let mut next_tick = Instant::now();
@@ -710,12 +751,21 @@ fn handle_net(
             }
         }
         NetEvent::Respawn(packet) => {
-            game.world = Some(World::new(packet.dimension as i8));
-            game.dirty.clear();
+            // The server keeps the chunks of the dimension, so only a change
+            // of the dimension replaces the world.
+            let dimension = packet.dimension as i8;
+            let changed = game
+                .world
+                .as_ref()
+                .is_none_or(|world| world.dimension() != dimension);
+            if changed {
+                game.world = Some(World::new(dimension));
+                game.dirty.clear();
+                let _ = frames.send(RenderEvent::Reset);
+            }
             game.state = None;
             game.status = "RESPAWN".to_string();
             game.status_data.status = game.status.clone();
-            let _ = frames.send(RenderEvent::Reset);
             publish_status(game, frames);
         }
         NetEvent::EntityTeleport(packet) => {
@@ -828,7 +878,7 @@ fn apply_placement(
             game.yaw = state.player().yaw;
             game.pitch = state.player().pitch;
             game.status_data.resyncs += 1;
-            tracing::info!(
+            tracing::debug!(
                 ?predicted,
                 authoritative = ?position,
                 delta = ?(predicted - position),
@@ -838,7 +888,7 @@ fn apply_placement(
     }
 
     // The server expects the acknowledgement of the placement.
-    queue.push(ClientCommand::PositionLook {
+    queue.push(ClientCommand::AckPosition {
         x: placement.x,
         y: placement.y,
         z: placement.z,
@@ -858,7 +908,7 @@ fn apply_correction(game: &mut Game, correction: &ServerCorrection, queue: &mut 
         game.yaw = state.player().yaw;
         game.pitch = state.player().pitch;
     }
-    queue.push(ClientCommand::PositionLook {
+    queue.push(ClientCommand::AckPosition {
         x: correction.x,
         y: correction.y,
         z: correction.z,
@@ -932,6 +982,27 @@ fn place_block(game: &mut Game, queue: &mut CommandQueue) {
         hit.block.y + offset.y,
         hit.block.z + offset.z,
     );
+    // A block inside the player would suffocate it (the server applies the
+    // suffocation damage), so the placement is skipped.
+    if let Some(state) = game.state.as_ref() {
+        let player = state.player().bounding_box();
+        let block = Aabb::new(
+            DVec3::new(
+                f64::from(target.x),
+                f64::from(target.y),
+                f64::from(target.z),
+            ),
+            DVec3::new(
+                f64::from(target.x) + 1.0,
+                f64::from(target.y) + 1.0,
+                f64::from(target.z) + 1.0,
+            ),
+        );
+        if player.intersects(&block) {
+            tracing::debug!(?target, "the placement would hit the player");
+            return;
+        }
+    }
     let item = game.held_item.clone().unwrap_or(WireItemStack::EMPTY);
     queue.push(ClientCommand::PlayerBlockPlacement {
         x: hit.block.x,
@@ -1322,7 +1393,7 @@ mod tests {
             &mut queue,
         );
         assert_eq!(game.selected_slot, 3);
-        assert_eq!(queue.pending.len(), 1);
+        assert_eq!(queue.ordered.len(), 1);
         handle_input(
             &mut game,
             InputUpdate {
@@ -1331,6 +1402,42 @@ mod tests {
             },
             &mut queue,
         );
-        assert_eq!(queue.pending.len(), 1);
+        assert_eq!(queue.ordered.len(), 1);
+    }
+
+    #[test]
+    fn the_position_reports_are_coalesced() {
+        let mut queue = CommandQueue::default();
+        for step in 0..10 {
+            queue.push(ClientCommand::PlayerPosition {
+                x: f64::from(step),
+                y: 0.0,
+                z: 0.0,
+                on_ground: true,
+            });
+        }
+        // Only the newest report is kept: a backlog of them would burst on
+        // the socket and the server would kick the client.
+        let Some(ClientCommand::PlayerPosition { x, .. }) = queue.position else {
+            panic!("the report must be a position packet");
+        };
+        assert_eq!(x, 9.0);
+    }
+
+    #[test]
+    fn the_input_packets_are_coalesced() {
+        let mut queue = CommandQueue::default();
+        for step in 0..10 {
+            queue.push(ClientCommand::Input {
+                strafe: 0.0,
+                forward: step as f32,
+                jumping: false,
+                sneaking: false,
+            });
+        }
+        let Some(ClientCommand::Input { forward, .. }) = queue.input else {
+            panic!("the input must be kept");
+        };
+        assert_eq!(forward, 9.0);
     }
 }

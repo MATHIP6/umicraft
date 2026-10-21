@@ -68,6 +68,12 @@ pub struct InputUpdate {
     pub place_block: bool,
 }
 
+/// The yaw the script turns per update, in radians.
+///
+/// The script is updated once per tick, so a quarter turn takes about eight
+/// seconds.
+const TURN_RATE: f32 = 0.08;
+
 /// One step of a scripted session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptStep {
@@ -83,6 +89,9 @@ pub enum ScriptStep {
     LookDown,
     /// Steer the view back to the horizon.
     LookUp,
+    /// Turn to the right, so the walk does not run into the block the script
+    /// placed.
+    Turn,
     /// Break the block under the crosshair.
     Break,
     /// Place a block against the targeted face.
@@ -185,6 +194,11 @@ impl Script {
                 }
             }
             ScriptStep::LookDown | ScriptStep::LookUp => {}
+            ScriptStep::Turn => {
+                // A slow turn to the right: the script walks in a zig-zag and
+                // does not run into the block it placed.
+                update.look_yaw = TURN_RATE;
+            }
             ScriptStep::Break => {
                 if !self.fired {
                     self.fired = true;
@@ -258,6 +272,11 @@ pub fn default_script() -> Vec<ScriptPhase> {
             ScriptPhase {
                 step: ScriptStep::LookUp,
                 duration: Duration::from_millis(700),
+                pitch: 0.0,
+            },
+            ScriptPhase {
+                step: ScriptStep::Turn,
+                duration: Duration::from_millis(1500),
                 pitch: 0.0,
             },
         ]);

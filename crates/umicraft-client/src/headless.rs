@@ -116,6 +116,12 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 }
                 RenderEvent::Reset => {}
             }
+            if report.error.is_some() {
+                break;
+            }
+        }
+        if report.error.is_some() {
+            break;
         }
         // The chunk snapshots are not needed without a window, but the queue
         // must be drained so the game thread never blocks on it.
@@ -124,6 +130,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     }
 
     let elapsed = started.elapsed();
+    let packets = session.packets_sent();
     drop(session);
 
     if let Some(error) = report.error.as_ref() {
@@ -136,6 +143,10 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     println!("script            : {}", args.script);
     println!("duration          : {:.1} s", elapsed.as_secs_f32());
     println!("ticks             : {}", report.ticks);
+    println!(
+        "packets sent      : {packets} ({:.1} per second)",
+        packets as f64 / f64::from(elapsed.as_secs_f32()).max(0.001)
+    );
     println!(
         "position          : {:.2} {:.2} {:.2}",
         report.position.0, report.position.1, report.position.2

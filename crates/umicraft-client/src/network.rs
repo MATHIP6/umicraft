@@ -14,7 +14,9 @@
 //! needs them. The framing, the login and the connection stay in
 //! `umicraft-net`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use tokio::sync::mpsc::Receiver as CommandReceiver;
@@ -130,9 +132,28 @@ pub enum ClientCommand {
         /// Whether the player rests on the ground.
         on_ground: bool,
     },
-    /// `Player Position and Look` (0x06): the acknowledgement of a server
-    /// placement, or a combined position and look report.
+    /// `Player Position and Look` (0x06): a combined position and look report.
+    ///
+    /// The acknowledgement of a server placement uses the same wire packet
+    /// but a separate variant: it must not be dropped, the server expects it
+    /// before it accepts the next position.
     PositionLook {
+        /// The feet X.
+        x: f64,
+        /// The feet Y.
+        y: f64,
+        /// The feet Z.
+        z: f64,
+        /// The yaw in degrees.
+        yaw: f32,
+        /// The pitch in degrees.
+        pitch: f32,
+        /// Whether the player rests on the ground.
+        on_ground: bool,
+    },
+    /// `Player Position and Look` (0x06): the acknowledgement of a server
+    /// placement.
+    AckPosition {
         /// The feet X.
         x: f64,
         /// The feet Y.
@@ -238,6 +259,21 @@ impl ClientCommand {
                 pitch,
                 on_ground,
             }),
+            Self::AckPosition {
+                x,
+                y,
+                z,
+                yaw,
+                pitch,
+                on_ground,
+            } => umicraft_protocol::PlayServerbound::PositionLook(ServerPositionLook {
+                x,
+                y,
+                z,
+                yaw,
+                pitch,
+                on_ground,
+            }),
             Self::PlayerDigging {
                 status,
                 x,
@@ -291,10 +327,11 @@ pub fn spawn(
     config: NetworkConfig,
     events: SyncSender<GameEvent>,
     commands: CommandReceiver<ClientCommand>,
+    sent: Arc<AtomicU64>,
 ) -> Result<JoinHandle<()>, ClientError> {
     let handle = std::thread::Builder::new()
         .name("umicraft-net".to_string())
-        .spawn(move || run_thread(config, events, commands))
+        .spawn(move || run_thread(config, events, commands, sent))
         .map_err(|error| ClientError::Network(format!("spawn network thread: {error}")))?;
     Ok(handle)
 }
@@ -303,6 +340,7 @@ fn run_thread(
     config: NetworkConfig,
     events: SyncSender<GameEvent>,
     commands: CommandReceiver<ClientCommand>,
+    sent: Arc<AtomicU64>,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -316,7 +354,7 @@ fn run_thread(
             return;
         }
     };
-    runtime.block_on(run_session(config, events, commands));
+    runtime.block_on(run_session(config, events, commands, sent));
 }
 
 /// The state the play loop keeps between packets.
@@ -387,6 +425,7 @@ async fn run_session(
     config: NetworkConfig,
     events: SyncSender<GameEvent>,
     mut commands: CommandReceiver<ClientCommand>,
+    sent: Arc<AtomicU64>,
 ) {
     let mut connection = match Connection::connect(&config.host, config.port).await {
         Ok(connection) => connection,
@@ -425,6 +464,7 @@ async fn run_session(
                     let _ = events.send(GameEvent::Net(NetEvent::Error(error.to_string())));
                     return;
                 }
+                sent.fetch_add(1, Ordering::Relaxed);
             }
             Incoming::Packet(Err(error)) => {
                 let _ = events.send(GameEvent::Net(NetEvent::Error(error.to_string())));
@@ -432,7 +472,7 @@ async fn run_session(
             }
             Incoming::Packet(Ok((id, body))) => {
                 if let Err(error) =
-                    handle_packet(&mut connection, id, &body, &mut state, &events).await
+                    handle_packet(&mut connection, id, &body, &mut state, &events, &sent).await
                 {
                     let _ = events.send(GameEvent::Net(NetEvent::Error(error.to_string())));
                     return;
@@ -452,6 +492,7 @@ async fn handle_packet(
     body: &[u8],
     state: &mut PlayState,
     events: &SyncSender<GameEvent>,
+    sent: &AtomicU64,
 ) -> Result<(), umicraft_net::NetError> {
     match id {
         clientbound::KeepAlive::ID => {
@@ -461,11 +502,13 @@ async fn handle_packet(
                     serverbound::KeepAlive { id: packet.id },
                 ))
                 .await?;
+            sent.fetch_add(1, Ordering::Relaxed);
         }
         clientbound::JoinGame::ID => {
             let packet = clientbound::JoinGame::decode(&mut &body[..])?;
             if !state.entry_sent {
                 send_entry_packets(connection, state.view_distance).await?;
+                sent.fetch_add(2, Ordering::Relaxed);
                 state.entry_sent = true;
             }
             let info = JoinGameInfo {
