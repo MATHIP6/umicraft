@@ -2637,6 +2637,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-game"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "umicraft-world",
+]
+
+[[package]]
 name = "umicraft-mesh"
 version = "0.1.0"
 dependencies = [
