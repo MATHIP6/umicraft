@@ -14,7 +14,9 @@
 //! The public surface is frozen by `docs/decisions/0006-m4-ui-foundation.md`.
 //! The widget modules are filled by the M4 workstreams; the types in
 //! [`geom`], [`id`], [`input`], [`draw`], [`text`] and [`context`] are the
-//! contract they compile against.
+//! contract they compile against. The layout helpers in [`geom`] are pure
+//! functions over [`Rect`]: a [`Layout`] carves rows or columns out of a panel
+//! and a [`ScrollArea`] clamps a viewport over taller content.
 //!
 //! [`umicraft-render`]: https://docs.rs/umicraft-render
 //!
@@ -43,7 +45,7 @@ pub mod widgets;
 
 pub use context::{Ui, UiOutput, UiResponse};
 pub use draw::{Color, DrawCommand, DrawList, TextStyle};
-pub use geom::Rect;
+pub use geom::{Axis, Insets, Layout, Rect, ScrollArea};
 pub use id::WidgetId;
 pub use input::{InputEvent, Key, Modifiers, PointerButton, UiInput};
 pub use text::{FontAtlas, Glyph};
