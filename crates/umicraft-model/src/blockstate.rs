@@ -33,8 +33,9 @@ impl BlockStateFile {
     /// Parses one blockstate document.
     ///
     /// # Errors
-    /// [`ModelError::Json`] for malformed JSON and [`ModelError::Invalid`] for
-    /// a document without `variants` or with an invalid rotation/weight.
+    /// [`crate::ModelError::Json`] for malformed JSON and
+    /// [`crate::ModelError::Invalid`] for a document without `variants` or
+    /// with an invalid rotation/weight.
     pub fn parse(bytes: &[u8], path: &str) -> ModelResult<Self> {
         let _ = (bytes, path);
         Ok(Self::default())

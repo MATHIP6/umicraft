@@ -1,7 +1,8 @@
 # M5 integration and acceptance
 
-Lead-owned. Runs only after W1–W6 are merged in order (or deviations recorded in
-ADR-0007).
+Lead-owned. The workstream table, the wave plan and the per-agent rules live in
+[`README.md`](README.md). Runs only after W1–W6 are merged in order (or
+deviations recorded in ADR-0007).
 
 ## Merge order
 
