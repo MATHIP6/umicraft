@@ -186,15 +186,41 @@ impl GameState {
                 self.player.yaw = correction.yaw;
                 self.player.pitch = correction.pitch;
 
-                // Replay the inputs that came after the corrected tick.
+                // The matched tick is the one the server confirmed: its
+                // position *is* the authoritative one, so its input has
+                // already been applied and must not be replayed. The ticks
+                // that come after it are the ones the server has not seen
+                // yet, and they are replayed on top of the correction.
+                let mut replayed = PredictionHistory::new();
+                replayed.push(PendingTick {
+                    intent: state.intent,
+                    position: authoritative,
+                    velocity: state.velocity,
+                    on_ground: correction.on_ground,
+                    yaw: correction.yaw,
+                    pitch: correction.pitch,
+                });
+
                 let mut previous = authoritative;
-                for index in index..self.history.len() {
-                    if let Some(tick) = self.history.get(index).copied() {
-                        previous = self.player.position;
-                        physics::step(&mut self.player, &tick.intent, world);
-                    }
+                for replay_index in (index + 1)..self.history.len() {
+                    let Some(tick) = self.history.get(replay_index).copied() else {
+                        break;
+                    };
+                    previous = self.player.position;
+                    physics::step(&mut self.player, &tick.intent, world);
+                    replayed.push(PendingTick {
+                        intent: tick.intent,
+                        position: self.player.position,
+                        velocity: self.player.velocity,
+                        on_ground: self.player.on_ground,
+                        yaw: self.player.yaw,
+                        pitch: self.player.pitch,
+                    });
                 }
                 self.previous_position = previous;
+                // The replayed ticks replace the old history: the next
+                // correction must be able to find a base among them.
+                self.history = replayed;
             }
             None => {
                 self.player.position = authoritative;
@@ -203,10 +229,9 @@ impl GameState {
                 self.player.yaw = correction.yaw;
                 self.player.pitch = correction.pitch;
                 self.previous_position = authoritative;
+                self.history.clear();
             }
         }
-
-        self.history.clear();
     }
 
     /// The interpolated view of the player for the renderer.
@@ -384,6 +409,70 @@ mod tests {
         assert!(
             (state.position().z - authoritative.z) > 0.0,
             "the pending inputs must have been replayed"
+        );
+    }
+
+    #[test]
+    fn a_correction_replays_the_pending_ticks_without_replaying_the_base() {
+        // Regression: the matched tick is the one the server confirmed, so
+        // its input has already been applied. Replaying it as well moved the
+        // player one tick too far.
+        let world = TestBlocks::flat();
+        let mut state = GameState::new(DVec3::new(0.0, 1.0, 0.0));
+        let intent = InputIntent::walking(0.0);
+        for _ in 0..10 {
+            state.tick(&intent, &world);
+        }
+        let predicted = state.position();
+
+        // The server confirms the position of the fifth tick.
+        let base = state.history().get(5).expect("a recorded tick").position;
+        let correction = ServerCorrection::new(base.x, base.y, base.z, 0.0, 0.0, true);
+        state.apply_correction(&correction, &world);
+
+        // The five ticks that follow the confirmed one are replayed, so the
+        // player ends up where the prediction had put it, not one tick
+        // further.
+        let expected = predicted.z;
+        assert!(
+            (state.position().z - expected).abs() < 1e-12,
+            "expected {expected}, got {}",
+            state.position().z
+        );
+    }
+
+    #[test]
+    fn a_correction_keeps_the_replayed_ticks_for_the_next_correction() {
+        // Regression: the history used to be cleared right after the
+        // replay, so the next correction could not find a base any more.
+        let world = TestBlocks::flat();
+        let mut state = GameState::new(DVec3::new(0.0, 1.0, 0.0));
+        let intent = InputIntent::walking(0.0);
+        for _ in 0..10 {
+            state.tick(&intent, &world);
+        }
+        let base = state.history().get(5).expect("a recorded tick").position;
+        let correction = ServerCorrection::new(base.x, base.y, base.z, 0.0, 0.0, true);
+        state.apply_correction(&correction, &world);
+
+        assert!(
+            state.history().len() >= 5,
+            "the replayed ticks must stay in the history, got {}",
+            state.history().len()
+        );
+        // A second correction on the same base lands on the same place: the
+        // replay is deterministic and the base is still in the history.
+        let after_first = state.position();
+        state.apply_correction(&correction, &world);
+        assert!(
+            (state.position().z - after_first.z).abs() < 1e-12,
+            "the second correction must not drift, got {} instead of {}",
+            state.position().z,
+            after_first.z
+        );
+        assert!(
+            state.position().z > base.z,
+            "the pending ticks must have been replayed again"
         );
     }
 

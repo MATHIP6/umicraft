@@ -73,6 +73,18 @@ pub const GRAVITY: f64 = 0.08;
 pub const VERTICAL_DAMPING: f64 = 0.98;
 
 /// The height of a ledge a player can step up (MCP `EntityLivingBase.java:208`).
+///
+/// The value is the **client** player's (0.6). The server player sets its
+/// step height to 0 (MCP `EntityPlayerMP.java:193`), which looks like a
+/// disagreement but is not one:
+///
+/// * the client reports the position it *reached*, vertical rise included;
+/// * the server resolves the axes in the order Y, X, Z
+///   (MCP `Entity.java:691`, `:699`, `:706`), so the rise is applied first
+///   and the horizontal move is no longer blocked by the ledge.
+///
+/// The two therefore end up at the same place, and the client must keep the
+/// 0.6 to be able to walk up a slab at all.
 pub const STEP_HEIGHT: f64 = 0.6;
 
 /// Motions smaller than this are dropped (MCP `EntityLivingBase.java:1963`).
