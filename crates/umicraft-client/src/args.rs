@@ -2,9 +2,9 @@
 
 //! Command-line arguments for `umicraft-client`.
 //!
-//! Windowed mode is the default; passing `--screenshot PATH` switches to the
-//! headless offscreen path that collects world data for `--collect-secs` and
-//! writes one PNG.
+//! Three modes are available: the windowed client (the default), the
+//! headless screenshot path (`--screenshot PATH`) and the headless scripted
+//! session (`--headless`) that spec §11 wants for the integration suite.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -19,9 +19,16 @@ options:
   --view-distance N   requested chunk view distance, 2-16 (default: 8)
   --screenshot PATH   render one offscreen PNG to PATH instead of opening a window
   --collect-secs N    world collection time for screenshots (default: 8)
+  --headless          run a scripted session without a window and print a report
+  --play-secs N       duration of the headless session (default: 60)
+  --script NAME       headless script: default (walk, break, place) or idle
+  --chat MESSAGE      chat line the headless session sends when it is placed
   --width N           framebuffer width (default: 1280)
   --height N          framebuffer height (default: 720)
   --help, -h          print this help";
+
+/// The scripted sessions the headless mode knows.
+pub const SCRIPTS: [&str; 2] = ["default", "idle"];
 
 /// Parsed client options.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +45,14 @@ pub struct Args {
     pub screenshot: Option<PathBuf>,
     /// How long to collect chunks before a screenshot.
     pub collect: Duration,
+    /// Whether the scripted headless session is requested.
+    pub headless: bool,
+    /// How long the headless session plays.
+    pub play: Duration,
+    /// The scripted session of the headless mode.
+    pub script: String,
+    /// A chat line the headless session sends once the player is placed.
+    pub chat: Option<String>,
     /// Framebuffer width.
     pub width: u32,
     /// Framebuffer height.
@@ -58,6 +73,10 @@ impl Args {
         let mut view_distance = 8_u8;
         let mut screenshot = None;
         let mut collect_secs = 8.0_f64;
+        let mut headless = false;
+        let mut play_secs = 60.0_f64;
+        let mut script = "default".to_string();
+        let mut chat = None;
         let mut width = 1280_u32;
         let mut height = 720_u32;
 
@@ -83,6 +102,29 @@ impl Args {
                 }
                 "--collect-secs" => {
                     collect_secs = parse_number(words.get(index + 1), "--collect-secs")?;
+                    index += 2;
+                }
+                "--headless" => {
+                    headless = true;
+                    index += 1;
+                }
+                "--play-secs" => {
+                    play_secs = parse_number(words.get(index + 1), "--play-secs")?;
+                    index += 2;
+                }
+                "--script" => {
+                    let value = words.get(index + 1).ok_or_else(help)?;
+                    if !SCRIPTS.contains(&value.as_str()) {
+                        return Err(format!(
+                            "--script must be one of {SCRIPTS:?}, got {value:?}\n{USAGE}"
+                        ));
+                    }
+                    script = value.clone();
+                    index += 2;
+                }
+                "--chat" => {
+                    let value = words.get(index + 1).ok_or_else(help)?;
+                    chat = Some(value.clone());
                     index += 2;
                 }
                 "--width" => {
@@ -121,6 +163,11 @@ impl Args {
                 "--collect-secs must be 0.2-300, got {collect_secs}\n{USAGE}"
             ));
         }
+        if !(1.0..=3600.0).contains(&play_secs) {
+            return Err(format!(
+                "--play-secs must be 1-3600, got {play_secs}\n{USAGE}"
+            ));
+        }
         if !(64..=7680).contains(&width) || !(64..=4320).contains(&height) {
             return Err(format!(
                 "framebuffer must be 64-7680 × 64-4320, got {width}×{height}\n{USAGE}"
@@ -134,6 +181,10 @@ impl Args {
             view_distance,
             screenshot,
             collect: Duration::from_secs_f64(collect_secs),
+            headless,
+            play: Duration::from_secs_f64(play_secs),
+            script,
+            chat,
             width,
             height,
         })
@@ -166,6 +217,9 @@ mod tests {
         assert_eq!(args.name, "umicraft");
         assert_eq!(args.view_distance, 8);
         assert!(args.screenshot.is_none());
+        assert!(!args.headless);
+        assert_eq!(args.play, Duration::from_secs(60));
+        assert_eq!(args.script, "default");
         assert_eq!(args.width, 1280);
         assert_eq!(args.height, 720);
     }
@@ -200,6 +254,23 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_headless_options() {
+        let args = Args::parse(&words(&[
+            "127.0.0.1",
+            "25599",
+            "--headless",
+            "--play-secs",
+            "90",
+            "--script",
+            "idle",
+        ]))
+        .expect("valid args");
+        assert!(args.headless);
+        assert_eq!(args.play, Duration::from_secs(90));
+        assert_eq!(args.script, "idle");
+    }
+
+    #[test]
     fn rejects_bad_values() {
         assert!(Args::parse(&words(&[])).is_err());
         assert!(Args::parse(&words(&["host", "0"])).is_err());
@@ -208,5 +279,7 @@ mod tests {
         assert!(Args::parse(&words(&["host", "25565", "--width", "0"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--unknown"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--name"])).is_err());
+        assert!(Args::parse(&words(&["host", "25565", "--play-secs", "0"])).is_err());
+        assert!(Args::parse(&words(&["host", "25565", "--script", "dance"])).is_err());
     }
 }
