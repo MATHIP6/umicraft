@@ -7,8 +7,9 @@
 //! JSON points at with a URL, a SHA-1 and a size.
 //!
 //! This module locates that jar, verifies it against the digest the version
-//! JSON promises, and exposes a minimal read of one entry out of it. The full
-//! extraction and the model/atlas work belongs to M5.
+//! JSON promises, and exposes both a single-entry read and the bulk prefix
+//! read used by [`crate::ClientResources`] (which opens the archive once and
+//! serves the model/atlas files from that copy).
 
 use std::path::{Path, PathBuf};
 
@@ -129,6 +130,35 @@ impl ClientJar {
             path: self.path.display().to_string(),
         })?;
         archive.read(entry)
+    }
+
+    /// Reads every entry whose name starts with one of `prefixes`.
+    ///
+    /// The archive is opened and its bytes are read from disk exactly once;
+    /// the entry headers are then served from that in-memory copy. This is the
+    /// bulk path used by [`crate::ClientResources::load`] instead of calling
+    /// [`Self::read_entry`] once per file. Results are sorted by entry name.
+    ///
+    /// # Errors
+    ///
+    /// [`AssetsError::Io`] when the jar cannot be read, and
+    /// [`AssetsError::Zip`] when the container or a matching entry is
+    /// malformed.
+    pub fn read_prefixes(&self, prefixes: &[&str]) -> AssetsResult<Vec<(String, Vec<u8>)>> {
+        let archive = self.archive()?;
+        let mut names = archive.names();
+        names.sort_unstable();
+        names.retain(|name| prefixes.iter().any(|prefix| name.starts_with(prefix)));
+
+        let mut entries = Vec::with_capacity(names.len());
+        for name in names {
+            let entry = archive.entry(&name).ok_or_else(|| AssetsError::Zip {
+                what: name.clone(),
+                reason: "the entry vanished from the open archive".to_string(),
+            })?;
+            entries.push((name, archive.read(entry)?));
+        }
+        Ok(entries)
     }
 
     /// Parses the jar as a zip container.

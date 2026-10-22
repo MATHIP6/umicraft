@@ -20,9 +20,17 @@
 //! points the client at an existing official installation, which is only ever
 //! read (AST-2).
 //!
-//! What is **not** in this crate: the texture atlas, the 1.8 block models and
-//! blockstates, the resource pack support, and the player skins. Those are
-//! the visual half of the pipeline and belong to M5 to M11 (spec AST-5 to AST-9).
+//! The crate also owns the **client resources** half of M5: it reads the
+//! blockstates, block models and block/item textures out of the verified
+//! client jar in one archive pass, exposes them through
+//! [`umicraft_model::ResourceSource`], and builds the deterministic
+//! [`BlockAtlas`] that the renderer uploads as a texture array. The jar is
+//! never copied into the repository; it is only read from the local install or
+//! the verified cache.
+//!
+//! What is **not** in this crate: the block model parser (it lives in
+//! `umicraft-model`), resource pack support, and the player skins. Those are
+//! later milestones (spec AST-5 to AST-9).
 //!
 //! # Example
 //!
