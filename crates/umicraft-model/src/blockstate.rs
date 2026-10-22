@@ -50,9 +50,10 @@ impl BlockStateFile {
     /// variant list.
     ///
     /// # Errors
-    /// [`ModelError::Json`] for malformed JSON and [`ModelError::Invalid`] for
-    /// a document without `variants`, an empty variant list, an invalid
-    /// rotation, an invalid weight, or a malformed variant key.
+    /// [`crate::ModelError::Json`] for malformed JSON and
+    /// [`crate::ModelError::Invalid`] for a document without `variants`, an
+    /// empty variant list, an invalid rotation, an invalid weight, or a
+    /// malformed variant key.
     pub fn parse(bytes: &[u8], path: &str) -> ModelResult<Self> {
         let value: Value = serde_json::from_slice(bytes).map_err(|source| ModelError::Json {
             path: path.to_string(),

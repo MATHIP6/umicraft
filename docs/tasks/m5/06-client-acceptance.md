@@ -37,8 +37,9 @@ Do not edit model/assets/mesh/render.
 3. `--block-demo` (server-less; wins over `--screenshot`? No: it uses
    `--screenshot` for the PNG, like `--ui-demo`):
    - load official resources; if unavailable return a clear typed error;
-   - build a synthetic `World` with loaded chunks containing the acceptance
-     blocks and a platform;
+   - build synthetic `ChunkColumn`s with the acceptance blocks and a platform,
+     then mesh them through `ChunkSnapshot::from_columns` (the client does not
+     need a mutable `World` for the demo);
    - mesh with `mesh_chunk_with_models`, upload, render offscreen;
    - print exactly the counts from ADR-0007 (blockstates, source models,
      artifact counts, layers, states, quads, fallbacks);
@@ -64,3 +65,16 @@ Do not edit model/assets/mesh/render.
 Run the full workspace gates plus the ignored GPU tests from the task card
 `docs/tasks/m5/00-integration.md` if present; otherwise report which commands
 ran. Do not merge; the lead runs final acceptance.
+
+## Suggested `--block-demo` scene
+
+Use one synthetic `ChunkColumn` at `ChunkPos::new(0, 0)`, all air except a
+full 16×16 stone platform at `y = 64` and the acceptance blocks at `y = 65`.
+Place them in readable rows with gaps for the cross/pane/torch/rail models.
+The camera can sit at `(8.0, 71.0, 22.0)` with yaw `0.0` (looking toward −Z)
+and pitch about `-0.35`, so the shape row is in front of the texture row.
+Mesh the single column plus an empty neighbour ring through a
+`ChunkSnapshot::from_columns`, upload it, render with a normal `Camera`, and
+overlay a two-line HUD label (`UMICRAFT M5 BLOCK DEMO`, counts). The exact
+layout is the agent's choice as long as every acceptance block is visible in
+the 1280×720 PNG.
