@@ -19,6 +19,7 @@ use crate::args::Args;
 use crate::error::ClientError;
 use crate::game::{camera_angles, ChunkEvent, GameStatus, RenderEvent, Session};
 use crate::mesher::{default_worker_count, MeshPool};
+use crate::model_resources::ModelResources;
 use crate::network::NetworkConfig;
 
 /// Runs the screenshot path and writes `args.screenshot`.
@@ -42,8 +43,31 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     })?;
 
     let deadline = Instant::now() + args.collect;
-    let mut renderer: Option<Renderer> = None;
-    let pool = MeshPool::new(default_worker_count())?;
+    // The atlas must be bound before the workers emit model layers. If it is
+    // rejected, the whole model bundle is dropped so the legacy cubes and the
+    // procedural texture array stay paired.
+    let mut model_resources = ModelResources::load_or_warn();
+    let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
+    let atlas_result = model_resources.as_ref().map(|resources| {
+        let atlas = resources.atlas();
+        renderer.set_block_atlas(
+            atlas.width(),
+            atlas.height(),
+            atlas.layers(),
+            atlas.pixels(),
+        )
+    });
+    if let Some(Err(error)) = atlas_result {
+        tracing::warn!(
+            %error,
+            "block texture array rejected; using procedural terrain textures"
+        );
+        model_resources = None;
+    }
+    let pool = MeshPool::new(
+        default_worker_count(),
+        model_resources.as_ref().map(ModelResources::context),
+    )?;
     let mut queued: Vec<(umicraft_world::ChunkPos, ChunkSnapshot)> = Vec::new();
     let mut pending = std::collections::HashSet::new();
     let mut camera = Camera::default();
@@ -67,9 +91,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 RenderEvent::Hud(new_hud) => hud = *new_hud,
                 RenderEvent::Status(new_status) => status = *new_status,
                 RenderEvent::Reset => {
-                    if let Some(renderer) = renderer.as_mut() {
-                        renderer.clear_meshes();
-                    }
+                    renderer.clear_meshes();
                 }
                 RenderEvent::Ended(reason) => {
                     return Err(ClientError::Network(reason));
@@ -104,12 +126,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
             faces += result.mesh.face_count();
             meshes += 1;
             chunks += 1;
-            if renderer.is_none() {
-                renderer = Some(Renderer::new_offscreen(args.width, args.height)?);
-            }
-            if let Some(renderer) = renderer.as_mut() {
-                renderer.upload_mesh(result.pos, &result.mesh);
-            }
+            renderer.upload_mesh(result.pos, &result.mesh);
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
@@ -125,10 +142,6 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         return Err(ClientError::NoChunks);
     }
 
-    let mut renderer = match renderer {
-        Some(renderer) => renderer,
-        None => Renderer::new_offscreen(args.width, args.height)?,
-    };
     camera.set_aspect(args.width, args.height);
     let mut overlay = Overlay::new(args.width, args.height);
     let lines = [

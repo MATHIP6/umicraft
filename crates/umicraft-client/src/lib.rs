@@ -11,18 +11,24 @@
 //! world and the player, [`input`] turns the keys into the intent of the
 //! game logic, [`mesher`] runs the CPU mesher pool, [`headless`] plays a
 //! scripted session without a window, [`screenshot`] writes a PNG,
-//! [`ui_demo`] drives the M4 debug screen without a window or a server, and
+//! [`ui_demo`] drives the M4 debug screen without a window or a server,
+//! [`block_demo`] proves the M5 model/atlas path without a server, and
 //! [`ui_font`] loads the user's 1.8 font or the built-in fallback.
 
 pub mod args;
+pub mod block_demo;
 pub mod chat;
 pub mod error;
 pub mod game;
 pub mod headless;
 pub mod input;
 pub mod mesher;
+pub mod model_resources;
 pub mod network;
+mod official;
 pub mod screenshot;
+#[cfg(test)]
+mod test_support;
 pub mod ui_demo;
 pub mod ui_font;
 pub mod ui_input;

@@ -14,18 +14,14 @@
 //! **both** the loaded atlas and the fallback is a fatal error, which
 //! [`install`] reports to the caller.
 
-use std::path::{Path, PathBuf};
-
 use thiserror::Error;
-use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::install::OfficialInstall;
-use umicraft_assets::manifest::VersionJson;
 use umicraft_assets::AssetsError;
 use umicraft_render::{FontAtlasError, Renderer};
 use umicraft_ui::{FontAtlas, FontError};
 
-/// The only game version M4 supports (protocol 47, spec §1.3).
-const VERSION_ID: &str = "1.8.8";
+use crate::official;
+
 /// The font entry inside the 1.8 client jar.
 const FONT_ENTRY: &str = "assets/minecraft/textures/font/ascii.png";
 
@@ -149,32 +145,9 @@ fn load_from_install(install: Option<OfficialInstall>) -> LoadedFont {
 
 /// Reads and decodes the font out of one official installation.
 fn load_official(install: &OfficialInstall) -> Result<FontAtlas, FontLoadError> {
-    let version_dir = install.versions_dir().join(VERSION_ID);
-    let json_path = version_dir.join(format!("{VERSION_ID}.json"));
-    let json = std::fs::read(&json_path).map_err(|source| AssetsError::Io {
-        path: json_path.display().to_string(),
-        source,
-    })?;
-    let version = VersionJson::parse(&json)?;
-    let descriptor = version.require_client_jar()?;
-
-    let jar_path = client_jar_path(install, &version_dir)?;
-    let jar = ClientJar::open(jar_path, &descriptor.sha1, descriptor.size)?;
+    let jar = official::open_client_jar(install)?;
     let png = jar.read_entry(FONT_ENTRY)?;
     Ok(FontAtlas::from_png(&png)?)
-}
-
-/// The client jar path of the installation, with a typed missing-file error.
-fn client_jar_path(install: &OfficialInstall, version_dir: &Path) -> Result<PathBuf, AssetsError> {
-    install
-        .client_jar_path(VERSION_ID)
-        .ok_or_else(|| AssetsError::Missing {
-            what: format!("client jar of version {VERSION_ID}"),
-            path: version_dir
-                .join(format!("{VERSION_ID}.jar"))
-                .display()
-                .to_string(),
-        })
 }
 
 /// The built-in original font.
@@ -187,69 +160,11 @@ fn fallback_font() -> LoadedFont {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use tracing::field::{Field, Visit};
-    use tracing::span;
-    use tracing::{Event, Metadata, Subscriber};
-
     use super::*;
-
-    #[derive(Clone, Default)]
-    struct Capture(Arc<Mutex<Vec<String>>>);
-
-    impl Subscriber for Capture {
-        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-            true
-        }
-
-        fn new_span(&self, _span: &span::Attributes<'_>) -> span::Id {
-            span::Id::from_u64(1)
-        }
-
-        fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
-
-        fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
-
-        fn event(&self, event: &Event<'_>) {
-            let mut message = Message(String::new());
-            event.record(&mut message);
-            if let Ok(mut messages) = self.0.lock() {
-                messages.push(message.0);
-            }
-        }
-
-        fn enter(&self, _span: &span::Id) {}
-
-        fn exit(&self, _span: &span::Id) {}
-    }
-
-    struct Message(String);
-
-    impl Visit for Message {
-        fn record_str(&mut self, field: &Field, value: &str) {
-            if field.name() == "message" {
-                self.0 = value.to_string();
-            }
-        }
-
-        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-            if field.name() == "message" {
-                self.0 = format!("{value:?}");
-            }
-        }
-    }
+    use crate::test_support;
 
     fn load_captured(install: Option<OfficialInstall>) -> (LoadedFont, Vec<String>) {
-        let capture = Capture::default();
-        let font =
-            tracing::subscriber::with_default(capture.clone(), || load_from_install(install));
-        let messages = capture
-            .0
-            .lock()
-            .map(|messages| messages.clone())
-            .unwrap_or_default();
-        (font, messages)
+        test_support::capture(|| load_from_install(install))
     }
 
     #[test]
@@ -301,19 +216,11 @@ mod tests {
             line_height: 8.0,
             white_uv: [0.0; 4],
         };
-        let capture = Capture::default();
-        let installed = tracing::subscriber::with_default(capture.clone(), || {
-            install(&mut renderer, &rejected)
-        })
-        .expect("the fallback atlas is accepted");
+        let (installed, messages) = test_support::capture(|| install(&mut renderer, &rejected));
+        let installed = installed.expect("the fallback atlas is accepted");
 
         assert!(installed.used_fallback);
         assert_eq!(installed.atlas, FontAtlas::fallback());
-        let messages = capture
-            .0
-            .lock()
-            .map(|messages| messages.clone())
-            .unwrap_or_default();
         assert!(
             messages.iter().any(|message| message.contains("fallback")),
             "expected a fallback warning, got {messages:?}"

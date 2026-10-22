@@ -2,10 +2,11 @@
 
 //! Command-line arguments for `umicraft-client`.
 //!
-//! Four modes are available: the windowed client (the default), the headless
+//! Five modes are available: the windowed client (the default), the headless
 //! screenshot path (`--screenshot PATH`), the headless scripted session
-//! (`--headless`) that spec §11 wants for the integration suite, and the
-//! server-less UI acceptance run (`--ui-demo`).
+//! (`--headless`) that spec §11 wants for the integration suite, the
+//! server-less UI acceptance run (`--ui-demo`), and the server-less M5 block
+//! acceptance run (`--block-demo`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -14,7 +15,9 @@ use std::time::Duration;
 pub const USAGE: &str = "\
 usage: umicraft-client <host> <port> [options]
        umicraft-client --ui-demo [--screenshot PATH] [options]
-  <host> <port>       Minecraft 1.8 server (protocol 47); not needed with --ui-demo
+       umicraft-client --block-demo [--screenshot PATH] [options]
+  <host> <port>       Minecraft 1.8 server (protocol 47); not needed with
+                      --ui-demo or --block-demo
 
 options:
   --name NAME         offline username (default: umicraft)
@@ -27,6 +30,8 @@ options:
   --chat MESSAGE      chat line the headless session sends when it is placed
   --ui-demo           drive the scripted M4 debug screen without a server or GPU;
                       combine with --screenshot to render the same screen offscreen
+  --block-demo        mesh and report the M5 acceptance blocks from the official
+                      1.8.8 jar; no server or GPU unless --screenshot is given
   --width N           framebuffer width (default: 1280)
   --height N          framebuffer height (default: 720)
   --help, -h          print this help";
@@ -36,9 +41,9 @@ pub const SCRIPTS: [&str; 2] = ["default", "idle"];
 
 /// The top-level mode selected by the parsed arguments.
 ///
-/// [`Args::mode`] fixes the dispatch precedence: a UI demo wins over the
-/// headless session, which wins over the terrain screenshot, which wins over
-/// the windowed client.
+/// [`Args::mode`] fixes the dispatch precedence: a UI demo wins over the block
+/// demo, which wins over the headless session, which wins over the terrain
+/// screenshot, which wins over the windowed client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// The interactive windowed client.
@@ -49,6 +54,8 @@ pub enum Mode {
     Headless,
     /// The server-less scripted UI acceptance run.
     UiDemo,
+    /// The server-less M5 block-model acceptance run.
+    BlockDemo,
 }
 
 /// Parsed client options.
@@ -76,6 +83,8 @@ pub struct Args {
     pub chat: Option<String>,
     /// Whether the server-less scripted UI acceptance run is requested.
     pub ui_demo: bool,
+    /// Whether the server-less M5 block acceptance run is requested.
+    pub block_demo: bool,
     /// Framebuffer width.
     pub width: u32,
     /// Framebuffer height.
@@ -85,8 +94,8 @@ pub struct Args {
 impl Args {
     /// The server endpoint, when this mode talks to a server.
     ///
-    /// A UI demo without positional arguments has no endpoint; every other
-    /// mode is rejected by [`Self::parse`] before it reaches this method.
+    /// A server-less demo without positional arguments has no endpoint; every
+    /// other mode is rejected by [`Self::parse`] before it reaches this method.
     #[must_use]
     pub fn server(&self) -> Option<(&str, u16)> {
         match (self.host.as_deref(), self.port) {
@@ -97,12 +106,14 @@ impl Args {
 
     /// The dispatch mode of these arguments.
     ///
-    /// `--ui-demo` wins over `--headless` and `--screenshot`; `--headless`
-    /// wins over `--screenshot`.
+    /// `--ui-demo` wins over `--block-demo`; the block demo wins over
+    /// `--headless` and `--screenshot`; `--headless` wins over `--screenshot`.
     #[must_use]
     pub fn mode(&self) -> Mode {
         if self.ui_demo {
             Mode::UiDemo
+        } else if self.block_demo {
+            Mode::BlockDemo
         } else if self.headless {
             Mode::Headless
         } else if self.screenshot.is_some() {
@@ -130,6 +141,7 @@ impl Args {
         let mut script = "default".to_string();
         let mut chat = None;
         let mut ui_demo = false;
+        let mut block_demo = false;
         let mut width = 1280_u32;
         let mut height = 720_u32;
 
@@ -184,6 +196,10 @@ impl Args {
                     ui_demo = true;
                     index += 1;
                 }
+                "--block-demo" => {
+                    block_demo = true;
+                    index += 1;
+                }
                 "--width" => {
                     width = parse_number(words.get(index + 1), "--width")?;
                     index += 2;
@@ -231,9 +247,10 @@ impl Args {
             ));
         }
 
-        // The UI demo is the only mode that can run without a server. Every
-        // other mode keeps the M1-M3 contract of an explicit host and port.
-        let (host, port) = if ui_demo {
+        // The UI and block demos are the only modes that can run without a
+        // server. Every other mode keeps the M1-M3 contract of an explicit
+        // host and port.
+        let (host, port) = if ui_demo || block_demo {
             (host, port)
         } else {
             (Some(host.ok_or_else(help)?), Some(port.ok_or_else(help)?))
@@ -251,6 +268,7 @@ impl Args {
             script,
             chat,
             ui_demo,
+            block_demo,
             width,
             height,
         })
@@ -285,6 +303,7 @@ mod tests {
         assert!(args.screenshot.is_none());
         assert!(!args.headless);
         assert!(!args.ui_demo);
+        assert!(!args.block_demo);
         assert_eq!(args.play, Duration::from_secs(60));
         assert_eq!(args.script, "default");
         assert_eq!(args.width, 1280);
@@ -373,6 +392,37 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_serverless_block_demo() {
+        let args = Args::parse(&words(&[
+            "--block-demo",
+            "--screenshot",
+            "/tmp/m5-blocks.png",
+        ]))
+        .expect("the block demo needs no server");
+        assert!(args.block_demo);
+        assert!(!args.ui_demo);
+        assert_eq!(args.host, None);
+        assert_eq!(args.port, None);
+        assert_eq!(args.server(), None);
+        assert_eq!(args.mode(), Mode::BlockDemo);
+        assert_eq!(
+            args.screenshot.as_deref(),
+            Some(std::path::Path::new("/tmp/m5-blocks.png"))
+        );
+    }
+
+    #[test]
+    fn the_demo_precedence_is_ui_then_blocks_then_headless() {
+        let ui = Args::parse(&words(&["--ui-demo", "--block-demo", "--headless"]))
+            .expect("both demos parse together");
+        assert_eq!(ui.mode(), Mode::UiDemo);
+
+        let blocks = Args::parse(&words(&["--block-demo", "--headless", "--screenshot", "x"]))
+            .expect("the block demo accepts the other mode flags");
+        assert_eq!(blocks.mode(), Mode::BlockDemo);
+    }
+
+    #[test]
     fn ui_demo_wins_over_the_other_serverless_modes() {
         let args = Args::parse(&words(&[
             "--ui-demo",
@@ -421,5 +471,6 @@ mod tests {
         assert!(Args::parse(&words(&["host", "25565", "--play-secs", "0"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--script", "dance"])).is_err());
         assert!(Args::parse(&words(&["--ui-demo", "--width", "0"])).is_err());
+        assert!(Args::parse(&words(&["--block-demo", "--width", "0"])).is_err());
     }
 }

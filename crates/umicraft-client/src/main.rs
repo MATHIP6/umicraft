@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! `umicraft-client` entry point: choose the windowed client, the offscreen
-//! screenshot, the headless scripted session or the server-less UI demo.
+//! screenshot, the headless scripted session, the server-less UI demo or the
+//! server-less M5 block demo.
 
 use std::process::ExitCode;
 
 use tracing_subscriber::EnvFilter;
 use umicraft_client::args::{Args, Mode, USAGE};
-use umicraft_client::{headless, screenshot, ui_demo, window};
+use umicraft_client::{block_demo, headless, screenshot, ui_demo, window};
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -31,6 +32,7 @@ fn main() -> ExitCode {
 
     let result = match args.mode() {
         Mode::UiDemo => ui_demo::run(&args),
+        Mode::BlockDemo => block_demo::run(&args),
         Mode::Headless => headless::run(&args),
         Mode::Screenshot => screenshot::run(&args),
         Mode::Windowed => window::run(args.clone()),

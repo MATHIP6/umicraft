@@ -4,8 +4,10 @@
 
 use thiserror::Error;
 
-use umicraft_render::{FontAtlasError, RenderError};
+use umicraft_render::{BlockAtlasError, FontAtlasError, RenderError};
 use umicraft_world::WorldError;
+
+use crate::model_resources::ModelResourcesError;
 
 /// Fatal client failure.
 #[derive(Debug, Error)]
@@ -28,6 +30,12 @@ pub enum ClientError {
     /// The renderer rejected both the loaded font atlas and the fallback.
     #[error("font atlas: {0}")]
     FontAtlas(#[from] FontAtlasError),
+    /// The renderer rejected the loaded block texture array.
+    #[error("block atlas: {0}")]
+    BlockAtlas(#[from] BlockAtlasError),
+    /// The official block models or atlas could not be loaded.
+    #[error("block resources: {0}")]
+    ModelResources(#[from] ModelResourcesError),
     /// Filesystem failure while writing a screenshot.
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
