@@ -2,9 +2,10 @@
 
 //! Command-line arguments for `umicraft-client`.
 //!
-//! Three modes are available: the windowed client (the default), the
-//! headless screenshot path (`--screenshot PATH`) and the headless scripted
-//! session (`--headless`) that spec §11 wants for the integration suite.
+//! Four modes are available: the windowed client (the default), the headless
+//! screenshot path (`--screenshot PATH`), the headless scripted session
+//! (`--headless`) that spec §11 wants for the integration suite, and the
+//! server-less UI acceptance run (`--ui-demo`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,7 +13,8 @@ use std::time::Duration;
 /// Usage text shown by `--help` and on argument errors.
 pub const USAGE: &str = "\
 usage: umicraft-client <host> <port> [options]
-  <host> <port>       Minecraft 1.8 server (protocol 47)
+       umicraft-client --ui-demo [--screenshot PATH] [options]
+  <host> <port>       Minecraft 1.8 server (protocol 47); not needed with --ui-demo
 
 options:
   --name NAME         offline username (default: umicraft)
@@ -23,6 +25,8 @@ options:
   --play-secs N       duration of the headless session (default: 60)
   --script NAME       headless script: default (walk, break, place) or idle
   --chat MESSAGE      chat line the headless session sends when it is placed
+  --ui-demo           drive the scripted M4 debug screen without a server or GPU;
+                      combine with --screenshot to render the same screen offscreen
   --width N           framebuffer width (default: 1280)
   --height N          framebuffer height (default: 720)
   --help, -h          print this help";
@@ -30,13 +34,30 @@ options:
 /// The scripted sessions the headless mode knows.
 pub const SCRIPTS: [&str; 2] = ["default", "idle"];
 
+/// The top-level mode selected by the parsed arguments.
+///
+/// [`Args::mode`] fixes the dispatch precedence: a UI demo wins over the
+/// headless session, which wins over the terrain screenshot, which wins over
+/// the windowed client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// The interactive windowed client.
+    Windowed,
+    /// The offscreen terrain screenshot.
+    Screenshot,
+    /// The scripted headless session.
+    Headless,
+    /// The server-less scripted UI acceptance run.
+    UiDemo,
+}
+
 /// Parsed client options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
-    /// Server host name or IP.
-    pub host: String,
-    /// Server port.
-    pub port: u16,
+    /// Server host name or IP; `None` in the server-less UI demo mode.
+    pub host: Option<String>,
+    /// Server port; `None` in the server-less UI demo mode.
+    pub port: Option<u16>,
     /// Offline-mode username.
     pub name: String,
     /// Requested chunk view distance.
@@ -53,6 +74,8 @@ pub struct Args {
     pub script: String,
     /// A chat line the headless session sends once the player is placed.
     pub chat: Option<String>,
+    /// Whether the server-less scripted UI acceptance run is requested.
+    pub ui_demo: bool,
     /// Framebuffer width.
     pub width: u32,
     /// Framebuffer height.
@@ -60,6 +83,35 @@ pub struct Args {
 }
 
 impl Args {
+    /// The server endpoint, when this mode talks to a server.
+    ///
+    /// A UI demo without positional arguments has no endpoint; every other
+    /// mode is rejected by [`Self::parse`] before it reaches this method.
+    #[must_use]
+    pub fn server(&self) -> Option<(&str, u16)> {
+        match (self.host.as_deref(), self.port) {
+            (Some(host), Some(port)) => Some((host, port)),
+            _ => None,
+        }
+    }
+
+    /// The dispatch mode of these arguments.
+    ///
+    /// `--ui-demo` wins over `--headless` and `--screenshot`; `--headless`
+    /// wins over `--screenshot`.
+    #[must_use]
+    pub fn mode(&self) -> Mode {
+        if self.ui_demo {
+            Mode::UiDemo
+        } else if self.headless {
+            Mode::Headless
+        } else if self.screenshot.is_some() {
+            Mode::Screenshot
+        } else {
+            Mode::Windowed
+        }
+    }
+
     /// Parses argv-style words (without the program name).
     ///
     /// # Errors
@@ -77,6 +129,7 @@ impl Args {
         let mut play_secs = 60.0_f64;
         let mut script = "default".to_string();
         let mut chat = None;
+        let mut ui_demo = false;
         let mut width = 1280_u32;
         let mut height = 720_u32;
 
@@ -127,6 +180,10 @@ impl Args {
                     chat = Some(value.clone());
                     index += 2;
                 }
+                "--ui-demo" => {
+                    ui_demo = true;
+                    index += 1;
+                }
                 "--width" => {
                     width = parse_number(words.get(index + 1), "--width")?;
                     index += 2;
@@ -174,9 +231,17 @@ impl Args {
             ));
         }
 
+        // The UI demo is the only mode that can run without a server. Every
+        // other mode keeps the M1-M3 contract of an explicit host and port.
+        let (host, port) = if ui_demo {
+            (host, port)
+        } else {
+            (Some(host.ok_or_else(help)?), Some(port.ok_or_else(help)?))
+        };
+
         Ok(Self {
-            host: host.ok_or_else(help)?,
-            port: port.ok_or_else(help)?,
+            host,
+            port,
             name,
             view_distance,
             screenshot,
@@ -185,6 +250,7 @@ impl Args {
             play: Duration::from_secs_f64(play_secs),
             script,
             chat,
+            ui_demo,
             width,
             height,
         })
@@ -212,16 +278,19 @@ mod tests {
     #[test]
     fn parses_windowed_defaults() {
         let args = Args::parse(&words(&["localhost", "25565"])).expect("valid args");
-        assert_eq!(args.host, "localhost");
-        assert_eq!(args.port, 25565);
+        assert_eq!(args.host.as_deref(), Some("localhost"));
+        assert_eq!(args.port, Some(25565));
         assert_eq!(args.name, "umicraft");
         assert_eq!(args.view_distance, 8);
         assert!(args.screenshot.is_none());
         assert!(!args.headless);
+        assert!(!args.ui_demo);
         assert_eq!(args.play, Duration::from_secs(60));
         assert_eq!(args.script, "default");
         assert_eq!(args.width, 1280);
         assert_eq!(args.height, 720);
+        assert_eq!(args.mode(), Mode::Windowed);
+        assert_eq!(args.server(), Some(("localhost", 25565)));
     }
 
     #[test]
@@ -268,6 +337,76 @@ mod tests {
         assert!(args.headless);
         assert_eq!(args.play, Duration::from_secs(90));
         assert_eq!(args.script, "idle");
+        assert_eq!(args.mode(), Mode::Headless);
+    }
+
+    #[test]
+    fn parses_ui_demo_without_a_server() {
+        let args = Args::parse(&words(&["--ui-demo"])).expect("the ui demo needs no server");
+        assert!(args.ui_demo);
+        assert_eq!(args.host, None);
+        assert_eq!(args.port, None);
+        assert_eq!(args.server(), None);
+        assert_eq!(args.mode(), Mode::UiDemo);
+        assert_eq!((args.width, args.height), (1280, 720));
+    }
+
+    #[test]
+    fn parses_ui_demo_with_a_screenshot() {
+        let args = Args::parse(&words(&[
+            "--ui-demo",
+            "--screenshot",
+            "/tmp/m4-ui.png",
+            "--width",
+            "800",
+            "--height",
+            "600",
+        ]))
+        .expect("the ui demo screenshot needs no server");
+        assert_eq!(args.mode(), Mode::UiDemo);
+        assert_eq!(
+            args.screenshot.as_deref(),
+            Some(std::path::Path::new("/tmp/m4-ui.png"))
+        );
+        assert_eq!((args.width, args.height), (800, 600));
+        assert_eq!(args.server(), None);
+    }
+
+    #[test]
+    fn ui_demo_wins_over_the_other_serverless_modes() {
+        let args = Args::parse(&words(&[
+            "--ui-demo",
+            "--headless",
+            "--screenshot",
+            "/tmp/out.png",
+        ]))
+        .expect("ui demo accepts the other mode flags");
+        assert_eq!(args.mode(), Mode::UiDemo);
+
+        let headless = Args::parse(&words(&[
+            "host",
+            "25565",
+            "--headless",
+            "--screenshot",
+            "x",
+        ]))
+        .expect("headless still parses");
+        assert_eq!(headless.mode(), Mode::Headless);
+    }
+
+    #[test]
+    fn the_serverless_modes_still_require_a_server() {
+        for case in [
+            vec!["--headless"],
+            vec!["--screenshot", "/tmp/out.png"],
+            vec!["host"],
+            vec![],
+        ] {
+            assert!(
+                Args::parse(&words(&case)).is_err(),
+                "the normal modes must reject {case:?}"
+            );
+        }
     }
 
     #[test]
@@ -281,5 +420,6 @@ mod tests {
         assert!(Args::parse(&words(&["host", "25565", "--name"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--play-secs", "0"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--script", "dance"])).is_err());
+        assert!(Args::parse(&words(&["--ui-demo", "--width", "0"])).is_err());
     }
 }

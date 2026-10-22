@@ -14,9 +14,10 @@ use std::time::Instant;
 
 use umicraft_game::RenderState;
 use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
+use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{DeviceEvent, ElementState, KeyEvent, MouseButton, WindowEvent};
+use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
@@ -27,6 +28,8 @@ use crate::game::{camera_angles, ChunkEvent, Frame, GameEvent, RenderEvent, Sess
 use crate::input::{InputState, InputUpdate};
 use crate::mesher::{default_worker_count, MeshPool};
 use crate::network::NetworkConfig;
+use crate::ui_font::{self, LoadedFont};
+use crate::ui_input::UiInputTranslator;
 
 const MOUSE_SENSITIVITY: f32 = 0.0022;
 const FRAME_HISTORY: usize = 120;
@@ -81,9 +84,12 @@ impl View {
 /// initialization failure. Runtime draw failures are surfaced the same way
 /// after the event loop returns.
 pub fn run(args: Args) -> Result<(), ClientError> {
+    let (host, port) = args.server().ok_or_else(|| {
+        ClientError::Network("the windowed client needs a host and port".to_string())
+    })?;
     let session = Session::start(NetworkConfig {
-        host: args.host.clone(),
-        port: args.port,
+        host: host.to_string(),
+        port,
         name: args.name.clone(),
         view_distance: args.view_distance,
     })?;
@@ -126,6 +132,18 @@ struct App {
     chat_open: bool,
     /// The line the player is typing.
     chat_input: String,
+    /// Whether the M4 debug screen is open.
+    show_debug_screen: bool,
+    /// The immediate-mode context, owned by the render thread.
+    ui: Ui,
+    /// The acceptance screen shown while `show_debug_screen` is set.
+    debug_screen: DebugScreen,
+    /// The winit events waiting for the next UI frame.
+    ui_input: UiInputTranslator,
+    /// The font loaded at startup, before the renderer exists.
+    font: LoadedFont,
+    /// The atlas the renderer accepted; the UI metrics must match it.
+    ui_atlas: Option<FontAtlas>,
     last_frame: Instant,
     frame_times: Vec<f32>,
     frame_ms: f32,
@@ -136,6 +154,8 @@ struct App {
 impl App {
     fn new(args: Args, session: Session) -> Result<Self, ClientError> {
         let pool = MeshPool::new(default_worker_count())?;
+        let font = ui_font::load();
+        let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
             args,
             window: None,
@@ -159,6 +179,12 @@ impl App {
             place_block: false,
             chat_open: false,
             chat_input: String::new(),
+            show_debug_screen: false,
+            ui: Ui::new(ui_viewport),
+            debug_screen: DebugScreen::new(),
+            ui_input: UiInputTranslator::new(),
+            font,
+            ui_atlas: None,
             last_frame: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
@@ -178,13 +204,27 @@ impl App {
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return;
+        };
+        // F2 is the debug-screen toggle. It is handled before the UI
+        // translation so it can never be typed into the screen, and it is
+        // ignored while the key repeats so one press toggles exactly once.
+        // Releases are swallowed as well, so no F2 event ever reaches the UI.
+        if code == KeyCode::F2 {
+            if is_debug_toggle(code, event.state, event.repeat) {
+                self.toggle_debug_screen();
+            }
+            return;
+        }
+        if self.show_debug_screen {
+            self.ui_input.key(code, event.state, event.text.as_deref());
+            return;
+        }
         if self.chat_open {
             self.handle_chat_key(event);
             return;
         }
-        let PhysicalKey::Code(code) = event.physical_key else {
-            return;
-        };
         match event.state {
             ElementState::Pressed => {
                 if !event.repeat {
@@ -213,6 +253,27 @@ impl App {
             ElementState::Released => {
                 self.keys.remove(&code);
             }
+        }
+    }
+
+    /// Opens or closes the M4 debug screen.
+    ///
+    /// Opening releases the cursor grab and clears the game input so no held
+    /// key, look delta or click leaks into the game while the UI owns the
+    /// mouse and keyboard. The game and network threads keep running; the
+    /// screen only reads the render-side snapshot.
+    fn toggle_debug_screen(&mut self) {
+        self.show_debug_screen = !self.show_debug_screen;
+        self.ui_input.clear();
+        if self.show_debug_screen {
+            self.chat_open = false;
+            self.chat_input.clear();
+            self.keys.clear();
+            self.select_slot = None;
+            self.break_block = false;
+            self.place_block = false;
+            self.look = (0.0, 0.0);
+            self.capture_mouse(false);
         }
     }
 
@@ -269,9 +330,9 @@ impl App {
 
     /// The key state of the window.
     fn key_state(&self) -> InputState {
-        if self.chat_open {
-            // While the chat is open the movement keys do not steer the
-            // player.
+        if self.chat_open || self.show_debug_screen {
+            // While the chat or the debug screen is open the movement keys do
+            // not steer the player.
             return InputState::default();
         }
         let mut state = InputState::default();
@@ -476,6 +537,25 @@ impl App {
         }
     }
 
+    /// Builds one UI frame from the render-side snapshot, or returns `None`
+    /// while the debug screen is closed.
+    ///
+    /// The frame is built on the render thread during redraw, after the HUD
+    /// overlay, so the UI never touches the game thread or its state. The
+    /// caller recycles the returned output after the renderer consumed the
+    /// draw list.
+    fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
+        if !self.show_debug_screen {
+            return None;
+        }
+        let atlas = self.ui_atlas.as_ref()?;
+        let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
+        let input = self.ui_input.take();
+        self.ui.begin_frame(viewport, input);
+        self.debug_screen.show(&mut self.ui, atlas);
+        Some(self.ui.end_frame())
+    }
+
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let elapsed = (now - self.last_frame).as_secs_f32();
@@ -511,10 +591,22 @@ impl App {
             return;
         }
 
+        let (width, height) = self
+            .renderer
+            .as_ref()
+            .map_or((self.args.width, self.args.height), Renderer::size);
+        let ui_frame = self.build_ui_frame(width, height);
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        if let Err(error) = renderer.render(&self.camera, &self.overlay) {
+        let rendered = match ui_frame.as_ref() {
+            Some(frame) => renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list),
+            None => renderer.render(&self.camera, &self.overlay),
+        };
+        if let Some(frame) = ui_frame {
+            self.ui.recycle_output(frame);
+        }
+        if let Err(error) = rendered {
             self.exit_error = Some(error.to_string());
             event_loop.exit();
             return;
@@ -523,6 +615,14 @@ impl App {
             window.request_redraw();
         }
     }
+}
+
+/// True when this key event must toggle the debug screen.
+///
+/// Only a fresh F2 press toggles: releases and auto-repeats are ignored so a
+/// held key cannot flicker the screen.
+fn is_debug_toggle(code: KeyCode, state: ElementState, repeat: bool) -> bool {
+    code == KeyCode::F2 && state == ElementState::Pressed && !repeat
 }
 
 /// The hotbar slot of a number key.
@@ -567,14 +667,25 @@ impl ApplicationHandler for App {
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
                 Box::new(event_loop.owned_display_handle()),
             ));
-        match Renderer::new_windowed(instance, window.clone()) {
-            Ok(renderer) => self.renderer = Some(renderer),
+        let mut renderer = match Renderer::new_windowed(instance, window.clone()) {
+            Ok(renderer) => renderer,
             Err(error) => {
                 self.exit_error = Some(error.to_string());
                 event_loop.exit();
                 return;
             }
+        };
+        // Upload the atlas once, before the first UI frame. A rejected atlas
+        // falls back to the built-in font; only a rejected fallback is fatal.
+        match ui_font::install(&mut renderer, &self.font.atlas) {
+            Ok(installed) => self.ui_atlas = Some(installed.atlas),
+            Err(error) => {
+                self.exit_error = Some(ClientError::FontAtlas(error).to_string());
+                event_loop.exit();
+                return;
+            }
         }
+        self.renderer = Some(renderer);
         self.window = Some(window.clone());
         event_loop.listen_device_events(DeviceEvents::Always);
         window.request_redraw();
@@ -590,24 +701,51 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => self.resize(size.width, size.height),
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, event),
-            WindowEvent::MouseInput { state, button, .. } => match button {
-                MouseButton::Left => {
-                    if state == ElementState::Pressed {
-                        if self.mouse_captured {
-                            self.break_block = true;
-                        } else {
-                            self.capture_mouse(true);
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.ui_input.modifiers(modifiers.state());
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if self.show_debug_screen {
+                    self.ui_input.pointer_moved(position);
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if self.show_debug_screen {
+                    self.ui_input.pointer_button(state, button);
+                } else {
+                    match button {
+                        MouseButton::Left => {
+                            if state == ElementState::Pressed {
+                                if self.mouse_captured {
+                                    self.break_block = true;
+                                } else {
+                                    self.capture_mouse(true);
+                                }
+                            }
                         }
+                        MouseButton::Right
+                            if state == ElementState::Pressed && self.mouse_captured =>
+                        {
+                            self.place_block = true;
+                        }
+                        _ => {}
                     }
                 }
-                MouseButton::Right if state == ElementState::Pressed && self.mouse_captured => {
-                    self.place_block = true;
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                if self.show_debug_screen {
+                    self.ui_input.wheel(delta);
                 }
-                _ => {}
-            },
+            }
+            WindowEvent::Ime(Ime::Commit(text)) => {
+                if self.show_debug_screen {
+                    self.ui_input.text(&text);
+                }
+            }
             WindowEvent::Focused(false) => {
                 self.keys.clear();
                 self.capture_mouse(false);
+                self.ui_input.clear();
             }
             WindowEvent::RedrawRequested => self.redraw(event_loop),
             _ => {}
@@ -621,7 +759,7 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            if self.mouse_captured {
+            if self.mouse_captured && !self.show_debug_screen {
                 // A positive delta moves the mouse to the right and down; the
                 // game logic turns right and looks down with it.
                 self.look.0 += delta.0 as f32 * MOUSE_SENSITIVITY;
@@ -634,5 +772,18 @@ impl ApplicationHandler for App {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fresh_f2_press_is_the_only_toggle() {
+        assert!(is_debug_toggle(KeyCode::F2, ElementState::Pressed, false));
+        assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, true));
+        assert!(!is_debug_toggle(KeyCode::F2, ElementState::Released, false));
+        assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
     }
 }
