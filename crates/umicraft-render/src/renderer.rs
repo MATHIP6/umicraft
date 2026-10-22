@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! wgpu renderer for chunk meshes, a procedural block texture array, and the
-//! debug overlay.
+//! wgpu renderer for chunk meshes, a procedural block texture array, the
+//! debug overlay, and the immediate-mode UI pass.
 //!
 //! [`Renderer::new_windowed`] presents to a winit window; [`Renderer::new_offscreen`]
 //! renders to a texture and can save its contents with [`Renderer::read_pixels`].
 //! Terrain is drawn with a depth buffer, back-face culling, per-face axis
 //! shading, and distance fog. Chunk meshes are uploaded whole and replaced
-//! copy-on-write when remeshed.
+//! copy-on-write when remeshed. The HUD and the UI share the overlay pipeline;
+//! [`Renderer::render_with_ui`] appends [`UiPass`] geometry after the HUD.
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -15,15 +16,16 @@ use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
 use umicraft_mesh::{Mesh, Vertex, TEXTURE_LAYERS};
+use umicraft_ui::{DrawList, FontAtlas};
 use umicraft_world::ChunkPos;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::camera::Camera;
 use crate::error::RenderError;
-use crate::font;
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
+use crate::ui_pass::{self, FontAtlasError, UiPass};
 
 /// Depth attachment format.
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -92,7 +94,19 @@ pub struct Renderer {
     terrain_pipeline: wgpu::RenderPipeline,
     terrain_bind_group: wgpu::BindGroup,
     overlay_pipeline: wgpu::RenderPipeline,
+    /// Layout and sampler shared by every font texture, so
+    /// [`Renderer::set_font_atlas`] can bind a replacement texture without
+    /// recreating the overlay pipeline.
+    overlay_layout: wgpu::BindGroupLayout,
+    font_sampler: wgpu::Sampler,
+    /// Fallback-atlas binding kept for the M3 HUD (`Overlay::text`).
     overlay_bind_group: wgpu::BindGroup,
+    /// Binding for the UI pass; starts on the fallback atlas and is replaced
+    /// once by [`Renderer::set_font_atlas`].
+    ui_bind_group: wgpu::BindGroup,
+    /// Metrics of the atlas bound to `ui_bind_group`; immutable after upload.
+    ui_atlas: FontAtlas,
+    ui_pass: UiPass,
     overlay_buffer: wgpu::Buffer,
     overlay_capacity: u64,
     offscreen: Option<OffscreenTarget>,
@@ -217,11 +231,15 @@ impl Renderer {
             ..Default::default()
         });
 
+        // The HUD and the UI start on the original 3×5 fallback atlas. A
+        // user-installed 1.8 atlas replaces the UI binding only, so the M3
+        // overlay keeps the metrics it was built with.
+        let ui_atlas = ui_pass::fallback_atlas();
         let font_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("overlay font atlas"),
             size: wgpu::Extent3d {
-                width: font::ATLAS_WIDTH,
-                height: font::ATLAS_HEIGHT,
+                width: ui_atlas.width,
+                height: ui_atlas.height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -231,7 +249,6 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let font_data = font::atlas();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &font_texture,
@@ -239,15 +256,15 @@ impl Renderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &font_data,
+            &ui_atlas.pixels,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(font::ATLAS_WIDTH),
-                rows_per_image: Some(font::ATLAS_HEIGHT),
+                bytes_per_row: Some(ui_atlas.width),
+                rows_per_image: Some(ui_atlas.height),
             },
             wgpu::Extent3d {
-                width: font::ATLAS_WIDTH,
-                height: font::ATLAS_HEIGHT,
+                width: ui_atlas.width,
+                height: ui_atlas.height,
                 depth_or_array_layers: 1,
             },
         );
@@ -351,20 +368,10 @@ impl Renderer {
                 },
             ],
         });
-        let overlay_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("overlay bind group"),
-            layout: &overlay_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&font_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&font_sampler),
-                },
-            ],
-        });
+        let overlay_bind_group =
+            create_font_bind_group(&device, &overlay_layout, &font_sampler, &font_view);
+        let ui_bind_group =
+            create_font_bind_group(&device, &overlay_layout, &font_sampler, &font_view);
 
         let terrain_pipeline =
             create_terrain_pipeline(&device, &terrain_shader, &terrain_layout, format);
@@ -399,7 +406,12 @@ impl Renderer {
             terrain_pipeline,
             terrain_bind_group,
             overlay_pipeline,
+            overlay_layout,
+            font_sampler,
             overlay_bind_group,
+            ui_bind_group,
+            ui_atlas,
+            ui_pass: UiPass::new(width, height),
             overlay_buffer,
             overlay_capacity: OVERLAY_MIN_BYTES,
             offscreen,
@@ -407,9 +419,36 @@ impl Renderer {
         })
     }
 
-    /// Draws one frame. Skips presentation on timeout or occlusion and
-    /// reconfigures the surface when the backend requests it.
+    /// Draws one frame with the M3 HUD overlay only.
+    ///
+    /// Any UI geometry from a previous [`Renderer::render_with_ui`] call is
+    /// discarded, so the two entry points can be interleaved safely. Skips
+    /// presentation on timeout or occlusion and reconfigures the surface when
+    /// the backend requests it.
     pub fn render(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
+        self.ui_pass.clear();
+        self.render_frame(camera, overlay)
+    }
+
+    /// Draws one frame: terrain, then the `overlay` HUD, then `draw_list`.
+    ///
+    /// The draw list is built by the caller (on this same render thread)
+    /// before the call; the renderer only converts it to vertices and submits
+    /// them. It uses the atlas most recently passed to
+    /// [`Renderer::set_font_atlas`], or the built-in fallback atlas when none
+    /// was set. The UI is drawn above the HUD and shares the overlay pipeline,
+    /// so no extra pass or thread is introduced.
+    pub fn render_with_ui(
+        &mut self,
+        camera: &Camera,
+        overlay: &Overlay,
+        draw_list: &DrawList,
+    ) -> Result<(), RenderError> {
+        self.ui_pass.rebuild(draw_list, &self.ui_atlas);
+        self.render_frame(camera, overlay)
+    }
+
+    fn render_frame(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
         self.write_camera(camera);
         self.upload_overlay(overlay);
         if self.surface.is_some() {
@@ -417,6 +456,65 @@ impl Renderer {
         } else {
             self.render_offscreen(overlay)
         }
+    }
+
+    /// Uploads the immutable UI font atlas and makes it current for
+    /// [`Renderer::render_with_ui`].
+    ///
+    /// The HUD ([`Overlay::text`]) deliberately keeps the built-in fallback
+    /// atlas so the M3 overlay and screenshots do not change appearance when
+    /// the user installs the 1.8 assets. Call this once at startup, after
+    /// load; it performs one texture upload and no blocking wait.
+    ///
+    /// # Errors
+    ///
+    /// [`FontAtlasError`] when the pixel buffer does not match the declared
+    /// size, the atlas exceeds the device texture limit, or its white UV
+    /// rectangle is malformed.
+    pub fn set_font_atlas(&mut self, atlas: &FontAtlas) -> Result<(), FontAtlasError> {
+        ui_pass::validate_font_atlas(atlas, self.device.limits().max_texture_dimension_2d)?;
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ui font atlas"),
+            size: wgpu::Extent3d {
+                width: atlas.width,
+                height: atlas.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &atlas.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(atlas.width),
+                rows_per_image: Some(atlas.height),
+            },
+            wgpu::Extent3d {
+                width: atlas.width,
+                height: atlas.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.ui_bind_group = create_font_bind_group(
+            &self.device,
+            &self.overlay_layout,
+            &self.font_sampler,
+            &view,
+        );
+        self.ui_atlas = atlas.clone();
+        Ok(())
     }
 
     /// Replaces the GPU mesh for `pos`, or removes it when `mesh` is empty.
@@ -486,6 +584,7 @@ impl Renderer {
             }
         }
         self.depth_view = create_depth(&self.device, width, height);
+        self.ui_pass.resize(width, height);
         if self.offscreen.is_some() {
             self.offscreen = Some(create_offscreen(&self.device, width, height));
         }
@@ -499,8 +598,8 @@ impl Renderer {
 
     /// Reads the offscreen colour target as tightly packed RGBA8.
     ///
-    /// Call [`Renderer::render`] first. The row padding required by WebGPU is
-    /// removed before returning.
+    /// Call [`Renderer::render`] or [`Renderer::render_with_ui`] first. The
+    /// row padding required by WebGPU is removed before returning.
     pub fn read_pixels(&self) -> Result<Image, RenderError> {
         let Some(target) = self.offscreen.as_ref() else {
             return Err(RenderError::NotOffscreen);
@@ -595,11 +694,12 @@ impl Renderer {
     }
 
     fn upload_overlay(&mut self, overlay: &Overlay) {
-        let bytes: &[u8] = bytemuck::cast_slice(overlay.vertices());
-        if bytes.len() as u64 > self.overlay_capacity {
-            let capacity = (bytes.len() as u64)
-                .next_power_of_two()
-                .max(OVERLAY_MIN_BYTES);
+        let hud_bytes: &[u8] = bytemuck::cast_slice(overlay.vertices());
+        let hud_len = hud_bytes.len();
+        let ui_len = std::mem::size_of_val(self.ui_pass.vertices());
+        let total = hud_len + ui_len;
+        if total as u64 > self.overlay_capacity {
+            let capacity = (total as u64).next_power_of_two().max(OVERLAY_MIN_BYTES);
             self.overlay_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("overlay vertices"),
                 size: capacity,
@@ -608,8 +708,13 @@ impl Renderer {
             });
             self.overlay_capacity = capacity;
         }
-        if !bytes.is_empty() {
-            self.queue.write_buffer(&self.overlay_buffer, 0, bytes);
+        if !hud_bytes.is_empty() {
+            self.queue.write_buffer(&self.overlay_buffer, 0, hud_bytes);
+        }
+        if ui_len != 0 {
+            let ui_bytes: &[u8] = bytemuck::cast_slice(self.ui_pass.vertices());
+            self.queue
+                .write_buffer(&self.overlay_buffer, hud_len as u64, ui_bytes);
         }
     }
 
@@ -703,11 +808,22 @@ impl Renderer {
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count, 0, 0..1);
         }
-        if !overlay.is_empty() {
+        if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_pipeline(&self.overlay_pipeline);
-            pass.set_bind_group(0, &self.overlay_bind_group, &[]);
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
-            pass.draw(0..overlay.vertex_count(), 0..1);
+            // Both vertex ranges live in the same buffer, in submission
+            // order. The HUD and the UI may use different atlases, so they
+            // are two draw calls with different bind groups.
+            if !overlay.is_empty() {
+                pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+                pass.draw(0..overlay.vertex_count(), 0..1);
+            }
+            if !self.ui_pass.is_empty() {
+                pass.set_bind_group(0, &self.ui_bind_group, &[]);
+                let first = overlay.vertex_count();
+                let end = first + self.ui_pass.vertex_count();
+                pass.draw(first..end, 0..1);
+            }
         }
     }
 
@@ -858,6 +974,29 @@ fn create_terrain_pipeline(
         }),
         multiview_mask: None,
         cache: None,
+    })
+}
+
+/// Binds one R8 font-atlas view and the shared font sampler.
+fn create_font_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("font bind group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
     })
 }
 

@@ -142,7 +142,10 @@ impl Overlay {
         }
     }
 
-    fn push_quad(
+    /// Appends one pixel-space quad projected to NDC.
+    ///
+    /// Shared with [`crate::ui_pass`], which clips quads before calling it.
+    pub(crate) fn push_quad(
         &mut self,
         [x, y, width, height]: [f32; 4],
         uv_min: [f32; 2],

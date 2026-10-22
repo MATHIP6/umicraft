@@ -13,6 +13,7 @@ glam = "0.34"
 pollster = "1"
 thiserror.workspace = true
 umicraft-mesh.workspace = true
+umicraft-ui.workspace = true
 umicraft-world.workspace = true
 wgpu = "30.0.1"
 winit = "0.30.8"
