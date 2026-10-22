@@ -2,15 +2,107 @@
 
 //! Baseline meshing benchmarks (spec §7).
 
+use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use umicraft_mesh::{mesh_chunk, ChunkSnapshot};
+use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, ModelMeshContext};
+use umicraft_model::{
+    AtlasLayout, BlockDefinition, BlockModelSet, ModelError, ModelResult, ResourceSource, StateDef,
+};
 use umicraft_world::{BlockState, ChunkColumn, ChunkPos};
 
 const FLAT_SECTION: &[u8] =
     include_bytes!("../../umicraft-world/tests/fixtures/flat-chunk-section.bin");
+
+/// A full cube with `cullface` on every face, used by the model benchmark.
+const CUBE_MODEL: &str = r##"{
+  "textures": { "particle": "#all", "all": "#all" },
+  "elements": [{
+    "from": [0, 0, 0],
+    "to": [16, 16, 16],
+    "faces": {
+      "down":  { "texture": "#all", "cullface": "down" },
+      "up":    { "texture": "#all", "cullface": "up" },
+      "north": { "texture": "#all", "cullface": "north" },
+      "south": { "texture": "#all", "cullface": "south" },
+      "west":  { "texture": "#all", "cullface": "west" },
+      "east":  { "texture": "#all", "cullface": "east" }
+    }
+  }]
+}"##;
+
+const CUBE_BLOCKSTATE: &str = r#"{ "variants": { "normal": { "model": "cube" } } }"#;
+
+const CUBE_STATES: &[StateDef] = &[StateDef {
+    mask: 0,
+    value: 0,
+    blockstate: "cube",
+    variant: "normal",
+}];
+
+/// The captured flat chunk uses ids 2 (grass), 3 (dirt) and 7 (bedrock); all
+/// three share one synthetic cube so the model path emits the same 512 faces
+/// as [`mesh_flat_chunk`].
+const CUBE_DEFS: &[BlockDefinition] = &[
+    BlockDefinition {
+        id: 2,
+        name: "grass",
+        states: CUBE_STATES,
+    },
+    BlockDefinition {
+        id: 3,
+        name: "dirt",
+        states: CUBE_STATES,
+    },
+    BlockDefinition {
+        id: 7,
+        name: "bedrock",
+        states: CUBE_STATES,
+    },
+];
+
+/// In-memory [`ResourceSource`] for the benchmark assets.
+struct Memory(BTreeMap<String, Vec<u8>>);
+
+impl ResourceSource for Memory {
+    fn read(&self, path: &str) -> ModelResult<Vec<u8>> {
+        self.0
+            .get(path)
+            .cloned()
+            .ok_or_else(|| ModelError::Resource {
+                path: path.to_string(),
+                message: "benchmark resource is missing".to_string(),
+            })
+    }
+
+    fn list(&self, prefix: &str) -> Vec<String> {
+        self.0
+            .keys()
+            .filter(|path| path.starts_with(prefix))
+            .cloned()
+            .collect()
+    }
+}
+
+fn model_context() -> ModelMeshContext {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/stone").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let set = BlockModelSet::build(&Memory(files), CUBE_DEFS)
+        .expect("the synthetic benchmark model set must build");
+    ModelMeshContext {
+        models: Arc::new(set),
+        atlas: Arc::new(AtlasLayout::from_keys(["blocks/stone"])),
+    }
+}
 
 fn flat_column(pos: ChunkPos) -> ChunkColumn {
     let mut column = ChunkColumn::new(pos);
@@ -29,6 +121,25 @@ fn mesh_flat_chunk(criterion: &mut Criterion) {
     let snapshot = ChunkSnapshot::from_columns(centre, columns);
     criterion.bench_function("mesh/flat_chunk_with_neighbours", |bencher| {
         bencher.iter(|| black_box(mesh_chunk(centre, black_box(&snapshot))));
+    });
+}
+
+fn mesh_flat_chunk_with_models(criterion: &mut Criterion) {
+    let centre = ChunkPos::new(0, 0);
+    let columns = (-1..=1)
+        .flat_map(|dz| (-1..=1).map(move |dx| ChunkPos::new(dx, dz)))
+        .map(|pos| Arc::new(flat_column(pos)))
+        .collect::<Vec<_>>();
+    let snapshot = ChunkSnapshot::from_columns(centre, columns);
+    let context = model_context();
+    criterion.bench_function("mesh/models", |bencher| {
+        bencher.iter(|| {
+            black_box(mesh_chunk_with_models(
+                centre,
+                black_box(&snapshot),
+                black_box(&context),
+            ))
+        });
     });
 }
 
@@ -84,5 +195,11 @@ fn mesh_dense_section(criterion: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, mesh_flat_chunk, mesh_flat_view, mesh_dense_section);
+criterion_group!(
+    benches,
+    mesh_flat_chunk,
+    mesh_flat_chunk_with_models,
+    mesh_flat_view,
+    mesh_dense_section
+);
 criterion_main!(benches);
