@@ -3378,6 +3378,7 @@ dependencies = [
  "pollster",
  "thiserror 2.0.21",
  "umicraft-mesh",
+ "umicraft-ui",
  "umicraft-world",
  "wgpu",
  "winit",
