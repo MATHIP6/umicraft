@@ -65,7 +65,7 @@ At the time this guide was written (2026-10-22):
 | W1 model core | merged; crate gates green |
 | W2 registry | agent running in `.worktrees/m5-registry` |
 | W3 atlas | merged; official 1.8.8 counts verified |
-| W4 mesher | agent running in `.worktrees/m5-mesher` against the merged W1 |
+| W4 mesher | merged; synthetic model tests green, full-registry integration pending W2 |
 | W5 renderer | merged; atlas-upload GPU tests green |
 | W6 client | waiting for W1–W5 |
 
