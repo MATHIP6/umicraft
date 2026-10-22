@@ -152,7 +152,7 @@ pub struct HudState {
     pub selected_slot: u8,
     /// Whether the crosshair is drawn.
     pub crosshair: bool,
-    /// Chat lines, oldest first; only the last [`CHAT_LINES`] are drawn.
+    /// Chat lines, oldest first; only the last ten are drawn.
     pub chat_lines: Vec<String>,
     /// Debug lines, top to bottom.
     pub debug_lines: Vec<String>,

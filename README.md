@@ -3,9 +3,11 @@
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
 (protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
 
-Status: **M2 — world data and first pixels**. The client logs in offline-mode,
-decodes chunk/block packets into a compact world, meshes chunks on worker
-threads, and renders them with wgpu either in a window or to an offscreen PNG.
+Status: **M3 complete; M4 (interface foundation) in progress**. The client
+logs in offline-mode, decodes chunk/block packets into a compact world, runs
+the player simulation on a game thread, meshes chunks on worker threads, and
+renders them with wgpu either in a window or to an offscreen PNG. M4 adds the
+backend-agnostic `umicraft-ui` crate and the custom widget layer.
 
 ## Workspace
 
@@ -17,6 +19,7 @@ threads, and renders them with wgpu either in a window or to an offscreen PNG.
 | `umicraft-world` | Block states, paletted chunk columns, world updates |
 | `umicraft-mesh` | Face-culling chunk mesher and texture-layer mapping |
 | `umicraft-render` | wgpu renderer, camera, procedural textures, debug overlay |
+| `umicraft-ui` | Immediate-mode UI: layout, focus, widgets, font atlas, draw list |
 | `umicraft-client` | Client binary: windowed play or offscreen screenshot |
 | `umicraft-testkit` | Fake server, packet capture/replay, test utilities |
 
@@ -74,6 +77,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+cargo deny check licenses bans
 ```
 
 The GPU smoke test is opt-in because it needs a working adapter:

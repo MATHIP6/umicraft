@@ -126,7 +126,8 @@ impl Endpoints {
     ///     endpoints.object_url(hash),
     ///     "http://127.0.0.1:8080/objects/09/0983f08be6a4e624f5d85689d1aca869ed99c738"
     /// );
-    /// ```    #[must_use]
+    /// ```
+    #[must_use]
     pub fn object_url(&self, hash: &str) -> String {
         crate::objects::object_url(&self.object_base, hash)
     }

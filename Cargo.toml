@@ -11,6 +11,7 @@ members = [
     "crates/umicraft-testkit",
     "crates/umicraft-assets",
     "crates/umicraft-game",
+    "crates/umicraft-ui",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ aes = "0.8"
 bytemuck = { version = "1", features = ["derive"] }
 flate2 = "1.0"
 num-bigint = "0.4"
+png = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "system-proxy"] }
 rsa = "0.9"
 serde = { version = "1.0", features = ["derive"] }
@@ -40,6 +42,7 @@ umicraft-world = { path = "crates/umicraft-world", version = "0.1.0" }
 umicraft-mesh = { path = "crates/umicraft-mesh", version = "0.1.0" }
 umicraft-render = { path = "crates/umicraft-render", version = "0.1.0" }
 umicraft-game = { path = "crates/umicraft-game", version = "0.1.0" }
+umicraft-ui = { path = "crates/umicraft-ui", version = "0.1.0" }
 
 [workspace.lints.rust]
 missing_docs = "deny"

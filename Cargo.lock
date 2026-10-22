@@ -3398,6 +3398,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-ui"
+version = "0.1.0"
+dependencies = [
+ "png",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "umicraft-world"
 version = "0.1.0"
 dependencies = [

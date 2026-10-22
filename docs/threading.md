@@ -79,6 +79,22 @@ ADR-0005).
 - The game thread owns the view angles: the look deltas are applied to its
   yaw and pitch, and the server corrections overwrite them.
 
+### UI boundary (M4)
+
+- `umicraft-ui` is backend-agnostic: it owns no thread, no GPU resource and no
+  I/O. The render thread builds one UI frame per rendered frame from the winit
+  events (or the headless script), then hands the resulting `DrawList` to
+  `umicraft-render` before the GPU submission.
+- The UI never reads or mutates the world. It sees only the render snapshot
+  (HUD state, frame statistics) and its own input, so it cannot block the game,
+  network or mesh threads.
+- The 1.8 font atlas is loaded once from the user's client jar when it is
+  available; the original 3×5 fallback is used otherwise. The atlas is
+  immutable after load and the renderer uploads it once.
+- The windowed F2 screen and the headless `--ui-demo` drive the same pure
+  `debug_screen`; the draw list is the only output they share with the
+  renderer.
+
 ### World and mesh boundary
 
 - `World` and all block mutation stay on the game thread. Columns are
@@ -120,3 +136,6 @@ ADR-0005).
 - M3: the world and the player state moved onto a game thread with a fixed
   20 Hz tick; the render thread only receives snapshots; the headless mode
   drives the same game thread as the windowed client.
+- M4 setup: the pure `umicraft-ui` crate was created and its public types
+  frozen in ADR-0006; the UI frame is planned on the render thread, with the
+  draw list as the only boundary to the renderer.

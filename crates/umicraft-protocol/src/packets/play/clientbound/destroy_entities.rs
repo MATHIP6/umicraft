@@ -33,7 +33,7 @@ impl DestroyEntities {
     ///
     /// # Errors
     /// [`ProtocolError`] on truncation, a malformed VarInt, or a count above
-    /// [`MAX_ENTITIES`].
+    /// the entity budget.
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
         let count = read_var_i32(reader)?;
         if count < 0 {

@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 glam = "0.34"
-png = "0.17"
+png.workspace = true
 pollster = "1"
 serde_json.workspace = true
 thiserror.workspace = true

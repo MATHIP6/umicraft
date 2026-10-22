@@ -1,0 +1,15 @@
+[package]
+name = "umicraft-ui"
+description = "Umicraft immediate-mode UI: layout, focus, widgets, font atlas, and a backend-agnostic draw list."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+png.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
