@@ -66,7 +66,7 @@ At the time this guide was written (2026-10-22):
 | W2 registry | agent running in `.worktrees/m5-registry` |
 | W3 atlas | merged; official 1.8.8 counts verified |
 | W4 mesher | agent running in `.worktrees/m5-mesher` against the merged W1 |
-| W5 renderer | agent running in `.worktrees/m5-renderer` against the frozen contract |
+| W5 renderer | merged; atlas-upload GPU tests green |
 | W6 client | waiting for W1–W5 |
 
 The lead updates this table at each handoff. A worktree with uncommitted
