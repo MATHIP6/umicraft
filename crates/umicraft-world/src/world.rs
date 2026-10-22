@@ -13,6 +13,7 @@ use umicraft_protocol::packets::play::clientbound::{
 use crate::block::BlockState;
 use crate::chunk::{ChunkColumn, WORLD_HEIGHT};
 use crate::error::WorldError;
+use crate::light::LightLevel;
 use crate::pos::{BlockPos, ChunkPos};
 
 /// Chunks loaded from the server, keyed by column position.
@@ -88,6 +89,30 @@ impl World {
                     pos.local_z() as usize,
                 )
             })
+    }
+
+    /// Combined light at a world position.
+    ///
+    /// Missing chunks and out-of-range Y read black. In the Nether and the
+    /// End the sky channel is forced to zero even for an elided air section.
+    #[must_use]
+    pub fn light(&self, pos: BlockPos) -> LightLevel {
+        if !(0..WORLD_HEIGHT as i32).contains(&pos.y) {
+            return LightLevel::DARK;
+        }
+        let Some(column) = self.chunks.get(&pos.chunk()) else {
+            return LightLevel::DARK;
+        };
+        let light = column.light(
+            pos.local_x() as usize,
+            pos.y as usize,
+            pos.local_z() as usize,
+        );
+        if self.has_sky_light() {
+            light
+        } else {
+            LightLevel::new(light.block, 0)
+        }
     }
 
     /// Writes a block, returning `true` when it changed.
@@ -377,6 +402,20 @@ mod tests {
         };
         world.apply_chunk_data(&packet).unwrap();
         world
+    }
+
+    #[test]
+    fn light_follows_the_dimension_sky_rule() {
+        let world = world_with_chunk(ChunkPos::new(0, 0));
+        assert_eq!(
+            world.light(BlockPos::new(0, 0, 0)),
+            LightLevel { block: 0, sky: 15 }
+        );
+        // The Nether has no sky nibbles even where the column omits a section.
+        let nether = World::new(-1);
+        assert_eq!(nether.light(BlockPos::new(0, 0, 0)), LightLevel::DARK);
+        // The loaded overworld column can still be mutated by the test.
+        assert_eq!(world.chunk_count(), 1);
     }
 
     #[test]

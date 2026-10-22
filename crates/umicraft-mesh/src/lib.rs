@@ -31,7 +31,7 @@
 //! fallback.
 
 use bytemuck::{Pod, Zeroable};
-use umicraft_world::{BlockKind, BlockPos, BlockState, ChunkColumn, ChunkPos, World};
+use umicraft_world::{BlockKind, BlockPos, BlockState, ChunkColumn, ChunkPos, LightLevel, World};
 
 use std::sync::Arc;
 
@@ -54,34 +54,129 @@ pub struct Vertex {
     pub uv: [f32; 2],
     /// Fallback texture-array layer.
     pub layer: u32,
+    /// Packed [`VertexLight`] payload (block/sky light, AO and face shading).
+    ///
+    /// The shader unpacks bits 0..=3 (block), 4..=7 (sky), 8..=11 (AO) and
+    /// bit 12 (shade). Keeping the payload in one `u32` leaves the vertex at
+    /// 40 bytes.
+    pub light: u32,
+}
+
+/// Per-vertex lighting payload.
+///
+/// Light levels and ambient occlusion are nibbles; `shade` is bit 12. The
+/// renderer uses the two light channels independently so sky light can follow
+/// the time of day while block light stays constant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VertexLight {
+    /// Block-light level (`0..=15`).
+    pub block: u8,
+    /// Sky-light level (`0..=15`).
+    pub sky: u8,
+    /// Ambient-occlusion strength (`0..=15`, where 15 is fully open).
+    pub ao: u8,
+    /// Whether the renderer applies the 1.8 per-face shade factor.
+    pub shade: bool,
+}
+
+impl VertexLight {
+    /// Full daylight, no ambient occlusion, with face shading enabled.
+    pub const DAY: Self = Self {
+        block: 0,
+        sky: 15,
+        ao: 15,
+        shade: true,
+    };
+
+    /// Fully open ambient occlusion.
+    pub const AO_OPEN: u8 = 15;
+
+    /// Builds a payload, clamping every nibble to `0..=15`.
+    #[must_use]
+    pub const fn new(block: u8, sky: u8, ao: u8, shade: bool) -> Self {
+        Self {
+            block: clamp_light(block),
+            sky: clamp_light(sky),
+            ao: clamp_light(ao),
+            shade,
+        }
+    }
+
+    /// Packs the payload for [`Vertex::light`].
+    #[must_use]
+    pub const fn pack(self) -> u32 {
+        (self.block as u32)
+            | ((self.sky as u32) << 4)
+            | ((self.ao as u32) << 8)
+            | ((self.shade as u32) << 12)
+    }
+
+    /// Unpacks a [`Vertex::light`] payload.
+    #[must_use]
+    pub const fn unpack(packed: u32) -> Self {
+        Self {
+            block: (packed & 0x0F) as u8,
+            sky: ((packed >> 4) & 0x0F) as u8,
+            ao: ((packed >> 8) & 0x0F) as u8,
+            shade: (packed & (1 << 12)) != 0,
+        }
+    }
+}
+
+const fn clamp_light(level: u8) -> u8 {
+    if level > 15 {
+        15
+    } else {
+        level
+    }
 }
 
 /// CPU mesh for one chunk column.
+///
+/// Geometry is split into two passes so the renderer can draw all opaque
+/// faces first and blend the transparent faces afterwards, back to front.
+/// [`Mesh::vertices`]/[`Mesh::indices`] hold the opaque pass.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mesh {
-    /// Interleaved vertices, four per face.
+    /// Opaque interleaved vertices, four per face.
     pub vertices: Vec<Vertex>,
-    /// Triangle indices, six per face.
+    /// Opaque triangle indices, six per face.
     pub indices: Vec<u32>,
+    /// Transparent interleaved vertices (water, glass, leaves), four per face.
+    pub transparent_vertices: Vec<Vertex>,
+    /// Transparent triangle indices, six per face.
+    pub transparent_indices: Vec<u32>,
 }
 
 impl Mesh {
-    /// True when no faces were emitted.
+    /// True when neither pass has faces.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.indices.is_empty()
+        self.indices.is_empty() && self.transparent_indices.is_empty()
     }
 
-    /// Number of triangles.
+    /// Number of triangles across both passes.
     #[must_use]
     pub fn triangle_count(&self) -> usize {
-        self.indices.len() / 3
+        (self.indices.len() + self.transparent_indices.len()) / 3
     }
 
-    /// Number of quads (faces).
+    /// Number of quads (faces) across both passes.
     #[must_use]
     pub fn face_count(&self) -> usize {
+        (self.vertices.len() + self.transparent_vertices.len()) / 4
+    }
+
+    /// Number of opaque quads.
+    #[must_use]
+    pub fn opaque_face_count(&self) -> usize {
         self.vertices.len() / 4
+    }
+
+    /// Number of transparent quads.
+    #[must_use]
+    pub fn transparent_face_count(&self) -> usize {
+        self.transparent_vertices.len() / 4
     }
 }
 
@@ -115,26 +210,44 @@ impl Face {
     }
 }
 
-/// Read access to block states by world coordinate.
+/// Read access to block states and light by world coordinate.
 ///
 /// Implemented for [`World`], [`ChunkSnapshot`], and references to any
-/// source. Keep implementations cheap: the mesher performs up to six lookups
-/// per block.
+/// source. Keep implementations cheap: the mesher performs up to six block
+/// lookups per block and samples light around each visible corner.
 pub trait BlockSource {
     /// Block at world coordinates; unloaded or out-of-range positions must
     /// read as [`BlockState::AIR`].
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState;
+
+    /// Light at world coordinates.
+    ///
+    /// Sources without light data keep the M2 full-bright look by returning
+    /// [`LightLevel::FULL_SKY`]. Real world sources override this with their
+    /// nibble arrays; unloaded positions use the same daylight default so the
+    /// visible edge of a snapshot is not artificially dark.
+    fn light(&self, _x: i32, _y: i32, _z: i32) -> LightLevel {
+        LightLevel::FULL_SKY
+    }
 }
 
 impl BlockSource for World {
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
         World::block(self, BlockPos::new(x, y, z))
     }
+
+    fn light(&self, x: i32, y: i32, z: i32) -> LightLevel {
+        World::light(self, BlockPos::new(x, y, z))
+    }
 }
 
 impl<T: BlockSource + ?Sized> BlockSource for &T {
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
         (**self).block(x, y, z)
+    }
+
+    fn light(&self, x: i32, y: i32, z: i32) -> LightLevel {
+        (**self).light(x, y, z)
     }
 }
 
@@ -201,6 +314,23 @@ impl BlockSource for ChunkSnapshot {
             .as_ref()
             .map_or(BlockState::AIR, |column| {
                 column.block((x & 15) as usize, y as usize, (z & 15) as usize)
+            })
+    }
+
+    fn light(&self, x: i32, y: i32, z: i32) -> LightLevel {
+        if !(0..256).contains(&y) {
+            return LightLevel::DARK;
+        }
+        let chunk = ChunkPos::new(x >> 4, z >> 4);
+        let dx = chunk.x - self.origin.x;
+        let dz = chunk.z - self.origin.z;
+        if !(0..3).contains(&dx) || !(0..3).contains(&dz) {
+            return LightLevel::FULL_SKY;
+        }
+        self.chunks[(dz * 3 + dx) as usize]
+            .as_ref()
+            .map_or(LightLevel::FULL_SKY, |column| {
+                column.light((x & 15) as usize, y as usize, (z & 15) as usize)
             })
     }
 }
@@ -334,6 +464,7 @@ fn emit_face(mesh: &mut Mesh, x: i32, y: i32, z: i32, def: &FaceDef, layer: u32)
             normal: def.normal,
             uv,
             layer,
+            light: VertexLight::DAY.pack(),
         });
     }
     mesh.indices
@@ -432,6 +563,44 @@ const FACE_DEFS: [FaceDef; 6] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vertex_light_round_trips_and_clamps() {
+        let light = VertexLight::new(20, 3, 9, false);
+        assert_eq!(light.block, 15);
+        assert_eq!(VertexLight::unpack(light.pack()), light);
+        assert_eq!(
+            VertexLight::unpack(VertexLight::DAY.pack()),
+            VertexLight::DAY
+        );
+        assert_eq!(VertexLight::DAY.pack() & 0x0F, 0);
+        assert_eq!((VertexLight::DAY.pack() >> 4) & 0x0F, 15);
+        assert_eq!((VertexLight::DAY.pack() >> 8) & 0x0F, 15);
+        assert_ne!(VertexLight::DAY.pack() & (1 << 12), 0);
+    }
+
+    #[test]
+    fn mesh_counts_include_both_passes() {
+        let vertex = Vertex {
+            position: [0.0, 0.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0, 0.0],
+            layer: 0,
+            light: VertexLight::DAY.pack(),
+        };
+        let mut mesh = Mesh::default();
+        assert!(mesh.is_empty());
+        mesh.vertices.extend([vertex; 4]);
+        mesh.indices.extend([0, 1, 2, 0, 2, 3]);
+        mesh.transparent_vertices.extend([vertex; 8]);
+        mesh.transparent_indices
+            .extend([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]);
+        assert!(!mesh.is_empty());
+        assert_eq!(mesh.opaque_face_count(), 1);
+        assert_eq!(mesh.transparent_face_count(), 2);
+        assert_eq!(mesh.face_count(), 3);
+        assert_eq!(mesh.triangle_count(), 6);
+    }
 
     struct TestSource {
         blocks: Vec<(i32, i32, i32, BlockState)>,

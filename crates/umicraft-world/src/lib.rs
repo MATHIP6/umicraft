@@ -11,7 +11,7 @@
 //! Each column holds up to 16 [`Section`]s. A section stores a small palette
 //! of [`BlockState`]s plus bit-packed indices (1–12 bits per block) instead of
 //! the wire's fixed 16 bits, and keeps the block/sky light nibble arrays for
-//! later lighting work.
+//! smooth lighting and ambient occlusion.
 //!
 //! ```
 //! use umicraft_world::{BlockPos, BlockState, ChunkPos, World};
@@ -33,6 +33,7 @@
 pub mod block;
 pub mod chunk;
 pub mod error;
+pub mod light;
 pub mod pos;
 pub mod section;
 pub mod world;
@@ -40,6 +41,7 @@ pub mod world;
 pub use block::{BlockKind, BlockState};
 pub use chunk::{ChunkColumn, SECTION_COUNT, WORLD_HEIGHT};
 pub use error::WorldError;
+pub use light::LightLevel;
 pub use pos::{BlockPos, ChunkPos};
 pub use section::Section;
 pub use world::World;

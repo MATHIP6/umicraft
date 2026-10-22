@@ -33,7 +33,9 @@ use std::sync::Arc;
 use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant, MISSING_TEXTURE};
 use umicraft_world::{BlockState, ChunkPos};
 
-use crate::{emit_legacy_faces_with, occludes, texture_layer, BlockSource, Face, Mesh, Vertex};
+use crate::{
+    emit_legacy_faces_with, occludes, texture_layer, BlockSource, Face, Mesh, Vertex, VertexLight,
+};
 
 /// The baked models and the texture layers the model mesher reads.
 ///
@@ -216,6 +218,7 @@ fn emit_model_quads<S: BlockSource + ?Sized>(
                 normal: quad.normal,
                 uv,
                 layer,
+                light: VertexLight::DAY.pack(),
             });
         }
         mesh.indices

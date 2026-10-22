@@ -6,6 +6,7 @@ use umicraft_protocol::packets::play::clientbound::chunk_data::chunk_payload_len
 
 use crate::block::BlockState;
 use crate::error::WorldError;
+use crate::light::LightLevel;
 use crate::pos::ChunkPos;
 use crate::section::{Section, BLOCKS_PER_SECTION, LIGHT_BYTES, SECTION_SIZE};
 
@@ -65,6 +66,50 @@ impl ChunkColumn {
             .map_or(BlockState::AIR, |section| {
                 section.block(x, y % SECTION_SIZE, z)
             })
+    }
+
+    /// Combined light at column-local coordinates.
+    ///
+    /// A section the server did not send is all air. Vanilla treats that as
+    /// full sky light above the terrain, which is also the safe default for
+    /// columns whose empty sections were elided. A present section without a
+    /// sky array reports zero sky light (the Nether/End case).
+    #[must_use]
+    pub fn light(&self, x: usize, y: usize, z: usize) -> LightLevel {
+        if x >= SECTION_SIZE || z >= SECTION_SIZE || y >= WORLD_HEIGHT {
+            return LightLevel::DARK;
+        }
+        self.sections[y / SECTION_SIZE]
+            .as_ref()
+            .map_or(LightLevel::FULL_SKY, |section| {
+                LightLevel::new(
+                    section.block_light(x, y % SECTION_SIZE, z),
+                    section.sky_light(x, y % SECTION_SIZE, z).unwrap_or(0),
+                )
+            })
+    }
+
+    /// Writes block light at column-local coordinates.
+    ///
+    /// Out-of-range coordinates are ignored. Values above 15 are clamped.
+    pub fn set_block_light(&mut self, x: usize, y: usize, z: usize, level: u8) {
+        if x >= SECTION_SIZE || z >= SECTION_SIZE || y >= WORLD_HEIGHT {
+            return;
+        }
+        let section = self.sections[y / SECTION_SIZE].get_or_insert_with(Section::empty);
+        section.set_block_light(x, y % SECTION_SIZE, z, level);
+    }
+
+    /// Writes sky light at column-local coordinates.
+    ///
+    /// Out-of-range coordinates are ignored. Values above 15 are clamped.
+    /// A section created by this method starts with no blocks.
+    pub fn set_sky_light(&mut self, x: usize, y: usize, z: usize, level: u8) {
+        if x >= SECTION_SIZE || z >= SECTION_SIZE || y >= WORLD_HEIGHT {
+            return;
+        }
+        let section = self.sections[y / SECTION_SIZE].get_or_insert_with(Section::empty);
+        section.set_sky_light(x, y % SECTION_SIZE, z, level);
     }
 
     /// Writes a block at column-local coordinates.
@@ -189,6 +234,22 @@ mod tests {
         assert_eq!(column.block(0, 1, 0), BlockState::AIR);
         assert_eq!(column.biomes()[0], 1, "partial updates keep biomes");
         assert_eq!(column.section(0).unwrap().sky_light(0, 0, 0), Some(0));
+    }
+
+    #[test]
+    fn light_reads_nibbles_and_defaults_elided_sections_to_sky() {
+        let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+        column
+            .apply_payload(1, true, true, &one_section_payload(0x30))
+            .unwrap();
+        assert_eq!(column.light(0, 0, 0), LightLevel { block: 0, sky: 15 });
+        column.set_block_light(0, 0, 0, 7);
+        column.set_sky_light(0, 0, 0, 3);
+        assert_eq!(column.light(0, 0, 0), LightLevel { block: 7, sky: 3 });
+
+        // y=20 is an elided all-air section.
+        assert_eq!(column.light(0, 20, 0), LightLevel::FULL_SKY);
+        assert_eq!(column.light(16, 0, 0), LightLevel::DARK);
     }
 
     #[test]

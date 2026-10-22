@@ -7,7 +7,7 @@
 //! Run with `cargo test -p umicraft-render --test offscreen_ui -- --ignored`
 //! on a machine with a wgpu adapter.
 
-use umicraft_mesh::{Mesh, Vertex};
+use umicraft_mesh::{Mesh, Vertex, VertexLight};
 use umicraft_render::{
     fallback_atlas, BlockAtlasError, Camera, FontAtlasError, Image, Overlay, Renderer,
 };
@@ -26,6 +26,7 @@ fn terrain_quad() -> Mesh {
         normal,
         uv,
         layer: 0,
+        light: VertexLight::DAY.pack(),
     };
     Mesh {
         vertices: vec![
@@ -35,6 +36,7 @@ fn terrain_quad() -> Mesh {
             vertex(-2.0, 81.5, [0.0, 0.0]),
         ],
         indices: vec![0, 1, 2, 0, 2, 3],
+        ..Mesh::default()
     }
 }
 

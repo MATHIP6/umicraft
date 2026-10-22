@@ -14,16 +14,19 @@
 
 mod block_atlas;
 mod camera;
+mod environment;
 mod error;
 mod font;
 mod hud;
 mod overlay;
 mod renderer;
+mod sky;
 mod texture;
 mod ui_pass;
 
 pub use block_atlas::BlockAtlasError;
 pub use camera::Camera;
+pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use hud::{
     draw as draw_hud, selected_index, status_fills, Fill, HudLayout, HudState, ItemStack, Rect,
@@ -31,5 +34,6 @@ pub use hud::{
 };
 pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};
+pub use sky::SkyState;
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};
 pub use ui_pass::{fallback_atlas, FontAtlasError, UiPass};

@@ -26,28 +26,28 @@ use winit::window::Window;
 
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::camera::Camera;
+use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
 use crate::overlay::{Overlay, OverlayVertex};
+use crate::sky::{SkyRenderer, SkyState};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
 use crate::ui_pass::{self, FontAtlasError, UiPass};
 
-/// Depth attachment format.
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-/// Clear colour and fog target. Linear values; the sRGB target converts them
-/// to displayed values.
-const SKY: wgpu::Color = wgpu::Color {
-    r: 0.55,
-    g: 0.72,
-    b: 0.95,
-    a: 1.0,
-};
+/// Depth attachment format. The sky pipeline in [`crate::sky`] uses the same
+/// format so it can draw in the main pass.
+pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Initial overlay vertex-buffer capacity (64 KiB, about 4,000 glyphs).
 const OVERLAY_MIN_BYTES: u64 = 64 * 1024;
 /// WebGPU requires 256-byte row alignment for buffer↔texture copies.
 const ROW_ALIGNMENT: u32 = 256;
 
-const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Uint32];
+const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+    0 => Float32x3,
+    1 => Float32x3,
+    2 => Float32x2,
+    3 => Uint32,
+    4 => Uint32
+];
 const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
 
@@ -101,6 +101,10 @@ pub struct Renderer {
     /// [`Renderer::set_block_atlas`] can bind a replacement array without
     /// rebuilding the pipeline.
     terrain_layout: wgpu::BindGroupLayout,
+    /// Sky, sun/moon and procedural clouds.
+    sky: SkyRenderer,
+    /// World clock and dimension of the next frame.
+    environment: RenderEnvironment,
     /// Nearest-neighbour sampler shared by the fallback and installed arrays.
     block_sampler: wgpu::Sampler,
     overlay_pipeline: wgpu::RenderPipeline,
@@ -376,6 +380,7 @@ impl Renderer {
             create_terrain_pipeline(&device, &terrain_shader, &terrain_layout, format);
         let overlay_pipeline =
             create_overlay_pipeline(&device, &overlay_shader, &overlay_layout, format);
+        let sky = SkyRenderer::new(&device, format);
 
         let overlay_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("overlay vertices"),
@@ -405,6 +410,8 @@ impl Renderer {
             terrain_pipeline,
             terrain_bind_group,
             terrain_layout,
+            sky,
+            environment: RenderEnvironment::default(),
             block_sampler,
             overlay_pipeline,
             overlay_layout,
@@ -418,6 +425,15 @@ impl Renderer {
             offscreen,
             chunks: HashMap::new(),
         })
+    }
+
+    /// Sets the world clock and dimension used by the sky and fog passes.
+    ///
+    /// The default is midday in the overworld. Call once per frame before
+    /// [`Renderer::render`] or [`Renderer::render_with_ui`]; the value is
+    /// plain data and does not allocate.
+    pub fn set_environment(&mut self, environment: RenderEnvironment) {
+        self.environment = environment;
     }
 
     /// Draws one frame with the M3 HUD overlay only.
@@ -451,6 +467,7 @@ impl Renderer {
 
     fn render_frame(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
         self.write_camera(camera);
+        self.sky.update(&self.queue, camera, self.environment);
         self.upload_overlay(overlay);
         if self.surface.is_some() {
             self.render_window(overlay)
@@ -867,12 +884,19 @@ impl Renderer {
         overlay: &Overlay,
         encoder: &mut wgpu::CommandEncoder,
     ) {
+        let sky_state = SkyState::at(self.environment);
+        let sky_color = sky_state.sky_color;
         let color_attachment = Some(wgpu::RenderPassColorAttachment {
             view,
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(SKY),
+                load: wgpu::LoadOp::Clear(wgpu::Color {
+                    r: f64::from(sky_color[0]),
+                    g: f64::from(sky_color[1]),
+                    b: f64::from(sky_color[2]),
+                    a: 1.0,
+                }),
                 store: wgpu::StoreOp::Store,
             },
         });
@@ -891,6 +915,7 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        self.sky.draw(&mut pass);
         pass.set_pipeline(&self.terrain_pipeline);
         pass.set_bind_group(0, &self.terrain_bind_group, &[]);
         for mesh in self.chunks.values() {

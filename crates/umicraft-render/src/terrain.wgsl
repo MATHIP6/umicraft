@@ -18,6 +18,10 @@ struct VertexIn {
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(3) layer: u32,
+    // Packed VertexLight: block/sky/AO nibbles and the shade bit. The M6
+    // terrain workstream consumes it; the attribute is declared now so the
+    // vertex layout is frozen before the parallel split.
+    @location(4) light: u32,
 };
 
 struct VertexOut {

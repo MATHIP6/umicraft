@@ -158,6 +158,27 @@ impl Section {
             .map(|data| nibble(data.as_slice(), x, y, z))
     }
 
+    /// Writes the block-light level (0..=15) at section-local coordinates.
+    ///
+    /// Out-of-range coordinates are ignored. Values above 15 are clamped.
+    pub fn set_block_light(&mut self, x: usize, y: usize, z: usize, level: u8) {
+        set_nibble(self.block_light.as_mut_slice(), x, y, z, level);
+    }
+
+    /// Writes the sky-light level (0..=15) at section-local coordinates.
+    ///
+    /// A section that was created without a sky-light array (a dimension with
+    /// no sky) gains one; callers that synthesize a cave for a screenshot use
+    /// this to make the cave independent of the daylight above it.
+    ///
+    /// Out-of-range coordinates are ignored. Values above 15 are clamped.
+    pub fn set_sky_light(&mut self, x: usize, y: usize, z: usize, level: u8) {
+        let data = self
+            .sky_light
+            .get_or_insert_with(|| Box::new([0; LIGHT_BYTES]));
+        set_nibble(data.as_mut_slice(), x, y, z, level);
+    }
+
     fn state_at(&self, index: usize) -> BlockState {
         self.palette[self.read_entry(index) as usize]
     }
@@ -265,6 +286,19 @@ fn nibble(data: &[u8], x: usize, y: usize, z: usize) -> u8 {
     }
 }
 
+fn set_nibble(data: &mut [u8], x: usize, y: usize, z: usize, level: u8) {
+    let Some(index) = block_index(x, y, z) else {
+        return;
+    };
+    let level = if level > 15 { 15 } else { level };
+    let byte = &mut data[index >> 1];
+    if index & 1 == 0 {
+        *byte = (*byte & 0xF0) | level;
+    } else {
+        *byte = (*byte & 0x0F) | (level << 4);
+    }
+}
+
 fn light_array(source: &[u8]) -> Box<[u8; LIGHT_BYTES]> {
     let mut data = Box::new([0; LIGHT_BYTES]);
     let len = source.len().min(LIGHT_BYTES);
@@ -321,6 +355,27 @@ mod tests {
         assert_eq!(section.block_light(1, 0, 0), 2);
         assert_eq!(section.sky_light(1, 3, 2), Some(15));
         assert_eq!(section.sky_light(0, 0, 0), Some(0));
+    }
+
+    #[test]
+    fn set_light_writes_both_nibbles_and_clamps() {
+        let mut section = Section::empty();
+        section.set_block_light(0, 0, 0, 1);
+        section.set_block_light(1, 0, 0, 2);
+        section.set_block_light(2, 0, 0, 200);
+        assert_eq!(section.block_light(0, 0, 0), 1);
+        assert_eq!(section.block_light(1, 0, 0), 2);
+        assert_eq!(section.block_light(2, 0, 0), 15);
+
+        // A section without a sky array gains one on demand.
+        assert_eq!(section.sky_light(3, 0, 0), None);
+        section.set_sky_light(3, 0, 0, 9);
+        assert_eq!(section.sky_light(3, 0, 0), Some(9));
+        assert_eq!(section.sky_light(4, 0, 0), Some(0));
+
+        // Out-of-range writes are ignored.
+        section.set_block_light(16, 0, 0, 7);
+        assert_eq!(section.block_light(0, 0, 0), 1);
     }
 
     #[test]

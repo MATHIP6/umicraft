@@ -3,7 +3,7 @@
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
 (protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
 
-Status: **M5 complete**.
+Status: **M5 complete; M6 in progress**.
 The client logs in offline-mode, decodes chunk/block packets into a compact
 world, runs the player simulation on a game thread, meshes chunks on worker
 threads, and renders them with wgpu either in a window or to an offscreen PNG.
@@ -11,7 +11,9 @@ M4 added the backend-agnostic `umicraft-ui` crate, the custom widget layer, the
 F2 debug screen, and runtime loading of the user's real 1.8 font with an
 original fallback. M5 adds the 1.8 blockstate/model parser, the block registry,
 the real block/item texture array, the model mesher, and the server-less
-`--block-demo` acceptance path.
+`--block-demo` acceptance path. M6 is adding smooth block/sky lighting and
+ambient occlusion, the sky/sun/moon/cloud/fog pass, and sorted transparent
+water/glass/leaves; its interfaces are frozen in ADR-0008.
 
 ## Workspace
 
