@@ -12,7 +12,10 @@
 //!   is a full opaque cube or the same transparent/liquid state, the rule
 //!   frozen in ADR-0007 and shared with the legacy mesher;
 //! - a state without a baked model emits the legacy procedural cube, so
-//!   technical and unknown ids still render instead of opening holes.
+//!   technical and unknown ids still render instead of opening holes. Its
+//!   texture is the real water/lava atlas layer when available; every other
+//!   no-model state uses the missing-texture checker (or the procedural layer
+//!   when no real atlas is present).
 //!
 //! Every quad becomes four [`Vertex`]es and two triangles, like the legacy
 //! path. Its texture layer comes from [`AtlasLayout`]; a key the atlas does
@@ -27,10 +30,10 @@
 
 use std::sync::Arc;
 
-use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant};
+use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant, MISSING_TEXTURE};
 use umicraft_world::{BlockState, ChunkPos};
 
-use crate::{emit_legacy_faces, occludes, BlockSource, Mesh, Vertex};
+use crate::{emit_legacy_faces_with, occludes, texture_layer, BlockSource, Face, Mesh, Vertex};
 
 /// The baked models and the texture layers the model mesher reads.
 ///
@@ -90,12 +93,44 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                 if let Some(variant) = variant {
                     emit_model_quads(&mut mesh, source, &context.atlas, state, variant, position);
                 } else if state.is_renderable() {
-                    emit_legacy_faces(&mut mesh, source, wx, y, wz, state);
+                    emit_legacy_faces_with(&mut mesh, source, wx, y, wz, state, |face| {
+                        fallback_layer(state, face, &context.atlas)
+                    });
                 }
             }
         }
     }
     mesh
+}
+
+/// Picks the texture layer of a state that has no baked model.
+///
+/// Water and lava are rendered by 1.8's `BlockFluidRenderer`, not by a
+/// blockstate model: it samples `blocks/water_still`/`lava_still` on the
+/// horizontal faces and `blocks/water_flow`/`lava_flow` on the sides
+/// (`mcp: src/minecraft/client/renderer/BlockFluidRenderer.java`,
+/// `func_178268_a`). Keeping the legacy cube geometry while resolving those
+/// keys in the real atlas avoids sampling an unrelated layer such as a bed.
+/// Other no-model states use the missing-texture checker when the atlas has
+/// one, and the procedural layer when it does not (the no-assets fallback).
+fn fallback_layer(state: BlockState, face: Face, atlas: &AtlasLayout) -> u32 {
+    let fluid_key = match state.id() {
+        8 | 9 => Some(match face {
+            Face::Up | Face::Down => "blocks/water_still",
+            _ => "blocks/water_flow",
+        }),
+        10 | 11 => Some(match face {
+            Face::Up | Face::Down => "blocks/lava_still",
+            _ => "blocks/lava_flow",
+        }),
+        _ => None,
+    };
+    if let Some(layer) = fluid_key.and_then(|key| atlas.layer(key)) {
+        return layer;
+    }
+    atlas
+        .layer(MISSING_TEXTURE)
+        .unwrap_or_else(|| texture_layer(state, face))
 }
 
 /// Picks the weighted variant of `model` for a block position.
@@ -223,6 +258,52 @@ mod tests {
         let model = model(&[0, 0]);
         let selected = select_variant(&model, [4, 5, 6]).expect("the first variant");
         assert!(std::ptr::eq(selected, &model.variants[0]));
+    }
+
+    #[test]
+    fn modelless_fluids_use_the_real_atlas_keys() {
+        let atlas = AtlasLayout::from_keys([
+            "blocks/water_still",
+            "blocks/water_flow",
+            "blocks/lava_still",
+            "blocks/lava_flow",
+        ]);
+        let water = BlockState::new(9, 0);
+        assert_eq!(
+            fallback_layer(water, Face::Up, &atlas),
+            atlas.layer("blocks/water_still").expect("water still")
+        );
+        assert_eq!(
+            fallback_layer(water, Face::North, &atlas),
+            atlas.layer("blocks/water_flow").expect("water flow")
+        );
+        let lava = BlockState::new(10, 0);
+        assert_eq!(
+            fallback_layer(lava, Face::Down, &atlas),
+            atlas.layer("blocks/lava_still").expect("lava still")
+        );
+        assert_eq!(
+            fallback_layer(lava, Face::East, &atlas),
+            atlas.layer("blocks/lava_flow").expect("lava flow")
+        );
+        // Any other no-model state gets the checker, never a random atlas
+        // layer from the procedural table.
+        assert_eq!(
+            fallback_layer(BlockState::new(1, 0), Face::Up, &atlas),
+            atlas.layer(MISSING_TEXTURE).expect("missing layer")
+        );
+
+        // The no-assets path has no atlas keys and must keep the procedural
+        // layers, so the legacy mesh stays byte-identical.
+        let empty = AtlasLayout::default();
+        assert_eq!(
+            fallback_layer(water, Face::Up, &empty),
+            texture_layer(water, Face::Up)
+        );
+        assert_eq!(
+            fallback_layer(BlockState::new(1, 0), Face::Up, &empty),
+            texture_layer(BlockState::new(1, 0), Face::Up)
+        );
     }
 
     #[test]

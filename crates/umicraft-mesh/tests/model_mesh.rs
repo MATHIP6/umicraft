@@ -523,6 +523,34 @@ fn modelless_states_fall_back_to_the_legacy_cube() {
 }
 
 #[test]
+fn modelless_water_samples_the_real_fluid_layers() {
+    let set = BlockModelSet::build(&Memory::new(), &[]).expect("an empty model set");
+    let context = context(set, &["blocks/water_still", "blocks/water_flow"]);
+    let still = layer(&context, "blocks/water_still");
+    let flow = layer(&context, "blocks/water_flow");
+    let mesh = mesh_chunk_with_models(
+        ChunkPos::new(0, 0),
+        &Single {
+            position: [8, 8, 8],
+            state: BlockState::new(9, 0),
+        },
+        &context,
+    );
+
+    assert_eq!(mesh.face_count(), 6);
+    assert_eq!(quads_with(&mesh, [0.0, 1.0, 0.0], still), 1);
+    assert_eq!(quads_with(&mesh, [0.0, -1.0, 0.0], still), 1);
+    for normal in [
+        [-1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, 1.0],
+    ] {
+        assert_eq!(quads_with(&mesh, normal, flow), 1, "{normal:?}");
+    }
+}
+
+#[test]
 fn weighted_variants_are_deterministic_and_vary_by_position() {
     let source = Memory::new()
         .model("variant_a", &CUBE_JSON.replace("#all", "blocks/stone"))

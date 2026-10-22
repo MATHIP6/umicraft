@@ -278,13 +278,35 @@ fn emit_legacy_faces<S: BlockSource + ?Sized>(
     z: i32,
     state: BlockState,
 ) {
+    emit_legacy_faces_with(mesh, source, x, y, z, state, |face| {
+        texture_layer(state, face)
+    });
+}
+
+/// Emits the legacy cube faces with a caller-selected texture layer.
+///
+/// [`mesh_chunk`] uses the procedural [`texture_layer`] table. The M5 model
+/// path passes an atlas-aware layer function so fluids such as water and lava,
+/// which have no blockstate model, still sample the real texture array.
+pub(crate) fn emit_legacy_faces_with<S, F>(
+    mesh: &mut Mesh,
+    source: &S,
+    x: i32,
+    y: i32,
+    z: i32,
+    state: BlockState,
+    mut layer_for_face: F,
+) where
+    S: BlockSource + ?Sized,
+    F: FnMut(Face) -> u32,
+{
     for face in ALL_FACES {
         let def = &FACE_DEFS[face.index()];
         let neighbour = source.block(x + def.offset[0], y + def.offset[1], z + def.offset[2]);
         if occludes(neighbour, state) {
             continue;
         }
-        emit_face(mesh, x, y, z, state, face, def);
+        emit_face(mesh, x, y, z, def, layer_for_face(face));
     }
 }
 
@@ -300,17 +322,8 @@ pub(crate) fn occludes(neighbour: BlockState, current: BlockState) -> bool {
     neighbour == current && matches!(current.kind(), BlockKind::Transparent | BlockKind::Liquid)
 }
 
-fn emit_face(
-    mesh: &mut Mesh,
-    x: i32,
-    y: i32,
-    z: i32,
-    state: BlockState,
-    face: Face,
-    def: &FaceDef,
-) {
+fn emit_face(mesh: &mut Mesh, x: i32, y: i32, z: i32, def: &FaceDef, layer: u32) {
     let base = mesh.vertices.len() as u32;
-    let layer = texture_layer(state, face);
     for (corner, uv) in def.corners.iter().zip(def.uvs) {
         mesh.vertices.push(Vertex {
             position: [
