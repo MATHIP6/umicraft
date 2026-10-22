@@ -31,7 +31,7 @@ Do not edit `umicraft-model`, mesh, render or client.
    - loads all `assets/minecraft/models/block/` `*.json`;
    - loads all `assets/minecraft/textures/blocks/` and
      `assets/minecraft/textures/items/` `*.png`;
-   - ignores `.mcmeta` and any non-requested entry;
+   - counts `.mcmeta` entries but does not add them as layers;
    - keeps the full virtual path as the key.
 3. `BlockAtlas`:
    - layout keys are texture keys relative to `textures/`, e.g.
@@ -39,8 +39,10 @@ Do not edit `umicraft-model`, mesh, render or client.
    - uses `AtlasLayout::from_keys` so missing is layer 0 and the rest sort;
    - layer 0 is an original procedural missing checker (no Mojang art);
    - each layer is RGBA8; decode PNG with the `png` workspace dependency;
-   - all textures must be the same size (1.8 is 16×16); reject otherwise with
-     `AssetsError::Image` naming the entry;
+   - the first 16×16 frame of every texture is the layer; tall animated strips
+     (water/lava/fire/portal/clock/compass) are cropped, not rejected;
+   - any other non-16×16 image is rejected with `AssetsError::Image` naming
+     the entry;
    - layer-major contiguous pixels, length = width*height*4*layers.
 4. `ClientResources::get`, `file_count`, `atlas` accessors and
    `ResourceSource` (`read` returns a typed resource error with the virtual
@@ -48,6 +50,7 @@ Do not edit `umicraft-model`, mesh, render or client.
 5. Tests use tiny synthetic zip fixtures/PNGs only:
    - bulk read returns only the requested prefixes;
    - two synthetic 2×2 PNGs decode into the expected sorted layers;
+   - a tall synthetic animated strip contributes only its first frame;
    - missing layer is opaque/checker-like and not zero length;
    - wrong image size and truncated PNG -> typed `AssetsError::Image`;
    - `ResourceSource::read/list` work for loaded and missing paths.
@@ -57,8 +60,9 @@ Do not edit `umicraft-model`, mesh, render or client.
 If `/home/mathip/.minecraft/versions/1.8.8/1.8.8.json` and the verified jar are
 available, write a temporary example/test outside the tracked tree or use an
 `#[ignore]` test. It must report exactly 340 blockstate files, 1080 block model
-files, 382 block PNGs, 229 item PNGs and 612 layers. Do not commit the jar or
-any extracted PNG.
+files, 382 block texture entries (373 PNG + 9 mcmeta), 229 item texture entries
+(227 PNG + 2 mcmeta) and 601 layers. Do not commit the jar or any extracted
+PNG.
 
 ## Gates
 
