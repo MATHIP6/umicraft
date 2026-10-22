@@ -1,6 +1,6 @@
 # ADR-0007 — M5: the 1.8 model system and the texture atlas
 
-- Status: Accepted
+- Status: Accepted and implemented
 - Date: 2026-10-22
 - Deciders: project owner
 - Supersedes: none
@@ -332,18 +332,46 @@ GPU smoke tests. `git ls-files` must show no Mojang assets.
 - The renderer keeps a 19-layer fallback until `set_block_atlas` succeeds, so a
   missing installation, corrupt jar or low texture-array limit degrades to the
   M2 look instead of failing.
+- Water and lava have no blockstate model. The model mesher keeps their legacy
+  cube geometry but maps the still/flow texture keys of the real atlas, so they
+  no longer sample an unrelated procedural layer. Other no-model states use the
+  missing-texture checker when the atlas is present.
 - M5 does not add biome tint, smooth lighting, transparent sorting or fog; those
   remain M6. Alpha cutout is the minimum needed for plants and glass.
 
 ## Acceptance checklist
 
-- [ ] 340 blockstates and 1080 source models parsed and counted.
-- [ ] 382 block + 229 item texture entries inventoried, 600 PNG frames
+- [x] 340 blockstates and 1080 source models parsed and counted.
+- [x] 382 block + 229 item texture entries inventoried, 600 PNG frames
       decoded into 601 layers (including the missing layer).
-- [ ] Common acceptance blocks use real blockstate/model shapes and textures.
-- [ ] Bottom/top slabs are 8/16 high; stairs/fence/pane/torch/rail/cross have
+- [x] Common acceptance blocks use real blockstate/model shapes and textures.
+- [x] Bottom/top slabs are 8/16 high; stairs/fence/pane/torch/rail/cross have
       non-cube geometry.
-- [ ] Windowed client and offscreen screenshot share the same model/atlas path.
-- [ ] No official installation falls back to the procedural M2 renderer.
-- [ ] No Mojang asset is tracked by git.
-- [ ] Full workspace gates and GPU smoke tests pass.
+- [x] Windowed client and offscreen screenshot share the same model/atlas path.
+- [x] No official installation falls back to the procedural M2 renderer.
+- [x] No Mojang asset is tracked by git.
+- [x] Full workspace gates and GPU smoke tests pass.
+
+## Final verification (2026-10-22)
+
+`main` at `2c60a86` (W6 merge) with the fluid fallback fix from `27fe180`:
+
+- `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings`: pass.
+- `cargo test --workspace`: **610 passed, 0 failed, 11 ignored**.
+- `cargo doc --workspace --no-deps` and `cargo deny check licenses bans`: pass.
+- Ignored GPU/official tests: 5 client, 3 `offscreen_ui`, 1 offscreen smoke and
+  2 `block_atlas` tests passed.
+- `--block-demo`: 340 blockstates, 1080 source models, 611 texture entries,
+  601 layers, 32×32 RGBA8 atlas of 2,461,696 bytes, 2912 block states,
+  899 quads and 0 metadata-variant fallbacks.
+- `--block-demo --screenshot`: 1280×720 PNG, 258,828 bytes; water now samples
+  `blocks/water_still`/`water_flow` instead of an unrelated atlas layer.
+- Empty-`HOME` screenshot: one warning and the procedural green terrain.
+- `--ui-demo` and its screenshot are unchanged.
+- `git ls-files` contains no `.jar`, `.class`, `.png`, `.mcmeta`, `.json` or
+  `assets/`/`minecraft/` path.
+
+The windowed client was not launched interactively because the environment has
+no usable desktop session; its meshing and atlas-upload path is the same code
+covered by the screenshot and ignored GPU tests.

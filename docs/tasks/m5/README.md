@@ -61,20 +61,22 @@ At the time this guide was written (2026-10-22):
 
 | Workstream | State |
 |---|---|
-| Setup / W0 | `b3b2a15` scaffold; W1 and W3 merged into `main` |
+| Setup / W0 | complete; W1–W6 merged into `main` |
 | W1 model core | merged; crate gates green |
 | W2 registry | merged; 182 definitions and 1,246 metadata rules |
 | W3 atlas | merged; official 1.8.8 counts verified |
-| W4 mesher | merged; full-registry integration now possible |
+| W4 mesher | merged; model quads, culling, fallback and benchmark green |
 | W5 renderer | merged; atlas-upload GPU tests green |
-| W6 client | agent starting in `.worktrees/m5-client` |
+| W6 client | merged; `--block-demo`, screenshots and acceptance green |
 
-The lead updates this table at each handoff. A worktree with uncommitted
-changes belongs to its active agent; the lead does not reset or clean it.
+M5 is accepted. The worktrees are retained for inspection; sync a branch with
+`main` before reusing one. The final acceptance record is in ADR-0007.
 
 W4 was started before W2 merged because the mesher consumes baked models, not
-the registry table; its unit tests build synthetic model sets. W2 is now merged,
-so W6 must exercise the full registry through `--block-demo`.
+the registry table; its unit tests build synthetic model sets. This deviation
+was recorded, and W6 exercised the full registry through `--block-demo`. The
+lead also fixed the no-model fluid fallback so water and lava sample their real
+atlas keys instead of a procedural layer.
 
 ## Integration gates
 
