@@ -155,17 +155,27 @@ fn block_atlas_upload_replaces_the_terrain_array() {
     // The quad spans NDC x = ±0.43 at z = −5, so its texture columns land
     // near x = 48 (left texel, transparent) and x = 80 (right texel, red),
     // with the quad edge around x = 36.
-    let sky = pixel(&image, 0, 0);
     let opaque = pixel(&image, 80, HEIGHT / 2);
     assert!(
         opaque[0] > 150 && opaque[1] < 60 && opaque[2] < 60,
         "the opaque half must sample the red layer: {opaque:?}"
     );
+
+    // The sky is a vertical gradient after M6, so a top-left pixel is not a
+    // valid reference for a pixel near the centre. Render the same frame
+    // without the quad and compare the exact screen position instead.
+    let cutout = pixel(&image, 48, HEIGHT / 2);
+    renderer.upload_mesh(ChunkPos::new(0, 0), &Mesh::default());
+    renderer
+        .render(&camera, &empty)
+        .expect("render sky reference");
+    let sky_only = renderer.read_pixels().expect("read sky reference");
     assert_eq!(
-        pixel(&image, 48, HEIGHT / 2),
-        sky,
+        cutout,
+        pixel(&sky_only, 48, HEIGHT / 2),
         "alpha cutout must discard the transparent half"
     );
+    renderer.upload_mesh(ChunkPos::new(0, 0), &terrain_quad());
 
     // A second upload replaces the array instead of appending to it.
     renderer
