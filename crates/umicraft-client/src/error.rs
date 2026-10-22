@@ -4,7 +4,7 @@
 
 use thiserror::Error;
 
-use umicraft_render::RenderError;
+use umicraft_render::{FontAtlasError, RenderError};
 use umicraft_world::WorldError;
 
 /// Fatal client failure.
@@ -25,6 +25,9 @@ pub enum ClientError {
     /// Renderer initialization, draw, or readback failure.
     #[error(transparent)]
     Render(#[from] RenderError),
+    /// The renderer rejected both the loaded font atlas and the fallback.
+    #[error("font atlas: {0}")]
+    FontAtlas(#[from] FontAtlasError),
     /// Filesystem failure while writing a screenshot.
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),

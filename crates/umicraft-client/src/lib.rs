@@ -10,7 +10,8 @@
 //! [`args`] parses the CLI, [`network`] owns the connection, [`game`] owns the
 //! world and the player, [`input`] turns the keys into the intent of the
 //! game logic, [`mesher`] runs the CPU mesher pool, [`headless`] plays a
-//! scripted session without a window and [`screenshot`] writes a PNG.
+//! scripted session without a window, [`screenshot`] writes a PNG, and
+//! [`ui_font`] loads the user's 1.8 font or the built-in fallback.
 
 pub mod args;
 pub mod chat;
@@ -21,6 +22,8 @@ pub mod input;
 pub mod mesher;
 pub mod network;
 pub mod screenshot;
+pub mod ui_font;
+pub mod ui_input;
 pub mod window;
 
 pub use error::ClientError;
