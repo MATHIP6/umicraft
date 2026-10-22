@@ -400,8 +400,13 @@ fn frames_reset_responses_and_reuse_the_draw_list() {
     let first_output = ui.end_frame();
     assert_eq!(first_output.responses.len(), 1);
     assert_eq!(first_output.draw_list.len(), 1);
+    let capacity = first_output.draw_list.capacity();
+
+    ui.recycle_output(first_output);
+    assert_eq!(ui.draw().capacity(), capacity);
 
     ui.begin_frame(viewport, UiInput::default());
+    assert_eq!(ui.draw().capacity(), capacity);
     assert!(ui.draw().is_empty());
     assert_eq!(ui.focus(), None);
     let second = ui.response(id, rect);

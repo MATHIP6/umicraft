@@ -172,6 +172,8 @@ impl Ui {
     /// frame is dropped, and every stored response is synchronised with
     /// [`UiOutput::focus`]. The draw list and the response vector move into the
     /// output; their allocations belong to the caller until the next frame.
+    /// Pass the output back through [`Self::recycle_output`] after rendering
+    /// to reuse those allocations.
     pub fn end_frame(&mut self) -> UiOutput {
         self.draw.close_clips();
 
@@ -206,6 +208,21 @@ impl Ui {
         self.primary_pressed = None;
         self.click_consumed = false;
         output
+    }
+
+    /// Returns the allocations of a completed frame to this context.
+    ///
+    /// [`Self::end_frame`] transfers ownership of the draw list and the
+    /// responses to the caller. When the renderer is done with a
+    /// [`UiOutput`], passing it back here lets the next frame reuse those
+    /// vectors instead of allocating them again. Call it between frames, not
+    /// while a frame is being built; the focus stored in the output is
+    /// ignored because the context already owns the current focus.
+    pub fn recycle_output(&mut self, output: UiOutput) {
+        self.draw = output.draw_list;
+        self.draw.clear();
+        self.responses = output.responses;
+        self.responses.clear();
     }
 
     /// The current viewport in physical pixels.
