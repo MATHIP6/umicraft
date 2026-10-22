@@ -25,7 +25,7 @@ use umicraft_net::login::login_offline;
 use umicraft_net::Connection;
 use umicraft_protocol::packets::play::clientbound::{
     self, BlockChange, ChunkData, EntityEquipment, MapChunkBulk, MultiBlockChange, PositionLook,
-    Respawn, SetExperience, SpawnPosition, UpdateHealth,
+    Respawn, SetExperience, SpawnPosition, TimeUpdate, UpdateHealth,
 };
 use umicraft_protocol::packets::play::serverbound::{
     self, Brand, ClientSettings, DiggingStatus, HeldItemChange as ServerHeldItemChange, Input,
@@ -89,6 +89,11 @@ pub enum NetEvent {
     SpawnPosition(SpawnPosition),
     /// The experience bar changed.
     SetExperience(SetExperience),
+    /// The world clock changed (`Time Update`, 0x03).
+    ///
+    /// The signed time of day is preserved: a negative value means the server
+    /// froze the day/night cycle (`S03PacketTimeUpdate` negates the field).
+    TimeUpdate(TimeUpdate),
     /// Fatal connection/session error, already formatted for the overlay.
     Error(String),
 }
@@ -526,6 +531,9 @@ async fn handle_packet(
             let packet = clientbound::Chat::decode(&mut &body[..])?;
             send(events, NetEvent::Chat(packet.json));
         }
+        clientbound::TimeUpdate::ID => {
+            send(events, decode_time_update(body)?);
+        }
         clientbound::PositionLook::ID => {
             let packet = clientbound::PositionLook::decode(&mut &body[..])?;
             let placement = state.resolve(&packet);
@@ -586,6 +594,18 @@ async fn handle_packet(
         }
     }
     Ok(())
+}
+
+/// Decodes a `Time Update` (0x03) body into the event of the game thread.
+///
+/// The packet is split out of [`handle_packet`] so the `0x03` dispatch can be
+/// unit-tested without a socket.
+///
+/// # Errors
+///
+/// [`umicraft_protocol::ProtocolError`] when the body is truncated.
+fn decode_time_update(body: &[u8]) -> Result<NetEvent, umicraft_protocol::ProtocolError> {
+    Ok(NetEvent::TimeUpdate(TimeUpdate::decode(&mut &body[..])?))
 }
 
 /// Sends the two entry packets a real client sends after `Join Game`.
@@ -756,5 +776,25 @@ mod tests {
             .expect("encode");
         let packet = KeepAlive::decode(&mut &body[..]).expect("decode");
         assert_eq!(packet.id, 4242);
+    }
+
+    #[test]
+    fn the_time_update_body_becomes_the_clock_event() {
+        use umicraft_protocol::EncodablePacket;
+        assert_eq!(TimeUpdate::ID, 0x03);
+        let mut body = Vec::new();
+        TimeUpdate {
+            world_age: 72_770,
+            time_of_day: -6_000,
+        }
+        .encode_body(&mut body)
+        .expect("encode");
+        let event = decode_time_update(&body).expect("decode");
+        let NetEvent::TimeUpdate(packet) = event else {
+            panic!("the 0x03 body must become a TimeUpdate event");
+        };
+        assert_eq!(packet.world_age, 72_770);
+        assert_eq!(packet.time_of_day, -6_000);
+        assert!(decode_time_update(&body[..4]).is_err());
     }
 }

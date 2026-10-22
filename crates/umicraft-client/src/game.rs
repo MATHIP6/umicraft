@@ -139,6 +139,13 @@ pub struct Frame {
     /// The render thread interpolates between the two newest frames, so it
     /// needs to know when the tick happened (GAM-8).
     pub tick_time: Instant,
+    /// The signed time of day in ticks.
+    ///
+    /// Negative values mean the server froze the day/night cycle; the render
+    /// thread must not advance the clock locally (ADR-0008 §4).
+    pub world_time: i64,
+    /// The current dimension (`0` overworld, `-1` Nether, `1` End).
+    pub dimension: i8,
 }
 
 /// The statistics the debug overlay shows.
@@ -327,6 +334,13 @@ struct Game {
     entity_id: i32,
     /// The gamemode of the local player; `1` is creative.
     gamemode: u8,
+    /// The current dimension; `0` is the overworld.
+    dimension: i8,
+    /// The latest signed time of day from `Time Update`.
+    ///
+    /// It is never advanced locally: the server sends updates regularly and a
+    /// negative value means the clock is frozen.
+    world_time: i64,
     /// Whether the server is in the play state.
     playing: bool,
     /// The world spawn point, as the server announced it.
@@ -385,6 +399,8 @@ impl Game {
             status: "CONNECTING".to_string(),
             entity_id: 0,
             gamemode: 0,
+            dimension: 0,
+            world_time: 0,
             playing: false,
             spawn: None,
             state: None,
@@ -662,6 +678,8 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     let _ = frames.try_send(RenderEvent::Frame(Frame {
         state: state.interpolated(1.0),
         tick_time,
+        world_time: game.world_time,
+        dimension: game.dimension,
     }));
 }
 
@@ -678,6 +696,10 @@ fn handle_net(
             game.dirty.clear();
             game.entity_id = info.entity_id;
             game.gamemode = info.gamemode;
+            game.dimension = info.dimension;
+            // The world clock of the new session is unknown until the first
+            // `Time Update`; start at the beginning of the cycle.
+            game.world_time = 0;
             game.status_data.gamemode = info.gamemode;
             game.playing = true;
             game.status = "PLAYING".to_string();
@@ -768,8 +790,13 @@ fn handle_net(
             if changed {
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
+                // The new dimension has its own clock; the first `Time
+                // Update` of the new world arrives right after the respawn.
+                game.world_time = 0;
                 let _ = frames.try_send(RenderEvent::Reset);
             }
+            // A same-dimension respawn keeps the current world clock.
+            game.dimension = dimension;
             game.state = None;
             game.status = "RESPAWN".to_string();
             // The player comes back with a full health (MCP
@@ -813,6 +840,12 @@ fn handle_net(
             game.experience = packet.experience;
             game.level = packet.level;
             game.hud_dirty = true;
+        }
+        NetEvent::TimeUpdate(packet) => {
+            // The signed value is kept as-is: a negative time means the
+            // server froze the cycle. The client never advances the clock
+            // between packets (ADR-0008 §4).
+            game.world_time = packet.time_of_day;
         }
         NetEvent::Error(message) => {
             tracing::error!(%message, "network session failed");
@@ -1549,5 +1582,95 @@ mod tests {
             panic!("the input must be kept");
         };
         assert_eq!(forward, 9.0);
+    }
+
+    #[test]
+    fn a_time_update_sets_the_world_clock_and_the_frame_carries_it() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, received) = mpsc::sync_channel(4);
+        game.state = Some(GameState::new(DVec3::new(0.0, 64.0, 0.0)));
+
+        handle_net(
+            &mut game,
+            NetEvent::TimeUpdate(umicraft_protocol::packets::play::clientbound::TimeUpdate {
+                world_age: 72_770,
+                time_of_day: -6_000,
+            }),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.world_time, -6_000);
+
+        publish_frame(&game, &frames, Instant::now());
+        let RenderEvent::Frame(frame) = received.try_recv().expect("a frame") else {
+            panic!("the published event must be a frame");
+        };
+        assert_eq!(frame.world_time, -6_000);
+        assert_eq!(frame.dimension, 0);
+        // `Frame` is `Copy`, so the render thread never needs a lock or an
+        // allocation to keep the newest snapshot.
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<Frame>();
+    }
+
+    #[test]
+    fn joining_and_changing_dimension_reset_the_world_clock() {
+        use umicraft_net::client::JoinGameInfo;
+        use umicraft_protocol::packets::play::clientbound::{Respawn, TimeUpdate};
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let join = |dimension| JoinGameInfo {
+            entity_id: 1,
+            gamemode: 0,
+            dimension,
+            difficulty: 0,
+            max_players: 20,
+            level_type: "default".to_string(),
+            reduced_debug_info: false,
+        };
+        let respawn = |dimension| Respawn {
+            dimension,
+            difficulty: 0,
+            game_mode: 0,
+            world_type: "default".to_string(),
+        };
+
+        handle_net(&mut game, NetEvent::JoinGame(join(0)), &mut queue, &frames);
+        assert_eq!(game.world_time, 0);
+        assert_eq!(game.dimension, 0);
+
+        handle_net(
+            &mut game,
+            NetEvent::TimeUpdate(TimeUpdate {
+                world_age: 1,
+                time_of_day: -6_000,
+            }),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.world_time, -6_000);
+
+        // A same-dimension respawn keeps the frozen clock.
+        handle_net(
+            &mut game,
+            NetEvent::Respawn(respawn(0)),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.world_time, -6_000);
+        assert_eq!(game.dimension, 0);
+
+        // A dimension change starts a new clock.
+        handle_net(
+            &mut game,
+            NetEvent::Respawn(respawn(-1)),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.world_time, 0);
+        assert_eq!(game.dimension, -1);
     }
 }

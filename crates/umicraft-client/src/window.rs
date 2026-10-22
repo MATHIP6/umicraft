@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_game::RenderState;
-use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
+use umicraft_render::{draw_hud, Camera, HudState, Overlay, RenderEnvironment, Renderer};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -44,6 +44,10 @@ struct View {
     current: Option<RenderState>,
     /// The instant of the newest tick.
     tick_time: Option<Instant>,
+    /// The newest signed world time in ticks.
+    world_time: i64,
+    /// The dimension of the newest frame.
+    dimension: i8,
 }
 
 impl View {
@@ -52,6 +56,37 @@ impl View {
         self.previous = self.current;
         self.current = Some(frame.state);
         self.tick_time = Some(frame.tick_time);
+        self.world_time = frame.world_time;
+        self.dimension = frame.dimension;
+    }
+
+    /// The interpolation fraction of the two newest ticks for `now`.
+    ///
+    /// The value is clamped to `0.0..=1.0` and is the same fraction
+    /// [`View::sample`] uses, so the camera and the world clock stay in step.
+    fn partial_tick(&self, now: Instant) -> f32 {
+        if self.previous.is_none() {
+            return 0.0;
+        }
+        let Some(tick_time) = self.tick_time else {
+            return 0.0;
+        };
+        let elapsed = now.saturating_duration_since(tick_time).as_secs_f32();
+        (elapsed / TICK.as_secs_f32()).clamp(0.0, 1.0)
+    }
+
+    /// The render environment for `now`.
+    ///
+    /// `RenderEnvironment::new` clamps the interpolation fraction, and the
+    /// world clock/dimension are the newest values the game thread published;
+    /// the render thread never advances the clock by itself.
+    fn environment(&self, now: Instant, view_distance: u8) -> RenderEnvironment {
+        RenderEnvironment::new(
+            self.dimension,
+            self.world_time,
+            self.partial_tick(now),
+            view_distance,
+        )
     }
 
     /// The interpolated state for `now`.
@@ -64,11 +99,7 @@ impl View {
         let Some(previous) = self.previous else {
             return Some(current);
         };
-        let Some(tick_time) = self.tick_time else {
-            return Some(current);
-        };
-        let elapsed = now.saturating_duration_since(tick_time).as_secs_f32();
-        let alpha = (elapsed / TICK.as_secs_f32()).clamp(0.0, 1.0);
+        let alpha = self.partial_tick(now);
         Some(RenderState {
             position: previous.position.lerp(current.position, alpha),
             yaw: current.yaw,
@@ -592,6 +623,7 @@ impl App {
         self.collect_meshes();
         self.publish_input();
         self.update_camera(now);
+        let environment = self.view.environment(now, self.args.view_distance);
         self.build_overlay();
 
         if self.exit_error.is_some() {
@@ -608,6 +640,9 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
+        // One environment per frame: the sky and the fog read the same clock
+        // and interpolation fraction as the camera.
+        renderer.set_environment(environment);
         let rendered = match ui_frame.as_ref() {
             Some(frame) => renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list),
             None => renderer.render(&self.camera, &self.overlay),
@@ -841,5 +876,79 @@ mod tests {
         assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, true));
         assert!(!is_debug_toggle(KeyCode::F2, ElementState::Released, false));
         assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
+    }
+
+    #[test]
+    fn the_frame_carries_the_clock_and_dimension() {
+        let mut view = View::default();
+        let tick = Instant::now();
+        let state = RenderState {
+            position: glam::Vec3::new(0.0, 64.0, 0.0),
+            yaw: 0.0,
+            pitch: 0.0,
+            on_ground: true,
+        };
+        view.push(Frame {
+            state,
+            tick_time: tick,
+            world_time: -6_000,
+            dimension: -1,
+        });
+        // One frame is not enough to interpolate, so the clock fraction is
+        // zero even when `now` is already ahead of the tick.
+        assert_eq!(view.environment(tick + TICK * 2, 12).partial_tick, 0.0);
+
+        let later = tick + TICK;
+        view.push(Frame {
+            state,
+            tick_time: later,
+            world_time: -5_900,
+            dimension: -1,
+        });
+
+        assert_eq!(view.world_time, -5_900);
+        assert_eq!(view.dimension, -1);
+        let halfway = view.environment(later + TICK / 2, 12);
+        assert!((halfway.partial_tick - 0.5).abs() < 1e-3);
+        assert_eq!(view.environment(later - TICK, 12).partial_tick, 0.0);
+        let environment = view.environment(later + TICK * 2, 12);
+        assert_eq!(environment.dimension, -1);
+        assert_eq!(environment.world_time, -5_900);
+        assert_eq!(environment.partial_tick, 1.0);
+        assert_eq!(environment.view_distance, 12);
+    }
+
+    #[test]
+    fn the_partial_tick_matches_the_camera_interpolation() {
+        let mut view = View::default();
+        let tick = Instant::now();
+        let state = RenderState {
+            position: glam::Vec3::ZERO,
+            yaw: 0.0,
+            pitch: 0.0,
+            on_ground: false,
+        };
+        // One frame is not enough to interpolate: the camera shows the
+        // current state and the clock fraction is zero.
+        view.push(Frame {
+            state,
+            tick_time: tick,
+            world_time: 0,
+            dimension: 0,
+        });
+        assert_eq!(view.partial_tick(tick), 0.0);
+        assert_eq!(view.environment(tick, 8).partial_tick, 0.0);
+
+        view.push(Frame {
+            state,
+            tick_time: tick + TICK,
+            world_time: 100,
+            dimension: 0,
+        });
+        // Before the newest tick and after a full tick the fraction is
+        // clamped to the interpolation range.
+        assert_eq!(view.partial_tick(tick), 0.0);
+        assert_eq!(view.partial_tick(tick + TICK * 3), 1.0);
+        assert!((0.0..=1.0).contains(&view.environment(tick + TICK * 2, 8).partial_tick));
     }
 }
