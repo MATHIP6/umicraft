@@ -1114,3 +1114,25 @@ fn debug_screen_runs_the_scripted_acceptance_sequence() {
     assert_eq!(screen.selection(), Some(1));
     assert!(screen.scroll_offset() > 0.0);
 }
+
+/// Regression: the default 720-pixel window must have a scrollable list, not
+/// only the small viewport used by the scripted unit test above. Otherwise the
+/// W5 `--ui-demo` wheel step would exercise no scrolling at the default size.
+#[test]
+fn debug_screen_list_scrolls_at_720p() {
+    let viewport = Rect::new(0.0, 0.0, 1280.0, 720.0);
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(viewport);
+    let mut screen = DebugScreen::new();
+
+    run_screen(&mut ui, &mut screen, &atlas, UiInput::default());
+    let list_rect = screen.list_rect();
+    assert!(list_rect.height > 0.0);
+
+    let output = run_screen(&mut ui, &mut screen, &atlas, wheel(center(list_rect), 3.0));
+    assert!(
+        screen.scroll_offset() > 0.0,
+        "the original list used to fit entirely in a 720-pixel panel"
+    );
+    assert_eq!(output.draw_list.clip_depth(), 0);
+}
