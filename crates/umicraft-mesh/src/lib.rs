@@ -582,7 +582,7 @@ const fn grid_index(du: i32, dv: i32) -> usize {
 ///
 /// A full-cube face has four corners whose four-cell light footprints cover
 /// exactly this 3×3 grid (plus the cell directly outward), so sampling it once
-/// costs nine light and nine occlusion lookups per emitted face instead of
+/// costs nine light and eight occlusion lookups per emitted face instead of
 /// sixteen light and twelve block lookups.
 struct FaceSamples {
     light: [LightLevel; 9],
@@ -610,7 +610,9 @@ impl FaceSamples {
                 let cell = frame.v.offset(frame.u.offset(base, du), dv);
                 let index = grid_index(du, dv);
                 samples.light[index] = source.light(cell[0], cell[1], cell[2]);
-                if ao_enabled {
+                // AO only ever reads the edge and diagonal cells; the centre
+                // is needed for smooth light but never for occlusion.
+                if ao_enabled && (du != 0 || dv != 0) {
                     samples.opaque[index] = source.block(cell[0], cell[1], cell[2]).is_opaque();
                 }
             }
