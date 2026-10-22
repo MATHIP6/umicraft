@@ -9,14 +9,14 @@ Rules (restated):
    no shared locks on hot paths.
 3. Every cross-thread boundary is documented here as it is introduced.
 
-## Current state (M4)
+## Current state (M5)
 
 | Thread | Owns | Talks to |
 |---|---|---|
-| Main/render thread (winit) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the mesh pool | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
-| **Game thread** (new in M3) | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) |
+| Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the mesh pool, and the one-time official resource load | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
+| **Game thread** | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) |
 | Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, the play loop, the keepalive answers | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
-| Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
+| Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s, with a shared immutable `ModelMeshContext` when the official models loaded | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
 
 The game thread is the only owner of the world: the render thread never
 mutates a chunk, and the collision solver never takes a lock (spec §5.3,
@@ -105,6 +105,36 @@ ADR-0005).
   with the renderer. `--ui-demo --screenshot` reuses the same final draw list
   on the offscreen renderer.
 
+### Official asset and model boundary (M5)
+
+- The official resources are loaded once per process, on the main thread,
+  before any mesh worker or renderer mesh exists. `ModelResources::load` first
+  resolves and verifies the user's 1.8.8 client jar, reads the blockstates,
+  block models and block/item textures in one bulk pass into an in-memory
+  `ClientResources`, builds the immutable `BlockModelSet` from `definitions()`
+  and the atlas, and wraps a `ModelMeshContext` in an `Arc`.
+- The windowed client loads the bundle in `App::new`, before the mesh pool and
+  before the event loop starts. Screenshot mode loads it before the pool and
+  creates the offscreen renderer immediately, because the atlas must be
+  accepted before any model job is queued. The load is start-up work only: no
+  frame, tick or worker ever reads the jar or touches the disk for assets.
+- Workers receive the `Arc<ModelMeshContext>` when the bundle loaded and call
+  `mesh_chunk_with_models`; otherwise they call the legacy `mesh_chunk`. The
+  context contains only immutable model quads and the atlas layout, so every
+  worker reads it without a lock and no job mutates shared model data.
+- The render thread uploads the texture array with `Renderer::set_block_atlas`
+  after the renderer exists. If the upload is rejected (for example a low
+  adapter limit), the bundle is dropped, the pending/waiting jobs and renderer
+  meshes are cleared, and the pool is rebuilt without a context. This keeps
+  real-layer meshes and the procedural fallback texture array from ever being
+  mixed. A missing installation, corrupt jar, model error or rejection logs
+  one warning; the game keeps running on the M2 procedural path.
+- `--block-demo` stays on the main thread: it builds the synthetic columns,
+  meshes one `ChunkSnapshot::from_columns` synchronously with
+  `mesh_chunk_with_models`, prints the report, and only then creates the
+  offscreen renderer when `--screenshot` is present. Without the flag it never
+  touches the GPU; with it, the demo uses the same atlas upload as the window.
+
 ### World and mesh boundary
 
 - `World` and all block mutation stay on the game thread. Columns are
@@ -112,7 +142,8 @@ ADR-0005).
   observes a half-applied column.
 - A dirty column is snapshotted as a 3×3 `ChunkSnapshot` of `Arc` clones
   before it leaves the game thread. Snapshot capture is the only game
-  thread work; the 16×256×16 meshing scan stays on workers.
+  thread work; the 16×256×16 meshing scan, model-quad emission and texture
+  layer assignment stay on workers.
 - Jobs use `sync_channel(512)` and are submitted with `try_send`. If the
   queue is full, the chunk is put back on the render thread's waiting list
   and retried on a later frame; the render thread never waits for a worker.
@@ -153,3 +184,10 @@ ADR-0005).
   user's installation at startup and uploaded once, with the original fallback
   on every failure. `--ui-demo` drives the same screen without a server or
   GPU, and its screenshot path reuses the offscreen renderer.
+- M5: the main thread loads the verified 1.8.8 client jar once before the pool
+  and renderer, builds the immutable model set and atlas, and gives workers an
+  `Arc<ModelMeshContext>`. Windowed and screenshot meshing switch to
+  `mesh_chunk_with_models` as a unit with the atlas upload; a rejected atlas
+  drops the bundle and rebuilds the pool without it. `--block-demo` meshes the
+  synthetic acceptance scene synchronously and needs no server, and reaches
+  the GPU only when a screenshot is requested.

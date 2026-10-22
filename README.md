@@ -3,14 +3,15 @@
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
 (protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
 
-Status: **M4 complete; M5 (1.8 block models and texture atlas) in progress**.
+Status: **M5 complete**.
 The client logs in offline-mode, decodes chunk/block packets into a compact
 world, runs the player simulation on a game thread, meshes chunks on worker
 threads, and renders them with wgpu either in a window or to an offscreen PNG.
-M4 adds the backend-agnostic `umicraft-ui` crate, the custom widget layer, the
+M4 added the backend-agnostic `umicraft-ui` crate, the custom widget layer, the
 F2 debug screen, and runtime loading of the user's real 1.8 font with an
 original fallback. M5 adds the 1.8 blockstate/model parser, the block registry,
-the real block/item texture array, and the model mesher.
+the real block/item texture array, the model mesher, and the server-less
+`--block-demo` acceptance path.
 
 ## Workspace
 
@@ -25,7 +26,7 @@ the real block/item texture array, and the model mesher.
 | `umicraft-mesh` | Cube/model chunk mesher and texture-layer mapping |
 | `umicraft-render` | wgpu renderer, camera, textures, HUD and UI draw-list pass |
 | `umicraft-ui` | Immediate-mode UI: layout, focus, widgets, font atlas, draw list |
-| `umicraft-client` | Windowed play, headless session, screenshots and UI demo |
+| `umicraft-client` | Windowed play, headless session, screenshots, UI demo and block demo |
 | `umicraft-testkit` | Fake server, packet capture/replay, test utilities |
 
 ## Prerequisites
@@ -56,6 +57,13 @@ Controls:
 The overlay shows FPS/frame time, position/rotation, chunk/mesh/face counts,
 chat/block-update/packet counters, and a frame-time graph.
 
+At startup the client reads the user's official 1.8.8 client jar once, bakes
+the blockstate/model set and uploads the real block/item texture array. If the
+installation is missing, the jar is corrupt or a model is unsupported, it logs
+one warning and keeps the original procedural terrain path; real model meshes
+and the fallback texture array are never mixed. No Mojang asset is stored in
+this repository or in a release.
+
 ## UI acceptance demo
 
 The M4 debug screen also runs without a window, a server or a GPU. It drives
@@ -77,6 +85,40 @@ If a local official Minecraft installation is found, the real
 runtime. Otherwise the original 3×5 fallback font is used and a warning is
 printed. No Mojang asset is stored in this repository or in a release.
 
+## Block acceptance demo
+
+`--block-demo` exercises the complete M5 path without a server:
+
+```sh
+cargo run -p umicraft-client -- --block-demo
+```
+
+It builds a synthetic stone platform with the acceptance blocks (common cubes,
+every ore, all 16 wool colours and the slab/stairs/fence/pane/torch/shape row),
+meshes it with the real model mesher and prints the ADR-0007 counts:
+
+```text
+blockstates       : 340
+source models     : 1080
+block textures    : 382 (373 png + 9 mcmeta)
+item textures     : 229 (227 png + 2 mcmeta)
+texture layers    : 601
+atlas             : 32x32 RGBA8, 2,461,696 bytes
+block states      : ...
+quads             : ...
+fallback variants : ...
+```
+
+The report needs no GPU and no server. Add `--screenshot` to upload the real
+texture array, render one offscreen frame and write a 1280×720 PNG:
+
+```sh
+cargo run -p umicraft-client -- --block-demo --screenshot /tmp/m5-blocks.png
+```
+
+Unlike the other modes, `--block-demo` needs the official resources and exits
+with a clear typed error when they are unavailable.
+
 ## Render an offscreen screenshot
 
 ```sh
@@ -87,7 +129,10 @@ cargo run -p umicraft-client -- 127.0.0.1 25599 --name UmicraftM2 \
 
 Screenshot mode collects world packets for the requested duration, meshes all
 loaded chunks through the worker pool, renders one frame, and writes an RGBA
-PNG. It does not need a window or a display server.
+PNG. It does not need a window or a display server. When the official resources
+are available the workers use the model mesher and the renderer samples the
+real texture array; otherwise the screenshot falls back to the procedural cubes
+and textures as a whole.
 
 ## Headless protocol client
 
