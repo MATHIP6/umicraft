@@ -63,18 +63,18 @@ At the time this guide was written (2026-10-22):
 |---|---|
 | Setup / W0 | `b3b2a15` scaffold; W1 and W3 merged into `main` |
 | W1 model core | merged; crate gates green |
-| W2 registry | agent running in `.worktrees/m5-registry` |
+| W2 registry | merged; 182 definitions and 1,246 metadata rules |
 | W3 atlas | merged; official 1.8.8 counts verified |
-| W4 mesher | merged; synthetic model tests green, full-registry integration pending W2 |
+| W4 mesher | merged; full-registry integration now possible |
 | W5 renderer | merged; atlas-upload GPU tests green |
-| W6 client | waiting for W1–W5 |
+| W6 client | agent starting in `.worktrees/m5-client` |
 
 The lead updates this table at each handoff. A worktree with uncommitted
 changes belongs to its active agent; the lead does not reset or clean it.
 
 W4 was started before W2 merged because the mesher consumes baked models, not
-the registry table; its unit tests build synthetic model sets. W2 MUST be
-merged before W4 is accepted, and W4 must merge `main` once W2 lands.
+the registry table; its unit tests build synthetic model sets. W2 is now merged,
+so W6 must exercise the full registry through `--block-demo`.
 
 ## Integration gates
 
