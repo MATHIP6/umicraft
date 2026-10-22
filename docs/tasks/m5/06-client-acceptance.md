@@ -37,8 +37,9 @@ Do not edit model/assets/mesh/render.
 3. `--block-demo` (server-less; wins over `--screenshot`? No: it uses
    `--screenshot` for the PNG, like `--ui-demo`):
    - load official resources; if unavailable return a clear typed error;
-   - build a synthetic `World` with loaded chunks containing the acceptance
-     blocks and a platform;
+   - build synthetic `ChunkColumn`s with the acceptance blocks and a platform,
+     then mesh them through `ChunkSnapshot::from_columns` (the client does not
+     need a mutable `World` for the demo);
    - mesh with `mesh_chunk_with_models`, upload, render offscreen;
    - print exactly the counts from ADR-0007 (blockstates, source models,
      artifact counts, layers, states, quads, fallbacks);
