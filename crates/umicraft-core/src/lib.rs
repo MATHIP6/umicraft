@@ -5,7 +5,7 @@
 //! Minimal runtime for Umicraft (spec §5.1): a registry of static [`Module`]s,
 //! a typed [`ServiceRegistry`], an [`EventBus`], a fixed-timestep [`Scheduler`],
 //! and TOML-backed [`ConfigStore`]s. All gameplay features hook in as modules
-//! through these primitives, so mods (M9) can replace or wrap built-ins.
+//! through these primitives, so mods (M15) can replace or wrap built-ins.
 //!
 //! Untrusted input — files, mod manifests, (from M1) server packets — is never
 //! allowed to surface as a panic: fallible operations return typed errors (see

@@ -8,7 +8,7 @@
 //!
 //! This module locates that jar, verifies it against the digest the version
 //! JSON promises, and exposes a minimal read of one entry out of it. The full
-//! extraction and the model/atlas work belongs to M6.
+//! extraction and the model/atlas work belongs to M5.
 
 use std::path::{Path, PathBuf};
 

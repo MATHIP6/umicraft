@@ -22,7 +22,7 @@
 //!
 //! What is **not** in this crate: the texture atlas, the 1.8 block models and
 //! blockstates, the resource pack support, and the player skins. Those are
-//! the visual half of the pipeline and belong to M6 (spec AST-5 to AST-9).
+//! the visual half of the pipeline and belong to M5 to M11 (spec AST-5 to AST-9).
 //!
 //! # Example
 //!

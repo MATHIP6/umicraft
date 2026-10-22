@@ -3,7 +3,7 @@
 //! Per-block collision geometry.
 //!
 //! Every 1.8 block state maps to at most [`MAX_BOXES`] axis-aligned boxes
-//! that the player collides with. The mapping is data driven so that the M6
+//! that the player collides with. The mapping is data driven so that the M5
 //! block registry can replace it wholesale; today it is a `match` on the 1.8
 //! block id (MCP `net/minecraft/block/Block.java`, `registerBlocks`).
 //!

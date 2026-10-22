@@ -3,7 +3,7 @@
 //! Block states and the coarse shape/opacity classes the M2 mesher needs.
 //!
 //! A 1.8 wire block state is `block id << 4 | metadata`
-//! (`Block.BLOCK_STATE_IDS` in MCP), which fits in 16 bits. M6 replaces this
+//! (`Block.BLOCK_STATE_IDS` in MCP), which fits in 16 bits. M5 replaces this
 //! with a real block registry; M2 only needs to tell air, full opaque cubes,
 //! see-through cubes, liquids, and non-cube decorations apart.
 
@@ -14,7 +14,7 @@ pub struct BlockState(u16);
 /// Coarse rendering class of a block state.
 ///
 /// The classes drive the naive mesher's face culling. Shapes and per-state
-/// models arrive with the block registry in M6.
+/// models arrive with the block registry in M5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockKind {
     /// No geometry and does not occlude neighbours.
@@ -28,7 +28,7 @@ pub enum BlockKind {
     /// for culling.
     Liquid,
     /// Non-cube decoration (plants, torches, slabs, fences, …). The M2 mesher
-    /// skips these; M6 adds models.
+    /// skips these; M5 adds models.
     Flat,
 }
 

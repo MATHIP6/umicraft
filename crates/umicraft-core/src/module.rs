@@ -4,7 +4,7 @@
 //!
 //! Everything Umicraft ships — chunk rendering, physics, chat, inventory UI —
 //! is a [`Module`] registered through the same hooks future mods use, so mods
-//! (M9) can wrap or replace built-in behavior instead of fighting it.
+//! (M15) can wrap or replace built-in behavior instead of fighting it.
 //!
 //! [`Core`] owns the four stores (services, events, scheduler, config) and runs
 //! each module's `on_load` once, in registration order, with a [`ModuleCtx`]
@@ -45,7 +45,7 @@ impl fmt::Display for ModuleId {
 /// A unit of functionality loaded by the core (built-ins and mods alike).
 ///
 /// Static modules implement this trait directly; dynamic mods get the same
-/// surface through the M9 C ABI shim, which is why hooks stay minimal.
+/// surface through the M15 C ABI shim, which is why hooks stay minimal.
 pub trait Module: Send {
     /// Stable, unique id — used in diagnostics, conflict errors, and profiling.
     fn id(&self) -> &ModuleId;

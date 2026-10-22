@@ -27,12 +27,12 @@ pub enum NetError {
     },
 
     /// The server demanded encryption + premium authentication, which lands
-    /// in M5; carried payloads let the auth crate answer the same handshake.
-    #[error("server is online-mode; premium auth (M5) required (server_id {server_id:?})")]
+    /// in M13; carried payloads let the auth crate answer the same handshake.
+    #[error("server is online-mode; premium auth (M13) required (server_id {server_id:?})")]
     OnlineModeRequired {
         /// `Encryption Request` server id string (usually empty on vanilla).
         server_id: String,
-        /// Server RSA public key, SPKI DER, for the M5 flow.
+        /// Server RSA public key, SPKI DER, for the M13 flow.
         public_key: Vec<u8>,
         /// Verify token to echo back encrypted.
         verify_token: Vec<u8>,

@@ -104,7 +104,7 @@ ADR-0005).
 - Lighting workers, asset/IO pool, audio thread, and mod workers do not exist
   yet. Add each to this table when introduced.
 - The player inventory is not received in M3: the 1.8 protocol only sends it
-  with the window packets, which belong to M7. The client therefore knows
+  with the window packets, which belong to M9. The client therefore knows
   the held item only from `Entity Equipment` (0x04) and the HUD shows the
   item of the selected slot.
 

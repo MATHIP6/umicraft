@@ -106,7 +106,7 @@ a server and without a GPU, which is what the physics conformance tests
 
 `umicraft-core` (module loader, service registry, event bus) is **not**
 wired in during M3. The service and event surfaces it provides become
-relevant when the mod API lands (M9, spec §8); the game thread is designed
+relevant when the mod API lands (M15, spec §8); the game thread is designed
 so that the physics step can later be published as a `PlayerPhysics` service
 without changing its call sites.
 

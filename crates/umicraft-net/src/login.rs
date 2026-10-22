@@ -5,7 +5,7 @@
 //!
 //! Clean failure contract (spec NET-2):
 //! - `Encryption Request` ⇒ [`NetError::OnlineModeRequired`] (premium auth is
-//!   the M5 flow; payload is preserved for it).
+//!   the M13 flow; payload is preserved for it).
 //! - login-state `Disconnect` ⇒ [`NetError::KickedAtLogin`] with readable text.
 //! - Any other login-state packet ⇒ [`NetError::UnexpectedPacket`].
 

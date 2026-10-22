@@ -6,7 +6,7 @@
 //! in a 16×256×16 column, emit a quad for each of the six faces whose
 //! neighbour does not occlude it. Opaque cubes cull faces; identical
 //! transparent/liquid blocks (glass-glass, water-water) cull each other;
-//! non-cube decorations are skipped until the block registry lands in M6.
+//! non-cube decorations are skipped until the block registry lands in M5.
 //!
 //! Meshing reads blocks through [`BlockSource`]. [`ChunkSnapshot`] captures a
 //! 3×3 neighbourhood of [`umicraft_world::ChunkColumn`] handles, so a worker

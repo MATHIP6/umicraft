@@ -4,7 +4,7 @@
 //!
 //! The client jar of a Minecraft version is a zip archive, and reading a
 //! single entry out of it is all the transport layer needs (the full
-//! extraction and the model/texture work belongs to M6). This module
+//! extraction and the model/texture work belongs to M5). This module
 //! implements just enough of the ZIP format (APPNOTE 6.3.x) to find the
 //! central directory, locate one entry, and inflate it.
 //!

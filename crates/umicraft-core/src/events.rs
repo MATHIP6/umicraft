@@ -110,7 +110,7 @@ impl EventBus {
         };
         // Sorted per dispatch so subscriber list mutations stay simple; the
         // list is tiny (builtin + modules), so the cost is negligible until
-        // profiling justifies a sorted-insert (M8 perf pass benches this).
+        // profiling justifies a sorted-insert (M14 perf pass benches this).
         subscriptions.sort_by_key(|subscription| subscription.priority);
         let mut cx = EventCx::default();
         for subscription in subscriptions {

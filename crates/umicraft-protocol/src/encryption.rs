@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Encryption handshake helpers (NET-4 groundwork for M5 online-mode login).
+//! Encryption handshake helpers (NET-4 groundwork for M13 online-mode login).
 //!
 //! 1.8 quirks honored here:
 //!
