@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 bytemuck.workspace = true
+umicraft-model.workspace = true
 umicraft-world.workspace = true
 
 [dev-dependencies]

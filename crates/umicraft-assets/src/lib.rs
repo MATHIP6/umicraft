@@ -52,8 +52,10 @@
 //! # }
 //! ```
 
+pub mod atlas;
 pub mod cache;
 pub mod client_jar;
+pub mod client_resources;
 pub mod error;
 pub mod hash;
 pub mod http;
@@ -64,5 +66,7 @@ pub mod progress;
 
 mod zip;
 
+pub use atlas::BlockAtlas;
+pub use client_resources::ClientResources;
 pub use error::{AssetsError, AssetsResult};
 pub use progress::{Progress, ProgressSnapshot};

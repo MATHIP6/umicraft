@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 flate2.workspace = true
+png.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -16,6 +17,7 @@ sha1.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "rt"] }
 tracing.workspace = true
+umicraft-model.workspace = true
 
 [lints]
 workspace = true

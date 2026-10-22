@@ -1,0 +1,17 @@
+[package]
+name = "umicraft-model"
+description = "1.8 blockstate/model parsing, parent resolution, block registry and baked block geometry."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+umicraft-world.workspace = true
+
+[lints]
+workspace = true

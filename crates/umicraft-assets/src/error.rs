@@ -116,6 +116,19 @@ pub enum AssetsError {
     /// A background download task panicked or was cancelled.
     #[error("a download task failed: {0}")]
     TaskFailed(String),
+
+    /// A texture is not a decodable PNG or has an invalid size.
+    #[error("texture `{path}` is invalid: {reason}")]
+    Image {
+        /// Jar entry or path of the image.
+        path: String,
+        /// Why it was rejected.
+        reason: String,
+    },
+
+    /// A blockstate/model or atlas layout failed.
+    #[error(transparent)]
+    Model(#[from] umicraft_model::ModelError),
 }
 
 /// Convenience alias for results carrying [`AssetsError`].

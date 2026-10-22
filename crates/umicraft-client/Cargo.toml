@@ -19,6 +19,7 @@ tracing-subscriber.workspace = true
 umicraft-assets.workspace = true
 umicraft-game.workspace = true
 umicraft-mesh.workspace = true
+umicraft-model.workspace = true
 umicraft-net.workspace = true
 umicraft-protocol.workspace = true
 umicraft-render.workspace = true
