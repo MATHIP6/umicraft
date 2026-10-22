@@ -24,11 +24,20 @@
 //!
 //! Texture layer indices in [`Vertex::layer`] index the renderer's fallback
 //! texture array; see [`texture_layer`].
+//!
+//! M5 adds the model path in [`models`]: [`mesh_chunk_with_models`] places the
+//! quads that `umicraft-model` baked from the 1.8 block models and writes the
+//! layers of the real texture atlas. [`mesh_chunk`] stays the no-assets
+//! fallback.
 
 use bytemuck::{Pod, Zeroable};
 use umicraft_world::{BlockKind, BlockPos, BlockState, ChunkColumn, ChunkPos, World};
 
 use std::sync::Arc;
+
+pub mod models;
+
+pub use models::{mesh_chunk_with_models, ModelMeshContext};
 
 /// Number of layers in the fallback block texture array.
 pub const TEXTURE_LAYERS: u32 = 19;
@@ -196,10 +205,12 @@ impl BlockSource for ChunkSnapshot {
     }
 }
 
-/// Builds the mesh for one chunk column.
+/// Builds the mesh for one chunk column with the legacy procedural cubes.
 ///
 /// `source` must answer queries in world coordinates and cover at least the
 /// 3×3 chunk neighbourhood; [`ChunkSnapshot`] does this.
+///
+/// This is the no-assets fallback of [`mesh_chunk_with_models`].
 #[must_use]
 pub fn mesh_chunk<S: BlockSource + ?Sized>(pos: ChunkPos, source: &S) -> Mesh {
     let mut mesh = Mesh::default();
@@ -215,16 +226,7 @@ pub fn mesh_chunk<S: BlockSource + ?Sized>(pos: ChunkPos, source: &S) -> Mesh {
                 if !state.is_renderable() {
                     continue;
                 }
-
-                for face in ALL_FACES {
-                    let def = &FACE_DEFS[face.index()];
-                    let neighbour =
-                        source.block(wx + def.offset[0], y + def.offset[1], wz + def.offset[2]);
-                    if occludes(neighbour, state) {
-                        continue;
-                    }
-                    emit_face(&mut mesh, wx, y, wz, state, face, def);
-                }
+                emit_legacy_faces(&mut mesh, source, wx, y, wz, state);
             }
         }
     }
@@ -264,7 +266,34 @@ pub fn texture_layer(state: BlockState, face: Face) -> u32 {
     }
 }
 
-fn occludes(neighbour: BlockState, current: BlockState) -> bool {
+/// Emits the legacy cube faces of one renderable state at `(x, y, z)`.
+///
+/// Shared by [`mesh_chunk`] and the no-model fallback of
+/// [`mesh_chunk_with_models`], so both paths cull with exactly the same rule.
+fn emit_legacy_faces<S: BlockSource + ?Sized>(
+    mesh: &mut Mesh,
+    source: &S,
+    x: i32,
+    y: i32,
+    z: i32,
+    state: BlockState,
+) {
+    for face in ALL_FACES {
+        let def = &FACE_DEFS[face.index()];
+        let neighbour = source.block(x + def.offset[0], y + def.offset[1], z + def.offset[2]);
+        if occludes(neighbour, state) {
+            continue;
+        }
+        emit_face(mesh, x, y, z, state, face, def);
+    }
+}
+
+/// Whether `neighbour` hides the face that `current` would emit towards it.
+///
+/// A full opaque cube hides every face; a see-through cube hides the face of
+/// the identical state only, which is the M2 rule frozen in ADR-0007 and also
+/// used for `cullface` quads of baked models.
+pub(crate) fn occludes(neighbour: BlockState, current: BlockState) -> bool {
     if neighbour.is_opaque() {
         return true;
     }
