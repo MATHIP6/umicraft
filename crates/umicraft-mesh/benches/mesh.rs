@@ -195,11 +195,41 @@ fn mesh_dense_section(criterion: &mut Criterion) {
     });
 }
 
+/// A 16³ stone section with an 8³ air room and a torch-like block-light
+/// gradient. Unlike the flat and dense benches, every emitted face samples
+/// non-uniform light, so this isolates the M6 smooth-light/AO cost.
+fn mesh_lit_cave(criterion: &mut Criterion) {
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in 0..16 {
+        for z in 0..16 {
+            for x in 0..16 {
+                let room = (4..12).contains(&x) && (4..12).contains(&y) && (4..12).contains(&z);
+                if !room {
+                    column.set_block(x, y, z, BlockState::new(1, 0));
+                }
+            }
+        }
+    }
+    for y in 4..12 {
+        for z in 4..12 {
+            for x in 4..12 {
+                let distance = (x as i32 - 8).abs() + (y as i32 - 8).abs() + (z as i32 - 8).abs();
+                column.set_block_light(x, y, z, 14_i32.saturating_sub(distance) as u8);
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    criterion.bench_function("mesh/lit_cave_section", |bencher| {
+        bencher.iter(|| black_box(mesh_chunk(ChunkPos::new(0, 0), black_box(&snapshot))));
+    });
+}
+
 criterion_group!(
     benches,
     mesh_flat_chunk,
     mesh_flat_chunk_with_models,
     mesh_flat_view,
-    mesh_dense_section
+    mesh_dense_section,
+    mesh_lit_cave
 );
 criterion_main!(benches);

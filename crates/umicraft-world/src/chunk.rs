@@ -57,6 +57,7 @@ impl ChunkColumn {
 
     /// Block at column-local coordinates; out-of-range reads air.
     #[must_use]
+    #[inline]
     pub fn block(&self, x: usize, y: usize, z: usize) -> BlockState {
         if x >= SECTION_SIZE || z >= SECTION_SIZE || y >= WORLD_HEIGHT {
             return BlockState::AIR;
@@ -75,6 +76,7 @@ impl ChunkColumn {
     /// columns whose empty sections were elided. A present section without a
     /// sky array reports zero sky light (the Nether/End case).
     #[must_use]
+    #[inline]
     pub fn light(&self, x: usize, y: usize, z: usize) -> LightLevel {
         if x >= SECTION_SIZE || z >= SECTION_SIZE || y >= WORLD_HEIGHT {
             return LightLevel::DARK;
@@ -123,9 +125,12 @@ impl ChunkColumn {
         let section_index = y / SECTION_SIZE;
         let section = self.sections[section_index].get_or_insert_with(Section::empty);
         let changed = section.set_block(x, y % SECTION_SIZE, z, state);
-        if changed && section.is_empty() {
+        if changed && section.is_empty() && !section.has_light() {
             // Air-only sections are not sent by the server either; dropping
-            // them keeps memory proportional to visible geometry.
+            // them keeps memory proportional to visible geometry. A section
+            // that still carries light is retained: M6 writes light into air
+            // sections for the cave scene, and a block update must not erase
+            // it (ADR-0008 §1).
             self.sections[section_index] = None;
         }
         changed
@@ -299,5 +304,50 @@ mod tests {
         assert!(column.section(0).is_some());
         assert!(column.set_block(0, 0, 0, BlockState::AIR));
         assert!(column.section(0).is_none());
+    }
+
+    #[test]
+    fn light_only_sections_survive_an_air_update() {
+        let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+        assert!(column.set_block(0, 0, 0, BlockState::new(1, 0)));
+        column.set_block_light(1, 0, 0, 9);
+        column.set_sky_light(0, 0, 0, 7);
+
+        // Removing the last block must not discard the light the M6 cave
+        // scene wrote into the section (ADR-0008 §1).
+        assert!(column.set_block(0, 0, 0, BlockState::AIR));
+
+        assert!(
+            column.section(0).is_some(),
+            "the light-only section must be kept"
+        );
+        assert_eq!(column.light(0, 0, 0), LightLevel::new(0, 7));
+        assert_eq!(column.light(1, 0, 0), LightLevel::new(9, 0));
+        assert_eq!(column.light(0, 0, 1), LightLevel::DARK);
+    }
+
+    #[test]
+    fn present_sections_without_sky_read_zero_and_elided_sections_read_daylight() {
+        let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+        assert!(column.set_block(0, 0, 0, BlockState::new(1, 0)));
+        assert_eq!(column.light(0, 0, 0), LightLevel::DARK);
+        // Section 1 is elided, so its air reads as daylight above the terrain.
+        assert_eq!(column.light(0, 20, 0), LightLevel::FULL_SKY);
+    }
+
+    #[test]
+    fn set_light_creates_a_section_and_ignores_out_of_range() {
+        let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+        column.set_sky_light(0, 0, 0, 7);
+        assert!(column.section(0).is_some());
+        assert_eq!(column.light(0, 0, 0), LightLevel::new(0, 7));
+        column.set_block_light(0, 0, 0, 9);
+        assert_eq!(column.light(0, 0, 0), LightLevel::new(9, 7));
+
+        // Out-of-range writes are ignored and never create a section.
+        column.set_block_light(0, 256, 0, 15);
+        column.set_sky_light(16, 0, 0, 15);
+        assert_eq!(column.light(0, 0, 0), LightLevel::new(9, 7));
+        assert!(column.section(8).is_none());
     }
 }

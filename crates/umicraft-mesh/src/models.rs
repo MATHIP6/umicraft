@@ -34,7 +34,8 @@ use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant, MISSI
 use umicraft_world::{BlockState, ChunkPos};
 
 use crate::{
-    emit_legacy_faces_with, occludes, texture_layer, BlockSource, Face, Mesh, Vertex, VertexLight,
+    emit_legacy_faces_with, is_transparent_pass, occludes, quad_light, texture_layer, BlockSource,
+    Face, Mesh, Vertex,
 };
 
 /// The baked models and the texture layers the model mesher reads.
@@ -207,22 +208,32 @@ fn emit_model_quads<S: BlockSource + ?Sized>(
         }
 
         let layer = atlas.layer(&quad.texture).unwrap_or(0);
-        let start = mesh.vertices.len() as u32;
-        for (corner, uv) in quad.positions.iter().zip(quad.uvs) {
-            mesh.vertices.push(Vertex {
+        // Smooth light and AO sample the same outward plane as the legacy
+        // cubes; the model's `ambientocclusion` flag and the per-quad `shade`
+        // flag decide whether the corner AO applies.
+        let lights = quad_light(
+            source,
+            position,
+            quad.normal,
+            &quad.positions,
+            variant.model.ambient_occlusion,
+            quad.shade,
+        );
+        let vertices = std::array::from_fn(|index| {
+            let corner = quad.positions[index];
+            Vertex {
                 position: [
                     x as f32 + corner[0],
                     y as f32 + corner[1],
                     z as f32 + corner[2],
                 ],
                 normal: quad.normal,
-                uv,
+                uv: quad.uvs[index],
                 layer,
-                light: VertexLight::DAY.pack(),
-            });
-        }
-        mesh.indices
-            .extend_from_slice(&[start, start + 1, start + 2, start, start + 2, start + 3]);
+                light: lights[index].pack(),
+            }
+        });
+        mesh.push_quad(is_transparent_pass(state), vertices);
     }
 }
 

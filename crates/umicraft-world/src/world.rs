@@ -76,6 +76,7 @@ impl World {
 
     /// Block at a world position; missing chunks and out-of-range Y read air.
     #[must_use]
+    #[inline]
     pub fn block(&self, pos: BlockPos) -> BlockState {
         if !(0..WORLD_HEIGHT as i32).contains(&pos.y) {
             return BlockState::AIR;
@@ -96,6 +97,7 @@ impl World {
     /// Missing chunks and out-of-range Y read black. In the Nether and the
     /// End the sky channel is forced to zero even for an elided air section.
     #[must_use]
+    #[inline]
     pub fn light(&self, pos: BlockPos) -> LightLevel {
         if !(0..WORLD_HEIGHT as i32).contains(&pos.y) {
             return LightLevel::DARK;
@@ -391,6 +393,15 @@ mod tests {
         data
     }
 
+    fn flat_payload_without_sky_light(block_state: u16) -> Vec<u8> {
+        let mut data = vec![0u8; chunk_payload_len(1, false, true)];
+        for pair in data[..8192].chunks_exact_mut(2) {
+            pair.copy_from_slice(&block_state.to_le_bytes());
+        }
+        data[8192 + 2048..].fill(1);
+        data
+    }
+
     fn world_with_chunk(pos: ChunkPos) -> World {
         let mut world = World::new(0);
         let packet = ChunkData {
@@ -416,6 +427,38 @@ mod tests {
         assert_eq!(nether.light(BlockPos::new(0, 0, 0)), LightLevel::DARK);
         // The loaded overworld column can still be mutated by the test.
         assert_eq!(world.chunk_count(), 1);
+    }
+
+    #[test]
+    fn nether_forces_sky_light_to_zero_for_loaded_columns() {
+        let mut world = World::new(-1);
+        world
+            .apply_chunk_data(&ChunkData {
+                chunk_x: 0,
+                chunk_z: 0,
+                ground_up: true,
+                primary_bit_mask: 1,
+                data: flat_payload_without_sky_light(0x20),
+            })
+            .unwrap();
+
+        // Section 0 is present but has no sky array (Nether wire format).
+        assert_eq!(
+            world.light(BlockPos::new(0, 0, 0)),
+            LightLevel { block: 0, sky: 0 }
+        );
+        // Section 1 is elided and would read FULL_SKY from the column; the
+        // world still has to report no sky light.
+        assert_eq!(world.light(BlockPos::new(0, 20, 0)), LightLevel::DARK);
+    }
+
+    #[test]
+    fn light_outside_a_loaded_chunk_is_dark() {
+        let world = World::new(0);
+        assert_eq!(world.light(BlockPos::new(0, 0, 0)), LightLevel::DARK);
+        let world = world_with_chunk(ChunkPos::new(0, 0));
+        assert_eq!(world.light(BlockPos::new(16, 0, 0)), LightLevel::DARK);
+        assert_eq!(world.light(BlockPos::new(0, 256, 0)), LightLevel::DARK);
     }
 
     #[test]

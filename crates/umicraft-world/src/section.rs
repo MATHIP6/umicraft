@@ -116,8 +116,23 @@ impl Section {
         self.non_air == 0
     }
 
+    /// True when any block-light or sky-light nibble is non-zero.
+    ///
+    /// Used by the column update rule: an air-only section that still carries
+    /// light must survive a block update so a synthetic cave does not lose its
+    /// darkness when the last block is removed (ADR-0008 §1).
+    #[must_use]
+    pub fn has_light(&self) -> bool {
+        self.block_light.iter().any(|byte| *byte != 0)
+            || self
+                .sky_light
+                .as_deref()
+                .is_some_and(|data| data.iter().any(|byte| *byte != 0))
+    }
+
     /// Block state at section-local coordinates; out-of-range reads air.
     #[must_use]
+    #[inline]
     pub fn block(&self, x: usize, y: usize, z: usize) -> BlockState {
         block_index(x, y, z).map_or(BlockState::AIR, |index| self.state_at(index))
     }
@@ -145,13 +160,18 @@ impl Section {
     }
 
     /// Block-light level (0..=15) at section-local coordinates.
+    ///
+    /// Hot path: the mesher samples this several times per visible face, so
+    /// the tiny body is marked for cross-crate inlining.
     #[must_use]
+    #[inline]
     pub fn block_light(&self, x: usize, y: usize, z: usize) -> u8 {
         nibble(self.block_light.as_slice(), x, y, z)
     }
 
     /// Sky-light level (0..=15), or `None` when this dimension has no sky.
     #[must_use]
+    #[inline]
     pub fn sky_light(&self, x: usize, y: usize, z: usize) -> Option<u8> {
         self.sky_light
             .as_deref()
@@ -171,8 +191,11 @@ impl Section {
     /// no sky) gains one; callers that synthesize a cave for a screenshot use
     /// this to make the cave independent of the daylight above it.
     ///
-    /// Out-of-range coordinates are ignored. Values above 15 are clamped.
+    /// Out-of-range coordinates are ignored and do not allocate the array.
     pub fn set_sky_light(&mut self, x: usize, y: usize, z: usize, level: u8) {
+        if block_index(x, y, z).is_none() {
+            return;
+        }
         let data = self
             .sky_light
             .get_or_insert_with(|| Box::new([0; LIGHT_BYTES]));
@@ -274,6 +297,7 @@ fn block_index(x: usize, y: usize, z: usize) -> Option<usize> {
     }
 }
 
+#[inline]
 fn nibble(data: &[u8], x: usize, y: usize, z: usize) -> u8 {
     let Some(index) = block_index(x, y, z) else {
         return 0;
@@ -427,5 +451,25 @@ mod tests {
         assert!(!section.set_block(0, 16, 0, BlockState::new(1, 0)));
         assert_eq!(section.block_light(16, 0, 0), 0);
         assert_eq!(section.sky_light(0, 0, 0), None);
+        // An invalid write must not allocate the sky array as a side effect.
+        section.set_sky_light(16, 0, 0, 15);
+        assert_eq!(section.sky_light(0, 0, 0), None);
+    }
+
+    #[test]
+    fn has_light_tracks_both_nibble_arrays() {
+        let mut section = Section::empty();
+        assert!(!section.has_light());
+
+        section.set_block_light(15, 15, 15, 1);
+        assert!(section.has_light());
+
+        // A fresh section with a sky array still reports no light until a
+        // nibble is written.
+        section.set_sky_light(0, 0, 0, 0);
+        section.set_block_light(15, 15, 15, 0);
+        assert!(!section.has_light());
+        section.set_sky_light(0, 0, 0, 4);
+        assert!(section.has_light());
     }
 }
