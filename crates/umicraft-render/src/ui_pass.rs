@@ -253,11 +253,11 @@ impl UiPass {
     ///
     /// Rectangles are filled with the atlas white texel; text runs use the
     /// glyph UVs and advances of `atlas`. A character the atlas does not know
-    /// is skipped without advancing, matching [`FontAtlas::advance`] (the UI
-    /// crate measures text with the same atlas, so the layout stays
-    /// consistent). `PushClip` intersects the current scope with its
-    /// rectangle, `PopClip` restores the previous one, and an empty
-    /// intersection suppresses every command until the scope is popped.
+    /// uses the replacement glyph returned by [`FontAtlas::glyph_or_fallback`],
+    /// so drawing and measurement agree. Control characters other than
+    /// `'\n'` have no glyph and no advance. `PushClip` intersects the current
+    /// scope with its rectangle, `PopClip` restores the previous one, and an
+    /// empty intersection suppresses every command until the scope is popped.
     pub fn rebuild(&mut self, draw_list: &DrawList, atlas: &FontAtlas) {
         self.clear();
         for command in draw_list.commands() {
@@ -315,7 +315,7 @@ impl UiPass {
                 cursor = [position[0], cursor[1] + line_height];
                 continue;
             }
-            let Some(glyph) = atlas.glyph(character) else {
+            let Some(glyph) = atlas.glyph_or_fallback(character) else {
                 continue;
             };
             let quad = glyph_quad(cursor, glyph, atlas, scale);

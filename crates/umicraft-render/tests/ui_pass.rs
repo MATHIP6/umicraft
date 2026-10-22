@@ -30,6 +30,12 @@ fn synthetic_atlas() -> FontAtlas {
                 uv_max: [1.0, 1.0],
                 advance: 6.0,
             },
+            Glyph {
+                character: '?',
+                uv_min: [0.25, 0.5],
+                uv_max: [0.5, 1.0],
+                advance: 5.0,
+            },
         ],
         10.0,
         [0.75, 0.5, 1.0, 1.0],
@@ -132,6 +138,20 @@ fn the_public_fallback_atlas_matches_the_hud_metrics() {
     assert_eq!(upper.advance, 4.0);
     assert!(atlas.white_uv[2] > atlas.white_uv[0]);
     assert!(atlas.white_uv[3] > atlas.white_uv[1]);
+}
+
+#[test]
+fn unknown_characters_use_the_fallback_glyph_and_advance() {
+    let atlas = synthetic_atlas();
+    let mut list = DrawList::new();
+    list.text([0.0, 0.0], "AZ", TextStyle::new(1.0, COLOR));
+
+    let mut pass = UiPass::new(100, 100);
+    pass.rebuild(&list, &atlas);
+
+    assert_eq!(pass.vertex_count(), 12);
+    assert_close(pass.vertices()[6].position, ndc(4.0, 0.0));
+    assert_eq!(atlas.measure("AZ", 1.0), 9.0);
 }
 
 #[test]
