@@ -7,17 +7,21 @@
 //! renders to a texture and can save its contents with [`Renderer::read_pixels`].
 //! Terrain samples a texture array that starts as the procedural fallback and
 //! is replaced by [`Renderer::set_block_atlas`] when the user's installation is
-//! available. It is drawn with a depth buffer, back-face culling, alpha cutout,
-//! per-face axis shading, and distance fog. Chunk meshes are uploaded whole and
-//! replaced copy-on-write when remeshed. The HUD and the UI share the overlay
-//! pipeline; [`Renderer::render_with_ui`] appends [`UiPass`] geometry after the
-//! HUD.
+//! available. It is drawn in two passes: opaque faces first with a depth write
+//! and alpha cutout, then transparent faces (water, glass, leaves) with depth
+//! writes disabled, straight-alpha blending and a farthest-first chunk order.
+//! Both passes consume the packed per-vertex block/sky light, baked AO and face
+//! shade from the M6 mesh payload, and fog toward the current
+//! [`SkyState::fog_color`]. Chunk meshes are uploaded whole and replaced
+//! copy-on-write when remeshed. The HUD and the UI share the overlay pipeline;
+//! [`Renderer::render_with_ui`] appends [`UiPass`] geometry after the HUD.
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
+use glam::Vec3;
 use umicraft_mesh::{Mesh, Vertex, TEXTURE_LAYERS};
 use umicraft_ui::{DrawList, FontAtlas};
 use umicraft_world::ChunkPos;
@@ -56,7 +60,40 @@ const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     camera_pos: [f32; 3],
-    _pad: f32,
+    /// Sun-light factor from [`SkyState::sun_brightness`].
+    sun_brightness: f32,
+    /// Linear fog target from [`SkyState::fog_color`].
+    fog_color: [f32; 3],
+    /// Start of the fog band in blocks.
+    fog_start: f32,
+    /// End of the fog band in blocks.
+    fog_end: f32,
+    /// Explicit tail padding: the WGSL `Camera` struct is 112 bytes.
+    _pad: [f32; 3],
+}
+
+/// GPU vertex and index buffers for one pass of a chunk mesh.
+struct GpuMeshPass {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
+/// GPU buffers for one chunk column mesh.
+///
+/// The two passes keep separate buffers so the transparent pass can be drawn
+/// after every opaque chunk without touching vertex data. A pass with no faces
+/// is absent rather than being a zero-sized buffer (which wgpu rejects).
+struct GpuMesh {
+    opaque: Option<GpuMeshPass>,
+    transparent: Option<GpuMeshPass>,
+}
+
+/// One transparent chunk queued for the back-to-front pass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TransparentDraw {
+    pos: ChunkPos,
+    distance_sq: f32,
 }
 
 /// RGBA8 pixels returned by [`Renderer::read_pixels`].
@@ -68,13 +105,6 @@ pub struct Image {
     pub height: u32,
     /// Tightly packed RGBA8 rows, top to bottom.
     pub rgba: Vec<u8>,
-}
-
-/// GPU buffers for one chunk column mesh.
-struct GpuMesh {
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    index_count: u32,
 }
 
 /// Offscreen colour target and the texture retained for readback.
@@ -96,11 +126,18 @@ pub struct Renderer {
     depth_view: wgpu::TextureView,
     camera_buffer: wgpu::Buffer,
     terrain_pipeline: wgpu::RenderPipeline,
+    /// Terrain pipeline for water, glass and leaves: no depth write, straight
+    /// alpha blending. Drawn after every opaque chunk.
+    terrain_transparent_pipeline: wgpu::RenderPipeline,
     terrain_bind_group: wgpu::BindGroup,
     /// Layout of the terrain camera + texture binding, kept so
     /// [`Renderer::set_block_atlas`] can bind a replacement array without
     /// rebuilding the pipeline.
     terrain_layout: wgpu::BindGroupLayout,
+    /// Reused per-frame queue of transparent chunks, farthest first. Its
+    /// capacity is bounded by the number of uploaded meshes and is retained
+    /// across frames, so sorting allocates nothing in steady state.
+    transparent_order: Vec<TransparentDraw>,
     /// Sky, sun/moon and procedural clouds.
     sky: SkyRenderer,
     /// World clock and dimension of the next frame.
@@ -376,8 +413,20 @@ impl Renderer {
         let ui_bind_group =
             create_font_bind_group(&device, &overlay_layout, &font_sampler, &font_view);
 
-        let terrain_pipeline =
-            create_terrain_pipeline(&device, &terrain_shader, &terrain_layout, format);
+        let terrain_pipeline = create_terrain_pipeline(
+            &device,
+            &terrain_shader,
+            &terrain_layout,
+            format,
+            TerrainPipelineState::opaque(),
+        );
+        let terrain_transparent_pipeline = create_terrain_pipeline(
+            &device,
+            &terrain_shader,
+            &terrain_layout,
+            format,
+            TerrainPipelineState::transparent(),
+        );
         let overlay_pipeline =
             create_overlay_pipeline(&device, &overlay_shader, &overlay_layout, format);
         let sky = SkyRenderer::new(&device, format);
@@ -408,8 +457,10 @@ impl Renderer {
             depth_view,
             camera_buffer,
             terrain_pipeline,
+            terrain_transparent_pipeline,
             terrain_bind_group,
             terrain_layout,
+            transparent_order: Vec::with_capacity(64),
             sky,
             environment: RenderEnvironment::default(),
             block_sampler,
@@ -466,14 +517,35 @@ impl Renderer {
     }
 
     fn render_frame(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
-        self.write_camera(camera);
+        // One SkyState per frame: the clear colour, the fog uniform and the
+        // sky pass must agree even if W3's model changes between calls.
+        let sky_state = SkyState::at(self.environment);
+        self.write_camera(camera, &sky_state);
         self.sky.update(&self.queue, camera, self.environment);
         self.upload_overlay(overlay);
+        self.prepare_transparent_order(camera.position);
         if self.surface.is_some() {
-            self.render_window(overlay)
+            self.render_window(overlay, &sky_state)
         } else {
-            self.render_offscreen(overlay)
+            self.render_offscreen(overlay, &sky_state)
         }
+    }
+
+    /// Rebuilds the reused transparent draw queue, farthest chunk first.
+    ///
+    /// Only chunks with a transparent pass are queued; opaque chunks are drawn
+    /// straight from the map. The queue never grows beyond the number of
+    /// resident meshes, and [`Vec::clear`] keeps its capacity across frames.
+    fn prepare_transparent_order(&mut self, camera_position: Vec3) {
+        self.transparent_order.clear();
+        self.transparent_order
+            .extend(self.chunks.iter().filter_map(|(pos, mesh)| {
+                mesh.transparent.as_ref().map(|_| TransparentDraw {
+                    pos: *pos,
+                    distance_sq: squared_distance_to_chunk(*pos, camera_position),
+                })
+            }));
+        sort_transparent_farthest_first(&mut self.transparent_order);
     }
 
     /// Uploads the immutable UI font atlas and makes it current for
@@ -624,31 +696,35 @@ impl Renderer {
         Ok(())
     }
 
-    /// Replaces the GPU mesh for `pos`, or removes it when `mesh` is empty.
+    /// Replaces the GPU mesh for `pos`, or removes it when both passes are
+    /// empty.
+    ///
+    /// The opaque and transparent halves are uploaded into separate vertex and
+    /// index buffers so the renderer can submit every opaque chunk before the
+    /// sorted transparent pass. A half with no faces gets no buffer.
     pub fn upload_mesh(&mut self, pos: ChunkPos, mesh: &Mesh) {
         if mesh.is_empty() {
             self.chunks.remove(&pos);
             return;
         }
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("chunk vertices"),
-                contents: bytemuck::cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("chunk indices"),
-                contents: bytemuck::cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-        let index_count = mesh.indices.len() as u32;
+        let opaque =
+            create_gpu_mesh_pass(&self.device, "chunk opaque", &mesh.vertices, &mesh.indices);
+        let transparent = create_gpu_mesh_pass(
+            &self.device,
+            "chunk transparent",
+            &mesh.transparent_vertices,
+            &mesh.transparent_indices,
+        );
+        // A pass without indices has no drawable faces. If neither half
+        // produced a buffer (including a malformed mesh with vertices but no
+        // indices), drop any previous mesh instead of keeping an empty entry.
+        if opaque.is_none() && transparent.is_none() {
+            self.chunks.remove(&pos);
+            return;
+        }
         let mesh = GpuMesh {
-            vertex_buffer,
-            index_buffer,
-            index_count,
+            opaque,
+            transparent,
         };
         if let Entry::Occupied(mut entry) = self.chunks.entry(pos) {
             *entry.get_mut() = mesh;
@@ -790,11 +866,16 @@ impl Renderer {
         })
     }
 
-    fn write_camera(&self, camera: &Camera) {
+    fn write_camera(&self, camera: &Camera, sky: &SkyState) {
+        let (fog_start, fog_end) = fog_range(self.environment.view_distance);
         let uniform = CameraUniform {
             view_proj: camera.view_projection().to_cols_array_2d(),
             camera_pos: camera.position.to_array(),
-            _pad: 0.0,
+            sun_brightness: sky.sun_brightness,
+            fog_color: sky.fog_color,
+            fog_start,
+            fog_end,
+            _pad: [0.0; 3],
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -825,7 +906,11 @@ impl Renderer {
         }
     }
 
-    fn render_window(&mut self, overlay: &Overlay) -> Result<(), RenderError> {
+    fn render_window(
+        &mut self,
+        overlay: &Overlay,
+        sky_state: &SkyState,
+    ) -> Result<(), RenderError> {
         let frame = {
             let surface = self
                 .surface
@@ -843,7 +928,7 @@ impl Renderer {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("frame encoder"),
                         });
-                self.draw(&view, overlay, &mut encoder);
+                self.draw(&view, overlay, &mut encoder, sky_state);
                 self.queue.submit(Some(encoder.finish()));
                 if let Some(window) = &self.window {
                     window.pre_present_notify();
@@ -864,7 +949,11 @@ impl Renderer {
         }
     }
 
-    fn render_offscreen(&mut self, overlay: &Overlay) -> Result<(), RenderError> {
+    fn render_offscreen(
+        &mut self,
+        overlay: &Overlay,
+        sky_state: &SkyState,
+    ) -> Result<(), RenderError> {
         let Some(target) = self.offscreen.as_ref() else {
             return Err(RenderError::NotOffscreen);
         };
@@ -873,7 +962,7 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("offscreen encoder"),
             });
-        self.draw(&target.view, overlay, &mut encoder);
+        self.draw(&target.view, overlay, &mut encoder, sky_state);
         self.queue.submit(Some(encoder.finish()));
         Ok(())
     }
@@ -883,8 +972,8 @@ impl Renderer {
         view: &wgpu::TextureView,
         overlay: &Overlay,
         encoder: &mut wgpu::CommandEncoder,
+        sky_state: &SkyState,
     ) {
-        let sky_state = SkyState::at(self.environment);
         let sky_color = sky_state.sky_color;
         let color_attachment = Some(wgpu::RenderPassColorAttachment {
             view,
@@ -916,13 +1005,32 @@ impl Renderer {
             multiview_mask: None,
         });
         self.sky.draw(&mut pass);
+
+        // Opaque terrain: depth write on, alpha cutout, order-independent.
         pass.set_pipeline(&self.terrain_pipeline);
         pass.set_bind_group(0, &self.terrain_bind_group, &[]);
         for mesh in self.chunks.values() {
-            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            if let Some(opaque) = mesh.opaque.as_ref() {
+                draw_gpu_pass(&mut pass, opaque);
+            }
         }
+
+        // Transparent terrain: water/glass/leaves, farthest chunk first, with
+        // depth testing but no depth writes so blended faces do not occlude
+        // each other by submission order.
+        if !self.transparent_order.is_empty() {
+            pass.set_pipeline(&self.terrain_transparent_pipeline);
+            pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+            for draw in &self.transparent_order {
+                let Some(mesh) = self.chunks.get(&draw.pos) else {
+                    continue;
+                };
+                if let Some(transparent) = mesh.transparent.as_ref() {
+                    draw_gpu_pass(&mut pass, transparent);
+                }
+            }
+        }
+
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_pipeline(&self.overlay_pipeline);
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
@@ -1036,11 +1144,60 @@ fn create_offscreen(device: &wgpu::Device, width: u32, height: u32) -> Offscreen
     OffscreenTarget { texture, view }
 }
 
+/// Pipeline settings that differ between the opaque and transparent terrain
+/// passes. Both share the vertex entry point and bind group layout.
+struct TerrainPipelineState {
+    label: &'static str,
+    fragment_entry: &'static str,
+    depth_write: bool,
+    depth_compare: wgpu::CompareFunction,
+    blend: wgpu::BlendState,
+}
+
+impl TerrainPipelineState {
+    /// Opaque pass: closer depth wins, depth is written, alpha cutout runs in
+    /// the fragment shader.
+    fn opaque() -> Self {
+        Self {
+            label: "terrain pipeline",
+            fragment_entry: "fs_main",
+            depth_write: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            blend: wgpu::BlendState::REPLACE,
+        }
+    }
+
+    /// Transparent pass: `LessEqual` keeps coincident/behind faces from
+    /// disappearing, depth write is off so blended faces accumulate, and
+    /// straight alpha is blended (`SrcAlpha`/`OneMinusSrcAlpha`).
+    fn transparent() -> Self {
+        Self {
+            label: "terrain transparent pipeline",
+            fragment_entry: "fs_transparent",
+            depth_write: false,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            blend: wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::SrcAlpha,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            },
+        }
+    }
+}
+
 fn create_terrain_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     bind_group_layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
+    state: TerrainPipelineState,
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("terrain pipeline layout"),
@@ -1048,7 +1205,7 @@ fn create_terrain_pipeline(
         immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("terrain pipeline"),
+        label: Some(state.label),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: shader,
@@ -1071,25 +1228,98 @@ fn create_terrain_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
+            depth_write_enabled: Some(state.depth_write),
+            depth_compare: Some(state.depth_compare),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(state.fragment_entry),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend: Some(state.blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
         multiview_mask: None,
         cache: None,
     })
+}
+
+/// Uploads one mesh pass, returning `None` when the pass has no drawable
+/// geometry.
+///
+/// Both slices are required: wgpu rejects a zero-sized buffer, and a malformed
+/// pass with indices but no vertices cannot be drawn. Valid `umicraft-mesh`
+/// output always has four vertices per face.
+fn create_gpu_mesh_pass(
+    device: &wgpu::Device,
+    label: &str,
+    vertices: &[Vertex],
+    indices: &[u32],
+) -> Option<GpuMeshPass> {
+    if vertices.is_empty() || indices.is_empty() {
+        return None;
+    }
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(label),
+        contents: bytemuck::cast_slice(vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(label),
+        contents: bytemuck::cast_slice(indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    Some(GpuMeshPass {
+        vertex_buffer,
+        index_buffer,
+        index_count: indices.len() as u32,
+    })
+}
+
+/// Binds and draws one uploaded mesh pass.
+fn draw_gpu_pass(pass: &mut wgpu::RenderPass<'_>, mesh: &GpuMeshPass) {
+    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+    pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+}
+
+/// The chunk centre used for transparent sorting: the middle of the 16×16
+/// column at the cloud/terrain reference height of y = 128.
+fn chunk_centre(pos: ChunkPos) -> Vec3 {
+    Vec3::new(pos.x as f32 * 16.0 + 8.0, 128.0, pos.z as f32 * 16.0 + 8.0)
+}
+
+/// Squared camera-to-chunk-centre distance; avoids a square root per chunk.
+fn squared_distance_to_chunk(pos: ChunkPos, camera_position: Vec3) -> f32 {
+    chunk_centre(pos).distance_squared(camera_position)
+}
+
+/// Orders transparent chunks farthest first, with `ChunkPos` as the
+/// deterministic tie-break (ADR-0008 §3).
+fn sort_transparent_farthest_first(chunks: &mut [TransparentDraw]) {
+    chunks.sort_unstable_by(|a, b| {
+        b.distance_sq
+            .total_cmp(&a.distance_sq)
+            .then_with(|| a.pos.cmp(&b.pos))
+    });
+}
+
+/// Fog band `(start, end)` in blocks for a view distance in chunks.
+///
+/// Uses the ADR-0008 range: start at 75 % of the view distance and end at the
+/// full distance capped at 500 blocks (inside the 512-block camera far plane).
+/// The start is capped below the end so a degenerate `view_distance` cannot
+/// invert the smoothstep edges.
+fn fog_range(view_distance: u8) -> (f32, f32) {
+    let nominal = f32::from(view_distance) * 16.0;
+    let end = nominal.clamp(1.0, 500.0);
+    let start = (nominal * 0.75).min(end - 0.001);
+    (start, end)
 }
 
 /// Binds the camera uniform, one block texture-array view and the block
@@ -1205,11 +1435,105 @@ mod tests {
         let uniform = CameraUniform {
             view_proj: [[0.0; 4]; 4],
             camera_pos: [1.0, 2.0, 3.0],
-            _pad: 0.0,
+            sun_brightness: 0.5,
+            fog_color: [0.25, 0.5, 0.75],
+            fog_start: 96.0,
+            fog_end: 128.0,
+            _pad: [0.0; 3],
         };
         let bytes = bytemuck::bytes_of(&uniform);
-        assert_eq!(bytes.len(), 80);
+        assert_eq!(bytes.len(), 112);
         assert_eq!(bytes.len() % 16, 0);
+        // These offsets must match the WGSL `Camera` struct in terrain.wgsl.
+        assert_eq!(std::mem::offset_of!(CameraUniform, camera_pos), 64);
+        assert_eq!(std::mem::offset_of!(CameraUniform, sun_brightness), 76);
+        assert_eq!(std::mem::offset_of!(CameraUniform, fog_color), 80);
+        assert_eq!(std::mem::offset_of!(CameraUniform, fog_start), 92);
+        assert_eq!(std::mem::offset_of!(CameraUniform, fog_end), 96);
+    }
+
+    #[test]
+    fn fog_range_uses_three_quarters_and_caps_at_500() {
+        assert_eq!(fog_range(8), (96.0, 128.0));
+        assert_eq!(fog_range(32), (384.0, 500.0));
+        // Degenerate and oversized view distances stay a valid band.
+        let (start, end) = fog_range(0);
+        assert!(start < end);
+        let (start, end) = fog_range(255);
+        assert!(start < end);
+        assert!(end <= 500.0);
+    }
+
+    #[test]
+    fn transparent_sort_is_farthest_first() {
+        let camera = Vec3::ZERO;
+        let mut chunks = vec![
+            TransparentDraw {
+                pos: ChunkPos::new(0, 0),
+                distance_sq: squared_distance_to_chunk(ChunkPos::new(0, 0), camera),
+            },
+            TransparentDraw {
+                pos: ChunkPos::new(2, 0),
+                distance_sq: squared_distance_to_chunk(ChunkPos::new(2, 0), camera),
+            },
+            TransparentDraw {
+                pos: ChunkPos::new(1, 0),
+                distance_sq: squared_distance_to_chunk(ChunkPos::new(1, 0), camera),
+            },
+        ];
+        sort_transparent_farthest_first(&mut chunks);
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.pos).collect::<Vec<_>>(),
+            vec![
+                ChunkPos::new(2, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(0, 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn transparent_sort_ties_break_by_chunk_pos() {
+        let camera = chunk_centre(ChunkPos::new(0, 0));
+        let mut chunks = [
+            ChunkPos::new(1, 0),
+            ChunkPos::new(0, -1),
+            ChunkPos::new(0, 1),
+            ChunkPos::new(-1, 0),
+        ]
+        .map(|pos| TransparentDraw {
+            pos,
+            distance_sq: squared_distance_to_chunk(pos, camera),
+        });
+        // Every chunk centre is exactly 16 blocks from the camera centre.
+        assert!(chunks
+            .iter()
+            .all(|chunk| (chunk.distance_sq - 16.0 * 16.0).abs() < 0.001));
+        sort_transparent_farthest_first(&mut chunks);
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.pos).collect::<Vec<_>>(),
+            vec![
+                ChunkPos::new(-1, 0),
+                ChunkPos::new(0, -1),
+                ChunkPos::new(0, 1),
+                ChunkPos::new(1, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn transparent_sort_of_an_empty_list_is_a_no_op() {
+        let mut chunks: Vec<TransparentDraw> = Vec::new();
+        sort_transparent_farthest_first(&mut chunks);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_centre_is_the_column_middle() {
+        assert_eq!(
+            chunk_centre(ChunkPos::new(-1, 2)),
+            Vec3::new(-8.0, 128.0, 40.0)
+        );
     }
 
     #[test]
