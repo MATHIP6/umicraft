@@ -6,6 +6,12 @@
 //! `umicraft-render` converts it into overlay vertices and never learns what a
 //! widget is. Keeping the boundary this narrow is what lets the same debug
 //! screen run in the window and in the headless path.
+//!
+//! Clip scopes are tracked as they are appended. [`DrawList::pop_clip`]
+//! ignores a second pop at depth zero, and [`DrawList::close_clips`] closes
+//! whatever is still open when the frame ends. A renderer can therefore
+//! assume that every [`DrawCommand::PushClip`] has a matching
+//! [`DrawCommand::PopClip`].
 
 use crate::geom::Rect;
 
@@ -71,6 +77,8 @@ pub enum DrawCommand {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DrawList {
     commands: Vec<DrawCommand>,
+    /// Effective clip rectangles, each already intersected with its parent.
+    clips: Vec<Rect>,
 }
 
 impl DrawList {
@@ -83,6 +91,7 @@ impl DrawList {
     /// Drops every command, keeping the allocation for the next frame.
     pub fn clear(&mut self) {
         self.commands.clear();
+        self.clips.clear();
     }
 
     /// True when the frame would draw nothing.
@@ -95,6 +104,31 @@ impl DrawList {
     #[must_use]
     pub fn len(&self) -> usize {
         self.commands.len()
+    }
+
+    /// Number of commands the list can hold without reallocating.
+    ///
+    /// This is exposed so tests and benchmarks can verify that [`Self::clear`]
+    /// reuses the frame allocation instead of dropping it.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.commands.capacity()
+    }
+
+    /// Number of clip scopes that are currently open.
+    #[must_use]
+    pub fn clip_depth(&self) -> usize {
+        self.clips.len()
+    }
+
+    /// The effective clip of the innermost scope, already intersected with
+    /// every enclosing clip, or `None` when no scope is open.
+    ///
+    /// The UI uses this for hit testing, so a widget can push a clip directly
+    /// on the draw list and the pointer test follows it.
+    #[must_use]
+    pub fn clip_rect(&self) -> Option<Rect> {
+        self.clips.last().copied()
     }
 
     /// Borrows the commands in draw order.
@@ -118,13 +152,42 @@ impl DrawList {
     }
 
     /// Starts a clip scope.
+    ///
+    /// The command records the intersection with the enclosing scopes, so the
+    /// renderer never has to combine them and [`Self::clip_rect`] can answer
+    /// hit tests with one rectangle.
     pub fn push_clip(&mut self, rect: Rect) {
-        self.commands.push(DrawCommand::PushClip { rect });
+        let effective = match self.clips.last() {
+            Some(parent) => parent
+                .intersect(rect)
+                .unwrap_or(Rect::new(parent.x, parent.y, 0.0, 0.0)),
+            None => rect,
+        };
+        self.clips.push(effective);
+        self.commands
+            .push(DrawCommand::PushClip { rect: effective });
     }
 
     /// Ends the most recent clip scope.
+    ///
+    /// A pop without a matching push is ignored instead of emitting an
+    /// unbalanced command; the renderer never sees a negative clip depth.
     pub fn pop_clip(&mut self) {
+        if self.clips.pop().is_none() {
+            return;
+        }
         self.commands.push(DrawCommand::PopClip);
+    }
+
+    /// Closes every clip scope that is still open.
+    ///
+    /// This is the frame-end safety net: a widget that forgot a
+    /// [`Self::pop_clip`] cannot leak its clip into the next frame, and the
+    /// list stays balanced for the renderer.
+    pub fn close_clips(&mut self) {
+        while !self.clips.is_empty() {
+            self.pop_clip();
+        }
     }
 }
 
@@ -153,5 +216,68 @@ mod tests {
         list.clear();
         assert!(list.is_empty());
         assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn clear_keeps_the_allocation() {
+        let mut list = DrawList::new();
+        list.rect(Rect::new(1.0, 2.0, 3.0, 4.0), [1.0; 4]);
+        let capacity = list.capacity();
+        assert!(capacity > 0);
+        list.clear();
+        assert_eq!(list.capacity(), capacity);
+    }
+
+    #[test]
+    fn clips_are_balanced_and_stray_pops_are_ignored() {
+        let mut list = DrawList::new();
+        list.pop_clip();
+        assert!(list.is_empty());
+        assert_eq!(list.clip_depth(), 0);
+
+        list.push_clip(Rect::new(0.0, 0.0, 10.0, 10.0));
+        list.push_clip(Rect::new(2.0, 2.0, 4.0, 4.0));
+        list.pop_clip();
+        assert_eq!(list.clip_depth(), 1);
+        list.close_clips();
+        assert_eq!(list.clip_depth(), 0);
+        assert_eq!(list.len(), 4);
+        assert_eq!(
+            list.commands()
+                .iter()
+                .filter(|command| matches!(command, DrawCommand::PushClip { .. }))
+                .count(),
+            list.commands()
+                .iter()
+                .filter(|command| matches!(command, DrawCommand::PopClip))
+                .count()
+        );
+    }
+
+    #[test]
+    fn clear_resets_the_clip_depth() {
+        let mut list = DrawList::new();
+        list.push_clip(Rect::new(0.0, 0.0, 10.0, 10.0));
+        list.clear();
+        assert_eq!(list.clip_depth(), 0);
+        list.pop_clip();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn nested_clips_record_the_intersection() {
+        let mut list = DrawList::new();
+        list.push_clip(Rect::new(0.0, 0.0, 100.0, 100.0));
+        assert_eq!(list.clip_rect(), Some(Rect::new(0.0, 0.0, 100.0, 100.0)));
+        list.push_clip(Rect::new(50.0, 40.0, 100.0, 100.0));
+        assert_eq!(list.clip_rect(), Some(Rect::new(50.0, 40.0, 50.0, 60.0)));
+        assert!(matches!(
+            list.commands()[1],
+            DrawCommand::PushClip { rect } if rect == Rect::new(50.0, 40.0, 50.0, 60.0)
+        ));
+        list.pop_clip();
+        assert_eq!(list.clip_rect(), Some(Rect::new(0.0, 0.0, 100.0, 100.0)));
+        list.close_clips();
+        assert_eq!(list.clip_rect(), None);
     }
 }
