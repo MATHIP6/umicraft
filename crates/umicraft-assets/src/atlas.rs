@@ -2,8 +2,9 @@
 
 //! The block/item texture array payload shared with the renderer.
 //!
-//! Every layer is an RGBA8 image of the same size. 1.8 block and item textures
-//! are normalised to their first 16×16 frame, but the type keeps the dimensions
+//! Every layer is an RGBA8 image of the same size. The builder normalises each
+//! texture to its first square frame and scales it to the largest frame edge in
+//! the source (32×32 for the 1.8.8 jar), but the type keeps the dimensions
 //! explicit so a resource pack can use a different size. The layout (and
 //! therefore the layer order) is the deterministic [`AtlasLayout`] from
 //! `umicraft-model`; layer zero is the original missing-texture checker.

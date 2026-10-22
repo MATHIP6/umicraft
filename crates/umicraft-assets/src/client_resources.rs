@@ -11,6 +11,11 @@
 //! that is what [`ResourceSource`] expects. The atlas uses the shorter texture
 //! key relative to `textures/` (`blocks/stone`, `items/apple`) because that is
 //! what the baked block models reference.
+//!
+//! Every atlas layer is normalised to the largest frame edge found in the jar.
+//! In 1.8.8 that is 32 pixels because the flowing water and lava strips have
+//! 32×32 frames, so all 16×16 textures are upscaled with nearest-neighbour
+//! sampling rather than cropping the larger animation frames.
 
 use std::collections::BTreeMap;
 
@@ -31,10 +36,9 @@ const ITEM_TEXTURES_PREFIX: &str = "assets/minecraft/textures/items/";
 /// Prefix shared by every texture key.
 const TEXTURES_ROOT: &str = "assets/minecraft/textures/";
 
-/// Edge length of a normal (non-animated) 1.8 texture.
+/// Edge length of an atlas with no textures at all.
 ///
-/// Used as the atlas frame size when a synthetic source contains only animated
-/// strips and therefore has no square image to infer a size from.
+/// A normal source derives the edge from its largest frame (32 for 1.8.8).
 const DEFAULT_FRAME_SIZE: u32 = 16;
 
 /// One decoded PNG before it is cropped and copied into the atlas.
@@ -110,66 +114,94 @@ impl DecodedPng {
         })
     }
 
-    /// True when the image is a single square frame.
-    fn is_square(&self) -> bool {
-        self.width == self.height
+    /// The edge of one square frame in this image.
+    ///
+    /// A square PNG is a single frame. A tall PNG is an animation strip made of
+    /// vertically stacked square frames, so its height must be an exact
+    /// multiple of its width. Anything else is not a 1.8 texture and is
+    /// rejected instead of being silently misread.
+    fn frame_edge(&self, path: &str) -> AssetsResult<u32> {
+        if self.width == self.height
+            || (self.height > self.width && self.height.is_multiple_of(self.width))
+        {
+            return Ok(self.width);
+        }
+        Err(image_error(
+            path,
+            format!(
+                "expected a square image or a vertical animation strip, got {}x{}",
+                self.width, self.height
+            ),
+        ))
     }
 
-    /// Returns the first `frame_width`×`frame_height` frame as RGBA8.
+    /// Returns the first frame scaled to `edge`×`edge` with nearest-neighbour
+    /// sampling.
     ///
-    /// 1.8 animation strips are vertically stacked square frames; M5 uses the
-    /// static first frame. Every other non-frame-sized image is rejected so a
-    /// mixed-resolution source fails loudly instead of producing a corrupt
-    /// atlas (see ADR-0007).
-    fn first_frame(
-        &self,
-        frame_width: u32,
-        frame_height: u32,
-        path: &str,
-    ) -> AssetsResult<Vec<u8>> {
-        if self.width == frame_width && self.height == frame_height {
-            return Ok(self.pixels.clone());
+    /// A square image uses its whole area. An animation strip contributes only
+    /// its top `width`×`width` frame, so a 16×512 strip yields one 16×16 frame
+    /// and a 32×1024 strip yields one full 32×32 frame. The frame is then
+    /// replicated or sampled to the atlas edge; integer scale factors preserve
+    /// every source pixel and its alpha exactly.
+    fn frame_at(&self, edge: u32, path: &str) -> AssetsResult<Vec<u8>> {
+        let frame_edge = self.frame_edge(path)?;
+        let source_edge = usize::try_from(frame_edge)
+            .map_err(|_| image_error(path, "the frame size does not fit into memory"))?;
+        let atlas_edge = usize::try_from(edge)
+            .map_err(|_| image_error(path, "the atlas size does not fit into memory"))?;
+        if atlas_edge == 0 {
+            return Err(image_error(path, "the atlas frame is empty"));
         }
 
-        let is_animation_strip = self.height > self.width
-            && self.width >= frame_width
-            && self.height >= frame_height
-            && self.width.is_multiple_of(frame_width)
-            && self.height.is_multiple_of(frame_height)
-            && self.height.is_multiple_of(self.width);
-        if !is_animation_strip {
-            return Err(image_error(
-                path,
-                format!(
-                    "expected a {frame_width}x{frame_height} frame or an animation strip, \
-                     got {}x{}",
-                    self.width, self.height
-                ),
-            ));
-        }
-
-        let row_bytes = pixel_bytes(frame_width, 1)
-            .ok_or_else(|| image_error(path, "the frame width overflows"))?;
         let source_stride = pixel_bytes(self.width, 1)
             .ok_or_else(|| image_error(path, "the image width overflows"))?;
-        let frame_len = row_bytes
-            .checked_mul(usize::try_from(frame_height).unwrap_or(usize::MAX))
+        let frame_row_bytes = pixel_bytes(frame_edge, 1)
+            .ok_or_else(|| image_error(path, "the frame width overflows"))?;
+        let frame_len = pixel_bytes(frame_edge, frame_edge)
             .ok_or_else(|| image_error(path, "the frame size overflows"))?;
         let mut frame = Vec::with_capacity(frame_len);
-        for row in 0..frame_height {
+        for row in 0..frame_edge {
             let start = source_stride
-                .checked_mul(usize::try_from(row).unwrap_or(usize::MAX))
-                .ok_or_else(|| image_error(path, "the animation frame offset overflows"))?;
+                .checked_mul(
+                    usize::try_from(row)
+                        .map_err(|_| image_error(path, "the frame row overflows"))?,
+                )
+                .ok_or_else(|| image_error(path, "the frame offset overflows"))?;
             let end = start
-                .checked_add(row_bytes)
-                .ok_or_else(|| image_error(path, "the animation frame offset overflows"))?;
+                .checked_add(frame_row_bytes)
+                .ok_or_else(|| image_error(path, "the frame offset overflows"))?;
             let row = self
                 .pixels
                 .get(start..end)
                 .ok_or_else(|| image_error(path, "the animation frame is truncated"))?;
             frame.extend_from_slice(row);
         }
-        Ok(frame)
+
+        if frame_edge == edge {
+            return Ok(frame);
+        }
+
+        let scaled_len = pixel_bytes(edge, edge)
+            .ok_or_else(|| image_error(path, "the scaled frame size overflows"))?;
+        let mut scaled = Vec::with_capacity(scaled_len);
+        for y in 0..atlas_edge {
+            let source_y = y
+                .checked_mul(source_edge)
+                .ok_or_else(|| image_error(path, "the source row overflows"))?
+                / atlas_edge;
+            for x in 0..atlas_edge {
+                let source_x = x
+                    .checked_mul(source_edge)
+                    .ok_or_else(|| image_error(path, "the source column overflows"))?
+                    / atlas_edge;
+                let index = (source_y * source_edge + source_x) * 4;
+                let pixel = frame
+                    .get(index..index + 4)
+                    .ok_or_else(|| image_error(path, "the scaled frame is truncated"))?;
+                scaled.extend_from_slice(pixel);
+            }
+        }
+        Ok(scaled)
     }
 }
 
@@ -297,24 +329,22 @@ fn texture_key(path: &str) -> Option<String> {
 
 /// Builds the deterministic atlas from decoded textures.
 fn build_atlas(textures: Vec<TextureLayer>) -> AssetsResult<BlockAtlas> {
-    let (frame_width, frame_height) = frame_size(&textures);
+    let edge = atlas_frame_edge(&textures)?;
     let mut layers = BTreeMap::new();
     for texture in textures {
-        let frame = texture
-            .image
-            .first_frame(frame_width, frame_height, &texture.path)?;
+        let frame = texture.image.frame_at(edge, &texture.path)?;
         layers.insert(texture.key, frame);
     }
 
     let layout = AtlasLayout::from_keys(layers.keys().cloned());
-    let layer_len = pixel_bytes(frame_width, frame_height)
+    let layer_len = pixel_bytes(edge, edge)
         .ok_or_else(|| image_error("atlas", "the atlas frame size overflows"))?;
     let mut pixels = Vec::with_capacity(
         layer_len
             .checked_mul(usize::try_from(layout.len()).unwrap_or(usize::MAX))
             .ok_or_else(|| image_error("atlas", "the atlas pixel count overflows"))?,
     );
-    pixels.extend_from_slice(&missing_checker(frame_width, frame_height));
+    pixels.extend_from_slice(&missing_checker(edge, edge));
     for key in layout.keys().iter().skip(1) {
         let frame = layers
             .remove(key)
@@ -322,44 +352,23 @@ fn build_atlas(textures: Vec<TextureLayer>) -> AssetsResult<BlockAtlas> {
         pixels.extend_from_slice(&frame);
     }
 
-    BlockAtlas::new(frame_width, frame_height, pixels, layout)
+    BlockAtlas::new(edge, edge, pixels, layout)
 }
 
-/// Picks the atlas frame size from the most common square texture, preferring
-/// the smaller size on a tie. Tall animation strips do not vote because their
-/// first frame is cropped to this size.
-fn frame_size(textures: &[TextureLayer]) -> (u32, u32) {
-    let mut counts: BTreeMap<(u32, u32), usize> = BTreeMap::new();
+/// The atlas edge is the largest frame edge of any texture.
+///
+/// 1.8.8 contains 32×32 frames (the flowing water and lava strips), so the
+/// whole atlas is built at 32×32 and the 16×16 textures are upscaled. Using the
+/// most common size instead would crop three quarters of those 32-wide frames.
+fn atlas_frame_edge(textures: &[TextureLayer]) -> AssetsResult<u32> {
+    let mut edge = 0;
     for texture in textures {
-        if texture.image.is_square() {
-            *counts
-                .entry((texture.image.width, texture.image.height))
-                .or_default() += 1;
-        }
+        edge = edge.max(texture.image.frame_edge(&texture.path)?);
     }
-
-    let mut best: Option<((u32, u32), usize)> = None;
-    for (size, count) in counts {
-        let replace = match best {
-            None => true,
-            Some((best_size, best_count)) => {
-                count > best_count || (count == best_count && size.0 < best_size.0)
-            }
-        };
-        if replace {
-            best = Some((size, count));
-        }
+    if edge == 0 {
+        return Ok(DEFAULT_FRAME_SIZE);
     }
-    if let Some((size, _)) = best {
-        return size;
-    }
-
-    textures
-        .iter()
-        .find(|texture| texture.image.width > 0)
-        .map_or((DEFAULT_FRAME_SIZE, DEFAULT_FRAME_SIZE), |texture| {
-            (texture.image.width, texture.image.width)
-        })
+    Ok(edge)
 }
 
 /// The original Umicraft missing-texture layer: an opaque checker that is not
@@ -472,9 +481,9 @@ mod tests {
         assert_eq!(texel(0, 0), texel(1, 1));
     }
 
-    #[test]
-    fn the_frame_size_prefers_the_most_common_square() {
-        let texture = |width, height| TextureLayer {
+    /// A texture layer with empty pixels, enough for size-only tests.
+    fn texture(width: u32, height: u32) -> TextureLayer {
+        TextureLayer {
             key: String::new(),
             path: String::new(),
             image: DecodedPng {
@@ -482,27 +491,56 @@ mod tests {
                 height,
                 pixels: Vec::new(),
             },
-        };
+        }
+    }
+
+    #[test]
+    fn the_atlas_edge_is_the_largest_frame_width() {
         let textures = vec![
             texture(32, 32),
             texture(16, 512),
             texture(16, 16),
             texture(16, 16),
         ];
-        assert_eq!(frame_size(&textures), (16, 16));
+        assert_eq!(
+            atlas_frame_edge(&textures).expect("every texture is a valid frame"),
+            32
+        );
     }
 
     #[test]
-    fn a_tied_frame_size_prefers_the_smaller_edge() {
-        let texture = |width| TextureLayer {
-            key: String::new(),
-            path: String::new(),
-            image: DecodedPng {
-                width,
-                height: width,
-                pixels: Vec::new(),
-            },
-        };
-        assert_eq!(frame_size(&[texture(4), texture(2)]), (2, 2));
+    fn a_wide_or_irregular_image_is_not_a_frame() {
+        for (width, height) in [(32, 16), (16, 24), (16, 20)] {
+            let err = texture(width, height)
+                .image
+                .frame_edge("test")
+                .expect_err("the image is not a square or an animation strip");
+            assert!(matches!(err, AssetsError::Image { .. }));
+        }
+    }
+
+    #[test]
+    fn square_and_vertical_strip_frames_have_their_width_as_edge() {
+        assert_eq!(
+            texture(16, 16)
+                .image
+                .frame_edge("square")
+                .expect("a square image is a frame"),
+            16
+        );
+        assert_eq!(
+            texture(16, 512)
+                .image
+                .frame_edge("animated")
+                .expect("an animation strip is a frame"),
+            16
+        );
+        assert_eq!(
+            texture(32, 1024)
+                .image
+                .frame_edge("wide animation")
+                .expect("a 32-wide animation strip is a frame"),
+            32
+        );
     }
 }

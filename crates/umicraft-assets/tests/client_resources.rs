@@ -305,10 +305,10 @@ fn the_missing_layer_is_opaque_checker_like_and_not_empty() {
 }
 
 #[test]
-fn a_wrong_image_size_is_a_typed_image_error() {
-    let dir = TempDir::new("wrong-size");
-    let small = solid(2, 2, [1, 2, 3, 255]);
-    let large = solid(4, 4, [4, 5, 6, 255]);
+fn mixed_square_sizes_upscale_to_the_largest_frame() {
+    let dir = TempDir::new("mixed-sizes");
+    let small = solid(16, 16, [10, 20, 30, 255]);
+    let large = solid(32, 32, [40, 50, 60, 255]);
     let jar = jar_with(
         &dir,
         &[
@@ -317,13 +317,134 @@ fn a_wrong_image_size_is_a_typed_image_error() {
         ],
     );
 
-    let err = ClientResources::load(&jar).expect_err("mixed sizes must fail");
-    match err {
-        AssetsError::Image { path, .. } => assert!(
-            path.ends_with("blocks/large.png"),
-            "the error names the offending entry, got {path}"
-        ),
-        other => panic!("expected an image error, got {other:?}"),
+    let resources = ClientResources::load(&jar).expect("mixed square sizes are normalised");
+    let atlas = resources.atlas();
+    assert_eq!((atlas.width(), atlas.height()), (32, 32));
+    assert_eq!(atlas.layers(), 3);
+    assert_eq!(atlas.pixels().len(), 32 * 32 * 4 * 3);
+    let small_layer = atlas
+        .layout()
+        .layer("blocks/small")
+        .expect("the small texture has a layer");
+    let large_layer = atlas
+        .layout()
+        .layer("blocks/large")
+        .expect("the large texture has a layer");
+    assert_eq!(texel(atlas, small_layer, 0, 0), [10, 20, 30, 255]);
+    assert_eq!(texel(atlas, small_layer, 31, 31), [10, 20, 30, 255]);
+    assert_eq!(texel(atlas, large_layer, 31, 31), [40, 50, 60, 255]);
+}
+
+#[test]
+fn a_32_wide_animation_strip_keeps_the_full_first_frame() {
+    let dir = TempDir::new("wide-animation");
+    let red = [255, 0, 0, 255];
+    let green = [0, 255, 0, 255];
+    let blue = [0, 0, 255, 255];
+    let yellow = [255, 255, 0, 255];
+    let black = [0, 0, 0, 255];
+    // Two 32x32 frames. The first has one distinct colour per 16x16 quadrant;
+    // the second is black and must not leak into the atlas layer.
+    let mut pixels = vec![black; 32 * 64];
+    for y in 0..16 {
+        for x in 0..16 {
+            pixels[y * 32 + x] = red;
+            pixels[y * 32 + x + 16] = green;
+            pixels[(y + 16) * 32 + x] = blue;
+            pixels[(y + 16) * 32 + x + 16] = yellow;
+        }
+    }
+    let flow = png_rgba(32, 64, &pixels);
+    // A 16x16 texture would make the most-common-size heuristic choose 16;
+    // the largest-frame rule must still choose 32.
+    let stone = solid(16, 16, [90, 80, 70, 255]);
+    let jar = jar_with(
+        &dir,
+        &[
+            (block_path("flow").as_str(), &flow),
+            (block_path("stone").as_str(), &stone),
+        ],
+    );
+
+    let resources = ClientResources::load(&jar).expect("the wide animation strip loads");
+    let atlas = resources.atlas();
+    assert_eq!((atlas.width(), atlas.height()), (32, 32));
+    let layer = atlas
+        .layout()
+        .layer("blocks/flow")
+        .expect("the flow texture has a layer");
+    assert_eq!(texel(atlas, layer, 0, 0), red);
+    assert_eq!(texel(atlas, layer, 16, 0), green);
+    assert_eq!(texel(atlas, layer, 0, 16), blue);
+    assert_eq!(texel(atlas, layer, 16, 16), yellow);
+    assert_eq!(texel(atlas, layer, 31, 31), yellow);
+    assert!(!atlas.pixels().windows(4).any(|pixel| pixel == black));
+}
+
+#[test]
+fn a_16px_texture_upscales_with_2x2_pixel_replication() {
+    let dir = TempDir::new("upscale");
+    let mut source = Vec::with_capacity(16 * 16);
+    for y in 0..16_u8 {
+        for x in 0..16_u8 {
+            source.push([x * 16 + y, 255 - (x * 16 + y), x * 16, 255 - x]);
+        }
+    }
+    let small = png_rgba(16, 16, &source);
+    let large = solid(32, 32, [1, 2, 3, 255]);
+    let jar = jar_with(
+        &dir,
+        &[
+            (block_path("small").as_str(), &small),
+            (block_path("large").as_str(), &large),
+        ],
+    );
+
+    let resources = ClientResources::load(&jar).expect("the small texture upscales");
+    let atlas = resources.atlas();
+    assert_eq!((atlas.width(), atlas.height()), (32, 32));
+    let layer = atlas
+        .layout()
+        .layer("blocks/small")
+        .expect("the small texture has a layer");
+    for y in 0..16 {
+        for x in 0..16 {
+            let color = source[y * 16 + x];
+            for (dx, dy) in [(0_u32, 0_u32), (1, 0), (0, 1), (1, 1)] {
+                assert_eq!(
+                    texel(atlas, layer, 2 * x as u32 + dx, 2 * y as u32 + dy),
+                    color,
+                    "source pixel ({x}, {y}) is replicated at ({}, {})",
+                    2 * x + dx as usize,
+                    2 * y + dy as usize
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_image_that_is_neither_square_nor_an_animation_strip_is_rejected() {
+    for (name, width, height) in [("tall", 2, 3), ("wide", 4, 2)] {
+        let dir = TempDir::new(&format!("invalid-{name}"));
+        let normal = solid(2, 2, [1, 2, 3, 255]);
+        let invalid = solid(width, height, [4, 5, 6, 255]);
+        let jar = jar_with(
+            &dir,
+            &[
+                (block_path("normal").as_str(), &normal),
+                (block_path(name).as_str(), &invalid),
+            ],
+        );
+
+        let err = ClientResources::load(&jar).expect_err("an irregular image must fail");
+        match err {
+            AssetsError::Image { path, .. } => assert!(
+                path.ends_with(&format!("blocks/{name}.png")),
+                "the error names the offending entry, got {path}"
+            ),
+            other => panic!("expected an image error, got {other:?}"),
+        }
     }
 }
 
@@ -476,7 +597,7 @@ fn official_1_8_8_counts() {
     assert_eq!(resources.atlas().layers(), 601);
     assert_eq!(
         (resources.atlas().width(), resources.atlas().height()),
-        (16, 16)
+        (32, 32)
     );
-    assert_eq!(resources.atlas().pixels().len(), 16 * 16 * 4 * 601);
+    assert_eq!(resources.atlas().pixels().len(), 32 * 32 * 4 * 601);
 }
