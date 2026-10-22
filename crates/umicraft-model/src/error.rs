@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Typed errors for the model pipeline.
+//!
+//! Every failure carries the virtual resource path that caused it, so a broken
+//! resource pack is reported in terms of the file the user can fix rather than
+//! an internal model key.
 
 /// A model or resource failure.
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +41,20 @@ pub enum ModelError {
         reference: String,
         /// Model that contains the reference.
         path: String,
+    },
+    /// The `parent` links of a model form a cycle.
+    #[error("parent cycle at model {path}")]
+    ParentCycle {
+        /// Model key (relative to `models/block`) that closes the cycle.
+        path: String,
+    },
+    /// A `parent` chain is longer than the supported limit.
+    #[error("parent chain through {path} exceeds the depth limit of {limit}")]
+    ParentDepth {
+        /// Model key (relative to `models/block`) that exceeded the limit.
+        path: String,
+        /// Maximum accepted chain length.
+        limit: usize,
     },
 }
 
