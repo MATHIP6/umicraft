@@ -189,8 +189,10 @@ The jar is read once. `ClientResources::load` reads all
 and builds the atlas in `AtlasLayout` order. Layer 0 is the original Umicraft
 missing-texture checker. The 373 block and 227 item PNGs give 600 layers; the
 11 `.mcmeta` animation files are counted as texture entries but do not add a
-layer, and a tall animated strip (water, lava, fire, portal, clock, compass) is
-cropped to its first 16×16 frame for M5. Item textures are loaded now so M8
+layer. The atlas edge is the largest frame width in the source (32 for the
+1.8 jar, because flowing water/lava use 32×32 frames); every layer is
+nearest-neighbour normalized to that edge, and a tall animated strip
+(water, lava, fire, portal, clock, compass) contributes its first frame. Item textures are loaded now so M8
 does not reopen the jar; no M5 block model references them.
 
 ### Mesher and renderer contract
@@ -261,6 +263,7 @@ blockstates       : 340
 source models     : 1080
 texture entries   : 611 (373 block PNG + 9 mcmeta, 227 item PNG + 2 mcmeta)
 texture layers    : 601 (600 PNG frames + missing)
+atlas             : 32x32 RGBA8, 2,461,696 bytes
 block states      : ...
 quads             : ...
 fallback variants : ...
@@ -321,7 +324,8 @@ GPU smoke tests. `git ls-files` must show no Mojang assets.
   `client→model`, `client→assets` already existed).
 - Startup reads and decodes the jar once; windowed play and the demo share the
   immutable model/atlas.
-- Memory: <1 MiB of texture pixels for 16×16 layers, plus parsed JSON/quad data.
+- Memory: about 2.4 MiB of texture pixels (601 layers at 32×32 RGBA8), plus
+  parsed JSON/quad data.
 - The renderer keeps a 19-layer fallback until `set_block_atlas` succeeds, so a
   missing installation, corrupt jar or low texture-array limit degrades to the
   M2 look instead of failing.
