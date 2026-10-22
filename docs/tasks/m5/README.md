@@ -62,7 +62,7 @@ At the time this guide was written (2026-10-22):
 | Workstream | State |
 |---|---|
 | Setup / W0 | `b3b2a15` scaffold; `main` has the later docs-only M5 commits |
-| W1 model core | changes in the worktree, not yet committed; `cargo test -p umicraft-model` is green |
+| W1 model core | committed as `6b8cfee`, synced with `main`, crate gates green |
 | W2 registry | at the setup base, synced to the current `main` docs |
 | W3 atlas | two commits on `feat/m5-atlas` (`925b196`, `883390e`), synced with `main` |
 | W4 mesher | at the setup base, synced to the current `main` docs |
@@ -71,7 +71,7 @@ At the time this guide was written (2026-10-22):
 
 The lead updates this table at each handoff. A worktree with uncommitted
 changes belongs to its active agent; the lead does not reset or clean it.
-W1 must commit its work and merge `main` before it can hand off to W4.
+W1 is ready for W4 once the lead merges it.
 
 ## Integration gates
 
