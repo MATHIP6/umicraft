@@ -1,7 +1,8 @@
 # ADR-0006 — M4: an immediate-mode UI crate and the frozen M4 contract
 
-- Status: Accepted
+- Status: Accepted (implemented 2026-10-22)
 - Date: 2026-10-21
+- Implemented: 2026-10-22
 - Deciders: project owner
 
 ## Context
@@ -123,6 +124,84 @@ before the workstreams start. Two contributors must never edit the same file.
 - An interface change is a stop-the-line event: the agent reports it, the
   lead updates this ADR and notifies the other workstreams before the change
   lands.
+
+## Implementation status (2026-10-22)
+
+M4 is complete and merged in the nominal workstream order except for the
+deliberate W3/W4 swap recorded below:
+
+| Workstream | Merge |
+|---|---|
+| W1 UI core | `40afac8` |
+| W2 text and font | `d5a29cd` |
+| W4 renderer UI pass | `e825b53` |
+| integration fixes | `153f84a`, `dfbc033` |
+| W3 widgets and debug screen | `28f2857` |
+| 720p list-scroll regression fix | `9cfaf99` |
+| W5 client integration and acceptance | `273bbfa` |
+
+### Acceptance evidence
+
+The lead ran, on `main` after the W5 merge:
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+cargo deny check licenses bans
+```
+
+All gates pass. The opt-in GPU tests also pass:
+`offscreen_smoke_renders_sky_and_overlay`,
+`ui_draw_list_renders_over_terrain_and_the_debug_overlay`,
+`a_rejected_atlas_retries_the_fallback`, and
+`the_ui_demo_screenshot_writes_a_png`. The ignored real-font test passes with
+`UMICRAFT_FONT_PNG` pointing at the PNG extracted from
+`/home/mathip/.minecraft/versions/1.8.8/1.8.8.jar`.
+
+The server-less demo reaches the scripted state through the W3 accessors and
+layout rectangles:
+
+```text
+--- umicraft ui demo ---
+font source       : official
+viewport          : 1280x720
+text              : HELL
+caret             : 3
+button clicks     : 1
+list selection    : 2
+list scroll offset: 72.0
+```
+
+With `HOME` pointing at an empty directory it prints `font source : fallback`
+and the same state after one warning. `--ui-demo --screenshot` writes a
+non-empty 1280×720 RGBA PNG from the same final draw list. A tracked-file audit
+finds no `png`, `jar` or other Mojang asset in the repository.
+
+The interactive F2 smoke was not injected into a live window: this environment
+has no `xdotool`/`ydotool` and no running 1.8 server. The pure winit-to-UiInput
+translation, the F2 toggle predicate, the offscreen draw-list path and the
+serverless script are covered by tests; the windowed path differs only in the
+final event-loop wiring.
+
+### Deliberate deviations
+
+- W4 was merged before W3. W4 only touches renderer files, has no overlap with
+  W3, and unblocks the client; the nominal order remains the default.
+- The frozen widget parameters were refined as Appendix B permits: `panel`
+  returns its content `Rect`; the button and text field take the `FontAtlas`;
+  the list and text field take caller-owned state. No other workstream had to
+  edit its files for the refinements.
+- The acceptance list has 32 original rows instead of 20: at 1280×720 the
+  20-row list fit entirely in the panel, so the scripted wheel step could not
+  scroll. A regression test covers the default viewport.
+- `Args.host`/`Args.port` are optional only so `--ui-demo` can run without a
+  server; every other mode still rejects a missing endpoint.
+- The client tracks the cursor while the UI is closed so the first click after
+  F2 uses the physical pointer rather than `(0, 0)`.
+- Adding the two client workspace dependencies regenerated two lines of
+  `Cargo.lock`; the file was not hand-edited.
 
 ## Consequences
 

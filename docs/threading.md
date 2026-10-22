@@ -9,11 +9,11 @@ Rules (restated):
    no shared locks on hot paths.
 3. Every cross-thread boundary is documented here as it is introduced.
 
-## Current state (M3)
+## Current state (M4)
 
 | Thread | Owns | Talks to |
 |---|---|---|
-| Main/render thread (winit) | Window, wgpu submission, the camera, the overlay, the mesh pool | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
+| Main/render thread (winit) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the mesh pool | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
 | **Game thread** (new in M3) | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) |
 | Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, the play loop, the keepalive answers | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
 | Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
@@ -89,11 +89,21 @@ ADR-0005).
   (HUD state, frame statistics) and its own input, so it cannot block the game,
   network or mesh threads.
 - The 1.8 font atlas is loaded once from the user's client jar when it is
-  available; the original 3×5 fallback is used otherwise. The atlas is
-  immutable after load and the renderer uploads it once.
+  available; the original 3×5 fallback is used otherwise. The loader takes the
+  version JSON, verifies the client jar, reads
+  `assets/minecraft/textures/font/ascii.png` and decodes it. The atlas is
+  immutable after load; a rejected atlas is retried once with the fallback
+  before the renderer is allowed to fail.
+- Opening the F2 screen clears game input, closes chat, releases the cursor
+  grab and routes keyboard, text/IME, mouse buttons, wheel and modifier events
+  to `UiInput`. The cursor position is tracked even while the UI is closed so
+  the first click lands at the physical pointer. Closing the UI leaves the
+  cursor uncaptured until the player clicks the game again.
 - The windowed F2 screen and the headless `--ui-demo` drive the same pure
-  `debug_screen`; the draw list is the only output they share with the
-  renderer.
+  `debug_screen`; the demo uses the same `UiInput` events and reads its state
+  through the screen accessors. The draw list is the only output they share
+  with the renderer. `--ui-demo --screenshot` reuses the same final draw list
+  on the offscreen renderer.
 
 ### World and mesh boundary
 
@@ -136,6 +146,10 @@ ADR-0005).
 - M3: the world and the player state moved onto a game thread with a fixed
   20 Hz tick; the render thread only receives snapshots; the headless mode
   drives the same game thread as the windowed client.
-- M4 setup: the pure `umicraft-ui` crate was created and its public types
-  frozen in ADR-0006; the UI frame is planned on the render thread, with the
-  draw list as the only boundary to the renderer.
+- M4: the pure `umicraft-ui` crate implements layout, focus, hit testing,
+  widgets, the text field/list/button debug screen, the 1.8 font atlas and the
+  draw list. The renderer gained a UI pass; the client builds the frame and
+  translates winit input on the render thread. The font is loaded from the
+  user's installation at startup and uploaded once, with the original fallback
+  on every failure. `--ui-demo` drives the same screen without a server or
+  GPU, and its screenshot path reuses the offscreen renderer.
