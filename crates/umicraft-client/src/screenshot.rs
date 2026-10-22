@@ -31,9 +31,12 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         .screenshot
         .as_deref()
         .ok_or_else(|| ClientError::Screenshot("no output path".to_string()))?;
+    let (host, port) = args
+        .server()
+        .ok_or_else(|| ClientError::Network("--screenshot needs a host and port".to_string()))?;
     let session = Session::start(NetworkConfig {
-        host: args.host.clone(),
-        port: args.port,
+        host: host.to_string(),
+        port,
         name: args.name.clone(),
         view_distance: args.view_distance,
     })?;
@@ -135,10 +138,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
             "XYZ {:.1} {:.1} {:.1}",
             camera.position.x, camera.position.y, camera.position.z
         ),
-        format!(
-            "SERVER {}:{}  VIEW {}",
-            args.host, args.port, args.view_distance
-        ),
+        format!("SERVER {host}:{port}  VIEW {}", args.view_distance),
         format!("COLLECTED {:.1}S", args.collect.as_secs_f32()),
     ];
     // The offscreen path draws the same HUD as the window, so the acceptance
@@ -167,7 +167,16 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     Ok(())
 }
 
-fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> Result<(), ClientError> {
+/// Writes one tightly packed RGBA8 frame to `path` as a PNG.
+///
+/// Shared by the terrain screenshot and the server-less UI demo so both paths
+/// use the same encoder and the same output-path handling.
+pub(crate) fn write_png(
+    path: &Path,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<(), ClientError> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;

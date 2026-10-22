@@ -57,9 +57,12 @@ pub struct Report {
 /// The session could not be started, or the server ended the session with an
 /// error.
 pub fn run(args: &Args) -> Result<(), ClientError> {
+    let (host, port) = args
+        .server()
+        .ok_or_else(|| ClientError::Network("--headless needs a host and port".to_string()))?;
     let session = Session::start(NetworkConfig {
-        host: args.host.clone(),
-        port: args.port,
+        host: host.to_string(),
+        port,
         name: args.name.clone(),
         view_distance: args.view_distance,
     })?;
@@ -139,7 +142,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     }
 
     println!("--- umicraft headless session ---");
-    println!("server            : {}:{}", args.host, args.port);
+    println!("server            : {host}:{port}");
     println!("script            : {}", args.script);
     println!("duration          : {:.1} s", elapsed.as_secs_f32());
     println!("ticks             : {}", report.ticks);
