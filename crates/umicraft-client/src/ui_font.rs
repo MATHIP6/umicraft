@@ -288,4 +288,35 @@ mod tests {
         assert_eq!(FontSource::Official.to_string(), "official");
         assert_eq!(FontSource::Fallback.to_string(), "fallback");
     }
+
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn a_rejected_atlas_retries_the_fallback() {
+        let mut renderer = Renderer::new_offscreen(16, 16).expect("offscreen renderer");
+        let rejected = FontAtlas {
+            width: 0,
+            height: 0,
+            pixels: Vec::new(),
+            glyphs: Vec::new(),
+            line_height: 8.0,
+            white_uv: [0.0; 4],
+        };
+        let capture = Capture::default();
+        let installed = tracing::subscriber::with_default(capture.clone(), || {
+            install(&mut renderer, &rejected)
+        })
+        .expect("the fallback atlas is accepted");
+
+        assert!(installed.used_fallback);
+        assert_eq!(installed.atlas, FontAtlas::fallback());
+        let messages = capture
+            .0
+            .lock()
+            .map(|messages| messages.clone())
+            .unwrap_or_default();
+        assert!(
+            messages.iter().any(|message| message.contains("fallback")),
+            "expected a fallback warning, got {messages:?}"
+        );
+    }
 }
