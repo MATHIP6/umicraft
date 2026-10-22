@@ -214,8 +214,11 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
 The legacy `mesh_chunk` and procedural texture layers stay as the no-assets
 fallback. `mesh_chunk_with_models` chooses a weighted variant deterministically
 from the block position, culls `cullface` quads, and writes the atlas layer.
-A state with no model uses the legacy cube mapping if its id is known, else the
-checker layer.
+A state with no model still uses the legacy cube geometry. If the real atlas is
+present, water and lava sample their `water_still`/`water_flow` and
+`lava_still`/`lava_flow` keys; every other no-model state uses the
+missing-texture checker. Without an atlas (the no-assets fallback) the
+procedural layer table is used unchanged.
 
 `umicraft-render` adds:
 
