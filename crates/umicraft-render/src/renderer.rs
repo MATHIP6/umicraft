@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! wgpu renderer for chunk meshes, a procedural block texture array, the
-//! debug overlay, and the immediate-mode UI pass.
+//! wgpu renderer for chunk meshes, a block texture array, the debug overlay,
+//! and the immediate-mode UI pass.
 //!
 //! [`Renderer::new_windowed`] presents to a winit window; [`Renderer::new_offscreen`]
 //! renders to a texture and can save its contents with [`Renderer::read_pixels`].
-//! Terrain is drawn with a depth buffer, back-face culling, per-face axis
-//! shading, and distance fog. Chunk meshes are uploaded whole and replaced
-//! copy-on-write when remeshed. The HUD and the UI share the overlay pipeline;
-//! [`Renderer::render_with_ui`] appends [`UiPass`] geometry after the HUD.
+//! Terrain samples a texture array that starts as the procedural fallback and
+//! is replaced by [`Renderer::set_block_atlas`] when the user's installation is
+//! available. It is drawn with a depth buffer, back-face culling, alpha cutout,
+//! per-face axis shading, and distance fog. Chunk meshes are uploaded whole and
+//! replaced copy-on-write when remeshed. The HUD and the UI share the overlay
+//! pipeline; [`Renderer::render_with_ui`] appends [`UiPass`] geometry after the
+//! HUD.
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -21,6 +24,7 @@ use umicraft_world::ChunkPos;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
+use crate::block_atlas::{self, BlockAtlasError};
 use crate::camera::Camera;
 use crate::error::RenderError;
 use crate::overlay::{Overlay, OverlayVertex};
@@ -93,6 +97,12 @@ pub struct Renderer {
     camera_buffer: wgpu::Buffer,
     terrain_pipeline: wgpu::RenderPipeline,
     terrain_bind_group: wgpu::BindGroup,
+    /// Layout of the terrain camera + texture binding, kept so
+    /// [`Renderer::set_block_atlas`] can bind a replacement array without
+    /// rebuilding the pipeline.
+    terrain_layout: wgpu::BindGroupLayout,
+    /// Nearest-neighbour sampler shared by the fallback and installed arrays.
+    block_sampler: wgpu::Sampler,
     overlay_pipeline: wgpu::RenderPipeline,
     /// Layout and sampler shared by every font texture, so
     /// [`Renderer::set_font_atlas`] can bind a replacement texture without
@@ -350,24 +360,13 @@ impl Renderer {
             ],
         });
 
-        let terrain_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain bind group"),
-            layout: &terrain_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&block_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&block_sampler),
-                },
-            ],
-        });
+        let terrain_bind_group = create_terrain_bind_group(
+            &device,
+            &terrain_layout,
+            &camera_buffer,
+            &block_sampler,
+            &block_view,
+        );
         let overlay_bind_group =
             create_font_bind_group(&device, &overlay_layout, &font_sampler, &font_view);
         let ui_bind_group =
@@ -405,6 +404,8 @@ impl Renderer {
             camera_buffer,
             terrain_pipeline,
             terrain_bind_group,
+            terrain_layout,
+            block_sampler,
             overlay_pipeline,
             overlay_layout,
             font_sampler,
@@ -514,6 +515,95 @@ impl Renderer {
             &view,
         );
         self.ui_atlas = atlas.clone();
+        Ok(())
+    }
+
+    /// Uploads the block/item texture array built from the user's installation
+    /// and binds it for terrain rendering.
+    ///
+    /// `pixels` is layer-major tightly packed RGBA8, exactly
+    /// `width × height × 4 × layers` bytes long (the payload of
+    /// `umicraft_assets::BlockAtlas`). One `Rgba8UnormSrgb` 2D array texture is
+    /// created at the declared layer count and written with a single upload;
+    /// the shared nearest-neighbour sampler keeps the texels crisp.
+    ///
+    /// Until this method succeeds the terrain samples the built-in procedural
+    /// fallback (see [`fallback_texture_data`]). A rejected upload leaves that
+    /// fallback bound and usable, so a missing or malformed installation
+    /// degrades to the M2 look instead of failing. Calling this method again
+    /// replaces the previous array.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockAtlasError`] when a dimension or the layer count is zero, the
+    /// buffer length does not equal `width × height × 4 × layers`, the size
+    /// arithmetic overflows, or the layer size or count exceeds the device
+    /// limits. Every check runs before any GPU resource is created.
+    pub fn set_block_atlas(
+        &mut self,
+        width: u32,
+        height: u32,
+        layers: u32,
+        pixels: &[u8],
+    ) -> Result<(), BlockAtlasError> {
+        let limits = self.device.limits();
+        block_atlas::validate(
+            width,
+            height,
+            layers,
+            pixels.len(),
+            limits.max_texture_dimension_2d,
+            limits.max_texture_array_layers,
+        )?;
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("block texture array"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: layers,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            // `Queue::write_texture` stages the data internally, so rows need
+            // no 256-byte alignment here (unlike texture↔buffer copies). The
+            // device limit check above caps `width`, so `width * 4` cannot
+            // overflow.
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: layers,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("block texture array view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        self.terrain_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.camera_buffer,
+            &self.block_sampler,
+            &view,
+        );
         Ok(())
     }
 
@@ -974,6 +1064,39 @@ fn create_terrain_pipeline(
         }),
         multiview_mask: None,
         cache: None,
+    })
+}
+
+/// Binds the camera uniform, one block texture-array view and the block
+/// sampler.
+///
+/// Shared by [`Renderer::create`] (procedural fallback array) and
+/// [`Renderer::set_block_atlas`] (installed array), so replacing the terrain
+/// texture never duplicates the binding layout.
+fn create_terrain_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    camera: &wgpu::Buffer,
+    sampler: &wgpu::Sampler,
+    view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("terrain bind group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
     })
 }
 
