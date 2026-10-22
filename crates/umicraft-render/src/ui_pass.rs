@@ -215,13 +215,13 @@ impl UiPass {
         }
     }
 
-    /// Updates the viewport size and resets the clip to the new viewport.
+    /// Updates the viewport size, drops the old vertices and resets the clip
+    /// to the new viewport.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width.max(1) as f32;
         self.height = height.max(1) as f32;
         self.overlay.resize(width, height);
-        self.clip = Some(Rect::new(0.0, 0.0, self.width, self.height));
-        self.clip_stack.clear();
+        self.clear();
     }
 
     /// Drops all vertices and clip scopes.
@@ -577,6 +577,7 @@ mod tests {
         assert_close(pass.vertices()[2].position, [0.0, 0.0]);
 
         pass.resize(200, 200);
+        assert!(pass.is_empty(), "resize must drop stale vertices");
         pass.rebuild(&list, &atlas());
         assert_close(pass.vertices()[2].position, [-0.5, 0.5]);
     }
