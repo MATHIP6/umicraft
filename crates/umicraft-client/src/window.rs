@@ -705,8 +705,12 @@ impl ApplicationHandler for App {
                 self.ui_input.modifiers(modifiers.state());
             }
             WindowEvent::CursorMoved { position, .. } => {
-                if self.show_debug_screen {
-                    self.ui_input.pointer_moved(position);
+                // Keep the pointer current even while the UI is closed: F2 can
+                // open the screen before the next mouse movement, and the first
+                // click must use the physical cursor, not the initial origin.
+                self.ui_input.pointer_moved(position);
+                if !self.show_debug_screen {
+                    self.ui_input.clear();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
