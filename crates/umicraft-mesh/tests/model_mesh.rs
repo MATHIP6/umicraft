@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use umicraft_mesh::{
     mesh_chunk, mesh_chunk_with_models, BlockSource, ChunkSnapshot, Mesh, ModelMeshContext, Vertex,
+    VertexLight,
 };
 use umicraft_model::{
     AtlasLayout, BlockDefinition, BlockModelSet, ModelError, ModelResult, ResourceSource, StateDef,
@@ -250,9 +251,16 @@ fn layer(context: &ModelMeshContext, key: &str) -> u32 {
         .expect("the synthetic atlas has the key")
 }
 
-/// Iterates the four vertices of every emitted quad.
+/// Iterates the four vertices of every emitted quad, both passes included.
 fn quads(mesh: &Mesh) -> impl Iterator<Item = &[Vertex]> {
-    mesh.vertices.chunks_exact(4)
+    mesh.vertices
+        .chunks_exact(4)
+        .chain(mesh.transparent_vertices.chunks_exact(4))
+}
+
+/// Iterates every vertex of both passes.
+fn all_vertices(mesh: &Mesh) -> impl Iterator<Item = &Vertex> {
+    mesh.vertices.iter().chain(mesh.transparent_vertices.iter())
 }
 
 /// Number of quads with `normal` and `layer`; used to prove which faces survive
@@ -310,12 +318,9 @@ fn a_cube_model_emits_six_faces_with_the_atlas_layer() {
     assert_eq!(mesh.triangle_count(), 12);
     assert_eq!(mesh.vertices.len(), 24);
     assert_eq!(mesh.indices.len(), 36);
-    assert!(mesh
-        .vertices
-        .iter()
-        .all(|vertex| vertex.layer == stone_layer));
+    assert!(all_vertices(&mesh).all(|vertex| vertex.layer == stone_layer));
     // The quad corners are block-local, so the whole cube sits at 8..=9.
-    assert!(mesh.vertices.iter().all(|vertex| {
+    assert!(all_vertices(&mesh).all(|vertex| {
         (8.0..=9.0).contains(&vertex.position[0])
             && (8.0..=9.0).contains(&vertex.position[1])
             && (8.0..=9.0).contains(&vertex.position[2])
@@ -387,26 +392,14 @@ fn a_bottom_slab_stops_at_half_height() {
 
     let mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &blocks, &context);
     assert_eq!(mesh.face_count(), 6, "a slab model has six quads");
-    assert!(mesh
-        .vertices
-        .iter()
-        .all(|vertex| vertex.position[1] <= 0.5 + 1.0e-6));
-    assert!(mesh
-        .vertices
-        .iter()
-        .any(|vertex| (vertex.position[1] - 0.5).abs() < 1.0e-6));
-    assert!(mesh
-        .vertices
-        .iter()
-        .all(|vertex| vertex.layer == slab_layer));
+    assert!(all_vertices(&mesh).all(|vertex| vertex.position[1] <= 0.5 + 1.0e-6));
+    assert!(all_vertices(&mesh).any(|vertex| (vertex.position[1] - 0.5).abs() < 1.0e-6));
+    assert!(all_vertices(&mesh).all(|vertex| vertex.layer == slab_layer));
     assert_counter_clockwise(&mesh);
 
     // The legacy path knows no slab shape and would emit a full cube.
     let legacy = mesh_chunk(ChunkPos::new(0, 0), &blocks);
-    assert!(legacy
-        .vertices
-        .iter()
-        .any(|vertex| (vertex.position[1] - 1.0).abs() < 1.0e-6));
+    assert!(all_vertices(&legacy).any(|vertex| (vertex.position[1] - 1.0).abs() < 1.0e-6));
 }
 
 #[test]
@@ -428,10 +421,7 @@ fn a_cross_emits_four_quads_and_is_not_culled() {
     let mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &alone, &context);
     assert_eq!(mesh.face_count(), 4);
     assert_eq!(mesh.triangle_count(), 8);
-    assert!(mesh
-        .vertices
-        .iter()
-        .all(|vertex| vertex.layer == plant_layer));
+    assert!(all_vertices(&mesh).all(|vertex| vertex.layer == plant_layer));
     assert_counter_clockwise(&mesh);
     // The coarse kind is Flat, so only the model makes the plant visible.
     assert!(mesh_chunk(ChunkPos::new(0, 0), &alone).is_empty());
@@ -442,19 +432,27 @@ fn a_cross_emits_four_quads_and_is_not_culled() {
     let mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &next_to_stone, &context);
     assert_eq!(mesh.face_count(), 10);
     assert_eq!(
-        mesh.vertices
-            .iter()
+        all_vertices(&mesh)
             .filter(|vertex| vertex.layer == plant_layer)
             .count(),
         16
     );
     assert_eq!(
-        mesh.vertices
-            .iter()
+        all_vertices(&mesh)
             .filter(|vertex| vertex.layer == stone_layer)
             .count(),
         24
     );
+    // Cross quads carry `shade = false`; AO stays open even though the
+    // synthetic model leaves `ambientocclusion` at its default of true.
+    let plant_lights: Vec<VertexLight> = all_vertices(&mesh)
+        .filter(|vertex| vertex.layer == plant_layer)
+        .map(|vertex| VertexLight::unpack(vertex.light))
+        .collect();
+    assert!(plant_lights
+        .iter()
+        .all(|light| light.ao == VertexLight::AO_OPEN));
+    assert!(plant_lights.iter().all(|light| !light.shade));
 }
 
 #[test]
@@ -477,17 +475,22 @@ fn glass_culls_only_against_the_same_state() {
     let two_glass = Scene::new(&[([0, 0, 0], glass), ([1, 0, 0], glass)]);
     let mesh = mesh_chunk_with_models(chunk, &two_glass, &context);
     assert_eq!(mesh.face_count(), 10);
+    assert_eq!(mesh.opaque_face_count(), 0);
+    assert_eq!(mesh.transparent_face_count(), 10);
     // Both faces in the shared plane x = 1 are gone; the outer planes remain.
     assert_eq!(quads_with(&mesh, [-1.0, 0.0, 0.0], glass_layer), 1);
     assert_eq!(quads_with(&mesh, [1.0, 0.0, 0.0], glass_layer), 1);
-    assert!(mesh
-        .vertices
-        .iter()
-        .all(|vertex| vertex.layer == glass_layer));
+    assert!(all_vertices(&mesh).all(|vertex| vertex.layer == glass_layer));
 
     let mixed = Scene::new(&[([0, 0, 0], glass), ([1, 0, 0], stone)]);
     let mesh = mesh_chunk_with_models(chunk, &mixed, &context);
     assert_eq!(mesh.face_count(), 11);
+    assert_eq!(mesh.opaque_face_count(), 6, "the stone stays opaque");
+    assert_eq!(
+        mesh.transparent_face_count(),
+        5,
+        "glass goes to the second pass"
+    );
     // The glass face against the opaque stone is culled; the stone face
     // against the see-through glass is not.
     assert_eq!(quads_with(&mesh, [1.0, 0.0, 0.0], glass_layer), 0);
@@ -628,4 +631,69 @@ fn the_mesh_is_deterministic_across_runs() {
     assert_eq!(first, second);
     assert!(!first.is_empty());
     assert_counter_clockwise(&first);
+}
+
+/// A context whose single cube model is the given JSON.
+fn cube_context(model_json: &str) -> ModelMeshContext {
+    let source = Memory::new()
+        .model("stone", model_json)
+        .blockstate("stone", &blockstate("stone"));
+    context(
+        BlockModelSet::build(&source, CUBE_DEFS).expect("synthetic cube model set"),
+        &["blocks/stone"],
+    )
+}
+
+/// A two-block scene where the second stone darkens one corner of the first.
+fn corner_occluder_scene() -> Scene {
+    let stone = BlockState::new(1, 0);
+    Scene::new(&[([0, 0, 0], stone), ([1, 1, 0], stone)])
+}
+
+#[test]
+fn a_model_without_ambient_occlusion_keeps_its_corners_open() {
+    let chunk = ChunkPos::new(0, 0);
+    let scene = corner_occluder_scene();
+
+    // The default model flag lets the diagonal block darken a corner.
+    let normal = cube_context(&CUBE_JSON.replace("#all", "blocks/stone"));
+    let mesh = mesh_chunk_with_models(chunk, &scene, &normal);
+    assert!(all_vertices(&mesh)
+        .any(|vertex| VertexLight::unpack(vertex.light).ao < VertexLight::AO_OPEN));
+
+    // `ambientocclusion: false` keeps every corner open but still shades.
+    let no_ao = CUBE_JSON.replace("#all", "blocks/stone").replacen(
+        '{',
+        "{\n  \"ambientocclusion\": false,",
+        1,
+    );
+    let context = cube_context(&no_ao);
+    let mesh = mesh_chunk_with_models(chunk, &scene, &context);
+    assert!(all_vertices(&mesh).all(|vertex| {
+        let light = VertexLight::unpack(vertex.light);
+        light.ao == VertexLight::AO_OPEN && light.shade
+    }));
+}
+
+#[test]
+fn a_quad_with_shade_false_keeps_its_corners_open() {
+    let chunk = ChunkPos::new(0, 0);
+    let scene = corner_occluder_scene();
+
+    let normal = cube_context(&CUBE_JSON.replace("#all", "blocks/stone"));
+    let mesh = mesh_chunk_with_models(chunk, &scene, &normal);
+    assert!(all_vertices(&mesh)
+        .any(|vertex| VertexLight::unpack(vertex.light).ao < VertexLight::AO_OPEN));
+
+    // The element `shade: false` flag (crosses, plants) disables corner AO
+    // while the flag itself is still carried to the shader.
+    let no_shade = CUBE_JSON
+        .replace("#all", "blocks/stone")
+        .replace("\"from\":", "\"shade\": false, \"from\":");
+    let context = cube_context(&no_shade);
+    let mesh = mesh_chunk_with_models(chunk, &scene, &context);
+    assert!(all_vertices(&mesh).all(|vertex| {
+        let light = VertexLight::unpack(vertex.light);
+        light.ao == VertexLight::AO_OPEN && !light.shade
+    }));
 }
