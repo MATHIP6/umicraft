@@ -64,7 +64,7 @@ At the time this guide was written (2026-10-22):
 | Setup / W0 | `b3b2a15` scaffold; `main` has the later docs-only M5 commits |
 | W1 model core | committed as `6b8cfee`, synced with `main`, crate gates green |
 | W2 registry | at the setup base, synced to the current `main` docs |
-| W3 atlas | two commits on `feat/m5-atlas` (`925b196`, `883390e`), synced with `main` |
+| W3 atlas | two commits on `feat/m5-atlas` (`925b196`, `883390e`), synced with `main`; official 1.8.8 counts verified |
 | W4 mesher | at the setup base, synced to the current `main` docs |
 | W5 renderer | at the setup base, synced to the current `main` docs |
 | W6 client | at the setup base, synced to the current `main` docs |
