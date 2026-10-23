@@ -67,18 +67,22 @@ without the lead splitting a new ADR.
 
 ## Current handoff state
 
-At setup time (2026-10-22):
+M6 is accepted on `main`, merged in the order W1 → W2 → W3 → W4:
 
 | Workstream | State |
 |---|---|
 | Setup / W0 | complete: ADR-0008 and frozen interfaces on `main` |
-| W1 lighting | ready to launch; no commits |
-| W2 terrain renderer | ready to launch; no commits |
-| W3 sky & clock | ready to launch; no commits |
-| W4 acceptance | ready to start its harness; final run waits for W1–W3 |
+| W1 lighting | accepted: `feat/m6-light` at `9536327`, merged in `bc9fe43` |
+| W2 terrain renderer | accepted: `feat/m6-render` at `1837fa5`, merged in `807725d` |
+| W3 sky & clock | accepted: `feat/m6-sky` at `841b7ba`, merged in `b3182ae` |
+| W4 acceptance | accepted: `feat/m6-acceptance` at `d7faaea`, merged in `831c3b8` |
 
-M5 is accepted at `a1bfe05`. The four M6 worktrees were created from the setup
-commit; they contain no implementation commits yet.
+M5 was accepted at `a1bfe05`. The M6 acceptance evidence is the four
+`--demo-view` screenshots (1280×720, llvmpipe), a measured AO gradient of
+15/10/5/0 at the demo corner, day/night/cave mean luminances of
+186.0/51.6/40.5, and the meshing proxy at 40.6–42.2 ms against the 125.7 ms
+budget (rows in `docs/perf-log.md`). The worktrees were removed after the
+merge; the four branches are retained.
 
 ## Integration gates
 

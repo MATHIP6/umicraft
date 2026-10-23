@@ -128,23 +128,23 @@ the owner's decisions, not part of this card.
 
 ## Closure checklist
 
-- [ ] W1–W4 merged with green per-merge gates.
-- [ ] Four M6 screenshots inspected: day, night, cave, transparency.
-- [ ] AO visible at the demo corner; night and cave are dark; water/glass/leaves
+- [x] W1–W4 merged with green per-merge gates.
+- [x] Four M6 screenshots inspected: day, night, cave, transparency.
+- [x] AO visible at the demo corner; night and cave are dark; water/glass/leaves
       are blended, not opaque or invisible.
-- [ ] `docs/perf-log.md` has the M6 before/after rows and the 110 % result.
-- [ ] ADR-0008 status changed to `Implemented` (or an amendment recorded for
+- [x] `docs/perf-log.md` has the M6 before/after rows and the 110 % result.
+- [x] ADR-0008 status changed to `Implemented` (or an amendment recorded for
       any deviation).
-- [ ] Root `README.md` status and M6 summary updated.
-- [ ] `docs/threading.md` documents the clock/environment channel and the
+- [x] Root `README.md` status and M6 summary updated.
+- [x] `docs/threading.md` documents the clock/environment channel and the
       transparent pass ordering.
-- [ ] `docs/sources.md` has the M6 rows (smooth light/AO, lightmap, time/sky/
+- [x] `docs/sources.md` has the M6 rows (smooth light/AO, lightmap, time/sky/
       fog/clouds, transparency sorting, `Time Update`).
-- [ ] `docs/tasks/m6/README.md` handoff table marked accepted.
-- [ ] `cargo fmt`, clippy, tests, doc, deny, opt-in GPU tests and no-asset audit
+- [x] `docs/tasks/m6/README.md` handoff table marked accepted.
+- [x] `cargo fmt`, clippy, tests, doc, deny, opt-in GPU tests and no-asset audit
       all green.
-- [ ] Worktrees left in place; do not delete or push without the owner's
-      explicit decision.
+- [x] Worktrees removed after the owner's explicit request; the four branches
+      are retained and nothing was pushed.
 
 ## Handoff template
 

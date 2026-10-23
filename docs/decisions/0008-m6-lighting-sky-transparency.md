@@ -1,6 +1,6 @@
 # ADR-0008 — M6: lighting, sky, fog and transparency
 
-- Status: Accepted (interfaces frozen); implementation in progress
+- Status: Implemented (2026-10-22)
 - Date: 2026-10-22
 - Deciders: project owner
 - Supersedes: none
