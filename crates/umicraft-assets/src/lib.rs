@@ -64,6 +64,7 @@ pub mod atlas;
 pub mod cache;
 pub mod client_jar;
 pub mod client_resources;
+pub mod colormap;
 pub mod error;
 pub mod hash;
 pub mod http;
@@ -76,5 +77,6 @@ mod zip;
 
 pub use atlas::BlockAtlas;
 pub use client_resources::ClientResources;
+pub use colormap::{BiomeColormaps, Colormap};
 pub use error::{AssetsError, AssetsResult};
 pub use progress::{Progress, ProgressSnapshot};
