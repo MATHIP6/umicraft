@@ -133,3 +133,11 @@ pub enum AssetsError {
 
 /// Convenience alias for results carrying [`AssetsError`].
 pub type AssetsResult<T> = Result<T, AssetsError>;
+
+/// Builds an [`AssetsError::Image`] with a consistent diagnostic.
+pub(crate) fn image_error(path: &str, reason: impl Into<String>) -> AssetsError {
+    AssetsError::Image {
+        path: path.to_string(),
+        reason: reason.into(),
+    }
+}

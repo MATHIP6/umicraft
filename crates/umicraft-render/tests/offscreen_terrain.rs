@@ -27,6 +27,7 @@ fn quad(z: f32, x: (f32, f32), y: (f32, f32), layer: u32, light: VertexLight) ->
         uv,
         layer,
         light: light.pack(),
+        tint: umicraft_mesh::tint::WHITE,
     };
     Mesh {
         vertices: vec![
@@ -288,4 +289,60 @@ fn removing_a_transparent_only_mesh_releases_it() {
     assert_eq!(renderer.mesh_count(), 1);
     renderer.upload_mesh(ChunkPos::new(0, 0), &Mesh::default());
     assert_eq!(renderer.mesh_count(), 0);
+}
+
+/// Replaces the tint of every vertex in both passes.
+fn tinted(mut mesh: Mesh, tint: u32) -> Mesh {
+    for vertex in &mut mesh.vertices {
+        vertex.tint = tint;
+    }
+    for vertex in &mut mesh.transparent_vertices {
+        vertex.tint = tint;
+    }
+    mesh
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_vertex_tint_multiplies_the_texel_colour() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    // White texture: the frame colour is the tint times the (full) light.
+    renderer
+        .set_block_atlas(1, 1, 1, &synthetic_atlas(&[[255, 255, 255, 255]]))
+        .expect("upload synthetic atlas");
+    let geometry = |tint| tinted(quad(-5.0, (-8.0, 8.0), (60.0, 100.0), 0, TORCH), tint);
+
+    renderer.upload_mesh(ChunkPos::new(0, 0), &geometry(umicraft_mesh::tint::WHITE));
+    let white = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(
+        white[0] > 240 && white[1] > 240 && white[2] > 240,
+        "an untinted white texel must stay white: {white:?}"
+    );
+
+    renderer.upload_mesh(ChunkPos::new(0, 0), &geometry(0x00FF_0000));
+    let red = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(
+        red[0] > 240 && red[1] < 10 && red[2] < 10,
+        "a red tint must zero the green and blue channels: {red:?}"
+    );
+    assert_eq!(red[3], 255, "the tint must not change alpha");
+
+    renderer.upload_mesh(ChunkPos::new(0, 0), &geometry(0x0080_0000));
+    let half = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(
+        half[0] > 100 && half[0] < red[0],
+        "a half-red tint must damp the red channel: {half:?}"
+    );
 }

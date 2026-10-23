@@ -19,7 +19,9 @@
 //!
 //! Every quad becomes four [`Vertex`]es and two triangles, like the legacy
 //! path. Its texture layer comes from [`AtlasLayout`]; a key the atlas does
-//! not contain falls back to layer 0, the missing-texture checker.
+//! not contain falls back to layer 0, the missing-texture checker. A face
+//! whose model entry carries `tintindex` samples the biome colour table from
+//! [`ModelMeshContext::tints`] (ADR-0009).
 //!
 //! References (ADR-0001): the 1.8 client selects the weighted model from the
 //! block position in `BlockRendererDispatcher.getModelFromBlockState` via
@@ -34,8 +36,8 @@ use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant, MISSI
 use umicraft_world::{BlockState, ChunkPos};
 
 use crate::{
-    emit_legacy_faces_with, is_transparent_pass, occludes, quad_light, texture_layer, BlockSource,
-    Face, Mesh, Vertex,
+    emit_legacy_faces_with, is_transparent_pass, occludes, quad_light, texture_layer, tint,
+    BlockSource, Face, Mesh, Vertex,
 };
 
 /// The baked models and the texture layers the model mesher reads.
@@ -44,12 +46,18 @@ use crate::{
 /// concrete texture keys (`blocks/stone`) and the atlas assigns their layers.
 /// The client keeps one context and shares its `Arc`s with every meshing
 /// worker, so building a context never touches the disk.
+///
+/// `tints` is the optional biome-colour table built from the two runtime
+/// colormaps (ADR-0009). `None` keeps every face white, which is the M5
+/// behaviour when the installation has no colormaps.
 #[derive(Debug, Clone)]
 pub struct ModelMeshContext {
     /// Baked block models keyed by wire state.
     pub models: Arc<BlockModelSet>,
     /// Texture-key to layer mapping of the texture array.
     pub atlas: Arc<AtlasLayout>,
+    /// Per-biome grass/foliage/water colours, or `None` for untinted output.
+    pub tints: Option<Arc<tint::BiomeTints>>,
 }
 
 /// Builds the mesh for one chunk column from baked block models.
@@ -94,9 +102,12 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     .model(state)
                     .and_then(|model| select_variant(model, position));
                 if let Some(variant) = variant {
-                    emit_model_quads(&mut mesh, source, &context.atlas, state, variant, position);
+                    emit_model_quads(&mut mesh, source, context, state, variant, position);
                 } else if state.is_renderable() {
-                    emit_legacy_faces_with(&mut mesh, source, wx, y, wz, state, |face| {
+                    let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
+                        tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
+                    });
+                    emit_legacy_faces_with(&mut mesh, source, [wx, y, wz], state, tint, |face| {
                         fallback_layer(state, face, &context.atlas)
                     });
                 }
@@ -192,12 +203,16 @@ fn position_random([x, y, z]: [i32; 3]) -> i64 {
 fn emit_model_quads<S: BlockSource + ?Sized>(
     mesh: &mut Mesh,
     source: &S,
-    atlas: &AtlasLayout,
+    context: &ModelMeshContext,
     state: BlockState,
     variant: &ModelVariant,
     position: [i32; 3],
 ) {
     let [x, y, z] = position;
+    // Tint is constant per block, so compute the 3×3 biome average at most
+    // once and reuse it for every tinted quad (grass top + side overlay,
+    // six leaf faces, ...). Untinted quads never sample the colormaps.
+    let mut block_tint = None;
     for quad in &variant.model.quads {
         if let Some(cullface) = quad.cullface {
             let offset = cullface.offset();
@@ -207,7 +222,16 @@ fn emit_model_quads<S: BlockSource + ?Sized>(
             }
         }
 
-        let layer = atlas.layer(&quad.texture).unwrap_or(0);
+        let layer = context.atlas.layer(&quad.texture).unwrap_or(0);
+        let tint = if quad.tint.is_some() {
+            *block_tint.get_or_insert_with(|| {
+                context.tints.as_deref().map_or(tint::WHITE, |tints| {
+                    tint::biome_tint(source, tint::tint_class(state), x, z, tints)
+                })
+            })
+        } else {
+            tint::WHITE
+        };
         // Smooth light and AO sample the same outward plane as the legacy
         // cubes; the model's `ambientocclusion` flag and the per-quad `shade`
         // flag decide whether the corner AO applies.
@@ -231,6 +255,7 @@ fn emit_model_quads<S: BlockSource + ?Sized>(
                 uv: quad.uvs[index],
                 layer,
                 light: lights[index].pack(),
+                tint,
             }
         });
         mesh.push_quad(is_transparent_pass(state), vertices);

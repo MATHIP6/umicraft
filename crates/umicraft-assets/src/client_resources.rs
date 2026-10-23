@@ -23,7 +23,9 @@ use umicraft_model::{AtlasLayout, ModelError, ModelResult, ResourceSource};
 
 use crate::atlas::BlockAtlas;
 use crate::client_jar::ClientJar;
-use crate::{AssetsError, AssetsResult};
+use crate::colormap::{BiomeColormaps, Colormap, COLORMAP_PREFIX, FOLIAGE_PATH, GRASS_PATH};
+use crate::error::image_error;
+use crate::AssetsResult;
 
 /// Prefix of the 1.8 blockstate documents inside the client jar.
 const BLOCKSTATES_PREFIX: &str = "assets/minecraft/blockstates/";
@@ -216,11 +218,13 @@ struct TextureLayer {
     image: DecodedPng,
 }
 
-/// Every blockstate, block model and block/item texture of one client jar.
+/// Every blockstate, block model and block/item texture of one client jar,
+/// plus the optional biome colormaps.
 #[derive(Debug, Clone)]
 pub struct ClientResources {
     files: BTreeMap<String, Vec<u8>>,
     atlas: BlockAtlas,
+    colormaps: Option<BiomeColormaps>,
 }
 
 impl ClientResources {
@@ -232,27 +236,36 @@ impl ClientResources {
     /// resource but does not add an atlas layer). Entries outside those
     /// prefixes or extensions are ignored.
     ///
+    /// The two 256×256 biome colormaps (`colormap/grass.png`,
+    /// `colormap/foliage.png`) are decoded into [`Self::colormaps`] and are
+    /// **not** added to the block atlas: the renderer multiplies them in the
+    /// shader, it never samples them as a texture layer.
+    ///
     /// # Errors
     ///
-    /// [`AssetsError::Io`] or [`AssetsError::Zip`] when the jar cannot be read,
-    /// and [`AssetsError::Image`] when a texture is not a decodable PNG or does
-    /// not fit the atlas frame size.
+    /// [`crate::AssetsError::Io`] or [`crate::AssetsError::Zip`] when the jar cannot be read,
+    /// and [`crate::AssetsError::Image`] when a texture or a present colormap is not a
+    /// decodable PNG, or when the colormap is not 256×256.
     pub fn load(jar: &ClientJar) -> AssetsResult<Self> {
         let entries = jar.read_prefixes(&[
             BLOCKSTATES_PREFIX,
             MODELS_PREFIX,
             BLOCK_TEXTURES_PREFIX,
             ITEM_TEXTURES_PREFIX,
+            COLORMAP_PREFIX,
         ])?;
 
         let mut files = BTreeMap::new();
         let mut textures = Vec::new();
+        let mut colormaps = BTreeMap::new();
         for (path, bytes) in entries {
             if is_json_resource(&path) {
                 files.insert(path, bytes);
             } else if is_texture_metadata(&path) {
                 // Kept for the future animation pass; it is not a layer.
                 files.insert(path, bytes);
+            } else if path == GRASS_PATH || path == FOLIAGE_PATH {
+                colormaps.insert(path.clone(), DecodedPng::decode(&path, &bytes)?);
             } else if let Some(key) = texture_key(&path) {
                 let image = DecodedPng::decode(&path, &bytes)?;
                 files.insert(path.clone(), bytes);
@@ -261,7 +274,12 @@ impl ClientResources {
         }
 
         let atlas = build_atlas(textures)?;
-        Ok(Self { files, atlas })
+        let colormaps = decode_colormaps(&mut colormaps)?;
+        Ok(Self {
+            files,
+            atlas,
+            colormaps,
+        })
     }
 
     /// Reads one virtual resource path.
@@ -284,6 +302,33 @@ impl ClientResources {
     pub fn atlas(&self) -> &BlockAtlas {
         &self.atlas
     }
+
+    /// The grass and foliage colormaps, when the jar contains both.
+    ///
+    /// `None` is not an error: the mesher then leaves every face untinted
+    /// (white), which keeps custom or synthetic installations renderable.
+    #[must_use]
+    pub fn colormaps(&self) -> Option<&BiomeColormaps> {
+        self.colormaps.as_ref()
+    }
+}
+
+/// Builds the optional colormap pair from the decoded jar entries.
+///
+/// Both maps are required together: `BiomeTints` samples grass and foliage
+/// from the same climate table, and partial tinting would silently diverge
+/// from vanilla. A malformed map is an error; a missing one disables tinting.
+fn decode_colormaps(
+    decoded: &mut BTreeMap<String, DecodedPng>,
+) -> AssetsResult<Option<BiomeColormaps>> {
+    let (Some(grass), Some(foliage)) = (decoded.remove(GRASS_PATH), decoded.remove(FOLIAGE_PATH))
+    else {
+        return Ok(None);
+    };
+    let grass = Colormap::from_rgba8(GRASS_PATH, grass.width, grass.height, &grass.pixels)?;
+    let foliage =
+        Colormap::from_rgba8(FOLIAGE_PATH, foliage.width, foliage.height, &foliage.pixels)?;
+    Ok(Some(BiomeColormaps { grass, foliage }))
 }
 
 impl ResourceSource for ClientResources {
@@ -425,17 +470,11 @@ fn gray_to_rgba(pixels: &[u8]) -> Vec<u8> {
     rgba
 }
 
-/// Builds an [`AssetsError::Image`] with a consistent diagnostic.
-fn image_error(path: &str, reason: impl Into<String>) -> AssetsError {
-    AssetsError::Image {
-        path: path.to_string(),
-        reason: reason.into(),
-    }
-}
-
+/// Builds an [`crate::AssetsError::Image`] with a consistent diagnostic.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AssetsError;
 
     #[test]
     fn texture_keys_are_relative_to_the_texture_root() {

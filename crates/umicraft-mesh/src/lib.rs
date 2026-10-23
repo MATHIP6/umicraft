@@ -42,6 +42,16 @@
 //!   [`BlockKind::Liquid`] go to [`Mesh::transparent_vertices`] /
 //!   [`Mesh::transparent_indices`], everything else to the opaque pass.
 //!
+//! Biome tints (ADR-0009) add one `u32` per vertex:
+//!
+//! - [`tint`] turns the biome byte of a column and the two runtime colormaps
+//!   into the 1.8 grass/foliage/water colours;
+//! - a model quad is tinted only when its face carries `tintindex`;
+//! - [`ModelMeshContext::tints`] is immutable and shared by all mesh workers.
+//!   Without it every vertex is white, so the no-assets path is unchanged.
+//!
+//! [`ModelMeshContext::tints`]: models::ModelMeshContext::tints
+//!
 //! The corner mapping and the light averaging follow
 //! `BlockModelRenderer.AmbientOcclusionFace` and
 //! `WorldProvider.generateLightBrightnessTable` in
@@ -56,6 +66,7 @@ use umicraft_world::{BlockKind, BlockPos, BlockState, ChunkColumn, ChunkPos, Lig
 use std::sync::Arc;
 
 pub mod models;
+pub mod tint;
 
 pub use models::{mesh_chunk_with_models, ModelMeshContext};
 
@@ -77,9 +88,14 @@ pub struct Vertex {
     /// Packed [`VertexLight`] payload (block/sky light, AO and face shading).
     ///
     /// The shader unpacks bits 0..=3 (block), 4..=7 (sky), 8..=11 (AO) and
-    /// bit 12 (shade). Keeping the payload in one `u32` leaves the vertex at
-    /// 40 bytes.
+    /// bit 12 (shade).
     pub light: u32,
+    /// Biome tint as `0x00RRGGBB`, white (`0x00FF_FFFF`) when untinted.
+    ///
+    /// Only the grass block, leaves, vines, tall grass and water set it
+    /// (ADR-0009); the shader multiplies the sampled texel by
+    /// `tint / 255`. The vertex is 44 bytes, still `Pod`/`repr(C)`.
+    pub tint: u32,
 }
 
 /// Per-vertex lighting payload.
@@ -268,6 +284,16 @@ pub trait BlockSource {
     fn light(&self, _x: i32, _y: i32, _z: i32) -> LightLevel {
         LightLevel::FULL_SKY
     }
+
+    /// Biome id at a world column, or `None` without biome data.
+    ///
+    /// The mesher only calls this for tinted faces (grass, leaves, vines,
+    /// water). `None` keeps the face white, which is the M5 behaviour for
+    /// synthetic sources and the no-assets path. Real world sources override
+    /// it with the column byte; `y` does not matter.
+    fn biome(&self, _x: i32, _z: i32) -> Option<u8> {
+        None
+    }
 }
 
 impl BlockSource for World {
@@ -280,6 +306,11 @@ impl BlockSource for World {
     fn light(&self, x: i32, y: i32, z: i32) -> LightLevel {
         World::light(self, BlockPos::new(x, y, z))
     }
+
+    #[inline]
+    fn biome(&self, x: i32, z: i32) -> Option<u8> {
+        World::biome(self, BlockPos::new(x, 0, z))
+    }
 }
 
 impl<T: BlockSource + ?Sized> BlockSource for &T {
@@ -289,6 +320,10 @@ impl<T: BlockSource + ?Sized> BlockSource for &T {
 
     fn light(&self, x: i32, y: i32, z: i32) -> LightLevel {
         (**self).light(x, y, z)
+    }
+
+    fn biome(&self, x: i32, z: i32) -> Option<u8> {
+        (**self).biome(x, z)
     }
 }
 
@@ -376,6 +411,19 @@ impl BlockSource for ChunkSnapshot {
                 column.light((x & 15) as usize, y as usize, (z & 15) as usize)
             })
     }
+
+    #[inline]
+    fn biome(&self, x: i32, z: i32) -> Option<u8> {
+        let chunk = ChunkPos::new(x >> 4, z >> 4);
+        let dx = chunk.x - self.origin.x;
+        let dz = chunk.z - self.origin.z;
+        if !(0..3).contains(&dx) || !(0..3).contains(&dz) {
+            return None;
+        }
+        self.chunks[(dz * 3 + dx) as usize]
+            .as_ref()
+            .map(|column| column.biomes()[((z & 15) << 4 | (x & 15)) as usize])
+    }
 }
 
 /// Builds the mesh for one chunk column with the legacy procedural cubes.
@@ -451,7 +499,7 @@ fn emit_legacy_faces<S: BlockSource + ?Sized>(
     z: i32,
     state: BlockState,
 ) {
-    emit_legacy_faces_with(mesh, source, x, y, z, state, |face| {
+    emit_legacy_faces_with(mesh, source, [x, y, z], state, tint::WHITE, |face| {
         texture_layer(state, face)
     });
 }
@@ -460,26 +508,35 @@ fn emit_legacy_faces<S: BlockSource + ?Sized>(
 ///
 /// [`mesh_chunk`] uses the procedural [`texture_layer`] table. The M5 model
 /// path passes an atlas-aware layer function so fluids such as water and lava,
-/// which have no blockstate model, still sample the real texture array.
+/// which have no blockstate model, still sample the real texture array. The
+/// same caller supplies the biome tint (white when no colormap loaded).
 pub(crate) fn emit_legacy_faces_with<S, F>(
     mesh: &mut Mesh,
     source: &S,
-    x: i32,
-    y: i32,
-    z: i32,
+    position: [i32; 3],
     state: BlockState,
+    tint: u32,
     mut layer_for_face: F,
 ) where
     S: BlockSource + ?Sized,
     F: FnMut(Face) -> u32,
 {
+    let [x, y, z] = position;
     for face in ALL_FACES {
         let def = &FACE_DEFS[face.index()];
         let neighbour = source.block(x + def.offset[0], y + def.offset[1], z + def.offset[2]);
         if occludes(neighbour, state) {
             continue;
         }
-        emit_face(mesh, source, [x, y, z], def, state, layer_for_face(face));
+        emit_face(
+            mesh,
+            source,
+            position,
+            def,
+            state,
+            layer_for_face(face),
+            tint,
+        );
     }
 }
 
@@ -700,6 +757,7 @@ fn emit_face<S: BlockSource + ?Sized>(
     def: &FaceDef,
     state: BlockState,
     layer: u32,
+    tint: u32,
 ) {
     let [x, y, z] = position;
     let lights = quad_light(source, position, def.normal, &def.corners, true, true);
@@ -715,6 +773,7 @@ fn emit_face<S: BlockSource + ?Sized>(
             uv: def.uvs[index],
             layer,
             light: lights[index].pack(),
+            tint,
         }
     });
     mesh.push_quad(is_transparent_pass(state), vertices);
@@ -814,6 +873,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_vertex_layout_is_pod_and_four_byte_aligned() {
+        assert_eq!(std::mem::size_of::<Vertex>(), 44);
+        assert_eq!(std::mem::align_of::<Vertex>(), 4);
+    }
+
+    #[test]
     fn vertex_light_round_trips_and_clamps() {
         let light = VertexLight::new(20, 3, 9, false);
         assert_eq!(light.block, 15);
@@ -836,6 +901,7 @@ mod tests {
             uv: [0.0, 0.0],
             layer: 0,
             light: VertexLight::DAY.pack(),
+            tint: tint::WHITE,
         };
         let mut mesh = Mesh::default();
         assert!(mesh.is_empty());

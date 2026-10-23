@@ -537,6 +537,20 @@ fn official_1_8_8_counts() {
         .expect("the official jar verifies");
     let resources = ClientResources::load(&jar).expect("the official resources load");
 
+    let colormaps = resources
+        .colormaps()
+        .expect("the official 1.8.8 jar provides both colormaps");
+    assert_ne!(
+        colormaps.grass.sample(0.8, 0.4),
+        [0xFF; 3],
+        "plains grass must not sample the white corner"
+    );
+    assert_ne!(
+        colormaps.foliage.sample(0.8, 0.4),
+        [0xFF; 3],
+        "plains foliage must not sample the white corner"
+    );
+
     let blockstates = resources
         .list(BLOCKSTATES)
         .iter()
@@ -600,4 +614,68 @@ fn official_1_8_8_counts() {
         (32, 32)
     );
     assert_eq!(resources.atlas().pixels().len(), 32 * 32 * 4 * 601);
+}
+
+/// A 256×256 colormap whose pixel `(x, y)` is `[x, y, 7, 255]`.
+fn coordinate_colormap() -> Vec<u8> {
+    let mut pixels = Vec::with_capacity(256 * 256);
+    for y in 0..256 {
+        for x in 0..256 {
+            pixels.push([x as u8, y as u8, 7, 255]);
+        }
+    }
+    png_rgba(256, 256, &pixels)
+}
+
+const GRASS_COLORMAP: &str = "assets/minecraft/textures/colormap/grass.png";
+const FOLIAGE_COLORMAP: &str = "assets/minecraft/textures/colormap/foliage.png";
+
+#[test]
+fn both_colormaps_are_decoded_outside_the_atlas() {
+    let dir = TempDir::new("colormaps");
+    let foliage = solid(256, 256, [9, 8, 7, 255]);
+    let jar = jar_with(
+        &dir,
+        &[
+            (GRASS_COLORMAP, &coordinate_colormap()),
+            (FOLIAGE_COLORMAP, &foliage),
+        ],
+    );
+    let resources = ClientResources::load(&jar).expect("the colormaps load");
+
+    let colormaps = resources.colormaps().expect("both colormaps are present");
+    assert_eq!(colormaps.grass.sample(1.0, 1.0), [0, 0, 7]);
+    assert_eq!(colormaps.grass.sample(0.0, 0.0), [255, 255, 7]);
+    assert_eq!(colormaps.grass.sample(0.5, 0.5), [127, 191, 7]);
+    assert_eq!(colormaps.foliage.sample(0.5, 0.5), [9, 8, 7]);
+
+    // The maps stay out of the texture array and the resource map.
+    assert!(resources.atlas().layout().layer("colormap/grass").is_none());
+    assert!(resources.get(GRASS_COLORMAP).is_none());
+    assert_eq!(resources.file_count(), 0);
+}
+
+#[test]
+fn one_missing_colormap_disables_tinting() {
+    let dir = TempDir::new("colormap-missing");
+    let jar = jar_with(&dir, &[(GRASS_COLORMAP, &coordinate_colormap())]);
+    let resources = ClientResources::load(&jar).expect("a partial colormap set loads");
+    assert!(resources.colormaps().is_none());
+}
+
+#[test]
+fn a_wrong_sized_colormap_is_rejected() {
+    let dir = TempDir::new("colormap-size");
+    let jar = jar_with(
+        &dir,
+        &[
+            (GRASS_COLORMAP, &solid(16, 16, [1, 2, 3, 255])),
+            (FOLIAGE_COLORMAP, &solid(256, 256, [1, 2, 3, 255])),
+        ],
+    );
+    let Err(AssetsError::Image { path, reason }) = ClientResources::load(&jar) else {
+        panic!("a 16x16 colormap must be rejected");
+    };
+    assert_eq!(path, GRASS_COLORMAP);
+    assert!(reason.contains("256x256"), "reason: {reason}");
 }

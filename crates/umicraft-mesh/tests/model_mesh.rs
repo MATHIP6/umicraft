@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use umicraft_mesh::tint::{BiomeTints, WHITE};
 use umicraft_mesh::{
     mesh_chunk, mesh_chunk_with_models, BlockSource, ChunkSnapshot, Mesh, ModelMeshContext, Vertex,
     VertexLight,
@@ -56,8 +57,7 @@ const SLAB_JSON: &str = r##"{
 
 /// The `block/cross` plant shape: two diagonal planes with four quads and no
 /// `cullface`.
-const CROSS_JSON: &str = r##"{
-  "textures": { "particle": "#cross", "cross": "#cross" },
+const CROSS_JSON: &str = r##"{  "textures": { "particle": "#cross", "cross": "#cross" },
   "elements": [
     {
       "from": [0.8, 0, 8],
@@ -80,6 +80,23 @@ const CROSS_JSON: &str = r##"{
       }
     }
   ]
+}"##;
+
+/// A full cube whose top face alone is tinted, like the grass block top.
+const TINTED_TOP_JSON: &str = r##"{
+  "textures": { "particle": "#all", "all": "#all" },
+  "elements": [{
+    "from": [0, 0, 0],
+    "to": [16, 16, 16],
+    "faces": {
+      "down":  { "texture": "#all" },
+      "up":    { "texture": "#all", "tintindex": 0 },
+      "north": { "texture": "#all" },
+      "south": { "texture": "#all" },
+      "west":  { "texture": "#all" },
+      "east":  { "texture": "#all" }
+    }
+  }]
 }"##;
 
 /// In-memory [`ResourceSource`] for the synthetic documents.
@@ -186,11 +203,23 @@ const WEIGHTED: BlockDefinition = BlockDefinition {
     name: "weighted",
     states: WEIGHTED_STATES,
 };
+const GRASS_STATES: &[StateDef] = &[StateDef {
+    mask: 0,
+    value: 0,
+    blockstate: "grass",
+    variant: "normal",
+}];
+const GRASS: BlockDefinition = BlockDefinition {
+    id: 2,
+    name: "grass",
+    states: GRASS_STATES,
+};
 
 static CUBE_DEFS: &[BlockDefinition] = &[STONE];
 static GLASS_DEFS: &[BlockDefinition] = &[STONE, GLASS];
 static PLANT_DEFS: &[BlockDefinition] = &[STONE, PLANT];
 static SCENE_DEFS: &[BlockDefinition] = &[STONE, GLASS, SLAB, PLANT];
+static GRASS_DEFS: &[BlockDefinition] = &[GRASS];
 
 /// Blockstate JSON for a single unweighted variant.
 fn blockstate(model: &str) -> String {
@@ -200,13 +229,21 @@ fn blockstate(model: &str) -> String {
 /// A block source with an explicit, small scene; everything else is air.
 struct Scene {
     blocks: Vec<([i32; 3], BlockState)>,
+    biome: Option<u8>,
 }
 
 impl Scene {
     fn new(blocks: &[([i32; 3], BlockState)]) -> Self {
         Self {
             blocks: blocks.to_vec(),
+            biome: None,
         }
+    }
+
+    /// Gives every column of the scene one biome id (tint tests).
+    fn in_biome(mut self, biome: u8) -> Self {
+        self.biome = Some(biome);
+        self
     }
 }
 
@@ -216,6 +253,10 @@ impl BlockSource for Scene {
             .iter()
             .find(|(position, _)| *position == [x, y, z])
             .map_or(BlockState::AIR, |(_, state)| *state)
+    }
+
+    fn biome(&self, _x: i32, _z: i32) -> Option<u8> {
+        self.biome
     }
 }
 
@@ -240,6 +281,7 @@ fn context(set: BlockModelSet, keys: &[&str]) -> ModelMeshContext {
     ModelMeshContext {
         models: Arc::new(set),
         atlas: Arc::new(AtlasLayout::from_keys(keys.iter().copied())),
+        tints: None,
     }
 }
 
@@ -508,6 +550,7 @@ fn modelless_states_fall_back_to_the_legacy_cube() {
     let context = ModelMeshContext {
         models: Arc::new(set),
         atlas: Arc::new(AtlasLayout::default()),
+        tints: None,
     };
     let blocks = Scene::new(&[
         ([0, 0, 0], BlockState::new(1, 0)),
@@ -696,4 +739,123 @@ fn a_quad_with_shade_false_keeps_its_corners_open() {
         let light = VertexLight::unpack(vertex.light);
         light.ao == VertexLight::AO_OPEN && !light.shade
     }));
+}
+
+/// Context for the tinted-top grass model, optionally with a colour table.
+fn grass_context(tints: Option<BiomeTints>) -> ModelMeshContext {
+    let source = Memory::new()
+        .model(
+            "grass",
+            &TINTED_TOP_JSON.replace("#all", "blocks/grass_top"),
+        )
+        .blockstate("grass", &blockstate("grass"));
+    ModelMeshContext {
+        models: Arc::new(
+            BlockModelSet::build(&source, GRASS_DEFS).expect("synthetic grass model set"),
+        ),
+        atlas: Arc::new(AtlasLayout::from_keys(["blocks/grass_top"])),
+        tints: tints.map(Arc::new),
+    }
+}
+
+/// Returns the four vertices of the quad whose normal is `normal`.
+fn quad_with(mesh: &Mesh, normal: [f32; 3]) -> &[Vertex] {
+    quads(mesh)
+        .find(|quad| quad[0].normal == normal)
+        .expect("the quad exists")
+}
+
+#[test]
+fn a_tinted_face_carries_the_biome_colour() {
+    let tints = BiomeTints::from_samplers(|_, _| [0x79, 0xC0, 0x5A], |_, _| [0x59, 0xAE, 0x30]);
+    let context = grass_context(Some(tints));
+    let scene = Scene::new(&[([0, 0, 0], BlockState::new(2, 0))]).in_biome(1);
+    let mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &scene, &context);
+
+    let top = quad_with(&mesh, [0.0, 1.0, 0.0]);
+    assert!(top.iter().all(|vertex| vertex.tint == 0x79_C0_5A));
+    // The side faces have no `tintindex` and must keep their texture colours.
+    for normal in [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]] {
+        assert!(quad_with(&mesh, normal)
+            .iter()
+            .all(|vertex| vertex.tint == WHITE));
+    }
+}
+
+#[test]
+fn without_a_colormap_the_face_stays_white() {
+    let context = grass_context(None);
+    let scene = Scene::new(&[([0, 0, 0], BlockState::new(2, 0))]).in_biome(1);
+    let mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &scene, &context);
+    assert!(all_vertices(&mesh).all(|vertex| vertex.tint == WHITE));
+}
+
+#[test]
+fn the_tint_is_averaged_over_the_three_by_three_biomes() {
+    // Plains (id 1) samples [90, 90, 90], desert (id 2) samples black.
+    let tints = BiomeTints::from_samplers(
+        |temperature, _| {
+            if temperature > 1.0 {
+                [0, 0, 0]
+            } else {
+                [90, 90, 90]
+            }
+        },
+        |_, _| [0, 0, 0],
+    );
+    let context = grass_context(Some(tints));
+
+    struct Border;
+    impl BlockSource for Border {
+        fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+            if (x, y, z) == (0, 0, 0) {
+                BlockState::new(2, 0)
+            } else {
+                BlockState::AIR
+            }
+        }
+
+        fn biome(&self, x: i32, _z: i32) -> Option<u8> {
+            Some(if x < 0 { 2 } else { 1 })
+        }
+    }
+
+    let mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &Border, &context);
+    // Three of the nine columns are desert: (6 * 90) / 9 = 60.
+    assert!(quad_with(&mesh, [0.0, 1.0, 0.0])
+        .iter()
+        .all(|vertex| vertex.tint == 0x3C_3C_3C));
+}
+
+#[test]
+fn the_water_fallback_uses_the_swamp_water_tint() {
+    let set = BlockModelSet::build(&Memory::new(), &[]).expect("an empty model set");
+    let tints = BiomeTints::from_samplers(|_, _| [0; 3], |_, _| [0; 3]);
+    let context = ModelMeshContext {
+        models: Arc::new(set),
+        atlas: Arc::new(AtlasLayout::default()),
+        tints: Some(Arc::new(tints)),
+    };
+    let water = [([0, 0, 0], BlockState::new(8, 0))];
+
+    let plains = mesh_chunk_with_models(
+        ChunkPos::new(0, 0),
+        &Scene::new(&water).in_biome(1),
+        &context,
+    );
+    assert!(!plains.transparent_vertices.is_empty());
+    assert!(plains
+        .transparent_vertices
+        .iter()
+        .all(|vertex| vertex.tint == WHITE));
+
+    let swamp = mesh_chunk_with_models(
+        ChunkPos::new(0, 0),
+        &Scene::new(&water).in_biome(6),
+        &context,
+    );
+    assert!(swamp
+        .transparent_vertices
+        .iter()
+        .all(|vertex| vertex.tint == 0xE0_FF_AE));
 }
