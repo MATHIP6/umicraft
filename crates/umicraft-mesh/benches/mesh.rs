@@ -7,6 +7,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use umicraft_mesh::tint::BiomeTints;
 use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, ModelMeshContext};
 use umicraft_model::{
     AtlasLayout, BlockDefinition, BlockModelSet, ModelError, ModelResult, ResourceSource, StateDef,
@@ -101,6 +102,7 @@ fn model_context() -> ModelMeshContext {
     ModelMeshContext {
         models: Arc::new(set),
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/stone"])),
+        tints: None,
     }
 }
 
@@ -224,12 +226,64 @@ fn mesh_lit_cave(criterion: &mut Criterion) {
     });
 }
 
+/// A dense 16³ grass section with the same cube model and a biome colour
+/// table: every visible face carries a tint, so this isolates the 3×3 biome
+/// sampling cost added by ADR-0009.
+fn mesh_dense_tinted_grass(criterion: &mut Criterion) {
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    column.fill_biomes(1);
+    for y in 0..16 {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(2, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL
+            .replace("#all", "blocks/grass_top")
+            .replace(
+                "\"texture\": \"#all\"",
+                "\"texture\": \"#all\", \"tintindex\": 0",
+            )
+            .into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let set = BlockModelSet::build(&Memory(files), CUBE_DEFS)
+        .expect("the synthetic benchmark model set must build");
+    let context = ModelMeshContext {
+        models: Arc::new(set),
+        atlas: Arc::new(AtlasLayout::from_keys(["blocks/grass_top"])),
+        tints: Some(Arc::new(BiomeTints::from_samplers(
+            |_, _| [0x79, 0xC0, 0x5A],
+            |_, _| [0x59, 0xAE, 0x30],
+        ))),
+    };
+    criterion.bench_function("mesh/dense_tinted_grass", |bencher| {
+        bencher.iter(|| {
+            black_box(mesh_chunk_with_models(
+                ChunkPos::new(0, 0),
+                black_box(&snapshot),
+                black_box(&context),
+            ))
+        });
+    });
+}
+
 criterion_group!(
     benches,
     mesh_flat_chunk,
     mesh_flat_chunk_with_models,
     mesh_flat_view,
     mesh_dense_section,
+    mesh_dense_tinted_grass,
     mesh_lit_cave
 );
 criterion_main!(benches);
