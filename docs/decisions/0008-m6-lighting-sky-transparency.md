@@ -65,6 +65,11 @@ Rules:
 
 ### 2. Vertex payload and mesh passes (`umicraft-mesh`)
 
+> **Amended 2026-10-22 by ADR-0009.** `Vertex` gains a sixth `u32`
+> (`tint`, `0x00RRGGBB`) for biome tints and is 44 bytes, still `Pod`/`repr(C)`
+> and 4-byte aligned. All other rules in this section are unchanged; the
+> 40-byte listing below is the historical M6 contract.
+
 `Vertex` grows one `u32` and stays `Pod`/`repr(C)` at 40 bytes:
 
 ```rust
