@@ -537,6 +537,20 @@ fn official_1_8_8_counts() {
         .expect("the official jar verifies");
     let resources = ClientResources::load(&jar).expect("the official resources load");
 
+    let colormaps = resources
+        .colormaps()
+        .expect("the official 1.8.8 jar provides both colormaps");
+    assert_ne!(
+        colormaps.grass.sample(0.8, 0.4),
+        [0xFF; 3],
+        "plains grass must not sample the white corner"
+    );
+    assert_ne!(
+        colormaps.foliage.sample(0.8, 0.4),
+        [0xFF; 3],
+        "plains foliage must not sample the white corner"
+    );
+
     let blockstates = resources
         .list(BLOCKSTATES)
         .iter()

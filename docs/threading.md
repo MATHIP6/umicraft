@@ -9,14 +9,14 @@ Rules (restated):
    no shared locks on hot paths.
 3. Every cross-thread boundary is documented here as it is introduced.
 
-## Current state (M6)
+## Current state (M6 + T1 biome tints)
 
 | Thread | Owns | Talks to |
 |---|---|---|
 | Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the sky/fog environment, the transparent draw order, the mesh pool, and the one-time official resource load | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
 | **Game thread** | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) |
 | Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, the play loop, the keepalive answers | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
-| Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s, with a shared immutable `ModelMeshContext` when the official models loaded | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
+| Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s, with a shared immutable `ModelMeshContext` (models, atlas layout and the optional `BiomeTints` table) when the official resources loaded | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
 
 The game thread is the only owner of the world: the render thread never
 mutates a chunk, and the collision solver never takes a lock (spec §5.3,
@@ -131,7 +131,9 @@ ADR-0005).
   resolves and verifies the user's 1.8.8 client jar, reads the blockstates,
   block models and block/item textures in one bulk pass into an in-memory
   `ClientResources`, builds the immutable `BlockModelSet` from `definitions()`
-  and the atlas, and wraps a `ModelMeshContext` in an `Arc`.
+  and the atlas, and wraps a `ModelMeshContext` in an `Arc`. The same bulk pass
+  decodes the two optional 256×256 biome colormaps, and the main thread samples
+  them into the immutable `BiomeTints` table placed in that context.
 - The windowed client loads the bundle in `App::new`, before the mesh pool and
   before the event loop starts. Screenshot mode loads it before the pool and
   creates the offscreen renderer immediately, because the atlas must be
@@ -139,8 +141,10 @@ ADR-0005).
   frame, tick or worker ever reads the jar or touches the disk for assets.
 - Workers receive the `Arc<ModelMeshContext>` when the bundle loaded and call
   `mesh_chunk_with_models`; otherwise they call the legacy `mesh_chunk`. The
-  context contains only immutable model quads and the atlas layout, so every
-  worker reads it without a lock and no job mutates shared model data.
+  context contains only immutable model quads, the atlas layout and the
+  optional immutable `BiomeTints` table, so every worker reads it without a
+  lock and no job mutates shared model or tint data. The colormap PNGs are
+  dropped after sampling; only the 40-entry table is retained.
 - The render thread uploads the texture array with `Renderer::set_block_atlas`
   after the renderer exists. If the upload is rejected (for example a low
   adapter limit), the bundle is dropped, the pending/waiting jobs and renderer
@@ -216,3 +220,9 @@ ADR-0005).
   terrain before a farthest-first transparent pass. Mesh workers now sample
   the world light nibbles and bake per-vertex smooth light/AO; the render
   thread still only owns uploaded meshes and the transparent order.
+- T1 (post-M6 biome tints): the main-thread resource load also decodes the two
+  optional colormaps and pre-samples the immutable 40-entry `BiomeTints` table
+  into the shared `ModelMeshContext`. Workers average the 3×3 biome colours per
+  tinted block and write the result into the new 44-byte vertex; the render
+  thread uploads the same vertex layout. No new thread or channel was added,
+  and the table is immutable so the workers still take no lock.

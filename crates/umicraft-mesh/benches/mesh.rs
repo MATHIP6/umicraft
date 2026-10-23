@@ -226,10 +226,18 @@ fn mesh_lit_cave(criterion: &mut Criterion) {
     });
 }
 
-/// A dense 16³ grass section with the same cube model and a biome colour
-/// table: every visible face carries a tint, so this isolates the 3×3 biome
-/// sampling cost added by ADR-0009.
-fn mesh_dense_tinted_grass(criterion: &mut Criterion) {
+/// A dense 16³ grass section with the same cube model, meshed twice: once with
+/// a `tintindex` and a biome table, once without either. The difference
+/// isolates the 3×3 biome sampling and the extra vertex word added by
+/// ADR-0009.
+struct DenseGrass {
+    snapshot: ChunkSnapshot,
+    plain: ModelMeshContext,
+    tinted: ModelMeshContext,
+}
+
+/// Builds the dense grass snapshot and the two model contexts.
+fn dense_grass() -> DenseGrass {
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     column.fill_biomes(1);
     for y in 0..16 {
@@ -241,37 +249,91 @@ fn mesh_dense_tinted_grass(criterion: &mut Criterion) {
     }
     let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
 
-    let mut files = BTreeMap::new();
-    files.insert(
-        "assets/minecraft/models/block/cube.json".to_string(),
-        CUBE_MODEL
-            .replace("#all", "blocks/grass_top")
-            .replace(
-                "\"texture\": \"#all\"",
-                "\"texture\": \"#all\", \"tintindex\": 0",
-            )
-            .into_bytes(),
-    );
-    files.insert(
-        "assets/minecraft/blockstates/cube.json".to_string(),
-        CUBE_BLOCKSTATE.as_bytes().to_vec(),
-    );
-    let set = BlockModelSet::build(&Memory(files), CUBE_DEFS)
-        .expect("the synthetic benchmark model set must build");
-    let context = ModelMeshContext {
-        models: Arc::new(set),
-        atlas: Arc::new(AtlasLayout::from_keys(["blocks/grass_top"])),
-        tints: Some(Arc::new(BiomeTints::from_samplers(
-            |_, _| [0x79, 0xC0, 0x5A],
-            |_, _| [0x59, 0xAE, 0x30],
-        ))),
+    let model_context = |tinted: bool| {
+        let source = if tinted {
+            CUBE_MODEL
+                .replace(
+                    "\"texture\": \"#all\"",
+                    "\"texture\": \"#all\", \"tintindex\": 0",
+                )
+                .replace("#all", "blocks/grass_top")
+        } else {
+            CUBE_MODEL.replace("#all", "blocks/grass_top")
+        };
+        let mut files = BTreeMap::new();
+        files.insert(
+            "assets/minecraft/models/block/cube.json".to_string(),
+            source.into_bytes(),
+        );
+        files.insert(
+            "assets/minecraft/blockstates/cube.json".to_string(),
+            CUBE_BLOCKSTATE.as_bytes().to_vec(),
+        );
+        let set = BlockModelSet::build(&Memory(files), CUBE_DEFS)
+            .expect("the synthetic benchmark model set must build");
+        ModelMeshContext {
+            models: Arc::new(set),
+            atlas: Arc::new(AtlasLayout::from_keys(["blocks/grass_top"])),
+            tints: tinted.then(|| {
+                Arc::new(BiomeTints::from_samplers(
+                    |_, _| [0x79, 0xC0, 0x5A],
+                    |_, _| [0x59, 0xAE, 0x30],
+                ))
+            }),
+        }
     };
+    let plain = model_context(false);
+    let tinted = model_context(true);
+    // Guard the fixture: the control must be all-white and the tinted run must
+    // actually sample the table, otherwise the benchmark compares two
+    // identical paths (as an earlier substitution-order bug did).
+    let plain_mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &snapshot, &plain);
+    let tinted_mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &snapshot, &tinted);
+    assert!(
+        plain_mesh
+            .vertices
+            .iter()
+            .all(|vertex| vertex.tint == umicraft_mesh::tint::WHITE),
+        "the untinted control must stay white"
+    );
+    assert!(
+        tinted_mesh
+            .vertices
+            .iter()
+            .any(|vertex| vertex.tint != umicraft_mesh::tint::WHITE),
+        "the tinted fixture must carry a biome colour"
+    );
+    DenseGrass {
+        snapshot,
+        plain,
+        tinted,
+    }
+}
+
+/// The untinted control for [`mesh_dense_tinted_grass`].
+fn mesh_dense_models(criterion: &mut Criterion) {
+    let scene = dense_grass();
+    criterion.bench_function("mesh/dense_models", |bencher| {
+        bencher.iter(|| {
+            black_box(mesh_chunk_with_models(
+                ChunkPos::new(0, 0),
+                black_box(&scene.snapshot),
+                black_box(&scene.plain),
+            ))
+        });
+    });
+}
+
+/// A dense 16³ grass section where every visible face carries a tint, so this
+/// isolates the 3×3 biome sampling cost added by ADR-0009.
+fn mesh_dense_tinted_grass(criterion: &mut Criterion) {
+    let scene = dense_grass();
     criterion.bench_function("mesh/dense_tinted_grass", |bencher| {
         bencher.iter(|| {
             black_box(mesh_chunk_with_models(
                 ChunkPos::new(0, 0),
-                black_box(&snapshot),
-                black_box(&context),
+                black_box(&scene.snapshot),
+                black_box(&scene.tinted),
             ))
         });
     });
@@ -283,6 +345,7 @@ criterion_group!(
     mesh_flat_chunk_with_models,
     mesh_flat_view,
     mesh_dense_section,
+    mesh_dense_models,
     mesh_dense_tinted_grass,
     mesh_lit_cave
 );

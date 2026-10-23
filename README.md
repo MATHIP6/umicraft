@@ -3,7 +3,7 @@
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
 (protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
 
-Status: **M6 complete**.
+Status: **M6 complete**, plus post-M6 biome tinting.
 The client logs in offline-mode, decodes chunk/block packets into a compact
 world, runs the player simulation on a game thread, meshes chunks on worker
 threads, and renders them with wgpu either in a window or to an offscreen PNG.
@@ -15,7 +15,10 @@ the real block/item texture array, the model mesher, and the server-less
 per-vertex ambient occlusion, the `Time Update`-driven sky/sun/moon/cloud/fog
 pass with a signed world clock, and a farthest-first translucent pass for
 water, glass and leaves; the contract is ADR-0008 and the acceptance evidence
-is in `docs/perf-log.md` and the four `--demo-view` shots.
+is in `docs/perf-log.md` and the four `--demo-view` shots. The post-M6 tint
+task samples the two optional colormaps from the same verified jar and
+multiplies grass, leaves, vines and water by the 3×3 biome colour, so the
+terrain is green instead of grey (ADR-0009).
 
 ## Workspace
 
@@ -109,9 +112,16 @@ item textures     : 229 (227 png + 2 mcmeta)
 texture layers    : 601
 atlas             : 32x32 RGBA8, 2,461,696 bytes
 block states      : ...
+biome tints       : on
 quads             : ...
 fallback variants : ...
 ```
+
+`biome tints : on` means the jar provided both 256×256 colormaps and the demo
+columns use plains (id 1); the report prints `off` when a custom jar omits them
+and the terrain keeps its previous grey/white output. The colormaps are read
+from the verified user jar at runtime and never stored in the repository or a
+release.
 
 The report needs no GPU and no server. Add `--screenshot` to upload the real
 texture array, render one offscreen frame and write a 1280×720 PNG:

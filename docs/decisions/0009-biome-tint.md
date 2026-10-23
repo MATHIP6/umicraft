@@ -149,8 +149,9 @@ grass noise split is collapsed to `0x6A7039`; the 1.8 altitude term in
 - The class comes from the block state:
   grass block 2; tall grass 31 (meta 0 dead bush excluded); double plant 175
   (meta 2/3 grass/fern only) → `Grass`; leaves 18 and vines 106 → `Foliage`;
-  water 8/9 → `Water`; lily pad 111 → fixed `0x208030`; everything else
-  untinted.
+  water 8/9 → `Water`; everything else untinted. Lily pad 111 is out of scope:
+  1.8.8 ships no `models/block/lily_pad.json` and draws it with a special
+  renderer, so the mesher has no correct geometry to tint.
 - The colour is the average of the 3×3 biome colours around the block column,
   matching `BiomeColorHelper`; columns without biome data are skipped and an
   all-`None` neighbourhood is white. The average is computed at most once per
@@ -184,8 +185,9 @@ channel is needed. Block changes cannot change a biome.
   registration), `BiomeGenForest.java`, `BiomeGenSwamp.java`,
   `BiomeGenMesa.java`, `BiomeGenMutated.java`, `BiomeColorHelper.java`.
 - `mcp: .../block/BlockGrass.java`, `BlockLeaves.java`, `BlockTallGrass.java`,
-  `BlockDoublePlant.java`, `BlockVine.java`, `BlockLiquid.java`,
-  `BlockLilyPad.java` (tint classes).
+  `BlockDoublePlant.java`, `BlockVine.java`, `BlockLiquid.java` (tint classes).
+  `BlockLilyPad.java` was consulted but is not implemented: 1.8.8 has no lily
+  pad block model and renders it with a special renderer.
 - The 1.8.8 jar (runtime evidence): all `leaves_*` and grass textures are
   grayscale; `models/block/leaves.json` and the grass model carry
   `"tintindex": 0`; the colormaps are 256×256.

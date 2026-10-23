@@ -50,8 +50,9 @@ grass, leaves, vines, tall grass, double plants and water.
      mesa grass `0x90814D`, foliage `0x9E814D`.
    - Tint classes by block id/metadata: grass block 2, tall grass 31 (meta 0
      dead bush stays white), double plant 175 (meta 2/3 only), leaves 18,
-     vines 106 → foliage, water 8/9. Lily pad 111 uses the fixed vanilla
-     `0x208030`. Everything else stays white.
+     vines 106 → foliage, water 8/9. Lily pad 111 is out of scope: 1.8.8 ships
+     no block model for it and draws it with a special renderer. Everything
+     else stays white.
    - A quad is tinted only when its model face carries `tintindex`; a face
      without one is white even on a tinted block (the grass side base).
 4. **Mesher**
@@ -95,3 +96,20 @@ Run the full workspace gates plus the opt-in GPU tests from the task README,
 record the Criterion before/after in `docs/perf-log.md`, append the vanilla
 sources to `docs/sources.md`, then merge `feat/biome-tint` into `main` with
 `--no-ff`. Do not push.
+
+## Status (2026-10-22)
+
+- [x] World, colormap, biome-table, mesher, renderer and client implementation.
+- [x] Unit/integration tests: synthetic 256×256 colormaps, biome borders,
+      swamp/mesa/roofed overrides, the 44-byte vertex, a GPU tint multiply and
+      real-jar colormap presence.
+- [x] Real-jar `--block-demo` prints `biome tints : on`; the overview, day and
+      transparency shots contain green grass/leaf pixels.
+- [x] Criterion control/tinted rows and the `Vertex` growth row recorded in
+      `docs/perf-log.md` (the benchmark fixture now asserts that the tinted row
+      really samples the table).
+- [x] ADR-0009, `docs/sources.md`, `docs/threading.md` and the root `README.md`
+      updated; the lily-pad claim is documented as out of scope.
+- [x] `cargo fmt`, clippy, workspace tests, rustdoc, `cargo deny check licenses
+      bans` and the opt-in render/client/assets tests pass.
+- [x] Merged into `main` with `--no-ff`; not pushed.
