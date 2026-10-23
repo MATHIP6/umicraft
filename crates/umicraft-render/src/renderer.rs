@@ -45,12 +45,13 @@ const OVERLAY_MIN_BYTES: u64 = 64 * 1024;
 /// WebGPU requires 256-byte row alignment for buffer↔texture copies.
 const ROW_ALIGNMENT: u32 = 256;
 
-const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
     0 => Float32x3,
     1 => Float32x3,
     2 => Float32x2,
     3 => Uint32,
-    4 => Uint32
+    4 => Uint32,
+    5 => Uint32
 ];
 const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Terrain shader: textured cube faces from a 2D texture array, smooth
-// block/sky lighting with baked ambient occlusion, 1.8 axis face shading and
-// distance fog toward the sky/fog colour.
+// block/sky lighting with baked ambient occlusion, 1.8 axis face shading,
+// biome tinting and distance fog toward the sky/fog colour.
 //
 // The light model is the M6 contract in
 // `docs/decisions/0008-m6-lighting-sky-transparency.md` §3, sourced from the
@@ -15,6 +15,10 @@
 //   ao       = 0.2 + 0.8 * (ao_nibble / 15)
 // The five `VertexLight` fields are packed in the fifth vertex attribute:
 // bits 0..=3 block, 4..=7 sky, 8..=11 AO, bit 12 shade.
+//
+// The sixth attribute is the biome tint (ADR-0009): `0x00RRGGBB`, white when
+// the face is not tinted. It multiplies the texel RGB in both fragment paths
+// and never changes alpha.
 
 struct Camera {
     view_proj: mat4x4<f32>,
@@ -43,6 +47,8 @@ struct VertexIn {
     @location(3) layer: u32,
     // Packed VertexLight: block/sky/AO nibbles and the shade bit.
     @location(4) light: u32,
+    // 1.8 biome tint: 0x00RRGGBB, white when untinted.
+    @location(5) tint: u32,
 };
 
 struct VertexOut {
@@ -55,6 +61,8 @@ struct VertexOut {
     @location(3) light: f32,
     @location(4) ao: f32,
     @location(5) shade: f32,
+    // Constant over a quad, so flat interpolation loses no information.
+    @location(6) @interpolate(flat) tint: vec3<f32>,
 };
 
 // 1.8 light-brightness curve. The input is a normalized nibble in 0..=1.
@@ -85,6 +93,11 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.world_position = in.position;
     out.uv = in.uv;
     out.layer = in.layer;
+    out.tint = vec3<f32>(
+        f32((in.tint >> 16u) & 0xFFu),
+        f32((in.tint >> 8u) & 0xFFu),
+        f32(in.tint & 0xFFu),
+    ) / 255.0;
 
     let block = light_brightness(f32(in.light & 0xFu) / 15.0);
     let sky = light_brightness(f32((in.light >> 4u) & 0xFu) / 15.0) * camera.sun_brightness;
@@ -104,7 +117,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
 // target is darkened by the fragment light so a cave does not show a bright
 // sky-coloured haze (`ADR-0008` §3).
 fn shade_fragment(in: VertexOut, texel: vec4<f32>) -> vec3<f32> {
-    let lit = texel.rgb * in.light * in.ao * in.shade;
+    let lit = texel.rgb * in.tint * in.light * in.ao * in.shade;
     let fog_target = camera.fog_color * (0.15 + 0.85 * in.light);
     let fog_span = max(camera.fog_end - camera.fog_start, 0.001);
     let distance = distance(in.world_position, camera.camera_pos);

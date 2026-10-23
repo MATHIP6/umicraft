@@ -27,6 +27,7 @@ fn terrain_quad() -> Mesh {
         uv,
         layer: 0,
         light: VertexLight::DAY.pack(),
+        tint: umicraft_mesh::tint::WHITE,
     };
     Mesh {
         vertices: vec![
