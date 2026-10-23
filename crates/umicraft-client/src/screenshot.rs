@@ -13,14 +13,50 @@ use std::path::Path;
 use std::time::Instant;
 
 use umicraft_mesh::ChunkSnapshot;
-use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
+use umicraft_render::{draw_hud, Camera, HudState, Overlay, RenderEnvironment, Renderer};
 
 use crate::args::Args;
 use crate::error::ClientError;
-use crate::game::{camera_angles, ChunkEvent, GameStatus, RenderEvent, Session};
+use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, Session, TICK};
 use crate::mesher::{default_worker_count, MeshPool};
 use crate::model_resources::ModelResources;
 use crate::network::NetworkConfig;
+
+/// The clock environment of the newest frame, for the final render.
+///
+/// The windowed client derives the interpolation fraction from the two newest
+/// frames ([`crate::window::View`]); the screenshot path collects at most one
+/// frame per 5 ms poll, so the sub-tick fraction is computed the same way
+/// from the frame's tick instant: the world clock advances smoothly without
+/// the render thread ever moving it by itself (ADR-0008 §4).
+struct FrameEnvironment {
+    /// The newest frame.
+    frame: Option<Frame>,
+    /// The instant the collection loop stopped.
+    now: Instant,
+}
+
+impl FrameEnvironment {
+    /// Stores the newest frame.
+    fn push(&mut self, frame: Frame) {
+        self.frame = Some(frame);
+    }
+
+    /// The render environment for the collected frame.
+    fn environment(&self, view_distance: u8) -> RenderEnvironment {
+        let partial_tick = self
+            .frame
+            .map(|frame| {
+                let tick = frame.tick_time;
+                self.now.saturating_duration_since(tick).as_secs_f32() / TICK.as_secs_f32()
+            })
+            .unwrap_or(0.0);
+        let (dimension, world_time) = self
+            .frame
+            .map_or((0, 6_000), |frame| (frame.dimension, frame.world_time));
+        RenderEnvironment::new(dimension, world_time, partial_tick, view_distance)
+    }
+}
 
 /// Runs the screenshot path and writes `args.screenshot`.
 ///
@@ -71,6 +107,10 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let mut queued: Vec<(umicraft_world::ChunkPos, ChunkSnapshot)> = Vec::new();
     let mut pending = std::collections::HashSet::new();
     let mut camera = Camera::default();
+    let mut environment = FrameEnvironment {
+        frame: None,
+        now: Instant::now(),
+    };
     let mut hud = HudState::default();
     let mut status = GameStatus::default();
     let mut meshes = 0_usize;
@@ -87,6 +127,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                     let (yaw, pitch) = camera_angles(&frame.state);
                     camera.yaw = yaw;
                     camera.pitch = pitch;
+                    environment.push(frame);
                 }
                 RenderEvent::Hud(new_hud) => hud = *new_hud,
                 RenderEvent::Status(new_status) => status = *new_status,
@@ -142,6 +183,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         return Err(ClientError::NoChunks);
     }
 
+    environment.now = Instant::now();
+    renderer.set_environment(environment.environment(args.view_distance));
     camera.set_aspect(args.width, args.height);
     let mut overlay = Overlay::new(args.width, args.height);
     let lines = [
@@ -214,6 +257,11 @@ pub(crate) fn write_png(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use glam::Vec3;
+    use umicraft_game::RenderState;
+
     use super::*;
 
     #[test]
@@ -226,5 +274,73 @@ mod tests {
         let reader = decoder.read_info().expect("png info");
         assert_eq!((reader.info().width, reader.info().height), (4, 4));
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn the_environment_tracks_the_newest_frame_and_interpolates() {
+        let tick = Instant::now();
+        let mut environment = FrameEnvironment {
+            frame: None,
+            now: tick,
+        };
+        // Without a frame the environment stays at the midday default.
+        assert_eq!(
+            environment.environment(8),
+            RenderEnvironment::new(0, 6_000, 0.0, 8)
+        );
+
+        environment.push(Frame {
+            state: frame_state(),
+            tick_time: tick,
+            world_time: 12_345,
+            dimension: -1,
+        });
+        environment.now = tick + TICK / 2;
+        let halfway = environment.environment(12);
+        assert_eq!(halfway.world_time, 12_345);
+        assert_eq!(halfway.dimension, -1);
+        assert_eq!(halfway.view_distance, 12);
+        assert!((halfway.partial_tick - 0.5).abs() < 1.0e-3);
+
+        // A frame older than one tick clamps the fraction at 1.0.
+        environment.now = tick + TICK * 3;
+        assert_eq!(environment.environment(8).partial_tick, 1.0);
+    }
+
+    #[test]
+    fn a_newer_frame_replaces_the_older_one() {
+        let tick = Instant::now();
+        let mut environment = FrameEnvironment {
+            frame: None,
+            now: tick,
+        };
+        environment.push(Frame {
+            state: frame_state(),
+            tick_time: tick,
+            world_time: 1,
+            dimension: 0,
+        });
+        environment.push(Frame {
+            state: frame_state(),
+            tick_time: tick + TICK,
+            world_time: 2,
+            dimension: 0,
+        });
+        assert_eq!(environment.environment(8).world_time, 2);
+    }
+
+    #[test]
+    fn tick_is_one_twentieth_of_a_second() {
+        assert_eq!(TICK, Duration::from_millis(50));
+    }
+
+    /// A minimal render state for synthetic frames.
+    fn frame_state() -> RenderState {
+        RenderState {
+            position: Vec3::ZERO,
+            yaw: 0.0,
+            pitch: 0.0,
+            on_ground: true,
+        }
     }
 }
