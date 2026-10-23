@@ -9,11 +9,11 @@ Rules (restated):
    no shared locks on hot paths.
 3. Every cross-thread boundary is documented here as it is introduced.
 
-## Current state (M5)
+## Current state (M6)
 
 | Thread | Owns | Talks to |
 |---|---|---|
-| Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the mesh pool, and the one-time official resource load | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
+| Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the sky/fog environment, the transparent draw order, the mesh pool, and the one-time official resource load | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
 | **Game thread** | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) |
 | Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, the play loop, the keepalive answers | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
 | Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s, with a shared immutable `ModelMeshContext` when the official models loaded | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
@@ -57,10 +57,11 @@ ADR-0005).
   world packets, runs the 20 Hz tick, and publishes the results.
 - Two bounded channels leave the game thread:
   - the **frames** (`sync_channel(32)`): the interpolated camera state, the
-    HUD state and the session statistics. The render thread polls them with
-    `try_recv`; the game thread publishes them with `try_send`, so a full
-    queue drops the message instead of stalling the simulation (the HUD is
-    published again when the last one was accepted, so a change is not lost).
+    signed world time and dimension, the HUD state and the session statistics.
+    The render thread polls them with `try_recv`; the game thread publishes
+    them with `try_send`, so a full queue drops the message instead of stalling
+    the simulation (the HUD is published again when the last one was accepted,
+    so a change is not lost).
   - the **chunk snapshots** (`sync_channel(64)`): the columns whose geometry
     changed. A snapshot that does not fit stays in the dirty set of the game
     thread and is derived again on a later tick, so the game thread never
@@ -68,6 +69,24 @@ ADR-0005).
 - The render thread interpolates between the two newest frames (GAM-8): it
   shows the simulation one tick behind and blends the two states with the
   fraction of a tick that elapsed since the newest one.
+
+### Clock and environment boundary (M6)
+
+- `Time Update` (0x03) is decoded on the network thread and delivered as
+  `NetEvent::TimeUpdate` through the existing bounded inbox. The game thread
+  owns the signed `world_time` (a negative value means the server froze the
+  cycle) and the current dimension; it never advances the clock locally.
+- Each published frame carries `world_time` and `dimension` next to the
+  interpolated camera state. The render thread keeps the newest values in
+  `View` and builds one `RenderEnvironment` per frame with the same
+  interpolation fraction the camera uses, then calls
+  `Renderer::set_environment` once before rendering. The render thread never
+  waits on the game thread for the clock.
+- The renderer derives the sky pass, clear colour, fog and lightmap from that
+  environment. Transparent ordering is render-thread state only: opaque chunks
+  are submitted first, then each transparent half farthest-first by squared
+  camera distance with `ChunkPos` as the deterministic tie-break. The sort uses
+  one reused `Vec`; it is not a channel and takes no lock.
 
 ### Input boundary
 
@@ -191,3 +210,9 @@ ADR-0005).
   drops the bundle and rebuilds the pool without it. `--block-demo` meshes the
   synthetic acceptance scene synchronously and needs no server, and reaches
   the GPU only when a screenshot is requested.
+- M6: the game thread stores the signed `Time Update` clock and dimension and
+  publishes them in the frame channel. The render thread turns them into one
+  `RenderEnvironment` per frame for the sky/fog/lightmap, and draws opaque
+  terrain before a farthest-first transparent pass. Mesh workers now sample
+  the world light nibbles and bake per-vertex smooth light/AO; the render
+  thread still only owns uploaded meshes and the transparent order.
