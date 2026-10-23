@@ -33,6 +33,8 @@ use crate::screenshot::write_png;
 
 /// The single meshed column of the demo.
 const DEMO_CHUNK: ChunkPos = ChunkPos::new(0, 0);
+/// Plains biome id (1.8 `BiomeGenBase.plains`), used by the whole demo.
+const PLAINS: u8 = 1;
 /// The full stone platform sits on this layer.
 const PLATFORM_Y: usize = 64;
 /// The M6 wing ground level (one block above the platform).
@@ -188,6 +190,9 @@ impl DemoScene {
     /// Builds the platform, the stepped rows and the empty 3×3 ring.
     fn build() -> Self {
         let mut column = ChunkColumn::new(DEMO_CHUNK);
+        // Plains everywhere: the demo grass, leaves and water must sample the
+        // plains palette so the screenshot shows the 1.8 green (ADR-0009).
+        column.fill_biomes(PLAINS);
         for z in 0..16 {
             for x in 0..16 {
                 column.set_block(x, PLATFORM_Y, z, BlockState::new(1, 0));
@@ -218,7 +223,9 @@ impl DemoScene {
         for dz in -1..=1 {
             for dx in -1..=1 {
                 if dx != 0 || dz != 0 {
-                    neighbours.push(Arc::new(ChunkColumn::new(ChunkPos::new(dx, dz))));
+                    let mut neighbour = ChunkColumn::new(ChunkPos::new(dx, dz));
+                    neighbour.fill_biomes(PLAINS);
+                    neighbours.push(Arc::new(neighbour));
                 }
             }
         }
@@ -416,6 +423,7 @@ impl BlockDemoReport {
              texture layers    : {} ({} PNG frames + missing)\n\
              atlas             : {}x{} RGBA8, {} bytes\n\
              block states      : {}\n\
+             biome tints       : {}\n\
              quads             : {}\n\
              opaque quads      : {}\n\
              transparent quads : {}\n\
@@ -442,6 +450,7 @@ impl BlockDemoReport {
             self.stats.atlas_height,
             group_digits(self.stats.atlas_bytes),
             self.stats.block_states,
+            if self.stats.biome_tints { "on" } else { "off" },
             self.quads,
             self.opaque_quads,
             self.transparent_quads,
@@ -660,6 +669,7 @@ mod tests {
 
     use super::*;
     use crate::model_resources::TextureEntries;
+    use umicraft_mesh::tint::BiomeTints;
     use umicraft_world::LightLevel;
 
     /// The exact ADR-0007 counts, independent of the machine's installation.
@@ -681,6 +691,7 @@ mod tests {
             atlas_bytes: 2_461_696,
             block_states: 5_000,
             fallback_variants: 7,
+            biome_tints: true,
         }
     }
 
@@ -710,6 +721,7 @@ texture entries   : 611 (600 png + 11 mcmeta)
 texture layers    : 601 (600 PNG frames + missing)
 atlas             : 32x32 RGBA8, 2,461,696 bytes
 block states      : 5000
+biome tints       : on
 quads             : 1337
 opaque quads      : 1300
 transparent quads : 37
@@ -1093,6 +1105,7 @@ scene blocks      : stone, dirt, oak stairs
         ModelMeshContext {
             models: Arc::new(models),
             atlas: Arc::new(AtlasLayout::from_keys([texture])),
+            tints: None,
         }
     }
 
@@ -1148,6 +1161,45 @@ scene blocks      : stone, dirt, oak stairs
             .chain(&mesh.transparent_vertices)
             .map(|vertex| VertexLight::unpack(vertex.light))
             .collect()
+    }
+
+    #[test]
+    fn the_demo_columns_are_plains() {
+        let scene = DemoScene::build();
+        assert!(scene.center.biomes().iter().all(|&biome| biome == PLAINS));
+        for neighbour in &scene.neighbours {
+            assert!(
+                neighbour.biomes().iter().all(|&biome| biome == PLAINS),
+                "the 3x3 ring must not blend the demo with ocean"
+            );
+        }
+    }
+
+    #[test]
+    fn the_demo_leaves_and_water_use_the_biome_tints() {
+        let mut context = synthetic_context();
+        context.tints = Some(Arc::new(BiomeTints::from_samplers(
+            |_, _| [0x79, 0xC0, 0x5A],
+            |_, _| [0x59, 0xAE, 0x30],
+        )));
+        let scene = DemoScene::build();
+        let mesh = scene.mesh(&context);
+
+        // Leaves and vines fall back to the legacy cube in the synthetic
+        // context and must still take the foliage colour.
+        assert!(
+            mesh.transparent_vertices
+                .iter()
+                .any(|vertex| vertex.tint == 0x59_AE_30),
+            "the leaf canopy must be tinted with the foliage colour"
+        );
+        // Plains water has no override and must stay white.
+        assert!(
+            mesh.transparent_vertices
+                .iter()
+                .any(|vertex| vertex.tint == umicraft_mesh::tint::WHITE),
+            "plains water must stay untinted"
+        );
     }
 
     #[test]

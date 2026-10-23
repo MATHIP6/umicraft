@@ -5,9 +5,10 @@
 //! [`ModelResources::load`] verifies the user's official 1.8.8 client jar,
 //! reads the blockstate, block-model, block-texture and item-texture entries
 //! once, builds the deterministic [`BlockAtlas`] and bakes the
-//! [`BlockModelSet`] from [`definitions`]. The resulting [`ModelMeshContext`]
-//! is shared by every meshing worker through an [`Arc`], so a chunk job never
-//! touches the disk.
+//! [`BlockModelSet`] from [`definitions`]. It also samples the two optional
+//! biome colormaps into the immutable [`BiomeTints`] table (ADR-0009). The
+//! resulting [`ModelMeshContext`] is shared by every meshing worker through an
+//! [`Arc`], so a chunk job never touches the disk.
 //!
 //! The bundle is also the single source of the acceptance counts printed by
 //! `--block-demo`: texture entries are counted from the same in-memory file
@@ -21,6 +22,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use umicraft_assets::{AssetsError, BlockAtlas, ClientResources};
+use umicraft_mesh::tint::BiomeTints;
 use umicraft_mesh::ModelMeshContext;
 use umicraft_model::{definitions, BlockModelSet, ModelError, ResourceSource};
 
@@ -71,6 +73,8 @@ pub struct ModelStats {
     pub block_states: usize,
     /// Metadata mappings that used a blockstate document's first variant.
     pub fallback_variants: usize,
+    /// Whether the jar provided both biome colormaps, enabling grass/leaf tint.
+    pub biome_tints: bool,
 }
 
 /// Every failure of the official block-model loader.
@@ -133,15 +137,26 @@ impl ModelResources {
         let jar = official::open_client_jar(install)?;
         let resources = ClientResources::load(&jar)?;
         let models = Arc::new(BlockModelSet::build(&resources, definitions())?);
+        // Sample the two 256×256 colormaps once per base biome into the small
+        // immutable table the mesher shares with every worker (ADR-0009). The
+        // closures only borrow `resources` for this call.
+        let tints = resources.colormaps().map(|maps| {
+            Arc::new(BiomeTints::from_samplers(
+                |temperature, rainfall| maps.grass.sample(temperature, rainfall),
+                |temperature, rainfall| maps.foliage.sample(temperature, rainfall),
+            ))
+        });
         let context = Arc::new(ModelMeshContext {
             models: Arc::clone(&models),
             atlas: Arc::new(resources.atlas().layout().clone()),
+            tints,
         });
         tracing::info!(
             root = %install.root().display(),
             blockstates = models.blockstate_count(),
             source_models = models.source_model_count(),
             layers = resources.atlas().layers(),
+            biome_tints = context.tints.is_some(),
             "loaded the 1.8 block models and texture atlas"
         );
         Ok(Self {
@@ -213,6 +228,7 @@ impl ModelResources {
             atlas_bytes: atlas.pixels().len(),
             block_states: self.models.state_count(),
             fallback_variants: self.models.fallback_count(),
+            biome_tints: self.resources.colormaps().is_some(),
         }
     }
 }
