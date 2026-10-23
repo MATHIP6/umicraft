@@ -48,6 +48,27 @@ impl ChunkColumn {
         &self.biomes
     }
 
+    /// Writes one biome id at column-local coordinates.
+    ///
+    /// Out-of-range X/Z coordinates are ignored, matching [`set_block`].
+    /// The biome only affects the terrain tint; no light or geometry changes.
+    ///
+    /// [`set_block`]: Self::set_block
+    pub fn set_biome(&mut self, x: usize, z: usize, id: u8) {
+        if x >= SECTION_SIZE || z >= SECTION_SIZE {
+            return;
+        }
+        self.biomes[z << 4 | x] = id;
+    }
+
+    /// Fills all 256 biome cells with `id`.
+    ///
+    /// The synthetic demo and tests use this to give a whole column a single
+    /// biome; real servers always send the full array in a ground-up chunk.
+    pub fn fill_biomes(&mut self, id: u8) {
+        self.biomes.fill(id);
+    }
+
     /// Section at a Y index (`0..16`), or `None` when the server did not send
     /// it (an all-air section).
     #[must_use]
@@ -349,5 +370,21 @@ mod tests {
         column.set_sky_light(16, 0, 0, 15);
         assert_eq!(column.light(0, 0, 0), LightLevel::new(9, 7));
         assert!(column.section(8).is_none());
+    }
+
+    #[test]
+    fn biomes_are_written_per_cell_and_out_of_range_is_ignored() {
+        let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+        column.fill_biomes(4);
+        assert!(column.biomes().iter().all(|&id| id == 4));
+
+        column.set_biome(15, 4, 21);
+        assert_eq!(column.biomes()[(4 << 4) | 15], 21);
+        column.set_biome(3, 9, 6);
+        assert_eq!(column.biomes()[(9 << 4) | 3], 6);
+
+        column.set_biome(16, 0, 9);
+        column.set_biome(0, 16, 9);
+        assert!(column.biomes().iter().all(|&id| id != 9));
     }
 }

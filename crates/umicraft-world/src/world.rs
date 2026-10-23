@@ -92,6 +92,18 @@ impl World {
             })
     }
 
+    /// Biome id at a world position.
+    ///
+    /// Biomes are stored once per column: Y is ignored. `None` means the chunk
+    /// is not loaded, which the mesher renders untinted (white).
+    #[must_use]
+    #[inline]
+    pub fn biome(&self, pos: BlockPos) -> Option<u8> {
+        self.chunks
+            .get(&pos.chunk())
+            .map(|column| column.biomes()[(pos.local_z() as usize) << 4 | pos.local_x() as usize])
+    }
+
     /// Combined light at a world position.
     ///
     /// Missing chunks and out-of-range Y read black. In the Nether and the
@@ -413,6 +425,17 @@ mod tests {
         };
         world.apply_chunk_data(&packet).unwrap();
         world
+    }
+
+    #[test]
+    fn biome_reads_follow_the_column_and_missing_chunks_are_none() {
+        let pos = ChunkPos::new(2, -3);
+        let world = world_with_chunk(pos);
+        let inside = BlockPos::new(pos.x * 16 + 15, 70, pos.z * 16 + 1);
+        assert_eq!(world.biome(inside), Some(1));
+        // Y does not matter: one biome per column.
+        assert_eq!(world.biome(BlockPos::new(inside.x, 0, inside.z)), Some(1));
+        assert_eq!(world.biome(BlockPos::new(1000, 70, 1000)), None);
     }
 
     #[test]
