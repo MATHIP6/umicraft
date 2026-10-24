@@ -17,6 +17,7 @@ pub mod connection;
 pub mod error;
 pub mod login;
 pub mod ping;
+pub mod play;
 pub mod status;
 
 pub use connection::Connection;
