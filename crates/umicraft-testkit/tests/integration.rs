@@ -251,12 +251,16 @@ async fn commands_and_keepalives_interleave_under_compression() {
     assert_eq!(end, SessionEnd::CommandsClosed);
     producer.await.expect("producer task");
 
-    // Every command was written before `drive` returned; give the server
-    // the time to read the tail of the stream.
+    // Every command and every answer was written before `drive` returned,
+    // and its counters no longer move; give the server the time to read the
+    // tail of the stream.
+    let answered = counters.keepalives_answered() as usize;
     let deadline = Instant::now() + Duration::from_secs(2);
     let observed = loop {
         let observed = server.observed().snapshot();
-        if observed.chat_messages.len() == MESSAGES || Instant::now() > deadline {
+        let caught_up =
+            observed.chat_messages.len() == MESSAGES && observed.keepalive_echoes.len() == answered;
+        if caught_up || Instant::now() > deadline {
             break observed;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
