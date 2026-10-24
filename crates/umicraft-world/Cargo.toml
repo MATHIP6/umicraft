@@ -9,10 +9,11 @@ publish = false
 
 [dependencies]
 thiserror.workspace = true
-umicraft-protocol.workspace = true
 
 [dev-dependencies]
 criterion = "0.8"
+# The payload-layout test checks the world's formula against the protocol's.
+umicraft-protocol.workspace = true
 
 [[bench]]
 name = "world"

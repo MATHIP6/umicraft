@@ -33,11 +33,12 @@ use umicraft_game::shapes::Aabb;
 use umicraft_game::{GameState, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_net::play::{PlayEvent, SessionCounters};
+use umicraft_protocol::packets::play::clientbound::{ChunkData, MapChunkBulk};
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack as WireItemStack};
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{HudState, ItemStack};
-use umicraft_world::{BlockPos, ChunkPos, World};
+use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
 use crate::error::ClientError;
 use crate::input::InputUpdate;
@@ -751,7 +752,8 @@ fn handle_net(
         PlayEvent::ChunkData(packet) => {
             game.status_data.chunk_packets += 1;
             if let Some(world) = game.world.as_mut() {
-                match world.apply_chunk_data(&packet) {
+                let (pos, payload) = chunk_payload(&packet);
+                match world.apply_chunk(pos, payload) {
                     Ok(dirty) => game.dirty.extend(dirty),
                     Err(error) => {
                         tracing::warn!(%error, "chunk data rejected");
@@ -763,7 +765,7 @@ fn handle_net(
         PlayEvent::MapChunkBulk(packet) => {
             game.status_data.chunk_packets += 1;
             if let Some(world) = game.world.as_mut() {
-                match world.apply_map_chunk_bulk(&packet) {
+                match world.apply_chunk_bulk(packet.sky_light, &bulk_payloads(&packet)) {
                     Ok(dirty) => game.dirty.extend(dirty),
                     Err(error) => {
                         tracing::warn!(%error, "bulk chunk rejected");
@@ -777,14 +779,22 @@ fn handle_net(
             let (x, y, z) = packet.position();
             let position = BlockPos::new(x, y, z);
             if let Some(world) = game.world.as_mut() {
-                game.dirty.extend(world.apply_block_change(&packet));
+                let state = BlockState::from_wire(packet.block_state);
+                game.dirty.extend(world.apply_block_change(position, state));
             }
             acknowledge_block(game, position, packet.block_state);
         }
         PlayEvent::MultiBlockChange(packet) => {
             game.status_data.block_updates += packet.records.len() as u64;
             if let Some(world) = game.world.as_mut() {
-                game.dirty.extend(world.apply_multi_block_change(&packet));
+                let chunk = ChunkPos::new(packet.chunk_x, packet.chunk_z);
+                let changes = packet.records.iter().map(|record| {
+                    (
+                        record.local_position(),
+                        BlockState::from_wire(record.block_state),
+                    )
+                });
+                game.dirty.extend(world.apply_block_changes(chunk, changes));
             }
             // The server confirms a dig or a placement with a single block
             // change, but a batch carries the same information.
@@ -878,6 +888,37 @@ fn handle_net(
             game.world_time = packet.time_of_day;
         }
     }
+}
+
+/// The column and payload of a `Chunk Data` packet.
+fn chunk_payload(packet: &ChunkData) -> (ChunkPos, ChunkPayload<'_>) {
+    (
+        ChunkPos::new(packet.chunk_x, packet.chunk_z),
+        ChunkPayload {
+            primary_bit_mask: packet.primary_bit_mask,
+            ground_up: packet.ground_up,
+            data: &packet.data,
+        },
+    )
+}
+
+/// The columns and payloads of a `Map Chunk Bulk` packet; every bulk entry
+/// is a ground-up column.
+fn bulk_payloads(packet: &MapChunkBulk) -> Vec<(ChunkPos, ChunkPayload<'_>)> {
+    packet
+        .chunks
+        .iter()
+        .map(|chunk| {
+            (
+                ChunkPos::new(chunk.chunk_x, chunk.chunk_z),
+                ChunkPayload {
+                    primary_bit_mask: chunk.primary_bit_mask,
+                    ground_up: true,
+                    data: &chunk.data,
+                },
+            )
+        })
+        .collect()
 }
 
 /// The sum of the armour points of the four armour pieces.

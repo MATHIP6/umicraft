@@ -36,3 +36,8 @@ game thread answers it with a position acknowledgement. ADR-0005 §A.5.
 spec §2.
 
 **Section** — one 16×16×16 cube of a chunk column; spec §2.
+
+**Chunk payload** — the raw 1.8 bytes of one column as the server sends them
+(block states, light nibbles, biomes), with the section mask and the
+ground-up flag that describe them (`ChunkPayload`). The world parses it; the
+protocol only carries it. ADR-0011.
