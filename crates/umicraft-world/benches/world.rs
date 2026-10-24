@@ -5,8 +5,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use umicraft_protocol::packets::play::clientbound::{BulkChunk, MapChunkBulk};
-use umicraft_world::{BlockPos, ChunkColumn, ChunkPos, World};
+use umicraft_world::{BlockPos, ChunkColumn, ChunkPayload, ChunkPos, World};
 
 const FLAT_SECTION: &[u8] = include_bytes!("../tests/fixtures/flat-chunk-section.bin");
 
@@ -22,43 +21,34 @@ fn decode_flat_section(criterion: &mut Criterion) {
     });
 }
 
+/// `count` captured flat columns in a row, as a bulk batch borrows them.
+fn flat_columns(count: i32) -> Vec<(ChunkPos, ChunkPayload<'static>)> {
+    (0..count)
+        .map(|index| {
+            let payload = ChunkPayload {
+                primary_bit_mask: 1,
+                ground_up: true,
+                data: FLAT_SECTION,
+            };
+            (ChunkPos::new(index, 0), payload)
+        })
+        .collect()
+}
+
 fn flat_world(chunk_count: i32) -> World {
     let mut world = World::new(0);
-    let chunks = (0..chunk_count)
-        .map(|index| BulkChunk {
-            chunk_x: index,
-            chunk_z: 0,
-            primary_bit_mask: 1,
-            data: FLAT_SECTION.to_vec(),
-        })
-        .collect();
     world
-        .apply_map_chunk_bulk(&MapChunkBulk {
-            sky_light: true,
-            chunks,
-        })
+        .apply_chunk_bulk(true, &flat_columns(chunk_count))
         .unwrap();
     world
 }
 
 fn apply_bulk_10(criterion: &mut Criterion) {
     criterion.bench_function("world/apply_bulk_10_chunks", |bencher| {
-        let chunks = (0..10)
-            .map(|index| BulkChunk {
-                chunk_x: index,
-                chunk_z: 0,
-                primary_bit_mask: 1,
-                data: FLAT_SECTION.to_vec(),
-            })
-            .collect::<Vec<_>>();
+        let chunks = flat_columns(10);
         bencher.iter(|| {
             let mut world = World::new(0);
-            world
-                .apply_map_chunk_bulk(&MapChunkBulk {
-                    sky_light: true,
-                    chunks: chunks.clone(),
-                })
-                .unwrap();
+            world.apply_chunk_bulk(true, black_box(&chunks)).unwrap();
             black_box(world)
         });
     });

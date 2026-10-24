@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The loaded-world container and packet application.
+//! The loaded-world container and the updates the server sends.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-
-use umicraft_protocol::packets::play::clientbound::{
-    BlockChange, ChunkData, MapChunkBulk, MultiBlockChange,
-};
 
 use crate::block::BlockState;
 use crate::chunk::{ChunkColumn, ChunkPayload, WORLD_HEIGHT};
@@ -237,68 +233,6 @@ impl World {
         } else {
             Vec::new()
         }
-    }
-
-    /// Applies one `Chunk Data` (0x21) packet.
-    ///
-    /// # Errors
-    /// [`WorldError::ChunkPayloadLength`] for a malformed payload.
-    pub fn apply_chunk_data(&mut self, packet: &ChunkData) -> Result<Vec<ChunkPos>, WorldError> {
-        self.apply_chunk(
-            ChunkPos::new(packet.chunk_x, packet.chunk_z),
-            ChunkPayload {
-                primary_bit_mask: packet.primary_bit_mask,
-                ground_up: packet.ground_up,
-                data: &packet.data,
-            },
-        )
-    }
-
-    /// Applies a `Map Chunk Bulk` (0x26) packet.
-    ///
-    /// # Errors
-    /// [`WorldError::ChunkPayloadLength`] for a malformed payload.
-    pub fn apply_map_chunk_bulk(
-        &mut self,
-        packet: &MapChunkBulk,
-    ) -> Result<Vec<ChunkPos>, WorldError> {
-        let chunks: Vec<_> = packet
-            .chunks
-            .iter()
-            .map(|chunk| {
-                (
-                    ChunkPos::new(chunk.chunk_x, chunk.chunk_z),
-                    ChunkPayload {
-                        primary_bit_mask: chunk.primary_bit_mask,
-                        ground_up: true,
-                        data: &chunk.data,
-                    },
-                )
-            })
-            .collect();
-        self.apply_chunk_bulk(packet.sky_light, &chunks)
-    }
-
-    /// Applies one `Block Change` (0x23) packet and returns the dirty chunks.
-    pub fn apply_block_change_packet(&mut self, packet: &BlockChange) -> Vec<ChunkPos> {
-        let (x, y, z) = packet.position();
-        self.apply_block_change(
-            BlockPos::new(x, y, z),
-            BlockState::from_wire(packet.block_state),
-        )
-    }
-
-    /// Applies one `Multi Block Change` (0x22) packet.
-    pub fn apply_multi_block_change(&mut self, packet: &MultiBlockChange) -> Vec<ChunkPos> {
-        self.apply_block_changes(
-            ChunkPos::new(packet.chunk_x, packet.chunk_z),
-            packet.records.iter().map(|record| {
-                (
-                    record.local_position(),
-                    BlockState::from_wire(record.block_state),
-                )
-            }),
-        )
     }
 
     /// Removes a column, returning the dirty positions (the column plus loaded

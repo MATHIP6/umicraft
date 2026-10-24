@@ -2,8 +2,6 @@
 
 //! Block and chunk coordinates.
 
-use umicraft_protocol::packets::play::{pack_block_position, unpack_block_position};
-
 /// A block position inside the 256-block-tall 1.8 world.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlockPos {
@@ -38,19 +36,6 @@ impl BlockPos {
     #[must_use]
     pub const fn local_z(self) -> u8 {
         (self.z & 15) as u8
-    }
-
-    /// Packs the position with the 1.8 `BlockPos.toLong` layout.
-    #[must_use]
-    pub const fn to_1_8_packed(self) -> i64 {
-        pack_block_position(self.x, self.y, self.z)
-    }
-
-    /// Unpacks a 1.8 `BlockPos.toLong` value.
-    #[must_use]
-    pub const fn from_1_8_packed(packed: i64) -> Self {
-        let (x, y, z) = unpack_block_position(packed);
-        Self { x, y, z }
     }
 }
 
@@ -104,12 +89,6 @@ mod tests {
         assert_eq!(pos.chunk(), ChunkPos::new(-1, -2));
         assert_eq!(pos.local_x(), 15);
         assert_eq!(pos.local_z(), 15);
-    }
-
-    #[test]
-    fn packed_round_trip() {
-        let pos = BlockPos::new(-1698, 64, 111);
-        assert_eq!(BlockPos::from_1_8_packed(pos.to_1_8_packed()), pos);
     }
 
     #[test]

@@ -32,7 +32,7 @@ use umicraft_net::play::{PlayEvent, PlayOptions, PlaySession};
 use umicraft_net::Connection;
 use umicraft_protocol::packets::play::serverbound::Input;
 use umicraft_protocol::PlayServerbound;
-use umicraft_world::World;
+use umicraft_world::{ChunkPayload, ChunkPos, World};
 
 const USAGE: &str = "usage: umicraft-movement-probe <host> <port> [--name NAME] [--ticks N] [--forward V] [--report]";
 
@@ -242,10 +242,28 @@ async fn main() -> Result<(), String> {
                     }
                 }
                 Some(PlayEvent::ChunkData(packet)) => {
-                    let _ = world.apply_chunk_data(&packet);
+                    let payload = ChunkPayload {
+                        primary_bit_mask: packet.primary_bit_mask,
+                        ground_up: packet.ground_up,
+                        data: &packet.data,
+                    };
+                    let _ =
+                        world.apply_chunk(ChunkPos::new(packet.chunk_x, packet.chunk_z), payload);
                 }
                 Some(PlayEvent::MapChunkBulk(packet)) => {
-                    let _ = world.apply_map_chunk_bulk(&packet);
+                    let chunks: Vec<_> = packet
+                        .chunks
+                        .iter()
+                        .map(|chunk| {
+                            let payload = ChunkPayload {
+                                primary_bit_mask: chunk.primary_bit_mask,
+                                ground_up: true,
+                                data: &chunk.data,
+                            };
+                            (ChunkPos::new(chunk.chunk_x, chunk.chunk_z), payload)
+                        })
+                        .collect();
+                    let _ = world.apply_chunk_bulk(packet.sky_light, &chunks);
                 }
                 _ => {}
             }
