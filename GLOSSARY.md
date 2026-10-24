@@ -38,6 +38,15 @@ with the mesher that writes layer indices into it. Two sets exist, the
 atlas); they are always installed as a whole, never mixed (`TerrainTextures`,
 `InstalledTerrain`). ADR-0012.
 
+**World view** — the render thread's copy of the game: the interpolated
+camera and clock, the chunks waiting for a mesh worker and the meshes handed
+to the renderer (`WorldView`). The window and the screenshot path drive the
+same one. ADR-0013.
+
+**Generation** (of the world view) — a counter a world reset increments;
+every mesh job carries it, and a mesh of an older generation is dropped.
+ADR-0013.
+
 ## World
 
 **Chunk** (column) — a 16×256×16 column of blocks addressed by `ChunkPos`;

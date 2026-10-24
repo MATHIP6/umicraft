@@ -13,7 +13,7 @@ Rules (restated):
 
 | Thread | Owns | Talks to |
 |---|---|---|
-| Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the sky/fog environment, the transparent draw order, the mesh pool, and the one-time official resource load | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
+| Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the sky/fog environment, the transparent draw order, the `WorldView` (camera interpolation, chunk queue, mesh pool), and the one-time official resource load | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
 | **Game thread** | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) |
 | Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, `PlaySession` and the `drive` loop (ADR-0010), the keepalive answers | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
 | Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s, with a shared immutable `ModelMeshContext` (models, atlas layout and the optional `BiomeTints` table) when the official resources loaded | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
@@ -76,16 +76,20 @@ ADR-0005).
 - The render thread interpolates between the two newest frames (GAM-8): it
   shows the simulation one tick behind and blends the two states with the
   fraction of a tick that elapsed since the newest one.
+- The window and the screenshot path read both channels through one
+  `WorldView::sync` per frame (ADR-0013): it applies the frames, queues the
+  snapshots (a newer snapshot of a waiting chunk replaces it), uploads the
+  finished meshes and hands waiting chunks to the workers. It never blocks.
 
 ### Clock and environment boundary (M6)
 
 - `Time Update` (0x03) is decoded on the network thread and delivered as
-  `NetEvent::TimeUpdate` through the existing bounded inbox. The game thread
+  `PlayEvent::TimeUpdate` through the existing bounded inbox. The game thread
   owns the signed `world_time` (a negative value means the server froze the
   cycle) and the current dimension; it never advances the clock locally.
 - Each published frame carries `world_time` and `dimension` next to the
   interpolated camera state. The render thread keeps the newest values in
-  `View` and builds one `RenderEnvironment` per frame with the same
+  the `WorldView` and builds one `RenderEnvironment` per frame with the same
   interpolation fraction the camera uses, then calls
   `Renderer::set_environment` once before rendering. The render thread never
   waits on the game thread for the clock.
@@ -185,7 +189,9 @@ ADR-0005).
 - Workers share the job `Receiver` behind a `Mutex`, held only while
   `recv()` waits for the next job. The meshing inner loop and the terrain
   data are lock-free.
-- A stale result is discarded when its column is no longer loaded.
+- Every job carries the `WorldView`'s world generation, which a `Reset`
+  increments. A result of an older generation is discarded, so a mesh of a
+  replaced world that was still being built is never drawn in the new one.
 
 ### Current deviations from the target model
 
@@ -242,3 +248,6 @@ ADR-0005).
   and installed together; the window's mesh pool is now created with its
   renderer instead of being rebuilt after a rejected atlas. No thread or
   channel was added.
+- ADR-0013 (world view): the window and the screenshot path share one
+  `WorldView`; mesh jobs carry a world generation so a reset drops the meshes
+  still in flight. No thread or channel was added.
