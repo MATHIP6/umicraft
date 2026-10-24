@@ -894,7 +894,7 @@ fn acknowledge_block(game: &mut Game, position: BlockPos, block_state: u16) {
 /// Applies a server placement.
 fn apply_placement(
     game: &mut Game,
-    placement: &umicraft_net::client::PlayerPlacement,
+    placement: &umicraft_net::play::PlayerPlacement,
     queue: &mut CommandQueue,
 ) {
     let yaw = placement.yaw.to_radians();
@@ -1616,7 +1616,7 @@ mod tests {
 
     #[test]
     fn joining_and_changing_dimension_reset_the_world_clock() {
-        use umicraft_net::client::JoinGameInfo;
+        use umicraft_net::play::JoinGameInfo;
         use umicraft_protocol::packets::play::clientbound::{Respawn, TimeUpdate};
 
         let mut game = Game::new();

@@ -131,7 +131,9 @@ mod tests {
 
     use super::*;
     use crate::play::PlayOptions;
-    use tokio::net::TcpListener;
+    use std::time::Duration;
+
+    use tokio::net::{TcpListener, TcpSocket};
     use tokio::sync::mpsc;
     use umicraft_protocol::packets::play::clientbound;
     use umicraft_protocol::packets::play::serverbound::Chat;
@@ -146,6 +148,26 @@ mod tests {
         let (stream, _) = accepted.expect("accept");
         (
             client.expect("connect"),
+            Connection::adopt(stream, "127.0.0.1", addr.port()),
+        )
+    }
+
+    /// A pair whose client send buffer and server receive buffer are a few
+    /// KiB, so the client's writes stall as soon as the server stops reading.
+    async fn congested_pair() -> (Connection, Connection) {
+        let listener = TcpSocket::new_v4().expect("socket");
+        listener.set_recv_buffer_size(4096).expect("recv buffer");
+        listener
+            .bind("127.0.0.1:0".parse().expect("address"))
+            .expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let listener = listener.listen(1).expect("listen");
+        let client = TcpSocket::new_v4().expect("socket");
+        client.set_send_buffer_size(4096).expect("send buffer");
+        let (accepted, client) = tokio::join!(listener.accept(), client.connect(addr));
+        let (stream, _) = accepted.expect("accept");
+        (
+            Connection::adopt(client.expect("connect"), "127.0.0.1", addr.port()),
             Connection::adopt(stream, "127.0.0.1", addr.port()),
         )
     }
@@ -267,5 +289,76 @@ mod tests {
         )
         .await;
         assert!(matches!(result, Err(NetError::Protocol(_))), "{result:?}");
+    }
+
+    /// Regression for the cancel-safety rule of ADR-0010.
+    ///
+    /// The server floods keepalives without reading, so the client's answers
+    /// fill its small send buffer until one answer stalls. Commands then
+    /// arrive while that write is pending. A loop that wrote the answer
+    /// inside its `select!` would drop it as soon as a command won the race:
+    /// one keepalive would stay unanswered (or half a frame would stay on the
+    /// socket). Here every answer and every command must arrive, in order.
+    #[tokio::test]
+    async fn a_stalled_reply_is_never_dropped_for_a_command() {
+        const KEEPALIVES: i32 = 5_000;
+        const COMMANDS: usize = 20;
+        let message = |index: usize| format!("command {index}");
+
+        let (mut client, mut server) = congested_pair().await;
+        let server = tokio::spawn(async move {
+            for id in 0..KEEPALIVES {
+                let keepalive = PlayClientbound::KeepAlive(clientbound::KeepAlive { id });
+                server.write_packet(&keepalive).await.expect("write");
+            }
+            // Stall while the commands arrive behind the blocked answers.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let mut messages = Vec::new();
+            let mut echoes = Vec::new();
+            while messages.len() < COMMANDS || echoes.len() < KEEPALIVES as usize {
+                match read_serverbound(&mut server).await {
+                    PlayServerbound::Chat(chat) => messages.push(chat.message),
+                    PlayServerbound::KeepAlive(answer) => echoes.push(answer.id),
+                    other => panic!("unexpected packet {other:?}"),
+                }
+            }
+            let kick = PlayClientbound::Disconnect(clientbound::Disconnect {
+                reason: r#"{"text":"done"}"#.to_string(),
+            });
+            server.write_packet(&kick).await.expect("write");
+            (messages, echoes)
+        });
+
+        let (sender, mut commands) = mpsc::channel(COMMANDS);
+        let producer = tokio::spawn(async move {
+            for index in 0..COMMANDS {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                let chat = PlayServerbound::Chat(Chat {
+                    message: message(index),
+                });
+                if sender.send(chat).await.is_err() {
+                    return;
+                }
+            }
+            // Keep the channel open: the server ends the session.
+            std::future::pending::<()>().await;
+        });
+
+        let mut session = PlaySession::new(PlayOptions::default());
+        let counters = SessionCounters::default();
+        let end = tokio::time::timeout(
+            Duration::from_secs(5),
+            drive(&mut client, &mut session, &mut commands, &counters, |_| {}),
+        )
+        .await
+        .expect("no answer or command may be lost")
+        .expect("the stream stays valid");
+        producer.abort();
+
+        assert_eq!(end, SessionEnd::Kicked("done".to_string()));
+        let (messages, echoes) = server.await.expect("server task");
+        assert_eq!(messages, (0..COMMANDS).map(message).collect::<Vec<_>>());
+        assert_eq!(echoes, (0..KEEPALIVES).collect::<Vec<_>>());
+        assert_eq!(counters.keepalives_answered(), KEEPALIVES as u64);
     }
 }

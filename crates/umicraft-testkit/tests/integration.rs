@@ -5,13 +5,15 @@
 //! acceptance: "fuzz tests on decoder run clean").
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use umicraft_net::client::{PlayEvent, PlayOptions, PlaySession};
+use tokio::sync::mpsc;
 use umicraft_net::login::login_offline;
+use umicraft_net::play::{drive, PlayEvent, PlayOptions, PlaySession, SessionCounters, SessionEnd};
 use umicraft_net::{ping::ping, Connection, NetError};
 use umicraft_protocol::framing::MAX_PACKET_LEN;
-use umicraft_protocol::{Framing, StatusClientbound};
+use umicraft_protocol::packets::play::serverbound::Chat;
+use umicraft_protocol::{Framing, PlayServerbound, StatusClientbound};
 use umicraft_testkit::capture::{Capture, Direction};
 use umicraft_testkit::fake_server::{start, FakeServerConfig, FAKE_UUID};
 
@@ -27,6 +29,58 @@ impl Rng {
         self.0 = state;
         state.wrapping_mul(0x2545_F491_4F6C_DD1D)
     }
+}
+
+/// What a test client observed while it held the play state.
+struct Played {
+    events: Vec<PlayEvent>,
+    /// `None` when the deadline stopped the session.
+    end: Option<SessionEnd>,
+    counters: SessionCounters,
+}
+
+/// Drives a logged-in connection like a client without a simulation: every
+/// placement is acknowledged. `stay` stops the session; dropping `drive` is
+/// safe because the test drops the connection afterwards (ADR-0010).
+async fn play(conn: &mut Connection, stay: Duration) -> Result<Played, NetError> {
+    let mut session = PlaySession::new(PlayOptions::default());
+    let (acks, mut commands) = mpsc::channel(4);
+    let mut played = Played {
+        events: Vec::new(),
+        end: None,
+        counters: SessionCounters::default(),
+    };
+    let run = drive(
+        conn,
+        &mut session,
+        &mut commands,
+        &played.counters,
+        |event| {
+            if let PlayEvent::Placement(placement) = &event {
+                let _ = acks.try_send(placement.acknowledgement(true));
+            }
+            played.events.push(event);
+        },
+    );
+    played.end = match tokio::time::timeout(stay, run).await {
+        Ok(end) => Some(end?),
+        Err(_) => None,
+    };
+    Ok(played)
+}
+
+async fn logged_in(
+    config: FakeServerConfig,
+    name: &str,
+) -> (Connection, umicraft_testkit::fake_server::FakeServer) {
+    let server = start(config).await.expect("fake server binds");
+    let mut conn = Connection::connect("127.0.0.1", server.addr.port())
+        .await
+        .expect("connect works");
+    login_offline(&mut conn, name, None)
+        .await
+        .expect("login works");
+    (conn, server)
 }
 
 #[tokio::test]
@@ -62,22 +116,34 @@ async fn full_offline_session_ping_login_play() {
     assert_eq!(profile.username, "TestBot");
 
     // Play-held connection with keepalive answering (spec NET-6).
-    let summary = conn
-        .run_play(Some(Duration::from_millis(700)), &PlayOptions::default())
+    let started = Instant::now();
+    let played = play(&mut conn, Duration::from_millis(700))
         .await
         .expect("play survives");
-    assert!(
-        summary.keepalives_answered >= 2,
-        "keepalives: {:?}",
-        summary.keepalives_answered
-    );
-    let join = summary.join.expect("join game decoded");
+    assert_eq!(played.end, None, "the deadline ends the session");
+    assert!(started.elapsed() >= Duration::from_millis(600));
+    let keepalives = played.counters.keepalives_answered();
+    assert!(keepalives >= 2, "keepalives: {keepalives}");
+    let join = played
+        .events
+        .iter()
+        .find_map(|event| match event {
+            PlayEvent::JoinGame(info) => Some(info),
+            _ => None,
+        })
+        .expect("join game decoded");
     assert_eq!(join.entity_id, 42);
     assert_eq!(join.level_type, "flat");
     assert_eq!(join.dimension, 0);
-    let placement = summary.placement.expect("teleport answered");
+    let placement = played
+        .events
+        .iter()
+        .find_map(|event| match event {
+            PlayEvent::Placement(placement) => Some(placement),
+            _ => None,
+        })
+        .expect("placement decoded");
     assert!((placement.y - 64.0).abs() < 1e-9);
-    assert!(summary.stayed >= Duration::from_millis(600));
 
     // Server-side observations agree with the client-side summary.
     let observed = server.observed().snapshot();
@@ -124,51 +190,86 @@ async fn play_session_streams_join_placement_chat() {
         keepalive_interval: Some(Duration::from_millis(100)),
         ..FakeServerConfig::default()
     };
-    let server = start(config).await.expect("fake server binds");
-    let mut conn = Connection::connect("127.0.0.1", server.addr.port())
-        .await
-        .expect("connect works");
-    login_offline(&mut conn, "Streamer", None)
-        .await
-        .expect("login works");
-    let mut session = PlaySession::new(PlayOptions::default());
+    let (mut conn, server) = logged_in(config, "Streamer").await;
 
-    let join = tokio::time::timeout(Duration::from_secs(2), session.next(&mut conn))
+    let played = play(&mut conn, Duration::from_millis(450))
         .await
-        .expect("join event before timeout")
-        .expect("join event");
-    match join {
-        PlayEvent::JoinGame(info) => assert_eq!(info.entity_id, 42),
-        other => panic!("expected JoinGame, got {other:?}"),
+        .expect("play works");
+    match &played.events[..3] {
+        [PlayEvent::JoinGame(info), PlayEvent::Placement(placement), PlayEvent::Chat(json)] => {
+            assert_eq!(info.entity_id, 42);
+            assert!((placement.y - 64.0).abs() < 1e-9);
+            assert!(json.contains("welcome"));
+        }
+        other => panic!("expected join, placement, chat; got {other:?}"),
     }
 
-    let placement = tokio::time::timeout(Duration::from_secs(2), session.next(&mut conn))
-        .await
-        .expect("placement event before timeout")
-        .expect("placement event");
-    match placement {
-        PlayEvent::Placement(p) => assert!((p.y - 64.0).abs() < 1e-9),
-        other => panic!("expected Placement, got {other:?}"),
-    }
-
-    let chat = tokio::time::timeout(Duration::from_secs(2), session.next(&mut conn))
-        .await
-        .expect("chat event before timeout")
-        .expect("chat event");
-    match chat {
-        PlayEvent::Chat(json) => assert!(json.contains("welcome")),
-        other => panic!("expected Chat, got {other:?}"),
-    }
-
-    // Keepalives are consumed inside `next`; let one interval elapse, then
-    // verify the session summary and the server-side echo.
-    let _ = tokio::time::timeout(Duration::from_millis(350), session.next(&mut conn)).await;
-    let summary = session.summary();
-    assert!(summary.keepalives_answered >= 1);
-    assert!(!server.observed().snapshot().keepalive_echoes.is_empty());
+    // Keepalives never become events; they are answered and counted.
+    assert!(played.counters.keepalives_answered() >= 1);
     let observed = server.observed().snapshot();
+    assert!(!observed.keepalive_echoes.is_empty());
     let (locale, view, _, _, _) = observed.client_settings.expect("entry packets");
     assert_eq!((locale.as_str(), view), ("en_us", 8));
+}
+
+/// The server sends a keepalive every 5 ms while the client writes a steady
+/// stream of compressed commands: both directions stay ordered and complete.
+/// The stalled-socket case of ADR-0010 is covered by the unit tests of
+/// `umicraft_net::play::drive`, which control the socket buffers.
+#[tokio::test]
+async fn commands_and_keepalives_interleave_under_compression() {
+    const MESSAGES: usize = 300;
+    let config = FakeServerConfig {
+        keepalive_interval: Some(Duration::from_millis(5)),
+        compression_threshold: Some(64),
+        ..FakeServerConfig::default()
+    };
+    let (mut conn, server) = logged_in(config, "Busy").await;
+
+    let (sender, mut commands) = mpsc::channel(8);
+    let producer = tokio::spawn(async move {
+        for index in 0..MESSAGES {
+            // 80 characters: above the threshold, so every frame is compressed.
+            let message = format!("{index:04}{}", "x".repeat(76));
+            let chat = PlayServerbound::Chat(Chat { message });
+            if sender.send(chat).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    });
+
+    let mut session = PlaySession::new(PlayOptions::default());
+    let counters = SessionCounters::default();
+    let end = tokio::time::timeout(
+        Duration::from_secs(10),
+        drive(&mut conn, &mut session, &mut commands, &counters, |_| {}),
+    )
+    .await
+    .expect("the session ends when the producer is done")
+    .expect("the stream stays valid");
+    assert_eq!(end, SessionEnd::CommandsClosed);
+    producer.await.expect("producer task");
+
+    // Every command was written before `drive` returned; give the server
+    // the time to read the tail of the stream.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let observed = loop {
+        let observed = server.observed().snapshot();
+        if observed.chat_messages.len() == MESSAGES || Instant::now() > deadline {
+            break observed;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let expected: Vec<String> = (0..MESSAGES)
+        .map(|index| format!("{index:04}{}", "x".repeat(76)))
+        .collect();
+    assert_eq!(observed.chat_messages, expected);
+    let echoes = &observed.keepalive_echoes;
+    assert!(echoes.len() >= 20, "keepalives echoed: {}", echoes.len());
+    let consecutive: Vec<i32> = (90_000..90_000 + echoes.len() as i32).collect();
+    assert_eq!(echoes, &consecutive, "every keepalive answered, in order");
+    assert_eq!(counters.keepalives_answered(), echoes.len() as u64);
 }
 
 #[tokio::test]
@@ -233,11 +334,13 @@ async fn play_kick_is_clean_with_reason() {
     login_offline(&mut conn, "Short", None)
         .await
         .expect("login works");
-    let err = conn
-        .run_play(None, &PlayOptions::default())
+    let played = play(&mut conn, Duration::from_secs(5))
         .await
-        .expect_err("kicked during play");
-    assert!(matches!(err, NetError::KickedAtPlay { ref reason } if reason == "session over"));
+        .expect("a kick is a clean end");
+    assert_eq!(
+        played.end,
+        Some(SessionEnd::Kicked("session over".to_string()))
+    );
 }
 
 #[tokio::test]
@@ -255,11 +358,10 @@ async fn raw_framing_session_works() {
     login_offline(&mut conn, "RawOk", None)
         .await
         .expect("login works");
-    let summary = conn
-        .run_play(Some(Duration::from_millis(400)), &PlayOptions::default())
+    let played = play(&mut conn, Duration::from_millis(400))
         .await
         .expect("play works");
-    assert!(summary.keepalives_answered >= 2);
+    assert!(played.counters.keepalives_answered() >= 2);
 }
 
 #[tokio::test]
@@ -276,11 +378,10 @@ async fn threshold_zero_disables_compression_symmetric() {
     login_offline(&mut conn, "ZeroThr", None)
         .await
         .expect("login works");
-    let summary = conn
-        .run_play(Some(Duration::from_millis(300)), &PlayOptions::default())
+    let played = play(&mut conn, Duration::from_millis(300))
         .await
         .expect("play works");
-    assert!(summary.keepalives_answered >= 1);
+    assert!(played.counters.keepalives_answered() >= 1);
 }
 
 #[test]

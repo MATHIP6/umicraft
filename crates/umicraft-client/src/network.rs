@@ -20,8 +20,8 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use tokio::sync::mpsc::Receiver as CommandReceiver;
-use umicraft_net::client::{JoinGameInfo, PlayerPlacement};
 use umicraft_net::login::login_offline;
+use umicraft_net::play::{JoinGameInfo, PlayerPlacement};
 use umicraft_net::Connection;
 use umicraft_protocol::packets::play::clientbound::{
     self, BlockChange, ChunkData, EntityEquipment, MapChunkBulk, MultiBlockChange, PositionLook,
