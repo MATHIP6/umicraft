@@ -3,17 +3,17 @@
 //! Windowed client: the winit event loop, the player camera, the chunk
 //! upload and the HUD.
 //!
-//! The render thread owns the window, the GPU resources and the mesh pool.
+//! The render thread owns the window, the GPU resources and the
+//! [`WorldView`], which interpolates the camera and drives the mesh workers.
 //! It never mutates the world and never blocks: the camera, the HUD and the
 //! chunk snapshots arrive over the bounded channels of the game thread
-//! (ADR-0005).
+//! (ADR-0005, ADR-0013).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use umicraft_game::RenderState;
-use umicraft_render::{draw_hud, Camera, HudState, Overlay, RenderEnvironment, Renderer};
+use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -24,90 +24,17 @@ use winit::window::{CursorGrabMode, Window};
 
 use crate::args::Args;
 use crate::error::ClientError;
-use crate::game::{camera_angles, ChunkEvent, Frame, GameEvent, RenderEvent, Session, TICK};
+use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
-use crate::mesher::{default_worker_count, MeshPool};
+use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::terrain_textures::TerrainTextures;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
+use crate::world_view::WorldView;
 
 const MOUSE_SENSITIVITY: f32 = 0.0022;
 const FRAME_HISTORY: usize = 120;
-
-/// The camera of the player, interpolated between the two newest frames.
-#[derive(Debug, Default)]
-struct View {
-    /// The state of the previous tick.
-    previous: Option<RenderState>,
-    /// The state of the newest tick.
-    current: Option<RenderState>,
-    /// The instant of the newest tick.
-    tick_time: Option<Instant>,
-    /// The newest signed world time in ticks.
-    world_time: i64,
-    /// The dimension of the newest frame.
-    dimension: i8,
-}
-
-impl View {
-    /// Stores a new frame.
-    fn push(&mut self, frame: Frame) {
-        self.previous = self.current;
-        self.current = Some(frame.state);
-        self.tick_time = Some(frame.tick_time);
-        self.world_time = frame.world_time;
-        self.dimension = frame.dimension;
-    }
-
-    /// The interpolation fraction of the two newest ticks for `now`.
-    ///
-    /// The value is clamped to `0.0..=1.0` and is the same fraction
-    /// [`View::sample`] uses, so the camera and the world clock stay in step.
-    fn partial_tick(&self, now: Instant) -> f32 {
-        if self.previous.is_none() {
-            return 0.0;
-        }
-        let Some(tick_time) = self.tick_time else {
-            return 0.0;
-        };
-        let elapsed = now.saturating_duration_since(tick_time).as_secs_f32();
-        (elapsed / TICK.as_secs_f32()).clamp(0.0, 1.0)
-    }
-
-    /// The render environment for `now`.
-    ///
-    /// `RenderEnvironment::new` clamps the interpolation fraction, and the
-    /// world clock/dimension are the newest values the game thread published;
-    /// the render thread never advances the clock by itself.
-    fn environment(&self, now: Instant, view_distance: u8) -> RenderEnvironment {
-        RenderEnvironment::new(
-            self.dimension,
-            self.world_time,
-            self.partial_tick(now),
-            view_distance,
-        )
-    }
-
-    /// The interpolated state for `now`.
-    ///
-    /// The renderer shows the simulation one tick behind and interpolates
-    /// between the two newest ticks, so the motion is smooth and independent
-    /// of the frame rate (GAM-8).
-    fn sample(&self, now: Instant) -> Option<RenderState> {
-        let current = self.current?;
-        let Some(previous) = self.previous else {
-            return Some(current);
-        };
-        let alpha = self.partial_tick(now);
-        Some(RenderState {
-            position: previous.position.lerp(current.position, alpha),
-            yaw: current.yaw,
-            pitch: current.pitch,
-            on_ground: current.on_ground,
-        })
-    }
-}
 
 /// Runs the windowed client until the user closes the window.
 ///
@@ -142,21 +69,14 @@ struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     camera: Camera,
-    view: View,
     overlay: Overlay,
     show_overlay: bool,
     mouse_captured: bool,
     keys: HashSet<KeyCode>,
-    /// The mesh workers; created with the renderer, once the terrain
-    /// textures are bound (ADR-0012).
-    pool: Option<MeshPool>,
-    /// The chunks that are being meshed.
-    pending: HashSet<umicraft_world::ChunkPos>,
-    /// The chunks whose snapshot could not be queued yet.
-    waiting: Vec<(umicraft_world::ChunkPos, umicraft_mesh::ChunkSnapshot)>,
-    faces: HashMap<umicraft_world::ChunkPos, usize>,
+    /// The camera, clock, chunk meshing and HUD of the game; created with
+    /// the renderer, once the terrain textures are bound (ADR-0012, ADR-0013).
+    world: Option<WorldView>,
     session: Session,
-    hud: HudState,
     last_input: InputState,
     look: (f32, f32),
     select_slot: Option<u8>,
@@ -199,17 +119,12 @@ impl App {
             window: None,
             renderer: None,
             camera: Camera::default(),
-            view: View::default(),
             overlay: Overlay::new(1280, 720),
             show_overlay: true,
             mouse_captured: false,
             keys: HashSet::new(),
-            pool: None,
-            pending: HashSet::new(),
-            waiting: Vec::new(),
-            faces: HashMap::new(),
+            world: None,
             session,
-            hud: HudState::default(),
             last_input: InputState::default(),
             look: (0.0, 0.0),
             select_slot: None,
@@ -431,102 +346,17 @@ impl App {
         }
     }
 
-    /// Reads the frames of the game thread.
-    fn drain_frames(&mut self) {
-        while let Ok(event) = self.session.frames().try_recv() {
-            match event {
-                RenderEvent::Frame(frame) => self.view.push(frame),
-                RenderEvent::Hud(hud) => self.hud = *hud,
-                RenderEvent::Status(status) => {
-                    tracing::debug!(status = %status.status, "session status");
-                }
-                RenderEvent::Ended(reason) => {
-                    self.exit_error = Some(reason);
-                }
-                RenderEvent::Reset => {
-                    self.reset_world();
-                }
-            }
-        }
-    }
-
-    /// Takes the chunk snapshots of the game thread.
-    fn drain_chunks(&mut self) {
-        while let Ok(ChunkEvent { pos, snapshot }) = self.session.chunks().try_recv() {
-            self.waiting.push((pos, snapshot));
-        }
-    }
-
-    /// Submits the queued snapshots to the mesh pool.
-    ///
-    /// A chunk that is still being meshed stays in the queue and is
-    /// submitted as soon as the worker finished it; the render thread never
-    /// waits for a worker.
-    fn dispatch_chunks(&mut self) {
-        let Some(pool) = self.pool.as_ref() else {
+    /// Moves the world view forward, follows the player with the camera and
+    /// leaves when the session ended.
+    fn sync_world(&mut self, now: Instant) {
+        let (Some(world), Some(renderer)) = (self.world.as_mut(), self.renderer.as_mut()) else {
             return;
         };
-        let mut index = 0;
-        while index < self.waiting.len() {
-            let (pos, snapshot) = self.waiting[index].clone();
-            if self.pending.contains(&pos) {
-                index += 1;
-                continue;
-            }
-            match pool.submit(pos, 0, snapshot) {
-                Ok(()) => {
-                    self.pending.insert(pos);
-                    self.waiting.remove(index);
-                }
-                Err(_snapshot) => {
-                    // The job queue is full: the render thread never waits
-                    // for a worker, the chunk is retried on a later frame.
-                    break;
-                }
-            }
+        world.sync(self.session.frames(), self.session.chunks(), renderer);
+        world.update_camera(&mut self.camera, now);
+        if let Some(reason) = world.ended() {
+            self.exit_error = Some(reason.to_string());
         }
-    }
-
-    /// Uploads the meshes the workers finished.
-    fn collect_meshes(&mut self) {
-        let Some(renderer) = self.renderer.as_mut() else {
-            return;
-        };
-        let Some(pool) = self.pool.as_ref() else {
-            return;
-        };
-        while let Some(result) = pool.try_recv() {
-            let pos = result.pos;
-            self.pending.remove(&pos);
-            if !result.mesh.is_empty() {
-                self.faces.insert(pos, result.mesh.face_count());
-                renderer.upload_mesh(pos, &result.mesh);
-            } else {
-                self.faces.remove(&pos);
-                renderer.remove_chunk(pos);
-            }
-        }
-    }
-
-    /// Drops the meshes of a world that was replaced.
-    fn reset_world(&mut self) {
-        if let Some(renderer) = self.renderer.as_mut() {
-            renderer.clear_meshes();
-        }
-        self.pending.clear();
-        self.waiting.clear();
-        self.faces.clear();
-    }
-
-    /// Moves the camera onto the player.
-    fn update_camera(&mut self, now: Instant) {
-        let Some(state) = self.view.sample(now) else {
-            return;
-        };
-        self.camera.position = state.position;
-        let (yaw, pitch) = camera_angles(&state);
-        self.camera.yaw = yaw;
-        self.camera.pitch = pitch;
     }
 
     /// Builds the HUD and the debug block.
@@ -540,7 +370,12 @@ impl App {
             return;
         }
         let meshes = self.renderer.as_ref().map_or(0, Renderer::mesh_count);
-        let faces: usize = self.faces.values().sum();
+        let faces = self.world.as_ref().map_or(0, WorldView::face_count);
+        let game_hud = self
+            .world
+            .as_ref()
+            .map(|world| world.hud().clone())
+            .unwrap_or_default();
         let position = self.camera.position;
         let yaw = self.camera.yaw.to_degrees();
         let pitch = self.camera.pitch.to_degrees();
@@ -559,14 +394,14 @@ impl App {
         ];
         // The HUD owns the debug block, the crosshair and the bottom stack;
         // the client only feeds it the lines it already tracks.
-        let mut chat_lines = self.hud.chat_lines.clone();
+        let mut chat_lines = game_hud.chat_lines.clone();
         if self.chat_open {
             chat_lines.push(format!("> {}", self.chat_input));
         }
         let hud = HudState {
             debug_lines: lines.to_vec(),
             chat_lines,
-            ..self.hud.clone()
+            ..game_hud
         };
         draw_hud(&mut self.overlay, &hud, width, height);
         let graph_width = 240.0_f32.min(width as f32 - 20.0);
@@ -622,13 +457,13 @@ impl App {
             self.frame_times.remove(0);
         }
 
-        self.drain_frames();
-        self.drain_chunks();
-        self.dispatch_chunks();
-        self.collect_meshes();
+        self.sync_world(now);
         self.publish_input();
-        self.update_camera(now);
-        let environment = self.view.environment(now, self.args.view_distance);
+        let environment = self
+            .world
+            .as_ref()
+            .map(|world| world.environment(now, self.args.view_distance))
+            .unwrap_or_default();
         self.build_overlay();
 
         if self.exit_error.is_some() {
@@ -741,8 +576,8 @@ impl ApplicationHandler for App {
             .take()
             .unwrap_or(TerrainTextures::Procedural)
             .install(&mut renderer);
-        match MeshPool::new(default_worker_count(), &terrain) {
-            Ok(pool) => self.pool = Some(pool),
+        match WorldView::new(&terrain, default_worker_count()) {
+            Ok(world) => self.world = Some(world),
             Err(error) => {
                 self.exit_error = Some(error.to_string());
                 event_loop.exit();
@@ -853,79 +688,5 @@ mod tests {
         assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, true));
         assert!(!is_debug_toggle(KeyCode::F2, ElementState::Released, false));
         assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
-    }
-
-    #[test]
-    fn the_frame_carries_the_clock_and_dimension() {
-        let mut view = View::default();
-        let tick = Instant::now();
-        let state = RenderState {
-            position: glam::Vec3::new(0.0, 64.0, 0.0),
-            yaw: 0.0,
-            pitch: 0.0,
-            on_ground: true,
-        };
-        view.push(Frame {
-            state,
-            tick_time: tick,
-            world_time: -6_000,
-            dimension: -1,
-        });
-        // One frame is not enough to interpolate, so the clock fraction is
-        // zero even when `now` is already ahead of the tick.
-        assert_eq!(view.environment(tick + TICK * 2, 12).partial_tick, 0.0);
-
-        let later = tick + TICK;
-        view.push(Frame {
-            state,
-            tick_time: later,
-            world_time: -5_900,
-            dimension: -1,
-        });
-
-        assert_eq!(view.world_time, -5_900);
-        assert_eq!(view.dimension, -1);
-        let halfway = view.environment(later + TICK / 2, 12);
-        assert!((halfway.partial_tick - 0.5).abs() < 1e-3);
-        assert_eq!(view.environment(later - TICK, 12).partial_tick, 0.0);
-        let environment = view.environment(later + TICK * 2, 12);
-        assert_eq!(environment.dimension, -1);
-        assert_eq!(environment.world_time, -5_900);
-        assert_eq!(environment.partial_tick, 1.0);
-        assert_eq!(environment.view_distance, 12);
-    }
-
-    #[test]
-    fn the_partial_tick_matches_the_camera_interpolation() {
-        let mut view = View::default();
-        let tick = Instant::now();
-        let state = RenderState {
-            position: glam::Vec3::ZERO,
-            yaw: 0.0,
-            pitch: 0.0,
-            on_ground: false,
-        };
-        // One frame is not enough to interpolate: the camera shows the
-        // current state and the clock fraction is zero.
-        view.push(Frame {
-            state,
-            tick_time: tick,
-            world_time: 0,
-            dimension: 0,
-        });
-        assert_eq!(view.partial_tick(tick), 0.0);
-        assert_eq!(view.environment(tick, 8).partial_tick, 0.0);
-
-        view.push(Frame {
-            state,
-            tick_time: tick + TICK,
-            world_time: 100,
-            dimension: 0,
-        });
-        // Before the newest tick and after a full tick the fraction is
-        // clamped to the interpolation range.
-        assert_eq!(view.partial_tick(tick), 0.0);
-        assert_eq!(view.partial_tick(tick + TICK * 3), 1.0);
-        assert!((0.0..=1.0).contains(&view.environment(tick + TICK * 2, 8).partial_tick));
     }
 }
