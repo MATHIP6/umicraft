@@ -30,6 +30,14 @@ play state. ADR-0010.
 `Player Position and Look` (0x08), after resolving the 1.8 relative flags. The
 game thread answers it with a position acknowledgement. ADR-0005 §A.5.
 
+## Rendering
+
+**Terrain textures** — the texture array the GPU samples for blocks together
+with the mesher that writes layer indices into it. Two sets exist, the
+**procedural** one (original art) and the **official** one (the user's 1.8.8
+atlas); they are always installed as a whole, never mixed (`TerrainTextures`,
+`InstalledTerrain`). ADR-0012.
+
 ## World
 
 **Chunk** (column) — a 16×256×16 column of blocks addressed by `ChunkPos`;

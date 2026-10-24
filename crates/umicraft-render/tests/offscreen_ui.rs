@@ -136,6 +136,34 @@ fn ui_draw_list_renders_over_terrain_and_the_debug_overlay() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
+fn the_procedural_array_can_be_bound_again_after_an_atlas() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    renderer.upload_mesh(ChunkPos::new(0, 0), &terrain_quad());
+    let mut camera = Camera::default();
+    camera.set_aspect(WIDTH, HEIGHT);
+    let empty = Overlay::new(WIDTH, HEIGHT);
+    let centre = |renderer: &mut Renderer| {
+        renderer.render(&camera, &empty).expect("render");
+        let image = renderer.read_pixels().expect("read");
+        pixel(&image, WIDTH / 2, HEIGHT / 2)
+    };
+
+    let procedural = centre(&mut renderer);
+    renderer
+        .set_block_atlas(2, 2, 1, &[0u8, 0, 255, 255].repeat(4))
+        .expect("upload a blue atlas");
+    assert_ne!(centre(&mut renderer), procedural, "the atlas is sampled");
+
+    renderer.use_procedural_blocks();
+    assert_eq!(
+        centre(&mut renderer),
+        procedural,
+        "the procedural array is sampled again"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
 fn block_atlas_upload_replaces_the_terrain_array() {
     let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
     renderer.upload_mesh(ChunkPos::new(0, 0), &terrain_quad());

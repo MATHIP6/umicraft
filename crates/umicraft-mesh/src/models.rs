@@ -32,12 +32,12 @@
 
 use std::sync::Arc;
 
-use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant, MISSING_TEXTURE};
+use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant};
 use umicraft_world::{BlockState, ChunkPos};
 
 use crate::{
-    emit_legacy_faces_with, is_transparent_pass, occludes, quad_light, texture_layer, tint,
-    BlockSource, Face, Mesh, Vertex,
+    emit_legacy_faces_with, is_transparent_pass, occludes, quad_light, tint, BlockSource, Face,
+    Mesh, Vertex,
 };
 
 /// The baked models and the texture layers the model mesher reads.
@@ -125,8 +125,9 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
 /// (`mcp: src/minecraft/client/renderer/BlockFluidRenderer.java`,
 /// `func_178268_a`). Keeping the legacy cube geometry while resolving those
 /// keys in the real atlas avoids sampling an unrelated layer such as a bed.
-/// Other no-model states use the missing-texture checker when the atlas has
-/// one, and the procedural layer when it does not (the no-assets fallback).
+/// Other no-model states use the missing-texture checker: this path only
+/// ever emits layers of the atlas it was given, never a procedural layer
+/// (ADR-0012).
 fn fallback_layer(state: BlockState, face: Face, atlas: &AtlasLayout) -> u32 {
     let fluid_key = match state.id() {
         8 | 9 => Some(match face {
@@ -139,12 +140,9 @@ fn fallback_layer(state: BlockState, face: Face, atlas: &AtlasLayout) -> u32 {
         }),
         _ => None,
     };
-    if let Some(layer) = fluid_key.and_then(|key| atlas.layer(key)) {
-        return layer;
-    }
-    atlas
-        .layer(MISSING_TEXTURE)
-        .unwrap_or_else(|| texture_layer(state, face))
+    fluid_key
+        .and_then(|key| atlas.layer(key))
+        .unwrap_or_else(|| atlas.missing_layer())
 }
 
 /// Picks the weighted variant of `model` for a block position.
@@ -266,6 +264,7 @@ fn emit_model_quads<S: BlockSource + ?Sized>(
 mod tests {
     use super::*;
     use umicraft_model::ResolvedModel;
+    use umicraft_model::MISSING_TEXTURE;
 
     fn variant(weight: u32) -> ModelVariant {
         ModelVariant {
@@ -332,16 +331,16 @@ mod tests {
             atlas.layer(MISSING_TEXTURE).expect("missing layer")
         );
 
-        // The no-assets path has no atlas keys and must keep the procedural
-        // layers, so the legacy mesh stays byte-identical.
+        // An atlas without the fluid textures still answers with one of its
+        // own layers: the checker, never a procedural layer index.
         let empty = AtlasLayout::default();
         assert_eq!(
             fallback_layer(water, Face::Up, &empty),
-            texture_layer(water, Face::Up)
+            empty.missing_layer()
         );
         assert_eq!(
             fallback_layer(BlockState::new(1, 0), Face::Up, &empty),
-            texture_layer(BlockState::new(1, 0), Face::Up)
+            empty.missing_layer()
         );
     }
 

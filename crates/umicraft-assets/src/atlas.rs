@@ -23,7 +23,7 @@ pub struct BlockAtlas {
 impl BlockAtlas {
     /// Builds an atlas from already decoded layers in layout order.
     ///
-    /// `pixels` must be exactly `width * height * 4 * layout.len()` bytes
+    /// `pixels` must be exactly `width * height * 4 * layout.layer_count()` bytes
     /// long. The first layer is expected to be the missing-texture checker,
     /// though this constructor only validates the arithmetic.
     ///
@@ -43,16 +43,10 @@ impl BlockAtlas {
                 reason: format!("the layer size {width}x{height} is empty"),
             });
         }
-        if layout.is_empty() {
-            return Err(crate::AssetsError::Image {
-                path: "atlas".to_string(),
-                reason: "the layout has no layers".to_string(),
-            });
-        }
         let expected = u64::from(width)
             .checked_mul(u64::from(height))
             .and_then(|pixels| pixels.checked_mul(4))
-            .and_then(|bytes| bytes.checked_mul(u64::from(layout.len())))
+            .and_then(|bytes| bytes.checked_mul(u64::from(layout.layer_count())))
             .ok_or_else(|| crate::AssetsError::Image {
                 path: "atlas".to_string(),
                 reason: "the texture array size overflows".to_string(),
@@ -62,7 +56,7 @@ impl BlockAtlas {
                 path: "atlas".to_string(),
                 reason: format!(
                     "{} layers of {width}x{height} need {expected} bytes, got {}",
-                    layout.len(),
+                    layout.layer_count(),
                     pixels.len()
                 ),
             });
@@ -90,7 +84,7 @@ impl BlockAtlas {
     /// Number of layers.
     #[must_use]
     pub fn layers(&self) -> u32 {
-        self.layout.len()
+        self.layout.layer_count()
     }
 
     /// Layer-major tightly packed RGBA8 pixels.
@@ -130,13 +124,6 @@ mod tests {
 
         let err =
             BlockAtlas::new(0, 2, Vec::new(), layout).expect_err("a zero dimension must fail");
-        assert!(matches!(err, crate::AssetsError::Image { .. }));
-    }
-
-    #[test]
-    fn an_empty_layout_is_rejected() {
-        let err = BlockAtlas::new(2, 2, Vec::new(), AtlasLayout::default())
-            .expect_err("a layout without the missing layer must fail");
         assert!(matches!(err, crate::AssetsError::Image { .. }));
     }
 }

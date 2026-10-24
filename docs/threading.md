@@ -141,29 +141,30 @@ ADR-0005).
   and the atlas, and wraps a `ModelMeshContext` in an `Arc`. The same bulk pass
   decodes the two optional 256×256 biome colormaps, and the main thread samples
   them into the immutable `BiomeTints` table placed in that context.
-- The windowed client loads the bundle in `App::new`, before the mesh pool and
-  before the event loop starts. Screenshot mode loads it before the pool and
-  creates the offscreen renderer immediately, because the atlas must be
-  accepted before any model job is queued. The load is start-up work only: no
-  frame, tick or worker ever reads the jar or touches the disk for assets.
-- Workers receive the `Arc<ModelMeshContext>` when the bundle loaded and call
-  `mesh_chunk_with_models`; otherwise they call the legacy `mesh_chunk`. The
-  context contains only immutable model quads, the atlas layout and the
-  optional immutable `BiomeTints` table, so every worker reads it without a
-  lock and no job mutates shared model or tint data. The colormap PNGs are
-  dropped after sampling; only the 40-entry table is retained.
-- The render thread uploads the texture array with `Renderer::set_block_atlas`
-  after the renderer exists. If the upload is rejected (for example a low
-  adapter limit), the bundle is dropped, the pending/waiting jobs and renderer
-  meshes are cleared, and the pool is rebuilt without a context. This keeps
-  real-layer meshes and the procedural fallback texture array from ever being
-  mixed. A missing installation, corrupt jar, model error or rejection logs
-  one warning; the game keeps running on the M2 procedural path.
+- `TerrainTextures::load` runs once on the main thread, in `App::new` for the
+  window and before the renderer in screenshot mode: it picks the official
+  set (the atlas and the `Arc<ModelMeshContext>`) or the procedural set. The
+  load is start-up work only: no frame, tick or worker ever reads the jar or
+  touches the disk for assets.
+- `TerrainTextures::install` binds the set's texture array on the renderer
+  once the renderer exists. A rejected official array (for example a low
+  adapter limit) logs one warning and installs the procedural set as a whole.
+  The resulting `InstalledTerrain` is the only source of the `TerrainMesher`,
+  and `MeshPool::new` requires it, so the pool is created after the array is
+  bound and its workers can never write layers of another array (ADR-0012).
+  The window creates its pool together with its renderer; snapshots that
+  arrive earlier wait in its queue.
+- Workers share one cloned `TerrainMesher`. The official mesher holds only
+  immutable model quads, the atlas layout and the optional immutable
+  `BiomeTints` table, so every worker reads it without a lock and no job
+  mutates shared model or tint data. The colormap PNGs are dropped after
+  sampling; only the 40-entry table is retained.
 - `--block-demo` stays on the main thread: it builds the synthetic columns,
   meshes one `ChunkSnapshot::from_columns` synchronously with
   `mesh_chunk_with_models`, prints the report, and only then creates the
   offscreen renderer when `--screenshot` is present. Without the flag it never
-  touches the GPU; with it, the demo uses the same atlas upload as the window.
+  touches the GPU; with it, the demo installs the official set like the window
+  and fails with a typed error instead of falling back.
 
 ### World and mesh boundary
 
@@ -237,3 +238,7 @@ ADR-0005).
   `umicraft_net::play::drive`, shared with the headless binary and the
   testkit. No thread or channel was added; the command queue now carries wire
   packets, and the loop writes only outside its `select!`.
+- ADR-0012 (terrain textures): the texture array and the mesher are chosen
+  and installed together; the window's mesh pool is now created with its
+  renderer instead of being rebuilt after a rejected atlas. No thread or
+  channel was added.
