@@ -112,18 +112,6 @@ impl ModelResources {
         Self::load_from_install(&install)
     }
 
-    /// Loads the resources, logging one warning and returning `None` on any
-    /// failure.
-    ///
-    /// The windowed client and the terrain screenshot use this entry point:
-    /// a missing installation, corrupt jar or unsupported model leaves the
-    /// immutable bundle absent, so the legacy mesh/texture path runs instead
-    /// of mixing real-layer meshes with the procedural texture array.
-    #[must_use]
-    pub fn load_or_warn() -> Option<Self> {
-        Self::load_or_warn_from(umicraft_assets::install::OfficialInstall::from_env())
-    }
-
     /// Reads and bakes one installation.
     ///
     /// The jar is read in one bulk pass; the model set and the texture layout
@@ -164,29 +152,6 @@ impl ModelResources {
             models,
             context,
         })
-    }
-
-    /// Loads from an optional installation, warning exactly once on failure.
-    fn load_or_warn_from(
-        install: Option<umicraft_assets::install::OfficialInstall>,
-    ) -> Option<Self> {
-        let Some(install) = install else {
-            tracing::warn!(
-                "no official Minecraft installation found; using procedural terrain textures"
-            );
-            return None;
-        };
-        match Self::load_from_install(&install) {
-            Ok(resources) => Some(resources),
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    root = %install.root().display(),
-                    "could not load the 1.8 block models and atlas; using procedural terrain textures"
-                );
-                None
-            }
-        }
     }
 
     /// The verified in-memory resources and their atlas.
@@ -257,14 +222,5 @@ mod tests {
             mcmeta: 9,
         };
         assert_eq!(entries.total(), 382);
-    }
-
-    #[test]
-    fn no_installation_warns_once_and_returns_none() {
-        let (resources, messages) =
-            crate::test_support::capture(|| ModelResources::load_or_warn_from(None));
-        assert!(resources.is_none());
-        assert_eq!(messages.len(), 1, "expected one warning, got {messages:?}");
-        assert!(messages[0].contains("procedural terrain textures"));
     }
 }

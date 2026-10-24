@@ -30,6 +30,7 @@ use crate::args::{Args, DemoView};
 use crate::error::ClientError;
 use crate::model_resources::{ModelResources, ModelStats};
 use crate::screenshot::write_png;
+use crate::terrain_textures::TerrainTextures;
 
 /// The single meshed column of the demo.
 const DEMO_CHUNK: ChunkPos = ChunkPos::new(0, 0);
@@ -469,8 +470,8 @@ impl BlockDemoReport {
 ///
 /// # Errors
 /// [`ClientError::ModelResources`] when the official installation, jar, models
-/// or atlas are unavailable; [`ClientError::BlockAtlas`] when the renderer
-/// rejects the atlas; or an offscreen render/readback/PNG error.
+/// or atlas are unavailable; [`ClientError::OfficialTexturesRejected`] when
+/// the renderer rejects the atlas; or an offscreen render/readback/PNG error.
 pub fn run(args: &Args) -> Result<(), ClientError> {
     let resources = ModelResources::load()?;
     let scene = DemoScene::build();
@@ -550,13 +551,14 @@ fn prepare_renderer(
     mesh: &Mesh,
 ) -> Result<Renderer, ClientError> {
     let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
-    let atlas = resources.atlas();
-    renderer.set_block_atlas(
-        atlas.width(),
-        atlas.height(),
-        atlas.layers(),
-        atlas.pixels(),
-    )?;
+    // The demo mesh indexes the official atlas; there is no procedural
+    // fallback for it (ADR-0012).
+    if !TerrainTextures::official(resources)
+        .install(&mut renderer)
+        .is_official()
+    {
+        return Err(ClientError::OfficialTexturesRejected);
+    }
     renderer.upload_mesh(DEMO_CHUNK, mesh);
     Ok(renderer)
 }
@@ -1371,15 +1373,12 @@ scene blocks      : stone, dirt, oak stairs
             }
             Err(error) => panic!("the offscreen renderer is required: {error}"),
         };
-        let atlas = resources.atlas();
-        renderer
-            .set_block_atlas(
-                atlas.width(),
-                atlas.height(),
-                atlas.layers(),
-                atlas.pixels(),
-            )
-            .expect("the real atlas uploads");
+        assert!(
+            TerrainTextures::official(&resources)
+                .install(&mut renderer)
+                .is_official(),
+            "the real atlas uploads"
+        );
         renderer.upload_mesh(DEMO_CHUNK, &mesh);
 
         let mut frame = |view: &str, time: &str| {

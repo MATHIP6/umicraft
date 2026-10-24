@@ -27,8 +27,8 @@ use crate::error::ClientError;
 use crate::game::{camera_angles, ChunkEvent, Frame, GameEvent, RenderEvent, Session, TICK};
 use crate::input::{InputState, InputUpdate};
 use crate::mesher::{default_worker_count, MeshPool};
-use crate::model_resources::ModelResources;
 use crate::network::NetworkConfig;
+use crate::terrain_textures::TerrainTextures;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 
@@ -147,7 +147,9 @@ struct App {
     show_overlay: bool,
     mouse_captured: bool,
     keys: HashSet<KeyCode>,
-    pool: MeshPool,
+    /// The mesh workers; created with the renderer, once the terrain
+    /// textures are bound (ADR-0012).
+    pool: Option<MeshPool>,
     /// The chunks that are being meshed.
     pending: HashSet<umicraft_world::ChunkPos>,
     /// The chunks whose snapshot could not be queued yet.
@@ -174,8 +176,8 @@ struct App {
     ui_input: UiInputTranslator,
     /// The font loaded at startup, before the renderer exists.
     font: LoadedFont,
-    /// The official models/atlas, or `None` for the procedural fallback.
-    model_resources: Option<ModelResources>,
+    /// The terrain textures loaded at start-up, until the renderer binds them.
+    terrain: Option<TerrainTextures>,
     /// The atlas the renderer accepted; the UI metrics must match it.
     ui_atlas: Option<FontAtlas>,
     last_frame: Instant,
@@ -188,11 +190,8 @@ struct App {
 impl App {
     fn new(args: Args, session: Session) -> Result<Self, ClientError> {
         // Assets are loaded once, before any worker or GPU resource exists.
-        // A missing/corrupt installation leaves the bundle absent and the pool
-        // on the procedural path.
-        let model_resources = ModelResources::load_or_warn();
-        let models = model_resources.as_ref().map(ModelResources::context);
-        let pool = MeshPool::new(default_worker_count(), models)?;
+        // A missing/corrupt installation picks the procedural set.
+        let terrain = Some(TerrainTextures::load());
         let font = ui_font::load();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
@@ -205,7 +204,7 @@ impl App {
             show_overlay: true,
             mouse_captured: false,
             keys: HashSet::new(),
-            pool,
+            pool: None,
             pending: HashSet::new(),
             waiting: Vec::new(),
             faces: HashMap::new(),
@@ -223,7 +222,7 @@ impl App {
             debug_screen: DebugScreen::new(),
             ui_input: UiInputTranslator::new(),
             font,
-            model_resources,
+            terrain,
             ui_atlas: None,
             last_frame: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
@@ -464,6 +463,9 @@ impl App {
     /// submitted as soon as the worker finished it; the render thread never
     /// waits for a worker.
     fn dispatch_chunks(&mut self) {
+        let Some(pool) = self.pool.as_ref() else {
+            return;
+        };
         let mut index = 0;
         while index < self.waiting.len() {
             let (pos, snapshot) = self.waiting[index].clone();
@@ -471,7 +473,7 @@ impl App {
                 index += 1;
                 continue;
             }
-            match self.pool.submit(pos, snapshot) {
+            match pool.submit(pos, snapshot) {
                 Ok(()) => {
                     self.pending.insert(pos);
                     self.waiting.remove(index);
@@ -490,7 +492,10 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        while let Some(result) = self.pool.try_recv() {
+        let Some(pool) = self.pool.as_ref() else {
+            return;
+        };
+        while let Some(result) = pool.try_recv() {
             let pos = result.pos;
             self.pending.remove(&pos);
             if !result.mesh.is_empty() {
@@ -729,48 +734,20 @@ impl ApplicationHandler for App {
                 return;
             }
         }
-        // The block atlas must be accepted before the model meshes are
-        // dispatched. On rejection the model bundle is dropped and the pool is
-        // rebuilt without a context, so real-layer meshes are never drawn with
-        // the procedural texture array.
-        let atlas_result = self.model_resources.as_ref().map(|resources| {
-            let atlas = resources.atlas();
-            renderer.set_block_atlas(
-                atlas.width(),
-                atlas.height(),
-                atlas.layers(),
-                atlas.pixels(),
-            )
-        });
-        match atlas_result {
-            Some(Ok(())) => {
-                let layers = self
-                    .model_resources
-                    .as_ref()
-                    .map_or(0, |resources| resources.atlas().layers());
-                tracing::info!(layers, "uploaded the 1.8 block texture array");
+        // The mesh workers only exist once the terrain textures are bound,
+        // so they never write layers of another array (ADR-0012).
+        let terrain = self
+            .terrain
+            .take()
+            .unwrap_or(TerrainTextures::Procedural)
+            .install(&mut renderer);
+        match MeshPool::new(default_worker_count(), &terrain) {
+            Ok(pool) => self.pool = Some(pool),
+            Err(error) => {
+                self.exit_error = Some(error.to_string());
+                event_loop.exit();
+                return;
             }
-            Some(Err(error)) => {
-                tracing::warn!(
-                    %error,
-                    "block texture array rejected; using procedural terrain textures"
-                );
-                self.model_resources = None;
-                self.pending.clear();
-                self.waiting.clear();
-                self.faces.clear();
-                renderer.clear_meshes();
-                let worker_count = self.pool.worker_count();
-                match MeshPool::new(worker_count, None) {
-                    Ok(pool) => self.pool = pool,
-                    Err(error) => {
-                        self.exit_error = Some(error.to_string());
-                        event_loop.exit();
-                        return;
-                    }
-                }
-            }
-            None => {}
         }
         self.renderer = Some(renderer);
         self.window = Some(window.clone());

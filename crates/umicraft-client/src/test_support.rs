@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Shared in-memory tracing subscriber for client unit tests.
+//! Shared test doubles for client unit tests: an in-memory tracing
+//! subscriber and a [`BlockTextureTarget`] that needs no GPU.
 //!
 //! Several loaders (font, block resources) deliberately degrade with one
 //! warning instead of failing. The tests need to observe that warning without
@@ -12,6 +13,9 @@ use std::sync::{Arc, Mutex};
 use tracing::field::{Field, Visit};
 use tracing::span;
 use tracing::{Event, Metadata, Subscriber};
+use umicraft_render::BlockAtlasError;
+
+use crate::terrain_textures::BlockTextureTarget;
 
 /// A subscriber that records every event message.
 #[derive(Clone, Default)]
@@ -70,4 +74,37 @@ pub(crate) fn capture<T>(operation: impl FnOnce() -> T) -> (T, Vec<String>) {
         .map(|messages| messages.clone())
         .unwrap_or_default();
     (value, messages)
+}
+
+/// A [`BlockTextureTarget`] without a GPU that records what was bound.
+#[derive(Debug, Default)]
+pub struct TextureTarget {
+    /// Whether every atlas upload is rejected.
+    pub reject: bool,
+    /// The layer count of the bound atlas; `None` while the procedural array
+    /// is bound.
+    pub atlas_layers: Option<u32>,
+    /// How many times the procedural array was bound.
+    pub procedural_calls: usize,
+}
+
+impl BlockTextureTarget for TextureTarget {
+    fn set_block_atlas(
+        &mut self,
+        _width: u32,
+        _height: u32,
+        layers: u32,
+        _pixels: &[u8],
+    ) -> Result<(), BlockAtlasError> {
+        if self.reject {
+            return Err(BlockAtlasError::EmptySize);
+        }
+        self.atlas_layers = Some(layers);
+        Ok(())
+    }
+
+    fn use_procedural_blocks(&mut self) {
+        self.atlas_layers = None;
+        self.procedural_calls += 1;
+    }
 }

@@ -10,10 +10,11 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, Mesh, ModelMeshContext};
+use umicraft_mesh::{ChunkSnapshot, Mesh};
 use umicraft_world::ChunkPos;
 
 use crate::error::ClientError;
+use crate::terrain_textures::{InstalledTerrain, TerrainMesher};
 
 /// Bounded job queue; the render thread uses non-blocking `try_send` and
 /// retries on a later frame when full.
@@ -46,17 +47,14 @@ pub struct MeshPool {
 impl MeshPool {
     /// Starts `worker_count.max(1)` worker threads.
     ///
-    /// When `models` is present every job goes through
-    /// [`mesh_chunk_with_models`] and writes the real atlas layers; without it
-    /// the workers keep the procedural [`mesh_chunk`] fallback. The context is
-    /// immutable and shared by all workers, so no job touches the disk.
+    /// The workers mesh with the mesher of `terrain`, so they only write
+    /// layers of the texture array the renderer has bound (ADR-0012). Its
+    /// state is immutable and shared by all workers, so no job touches the
+    /// disk.
     ///
     /// # Errors
     /// [`ClientError::Worker`] when a thread cannot be spawned.
-    pub fn new(
-        worker_count: usize,
-        models: Option<Arc<ModelMeshContext>>,
-    ) -> Result<Self, ClientError> {
+    pub fn new(worker_count: usize, terrain: &InstalledTerrain) -> Result<Self, ClientError> {
         let worker_count = worker_count.max(1);
         let (job_sender, job_receiver) = mpsc::sync_channel::<MeshJob>(JOB_CAPACITY);
         let (result_sender, result_receiver) = mpsc::sync_channel::<MeshResult>(RESULT_CAPACITY);
@@ -66,9 +64,9 @@ impl MeshPool {
         for index in 0..worker_count {
             let receiver = Arc::clone(&job_receiver);
             let results = result_sender.clone();
-            let models = models.clone();
+            let mesher = terrain.mesher();
             let builder = std::thread::Builder::new().name(format!("umicraft-mesh-{index}"));
-            match builder.spawn(move || worker_loop(&receiver, &results, models.as_deref())) {
+            match builder.spawn(move || worker_loop(&receiver, &results, &mesher)) {
                 Ok(handle) => workers.push(handle),
                 Err(error) => {
                     drop(job_sender);
@@ -137,7 +135,7 @@ impl Drop for MeshPool {
 fn worker_loop(
     receiver: &Mutex<Receiver<MeshJob>>,
     results: &SyncSender<MeshResult>,
-    models: Option<&ModelMeshContext>,
+    mesher: &TerrainMesher,
 ) {
     loop {
         let job = {
@@ -150,10 +148,7 @@ fn worker_loop(
                 Err(_) => return,
             }
         };
-        let mesh = match models {
-            Some(context) => mesh_chunk_with_models(job.pos, &job.snapshot, context),
-            None => mesh_chunk(job.pos, &job.snapshot),
-        };
+        let mesh = mesher.mesh(job.pos, &job.snapshot);
         if results.send(MeshResult { pos: job.pos, mesh }).is_err() {
             return;
         }
@@ -174,10 +169,14 @@ mod tests {
     use super::*;
     use umicraft_world::World;
 
+    use crate::terrain_textures::TerrainTextures;
+    use crate::test_support::TextureTarget;
+
     #[test]
     fn meshes_submitted_chunks() {
         let world = World::new(0);
-        let pool = MeshPool::new(2, None).expect("pool");
+        let terrain = TerrainTextures::Procedural.install(&mut TextureTarget::default());
+        let pool = MeshPool::new(2, &terrain).expect("pool");
         assert_eq!(pool.worker_count(), 2);
         for x in 0..2 {
             let pos = ChunkPos::new(x, 0);

@@ -4,7 +4,7 @@
 
 use thiserror::Error;
 
-use umicraft_render::{BlockAtlasError, FontAtlasError, RenderError};
+use umicraft_render::{FontAtlasError, RenderError};
 use umicraft_world::WorldError;
 
 use crate::model_resources::ModelResourcesError;
@@ -30,9 +30,11 @@ pub enum ClientError {
     /// The renderer rejected both the loaded font atlas and the fallback.
     #[error("font atlas: {0}")]
     FontAtlas(#[from] FontAtlasError),
-    /// The renderer rejected the loaded block texture array.
-    #[error("block atlas: {0}")]
-    BlockAtlas(#[from] BlockAtlasError),
+    /// The GPU rejected the official block texture array where no procedural
+    /// fallback exists (`--block-demo`); the warning logged by the terrain
+    /// installation carries the reason.
+    #[error("block atlas: the GPU rejected the official texture array (see the warning above)")]
+    OfficialTexturesRejected,
     /// The official block models or atlas could not be loaded.
     #[error("block resources: {0}")]
     ModelResources(#[from] ModelResourcesError),

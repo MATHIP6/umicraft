@@ -19,8 +19,8 @@ use crate::args::Args;
 use crate::error::ClientError;
 use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, Session, TICK};
 use crate::mesher::{default_worker_count, MeshPool};
-use crate::model_resources::ModelResources;
 use crate::network::NetworkConfig;
+use crate::terrain_textures::TerrainTextures;
 
 /// The clock environment of the newest frame, for the final render.
 ///
@@ -79,31 +79,9 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     })?;
 
     let deadline = Instant::now() + args.collect;
-    // The atlas must be bound before the workers emit model layers. If it is
-    // rejected, the whole model bundle is dropped so the legacy cubes and the
-    // procedural texture array stay paired.
-    let mut model_resources = ModelResources::load_or_warn();
     let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
-    let atlas_result = model_resources.as_ref().map(|resources| {
-        let atlas = resources.atlas();
-        renderer.set_block_atlas(
-            atlas.width(),
-            atlas.height(),
-            atlas.layers(),
-            atlas.pixels(),
-        )
-    });
-    if let Some(Err(error)) = atlas_result {
-        tracing::warn!(
-            %error,
-            "block texture array rejected; using procedural terrain textures"
-        );
-        model_resources = None;
-    }
-    let pool = MeshPool::new(
-        default_worker_count(),
-        model_resources.as_ref().map(ModelResources::context),
-    )?;
+    let terrain = TerrainTextures::load().install(&mut renderer);
+    let pool = MeshPool::new(default_worker_count(), &terrain)?;
     let mut queued: Vec<(umicraft_world::ChunkPos, ChunkSnapshot)> = Vec::new();
     let mut pending = std::collections::HashSet::new();
     let mut camera = Camera::default();
