@@ -10,14 +10,22 @@
 //! ```
 
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
-use umicraft_net::client::PlayOptions;
 use umicraft_net::login::login_offline;
 use umicraft_net::ping::ping;
-use umicraft_net::Connection;
+use umicraft_net::play::{
+    drive, JoinGameInfo, PlayEvent, PlayOptions, PlaySession, PlayerPlacement, SessionCounters,
+    SessionEnd,
+};
+use umicraft_net::{Connection, NetError};
 use umicraft_protocol::ProtocolError;
+
+/// Placement acknowledgements waiting for the socket; the server sends one
+/// placement at login and rarely more.
+const ACK_CAPACITY: usize = 4;
 
 const USAGE: &str = "\
 usage: umicraft-headless <host> <port> [--name NAME] [--stay-secs N] [--no-ping]
@@ -134,28 +142,68 @@ async fn execute(args: &Args) -> Result<(), SessionError> {
         profile.uuid, profile.username
     );
 
-    let summary = conn
-        .run_play(Some(args.stay), &PlayOptions::default())
-        .await?;
-    if let Some(join) = summary.join {
+    let started = Instant::now();
+    let held = hold_play(&mut conn, args.stay).await?;
+    if let Some(join) = held.join {
         println!(
             "joined: entity_id={} dimension={} difficulty={} max_players={} level_type={}",
             join.entity_id, join.dimension, join.difficulty, join.max_players, join.level_type
         );
     }
-    if let Some(place) = summary.placement {
+    if let Some(place) = held.placement {
         println!(
             "placed at ({:.2}, {:.2}, {:.2}) yaw={:.1} pitch={:.1}",
             place.x, place.y, place.z, place.yaw, place.pitch
         );
     }
     println!(
-        "held connection {}s: keepalives answered={}, chat observed={}",
-        summary.stayed.as_secs_f64().max(0.0),
-        summary.keepalives_answered,
-        summary.chat_messages,
+        "held connection {}s: keepalives answered={}, chat observed={}, packets sent={}",
+        started.elapsed().as_secs_f64(),
+        held.counters.keepalives_answered(),
+        held.chat_messages,
+        held.counters.packets_sent(),
     );
     Ok(())
+}
+
+/// What the client observed while it held the play state.
+struct Held {
+    join: Option<JoinGameInfo>,
+    placement: Option<PlayerPlacement>,
+    chat_messages: u64,
+    counters: SessionCounters,
+}
+
+/// Drives the play state for `stay`, acknowledging every placement.
+///
+/// The deadline drops the `drive` future, which is safe here because the
+/// connection is dropped right after (ADR-0010).
+async fn hold_play(conn: &mut Connection, stay: Duration) -> Result<Held, SessionError> {
+    let mut session = PlaySession::new(PlayOptions::default());
+    let (acks, mut commands) = mpsc::channel(ACK_CAPACITY);
+    let mut held = Held {
+        join: None,
+        placement: None,
+        chat_messages: 0,
+        counters: SessionCounters::default(),
+    };
+    let play = drive(conn, &mut session, &mut commands, &held.counters, |event| {
+        match event {
+            PlayEvent::JoinGame(info) => held.join = Some(info),
+            PlayEvent::Placement(placement) => {
+                // A full queue only delays the answer to the next placement.
+                let _ = acks.try_send(placement.acknowledgement(true));
+                held.placement = Some(placement);
+            }
+            PlayEvent::Chat(_) => held.chat_messages += 1,
+            _ => {}
+        }
+    });
+    match tokio::time::timeout(stay, play).await {
+        Ok(Ok(SessionEnd::Kicked(reason))) => Err(NetError::KickedAtPlay { reason }.into()),
+        Ok(Ok(SessionEnd::CommandsClosed)) | Err(_) => Ok(held),
+        Ok(Err(err)) => Err(err.into()),
+    }
 }
 
 fn main() -> ExitCode {

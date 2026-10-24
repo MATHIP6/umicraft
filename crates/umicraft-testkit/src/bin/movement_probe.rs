@@ -28,14 +28,9 @@ use std::time::{Duration, Instant};
 
 use umicraft_game::{GameState, InputIntent};
 use umicraft_net::login::login_offline;
+use umicraft_net::play::{PlayEvent, PlayOptions, PlaySession};
 use umicraft_net::Connection;
-use umicraft_protocol::packets::play::clientbound::{
-    ChunkData, JoinGame, KeepAlive, MapChunkBulk, PositionLook,
-};
-use umicraft_protocol::packets::play::serverbound::{
-    Brand, ClientSettings, Input, KeepAlive as ServerKeepAlive, PositionLook as ServerPositionLook,
-};
-use umicraft_protocol::varint::write_var_u32;
+use umicraft_protocol::packets::play::serverbound::Input;
 use umicraft_protocol::PlayServerbound;
 use umicraft_world::World;
 
@@ -186,9 +181,7 @@ async fn main() -> Result<(), String> {
 
     let mut world = World::new(0);
     let mut samples: Vec<Sample> = Vec::new();
-    let mut placement: Option<(f64, f64, f64)> = None;
-    let mut entry_sent = false;
-    let mut previous = (0.0_f64, 0.0_f64, 0.0_f64);
+    let mut session = PlaySession::new(PlayOptions::default());
     let mut tick = 0_u32;
     let mut model: Option<GameState> = None;
     let mut history: Vec<(f64, f64, f64)> = Vec::new();
@@ -208,72 +201,50 @@ async fn main() -> Result<(), String> {
         while let Ok(Ok((id, body))) =
             tokio::time::timeout(Duration::from_millis(2), connection.read_packet()).await
         {
-            match id {
-                KeepAlive::ID => {
-                    let packet = KeepAlive::decode(&mut &body[..])
-                        .map_err(|error| format!("keepalive: {error}"))?;
-                    connection
-                        .write_packet(&PlayServerbound::KeepAlive(ServerKeepAlive {
-                            id: packet.id,
-                        }))
-                        .await
-                        .map_err(|error| format!("keepalive answer: {error}"))?;
-                }
-                JoinGame::ID => {
-                    let packet = JoinGame::decode(&mut &body[..])
-                        .map_err(|error| format!("join: {error}"))?;
-                    println!(
-                        "joined: entity_id={} dimension={} level_type={}",
-                        packet.entity_id, packet.dimension, packet.level_type
-                    );
-                    if !entry_sent {
-                        send_entry_packets(&mut connection).await?;
-                        entry_sent = true;
-                    }
-                }
-                PositionLook::ID => {
-                    let packet = PositionLook::decode(&mut &body[..])
-                        .map_err(|error| format!("position: {error}"))?;
-                    let resolved = resolve(previous, &packet);
-                    previous = resolved;
+            let reaction = session
+                .handle(id, &body)
+                .map_err(|error| format!("play packet {id:#04x}: {error}"))?;
+            for reply in reaction.replies() {
+                connection
+                    .write_packet(reply)
+                    .await
+                    .map_err(|error| format!("reply: {error}"))?;
+            }
+            if let Some(reason) = reaction.kick_reason() {
+                return Err(format!("kicked: {reason}"));
+            }
+            match reaction.into_event() {
+                Some(PlayEvent::JoinGame(info)) => println!(
+                    "joined: entity_id={} dimension={} level_type={}",
+                    info.entity_id, info.dimension, info.level_type
+                ),
+                Some(PlayEvent::Placement(resolved)) => {
                     // Acknowledge the teleport the way a real client does.
                     connection
-                        .write_packet(&PlayServerbound::PositionLook(ServerPositionLook {
-                            x: resolved.0,
-                            y: resolved.1,
-                            z: resolved.2,
-                            yaw: packet.yaw,
-                            pitch: packet.pitch,
-                            on_ground: true,
-                        }))
+                        .write_packet(&resolved.acknowledgement(true))
                         .await
                         .map_err(|error| format!("position answer: {error}"))?;
-                    if placement.is_none() {
-                        placement = Some(resolved);
+                    if model.is_none() {
                         println!(
                             "placed at ({:.2}, {:.2}, {:.2})",
-                            resolved.0, resolved.1, resolved.2
+                            resolved.x, resolved.y, resolved.z
                         );
                         model = Some(GameState::new(glam::DVec3::new(
-                            resolved.0, resolved.1, resolved.2,
+                            resolved.x, resolved.y, resolved.z,
                         )));
                     } else {
                         samples.push(Sample {
                             tick,
-                            x: resolved.0,
-                            y: resolved.1,
-                            z: resolved.2,
+                            x: resolved.x,
+                            y: resolved.y,
+                            z: resolved.z,
                         });
                     }
                 }
-                ChunkData::ID => {
-                    let packet = ChunkData::decode(&mut &body[..])
-                        .map_err(|error| format!("chunk data: {error}"))?;
+                Some(PlayEvent::ChunkData(packet)) => {
                     let _ = world.apply_chunk_data(&packet);
                 }
-                MapChunkBulk::ID => {
-                    let packet = MapChunkBulk::decode(&mut &body[..])
-                        .map_err(|error| format!("chunk bulk: {error}"))?;
+                Some(PlayEvent::MapChunkBulk(packet)) => {
                     let _ = world.apply_map_chunk_bulk(&packet);
                 }
                 _ => {}
@@ -355,54 +326,6 @@ async fn main() -> Result<(), String> {
 
     report(&samples, model.as_ref().expect("model"), args.ticks);
     Ok(())
-}
-
-/// Sends the two entry packets a real client sends after `Join Game`.
-///
-/// The order matters: sending them before the server switches to the play
-/// state makes it log `Bad packet id 21`.
-async fn send_entry_packets(connection: &mut Connection) -> Result<(), String> {
-    connection
-        .write_packet(&PlayServerbound::ClientSettings(ClientSettings {
-            locale: "en_us".to_string(),
-            view_distance: 8,
-            chat_mode: 0,
-            chat_colors: true,
-            skin_parts: 0b0111_1111,
-        }))
-        .await
-        .map_err(|error| format!("client settings: {error}"))?;
-    let mut data = Vec::with_capacity(12);
-    write_var_u32(&mut data, "umicraft".len() as u32).map_err(|error| format!("brand: {error}"))?;
-    data.extend_from_slice(b"umicraft");
-    connection
-        .write_packet(&PlayServerbound::Brand(Brand {
-            channel: "MC|Brand".to_string(),
-            data,
-        }))
-        .await
-        .map_err(|error| format!("brand: {error}"))?;
-    Ok(())
-}
-
-/// Resolves the 1.8 relative flags of a `Player Position and Look` packet.
-fn resolve(previous: (f64, f64, f64), packet: &PositionLook) -> (f64, f64, f64) {
-    let x = if packet.flags & 0x01 != 0 {
-        previous.0 + packet.x
-    } else {
-        packet.x
-    };
-    let y = if packet.flags & 0x02 != 0 {
-        previous.1 + packet.y
-    } else {
-        packet.y
-    };
-    let z = if packet.flags & 0x04 != 0 {
-        previous.2 + packet.z
-    } else {
-        packet.z
-    };
-    (x, y, z)
 }
 
 /// Prints the comparison between the server's trajectory and the prediction.

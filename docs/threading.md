@@ -15,7 +15,7 @@ Rules (restated):
 |---|---|---|
 | Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the sky/fog environment, the transparent draw order, the mesh pool, and the one-time official resource load | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
 | **Game thread** | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) |
-| Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, the play loop, the keepalive answers | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
+| Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, `PlaySession` and the `drive` loop (ADR-0010), the keepalive answers | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
 | Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s, with a shared immutable `ModelMeshContext` (models, atlas layout and the optional `BiomeTints` table) when the official resources loaded | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
 
 The game thread is the only owner of the world: the render thread never
@@ -27,29 +27,36 @@ ADR-0005).
 - `umicraft-client::network::spawn` starts one std thread named
   `umicraft-net` with a Tokio current-thread runtime. All socket I/O and
   packet framing stay on that runtime; no other thread ever awaits I/O.
-- The play loop lives in the client crate (and not in `umicraft-net`) because
-  the frozen `PlaySession` of that crate skips the M3 play packets
-  (`Update Health` 0x06, `Held Item Change` 0x09, `Respawn` 0x07 and
-  `Entity Teleport` 0x18), which the game thread needs. The framing, the
-  login and the connection stay in `umicraft-net`.
-- Decoded events cross the bounded `sync_channel(256)` inbox of the game
-  thread. Chunk and bulk payloads are boxed; the queue bounds the queued
+- After the login the thread hands the connection to
+  `umicraft_net::play::drive`, the one play loop shared with the headless
+  binary and the testkit (ADR-0010). `PlaySession` decodes the packets
+  without I/O; `drive` writes its replies and the commands.
+- Decoded `PlayEvent`s cross the bounded `sync_channel(256)` inbox of the
+  game thread; a failure or a kick crosses it once as
+  `GameEvent::Disconnected`. Chunk and bulk payloads are boxed; the queue bounds the queued
   world data at roughly 25 MiB worst case. When the inbox is full, the
   network thread blocks in `send` and TCP backpressure slows the server —
   memory never grows without bound.
 - The serverbound packets the game thread produces cross a bounded
-  `tokio::sync::mpsc` queue of 64 commands (game thread → network thread).
-  The queue is polled with `try_send` by the game thread: a full queue keeps
-  the command for the next tick instead of blocking the simulation. The input
+  `tokio::sync::mpsc` queue of 64 wire packets (game thread → network
+  thread). The game thread reserves a slot with `try_reserve` before it
+  converts a `ClientCommand` into its packet: a full queue keeps the command
+  for the next tick instead of blocking the simulation. The input
   packet and the position report are *coalesced* — only the newest one of
   each is kept — because a backlog of them would burst on the socket, and the
   1.8 server counts the packets of a player (PandaSpigot kicks above 500
   packets in seven seconds). The commands that keep their order (the
   acknowledgement of a placement, the dig, the placement, the chat) are never
   dropped.
-- The network thread selects between the socket and the command queue, so a
-  command is written even while the server is silent. Keepalives are
-  answered inside the play loop and never reach the game thread.
+- `drive` selects between the socket read and the command queue, so a
+  command is written even while the server is silent. Only those two
+  cancel-safe futures race; every write (a keepalive answer, the entry
+  packets, a command) happens after the `select!` released the connection,
+  so a write is never cut in half by the other branch. Keepalives are
+  answered there and never reach the game thread.
+- `SessionCounters` (atomics: packets received and sent, keepalives
+  answered) are written by the network thread and read by the overlay and
+  the headless report; they take no lock.
 
 ### Game thread boundary
 
@@ -226,3 +233,7 @@ ADR-0005).
   tinted block and write the result into the new 44-byte vertex; the render
   thread uploads the same vertex layout. No new thread or channel was added,
   and the table is immutable so the workers still take no lock.
+- ADR-0010 (play session): the client's own play loop was replaced by
+  `umicraft_net::play::drive`, shared with the headless binary and the
+  testkit. No thread or channel was added; the command queue now carries wire
+  packets, and the loop writes only outside its `select!`.

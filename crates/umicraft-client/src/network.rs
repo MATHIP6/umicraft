@@ -1,39 +1,28 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The network thread: the owner of the socket and the decoder of the
-//! clientbound play packets.
+//! The network thread: the owner of the socket during play.
 //!
-//! The thread runs a Tokio current-thread runtime, answers the keepalives,
-//! sends the entry packets after `Join Game` and forwards every decoded event
-//! to the game thread over a bounded channel. The game thread answers with
-//! [`ClientCommand`]s, which this thread turns into serverbound packets.
-//!
-//! The play loop lives here rather than in `umicraft-net` because the frozen
-//! `PlaySession` of that crate skips the M3 play packets (`Update Health`,
-//! `Held Item Change`, `Respawn`, `Entity Teleport`), and the game thread
-//! needs them. The framing, the login and the connection stay in
-//! `umicraft-net`.
+//! The thread runs a Tokio current-thread runtime, logs in and hands the
+//! connection to [`umicraft_net::play::drive`], which answers the keepalives,
+//! sends the entry packets and decodes the clientbound play packets
+//! (ADR-0010). Every event is forwarded to the game thread over its bounded
+//! inbox. The game thread answers with [`ClientCommand`]s, which it converts
+//! into wire packets before they reach this thread.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use tokio::sync::mpsc::Receiver as CommandReceiver;
-use umicraft_net::client::{JoinGameInfo, PlayerPlacement};
 use umicraft_net::login::login_offline;
-use umicraft_net::Connection;
-use umicraft_protocol::packets::play::clientbound::{
-    self, BlockChange, ChunkData, EntityEquipment, MapChunkBulk, MultiBlockChange, PositionLook,
-    Respawn, SetExperience, SpawnPosition, TimeUpdate, UpdateHealth,
-};
+use umicraft_net::play::{drive, PlayOptions, PlaySession, SessionCounters, SessionEnd};
+use umicraft_net::{Connection, NetError};
 use umicraft_protocol::packets::play::serverbound::{
-    self, Brand, ClientSettings, DiggingStatus, HeldItemChange as ServerHeldItemChange, Input,
-    PlayerBlockPlacement, PlayerDigging, PlayerLook, PlayerPosition,
-    PositionLook as ServerPositionLook,
+    self, DiggingStatus, HeldItemChange as ServerHeldItemChange, Input, PlayerBlockPlacement,
+    PlayerDigging, PlayerLook, PlayerPosition, PositionLook as ServerPositionLook,
 };
 use umicraft_protocol::packets::play::{Facing, ItemStack};
-use umicraft_protocol::varint::write_var_u32;
+use umicraft_protocol::PlayServerbound;
 
 use crate::error::ClientError;
 use crate::game::GameEvent;
@@ -56,46 +45,6 @@ pub struct NetworkConfig {
     pub name: String,
     /// Client Settings view distance.
     pub view_distance: u8,
-}
-
-/// A decoded clientbound event.
-#[derive(Debug)]
-pub enum NetEvent {
-    /// The server entered play state; start a fresh world for this dimension.
-    JoinGame(JoinGameInfo),
-    /// Absolute player placement after relative-flag resolution.
-    Placement(PlayerPlacement),
-    /// Raw chat JSON.
-    Chat(String),
-    /// One chunk column.
-    ChunkData(Box<ChunkData>),
-    /// Initial chunk batch.
-    MapChunkBulk(Box<MapChunkBulk>),
-    /// One block change.
-    BlockChange(BlockChange),
-    /// Batched block changes.
-    MultiBlockChange(MultiBlockChange),
-    /// The player's health, food and saturation.
-    UpdateHealth(UpdateHealth),
-    /// The selected hotbar slot.
-    HeldItemChange(i8),
-    /// The player changed dimension.
-    Respawn(Respawn),
-    /// An entity was teleported; only the local player matters.
-    EntityTeleport(clientbound::EntityTeleport),
-    /// The equipment of an entity; only the local player matters.
-    EntityEquipment(EntityEquipment),
-    /// The world spawn point.
-    SpawnPosition(SpawnPosition),
-    /// The experience bar changed.
-    SetExperience(SetExperience),
-    /// The world clock changed (`Time Update`, 0x03).
-    ///
-    /// The signed time of day is preserved: a negative value means the server
-    /// froze the day/night cycle (`S03PacketTimeUpdate` negates the field).
-    TimeUpdate(TimeUpdate),
-    /// Fatal connection/session error, already formatted for the overlay.
-    Error(String),
 }
 
 /// A serverbound packet the game thread wants the socket to send.
@@ -219,32 +168,27 @@ pub enum ClientCommand {
 impl ClientCommand {
     /// The wire packet of the command.
     #[must_use]
-    pub fn into_packet(self) -> umicraft_protocol::PlayServerbound {
+    pub fn into_packet(self) -> PlayServerbound {
         match self {
             Self::Input {
                 strafe,
                 forward,
                 jumping,
                 sneaking,
-            } => umicraft_protocol::PlayServerbound::Input(Input {
+            } => PlayServerbound::Input(Input {
                 strafe,
                 forward,
                 jumping,
                 sneaking,
             }),
             Self::PlayerPosition { x, y, z, on_ground } => {
-                umicraft_protocol::PlayServerbound::PlayerPosition(PlayerPosition {
-                    x,
-                    y,
-                    z,
-                    on_ground,
-                })
+                PlayServerbound::PlayerPosition(PlayerPosition { x, y, z, on_ground })
             }
             Self::PlayerLook {
                 yaw,
                 pitch,
                 on_ground,
-            } => umicraft_protocol::PlayServerbound::PlayerLook(PlayerLook {
+            } => PlayServerbound::PlayerLook(PlayerLook {
                 yaw,
                 pitch,
                 on_ground,
@@ -256,7 +200,7 @@ impl ClientCommand {
                 yaw,
                 pitch,
                 on_ground,
-            } => umicraft_protocol::PlayServerbound::PositionLook(ServerPositionLook {
+            } => PlayServerbound::PositionLook(ServerPositionLook {
                 x,
                 y,
                 z,
@@ -271,7 +215,7 @@ impl ClientCommand {
                 yaw,
                 pitch,
                 on_ground,
-            } => umicraft_protocol::PlayServerbound::PositionLook(ServerPositionLook {
+            } => PlayServerbound::PositionLook(ServerPositionLook {
                 x,
                 y,
                 z,
@@ -285,7 +229,7 @@ impl ClientCommand {
                 y,
                 z,
                 face,
-            } => umicraft_protocol::PlayServerbound::PlayerDigging(PlayerDigging {
+            } => PlayServerbound::PlayerDigging(PlayerDigging {
                 status,
                 x,
                 y,
@@ -301,7 +245,7 @@ impl ClientCommand {
                 cursor_x,
                 cursor_y,
                 cursor_z,
-            } => umicraft_protocol::PlayServerbound::PlayerBlockPlacement(PlayerBlockPlacement {
+            } => PlayServerbound::PlayerBlockPlacement(PlayerBlockPlacement {
                 x,
                 y,
                 z,
@@ -312,11 +256,9 @@ impl ClientCommand {
                 cursor_z,
             }),
             Self::HeldItemChange { slot } => {
-                umicraft_protocol::PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
+                PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
             }
-            Self::Chat { message } => {
-                umicraft_protocol::PlayServerbound::Chat(serverbound::Chat { message })
-            }
+            Self::Chat { message } => PlayServerbound::Chat(serverbound::Chat { message }),
         }
     }
 }
@@ -324,19 +266,20 @@ impl ClientCommand {
 /// Starts the network thread and returns its join handle.
 ///
 /// The thread exits when the connection fails, the server disconnects, or the
-/// command channel is closed (which happens when the game thread stops).
+/// command channel is closed (which happens when the game thread stops). A
+/// failure or a kick reaches the game thread as [`GameEvent::Disconnected`].
 ///
 /// # Errors
 /// [`ClientError::Network`] when the OS refuses to start the thread.
 pub fn spawn(
     config: NetworkConfig,
     events: SyncSender<GameEvent>,
-    commands: CommandReceiver<ClientCommand>,
-    sent: Arc<AtomicU64>,
+    commands: CommandReceiver<PlayServerbound>,
+    counters: Arc<SessionCounters>,
 ) -> Result<JoinHandle<()>, ClientError> {
     let handle = std::thread::Builder::new()
         .name("umicraft-net".to_string())
-        .spawn(move || run_thread(config, events, commands, sent))
+        .spawn(move || run_thread(config, events, commands, &counters))
         .map_err(|error| ClientError::Network(format!("spawn network thread: {error}")))?;
     Ok(handle)
 }
@@ -344,8 +287,8 @@ pub fn spawn(
 fn run_thread(
     config: NetworkConfig,
     events: SyncSender<GameEvent>,
-    commands: CommandReceiver<ClientCommand>,
-    sent: Arc<AtomicU64>,
+    commands: CommandReceiver<PlayServerbound>,
+    counters: &SessionCounters,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -353,98 +296,35 @@ fn run_thread(
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            let _ = events.send(GameEvent::Net(NetEvent::Error(format!(
+            let _ = events.send(GameEvent::Disconnected(format!(
                 "could not start network runtime: {error}"
-            ))));
+            )));
             return;
         }
     };
-    runtime.block_on(run_session(config, events, commands, sent));
-}
-
-/// The state the play loop keeps between packets.
-struct PlayState {
-    /// Whether the entry packets were already sent.
-    entry_sent: bool,
-    /// The view distance announced in the `Client Settings` packet.
-    view_distance: u8,
-    /// The last placement, used to resolve the relative flags of 0x08.
-    placement: Option<PlayerPlacement>,
-}
-
-impl PlayState {
-    fn new(view_distance: u8) -> Self {
-        Self {
-            entry_sent: false,
-            view_distance,
-            placement: None,
-        }
-    }
-
-    /// Resolves the 1.8 relative-position flag bits against the last
-    /// placement.
-    ///
-    /// Flags: X, Y, Z, yaw, pitch (bits 0-4); vanilla accumulates the
-    /// relative components on the last accepted position.
-    fn resolve(&self, packet: &PositionLook) -> PlayerPlacement {
-        let previous = self.placement.clone().unwrap_or_default();
-        PlayerPlacement {
-            x: if packet.flags & 0x01 != 0 {
-                previous.x + packet.x
-            } else {
-                packet.x
-            },
-            y: if packet.flags & 0x02 != 0 {
-                previous.y + packet.y
-            } else {
-                packet.y
-            },
-            z: if packet.flags & 0x04 != 0 {
-                previous.z + packet.z
-            } else {
-                packet.z
-            },
-            yaw: if packet.flags & 0x08 != 0 {
-                previous.yaw + packet.yaw
-            } else {
-                packet.yaw
-            },
-            pitch: if packet.flags & 0x10 != 0 {
-                previous.pitch + packet.pitch
-            } else {
-                packet.pitch
-            },
-        }
+    let ended = runtime.block_on(run_session(&config, &events, commands, counters));
+    if let Some(reason) = ended {
+        let _ = events.send(GameEvent::Disconnected(reason));
     }
 }
 
-/// What the play loop received.
-enum Incoming {
-    /// A command from the game thread; `None` means the game thread stopped.
-    Command(Option<ClientCommand>),
-    /// A packet from the server.
-    Packet(Result<(u8, Vec<u8>), umicraft_net::NetError>),
-}
-
+/// Connects, logs in and drives the play state.
+///
+/// Returns the message for the game thread, or `None` when the game thread
+/// itself ended the session by dropping the command sender.
 async fn run_session(
-    config: NetworkConfig,
-    events: SyncSender<GameEvent>,
-    mut commands: CommandReceiver<ClientCommand>,
-    sent: Arc<AtomicU64>,
-) {
+    config: &NetworkConfig,
+    events: &SyncSender<GameEvent>,
+    mut commands: CommandReceiver<PlayServerbound>,
+    counters: &SessionCounters,
+) -> Option<String> {
     let mut connection = match Connection::connect(&config.host, config.port).await {
         Ok(connection) => connection,
-        Err(error) => {
-            let _ = events.send(GameEvent::Net(NetEvent::Error(error.to_string())));
-            return;
-        }
+        Err(error) => return Some(error.to_string()),
     };
     let profile = match login_offline(&mut connection, &config.name, None).await {
         Ok(profile) => profile,
-        Err(error) => {
-            let _ = events.send(GameEvent::Net(NetEvent::Error(error.to_string())));
-            return;
-        }
+        Err(error) => return Some(error.to_string()),
     };
     tracing::info!(
         host = %config.host,
@@ -453,230 +333,34 @@ async fn run_session(
         "logged in"
     );
 
-    let mut state = PlayState::new(config.view_distance);
-    loop {
-        // The read future borrows the connection, so the packet is handled
-        // after the select released it.
-        let incoming = tokio::select! {
-            biased;
-            command = commands.recv() => Incoming::Command(command),
-            packet = connection.read_packet() => Incoming::Packet(packet),
-        };
-        match incoming {
-            Incoming::Command(None) => return,
-            Incoming::Command(Some(command)) => {
-                if let Err(error) = connection.write_packet(&command.into_packet()).await {
-                    let _ = events.send(GameEvent::Net(NetEvent::Error(error.to_string())));
-                    return;
-                }
-                sent.fetch_add(1, Ordering::Relaxed);
-            }
-            Incoming::Packet(Err(error)) => {
-                let _ = events.send(GameEvent::Net(NetEvent::Error(error.to_string())));
-                return;
-            }
-            Incoming::Packet(Ok((id, body))) => {
-                if let Err(error) =
-                    handle_packet(&mut connection, id, &body, &mut state, &events, &sent).await
-                {
-                    let _ = events.send(GameEvent::Net(NetEvent::Error(error.to_string())));
-                    return;
-                }
-            }
-        }
+    let mut session = PlaySession::new(PlayOptions {
+        view_distance: config.view_distance,
+        ..PlayOptions::default()
+    });
+    // A full inbox blocks this thread in `send`, which slows the server down
+    // through TCP instead of losing world data. A closed inbox means the game
+    // thread is gone; the command channel closes with it and ends the loop.
+    let forward = |event| {
+        let _ = events.send(GameEvent::Net(event));
+    };
+    match drive(
+        &mut connection,
+        &mut session,
+        &mut commands,
+        counters,
+        forward,
+    )
+    .await
+    {
+        Ok(SessionEnd::CommandsClosed) => None,
+        Ok(SessionEnd::Kicked(reason)) => Some(NetError::KickedAtPlay { reason }.to_string()),
+        Err(error) => Some(error.to_string()),
     }
-}
-
-/// Handles one clientbound packet.
-///
-/// The keepalive is answered on the socket thread; everything else is
-/// forwarded to the game thread.
-async fn handle_packet(
-    connection: &mut Connection,
-    id: u8,
-    body: &[u8],
-    state: &mut PlayState,
-    events: &SyncSender<GameEvent>,
-    sent: &AtomicU64,
-) -> Result<(), umicraft_net::NetError> {
-    match id {
-        clientbound::KeepAlive::ID => {
-            let packet = clientbound::KeepAlive::decode(&mut &body[..])?;
-            connection
-                .write_packet(&umicraft_protocol::PlayServerbound::KeepAlive(
-                    serverbound::KeepAlive { id: packet.id },
-                ))
-                .await?;
-            sent.fetch_add(1, Ordering::Relaxed);
-        }
-        clientbound::JoinGame::ID => {
-            let packet = clientbound::JoinGame::decode(&mut &body[..])?;
-            if !state.entry_sent {
-                send_entry_packets(connection, state.view_distance).await?;
-                sent.fetch_add(2, Ordering::Relaxed);
-                state.entry_sent = true;
-            }
-            let info = JoinGameInfo {
-                entity_id: packet.entity_id,
-                gamemode: packet.gamemode,
-                dimension: packet.dimension,
-                difficulty: packet.difficulty,
-                max_players: packet.max_players,
-                level_type: packet.level_type,
-                reduced_debug_info: packet.reduced_debug_info,
-            };
-            send(events, NetEvent::JoinGame(info));
-        }
-        clientbound::Chat::ID => {
-            let packet = clientbound::Chat::decode(&mut &body[..])?;
-            send(events, NetEvent::Chat(packet.json));
-        }
-        clientbound::TimeUpdate::ID => {
-            send(events, decode_time_update(body)?);
-        }
-        clientbound::PositionLook::ID => {
-            let packet = clientbound::PositionLook::decode(&mut &body[..])?;
-            let placement = state.resolve(&packet);
-            state.placement = Some(placement.clone());
-            send(events, NetEvent::Placement(placement));
-        }
-        clientbound::UpdateHealth::ID => {
-            let packet = clientbound::UpdateHealth::decode(&mut &body[..])?;
-            send(events, NetEvent::UpdateHealth(packet));
-        }
-        clientbound::HeldItemChange::ID => {
-            let packet = clientbound::HeldItemChange::decode(&mut &body[..])?;
-            send(events, NetEvent::HeldItemChange(packet.slot));
-        }
-        clientbound::Respawn::ID => {
-            let packet = clientbound::Respawn::decode(&mut &body[..])?;
-            send(events, NetEvent::Respawn(packet));
-        }
-        clientbound::EntityTeleport::ID => {
-            let packet = clientbound::EntityTeleport::decode(&mut &body[..])?;
-            send(events, NetEvent::EntityTeleport(packet));
-        }
-        clientbound::EntityEquipment::ID => {
-            let packet = clientbound::EntityEquipment::decode(&mut &body[..])?;
-            send(events, NetEvent::EntityEquipment(packet));
-        }
-        clientbound::SpawnPosition::ID => {
-            let packet = clientbound::SpawnPosition::decode(&mut &body[..])?;
-            send(events, NetEvent::SpawnPosition(packet));
-        }
-        clientbound::SetExperience::ID => {
-            let packet = clientbound::SetExperience::decode(&mut &body[..])?;
-            send(events, NetEvent::SetExperience(packet));
-        }
-        clientbound::ChunkData::ID => {
-            let packet = clientbound::ChunkData::decode(&mut &body[..])?;
-            send(events, NetEvent::ChunkData(Box::new(packet)));
-        }
-        clientbound::MapChunkBulk::ID => {
-            let packet = clientbound::MapChunkBulk::decode(&mut &body[..])?;
-            send(events, NetEvent::MapChunkBulk(Box::new(packet)));
-        }
-        clientbound::BlockChange::ID => {
-            let packet = clientbound::BlockChange::decode(&mut &body[..])?;
-            send(events, NetEvent::BlockChange(packet));
-        }
-        clientbound::MultiBlockChange::ID => {
-            let packet = clientbound::MultiBlockChange::decode(&mut &body[..])?;
-            send(events, NetEvent::MultiBlockChange(packet));
-        }
-        clientbound::Disconnect::ID => {
-            let packet = clientbound::Disconnect::decode(&mut &body[..])?;
-            let reason = umicraft_net::status::disconnect_reason(&packet.reason);
-            return Err(umicraft_net::NetError::KickedAtPlay { reason });
-        }
-        other => {
-            tracing::trace!(id = other, bytes = body.len(), "skipped play packet");
-        }
-    }
-    Ok(())
-}
-
-/// Decodes a `Time Update` (0x03) body into the event of the game thread.
-///
-/// The packet is split out of [`handle_packet`] so the `0x03` dispatch can be
-/// unit-tested without a socket.
-///
-/// # Errors
-///
-/// [`umicraft_protocol::ProtocolError`] when the body is truncated.
-fn decode_time_update(body: &[u8]) -> Result<NetEvent, umicraft_protocol::ProtocolError> {
-    Ok(NetEvent::TimeUpdate(TimeUpdate::decode(&mut &body[..])?))
-}
-
-/// Sends the two entry packets a real client sends after `Join Game`.
-///
-/// The order matters: sending them before the server switches to the play
-/// state makes it log `Bad packet id 21`.
-async fn send_entry_packets(
-    connection: &mut Connection,
-    view_distance: u8,
-) -> Result<(), umicraft_net::NetError> {
-    connection
-        .write_packet(&umicraft_protocol::PlayServerbound::ClientSettings(
-            ClientSettings {
-                locale: "en_us".to_string(),
-                view_distance,
-                chat_mode: 0,
-                chat_colors: true,
-                skin_parts: 0b0111_1111,
-            },
-        ))
-        .await?;
-    let mut data = Vec::with_capacity(12);
-    write_var_u32(&mut data, "umicraft".len() as u32)?;
-    data.extend_from_slice(b"umicraft");
-    connection
-        .write_packet(&umicraft_protocol::PlayServerbound::Brand(Brand {
-            channel: "MC|Brand".to_string(),
-            data,
-        }))
-        .await?;
-    Ok(())
-}
-
-/// Forwards an event to the game thread.
-///
-/// A full channel means the game thread is behind; the network thread blocks
-/// in `send`, which slows the server down instead of losing world data.
-fn send(events: &SyncSender<GameEvent>, event: NetEvent) {
-    let _ = events.send(GameEvent::Net(event));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use umicraft_protocol::packets::play::clientbound::KeepAlive;
-
-    #[test]
-    fn the_relative_flags_accumulate_on_the_last_placement() {
-        let mut state = PlayState::new(8);
-        state.placement = Some(PlayerPlacement {
-            x: 10.0,
-            y: 64.0,
-            z: -5.0,
-            yaw: 90.0,
-            pitch: 10.0,
-        });
-        let packet = PositionLook {
-            x: 1.5,
-            y: 70.0,
-            z: -2.5,
-            yaw: 15.0,
-            pitch: -20.0,
-            flags: 0x01 | 0x04 | 0x08,
-        };
-        let placement = state.resolve(&packet);
-        assert_eq!(placement.x, 11.5);
-        assert_eq!(placement.y, 70.0);
-        assert_eq!(placement.z, -7.5);
-        assert_eq!(placement.yaw, 105.0);
-        assert_eq!(placement.pitch, -20.0);
-    }
 
     #[test]
     fn the_commands_map_to_the_expected_wire_ids() {
@@ -758,43 +442,12 @@ mod tests {
             sneaking: true,
         };
         let packet = command.into_packet();
-        let umicraft_protocol::PlayServerbound::Input(input) = packet else {
+        let PlayServerbound::Input(input) = packet else {
             panic!("the command must map to an input packet");
         };
         assert_eq!(input.strafe, -1.0);
         assert_eq!(input.forward, 0.3);
         assert!(!input.jumping);
         assert!(input.sneaking);
-    }
-
-    #[test]
-    fn the_keepalive_is_answered_with_the_same_id() {
-        use umicraft_protocol::EncodablePacket;
-        let mut body = Vec::new();
-        KeepAlive { id: 4242 }
-            .encode_body(&mut body)
-            .expect("encode");
-        let packet = KeepAlive::decode(&mut &body[..]).expect("decode");
-        assert_eq!(packet.id, 4242);
-    }
-
-    #[test]
-    fn the_time_update_body_becomes_the_clock_event() {
-        use umicraft_protocol::EncodablePacket;
-        assert_eq!(TimeUpdate::ID, 0x03);
-        let mut body = Vec::new();
-        TimeUpdate {
-            world_age: 72_770,
-            time_of_day: -6_000,
-        }
-        .encode_body(&mut body)
-        .expect("encode");
-        let event = decode_time_update(&body).expect("decode");
-        let NetEvent::TimeUpdate(packet) = event else {
-            panic!("the 0x03 body must become a TimeUpdate event");
-        };
-        assert_eq!(packet.world_age, 72_770);
-        assert_eq!(packet.time_of_day, -6_000);
-        assert!(decode_time_update(&body[..4]).is_err());
     }
 }

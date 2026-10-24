@@ -18,7 +18,7 @@
 //! fit into the queue stays in the dirty set and is derived again later.
 
 use std::collections::{BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -32,14 +32,16 @@ use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SU
 use umicraft_game::shapes::Aabb;
 use umicraft_game::{GameState, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
+use umicraft_net::play::{PlayEvent, SessionCounters};
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack as WireItemStack};
+use umicraft_protocol::PlayServerbound;
 use umicraft_render::{HudState, ItemStack};
 use umicraft_world::{BlockPos, ChunkPos, World};
 
 use crate::error::ClientError;
 use crate::input::InputUpdate;
-use crate::network::{self, ClientCommand, NetEvent, NetworkConfig};
+use crate::network::{self, ClientCommand, NetworkConfig};
 
 /// The tick period of the simulation: 20 Hz, as the 1.8 server (spec GAM-1).
 pub const TICK: Duration = Duration::from_millis(50);
@@ -122,7 +124,10 @@ pub fn camera_angles(state: &RenderState) -> (f32, f32) {
 #[derive(Debug)]
 pub enum GameEvent {
     /// A decoded clientbound packet.
-    Net(NetEvent),
+    Net(PlayEvent),
+    /// The network session ended: a failure or a kick, already formatted for
+    /// the overlay.
+    Disconnected(String),
     /// An input update from an input source.
     Input(InputUpdate),
     /// A chat line the player typed.
@@ -210,8 +215,8 @@ pub struct Session {
     chunks: Receiver<ChunkEvent>,
     /// The stop flag of the session.
     stop: Arc<AtomicBool>,
-    /// The number of serverbound packets the socket thread wrote.
-    sent: Arc<AtomicU64>,
+    /// The live statistics of the play session.
+    counters: Arc<SessionCounters>,
     network: Option<JoinHandle<()>>,
     game: Option<JoinHandle<()>>,
 }
@@ -228,9 +233,14 @@ impl Session {
         let (chunks_tx, chunks_rx) = mpsc::sync_channel(CHUNK_CAPACITY);
         let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(network::COMMAND_CAPACITY);
         let stop = Arc::new(AtomicBool::new(false));
-        let sent = Arc::new(AtomicU64::new(0));
+        let counters = Arc::new(SessionCounters::default());
 
-        let network = network::spawn(config, events_tx.clone(), commands_rx, Arc::clone(&sent))?;
+        let network = network::spawn(
+            config,
+            events_tx.clone(),
+            commands_rx,
+            Arc::clone(&counters),
+        )?;
         let game = spawn_game_thread(
             events_rx,
             frames_tx,
@@ -244,7 +254,7 @@ impl Session {
             frames: frames_rx,
             chunks: chunks_rx,
             stop,
-            sent,
+            counters,
             network: Some(network),
             game: Some(game),
         })
@@ -257,7 +267,7 @@ impl Session {
     /// the acceptance report.
     #[must_use]
     pub fn packets_sent(&self) -> u64 {
-        self.sent.load(Ordering::Relaxed)
+        self.counters.packets_sent()
     }
 
     /// The sender for the events the front end produces.
@@ -302,7 +312,7 @@ fn spawn_game_thread(
     events: Receiver<GameEvent>,
     frames: SyncSender<RenderEvent>,
     chunks: SyncSender<ChunkEvent>,
-    commands: CommandSender<ClientCommand>,
+    commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
 ) -> Result<JoinHandle<()>, ClientError> {
     std::thread::Builder::new()
@@ -527,7 +537,7 @@ struct CommandQueue {
     input: Option<ClientCommand>,
     /// The newest position report.
     position: Option<ClientCommand>,
-    sender: Option<CommandSender<ClientCommand>>,
+    sender: Option<CommandSender<PlayServerbound>>,
 }
 
 impl CommandQueue {
@@ -543,34 +553,44 @@ impl CommandQueue {
     }
 
     /// Retries the queued commands.
+    ///
+    /// A command is converted into its wire packet only once the channel
+    /// reserved a slot for it, so a full channel keeps the command (and its
+    /// coalescing slot) for the next tick.
     fn flush(&mut self) {
         let Some(sender) = self.sender.as_ref() else {
             return;
         };
         while let Some(command) = self.ordered.pop_front() {
-            match sender.try_send(command) {
-                Ok(()) => {}
-                Err(TrySendError::Full(command)) => {
-                    self.ordered.push_front(command);
-                    break;
-                }
-                Err(TrySendError::Closed(_)) => break,
+            if let Err(command) = try_send(sender, command) {
+                self.ordered.push_front(command);
+                break;
             }
         }
         if let Some(command) = self.position.take() {
-            match sender.try_send(command) {
-                Ok(()) => {}
-                Err(TrySendError::Full(command)) => self.position = Some(command),
-                Err(TrySendError::Closed(_)) => {}
-            }
+            self.position = try_send(sender, command).err();
         }
         if let Some(command) = self.input.take() {
-            match sender.try_send(command) {
-                Ok(()) => {}
-                Err(TrySendError::Full(command)) => self.input = Some(command),
-                Err(TrySendError::Closed(_)) => {}
-            }
+            self.input = try_send(sender, command).err();
         }
+    }
+}
+
+/// Sends a command to the network thread without blocking.
+///
+/// Gives the command back when the channel is full; drops it when the network
+/// thread is gone, since nothing will ever read it.
+fn try_send(
+    sender: &CommandSender<PlayServerbound>,
+    command: ClientCommand,
+) -> Result<(), ClientCommand> {
+    match sender.try_reserve() {
+        Ok(permit) => {
+            permit.send(command.into_packet());
+            Ok(())
+        }
+        Err(TrySendError::Full(())) => Err(command),
+        Err(TrySendError::Closed(())) => Ok(()),
     }
 }
 
@@ -579,7 +599,7 @@ fn run(
     events: Receiver<GameEvent>,
     frames: SyncSender<RenderEvent>,
     chunks: SyncSender<ChunkEvent>,
-    commands: CommandSender<ClientCommand>,
+    commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
 ) {
     let mut game = Game::new();
@@ -646,7 +666,17 @@ fn handle_event(
     frames: &SyncSender<RenderEvent>,
 ) -> bool {
     match event {
-        GameEvent::Net(event) => handle_net(game, event, queue, frames),
+        GameEvent::Net(event) => {
+            handle_net(game, event, queue, frames);
+            false
+        }
+        GameEvent::Disconnected(message) => {
+            tracing::error!(%message, "network session ended");
+            game.status = format!("ERROR {message}");
+            game.status_data.status = game.status.clone();
+            publish_status(game, frames);
+            true
+        }
         GameEvent::Input(update) => {
             let before = (game.yaw, game.pitch);
             handle_input(game, update, queue);
@@ -686,12 +716,12 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
 /// Handles one decoded clientbound packet.
 fn handle_net(
     game: &mut Game,
-    event: NetEvent,
+    event: PlayEvent,
     queue: &mut CommandQueue,
     frames: &SyncSender<RenderEvent>,
-) -> bool {
+) {
     match event {
-        NetEvent::JoinGame(info) => {
+        PlayEvent::JoinGame(info) => {
             game.world = Some(World::new(info.dimension));
             game.dirty.clear();
             game.entity_id = info.entity_id;
@@ -707,10 +737,10 @@ fn handle_net(
             let _ = frames.try_send(RenderEvent::Reset);
             publish_status(game, frames);
         }
-        NetEvent::Placement(placement) => {
+        PlayEvent::Placement(placement) => {
             apply_placement(game, &placement, queue);
         }
-        NetEvent::Chat(json) => {
+        PlayEvent::Chat(json) => {
             game.status_data.chat_messages += 1;
             game.chat.push_back(crate::chat::plain_text(&json));
             while game.chat.len() > CHAT_HISTORY {
@@ -718,7 +748,7 @@ fn handle_net(
             }
             game.hud_dirty = true;
         }
-        NetEvent::ChunkData(packet) => {
+        PlayEvent::ChunkData(packet) => {
             game.status_data.chunk_packets += 1;
             if let Some(world) = game.world.as_mut() {
                 match world.apply_chunk_data(&packet) {
@@ -730,7 +760,7 @@ fn handle_net(
                 }
             }
         }
-        NetEvent::MapChunkBulk(packet) => {
+        PlayEvent::MapChunkBulk(packet) => {
             game.status_data.chunk_packets += 1;
             if let Some(world) = game.world.as_mut() {
                 match world.apply_map_chunk_bulk(&packet) {
@@ -742,7 +772,7 @@ fn handle_net(
                 }
             }
         }
-        NetEvent::BlockChange(packet) => {
+        PlayEvent::BlockChange(packet) => {
             game.status_data.block_updates += 1;
             let (x, y, z) = packet.position();
             let position = BlockPos::new(x, y, z);
@@ -751,7 +781,7 @@ fn handle_net(
             }
             acknowledge_block(game, position, packet.block_state);
         }
-        NetEvent::MultiBlockChange(packet) => {
+        PlayEvent::MultiBlockChange(packet) => {
             game.status_data.block_updates += packet.records.len() as u64;
             if let Some(world) = game.world.as_mut() {
                 game.dirty.extend(world.apply_multi_block_change(&packet));
@@ -768,18 +798,18 @@ fn handle_net(
                 acknowledge_block(game, position, record.block_state);
             }
         }
-        NetEvent::UpdateHealth(packet) => {
+        PlayEvent::UpdateHealth(packet) => {
             game.health = packet.health;
             game.food = packet.food as f32;
             game.hud_dirty = true;
         }
-        NetEvent::HeldItemChange(slot) => {
+        PlayEvent::HeldItemChange(slot) => {
             if (0..9).contains(&slot) {
                 game.selected_slot = slot as u8;
                 game.hud_dirty = true;
             }
         }
-        NetEvent::Respawn(packet) => {
+        PlayEvent::Respawn(packet) => {
             // The server keeps the chunks of the dimension, so only a change
             // of the dimension replaces the world.
             let dimension = packet.dimension as i8;
@@ -807,7 +837,7 @@ fn handle_net(
             game.status_data.status = game.status.clone();
             publish_status(game, frames);
         }
-        NetEvent::EntityTeleport(packet) => {
+        PlayEvent::EntityTeleport(packet) => {
             if packet.entity_id == game.entity_id {
                 let correction = ServerCorrection::new(
                     f64::from(packet.x) / 32.0,
@@ -820,7 +850,7 @@ fn handle_net(
                 apply_correction(game, &correction, queue);
             }
         }
-        NetEvent::EntityEquipment(packet) => {
+        PlayEvent::EntityEquipment(packet) => {
             if packet.entity_id == game.entity_id {
                 let slot = usize::try_from(packet.slot).unwrap_or(usize::MAX);
                 if slot < game.equipment.len() {
@@ -833,29 +863,21 @@ fn handle_net(
                 }
             }
         }
-        NetEvent::SpawnPosition(packet) => {
+        PlayEvent::SpawnPosition(packet) => {
             game.spawn = Some((packet.x, packet.y, packet.z));
         }
-        NetEvent::SetExperience(packet) => {
+        PlayEvent::SetExperience(packet) => {
             game.experience = packet.experience;
             game.level = packet.level;
             game.hud_dirty = true;
         }
-        NetEvent::TimeUpdate(packet) => {
+        PlayEvent::TimeUpdate(packet) => {
             // The signed value is kept as-is: a negative time means the
             // server froze the cycle. The client never advances the clock
             // between packets (ADR-0008 §4).
             game.world_time = packet.time_of_day;
         }
-        NetEvent::Error(message) => {
-            tracing::error!(%message, "network session failed");
-            game.status = format!("ERROR {message}");
-            game.status_data.status = game.status.clone();
-            publish_status(game, frames);
-            return true;
-        }
     }
-    false
 }
 
 /// The sum of the armour points of the four armour pieces.
@@ -894,7 +916,7 @@ fn acknowledge_block(game: &mut Game, position: BlockPos, block_state: u16) {
 /// Applies a server placement.
 fn apply_placement(
     game: &mut Game,
-    placement: &umicraft_net::client::PlayerPlacement,
+    placement: &umicraft_net::play::PlayerPlacement,
     queue: &mut CommandQueue,
 ) {
     let yaw = placement.yaw.to_radians();
@@ -1549,6 +1571,49 @@ mod tests {
     }
 
     #[test]
+    fn a_full_channel_keeps_the_commands_for_the_next_flush() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let mut queue = CommandQueue {
+            sender: Some(sender),
+            ..CommandQueue::default()
+        };
+        queue.push(ClientCommand::Chat {
+            message: "first".to_string(),
+        });
+        queue.push(ClientCommand::Chat {
+            message: "second".to_string(),
+        });
+        queue.push(ClientCommand::PlayerPosition {
+            x: 1.0,
+            y: 64.0,
+            z: 2.0,
+            on_ground: true,
+        });
+
+        queue.flush();
+        assert_eq!(queue.ordered.len(), 1, "the second chat waits");
+        assert!(queue.position.is_some(), "the report waits");
+        let Ok(PlayServerbound::Chat(chat)) = receiver.try_recv() else {
+            panic!("the first chat is sent as its wire packet");
+        };
+        assert_eq!(chat.message, "first");
+
+        queue.flush();
+        let Ok(PlayServerbound::Chat(chat)) = receiver.try_recv() else {
+            panic!("the second chat follows in order");
+        };
+        assert_eq!(chat.message, "second");
+        assert!(queue.position.is_some(), "the channel is full again");
+
+        queue.flush();
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlayServerbound::PlayerPosition(_))
+        ));
+        assert!(queue.ordered.is_empty() && queue.position.is_none());
+    }
+
+    #[test]
     fn the_position_reports_are_coalesced() {
         let mut queue = CommandQueue::default();
         for step in 0..10 {
@@ -1593,7 +1658,7 @@ mod tests {
 
         handle_net(
             &mut game,
-            NetEvent::TimeUpdate(umicraft_protocol::packets::play::clientbound::TimeUpdate {
+            PlayEvent::TimeUpdate(umicraft_protocol::packets::play::clientbound::TimeUpdate {
                 world_age: 72_770,
                 time_of_day: -6_000,
             }),
@@ -1616,7 +1681,7 @@ mod tests {
 
     #[test]
     fn joining_and_changing_dimension_reset_the_world_clock() {
-        use umicraft_net::client::JoinGameInfo;
+        use umicraft_net::play::JoinGameInfo;
         use umicraft_protocol::packets::play::clientbound::{Respawn, TimeUpdate};
 
         let mut game = Game::new();
@@ -1638,13 +1703,13 @@ mod tests {
             world_type: "default".to_string(),
         };
 
-        handle_net(&mut game, NetEvent::JoinGame(join(0)), &mut queue, &frames);
+        handle_net(&mut game, PlayEvent::JoinGame(join(0)), &mut queue, &frames);
         assert_eq!(game.world_time, 0);
         assert_eq!(game.dimension, 0);
 
         handle_net(
             &mut game,
-            NetEvent::TimeUpdate(TimeUpdate {
+            PlayEvent::TimeUpdate(TimeUpdate {
                 world_age: 1,
                 time_of_day: -6_000,
             }),
@@ -1656,7 +1721,7 @@ mod tests {
         // A same-dimension respawn keeps the frozen clock.
         handle_net(
             &mut game,
-            NetEvent::Respawn(respawn(0)),
+            PlayEvent::Respawn(respawn(0)),
             &mut queue,
             &frames,
         );
@@ -1666,7 +1731,7 @@ mod tests {
         // A dimension change starts a new clock.
         handle_net(
             &mut game,
-            NetEvent::Respawn(respawn(-1)),
+            PlayEvent::Respawn(respawn(-1)),
             &mut queue,
             &frames,
         );
