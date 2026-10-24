@@ -994,7 +994,6 @@ fn apply_placement(
             );
         }
     }
-    unstick(game);
 
     // The server expects the acknowledgement of the placement.
     //
@@ -1033,7 +1032,6 @@ fn apply_correction(game: &mut Game, correction: &ServerCorrection, queue: &mut 
         game.yaw = state.player().yaw;
         game.pitch = state.player().pitch;
     }
-    unstick(game);
     queue.push(ClientCommand::AckPosition {
         x: correction.x,
         y: correction.y,
@@ -1043,77 +1041,6 @@ fn apply_correction(game: &mut Game, correction: &ServerCorrection, queue: &mut 
         on_ground: correction.on_ground,
     });
     game.last_position = None;
-}
-
-/// Moves the player out of the blocks it stands in.
-///
-/// The server places a dead player at the position it died in, and that
-/// position may be inside a block. A player that stands inside a block is
-/// resynchronised by the server with *every* position report (MCP
-/// `NetHandlerPlayServer.handlePlayerPosition` checks the collision boxes of
-/// the player), so the client lifts the player onto the top of the block.
-/// The server applies the same movement through its own collision code, so
-/// both agree again.
-fn unstick(game: &mut Game) {
-    let Some(state) = game.state.as_ref() else {
-        return;
-    };
-    let Some(world) = game.world.as_ref() else {
-        return;
-    };
-    let position = state.position();
-    let half = umicraft_game::physics::PLAYER_HALF_WIDTH;
-    let height = umicraft_game::physics::PLAYER_HEIGHT;
-    // The test uses the box shrunk by a sixteenth of a block, the same margin
-    // the server uses (MCP `NetHandlerPlayServer.handlePlayerPosition` asks
-    // for the collision boxes of the box shrunk by 0.0625). A player that only
-    // touches a block is not inside it.
-    let margin = 0.0625;
-    // The lift may still leave the player inside another block, so the search
-    // repeats until the box of the player is free.
-    let mut feet = position.y;
-    for _ in 0..8 {
-        let bounds = Aabb::new(
-            DVec3::new(
-                position.x - half + margin,
-                feet + margin,
-                position.z - half + margin,
-            ),
-            DVec3::new(
-                position.x + half - margin,
-                feet + height - margin,
-                position.z + half - margin,
-            ),
-        );
-        let mut top: Option<i32> = None;
-        for x in (bounds.min.x.floor() as i32)..=(bounds.max.x.floor() as i32) {
-            for z in (bounds.min.z.floor() as i32)..=(bounds.max.z.floor() as i32) {
-                for y in (bounds.min.y.floor() as i32)..=(bounds.max.y.floor() as i32) {
-                    if !world.block(BlockPos::new(x, y, z)).is_air() {
-                        top = Some(top.map_or(y + 1, |current: i32| current.max(y + 1)));
-                    }
-                }
-            }
-        }
-        let Some(top) = top else {
-            break;
-        };
-        feet = f64::from(top);
-    }
-    if (feet - position.y).abs() < 1e-6 {
-        return;
-    }
-    let lifted = DVec3::new(position.x, feet, position.z);
-    tracing::info!(?position, ?lifted, "the player stands inside a block");
-    let correction =
-        ServerCorrection::new(lifted.x, lifted.y, lifted.z, game.yaw, game.pitch, true);
-    if let Some(state) = game.state.as_mut() {
-        if let Some(world) = game.world.as_ref() {
-            state.apply_correction(&correction, world);
-        }
-        game.yaw = state.player().yaw;
-        game.pitch = state.player().pitch;
-    }
 }
 
 /// Handles one input update.
@@ -1288,9 +1215,9 @@ fn tick(
             state.tick(&intent, world);
         }
     }
-    // The player must not stand inside a block: the server resynchronises a
-    // player that does with every position report.
-    unstick(game);
+    // A player inside a block is pushed out sideways by the simulation
+    // itself, like the vanilla client (`umicraft_game::physics`); it is
+    // never lifted.
 
     // The input packet carries the raw wire values; the 0.98 damping of
     // `EntityLivingBase.java:2020` is applied by the game logic and by the
@@ -1652,6 +1579,55 @@ mod tests {
             Ok(PlayServerbound::PlayerPosition(_))
         ));
         assert!(queue.ordered.is_empty() && queue.position.is_none());
+    }
+
+    /// A grass floor (top at y = 64) with one block of `plant` standing on
+    /// it at (0, 64, 0), and a player whose feet are at y = 64 there.
+    fn game_on_floor_with(plant: BlockState) -> Game {
+        let mut world = World::new(0);
+        let payload = vec![0u8; umicraft_world::chunk::payload_len(0b1000, true, true)];
+        world
+            .apply_chunk(
+                ChunkPos::new(0, 0),
+                umicraft_world::ChunkPayload {
+                    primary_bit_mask: 0b1000,
+                    ground_up: true,
+                    data: &payload,
+                },
+            )
+            .expect("an empty column");
+        for x in 0..16 {
+            for z in 0..16 {
+                world.set_block(BlockPos::new(x, 63, z), BlockState::new(2, 0));
+            }
+        }
+        world.set_block(BlockPos::new(0, 64, 0), plant);
+        let mut game = Game::new();
+        game.world = Some(world);
+        game.state = Some(GameState::new(DVec3::new(0.5, 64.0, 0.5)));
+        game
+    }
+
+    /// Regression: every tick lifted a player standing in a plant, in water
+    /// or under leaves onto the top of the block, which put players on
+    /// flowers and on top of trees.
+    #[test]
+    fn a_player_in_plants_or_water_is_never_lifted() {
+        for plant in [
+            BlockState::new(31, 1),
+            BlockState::new(38, 0),
+            BlockState::new(9, 0),
+        ] {
+            let mut game = game_on_floor_with(plant);
+            let mut queue = CommandQueue::default();
+            let (frames, _frames_rx) = mpsc::sync_channel(64);
+            let (chunks, _chunks_rx) = mpsc::sync_channel(64);
+            for _ in 0..10 {
+                tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+            }
+            let feet = game.state.as_ref().expect("state").position();
+            assert_eq!(feet.y, 64.0, "lifted out of {plant:?}");
+        }
     }
 
     #[test]

@@ -346,20 +346,19 @@ mod tests {
 
     #[test]
     fn the_trajectory_of_a_walk_is_the_analytic_one() {
-        // The player walks on a flat floor from x = 0 towards +Z (yaw 0).
+        // The player walks on a flat stone floor from z = 0 towards +Z (yaw 0).
         //
-        // MCP `EntityLivingBase.java:1606` gives the movement factor
-        // 0.16277136 / 0.91^3, the movement speed attribute is 0.1
-        // (`EntityPlayer.java:193`) and the input is damped by 0.98
-        // (`EntityLivingBase.java:2020`), so every tick adds
-        // 0.98 * 0.1 * 0.16277136 / 0.91^3 = 0.021168 to the motion, which is
-        // then damped by 0.91 (`EntityLivingBase.java:1670`).
+        // On the ground the friction is the slipperiness of stone times 0.91,
+        // `f = 0.6 * 0.91` (MCP `EntityLivingBase.java:1599-1604`); the
+        // movement factor is `0.16277136 / f^3` (line 1606), the movement
+        // speed attribute 0.1 (`EntityPlayer.java:193`) and the input is
+        // damped by 0.98 (line 2020). Every tick adds the acceleration to
+        // the motion, moves by it, then damps it by `f` (line 1670).
         //
         // The first two ticks are still in the air: the player starts with
         // `onGround == false` and only lands once the gravity has pulled it
         // onto the floor, so those ticks use the air control factor of 0.02
-        // (`EntityLivingBase.java:1615`) instead. Summing the 20 advances
-        // gives 2.6571996611686175 blocks.
+        // (`EntityLivingBase.java:1615`) and the air friction of 0.91.
         let world = TestBlocks::flat();
         let mut state = GameState::new(DVec3::new(0.0, 1.0, 0.0));
         let intent = InputIntent::walking(0.0);
@@ -368,7 +367,19 @@ mod tests {
             state.tick(&intent, &world);
         }
 
-        let expected = 2.657_199_661_168_617_5;
+        let ground = 0.6 * physics::GROUND_FRICTION;
+        let mut motion = 0.0;
+        let mut expected = 0.0;
+        for tick in 0..20 {
+            let (acceleration, friction) = if tick < 2 {
+                (0.98 * 0.02, physics::GROUND_FRICTION)
+            } else {
+                (0.98 * 0.1 * 0.162_771_36 / ground.powi(3), ground)
+            };
+            motion += acceleration;
+            expected += motion;
+            motion *= friction;
+        }
         assert!(
             (state.position().z - expected).abs() < 1e-12,
             "expected {expected}, got {}",

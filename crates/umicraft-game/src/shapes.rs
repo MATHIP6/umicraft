@@ -450,6 +450,65 @@ pub fn shape_of<S: BlockSource + ?Sized>(
     }
 }
 
+/// Whether a block is a *normal cube*: an opaque, full, non-powering block.
+///
+/// MCP `Block.isNormalCube` (`Block.java:354`) is
+/// `material.isOpaque() && isFullCube() && !canProvidePower()`. The ids below
+/// were derived from the registrations of `Block.registerBlocks`, each
+/// block's material (`Material.java`, translucent or non-solid materials are
+/// not opaque) and its `isFullCube`/`canProvidePower` overrides; the double
+/// slabs (43, 125, 181) are full because `BlockSlab.isFullCube` returns
+/// `isDouble()`. Leaves, glass, glowstone, ice, TNT, chests, slabs, stairs,
+/// plants and the redstone block are therefore *not* normal cubes.
+#[must_use]
+pub fn is_normal_cube(state: BlockState) -> bool {
+    matches!(
+        state.id(),
+        1..=5
+            | 7
+            | 12..=17
+            | 19
+            | 21..=25
+            | 35
+            | 41..=43
+            | 45
+            | 47..=49
+            | 52
+            | 56..=58
+            | 61
+            | 62
+            | 73
+            | 74
+            | 80
+            | 82
+            | 84
+            | 86..=88
+            | 91
+            | 97..=100
+            | 103
+            | 110
+            | 112
+            | 120
+            | 121
+            | 123..=125
+            | 129
+            | 133
+            | 137
+            | 153
+            | 155
+            | 158
+            | 159
+            | 162
+            | 165
+            | 166
+            | 168
+            | 170
+            | 172..=174
+            | 179
+            | 181
+    )
+}
+
 /// The shape used for block targeting.
 ///
 /// It is the collision shape of the block, except for decorations: a
