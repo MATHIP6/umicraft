@@ -3,60 +3,24 @@
 //! Offscreen screenshot pipeline: collect the world through the game thread,
 //! mesh the chunk snapshots, render with wgpu and write a PNG.
 //!
-//! The path shares the network thread, the game thread and the mesh pool
-//! with the windowed client, so a screenshot shows exactly what the player
-//! would see — including the HUD of the real session.
+//! The path shares the network thread, the game thread and the
+//! [`WorldView`] with the windowed client, so a screenshot shows exactly what
+//! the player would see — including the HUD of the real session.
 
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 use std::time::Instant;
 
-use umicraft_mesh::ChunkSnapshot;
-use umicraft_render::{draw_hud, Camera, HudState, Overlay, RenderEnvironment, Renderer};
+use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
 
 use crate::args::Args;
 use crate::error::ClientError;
-use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, Session, TICK};
-use crate::mesher::{default_worker_count, MeshPool};
+use crate::game::Session;
+use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::terrain_textures::TerrainTextures;
-
-/// The clock environment of the newest frame, for the final render.
-///
-/// The windowed client derives the interpolation fraction from the two newest
-/// frames ([`crate::window::View`]); the screenshot path collects at most one
-/// frame per 5 ms poll, so the sub-tick fraction is computed the same way
-/// from the frame's tick instant: the world clock advances smoothly without
-/// the render thread ever moving it by itself (ADR-0008 §4).
-struct FrameEnvironment {
-    /// The newest frame.
-    frame: Option<Frame>,
-    /// The instant the collection loop stopped.
-    now: Instant,
-}
-
-impl FrameEnvironment {
-    /// Stores the newest frame.
-    fn push(&mut self, frame: Frame) {
-        self.frame = Some(frame);
-    }
-
-    /// The render environment for the collected frame.
-    fn environment(&self, view_distance: u8) -> RenderEnvironment {
-        let partial_tick = self
-            .frame
-            .map(|frame| {
-                let tick = frame.tick_time;
-                self.now.saturating_duration_since(tick).as_secs_f32() / TICK.as_secs_f32()
-            })
-            .unwrap_or(0.0);
-        let (dimension, world_time) = self
-            .frame
-            .map_or((0, 6_000), |frame| (frame.dimension, frame.world_time));
-        RenderEnvironment::new(dimension, world_time, partial_tick, view_distance)
-    }
-}
+use crate::world_view::WorldView;
 
 /// Runs the screenshot path and writes `args.screenshot`.
 ///
@@ -81,88 +45,34 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let deadline = Instant::now() + args.collect;
     let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
     let terrain = TerrainTextures::load().install(&mut renderer);
-    let pool = MeshPool::new(default_worker_count(), &terrain)?;
-    let mut queued: Vec<(umicraft_world::ChunkPos, ChunkSnapshot)> = Vec::new();
-    let mut pending = std::collections::HashSet::new();
-    let mut camera = Camera::default();
-    let mut environment = FrameEnvironment {
-        frame: None,
-        now: Instant::now(),
-    };
-    let mut hud = HudState::default();
-    let mut status = GameStatus::default();
-    let mut meshes = 0_usize;
-    let mut faces = 0_usize;
-    let mut frames = 0_usize;
-    let mut chunks = 0_usize;
+    let mut world = WorldView::new(&terrain, default_worker_count())?;
 
     while Instant::now() < deadline {
-        while let Ok(event) = session.frames().try_recv() {
-            match event {
-                RenderEvent::Frame(frame) => {
-                    frames += 1;
-                    camera.position = frame.state.position;
-                    let (yaw, pitch) = camera_angles(&frame.state);
-                    camera.yaw = yaw;
-                    camera.pitch = pitch;
-                    environment.push(frame);
-                }
-                RenderEvent::Hud(new_hud) => hud = *new_hud,
-                RenderEvent::Status(new_status) => status = *new_status,
-                RenderEvent::Reset => {
-                    renderer.clear_meshes();
-                }
-                RenderEvent::Ended(reason) => {
-                    return Err(ClientError::Network(reason));
-                }
-            }
-        }
-        while let Ok(ChunkEvent { pos, snapshot }) = session.chunks().try_recv() {
-            queued.push((pos, snapshot));
-        }
-
-        // Mesh the snapshots the game thread delivered.
-        let mut index = 0;
-        while index < queued.len() {
-            let (pos, snapshot) = queued[index].clone();
-            if pending.contains(&pos) {
-                index += 1;
-                continue;
-            }
-            match pool.submit(pos, snapshot) {
-                Ok(()) => {
-                    pending.insert(pos);
-                    queued.remove(index);
-                }
-                Err(_) => break,
-            }
-        }
-        while let Some(result) = pool.try_recv() {
-            pending.remove(&result.pos);
-            if result.mesh.is_empty() {
-                continue;
-            }
-            faces += result.mesh.face_count();
-            meshes += 1;
-            chunks += 1;
-            renderer.upload_mesh(result.pos, &result.mesh);
+        world.sync(session.frames(), session.chunks(), &mut renderer);
+        if let Some(reason) = world.ended() {
+            return Err(ClientError::Network(reason.to_string()));
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
 
     drop(session);
 
-    if status.status.starts_with("ERROR ") {
-        return Err(ClientError::Network(
-            status.status["ERROR ".len()..].to_string(),
-        ));
+    let status = world.status();
+    if let Some(error) = status.status.strip_prefix("ERROR ") {
+        return Err(ClientError::Network(error.to_string()));
     }
+    let chunks = world.chunk_count();
     if chunks == 0 {
         return Err(ClientError::NoChunks);
     }
+    let meshes = renderer.mesh_count();
+    let faces = world.face_count();
+    let frames = world.frame_count();
 
-    environment.now = Instant::now();
-    renderer.set_environment(environment.environment(args.view_distance));
+    let now = Instant::now();
+    let mut camera = Camera::default();
+    world.update_camera(&mut camera, now);
+    renderer.set_environment(world.environment(now, args.view_distance));
     camera.set_aspect(args.width, args.height);
     let mut overlay = Overlay::new(args.width, args.height);
     let lines = [
@@ -179,7 +89,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     // screenshot shows the in-game layout.
     let hud = HudState {
         debug_lines: lines.to_vec(),
-        ..hud
+        ..world.hud().clone()
     };
     draw_hud(&mut overlay, &hud, args.width, args.height);
 
@@ -237,10 +147,8 @@ pub(crate) fn write_png(
 mod tests {
     use std::time::Duration;
 
-    use glam::Vec3;
-    use umicraft_game::RenderState;
-
     use super::*;
+    use crate::game::TICK;
 
     #[test]
     fn png_round_trip_dimensions() {
@@ -255,70 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn the_environment_tracks_the_newest_frame_and_interpolates() {
-        let tick = Instant::now();
-        let mut environment = FrameEnvironment {
-            frame: None,
-            now: tick,
-        };
-        // Without a frame the environment stays at the midday default.
-        assert_eq!(
-            environment.environment(8),
-            RenderEnvironment::new(0, 6_000, 0.0, 8)
-        );
-
-        environment.push(Frame {
-            state: frame_state(),
-            tick_time: tick,
-            world_time: 12_345,
-            dimension: -1,
-        });
-        environment.now = tick + TICK / 2;
-        let halfway = environment.environment(12);
-        assert_eq!(halfway.world_time, 12_345);
-        assert_eq!(halfway.dimension, -1);
-        assert_eq!(halfway.view_distance, 12);
-        assert!((halfway.partial_tick - 0.5).abs() < 1.0e-3);
-
-        // A frame older than one tick clamps the fraction at 1.0.
-        environment.now = tick + TICK * 3;
-        assert_eq!(environment.environment(8).partial_tick, 1.0);
-    }
-
-    #[test]
-    fn a_newer_frame_replaces_the_older_one() {
-        let tick = Instant::now();
-        let mut environment = FrameEnvironment {
-            frame: None,
-            now: tick,
-        };
-        environment.push(Frame {
-            state: frame_state(),
-            tick_time: tick,
-            world_time: 1,
-            dimension: 0,
-        });
-        environment.push(Frame {
-            state: frame_state(),
-            tick_time: tick + TICK,
-            world_time: 2,
-            dimension: 0,
-        });
-        assert_eq!(environment.environment(8).world_time, 2);
-    }
-
-    #[test]
     fn tick_is_one_twentieth_of_a_second() {
         assert_eq!(TICK, Duration::from_millis(50));
-    }
-
-    /// A minimal render state for synthetic frames.
-    fn frame_state() -> RenderState {
-        RenderState {
-            position: Vec3::ZERO,
-            yaw: 0.0,
-            pitch: 0.0,
-            on_ground: true,
-        }
     }
 }
