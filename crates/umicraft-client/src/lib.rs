@@ -34,5 +34,6 @@ pub mod ui_demo;
 pub mod ui_font;
 pub mod ui_input;
 pub mod window;
+pub mod world_view;
 
 pub use error::ClientError;
