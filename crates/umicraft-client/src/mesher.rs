@@ -28,12 +28,19 @@ const RESULT_CAPACITY: usize = 512;
 pub struct MeshResult {
     /// Chunk column that was meshed.
     pub pos: ChunkPos,
+    /// The caller's tag of the job, returned unchanged.
+    ///
+    /// The render thread tags every job with its world generation, so a mesh
+    /// of a world that was replaced while the job ran can be recognised and
+    /// dropped instead of drawn in the new world.
+    pub generation: u64,
     /// CPU mesh; empty when the column is empty or unloaded.
     pub mesh: Mesh,
 }
 
 struct MeshJob {
     pos: ChunkPos,
+    generation: u64,
     snapshot: ChunkSnapshot,
 }
 
@@ -91,16 +98,26 @@ impl MeshPool {
         self.workers.len()
     }
 
-    /// Queues a chunk for meshing.
+    /// Queues a chunk for meshing; `generation` comes back in its result.
     ///
     /// The snapshot is returned when the job queue is full or when all
     /// workers have gone, so the caller can retry it on a later frame
     /// instead of losing the work.
-    pub fn submit(&self, pos: ChunkPos, snapshot: ChunkSnapshot) -> Result<(), ChunkSnapshot> {
+    pub fn submit(
+        &self,
+        pos: ChunkPos,
+        generation: u64,
+        snapshot: ChunkSnapshot,
+    ) -> Result<(), ChunkSnapshot> {
         let Some(sender) = self.jobs.as_ref() else {
             return Err(snapshot);
         };
-        match sender.try_send(MeshJob { pos, snapshot }) {
+        let job = MeshJob {
+            pos,
+            generation,
+            snapshot,
+        };
+        match sender.try_send(job) {
             Ok(()) => Ok(()),
             Err(mpsc::TrySendError::Full(job)) => Err(job.snapshot),
             Err(mpsc::TrySendError::Disconnected(job)) => Err(job.snapshot),
@@ -149,7 +166,12 @@ fn worker_loop(
             }
         };
         let mesh = mesher.mesh(job.pos, &job.snapshot);
-        if results.send(MeshResult { pos: job.pos, mesh }).is_err() {
+        let result = MeshResult {
+            pos: job.pos,
+            generation: job.generation,
+            mesh,
+        };
+        if results.send(result).is_err() {
             return;
         }
     }
@@ -180,18 +202,23 @@ mod tests {
         assert_eq!(pool.worker_count(), 2);
         for x in 0..2 {
             let pos = ChunkPos::new(x, 0);
+            let generation = 7 + x as u64;
             assert!(pool
-                .submit(pos, ChunkSnapshot::from_world(&world, pos))
+                .submit(pos, generation, ChunkSnapshot::from_world(&world, pos))
                 .is_ok());
         }
-        let mut positions = Vec::new();
-        while positions.len() < 2 {
+        let mut results = Vec::new();
+        while results.len() < 2 {
             let result = pool.recv().expect("mesh result");
             assert!(result.mesh.is_empty());
-            positions.push(result.pos);
+            results.push((result.pos, result.generation));
         }
-        positions.sort_unstable();
-        assert_eq!(positions, vec![ChunkPos::new(0, 0), ChunkPos::new(1, 0)]);
+        results.sort_unstable();
+        // Each result carries the tag of its job back.
+        assert_eq!(
+            results,
+            vec![(ChunkPos::new(0, 0), 7), (ChunkPos::new(1, 0), 8)]
+        );
     }
 
     #[test]

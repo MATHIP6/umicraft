@@ -473,7 +473,7 @@ impl App {
                 index += 1;
                 continue;
             }
-            match pool.submit(pos, snapshot) {
+            match pool.submit(pos, 0, snapshot) {
                 Ok(()) => {
                     self.pending.insert(pos);
                     self.waiting.remove(index);

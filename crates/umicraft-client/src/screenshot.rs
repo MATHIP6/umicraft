@@ -129,7 +129,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 index += 1;
                 continue;
             }
-            match pool.submit(pos, snapshot) {
+            match pool.submit(pos, 0, snapshot) {
                 Ok(()) => {
                     pending.insert(pos);
                     queued.remove(index);
