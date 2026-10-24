@@ -386,7 +386,7 @@ fn build_atlas(textures: Vec<TextureLayer>) -> AssetsResult<BlockAtlas> {
         .ok_or_else(|| image_error("atlas", "the atlas frame size overflows"))?;
     let mut pixels = Vec::with_capacity(
         layer_len
-            .checked_mul(usize::try_from(layout.len()).unwrap_or(usize::MAX))
+            .checked_mul(usize::try_from(layout.layer_count()).unwrap_or(usize::MAX))
             .ok_or_else(|| image_error("atlas", "the atlas pixel count overflows"))?,
     );
     pixels.extend_from_slice(&missing_checker(edge, edge));

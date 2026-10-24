@@ -12,7 +12,10 @@ use std::collections::HashMap;
 pub const MISSING_TEXTURE: &str = "umicraft/missing";
 
 /// Texture-key to layer mapping shared by the atlas builder and the mesher.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// Every layout contains [`MISSING_TEXTURE`] at layer zero, so a texture
+/// lookup that fails always has an atlas layer to fall back to.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtlasLayout {
     keys: Vec<String>,
     index: HashMap<String, u32>,
@@ -47,6 +50,12 @@ impl AtlasLayout {
         Self { keys: all, index }
     }
 
+    /// The layer of [`MISSING_TEXTURE`], present in every layout.
+    #[must_use]
+    pub const fn missing_layer(&self) -> u32 {
+        0
+    }
+
     /// Layer for `key`, or `None` when the atlas does not contain it.
     #[must_use]
     pub fn layer(&self, key: &str) -> Option<u32> {
@@ -59,16 +68,17 @@ impl AtlasLayout {
         &self.keys
     }
 
-    /// Number of layers including the missing layer.
+    /// Number of layers including the missing layer; never zero.
     #[must_use]
-    pub fn len(&self) -> u32 {
+    pub fn layer_count(&self) -> u32 {
         self.keys.len() as u32
     }
+}
 
-    /// True when the layout has no layers (only possible for a default value).
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
+impl Default for AtlasLayout {
+    /// The layout that holds only the missing-texture layer.
+    fn default() -> Self {
+        Self::from_keys(std::iter::empty::<&str>())
     }
 }
 
@@ -82,8 +92,17 @@ mod tests {
         assert_eq!(layout.layer(MISSING_TEXTURE), Some(0));
         assert_eq!(layout.layer("blocks/dirt"), Some(1));
         assert_eq!(layout.layer("blocks/stone"), Some(2));
-        assert_eq!(layout.len(), 3);
+        assert_eq!(layout.layer_count(), 3);
         assert_eq!(layout.keys()[2], "blocks/stone");
+    }
+
+    #[test]
+    fn every_layout_has_the_missing_layer() {
+        let empty = AtlasLayout::default();
+        assert_eq!(empty.layer_count(), 1);
+        assert_eq!(empty.layer(MISSING_TEXTURE), Some(empty.missing_layer()));
+        let layout = AtlasLayout::from_keys(["blocks/stone"]);
+        assert_eq!(layout.layer(MISSING_TEXTURE), Some(layout.missing_layer()));
     }
 
     #[test]

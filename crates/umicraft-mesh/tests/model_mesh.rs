@@ -541,31 +541,37 @@ fn glass_culls_only_against_the_same_state() {
 }
 
 #[test]
-fn modelless_states_fall_back_to_the_legacy_cube() {
-    // An empty model set: every state takes the legacy path, so the two
-    // meshers must agree vertex for vertex.
+fn modelless_states_keep_the_legacy_cube_but_only_atlas_layers() {
+    // An empty model set: every state takes the legacy cube geometry, but
+    // the model path never borrows a procedural layer index (ADR-0012): with
+    // an atlas that has only the checker, every face samples the checker.
     let source = Memory::new();
     let set = BlockModelSet::build(&source, &[]).expect("an empty model set");
     assert_eq!(set.state_count(), 0);
+    let atlas = AtlasLayout::default();
+    let missing = atlas.missing_layer();
     let context = ModelMeshContext {
         models: Arc::new(set),
-        atlas: Arc::new(AtlasLayout::default()),
+        atlas: Arc::new(atlas),
         tints: None,
     };
     let blocks = Scene::new(&[
         ([0, 0, 0], BlockState::new(1, 0)),
         ([1, 0, 0], BlockState::new(1, 0)),
         ([0, 1, 0], BlockState::new(20, 0)),
-        // Unknown id: the procedural table falls back to the checker layer.
         ([0, 2, 0], BlockState::new(500, 0)),
     ]);
     let chunk = ChunkPos::new(0, 0);
 
     let models = mesh_chunk_with_models(chunk, &blocks, &context);
     let legacy = mesh_chunk(chunk, &blocks);
-    assert_eq!(models, legacy);
-    assert!(models.vertices.iter().any(|vertex| vertex.layer == 3));
-    assert!(models.vertices.iter().any(|vertex| vertex.layer == 18));
+    assert_eq!(models.face_count(), legacy.face_count(), "same geometry");
+    assert!(!models.vertices.is_empty());
+    assert!(models
+        .vertices
+        .iter()
+        .chain(&models.transparent_vertices)
+        .all(|vertex| vertex.layer == missing));
 }
 
 #[test]
