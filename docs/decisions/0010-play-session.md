@@ -75,5 +75,5 @@ are deleted without a compatibility layer.
 - A caller that stops a session early may drop the `drive` future; this is
   safe only because the connection is dropped with it. Code that keeps using
   the connection must close the command channel instead.
-- World packets still carry protocol structs; moving the packet-to-world
-  translation out of `umicraft-world` is a separate change on this seam.
+- World packets still carry protocol structs in `PlayEvent`; the game thread
+  translates them into world updates (ADR-0011).
