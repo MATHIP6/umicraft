@@ -61,7 +61,7 @@ each crate invents its own version of the same interface.
 
 | Thread | Owns | Talks to |
 |---|---|---|
-| Network thread (M2, unchanged) | Tokio runtime, `Connection`, `PlaySession` | game thread, via the bounded event channel |
+| Network thread (M2, unchanged) | Tokio runtime, `Connection`, the play loop (since ADR-0010: `PlaySession` + `drive` from `umicraft-net`) | game thread, via the bounded event channel |
 | **Game thread (new)** | `umicraft_game::GameState`, the `umicraft_world::World`, the 20 Hz tick | network thread (events in), render thread (snapshots and render state out) |
 | Render thread (M2, unchanged) | Window, wgpu, camera, `SessionWorld`-equivalent render state, mesh pool | game thread, via bounded channels |
 | Mesh workers (M2, unchanged) | CPU meshing of immutable `ChunkSnapshot`s | render thread, via bounded channels |

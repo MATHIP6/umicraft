@@ -1,6 +1,6 @@
 # ADR-0010 — One play session, without I/O, behind a cancel-safe loop
 
-- Status: Accepted
+- Status: Implemented
 - Date: 2026-10-24
 - Deciders: project owner
 - Supersedes: the network-thread row of ADR-0005 (`PlaySession` ownership)
