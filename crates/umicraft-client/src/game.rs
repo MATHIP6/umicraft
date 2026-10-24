@@ -777,7 +777,7 @@ fn handle_net(
             let (x, y, z) = packet.position();
             let position = BlockPos::new(x, y, z);
             if let Some(world) = game.world.as_mut() {
-                game.dirty.extend(world.apply_block_change(&packet));
+                game.dirty.extend(world.apply_block_change_packet(&packet));
             }
             acknowledge_block(game, position, packet.block_state);
         }

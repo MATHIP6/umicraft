@@ -5,13 +5,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use umicraft_protocol::packets::play::clientbound::chunk_data::chunk_payload_len;
 use umicraft_protocol::packets::play::clientbound::{
     BlockChange, ChunkData, MapChunkBulk, MultiBlockChange,
 };
 
 use crate::block::BlockState;
-use crate::chunk::{ChunkColumn, WORLD_HEIGHT};
+use crate::chunk::{ChunkColumn, ChunkPayload, WORLD_HEIGHT};
 use crate::error::WorldError;
 use crate::light::LightLevel;
 use crate::pos::{BlockPos, ChunkPos};
@@ -148,63 +147,48 @@ impl World {
         )
     }
 
-    /// Applies one `Chunk Data` (0x21) packet.
+    /// Applies one chunk column payload (`Chunk Data`, 0x21).
     ///
-    /// Returns the chunk positions whose rendered geometry may have changed
-    /// (the column itself plus any loaded neighbours). A `ground_up` packet
-    /// with an empty mask unloads the column.
+    /// The sky-light layout follows the Join Game dimension. Returns the chunk
+    /// positions whose rendered geometry may have changed (the column itself
+    /// plus any loaded neighbours). A `ground_up` payload with an empty mask
+    /// unloads the column.
     ///
     /// # Errors
-    /// [`WorldError::ChunkPayloadLength`] for a malformed payload.
-    pub fn apply_chunk_data(&mut self, packet: &ChunkData) -> Result<Vec<ChunkPos>, WorldError> {
-        let pos = ChunkPos::new(packet.chunk_x, packet.chunk_z);
-        if packet.ground_up && packet.primary_bit_mask == 0 {
+    /// [`WorldError::ChunkPayloadLength`] for a malformed payload; the world is
+    /// not modified in that case.
+    pub fn apply_chunk(
+        &mut self,
+        pos: ChunkPos,
+        payload: ChunkPayload<'_>,
+    ) -> Result<Vec<ChunkPos>, WorldError> {
+        if payload.ground_up && payload.primary_bit_mask == 0 {
             return Ok(self.unload_chunk(pos));
         }
         let has_sky_light = self.has_sky_light();
-        self.apply_payload(
-            pos,
-            packet.primary_bit_mask,
-            packet.ground_up,
-            has_sky_light,
-            &packet.data,
-        )?;
+        self.apply_payload(pos, payload, has_sky_light)?;
         Ok(self.dirty_with_neighbours(pos))
     }
 
-    /// Applies a `Map Chunk Bulk` (0x26) packet, validating every payload
-    /// before mutating the world.
+    /// Applies a batch of column payloads (`Map Chunk Bulk`, 0x26) that share
+    /// one sky-light flag.
+    ///
+    /// Every payload is validated before the world changes, so a malformed
+    /// batch applies nothing.
     ///
     /// # Errors
-    /// [`WorldError::ChunkPayloadLength`] for a malformed payload; no chunk is
-    /// applied in that case.
-    pub fn apply_map_chunk_bulk(
+    /// [`WorldError::ChunkPayloadLength`] for the first malformed payload.
+    pub fn apply_chunk_bulk(
         &mut self,
-        packet: &MapChunkBulk,
+        has_sky_light: bool,
+        chunks: &[(ChunkPos, ChunkPayload<'_>)],
     ) -> Result<Vec<ChunkPos>, WorldError> {
-        for chunk in &packet.chunks {
-            let expected = chunk_payload_len(chunk.primary_bit_mask, packet.sky_light, true);
-            if chunk.data.len() != expected {
-                return Err(WorldError::ChunkPayloadLength {
-                    expected,
-                    actual: chunk.data.len(),
-                    primary_bit_mask: chunk.primary_bit_mask,
-                    sky_light: packet.sky_light,
-                    ground_up: true,
-                });
-            }
+        for (_, payload) in chunks {
+            payload.check_len(has_sky_light)?;
         }
-
-        let mut dirty = Vec::with_capacity(packet.chunks.len() * 2);
-        for chunk in &packet.chunks {
-            let pos = ChunkPos::new(chunk.chunk_x, chunk.chunk_z);
-            self.apply_payload(
-                pos,
-                chunk.primary_bit_mask,
-                true,
-                packet.sky_light,
-                &chunk.data,
-            )?;
+        let mut dirty = Vec::with_capacity(chunks.len() * 2);
+        for &(pos, payload) in chunks {
+            self.apply_payload(pos, payload, has_sky_light)?;
             push_with_neighbours(&self.chunks, pos, &mut dirty);
         }
         dirty.sort_unstable();
@@ -212,66 +196,108 @@ impl World {
         Ok(dirty)
     }
 
-    /// Applies one `Block Change` (0x23) packet and returns the dirty chunks.
+    /// Writes one block (`Block Change`, 0x23) and returns the dirty chunks.
     ///
     /// Border updates also dirty the adjacent chunk so its face culling can be
-    /// rebuilt.
-    pub fn apply_block_change(&mut self, packet: &BlockChange) -> Vec<ChunkPos> {
-        let (x, y, z) = packet.position();
-        let pos = BlockPos::new(x, y, z);
-        if !(0..WORLD_HEIGHT as i32).contains(&pos.y) {
-            return Vec::new();
-        }
-        let chunk_pos = pos.chunk();
-        let Some(column) = self.chunks.get_mut(&chunk_pos) else {
-            return Vec::new();
-        };
-        let changed = Arc::make_mut(column).set_block(
-            pos.local_x() as usize,
-            pos.y as usize,
-            pos.local_z() as usize,
-            BlockState::from_wire(packet.block_state),
-        );
-        if changed {
-            self.dirty_for_block(chunk_pos, pos.local_x(), pos.local_z())
+    /// rebuilt; ignored updates (see [`Self::set_block`]) dirty nothing.
+    pub fn apply_block_change(&mut self, pos: BlockPos, state: BlockState) -> Vec<ChunkPos> {
+        if self.set_block(pos, state) {
+            self.dirty_for_block(pos.chunk(), pos.local_x(), pos.local_z())
         } else {
             Vec::new()
         }
     }
 
-    /// Applies one `Multi Block Change` (0x22) packet.
-    pub fn apply_multi_block_change(&mut self, packet: &MultiBlockChange) -> Vec<ChunkPos> {
-        let chunk_pos = ChunkPos::new(packet.chunk_x, packet.chunk_z);
-        let Some(column) = self.chunks.get_mut(&chunk_pos) else {
+    /// Writes a batch of blocks of one column (`Multi Block Change`, 0x22).
+    ///
+    /// Each change is a chunk-local `(x, y, z)` and its new state. Returns the
+    /// column and the loaded neighbours whose shared border changed.
+    pub fn apply_block_changes(
+        &mut self,
+        chunk: ChunkPos,
+        changes: impl IntoIterator<Item = ((u8, u8, u8), BlockState)>,
+    ) -> Vec<ChunkPos> {
+        let Some(column) = self.chunks.get_mut(&chunk) else {
             return Vec::new();
         };
         let column = Arc::make_mut(column);
         let mut changed = false;
-        let mut touches_west = false;
-        let mut touches_east = false;
-        let mut touches_north = false;
-        let mut touches_south = false;
-        for record in &packet.records {
-            let (x, y, z) = record.local_position();
-            if column.set_block(
-                usize::from(x),
-                usize::from(y),
-                usize::from(z),
-                BlockState::from_wire(record.block_state),
-            ) {
+        let mut edges = (false, false, false, false);
+        for ((x, y, z), state) in changes {
+            if column.set_block(usize::from(x), usize::from(y), usize::from(z), state) {
                 changed = true;
-                touches_west |= x == 0;
-                touches_east |= x == 15;
-                touches_north |= z == 0;
-                touches_south |= z == 15;
+                edges.0 |= x == 0;
+                edges.1 |= x == 15;
+                edges.2 |= z == 0;
+                edges.3 |= z == 15;
             }
         }
-        if !changed {
-            return Vec::new();
+        if changed {
+            self.dirty_for_edges(chunk, edges)
+        } else {
+            Vec::new()
         }
-        self.dirty_for_edges(
-            chunk_pos,
-            (touches_west, touches_east, touches_north, touches_south),
+    }
+
+    /// Applies one `Chunk Data` (0x21) packet.
+    ///
+    /// # Errors
+    /// [`WorldError::ChunkPayloadLength`] for a malformed payload.
+    pub fn apply_chunk_data(&mut self, packet: &ChunkData) -> Result<Vec<ChunkPos>, WorldError> {
+        self.apply_chunk(
+            ChunkPos::new(packet.chunk_x, packet.chunk_z),
+            ChunkPayload {
+                primary_bit_mask: packet.primary_bit_mask,
+                ground_up: packet.ground_up,
+                data: &packet.data,
+            },
+        )
+    }
+
+    /// Applies a `Map Chunk Bulk` (0x26) packet.
+    ///
+    /// # Errors
+    /// [`WorldError::ChunkPayloadLength`] for a malformed payload.
+    pub fn apply_map_chunk_bulk(
+        &mut self,
+        packet: &MapChunkBulk,
+    ) -> Result<Vec<ChunkPos>, WorldError> {
+        let chunks: Vec<_> = packet
+            .chunks
+            .iter()
+            .map(|chunk| {
+                (
+                    ChunkPos::new(chunk.chunk_x, chunk.chunk_z),
+                    ChunkPayload {
+                        primary_bit_mask: chunk.primary_bit_mask,
+                        ground_up: true,
+                        data: &chunk.data,
+                    },
+                )
+            })
+            .collect();
+        self.apply_chunk_bulk(packet.sky_light, &chunks)
+    }
+
+    /// Applies one `Block Change` (0x23) packet and returns the dirty chunks.
+    pub fn apply_block_change_packet(&mut self, packet: &BlockChange) -> Vec<ChunkPos> {
+        let (x, y, z) = packet.position();
+        self.apply_block_change(
+            BlockPos::new(x, y, z),
+            BlockState::from_wire(packet.block_state),
+        )
+    }
+
+    /// Applies one `Multi Block Change` (0x22) packet.
+    pub fn apply_multi_block_change(&mut self, packet: &MultiBlockChange) -> Vec<ChunkPos> {
+        self.apply_block_changes(
+            ChunkPos::new(packet.chunk_x, packet.chunk_z),
+            packet.records.iter().map(|record| {
+                (
+                    record.local_position(),
+                    BlockState::from_wire(record.block_state),
+                )
+            }),
         )
     }
 
@@ -295,11 +321,14 @@ impl World {
     fn apply_payload(
         &mut self,
         pos: ChunkPos,
-        primary_bit_mask: u16,
-        ground_up: bool,
+        payload: ChunkPayload<'_>,
         has_sky_light: bool,
-        data: &[u8],
     ) -> Result<(), WorldError> {
+        let ChunkPayload {
+            primary_bit_mask,
+            ground_up,
+            data,
+        } = payload;
         if let Some(existing) = self.chunks.get_mut(&pos) {
             Arc::make_mut(existing).apply_payload(
                 primary_bit_mask,
@@ -391,12 +420,18 @@ fn push_if_loaded(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use umicraft_protocol::packets::play::clientbound::{
-        chunk_data::chunk_payload_len, BlockUpdate, BulkChunk,
-    };
+    use crate::chunk::payload_len;
+
+    fn payload(data: &[u8]) -> ChunkPayload<'_> {
+        ChunkPayload {
+            primary_bit_mask: 1,
+            ground_up: true,
+            data,
+        }
+    }
 
     fn flat_payload(block_state: u16) -> Vec<u8> {
-        let mut data = vec![0u8; chunk_payload_len(1, true, true)];
+        let mut data = vec![0u8; payload_len(1, true, true)];
         for pair in data[..8192].chunks_exact_mut(2) {
             pair.copy_from_slice(&block_state.to_le_bytes());
         }
@@ -406,7 +441,7 @@ mod tests {
     }
 
     fn flat_payload_without_sky_light(block_state: u16) -> Vec<u8> {
-        let mut data = vec![0u8; chunk_payload_len(1, false, true)];
+        let mut data = vec![0u8; payload_len(1, false, true)];
         for pair in data[..8192].chunks_exact_mut(2) {
             pair.copy_from_slice(&block_state.to_le_bytes());
         }
@@ -416,14 +451,9 @@ mod tests {
 
     fn world_with_chunk(pos: ChunkPos) -> World {
         let mut world = World::new(0);
-        let packet = ChunkData {
-            chunk_x: pos.x,
-            chunk_z: pos.z,
-            ground_up: true,
-            primary_bit_mask: 1,
-            data: flat_payload(0x20),
-        };
-        world.apply_chunk_data(&packet).unwrap();
+        world
+            .apply_chunk(pos, payload(&flat_payload(0x20)))
+            .unwrap();
         world
     }
 
@@ -456,13 +486,10 @@ mod tests {
     fn nether_forces_sky_light_to_zero_for_loaded_columns() {
         let mut world = World::new(-1);
         world
-            .apply_chunk_data(&ChunkData {
-                chunk_x: 0,
-                chunk_z: 0,
-                ground_up: true,
-                primary_bit_mask: 1,
-                data: flat_payload_without_sky_light(0x20),
-            })
+            .apply_chunk(
+                ChunkPos::new(0, 0),
+                payload(&flat_payload_without_sky_light(0x20)),
+            )
             .unwrap();
 
         // Section 0 is present but has no sky array (Nether wire format).
@@ -487,25 +514,21 @@ mod tests {
     #[test]
     fn applies_chunk_data_and_marks_neighbours() {
         let mut world = World::new(0);
-        let packet = ChunkData {
-            chunk_x: 0,
-            chunk_z: 0,
-            ground_up: true,
-            primary_bit_mask: 1,
-            data: flat_payload(0x20),
-        };
+        let data = flat_payload(0x20);
         assert_eq!(
-            world.apply_chunk_data(&packet).unwrap(),
+            world
+                .apply_chunk(ChunkPos::new(0, 0), payload(&data))
+                .unwrap(),
             vec![ChunkPos::new(0, 0)]
         );
         assert_eq!(world.chunk_count(), 1);
         assert_eq!(world.block(BlockPos::new(15, 0, 15)), BlockState::new(2, 0));
 
         // Loading the western neighbour dirties both columns.
-        let mut west = packet.clone();
-        west.chunk_x = -1;
         assert_eq!(
-            world.apply_chunk_data(&west).unwrap(),
+            world
+                .apply_chunk(ChunkPos::new(-1, 0), payload(&data))
+                .unwrap(),
             vec![ChunkPos::new(-1, 0), ChunkPos::new(0, 0)]
         );
     }
@@ -514,15 +537,13 @@ mod tests {
     fn ground_up_empty_mask_unloads_the_column() {
         let mut world = world_with_chunk(ChunkPos::new(0, 0));
         assert_eq!(world.chunk_count(), 1);
-        let unload = ChunkData {
-            chunk_x: 0,
-            chunk_z: 0,
-            ground_up: true,
+        let unload = ChunkPayload {
             primary_bit_mask: 0,
-            data: Vec::new(),
+            ground_up: true,
+            data: &[],
         };
         assert_eq!(
-            world.apply_chunk_data(&unload).unwrap(),
+            world.apply_chunk(ChunkPos::new(0, 0), unload).unwrap(),
             vec![ChunkPos::new(0, 0)]
         );
         assert_eq!(world.chunk_count(), 0);
@@ -532,43 +553,35 @@ mod tests {
     #[test]
     fn bulk_is_atomic_on_bad_payload() {
         let mut world = World::new(0);
-        let good = BulkChunk {
-            chunk_x: 0,
-            chunk_z: 0,
-            primary_bit_mask: 1,
-            data: flat_payload(0x20),
-        };
-        let bad = BulkChunk {
-            chunk_x: 1,
-            chunk_z: 0,
-            primary_bit_mask: 1,
-            data: vec![0; 5],
-        };
-        let packet = MapChunkBulk {
-            sky_light: true,
-            chunks: vec![good, bad],
-        };
-        let err = world.apply_map_chunk_bulk(&packet).unwrap_err();
+        let good = flat_payload(0x20);
+        let chunks = [
+            (ChunkPos::new(0, 0), payload(&good)),
+            (ChunkPos::new(1, 0), payload(&[0; 5])),
+        ];
+        let err = world.apply_chunk_bulk(true, &chunks).unwrap_err();
         assert!(matches!(err, WorldError::ChunkPayloadLength { .. }));
         assert_eq!(world.chunk_count(), 0, "validation happens before mutation");
+    }
+
+    #[test]
+    fn a_malformed_chunk_leaves_the_world_unchanged() {
+        let mut world = world_with_chunk(ChunkPos::new(0, 0));
+        let err = world
+            .apply_chunk(ChunkPos::new(0, 0), payload(&[0; 5]))
+            .unwrap_err();
+        assert!(matches!(err, WorldError::ChunkPayloadLength { .. }));
+        assert_eq!(world.block(BlockPos::new(0, 0, 0)), BlockState::new(2, 0));
     }
 
     #[test]
     fn block_change_updates_and_dirties_border_neighbour() {
         let mut world = world_with_chunk(ChunkPos::new(0, 0));
         world
-            .apply_chunk_data(&ChunkData {
-                chunk_x: -1,
-                chunk_z: 0,
-                ground_up: true,
-                primary_bit_mask: 1,
-                data: flat_payload(0x20),
-            })
+            .apply_chunk(ChunkPos::new(-1, 0), payload(&flat_payload(0x20)))
             .unwrap();
 
-        let packet = BlockChange::at(-1, 5, 3, 0x10);
         assert_eq!(
-            world.apply_block_change(&packet),
+            world.apply_block_change(BlockPos::new(-1, 5, 3), BlockState::from_wire(0x10)),
             vec![ChunkPos::new(-1, 0), ChunkPos::new(0, 0)]
         );
         assert_eq!(world.block(BlockPos::new(-1, 5, 3)), BlockState::new(1, 0));
@@ -577,15 +590,13 @@ mod tests {
     #[test]
     fn multi_block_change_applies_chunk_local_offsets() {
         let mut world = world_with_chunk(ChunkPos::new(2, -3));
-        let packet = MultiBlockChange {
-            chunk_x: 2,
-            chunk_z: -3,
-            records: vec![
-                BlockUpdate::at(0, 0, 0, 0x70),
-                BlockUpdate::at(15, 255, 15, 0x10),
+        let dirty = world.apply_block_changes(
+            ChunkPos::new(2, -3),
+            [
+                ((0, 0, 0), BlockState::from_wire(0x70)),
+                ((15, 255, 15), BlockState::from_wire(0x10)),
             ],
-        };
-        let dirty = world.apply_multi_block_change(&packet);
+        );
         assert_eq!(dirty, vec![ChunkPos::new(2, -3)]);
         assert_eq!(
             world.block(BlockPos::new(32, 0, -48)),
@@ -600,16 +611,13 @@ mod tests {
     #[test]
     fn updates_outside_loaded_chunks_are_ignored() {
         let mut world = World::new(0);
+        let stone = BlockState::new(1, 0);
         assert!(world
-            .apply_block_change(&BlockChange::at(0, 0, 0, 0x10))
+            .apply_block_change(BlockPos::new(0, 0, 0), stone)
             .is_empty());
-        assert!(!world.set_block(BlockPos::new(0, 0, 0), BlockState::new(1, 0)));
+        assert!(!world.set_block(BlockPos::new(0, 0, 0), stone));
         assert!(world
-            .apply_multi_block_change(&MultiBlockChange {
-                chunk_x: 0,
-                chunk_z: 0,
-                records: vec![BlockUpdate::at(0, 0, 0, 1)],
-            })
+            .apply_block_changes(ChunkPos::new(0, 0), [((0, 0, 0), stone)])
             .is_empty());
     }
 }

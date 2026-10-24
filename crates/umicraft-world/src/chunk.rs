@@ -2,8 +2,6 @@
 
 //! A full 16×256×16 chunk column.
 
-use umicraft_protocol::packets::play::clientbound::chunk_data::chunk_payload_len;
-
 use crate::block::BlockState;
 use crate::error::WorldError;
 use crate::light::LightLevel;
@@ -16,6 +14,74 @@ pub const SECTION_COUNT: usize = 16;
 pub const WORLD_HEIGHT: usize = 256;
 /// Biome bytes per column.
 const BIOME_COUNT: usize = 256;
+
+/// One chunk column payload in the 1.8 layout, as the server sends it.
+///
+/// The layout, for each section of `primary_bit_mask` in ascending order: the
+/// 4096 little-endian block states of every section, then their block-light
+/// nibbles, then their sky-light nibbles when the dimension has a sky, then the
+/// 256 biome bytes when `ground_up` is set. Source: docs/sources.md,
+/// "M2 / Chunk Data 0x21".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkPayload<'a> {
+    /// The sections present in `data`, bit `n` for section `n`.
+    pub primary_bit_mask: u16,
+    /// Whether the payload replaces the whole column (and carries biomes).
+    pub ground_up: bool,
+    /// The raw payload bytes.
+    pub data: &'a [u8],
+}
+
+impl ChunkPayload<'_> {
+    /// Checks that `data` has the length the mask and flags announce.
+    ///
+    /// # Errors
+    /// [`WorldError::ChunkPayloadLength`] on a mismatch.
+    pub fn check_len(&self, has_sky_light: bool) -> Result<(), WorldError> {
+        check_payload_len(
+            self.primary_bit_mask,
+            self.ground_up,
+            has_sky_light,
+            self.data.len(),
+        )
+    }
+}
+
+/// Byte length of a 1.8 chunk payload for a section mask and its flags.
+///
+/// ```
+/// use umicraft_world::chunk::payload_len;
+///
+/// // One section with both light arrays, plus the biomes.
+/// assert_eq!(payload_len(0b1, true, true), 12_544);
+/// ```
+#[must_use]
+pub const fn payload_len(primary_bit_mask: u16, has_sky_light: bool, ground_up: bool) -> usize {
+    let sky = if has_sky_light { LIGHT_BYTES } else { 0 };
+    let per_section = BLOCKS_PER_SECTION * 2 + LIGHT_BYTES + sky;
+    let biomes = if ground_up { BIOME_COUNT } else { 0 };
+    primary_bit_mask.count_ones() as usize * per_section + biomes
+}
+
+fn check_payload_len(
+    primary_bit_mask: u16,
+    ground_up: bool,
+    has_sky_light: bool,
+    actual: usize,
+) -> Result<(), WorldError> {
+    let expected = payload_len(primary_bit_mask, has_sky_light, ground_up);
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(WorldError::ChunkPayloadLength {
+            expected,
+            actual,
+            primary_bit_mask,
+            sky_light: has_sky_light,
+            ground_up,
+        })
+    }
+}
 
 /// One chunk column: up to 16 sections plus the 256-biome array.
 #[derive(Debug, Clone)]
@@ -175,16 +241,7 @@ impl ChunkColumn {
         has_sky_light: bool,
         data: &[u8],
     ) -> Result<(), WorldError> {
-        let expected = chunk_payload_len(primary_bit_mask, has_sky_light, ground_up);
-        if data.len() != expected {
-            return Err(WorldError::ChunkPayloadLength {
-                expected,
-                actual: data.len(),
-                primary_bit_mask,
-                sky_light: has_sky_light,
-                ground_up,
-            });
-        }
+        check_payload_len(primary_bit_mask, ground_up, has_sky_light, data.len())?;
 
         let section_indices: Vec<usize> = (0..SECTION_COUNT)
             .filter(|index| primary_bit_mask & (1 << index) != 0)
