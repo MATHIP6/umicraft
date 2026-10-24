@@ -145,6 +145,10 @@ pub struct Renderer {
     environment: RenderEnvironment,
     /// Nearest-neighbour sampler shared by the fallback and installed arrays.
     block_sampler: wgpu::Sampler,
+    /// The built-in procedural block array, kept so
+    /// [`Renderer::use_procedural_blocks`] can bind it again after an
+    /// official atlas replaced it.
+    procedural_blocks: wgpu::TextureView,
     overlay_pipeline: wgpu::RenderPipeline,
     /// Layout and sampler shared by every font texture, so
     /// [`Renderer::set_font_atlas`] can bind a replacement texture without
@@ -465,6 +469,7 @@ impl Renderer {
             sky,
             environment: RenderEnvironment::default(),
             block_sampler,
+            procedural_blocks: block_view,
             overlay_pipeline,
             overlay_layout,
             font_sampler,
@@ -695,6 +700,22 @@ impl Renderer {
             &view,
         );
         Ok(())
+    }
+
+    /// Binds the built-in procedural block array again.
+    ///
+    /// Meshes built by the procedural mesher index this array's layers; a
+    /// caller that switches back from an official atlas calls this before it
+    /// uploads such meshes. The renderer starts on this array, so a call on a
+    /// fresh renderer changes nothing.
+    pub fn use_procedural_blocks(&mut self) {
+        self.terrain_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.camera_buffer,
+            &self.block_sampler,
+            &self.procedural_blocks,
+        );
     }
 
     /// Replaces the GPU mesh for `pos`, or removes it when both passes are
