@@ -30,6 +30,12 @@ play state. ADR-0010.
 `Player Position and Look` (0x08), after resolving the 1.8 relative flags. The
 game thread answers it with a position acknowledgement. ADR-0005 §A.5.
 
+## Physics
+
+**Medium** — what the player moves through in a tick and whose rules apply:
+land (with ladders), water or lava (`umicraft_game::media`). Cobwebs and
+soul sand are not media; they act on the motion after the move. ADR-0014.
+
 ## Rendering
 
 **Terrain textures** — the texture array the GPU samples for blocks together

@@ -35,6 +35,7 @@
 
 pub mod collision;
 pub mod input;
+pub mod media;
 pub mod physics;
 pub mod prediction;
 pub mod raycast;
