@@ -1012,7 +1012,8 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, AssetsError> {
 /// # Errors
 /// [`AssetsError::Image`] on corrupt PNG or unsupported color format.
 pub fn decode_png_bytes(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), AssetsError> {
-    let decoder = png::Decoder::new(bytes);
+    let mut decoder = png::Decoder::new(bytes);
+    decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().map_err(|err| AssetsError::Image {
         path: "skin.png".to_string(),
         reason: err.to_string(),
@@ -1026,12 +1027,27 @@ pub fn decode_png_bytes(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), AssetsError
         })?;
 
     buf.truncate(info.buffer_size());
-    let rgba = match info.color_type {
+    let (output_color, _bits) = reader.output_color_type();
+    let rgba = match output_color {
         png::ColorType::Rgba => buf,
         png::ColorType::Rgb => {
             let mut expanded = Vec::with_capacity((buf.len() / 3) * 4);
             for chunk in buf.chunks_exact(3) {
                 expanded.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
+            }
+            expanded
+        }
+        png::ColorType::Grayscale => {
+            let mut expanded = Vec::with_capacity(buf.len() * 4);
+            for &gray in &buf {
+                expanded.extend_from_slice(&[gray, gray, gray, 255]);
+            }
+            expanded
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let mut expanded = Vec::with_capacity((buf.len() / 2) * 4);
+            for chunk in buf.chunks_exact(2) {
+                expanded.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
             }
             expanded
         }

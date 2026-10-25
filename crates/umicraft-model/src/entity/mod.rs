@@ -552,7 +552,9 @@ mod tests {
     fn creeper_model_vertex_count() {
         let model = CreeperModel::new();
         let mesh = model.emit_mesh();
-        assert_eq!(mesh.len(), 252);
+        // 6 boxes: head, body, 4 legs (6 * 36 = 216 vertices).
+        // (MCP ModelCreeper.render renders head, body, leg1..4; creeperArmor is an unrendered field).
+        assert_eq!(mesh.len(), 216);
     }
 
     #[test]

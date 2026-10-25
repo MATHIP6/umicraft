@@ -90,7 +90,7 @@ impl HorseModel {
                 tex,
                 0.0,
             ));
-        head.rotation[0] = std::f32::consts::FRAC_PI_6;
+        head.rotation[0] = -std::f32::consts::FRAC_PI_6;
 
         // Back left leg
         let back_left_leg = ModelPart::new([4.0, 15.0, 9.0])
@@ -234,7 +234,7 @@ impl HorseModel {
         head_pitch: f32,
     ) {
         self.head.rotation[1] = head_yaw;
-        self.head.rotation[0] = std::f32::consts::FRAC_PI_6 + head_pitch;
+        self.head.rotation[0] = -std::f32::consts::FRAC_PI_6 + head_pitch;
 
         let swing = (limb_angle * 0.6662).cos() * 0.8 * limb_distance;
         self.back_left_leg.rotation[0] = swing;

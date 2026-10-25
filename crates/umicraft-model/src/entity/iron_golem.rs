@@ -28,12 +28,14 @@ impl IronGolemModel {
     #[must_use]
     pub fn new() -> Self {
         let tex = [128.0, 128.0];
-        // Ground Y=0. Legs are 16 units high, pivot Y = 13.0 (MCP: 18.0 - 7.0 = 11.0).
-        // Torso pivot Y = 23.0 (MCP: -7.0 from Y=30).
-        let torso_py = 23.0;
+        // Ground Y=0.
+        // In MCP: leg top is at Y=16, waist is Y=16..21, chest is Y=21..33, head is Y=33..43.
+        let waist_py = 16.0;
         let leg_py = 13.0;
+        let shoulder_py = 31.0;
+        let head_py = 33.0;
 
-        let head = ModelPart::new([0.0, torso_py + 8.0, -2.0])
+        let head = ModelPart::new([0.0, head_py, -2.0])
             .with_box(ModelBox::new(
                 [-4.0, 0.0, -5.5],
                 [8.0, 10.0, 8.0],
@@ -49,34 +51,34 @@ impl IronGolemModel {
                 0.0,
             ));
 
-        let body = ModelPart::new([0.0, torso_py, 0.0])
-            // Upper chest
+        let body = ModelPart::new([0.0, waist_py, 0.0])
+            // Lower waist (Y = 16..21)
             .with_box(ModelBox::new(
-                [-9.0, -2.0, -6.0],
-                [18.0, 12.0, 11.0],
-                [0.0, 40.0],
-                tex,
-                0.0,
-            ))
-            // Lower waist
-            .with_box(ModelBox::new(
-                [-4.5, -10.0, -3.0],
+                [-4.5, 0.0, -3.0],
                 [9.0, 5.0, 6.0],
                 [0.0, 70.0],
                 tex,
                 0.5,
+            ))
+            // Upper chest (Y = 21..33)
+            .with_box(ModelBox::new(
+                [-9.0, 5.0, -6.0],
+                [18.0, 12.0, 11.0],
+                [0.0, 40.0],
+                tex,
+                0.0,
             ));
 
-        let right_arm = ModelPart::new([0.0, torso_py + 8.0, 0.0]).with_box(ModelBox::new(
-            [-13.0, -28.0, -3.0],
+        let right_arm = ModelPart::new([0.0, shoulder_py, 0.0]).with_box(ModelBox::new(
+            [-13.0, -27.5, -3.0],
             [4.0, 30.0, 6.0],
             [60.0, 21.0],
             tex,
             0.0,
         ));
 
-        let left_arm = ModelPart::new([0.0, torso_py + 8.0, 0.0]).with_box(ModelBox::new(
-            [9.0, -28.0, -3.0],
+        let left_arm = ModelPart::new([0.0, shoulder_py, 0.0]).with_box(ModelBox::new(
+            [9.0, -27.5, -3.0],
             [4.0, 30.0, 6.0],
             [60.0, 58.0],
             tex,

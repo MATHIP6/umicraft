@@ -115,7 +115,7 @@ impl OcelotModel {
             tex,
             0.0,
         ));
-        tail1.rotation[0] = 0.9;
+        tail1.rotation[0] = -0.9;
 
         // Tail 2
         let tail2 = ModelPart::new([0.0, 4.0, 14.0]).with_box(ModelBox::new(

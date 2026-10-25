@@ -79,7 +79,7 @@ impl BatModel {
             0.0,
         ));
 
-        let outer_right_wing = ModelPart::new([-12.0, 6.0, 0.0]).with_box(ModelBox::new(
+        let outer_right_wing = ModelPart::new([-12.0, 0.0, 0.0]).with_box(ModelBox::new(
             [-8.0, -6.0, 0.0],
             [8.0, 12.0, 1.0],
             [24.0, 16.0],
@@ -95,7 +95,7 @@ impl BatModel {
             0.0,
         ));
 
-        let outer_left_wing = ModelPart::new([12.0, 6.0, 0.0]).with_box(ModelBox::new(
+        let outer_left_wing = ModelPart::new([12.0, 0.0, 0.0]).with_box(ModelBox::new(
             [0.0, -6.0, 0.0],
             [8.0, 12.0, 1.0],
             [24.0, 16.0],
@@ -131,10 +131,14 @@ impl BatModel {
 
         self.head.emit(root, &mut out);
         self.body.emit(root, &mut out);
+
+        let rw_transform = self.right_wing.transform(root);
         self.right_wing.emit(root, &mut out);
-        self.outer_right_wing.emit(root, &mut out);
+        self.outer_right_wing.emit(rw_transform, &mut out);
+
+        let lw_transform = self.left_wing.transform(root);
         self.left_wing.emit(root, &mut out);
-        self.outer_left_wing.emit(root, &mut out);
+        self.outer_left_wing.emit(lw_transform, &mut out);
 
         out
     }

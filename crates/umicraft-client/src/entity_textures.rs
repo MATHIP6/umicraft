@@ -672,7 +672,7 @@ pub fn mesh_entities(
     for ent in snapshots {
         let world_pos = ent.position;
         let yaw_rad = ent.yaw.to_radians();
-        let rot = Mat4::from_rotation_y(std::f32::consts::PI - yaw_rad);
+        let rot = Mat4::from_rotation_y(-yaw_rad);
 
         let sneaking = ent.kind == EntityKind::Player && ent.flags.is_sneaking();
         let pos = if sneaking {

@@ -64,7 +64,7 @@ impl RabbitModel {
             tex,
             0.0,
         ));
-        left_thigh.rotation[0] = -0.349;
+        left_thigh.rotation[0] = 0.349;
 
         let mut right_thigh = ModelPart::new([-3.0, 1.0, 3.7]).with_box(ModelBox::new(
             [-1.0, 0.0, 0.0],
@@ -73,9 +73,9 @@ impl RabbitModel {
             tex,
             0.0,
         ));
-        right_thigh.rotation[0] = -0.349;
+        right_thigh.rotation[0] = 0.349;
 
-        // Body (6×5×10)
+        // Body
         let mut body = ModelPart::new([0.0, 5.0, 8.0]).with_box(ModelBox::new(
             [-3.0, -2.5, -10.0],
             [6.0, 5.0, 10.0],
@@ -83,9 +83,9 @@ impl RabbitModel {
             tex,
             0.0,
         ));
-        body.rotation[0] = -0.349;
+        body.rotation[0] = 0.349;
 
-        // Front arms (2×7×2)
+        // Front arms
         let mut left_arm = ModelPart::new([3.0, 7.0, -1.0]).with_box(ModelBox::new(
             [-1.0, -7.0, -1.0],
             [2.0, 7.0, 2.0],
@@ -93,7 +93,7 @@ impl RabbitModel {
             tex,
             0.0,
         ));
-        left_arm.rotation[0] = -0.174;
+        left_arm.rotation[0] = 0.174;
 
         let mut right_arm = ModelPart::new([-3.0, 7.0, -1.0]).with_box(ModelBox::new(
             [-1.0, -7.0, -1.0],
@@ -102,7 +102,7 @@ impl RabbitModel {
             tex,
             0.0,
         ));
-        right_arm.rotation[0] = -0.174;
+        right_arm.rotation[0] = 0.174;
 
         // Head (5×4×5) + Nose (1×1×1)
         let head = ModelPart::new([0.0, 8.0, -1.0])
@@ -148,7 +148,7 @@ impl RabbitModel {
             tex,
             0.0,
         ));
-        tail.rotation[0] = -0.349;
+        tail.rotation[0] = 0.349;
 
         Self {
             left_foot,

@@ -143,7 +143,7 @@ impl DragonModel {
                 0.0,
             ));
 
-        let left_wing_tip = ModelPart::new([68.0, 20.0, 2.0])
+        let left_wing_tip = ModelPart::new([56.0, 0.0, 0.0])
             .with_box(ModelBox::new(
                 [0.0, -2.0, -2.0],
                 [56.0, 4.0, 4.0],
@@ -176,7 +176,7 @@ impl DragonModel {
                 0.0,
             ));
 
-        let right_wing_tip = ModelPart::new([-68.0, 20.0, 2.0])
+        let right_wing_tip = ModelPart::new([-56.0, 0.0, 0.0])
             .with_box(ModelBox::new(
                 [-56.0, -2.0, -2.0],
                 [56.0, 4.0, 4.0],
@@ -288,10 +288,15 @@ impl DragonModel {
         self.head.emit(root, &mut out);
         self.jaw.emit(root, &mut out);
         self.body.emit(root, &mut out);
+
+        let lw_t = self.left_wing.transform(root);
         self.left_wing.emit(root, &mut out);
-        self.left_wing_tip.emit(root, &mut out);
+        self.left_wing_tip.emit(lw_t, &mut out);
+
+        let rw_t = self.right_wing.transform(root);
         self.right_wing.emit(root, &mut out);
-        self.right_wing_tip.emit(root, &mut out);
+        self.right_wing_tip.emit(rw_t, &mut out);
+
         self.rear_left_leg.emit(root, &mut out);
         self.rear_right_leg.emit(root, &mut out);
         self.front_left_leg.emit(root, &mut out);

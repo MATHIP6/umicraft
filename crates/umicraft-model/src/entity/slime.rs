@@ -84,23 +84,39 @@ impl SlimeModel {
         }
     }
 
-    /// Creates a magma cube model (segmented 8-layer core).
+    /// Creates a magma cube model (segmented 8-layer shell + inner core) matching MCP `ModelMagmaCube.java`.
     #[must_use]
     pub fn magma_cube(scale: f32) -> Self {
         let tex = [64.0, 32.0];
         let mut core = ModelPart::new([0.0, 0.0, 0.0]);
-        // 8 segmented slices
+
+        // 8 segmented slices from MCP ModelMagmaCube
         for i in 0..8 {
-            let y = i as f32;
-            let v = (i * 4) as f32;
+            let (u, v) = match i {
+                2 => (24.0, 10.0),
+                3 => (24.0, 19.0),
+                other => (0.0, other as f32),
+            };
+            // In MCP: Y = 16 + i (where 24 is ground).
+            // So slice 0 is at Y=7, slice 7 is at Y=0.
+            let y = (7 - i) as f32;
             core = core.with_box(ModelBox::new(
                 [-4.0, y, -4.0],
                 [8.0, 1.0, 8.0],
-                [0.0, v],
+                [u, v],
                 tex,
                 0.0,
             ));
         }
+
+        // Inner core (4x4x4) at [0, 16] in MCP at Y=18..22 (Umicraft Y=2..6)
+        core = core.with_box(ModelBox::new(
+            [-2.0, 2.0, -2.0],
+            [4.0, 4.0, 4.0],
+            [0.0, 16.0],
+            tex,
+            0.0,
+        ));
 
         Self {
             inner_body: core,

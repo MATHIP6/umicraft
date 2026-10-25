@@ -31,7 +31,7 @@ impl BlazeModel {
 
         let sticks = std::array::from_fn(|_| {
             ModelPart::new([0.0, 0.0, 0.0]).with_box(ModelBox::new(
-                [-1.0, -4.0, -1.0],
+                [-1.0, -8.0, -1.0],
                 [2.0, 8.0, 2.0],
                 [0.0, 16.0],
                 tex,
@@ -59,7 +59,7 @@ impl BlazeModel {
         let mut angle2 = (std::f32::consts::PI / 4.0) + anim_time * std::f32::consts::PI * 0.03;
         for (i, stick) in self.sticks[4..8].iter_mut().enumerate() {
             let y_off = (((i + 4) * 2) as f32 + anim_time * 0.25).cos();
-            stick.pivot = [angle2.cos() * 7.0, 14.0 + y_off, angle2.sin() * 7.0];
+            stick.pivot = [angle2.cos() * 7.0, 16.0 + y_off, angle2.sin() * 7.0];
             angle2 += 1.0;
         }
 
@@ -68,7 +68,7 @@ impl BlazeModel {
         for (i, stick) in self.sticks[8..12].iter_mut().enumerate() {
             let k = (i + 8) as f32;
             let y_off = (k * 1.5 + anim_time * 0.5).cos();
-            stick.pivot = [angle3.cos() * 5.0, 6.0 + y_off, angle3.sin() * 5.0];
+            stick.pivot = [angle3.cos() * 5.0, 7.0 + y_off, angle3.sin() * 5.0];
             angle3 += 1.0;
         }
     }
