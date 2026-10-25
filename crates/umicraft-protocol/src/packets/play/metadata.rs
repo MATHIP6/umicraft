@@ -145,11 +145,21 @@ impl Metadata {
     }
 
     /// Reads a string value at the given index.
+    ///
+    /// The raw `value` includes the VarInt length prefix; this method skips it
+    /// and returns only the UTF-8 payload.
     #[must_use]
     pub fn get_string(&self, index: u8) -> Option<String> {
         self.get(index)
             .filter(|obj| obj.type_id == 4)
-            .and_then(|obj| String::from_utf8(obj.value.clone()).ok())
+            .and_then(|obj| {
+                let mut cursor = obj.value.as_slice();
+                let len = read_var_u32(&mut cursor).ok()? as usize;
+                if cursor.len() < len {
+                    return None;
+                }
+                String::from_utf8(cursor[..len].to_vec()).ok()
+            })
     }
 
     /// Decodes the standard 1.8 data watcher fields into a typed structure.
@@ -291,13 +301,18 @@ fn read_value(reader: &mut impl Read, type_id: u8) -> Result<Vec<u8>, ProtocolEr
         3 => read_exact_bytes(reader, 4), // float
         4 => {
             // String: VarInt byte length, then the UTF-8 bytes.
-            let len = read_var_u32(reader)? as usize;
+            // Use a recording reader so the VarInt prefix is kept in `value`
+            // and the roundtrip encode reproduces the original wire bytes.
+            let mut recorder = RecordingReader::new(reader);
+            let len = read_var_u32(&mut recorder)? as usize;
             if len > MAX_STRING_BYTES {
                 return Err(ProtocolError::Invariant(format!(
                     "data watcher string of {len} bytes exceeds the packet budget"
                 )));
             }
-            read_exact_bytes(reader, len)
+            let mut bytes = vec![0u8; len];
+            recorder.read_exact(&mut bytes)?;
+            Ok(recorder.into_recorded())
         }
         5 => {
             // Item stack: variable width, so it is parsed with a recording
@@ -372,6 +387,27 @@ mod tests {
             metadata.objects[0].value,
             vec![0x00, 0x01, 0x40, 0x00, 0x00, 0x00]
         );
+    }
+
+    #[test]
+    fn a_string_value_round_trips() {
+        // Type 4 (string), index 2: "Hi" encoded as VarInt(2) + 0x48 0x69.
+        let bytes = [
+            0x82, // header: type 4 (string), index 2
+            0x02, 0x48, 0x69, // VarInt length 2 + "Hi"
+            0x7F, // terminator
+        ];
+        let metadata = Metadata::decode(&mut &bytes[..]).unwrap();
+        assert_eq!(metadata.objects.len(), 1);
+        assert_eq!(metadata.objects[0].type_id, 4);
+        assert_eq!(metadata.objects[0].index, 2);
+        assert_eq!(metadata.objects[0].value, vec![0x02, 0x48, 0x69]);
+
+        let mut buffer = Vec::new();
+        metadata.encode(&mut buffer).unwrap();
+        assert_eq!(buffer, bytes);
+
+        assert_eq!(metadata.get_string(2), Some("Hi".to_string()),);
     }
 
     #[test]

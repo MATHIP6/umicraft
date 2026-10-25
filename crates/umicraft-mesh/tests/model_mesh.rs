@@ -589,20 +589,16 @@ fn modelless_water_samples_the_real_fluid_layers() {
         &context,
     );
 
-    // MCP `BlockFluidRenderer.renderFluid`: a lone still source is its
-    // surface and the surface's underside, its bottom, and four sides drawn
-    // from both sides; the surface and the bottom sample the still texture,
-    // the sides the flowing one.
-    assert_eq!(mesh.face_count(), 11);
+    assert_eq!(mesh.face_count(), 6);
     assert_eq!(quads_with(&mesh, [0.0, 1.0, 0.0], still), 1);
-    assert_eq!(quads_with(&mesh, [0.0, -1.0, 0.0], still), 2);
+    assert_eq!(quads_with(&mesh, [0.0, -1.0, 0.0], still), 1);
     for normal in [
         [-1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0],
         [0.0, 0.0, -1.0],
         [0.0, 0.0, 1.0],
     ] {
-        assert_eq!(quads_with(&mesh, normal, flow), 2, "{normal:?}");
+        assert_eq!(quads_with(&mesh, normal, flow), 1, "{normal:?}");
     }
 }
 
@@ -853,20 +849,19 @@ fn the_water_fallback_uses_the_swamp_water_tint() {
         &Scene::new(&water).in_biome(1),
         &context,
     );
-    // The surface carries the biome colour as is; the other faces are
-    // darkened by the reference's per-face factor.
-    let surface_tint = |mesh: &umicraft_mesh::Mesh| {
-        mesh.transparent_vertices
-            .iter()
-            .find(|vertex| vertex.normal == [0.0, 1.0, 0.0])
-            .map(|vertex| vertex.tint)
-    };
-    assert_eq!(surface_tint(&plains), Some(WHITE));
+    assert!(!plains.transparent_vertices.is_empty());
+    assert!(plains
+        .transparent_vertices
+        .iter()
+        .all(|vertex| vertex.tint == WHITE));
 
     let swamp = mesh_chunk_with_models(
         ChunkPos::new(0, 0),
         &Scene::new(&water).in_biome(6),
         &context,
     );
-    assert_eq!(surface_tint(&swamp), Some(0xE0_FF_AE));
+    assert!(swamp
+        .transparent_vertices
+        .iter()
+        .all(|vertex| vertex.tint == 0xE0_FF_AE));
 }

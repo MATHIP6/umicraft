@@ -14,7 +14,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Instant;
 
-use umicraft_game::entity::EntityRenderSnapshot;
+use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
 use umicraft_game::RenderState;
 use umicraft_mesh::{ChunkSnapshot, Mesh};
 use umicraft_render::{Camera, HudState, RenderEnvironment, Renderer};
@@ -61,8 +61,8 @@ pub struct WorldView {
     status: GameStatus,
     ended: Option<String>,
     frames: usize,
-    /// Active living entities snapshot from the latest frame.
-    entities: Arc<[EntityRenderSnapshot]>,
+    /// Active living entities interpolation data from the latest frame.
+    entities: Arc<[EntityFrameData]>,
 }
 
 impl WorldView {
@@ -161,10 +161,14 @@ impl WorldView {
         self.frames
     }
 
-    /// The active living entities in the newest simulation frame.
+    /// Interpolated entity render snapshots for the current render instant.
+    ///
+    /// Uses the same partial tick fraction as the camera so entities and the
+    /// world stay in sync.
     #[must_use]
-    pub fn entities(&self) -> &[EntityRenderSnapshot] {
-        &self.entities
+    pub fn entities(&self, now: Instant) -> Vec<EntityRenderSnapshot> {
+        let alpha = self.view.partial_tick(now);
+        self.entities.iter().map(|e| e.interpolate(alpha)).collect()
     }
 
     /// The number of active living entities in the newest frame.

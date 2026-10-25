@@ -309,22 +309,6 @@ impl DemoScene {
         }
         labels.push("leaf canopy");
 
-        // 6b. Liquid slopes along the south edge, levels written by hand
-        //     because the demo world does not tick: water losing one level
-        //     per block from a source at x = 15, lava two per block as in
-        //     the overworld. The surfaces must step down and the flowing
-        //     texture must turn west (`BlockFluidRenderer`).
-        for (offset, level) in [0u8, 1, 2, 3, 4].into_iter().enumerate() {
-            let id = if level == 0 { 9 } else { 8 };
-            column.set_block(15 - offset, M6_GROUND_Y + 1, 14, BlockState::new(id, level));
-        }
-        labels.push("water slope");
-        for (offset, level) in [0u8, 2, 4, 6].into_iter().enumerate() {
-            let id = if level == 0 { 11 } else { 10 };
-            column.set_block(15 - offset, M6_GROUND_Y + 1, 15, BlockState::new(id, level));
-        }
-        labels.push("lava slope");
-
         // 7. The cave: a stone shell under the platform with a 3×3×3 room,
         //    a glowstone in the west wall and a light falloff inside. The
         //    shell spans one cell beyond the interior on every side so the
@@ -773,8 +757,6 @@ scene blocks      : stone, dirt, oak stairs
             "silhouette pillar",
             "water pool",
             "leaf canopy",
-            "water slope",
-            "lava slope",
             "cave glowstone",
         ];
         let expected_labels = 52 + m6_labels.len();

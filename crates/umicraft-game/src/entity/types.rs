@@ -150,6 +150,8 @@ pub struct EntityRecord {
     pub held_item: Option<u16>,
     /// Visual flags.
     pub flags: EntityFlags,
+    /// Remaining interpolation ticks for position/rotation smoothing (vanilla: 3).
+    pub interpolation_steps: u8,
 }
 
 impl EntityRecord {
@@ -179,8 +181,91 @@ impl EntityRecord {
             uuid: None,
             held_item: None,
             flags: EntityFlags::default(),
+            interpolation_steps: 0,
         }
     }
+}
+
+/// Per-entity interpolation data sent to the render thread each tick.
+///
+/// Carries the previous and current tick states so the render thread can
+/// produce smoothly interpolated snapshots at any sub-tick fraction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EntityFrameData {
+    /// Unique entity ID.
+    pub id: EntityId,
+    /// Entity category.
+    pub kind: EntityKind,
+    /// Position at the previous simulation tick.
+    pub prev_position: Vec3,
+    /// Position at the current simulation tick.
+    pub position: Vec3,
+    /// Previous body yaw in degrees.
+    pub prev_yaw: f32,
+    /// Current body yaw in degrees.
+    pub yaw: f32,
+    /// Previous pitch in degrees.
+    pub prev_pitch: f32,
+    /// Current pitch in degrees.
+    pub pitch: f32,
+    /// Previous head yaw in degrees.
+    pub prev_head_yaw: f32,
+    /// Current head yaw in degrees.
+    pub head_yaw: f32,
+    /// Accumulated limb swing phase.
+    pub limb_swing: f32,
+    /// Previous limb swing amplitude.
+    pub prev_limb_swing_amount: f32,
+    /// Current limb swing amplitude.
+    pub limb_swing_amount: f32,
+    /// Player UUID for skin lookup.
+    pub uuid: Option<[u8; 16]>,
+    /// Numeric ID of the held item.
+    pub held_item: Option<u16>,
+    /// Entity visual flags.
+    pub flags: EntityFlags,
+}
+
+impl EntityFrameData {
+    /// Produces an interpolated render snapshot at the given sub-tick fraction.
+    ///
+    /// `alpha` is in `0.0..=1.0` where 0 is the previous tick and 1 the current.
+    #[must_use]
+    pub fn interpolate(&self, alpha: f32) -> EntityRenderSnapshot {
+        let a = alpha.clamp(0.0, 1.0);
+        let position = self.prev_position.lerp(self.position, a);
+        let yaw = interpolate_angle_deg(self.prev_yaw, self.yaw, a);
+        let pitch = self.prev_pitch + (self.pitch - self.prev_pitch) * a;
+        let head_yaw = interpolate_angle_deg(self.prev_head_yaw, self.head_yaw, a);
+        let limb_swing_amount = self.prev_limb_swing_amount
+            + (self.limb_swing_amount - self.prev_limb_swing_amount) * a;
+        let limb_swing = self.limb_swing - self.limb_swing_amount * (1.0 - a);
+
+        EntityRenderSnapshot {
+            id: self.id,
+            kind: self.kind,
+            position,
+            yaw,
+            pitch,
+            head_yaw,
+            limb_swing,
+            limb_swing_amount,
+            uuid: self.uuid,
+            held_item: self.held_item,
+            flags: self.flags,
+        }
+    }
+}
+
+/// Interpolates between two degree angles taking the shortest arc.
+fn interpolate_angle_deg(prev: f32, current: f32, alpha: f32) -> f32 {
+    let mut diff = (current - prev) % 360.0;
+    if diff < -180.0 {
+        diff += 360.0;
+    } else if diff >= 180.0 {
+        diff -= 360.0;
+    }
+    prev + diff * alpha
 }
 
 /// Immutable snapshot of one entity prepared for the render thread.

@@ -50,7 +50,10 @@ pub mod registry;
 
 pub use atlas::{AtlasLayout, MISSING_TEXTURE};
 pub use blockstate::BlockStateFile;
-pub use entity::{HumanoidModel, ModelBox, ModelPart, ModelVertex, QuadrupedModel};
+pub use entity::{
+    ChickenModel, CreeperModel, HumanoidModel, MeshLayer, ModelBox, ModelPart, ModelVertex,
+    QuadrupedModel, SheepModel, TextureSlot,
+};
 pub use error::{ModelError, ModelResult};
 pub use geometry::{Face, ModelQuad};
 pub use model::{BlockModel, BlockModelSet, ModelVariant, ResolvedModel, ResourceSource};

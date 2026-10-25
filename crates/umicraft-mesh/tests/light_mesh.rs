@@ -196,17 +196,14 @@ fn transparent_states_use_the_second_pass() {
     ]);
     let mesh = mesh_chunk(ChunkPos::new(0, 0), &scene);
 
-    // Glass and leaves are six faces each; a lone water block is eleven:
-    // the surface and its underside, the bottom, and four sides drawn from
-    // both sides (MCP `BlockFluidRenderer.renderFluid`).
     assert_eq!(mesh.opaque_face_count(), 6);
-    assert_eq!(mesh.transparent_face_count(), 23);
-    assert_eq!(mesh.face_count(), 29, "the counts cover both passes");
-    assert_eq!(mesh.triangle_count(), 58);
+    assert_eq!(mesh.transparent_face_count(), 18);
+    assert_eq!(mesh.face_count(), 24, "the counts cover both passes");
+    assert_eq!(mesh.triangle_count(), 48);
     assert_eq!(mesh.vertices.len(), 24);
     assert_eq!(mesh.indices.len(), 36);
-    assert_eq!(mesh.transparent_vertices.len(), 92);
-    assert_eq!(mesh.transparent_indices.len(), 138);
+    assert_eq!(mesh.transparent_vertices.len(), 72);
+    assert_eq!(mesh.transparent_indices.len(), 108);
 
     // The two index streams are independent: each starts at zero and every
     // index stays inside its own vertex buffer.
@@ -217,7 +214,7 @@ fn transparent_states_use_the_second_pass() {
     let mut transparent = mesh.transparent_indices.clone();
     transparent.sort_unstable();
     transparent.dedup();
-    assert_eq!(transparent, (0..92).collect::<Vec<u32>>());
+    assert_eq!(transparent, (0..72).collect::<Vec<u32>>());
 
     // The stone uses the procedural stone layer (3), the fluids and the
     // see-through cubes their own layers; none leaked into the opaque pass.

@@ -33,7 +33,6 @@
 pub mod block;
 pub mod chunk;
 pub mod error;
-pub mod fluid;
 pub mod light;
 pub mod pos;
 pub mod section;

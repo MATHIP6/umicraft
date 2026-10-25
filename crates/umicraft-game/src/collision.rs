@@ -110,7 +110,7 @@ pub fn move_entity<S: BlockSource + ?Sized>(
         requested.z = sneak_shorten(original, 0.0, requested.z, world);
         while requested.x != 0.0
             && requested.z != 0.0
-            && !any_collision(
+            && !has_ground_below(
                 original.offset(DVec3::new(requested.x, -1.0, requested.z)),
                 world,
             )
@@ -260,7 +260,7 @@ fn step_up<S: BlockSource + ?Sized>(
 /// MCP `net/minecraft/entity/Entity.java:622` and `:638`.
 fn sneak_shorten<S: BlockSource + ?Sized>(original: Aabb, x: f64, z: f64, world: &S) -> f64 {
     let mut x = x;
-    while x != 0.0 && !any_collision(original.offset(DVec3::new(x, -1.0, z)), world) {
+    while x != 0.0 && !has_ground_below(original.offset(DVec3::new(x, -1.0, z)), world) {
         x = sneak_step(x);
     }
     x
@@ -278,7 +278,7 @@ fn sneak_step(value: f64) -> f64 {
 }
 
 /// True when any block collides with the given box.
-pub(crate) fn any_collision<S: BlockSource + ?Sized>(bounding_box: Aabb, world: &S) -> bool {
+fn has_ground_below<S: BlockSource + ?Sized>(bounding_box: Aabb, world: &S) -> bool {
     let range = BlockRange::of(bounding_box);
     let mut found = false;
     for_each_collision_box(&range, &bounding_box, world, |_| {

@@ -185,7 +185,7 @@ pub fn build_demo_scene() -> DemoScene {
     });
 
     // 3. Zombie (HumanoidModel biped, zombie arms forward)
-    let mut zombie_model = HumanoidModel::biped(true);
+    let mut zombie_model = HumanoidModel::zombie();
     zombie_model.set_angles(0.0, 0.0, 0.0, 0.0, true);
     let zombie_pos = Vec3::new(9.0, 64.0, 6.0);
     let zombie_mesh = zombie_model.emit_mesh();

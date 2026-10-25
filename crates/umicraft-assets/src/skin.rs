@@ -23,13 +23,21 @@ impl SkinModel {
         matches!(self, Self::Slim)
     }
 
-    /// Derives the default model from a player UUID according to 1.8 rules.
+    /// Derives the default model from a player UUID using the vanilla 1.8 algorithm.
     ///
-    /// In vanilla 1.8, the model is Alex if the UUID's least significant bits XOR
-    /// produces an odd result (`(uuid[15] & 1) != 0`).
+    /// Java's `UUID.hashCode()` XORs the two 64-bit halves, then folds the result
+    /// into 32 bits.  The model is Alex (slim) when the lowest bit is set.
     #[must_use]
     pub const fn default_for_uuid(uuid: [u8; 16]) -> Self {
-        if (uuid[15] & 1) != 0 {
+        let msb = u64::from_be_bytes([
+            uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
+        ]);
+        let lsb = u64::from_be_bytes([
+            uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15],
+        ]);
+        let hilo = msb ^ lsb;
+        let hash = ((hilo >> 32) as u32) ^ (hilo as u32);
+        if hash & 1 != 0 {
             Self::Slim
         } else {
             Self::Classic
@@ -59,37 +67,12 @@ pub fn convert_64x32_to_64x64(raw: &[u8]) -> Result<Vec<u8>, AssetsError> {
     // Copy the original 64x32 upper half
     out[0..raw.len()].copy_from_slice(raw);
 
-    // Copy and mirror right leg (0..16, 16..32) to left leg (16..32, 48..64)
-    copy_sub_image(raw, 64, 32, 0, 16, &mut out, 64, 64, 16, 48, 16, 16);
-    // Copy and mirror right arm (40..56, 16..32) to left arm (32..48, 48..64)
-    copy_sub_image(raw, 64, 32, 40, 16, &mut out, 64, 64, 32, 48, 16, 16);
+    // Mirror right leg (0..16, 16..32) to left leg (16..32, 48..64)
+    copy_sub_image_mirrored(raw, 64, 0, 16, &mut out, 64, 16, 48, 16, 16);
+    // Mirror right arm (40..56, 16..32) to left arm (32..48, 48..64)
+    copy_sub_image_mirrored(raw, 64, 40, 16, &mut out, 64, 32, 48, 16, 16);
 
     Ok(out)
-}
-
-/// Helper to copy a rectangular region between two RGBA buffers.
-#[allow(clippy::too_many_arguments)]
-fn copy_sub_image(
-    src: &[u8],
-    src_w: usize,
-    _src_h: usize,
-    src_x: usize,
-    src_y: usize,
-    dst: &mut [u8],
-    dst_w: usize,
-    _dst_h: usize,
-    dst_x: usize,
-    dst_y: usize,
-    w: usize,
-    h: usize,
-) {
-    for y in 0..h {
-        let src_row_start = ((src_y + y) * src_w + src_x) * 4;
-        let dst_row_start = ((dst_y + y) * dst_w + dst_x) * 4;
-        let bytes_to_copy = w * 4;
-        dst[dst_row_start..dst_row_start + bytes_to_copy]
-            .copy_from_slice(&src[src_row_start..src_row_start + bytes_to_copy]);
-    }
 }
 
 /// Generates an original procedural fallback skin (64×64 RGBA8).
@@ -155,6 +138,165 @@ pub fn procedural_zombie_skin() -> Vec<u8> {
     rgba
 }
 
+/// Generates an original procedural fallback skeleton skin (64×32 RGBA8).
+#[must_use]
+pub fn procedural_skeleton_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+
+    let bone = [200, 200, 190, 255];
+    let dark_bone = [140, 140, 130, 255];
+    let eye = [40, 40, 40, 255];
+
+    // Head
+    fill_rect(&mut rgba, 64, 0, 0, 32, 16, bone);
+    fill_rect(&mut rgba, 64, 8, 10, 3, 3, eye);
+    fill_rect(&mut rgba, 64, 13, 10, 3, 3, eye);
+
+    // Torso
+    fill_rect(&mut rgba, 64, 16, 16, 24, 16, dark_bone);
+
+    // Thin arms and legs
+    fill_rect(&mut rgba, 64, 40, 16, 16, 16, bone);
+    fill_rect(&mut rgba, 64, 0, 16, 16, 16, bone);
+
+    rgba
+}
+
+/// Generates an original procedural fallback creeper texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_creeper_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+
+    let green = [80, 140, 55, 255];
+    let dark_green = [50, 100, 35, 255];
+    let eye_black = [20, 20, 20, 255];
+
+    // Mottled green pattern
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            let color = if ((x / 3) + (y / 3)) % 2 == 0 {
+                green
+            } else {
+                dark_green
+            };
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+
+    // Eyes (in head UV region)
+    fill_rect(&mut rgba, 64, 8, 10, 2, 4, eye_black);
+    fill_rect(&mut rgba, 64, 14, 10, 2, 4, eye_black);
+
+    rgba
+}
+
+/// Generates an original procedural fallback sheep body texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_sheep_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+
+    let wool = [220, 220, 215, 255];
+    let face = [180, 160, 150, 255];
+    let hoof = [50, 45, 40, 255];
+
+    // Wool base
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&wool);
+        }
+    }
+
+    // Face (head region)
+    fill_rect(&mut rgba, 64, 6, 6, 8, 8, face);
+    // Hooves
+    fill_rect(&mut rgba, 64, 0, 28, 16, 4, hoof);
+
+    rgba
+}
+
+/// Generates an original procedural fallback sheep fur overlay texture (64×32 RGBA8).
+///
+/// Used with `ModelSheep1` (the wool layer) — separate from the base body texture.
+#[must_use]
+pub fn procedural_sheep_fur_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            let noise = ((x * 13 + y * 7) ^ (x * 3 + y * 11)) % 20;
+            let shade = 225_u8.saturating_add(noise as u8).min(245);
+            rgba[idx] = shade;
+            rgba[idx + 1] = shade;
+            rgba[idx + 2] = shade.saturating_sub(5);
+            rgba[idx + 3] = 255;
+        }
+    }
+
+    rgba
+}
+
+/// Generates an original procedural fallback pig texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_pig_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+
+    let skin = [230, 165, 145, 255];
+    let snout = [200, 140, 120, 255];
+    let hoof = [90, 70, 55, 255];
+
+    // Base coat: solid pink
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&skin);
+        }
+    }
+
+    // Snout (UV: 16..24, 16..21 in MCP ModelPig)
+    fill_rect(&mut rgba, 64, 16, 17, 8, 4, snout);
+
+    // Hooves (bottom of legs)
+    fill_rect(&mut rgba, 64, 0, 28, 16, 4, hoof);
+
+    rgba
+}
+
+/// Generates an original procedural fallback chicken texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_chicken_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+
+    let feather = [220, 220, 220, 255];
+    let beak = [200, 130, 40, 255];
+    let wattle = [200, 50, 50, 255];
+    let comb = [180, 40, 40, 255];
+    let leg = [200, 170, 50, 255];
+
+    // Base coat: white feathers
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&feather);
+        }
+    }
+
+    // Beak (UV: 14..22, 0..4)
+    fill_rect(&mut rgba, 64, 14, 0, 8, 4, beak);
+    // Wattle (UV: 14..20, 4..8)
+    fill_rect(&mut rgba, 64, 14, 4, 6, 4, wattle);
+    // Head comb hint (top of head UV area)
+    fill_rect(&mut rgba, 64, 2, 0, 4, 2, comb);
+    // Legs (UV: 26..35, 0..8)
+    fill_rect(&mut rgba, 64, 26, 0, 9, 8, leg);
+    // Wing feathers (UV: 24..32, 13..23)
+    fill_rect(&mut rgba, 64, 24, 13, 8, 10, feather);
+
+    rgba
+}
+
 /// Generates an original procedural fallback cow texture (64×32 RGBA8).
 #[must_use]
 pub fn procedural_cow_texture() -> Vec<u8> {
@@ -190,6 +332,29 @@ pub fn procedural_cow_texture() -> Vec<u8> {
     fill_rect(&mut rgba, 64, 16, 28, 16, 4, hoof);
 
     rgba
+}
+
+/// Copies a rectangular region between two RGBA buffers with horizontal flip.
+#[allow(clippy::too_many_arguments)]
+fn copy_sub_image_mirrored(
+    src: &[u8],
+    src_w: usize,
+    src_x: usize,
+    src_y: usize,
+    dst: &mut [u8],
+    dst_w: usize,
+    dst_x: usize,
+    dst_y: usize,
+    w: usize,
+    h: usize,
+) {
+    for y in 0..h {
+        for x in 0..w {
+            let src_idx = ((src_y + y) * src_w + src_x + x) * 4;
+            let dst_idx = ((dst_y + y) * dst_w + dst_x + (w - 1 - x)) * 4;
+            dst[dst_idx..dst_idx + 4].copy_from_slice(&src[src_idx..src_idx + 4]);
+        }
+    }
 }
 
 fn fill_rect(dst: &mut [u8], dst_w: usize, x: usize, y: usize, w: usize, h: usize, color: [u8; 4]) {
@@ -429,12 +594,19 @@ mod tests {
 
     #[test]
     fn model_default_for_uuid() {
-        let mut uuid = [0u8; 16];
-        uuid[15] = 0;
-        assert_eq!(SkinModel::default_for_uuid(uuid), SkinModel::Classic);
+        // All-zero UUID: msb=0, lsb=0, hash=0, even → Classic
+        assert_eq!(SkinModel::default_for_uuid([0u8; 16]), SkinModel::Classic);
 
-        uuid[15] = 1;
+        // UUID where hash folds to an odd number → Slim.
+        // msb = 0x00..01, lsb = 0x00..00 → hilo = 0x00..01 → hash = 0^1 = 1 (odd)
+        let mut uuid = [0u8; 16];
+        uuid[7] = 1;
         assert_eq!(SkinModel::default_for_uuid(uuid), SkinModel::Slim);
+
+        // UUID where XOR cancels both halves → Classic.
+        // msb = lsb → hilo = 0 → hash = 0 (even)
+        let uuid = [0xAB; 16];
+        assert_eq!(SkinModel::default_for_uuid(uuid), SkinModel::Classic);
     }
 
     #[test]
@@ -444,5 +616,33 @@ mod tests {
         let new = convert_64x32_to_64x64(&old).unwrap();
         assert_eq!(new.len(), 64 * 64 * 4);
         assert_eq!(&new[0..4], &[10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn convert_64x32_mirrors_limb_textures_horizontally() {
+        let mut old = vec![0u8; 64 * 32 * 4];
+        // Paint pixel (0, 16) in the right leg region with a unique color.
+        let src_idx = (16 * 64) * 4;
+        old[src_idx..src_idx + 4].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xFF]);
+
+        let new = convert_64x32_to_64x64(&old).unwrap();
+
+        // The right leg (x:0..16, y:16..32) is mirrored to left leg (x:16..32, y:48..64).
+        // Source pixel at local (0, 0) of the 16-wide strip should appear at
+        // destination local (15, 0) due to horizontal flip: dst (16+15, 48) = (31, 48).
+        let dst_idx = (48 * 64 + 31) * 4;
+        assert_eq!(
+            &new[dst_idx..dst_idx + 4],
+            &[0xAA, 0xBB, 0xCC, 0xFF],
+            "right-leg pixel at src (0,16) should mirror to dst (31,48)"
+        );
+
+        // The un-flipped position (16, 48) should NOT have our color.
+        let wrong_idx = (48 * 64 + 16) * 4;
+        assert_ne!(
+            &new[wrong_idx..wrong_idx + 4],
+            &[0xAA, 0xBB, 0xCC, 0xFF],
+            "mirrored copy must flip horizontally, not plain-copy"
+        );
     }
 }

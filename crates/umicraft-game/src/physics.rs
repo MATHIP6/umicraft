@@ -20,7 +20,6 @@ use glam::DVec3;
 
 use crate::collision::{self, MoveOptions};
 use crate::input::{InputIntent, SPRINT_FORWARD_THRESHOLD};
-use crate::media;
 use crate::shapes::{is_normal_cube, Aabb, BlockSource};
 use umicraft_world::BlockState;
 
@@ -64,33 +63,6 @@ pub const DEFAULT_SLIPPERINESS: f64 = 0.6;
 /// The horizontal motion the push out of a block sets
 /// (MCP `EntityPlayerSP.java:483`).
 pub const PUSH_OUT_SPEED: f64 = 0.1;
-
-/// The horizontal and downward speed limit on a ladder
-/// (MCP `EntityLivingBase.java:1627`, `0.15F`).
-pub const LADDER_SPEED: f64 = 0.15000000596046448;
-
-/// The vertical motion of a player that walks into the wall on a ladder
-/// (MCP `EntityLivingBase.java:1649`).
-pub const LADDER_CLIMB: f64 = 0.2;
-
-/// What the jump key adds to the vertical motion in water or lava
-/// (MCP `EntityLivingBase.java:1580`, `0.03999999910593033D`).
-pub const LIQUID_SWIM_UP: f64 = 0.039_999_999_105_930_33;
-
-/// The gravity in a liquid (MCP `EntityLivingBase.java:1711`).
-pub const LIQUID_GRAVITY: f64 = 0.02;
-
-/// The height above the start of the tick a swimmer must be able to reach
-/// to climb out (MCP `EntityLivingBase.java:1712`, `0.6000000238418579D`).
-const CLIMB_OUT_HEIGHT: f64 = 0.600_000_023_841_857_9;
-
-/// The vertical motion of a swimmer that climbs out
-/// (MCP `EntityLivingBase.java:1714`, `0.30000001192092896D`).
-const CLIMB_OUT_MOTION: f64 = 0.300_000_011_920_928_96;
-
-/// The vertical factor of a move through a cobweb
-/// (MCP `Entity.java:605`, `0.05000000074505806D`).
-const WEB_VERTICAL_FACTOR: f64 = 0.05000000074505806;
 
 /// The slime block id, the one block that bounces a landing entity.
 const SLIME_BLOCK: u16 = 165;
@@ -178,16 +150,6 @@ pub struct Player {
     pub previous_forward: f32,
     /// Whether the last move was blocked horizontally.
     pub collided_horizontally: bool,
-    /// Whether the last move touched a cobweb, which slows the next one
-    /// (MCP `Entity.isInWeb`).
-    pub in_web: bool,
-    /// Whether the player is in water this tick (MCP `Entity.inWater`, set by
-    /// `handleWaterMovement` at the start of the tick).
-    pub in_water: bool,
-    /// The Depth Strider level of the boots, 0 without the enchantment
-    /// (MCP `EnchantmentHelper.getDepthStriderModifier`). The inventory (M9)
-    /// sets it; until then it stays 0.
-    pub depth_strider: u8,
 }
 
 impl Default for Player {
@@ -206,9 +168,6 @@ impl Default for Player {
             speed_multiplier: 1.0,
             previous_forward: 0.0,
             collided_horizontally: false,
-            in_web: false,
-            in_water: false,
-            depth_strider: 0,
         }
     }
 }
@@ -277,10 +236,6 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     player.pitch = intent.pitch;
     player.sneaking = intent.sneak;
 
-    // The water check and the current, MCP `Entity.onEntityUpdate`, which
-    // runs before the living update.
-    player.in_water = media::handle_water_movement(player, world);
-
     update_sprint(player, intent);
 
     // MCP `EntityPlayerSP.java:795-798`, before the living update.
@@ -302,11 +257,7 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
         player.jump_ticks -= 1;
     }
     if intent.jump {
-        // In a liquid the jump key swims up instead, MCP
-        // `EntityLivingBase.updateAITick` and `handleJumpLava` (line 1578).
-        if player.in_water || media::is_in_lava(player, world) {
-            player.velocity.y += LIQUID_SWIM_UP;
-        } else if player.on_ground && player.jump_ticks == 0 {
+        if player.on_ground && player.jump_ticks == 0 {
             player.velocity.y = JUMP_MOTION;
             if player.sprinting {
                 let (sin_yaw, cos_yaw) = player.yaw.sin_cos();
@@ -501,75 +452,6 @@ fn update_sprint(player: &mut Player, intent: &InputIntent) {
 ///
 /// MCP `net/minecraft/entity/EntityLivingBase.java:1591-1672`.
 fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64, world: &S) {
-    if player.in_water {
-        swim(player, strafe, forward, world);
-    } else if media::is_in_lava(player, world) {
-        wade_through_lava(player, strafe, forward, world);
-    } else {
-        travel_on_land(player, strafe, forward, world);
-    }
-}
-
-/// The water branch of MCP `EntityLivingBase.moveEntityWithHeading`
-/// (lines 1690-1716): an acceleration of 0.02 and a friction of 0.8, both
-/// moved towards the land values by Depth Strider.
-fn swim<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64, world: &S) {
-    let start_y = player.position.y;
-    // The reference computes these in `float`.
-    let mut friction = 0.8_f32;
-    let mut acceleration = 0.02_f32;
-    let mut strider = f32::from(player.depth_strider.min(3));
-    if !player.on_ground {
-        strider *= 0.5;
-    }
-    if strider > 0.0 {
-        let move_speed = (WALK_SPEED * player.speed_multiplier) as f32;
-        friction += (0.546_000_06 - friction) * strider / 3.0;
-        acceleration += (move_speed - acceleration) * strider / 3.0;
-    }
-    move_flying(player, strafe, forward, f64::from(acceleration));
-    move_player(player, world);
-    player.velocity.x *= f64::from(friction);
-    player.velocity.y *= f64::from(0.8_f32);
-    player.velocity.z *= f64::from(friction);
-    player.velocity.y -= LIQUID_GRAVITY;
-    climb_out_of_liquid(player, start_y, world);
-}
-
-/// The lava branch of MCP `EntityLivingBase.moveEntityWithHeading`
-/// (lines 1718-1731): an acceleration of 0.02 and a friction of 0.5.
-fn wade_through_lava<S: BlockSource + ?Sized>(
-    player: &mut Player,
-    strafe: f64,
-    forward: f64,
-    world: &S,
-) {
-    let start_y = player.position.y;
-    move_flying(player, strafe, forward, f64::from(0.02_f32));
-    move_player(player, world);
-    player.velocity *= 0.5;
-    player.velocity.y -= LIQUID_GRAVITY;
-    climb_out_of_liquid(player, start_y, world);
-}
-
-/// A swimmer blocked by a wall whose top is free and dry is lifted out with
-/// `motionY = 0.3` (MCP `EntityLivingBase.java:1712-1715`, `1727-1730`).
-fn climb_out_of_liquid<S: BlockSource + ?Sized>(player: &mut Player, start_y: f64, world: &S) {
-    let lift = player.velocity.y + CLIMB_OUT_HEIGHT - player.position.y + start_y;
-    let offset = DVec3::new(player.velocity.x, lift, player.velocity.z);
-    if player.collided_horizontally && media::is_free_of_blocks_and_liquid(player, offset, world) {
-        player.velocity.y = CLIMB_OUT_MOTION;
-    }
-}
-
-/// The land branch of MCP `EntityLivingBase.moveEntityWithHeading`
-/// (lines 1597-1672), with the ladder rules.
-fn travel_on_land<S: BlockSource + ?Sized>(
-    player: &mut Player,
-    strafe: f64,
-    forward: f64,
-    world: &S,
-) {
     // MCP `EntityLivingBase.java:1599-1604`: the block below the feet sets
     // the friction on the ground; it is read before the move, so the same
     // value drives the acceleration and the damping.
@@ -587,37 +469,8 @@ fn travel_on_land<S: BlockSource + ?Sized>(
         // MCP `EntityLivingBase.java:1613-1616`.
         AIR_CONTROL * player.speed_multiplier
     };
-    move_flying(player, strafe, forward, speed);
 
-    // A ladder caps the motion, MCP `EntityLivingBase.java:1625-1643`.
-    if media::is_on_ladder(player, world) {
-        player.velocity.x = player.velocity.x.clamp(-LADDER_SPEED, LADDER_SPEED);
-        player.velocity.z = player.velocity.z.clamp(-LADDER_SPEED, LADDER_SPEED);
-        player.velocity.y = player.velocity.y.max(-LADDER_SPEED);
-        // A sneaking player holds on to the ladder.
-        if player.sneaking && player.velocity.y < 0.0 {
-            player.velocity.y = 0.0;
-        }
-    }
-
-    move_player(player, world);
-
-    // Walking into the wall climbs it, MCP `EntityLivingBase.java:1647-1650`.
-    if player.collided_horizontally && media::is_on_ladder(player, world) {
-        player.velocity.y = LADDER_CLIMB;
-    }
-
-    // Gravity and friction, MCP `EntityLivingBase.java:1666-1671`.
-    player.velocity.y -= GRAVITY;
-    player.velocity.y *= VERTICAL_DAMPING;
-    player.velocity.x *= friction;
-    player.velocity.z *= friction;
-}
-
-/// Accelerates the player along its look by `speed`.
-///
-/// `moveFlying`, MCP `net/minecraft/entity/Entity.java:1214-1235`.
-fn move_flying(player: &mut Player, strafe: f64, forward: f64, speed: f64) {
+    // `moveFlying`, MCP `net/minecraft/entity/Entity.java:1214-1235`.
     let mut strafe = strafe;
     let mut forward = forward;
     let norm = strafe * strafe + forward * forward;
@@ -634,26 +487,11 @@ fn move_flying(player: &mut Player, strafe: f64, forward: f64, speed: f64) {
         player.velocity.x += strafe * cos_yaw - forward * sin_yaw;
         player.velocity.z += forward * cos_yaw + strafe * sin_yaw;
     }
-}
 
-/// Moves the player by its motion through the world.
-///
-/// `moveEntity`, MCP `net/minecraft/entity/Entity.java:588-844`: the
-/// collision-resolved move, the axes that were blocked lose their motion, a
-/// vertical collision lands the player, and the blocks the player overlaps
-/// act on it (`doBlockCollisions`, line 887).
-fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
-    let mut delta = player.velocity;
-    // A cobweb touched by the last move slows this one and clears the
-    // motion, MCP `Entity.java:602-611`.
-    if player.in_web {
-        player.in_web = false;
-        delta *= DVec3::new(0.25, WEB_VERTICAL_FACTOR, 0.25);
-        player.velocity = DVec3::ZERO;
-    }
+    // `moveEntity`, MCP `net/minecraft/entity/Entity.java:588-844`.
     let result = collision::move_entity(
         player.bounding_box(),
-        delta,
+        player.velocity,
         world,
         MoveOptions {
             step_height: STEP_HEIGHT,
@@ -673,7 +511,12 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
     if result.blocked_vertically {
         land(player, world);
     }
-    media::collide_with_blocks(player, world);
+
+    // Gravity and friction, MCP `EntityLivingBase.java:1666-1671`.
+    player.velocity.y -= GRAVITY;
+    player.velocity.y *= VERTICAL_DAMPING;
+    player.velocity.x *= friction;
+    player.velocity.z *= friction;
 }
 
 #[cfg(test)]
@@ -1091,284 +934,5 @@ mod tests {
             step(&mut player, &InputIntent::still(0.0), &world);
         }
         assert_eq!(player.position, DVec3::new(0.5, 1.0, 0.5));
-    }
-
-    /// A stone floor at y = 10 and a stone wall at z = 1 with a ladder on
-    /// its north face, from y = 11 to y = 30.
-    fn ladder_wall(ladder: BlockState) -> TestBlocks {
-        let mut blocks = Vec::new();
-        for x in -2..3 {
-            for z in -3..3 {
-                blocks.push((x, 10, z, BlockState::new(1, 0)));
-            }
-        }
-        for y in 11..31 {
-            blocks.push((0, y, 1, BlockState::new(1, 0)));
-            blocks.push((0, y, 0, ladder));
-        }
-        TestBlocks::with(&blocks)
-    }
-
-    /// A ladder facing north (metadata 2) hangs on the wall south of it.
-    const LADDER: BlockState = BlockState::new(65, 2);
-
-    /// MCP `EntityLivingBase.moveEntityWithHeading` (lines 1625-1650): a
-    /// player that walks into the wall on a ladder gets `motionY = 0.2`, which
-    /// gravity turns into a climb of `(0.2 - 0.08) * 0.98` blocks per tick.
-    #[test]
-    fn walking_into_a_ladder_climbs_it() {
-        for climbable in [LADDER, BlockState::new(106, 0)] {
-            let world = ladder_wall(climbable);
-            let mut player = Player::new(DVec3::new(0.5, 11.0, 0.5));
-            let intent = InputIntent::walking(0.0);
-            for _ in 0..20 {
-                step(&mut player, &intent, &world);
-            }
-            let before = player.position.y;
-            step(&mut player, &intent, &world);
-            let climb = player.position.y - before;
-            assert!(
-                (climb - 0.1176).abs() < 1e-6,
-                "{climbable:?}: climbed {climb} in one tick"
-            );
-        }
-    }
-
-    /// The fall speed on a ladder is capped at 0.15 blocks per tick.
-    #[test]
-    fn a_ladder_slows_the_fall() {
-        let world = ladder_wall(LADDER);
-        let mut player = Player::new(DVec3::new(0.5, 30.0, 0.5));
-        let mut previous = player.position.y;
-        for _ in 0..60 {
-            step(&mut player, &InputIntent::still(0.0), &world);
-            assert!(previous - player.position.y <= LADDER_SPEED + 1e-9);
-            previous = player.position.y;
-        }
-        assert!(player.position.y < 29.0, "the player still slides down");
-    }
-
-    /// A sneaking player holds on to the ladder (`motionY` stays at 0).
-    #[test]
-    fn sneaking_on_a_ladder_holds_the_player() {
-        let world = ladder_wall(LADDER);
-        let mut player = Player::new(DVec3::new(0.5, 20.0, 0.5));
-        let mut intent = InputIntent::still(0.0);
-        intent.sneak = true;
-        for _ in 0..20 {
-            step(&mut player, &intent, &world);
-        }
-        assert!(
-            (player.position.y - 20.0).abs() < 1e-9,
-            "{}",
-            player.position.y
-        );
-    }
-
-    /// A floor of `floor` blocks at y = 10 over stone at y = 9.
-    fn floor_of(floor: BlockState) -> TestBlocks {
-        let mut blocks = Vec::new();
-        for x in -4..4 {
-            for z in -4..64 {
-                blocks.push((x, 9, z, BlockState::new(1, 0)));
-                blocks.push((x, 10, z, floor));
-            }
-        }
-        TestBlocks::with(&blocks)
-    }
-
-    /// The horizontal motion left after one tick that starts with
-    /// `motion_z` at `z` on a soul sand floor.
-    fn soul_sand_motion_after_one_tick(z: f64, motion_z: f64) -> f64 {
-        let world = floor_of(BlockState::new(88, 0));
-        let mut player = Player::new(DVec3::new(0.5, 10.875, z));
-        player.on_ground = true;
-        player.velocity.z = motion_z;
-        step(&mut player, &InputIntent::still(0.0), &world);
-        player.velocity.z
-    }
-
-    /// MCP `BlockSoulSand.onEntityCollidedWithBlock` (line 29) multiplies the
-    /// horizontal motion by 0.4 for every soul sand block the player
-    /// overlaps (`Entity.doBlockCollisions` calls it per block), before the
-    /// ground friction of the block below.
-    #[test]
-    fn soul_sand_slows_the_walk_per_block_overlapped() {
-        let friction = DEFAULT_SLIPPERINESS * GROUND_FRICTION;
-        // The box stays inside one soul sand column.
-        let one = soul_sand_motion_after_one_tick(0.5, 0.1);
-        assert!((one - 0.1 * 0.4 * friction).abs() < 1e-12, "{one}");
-        // The box straddles two columns after the move.
-        let two = soul_sand_motion_after_one_tick(0.9, 0.1);
-        assert!((two - 0.1 * 0.4 * 0.4 * friction).abs() < 1e-12, "{two}");
-    }
-
-    /// MCP `BlockWeb.onEntityCollidedWithBlock` and `Entity.moveEntity`
-    /// (line 602): the move after touching a cobweb is scaled by
-    /// `(0.25, 0.05, 0.25)` and the motion is cleared.
-    #[test]
-    fn a_cobweb_nearly_stops_the_player() {
-        let mut blocks = Vec::new();
-        for y in 11..20 {
-            blocks.push((0, y, 0, BlockState::new(30, 0)));
-        }
-        let world = TestBlocks::with(&blocks);
-        let mut player = Player::new(DVec3::new(0.5, 15.0, 0.5));
-        step(&mut player, &InputIntent::still(0.0), &world);
-        assert!(player.in_web, "touching the web sets the flag");
-        let mut previous = player.position.y;
-        for _ in 0..20 {
-            step(&mut player, &InputIntent::still(0.0), &world);
-            let fall = previous - player.position.y;
-            // Each tick only moves 5 % of one tick of gravity.
-            assert!(fall < 0.005, "fell {fall} in one tick");
-            previous = player.position.y;
-        }
-    }
-
-    /// A pool of `liquid` from y = 11 to y = 20 over a stone floor at
-    /// y = 10, walled in at |x| = 4 and z = -4 / z = 40.
-    fn pool(liquid: BlockState) -> TestBlocks {
-        let mut blocks = Vec::new();
-        for x in -4_i32..=4 {
-            for z in -4..=40 {
-                blocks.push((x, 10, z, BlockState::new(1, 0)));
-                for y in 11..=20 {
-                    let wall = x.abs() == 4 || z == -4 || z == 40;
-                    let block = if wall { BlockState::new(1, 0) } else { liquid };
-                    blocks.push((x, y, z, block));
-                }
-            }
-        }
-        TestBlocks::with(&blocks)
-    }
-
-    const WATER: BlockState = BlockState::new(9, 0);
-    const LAVA: BlockState = BlockState::new(11, 0);
-
-    /// The horizontal distance per tick once the speed settled in `world`.
-    fn settled_distance(world: &TestBlocks, start: DVec3, intent: InputIntent) -> (f64, Player) {
-        let mut player = Player::new(start);
-        for _ in 0..60 {
-            step(&mut player, &intent, world);
-        }
-        let before = player.position.z;
-        step(&mut player, &intent, world);
-        (player.position.z - before, player)
-    }
-
-    /// MCP `EntityLivingBase.moveEntityWithHeading` (lines 1690-1716): in
-    /// water the acceleration is 0.02 and the friction 0.8, so a swimmer
-    /// covers `0.98 * 0.02 / (1 - 0.8)` blocks per tick.
-    #[test]
-    fn swimming_follows_the_water_friction() {
-        // The swimmer walks on the bottom: the water branch applies on the
-        // ground too.
-        let intent = InputIntent::walking(0.0);
-        let (distance, player) = settled_distance(&pool(WATER), DVec3::new(0.5, 11.0, 0.5), intent);
-        assert!(player.in_water);
-        let acceleration = 0.98 * f64::from(0.02_f32);
-        let friction = f64::from(0.8_f32);
-        let expected = acceleration / (1.0 - friction);
-        assert!(
-            (distance - expected).abs() < 1e-6,
-            "expected {expected}, got {distance}"
-        );
-    }
-
-    /// In lava the friction is 0.5 (MCP `EntityLivingBase.java:1720-1726`).
-    #[test]
-    fn lava_is_slower_than_water() {
-        let mut intent = InputIntent::walking(0.0);
-        intent.jump = true;
-        let (distance, _) = settled_distance(&pool(LAVA), DVec3::new(0.5, 15.0, 0.5), intent);
-        let expected = 0.98 * f64::from(0.02_f32) / 0.5;
-        assert!(
-            (distance - expected).abs() < 1e-6,
-            "expected {expected}, got {distance}"
-        );
-    }
-
-    /// Without input a player sinks, at most `0.02 / (1 - 0.8)` per tick.
-    #[test]
-    fn a_still_player_sinks_slowly_in_water() {
-        let world = pool(WATER);
-        let mut player = Player::new(DVec3::new(0.5, 18.0, 0.5));
-        let mut previous = player.position.y;
-        for _ in 0..30 {
-            step(&mut player, &InputIntent::still(0.0), &world);
-            let fall = previous - player.position.y;
-            assert!(fall <= 0.1 + 1e-9, "sank {fall} in one tick");
-            previous = player.position.y;
-        }
-        assert!(player.position.y < 17.0, "the player sank");
-    }
-
-    /// Jumping in water adds 0.04 to the vertical motion every tick
-    /// (MCP `EntityLivingBase.updateAITick`, line 1578), which floats the
-    /// player up.
-    #[test]
-    fn jumping_in_water_swims_up() {
-        let world = pool(WATER);
-        let mut player = Player::new(DVec3::new(0.5, 12.0, 0.5));
-        let mut intent = InputIntent::still(0.0);
-        intent.jump = true;
-        for _ in 0..40 {
-            step(&mut player, &intent, &world);
-        }
-        assert!(player.position.y > 15.0, "rose to {}", player.position.y);
-    }
-
-    /// MCP `BlockLiquid.getFlowVector` (line 150) pushes towards the
-    /// neighbours with a higher level, i.e. downstream, by 0.014 per tick
-    /// (`World.handleMaterialAcceleration`, line 2125).
-    #[test]
-    fn flowing_water_pushes_the_player_downstream() {
-        let mut blocks = Vec::new();
-        for z in -2..=12 {
-            for x in -2..=2 {
-                blocks.push((x, 10, z, BlockState::new(1, 0)));
-            }
-            // The level grows by one per block towards +Z.
-            let level = (z.clamp(0, 7)) as u8;
-            blocks.push((0, 11, z, BlockState::new(8, level)));
-        }
-        let world = TestBlocks::with(&blocks);
-        let mut player = Player::new(DVec3::new(0.5, 11.0, 3.5));
-        step(&mut player, &InputIntent::still(0.0), &world);
-        assert!(player.in_water);
-        assert!(
-            player.velocity.z > 0.0,
-            "pushed downstream: {}",
-            player.velocity.z
-        );
-        assert!(player.velocity.x.abs() < 1e-12);
-    }
-
-    /// A swimmer against a bank level with the water surface is lifted out
-    /// with `motionY = 0.3` (MCP `EntityLivingBase.java:1712-1715`).
-    #[test]
-    fn swimming_into_a_bank_climbs_out() {
-        let mut blocks = Vec::new();
-        for x in -3..=3 {
-            for z in -3..=10 {
-                blocks.push((x, 10, z, BlockState::new(1, 0)));
-                for y in 11..=20 {
-                    // Water up to the top of y = 20 for z < 5, a bank above.
-                    let block = if z < 5 { WATER } else { BlockState::new(1, 0) };
-                    blocks.push((x, y, z, block));
-                }
-            }
-        }
-        let world = TestBlocks::with(&blocks);
-        let mut player = Player::new(DVec3::new(0.5, 19.0, 0.5));
-        let mut intent = InputIntent::walking(0.0);
-        intent.jump = true;
-        let mut on_the_bank = false;
-        for _ in 0..200 {
-            step(&mut player, &intent, &world);
-            on_the_bank |= player.position.y >= 21.0 && player.position.z > 5.0;
-        }
-        assert!(on_the_bank, "the swimmer never left the water");
     }
 }

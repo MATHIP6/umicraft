@@ -92,8 +92,7 @@ options:
   --collect-secs N    world collection time for screenshots (default: 8)
   --headless          run a scripted session without a window and print a report
   --play-secs N       duration of the headless session (default: 60)
-  --script NAME       headless script: default (walk, break, place), idle, or course
-                      (walk with jump held through water, soul sand, webs, ladders)
+  --script NAME       headless script: default (walk, break, place) or idle
   --chat MESSAGE      chat line the headless session sends when it is placed
   --ui-demo           drive the scripted M4 debug screen without a server or GPU;
                       combine with --screenshot to render the same screen offscreen
@@ -111,7 +110,7 @@ options:
   --help, -h          print this help";
 
 /// The scripted sessions the headless mode knows.
-pub const SCRIPTS: [&str; 3] = ["default", "idle", "course"];
+pub const SCRIPTS: [&str; 2] = ["default", "idle"];
 
 /// The top-level mode selected by the parsed arguments.
 ///
@@ -485,19 +484,6 @@ mod tests {
         assert_eq!(args.play, Duration::from_secs(90));
         assert_eq!(args.script, "idle");
         assert_eq!(args.mode(), Mode::Headless);
-    }
-
-    #[test]
-    fn the_course_script_is_accepted() {
-        let args = Args::parse(&words(&[
-            "127.0.0.1",
-            "25599",
-            "--headless",
-            "--script",
-            "course",
-        ]))
-        .expect("valid args");
-        assert_eq!(args.script, "course");
     }
 
     #[test]

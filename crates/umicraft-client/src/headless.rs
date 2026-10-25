@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use crate::args::Args;
 use crate::error::ClientError;
 use crate::game::{GameEvent, GameStatus, RenderEvent, Session, TICK};
-use crate::input::{course_script, default_script, idle_script, Script, ScriptPhase};
+use crate::input::{default_script, idle_script, Script, ScriptPhase};
 use crate::network::NetworkConfig;
 
 /// The summary of a headless session.
@@ -178,7 +178,6 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 fn phases(name: &str) -> Vec<ScriptPhase> {
     match name {
         "idle" => idle_script(),
-        "course" => course_script(),
         _ => default_script(),
     }
 }

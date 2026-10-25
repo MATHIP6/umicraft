@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 
 use glam::{DVec3, Vec3};
 
-use super::types::{EntityFlags, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot};
+use super::types::{
+    EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
+};
 
 /// The storage and simulation of non-local entities on the game thread.
 #[derive(Debug, Clone, Default)]
@@ -111,6 +113,7 @@ impl EntityStore {
         if let Some(entity) = self.entities.get_mut(&id) {
             entity.target_position += delta;
             entity.on_ground = on_ground;
+            entity.interpolation_steps = 3;
         }
     }
 
@@ -120,6 +123,7 @@ impl EntityStore {
             entity.target_yaw = yaw;
             entity.target_pitch = pitch;
             entity.on_ground = on_ground;
+            entity.interpolation_steps = 3;
         }
     }
 
@@ -130,6 +134,7 @@ impl EntityStore {
             entity.target_yaw = yaw;
             entity.target_pitch = pitch;
             entity.on_ground = on_ground;
+            entity.interpolation_steps = 3;
         }
     }
 
@@ -185,21 +190,31 @@ impl EntityStore {
     }
 
     /// Advances the simulation by one tick (20 Hz).
+    ///
+    /// Position and rotation glide toward the server target over 3 ticks,
+    /// matching vanilla `EntityLivingBase.onLivingUpdate`.
     pub fn tick(&mut self) {
         for entity in self.entities.values_mut() {
             entity.previous_position = entity.position;
-            entity.position = entity.target_position;
-
             entity.previous_yaw = entity.yaw;
-            entity.yaw = entity.target_yaw;
-
             entity.previous_pitch = entity.pitch;
-            entity.pitch = entity.target_pitch;
-
             entity.previous_head_yaw = entity.head_yaw;
-            entity.head_yaw = entity.target_head_yaw;
 
-            // Walking limb swing animation
+            if entity.interpolation_steps > 0 {
+                let steps = f64::from(entity.interpolation_steps);
+                entity.position += (entity.target_position - entity.position) / steps;
+
+                let yaw_diff = wrap_degrees(entity.target_yaw - entity.yaw);
+                entity.yaw += yaw_diff / steps as f32;
+
+                entity.pitch += (entity.target_pitch - entity.pitch) / steps as f32;
+
+                let head_diff = wrap_degrees(entity.target_head_yaw - entity.head_yaw);
+                entity.head_yaw += head_diff / steps as f32;
+
+                entity.interpolation_steps -= 1;
+            }
+
             let dx = entity.position.x - entity.previous_position.x;
             let dz = entity.position.z - entity.previous_position.z;
             let speed = (dx * dx + dz * dz).sqrt() as f32;
@@ -238,6 +253,9 @@ impl EntityStore {
                 let limb_swing_amount = entity.previous_limb_swing_amount
                     + (entity.limb_swing_amount - entity.previous_limb_swing_amount) * alpha_f;
 
+                // Vanilla: limbSwing - limbSwingAmount * (1.0 - partialTicks)
+                let limb_swing = entity.limb_swing - entity.limb_swing_amount * (1.0 - alpha_f);
+
                 EntityRenderSnapshot {
                     id: entity.id,
                     kind: entity.kind,
@@ -245,7 +263,7 @@ impl EntityStore {
                     yaw,
                     pitch,
                     head_yaw,
-                    limb_swing: entity.limb_swing,
+                    limb_swing,
                     limb_swing_amount,
                     uuid: entity.uuid,
                     held_item: entity.held_item,
@@ -254,17 +272,64 @@ impl EntityStore {
             })
             .collect()
     }
+
+    /// Produces per-entity interpolation data for the render thread.
+    ///
+    /// Unlike [`snapshots`](Self::snapshots), this carries both previous and
+    /// current tick states so the render thread can interpolate at any sub-tick
+    /// fraction without pre-baking the alpha on the game thread.
+    #[must_use]
+    pub fn frame_data(&self) -> Vec<EntityFrameData> {
+        self.entities
+            .values()
+            .map(|e| {
+                let prev_position = Vec3::new(
+                    e.previous_position.x as f32,
+                    e.previous_position.y as f32,
+                    e.previous_position.z as f32,
+                );
+                let position = Vec3::new(
+                    e.position.x as f32,
+                    e.position.y as f32,
+                    e.position.z as f32,
+                );
+                EntityFrameData {
+                    id: e.id,
+                    kind: e.kind,
+                    prev_position,
+                    position,
+                    prev_yaw: e.previous_yaw,
+                    yaw: e.yaw,
+                    prev_pitch: e.previous_pitch,
+                    pitch: e.pitch,
+                    prev_head_yaw: e.previous_head_yaw,
+                    head_yaw: e.head_yaw,
+                    limb_swing: e.limb_swing,
+                    prev_limb_swing_amount: e.previous_limb_swing_amount,
+                    limb_swing_amount: e.limb_swing_amount,
+                    uuid: e.uuid,
+                    held_item: e.held_item,
+                    flags: e.flags,
+                }
+            })
+            .collect()
+    }
+}
+
+/// Wraps a degree difference into `(-180, 180]`.
+fn wrap_degrees(d: f32) -> f32 {
+    let mut r = d % 360.0;
+    if r < -180.0 {
+        r += 360.0;
+    } else if r >= 180.0 {
+        r -= 360.0;
+    }
+    r
 }
 
 /// Interpolates between two angles in degrees taking the shortest arc.
 fn interpolate_angle(prev: f32, current: f32, alpha: f32) -> f32 {
-    let mut diff = (current - prev) % 360.0;
-    if diff < -180.0 {
-        diff += 360.0;
-    } else if diff >= 180.0 {
-        diff -= 360.0;
-    }
-    prev + diff * alpha
+    prev + wrap_degrees(current - prev) * alpha
 }
 
 #[cfg(test)]
@@ -298,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn movement_interpolation() {
+    fn movement_smoothed_over_three_ticks() {
         let mut store = EntityStore::new();
         let mob_id = EntityId(20);
         store.spawn_mob(
@@ -312,12 +377,56 @@ mod tests {
             EntityFlags::default(),
         );
 
-        store.move_relative(mob_id, DVec3::new(2.0, 0.0, 0.0), true);
+        store.move_relative(mob_id, DVec3::new(3.0, 0.0, 0.0), true);
+
+        // Tick 1: moves 1/3 of the remaining distance → position ≈ 1.0
+        store.tick();
+        let s1 = store.snapshots(1.0);
+        assert!(
+            (s1[0].position.x - 1.0).abs() < 1e-4,
+            "tick 1: {}",
+            s1[0].position.x
+        );
+
+        // Tick 2: moves 1/2 of the remaining 2.0 → position ≈ 2.0
+        store.tick();
+        let s2 = store.snapshots(1.0);
+        assert!(
+            (s2[0].position.x - 2.0).abs() < 1e-4,
+            "tick 2: {}",
+            s2[0].position.x
+        );
+
+        // Tick 3: moves the last 1.0 → position ≈ 3.0
+        store.tick();
+        let s3 = store.snapshots(1.0);
+        assert!(
+            (s3[0].position.x - 3.0).abs() < 1e-4,
+            "tick 3: {}",
+            s3[0].position.x
+        );
+    }
+
+    #[test]
+    fn sub_tick_interpolation() {
+        let mut store = EntityStore::new();
+        let mob_id = EntityId(20);
+        store.spawn_mob(
+            mob_id,
+            54, // Zombie
+            DVec3::new(0.0, 64.0, 0.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+
+        store.move_relative(mob_id, DVec3::new(3.0, 0.0, 0.0), true);
         store.tick();
 
+        // After tick 1: prev=0.0, current=1.0 → alpha 0.5 gives 0.5
         let mid = store.snapshots(0.5);
-        assert_eq!(mid.len(), 1);
-        // previous is 0.0, current is 2.0 -> lerp 0.5 is 1.0
-        assert!((mid[0].position.x - 1.0).abs() < 1e-4);
+        assert!((mid[0].position.x - 0.5).abs() < 1e-4);
     }
 }

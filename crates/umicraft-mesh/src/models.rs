@@ -33,14 +33,11 @@
 use std::sync::Arc;
 
 use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant};
-use umicraft_world::fluid::Liquid;
 use umicraft_world::{BlockState, ChunkPos};
 
-use crate::fluid::{self, FluidLayers};
-
 use crate::{
-    emit_legacy_faces_with, is_transparent_pass, occludes, quad_light, tint, BlockSource, Mesh,
-    Vertex,
+    emit_legacy_faces_with, is_transparent_pass, occludes, quad_light, tint, BlockSource, Face,
+    Mesh, Vertex,
 };
 
 /// The baked models and the texture layers the model mesher reads.
@@ -100,14 +97,6 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     continue;
                 }
                 let position = [wx, y, wz];
-                if let Some(liquid) = Liquid::of(state) {
-                    let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
-                        tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
-                    });
-                    let layers = fluid_layers(liquid, &context.atlas);
-                    fluid::emit_fluid(&mut mesh, source, position, liquid, layers, tint);
-                    continue;
-                }
                 let variant = context
                     .models
                     .model(state)
@@ -118,11 +107,8 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
                         tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
                     });
-                    // No model and not a liquid: the checker, never a
-                    // procedural layer index (ADR-0012).
-                    let missing = context.atlas.missing_layer();
-                    emit_legacy_faces_with(&mut mesh, source, [wx, y, wz], state, tint, |_| {
-                        missing
+                    emit_legacy_faces_with(&mut mesh, source, [wx, y, wz], state, tint, |face| {
+                        fallback_layer(state, face, &context.atlas)
                     });
                 }
             }
@@ -131,19 +117,32 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
     mesh
 }
 
-/// The still and flowing layers of a liquid in the atlas
-/// (`BlockFluidRenderer.initAtlasSprites`), or the checker when the atlas
-/// lacks them.
-fn fluid_layers(liquid: Liquid, atlas: &AtlasLayout) -> FluidLayers {
-    let (still, flow) = match liquid {
-        Liquid::Water => ("blocks/water_still", "blocks/water_flow"),
-        Liquid::Lava => ("blocks/lava_still", "blocks/lava_flow"),
+/// Picks the texture layer of a state that has no baked model.
+///
+/// Water and lava are rendered by 1.8's `BlockFluidRenderer`, not by a
+/// blockstate model: it samples `blocks/water_still`/`lava_still` on the
+/// horizontal faces and `blocks/water_flow`/`lava_flow` on the sides
+/// (`mcp: src/minecraft/client/renderer/BlockFluidRenderer.java`,
+/// `func_178268_a`). Keeping the legacy cube geometry while resolving those
+/// keys in the real atlas avoids sampling an unrelated layer such as a bed.
+/// Other no-model states use the missing-texture checker: this path only
+/// ever emits layers of the atlas it was given, never a procedural layer
+/// (ADR-0012).
+fn fallback_layer(state: BlockState, face: Face, atlas: &AtlasLayout) -> u32 {
+    let fluid_key = match state.id() {
+        8 | 9 => Some(match face {
+            Face::Up | Face::Down => "blocks/water_still",
+            _ => "blocks/water_flow",
+        }),
+        10 | 11 => Some(match face {
+            Face::Up | Face::Down => "blocks/lava_still",
+            _ => "blocks/lava_flow",
+        }),
+        _ => None,
     };
-    let layer = |key| atlas.layer(key).unwrap_or_else(|| atlas.missing_layer());
-    FluidLayers {
-        still: layer(still),
-        flow: layer(flow),
-    }
+    fluid_key
+        .and_then(|key| atlas.layer(key))
+        .unwrap_or_else(|| atlas.missing_layer())
 }
 
 /// Picks the weighted variant of `model` for a block position.
@@ -265,6 +264,7 @@ fn emit_model_quads<S: BlockSource + ?Sized>(
 mod tests {
     use super::*;
     use umicraft_model::ResolvedModel;
+    use umicraft_model::MISSING_TEXTURE;
 
     fn variant(weight: u32) -> ModelVariant {
         ModelVariant {
@@ -299,27 +299,48 @@ mod tests {
     }
 
     #[test]
-    fn liquids_take_their_still_and_flowing_layers_from_the_atlas() {
+    fn modelless_fluids_use_the_real_atlas_keys() {
         let atlas = AtlasLayout::from_keys([
             "blocks/water_still",
             "blocks/water_flow",
             "blocks/lava_still",
             "blocks/lava_flow",
         ]);
-        let water = fluid_layers(Liquid::Water, &atlas);
-        assert_eq!(Some(water.still), atlas.layer("blocks/water_still"));
-        assert_eq!(Some(water.flow), atlas.layer("blocks/water_flow"));
-        let lava = fluid_layers(Liquid::Lava, &atlas);
-        assert_eq!(Some(lava.still), atlas.layer("blocks/lava_still"));
-        assert_eq!(Some(lava.flow), atlas.layer("blocks/lava_flow"));
-
-        // An atlas without the liquid textures answers with its checker,
-        // never a procedural layer index (ADR-0012).
-        let empty = AtlasLayout::default();
-        let missing = fluid_layers(Liquid::Water, &empty);
+        let water = BlockState::new(9, 0);
         assert_eq!(
-            (missing.still, missing.flow),
-            (empty.missing_layer(), empty.missing_layer())
+            fallback_layer(water, Face::Up, &atlas),
+            atlas.layer("blocks/water_still").expect("water still")
+        );
+        assert_eq!(
+            fallback_layer(water, Face::North, &atlas),
+            atlas.layer("blocks/water_flow").expect("water flow")
+        );
+        let lava = BlockState::new(10, 0);
+        assert_eq!(
+            fallback_layer(lava, Face::Down, &atlas),
+            atlas.layer("blocks/lava_still").expect("lava still")
+        );
+        assert_eq!(
+            fallback_layer(lava, Face::East, &atlas),
+            atlas.layer("blocks/lava_flow").expect("lava flow")
+        );
+        // Any other no-model state gets the checker, never a random atlas
+        // layer from the procedural table.
+        assert_eq!(
+            fallback_layer(BlockState::new(1, 0), Face::Up, &atlas),
+            atlas.layer(MISSING_TEXTURE).expect("missing layer")
+        );
+
+        // An atlas without the fluid textures still answers with one of its
+        // own layers: the checker, never a procedural layer index.
+        let empty = AtlasLayout::default();
+        assert_eq!(
+            fallback_layer(water, Face::Up, &empty),
+            empty.missing_layer()
+        );
+        assert_eq!(
+            fallback_layer(BlockState::new(1, 0), Face::Up, &empty),
+            empty.missing_layer()
         );
     }
 

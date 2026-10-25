@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
-use umicraft_game::entity::{EntityFlags, EntityId, EntityRenderSnapshot, EntityStore};
+use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityStore};
 use umicraft_game::input::RawInput;
 use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SURVIVAL_REACH};
 use umicraft_game::shapes::Aabb;
@@ -155,8 +155,8 @@ pub struct Frame {
     pub world_time: i64,
     /// The current dimension (`0` overworld, `-1` Nether, `1` End).
     pub dimension: i8,
-    /// Render snapshots of all tracked entities.
-    pub entities: Arc<[EntityRenderSnapshot]>,
+    /// Per-entity interpolation data for the render thread.
+    pub entities: Arc<[EntityFrameData]>,
 }
 
 /// The statistics the debug overlay shows.
@@ -727,7 +727,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
-        entities: game.entities.snapshots(1.0).into(),
+        entities: game.entities.frame_data().into(),
     }));
 }
 

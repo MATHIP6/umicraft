@@ -515,7 +515,7 @@ impl App {
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())
         {
-            entity_textures.mesh_and_upload(world.entities(), renderer);
+            entity_textures.mesh_and_upload(&world.entities(now), renderer);
         }
 
         let rendered = match ui_frame.as_ref() {
