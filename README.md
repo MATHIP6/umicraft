@@ -46,14 +46,21 @@ or .zip), and hot reloading via `F3 + T` / `F4` (ADR-0014).
 ## Run the graphical client
 
 ```sh
-cargo run -p umicraft-client -- 127.0.0.1 25599 --name Umicraft --view-distance 8
+cargo run --release -p umicraft-client -- 127.0.0.1 25599 --name Umicraft --view-distance 8
 ```
+
+Always play and measure with `--release`. A debug build compiles the whole
+client, including the zlib decompression of the chunks and the mesher,
+without optimisation: measured on the same machine and world it loads the
+chunks about five times slower (≈10.5 s instead of ≈2 s) and renders about
+three times fewer frames.
 
 Controls:
 
-- **WASD** move, **Space/Shift** up/down, **Ctrl** fast.
-- **Right-drag** capture the mouse and look; **arrow keys** look without capture.
-- **F1** toggle the debug overlay, **R** reset the camera to spawn.
+- **WASD** move, **Space** jump, **Shift** sneak, **Ctrl** sprint.
+- **Left click** capture the mouse, then break a block; **right click** place
+  a block; **1-9** select the hotbar slot; **T** open the chat.
+- **F1** toggle the debug overlay.
 - **F2** toggle the M4 debug screen: a text field, a button, a scrollable list
   and a visible caret. The game keeps running while it is open; the mouse is
   released and keyboard/mouse input goes to the UI.
@@ -134,7 +141,7 @@ with a clear typed error when they are unavailable.
 ## Render an offscreen screenshot
 
 ```sh
-cargo run -p umicraft-client -- 127.0.0.1 25599 --name UmicraftM2 \
+cargo run --release -p umicraft-client -- 127.0.0.1 25599 --name UmicraftM2 \
   --view-distance 8 --screenshot /tmp/umicraft.png \
   --collect-secs 8 --width 1280 --height 720
 ```

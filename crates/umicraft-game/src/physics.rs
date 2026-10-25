@@ -20,7 +20,8 @@ use glam::DVec3;
 
 use crate::collision::{self, MoveOptions};
 use crate::input::{InputIntent, SPRINT_FORWARD_THRESHOLD};
-use crate::shapes::{Aabb, BlockSource};
+use crate::shapes::{is_normal_cube, Aabb, BlockSource};
+use umicraft_world::BlockState;
 
 /// The width of the player bounding box (MCP `Entity.java:259`).
 pub const PLAYER_WIDTH: f64 = 0.6;
@@ -51,9 +52,20 @@ pub const JUMP_MOTION: f64 = 0.42;
 /// The forward boost of a sprinting jump (MCP `EntityLivingBase.java:1568`).
 pub const SPRINT_JUMP_BOOST: f64 = 0.2;
 
-/// The friction applied to the horizontal motion on the ground
-/// (MCP `EntityLivingBase.java:1599`).
+/// The friction applied to the horizontal motion in the air; on the ground it
+/// is multiplied by the slipperiness of the block below
+/// (MCP `EntityLivingBase.java:1599-1604`).
 pub const GROUND_FRICTION: f64 = 0.91;
+
+/// The slipperiness of an ordinary block (MCP `Block.java:289`).
+pub const DEFAULT_SLIPPERINESS: f64 = 0.6;
+
+/// The horizontal motion the push out of a block sets
+/// (MCP `EntityPlayerSP.java:483`).
+pub const PUSH_OUT_SPEED: f64 = 0.1;
+
+/// The slime block id, the one block that bounces a landing entity.
+const SLIME_BLOCK: u16 = 165;
 
 /// The numerator of the movement speed factor (MCP `EntityLivingBase.java:1606`).
 pub const MOVE_SPEED_NUMERATOR: f64 = 0.16277136;
@@ -226,6 +238,9 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
 
     update_sprint(player, intent);
 
+    // MCP `EntityPlayerSP.java:795-798`, before the living update.
+    push_out_of_blocks(player, world);
+
     // Drop the tiny motions, MCP `EntityLivingBase.java:1963-1976`.
     if player.velocity.x.abs() < MOTION_EPSILON {
         player.velocity.x = 0.0;
@@ -267,6 +282,122 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     } else {
         1.0
     };
+}
+
+/// The slipperiness of a block (MCP `Block.slipperiness`): ice and packed ice
+/// 0.98 (`BlockIce.java:23`, `BlockPackedIce.java:12`), slime 0.8
+/// (`BlockSlime.java:17`), every other block 0.6 (`Block.java:289`).
+fn slipperiness(state: BlockState) -> f64 {
+    match state.id() {
+        79 | 174 => 0.98,
+        SLIME_BLOCK => 0.8,
+        _ => DEFAULT_SLIPPERINESS,
+    }
+}
+
+/// The block the friction is read from: the one under the feet, at
+/// `(floor(x), floor(minY) - 1, floor(z))` (MCP `EntityLivingBase.java:1603`).
+fn block_below_feet<S: BlockSource + ?Sized>(player: &Player, world: &S) -> BlockState {
+    world.block(
+        player.position.x.floor() as i32,
+        player.position.y.floor() as i32 - 1,
+        player.position.z.floor() as i32,
+    )
+}
+
+/// The vertical collision of a move: MCP `Entity.java:836-839` calls
+/// `onLanded` on the block at `floor(y - 0.2)`. Every block clears the
+/// vertical motion (`Block.java:1111`), except a slime block, which reverses
+/// a downward motion unless the player sneaks (`BlockSlime.java:44-54`).
+fn land<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
+    let landed_on = world.block(
+        player.position.x.floor() as i32,
+        (player.position.y - 0.2).floor() as i32,
+        player.position.z.floor() as i32,
+    );
+    if landed_on.id() == SLIME_BLOCK && !player.sneaking {
+        if player.velocity.y < 0.0 {
+            player.velocity.y = -player.velocity.y;
+        }
+    } else {
+        player.velocity.y = 0.0;
+    }
+}
+
+/// Pushes a player whose corners are inside a normal cube sideways.
+///
+/// MCP `EntityPlayerSP.java:795-798` tests the four corners of the box, shrunk
+/// to 35 % of the width, half a block above the feet. The vanilla client
+/// never lifts the player out of a block.
+fn push_out_of_blocks<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
+    let inset = PLAYER_WIDTH * 0.35;
+    let y = player.position.y + 0.5;
+    let (x, z) = (player.position.x, player.position.z);
+    for (dx, dz) in [
+        (-inset, inset),
+        (-inset, -inset),
+        (inset, -inset),
+        (inset, inset),
+    ] {
+        push_out_of_block(player, world, x + dx, y, z + dz);
+    }
+}
+
+/// One corner of [`push_out_of_blocks`], MCP `EntityPlayerSP.java:437-505`:
+/// the nearest open side among west, east, north and south, in that order of
+/// preference on ties, sets the horizontal motion towards it.
+fn push_out_of_block<S: BlockSource + ?Sized>(
+    player: &mut Player,
+    world: &S,
+    x: f64,
+    y: f64,
+    z: f64,
+) {
+    let (block_x, block_y, block_z) = (x.floor() as i32, y.floor() as i32, z.floor() as i32);
+    let open = |bx: i32, bz: i32| {
+        !is_normal_cube(world.block(bx, block_y, bz))
+            && !is_normal_cube(world.block(bx, block_y + 1, bz))
+    };
+    if open(block_x, block_z) {
+        return;
+    }
+    let fraction_x = x - f64::from(block_x);
+    let fraction_z = z - f64::from(block_z);
+    let candidates = [
+        (
+            open(block_x - 1, block_z),
+            fraction_x,
+            DVec3::new(-PUSH_OUT_SPEED, 0.0, 0.0),
+        ),
+        (
+            open(block_x + 1, block_z),
+            1.0 - fraction_x,
+            DVec3::new(PUSH_OUT_SPEED, 0.0, 0.0),
+        ),
+        (
+            open(block_x, block_z - 1),
+            fraction_z,
+            DVec3::new(0.0, 0.0, -PUSH_OUT_SPEED),
+        ),
+        (
+            open(block_x, block_z + 1),
+            1.0 - fraction_z,
+            DVec3::new(0.0, 0.0, PUSH_OUT_SPEED),
+        ),
+    ];
+    let mut nearest: Option<(f64, DVec3)> = None;
+    for (is_open, distance, push) in candidates {
+        if is_open && nearest.map_or(distance < 9999.0, |(best, _)| distance < best) {
+            nearest = Some((distance, push));
+        }
+    }
+    if let Some((_, push)) = nearest {
+        if push.x != 0.0 {
+            player.velocity.x = push.x;
+        } else {
+            player.velocity.z = push.z;
+        }
+    }
 }
 
 /// The sprint state machine.
@@ -321,7 +452,14 @@ fn update_sprint(player: &mut Player, intent: &InputIntent) {
 ///
 /// MCP `net/minecraft/entity/EntityLivingBase.java:1591-1672`.
 fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64, world: &S) {
-    let friction = GROUND_FRICTION;
+    // MCP `EntityLivingBase.java:1599-1604`: the block below the feet sets
+    // the friction on the ground; it is read before the move, so the same
+    // value drives the acceleration and the damping.
+    let friction = if player.on_ground {
+        slipperiness(block_below_feet(player, world)) * GROUND_FRICTION
+    } else {
+        GROUND_FRICTION
+    };
     let speed = if player.on_ground {
         // MCP `EntityLivingBase.java:1606-1612`.
         WALK_SPEED
@@ -369,6 +507,9 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
     }
     if result.blocked_z {
         player.velocity.z = 0.0;
+    }
+    if result.blocked_vertically {
+        land(player, world);
     }
 
     // Gravity and friction, MCP `EntityLivingBase.java:1666-1671`.
@@ -422,22 +563,28 @@ mod tests {
         TestBlocks::with(&blocks)
     }
 
+    /// The friction on an ordinary block: `0.6 * 0.91`
+    /// (MCP `EntityLivingBase.java:1603`).
+    fn stone_friction() -> f64 {
+        DEFAULT_SLIPPERINESS * GROUND_FRICTION
+    }
+
     /// The acceleration the player gains per tick while walking.
     ///
-    /// MCP `EntityLivingBase.java:1606` gives `0.16277136 / 0.91^3 = 0.216`,
-    /// the movement speed attribute is `0.1` and the input is damped by
-    /// `0.98` (line 2020).
+    /// MCP `EntityLivingBase.java:1606` gives `0.16277136 / f^3`, the
+    /// movement speed attribute is `0.1` and the input is damped by `0.98`
+    /// (line 2020).
     fn walk_acceleration() -> f64 {
-        INPUT_DAMPING * WALK_SPEED * (MOVE_SPEED_NUMERATOR / GROUND_FRICTION.powi(3))
+        INPUT_DAMPING * WALK_SPEED * (MOVE_SPEED_NUMERATOR / stone_friction().powi(3))
     }
 
     /// The speed a walking player converges to.
     ///
     /// The motion is damped *after* the acceleration was added to it
     /// (MCP `EntityLivingBase.java:1618-1671`), so the steady state is
-    /// `acceleration * 0.91 / (1 - 0.91)`.
+    /// `acceleration * f / (1 - f)`.
     fn walk_speed() -> f64 {
-        walk_acceleration() * GROUND_FRICTION / (1.0 - GROUND_FRICTION)
+        walk_acceleration() * stone_friction() / (1.0 - stone_friction())
     }
 
     #[test]
@@ -446,7 +593,7 @@ mod tests {
         let mut player = Player::new(DVec3::new(0.0, 1.0, 0.0));
         let intent = InputIntent::walking(0.0);
         // The player walks towards +Z (yaw 0 is south in Minecraft). The speed
-        // converges with the 0.91 friction, so the test waits for it.
+        // converges with the ground friction, so the test waits for it.
         for _ in 0..200 {
             step(&mut player, &intent, &world);
         }
@@ -611,5 +758,181 @@ mod tests {
         step(&mut player, &InputIntent::walking(0.0), &world);
         assert!(player.sprinting);
         assert_eq!(player.sprinting_ticks_left, SPRINT_DURATION_TICKS);
+    }
+
+    /// A stone floor at y = 10 for z < 3 and at y = 9 for z >= 3: a one
+    /// block ledge in front of a player walking towards +Z.
+    fn ledge() -> TestBlocks {
+        let mut blocks = Vec::new();
+        for x in -4..4 {
+            for z in -4..32 {
+                let top = if z < 3 { 10 } else { 9 };
+                blocks.push((x, top, z, BlockState::new(1, 0)));
+            }
+        }
+        TestBlocks::with(&blocks)
+    }
+
+    /// Regression: the vertical motion piled up while the player walked, so
+    /// walking off a ledge dropped the whole block in one tick.
+    #[test]
+    fn walking_off_a_ledge_falls_with_gravity() {
+        let world = ledge();
+        let mut player = Player::new(DVec3::new(0.5, 11.0, 0.5));
+        let intent = InputIntent::walking(0.0);
+        let mut previous = player.position.y;
+        let mut falling_ticks = 0;
+        for _ in 0..60 {
+            step(&mut player, &intent, &world);
+            let drop = previous - player.position.y;
+            assert!(drop < 0.5, "the player dropped {drop} blocks in one tick");
+            if drop > 0.0 {
+                falling_ticks += 1;
+            }
+            previous = player.position.y;
+        }
+        assert!(
+            (player.position.y - 10.0).abs() < 1e-9,
+            "landed below the ledge"
+        );
+        assert!(falling_ticks >= 4, "the fall took {falling_ticks} ticks");
+    }
+
+    /// MCP `Block.onLanded` (`Block.java:1111`) clears the vertical motion on
+    /// every vertical collision.
+    #[test]
+    fn the_vertical_motion_does_not_pile_up_on_the_ground() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(0.0, 1.0, 0.0));
+        for _ in 0..40 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+        }
+        assert!(player.on_ground);
+        // Cleared on landing, then one tick of gravity: (0 - 0.08) * 0.98.
+        assert!(
+            (player.velocity.y + 0.0784).abs() < 1e-9,
+            "{}",
+            player.velocity.y
+        );
+    }
+
+    /// The distance a walking player covers per tick on a plain block:
+    /// `a / (1 - f)` with `f = 0.6 * 0.91` and
+    /// `a = 0.98 * 0.1 * 0.16277136 / f^3` (MCP `EntityLivingBase.java:1599-1671`).
+    #[test]
+    fn the_walking_distance_per_tick_matches_vanilla() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(0.0, 1.0, 0.0));
+        let intent = InputIntent::walking(0.0);
+        for _ in 0..100 {
+            step(&mut player, &intent, &world);
+        }
+        let before = player.position.z;
+        step(&mut player, &intent, &world);
+        let per_tick = player.position.z - before;
+        let friction = 0.6 * GROUND_FRICTION;
+        let acceleration = 0.98 * WALK_SPEED * MOVE_SPEED_NUMERATOR / friction.powi(3);
+        let expected = acceleration / (1.0 - friction);
+        assert!(
+            (per_tick - expected).abs() < 1e-6,
+            "expected {expected}, got {per_tick}"
+        );
+    }
+
+    /// The distance a player slides after releasing the key, on `floor`.
+    fn slide(floor: BlockState) -> f64 {
+        let mut blocks = Vec::new();
+        for x in -4..4 {
+            for z in -4..64 {
+                blocks.push((x, 0, z, floor));
+            }
+        }
+        let world = TestBlocks::with(&blocks);
+        let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        for _ in 0..40 {
+            step(&mut player, &InputIntent::walking(0.0), &world);
+        }
+        let released = player.position.z;
+        for _ in 0..40 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+        }
+        player.position.z - released
+    }
+
+    /// Ice (0.98) is more slippery than a plain block (0.6), MCP
+    /// `BlockIce.java:23`.
+    #[test]
+    fn ice_slides_further_than_stone() {
+        let stone = slide(BlockState::new(1, 0));
+        let ice = slide(BlockState::new(79, 0));
+        assert!(ice > stone * 3.0, "ice {ice}, stone {stone}");
+    }
+
+    /// MCP `BlockSlime.onLanded` (`BlockSlime.java:44`): a falling player
+    /// bounces back, unless it sneaks.
+    #[test]
+    fn a_slime_block_bounces_a_player_that_does_not_sneak() {
+        let world = TestBlocks::with(&[(0, 0, 0, BlockState::new(165, 0))]);
+        let mut player = Player::new(DVec3::new(0.5, 3.0, 0.5));
+        let mut bounced = false;
+        for _ in 0..30 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+            bounced |= player.velocity.y > 0.0;
+        }
+        assert!(bounced, "the slime block did not bounce");
+
+        let mut sneaking = Player::new(DVec3::new(0.5, 3.0, 0.5));
+        let mut intent = InputIntent::still(0.0);
+        intent.sneak = true;
+        for _ in 0..30 {
+            step(&mut sneaking, &intent, &world);
+            assert!(sneaking.velocity.y <= 0.0, "a sneaking player bounced");
+        }
+    }
+
+    /// MCP `EntityPlayerSP.pushOutOfBlocks` (`EntityPlayerSP.java:437`): a
+    /// player whose corner is inside a normal cube is pushed sideways towards
+    /// the nearest open side, never lifted.
+    #[test]
+    fn a_player_inside_a_full_block_is_pushed_sideways() {
+        let mut blocks = Vec::new();
+        for x in -4..4 {
+            for z in -4..4 {
+                blocks.push((x, 0, z, BlockState::new(1, 0)));
+            }
+        }
+        // A two-block stone pillar that the player's west corners overlap.
+        blocks.push((0, 1, 0, BlockState::new(1, 0)));
+        blocks.push((0, 2, 0, BlockState::new(1, 0)));
+        let world = TestBlocks::with(&blocks);
+        let mut player = Player::new(DVec3::new(0.25, 1.0, 0.5));
+        player.on_ground = true;
+        step(&mut player, &InputIntent::still(0.0), &world);
+        assert!(
+            player.position.x < 0.25,
+            "pushed west, got {}",
+            player.position.x
+        );
+        assert!((player.position.y - 1.0).abs() < 1e-9, "never lifted");
+    }
+
+    /// Plants have no collision box and are not normal cubes: standing in
+    /// tall grass neither lifts nor pushes the player.
+    #[test]
+    fn a_player_in_tall_grass_stays_put() {
+        let mut blocks = Vec::new();
+        for x in -4..4 {
+            for z in -4..4 {
+                blocks.push((x, 0, z, BlockState::new(2, 0)));
+            }
+        }
+        blocks.push((0, 1, 0, BlockState::new(31, 1)));
+        let world = TestBlocks::with(&blocks);
+        let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        player.on_ground = true;
+        for _ in 0..5 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+        }
+        assert_eq!(player.position, DVec3::new(0.5, 1.0, 0.5));
     }
 }

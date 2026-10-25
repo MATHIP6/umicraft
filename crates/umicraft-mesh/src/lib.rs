@@ -1061,6 +1061,16 @@ mod tests {
         assert!(texture_layer(BlockState::new(1, 0), Face::Up) < TEXTURE_LAYERS);
     }
 
+    /// A slab (Flat) next to a full cube must NOT cull the cube's face.
+    #[test]
+    fn slab_does_not_occlude_adjacent_full_block() {
+        let stone = BlockState::new(1, 0);
+        let slab = BlockState::new(44, 0);
+        assert!(!occludes(slab, stone));
+        let stair = BlockState::new(53, 0);
+        assert!(!occludes(stair, stone));
+    }
+
     #[test]
     fn snapshot_reads_neighbour_chunks() {
         let mut west = ChunkColumn::new(ChunkPos::new(-1, 0));
