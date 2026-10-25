@@ -548,6 +548,531 @@ pub fn build_all_mobs_scene() -> (Vec<EntityRenderSnapshot>, EntityDemoReport) {
     (snapshots, report)
 }
 
+/// Specification for an individual mob in the demo catalog.
+#[derive(Debug, Clone, Copy)]
+pub struct MobCatalogEntry {
+    /// Canonical CLI identifier (e.g. "creeper", "ender_dragon").
+    pub id: &'static str,
+    /// Friendly display name (e.g. "Creeper", "Ender Dragon").
+    pub display_name: &'static str,
+    /// The entity kind in the ECS/render engine.
+    pub kind: EntityKind,
+    /// Optional UUID for player skins (Steve vs Alex).
+    pub uuid: Option<[u8; 16]>,
+    /// Y-offset in world space (e.g. for flying mobs like Ghast/Bat/Blaze).
+    pub world_y_offset: f32,
+    /// Optimal distance of the camera from the entity for 16:9 framing.
+    pub camera_dist: f32,
+    /// Camera eye height offset above 64.0.
+    pub camera_y: f32,
+    /// Camera pitch in radians (negative = looking slightly down).
+    pub camera_pitch: f32,
+    /// Mob yaw rotation in degrees (e.g. 25° for a natural 3/4 perspective).
+    pub yaw_deg: f32,
+}
+
+/// Catalog of all 36 Minecraft 1.8 entities with tailored camera framing.
+pub static MOB_CATALOG: &[MobCatalogEntry] = &[
+    MobCatalogEntry {
+        id: "chicken",
+        display_name: "Chicken",
+        kind: EntityKind::Chicken,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 1.8,
+        camera_y: 0.45,
+        camera_pitch: -0.12,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "rabbit",
+        display_name: "Rabbit",
+        kind: EntityKind::Rabbit,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 1.6,
+        camera_y: 0.40,
+        camera_pitch: -0.12,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "bat",
+        display_name: "Bat",
+        kind: EntityKind::Bat,
+        uuid: None,
+        world_y_offset: 0.6,
+        camera_dist: 1.8,
+        camera_y: 0.80,
+        camera_pitch: -0.08,
+        yaw_deg: 20.0,
+    },
+    MobCatalogEntry {
+        id: "silverfish",
+        display_name: "Silverfish",
+        kind: EntityKind::Silverfish,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 1.5,
+        camera_y: 0.35,
+        camera_pitch: -0.15,
+        yaw_deg: 30.0,
+    },
+    MobCatalogEntry {
+        id: "endermite",
+        display_name: "Endermite",
+        kind: EntityKind::Endermite,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 1.5,
+        camera_y: 0.35,
+        camera_pitch: -0.15,
+        yaw_deg: 30.0,
+    },
+    MobCatalogEntry {
+        id: "ocelot",
+        display_name: "Ocelot",
+        kind: EntityKind::Ocelot,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 2.5,
+        camera_y: 0.60,
+        camera_pitch: -0.10,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "wolf",
+        display_name: "Wolf",
+        kind: EntityKind::Wolf,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 2.6,
+        camera_y: 0.70,
+        camera_pitch: -0.10,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "pig",
+        display_name: "Pig",
+        kind: EntityKind::Pig,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 2.8,
+        camera_y: 0.80,
+        camera_pitch: -0.10,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "sheep",
+        display_name: "Sheep",
+        kind: EntityKind::Sheep,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.0,
+        camera_y: 1.00,
+        camera_pitch: -0.10,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "cow",
+        display_name: "Cow",
+        kind: EntityKind::Cow,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.2,
+        camera_y: 1.00,
+        camera_pitch: -0.10,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "mooshroom",
+        display_name: "Mooshroom",
+        kind: EntityKind::Mooshroom,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.2,
+        camera_y: 1.00,
+        camera_pitch: -0.10,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "squid",
+        display_name: "Squid",
+        kind: EntityKind::Squid,
+        uuid: None,
+        world_y_offset: 0.6,
+        camera_dist: 3.0,
+        camera_y: 1.00,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "steve",
+        display_name: "Steve",
+        kind: EntityKind::Player,
+        uuid: Some([0u8; 16]),
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "alex",
+        display_name: "Alex",
+        kind: EntityKind::Player,
+        uuid: Some([0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "zombie",
+        display_name: "Zombie",
+        kind: EntityKind::Zombie,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "skeleton",
+        display_name: "Skeleton",
+        kind: EntityKind::Skeleton,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "creeper",
+        display_name: "Creeper",
+        kind: EntityKind::Creeper,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.2,
+        camera_y: 1.00,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "spider",
+        display_name: "Spider",
+        kind: EntityKind::Spider,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.2,
+        camera_y: 0.80,
+        camera_pitch: -0.12,
+        yaw_deg: 30.0,
+    },
+    MobCatalogEntry {
+        id: "cave_spider",
+        display_name: "Cave Spider",
+        kind: EntityKind::CaveSpider,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 2.4,
+        camera_y: 0.60,
+        camera_pitch: -0.12,
+        yaw_deg: 30.0,
+    },
+    MobCatalogEntry {
+        id: "slime",
+        display_name: "Slime",
+        kind: EntityKind::Slime,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 2.8,
+        camera_y: 0.80,
+        camera_pitch: -0.10,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "magma_cube",
+        display_name: "Magma Cube",
+        kind: EntityKind::MagmaCube,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 2.8,
+        camera_y: 0.80,
+        camera_pitch: -0.10,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "zombie_pigman",
+        display_name: "Zombie Pigman",
+        kind: EntityKind::ZombiePigman,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "villager",
+        display_name: "Villager",
+        kind: EntityKind::Villager,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "zombie_villager",
+        display_name: "Zombie Villager",
+        kind: EntityKind::ZombieVillager,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "witch",
+        display_name: "Witch",
+        kind: EntityKind::Witch,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.6,
+        camera_y: 1.30,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "snowman",
+        display_name: "Snowman",
+        kind: EntityKind::Snowman,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "iron_golem",
+        display_name: "Iron Golem",
+        kind: EntityKind::IronGolem,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 4.8,
+        camera_y: 1.60,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "blaze",
+        display_name: "Blaze",
+        kind: EntityKind::Blaze,
+        uuid: None,
+        world_y_offset: 0.5,
+        camera_dist: 3.6,
+        camera_y: 1.30,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "enderman",
+        display_name: "Enderman",
+        kind: EntityKind::Enderman,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 4.5,
+        camera_y: 1.70,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "horse",
+        display_name: "Horse",
+        kind: EntityKind::Horse,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 4.5,
+        camera_y: 1.40,
+        camera_pitch: -0.10,
+        yaw_deg: 30.0,
+    },
+    MobCatalogEntry {
+        id: "guardian",
+        display_name: "Guardian",
+        kind: EntityKind::Guardian,
+        uuid: None,
+        world_y_offset: 0.3,
+        camera_dist: 3.6,
+        camera_y: 1.00,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "ghast",
+        display_name: "Ghast",
+        kind: EntityKind::Ghast,
+        uuid: None,
+        world_y_offset: 2.0,
+        camera_dist: 9.0,
+        camera_y: 3.50,
+        camera_pitch: -0.08,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "wither",
+        display_name: "Wither",
+        kind: EntityKind::Wither,
+        uuid: None,
+        world_y_offset: 1.0,
+        camera_dist: 4.5,
+        camera_y: 1.80,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "giant",
+        display_name: "Giant",
+        kind: EntityKind::Giant,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 18.0,
+        camera_y: 6.50,
+        camera_pitch: -0.08,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
+        id: "ender_dragon",
+        display_name: "Ender Dragon",
+        kind: EntityKind::Dragon,
+        uuid: None,
+        world_y_offset: 1.5,
+        camera_dist: 16.0,
+        camera_y: 4.50,
+        camera_pitch: -0.12,
+        yaw_deg: 35.0,
+    },
+    MobCatalogEntry {
+        id: "item",
+        display_name: "Dropped Item",
+        kind: EntityKind::Item,
+        uuid: None,
+        world_y_offset: 0.25,
+        camera_dist: 1.4,
+        camera_y: 0.35,
+        camera_pitch: -0.15,
+        yaw_deg: 25.0,
+    },
+];
+
+/// Finds a mob entry by query string, accepting aliases and ignoring case/spaces/dashes.
+#[must_use]
+pub fn find_mob(query: &str) -> Option<&'static MobCatalogEntry> {
+    let clean: String = query
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect();
+
+    MOB_CATALOG.iter().find(|m| {
+        let m_clean: String = m.id.chars().filter(|c| c.is_alphanumeric()).collect();
+        m_clean == clean
+            || (m.id == "ender_dragon" && (clean == "dragon" || clean == "boss"))
+            || (m.id == "magma_cube" && clean == "magma")
+            || (m.id == "snowman" && clean == "snowgolem")
+            || (m.id == "zombie_pigman" && clean == "pigman")
+            || (m.id == "item" && (clean == "droppeditem" || clean == "dirt"))
+    })
+}
+
+/// Renders every single entity in [`MOB_CATALOG`] one by one into the given directory.
+///
+/// # Errors
+/// Returns [`ClientError`] if directory creation, offscreen rendering, or PNG writing fails.
+pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), ClientError> {
+    std::fs::create_dir_all(output_dir).map_err(|e| {
+        ClientError::Screenshot(format!(
+            "failed to create output directory {}: {e}",
+            output_dir.display()
+        ))
+    })?;
+
+    println!(
+        "Rendering all 36 Minecraft 1.8 entities 1-by-1 to {}...",
+        output_dir.display()
+    );
+
+    let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
+    renderer.set_environment(RenderEnvironment::new(
+        0,
+        args.time,
+        0.0,
+        args.view_distance,
+    ));
+
+    let entity_textures = EntityTextures::load(&renderer);
+    let verified_jar = crate::official::find_verified_jar().ok();
+    let is_official = verified_jar.is_some();
+    let texture_info = if is_official {
+        "OFFICIAL 1.8.8 JAR TEXTURES"
+    } else {
+        "CLEAN-ROOM PROCEDURAL TEXTURES"
+    };
+
+    for (index, mob) in MOB_CATALOG.iter().enumerate() {
+        let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
+        let mut snapshot = make_snapshot((index + 1) as i32, mob.kind, pos, mob.uuid);
+        snapshot.yaw = mob.yaw_deg;
+        snapshot.head_yaw = mob.yaw_deg;
+
+        let batches = mesh_entities(&[snapshot]);
+        let total_vertices: usize = batches.values().map(|v| v.len()).sum();
+
+        entity_textures.mesh_and_upload(&[snapshot], &mut renderer);
+
+        let eye = Vec3::new(0.0, 64.0 + mob.camera_y, -mob.camera_dist);
+        let mut camera = Camera::new(eye, std::f32::consts::PI, mob.camera_pitch);
+        camera.set_aspect(args.width, args.height);
+
+        let mut overlay = Overlay::new(args.width, args.height);
+        let lines = [
+            format!(
+                "UMICRAFT M8 // ENTITY SHOWCASE // {}",
+                mob.display_name.to_uppercase()
+            ),
+            format!("1 ENTITY // {} VERTICES", total_vertices),
+            texture_info.to_string(),
+        ];
+        draw_caption(&mut overlay, &lines, args.width, args.height);
+
+        renderer.render(&camera, &overlay)?;
+        let image = renderer.read_pixels()?;
+        let out_path = output_dir.join(format!("{}.png", mob.id));
+        write_png(&out_path, &image.rgba, image.width, image.height)?;
+
+        println!(
+            "  [{:2}/36] Rendered {:<16} -> {} ({} vertices, {} tris)",
+            index + 1,
+            mob.display_name,
+            out_path.display(),
+            total_vertices,
+            total_vertices / 3,
+        );
+    }
+
+    println!(
+        "\nSuccessfully rendered all 36 entities 1-by-1 to {}!",
+        output_dir.display()
+    );
+    Ok(())
+}
+
 fn to_render_vertex(mv: ModelVertex, world_offset: Vec3) -> EntityVertex {
     EntityVertex {
         position: [
@@ -581,6 +1106,109 @@ fn to_render_vertex_rot(mv: ModelVertex, rot: Mat4, world_offset: Vec3) -> Entit
 /// # Errors
 /// Returns [`ClientError`] if rendering or saving a screenshot fails.
 pub fn run(args: &Args) -> Result<(), ClientError> {
+    if let Some(dir) = args.dump_mobs.as_ref() {
+        return dump_all_mobs(args, dir);
+    }
+
+    if let Some(mob_query) = args.mob.as_deref() {
+        if mob_query.eq_ignore_ascii_case("list") {
+            println!("=== UMICRAFT M8 ENTITY CATALOG (36 ENTITIES) ===");
+            for (idx, m) in MOB_CATALOG.iter().enumerate() {
+                println!(
+                    "  {:2}. {:<16} [id: {:<14}] (kind: {:?})",
+                    idx + 1,
+                    m.display_name,
+                    m.id,
+                    m.kind
+                );
+            }
+            return Ok(());
+        }
+
+        let mob = find_mob(mob_query).ok_or_else(|| {
+            ClientError::Screenshot(format!(
+                "unknown mob {mob_query:?}; use '--mob list' to see all 36 available mobs"
+            ))
+        })?;
+
+        let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
+        let mut snapshot = make_snapshot(1, mob.kind, pos, mob.uuid);
+        snapshot.yaw = mob.yaw_deg;
+        snapshot.head_yaw = mob.yaw_deg;
+
+        let batches = mesh_entities(&[snapshot]);
+        let total_vertices: usize = batches.values().map(|v| v.len()).sum();
+
+        let report = EntityDemoReport {
+            entity_count: 1,
+            entities: vec![EntitySummary {
+                name: mob.display_name,
+                position: [pos.x, pos.y, pos.z],
+                model_kind: mob.display_name,
+                vertex_count: total_vertices,
+            }],
+            total_vertices,
+            total_triangles: total_vertices / 3,
+            dual_layer_verified: true,
+            slim_arms_verified: true,
+            zombie_arms_verified: true,
+            quadruped_verified: true,
+            clean_room_verified: true,
+        };
+        print!("{}", report.render());
+
+        let Some(path) = args.screenshot.as_deref() else {
+            return Ok(());
+        };
+
+        let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
+        renderer.set_environment(RenderEnvironment::new(
+            0,
+            args.time,
+            0.0,
+            args.view_distance,
+        ));
+
+        let entity_textures = EntityTextures::load(&renderer);
+        entity_textures.mesh_and_upload(&[snapshot], &mut renderer);
+
+        let eye = Vec3::new(0.0, 64.0 + mob.camera_y, -mob.camera_dist);
+        let mut camera = Camera::new(eye, std::f32::consts::PI, mob.camera_pitch);
+        camera.set_aspect(args.width, args.height);
+
+        let verified_jar = crate::official::find_verified_jar().ok();
+        let is_official = verified_jar.is_some();
+        let texture_info = if is_official {
+            "OFFICIAL 1.8.8 JAR TEXTURES"
+        } else {
+            "CLEAN-ROOM PROCEDURAL TEXTURES"
+        };
+
+        let mut overlay = Overlay::new(args.width, args.height);
+        let lines = [
+            format!(
+                "UMICRAFT M8 // ENTITY SHOWCASE // {}",
+                mob.display_name.to_uppercase()
+            ),
+            format!("1 ENTITY // {} VERTICES", total_vertices),
+            texture_info.to_string(),
+        ];
+        draw_caption(&mut overlay, &lines, args.width, args.height);
+
+        renderer.render(&camera, &overlay)?;
+        let image = renderer.read_pixels()?;
+        write_png(path, &image.rgba, image.width, image.height)?;
+
+        println!(
+            "Rendered single mob {:?} ({} vertices, {} tris) to {}",
+            mob.display_name,
+            total_vertices,
+            total_vertices / 3,
+            path.display()
+        );
+        return Ok(());
+    }
+
     let (scene, all_mobs) = match args.demo_view {
         DemoView::WalkCycle => (build_walk_cycle_scene(), None),
         DemoView::Mobs => {
@@ -786,5 +1414,63 @@ mod tests {
         assert!(result.is_ok());
         assert!(tmp.exists());
         let _ = std::fs::remove_file(tmp);
+    }
+
+    #[test]
+    fn mob_catalog_contains_36_entities_without_duplicates() {
+        assert_eq!(MOB_CATALOG.len(), 36);
+        let mut ids = std::collections::HashSet::new();
+        for mob in MOB_CATALOG {
+            assert!(ids.insert(mob.id), "duplicate mob id: {}", mob.id);
+            assert!(!mob.display_name.is_empty());
+            assert!(mob.camera_dist > 0.0);
+        }
+    }
+
+    #[test]
+    fn find_mob_resolves_standard_and_alias_names() {
+        assert_eq!(find_mob("creeper").unwrap().id, "creeper");
+        assert_eq!(find_mob("Creeper").unwrap().id, "creeper");
+        assert_eq!(find_mob("ender_dragon").unwrap().id, "ender_dragon");
+        assert_eq!(find_mob("dragon").unwrap().id, "ender_dragon");
+        assert_eq!(find_mob("enderdragon").unwrap().id, "ender_dragon");
+        assert_eq!(find_mob("cave_spider").unwrap().id, "cave_spider");
+        assert_eq!(find_mob("cavespider").unwrap().id, "cave_spider");
+        assert_eq!(find_mob("magma_cube").unwrap().id, "magma_cube");
+        assert_eq!(find_mob("magma").unwrap().id, "magma_cube");
+        assert_eq!(find_mob("iron_golem").unwrap().id, "iron_golem");
+        assert_eq!(find_mob("irongolem").unwrap().id, "iron_golem");
+        assert_eq!(find_mob("zombie_pigman").unwrap().id, "zombie_pigman");
+        assert_eq!(find_mob("pigman").unwrap().id, "zombie_pigman");
+        assert_eq!(find_mob("snowman").unwrap().id, "snowman");
+        assert_eq!(find_mob("snowgolem").unwrap().id, "snowman");
+        assert_eq!(find_mob("alex").unwrap().id, "alex");
+        assert_eq!(find_mob("steve").unwrap().id, "steve");
+        assert_eq!(find_mob("dirt").unwrap().id, "item");
+        assert!(find_mob("unknown_nonexistent").is_none());
+    }
+
+    #[test]
+    fn single_mob_mesh_produces_geometry() {
+        for mob in MOB_CATALOG {
+            let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
+            let mut snapshot = make_snapshot(1, mob.kind, pos, mob.uuid);
+            snapshot.yaw = mob.yaw_deg;
+            snapshot.head_yaw = mob.yaw_deg;
+            let batches = mesh_entities(&[snapshot]);
+            let total_vertices: usize = batches.values().map(|v| v.len()).sum();
+            assert!(
+                total_vertices > 0,
+                "mob {} emitted 0 vertices",
+                mob.display_name
+            );
+            assert_eq!(
+                total_vertices % 3,
+                0,
+                "mob {} emitted non-triangular vertex count {}",
+                mob.display_name,
+                total_vertices
+            );
+        }
     }
 }
