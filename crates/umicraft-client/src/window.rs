@@ -23,6 +23,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
 
 use crate::args::Args;
+use crate::entity_textures::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
@@ -100,6 +101,8 @@ struct App {
     terrain: Option<TerrainTextures>,
     /// The atlas the renderer accepted; the UI metrics must match it.
     ui_atlas: Option<FontAtlas>,
+    /// Entity textures bound for GPU rendering.
+    entity_textures: Option<EntityTextures>,
     last_frame: Instant,
     frame_times: Vec<f32>,
     frame_ms: f32,
@@ -139,6 +142,7 @@ impl App {
             font,
             terrain,
             ui_atlas: None,
+            entity_textures: None,
             last_frame: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
@@ -222,9 +226,13 @@ impl App {
         let terrain = TerrainTextures::load_with_packs(&self.args.resource_packs);
         if let Some(renderer) = self.renderer.as_mut() {
             let installed = terrain.install(renderer);
+            self.entity_textures = Some(EntityTextures::load(renderer));
             if let Some(world) = self.world.as_mut() {
                 world.reload_terrain(&installed, default_worker_count(), renderer);
-                let _ = self.session.events().try_send(crate::game::GameEvent::ReMeshAll);
+                let _ = self
+                    .session
+                    .events()
+                    .try_send(crate::game::GameEvent::ReMeshAll);
             }
         }
         tracing::info!("resource packs reloaded");
@@ -503,6 +511,13 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+
+        if let (Some(entity_textures), Some(world)) =
+            (self.entity_textures.as_ref(), self.world.as_ref())
+        {
+            entity_textures.mesh_and_upload(world.entities(), renderer);
+        }
+
         let rendered = match ui_frame.as_ref() {
             Some(frame) => renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list),
             None => renderer.render(&self.camera, &self.overlay),
@@ -604,6 +619,7 @@ impl ApplicationHandler for App {
                 return;
             }
         }
+        self.entity_textures = Some(EntityTextures::load(&renderer));
         self.renderer = Some(renderer);
         self.window = Some(window.clone());
         event_loop.listen_device_events(DeviceEvents::Always);

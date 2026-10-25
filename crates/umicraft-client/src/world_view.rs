@@ -11,8 +11,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::time::Instant;
 
+use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_game::RenderState;
 use umicraft_mesh::{ChunkSnapshot, Mesh};
 use umicraft_render::{Camera, HudState, RenderEnvironment, Renderer};
@@ -59,6 +61,8 @@ pub struct WorldView {
     status: GameStatus,
     ended: Option<String>,
     frames: usize,
+    /// Active living entities snapshot from the latest frame.
+    entities: Arc<[EntityRenderSnapshot]>,
 }
 
 impl WorldView {
@@ -78,6 +82,7 @@ impl WorldView {
             status: GameStatus::default(),
             ended: None,
             frames: 0,
+            entities: Arc::from([]),
         })
     }
 
@@ -156,10 +161,23 @@ impl WorldView {
         self.frames
     }
 
+    /// The active living entities in the newest simulation frame.
+    #[must_use]
+    pub fn entities(&self) -> &[EntityRenderSnapshot] {
+        &self.entities
+    }
+
+    /// The number of active living entities in the newest frame.
+    #[must_use]
+    pub fn entity_count(&self) -> usize {
+        self.entities.len()
+    }
+
     fn apply(&mut self, event: RenderEvent, target: &mut impl MeshTarget) {
         match event {
             RenderEvent::Frame(frame) => {
                 self.frames += 1;
+                self.entities = Arc::clone(&frame.entities);
                 self.view.push(frame);
             }
             RenderEvent::Hud(hud) => self.hud = *hud,
@@ -189,6 +207,7 @@ impl WorldView {
         self.waiting.clear();
         self.pending.clear();
         self.faces.clear();
+        self.entities = Arc::from([]);
         target.clear_meshes();
     }
 
@@ -506,6 +525,7 @@ mod tests {
             tick_time,
             world_time,
             dimension: -1,
+            entities: Arc::from([]),
         }
     }
 

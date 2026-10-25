@@ -10,6 +10,10 @@ Thumbs.db
 # Scratch
 *.log
 
+# Decompiled sources or local reference code (never commit, spec §3)
+/src/
+/mcp/
+
 # Mojang assets must never be committed (spec §3 rule 3); the CI job
 # `assets-guard` fails the build if one is. The assets live in the platform
 # data directory (spec §9), never in the repository.

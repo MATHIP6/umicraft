@@ -100,7 +100,9 @@ fn png_rgba(width: u32, height: u32, pixels: &[[u8; 4]]) -> Vec<u8> {
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().expect("the PNG header is written");
         let raw: Vec<u8> = pixels.iter().flatten().copied().collect();
-        writer.write_image_data(&raw).expect("the pixels are written");
+        writer
+            .write_image_data(&raw)
+            .expect("the pixels are written");
     }
     bytes
 }
@@ -280,10 +282,7 @@ fn resource_pack_ignores_macos_and_hidden_metadata_files() {
             "assets/minecraft/textures/gui/container/creative_inventory/._tab_inventory.png",
             fake_metadata,
         ),
-        (
-            "assets/minecraft/textures/blocks/.DS_Store",
-            fake_metadata,
-        ),
+        ("assets/minecraft/textures/blocks/.DS_Store", fake_metadata),
         ("assets/minecraft/textures/blocks/stone.png", &stone_png),
     ]);
 

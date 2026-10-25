@@ -135,7 +135,10 @@ where
 
     let version_dir = cache.versions_dir().join(TARGET_VERSION);
     let _ = std::fs::create_dir_all(&version_dir);
-    let _ = std::fs::write(version_dir.join(format!("{TARGET_VERSION}.json")), version_raw);
+    let _ = std::fs::write(
+        version_dir.join(format!("{TARGET_VERSION}.json")),
+        version_raw,
+    );
 
     let jar_desc = version.require_client_jar()?;
     on_step(SetupStep::DownloadingClientJar);

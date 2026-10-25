@@ -117,8 +117,7 @@ impl ModelResources {
     pub fn load_with_packs(
         packs: &[umicraft_assets::ResourcePack],
     ) -> Result<Self, ModelResourcesError> {
-        let jar = official::find_verified_jar()
-            .map_err(|_| ModelResourcesError::NoInstallation)?;
+        let jar = official::find_verified_jar().map_err(|_| ModelResourcesError::NoInstallation)?;
         let base = ClientResources::load(&jar)?;
         Self::from_resources_and_packs(base, packs)
     }
@@ -127,9 +126,7 @@ impl ModelResources {
     ///
     /// # Errors
     /// [`ModelResourcesError`] if pack loading or model baking fails.
-    pub fn load_with_pack_paths(
-        paths: &[std::path::PathBuf],
-    ) -> Result<Self, ModelResourcesError> {
+    pub fn load_with_pack_paths(paths: &[std::path::PathBuf]) -> Result<Self, ModelResourcesError> {
         let mut packs = Vec::with_capacity(paths.len());
         for path in paths {
             let pack = umicraft_assets::ResourcePack::from_path(path)?;

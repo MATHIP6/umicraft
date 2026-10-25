@@ -133,8 +133,6 @@ impl TerrainTextures {
         }
     }
 
-
-
     /// Binds this set's array on `target` and returns the matching mesher.
     ///
     /// A rejected official array logs one warning and installs the

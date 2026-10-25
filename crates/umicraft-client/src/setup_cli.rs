@@ -20,8 +20,7 @@ use crate::error::ClientError;
 ///
 /// [`ClientError`] if asset downloading, verification or caching fails.
 pub fn run() -> Result<(), ClientError> {
-    let cache = AssetCache::in_data_dir()
-        .map_err(|err| ClientError::Assets(err.to_string()))?;
+    let cache = AssetCache::in_data_dir().map_err(|err| ClientError::Assets(err.to_string()))?;
     let cache = Arc::new(cache);
     println!("Umicraft Asset Setup");
     println!("Target cache: {}", cache.root().display());
@@ -41,10 +40,16 @@ pub fn run() -> Result<(), ClientError> {
             |step| match step {
                 SetupStep::CheckingLocalInstall => println!("[1/5] Checking local installation..."),
                 SetupStep::CheckingCache => println!("[1/5] Checking asset cache..."),
-                SetupStep::ResolvingManifest => println!("[2/5] Resolving official version manifest..."),
-                SetupStep::DownloadingClientJar => println!("[3/5] Downloading and verifying 1.8.8 client jar..."),
+                SetupStep::ResolvingManifest => {
+                    println!("[2/5] Resolving official version manifest...")
+                }
+                SetupStep::DownloadingClientJar => {
+                    println!("[3/5] Downloading and verifying 1.8.8 client jar...")
+                }
                 SetupStep::FetchingAssetIndex => println!("[4/5] Fetching asset index..."),
-                SetupStep::DownloadingObjects => println!("[5/5] Downloading missing asset objects..."),
+                SetupStep::DownloadingObjects => {
+                    println!("[5/5] Downloading missing asset objects...")
+                }
                 SetupStep::Completed => println!("Asset setup complete!"),
             },
         )

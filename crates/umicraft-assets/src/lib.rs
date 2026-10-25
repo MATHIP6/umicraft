@@ -74,6 +74,7 @@ pub mod objects;
 pub mod progress;
 pub mod resource_pack;
 pub mod setup;
+pub mod skin;
 
 mod zip;
 
@@ -84,3 +85,7 @@ pub use error::{AssetsError, AssetsResult};
 pub use progress::{Progress, ProgressSnapshot};
 pub use resource_pack::{PackMetadata, ResourcePack, ResourceStack};
 pub use setup::{find_existing_jar, run_setup, SetupStep, TARGET_VERSION};
+pub use skin::{
+    convert_64x32_to_64x64, decode_png_bytes, fetch_mojang_skin, procedural_cow_texture,
+    procedural_fallback_skin, procedural_zombie_skin, ResolvedSkin, SkinModel,
+};

@@ -591,8 +591,8 @@ Wasm "safe mods"; more languages for mod templates; Bedrock-style data-driven UI
 ## 13. Open Decisions (to be recorded in `docs/decisions/`)
 
 1. Project license (permissive MIT/Apache-2.0 vs copyleft GPL) — affects mod ecosystem and trust. *(Decided: ADR-0002.)*
-2. ECS crate choice. *Blocks M8 (the entity rendering).*
-3. GUI approach (`egui` for menus vs fully custom). *Blocks M4 (the interface foundation).*
+2. ECS crate choice. *Blocks M8 (the entity rendering).* *(Decided: ADR-0015 — typed `EntityStore` with immutable render snapshots).*
+3. GUI approach (`egui` for menus vs fully custom). *Blocks M4 (the interface foundation).* *(Decided: ADR-0010 — immediate-mode `umicraft-ui`).*
 4. ABI helper (`abi_stable` vs `stabby` vs pure C ABI). *Blocks M15.*
 5. Audio crate. *Blocks M11.*
 6. Distribution channel for mods (official index, signing authority). *Blocks M15.*

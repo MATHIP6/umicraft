@@ -62,12 +62,10 @@ impl PackMetadata {
             source,
         })?;
 
-        let pack = value
-            .get("pack")
-            .ok_or_else(|| AssetsError::Pack {
-                name: PACK_MCMETA.to_string(),
-                reason: "missing `pack` section".to_string(),
-            })?;
+        let pack = value.get("pack").ok_or_else(|| AssetsError::Pack {
+            name: PACK_MCMETA.to_string(),
+            reason: "missing `pack` section".to_string(),
+        })?;
 
         let pack_format = pack
             .get("pack_format")

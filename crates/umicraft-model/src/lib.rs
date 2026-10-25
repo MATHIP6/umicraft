@@ -42,6 +42,7 @@
 
 pub mod atlas;
 pub mod blockstate;
+pub mod entity;
 pub mod error;
 pub mod geometry;
 pub mod model;
@@ -49,6 +50,7 @@ pub mod registry;
 
 pub use atlas::{AtlasLayout, MISSING_TEXTURE};
 pub use blockstate::BlockStateFile;
+pub use entity::{HumanoidModel, ModelBox, ModelPart, ModelVertex, QuadrupedModel};
 pub use error::{ModelError, ModelResult};
 pub use geometry::{Face, ModelQuad};
 pub use model::{BlockModel, BlockModelSet, ModelVariant, ResolvedModel, ResourceSource};
