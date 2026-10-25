@@ -73,6 +73,10 @@ pub const LADDER_SPEED: f64 = 0.15000000596046448;
 /// (MCP `EntityLivingBase.java:1649`).
 pub const LADDER_CLIMB: f64 = 0.2;
 
+/// The vertical factor of a move through a cobweb
+/// (MCP `Entity.java:605`, `0.05000000074505806D`).
+const WEB_VERTICAL_FACTOR: f64 = 0.05000000074505806;
+
 /// The slime block id, the one block that bounces a landing entity.
 const SLIME_BLOCK: u16 = 165;
 
@@ -159,6 +163,9 @@ pub struct Player {
     pub previous_forward: f32,
     /// Whether the last move was blocked horizontally.
     pub collided_horizontally: bool,
+    /// Whether the last move touched a cobweb, which slows the next one
+    /// (MCP `Entity.isInWeb`).
+    pub in_web: bool,
 }
 
 impl Default for Player {
@@ -177,6 +184,7 @@ impl Default for Player {
             speed_multiplier: 1.0,
             previous_forward: 0.0,
             collided_horizontally: false,
+            in_web: false,
         }
     }
 }
@@ -530,12 +538,21 @@ fn move_flying(player: &mut Player, strafe: f64, forward: f64, speed: f64) {
 /// Moves the player by its motion through the world.
 ///
 /// `moveEntity`, MCP `net/minecraft/entity/Entity.java:588-844`: the
-/// collision-resolved move, the axes that were blocked lose their motion,
-/// and a vertical collision lands the player.
+/// collision-resolved move, the axes that were blocked lose their motion, a
+/// vertical collision lands the player, and the blocks the player overlaps
+/// act on it (`doBlockCollisions`, line 887).
 fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
+    let mut delta = player.velocity;
+    // A cobweb touched by the last move slows this one and clears the
+    // motion, MCP `Entity.java:602-611`.
+    if player.in_web {
+        player.in_web = false;
+        delta *= DVec3::new(0.25, WEB_VERTICAL_FACTOR, 0.25);
+        player.velocity = DVec3::ZERO;
+    }
     let result = collision::move_entity(
         player.bounding_box(),
-        player.velocity,
+        delta,
         world,
         MoveOptions {
             step_height: STEP_HEIGHT,
@@ -555,6 +572,7 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
     if result.blocked_vertically {
         land(player, world);
     }
+    media::collide_with_blocks(player, world);
 }
 
 #[cfg(test)]
@@ -1044,5 +1062,66 @@ mod tests {
             "{}",
             player.position.y
         );
+    }
+
+    /// A floor of `floor` blocks at y = 10 over stone at y = 9.
+    fn floor_of(floor: BlockState) -> TestBlocks {
+        let mut blocks = Vec::new();
+        for x in -4..4 {
+            for z in -4..64 {
+                blocks.push((x, 9, z, BlockState::new(1, 0)));
+                blocks.push((x, 10, z, floor));
+            }
+        }
+        TestBlocks::with(&blocks)
+    }
+
+    /// The horizontal motion left after one tick that starts with
+    /// `motion_z` at `z` on a soul sand floor.
+    fn soul_sand_motion_after_one_tick(z: f64, motion_z: f64) -> f64 {
+        let world = floor_of(BlockState::new(88, 0));
+        let mut player = Player::new(DVec3::new(0.5, 10.875, z));
+        player.on_ground = true;
+        player.velocity.z = motion_z;
+        step(&mut player, &InputIntent::still(0.0), &world);
+        player.velocity.z
+    }
+
+    /// MCP `BlockSoulSand.onEntityCollidedWithBlock` (line 29) multiplies the
+    /// horizontal motion by 0.4 for every soul sand block the player
+    /// overlaps (`Entity.doBlockCollisions` calls it per block), before the
+    /// ground friction of the block below.
+    #[test]
+    fn soul_sand_slows_the_walk_per_block_overlapped() {
+        let friction = DEFAULT_SLIPPERINESS * GROUND_FRICTION;
+        // The box stays inside one soul sand column.
+        let one = soul_sand_motion_after_one_tick(0.5, 0.1);
+        assert!((one - 0.1 * 0.4 * friction).abs() < 1e-12, "{one}");
+        // The box straddles two columns after the move.
+        let two = soul_sand_motion_after_one_tick(0.9, 0.1);
+        assert!((two - 0.1 * 0.4 * 0.4 * friction).abs() < 1e-12, "{two}");
+    }
+
+    /// MCP `BlockWeb.onEntityCollidedWithBlock` and `Entity.moveEntity`
+    /// (line 602): the move after touching a cobweb is scaled by
+    /// `(0.25, 0.05, 0.25)` and the motion is cleared.
+    #[test]
+    fn a_cobweb_nearly_stops_the_player() {
+        let mut blocks = Vec::new();
+        for y in 11..20 {
+            blocks.push((0, y, 0, BlockState::new(30, 0)));
+        }
+        let world = TestBlocks::with(&blocks);
+        let mut player = Player::new(DVec3::new(0.5, 15.0, 0.5));
+        step(&mut player, &InputIntent::still(0.0), &world);
+        assert!(player.in_web, "touching the web sets the flag");
+        let mut previous = player.position.y;
+        for _ in 0..20 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+            let fall = previous - player.position.y;
+            // Each tick only moves 5 % of one tick of gravity.
+            assert!(fall < 0.005, "fell {fall} in one tick");
+            previous = player.position.y;
+        }
     }
 }
