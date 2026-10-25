@@ -216,6 +216,9 @@ impl ResourcePack {
 
         for entry in archive.entries() {
             let normalized = normalize_virtual_path(&entry.name);
+            if is_ignored_path(&normalized) {
+                continue;
+            }
             if normalized == PACK_MCMETA {
                 if let Ok(bytes) = archive.read(entry) {
                     metadata = PackMetadata::parse(&bytes).ok();
@@ -310,6 +313,9 @@ fn collect_dir_files(
                     .map(|comp| comp.as_os_str().to_string_lossy())
                     .collect::<Vec<_>>()
                     .join("/");
+                if is_ignored_path(&virtual_path) {
+                    continue;
+                }
                 if virtual_path.starts_with(ASSETS_PREFIX) {
                     if let Ok(bytes) = std::fs::read(&path) {
                         files.insert(virtual_path, bytes);
@@ -319,6 +325,11 @@ fn collect_dir_files(
         }
     }
     Ok(())
+}
+
+/// Returns true if `path` is an OS metadata or hidden file (e.g. `__MACOSX`, `.DS_Store`, `._*`).
+fn is_ignored_path(path: &str) -> bool {
+    path.starts_with("__MACOSX/") || path.split('/').any(|segment| segment.starts_with('.'))
 }
 
 /// Normalizes archive paths by removing leading slashes and handling backslashes.

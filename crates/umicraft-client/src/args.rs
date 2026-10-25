@@ -598,4 +598,29 @@ mod tests {
         assert_eq!(args.demo_view, DemoView::Overview);
         assert_eq!(args.time, 6000);
     }
+
+    #[test]
+    fn setup_assets_sets_expected_mode() {
+        let args = Args::parse(&words(&["--setup-assets"])).expect("setup assets parses");
+        assert!(args.setup_assets);
+        assert_eq!(args.mode(), Mode::SetupAssets);
+    }
+
+    #[test]
+    fn resource_pack_accumulates_in_order() {
+        let args = Args::parse(&words(&[
+            "--block-demo",
+            "--resource-pack",
+            "pack_a.zip",
+            "--resource-pack",
+            "pack_b",
+        ]))
+        .expect("block demo with resource packs parses");
+        assert_eq!(args.resource_packs.len(), 2);
+        assert_eq!(
+            args.resource_packs[0],
+            std::path::PathBuf::from("pack_a.zip")
+        );
+        assert_eq!(args.resource_packs[1], std::path::PathBuf::from("pack_b"));
+    }
 }

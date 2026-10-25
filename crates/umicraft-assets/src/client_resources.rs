@@ -414,6 +414,9 @@ fn is_texture_metadata(path: &str) -> bool {
 
 /// The atlas key of a block or item PNG, or `None` for any other path.
 fn texture_key(path: &str) -> Option<String> {
+    if !path.starts_with(BLOCK_TEXTURES_PREFIX) && !path.starts_with(ITEM_TEXTURES_PREFIX) {
+        return None;
+    }
     let relative = path.strip_prefix(TEXTURES_ROOT)?.strip_suffix(".png")?;
     if relative.is_empty() {
         return None;
@@ -534,6 +537,10 @@ mod tests {
         assert_eq!(
             texture_key("assets/minecraft/textures/items/apple.png").as_deref(),
             Some("items/apple")
+        );
+        assert_eq!(
+            texture_key("assets/minecraft/textures/gui/container/inventory.png"),
+            None
         );
         assert_eq!(
             texture_key("assets/minecraft/textures/blocks/stone.png.mcmeta"),

@@ -266,3 +266,36 @@ fn resource_stack_layers_and_overrides_client_resources() {
     let layer_bytes = &layered.atlas().pixels()[offset..offset + layer_size];
     assert_eq!(&layer_bytes[0..4], &[255, 0, 0, 255]); // top-left pixel is red!
 }
+
+#[test]
+fn resource_pack_ignores_macos_and_hidden_metadata_files() {
+    let mcmeta = br#"{"pack": {"pack_format": 1, "description": "Mac pack"}}"#;
+    let stone_png = solid(16, 16, [100, 100, 100, 255]);
+    let fake_metadata = b"AppleDouble binary junk";
+
+    let zip_data = stored_zip(&[
+        ("pack.mcmeta", mcmeta),
+        ("__MACOSX/pack.mcmeta", fake_metadata),
+        (
+            "assets/minecraft/textures/gui/container/creative_inventory/._tab_inventory.png",
+            fake_metadata,
+        ),
+        (
+            "assets/minecraft/textures/blocks/.DS_Store",
+            fake_metadata,
+        ),
+        ("assets/minecraft/textures/blocks/stone.png", &stone_png),
+    ]);
+
+    let pack = ResourcePack::from_zip_bytes("mac_pack", zip_data).expect("zip pack loads");
+    assert_eq!(pack.file_count(), 1);
+    assert!(pack
+        .get("assets/minecraft/textures/blocks/stone.png")
+        .is_some());
+    assert!(pack
+        .get("assets/minecraft/textures/gui/container/creative_inventory/._tab_inventory.png")
+        .is_none());
+    assert!(pack
+        .get("assets/minecraft/textures/blocks/.DS_Store")
+        .is_none());
+}
