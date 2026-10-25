@@ -20,6 +20,7 @@ use glam::DVec3;
 
 use crate::collision::{self, MoveOptions};
 use crate::input::{InputIntent, SPRINT_FORWARD_THRESHOLD};
+use crate::media;
 use crate::shapes::{is_normal_cube, Aabb, BlockSource};
 use umicraft_world::BlockState;
 
@@ -63,6 +64,14 @@ pub const DEFAULT_SLIPPERINESS: f64 = 0.6;
 /// The horizontal motion the push out of a block sets
 /// (MCP `EntityPlayerSP.java:483`).
 pub const PUSH_OUT_SPEED: f64 = 0.1;
+
+/// The horizontal and downward speed limit on a ladder
+/// (MCP `EntityLivingBase.java:1627`, `0.15F`).
+pub const LADDER_SPEED: f64 = 0.15000000596046448;
+
+/// The vertical motion of a player that walks into the wall on a ladder
+/// (MCP `EntityLivingBase.java:1649`).
+pub const LADDER_CLIMB: f64 = 0.2;
 
 /// The slime block id, the one block that bounces a landing entity.
 const SLIME_BLOCK: u16 = 165;
@@ -469,8 +478,37 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
         // MCP `EntityLivingBase.java:1613-1616`.
         AIR_CONTROL * player.speed_multiplier
     };
+    move_flying(player, strafe, forward, speed);
 
-    // `moveFlying`, MCP `net/minecraft/entity/Entity.java:1214-1235`.
+    // A ladder caps the motion, MCP `EntityLivingBase.java:1625-1643`.
+    if media::is_on_ladder(player, world) {
+        player.velocity.x = player.velocity.x.clamp(-LADDER_SPEED, LADDER_SPEED);
+        player.velocity.z = player.velocity.z.clamp(-LADDER_SPEED, LADDER_SPEED);
+        player.velocity.y = player.velocity.y.max(-LADDER_SPEED);
+        // A sneaking player holds on to the ladder.
+        if player.sneaking && player.velocity.y < 0.0 {
+            player.velocity.y = 0.0;
+        }
+    }
+
+    move_player(player, world);
+
+    // Walking into the wall climbs it, MCP `EntityLivingBase.java:1647-1650`.
+    if player.collided_horizontally && media::is_on_ladder(player, world) {
+        player.velocity.y = LADDER_CLIMB;
+    }
+
+    // Gravity and friction, MCP `EntityLivingBase.java:1666-1671`.
+    player.velocity.y -= GRAVITY;
+    player.velocity.y *= VERTICAL_DAMPING;
+    player.velocity.x *= friction;
+    player.velocity.z *= friction;
+}
+
+/// Accelerates the player along its look by `speed`.
+///
+/// `moveFlying`, MCP `net/minecraft/entity/Entity.java:1214-1235`.
+fn move_flying(player: &mut Player, strafe: f64, forward: f64, speed: f64) {
     let mut strafe = strafe;
     let mut forward = forward;
     let norm = strafe * strafe + forward * forward;
@@ -487,8 +525,14 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
         player.velocity.x += strafe * cos_yaw - forward * sin_yaw;
         player.velocity.z += forward * cos_yaw + strafe * sin_yaw;
     }
+}
 
-    // `moveEntity`, MCP `net/minecraft/entity/Entity.java:588-844`.
+/// Moves the player by its motion through the world.
+///
+/// `moveEntity`, MCP `net/minecraft/entity/Entity.java:588-844`: the
+/// collision-resolved move, the axes that were blocked lose their motion,
+/// and a vertical collision lands the player.
+fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
     let result = collision::move_entity(
         player.bounding_box(),
         player.velocity,
@@ -511,12 +555,6 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
     if result.blocked_vertically {
         land(player, world);
     }
-
-    // Gravity and friction, MCP `EntityLivingBase.java:1666-1671`.
-    player.velocity.y -= GRAVITY;
-    player.velocity.y *= VERTICAL_DAMPING;
-    player.velocity.x *= friction;
-    player.velocity.z *= friction;
 }
 
 #[cfg(test)]
@@ -934,5 +972,77 @@ mod tests {
             step(&mut player, &InputIntent::still(0.0), &world);
         }
         assert_eq!(player.position, DVec3::new(0.5, 1.0, 0.5));
+    }
+
+    /// A stone floor at y = 10 and a stone wall at z = 1 with a ladder on
+    /// its north face, from y = 11 to y = 30.
+    fn ladder_wall(ladder: BlockState) -> TestBlocks {
+        let mut blocks = Vec::new();
+        for x in -2..3 {
+            for z in -3..3 {
+                blocks.push((x, 10, z, BlockState::new(1, 0)));
+            }
+        }
+        for y in 11..31 {
+            blocks.push((0, y, 1, BlockState::new(1, 0)));
+            blocks.push((0, y, 0, ladder));
+        }
+        TestBlocks::with(&blocks)
+    }
+
+    /// A ladder facing north (metadata 2) hangs on the wall south of it.
+    const LADDER: BlockState = BlockState::new(65, 2);
+
+    /// MCP `EntityLivingBase.moveEntityWithHeading` (lines 1625-1650): a
+    /// player that walks into the wall on a ladder gets `motionY = 0.2`, which
+    /// gravity turns into a climb of `(0.2 - 0.08) * 0.98` blocks per tick.
+    #[test]
+    fn walking_into_a_ladder_climbs_it() {
+        for climbable in [LADDER, BlockState::new(106, 0)] {
+            let world = ladder_wall(climbable);
+            let mut player = Player::new(DVec3::new(0.5, 11.0, 0.5));
+            let intent = InputIntent::walking(0.0);
+            for _ in 0..20 {
+                step(&mut player, &intent, &world);
+            }
+            let before = player.position.y;
+            step(&mut player, &intent, &world);
+            let climb = player.position.y - before;
+            assert!(
+                (climb - 0.1176).abs() < 1e-6,
+                "{climbable:?}: climbed {climb} in one tick"
+            );
+        }
+    }
+
+    /// The fall speed on a ladder is capped at 0.15 blocks per tick.
+    #[test]
+    fn a_ladder_slows_the_fall() {
+        let world = ladder_wall(LADDER);
+        let mut player = Player::new(DVec3::new(0.5, 30.0, 0.5));
+        let mut previous = player.position.y;
+        for _ in 0..60 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+            assert!(previous - player.position.y <= LADDER_SPEED + 1e-9);
+            previous = player.position.y;
+        }
+        assert!(player.position.y < 29.0, "the player still slides down");
+    }
+
+    /// A sneaking player holds on to the ladder (`motionY` stays at 0).
+    #[test]
+    fn sneaking_on_a_ladder_holds_the_player() {
+        let world = ladder_wall(LADDER);
+        let mut player = Player::new(DVec3::new(0.5, 20.0, 0.5));
+        let mut intent = InputIntent::still(0.0);
+        intent.sneak = true;
+        for _ in 0..20 {
+            step(&mut player, &intent, &world);
+        }
+        assert!(
+            (player.position.y - 20.0).abs() < 1e-9,
+            "{}",
+            player.position.y
+        );
     }
 }
