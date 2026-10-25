@@ -197,4 +197,5 @@ UMICRAFT_FONT_PNG=/path/to/ascii.png \
 - `docs/sources.md` — provenance for protocol and behavior facts.
 - `docs/perf-log.md` — benchmark baselines.
 - `docs/decisions/` — architecture decision records.
+- `docs/backlog.md` — known gaps, follow-ups and decisions waiting outside a milestone.
 - `UMICRAFT_SPEC.md` (repository root) — requirements and roadmap.
