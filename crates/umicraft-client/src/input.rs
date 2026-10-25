@@ -96,6 +96,9 @@ pub enum ScriptStep {
     Break,
     /// Place a block against the targeted face.
     Place,
+    /// Walk forward with the jump key held: swims up in water and lava, and
+    /// jumps every time the player lands.
+    Swim,
 }
 
 /// One phase of a scripted session.
@@ -192,6 +195,10 @@ impl Script {
                     self.last_jump = now;
                     update.state.jump = true;
                 }
+            }
+            ScriptStep::Swim => {
+                update.state.forward = 1.0;
+                update.state.jump = true;
             }
             ScriptStep::LookDown | ScriptStep::LookUp => {}
             ScriptStep::Turn => {
@@ -314,9 +321,31 @@ pub fn idle_script() -> Vec<ScriptPhase> {
     }]
 }
 
+/// The scripted run through the movement media (ADR-0014): walk forward
+/// with the jump key held, so the player swims across water, climbs out,
+/// crosses soul sand and cobwebs and climbs a ladder it walks into.
+#[must_use]
+pub fn course_script() -> Vec<ScriptPhase> {
+    vec![ScriptPhase {
+        step: ScriptStep::Swim,
+        duration: Duration::from_secs(3600),
+        pitch: 0.0,
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_course_walks_with_the_jump_key_held() {
+        let mut script = Script::new(course_script());
+        for _ in 0..3 {
+            let update = script.update(Instant::now());
+            assert_eq!(update.state.forward, 1.0);
+            assert!(update.state.jump, "the jump key stays held");
+        }
+    }
 
     #[test]
     fn the_walk_phase_moves_forward() {
