@@ -111,7 +111,7 @@ impl App {
     fn new(args: Args, session: Session) -> Result<Self, ClientError> {
         // Assets are loaded once, before any worker or GPU resource exists.
         // A missing/corrupt installation picks the procedural set.
-        let terrain = Some(TerrainTextures::load());
+        let terrain = Some(TerrainTextures::load_with_packs(&args.resource_packs));
         let font = ui_font::load();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
@@ -191,10 +191,15 @@ impl App {
                             }
                         }
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
+                        KeyCode::F4 => self.reload_resources(),
                         KeyCode::KeyT => {
-                            self.chat_open = true;
-                            self.chat_input.clear();
-                            self.capture_mouse(false);
+                            if self.keys.contains(&KeyCode::F3) {
+                                self.reload_resources();
+                            } else {
+                                self.chat_open = true;
+                                self.chat_input.clear();
+                                self.capture_mouse(false);
+                            }
                         }
                         _ => {}
                     }
@@ -208,6 +213,21 @@ impl App {
                 self.keys.remove(&code);
             }
         }
+    }
+
+    /// Hot-reloads the active resource packs, rebinding the block atlas and
+    /// re-meshing all loaded chunk columns.
+    fn reload_resources(&mut self) {
+        tracing::info!("reloading resource packs...");
+        let terrain = TerrainTextures::load_with_packs(&self.args.resource_packs);
+        if let Some(renderer) = self.renderer.as_mut() {
+            let installed = terrain.install(renderer);
+            if let Some(world) = self.world.as_mut() {
+                world.reload_terrain(&installed, default_worker_count(), renderer);
+                let _ = self.session.events().try_send(crate::game::GameEvent::ReMeshAll);
+            }
+        }
+        tracing::info!("resource packs reloaded");
     }
 
     /// Opens or closes the M4 debug screen.

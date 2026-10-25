@@ -47,9 +47,12 @@ pub enum ClientError {
     /// The world arrived but contained no chunks.
     #[error("no chunks were received before the deadline")]
     NoChunks,
-    /// A mesh worker thread could not be started.
+    /// Mesh worker thread could not be started.
     #[error("mesh worker: {0}")]
     Worker(String),
+    /// Asset downloading, verification or caching failure.
+    #[error("assets: {0}")]
+    Assets(String),
     /// A worker or network thread panicked.
     #[error("background thread failed: {0}")]
     Thread(String),

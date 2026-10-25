@@ -109,6 +109,15 @@ pub enum AssetsError {
         reason: String,
     },
 
+    /// A resource pack was invalid, corrupt or could not be loaded.
+    #[error("resource pack `{name}` is invalid: {reason}")]
+    Pack {
+        /// Name or path of the pack.
+        name: String,
+        /// Description of the failure.
+        reason: String,
+    },
+
     /// The platform data directory could not be determined.
     #[error("the platform data directory could not be determined")]
     NoDataDir,

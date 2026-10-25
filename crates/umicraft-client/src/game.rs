@@ -133,6 +133,8 @@ pub enum GameEvent {
     Input(InputUpdate),
     /// A chat line the player typed.
     Chat(String),
+    /// Request to re-mesh every loaded chunk column (e.g. after a resource pack reload).
+    ReMeshAll,
 }
 
 /// One simulation frame published to the render thread.
@@ -691,6 +693,14 @@ fn handle_event(
         GameEvent::Chat(message) => {
             if !message.is_empty() && message.len() <= 100 {
                 queue.push(ClientCommand::Chat { message });
+            }
+            false
+        }
+        GameEvent::ReMeshAll => {
+            if let Some(world) = game.world.as_ref() {
+                for (pos, _) in world.chunks() {
+                    game.dirty.insert(pos);
+                }
             }
             false
         }

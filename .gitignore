@@ -5,6 +5,7 @@ target/
 # OS noise
 .DS_Store
 Thumbs.db
+.idea/
 
 # Scratch
 *.log

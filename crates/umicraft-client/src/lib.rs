@@ -27,6 +27,7 @@ pub mod model_resources;
 pub mod network;
 mod official;
 pub mod screenshot;
+pub mod setup_cli;
 pub mod terrain_textures;
 #[cfg(test)]
 mod test_support;

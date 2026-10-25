@@ -83,6 +83,8 @@ options:
                       combine with --screenshot to render the same screen offscreen
   --block-demo        mesh and report the M5/M6 acceptance blocks from the official
                       1.8.8 jar; no server or GPU unless --screenshot is given
+  --resource-pack PATH path to a resource pack directory or .zip (repeatable)
+  --setup-assets      download and verify official 1.8.8 assets then exit
   --time N            world time in ticks (signed; default: 6000 noon)
   --demo-view NAME    acceptance camera: overview, day, night, cave, transparency
                       (default: overview)
@@ -110,6 +112,8 @@ pub enum Mode {
     UiDemo,
     /// The server-less M5 block-model acceptance run.
     BlockDemo,
+    /// First-run download and verification of official assets.
+    SetupAssets,
 }
 
 /// Parsed client options.
@@ -139,6 +143,10 @@ pub struct Args {
     pub ui_demo: bool,
     /// Whether the server-less M5/M6 block acceptance run is requested.
     pub block_demo: bool,
+    /// Whether asset setup/download was explicitly requested.
+    pub setup_assets: bool,
+    /// Active resource pack paths, layered in argument order.
+    pub resource_packs: Vec<PathBuf>,
     /// World time in ticks (signed; default: 6000 noon). Only used by `--block-demo`.
     pub time: i64,
     /// Acceptance camera view for `--block-demo`.
@@ -168,7 +176,9 @@ impl Args {
     /// `--headless` and `--screenshot`; `--headless` wins over `--screenshot`.
     #[must_use]
     pub fn mode(&self) -> Mode {
-        if self.ui_demo {
+        if self.setup_assets {
+            Mode::SetupAssets
+        } else if self.ui_demo {
             Mode::UiDemo
         } else if self.block_demo {
             Mode::BlockDemo
@@ -200,6 +210,8 @@ impl Args {
         let mut chat = None;
         let mut ui_demo = false;
         let mut block_demo = false;
+        let mut setup_assets = false;
+        let mut resource_packs = Vec::new();
         let mut time = 6000_i64;
         let mut demo_view = DemoView::Overview;
         let mut width = 1280_u32;
@@ -260,6 +272,18 @@ impl Args {
                     block_demo = true;
                     index += 1;
                 }
+                "--setup-assets" => {
+                    setup_assets = true;
+                    index += 1;
+                }
+                "--resource-pack" => {
+                    let value = words.get(index + 1).ok_or_else(help)?;
+                    if value.is_empty() {
+                        return Err(format!("--resource-pack needs a path\n{USAGE}"));
+                    }
+                    resource_packs.push(PathBuf::from(value));
+                    index += 2;
+                }
                 "--time" => {
                     time = parse_number(words.get(index + 1), "--time")?;
                     index += 2;
@@ -316,10 +340,10 @@ impl Args {
             ));
         }
 
-        // The UI and block demos are the only modes that can run without a
+        // The UI, block demos, and setup-assets mode can run without a
         // server. Every other mode keeps the M1-M3 contract of an explicit
         // host and port.
-        let (host, port) = if ui_demo || block_demo {
+        let (host, port) = if ui_demo || block_demo || setup_assets {
             (host, port)
         } else {
             (Some(host.ok_or_else(help)?), Some(port.ok_or_else(help)?))
@@ -338,6 +362,8 @@ impl Args {
             chat,
             ui_demo,
             block_demo,
+            setup_assets,
+            resource_packs,
             time,
             demo_view,
             width,
