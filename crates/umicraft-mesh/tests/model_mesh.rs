@@ -439,9 +439,9 @@ fn a_bottom_slab_stops_at_half_height() {
     assert!(all_vertices(&mesh).all(|vertex| vertex.layer == slab_layer));
     assert_counter_clockwise(&mesh);
 
-    // The legacy path knows no slab shape and would emit a full cube.
+    // The legacy path skips slabs (Flat) — they only render via models.
     let legacy = mesh_chunk(ChunkPos::new(0, 0), &blocks);
-    assert!(all_vertices(&legacy).any(|vertex| (vertex.position[1] - 1.0).abs() < 1.0e-6));
+    assert_eq!(legacy.face_count(), 0);
 }
 
 #[test]

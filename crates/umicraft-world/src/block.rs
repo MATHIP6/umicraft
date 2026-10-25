@@ -82,14 +82,49 @@ impl BlockState {
             8..=11 => BlockKind::Liquid,
             // See-through full cubes.
             18 | 20 | 79 | 95 => BlockKind::Transparent,
-            // Non-cube decorations. Unknown blocks default to opaque cubes so
-            // a missing registry entry never opens holes in the terrain.
-            6 | 26 | 31 | 32 | 34 | 36 | 37 | 38 | 39 | 40 | 50 | 51 | 55 | 59 | 63 | 65 | 68
-            | 70 | 72 | 75 | 76 | 77 | 78 | 83 | 90 | 93 | 94 | 96 | 101 | 102 | 104 | 105
-            | 106 | 111 | 113 | 115 | 116 | 117 | 118 | 119 | 127 | 131 | 132 | 140 | 141 | 142
-            | 143 | 144 | 145 | 146 | 147 | 148 | 149 | 150 | 151 | 154 | 157 | 167 | 171 | 175
-            | 176 | 177 | 178 | 188 | 189 | 190 | 191 | 192 | 198 | 199 | 200 | 201 | 202 | 203
-            | 204 | 205 => BlockKind::Flat,
+            // Non-cube blocks (slabs, stairs, fences, doors, rails, plants,
+            // torches, etc.). Unknown blocks default to opaque cubes so a
+            // missing registry entry never opens holes in the terrain.
+            6
+            | 26..=28
+            | 30..=32
+            | 34
+            | 36..=40
+            | 44
+            | 50
+            | 51
+            | 53
+            | 55
+            | 59
+            | 63..=72
+            | 75..=78
+            | 81
+            | 83
+            | 85
+            | 90
+            | 92..=94
+            | 96
+            | 101
+            | 102
+            | 104..=109
+            | 111
+            | 113..=120
+            | 126..=128
+            | 131
+            | 132
+            | 134..=136
+            | 139..=151
+            | 154
+            | 156
+            | 157
+            | 160
+            | 163
+            | 164
+            | 167
+            | 171
+            | 175..=178
+            | 180
+            | 182..=205 => BlockKind::Flat,
             _ => BlockKind::Opaque,
         }
     }
@@ -134,5 +169,47 @@ mod tests {
         assert!(!BlockState::new(8, 0).is_opaque());
         assert!(!BlockState::new(31, 0).is_renderable());
         assert_eq!(BlockState::new(20, 0).kind(), BlockKind::Transparent);
+    }
+
+    /// Slabs, stairs and other non-full blocks must be `Flat` so they never
+    /// occlude the face of an adjacent full cube.
+    #[test]
+    fn non_full_blocks_are_flat() {
+        // Slabs
+        for id in [44, 126, 182] {
+            assert_eq!(
+                BlockState::new(id, 0).kind(),
+                BlockKind::Flat,
+                "slab id {id}"
+            );
+            assert!(!BlockState::new(id, 0).is_opaque(), "slab id {id}");
+        }
+        // Stairs
+        for id in [
+            53, 67, 108, 109, 114, 128, 134, 135, 136, 156, 163, 164, 180,
+        ] {
+            assert_eq!(
+                BlockState::new(id, 0).kind(),
+                BlockKind::Flat,
+                "stair id {id}"
+            );
+            assert!(!BlockState::new(id, 0).is_opaque(), "stair id {id}");
+        }
+        // Fences, walls, gates
+        for id in [85, 107, 139, 183, 184, 185, 186, 187] {
+            assert_eq!(
+                BlockState::new(id, 0).kind(),
+                BlockKind::Flat,
+                "fence/wall id {id}"
+            );
+        }
+        // Doors
+        for id in [64, 71, 193, 194, 195, 196, 197] {
+            assert_eq!(
+                BlockState::new(id, 0).kind(),
+                BlockKind::Flat,
+                "door id {id}"
+            );
+        }
     }
 }
