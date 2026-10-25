@@ -9,7 +9,8 @@
 
 use glam::DVec3;
 
-use umicraft_world::BlockState;
+use umicraft_world::fluid::{self, Liquid};
+use umicraft_world::BlockPos;
 
 use crate::collision;
 use crate::physics::Player;
@@ -74,73 +75,6 @@ pub fn collide_with_blocks<S: BlockSource + ?Sized>(player: &mut Player, world: 
 /// (MCP `World.handleMaterialAcceleration`, line 2125).
 const CURRENT_PUSH: f64 = 0.014;
 
-/// True for still and flowing water (material `water`).
-fn is_water(state: BlockState) -> bool {
-    matches!(state.id(), 8 | 9)
-}
-
-/// True for still and flowing lava (material `lava`).
-fn is_lava(state: BlockState) -> bool {
-    matches!(state.id(), 10 | 11)
-}
-
-/// True when the block's material does not block movement: air, liquids,
-/// plants, vines, fire, circuits, carpets, snow layers, portals and cobwebs.
-///
-/// Derived from the materials of `Block.registerBlocks` and
-/// `Material.blocksMovement` (`MaterialLogic`, `MaterialTransparent`,
-/// `MaterialLiquid`, `MaterialPortal` and the anonymous `web` material).
-fn lets_movement_through(state: BlockState) -> bool {
-    matches!(
-        state.id(),
-        0 | 6
-            | 8..=11
-            | 27
-            | 28
-            | 30..=32
-            | 37..=40
-            | 50
-            | 51
-            | 55
-            | 59
-            | 65
-            | 66
-            | 69
-            | 75..=78
-            | 83
-            | 90
-            | 93
-            | 94
-            | 104..=106
-            | 111
-            | 115
-            | 119
-            | 127
-            | 131
-            | 132
-            | 140..=144
-            | 149
-            | 150
-            | 157
-            | 171
-            | 175
-    )
-}
-
-/// `BlockLiquid.isBlockSolid` towards a horizontal side: never the liquid
-/// itself nor ice, otherwise `Material.isSolid`, which only differs from
-/// [`lets_movement_through`] for the cobweb.
-fn is_solid_for_water(state: BlockState) -> bool {
-    !is_water(state) && state.id() != 79 && (state.id() == 30 || !lets_movement_through(state))
-}
-
-/// `BlockLiquid.getLiquidHeightPercent`: the empty share of a liquid block
-/// at a level (0 is a source, 1-7 flow, 8 and above fall).
-fn liquid_height_percent(level: u8) -> f32 {
-    let level = if level >= 8 { 0 } else { level };
-    f32::from(level + 1) / 9.0
-}
-
 /// `Vec3.normalize`: a unit vector, or zero below a length of 1e-4.
 fn normalize(vector: DVec3) -> DVec3 {
     let length = vector.length();
@@ -149,60 +83,6 @@ fn normalize(vector: DVec3) -> DVec3 {
     } else {
         vector / length
     }
-}
-
-/// The horizontal neighbours in the order of `EnumFacing.Plane.HORIZONTAL`:
-/// north, east, south, west.
-const HORIZONTAL: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
-
-/// `BlockLiquid.getEffectiveFlowDecay` for water: the level, 0 for a falling
-/// block, -1 when the block is not water.
-fn flow_decay<S: BlockSource + ?Sized>(world: &S, x: i32, y: i32, z: i32) -> i32 {
-    let state = world.block(x, y, z);
-    if !is_water(state) {
-        return -1;
-    }
-    let level = i32::from(state.metadata());
-    if level >= 8 {
-        0
-    } else {
-        level
-    }
-}
-
-/// The direction water flows in at a block, `BlockLiquid.getFlowVector`
-/// (line 150): towards the neighbours with a higher level, towards a lower
-/// neighbour across an opening, and straight down for falling water next to
-/// a solid side.
-fn flow_vector<S: BlockSource + ?Sized>(world: &S, x: i32, y: i32, z: i32) -> DVec3 {
-    let decay = flow_decay(world, x, y, z);
-    let mut flow = DVec3::ZERO;
-    for (dx, dz) in HORIZONTAL {
-        let (nx, nz) = (x + dx, z + dz);
-        let neighbour = flow_decay(world, nx, y, nz);
-        let weight = if neighbour >= 0 {
-            neighbour - decay
-        } else if lets_movement_through(world.block(nx, y, nz)) {
-            let below = flow_decay(world, nx, y - 1, nz);
-            if below < 0 {
-                continue;
-            }
-            below - (decay - 8)
-        } else {
-            continue;
-        };
-        flow += DVec3::new(f64::from(dx * weight), 0.0, f64::from(dz * weight));
-    }
-    if world.block(x, y, z).metadata() >= 8 {
-        let walled = HORIZONTAL.iter().any(|(dx, dz)| {
-            is_solid_for_water(world.block(x + dx, y, z + dz))
-                || is_solid_for_water(world.block(x + dx, y + 1, z + dz))
-        });
-        if walled {
-            flow = normalize(flow) + DVec3::new(0.0, -6.0, 0.0);
-        }
-    }
-    normalize(flow)
 }
 
 /// Whether the player is in water, pushing it along the current.
@@ -223,14 +103,19 @@ pub fn handle_water_movement<S: BlockSource + ?Sized>(player: &mut Player, world
         for y in min.y.floor() as i32..top {
             for z in min.z.floor() as i32..(max.z + 1.0).floor() as i32 {
                 let state = world.block(x, y, z);
-                if !is_water(state) {
+                if !Liquid::Water.contains(state) {
                     continue;
                 }
                 // The reference compares the scan bound, not the box top.
-                let surface = (y + 1) as f32 - liquid_height_percent(state.metadata());
+                let surface = (y + 1) as f32 - fluid::height_percent(state.metadata());
                 if f64::from(top) >= f64::from(surface) {
                     in_water = true;
-                    current += flow_vector(world, x, y, z);
+                    let at = |pos: BlockPos| world.block(pos.x, pos.y, pos.z);
+                    current += DVec3::from(fluid::flow_vector(
+                        Liquid::Water,
+                        BlockPos::new(x, y, z),
+                        at,
+                    ));
                 }
             }
         }
@@ -251,7 +136,7 @@ pub fn is_in_lava<S: BlockSource + ?Sized>(player: &Player, world: &S) -> bool {
     for x in min.x.floor() as i32..(max.x + 1.0).floor() as i32 {
         for y in min.y.floor() as i32..(max.y + 1.0).floor() as i32 {
             for z in min.z.floor() as i32..(max.z + 1.0).floor() as i32 {
-                if is_lava(world.block(x, y, z)) {
+                if Liquid::Lava.contains(world.block(x, y, z)) {
                     return true;
                 }
             }
@@ -278,8 +163,7 @@ fn touches_liquid<S: BlockSource + ?Sized>(bounds: Aabb, world: &S) -> bool {
     for x in bounds.min.x.floor() as i32..=bounds.max.x.floor() as i32 {
         for y in bounds.min.y.floor() as i32..=bounds.max.y.floor() as i32 {
             for z in bounds.min.z.floor() as i32..=bounds.max.z.floor() as i32 {
-                let state = world.block(x, y, z);
-                if is_water(state) || is_lava(state) {
+                if Liquid::of(world.block(x, y, z)).is_some() {
                     return true;
                 }
             }
