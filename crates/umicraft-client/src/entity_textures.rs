@@ -151,7 +151,8 @@ impl EntityTextures {
         let verified_jar = crate::official::find_verified_jar().ok();
         let mut textures = HashMap::new();
         for spec in texture_specs() {
-            let (rgba, w, h) = load_or_fallback(verified_jar.as_ref(), spec.jar_path, spec.fallback);
+            let (rgba, w, h) =
+                load_or_fallback(verified_jar.as_ref(), spec.jar_path, spec.fallback);
             textures.insert(spec.slot, renderer.create_entity_texture(&rgba, w, h));
         }
         Self { textures }
@@ -215,7 +216,13 @@ fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
         }
         EntityKind::Zombie => {
             let mut model = HumanoidModel::zombie();
-            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch, true);
+            model.set_angles(
+                ent.limb_swing,
+                ent.limb_swing_amount,
+                head_yaw,
+                head_pitch,
+                true,
+            );
             vec![MeshLayer {
                 slot: TextureSlot::Zombie,
                 vertices: model.emit_mesh(),
@@ -223,7 +230,13 @@ fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
         }
         EntityKind::Skeleton => {
             let mut model = HumanoidModel::skeleton();
-            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch, true);
+            model.set_angles(
+                ent.limb_swing,
+                ent.limb_swing_amount,
+                head_yaw,
+                head_pitch,
+                true,
+            );
             vec![MeshLayer {
                 slot: TextureSlot::Skeleton,
                 vertices: model.emit_mesh(),
@@ -289,7 +302,9 @@ fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
 
 /// Meshes entity snapshots into batched vertex lists grouped by [`TextureSlot`].
 #[must_use]
-pub fn mesh_entities(snapshots: &[EntityRenderSnapshot]) -> HashMap<TextureSlot, Vec<EntityVertex>> {
+pub fn mesh_entities(
+    snapshots: &[EntityRenderSnapshot],
+) -> HashMap<TextureSlot, Vec<EntityVertex>> {
     let mut batches: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
@@ -415,6 +430,6 @@ mod tests {
         assert_eq!(batches[&TextureSlot::Zombie].len(), 432);
         assert_eq!(batches[&TextureSlot::Cow].len(), 324);
         assert_eq!(batches[&TextureSlot::Item].len(), 36);
-        assert!(batches.get(&TextureSlot::Alex).is_none());
+        assert!(!batches.contains_key(&TextureSlot::Alex));
     }
 }
