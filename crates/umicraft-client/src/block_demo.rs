@@ -617,9 +617,11 @@ fn draw_view(
 /// Day and night share the ground camera; only `--time` differs.
 fn camera_for_view(view: DemoView) -> DemoCamera {
     match view {
-        DemoView::Overview | DemoView::Back | DemoView::Closeup | DemoView::WalkCycle => {
-            OVERVIEW_CAMERA
-        }
+        DemoView::Overview
+        | DemoView::Back
+        | DemoView::Closeup
+        | DemoView::WalkCycle
+        | DemoView::Mobs => OVERVIEW_CAMERA,
         DemoView::Day | DemoView::Night => GROUND_CAMERA,
         DemoView::Cave => CAVE_CAMERA,
         DemoView::Transparency => TRANSPARENCY_CAMERA,

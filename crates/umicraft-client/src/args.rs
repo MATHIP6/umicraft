@@ -30,6 +30,8 @@ pub enum DemoView {
     Closeup,
     /// Walk cycle animation decomposition showing leg/arm swinging phases.
     WalkCycle,
+    /// Exhibition lineup of all Minecraft 1.8 mobs.
+    Mobs,
 }
 
 impl DemoView {
@@ -44,8 +46,9 @@ impl DemoView {
             "back" => Ok(Self::Back),
             "closeup" => Ok(Self::Closeup),
             "walk-cycle" | "walk" => Ok(Self::WalkCycle),
+            "mobs" | "all" | "all-mobs" => Ok(Self::Mobs),
             other => Err(format!(
-                "unknown demo view {other:?}; must be one of overview, day, night, cave, transparency, back, closeup, walk-cycle"
+                "unknown demo view {other:?}; must be one of overview, day, night, cave, transparency, back, closeup, walk-cycle, mobs"
             )),
         }
     }
@@ -53,7 +56,7 @@ impl DemoView {
     /// Returns the default world time in ticks for this view.
     pub fn default_time(self) -> i64 {
         match self {
-            Self::Overview | Self::Back | Self::Closeup | Self::WalkCycle => 6000,
+            Self::Overview | Self::Back | Self::Closeup | Self::WalkCycle | Self::Mobs => 6000,
             Self::Day => 6000,
             Self::Night => 18000,
             Self::Cave => 6000,
@@ -72,6 +75,7 @@ impl DemoView {
             Self::Back => "back",
             Self::Closeup => "closeup",
             Self::WalkCycle => "walk-cycle",
+            Self::Mobs => "mobs",
         }
     }
 }
@@ -104,7 +108,7 @@ options:
   --setup-assets      download and verify official 1.8.8 assets then exit
   --time N            world time in ticks (signed; default: 6000 noon)
   --demo-view NAME    acceptance camera: overview, day, night, cave, transparency,
-                      back, closeup, walk-cycle (default: overview)
+                      back, closeup, walk-cycle, mobs (default: overview)
   --width N           framebuffer width (default: 1280)
   --height N          framebuffer height (default: 720)
   --help, -h          print this help";
