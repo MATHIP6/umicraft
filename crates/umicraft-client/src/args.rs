@@ -24,6 +24,12 @@ pub enum DemoView {
     Cave,
     /// Close-up of water/glass/leaves against stone.
     Transparency,
+    /// View of entities from behind.
+    Back,
+    /// Close-up of player dual-layer clothing (Steve & Alex).
+    Closeup,
+    /// Walk cycle animation decomposition showing leg/arm swinging phases.
+    WalkCycle,
 }
 
 impl DemoView {
@@ -35,14 +41,19 @@ impl DemoView {
             "night" => Ok(Self::Night),
             "cave" => Ok(Self::Cave),
             "transparency" => Ok(Self::Transparency),
-            other => Err(format!("unknown demo view {other:?}; must be one of overview, day, night, cave, transparency")),
+            "back" => Ok(Self::Back),
+            "closeup" => Ok(Self::Closeup),
+            "walk-cycle" | "walk" => Ok(Self::WalkCycle),
+            other => Err(format!(
+                "unknown demo view {other:?}; must be one of overview, day, night, cave, transparency, back, closeup, walk-cycle"
+            )),
         }
     }
 
     /// Returns the default world time in ticks for this view.
     pub fn default_time(self) -> i64 {
         match self {
-            Self::Overview => 6000,
+            Self::Overview | Self::Back | Self::Closeup | Self::WalkCycle => 6000,
             Self::Day => 6000,
             Self::Night => 18000,
             Self::Cave => 6000,
@@ -58,6 +69,9 @@ impl DemoView {
             Self::Night => "night",
             Self::Cave => "cave",
             Self::Transparency => "transparency",
+            Self::Back => "back",
+            Self::Closeup => "closeup",
+            Self::WalkCycle => "walk-cycle",
         }
     }
 }
@@ -67,8 +81,9 @@ pub const USAGE: &str = "\
 usage: umicraft-client <host> <port> [options]
        umicraft-client --ui-demo [--screenshot PATH] [options]
        umicraft-client --block-demo [--screenshot PATH] [options]
+       umicraft-client --entity-demo [--screenshot PATH] [options]
   <host> <port>       Minecraft 1.8 server (protocol 47); not needed with
-                      --ui-demo or --block-demo
+                      --ui-demo, --block-demo or --entity-demo
 
 options:
   --name NAME         offline username (default: umicraft)
@@ -84,11 +99,13 @@ options:
                       combine with --screenshot to render the same screen offscreen
   --block-demo        mesh and report the M5/M6 acceptance blocks from the official
                       1.8.8 jar; no server or GPU unless --screenshot is given
+  --entity-demo       mesh and report the M8 acceptance entities (Steve, Alex,
+                      Zombie, Cow, Item); no server or GPU unless --screenshot is given
   --resource-pack PATH path to a resource pack directory or .zip (repeatable)
   --setup-assets      download and verify official 1.8.8 assets then exit
   --time N            world time in ticks (signed; default: 6000 noon)
-  --demo-view NAME    acceptance camera: overview, day, night, cave, transparency
-                      (default: overview)
+  --demo-view NAME    acceptance camera: overview, day, night, cave, transparency,
+                      back, closeup, walk-cycle (default: overview)
   --width N           framebuffer width (default: 1280)
   --height N          framebuffer height (default: 720)
   --help, -h          print this help";
@@ -99,8 +116,8 @@ pub const SCRIPTS: [&str; 3] = ["default", "idle", "course"];
 /// The top-level mode selected by the parsed arguments.
 ///
 /// [`Args::mode`] fixes the dispatch precedence: a UI demo wins over the block
-/// demo, which wins over the headless session, which wins over the terrain
-/// screenshot, which wins over the windowed client.
+/// demo, which wins over the entity demo, which wins over the headless session,
+/// which wins over the terrain screenshot, which wins over the windowed client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// The interactive windowed client.
@@ -113,6 +130,8 @@ pub enum Mode {
     UiDemo,
     /// The server-less M5 block-model acceptance run.
     BlockDemo,
+    /// The server-less M8 entity acceptance run.
+    EntityDemo,
     /// First-run download and verification of official assets.
     SetupAssets,
 }
@@ -144,6 +163,8 @@ pub struct Args {
     pub ui_demo: bool,
     /// Whether the server-less M5/M6 block acceptance run is requested.
     pub block_demo: bool,
+    /// Whether the server-less M8 entity acceptance run is requested.
+    pub entity_demo: bool,
     /// Whether asset setup/download was explicitly requested.
     pub setup_assets: bool,
     /// Active resource pack paths, layered in argument order.
@@ -174,7 +195,8 @@ impl Args {
     /// The dispatch mode of these arguments.
     ///
     /// `--ui-demo` wins over `--block-demo`; the block demo wins over
-    /// `--headless` and `--screenshot`; `--headless` wins over `--screenshot`.
+    /// `--entity-demo`; the entity demo wins over `--headless` and `--screenshot`;
+    /// `--headless` wins over `--screenshot`.
     #[must_use]
     pub fn mode(&self) -> Mode {
         if self.setup_assets {
@@ -183,6 +205,8 @@ impl Args {
             Mode::UiDemo
         } else if self.block_demo {
             Mode::BlockDemo
+        } else if self.entity_demo {
+            Mode::EntityDemo
         } else if self.headless {
             Mode::Headless
         } else if self.screenshot.is_some() {
@@ -211,6 +235,7 @@ impl Args {
         let mut chat = None;
         let mut ui_demo = false;
         let mut block_demo = false;
+        let mut entity_demo = false;
         let mut setup_assets = false;
         let mut resource_packs = Vec::new();
         let mut time = 6000_i64;
@@ -271,6 +296,10 @@ impl Args {
                 }
                 "--block-demo" => {
                     block_demo = true;
+                    index += 1;
+                }
+                "--entity-demo" => {
+                    entity_demo = true;
                     index += 1;
                 }
                 "--setup-assets" => {
@@ -341,10 +370,10 @@ impl Args {
             ));
         }
 
-        // The UI, block demos, and setup-assets mode can run without a
+        // The UI, block demos, entity demo, and setup-assets mode can run without a
         // server. Every other mode keeps the M1-M3 contract of an explicit
         // host and port.
-        let (host, port) = if ui_demo || block_demo || setup_assets {
+        let (host, port) = if ui_demo || block_demo || entity_demo || setup_assets {
             (host, port)
         } else {
             (Some(host.ok_or_else(help)?), Some(port.ok_or_else(help)?))
@@ -363,6 +392,7 @@ impl Args {
             chat,
             ui_demo,
             block_demo,
+            entity_demo,
             setup_assets,
             resource_packs,
             time,
@@ -636,5 +666,24 @@ mod tests {
             std::path::PathBuf::from("pack_a.zip")
         );
         assert_eq!(args.resource_packs[1], std::path::PathBuf::from("pack_b"));
+    }
+
+    #[test]
+    fn entity_demo_parses_without_server() {
+        let args = Args::parse(&words(&["--entity-demo"])).expect("entity demo parses");
+        assert!(args.entity_demo);
+        assert_eq!(args.mode(), Mode::EntityDemo);
+    }
+
+    #[test]
+    fn entity_demo_with_screenshot_sets_expected_mode() {
+        let args = Args::parse(&words(&["--entity-demo", "--screenshot", "/tmp/m8.png"]))
+            .expect("entity demo with screenshot");
+        assert!(args.entity_demo);
+        assert_eq!(
+            args.screenshot,
+            Some(std::path::PathBuf::from("/tmp/m8.png"))
+        );
+        assert_eq!(args.mode(), Mode::EntityDemo);
     }
 }

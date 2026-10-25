@@ -8,8 +8,10 @@
 //! feeds it and writes what it answers.
 
 use umicraft_protocol::packets::play::clientbound::{
-    self, BlockChange, ChunkData, EntityEquipment, EntityTeleport, MapChunkBulk, MultiBlockChange,
-    PositionLook, Respawn, SetExperience, SpawnPosition, TimeUpdate, UpdateHealth,
+    self, Animation, AttachEntity, BlockChange, ChunkData, DestroyEntities, EntityEquipment,
+    EntityHeadLook, EntityLook, EntityLookMove, EntityMetadata, EntityRelativeMove, EntityStatus,
+    EntityTeleport, EntityVelocity, MapChunkBulk, MultiBlockChange, PositionLook, Respawn,
+    SetExperience, SpawnMob, SpawnObject, SpawnPlayer, SpawnPosition, TimeUpdate, UpdateHealth,
 };
 use umicraft_protocol::packets::play::serverbound::{Brand, ClientSettings, KeepAlive};
 use umicraft_protocol::varint::write_var_u32;
@@ -135,6 +137,32 @@ pub enum PlayEvent {
     EntityTeleport(EntityTeleport),
     /// The equipment of an entity.
     EntityEquipment(EntityEquipment),
+    /// Another player was spawned.
+    SpawnPlayer(SpawnPlayer),
+    /// A mob was spawned.
+    SpawnMob(SpawnMob),
+    /// An object or item was spawned.
+    SpawnObject(SpawnObject),
+    /// Entities were destroyed / removed.
+    DestroyEntities(DestroyEntities),
+    /// An entity moved relative to its previous position.
+    EntityRelativeMove(EntityRelativeMove),
+    /// An entity rotated.
+    EntityLook(EntityLook),
+    /// An entity moved and rotated.
+    EntityLookMove(EntityLookMove),
+    /// An entity's head turned.
+    EntityHeadLook(EntityHeadLook),
+    /// An entity's velocity changed.
+    EntityVelocity(EntityVelocity),
+    /// An entity's metadata changed.
+    EntityMetadata(EntityMetadata),
+    /// An entity was attached (riding / leashed).
+    AttachEntity(AttachEntity),
+    /// An entity status event occurred.
+    EntityStatus(EntityStatus),
+    /// An entity animation occurred.
+    Animation(Animation),
     /// The world spawn point.
     SpawnPosition(SpawnPosition),
     /// The experience bar changed.
@@ -268,6 +296,46 @@ impl PlaySession {
             }
             clientbound::EntityEquipment::ID => {
                 Reaction::event(PlayEvent::EntityEquipment(EntityEquipment::decode(body)?))
+            }
+            clientbound::SpawnPlayer::ID => {
+                Reaction::event(PlayEvent::SpawnPlayer(SpawnPlayer::decode(body)?))
+            }
+            clientbound::SpawnMob::ID => {
+                Reaction::event(PlayEvent::SpawnMob(SpawnMob::decode(body)?))
+            }
+            clientbound::SpawnObject::ID => {
+                Reaction::event(PlayEvent::SpawnObject(SpawnObject::decode(body)?))
+            }
+            clientbound::DestroyEntities::ID => {
+                Reaction::event(PlayEvent::DestroyEntities(DestroyEntities::decode(body)?))
+            }
+            clientbound::Entity::ID => Reaction::default(),
+            clientbound::EntityRelativeMove::ID => Reaction::event(PlayEvent::EntityRelativeMove(
+                EntityRelativeMove::decode(body)?,
+            )),
+            clientbound::EntityLook::ID => {
+                Reaction::event(PlayEvent::EntityLook(EntityLook::decode(body)?))
+            }
+            clientbound::EntityLookMove::ID => {
+                Reaction::event(PlayEvent::EntityLookMove(EntityLookMove::decode(body)?))
+            }
+            clientbound::EntityHeadLook::ID => {
+                Reaction::event(PlayEvent::EntityHeadLook(EntityHeadLook::decode(body)?))
+            }
+            clientbound::EntityVelocity::ID => {
+                Reaction::event(PlayEvent::EntityVelocity(EntityVelocity::decode(body)?))
+            }
+            clientbound::EntityMetadata::ID => {
+                Reaction::event(PlayEvent::EntityMetadata(EntityMetadata::decode(body)?))
+            }
+            clientbound::AttachEntity::ID => {
+                Reaction::event(PlayEvent::AttachEntity(AttachEntity::decode(body)?))
+            }
+            clientbound::EntityStatus::ID => {
+                Reaction::event(PlayEvent::EntityStatus(EntityStatus::decode(body)?))
+            }
+            clientbound::Animation::ID => {
+                Reaction::event(PlayEvent::Animation(Animation::decode(body)?))
             }
             clientbound::SpawnPosition::ID => {
                 Reaction::event(PlayEvent::SpawnPosition(SpawnPosition::decode(body)?))
@@ -672,9 +740,9 @@ mod tests {
     #[test]
     fn an_unconsumed_id_produces_an_empty_reaction() {
         let mut session = PlaySession::new(PlayOptions::default());
-        // `Animation` (0x0B) is decoded by the protocol crate but not
-        // consumed by the client yet; its body is not even read.
-        let reaction = session.handle(0x0B, &[0xFF]).expect("skipped, not failed");
+        // `Block Action` (0x24) is decoded by the protocol crate but not
+        // consumed by the client session yet; its body is not even read.
+        let reaction = session.handle(0x24, &[0xFF]).expect("skipped, not failed");
         assert_eq!(reaction, Reaction::default());
     }
 

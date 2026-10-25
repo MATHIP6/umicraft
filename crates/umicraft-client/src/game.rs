@@ -24,9 +24,10 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use glam::DVec3;
+use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
+use umicraft_game::entity::{EntityFlags, EntityId, EntityRenderSnapshot, EntityStore};
 use umicraft_game::input::RawInput;
 use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SURVIVAL_REACH};
 use umicraft_game::shapes::Aabb;
@@ -138,7 +139,7 @@ pub enum GameEvent {
 }
 
 /// One simulation frame published to the render thread.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Frame {
     /// The player state after the tick.
     pub state: RenderState,
@@ -154,6 +155,8 @@ pub struct Frame {
     pub world_time: i64,
     /// The current dimension (`0` overworld, `-1` Nether, `1` End).
     pub dimension: i8,
+    /// Render snapshots of all tracked entities.
+    pub entities: Arc<[EntityRenderSnapshot]>,
 }
 
 /// The statistics the debug overlay shows.
@@ -402,6 +405,8 @@ struct Game {
     status_data: GameStatus,
     /// Whether the HUD has to be published again.
     hud_dirty: bool,
+    /// Entities in the world (mobs, players, objects).
+    entities: EntityStore,
 }
 
 impl Game {
@@ -438,6 +443,7 @@ impl Game {
             expected_placement: None,
             status_data: GameStatus::default(),
             hud_dirty: true,
+            entities: EntityStore::new(),
         }
     }
 
@@ -721,6 +727,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
+        entities: game.entities.snapshots(1.0).into(),
     }));
 }
 
@@ -735,6 +742,7 @@ fn handle_net(
         PlayEvent::JoinGame(info) => {
             game.world = Some(World::new(info.dimension));
             game.dirty.clear();
+            game.entities.clear();
             game.entity_id = info.entity_id;
             game.gamemode = info.gamemode;
             game.dimension = info.dimension;
@@ -840,6 +848,7 @@ fn handle_net(
             if changed {
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
+                game.entities.clear();
                 // The new dimension has its own clock; the first `Time
                 // Update` of the new world arrives right after the respawn.
                 game.world_time = 0;
@@ -868,6 +877,21 @@ fn handle_net(
                     packet.on_ground,
                 );
                 apply_correction(game, &correction, queue);
+            } else {
+                let pos = DVec3::new(
+                    f64::from(packet.x) / 32.0,
+                    f64::from(packet.y) / 32.0,
+                    f64::from(packet.z) / 32.0,
+                );
+                let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
+                let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
+                game.entities.teleport(
+                    EntityId(packet.entity_id),
+                    pos,
+                    yaw,
+                    pitch,
+                    packet.on_ground,
+                );
             }
         }
         PlayEvent::EntityEquipment(packet) => {
@@ -881,7 +905,131 @@ fn handle_net(
                     game.armor = f32::from(total_armor(&game.equipment));
                     game.hud_dirty = true;
                 }
+            } else if packet.slot == 0 {
+                let item_id = if packet.item.item_id > 0 {
+                    Some(packet.item.item_id as u16)
+                } else {
+                    None
+                };
+                game.entities
+                    .set_held_item(EntityId(packet.entity_id), item_id);
             }
+        }
+        PlayEvent::SpawnPlayer(p) => {
+            let pos = DVec3::new(
+                f64::from(p.x) / 32.0,
+                f64::from(p.y) / 32.0,
+                f64::from(p.z) / 32.0,
+            );
+            let yaw = f32::from(p.yaw) * 360.0 / 256.0;
+            let pitch = f32::from(p.pitch) * 360.0 / 256.0;
+            let held = if p.held_item > 0 {
+                Some(p.held_item as u16)
+            } else {
+                None
+            };
+            let flags = EntityFlags::new(
+                p.metadata.get_byte(0).unwrap_or(0),
+                p.metadata.get_byte(10).unwrap_or(0),
+            );
+            game.entities
+                .spawn_player(EntityId(p.entity_id), p.uuid, pos, yaw, pitch, held, flags);
+        }
+        PlayEvent::SpawnMob(m) => {
+            let pos = DVec3::new(
+                f64::from(m.x) / 32.0,
+                f64::from(m.y) / 32.0,
+                f64::from(m.z) / 32.0,
+            );
+            let yaw = f32::from(m.yaw) * 360.0 / 256.0;
+            let pitch = f32::from(m.pitch) * 360.0 / 256.0;
+            let head_yaw = f32::from(m.head_yaw) * 360.0 / 256.0;
+            let vel = Vec3::new(
+                f32::from(m.velocity_x) / 8000.0,
+                f32::from(m.velocity_y) / 8000.0,
+                f32::from(m.velocity_z) / 8000.0,
+            );
+            let flags = EntityFlags::new(
+                m.metadata.get_byte(0).unwrap_or(0),
+                m.metadata.get_byte(10).unwrap_or(0),
+            );
+            game.entities.spawn_mob(
+                EntityId(m.entity_id),
+                m.mob_type,
+                pos,
+                yaw,
+                pitch,
+                head_yaw,
+                vel,
+                flags,
+            );
+        }
+        PlayEvent::SpawnObject(o) => {
+            let pos = DVec3::new(
+                f64::from(o.x) / 32.0,
+                f64::from(o.y) / 32.0,
+                f64::from(o.z) / 32.0,
+            );
+            let pitch = f32::from(o.pitch) * 360.0 / 256.0;
+            let yaw = f32::from(o.yaw) * 360.0 / 256.0;
+            let vel = Vec3::new(
+                f32::from(o.velocity_x) / 8000.0,
+                f32::from(o.velocity_y) / 8000.0,
+                f32::from(o.velocity_z) / 8000.0,
+            );
+            game.entities
+                .spawn_object(EntityId(o.entity_id), o.object_type, pos, pitch, yaw, vel);
+        }
+        PlayEvent::DestroyEntities(d) => {
+            game.entities.destroy(&d.entity_ids);
+        }
+        PlayEvent::EntityRelativeMove(m) => {
+            let delta = DVec3::new(
+                f64::from(m.dx) / 32.0,
+                f64::from(m.dy) / 32.0,
+                f64::from(m.dz) / 32.0,
+            );
+            game.entities
+                .move_relative(EntityId(m.entity_id), delta, m.on_ground);
+        }
+        PlayEvent::EntityLook(l) => {
+            let yaw = f32::from(l.yaw) * 360.0 / 256.0;
+            let pitch = f32::from(l.pitch) * 360.0 / 256.0;
+            game.entities
+                .look(EntityId(l.entity_id), yaw, pitch, l.on_ground);
+        }
+        PlayEvent::EntityLookMove(lm) => {
+            let delta = DVec3::new(
+                f64::from(lm.dx) / 32.0,
+                f64::from(lm.dy) / 32.0,
+                f64::from(lm.dz) / 32.0,
+            );
+            let yaw = f32::from(lm.yaw) * 360.0 / 256.0;
+            let pitch = f32::from(lm.pitch) * 360.0 / 256.0;
+            game.entities
+                .look_move(EntityId(lm.entity_id), delta, yaw, pitch, lm.on_ground);
+        }
+        PlayEvent::EntityHeadLook(h) => {
+            let head_yaw = f32::from(h.head_yaw) * 360.0 / 256.0;
+            game.entities.set_head_yaw(EntityId(h.entity_id), head_yaw);
+        }
+        PlayEvent::EntityVelocity(v) => {
+            let vel = Vec3::new(
+                f32::from(v.velocity_x) / 8000.0,
+                f32::from(v.velocity_y) / 8000.0,
+                f32::from(v.velocity_z) / 8000.0,
+            );
+            game.entities.set_velocity(EntityId(v.entity_id), vel);
+        }
+        PlayEvent::EntityMetadata(m) => {
+            let flags = EntityFlags::new(
+                m.metadata.get_byte(0).unwrap_or(0),
+                m.metadata.get_byte(10).unwrap_or(0),
+            );
+            game.entities.set_flags(EntityId(m.entity_id), flags);
+        }
+        PlayEvent::AttachEntity(_) | PlayEvent::EntityStatus(_) | PlayEvent::Animation(_) => {
+            // Unused or visual-only 1.8 packets.
         }
         PlayEvent::SpawnPosition(packet) => {
             game.spawn = Some((packet.x, packet.y, packet.z));
@@ -1225,6 +1373,7 @@ fn tick(
             state.tick(&intent, world);
         }
     }
+    game.entities.tick();
     // A player inside a block is pushed out sideways by the simulation
     // itself, like the vanilla client (`umicraft_game::physics`); it is
     // never lifted.
@@ -1700,10 +1849,9 @@ mod tests {
         };
         assert_eq!(frame.world_time, -6_000);
         assert_eq!(frame.dimension, 0);
-        // `Frame` is `Copy`, so the render thread never needs a lock or an
-        // allocation to keep the newest snapshot.
-        fn assert_copy<T: Copy>() {}
-        assert_copy::<Frame>();
+        // `Frame` is cheap to clone and send across threads without taking locks.
+        fn assert_send_sync<T: Send + Sync + Clone + 'static>() {}
+        assert_send_sync::<Frame>();
     }
 
     #[test]

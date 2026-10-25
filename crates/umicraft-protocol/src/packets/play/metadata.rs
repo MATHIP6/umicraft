@@ -105,6 +105,181 @@ impl Metadata {
         writer.write_all(&[TERMINATOR])?;
         Ok(())
     }
+
+    /// Finds a watched object by index.
+    #[must_use]
+    pub fn get(&self, index: u8) -> Option<&WatchedObject> {
+        self.objects.iter().find(|obj| obj.index == index)
+    }
+
+    /// Reads a byte value at the given index.
+    #[must_use]
+    pub fn get_byte(&self, index: u8) -> Option<u8> {
+        self.get(index)
+            .filter(|obj| obj.type_id == 0 && obj.value.len() == 1)
+            .map(|obj| obj.value[0])
+    }
+
+    /// Reads an i16 short value at the given index.
+    #[must_use]
+    pub fn get_short(&self, index: u8) -> Option<i16> {
+        self.get(index)
+            .filter(|obj| obj.type_id == 1 && obj.value.len() == 2)
+            .map(|obj| i16::from_be_bytes([obj.value[0], obj.value[1]]))
+    }
+
+    /// Reads an i32 int value at the given index.
+    #[must_use]
+    pub fn get_int(&self, index: u8) -> Option<i32> {
+        self.get(index)
+            .filter(|obj| obj.type_id == 2 && obj.value.len() == 4)
+            .map(|obj| i32::from_be_bytes([obj.value[0], obj.value[1], obj.value[2], obj.value[3]]))
+    }
+
+    /// Reads an f32 float value at the given index.
+    #[must_use]
+    pub fn get_float(&self, index: u8) -> Option<f32> {
+        self.get(index)
+            .filter(|obj| obj.type_id == 3 && obj.value.len() == 4)
+            .map(|obj| f32::from_be_bytes([obj.value[0], obj.value[1], obj.value[2], obj.value[3]]))
+    }
+
+    /// Reads a string value at the given index.
+    #[must_use]
+    pub fn get_string(&self, index: u8) -> Option<String> {
+        self.get(index)
+            .filter(|obj| obj.type_id == 4)
+            .and_then(|obj| String::from_utf8(obj.value.clone()).ok())
+    }
+
+    /// Decodes the standard 1.8 data watcher fields into a typed structure.
+    #[must_use]
+    pub fn to_typed(&self) -> TypedMetadata {
+        let flags = self.get_byte(0).unwrap_or(0);
+        let air = self.get_short(1).unwrap_or(300);
+        let custom_name = self.get_string(2).unwrap_or_default();
+        let custom_name_visible = self.get_byte(3).unwrap_or(0) != 0;
+        let health = self.get_float(6).unwrap_or(20.0);
+        let skin_parts = self.get_byte(10).unwrap_or(0x7F);
+        let is_baby = self.get_byte(12).unwrap_or(0) == 1;
+
+        TypedMetadata {
+            flags,
+            air,
+            custom_name,
+            custom_name_visible,
+            health,
+            skin_parts,
+            is_baby,
+        }
+    }
+}
+
+/// Standard typed 1.8 entity metadata decoded from standard data watchers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypedMetadata {
+    /// Entity status flags (index 0).
+    pub flags: u8,
+    /// Air ticks remaining (index 1).
+    pub air: i16,
+    /// Custom name (index 2).
+    pub custom_name: String,
+    /// Custom name visibility (index 3).
+    pub custom_name_visible: bool,
+    /// Health (index 6).
+    pub health: f32,
+    /// Player skin parts (index 10).
+    pub skin_parts: u8,
+    /// Whether ageable mob is a baby (index 12).
+    pub is_baby: bool,
+}
+
+impl Default for TypedMetadata {
+    fn default() -> Self {
+        Self {
+            flags: 0,
+            air: 300,
+            custom_name: String::new(),
+            custom_name_visible: false,
+            health: 20.0,
+            skin_parts: 0x7F,
+            is_baby: false,
+        }
+    }
+}
+
+impl TypedMetadata {
+    /// Returns true if the entity is burning.
+    #[must_use]
+    pub fn on_fire(&self) -> bool {
+        self.flags & 0x01 != 0
+    }
+
+    /// Returns true if the entity is crouching / sneaking.
+    #[must_use]
+    pub fn is_sneaking(&self) -> bool {
+        self.flags & 0x02 != 0
+    }
+
+    /// Returns true if the entity is sprinting.
+    #[must_use]
+    pub fn is_sprinting(&self) -> bool {
+        self.flags & 0x08 != 0
+    }
+
+    /// Returns true if the entity is eating / drawing a bow.
+    #[must_use]
+    pub fn is_eating(&self) -> bool {
+        self.flags & 0x10 != 0
+    }
+
+    /// Returns true if the entity is invisible.
+    #[must_use]
+    pub fn is_invisible(&self) -> bool {
+        self.flags & 0x20 != 0
+    }
+
+    /// Returns true if the player's cape is enabled.
+    #[must_use]
+    pub fn cape_enabled(&self) -> bool {
+        self.skin_parts & 0x01 != 0
+    }
+
+    /// Returns true if the player's jacket is enabled.
+    #[must_use]
+    pub fn jacket_enabled(&self) -> bool {
+        self.skin_parts & 0x02 != 0
+    }
+
+    /// Returns true if the player's left sleeve is enabled.
+    #[must_use]
+    pub fn left_sleeve_enabled(&self) -> bool {
+        self.skin_parts & 0x04 != 0
+    }
+
+    /// Returns true if the player's right sleeve is enabled.
+    #[must_use]
+    pub fn right_sleeve_enabled(&self) -> bool {
+        self.skin_parts & 0x08 != 0
+    }
+
+    /// Returns true if the player's left pants leg is enabled.
+    #[must_use]
+    pub fn left_pants_enabled(&self) -> bool {
+        self.skin_parts & 0x10 != 0
+    }
+
+    /// Returns true if the player's right pants leg is enabled.
+    #[must_use]
+    pub fn right_pants_enabled(&self) -> bool {
+        self.skin_parts & 0x20 != 0
+    }
+
+    /// Returns true if the player's hat / helmet layer is enabled.
+    #[must_use]
+    pub fn hat_enabled(&self) -> bool {
+        self.skin_parts & 0x40 != 0
+    }
 }
 
 /// Reads the value of one watcher entry, keeping its raw bytes.

@@ -53,7 +53,7 @@ use super::EncodablePacket;
 
 pub use facing::Facing;
 pub use item_stack::ItemStack;
-pub use metadata::Metadata;
+pub use metadata::{Metadata, TypedMetadata};
 pub use position::{pack_block_position, unpack_block_position};
 
 /// Clientbound play-state packets (inbound for a client).
@@ -83,6 +83,12 @@ pub enum PlayClientbound {
     Animation(clientbound::Animation),
     /// `Spawn Player` (0x0C): another player entered the world.
     SpawnPlayer(clientbound::SpawnPlayer),
+    /// `Spawn Object` (0x0E): an object/item was spawned.
+    SpawnObject(clientbound::SpawnObject),
+    /// `Spawn Mob` (0x0F): a living non-player entity was spawned.
+    SpawnMob(clientbound::SpawnMob),
+    /// `Entity Velocity` (0x12): an entity's velocity changed.
+    EntityVelocity(clientbound::EntityVelocity),
     /// `Destroy Entities` (0x13): entities left the world.
     DestroyEntities(clientbound::DestroyEntities),
     /// `Entity` (0x14): the legacy entity id packet.
@@ -95,8 +101,14 @@ pub enum PlayClientbound {
     EntityLookMove(clientbound::EntityLookMove),
     /// `Entity Teleport` (0x18): an entity was placed absolutely.
     EntityTeleport(clientbound::EntityTeleport),
+    /// `Entity Head Look` (0x19): an entity's head turned.
+    EntityHeadLook(clientbound::EntityHeadLook),
     /// `Entity Status` (0x1A): an entity triggered a status event.
     EntityStatus(clientbound::EntityStatus),
+    /// `Attach Entity` (0x1B): an entity was mounted or leashed.
+    AttachEntity(clientbound::AttachEntity),
+    /// `Entity Metadata` (0x1C): an entity's data watchers changed.
+    EntityMetadata(clientbound::EntityMetadata),
     /// `Set Experience` (0x1F): the experience bar changed.
     SetExperience(clientbound::SetExperience),
     /// `Chunk Data` (0x21): one chunk column, full or partial.
@@ -134,13 +146,19 @@ impl PlayClientbound {
             Self::HeldItemChange(_) => clientbound::HeldItemChange::ID,
             Self::Animation(_) => clientbound::Animation::ID,
             Self::SpawnPlayer(_) => clientbound::SpawnPlayer::ID,
+            Self::SpawnObject(_) => clientbound::SpawnObject::ID,
+            Self::SpawnMob(_) => clientbound::SpawnMob::ID,
+            Self::EntityVelocity(_) => clientbound::EntityVelocity::ID,
             Self::DestroyEntities(_) => clientbound::DestroyEntities::ID,
             Self::Entity(_) => clientbound::Entity::ID,
             Self::EntityRelativeMove(_) => clientbound::EntityRelativeMove::ID,
             Self::EntityLook(_) => clientbound::EntityLook::ID,
             Self::EntityLookMove(_) => clientbound::EntityLookMove::ID,
             Self::EntityTeleport(_) => clientbound::EntityTeleport::ID,
+            Self::EntityHeadLook(_) => clientbound::EntityHeadLook::ID,
             Self::EntityStatus(_) => clientbound::EntityStatus::ID,
+            Self::AttachEntity(_) => clientbound::AttachEntity::ID,
+            Self::EntityMetadata(_) => clientbound::EntityMetadata::ID,
             Self::SetExperience(_) => clientbound::SetExperience::ID,
             Self::ChunkData(_) => clientbound::ChunkData::ID,
             Self::MultiBlockChange(_) => clientbound::MultiBlockChange::ID,
@@ -171,13 +189,19 @@ impl PlayClientbound {
             Self::HeldItemChange(packet) => packet.encode_body(writer),
             Self::Animation(packet) => packet.encode_body(writer),
             Self::SpawnPlayer(packet) => packet.encode_body(writer),
+            Self::SpawnObject(packet) => packet.encode_body(writer),
+            Self::SpawnMob(packet) => packet.encode_body(writer),
+            Self::EntityVelocity(packet) => packet.encode_body(writer),
             Self::DestroyEntities(packet) => packet.encode_body(writer),
             Self::Entity(packet) => packet.encode_body(writer),
             Self::EntityRelativeMove(packet) => packet.encode_body(writer),
             Self::EntityLook(packet) => packet.encode_body(writer),
             Self::EntityLookMove(packet) => packet.encode_body(writer),
             Self::EntityTeleport(packet) => packet.encode_body(writer),
+            Self::EntityHeadLook(packet) => packet.encode_body(writer),
             Self::EntityStatus(packet) => packet.encode_body(writer),
+            Self::AttachEntity(packet) => packet.encode_body(writer),
+            Self::EntityMetadata(packet) => packet.encode_body(writer),
             Self::SetExperience(packet) => packet.encode_body(writer),
             Self::ChunkData(packet) => packet.encode_body(writer),
             Self::MultiBlockChange(packet) => packet.encode_body(writer),
@@ -222,6 +246,13 @@ impl PlayClientbound {
             clientbound::SpawnPlayer::ID => {
                 Self::SpawnPlayer(clientbound::SpawnPlayer::decode(reader)?)
             }
+            clientbound::SpawnObject::ID => {
+                Self::SpawnObject(clientbound::SpawnObject::decode(reader)?)
+            }
+            clientbound::SpawnMob::ID => Self::SpawnMob(clientbound::SpawnMob::decode(reader)?),
+            clientbound::EntityVelocity::ID => {
+                Self::EntityVelocity(clientbound::EntityVelocity::decode(reader)?)
+            }
             clientbound::DestroyEntities::ID => {
                 Self::DestroyEntities(clientbound::DestroyEntities::decode(reader)?)
             }
@@ -238,8 +269,17 @@ impl PlayClientbound {
             clientbound::EntityTeleport::ID => {
                 Self::EntityTeleport(clientbound::EntityTeleport::decode(reader)?)
             }
+            clientbound::EntityHeadLook::ID => {
+                Self::EntityHeadLook(clientbound::EntityHeadLook::decode(reader)?)
+            }
             clientbound::EntityStatus::ID => {
                 Self::EntityStatus(clientbound::EntityStatus::decode(reader)?)
+            }
+            clientbound::AttachEntity::ID => {
+                Self::AttachEntity(clientbound::AttachEntity::decode(reader)?)
+            }
+            clientbound::EntityMetadata::ID => {
+                Self::EntityMetadata(clientbound::EntityMetadata::decode(reader)?)
             }
             clientbound::SetExperience::ID => {
                 Self::SetExperience(clientbound::SetExperience::decode(reader)?)

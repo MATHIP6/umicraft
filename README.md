@@ -3,7 +3,7 @@
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
 (protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
 
-Status: **M7 complete** (First-run asset setup & 1.8 resource packs).
+Status: **M8 complete** (Entities, models, skins and rendering).
 The client logs in offline-mode, decodes chunk/block packets into a compact
 world, runs the player simulation on a game thread, meshes chunks on worker
 threads, and renders them with wgpu either in a window or to an offscreen PNG.
@@ -16,7 +16,11 @@ per-vertex ambient occlusion, the `Time Update`-driven sky/sun/moon/cloud/fog
 pass with a signed world clock, and a farthest-first translucent pass for
 water, glass and leaves. M7 adds the official first-run asset setup with
 SHA-1 verification and resume support, 1.8 resource pack layering (folder
-or .zip), and hot reloading via `F3 + T` / `F4` (ADR-0014).
+or .zip), and hot reloading via `F3 + T` / `F4` (ADR-0014). M8 adds the
+typed entity store and protocol in `umicraft-game`, player skins (async Mojang fetch,
+64×32 to 64×64 upgrade, classic and slim models), articulated models (Steve,
+Alex, Zombie, Cow, Dropped Item), GPU entity rendering pass in `wgpu` with fog
+and lighting, and the server-less `--entity-demo` acceptance path (ADR-0015).
 
 ## Workspace
 
@@ -137,6 +141,46 @@ cargo run -p umicraft-client -- --block-demo --screenshot /tmp/m5-blocks.png
 
 Unlike the other modes, `--block-demo` needs the official resources and exits
 with a clear typed error when they are unavailable.
+
+## Entity acceptance demo
+
+`--entity-demo` exercises the complete M8 entity system without a server:
+
+```sh
+cargo run -p umicraft-client -- --entity-demo
+```
+
+It builds a synthetic scene with 5 acceptance entities (Steve classic, Alex slim,
+Zombie with arms forward, Cow quadruped with animated legs/horns/udder, and a dropped
+3D dirt block item), meshes them with articulated box models, and reports the ADR-0015
+compliance metrics:
+
+```text
+=== UMICRAFT M8 ENTITY SYSTEM ACCEPTANCE REPORT ===
+Entities in synthetic scene: 5
+  1. Steve (HumanoidModel classic 4px arms, dual-layer) at (5.0, 64.0, 6.0) - 432 vertices
+  2. Alex (HumanoidModel slim 3px arms, walking pose) at (7.0, 64.0, 6.0) - 432 vertices
+  3. Zombie (HumanoidModel zombie arms forward) at (9.0, 64.0, 6.0) - 432 vertices
+  4. Cow (QuadrupedModel 4 legs, horns) at (11.0, 64.0, 6.0) - 324 vertices
+  5. Dropped Item (Floating item cuboid) at (7.0, 64.2, 4.0) - 36 vertices
+Total vertices: 1656
+Total triangles: 552
+```
+
+Add `--screenshot` to render an offscreen 1280×720 PNG:
+
+```sh
+cargo run -p umicraft-client -- --entity-demo --screenshot target/m8-entities.png
+```
+
+Alternative camera perspectives are available via `--demo-view`:
+- `--demo-view overview` (default, front-facing view)
+- `--demo-view back` (reverse angle showing hair, back of clothing, cow pattern)
+- `--demo-view closeup` (close-up on Steve & Alex dual-layer clothing and slim arms)
+- `--demo-view walk-cycle` (5-entity animation progression showing limb swings)
+
+When the official jar is found, the real 1.8.8 textures are used; otherwise,
+clean-room procedural textures provide 100% offline fallback functionality.
 
 ## Render an offscreen screenshot
 

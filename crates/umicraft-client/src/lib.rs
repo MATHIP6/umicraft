@@ -18,6 +18,8 @@
 pub mod args;
 pub mod block_demo;
 pub mod chat;
+pub mod entity_demo;
+pub mod entity_textures;
 pub mod error;
 pub mod game;
 pub mod headless;

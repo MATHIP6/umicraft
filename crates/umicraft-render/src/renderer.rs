@@ -30,6 +30,7 @@ use winit::window::Window;
 
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::camera::Camera;
+use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
 use crate::overlay::{Overlay, OverlayVertex};
@@ -167,6 +168,9 @@ pub struct Renderer {
     overlay_capacity: u64,
     offscreen: Option<OffscreenTarget>,
     chunks: HashMap<ChunkPos, GpuMesh>,
+    camera_bind_group: wgpu::BindGroup,
+    entity_renderer: EntityRenderer,
+    entity_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
 }
 
 impl Renderer {
@@ -436,6 +440,29 @@ impl Renderer {
             create_overlay_pipeline(&device, &overlay_shader, &overlay_layout, format);
         let sky = SkyRenderer::new(&device, format);
 
+        let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("camera bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("entity camera bind group"),
+            layout: &camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+        let entity_renderer = EntityRenderer::new(&device, &camera_layout, format);
+
         let overlay_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("overlay vertices"),
             size: OVERLAY_MIN_BYTES,
@@ -481,6 +508,9 @@ impl Renderer {
             overlay_capacity: OVERLAY_MIN_BYTES,
             offscreen,
             chunks: HashMap::new(),
+            camera_bind_group,
+            entity_renderer,
+            entity_batches: Vec::new(),
         })
     }
 
@@ -801,6 +831,60 @@ impl Renderer {
         (self.width, self.height)
     }
 
+    /// Access to the entity renderer pipeline.
+    #[must_use]
+    pub fn entity_renderer(&self) -> &EntityRenderer {
+        &self.entity_renderer
+    }
+
+    /// Access to the underlying wgpu device.
+    #[must_use]
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// Access to the underlying wgpu queue.
+    #[must_use]
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Uploads entity vertex batches to be drawn in the next frame.
+    pub fn upload_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.entity_batches.clear();
+        for (vertices, bind_group) in batches {
+            if vertices.is_empty() {
+                continue;
+            }
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("entity batch vertices"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            self.entity_batches
+                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
+        }
+    }
+
+    /// Clears any queued entity batches.
+    pub fn clear_entities(&mut self) {
+        self.entity_batches.clear();
+    }
+
+    /// Creates an entity texture (such as a mob skin or player skin) for entity batches.
+    #[must_use]
+    pub fn create_entity_texture(
+        &self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> crate::entity_pass::EntityTexture {
+        self.entity_renderer
+            .create_texture(&self.device, &self.queue, rgba, width, height)
+    }
+
     /// Reads the offscreen colour target as tightly packed RGBA8.
     ///
     /// Call [`Renderer::render`] or [`Renderer::render_with_ui`] first. The
@@ -1035,6 +1119,16 @@ impl Renderer {
             if let Some(opaque) = mesh.opaque.as_ref() {
                 draw_gpu_pass(&mut pass, opaque);
             }
+        }
+
+        // Entities: depth write on, cutout discard, rendered between opaque and transparent passes.
+        if !self.entity_batches.is_empty() {
+            let batches = self
+                .entity_batches
+                .iter()
+                .map(|(buf, count, bg)| (buf, *count, bg));
+            self.entity_renderer
+                .render(&mut pass, &self.camera_bind_group, batches);
         }
 
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
