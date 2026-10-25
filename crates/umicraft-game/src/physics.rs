@@ -73,6 +73,21 @@ pub const LADDER_SPEED: f64 = 0.15000000596046448;
 /// (MCP `EntityLivingBase.java:1649`).
 pub const LADDER_CLIMB: f64 = 0.2;
 
+/// What the jump key adds to the vertical motion in water or lava
+/// (MCP `EntityLivingBase.java:1580`, `0.03999999910593033D`).
+pub const LIQUID_SWIM_UP: f64 = 0.039_999_999_105_930_33;
+
+/// The gravity in a liquid (MCP `EntityLivingBase.java:1711`).
+pub const LIQUID_GRAVITY: f64 = 0.02;
+
+/// The height above the start of the tick a swimmer must be able to reach
+/// to climb out (MCP `EntityLivingBase.java:1712`, `0.6000000238418579D`).
+const CLIMB_OUT_HEIGHT: f64 = 0.600_000_023_841_857_9;
+
+/// The vertical motion of a swimmer that climbs out
+/// (MCP `EntityLivingBase.java:1714`, `0.30000001192092896D`).
+const CLIMB_OUT_MOTION: f64 = 0.300_000_011_920_928_96;
+
 /// The vertical factor of a move through a cobweb
 /// (MCP `Entity.java:605`, `0.05000000074505806D`).
 const WEB_VERTICAL_FACTOR: f64 = 0.05000000074505806;
@@ -166,6 +181,13 @@ pub struct Player {
     /// Whether the last move touched a cobweb, which slows the next one
     /// (MCP `Entity.isInWeb`).
     pub in_web: bool,
+    /// Whether the player is in water this tick (MCP `Entity.inWater`, set by
+    /// `handleWaterMovement` at the start of the tick).
+    pub in_water: bool,
+    /// The Depth Strider level of the boots, 0 without the enchantment
+    /// (MCP `EnchantmentHelper.getDepthStriderModifier`). The inventory (M9)
+    /// sets it; until then it stays 0.
+    pub depth_strider: u8,
 }
 
 impl Default for Player {
@@ -185,6 +207,8 @@ impl Default for Player {
             previous_forward: 0.0,
             collided_horizontally: false,
             in_web: false,
+            in_water: false,
+            depth_strider: 0,
         }
     }
 }
@@ -253,6 +277,10 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     player.pitch = intent.pitch;
     player.sneaking = intent.sneak;
 
+    // The water check and the current, MCP `Entity.onEntityUpdate`, which
+    // runs before the living update.
+    player.in_water = media::handle_water_movement(player, world);
+
     update_sprint(player, intent);
 
     // MCP `EntityPlayerSP.java:795-798`, before the living update.
@@ -274,7 +302,11 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
         player.jump_ticks -= 1;
     }
     if intent.jump {
-        if player.on_ground && player.jump_ticks == 0 {
+        // In a liquid the jump key swims up instead, MCP
+        // `EntityLivingBase.updateAITick` and `handleJumpLava` (line 1578).
+        if player.in_water || media::is_in_lava(player, world) {
+            player.velocity.y += LIQUID_SWIM_UP;
+        } else if player.on_ground && player.jump_ticks == 0 {
             player.velocity.y = JUMP_MOTION;
             if player.sprinting {
                 let (sin_yaw, cos_yaw) = player.yaw.sin_cos();
@@ -469,6 +501,75 @@ fn update_sprint(player: &mut Player, intent: &InputIntent) {
 ///
 /// MCP `net/minecraft/entity/EntityLivingBase.java:1591-1672`.
 fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64, world: &S) {
+    if player.in_water {
+        swim(player, strafe, forward, world);
+    } else if media::is_in_lava(player, world) {
+        wade_through_lava(player, strafe, forward, world);
+    } else {
+        travel_on_land(player, strafe, forward, world);
+    }
+}
+
+/// The water branch of MCP `EntityLivingBase.moveEntityWithHeading`
+/// (lines 1690-1716): an acceleration of 0.02 and a friction of 0.8, both
+/// moved towards the land values by Depth Strider.
+fn swim<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64, world: &S) {
+    let start_y = player.position.y;
+    // The reference computes these in `float`.
+    let mut friction = 0.8_f32;
+    let mut acceleration = 0.02_f32;
+    let mut strider = f32::from(player.depth_strider.min(3));
+    if !player.on_ground {
+        strider *= 0.5;
+    }
+    if strider > 0.0 {
+        let move_speed = (WALK_SPEED * player.speed_multiplier) as f32;
+        friction += (0.546_000_06 - friction) * strider / 3.0;
+        acceleration += (move_speed - acceleration) * strider / 3.0;
+    }
+    move_flying(player, strafe, forward, f64::from(acceleration));
+    move_player(player, world);
+    player.velocity.x *= f64::from(friction);
+    player.velocity.y *= f64::from(0.8_f32);
+    player.velocity.z *= f64::from(friction);
+    player.velocity.y -= LIQUID_GRAVITY;
+    climb_out_of_liquid(player, start_y, world);
+}
+
+/// The lava branch of MCP `EntityLivingBase.moveEntityWithHeading`
+/// (lines 1718-1731): an acceleration of 0.02 and a friction of 0.5.
+fn wade_through_lava<S: BlockSource + ?Sized>(
+    player: &mut Player,
+    strafe: f64,
+    forward: f64,
+    world: &S,
+) {
+    let start_y = player.position.y;
+    move_flying(player, strafe, forward, f64::from(0.02_f32));
+    move_player(player, world);
+    player.velocity *= 0.5;
+    player.velocity.y -= LIQUID_GRAVITY;
+    climb_out_of_liquid(player, start_y, world);
+}
+
+/// A swimmer blocked by a wall whose top is free and dry is lifted out with
+/// `motionY = 0.3` (MCP `EntityLivingBase.java:1712-1715`, `1727-1730`).
+fn climb_out_of_liquid<S: BlockSource + ?Sized>(player: &mut Player, start_y: f64, world: &S) {
+    let lift = player.velocity.y + CLIMB_OUT_HEIGHT - player.position.y + start_y;
+    let offset = DVec3::new(player.velocity.x, lift, player.velocity.z);
+    if player.collided_horizontally && media::is_free_of_blocks_and_liquid(player, offset, world) {
+        player.velocity.y = CLIMB_OUT_MOTION;
+    }
+}
+
+/// The land branch of MCP `EntityLivingBase.moveEntityWithHeading`
+/// (lines 1597-1672), with the ladder rules.
+fn travel_on_land<S: BlockSource + ?Sized>(
+    player: &mut Player,
+    strafe: f64,
+    forward: f64,
+    world: &S,
+) {
     // MCP `EntityLivingBase.java:1599-1604`: the block below the feet sets
     // the friction on the ground; it is read before the move, so the same
     // value drives the acceleration and the damping.
@@ -1123,5 +1224,151 @@ mod tests {
             assert!(fall < 0.005, "fell {fall} in one tick");
             previous = player.position.y;
         }
+    }
+
+    /// A pool of `liquid` from y = 11 to y = 20 over a stone floor at
+    /// y = 10, walled in at |x| = 4 and z = -4 / z = 40.
+    fn pool(liquid: BlockState) -> TestBlocks {
+        let mut blocks = Vec::new();
+        for x in -4_i32..=4 {
+            for z in -4..=40 {
+                blocks.push((x, 10, z, BlockState::new(1, 0)));
+                for y in 11..=20 {
+                    let wall = x.abs() == 4 || z == -4 || z == 40;
+                    let block = if wall { BlockState::new(1, 0) } else { liquid };
+                    blocks.push((x, y, z, block));
+                }
+            }
+        }
+        TestBlocks::with(&blocks)
+    }
+
+    const WATER: BlockState = BlockState::new(9, 0);
+    const LAVA: BlockState = BlockState::new(11, 0);
+
+    /// The horizontal distance per tick once the speed settled in `world`.
+    fn settled_distance(world: &TestBlocks, start: DVec3, intent: InputIntent) -> (f64, Player) {
+        let mut player = Player::new(start);
+        for _ in 0..60 {
+            step(&mut player, &intent, world);
+        }
+        let before = player.position.z;
+        step(&mut player, &intent, world);
+        (player.position.z - before, player)
+    }
+
+    /// MCP `EntityLivingBase.moveEntityWithHeading` (lines 1690-1716): in
+    /// water the acceleration is 0.02 and the friction 0.8, so a swimmer
+    /// covers `0.98 * 0.02 / (1 - 0.8)` blocks per tick.
+    #[test]
+    fn swimming_follows_the_water_friction() {
+        // The swimmer walks on the bottom: the water branch applies on the
+        // ground too.
+        let intent = InputIntent::walking(0.0);
+        let (distance, player) = settled_distance(&pool(WATER), DVec3::new(0.5, 11.0, 0.5), intent);
+        assert!(player.in_water);
+        let acceleration = 0.98 * f64::from(0.02_f32);
+        let friction = f64::from(0.8_f32);
+        let expected = acceleration / (1.0 - friction);
+        assert!(
+            (distance - expected).abs() < 1e-6,
+            "expected {expected}, got {distance}"
+        );
+    }
+
+    /// In lava the friction is 0.5 (MCP `EntityLivingBase.java:1720-1726`).
+    #[test]
+    fn lava_is_slower_than_water() {
+        let mut intent = InputIntent::walking(0.0);
+        intent.jump = true;
+        let (distance, _) = settled_distance(&pool(LAVA), DVec3::new(0.5, 15.0, 0.5), intent);
+        let expected = 0.98 * f64::from(0.02_f32) / 0.5;
+        assert!(
+            (distance - expected).abs() < 1e-6,
+            "expected {expected}, got {distance}"
+        );
+    }
+
+    /// Without input a player sinks, at most `0.02 / (1 - 0.8)` per tick.
+    #[test]
+    fn a_still_player_sinks_slowly_in_water() {
+        let world = pool(WATER);
+        let mut player = Player::new(DVec3::new(0.5, 18.0, 0.5));
+        let mut previous = player.position.y;
+        for _ in 0..30 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+            let fall = previous - player.position.y;
+            assert!(fall <= 0.1 + 1e-9, "sank {fall} in one tick");
+            previous = player.position.y;
+        }
+        assert!(player.position.y < 17.0, "the player sank");
+    }
+
+    /// Jumping in water adds 0.04 to the vertical motion every tick
+    /// (MCP `EntityLivingBase.updateAITick`, line 1578), which floats the
+    /// player up.
+    #[test]
+    fn jumping_in_water_swims_up() {
+        let world = pool(WATER);
+        let mut player = Player::new(DVec3::new(0.5, 12.0, 0.5));
+        let mut intent = InputIntent::still(0.0);
+        intent.jump = true;
+        for _ in 0..40 {
+            step(&mut player, &intent, &world);
+        }
+        assert!(player.position.y > 15.0, "rose to {}", player.position.y);
+    }
+
+    /// MCP `BlockLiquid.getFlowVector` (line 150) pushes towards the
+    /// neighbours with a higher level, i.e. downstream, by 0.014 per tick
+    /// (`World.handleMaterialAcceleration`, line 2125).
+    #[test]
+    fn flowing_water_pushes_the_player_downstream() {
+        let mut blocks = Vec::new();
+        for z in -2..=12 {
+            for x in -2..=2 {
+                blocks.push((x, 10, z, BlockState::new(1, 0)));
+            }
+            // The level grows by one per block towards +Z.
+            let level = (z.clamp(0, 7)) as u8;
+            blocks.push((0, 11, z, BlockState::new(8, level)));
+        }
+        let world = TestBlocks::with(&blocks);
+        let mut player = Player::new(DVec3::new(0.5, 11.0, 3.5));
+        step(&mut player, &InputIntent::still(0.0), &world);
+        assert!(player.in_water);
+        assert!(
+            player.velocity.z > 0.0,
+            "pushed downstream: {}",
+            player.velocity.z
+        );
+        assert!(player.velocity.x.abs() < 1e-12);
+    }
+
+    /// A swimmer against a bank level with the water surface is lifted out
+    /// with `motionY = 0.3` (MCP `EntityLivingBase.java:1712-1715`).
+    #[test]
+    fn swimming_into_a_bank_climbs_out() {
+        let mut blocks = Vec::new();
+        for x in -3..=3 {
+            for z in -3..=10 {
+                blocks.push((x, 10, z, BlockState::new(1, 0)));
+                for y in 11..=20 {
+                    // Water up to the top of y = 20 for z < 5, a bank above.
+                    let block = if z < 5 { WATER } else { BlockState::new(1, 0) };
+                    blocks.push((x, y, z, block));
+                }
+            }
+        }
+        let world = TestBlocks::with(&blocks);
+        let mut player = Player::new(DVec3::new(0.5, 19.0, 0.5));
+        let mut intent = InputIntent::walking(0.0);
+        intent.jump = true;
+        let mut on_the_bank = false;
+        for _ in 0..200 {
+            step(&mut player, &intent, &world);
+            on_the_bank |= player.position.y >= 21.0 && player.position.z > 5.0;
+        }
+        assert!(on_the_bank, "the swimmer never left the water");
     }
 }
