@@ -75,11 +75,24 @@ pub fn find_existing_jar(cache: &AssetCache) -> Option<ClientJar> {
         }
     }
 
+    let cache_version_dir = cache.versions_dir().join(TARGET_VERSION);
+    let cache_json_path = cache_version_dir.join(format!("{TARGET_VERSION}.json"));
+    if let Ok(json_bytes) = std::fs::read(&cache_json_path) {
+        if let Ok(version_json) = crate::manifest::VersionJson::parse(&json_bytes) {
+            if let Ok(descriptor) = version_json.require_client_jar() {
+                let cache_jar = cache.client_jar_path(TARGET_VERSION);
+                if ClientJar::open(&cache_jar, &descriptor.sha1, descriptor.size).is_ok() {
+                    return ClientJar::open(&cache_jar, &descriptor.sha1, descriptor.size).ok();
+                }
+            }
+        }
+    }
+
     let cache_jar = cache.client_jar_path(TARGET_VERSION);
     if cache_jar.is_file() {
-        // When cached without local install descriptor, verify with the known official 1.8.8 hash
-        const OFFICIAL_1_8_8_JAR_SHA1: &str = "0a279f6916551b94c3ce7d045d656093d50b4ec2";
-        const OFFICIAL_1_8_8_JAR_SIZE: u64 = 8_637_730;
+        // When cached without local install descriptor, verify with the official 1.8.8 client jar hash
+        const OFFICIAL_1_8_8_JAR_SHA1: &str = "0983f08be6a4e624f5d85689d1aca869ed99c738";
+        const OFFICIAL_1_8_8_JAR_SIZE: u64 = 8_465_313;
         if ClientJar::open(&cache_jar, OFFICIAL_1_8_8_JAR_SHA1, OFFICIAL_1_8_8_JAR_SIZE).is_ok() {
             return ClientJar::open(&cache_jar, OFFICIAL_1_8_8_JAR_SHA1, OFFICIAL_1_8_8_JAR_SIZE)
                 .ok();
@@ -116,7 +129,13 @@ where
     on_step(SetupStep::ResolvingManifest);
     let manifest_bytes = http.get_bytes(http.endpoints().manifest_url()).await?;
     let manifest = VersionManifest::parse(&manifest_bytes)?;
-    let version = manifest.resolve(&http, TARGET_VERSION).await?;
+    let summary = manifest.find(TARGET_VERSION)?;
+    let version_raw = http.get_bytes(&summary.url).await?;
+    let version = crate::manifest::VersionJson::parse(&version_raw)?;
+
+    let version_dir = cache.versions_dir().join(TARGET_VERSION);
+    let _ = std::fs::create_dir_all(&version_dir);
+    let _ = std::fs::write(version_dir.join(format!("{TARGET_VERSION}.json")), version_raw);
 
     let jar_desc = version.require_client_jar()?;
     on_step(SetupStep::DownloadingClientJar);
