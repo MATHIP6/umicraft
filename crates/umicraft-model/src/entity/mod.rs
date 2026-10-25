@@ -6,17 +6,55 @@
 //! ([`ModelVertex`], [`ModelBox`], [`ModelPart`]) and the texture-slot
 //! registry ([`TextureSlot`], [`MeshLayer`]) are defined here.
 
+mod bat;
+mod blaze;
 mod chicken;
 mod creeper;
+mod dragon;
+mod enderman;
+mod endermite;
+mod ghast;
+mod guardian;
+mod horse;
 mod humanoid;
+mod iron_golem;
+mod ocelot;
 mod quadruped;
+mod rabbit;
 mod sheep;
+mod silverfish;
+mod slime;
+mod snowman;
+mod spider;
+mod squid;
+mod villager;
+mod wither;
+mod wolf;
 
+pub use bat::BatModel;
+pub use blaze::BlazeModel;
 pub use chicken::ChickenModel;
 pub use creeper::CreeperModel;
+pub use dragon::DragonModel;
+pub use enderman::EndermanModel;
+pub use endermite::EndermiteModel;
+pub use ghast::GhastModel;
+pub use guardian::GuardianModel;
+pub use horse::HorseModel;
 pub use humanoid::HumanoidModel;
+pub use iron_golem::IronGolemModel;
+pub use ocelot::OcelotModel;
 pub use quadruped::QuadrupedModel;
+pub use rabbit::RabbitModel;
 pub use sheep::SheepModel;
+pub use silverfish::SilverfishModel;
+pub use slime::SlimeModel;
+pub use snowman::SnowmanModel;
+pub use spider::SpiderModel;
+pub use squid::SquidModel;
+pub use villager::VillagerModel;
+pub use wither::WitherModel;
+pub use wolf::WolfModel;
 
 use glam::{Mat4, Vec3};
 
@@ -377,6 +415,56 @@ pub enum TextureSlot {
     SheepWool,
     /// Chicken mob texture.
     Chicken,
+    /// Spider mob texture.
+    Spider,
+    /// Cave Spider mob texture.
+    CaveSpider,
+    /// Enderman mob texture.
+    Enderman,
+    /// Slime inner/outer texture.
+    Slime,
+    /// Magma Cube texture.
+    MagmaCube,
+    /// Zombie Pigman texture.
+    ZombiePigman,
+    /// Villager texture.
+    Villager,
+    /// Zombie Villager texture.
+    ZombieVillager,
+    /// Witch texture.
+    Witch,
+    /// Iron Golem texture.
+    IronGolem,
+    /// Snowman / Snow Golem texture.
+    Snowman,
+    /// Wolf texture.
+    Wolf,
+    /// Mooshroom cow texture.
+    Mooshroom,
+    /// Squid texture.
+    Squid,
+    /// Bat texture.
+    Bat,
+    /// Blaze texture.
+    Blaze,
+    /// Ender Dragon texture.
+    Dragon,
+    /// Endermite texture.
+    Endermite,
+    /// Ghast texture.
+    Ghast,
+    /// Guardian texture.
+    Guardian,
+    /// Horse texture.
+    Horse,
+    /// Ocelot texture.
+    Ocelot,
+    /// Rabbit texture.
+    Rabbit,
+    /// Silverfish texture.
+    Silverfish,
+    /// Wither boss texture.
+    Wither,
     /// Dropped item block texture.
     Item,
 }
@@ -502,5 +590,30 @@ mod tests {
             min_y.abs() < 0.01,
             "sheep feet should reach Y≈0, got {min_y}"
         );
+    }
+
+    #[test]
+    fn all_mobs_emit_valid_meshes() {
+        assert!(!SpiderModel::new().emit_mesh().is_empty());
+        assert!(!EndermanModel::new().emit_mesh().is_empty());
+        assert!(!SlimeModel::slime(1.0).emit_inner_mesh().is_empty());
+        assert!(!SlimeModel::magma_cube(1.0).emit_inner_mesh().is_empty());
+        assert!(!VillagerModel::villager().emit_mesh().is_empty());
+        assert!(!VillagerModel::witch().emit_mesh().is_empty());
+        assert!(!IronGolemModel::new().emit_mesh().is_empty());
+        assert!(!SnowmanModel::new().emit_mesh().is_empty());
+        assert!(!WolfModel::new().emit_mesh().is_empty());
+        assert!(!SquidModel::new().emit_mesh().is_empty());
+        assert!(!BatModel::new().emit_mesh().is_empty());
+        assert!(!BlazeModel::new().emit_mesh().is_empty());
+        assert!(!DragonModel::new().emit_mesh().is_empty());
+        assert!(!EndermiteModel::new().emit_mesh().is_empty());
+        assert!(!GhastModel::new().emit_mesh().is_empty());
+        assert!(!GuardianModel::new().emit_mesh().is_empty());
+        assert!(!HorseModel::new().emit_mesh().is_empty());
+        assert!(!OcelotModel::new().emit_mesh().is_empty());
+        assert!(!RabbitModel::new().emit_mesh().is_empty());
+        assert!(!SilverfishModel::new().emit_mesh().is_empty());
+        assert!(!WitherModel::new().emit_mesh().is_empty());
     }
 }

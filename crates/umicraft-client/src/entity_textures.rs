@@ -12,15 +12,26 @@ use std::collections::HashMap;
 use glam::{Mat4, Vec3};
 use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::skin::{
-    decode_png_bytes, procedural_chicken_texture, procedural_cow_texture,
-    procedural_creeper_texture, procedural_fallback_skin, procedural_pig_texture,
-    procedural_sheep_fur_texture, procedural_sheep_texture, procedural_skeleton_texture,
-    procedural_zombie_skin, SkinModel,
+    decode_png_bytes, procedural_bat_texture, procedural_blaze_texture,
+    procedural_cave_spider_texture, procedural_chicken_texture, procedural_cow_texture,
+    procedural_creeper_texture, procedural_dragon_texture, procedural_enderman_texture,
+    procedural_endermite_texture, procedural_fallback_skin, procedural_ghast_texture,
+    procedural_guardian_texture, procedural_horse_texture, procedural_iron_golem_texture,
+    procedural_magma_cube_texture, procedural_mooshroom_texture, procedural_ocelot_texture,
+    procedural_pig_texture, procedural_rabbit_texture, procedural_sheep_fur_texture,
+    procedural_sheep_texture, procedural_silverfish_texture, procedural_skeleton_texture,
+    procedural_slime_texture, procedural_snowman_texture, procedural_spider_texture,
+    procedural_squid_texture, procedural_villager_texture, procedural_witch_texture,
+    procedural_wither_texture, procedural_wolf_texture, procedural_zombie_pigman_texture,
+    procedural_zombie_skin, procedural_zombie_villager_texture, SkinModel,
 };
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::{
-    emit_block_item_cube, ChickenModel, CreeperModel, HumanoidModel, MeshLayer, ModelVertex,
-    QuadrupedModel, SheepModel, TextureSlot,
+    emit_block_item_cube, BatModel, BlazeModel, ChickenModel, CreeperModel, DragonModel,
+    EndermanModel, EndermiteModel, GhastModel, GuardianModel, HorseModel, HumanoidModel,
+    IronGolemModel, MeshLayer, ModelVertex, OcelotModel, QuadrupedModel, RabbitModel, SheepModel,
+    SilverfishModel, SlimeModel, SnowmanModel, SpiderModel, SquidModel, TextureSlot, VillagerModel,
+    WitherModel, WolfModel,
 };
 use umicraft_render::{EntityTexture, EntityVertex, Renderer};
 
@@ -87,6 +98,131 @@ fn texture_specs() -> Vec<TextureSpec> {
             slot: TextureSlot::Chicken,
             jar_path: "assets/minecraft/textures/entity/chicken.png",
             fallback: || (procedural_chicken_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Spider,
+            jar_path: "assets/minecraft/textures/entity/spider/spider.png",
+            fallback: || (procedural_spider_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::CaveSpider,
+            jar_path: "assets/minecraft/textures/entity/spider/cave_spider.png",
+            fallback: || (procedural_cave_spider_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Enderman,
+            jar_path: "assets/minecraft/textures/entity/enderman/enderman.png",
+            fallback: || (procedural_enderman_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Slime,
+            jar_path: "assets/minecraft/textures/entity/slime/slime.png",
+            fallback: || (procedural_slime_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::MagmaCube,
+            jar_path: "assets/minecraft/textures/entity/slime/magmacube.png",
+            fallback: || (procedural_magma_cube_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::ZombiePigman,
+            jar_path: "assets/minecraft/textures/entity/zombie_pigman.png",
+            fallback: || (procedural_zombie_pigman_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Villager,
+            jar_path: "assets/minecraft/textures/entity/villager/villager.png",
+            fallback: || (procedural_villager_texture(), 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::ZombieVillager,
+            jar_path: "assets/minecraft/textures/entity/zombie/zombie_villager.png",
+            fallback: || (procedural_zombie_villager_texture(), 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::Witch,
+            jar_path: "assets/minecraft/textures/entity/witch.png",
+            fallback: || (procedural_witch_texture(), 64, 128),
+        },
+        TextureSpec {
+            slot: TextureSlot::IronGolem,
+            jar_path: "assets/minecraft/textures/entity/iron_golem.png",
+            fallback: || (procedural_iron_golem_texture(), 128, 128),
+        },
+        TextureSpec {
+            slot: TextureSlot::Snowman,
+            jar_path: "assets/minecraft/textures/entity/snowman.png",
+            fallback: || (procedural_snowman_texture(), 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::Wolf,
+            jar_path: "assets/minecraft/textures/entity/wolf/wolf.png",
+            fallback: || (procedural_wolf_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Mooshroom,
+            jar_path: "assets/minecraft/textures/entity/cow/mooshroom.png",
+            fallback: || (procedural_mooshroom_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Squid,
+            jar_path: "assets/minecraft/textures/entity/squid.png",
+            fallback: || (procedural_squid_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Bat,
+            jar_path: "assets/minecraft/textures/entity/bat.png",
+            fallback: || (procedural_bat_texture(), 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::Blaze,
+            jar_path: "assets/minecraft/textures/entity/blaze.png",
+            fallback: || (procedural_blaze_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Dragon,
+            jar_path: "assets/minecraft/textures/entity/enderdragon/dragon.png",
+            fallback: || (procedural_dragon_texture(), 256, 256),
+        },
+        TextureSpec {
+            slot: TextureSlot::Endermite,
+            jar_path: "assets/minecraft/textures/entity/endermite.png",
+            fallback: || (procedural_endermite_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Ghast,
+            jar_path: "assets/minecraft/textures/entity/ghast/ghast.png",
+            fallback: || (procedural_ghast_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Guardian,
+            jar_path: "assets/minecraft/textures/entity/guardian.png",
+            fallback: || (procedural_guardian_texture(), 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::Horse,
+            jar_path: "assets/minecraft/textures/entity/horse/horse_white.png",
+            fallback: || (procedural_horse_texture(), 128, 128),
+        },
+        TextureSpec {
+            slot: TextureSlot::Ocelot,
+            jar_path: "assets/minecraft/textures/entity/cat/ocelot.png",
+            fallback: || (procedural_ocelot_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Rabbit,
+            jar_path: "assets/minecraft/textures/entity/rabbit/brown.png",
+            fallback: || (procedural_rabbit_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Silverfish,
+            jar_path: "assets/minecraft/textures/entity/silverfish.png",
+            fallback: || (procedural_silverfish_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Wither,
+            jar_path: "assets/minecraft/textures/entity/wither/wither.png",
+            fallback: || (procedural_wither_texture(), 64, 64),
         },
         TextureSpec {
             slot: TextureSlot::Item,
@@ -285,6 +421,232 @@ fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
             model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
             vec![MeshLayer {
                 slot: TextureSlot::Chicken,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Spider => {
+            let mut model = SpiderModel::new();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Spider,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::CaveSpider => {
+            let mut model = SpiderModel::with_scale(0.7);
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::CaveSpider,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Enderman => {
+            let mut model = EndermanModel::new();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Enderman,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Slime => {
+            let model = SlimeModel::slime(1.0);
+            let mut verts = model.emit_inner_mesh();
+            verts.extend(model.emit_outer_mesh());
+            vec![MeshLayer {
+                slot: TextureSlot::Slime,
+                vertices: verts,
+            }]
+        }
+        EntityKind::MagmaCube => {
+            let model = SlimeModel::magma_cube(1.0);
+            vec![MeshLayer {
+                slot: TextureSlot::MagmaCube,
+                vertices: model.emit_inner_mesh(),
+            }]
+        }
+        EntityKind::ZombiePigman => {
+            let mut model = HumanoidModel::zombie();
+            model.set_angles(
+                ent.limb_swing,
+                ent.limb_swing_amount,
+                head_yaw,
+                head_pitch,
+                true,
+            );
+            vec![MeshLayer {
+                slot: TextureSlot::ZombiePigman,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Giant => {
+            let mut model = HumanoidModel::zombie();
+            model.set_angles(
+                ent.limb_swing,
+                ent.limb_swing_amount,
+                head_yaw,
+                head_pitch,
+                true,
+            );
+            let mut verts = model.emit_mesh();
+            for v in &mut verts {
+                v.position[0] *= 6.0;
+                v.position[1] *= 6.0;
+                v.position[2] *= 6.0;
+            }
+            vec![MeshLayer {
+                slot: TextureSlot::Zombie,
+                vertices: verts,
+            }]
+        }
+        EntityKind::Villager => {
+            let mut model = VillagerModel::villager();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Villager,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::ZombieVillager => {
+            let mut model = VillagerModel::villager();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::ZombieVillager,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Witch => {
+            let mut model = VillagerModel::witch();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Witch,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::IronGolem => {
+            let mut model = IronGolemModel::new();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::IronGolem,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Snowman => {
+            let mut model = SnowmanModel::new();
+            model.set_angles(head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Snowman,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Wolf => {
+            let mut model = WolfModel::new();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Wolf,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Mooshroom => {
+            let mut model = QuadrupedModel::cow();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Mooshroom,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Squid => {
+            let mut model = SquidModel::new();
+            model.set_angles(ent.limb_swing);
+            vec![MeshLayer {
+                slot: TextureSlot::Squid,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Bat => {
+            let mut model = BatModel::new();
+            model.set_angles(ent.limb_swing);
+            vec![MeshLayer {
+                slot: TextureSlot::Bat,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Blaze => {
+            let mut model = BlazeModel::new();
+            model.set_angles(ent.limb_swing, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Blaze,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Dragon => {
+            let mut model = DragonModel::new();
+            model.set_angles(ent.limb_swing);
+            vec![MeshLayer {
+                slot: TextureSlot::Dragon,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Endermite => {
+            let mut model = EndermiteModel::new();
+            model.set_angles(ent.limb_swing);
+            vec![MeshLayer {
+                slot: TextureSlot::Endermite,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Ghast => {
+            let mut model = GhastModel::new();
+            model.set_angles(ent.limb_swing);
+            vec![MeshLayer {
+                slot: TextureSlot::Ghast,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Guardian => {
+            let mut model = GuardianModel::new();
+            model.set_angles(ent.limb_swing);
+            vec![MeshLayer {
+                slot: TextureSlot::Guardian,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Horse => {
+            let mut model = HorseModel::new();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Horse,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Ocelot => {
+            let mut model = OcelotModel::new();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Ocelot,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Rabbit => {
+            let mut model = RabbitModel::new();
+            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Rabbit,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Silverfish => {
+            let mut model = SilverfishModel::new();
+            model.set_angles(ent.limb_swing);
+            vec![MeshLayer {
+                slot: TextureSlot::Silverfish,
+                vertices: model.emit_mesh(),
+            }]
+        }
+        EntityKind::Wither => {
+            let mut model = WitherModel::new();
+            model.set_angles(ent.limb_swing, head_yaw, head_pitch);
+            vec![MeshLayer {
+                slot: TextureSlot::Wither,
                 vertices: model.emit_mesh(),
             }]
         }
