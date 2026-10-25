@@ -169,6 +169,20 @@ impl WorldView {
         }
     }
 
+    /// Replaces the active terrain mesher and worker pool, clearing current meshes
+    /// and invalidating all jobs in flight.
+    pub fn reload_terrain(
+        &mut self,
+        terrain: &InstalledTerrain,
+        worker_count: usize,
+        target: &mut impl MeshTarget,
+    ) {
+        self.reset(target);
+        if let Ok(pool) = MeshPool::new(worker_count, terrain) {
+            self.pool = pool;
+        }
+    }
+
     /// Forgets the replaced world, including the jobs still in flight.
     fn reset(&mut self, target: &mut impl MeshTarget) {
         self.generation += 1;

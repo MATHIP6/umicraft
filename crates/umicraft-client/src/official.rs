@@ -38,6 +38,26 @@ pub(crate) fn open_client_jar(install: &OfficialInstall) -> Result<ClientJar, As
     ClientJar::open(jar_path, &descriptor.sha1, descriptor.size)
 }
 
+/// Discovers a verified client jar from an official installation or the Umicraft cache.
+pub(crate) fn find_verified_jar() -> Result<ClientJar, AssetsError> {
+    if let Some(install) = OfficialInstall::from_env() {
+        if let Ok(jar) = open_client_jar(&install) {
+            return Ok(jar);
+        }
+    }
+
+    if let Ok(cache) = umicraft_assets::cache::AssetCache::in_data_dir() {
+        if let Some(jar) = umicraft_assets::find_existing_jar(&cache) {
+            return Ok(jar);
+        }
+    }
+
+    Err(AssetsError::Missing {
+        what: format!("client jar of version {VERSION_ID}"),
+        path: "official installation or umicraft asset cache".to_string(),
+    })
+}
+
 /// The client jar path of the installation, with a typed missing-file error.
 fn client_jar_path(
     install: &OfficialInstall,

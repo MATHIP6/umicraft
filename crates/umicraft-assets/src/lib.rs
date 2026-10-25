@@ -72,6 +72,8 @@ pub mod install;
 pub mod manifest;
 pub mod objects;
 pub mod progress;
+pub mod resource_pack;
+pub mod setup;
 
 mod zip;
 
@@ -80,3 +82,5 @@ pub use client_resources::ClientResources;
 pub use colormap::{BiomeColormaps, Colormap};
 pub use error::{AssetsError, AssetsResult};
 pub use progress::{Progress, ProgressSnapshot};
+pub use resource_pack::{PackMetadata, ResourcePack, ResourceStack};
+pub use setup::{find_existing_jar, run_setup, SetupStep, TARGET_VERSION};

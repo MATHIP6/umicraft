@@ -76,26 +76,25 @@ pub enum TerrainTextures {
 }
 
 impl TerrainTextures {
-    /// Loads the official set from the installation found in the
-    /// environment, or picks the procedural set with exactly one warning.
+    /// Loads the official set with optional resource packs, or falls back to procedural.
     #[must_use]
-    pub fn load() -> Self {
-        Self::load_from(umicraft_assets::install::OfficialInstall::from_env())
-    }
-
-    /// The official set of already loaded resources.
-    ///
-    /// Copies the atlas pixels once, so the caller may keep the resources
-    /// for their counts (the `--block-demo` report).
-    #[must_use]
-    pub fn official(resources: &ModelResources) -> Self {
-        Self::Official {
-            atlas: resources.atlas().clone(),
-            context: resources.context(),
+    pub fn load_with_packs(paths: &[std::path::PathBuf]) -> Self {
+        match ModelResources::load_with_pack_paths(paths) {
+            Ok(resources) => Self::official(&resources),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "could not load official 1.8 models or packs; using procedural terrain textures"
+                );
+                Self::Procedural
+            }
         }
     }
 
-    fn load_from(install: Option<umicraft_assets::install::OfficialInstall>) -> Self {
+    /// Loads from an optional installation, used by tests.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn load_from(install: Option<umicraft_assets::install::OfficialInstall>) -> Self {
         let Some(install) = install else {
             tracing::warn!(
                 "no official Minecraft installation found; using procedural terrain textures"
@@ -114,6 +113,27 @@ impl TerrainTextures {
             }
         }
     }
+
+    /// Loads the official set from the installation found in the
+    /// environment, or picks the procedural set with exactly one warning.
+    #[must_use]
+    pub fn load() -> Self {
+        Self::load_with_packs(&[])
+    }
+
+    /// The official set of already loaded resources.
+    ///
+    /// Copies the atlas pixels once, so the caller may keep the resources
+    /// for their counts (the `--block-demo` report).
+    #[must_use]
+    pub fn official(resources: &ModelResources) -> Self {
+        Self::Official {
+            atlas: resources.atlas().clone(),
+            context: resources.context(),
+        }
+    }
+
+
 
     /// Binds this set's array on `target` and returns the matching mesher.
     ///

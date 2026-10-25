@@ -73,6 +73,11 @@ impl ZipArchive {
         Ok(Self { data, entries })
     }
 
+    /// The parsed central directory entries.
+    pub(crate) fn entries(&self) -> &[ZipEntry] {
+        &self.entries
+    }
+
     /// The entry with the given name, if the archive has one.
     pub(crate) fn entry(&self, name: &str) -> Option<&ZipEntry> {
         self.entries.iter().find(|entry| entry.name == name)

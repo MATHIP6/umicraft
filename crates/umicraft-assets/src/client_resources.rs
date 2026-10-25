@@ -223,6 +223,7 @@ struct TextureLayer {
 #[derive(Debug, Clone)]
 pub struct ClientResources {
     files: BTreeMap<String, Vec<u8>>,
+    raw_colormaps: BTreeMap<String, Vec<u8>>,
     atlas: BlockAtlas,
     colormaps: Option<BiomeColormaps>,
 }
@@ -256,27 +257,75 @@ impl ClientResources {
         ])?;
 
         let mut files = BTreeMap::new();
-        let mut textures = Vec::new();
-        let mut colormaps = BTreeMap::new();
+        let mut raw_colormaps = BTreeMap::new();
         for (path, bytes) in entries {
-            if is_json_resource(&path) {
+            if path == GRASS_PATH || path == FOLIAGE_PATH {
+                raw_colormaps.insert(path, bytes);
+            } else if is_json_resource(&path)
+                || is_texture_metadata(&path)
+                || texture_key(&path).is_some()
+            {
                 files.insert(path, bytes);
-            } else if is_texture_metadata(&path) {
-                // Kept for the future animation pass; it is not a layer.
-                files.insert(path, bytes);
-            } else if path == GRASS_PATH || path == FOLIAGE_PATH {
-                colormaps.insert(path.clone(), DecodedPng::decode(&path, &bytes)?);
-            } else if let Some(key) = texture_key(&path) {
-                let image = DecodedPng::decode(&path, &bytes)?;
-                files.insert(path.clone(), bytes);
-                textures.push(TextureLayer { key, path, image });
             }
         }
 
+        Self::build_internal(files, raw_colormaps)
+    }
+
+    /// Builds a new [`ClientResources`] instance by layering resource packs
+    /// over this base instance.
+    ///
+    /// Files present in packs override matching files from this instance.
+    /// The atlas and colormaps are re-generated accordingly.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::AssetsError::Image`] if an overridden texture or colormap is invalid.
+    pub fn apply_packs(&self, packs: &[crate::resource_pack::ResourcePack]) -> AssetsResult<Self> {
+        let mut files = self.files.clone();
+        let mut raw_colormaps = self.raw_colormaps.clone();
+        for pack in packs {
+            for (path, bytes) in pack.files() {
+                if path == GRASS_PATH || path == FOLIAGE_PATH {
+                    raw_colormaps.insert(path.clone(), bytes.clone());
+                } else if is_json_resource(path)
+                    || is_texture_metadata(path)
+                    || texture_key(path).is_some()
+                {
+                    files.insert(path.clone(), bytes.clone());
+                }
+            }
+        }
+        Self::build_internal(files, raw_colormaps)
+    }
+
+    /// Internal builder that constructs a complete [`ClientResources`].
+    fn build_internal(
+        files: BTreeMap<String, Vec<u8>>,
+        raw_colormaps: BTreeMap<String, Vec<u8>>,
+    ) -> AssetsResult<Self> {
+        let mut textures = Vec::new();
+        for (path, bytes) in &files {
+            if let Some(key) = texture_key(path) {
+                let image = DecodedPng::decode(path, bytes)?;
+                textures.push(TextureLayer {
+                    key,
+                    path: path.clone(),
+                    image,
+                });
+            }
+        }
+
+        let mut decoded_colormaps = BTreeMap::new();
+        for (path, bytes) in &raw_colormaps {
+            decoded_colormaps.insert(path.clone(), DecodedPng::decode(path, bytes)?);
+        }
+
         let atlas = build_atlas(textures)?;
-        let colormaps = decode_colormaps(&mut colormaps)?;
+        let colormaps = decode_colormaps(&mut decoded_colormaps)?;
         Ok(Self {
             files,
+            raw_colormaps,
             atlas,
             colormaps,
         })
@@ -365,6 +414,9 @@ fn is_texture_metadata(path: &str) -> bool {
 
 /// The atlas key of a block or item PNG, or `None` for any other path.
 fn texture_key(path: &str) -> Option<String> {
+    if !path.starts_with(BLOCK_TEXTURES_PREFIX) && !path.starts_with(ITEM_TEXTURES_PREFIX) {
+        return None;
+    }
     let relative = path.strip_prefix(TEXTURES_ROOT)?.strip_suffix(".png")?;
     if relative.is_empty() {
         return None;
@@ -485,6 +537,10 @@ mod tests {
         assert_eq!(
             texture_key("assets/minecraft/textures/items/apple.png").as_deref(),
             Some("items/apple")
+        );
+        assert_eq!(
+            texture_key("assets/minecraft/textures/gui/container/inventory.png"),
+            None
         );
         assert_eq!(
             texture_key("assets/minecraft/textures/blocks/stone.png.mcmeta"),

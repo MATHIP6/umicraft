@@ -101,15 +101,81 @@ pub struct ModelResources {
 
 impl ModelResources {
     /// Loads the 1.8.8 models and atlas from the installation found in the
-    /// environment.
+    /// environment or the Umicraft asset cache.
     ///
     /// # Errors
-    /// [`ModelResourcesError::NoInstallation`] when there is no installation,
+    /// [`ModelResourcesError::NoInstallation`] when there is no installation or cache,
     /// or the asset/model error of the first corrupt or missing resource.
     pub fn load() -> Result<Self, ModelResourcesError> {
-        let install = umicraft_assets::install::OfficialInstall::from_env()
-            .ok_or(ModelResourcesError::NoInstallation)?;
-        Self::load_from_install(&install)
+        Self::load_with_packs(&[])
+    }
+
+    /// Loads the base resources and layers the requested resource packs over them.
+    ///
+    /// # Errors
+    /// [`ModelResourcesError`] if loading or baking fails.
+    pub fn load_with_packs(
+        packs: &[umicraft_assets::ResourcePack],
+    ) -> Result<Self, ModelResourcesError> {
+        let jar = official::find_verified_jar()
+            .map_err(|_| ModelResourcesError::NoInstallation)?;
+        let base = ClientResources::load(&jar)?;
+        Self::from_resources_and_packs(base, packs)
+    }
+
+    /// Loads resource packs from disk paths and applies them over base resources.
+    ///
+    /// # Errors
+    /// [`ModelResourcesError`] if pack loading or model baking fails.
+    pub fn load_with_pack_paths(
+        paths: &[std::path::PathBuf],
+    ) -> Result<Self, ModelResourcesError> {
+        let mut packs = Vec::with_capacity(paths.len());
+        for path in paths {
+            let pack = umicraft_assets::ResourcePack::from_path(path)?;
+            packs.push(pack);
+        }
+        Self::load_with_packs(&packs)
+    }
+
+    /// Builds [`ModelResources`] from base resources and active resource packs.
+    ///
+    /// # Errors
+    /// [`ModelResourcesError`] on asset or model errors.
+    pub fn from_resources_and_packs(
+        base: ClientResources,
+        packs: &[umicraft_assets::ResourcePack],
+    ) -> Result<Self, ModelResourcesError> {
+        let resources = if packs.is_empty() {
+            base
+        } else {
+            base.apply_packs(packs)?
+        };
+        let models = Arc::new(BlockModelSet::build(&resources, definitions())?);
+        let tints = resources.colormaps().map(|maps| {
+            Arc::new(BiomeTints::from_samplers(
+                |temperature, rainfall| maps.grass.sample(temperature, rainfall),
+                |temperature, rainfall| maps.foliage.sample(temperature, rainfall),
+            ))
+        });
+        let context = Arc::new(ModelMeshContext {
+            models: Arc::clone(&models),
+            atlas: Arc::new(resources.atlas().layout().clone()),
+            tints,
+        });
+        tracing::info!(
+            blockstates = models.blockstate_count(),
+            source_models = models.source_model_count(),
+            layers = resources.atlas().layers(),
+            biome_tints = context.tints.is_some(),
+            packs = packs.len(),
+            "loaded 1.8 block models, atlas and resource packs"
+        );
+        Ok(Self {
+            resources,
+            models,
+            context,
+        })
     }
 
     /// Reads and bakes one installation.

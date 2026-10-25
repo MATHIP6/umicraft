@@ -489,7 +489,7 @@ impl BlockDemoReport {
 /// or atlas are unavailable; [`ClientError::OfficialTexturesRejected`] when
 /// the renderer rejects the atlas; or an offscreen render/readback/PNG error.
 pub fn run(args: &Args) -> Result<(), ClientError> {
-    let resources = ModelResources::load()?;
+    let resources = ModelResources::load_with_pack_paths(&args.resource_packs)?;
     let scene = DemoScene::build();
     let mesh = scene.mesh(&resources.context());
     let report = build_report(args, &resources, &scene, &mesh);

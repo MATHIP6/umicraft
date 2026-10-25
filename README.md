@@ -3,7 +3,7 @@
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
 (protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
 
-Status: **M6 complete**, plus post-M6 biome tinting.
+Status: **M7 complete** (First-run asset setup & 1.8 resource packs).
 The client logs in offline-mode, decodes chunk/block packets into a compact
 world, runs the player simulation on a game thread, meshes chunks on worker
 threads, and renders them with wgpu either in a window or to an offscreen PNG.
@@ -14,11 +14,9 @@ the real block/item texture array, the model mesher, and the server-less
 `--block-demo` acceptance path. M6 adds smooth block/sky lighting and
 per-vertex ambient occlusion, the `Time Update`-driven sky/sun/moon/cloud/fog
 pass with a signed world clock, and a farthest-first translucent pass for
-water, glass and leaves; the contract is ADR-0008 and the acceptance evidence
-is in `docs/perf-log.md` and the four `--demo-view` shots. The post-M6 tint
-task samples the two optional colormaps from the same verified jar and
-multiplies grass, leaves, vines and water by the 3×3 biome colour, so the
-terrain is green instead of grey (ADR-0009).
+water, glass and leaves. M7 adds the official first-run asset setup with
+SHA-1 verification and resume support, 1.8 resource pack layering (folder
+or .zip), and hot reloading via `F3 + T` / `F4` (ADR-0014).
 
 ## Workspace
 

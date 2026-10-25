@@ -17,6 +17,7 @@ use umicraft_assets::install::OfficialInstall;
 use umicraft_assets::manifest::VersionManifest;
 use umicraft_assets::objects::{AssetIndex, Downloader, FetchMode};
 use umicraft_assets::progress::Progress;
+use umicraft_assets::setup::{run_setup, SetupStep};
 
 mod common;
 
@@ -372,4 +373,93 @@ async fn the_pointer_mode_finds_the_assets_without_copying_them() {
     assert_eq!(count_files(&install_root), 1);
 
     let _ = std::fs::remove_dir_all(&install_root);
+}
+
+#[tokio::test]
+async fn run_setup_orchestrates_first_run_download_and_resumes() {
+    let jar_bytes = b"fake 1.8.8 client jar bytes";
+    let jar_sha1 = sha1_hex(jar_bytes);
+    let obj_bytes = b"test asset sound or texture";
+    let obj_sha1 = sha1_hex(obj_bytes);
+    let index_bytes = index_document(&obj_sha1, obj_bytes.len() as u64).into_bytes();
+    let index_sha1 = sha1_hex(&index_bytes);
+
+    let server = common::start(|base| {
+        let manifest = format!(
+            r#"{{"latest":{{"release":"1.8.8","snapshot":"1.8.8"}},
+                 "versions":[{{"id":"1.8.8","type":"release","url":"{base}/1.8.8.json",
+                 "time":"2021-12-15T15:44:12+00:00","releaseTime":"2015-07-27T10:31:28+00:00"}}]}}"#
+        );
+        let version = format!(
+            r#"{{"id":"1.8.8","assets":"1.8",
+                 "assetIndex":{{"id":"1.8","sha1":"{index_sha1}","size":{index_size},
+                 "totalSize":{index_size},"url":"{base}/1.8.json"}},
+                 "downloads":{{"client":{{"sha1":"{jar_sha1}","size":{jar_size},"url":"{base}/1.8.8.jar"}}}}}}"#,
+            index_size = index_bytes.len(),
+            jar_size = jar_bytes.len(),
+        );
+        let mut routes = HashMap::new();
+        routes.insert(
+            "/version_manifest.json".to_string(),
+            Route::Body(manifest.into_bytes()),
+        );
+        routes.insert("/1.8.8.json".to_string(), Route::Body(version.into_bytes()));
+        routes.insert("/1.8.json".to_string(), Route::Body(index_bytes.clone()));
+        routes.insert("/1.8.8.jar".to_string(), Route::Body(jar_bytes.to_vec()));
+        routes.insert(object_route(&obj_sha1), Route::Body(obj_bytes.to_vec()));
+        routes
+    })
+    .await;
+
+    let cache = AssetCache::new(temp_root("first-run-setup"));
+    let cache = Arc::new(cache);
+    let progress = Progress::new();
+    let mut steps = Vec::new();
+
+    // 1. Initial run downloads everything
+    let (jar, report) = run_setup(
+        Endpoints::rooted_at(&server.base_url()),
+        cache.clone(),
+        4,
+        &progress,
+        |step| steps.push(step),
+    )
+    .await
+    .expect("run_setup succeeds");
+
+    assert_eq!(jar.sha1(), jar_sha1);
+    assert_eq!(jar.size(), jar_bytes.len() as u64);
+    assert_eq!(report.objects_total, 1);
+    assert_eq!(report.downloaded, 1);
+    assert_eq!(report.cached, 0);
+
+    assert_eq!(
+        steps,
+        vec![
+            SetupStep::CheckingCache,
+            SetupStep::ResolvingManifest,
+            SetupStep::DownloadingClientJar,
+            SetupStep::FetchingAssetIndex,
+            SetupStep::DownloadingObjects,
+            SetupStep::Completed,
+        ]
+    );
+
+    // 2. Second run on same cache resumes and skips already downloaded files
+    let mut second_steps = Vec::new();
+    let (resumed_jar, second_report) = run_setup(
+        Endpoints::rooted_at(&server.base_url()),
+        cache.clone(),
+        4,
+        &progress,
+        |step| second_steps.push(step),
+    )
+    .await
+    .expect("second run_setup resumes");
+
+    assert_eq!(resumed_jar.sha1(), jar_sha1);
+    assert_eq!(second_report.downloaded, 0);
+    assert_eq!(second_report.cached, 1);
+
+    let _ = std::fs::remove_dir_all(cache.root());
 }
