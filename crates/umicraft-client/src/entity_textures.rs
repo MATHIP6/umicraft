@@ -430,6 +430,6 @@ mod tests {
         assert_eq!(batches[&TextureSlot::Zombie].len(), 432);
         assert_eq!(batches[&TextureSlot::Cow].len(), 324);
         assert_eq!(batches[&TextureSlot::Item].len(), 36);
-        assert!(batches.get(&TextureSlot::Alex).is_none());
+        assert!(!batches.contains_key(&TextureSlot::Alex));
     }
 }
