@@ -44,7 +44,7 @@ impl IronGolemModel {
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-1.0, 2.0, -7.5],
+                [-1.0, -1.0, -7.5],
                 [2.0, 4.0, 2.0],
                 [24.0, 0.0],
                 tex,

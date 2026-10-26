@@ -374,15 +374,25 @@ pub fn procedural_cave_spider_texture() -> Vec<u8> {
 pub fn procedural_enderman_texture() -> Vec<u8> {
     let mut rgba = vec![0u8; 64 * 32 * 4];
     let black = [18, 18, 18, 255];
-    let purple_eye = [180, 40, 220, 255];
+    let white = [230, 230, 230, 255];
+    let pupil = [180, 40, 220, 255];
     for y in 0..32 {
         for x in 0..64 {
             let idx = (y * 64 + x) * 4;
             rgba[idx..idx + 4].copy_from_slice(&black);
         }
     }
-    fill_rect(&mut rgba, 64, 2, 4, 2, 1, purple_eye);
-    fill_rect(&mut rgba, 64, 5, 4, 2, 1, purple_eye);
+    // Eyes on head front face (X=8..16, Y=8..16)
+    fill_rect(&mut rgba, 64, 8, 12, 3, 1, white);
+    fill_rect(&mut rgba, 64, 13, 12, 3, 1, white);
+    fill_rect(&mut rgba, 64, 9, 12, 1, 1, pupil);
+    fill_rect(&mut rgba, 64, 14, 12, 1, 1, pupil);
+    // Cutout for mouth on head
+    fill_rect(&mut rgba, 64, 8, 14, 8, 2, [0, 0, 0, 0]);
+    // Teeth on headwear front face (X=8..16, Y=24..32)
+    fill_rect(&mut rgba, 64, 8, 24, 8, 5, [0, 0, 0, 0]);
+    fill_rect(&mut rgba, 64, 9, 29, 2, 2, [220, 220, 220, 255]);
+    fill_rect(&mut rgba, 64, 13, 29, 2, 2, [220, 220, 220, 255]);
     rgba
 }
 
@@ -459,18 +469,14 @@ pub fn procedural_villager_texture() -> Vec<u8> {
 /// Generates an original procedural fallback zombie villager texture (64×64 RGBA8).
 #[must_use]
 pub fn procedural_zombie_villager_texture() -> Vec<u8> {
-    let mut rgba = vec![0u8; 64 * 64 * 4];
-    let rot_robe = [80, 60, 50, 255];
-    let green_face = [60, 120, 60, 255];
-    let rot_nose = [50, 100, 50, 255];
-    for y in 0..64 {
-        for x in 0..64 {
-            let idx = (y * 64 + x) * 4;
-            rgba[idx..idx + 4].copy_from_slice(&rot_robe);
-        }
-    }
-    fill_rect(&mut rgba, 64, 0, 0, 16, 16, green_face);
-    fill_rect(&mut rgba, 64, 24, 0, 8, 8, rot_nose);
+    let mut rgba = procedural_zombie_skin();
+    let green_face = [80, 130, 60, 255];
+    let dark_green = [50, 90, 40, 255];
+    // Villager elongated head at (0, 32, 32, 32)
+    fill_rect(&mut rgba, 64, 0, 32, 32, 10, dark_green);
+    fill_rect(&mut rgba, 64, 0, 42, 32, 22, green_face);
+    // Nose at (24, 32, 8, 8)
+    fill_rect(&mut rgba, 64, 24, 32, 8, 8, dark_green);
     rgba
 }
 

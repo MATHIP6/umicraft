@@ -54,7 +54,7 @@ impl HumanoidModel {
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-1.0, 1.0, -6.0],
+                [-1.0, -1.0, -6.0],
                 [2.0, 4.0, 2.0],
                 [24.0, 32.0],
                 tex,
@@ -70,7 +70,7 @@ impl HumanoidModel {
         ));
 
         let right_arm = ModelPart::new([-5.0, 22.0, 0.0]).with_box(ModelBox::new(
-            [-2.0, -10.0, -2.0],
+            [-3.0, -10.0, -2.0],
             [4.0, 12.0, 4.0],
             [40.0, 16.0],
             tex,
@@ -78,7 +78,7 @@ impl HumanoidModel {
         ));
 
         let left_arm = ModelPart::new([5.0, 22.0, 0.0]).with_box(ModelBox::new(
-            [-2.0, -10.0, -2.0],
+            [-1.0, -10.0, -2.0],
             [4.0, 12.0, 4.0],
             [40.0, 16.0],
             tex,

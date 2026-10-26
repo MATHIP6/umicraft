@@ -51,11 +51,11 @@ impl EndermanModel {
         ));
 
         let headwear = ModelPart::new([0.0, torso_py, 0.0]).with_box(ModelBox::new(
-            [-4.0, 0.0, -4.0],
-            [8.0, 8.0, 8.0],
+            [-3.5, 0.0, -3.5],
+            [7.0, 8.0, 7.0],
             [0.0, 16.0],
             tex,
-            -0.5,
+            0.0,
         ));
 
         let body = ModelPart::new([0.0, torso_py, 0.0]).with_box(ModelBox::new(
@@ -122,6 +122,12 @@ impl EndermanModel {
         self.head.rotation[0] = -head_pitch.to_radians();
         self.head.rotation[1] = head_yaw.to_radians();
         self.headwear.rotation = self.head.rotation;
+
+        if self.is_attacking {
+            self.head.pivot[1] = 47.0;
+        } else {
+            self.head.pivot[1] = 42.0;
+        }
 
         let leg_angle = (limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount * 0.5;
         let leg_angle_clamped = leg_angle.clamp(-0.4, 0.4);

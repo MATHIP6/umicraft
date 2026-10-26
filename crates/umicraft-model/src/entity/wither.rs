@@ -39,7 +39,7 @@ impl WitherModel {
         ));
 
         // Right side head: 6×6×6
-        let right_head = ModelPart::new([-8.0, 20.0, 0.0]).with_box(ModelBox::new(
+        let right_head = ModelPart::new([-9.0, 20.0, 0.0]).with_box(ModelBox::new(
             [-3.0, 0.0, -3.0],
             [6.0, 6.0, 6.0],
             [32.0, 0.0],
@@ -48,7 +48,7 @@ impl WitherModel {
         ));
 
         // Left side head: 6×6×6
-        let left_head = ModelPart::new([8.0, 20.0, 0.0]).with_box(ModelBox::new(
+        let left_head = ModelPart::new([9.0, 20.0, 0.0]).with_box(ModelBox::new(
             [-3.0, 0.0, -3.0],
             [6.0, 6.0, 6.0],
             [32.0, 0.0],
@@ -56,49 +56,49 @@ impl WitherModel {
             0.0,
         ));
 
-        // Shoulders bar: 20×3×3
-        let shoulders = ModelPart::new([0.0, 20.0, 0.0]).with_box(ModelBox::new(
-            [-10.0, 0.0, -1.5],
+        // Shoulders bar: 20×3×3 (Y = 17.1..20.1)
+        let shoulders = ModelPart::new([0.0, 24.0, 0.0]).with_box(ModelBox::new(
+            [-10.0, -6.9, -1.5],
             [20.0, 3.0, 3.0],
             [0.0, 16.0],
             tex,
             0.0,
         ));
 
-        // Spine and 3 ribs
-        let spine = ModelPart::new([0.0, 10.0, 0.0])
+        // Spine and 3 ribs extending down from shoulders pivot at Y = 17.1
+        let spine = ModelPart::new([0.0, 17.1, 0.0])
             .with_box(ModelBox::new(
-                [-1.5, 0.0, -1.5],
+                [-1.5, -10.0, -1.5],
                 [3.0, 10.0, 3.0],
                 [0.0, 22.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-5.5, 7.0, -1.0],
+                [-5.5, -3.5, -1.0],
                 [11.0, 2.0, 2.0],
                 [24.0, 22.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-5.5, 4.5, -1.0],
+                [-5.5, -6.0, -1.0],
                 [11.0, 2.0, 2.0],
                 [24.0, 22.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-5.5, 2.0, -1.0],
+                [-5.5, -8.5, -1.0],
                 [11.0, 2.0, 2.0],
                 [24.0, 22.0],
                 tex,
                 0.0,
             ));
 
-        // Tail spine (3×6×3)
-        let tail = ModelPart::new([0.0, 4.0, 0.0]).with_box(ModelBox::new(
-            [-1.5, 0.0, -1.5],
+        // Tail spine (3×6×3) connected seamlessly at bottom of spine (Y = 7.1)
+        let tail = ModelPart::new([0.0, 7.1, 0.0]).with_box(ModelBox::new(
+            [-1.5, -6.0, -1.5],
             [3.0, 6.0, 3.0],
             [12.0, 22.0],
             tex,
@@ -131,7 +131,7 @@ impl WitherModel {
         self.spine.rotation[0] = spine_angle;
         self.tail.pivot = [
             0.0,
-            10.0 - spine_angle.cos() * 10.0,
+            17.1 - spine_angle.cos() * 10.0,
             spine_angle.sin() * 10.0,
         ];
         self.tail.rotation[0] = (0.265 + 0.1 * sway) * std::f32::consts::PI;

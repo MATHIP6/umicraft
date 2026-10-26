@@ -108,9 +108,9 @@ impl OcelotModel {
             0.0,
         ));
 
-        // Tail 1
+        // Tail 1 (extends down from pivot, tilted back with -0.9 pitch)
         let mut tail1 = ModelPart::new([0.0, 9.0, 8.0]).with_box(ModelBox::new(
-            [-0.5, 0.0, 0.0],
+            [-0.5, -8.0, 0.0],
             [1.0, 8.0, 1.0],
             [0.0, 15.0],
             tex,
@@ -118,14 +118,15 @@ impl OcelotModel {
         ));
         tail1.rotation[0] = -0.9;
 
-        // Tail 2
-        let tail2 = ModelPart::new([0.0, 4.0, 14.0]).with_box(ModelBox::new(
-            [-0.5, 0.0, 0.0],
+        // Tail 2 (attached at tip of tail 1: Y = 9.0 - 8*cos(0.9) = 4.03, Z = 8.0 + 8*sin(0.9) = 14.27)
+        let mut tail2 = ModelPart::new([0.0, 4.03, 14.27]).with_box(ModelBox::new(
+            [-0.5, -8.0, 0.0],
             [1.0, 8.0, 1.0],
             [4.0, 15.0],
             tex,
             0.0,
         ));
+        tail2.rotation[0] = -1.7278761;
 
         Self {
             head,
@@ -157,7 +158,7 @@ impl OcelotModel {
         self.front_right_leg.rotation[0] = swing;
 
         self.tail1.rotation[0] = -0.9 + (limb_angle * 0.6662).cos() * 0.2 * limb_distance;
-        self.tail2.rotation[0] = self.tail1.rotation[0] - 0.4;
+        self.tail2.rotation[0] = -1.7278761 + (limb_angle * 0.6662).cos() * 0.3 * limb_distance;
     }
 
     /// Emits the ocelot mesh vertices transformed into world units.
