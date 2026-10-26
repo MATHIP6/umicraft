@@ -32,7 +32,7 @@ pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use hud::{
     draw as draw_hud, selected_index, status_fills, Fill, HudLayout, HudState, ItemStack, Rect,
-    StatusRow,
+    SidebarView, StatusRow, TabEntryView, TabListView, TitleView,
 };
 pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};

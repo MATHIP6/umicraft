@@ -49,6 +49,20 @@ pub fn plain_text(json: &str) -> String {
     }
 }
 
+/// The plain text of a chat JSON component, empty when the component is.
+///
+/// [`plain_text`] falls back to the raw JSON for an empty result so that no
+/// chat message is lost. The tab-list header, the title and the action bar
+/// are legitimately empty (`{"text":""}` clears them), so they use this
+/// variant. A malformed component is still returned unchanged.
+#[must_use]
+pub fn flatten(json: &str) -> String {
+    match serde_json::from_str::<Value>(json) {
+        Ok(value) => component_text(&value),
+        Err(_) => json.to_string(),
+    }
+}
+
 /// The text of one component and of its children.
 fn component_text(value: &Value) -> String {
     // An argument of a translation may be a plain string.
@@ -102,6 +116,31 @@ fn translate(key: &str, arguments: &[String]) -> String {
     }
     out.push_str(rest);
     out
+}
+
+#[cfg(test)]
+mod flatten_tests {
+    use super::{flatten, plain_text};
+
+    #[test]
+    fn an_empty_component_stays_empty_for_the_overlays() {
+        assert_eq!(flatten(r#"{"text":""}"#), "");
+        // The chat keeps the raw JSON so no message is lost.
+        assert_eq!(plain_text(r#"{"text":""}"#), r#"{"text":""}"#);
+    }
+
+    #[test]
+    fn flatten_joins_the_text_and_the_extra_children() {
+        assert_eq!(
+            flatten(r#"{"text":"a","extra":[{"text":"b"},{"text":"c"}]}"#),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn a_malformed_component_is_returned_unchanged() {
+        assert_eq!(flatten("not json"), "not json");
+    }
 }
 
 #[cfg(test)]

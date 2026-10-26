@@ -38,9 +38,12 @@ pub mod entity;
 pub mod input;
 pub mod inventory;
 pub mod physics;
+pub mod player_list;
 pub mod prediction;
 pub mod raycast;
+pub mod scoreboard;
 pub mod shapes;
+pub mod title;
 
 use glam::{DVec3, Vec3};
 

@@ -30,8 +30,11 @@ use tokio::sync::mpsc::Sender as CommandSender;
 use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityStore};
 use umicraft_game::input::RawInput;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
+use umicraft_game::player_list::PlayerList;
 use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SURVIVAL_REACH};
+use umicraft_game::scoreboard::Scoreboard;
 use umicraft_game::shapes::Aabb;
+use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::{GameState, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_net::play::{PlayEvent, SessionCounters};
@@ -39,7 +42,7 @@ use umicraft_protocol::packets::play::clientbound::{ChunkData, MapChunkBulk};
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack as WireItemStack};
 use umicraft_protocol::PlayServerbound;
-use umicraft_render::{HudState, ItemStack};
+use umicraft_render::{HudState, ItemStack, SidebarView, TabEntryView, TabListView, TitleView};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
 use crate::error::ClientError;
@@ -245,6 +248,7 @@ impl Session {
         let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(network::COMMAND_CAPACITY);
         let stop = Arc::new(AtomicBool::new(false));
         let counters = Arc::new(SessionCounters::default());
+        let own_name = config.name.clone();
 
         let network = network::spawn(
             config,
@@ -258,6 +262,7 @@ impl Session {
             chunks_tx,
             commands_tx,
             Arc::clone(&stop),
+            own_name,
         )?;
 
         Ok(Self {
@@ -325,10 +330,11 @@ fn spawn_game_thread(
     chunks: SyncSender<ChunkEvent>,
     commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
+    own_name: String,
 ) -> Result<JoinHandle<()>, ClientError> {
     std::thread::Builder::new()
         .name("umicraft-game".to_string())
-        .spawn(move || run(events, frames, chunks, commands, stop))
+        .spawn(move || run(events, frames, chunks, commands, stop, own_name))
         .map_err(|error| ClientError::Worker(format!("spawn game thread: {error}")))
 }
 
@@ -414,6 +420,18 @@ struct Game {
     entities: EntityStore,
     /// The inventory and container window model.
     windows: WindowManager,
+    /// The player's own name; it picks the team sidebar of the scoreboard.
+    own_name: String,
+    /// The tab list of the server.
+    player_list: PlayerList,
+    /// The scoreboard of the current world.
+    scoreboard: Scoreboard,
+    /// The title and subtitle.
+    title: TitleState,
+    /// The message above the hotbar.
+    action_bar: ActionBar,
+    /// The completions the server offered for the open chat line.
+    completions: Vec<String>,
 }
 
 impl Game {
@@ -452,6 +470,12 @@ impl Game {
             hud_dirty: true,
             entities: EntityStore::new(),
             windows: WindowManager::new(),
+            own_name: String::new(),
+            player_list: PlayerList::new(),
+            scoreboard: Scoreboard::new(),
+            title: TitleState::new(),
+            action_bar: ActionBar::new(),
+            completions: Vec::new(),
         }
     }
 
@@ -532,7 +556,80 @@ impl Game {
             crosshair: true,
             chat_lines: self.chat.iter().cloned().collect(),
             debug_lines: Vec::new(),
+            action_bar: self.action_bar_view(),
+            title: self.title_view(),
+            sidebar: self.sidebar_view(),
+            tab_list: self.tab_list_view(),
+            completions: self.completions.clone(),
         }
+    }
+
+    /// The action bar message with its opacity, while one is displayed.
+    fn action_bar_view(&self) -> Option<(String, f32)> {
+        let json = self.action_bar.message()?;
+        let alpha = self.action_bar.alpha(0.0);
+        (alpha > 0.0).then(|| (crate::chat::flatten(json), alpha))
+    }
+
+    /// The title and subtitle with their opacity, while they are displayed.
+    fn title_view(&self) -> Option<TitleView> {
+        let title = self.title.title();
+        let subtitle = self.title.subtitle();
+        let alpha = self.title.alpha(0.0);
+        if alpha <= 0.0 || (title.is_none() && subtitle.is_none()) {
+            return None;
+        }
+        Some(TitleView {
+            title: title.map(crate::chat::flatten).unwrap_or_default(),
+            subtitle: subtitle.map(crate::chat::flatten).unwrap_or_default(),
+            alpha,
+        })
+    }
+
+    /// The sidebar of the scoreboard, as the player sees it.
+    fn sidebar_view(&self) -> Option<SidebarView> {
+        let sidebar = self.scoreboard.sidebar(&self.own_name)?;
+        Some(SidebarView {
+            title: sidebar.title,
+            lines: sidebar
+                .lines
+                .into_iter()
+                .map(|line| (line.name, line.value))
+                .collect(),
+        })
+    }
+
+    /// The tab list in display order, once the server listed a player.
+    fn tab_list_view(&self) -> Option<TabListView> {
+        if self.player_list.is_empty() {
+            return None;
+        }
+        let entries = self
+            .player_list
+            .sorted(&self.scoreboard)
+            .into_iter()
+            .map(|entry| TabEntryView {
+                name: entry.display_name.as_deref().map_or_else(
+                    || self.scoreboard.format_name(&entry.name),
+                    crate::chat::flatten,
+                ),
+                ping: entry.ping,
+                game_mode: entry.game_mode,
+            })
+            .collect();
+        Some(TabListView {
+            header: self
+                .player_list
+                .header()
+                .map(crate::chat::flatten)
+                .unwrap_or_default(),
+            footer: self
+                .player_list
+                .footer()
+                .map(crate::chat::flatten)
+                .unwrap_or_default(),
+            entries,
+        })
     }
 }
 
@@ -616,8 +713,10 @@ fn run(
     chunks: SyncSender<ChunkEvent>,
     commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
+    own_name: String,
 ) {
     let mut game = Game::new();
+    game.own_name = own_name;
     let mut queue = CommandQueue {
         ordered: VecDeque::new(),
         input: None,
@@ -766,6 +865,12 @@ fn handle_net(
             game.playing = true;
             game.status = "PLAYING".to_string();
             game.status_data.status = game.status.clone();
+            game.player_list = PlayerList::new();
+            game.scoreboard = Scoreboard::new();
+            game.title = TitleState::new();
+            game.action_bar = ActionBar::new();
+            game.completions.clear();
+            game.hud_dirty = true;
             let _ = frames.try_send(RenderEvent::Reset);
             publish_status(game, frames);
         }
@@ -778,6 +883,42 @@ fn handle_net(
             while game.chat.len() > CHAT_HISTORY {
                 game.chat.pop_front();
             }
+            game.hud_dirty = true;
+        }
+        PlayEvent::ActionBar(json) => {
+            game.action_bar.show(&json);
+            game.hud_dirty = true;
+        }
+        PlayEvent::PlayerListItem(packet) => {
+            game.player_list.apply(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::PlayerListHeaderFooter(packet) => {
+            game.player_list.set_header_footer(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::TabComplete(packet) => {
+            game.completions = packet.matches;
+            game.hud_dirty = true;
+        }
+        PlayEvent::ScoreboardObjective(packet) => {
+            game.scoreboard.apply_objective(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::UpdateScore(packet) => {
+            game.scoreboard.apply_score(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::DisplayScoreboard(packet) => {
+            game.scoreboard.apply_display(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::Teams(packet) => {
+            game.scoreboard.apply_teams(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::Title(packet) => {
+            game.title.apply(&packet);
             game.hud_dirty = true;
         }
         PlayEvent::ChunkData(packet) => {
@@ -863,6 +1004,10 @@ fn handle_net(
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
                 game.entities.clear();
+                // A new world has its own scoreboard; the tab list belongs to
+                // the connection and stays.
+                game.scoreboard = Scoreboard::new();
+                game.hud_dirty = true;
                 // The new dimension has its own clock; the first `Time
                 // Update` of the new world arrives right after the respawn.
                 game.world_time = 0;
@@ -1410,6 +1555,17 @@ fn tick(
     tick_time: Instant,
 ) {
     game.status_data.ticks += 1;
+
+    // The title and the action bar fade with the tick, so the HUD is
+    // published again on every tick while one of them is displayed.
+    if game.title.title().is_some()
+        || game.title.subtitle().is_some()
+        || game.action_bar.message().is_some()
+    {
+        game.title.tick();
+        game.action_bar.tick();
+        game.hud_dirty = true;
+    }
 
     // The intent of the tick: the raw key state with the yaw and the pitch
     // the player is looking at.
@@ -1975,5 +2131,161 @@ mod tests {
         );
         assert_eq!(game.world_time, 0);
         assert_eq!(game.dimension, -1);
+    }
+
+    #[test]
+    fn the_social_events_fill_the_hud() {
+        use umicraft_protocol::packets::play::clientbound::{
+            DisplayScoreboard, ObjectiveInfo, PlayerListAdd, PlayerListHeaderFooter,
+            PlayerListItem, ScoreboardObjective, Title, UpdateScore,
+        };
+
+        let mut game = Game::new();
+        game.own_name = "Steve".to_string();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let mut send = |game: &mut Game, event| handle_net(game, event, &mut queue, &frames);
+
+        send(
+            &mut game,
+            PlayEvent::ScoreboardObjective(ScoreboardObjective {
+                name: "kills".to_string(),
+                mode: 0,
+                info: Some(ObjectiveInfo {
+                    display_name: "Kills".to_string(),
+                    render_type: "integer".to_string(),
+                }),
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::DisplayScoreboard(DisplayScoreboard {
+                position: 1,
+                name: "kills".to_string(),
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::UpdateScore(UpdateScore {
+                name: "Alex".to_string(),
+                objective: "kills".to_string(),
+                value: Some(4),
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::PlayerListItem(PlayerListItem::Add(vec![PlayerListAdd {
+                uuid: [1; 16],
+                name: "Steve".to_string(),
+                properties: vec![],
+                game_mode: 0,
+                ping: 37,
+                display_name: None,
+            }])),
+        );
+        send(
+            &mut game,
+            PlayEvent::PlayerListHeaderFooter(PlayerListHeaderFooter {
+                header: r#"{"text":"Welcome"}"#.to_string(),
+                footer: r#"{"text":""}"#.to_string(),
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::Title(Title::Title(r#"{"text":"Round 1"}"#.to_string())),
+        );
+        send(
+            &mut game,
+            PlayEvent::ActionBar(r#"{"text":"Go!"}"#.to_string()),
+        );
+
+        // The title fades in from nothing, so it needs a few ticks to show.
+        for _ in 0..5 {
+            game.title.tick();
+        }
+        let hud = game.hud();
+        let sidebar = hud.sidebar.expect("the sidebar objective is displayed");
+        assert_eq!(sidebar.title, "Kills");
+        assert_eq!(sidebar.lines, [("Alex".to_string(), 4)]);
+
+        let tab_list = hud.tab_list.expect("a player is listed");
+        assert_eq!(tab_list.header, "Welcome");
+        assert_eq!(tab_list.footer, "", "an empty footer stays empty");
+        assert_eq!(tab_list.entries.len(), 1);
+        assert_eq!(tab_list.entries[0].name, "Steve");
+        assert_eq!(tab_list.entries[0].ping, 37);
+
+        let title = hud.title.expect("a title is displayed");
+        assert_eq!(title.title, "Round 1");
+        assert!(title.alpha > 0.0);
+        let (action_bar, alpha) = hud.action_bar.expect("an action bar is displayed");
+        assert_eq!(action_bar, "Go!");
+        assert!(alpha > 0.0);
+    }
+
+    #[test]
+    fn a_dimension_change_clears_the_scoreboard_but_keeps_the_tab_list() {
+        use umicraft_protocol::packets::play::clientbound::{
+            DisplayScoreboard, ObjectiveInfo, PlayerListAdd, PlayerListItem, Respawn,
+            ScoreboardObjective,
+        };
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(
+            &mut game,
+            PlayEvent::ScoreboardObjective(ScoreboardObjective {
+                name: "o".to_string(),
+                mode: 0,
+                info: Some(ObjectiveInfo {
+                    display_name: "O".to_string(),
+                    render_type: "integer".to_string(),
+                }),
+            }),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::DisplayScoreboard(DisplayScoreboard {
+                position: 1,
+                name: "o".to_string(),
+            }),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::PlayerListItem(PlayerListItem::Add(vec![PlayerListAdd {
+                uuid: [2; 16],
+                name: "Alex".to_string(),
+                properties: vec![],
+                game_mode: 0,
+                ping: 5,
+                display_name: None,
+            }])),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.hud().sidebar.is_some());
+
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(Respawn {
+                dimension: -1,
+                difficulty: 0,
+                game_mode: 0,
+                world_type: "default".to_string(),
+            }),
+            &mut queue,
+            &frames,
+        );
+        let hud = game.hud();
+        assert!(hud.sidebar.is_none(), "a new world has a new scoreboard");
+        assert!(
+            hud.tab_list.is_some(),
+            "the tab list belongs to the connection"
+        );
     }
 }

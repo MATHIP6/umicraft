@@ -19,6 +19,7 @@ pub mod player_digging;
 pub mod player_look;
 pub mod player_position;
 pub mod position_look;
+pub mod tab_complete;
 pub mod use_entity;
 
 pub use animation::Animation;
@@ -38,4 +39,5 @@ pub use player_digging::{DiggingStatus, PlayerDigging};
 pub use player_look::PlayerLook;
 pub use player_position::PlayerPosition;
 pub use position_look::PositionLook;
+pub use tab_complete::TabComplete;
 pub use use_entity::{UseEntity, UseEntityAction};

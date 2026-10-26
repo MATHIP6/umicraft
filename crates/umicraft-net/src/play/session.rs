@@ -25,6 +25,9 @@ use crate::status::disconnect_reason;
 /// entry packets of the first `Join Game`.
 const MAX_REPLIES: usize = 2;
 
+/// The `Chat Message` position byte that routes the text to the action bar.
+const ACTION_BAR_POSITION: u8 = 2;
+
 /// Every skin layer shown, as a vanilla client announces by default.
 const ALL_SKIN_PARTS: u8 = 0b0111_1111;
 
@@ -123,6 +126,24 @@ pub enum PlayEvent {
     Placement(PlayerPlacement),
     /// Chat/system JSON.
     Chat(String),
+    /// A message for the action bar above the hotbar (chat position 2).
+    ActionBar(String),
+    /// Tab-list entries were added, changed or removed.
+    PlayerListItem(clientbound::PlayerListItem),
+    /// The tab-list header and footer changed.
+    PlayerListHeaderFooter(clientbound::PlayerListHeaderFooter),
+    /// The server answered a tab-completion request.
+    TabComplete(clientbound::TabComplete),
+    /// A scoreboard objective was created, removed or updated.
+    ScoreboardObjective(clientbound::ScoreboardObjective),
+    /// A score line changed or was removed.
+    UpdateScore(clientbound::UpdateScore),
+    /// An objective was assigned to a display slot.
+    DisplayScoreboard(clientbound::DisplayScoreboard),
+    /// A scoreboard team changed.
+    Teams(clientbound::Teams),
+    /// A title, subtitle or timing change.
+    Title(clientbound::Title),
     /// The world clock changed (`Time Update`, 0x03).
     ///
     /// The signed time of day is preserved: a negative value means the server
@@ -290,7 +311,38 @@ impl PlaySession {
             }
             clientbound::JoinGame::ID => self.join_game(clientbound::JoinGame::decode(body)?)?,
             clientbound::Chat::ID => {
-                Reaction::event(PlayEvent::Chat(clientbound::Chat::decode(body)?.json))
+                let packet = clientbound::Chat::decode(body)?;
+                Reaction::event(if packet.position == ACTION_BAR_POSITION {
+                    PlayEvent::ActionBar(packet.json)
+                } else {
+                    PlayEvent::Chat(packet.json)
+                })
+            }
+            clientbound::PlayerListItem::ID => Reaction::event(PlayEvent::PlayerListItem(
+                clientbound::PlayerListItem::decode(body)?,
+            )),
+            clientbound::PlayerListHeaderFooter::ID => {
+                Reaction::event(PlayEvent::PlayerListHeaderFooter(
+                    clientbound::PlayerListHeaderFooter::decode(body)?,
+                ))
+            }
+            clientbound::TabComplete::ID => Reaction::event(PlayEvent::TabComplete(
+                clientbound::TabComplete::decode(body)?,
+            )),
+            clientbound::ScoreboardObjective::ID => Reaction::event(
+                PlayEvent::ScoreboardObjective(clientbound::ScoreboardObjective::decode(body)?),
+            ),
+            clientbound::UpdateScore::ID => Reaction::event(PlayEvent::UpdateScore(
+                clientbound::UpdateScore::decode(body)?,
+            )),
+            clientbound::DisplayScoreboard::ID => Reaction::event(PlayEvent::DisplayScoreboard(
+                clientbound::DisplayScoreboard::decode(body)?,
+            )),
+            clientbound::Teams::ID => {
+                Reaction::event(PlayEvent::Teams(clientbound::Teams::decode(body)?))
+            }
+            clientbound::Title::ID => {
+                Reaction::event(PlayEvent::Title(clientbound::Title::decode(body)?))
             }
             clientbound::TimeUpdate::ID => {
                 Reaction::event(PlayEvent::TimeUpdate(TimeUpdate::decode(body)?))
@@ -527,6 +579,53 @@ mod tests {
         assert_eq!(reaction.replies().count(), 0, "no reply expected");
         assert_eq!(reaction.kick_reason(), None);
         reaction.into_event().expect("the packet becomes an event")
+    }
+
+    #[test]
+    fn only_chat_position_two_becomes_an_action_bar_event() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let chat = |position| {
+            PlayClientbound::Chat(clientbound::Chat {
+                json: "{}".to_string(),
+                position,
+            })
+        };
+        let text = || "{}".to_string();
+        assert_eq!(event(&mut session, chat(0)), PlayEvent::Chat(text()));
+        assert_eq!(event(&mut session, chat(1)), PlayEvent::Chat(text()));
+        assert_eq!(event(&mut session, chat(2)), PlayEvent::ActionBar(text()));
+    }
+
+    #[test]
+    fn the_tab_list_scoreboard_and_title_packets_become_events() {
+        let mut session = PlaySession::new(PlayOptions::default());
+
+        let list = clientbound::PlayerListItem::Remove(vec![[1; 16]]);
+        assert_eq!(
+            event(&mut session, PlayClientbound::PlayerListItem(list.clone())),
+            PlayEvent::PlayerListItem(list)
+        );
+        let score = clientbound::UpdateScore {
+            name: "Steve".to_string(),
+            objective: "kills".to_string(),
+            value: Some(3),
+        };
+        assert_eq!(
+            event(&mut session, PlayClientbound::UpdateScore(score.clone())),
+            PlayEvent::UpdateScore(score)
+        );
+        let title = clientbound::Title::Clear;
+        assert_eq!(
+            event(&mut session, PlayClientbound::Title(title.clone())),
+            PlayEvent::Title(title)
+        );
+        let complete = clientbound::TabComplete {
+            matches: vec!["/help".to_string()],
+        };
+        assert_eq!(
+            event(&mut session, PlayClientbound::TabComplete(complete.clone())),
+            PlayEvent::TabComplete(complete)
+        );
     }
 
     fn join_game() -> PlayClientbound {

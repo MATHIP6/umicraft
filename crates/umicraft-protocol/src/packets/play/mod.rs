@@ -25,7 +25,10 @@
 //! Break Animation` (0x25), `Map Chunk Bulk` (0x26), `Change Game State`
 //! (0x2B), `Open Window` (0x2D), `Close Window` (0x2E), `Set Slot`
 //! (0x2F), `Window Items` (0x30), `Window Property` (0x31), `Confirm
-//! Transaction` (0x32), `Disconnect` (0x40).
+//! Transaction` (0x32), `Player List Item` (0x38), `Tab-Complete` (0x3A),
+//! `Scoreboard Objective` (0x3B), `Update Score` (0x3C), `Display
+//! Scoreboard` (0x3D), `Teams` (0x3E), `Disconnect` (0x40), `Title` (0x45),
+//! `Player List Header and Footer` (0x47).
 //!
 //! Serverbound: `Keep Alive` (0x00), `Chat Message` (0x01), `Use Entity`
 //! (0x02), `Player Position` (0x04), `Player Look` (0x05), `Player
@@ -33,7 +36,8 @@
 //! Placement` (0x08), `Held Item Change` (0x09), `Animation` (0x0A),
 //! `Entity Action` (0x0B), `Input` (0x0C), `Close Window` (0x0D),
 //! `Click Window` (0x0E), `Confirm Transaction` (0x0F), `Creative
-//! Inventory Action` (0x10), `Client Settings` (0x15), `Plugin Message`
+//! Inventory Action` (0x10), `Tab-Complete` (0x14), `Client Settings`
+//! (0x15), `Plugin Message`
 //! (0x17).
 //!
 //! Ids outside this subset are rejected as [`ProtocolError::UnknownPacket`]
@@ -141,8 +145,24 @@ pub enum PlayClientbound {
     WindowProperty(clientbound::WindowProperty),
     /// `Confirm Transaction` (0x32): the server confirms or rejects a click.
     ConfirmTransaction(clientbound::ConfirmTransaction),
+    /// `Player List Item` (0x38): tab-list entries were added or changed.
+    PlayerListItem(clientbound::PlayerListItem),
+    /// `Tab-Complete` (0x3A): completions for the text being typed.
+    TabComplete(clientbound::TabComplete),
+    /// `Scoreboard Objective` (0x3B): an objective was created or changed.
+    ScoreboardObjective(clientbound::ScoreboardObjective),
+    /// `Update Score` (0x3C): one score line changed.
+    UpdateScore(clientbound::UpdateScore),
+    /// `Display Scoreboard` (0x3D): an objective was assigned to a slot.
+    DisplayScoreboard(clientbound::DisplayScoreboard),
+    /// `Teams` (0x3E): a scoreboard team changed.
+    Teams(clientbound::Teams),
     /// `Disconnect` (0x40): reason as chat JSON; the socket closes after.
     Disconnect(clientbound::Disconnect),
+    /// `Title` (0x45): a title, subtitle or timing change.
+    Title(clientbound::Title),
+    /// `Player List Header and Footer` (0x47): the tab-list header and footer.
+    PlayerListHeaderFooter(clientbound::PlayerListHeaderFooter),
 }
 
 impl PlayClientbound {
@@ -189,7 +209,15 @@ impl PlayClientbound {
             Self::WindowItems(_) => clientbound::WindowItems::ID,
             Self::WindowProperty(_) => clientbound::WindowProperty::ID,
             Self::ConfirmTransaction(_) => clientbound::ConfirmTransaction::ID,
+            Self::PlayerListItem(_) => clientbound::PlayerListItem::ID,
+            Self::TabComplete(_) => clientbound::TabComplete::ID,
+            Self::ScoreboardObjective(_) => clientbound::ScoreboardObjective::ID,
+            Self::UpdateScore(_) => clientbound::UpdateScore::ID,
+            Self::DisplayScoreboard(_) => clientbound::DisplayScoreboard::ID,
+            Self::Teams(_) => clientbound::Teams::ID,
             Self::Disconnect(_) => clientbound::Disconnect::ID,
+            Self::Title(_) => clientbound::Title::ID,
+            Self::PlayerListHeaderFooter(_) => clientbound::PlayerListHeaderFooter::ID,
         }
     }
 
@@ -238,7 +266,15 @@ impl PlayClientbound {
             Self::WindowItems(packet) => packet.encode_body(writer),
             Self::WindowProperty(packet) => packet.encode_body(writer),
             Self::ConfirmTransaction(packet) => packet.encode_body(writer),
+            Self::PlayerListItem(packet) => packet.encode_body(writer),
+            Self::TabComplete(packet) => packet.encode_body(writer),
+            Self::ScoreboardObjective(packet) => packet.encode_body(writer),
+            Self::UpdateScore(packet) => packet.encode_body(writer),
+            Self::DisplayScoreboard(packet) => packet.encode_body(writer),
+            Self::Teams(packet) => packet.encode_body(writer),
             Self::Disconnect(packet) => packet.encode_body(writer),
+            Self::Title(packet) => packet.encode_body(writer),
+            Self::PlayerListHeaderFooter(packet) => packet.encode_body(writer),
         }
     }
 
@@ -347,8 +383,28 @@ impl PlayClientbound {
             clientbound::ConfirmTransaction::ID => {
                 Self::ConfirmTransaction(clientbound::ConfirmTransaction::decode(reader)?)
             }
+            clientbound::PlayerListItem::ID => {
+                Self::PlayerListItem(clientbound::PlayerListItem::decode(reader)?)
+            }
+            clientbound::TabComplete::ID => {
+                Self::TabComplete(clientbound::TabComplete::decode(reader)?)
+            }
+            clientbound::ScoreboardObjective::ID => {
+                Self::ScoreboardObjective(clientbound::ScoreboardObjective::decode(reader)?)
+            }
+            clientbound::UpdateScore::ID => {
+                Self::UpdateScore(clientbound::UpdateScore::decode(reader)?)
+            }
+            clientbound::DisplayScoreboard::ID => {
+                Self::DisplayScoreboard(clientbound::DisplayScoreboard::decode(reader)?)
+            }
+            clientbound::Teams::ID => Self::Teams(clientbound::Teams::decode(reader)?),
             clientbound::Disconnect::ID => {
                 Self::Disconnect(clientbound::Disconnect::decode(reader)?)
+            }
+            clientbound::Title::ID => Self::Title(clientbound::Title::decode(reader)?),
+            clientbound::PlayerListHeaderFooter::ID => {
+                Self::PlayerListHeaderFooter(clientbound::PlayerListHeaderFooter::decode(reader)?)
             }
             _ => {
                 return Err(ProtocolError::UnknownPacket {
@@ -395,6 +451,8 @@ pub enum PlayServerbound {
     ConfirmTransaction(serverbound::ConfirmTransaction),
     /// `Creative Inventory Action` (0x10): the client sets a slot in creative mode.
     CreativeInventoryAction(serverbound::CreativeInventoryAction),
+    /// `Tab-Complete` (0x14): ask the server to complete the typed text.
+    TabComplete(serverbound::TabComplete),
     /// `Client Settings` (0x15): required before some servers release content.
     ClientSettings(serverbound::ClientSettings),
     /// `Plugin Message` (0x17): client brand channel payload.
@@ -422,6 +480,7 @@ impl PlayServerbound {
             Self::ClickWindow(_) => serverbound::ClickWindow::ID,
             Self::ConfirmTransaction(_) => serverbound::ConfirmTransaction::ID,
             Self::CreativeInventoryAction(_) => serverbound::CreativeInventoryAction::ID,
+            Self::TabComplete(_) => serverbound::TabComplete::ID,
             Self::ClientSettings(_) => serverbound::ClientSettings::ID,
             Self::Brand(_) => serverbound::Brand::ID,
         }
@@ -471,6 +530,9 @@ impl PlayServerbound {
             serverbound::CreativeInventoryAction::ID => {
                 Self::CreativeInventoryAction(serverbound::CreativeInventoryAction::decode(reader)?)
             }
+            serverbound::TabComplete::ID => {
+                Self::TabComplete(serverbound::TabComplete::decode(reader)?)
+            }
             serverbound::ClientSettings::ID => {
                 Self::ClientSettings(serverbound::ClientSettings::decode(reader)?)
             }
@@ -506,6 +568,7 @@ impl PlayServerbound {
             Self::ClickWindow(packet) => packet.encode_body(writer),
             Self::ConfirmTransaction(packet) => packet.encode_body(writer),
             Self::CreativeInventoryAction(packet) => packet.encode_body(writer),
+            Self::TabComplete(packet) => packet.encode_body(writer),
             Self::ClientSettings(packet) => packet.encode_body(writer),
             Self::Brand(packet) => packet.encode_body(writer),
         }

@@ -156,6 +156,58 @@ pub struct HudState {
     pub chat_lines: Vec<String>,
     /// Debug lines, top to bottom.
     pub debug_lines: Vec<String>,
+    /// The action bar text and its opacity, when a message is displayed.
+    pub action_bar: Option<(String, f32)>,
+    /// The title and subtitle, when displayed.
+    pub title: Option<TitleView>,
+    /// The scoreboard sidebar, when an objective is assigned to it.
+    pub sidebar: Option<SidebarView>,
+    /// The tab list, filled whether or not the player holds the key.
+    pub tab_list: Option<TabListView>,
+    /// The tab completions the server offered for the open chat line.
+    pub completions: Vec<String>,
+}
+
+/// The title and subtitle drawn in the middle of the screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TitleView {
+    /// The title text.
+    pub title: String,
+    /// The subtitle text; empty when there is none.
+    pub subtitle: String,
+    /// The opacity in `0.0..=1.0`.
+    pub alpha: f32,
+}
+
+/// The scoreboard sidebar: a title and lines, top line first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SidebarView {
+    /// The objective display name.
+    pub title: String,
+    /// The lines as `(name, score)`.
+    pub lines: Vec<(String, i32)>,
+}
+
+/// One player of the tab list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabEntryView {
+    /// The name drawn for the player, with its team decoration.
+    pub name: String,
+    /// The latency in milliseconds.
+    pub ping: i32,
+    /// The game mode id; 3 is spectator.
+    pub game_mode: i32,
+}
+
+/// The tab list in display order, with its header and footer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabListView {
+    /// The header text; empty when there is none.
+    pub header: String,
+    /// The footer text; empty when there is none.
+    pub footer: String,
+    /// The players, already sorted and capped.
+    pub entries: Vec<TabEntryView>,
 }
 
 impl Default for HudState {
@@ -172,6 +224,11 @@ impl Default for HudState {
             crosshair: true,
             chat_lines: Vec::new(),
             debug_lines: Vec::new(),
+            action_bar: None,
+            title: None,
+            sidebar: None,
+            tab_list: None,
+            completions: Vec::new(),
         }
     }
 }

@@ -16,6 +16,10 @@ use crate::varint::{read_var_u32, write_var_u32};
 /// The default maximum string length used by 1.8 vanilla fields.
 pub const MAX_STRING_CHARS: usize = 256;
 
+/// The maximum length of a chat JSON component or of a free-form string on
+/// the 1.8 wire (`PacketBuffer.readStringFromBuffer(32767)`).
+pub const MAX_JSON_CHARS: usize = 32767;
+
 /// Maximum bytes a 256-char string may occupy (4 bytes per UTF-8 code point).
 fn max_string_bytes(max_chars: usize) -> usize {
     max_chars.saturating_mul(4)
