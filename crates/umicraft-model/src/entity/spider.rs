@@ -161,14 +161,15 @@ impl SpiderModel {
         self.head.rotation[1] = head_yaw.to_radians();
 
         let pi_4 = std::f32::consts::PI / 4.0;
-        self.leg1.rotation[2] = -pi_4;
-        self.leg2.rotation[2] = pi_4;
-        self.leg3.rotation[2] = -pi_4 * 0.74;
-        self.leg4.rotation[2] = pi_4 * 0.74;
-        self.leg5.rotation[2] = -pi_4 * 0.74;
-        self.leg6.rotation[2] = pi_4 * 0.74;
-        self.leg7.rotation[2] = -pi_4;
-        self.leg8.rotation[2] = pi_4;
+        // In Umicraft (+Y up): right legs (-X) need positive Z angle to slope down; left legs (+X) need negative Z angle.
+        self.leg1.rotation[2] = pi_4;
+        self.leg2.rotation[2] = -pi_4;
+        self.leg3.rotation[2] = pi_4 * 0.74;
+        self.leg4.rotation[2] = -pi_4 * 0.74;
+        self.leg5.rotation[2] = pi_4 * 0.74;
+        self.leg6.rotation[2] = -pi_4 * 0.74;
+        self.leg7.rotation[2] = pi_4;
+        self.leg8.rotation[2] = -pi_4;
 
         let f2 = std::f32::consts::FRAC_PI_8;
         self.leg1.rotation[1] = f2 * 2.0;
@@ -205,14 +206,14 @@ impl SpiderModel {
         self.leg7.rotation[1] += f6;
         self.leg8.rotation[1] += -f6;
 
-        self.leg1.rotation[2] += f7;
-        self.leg2.rotation[2] += -f7;
-        self.leg3.rotation[2] += f8;
-        self.leg4.rotation[2] += -f8;
-        self.leg5.rotation[2] += f9;
-        self.leg6.rotation[2] += -f9;
-        self.leg7.rotation[2] += f10;
-        self.leg8.rotation[2] += -f10;
+        self.leg1.rotation[2] -= f7;
+        self.leg2.rotation[2] += f7;
+        self.leg3.rotation[2] -= f8;
+        self.leg4.rotation[2] += f8;
+        self.leg5.rotation[2] -= f9;
+        self.leg6.rotation[2] += f9;
+        self.leg7.rotation[2] -= f10;
+        self.leg8.rotation[2] += f10;
     }
 
     /// Emits all mesh vertices scaled to blocks (1/16 block per unit * self.scale).

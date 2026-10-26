@@ -371,7 +371,7 @@ fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
                 ent.limb_swing_amount,
                 head_yaw,
                 head_pitch,
-                true,
+                false,
             );
             vec![MeshLayer {
                 slot: TextureSlot::Skeleton,
@@ -507,8 +507,14 @@ fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
             }]
         }
         EntityKind::ZombieVillager => {
-            let mut model = VillagerModel::villager();
-            model.set_angles(ent.limb_swing, ent.limb_swing_amount, head_yaw, head_pitch);
+            let mut model = HumanoidModel::zombie_villager();
+            model.set_angles(
+                ent.limb_swing,
+                ent.limb_swing_amount,
+                head_yaw,
+                head_pitch,
+                true,
+            );
             vec![MeshLayer {
                 slot: TextureSlot::ZombieVillager,
                 vertices: model.emit_mesh(),

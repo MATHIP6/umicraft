@@ -64,14 +64,15 @@ impl OcelotModel {
                 0.0,
             ));
 
-        // Body: 4 wide, 6 high, 16 long, centered at Y = 7.0, Z = 0.0
-        let body = ModelPart::new([0.0, 7.0, 0.0]).with_box(ModelBox::new(
-            [-2.0, -3.0, -8.0],
-            [4.0, 6.0, 16.0],
+        // Body: 4 wide, 16 high, 6 deep with texture [20.0, 0.0] rotated PI/2 (matching MCP ModelOcelot)
+        let mut body = ModelPart::new([0.0, 7.0, 1.0]).with_box(ModelBox::new(
+            [-2.0, -8.0, -3.0],
+            [4.0, 16.0, 6.0],
             [20.0, 0.0],
             tex,
             0.0,
         ));
+        body.rotation[0] = std::f32::consts::PI / 2.0;
 
         // Back legs (6 units high)
         let back_left_leg = ModelPart::new([1.1, 6.0, 5.0]).with_box(ModelBox::new(
@@ -146,14 +147,17 @@ impl OcelotModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        self.head.rotation[1] = head_yaw;
-        self.head.rotation[0] = head_pitch;
+        self.head.rotation[1] = head_yaw.to_radians();
+        self.head.rotation[0] = head_pitch.to_radians();
 
         let swing = (limb_angle * 0.6662).cos() * 1.0 * limb_distance;
         self.back_left_leg.rotation[0] = swing;
         self.back_right_leg.rotation[0] = -swing;
         self.front_left_leg.rotation[0] = -swing;
         self.front_right_leg.rotation[0] = swing;
+
+        self.tail1.rotation[0] = -0.9 + (limb_angle * 0.6662).cos() * 0.2 * limb_distance;
+        self.tail2.rotation[0] = self.tail1.rotation[0] - 0.4;
     }
 
     /// Emits the ocelot mesh vertices transformed into world units.

@@ -39,7 +39,7 @@ impl WolfModel {
         let body_py = 10.0;
         let head_py = 10.5;
 
-        let head = ModelPart::new([-1.0, head_py, -7.0])
+        let head = ModelPart::new([0.0, head_py, -7.0])
             // Main head cube
             .with_box(ModelBox::new(
                 [-3.0, -3.0, -2.0],
@@ -82,8 +82,8 @@ impl WolfModel {
         ));
         body.rotation[0] = std::f32::consts::PI / 2.0;
 
-        let mut mane = ModelPart::new([-1.0, body_py, 1.0]).with_box(ModelBox::new(
-            [-3.0, -3.0, -3.0],
+        let mut mane = ModelPart::new([0.0, body_py, -1.0]).with_box(ModelBox::new(
+            [-4.0, -3.0, -3.0],
             [8.0, 6.0, 7.0],
             [21.0, 0.0],
             tex,
@@ -91,7 +91,7 @@ impl WolfModel {
         ));
         mane.rotation[0] = std::f32::consts::PI / 2.0;
 
-        let leg1 = ModelPart::new([-2.5, leg_py, 7.0]).with_box(ModelBox::new(
+        let leg1 = ModelPart::new([-1.5, leg_py, 7.0]).with_box(ModelBox::new(
             [-1.0, -8.0, -1.0],
             [2.0, 8.0, 2.0],
             [0.0, 18.0],
@@ -99,7 +99,7 @@ impl WolfModel {
             0.0,
         ));
 
-        let leg2 = ModelPart::new([0.5, leg_py, 7.0]).with_box(ModelBox::new(
+        let leg2 = ModelPart::new([1.5, leg_py, 7.0]).with_box(ModelBox::new(
             [-1.0, -8.0, -1.0],
             [2.0, 8.0, 2.0],
             [0.0, 18.0],
@@ -107,7 +107,7 @@ impl WolfModel {
             0.0,
         ));
 
-        let leg3 = ModelPart::new([-2.5, leg_py, -4.0]).with_box(ModelBox::new(
+        let leg3 = ModelPart::new([-1.5, leg_py, -4.0]).with_box(ModelBox::new(
             [-1.0, -8.0, -1.0],
             [2.0, 8.0, 2.0],
             [0.0, 18.0],
@@ -115,7 +115,7 @@ impl WolfModel {
             0.0,
         ));
 
-        let leg4 = ModelPart::new([0.5, leg_py, -4.0]).with_box(ModelBox::new(
+        let leg4 = ModelPart::new([1.5, leg_py, -4.0]).with_box(ModelBox::new(
             [-1.0, -8.0, -1.0],
             [2.0, 8.0, 2.0],
             [0.0, 18.0],
@@ -123,7 +123,7 @@ impl WolfModel {
             0.0,
         ));
 
-        let tail = ModelPart::new([-1.0, body_py + 2.0, 8.0]).with_box(ModelBox::new(
+        let tail = ModelPart::new([0.0, body_py + 2.0, 8.0]).with_box(ModelBox::new(
             [-1.0, -8.0, -1.0],
             [2.0, 8.0, 2.0],
             [9.0, 18.0],

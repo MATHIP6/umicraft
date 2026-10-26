@@ -95,7 +95,7 @@ impl VillagerModel {
                 0.5,
             ));
 
-        // Folded arms: pivot at [0, 21, -1] rotated by -0.75 rad
+        // Folded arms: pivot at [0, 21, -1] rotated by +0.75 rad (tilts forward in front of torso)
         let mut arms = ModelPart::new([0.0, torso_py - 3.0, -1.0])
             // Left arm
             .with_box(ModelBox::new(
@@ -113,7 +113,7 @@ impl VillagerModel {
                 tex,
                 0.0,
             ))
-            // Middle crossed segment
+            // Middle crossed segment (at the bottom of vertical sleeves)
             .with_box(ModelBox::new(
                 [-4.0, -6.0, -2.0],
                 [8.0, 4.0, 4.0],
@@ -121,7 +121,7 @@ impl VillagerModel {
                 tex,
                 0.0,
             ));
-        arms.rotation[0] = -0.75;
+        arms.rotation[0] = 0.75;
 
         let right_leg = ModelPart::new([-2.0, leg_py, 0.0]).with_box(ModelBox::new(
             [-2.0, -12.0, -2.0],

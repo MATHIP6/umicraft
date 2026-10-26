@@ -117,15 +117,23 @@ impl WitherModel {
 
     /// Sets head rotations and hover spine undulation.
     pub fn set_angles(&mut self, anim_time: f32, head_yaw: f32, head_pitch: f32) {
-        self.center_head.rotation[1] = head_yaw;
-        self.center_head.rotation[0] = head_pitch;
+        let yaw_rad = head_yaw.to_radians();
+        let pitch_rad = head_pitch.to_radians();
+        self.center_head.rotation[1] = yaw_rad;
+        self.center_head.rotation[0] = pitch_rad;
 
         // Side heads look around slightly
         let sway = (anim_time * 0.1).cos();
-        self.right_head.rotation[1] = head_yaw + (anim_time * 0.5).sin() * 0.2;
-        self.left_head.rotation[1] = head_yaw + (anim_time * 0.5 + 1.0).sin() * 0.2;
+        self.right_head.rotation[1] = yaw_rad + (anim_time * 0.5).sin() * 0.2;
+        self.left_head.rotation[1] = yaw_rad + (anim_time * 0.5 + 1.0).sin() * 0.2;
 
-        self.spine.rotation[0] = (0.065 + 0.05 * sway) * std::f32::consts::PI;
+        let spine_angle = (0.065 + 0.05 * sway) * std::f32::consts::PI;
+        self.spine.rotation[0] = spine_angle;
+        self.tail.pivot = [
+            0.0,
+            10.0 - spine_angle.cos() * 6.0,
+            -spine_angle.sin() * 6.0,
+        ];
         self.tail.rotation[0] = (0.265 + 0.1 * sway) * std::f32::consts::PI;
     }
 

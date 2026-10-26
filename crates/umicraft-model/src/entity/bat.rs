@@ -70,8 +70,8 @@ impl BatModel {
                 0.0,
             ));
 
-        // Inner wings
-        let right_wing = ModelPart::new([0.0, 6.0, 0.0]).with_box(ModelBox::new(
+        // Inner wings (attached to body at [0, 0, 0])
+        let right_wing = ModelPart::new([0.0, 0.0, 0.0]).with_box(ModelBox::new(
             [-12.0, -8.0, 0.0],
             [10.0, 16.0, 1.0],
             [42.0, 0.0],
@@ -87,7 +87,7 @@ impl BatModel {
             0.0,
         ));
 
-        let left_wing = ModelPart::new([0.0, 6.0, 0.0]).with_box(ModelBox::new(
+        let left_wing = ModelPart::new([0.0, 0.0, 0.0]).with_box(ModelBox::new(
             [2.0, -8.0, 0.0],
             [10.0, 16.0, 1.0],
             [42.0, 0.0],
@@ -132,12 +132,13 @@ impl BatModel {
         self.head.emit(root, &mut out);
         self.body.emit(root, &mut out);
 
-        let rw_transform = self.right_wing.transform(root);
-        self.right_wing.emit(root, &mut out);
+        let body_transform = self.body.transform(root);
+        let rw_transform = self.right_wing.transform(body_transform);
+        self.right_wing.emit(body_transform, &mut out);
         self.outer_right_wing.emit(rw_transform, &mut out);
 
-        let lw_transform = self.left_wing.transform(root);
-        self.left_wing.emit(root, &mut out);
+        let lw_transform = self.left_wing.transform(body_transform);
+        self.left_wing.emit(body_transform, &mut out);
         self.outer_left_wing.emit(lw_transform, &mut out);
 
         out

@@ -233,8 +233,8 @@ impl HorseModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        self.head.rotation[1] = head_yaw;
-        self.head.rotation[0] = -std::f32::consts::FRAC_PI_6 + head_pitch;
+        self.head.rotation[1] = head_yaw.to_radians();
+        self.head.rotation[0] = -std::f32::consts::FRAC_PI_6 + head_pitch.to_radians();
 
         let swing = (limb_angle * 0.6662).cos() * 0.8 * limb_distance;
         self.back_left_leg.rotation[0] = swing;

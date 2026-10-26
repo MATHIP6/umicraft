@@ -56,7 +56,8 @@ impl GhastModel {
     /// Sets the tentacle sway animation angles.
     pub fn set_angles(&mut self, anim_time: f32) {
         for (j, tentacle) in self.tentacles.iter_mut().enumerate() {
-            tentacle.rotation[0] = 0.2 * (anim_time * 0.3 + j as f32).sin() + 0.4;
+            // Negative angle tilts tentacles backward (+Z in Umicraft)
+            tentacle.rotation[0] = -0.2 * (anim_time * 0.3 + j as f32).sin() - 0.4;
         }
     }
 

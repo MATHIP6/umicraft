@@ -62,8 +62,9 @@ impl QuadrupedModel {
                 tex,
                 0.0,
             ))
+            // Udder (MCP ModelCow: addBox(-2, 2, -8, 4, 6, 1))
             .with_box(ModelBox::new(
-                [-2.0, 2.0, 3.0],
+                [-2.0, 2.0, -8.0],
                 [4.0, 6.0, 1.0],
                 [52.0, 0.0],
                 tex,
