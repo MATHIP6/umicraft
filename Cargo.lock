@@ -3336,6 +3336,7 @@ name = "umicraft-game"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "serde_json",
  "umicraft-protocol",
  "umicraft-world",
 ]

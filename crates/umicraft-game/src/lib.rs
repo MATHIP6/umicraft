@@ -33,6 +33,8 @@
 //! collision in [`collision`], the block geometry in [`shapes`], the
 //! reconciliation in [`prediction`] and the block targeting in [`raycast`].
 
+pub mod chat_component;
+pub mod chat_input;
 pub mod collision;
 pub mod entity;
 pub mod input;

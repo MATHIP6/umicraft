@@ -14,6 +14,7 @@
 
 mod block_atlas;
 mod camera;
+mod chat_hud;
 pub mod entity_pass;
 mod environment;
 mod error;
@@ -32,8 +33,9 @@ pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use hud::{
-    draw as draw_hud, selected_index, status_fills, Fill, HudLayout, HudState, ItemStack, Rect,
-    SidebarView, StatusRow, TabEntryView, TabListView, TitleView,
+    draw as draw_hud, selected_index, status_fills, ChatInputView, ChatLineView, ChatRunView, Fill,
+    HudLayout, HudState, ItemStack, Rect, SidebarView, StatusRow, TabEntryView, TabListView,
+    TitleView,
 };
 pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};

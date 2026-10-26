@@ -164,6 +164,11 @@ pub enum ClientCommand {
         /// The message, with the leading slash of a command.
         message: String,
     },
+    /// `Tab-Complete` (0x14): ask the server to complete the typed text.
+    TabComplete {
+        /// The text before the caret, with the leading slash of a command.
+        message: String,
+    },
     /// `Close Window` (0x0D): the client closes a container window.
     CloseWindow {
         /// The window id (0 for the player inventory).
@@ -280,6 +285,12 @@ impl ClientCommand {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
             }
             Self::Chat { message } => PlayServerbound::Chat(serverbound::Chat { message }),
+            Self::TabComplete { message } => {
+                PlayServerbound::TabComplete(serverbound::TabComplete {
+                    message,
+                    target_block: None,
+                })
+            }
             Self::CloseWindow { window_id } => {
                 PlayServerbound::CloseWindow(ServerCloseWindow { window_id })
             }

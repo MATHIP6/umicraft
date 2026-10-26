@@ -11,7 +11,10 @@
 //! arguments and the `extra` list. A component that cannot be parsed falls
 //! back to the raw JSON, so no message is ever lost.
 
+use std::sync::OnceLock;
+
 use serde_json::Value;
+use umicraft_game::chat_component::{self, Translations};
 
 /// The system messages of the vanilla server that the client can flatten.
 ///
@@ -57,10 +60,9 @@ pub fn plain_text(json: &str) -> String {
 /// variant. A malformed component is still returned unchanged.
 #[must_use]
 pub fn flatten(json: &str) -> String {
-    match serde_json::from_str::<Value>(json) {
-        Ok(value) => component_text(&value),
-        Err(_) => json.to_string(),
-    }
+    static TRANSLATIONS: OnceLock<Translations> = OnceLock::new();
+    let translations = TRANSLATIONS.get_or_init(Translations::builtin);
+    chat_component::plain(&chat_component::parse(json, translations))
 }
 
 /// The text of one component and of its children.
@@ -140,6 +142,19 @@ mod flatten_tests {
     #[test]
     fn a_malformed_component_is_returned_unchanged() {
         assert_eq!(flatten("not json"), "not json");
+    }
+
+    #[test]
+    fn flatten_drops_the_legacy_colour_codes_the_font_cannot_draw() {
+        assert_eq!(flatten("{\"text\":\"\u{a7}cRed \u{a7}lBold\"}"), "Red Bold");
+    }
+
+    #[test]
+    fn flatten_translates_the_known_system_messages() {
+        assert_eq!(
+            flatten(r#"{"translate":"multiplayer.player.joined","with":["Alex"]}"#),
+            "Alex joined the game"
+        );
     }
 }
 

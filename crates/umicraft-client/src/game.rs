@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
+use umicraft_game::chat_component::{self, Translations};
 use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityStore};
 use umicraft_game::input::RawInput;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
@@ -42,7 +43,10 @@ use umicraft_protocol::packets::play::clientbound::{ChunkData, MapChunkBulk};
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack as WireItemStack};
 use umicraft_protocol::PlayServerbound;
-use umicraft_render::{HudState, ItemStack, SidebarView, TabEntryView, TabListView, TitleView};
+use umicraft_render::{
+    ChatLineView, ChatRunView, HudState, ItemStack, SidebarView, TabEntryView, TabListView,
+    TitleView,
+};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
 use crate::error::ClientError;
@@ -65,8 +69,12 @@ const FRAME_CAPACITY: usize = 32;
 /// Bounded queue of the chunk snapshots the render thread polls.
 const CHUNK_CAPACITY: usize = 64;
 
-/// The number of chat lines the HUD keeps.
-const CHAT_HISTORY: usize = 10;
+/// The number of chat messages kept (MCP `GuiNewChat` keeps 100). The HUD
+/// wraps them and shows the newest rows that fit.
+const CHAT_HISTORY: usize = 100;
+
+/// The longest message the server accepts, in characters (`C01PacketChatMessage`).
+const MAX_CHAT_CHARS: usize = 100;
 
 /// The number of ticks between two status updates.
 const STATUS_PERIOD: u64 = 20;
@@ -138,6 +146,10 @@ pub enum GameEvent {
     Input(InputUpdate),
     /// A chat line the player typed.
     Chat(String),
+    /// The player pressed Tab: ask the server to complete this text.
+    TabComplete(String),
+    /// A line the client shows in its own chat (the completion list).
+    LocalChat(String),
     /// Request to re-mesh every loaded chunk column (e.g. after a resource pack reload).
     ReMeshAll,
     /// The client closes a container or the player inventory (E / Escape).
@@ -396,8 +408,12 @@ struct Game {
     equipment: [Option<WireItemStack>; 5],
     /// The selected hotbar slot.
     selected_slot: u8,
-    /// The chat lines, oldest first.
-    chat: VecDeque<String>,
+    /// The chat messages, oldest first.
+    chat: VecDeque<ChatLineView>,
+    /// The translations of the `translate` chat components.
+    translations: Translations,
+    /// Counts the tab-completion answers.
+    completions_serial: u64,
     /// The last reported position.
     last_position: Option<(f64, f64, f64)>,
     /// The last reported view angles, in radians.
@@ -459,6 +475,8 @@ impl Game {
             equipment: std::array::from_fn(|_| None),
             selected_slot: 0,
             chat: VecDeque::new(),
+            translations: Translations::builtin(),
+            completions_serial: 0,
             last_position: None,
             last_rotation: (0.0, 0.0),
             ticks_since_report: 0,
@@ -554,7 +572,7 @@ impl Game {
             hotbar,
             selected_slot: self.selected_slot,
             crosshair: true,
-            chat_lines: self.chat.iter().cloned().collect(),
+            chat: self.chat.iter().cloned().collect(),
             debug_lines: Vec::new(),
             action_bar: self.action_bar_view(),
             title: self.title_view(),
@@ -562,6 +580,8 @@ impl Game {
             tab_list: self.tab_list_view(),
             show_tab_list: false,
             completions: self.completions.clone(),
+            completions_serial: self.completions_serial,
+            ..HudState::default()
         }
     }
 
@@ -632,6 +652,49 @@ impl Game {
             entries,
         })
     }
+}
+
+/// A chat message from the chat JSON of the server.
+fn chat_line(json: &str, translations: &Translations) -> ChatLineView {
+    line_from_runs(&chat_component::parse(json, translations))
+}
+
+/// A line the client writes itself. The text is wrapped in a component so it
+/// is never mistaken for JSON (a player named `null` or `123`).
+fn local_chat_line(text: &str, translations: &Translations) -> ChatLineView {
+    let json = serde_json::json!({ "text": text }).to_string();
+    chat_line(&json, translations)
+}
+
+/// The HUD view of parsed runs, stamped with the arrival time.
+fn line_from_runs(runs: &[chat_component::Run]) -> ChatLineView {
+    ChatLineView {
+        runs: runs
+            .iter()
+            .map(|run| ChatRunView {
+                text: run.text.clone(),
+                color: run.style.color.map_or(
+                    chat_component::Color::WHITE.rgb(),
+                    chat_component::Color::rgb,
+                ),
+                bold: run.style.bold,
+                italic: run.style.italic,
+                underlined: run.style.underlined,
+                strikethrough: run.style.strikethrough,
+                obfuscated: run.style.obfuscated,
+            })
+            .collect(),
+        received: Instant::now(),
+    }
+}
+
+/// Adds a message to the chat, dropping the oldest beyond [`CHAT_HISTORY`].
+fn push_chat(game: &mut Game, line: ChatLineView) {
+    game.chat.push_back(line);
+    while game.chat.len() > CHAT_HISTORY {
+        game.chat.pop_front();
+    }
+    game.hud_dirty = true;
 }
 
 /// The commands that could not be handed to the network thread yet.
@@ -803,9 +866,21 @@ fn handle_event(
             false
         }
         GameEvent::Chat(message) => {
-            if !message.is_empty() && message.len() <= 100 {
+            // The server limit counts characters, not bytes.
+            if !message.is_empty() && message.chars().count() <= MAX_CHAT_CHARS {
                 queue.push(ClientCommand::Chat { message });
             }
+            false
+        }
+        GameEvent::TabComplete(message) => {
+            if message.chars().count() <= MAX_CHAT_CHARS {
+                queue.push(ClientCommand::TabComplete { message });
+            }
+            false
+        }
+        GameEvent::LocalChat(text) => {
+            let line = local_chat_line(&text, &game.translations);
+            push_chat(game, line);
             false
         }
         GameEvent::ReMeshAll => {
@@ -880,11 +955,8 @@ fn handle_net(
         }
         PlayEvent::Chat(json) => {
             game.status_data.chat_messages += 1;
-            game.chat.push_back(crate::chat::plain_text(&json));
-            while game.chat.len() > CHAT_HISTORY {
-                game.chat.pop_front();
-            }
-            game.hud_dirty = true;
+            let line = chat_line(&json, &game.translations);
+            push_chat(game, line);
         }
         PlayEvent::ActionBar(json) => {
             game.action_bar.show(&json);
@@ -900,6 +972,7 @@ fn handle_net(
         }
         PlayEvent::TabComplete(packet) => {
             game.completions = packet.matches;
+            game.completions_serial += 1;
             game.hud_dirty = true;
         }
         PlayEvent::ScoreboardObjective(packet) => {
@@ -2132,6 +2205,135 @@ mod tests {
         );
         assert_eq!(game.world_time, 0);
         assert_eq!(game.dimension, -1);
+    }
+
+    #[test]
+    fn a_formatted_chat_message_keeps_its_styles_and_arrival_time() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let before = Instant::now();
+        handle_net(
+            &mut game,
+            PlayEvent::Chat(
+                r#"{"text":"Hi ","color":"red","extra":[{"text":"there","bold":true}]}"#
+                    .to_string(),
+            ),
+            &mut queue,
+            &frames,
+        );
+        let hud = game.hud();
+        assert_eq!(hud.chat.len(), 1);
+        assert_eq!(hud.chat[0].plain(), "Hi there");
+        assert_eq!(hud.chat[0].runs[0].color, [0xFF, 0x55, 0x55]);
+        assert!(!hud.chat[0].runs[0].bold);
+        assert!(hud.chat[0].runs[1].bold);
+        assert!(hud.chat[0].received >= before);
+    }
+
+    #[test]
+    fn an_empty_chat_component_is_a_blank_line_not_raw_json() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(
+            &mut game,
+            PlayEvent::Chat(r#"{"text":""}"#.to_string()),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.hud().chat[0].plain(), "");
+    }
+
+    #[test]
+    fn the_chat_keeps_the_last_one_hundred_messages() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        for number in 0..150 {
+            handle_net(
+                &mut game,
+                PlayEvent::Chat(format!(r#"{{"text":"message {number}"}}"#)),
+                &mut queue,
+                &frames,
+            );
+        }
+        let chat = game.hud().chat;
+        assert_eq!(chat.len(), CHAT_HISTORY);
+        assert_eq!(chat[0].plain(), "message 50");
+        assert_eq!(chat[99].plain(), "message 149");
+    }
+
+    #[test]
+    fn the_typed_chat_limit_counts_characters_not_bytes() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        // 100 two-byte characters: 200 bytes, but within the 100-character limit.
+        let message = "\u{e9}".repeat(100);
+        handle_event(
+            &mut game,
+            GameEvent::Chat(message.clone()),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(queue.ordered.len(), 1, "a 100-character message is sent");
+        handle_event(
+            &mut game,
+            GameEvent::Chat("\u{e9}".repeat(101)),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(queue.ordered.len(), 1, "101 characters is too long");
+    }
+
+    #[test]
+    fn a_tab_request_is_queued_and_the_answer_is_published_with_a_new_serial() {
+        use umicraft_protocol::packets::play::clientbound::TabComplete;
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_event(
+            &mut game,
+            GameEvent::TabComplete("/he".to_string()),
+            &mut queue,
+            &frames,
+        );
+        assert!(matches!(
+            queue.ordered.front(),
+            Some(ClientCommand::TabComplete { message }) if message == "/he"
+        ));
+
+        assert_eq!(game.hud().completions_serial, 0);
+        handle_net(
+            &mut game,
+            PlayEvent::TabComplete(TabComplete {
+                matches: vec!["/help".to_string()],
+            }),
+            &mut queue,
+            &frames,
+        );
+        let hud = game.hud();
+        assert_eq!(hud.completions, ["/help"]);
+        assert_eq!(hud.completions_serial, 1);
+    }
+
+    #[test]
+    fn a_local_chat_line_is_never_parsed_as_json() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        for text in ["null", "123", "Steve, Alex"] {
+            handle_event(
+                &mut game,
+                GameEvent::LocalChat(text.to_string()),
+                &mut queue,
+                &frames,
+            );
+        }
+        let plain: Vec<_> = game.hud().chat.iter().map(ChatLineView::plain).collect();
+        assert_eq!(plain, ["null", "123", "Steve, Alex"]);
     }
 
     #[test]

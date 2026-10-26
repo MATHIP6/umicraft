@@ -13,7 +13,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
+use umicraft_game::chat_input::{push_sent, ChatInput, TabOutcome};
+use umicraft_render::{draw_hud, Camera, ChatInputView, HudState, Overlay, Renderer};
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{
     container_layout, player_inventory_layout, slot, ContainerLayout, InventoryLayout, SlotItem,
@@ -21,7 +22,9 @@ use umicraft_ui::widgets::{
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, WindowEvent};
+use winit::event::{
+    DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
@@ -40,6 +43,14 @@ use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
 
 const MOUSE_SENSITIVITY: f32 = 0.0022;
+/// How long the chat caret stays on, then off, in milliseconds (6 ticks).
+const CARET_BLINK_MS: u128 = 300;
+/// Rows a Page Up or Page Down scrolls the open chat.
+const CHAT_PAGE: isize = 19;
+/// Rows one mouse-wheel notch scrolls the open chat.
+const CHAT_WHEEL_ROWS: isize = 7;
+/// The furthest the chat can be scrolled: more than the 100 messages kept.
+const CHAT_SCROLL_MAX: isize = 2_000;
 const FRAME_HISTORY: usize = 120;
 
 /// Runs the windowed client until the user closes the window.
@@ -93,7 +104,17 @@ struct App {
     /// [`App::screen`].
     screen: Screen,
     /// The line the player is typing while [`Screen::Chat`] is current.
-    chat_input: String,
+    chat_input: ChatInput,
+    /// The messages the player sent, for the up and down keys.
+    sent_messages: Vec<String>,
+    /// How many rows the open chat is scrolled up.
+    chat_scroll: usize,
+    /// When the chat opened; the caret blinks from here.
+    chat_opened: Instant,
+    /// The completion answer the chat already handled.
+    seen_completions: u64,
+    /// Whether a Control key is held (word movement in the chat).
+    ctrl_held: bool,
     /// The immediate-mode context, owned by the render thread.
     ui: Ui,
     /// The acceptance screen shown while [`Screen::Debug`] is current.
@@ -145,7 +166,12 @@ impl App {
             break_block: false,
             place_block: false,
             screen: Screen::None,
-            chat_input: String::new(),
+            chat_input: ChatInput::new("", 0),
+            sent_messages: Vec::new(),
+            chat_scroll: 0,
+            chat_opened: Instant::now(),
+            seen_completions: 0,
+            ctrl_held: false,
             ui: Ui::new(ui_viewport),
             debug_screen: DebugScreen::new(),
             game_menu: GameMenu::new(),
@@ -218,9 +244,10 @@ impl App {
                             if self.keys.contains(&KeyCode::F3) {
                                 self.reload_resources();
                             } else {
-                                self.set_screen(Screen::Chat);
+                                self.open_chat("");
                             }
                         }
+                        KeyCode::Slash => self.open_chat("/"),
                         KeyCode::KeyE => self.set_screen(Screen::Inventory),
                         _ => {}
                     }
@@ -283,7 +310,7 @@ impl App {
         }
         self.screen = screen;
         self.ui_input.clear();
-        self.chat_input.clear();
+        self.chat_scroll = 0;
         self.keys.clear();
         self.select_slot = None;
         self.break_block = false;
@@ -347,30 +374,94 @@ impl App {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
-        match event.state {
-            ElementState::Pressed => match code {
-                KeyCode::Escape => self.set_screen(Screen::Chat.after_escape()),
-                KeyCode::Enter => {
-                    let message = std::mem::take(&mut self.chat_input);
-                    self.set_screen(Screen::None);
-                    if !message.is_empty() {
-                        let _ = self.session.events().try_send(GameEvent::Chat(message));
-                    }
-                }
-                KeyCode::Backspace => {
-                    self.chat_input.pop();
-                }
-                _ => {
+        if event.state != ElementState::Pressed {
+            return;
+        }
+        let word = self.ctrl_held;
+        match code {
+            KeyCode::Escape => self.set_screen(Screen::Chat.after_escape()),
+            KeyCode::Enter | KeyCode::NumpadEnter => self.submit_chat(),
+            KeyCode::Tab => self.complete_chat(),
+            KeyCode::ArrowUp => self.chat_input.history_previous(&self.sent_messages),
+            KeyCode::ArrowDown => self.chat_input.history_next(&self.sent_messages),
+            KeyCode::PageUp => self.scroll_chat(CHAT_PAGE),
+            KeyCode::PageDown => self.scroll_chat(-CHAT_PAGE),
+            KeyCode::Backspace => self.chat_input.backspace(word),
+            KeyCode::Delete => self.chat_input.delete(word),
+            KeyCode::ArrowLeft => self.chat_input.left(word),
+            KeyCode::ArrowRight => self.chat_input.right(word),
+            KeyCode::Home => self.chat_input.home(),
+            KeyCode::End => self.chat_input.end(),
+            _ => {
+                // Control combinations are shortcuts, not text.
+                if !self.ctrl_held {
                     if let Some(text) = event.text.as_ref() {
-                        for character in text.chars() {
-                            if !character.is_control() && self.chat_input.len() < 100 {
-                                self.chat_input.push(character);
-                            }
-                        }
+                        self.chat_input.insert(text);
                     }
                 }
-            },
-            ElementState::Released => {}
+            }
+        }
+    }
+
+    /// Opens the chat with `initial` already typed (`/` for the command key).
+    fn open_chat(&mut self, initial: &str) {
+        self.set_screen(Screen::Chat);
+        self.chat_input = ChatInput::new(initial, self.sent_messages.len());
+        self.chat_scroll = 0;
+        self.chat_opened = Instant::now();
+    }
+
+    /// Sends the typed line, remembers it for the history and closes the chat.
+    fn submit_chat(&mut self) {
+        let message = self.chat_input.text().trim().to_string();
+        self.set_screen(Screen::None);
+        if !message.is_empty() {
+            push_sent(&mut self.sent_messages, &message);
+            let _ = self.session.events().try_send(GameEvent::Chat(message));
+        }
+    }
+
+    /// Presses Tab in the chat: asks the server or cycles its answer.
+    fn complete_chat(&mut self) {
+        match self.chat_input.tab() {
+            TabOutcome::Nothing => {}
+            TabOutcome::Request(text) => {
+                let _ = self.session.events().try_send(GameEvent::TabComplete(text));
+            }
+            TabOutcome::Cycled { listing } => {
+                if let Some(listing) = listing {
+                    let _ = self
+                        .session
+                        .events()
+                        .try_send(GameEvent::LocalChat(listing));
+                }
+            }
+        }
+    }
+
+    /// Scrolls the open chat by `rows` (positive is towards older messages).
+    fn scroll_chat(&mut self, rows: isize) {
+        self.chat_scroll = (self.chat_scroll as isize + rows).clamp(0, CHAT_SCROLL_MAX) as usize;
+    }
+
+    /// Hands a new tab-completion answer to the chat input.
+    fn process_completions(&mut self) {
+        let Some(world) = self.world.as_ref() else {
+            return;
+        };
+        let serial = world.hud().completions_serial;
+        if serial == self.seen_completions {
+            return;
+        }
+        let matches = world.hud().completions.clone();
+        self.seen_completions = serial;
+        if self.screen == Screen::Chat {
+            if let Some(listing) = self.chat_input.on_completions(&matches) {
+                let _ = self
+                    .session
+                    .events()
+                    .try_send(GameEvent::LocalChat(listing));
+            }
         }
     }
 
@@ -501,13 +592,18 @@ impl App {
         ];
         // The HUD owns the debug block, the crosshair and the bottom stack;
         // the client only feeds it the lines it already tracks.
-        let mut chat_lines = game_hud.chat_lines.clone();
-        if self.screen == Screen::Chat {
-            chat_lines.push(format!("> {}", self.chat_input));
-        }
+        let chatting = self.screen == Screen::Chat;
         let hud = HudState {
             debug_lines: lines.to_vec(),
-            chat_lines,
+            chat_open: chatting,
+            chat_scroll: self.chat_scroll,
+            chat_input: chatting.then(|| ChatInputView {
+                text: self.chat_input.text(),
+                caret: self.chat_input.caret(),
+                caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
+                    .is_multiple_of(2),
+            }),
+            now: Some(Instant::now()),
             // The tab list shows while the key is held and no screen is open.
             show_tab_list: self.screen() == Screen::None && self.keys.contains(&KeyCode::Tab),
             ..game_hud
@@ -584,6 +680,7 @@ impl App {
         }
 
         self.sync_world(now);
+        self.process_completions();
         self.publish_input();
         let environment = self
             .world
@@ -912,6 +1009,7 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => self.resize(size.width, size.height),
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, event),
             WindowEvent::ModifiersChanged(modifiers) => {
+                self.ctrl_held = modifiers.state().control_key();
                 self.ui_input.modifiers(modifiers.state());
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -952,11 +1050,28 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 if self.screen().uses_ui() {
                     self.ui_input.wheel(delta);
+                } else if self.screen == Screen::Chat {
+                    // A notch scrolls seven rows, one with Shift held
+                    // (`GuiScreen.handleMouseInput` in the reference).
+                    let notches = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y,
+                        MouseScrollDelta::PixelDelta(position) => position.y as f32 / 20.0,
+                    };
+                    let rows = if notches > 0.0 {
+                        CHAT_WHEEL_ROWS
+                    } else if notches < 0.0 {
+                        -CHAT_WHEEL_ROWS
+                    } else {
+                        0
+                    };
+                    self.scroll_chat(rows);
                 }
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
                 if self.screen().uses_ui() {
                     self.ui_input.text(&text);
+                } else if self.screen == Screen::Chat {
+                    self.chat_input.insert(&text);
                 }
             }
             WindowEvent::Focused(false) => {

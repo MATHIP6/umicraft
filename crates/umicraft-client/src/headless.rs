@@ -97,8 +97,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                     }
                 }
                 RenderEvent::Hud(hud) => {
-                    if !hud.chat_lines.is_empty() {
-                        report.chat = hud.chat_lines.clone();
+                    if !hud.chat.is_empty() {
+                        report.chat = hud.chat.iter().map(|line| line.plain()).collect();
                     }
                     report.health = hud.health;
                     report.food = hud.food;
