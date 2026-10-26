@@ -27,6 +27,58 @@ pub enum EntityKind {
     Sheep,
     /// Chicken.
     Chicken,
+    /// Spider.
+    Spider,
+    /// Cave Spider.
+    CaveSpider,
+    /// Enderman.
+    Enderman,
+    /// Slime.
+    Slime,
+    /// Magma Cube.
+    MagmaCube,
+    /// Zombie Pigman.
+    ZombiePigman,
+    /// Giant Zombie.
+    Giant,
+    /// Villager.
+    Villager,
+    /// Zombie Villager.
+    ZombieVillager,
+    /// Witch.
+    Witch,
+    /// Iron Golem.
+    IronGolem,
+    /// Snow Golem / Snowman.
+    Snowman,
+    /// Wolf / Dog.
+    Wolf,
+    /// Mooshroom (Mushroom Cow).
+    Mooshroom,
+    /// Squid.
+    Squid,
+    /// Bat.
+    Bat,
+    /// Blaze.
+    Blaze,
+    /// Ender Dragon.
+    Dragon,
+    /// Endermite.
+    Endermite,
+    /// Ghast.
+    Ghast,
+    /// Guardian.
+    Guardian,
+    /// Horse / Donkey / Mule.
+    Horse,
+    /// Ocelot / Cat.
+    Ocelot,
+    /// Rabbit.
+    Rabbit,
+    /// Silverfish.
+    Silverfish,
+    /// Wither.
+    Wither,
     /// Dropped item stack.
     Item,
     /// Projectile arrow.
@@ -42,11 +94,36 @@ impl EntityKind {
         match id {
             50 => Self::Creeper,
             51 => Self::Skeleton,
+            52 => Self::Spider,
+            53 => Self::Giant,
             54 => Self::Zombie,
+            55 => Self::Slime,
+            56 => Self::Ghast,
+            57 => Self::ZombiePigman,
+            58 => Self::Enderman,
+            59 => Self::CaveSpider,
+            60 => Self::Silverfish,
+            61 => Self::Blaze,
+            62 => Self::MagmaCube,
+            63 => Self::Dragon,
+            64 => Self::Wither,
+            65 => Self::Bat,
+            66 => Self::Witch,
+            67 => Self::Endermite,
+            68 => Self::Guardian,
             90 => Self::Pig,
             91 => Self::Sheep,
             92 => Self::Cow,
             93 => Self::Chicken,
+            94 => Self::Squid,
+            95 => Self::Wolf,
+            96 => Self::Mooshroom,
+            97 => Self::Snowman,
+            98 => Self::Ocelot,
+            99 => Self::IronGolem,
+            100 => Self::Horse,
+            101 => Self::Rabbit,
+            120 => Self::Villager,
             other => Self::Other(other),
         }
     }

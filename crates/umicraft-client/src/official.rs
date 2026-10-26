@@ -26,16 +26,23 @@ pub(crate) const VERSION_ID: &str = "1.8.8";
 /// errors of [`VersionJson::parse`] and [`ClientJar::open`] when the files are
 /// corrupt.
 pub(crate) fn open_client_jar(install: &OfficialInstall) -> Result<ClientJar, AssetsError> {
+    const OFFICIAL_1_8_8_JAR_SHA1: &str = "0983f08be6a4e624f5d85689d1aca869ed99c738";
+    const OFFICIAL_1_8_8_JAR_SIZE: u64 = 8_465_313;
+
     let version_dir = install.versions_dir().join(VERSION_ID);
     let json_path = version_dir.join(format!("{VERSION_ID}.json"));
-    let json = std::fs::read(&json_path).map_err(|source| AssetsError::Io {
-        path: json_path.display().to_string(),
-        source,
-    })?;
-    let version = VersionJson::parse(&json)?;
-    let descriptor = version.require_client_jar()?;
+    if let Ok(json) = std::fs::read(&json_path) {
+        if let Ok(version) = VersionJson::parse(&json) {
+            if let Ok(descriptor) = version.require_client_jar() {
+                let jar_path = client_jar_path(install, &version_dir)?;
+                return ClientJar::open(jar_path, &descriptor.sha1, descriptor.size);
+            }
+        }
+    }
+
+    // Direct fallback if 1.8.8.jar exists without the version JSON
     let jar_path = client_jar_path(install, &version_dir)?;
-    ClientJar::open(jar_path, &descriptor.sha1, descriptor.size)
+    ClientJar::open(jar_path, OFFICIAL_1_8_8_JAR_SHA1, OFFICIAL_1_8_8_JAR_SIZE)
 }
 
 /// Discovers a verified client jar from an official installation or the Umicraft cache.

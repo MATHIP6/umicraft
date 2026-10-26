@@ -6,17 +6,55 @@
 //! ([`ModelVertex`], [`ModelBox`], [`ModelPart`]) and the texture-slot
 //! registry ([`TextureSlot`], [`MeshLayer`]) are defined here.
 
+mod bat;
+mod blaze;
 mod chicken;
 mod creeper;
+mod dragon;
+mod enderman;
+mod endermite;
+mod ghast;
+mod guardian;
+mod horse;
 mod humanoid;
+mod iron_golem;
+mod ocelot;
 mod quadruped;
+mod rabbit;
 mod sheep;
+mod silverfish;
+mod slime;
+mod snowman;
+mod spider;
+mod squid;
+mod villager;
+mod wither;
+mod wolf;
 
+pub use bat::BatModel;
+pub use blaze::BlazeModel;
 pub use chicken::ChickenModel;
 pub use creeper::CreeperModel;
+pub use dragon::DragonModel;
+pub use enderman::EndermanModel;
+pub use endermite::EndermiteModel;
+pub use ghast::GhastModel;
+pub use guardian::GuardianModel;
+pub use horse::HorseModel;
 pub use humanoid::HumanoidModel;
+pub use iron_golem::IronGolemModel;
+pub use ocelot::OcelotModel;
 pub use quadruped::QuadrupedModel;
+pub use rabbit::RabbitModel;
 pub use sheep::SheepModel;
+pub use silverfish::SilverfishModel;
+pub use slime::SlimeModel;
+pub use snowman::SnowmanModel;
+pub use spider::SpiderModel;
+pub use squid::SquidModel;
+pub use villager::VillagerModel;
+pub use wither::WitherModel;
+pub use wolf::WolfModel;
 
 use glam::{Mat4, Vec3};
 
@@ -48,6 +86,8 @@ pub struct ModelBox {
     pub texture_size: [f32; 2],
     /// Dilation inflation applied outward along all axes (e.g. 0.25 or 0.5 for outer layers).
     pub dilation: f32,
+    /// Whether horizontal UVs and X faces are mirrored (MCP `ModelRenderer.mirror`).
+    pub mirror: bool,
 }
 
 impl ModelBox {
@@ -66,17 +106,32 @@ impl ModelBox {
             uv,
             texture_size,
             dilation,
+            mirror: false,
         }
+    }
+
+    /// Marks this box as horizontally mirrored (`ModelRenderer.mirror = true` in MCP).
+    #[must_use]
+    pub const fn mirrored(mut self) -> Self {
+        self.mirror = true;
+        self
     }
 
     /// Emits the 36 vertices (12 triangles) for this cuboid transformed by `transform`.
     pub fn emit_triangles(&self, transform: Mat4, out: &mut Vec<ModelVertex>) {
-        let x0 = self.origin[0] - self.dilation;
+        let raw_x0 = self.origin[0] - self.dilation;
         let y0 = self.origin[1] - self.dilation;
         let z0 = self.origin[2] - self.dilation;
-        let x1 = self.origin[0] + self.size[0] + self.dilation;
+        let raw_x1 = self.origin[0] + self.size[0] + self.dilation;
         let y1 = self.origin[1] + self.size[1] + self.dilation;
         let z1 = self.origin[2] + self.size[2] + self.dilation;
+
+        let (x0, x1) = if self.mirror {
+            (raw_x1, raw_x0)
+        } else {
+            (raw_x0, raw_x1)
+        };
+        let flip_winding = self.mirror ^ (transform.determinant() < 0.0);
 
         let w = self.size[0];
         let h = self.size[1];
@@ -96,6 +151,7 @@ impl ModelBox {
         let c111 = transform.transform_point3(Vec3::new(x1, y1, z1)).to_array();
         let c011 = transform.transform_point3(Vec3::new(x0, y1, z1)).to_array();
 
+        let x_sign = if self.mirror { -1.0 } else { 1.0 };
         let n_down = transform
             .transform_vector3(Vec3::new(0.0, -1.0, 0.0))
             .normalize_or_zero()
@@ -113,17 +169,35 @@ impl ModelBox {
             .normalize_or_zero()
             .to_array();
         let n_west = transform
-            .transform_vector3(Vec3::new(-1.0, 0.0, 0.0))
+            .transform_vector3(Vec3::new(-x_sign, 0.0, 0.0))
             .normalize_or_zero()
             .to_array();
         let n_east = transform
-            .transform_vector3(Vec3::new(1.0, 0.0, 0.0))
+            .transform_vector3(Vec3::new(x_sign, 0.0, 0.0))
             .normalize_or_zero()
             .to_array();
 
+        // For 0-height flat plane boxes (such as ModelDragon wing membranes),
+        // only emit the Up (+Y) sheet so top/bottom faces do not Z-fight when cull_mode is None.
+        if h == 0.0 {
+            emit_quad_oriented(
+                out,
+                [c011, c111, c110, c010],
+                n_up,
+                [
+                    [(u + d) / tw, v / th],
+                    [(u + d + w) / tw, v / th],
+                    [(u + d + w) / tw, (v + d) / th],
+                    [(u + d) / tw, (v + d) / th],
+                ],
+                flip_winding,
+            );
+            return;
+        }
+
         // Standard 1.8 UV mapping layout from MCP ModelBox.java:
         // Down (-Y)
-        emit_quad(
+        emit_quad_oriented(
             out,
             [c000, c100, c101, c001],
             n_down,
@@ -133,9 +207,10 @@ impl ModelBox {
                 [(u + d + 2.0 * w) / tw, v / th],
                 [(u + d + w) / tw, v / th],
             ],
+            flip_winding,
         );
         // Up (+Y)
-        emit_quad(
+        emit_quad_oriented(
             out,
             [c011, c111, c110, c010],
             n_up,
@@ -145,9 +220,10 @@ impl ModelBox {
                 [(u + d + w) / tw, (v + d) / th],
                 [(u + d) / tw, (v + d) / th],
             ],
+            flip_winding,
         );
         // North (-Z)
-        emit_quad(
+        emit_quad_oriented(
             out,
             [c100, c000, c010, c110],
             n_north,
@@ -157,9 +233,10 @@ impl ModelBox {
                 [(u + d) / tw, (v + d) / th],
                 [(u + d + w) / tw, (v + d) / th],
             ],
+            flip_winding,
         );
         // South (+Z)
-        emit_quad(
+        emit_quad_oriented(
             out,
             [c001, c101, c111, c011],
             n_south,
@@ -169,9 +246,10 @@ impl ModelBox {
                 [(u + 2.0 * d + w) / tw, (v + d) / th],
                 [(u + 2.0 * d + 2.0 * w) / tw, (v + d) / th],
             ],
+            flip_winding,
         );
         // West (-X)
-        emit_quad(
+        emit_quad_oriented(
             out,
             [c000, c001, c011, c010],
             n_west,
@@ -181,9 +259,10 @@ impl ModelBox {
                 [u / tw, (v + d) / th],
                 [(u + d) / tw, (v + d) / th],
             ],
+            flip_winding,
         );
         // East (+X)
-        emit_quad(
+        emit_quad_oriented(
             out,
             [c101, c100, c110, c111],
             n_east,
@@ -193,7 +272,27 @@ impl ModelBox {
                 [(u + d + w) / tw, (v + d) / th],
                 [(u + 2.0 * d + w) / tw, (v + d) / th],
             ],
+            flip_winding,
         );
+    }
+}
+
+fn emit_quad_oriented(
+    out: &mut Vec<ModelVertex>,
+    corners: [[f32; 3]; 4],
+    normal: [f32; 3],
+    uvs: [[f32; 2]; 4],
+    flip_winding: bool,
+) {
+    if flip_winding {
+        emit_quad(
+            out,
+            [corners[3], corners[2], corners[1], corners[0]],
+            normal,
+            [uvs[3], uvs[2], uvs[1], uvs[0]],
+        );
+    } else {
+        emit_quad(out, corners, normal, uvs);
     }
 }
 
@@ -377,6 +476,56 @@ pub enum TextureSlot {
     SheepWool,
     /// Chicken mob texture.
     Chicken,
+    /// Spider mob texture.
+    Spider,
+    /// Cave Spider mob texture.
+    CaveSpider,
+    /// Enderman mob texture.
+    Enderman,
+    /// Slime inner/outer texture.
+    Slime,
+    /// Magma Cube texture.
+    MagmaCube,
+    /// Zombie Pigman texture.
+    ZombiePigman,
+    /// Villager texture.
+    Villager,
+    /// Zombie Villager texture.
+    ZombieVillager,
+    /// Witch texture.
+    Witch,
+    /// Iron Golem texture.
+    IronGolem,
+    /// Snowman / Snow Golem texture.
+    Snowman,
+    /// Wolf texture.
+    Wolf,
+    /// Mooshroom cow texture.
+    Mooshroom,
+    /// Squid texture.
+    Squid,
+    /// Bat texture.
+    Bat,
+    /// Blaze texture.
+    Blaze,
+    /// Ender Dragon texture.
+    Dragon,
+    /// Endermite texture.
+    Endermite,
+    /// Ghast texture.
+    Ghast,
+    /// Guardian texture.
+    Guardian,
+    /// Horse texture.
+    Horse,
+    /// Ocelot texture.
+    Ocelot,
+    /// Rabbit texture.
+    Rabbit,
+    /// Silverfish texture.
+    Silverfish,
+    /// Wither boss texture.
+    Wither,
     /// Dropped item block texture.
     Item,
 }
@@ -464,7 +613,9 @@ mod tests {
     fn creeper_model_vertex_count() {
         let model = CreeperModel::new();
         let mesh = model.emit_mesh();
-        assert_eq!(mesh.len(), 252);
+        // 6 boxes: head, body, 4 legs (6 * 36 = 216 vertices).
+        // (MCP ModelCreeper.render renders head, body, leg1..4; creeperArmor is an unrendered field).
+        assert_eq!(mesh.len(), 216);
     }
 
     #[test]
@@ -502,5 +653,30 @@ mod tests {
             min_y.abs() < 0.01,
             "sheep feet should reach Y≈0, got {min_y}"
         );
+    }
+
+    #[test]
+    fn all_mobs_emit_valid_meshes() {
+        assert!(!SpiderModel::new().emit_mesh().is_empty());
+        assert!(!EndermanModel::new().emit_mesh().is_empty());
+        assert!(!SlimeModel::slime(1.0).emit_inner_mesh().is_empty());
+        assert!(!SlimeModel::magma_cube(1.0).emit_inner_mesh().is_empty());
+        assert!(!VillagerModel::villager().emit_mesh().is_empty());
+        assert!(!VillagerModel::witch().emit_mesh().is_empty());
+        assert!(!IronGolemModel::new().emit_mesh().is_empty());
+        assert!(!SnowmanModel::new().emit_mesh().is_empty());
+        assert!(!WolfModel::new().emit_mesh().is_empty());
+        assert!(!SquidModel::new().emit_mesh().is_empty());
+        assert!(!BatModel::new().emit_mesh().is_empty());
+        assert!(!BlazeModel::new().emit_mesh().is_empty());
+        assert!(!DragonModel::new().emit_mesh().is_empty());
+        assert!(!EndermiteModel::new().emit_mesh().is_empty());
+        assert!(!GhastModel::new().emit_mesh().is_empty());
+        assert!(!GuardianModel::new().emit_mesh().is_empty());
+        assert!(!HorseModel::new().emit_mesh().is_empty());
+        assert!(!OcelotModel::new().emit_mesh().is_empty());
+        assert!(!RabbitModel::new().emit_mesh().is_empty());
+        assert!(!SilverfishModel::new().emit_mesh().is_empty());
+        assert!(!WitherModel::new().emit_mesh().is_empty());
     }
 }

@@ -30,6 +30,8 @@ pub enum DemoView {
     Closeup,
     /// Walk cycle animation decomposition showing leg/arm swinging phases.
     WalkCycle,
+    /// Exhibition lineup of all Minecraft 1.8 mobs.
+    Mobs,
 }
 
 impl DemoView {
@@ -44,8 +46,9 @@ impl DemoView {
             "back" => Ok(Self::Back),
             "closeup" => Ok(Self::Closeup),
             "walk-cycle" | "walk" => Ok(Self::WalkCycle),
+            "mobs" | "all" | "all-mobs" => Ok(Self::Mobs),
             other => Err(format!(
-                "unknown demo view {other:?}; must be one of overview, day, night, cave, transparency, back, closeup, walk-cycle"
+                "unknown demo view {other:?}; must be one of overview, day, night, cave, transparency, back, closeup, walk-cycle, mobs"
             )),
         }
     }
@@ -53,7 +56,7 @@ impl DemoView {
     /// Returns the default world time in ticks for this view.
     pub fn default_time(self) -> i64 {
         match self {
-            Self::Overview | Self::Back | Self::Closeup | Self::WalkCycle => 6000,
+            Self::Overview | Self::Back | Self::Closeup | Self::WalkCycle | Self::Mobs => 6000,
             Self::Day => 6000,
             Self::Night => 18000,
             Self::Cave => 6000,
@@ -72,6 +75,7 @@ impl DemoView {
             Self::Back => "back",
             Self::Closeup => "closeup",
             Self::WalkCycle => "walk-cycle",
+            Self::Mobs => "mobs",
         }
     }
 }
@@ -100,11 +104,13 @@ options:
                       1.8.8 jar; no server or GPU unless --screenshot is given
   --entity-demo       mesh and report the M8 acceptance entities (Steve, Alex,
                       Zombie, Cow, Item); no server or GPU unless --screenshot is given
+  --mob NAME          render a single mob by name (e.g. creeper, zombie, cow, or 'list')
+  --dump-mobs DIR     render each mob individually 1-by-1 to PNG images in DIR
   --resource-pack PATH path to a resource pack directory or .zip (repeatable)
   --setup-assets      download and verify official 1.8.8 assets then exit
   --time N            world time in ticks (signed; default: 6000 noon)
   --demo-view NAME    acceptance camera: overview, day, night, cave, transparency,
-                      back, closeup, walk-cycle (default: overview)
+                      back, closeup, walk-cycle, mobs (default: overview)
   --width N           framebuffer width (default: 1280)
   --height N          framebuffer height (default: 720)
   --help, -h          print this help";
@@ -164,6 +170,10 @@ pub struct Args {
     pub block_demo: bool,
     /// Whether the server-less M8 entity acceptance run is requested.
     pub entity_demo: bool,
+    /// Specific mob name to view or screenshot in entity demo (e.g. "creeper", "cow").
+    pub mob: Option<String>,
+    /// Directory to export individual PNG screenshots of all mobs 1 by 1.
+    pub dump_mobs: Option<PathBuf>,
     /// Whether asset setup/download was explicitly requested.
     pub setup_assets: bool,
     /// Active resource pack paths, layered in argument order.
@@ -204,7 +214,7 @@ impl Args {
             Mode::UiDemo
         } else if self.block_demo {
             Mode::BlockDemo
-        } else if self.entity_demo {
+        } else if self.entity_demo || self.mob.is_some() || self.dump_mobs.is_some() {
             Mode::EntityDemo
         } else if self.headless {
             Mode::Headless
@@ -235,6 +245,8 @@ impl Args {
         let mut ui_demo = false;
         let mut block_demo = false;
         let mut entity_demo = false;
+        let mut mob = None;
+        let mut dump_mobs = None;
         let mut setup_assets = false;
         let mut resource_packs = Vec::new();
         let mut time = 6000_i64;
@@ -300,6 +312,22 @@ impl Args {
                 "--entity-demo" => {
                     entity_demo = true;
                     index += 1;
+                }
+                "--mob" => {
+                    let value = words.get(index + 1).ok_or_else(help)?;
+                    if value.is_empty() {
+                        return Err(format!("--mob needs a name\n{USAGE}"));
+                    }
+                    mob = Some(value.clone());
+                    index += 2;
+                }
+                "--dump-mobs" => {
+                    let value = words.get(index + 1).ok_or_else(help)?;
+                    if value.is_empty() {
+                        return Err(format!("--dump-mobs needs a directory path\n{USAGE}"));
+                    }
+                    dump_mobs = Some(PathBuf::from(value));
+                    index += 2;
                 }
                 "--setup-assets" => {
                     setup_assets = true;
@@ -369,10 +397,16 @@ impl Args {
             ));
         }
 
-        // The UI, block demos, entity demo, and setup-assets mode can run without a
+        // The UI, block demos, entity demo, mob inspection, dump-mobs, and setup-assets mode can run without a
         // server. Every other mode keeps the M1-M3 contract of an explicit
         // host and port.
-        let (host, port) = if ui_demo || block_demo || entity_demo || setup_assets {
+        let (host, port) = if ui_demo
+            || block_demo
+            || entity_demo
+            || mob.is_some()
+            || dump_mobs.is_some()
+            || setup_assets
+        {
             (host, port)
         } else {
             (Some(host.ok_or_else(help)?), Some(port.ok_or_else(help)?))
@@ -392,6 +426,8 @@ impl Args {
             ui_demo,
             block_demo,
             entity_demo,
+            mob,
+            dump_mobs,
             setup_assets,
             resource_packs,
             time,
@@ -669,6 +705,28 @@ mod tests {
         assert_eq!(
             args.screenshot,
             Some(std::path::PathBuf::from("/tmp/m8.png"))
+        );
+        assert_eq!(args.mode(), Mode::EntityDemo);
+    }
+
+    #[test]
+    fn mob_flag_parses_without_server_and_activates_entity_demo() {
+        let args = Args::parse(&words(&["--mob", "creeper", "--screenshot", "creeper.png"]))
+            .expect("mob flag parses");
+        assert_eq!(args.mob.as_deref(), Some("creeper"));
+        assert_eq!(
+            args.screenshot,
+            Some(std::path::PathBuf::from("creeper.png"))
+        );
+        assert_eq!(args.mode(), Mode::EntityDemo);
+    }
+
+    #[test]
+    fn dump_mobs_flag_parses_without_server() {
+        let args = Args::parse(&words(&["--dump-mobs", "target/mobs"])).expect("dump-mobs parses");
+        assert_eq!(
+            args.dump_mobs,
+            Some(std::path::PathBuf::from("target/mobs"))
         );
         assert_eq!(args.mode(), Mode::EntityDemo);
     }

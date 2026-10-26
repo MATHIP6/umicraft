@@ -38,6 +38,79 @@ impl HumanoidModel {
         Self::create(false, true)
     }
 
+    /// Builds a 1.8 zombie villager biped model (MCP `ModelZombieVillager`).
+    /// Combines a 64×64 zombie biped body/limbs with an elongated villager head and nose.
+    #[must_use]
+    pub fn zombie_villager() -> Self {
+        let tex = [64.0, 64.0];
+
+        // Head and nose (MCP ModelZombieVillager: texture offset 0,32 and 24,32)
+        let head = ModelPart::new([0.0, 24.0, 0.0])
+            .with_box(ModelBox::new(
+                [-4.0, 0.0, -4.0],
+                [8.0, 10.0, 8.0],
+                [0.0, 32.0],
+                tex,
+                0.0,
+            ))
+            .with_box(ModelBox::new(
+                [-1.0, -1.0, -6.0],
+                [2.0, 4.0, 2.0],
+                [24.0, 32.0],
+                tex,
+                0.0,
+            ));
+
+        let body = ModelPart::new([0.0, 12.0, 0.0]).with_box(ModelBox::new(
+            [-4.0, 0.0, -2.0],
+            [8.0, 12.0, 4.0],
+            [16.0, 16.0],
+            tex,
+            0.0,
+        ));
+
+        let right_arm = ModelPart::new([-5.0, 22.0, 0.0]).with_box(ModelBox::new(
+            [-3.0, -10.0, -2.0],
+            [4.0, 12.0, 4.0],
+            [40.0, 16.0],
+            tex,
+            0.0,
+        ));
+
+        let left_arm = ModelPart::new([5.0, 22.0, 0.0]).with_box(ModelBox::new(
+            [-1.0, -10.0, -2.0],
+            [4.0, 12.0, 4.0],
+            [40.0, 16.0],
+            tex,
+            0.0,
+        ));
+
+        let right_leg = ModelPart::new([-1.9, 12.0, 0.0]).with_box(ModelBox::new(
+            [-2.0, -12.0, -2.0],
+            [4.0, 12.0, 4.0],
+            [0.0, 16.0],
+            tex,
+            0.0,
+        ));
+
+        let left_leg = ModelPart::new([1.9, 12.0, 0.0]).with_box(ModelBox::new(
+            [-2.0, -12.0, -2.0],
+            [4.0, 12.0, 4.0],
+            [0.0, 16.0],
+            tex,
+            0.0,
+        ));
+
+        Self {
+            head,
+            body,
+            right_arm,
+            left_arm,
+            right_leg,
+            left_leg,
+        }
+    }
+
     /// Builds a 1.8 skeleton biped with thin 2-pixel-wide limbs (MCP `ModelSkeleton`).
     #[must_use]
     pub fn skeleton() -> Self {

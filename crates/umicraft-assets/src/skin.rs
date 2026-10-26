@@ -334,6 +334,478 @@ pub fn procedural_cow_texture() -> Vec<u8> {
     rgba
 }
 
+/// Generates an original procedural fallback spider texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_spider_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let dark = [20, 18, 16, 255];
+    let red_eyes = [180, 20, 20, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&dark);
+        }
+    }
+    // Red eyes on head (UV: 32..40, 4..12)
+    fill_rect(&mut rgba, 64, 34, 8, 2, 2, red_eyes);
+    fill_rect(&mut rgba, 64, 38, 8, 2, 2, red_eyes);
+    rgba
+}
+
+/// Generates an original procedural fallback cave spider texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_cave_spider_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let blue_dark = [16, 32, 45, 255];
+    let red_eyes = [200, 20, 20, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&blue_dark);
+        }
+    }
+    fill_rect(&mut rgba, 64, 34, 8, 2, 2, red_eyes);
+    fill_rect(&mut rgba, 64, 38, 8, 2, 2, red_eyes);
+    rgba
+}
+
+/// Generates an original procedural fallback enderman texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_enderman_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let black = [18, 18, 18, 255];
+    let white = [230, 230, 230, 255];
+    let pupil = [180, 40, 220, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&black);
+        }
+    }
+    // Eyes on head front face (X=8..16, Y=8..16)
+    fill_rect(&mut rgba, 64, 8, 12, 3, 1, white);
+    fill_rect(&mut rgba, 64, 13, 12, 3, 1, white);
+    fill_rect(&mut rgba, 64, 9, 12, 1, 1, pupil);
+    fill_rect(&mut rgba, 64, 14, 12, 1, 1, pupil);
+    // Cutout for mouth on head
+    fill_rect(&mut rgba, 64, 8, 14, 8, 2, [0, 0, 0, 0]);
+    // Teeth on headwear front face (X=8..16, Y=24..32)
+    fill_rect(&mut rgba, 64, 8, 24, 8, 5, [0, 0, 0, 0]);
+    fill_rect(&mut rgba, 64, 9, 29, 2, 2, [220, 220, 220, 255]);
+    fill_rect(&mut rgba, 64, 13, 29, 2, 2, [220, 220, 220, 255]);
+    rgba
+}
+
+/// Generates an original procedural fallback slime texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_slime_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let gel = [100, 180, 80, 180];
+    let eye = [20, 50, 15, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&gel);
+        }
+    }
+    fill_rect(&mut rgba, 64, 32, 0, 4, 4, eye);
+    rgba
+}
+
+/// Generates an original procedural fallback magma cube texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_magma_cube_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let magma = [180, 50, 20, 255];
+    let orange = [220, 130, 20, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let color = if (x + y) % 2 == 0 { magma } else { orange };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    rgba
+}
+
+/// Generates an original procedural fallback zombie pigman texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_zombie_pigman_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let pig_skin = [230, 160, 150, 255];
+    let rot = [80, 110, 60, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let color = if (x / 4 + y / 4) % 2 == 0 {
+                pig_skin
+            } else {
+                rot
+            };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    rgba
+}
+
+/// Generates an original procedural fallback villager texture (64×64 RGBA8).
+#[must_use]
+pub fn procedural_villager_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 64 * 4];
+    let brown_robe = [120, 80, 50, 255];
+    let face = [200, 150, 130, 255];
+    let nose = [180, 130, 110, 255];
+    for y in 0..64 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&brown_robe);
+        }
+    }
+    fill_rect(&mut rgba, 64, 0, 0, 16, 16, face);
+    fill_rect(&mut rgba, 64, 24, 0, 8, 8, nose);
+    rgba
+}
+
+/// Generates an original procedural fallback zombie villager texture (64×64 RGBA8).
+#[must_use]
+pub fn procedural_zombie_villager_texture() -> Vec<u8> {
+    let mut rgba = procedural_zombie_skin();
+    let green_face = [80, 130, 60, 255];
+    let dark_green = [50, 90, 40, 255];
+    // Villager elongated head at (0, 32, 32, 32)
+    fill_rect(&mut rgba, 64, 0, 32, 32, 10, dark_green);
+    fill_rect(&mut rgba, 64, 0, 42, 32, 22, green_face);
+    // Nose at (24, 32, 8, 8)
+    fill_rect(&mut rgba, 64, 24, 32, 8, 8, dark_green);
+    rgba
+}
+
+/// Generates an original procedural fallback witch texture (64×128 RGBA8).
+#[must_use]
+pub fn procedural_witch_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 128 * 4];
+    let purple_robe = [70, 30, 80, 255];
+    let black_hat = [30, 25, 35, 255];
+    let face = [180, 160, 140, 255];
+    for y in 0..128 {
+        for x in 0..64 {
+            let color = if y >= 64 { black_hat } else { purple_robe };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    fill_rect(&mut rgba, 64, 0, 0, 16, 16, face);
+    rgba
+}
+
+/// Generates an original procedural fallback iron golem texture (128×128 RGBA8).
+#[must_use]
+pub fn procedural_iron_golem_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 128 * 128 * 4];
+    let iron = [210, 210, 205, 255];
+    let vine = [90, 130, 60, 255];
+    let eye = [180, 40, 40, 255];
+    for y in 0..128 {
+        for x in 0..128 {
+            let color = if (x * 7 + y * 13) % 31 == 0 {
+                vine
+            } else {
+                iron
+            };
+            let idx = (y * 128 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    fill_rect(&mut rgba, 128, 10, 10, 4, 2, eye);
+    fill_rect(&mut rgba, 128, 18, 10, 4, 2, eye);
+    rgba
+}
+
+/// Generates an original procedural fallback snowman texture (64×64 RGBA8).
+#[must_use]
+pub fn procedural_snowman_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 64 * 4];
+    let snow = [240, 245, 250, 255];
+    let branch = [90, 60, 35, 255];
+    let coal = [30, 30, 30, 255];
+    for y in 0..64 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&snow);
+        }
+    }
+    fill_rect(&mut rgba, 64, 32, 0, 16, 8, branch);
+    fill_rect(&mut rgba, 64, 3, 4, 2, 2, coal);
+    fill_rect(&mut rgba, 64, 7, 4, 2, 2, coal);
+    rgba
+}
+
+/// Generates an original procedural fallback wolf texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_wolf_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let grey = [180, 180, 180, 255];
+    let dark_grey = [120, 120, 120, 255];
+    let nose = [30, 30, 30, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let color = if (x + y) % 4 == 0 { dark_grey } else { grey };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    fill_rect(&mut rgba, 64, 1, 11, 2, 2, nose);
+    rgba
+}
+
+/// Generates an original procedural fallback mooshroom cow texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_mooshroom_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let red = [160, 25, 25, 255];
+    let white = [230, 230, 230, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let color = if (x / 4 + y / 4) % 2 == 0 { red } else { white };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    rgba
+}
+
+/// Generates an original procedural fallback squid texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_squid_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let ink = [35, 45, 65, 255];
+    let eye = [220, 220, 220, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&ink);
+        }
+    }
+    fill_rect(&mut rgba, 64, 4, 12, 2, 2, eye);
+    fill_rect(&mut rgba, 64, 10, 12, 2, 2, eye);
+    rgba
+}
+
+/// Generates an original procedural fallback bat texture (64×64 RGBA8).
+#[must_use]
+pub fn procedural_bat_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 64 * 4];
+    let dark = [45, 35, 30, 255];
+    let wing = [30, 25, 20, 255];
+    for y in 0..64 {
+        for x in 0..64 {
+            let color = if x >= 24 { wing } else { dark };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    rgba
+}
+
+/// Generates an original procedural fallback blaze texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_blaze_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let yellow = [240, 180, 20, 255];
+    let orange = [220, 100, 10, 255];
+    let eye = [255, 255, 100, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let color = if (x + y) % 3 == 0 { orange } else { yellow };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    fill_rect(&mut rgba, 64, 2, 3, 2, 2, eye);
+    fill_rect(&mut rgba, 64, 5, 3, 2, 2, eye);
+    rgba
+}
+
+/// Generates an original procedural fallback ender dragon texture (256×256 RGBA8).
+#[must_use]
+pub fn procedural_dragon_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 256 * 256 * 4];
+    let black = [15, 15, 15, 255];
+    let dark_grey = [30, 30, 30, 255];
+    let eye = [200, 50, 230, 255];
+    for y in 0..256 {
+        for x in 0..256 {
+            let color = if (x * 3 + y * 7) % 17 == 0 {
+                dark_grey
+            } else {
+                black
+            };
+            let idx = (y * 256 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    // Eyes
+    fill_rect(&mut rgba, 256, 120, 40, 8, 4, eye);
+    fill_rect(&mut rgba, 256, 140, 40, 8, 4, eye);
+    rgba
+}
+
+/// Generates an original procedural fallback endermite texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_endermite_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let dark_purple = [35, 20, 45, 255];
+    let eye = [180, 40, 200, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&dark_purple);
+        }
+    }
+    fill_rect(&mut rgba, 64, 1, 1, 2, 1, eye);
+    fill_rect(&mut rgba, 64, 3, 1, 2, 1, eye);
+    rgba
+}
+
+/// Generates an original procedural fallback ghast texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_ghast_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let white = [240, 240, 240, 255];
+    let grey_face = [160, 160, 160, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&white);
+        }
+    }
+    // Face (eyes and mouth)
+    fill_rect(&mut rgba, 64, 3, 4, 2, 2, grey_face);
+    fill_rect(&mut rgba, 64, 7, 4, 2, 2, grey_face);
+    fill_rect(&mut rgba, 64, 4, 7, 4, 2, grey_face);
+    rgba
+}
+
+/// Generates an original procedural fallback guardian texture (64×64 RGBA8).
+#[must_use]
+pub fn procedural_guardian_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 64 * 4];
+    let teal = [80, 130, 130, 255];
+    let orange_spike = [200, 100, 50, 255];
+    let eye = [180, 40, 30, 255];
+    for y in 0..64 {
+        for x in 0..64 {
+            let color = if y >= 40 { orange_spike } else { teal };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    // Center eye
+    fill_rect(&mut rgba, 64, 8, 0, 4, 4, eye);
+    rgba
+}
+
+/// Generates an original procedural fallback horse texture (128×128 RGBA8).
+#[must_use]
+pub fn procedural_horse_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 128 * 128 * 4];
+    let chestnut = [135, 75, 45, 255];
+    let dark_mane = [40, 25, 20, 255];
+    let white_marking = [220, 220, 220, 255];
+    for y in 0..128 {
+        for x in 0..128 {
+            let idx = (y * 128 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&chestnut);
+        }
+    }
+    fill_rect(&mut rgba, 128, 56, 0, 8, 32, dark_mane);
+    fill_rect(&mut rgba, 128, 0, 0, 8, 8, white_marking);
+    rgba
+}
+
+/// Generates an original procedural fallback ocelot texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_ocelot_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let yellow = [215, 170, 70, 255];
+    let dark_spot = [120, 80, 40, 255];
+    let green_eye = [80, 180, 60, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let color = if (x * 5 + y * 11) % 13 == 0 {
+                dark_spot
+            } else {
+                yellow
+            };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    fill_rect(&mut rgba, 64, 1, 1, 1, 1, green_eye);
+    fill_rect(&mut rgba, 64, 3, 1, 1, 1, green_eye);
+    rgba
+}
+
+/// Generates an original procedural fallback rabbit texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_rabbit_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let tan = [170, 135, 105, 255];
+    let white = [225, 220, 215, 255];
+    let pink_ear = [220, 160, 160, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&tan);
+        }
+    }
+    // Chest / belly
+    fill_rect(&mut rgba, 64, 0, 0, 8, 6, white);
+    // Ears
+    fill_rect(&mut rgba, 64, 52, 0, 4, 5, pink_ear);
+    rgba
+}
+
+/// Generates an original procedural fallback silverfish texture (64×32 RGBA8).
+#[must_use]
+pub fn procedural_silverfish_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 32 * 4];
+    let silver = [140, 145, 150, 255];
+    let dark_silver = [100, 105, 110, 255];
+    for y in 0..32 {
+        for x in 0..64 {
+            let color = if (x + y) % 2 == 0 {
+                silver
+            } else {
+                dark_silver
+            };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    rgba
+}
+
+/// Generates an original procedural fallback wither texture (64×64 RGBA8).
+#[must_use]
+pub fn procedural_wither_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 64 * 4];
+    let wither_dark = [25, 25, 25, 255];
+    let rib_grey = [50, 50, 55, 255];
+    let eye = [210, 215, 220, 255];
+    for y in 0..64 {
+        for x in 0..64 {
+            let color = if y % 4 == 0 { rib_grey } else { wither_dark };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    // Eyes on main head (UV: 0..8, 0..8)
+    fill_rect(&mut rgba, 64, 2, 3, 2, 1, eye);
+    fill_rect(&mut rgba, 64, 5, 3, 2, 1, eye);
+    rgba
+}
+
 /// Copies a rectangular region between two RGBA buffers with horizontal flip.
 #[allow(clippy::too_many_arguments)]
 fn copy_sub_image_mirrored(
@@ -546,7 +1018,8 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, AssetsError> {
 /// # Errors
 /// [`AssetsError::Image`] on corrupt PNG or unsupported color format.
 pub fn decode_png_bytes(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), AssetsError> {
-    let decoder = png::Decoder::new(bytes);
+    let mut decoder = png::Decoder::new(bytes);
+    decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().map_err(|err| AssetsError::Image {
         path: "skin.png".to_string(),
         reason: err.to_string(),
@@ -560,12 +1033,27 @@ pub fn decode_png_bytes(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), AssetsError
         })?;
 
     buf.truncate(info.buffer_size());
-    let rgba = match info.color_type {
+    let (output_color, _bits) = reader.output_color_type();
+    let rgba = match output_color {
         png::ColorType::Rgba => buf,
         png::ColorType::Rgb => {
             let mut expanded = Vec::with_capacity((buf.len() / 3) * 4);
             for chunk in buf.chunks_exact(3) {
                 expanded.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
+            }
+            expanded
+        }
+        png::ColorType::Grayscale => {
+            let mut expanded = Vec::with_capacity(buf.len() * 4);
+            for &gray in &buf {
+                expanded.extend_from_slice(&[gray, gray, gray, 255]);
+            }
+            expanded
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let mut expanded = Vec::with_capacity((buf.len() / 2) * 4);
+            for chunk in buf.chunks_exact(2) {
+                expanded.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
             }
             expanded
         }
@@ -644,5 +1132,34 @@ mod tests {
             &[0xAA, 0xBB, 0xCC, 0xFF],
             "mirrored copy must flip horizontally, not plain-copy"
         );
+    }
+
+    #[test]
+    fn all_procedural_textures_have_expected_sizes() {
+        assert_eq!(procedural_spider_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_cave_spider_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_enderman_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_slime_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_magma_cube_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_zombie_pigman_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_villager_texture().len(), 64 * 64 * 4);
+        assert_eq!(procedural_zombie_villager_texture().len(), 64 * 64 * 4);
+        assert_eq!(procedural_witch_texture().len(), 64 * 128 * 4);
+        assert_eq!(procedural_iron_golem_texture().len(), 128 * 128 * 4);
+        assert_eq!(procedural_snowman_texture().len(), 64 * 64 * 4);
+        assert_eq!(procedural_wolf_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_mooshroom_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_squid_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_bat_texture().len(), 64 * 64 * 4);
+        assert_eq!(procedural_blaze_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_dragon_texture().len(), 256 * 256 * 4);
+        assert_eq!(procedural_endermite_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_ghast_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_guardian_texture().len(), 64 * 64 * 4);
+        assert_eq!(procedural_horse_texture().len(), 128 * 128 * 4);
+        assert_eq!(procedural_ocelot_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_rabbit_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_silverfish_texture().len(), 64 * 32 * 4);
+        assert_eq!(procedural_wither_texture().len(), 64 * 64 * 4);
     }
 }

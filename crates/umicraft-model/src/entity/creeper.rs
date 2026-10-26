@@ -34,21 +34,13 @@ impl CreeperModel {
     #[must_use]
     pub fn new() -> Self {
         let tex = [64.0, 32.0];
-        let head = ModelPart::new([0.0, 18.0, 0.0])
-            .with_box(ModelBox::new(
-                [-4.0, 0.0, -4.0],
-                [8.0, 8.0, 8.0],
-                [0.0, 0.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-4.0, 0.0, -4.0],
-                [8.0, 8.0, 8.0],
-                [32.0, 0.0],
-                tex,
-                0.5,
-            ));
+        let head = ModelPart::new([0.0, 18.0, 0.0]).with_box(ModelBox::new(
+            [-4.0, 0.0, -4.0],
+            [8.0, 8.0, 8.0],
+            [0.0, 0.0],
+            tex,
+            0.0,
+        ));
 
         let body = ModelPart::new([0.0, 18.0, 0.0]).with_box(ModelBox::new(
             [-4.0, -12.0, -2.0],

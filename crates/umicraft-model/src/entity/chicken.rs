@@ -139,6 +139,11 @@ impl ChickenModel {
         let leg_angle = (limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount;
         self.right_leg.rotation[0] = -leg_angle;
         self.left_leg.rotation[0] = leg_angle;
+
+        // Flapping wings
+        let wing_angle = (limb_swing * 0.6662).cos() * 0.4 * limb_swing_amount;
+        self.right_wing.rotation[2] = wing_angle;
+        self.left_wing.rotation[2] = -wing_angle;
     }
 
     /// Emits all vertices.
