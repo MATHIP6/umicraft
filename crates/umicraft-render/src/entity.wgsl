@@ -10,9 +10,9 @@ struct Camera {
     fog_color: vec3<f32>,
     fog_start: f32,
     fog_end: f32,
+    gamma: f32,
     _pad0: f32,
     _pad1: f32,
-    _pad2: f32,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -36,6 +36,12 @@ struct VertexOut {
 
 fn light_brightness(level: f32) -> f32 {
     return level / (3.0 * (1.0 - level) + 1.0);
+}
+
+fn gamma_correct(value: f32) -> f32 {
+    let inv = 1.0 - value;
+    let corrected = 1.0 - inv * inv * inv * inv;
+    return value * (1.0 - camera.gamma) + corrected * camera.gamma;
 }
 
 fn face_shade(normal: vec3<f32>) -> f32 {
@@ -62,7 +68,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
 
     let block_light = light_brightness(block_nibble);
     let sky_light = light_brightness(sky_nibble) * camera.sun_brightness;
-    out.light = clamp(block_light + sky_light, 0.05, 1.0);
+    out.light = gamma_correct(clamp(block_light + sky_light, 0.05, 1.0));
     out.shade = face_shade(in.normal);
 
     return out;

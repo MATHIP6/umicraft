@@ -694,6 +694,13 @@ impl FaceSamples {
 /// flag is still carried to the shader (ADR-0008 §2).
 ///
 /// The returned array lives on the stack; the sampler performs no allocation.
+///
+/// When `ambient_occlusion` is `false` (cross and plant models), the function
+/// returns flat lighting: all four corners share the same light sampled from the
+/// block's own position.  This matches `renderModelStandardQuads` in the 1.8
+/// reference, which uses `getMixedBrightnessForBlock(pos)` uniformly.  Without
+/// this, cross-model faces pick up dark samples from the ground block below and
+/// show a visible shadow at their base.
 pub(crate) fn quad_light<S: BlockSource + ?Sized>(
     source: &S,
     block: [i32; 3],
@@ -702,8 +709,14 @@ pub(crate) fn quad_light<S: BlockSource + ?Sized>(
     ambient_occlusion: bool,
     shade: bool,
 ) -> [VertexLight; 4] {
+    if !ambient_occlusion {
+        let light = source.light(block[0], block[1], block[2]);
+        let flat = VertexLight::new(light.block, light.sky, VertexLight::AO_OPEN, shade);
+        return [flat; 4];
+    }
+
     let frame = FaceFrame::from_normal(normal);
-    let ao_enabled = ambient_occlusion && shade;
+    let ao_enabled = shade;
     let samples = FaceSamples::new(source, block, frame, ao_enabled);
 
     std::array::from_fn(|index| {
