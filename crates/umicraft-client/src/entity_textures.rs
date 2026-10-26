@@ -131,7 +131,7 @@ fn texture_specs() -> Vec<TextureSpec> {
         },
         TextureSpec {
             slot: TextureSlot::Villager,
-            jar_path: "assets/minecraft/textures/entity/villager/villager.png",
+            jar_path: "assets/minecraft/textures/entity/villager/farmer.png",
             fallback: || (procedural_villager_texture(), 64, 64),
         },
         TextureSpec {

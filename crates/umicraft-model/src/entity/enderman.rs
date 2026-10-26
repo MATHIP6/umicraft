@@ -119,7 +119,7 @@ impl EndermanModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        self.head.rotation[0] = head_pitch.to_radians();
+        self.head.rotation[0] = -head_pitch.to_radians();
         self.head.rotation[1] = head_yaw.to_radians();
         self.headwear.rotation = self.head.rotation;
 

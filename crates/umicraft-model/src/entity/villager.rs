@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Villager, Zombie Villager and Witch box models matching MCP 1.8 `ModelVillager.java` and `ModelWitch.java`.
+//! Villager and Witch box model matching MCP 1.8 `ModelVillager.java` and `ModelWitch.java`.
 
 use glam::{Mat4, Vec3};
 
 use super::{ModelBox, ModelPart, ModelVertex};
 
-/// Villager and Witch model with distinctive large nose, long robe and folded arms.
+/// Villager and Witch model (64×64 or 64×128 texture sheet) with robe, folded arms and elongated head.
 #[derive(Debug, Clone)]
 pub struct VillagerModel {
-    /// Head part with large nose.
+    /// Head part with elongated forehead and protruding nose.
     pub head: ModelPart,
-    /// Torso part with outer robe layer.
+    /// Torso part with robe body.
     pub body: ModelPart,
-    /// Crossed arms part.
+    /// Folded arms held in front of chest.
     pub arms: ModelPart,
     /// Right leg.
     pub right_leg: ModelPart,
     /// Left leg.
     pub left_leg: ModelPart,
-    /// Witch hat (present for Witch).
-    pub witch_hat: Option<ModelPart>,
+    /// Hierarchical witch hat sections (brim, lower cone, upper cone, crooked tip).
+    pub witch_hat: Option<Vec<ModelPart>>,
 }
 
 impl VillagerModel {
@@ -68,7 +68,7 @@ impl VillagerModel {
             ));
 
         if is_witch {
-            // Mole on nose
+            // Mole on nose (MCP: 1x1x1 at z = -6.75)
             head = head.with_box(ModelBox::new(
                 [0.0, 1.0, -6.75],
                 [1.0, 1.0, 1.0],
@@ -140,40 +140,50 @@ impl VillagerModel {
         ));
 
         let witch_hat = if is_witch {
-            let hat = ModelPart::new([0.0, torso_py + 10.0, 0.0])
-                // Brim
-                .with_box(ModelBox::new(
-                    [-5.0, 0.0, -5.0],
-                    [10.0, 2.0, 10.0],
-                    [0.0, 64.0],
-                    tex,
-                    0.0,
-                ))
-                // Middle cone
-                .with_box(ModelBox::new(
-                    [-3.5, 2.0, -3.5],
-                    [7.0, 4.0, 7.0],
-                    [0.0, 76.0],
-                    tex,
-                    0.0,
-                ))
-                // Upper cone
-                .with_box(ModelBox::new(
-                    [-2.0, 6.0, -2.0],
-                    [4.0, 4.0, 4.0],
-                    [0.0, 87.0],
-                    tex,
-                    0.0,
-                ))
-                // Tip
-                .with_box(ModelBox::new(
-                    [-0.5, 10.0, -0.5],
-                    [1.0, 2.0, 1.0],
-                    [0.0, 95.0],
-                    tex,
-                    0.25,
-                ));
-            Some(hat)
+            // MCP ModelWitch hierarchy:
+            // 1. witchHat attached to villagerHead at (0, 10, 0), box 10×2×10
+            let brim = ModelPart::new([0.0, 10.0, 0.0]).with_box(ModelBox::new(
+                [-5.0, 0.0, -5.0],
+                [10.0, 2.0, 10.0],
+                [0.0, 64.0],
+                tex,
+                0.0,
+            ));
+
+            // 2. Middle cone child at (1.75, 2.0, 2.0) relative to brim top, rotX=-0.052, rotZ=0.026
+            let mut cone1 = ModelPart::new([-3.25, 2.0, -3.0]).with_box(ModelBox::new(
+                [0.0, 0.0, 0.0],
+                [7.0, 4.0, 7.0],
+                [0.0, 76.0],
+                tex,
+                0.0,
+            ));
+            cone1.rotation[0] = -0.05235988;
+            cone1.rotation[2] = 0.02617994;
+
+            // 3. Upper cone child at (1.75, 4.0, 2.0) relative to cone1, rotX=-0.105, rotZ=0.052
+            let mut cone2 = ModelPart::new([1.75, 4.0, 2.0]).with_box(ModelBox::new(
+                [0.0, 0.0, 0.0],
+                [4.0, 4.0, 4.0],
+                [0.0, 87.0],
+                tex,
+                0.0,
+            ));
+            cone2.rotation[0] = -0.10471976;
+            cone2.rotation[2] = 0.05235988;
+
+            // 4. Tip child at (1.75, 4.0, 2.0) relative to cone2, rotX=-0.209, rotZ=0.105
+            let mut tip = ModelPart::new([1.75, 4.0, 2.0]).with_box(ModelBox::new(
+                [0.0, 0.0, 0.0],
+                [1.0, 2.0, 1.0],
+                [0.0, 95.0],
+                tex,
+                0.25,
+            ));
+            tip.rotation[0] = -0.20943952;
+            tip.rotation[2] = 0.10471976;
+
+            Some(vec![brim, cone1, cone2, tip])
         } else {
             None
         };
@@ -196,11 +206,8 @@ impl VillagerModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        self.head.rotation[0] = head_pitch.to_radians();
+        self.head.rotation[0] = -head_pitch.to_radians();
         self.head.rotation[1] = head_yaw.to_radians();
-        if let Some(hat) = self.witch_hat.as_mut() {
-            hat.rotation = self.head.rotation;
-        }
 
         let leg_angle = (limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount * 0.5;
         self.right_leg.rotation[0] = leg_angle;
@@ -217,8 +224,24 @@ impl VillagerModel {
         self.arms.emit(root, &mut out);
         self.right_leg.emit(root, &mut out);
         self.left_leg.emit(root, &mut out);
-        if let Some(hat) = self.witch_hat.as_ref() {
-            hat.emit(root, &mut out);
+        if let Some(hat_parts) = self.witch_hat.as_ref() {
+            let t_head = self.head.transform(root);
+            let t_brim = hat_parts[0].transform(t_head);
+            for b in &hat_parts[0].boxes {
+                b.emit_triangles(t_brim, &mut out);
+            }
+            let t_cone1 = hat_parts[1].transform(t_brim);
+            for b in &hat_parts[1].boxes {
+                b.emit_triangles(t_cone1, &mut out);
+            }
+            let t_cone2 = hat_parts[2].transform(t_cone1);
+            for b in &hat_parts[2].boxes {
+                b.emit_triangles(t_cone2, &mut out);
+            }
+            let t_cone3 = hat_parts[3].transform(t_cone2);
+            for b in &hat_parts[3].boxes {
+                b.emit_triangles(t_cone3, &mut out);
+            }
         }
         out
     }

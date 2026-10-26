@@ -11,9 +11,7 @@ use super::{ModelBox, ModelPart, ModelVertex};
 pub struct HorseModel {
     /// Torso / body.
     pub body: ModelPart,
-    /// Angled neck with mane.
-    pub neck: ModelPart,
-    /// Head with muzzle and ears.
+    /// Head, neck, mane, muzzle, jaw, and ears sharing the shoulder pivot (MCP `ModelHorse.java`).
     pub head: ModelPart,
     /// Back left leg (thigh, shin, hoof).
     pub back_left_leg: ModelPart,
@@ -28,63 +26,76 @@ pub struct HorseModel {
 }
 
 impl HorseModel {
-    /// Creates a new horse model.
+    /// Creates a new horse model matching MCP `ModelHorse.java`.
     #[must_use]
     pub fn new() -> Self {
         let tex = [128.0, 128.0];
 
-        // In Umicraft: ground is at Y = 0.
-        // Body: 10 wide, 10 high, 24 long. Pivot at Y = 13.0, Z = 0.0.
-        let body = ModelPart::new([0.0, 13.0, 0.0]).with_box(ModelBox::new(
-            [-5.0, -5.0, -12.0],
+        // In Umicraft: ground is at Y = 0. (Y_umicraft = 24.0 - Y_mcp)
+        // Body: MCP pivot (0, 11, 9), box [-5, -8, -19, 10, 10, 24]
+        let body = ModelPart::new([0.0, 13.0, 9.0]).with_box(ModelBox::new(
+            [-5.0, -2.0, -19.0],
             [10.0, 10.0, 24.0],
             [0.0, 34.0],
             tex,
             0.0,
         ));
 
-        // Neck angled upward and forward (pitch ~ 30 deg = FRAC_PI_6)
-        let mut neck = ModelPart::new([0.0, 16.0, -9.0]).with_box(ModelBox::new(
-            [-2.05, 0.0, -4.0],
-            [4.0, 14.0, 8.0],
-            [0.0, 12.0],
-            tex,
-            0.0,
-        ));
-        neck.rotation[0] = -std::f32::consts::FRAC_PI_6;
-
-        // Head attached near the top of the neck
-        let mut head = ModelPart::new([0.0, 26.0, -15.0])
+        // In MCP ModelHorse.java, head, neck, mane, muzzle, jaw, and ears all share
+        // the rotation point (0.0F, 4.0F, -10.0F) and rest pitch 0.5235988F (+30 deg).
+        // Y_umicraft = 24 - 4 = 20.0, Z = -10.0.
+        let mut head = ModelPart::new([0.0, 20.0, -10.0])
+            // Neck (MCP: [-2.05, -9.8, -2.0, 4, 14, 8], UV: [0, 12])
             .with_box(ModelBox::new(
-                [-2.5, 0.0, -3.5],
+                [-2.05, -4.2, -2.0],
+                [4.0, 14.0, 8.0],
+                [0.0, 12.0],
+                tex,
+                0.0,
+            ))
+            // Mane (MCP: [-1.0, -11.5, 5.0, 2, 16, 4], UV: [58, 0])
+            .with_box(ModelBox::new(
+                [-1.0, -4.5, 5.0],
+                [2.0, 16.0, 4.0],
+                [58.0, 0.0],
+                tex,
+                0.0,
+            ))
+            // Head (MCP: [-2.5, -10.0, -1.5, 5, 5, 7], UV: [0, 0])
+            .with_box(ModelBox::new(
+                [-2.5, 5.0, -1.5],
                 [5.0, 5.0, 7.0],
                 [0.0, 0.0],
                 tex,
                 0.0,
             ))
+            // Muzzle (MCP: [-2.0, -10.0, -7.0, 4, 3, 6], UV: [24, 18])
             .with_box(ModelBox::new(
-                [-2.0, 0.0, -9.5],
+                [-2.0, 7.0, -7.0],
                 [4.0, 3.0, 6.0],
                 [24.0, 18.0],
                 tex,
                 0.0,
             ))
+            // Jaw (MCP: [-2.0, -7.0, -6.5, 4, 2, 5], UV: [24, 27])
             .with_box(ModelBox::new(
-                [-2.0, 0.0, -8.5],
+                [-2.0, 5.0, -6.5],
                 [4.0, 2.0, 5.0],
                 [24.0, 27.0],
                 tex,
                 0.0,
             ))
+            // Left ear (MCP: [0.45, -12.0, 4.0, 2, 3, 1], UV: [0, 0])
             .with_box(ModelBox::new(
-                [0.5, 5.0, 1.5],
+                [0.45, 9.0, 4.0],
                 [2.0, 3.0, 1.0],
                 [0.0, 0.0],
                 tex,
                 0.0,
             ))
+            // Right ear (MCP: [-2.45, -12.0, 4.0, 2, 3, 1], UV: [0, 0])
             .with_box(ModelBox::new(
-                [-2.5, 5.0, 1.5],
+                [-2.45, 9.0, 4.0],
                 [2.0, 3.0, 1.0],
                 [0.0, 0.0],
                 tex,
@@ -92,11 +103,11 @@ impl HorseModel {
             ));
         head.rotation[0] = -std::f32::consts::FRAC_PI_6;
 
-        // Back left leg
-        let back_left_leg = ModelPart::new([4.0, 15.0, 9.0])
+        // Back left leg (MCP: pivot (4, 9, 11), thigh + shin + hoof)
+        let back_left_leg = ModelPart::new([4.0, 15.0, 11.0])
             .with_box(ModelBox::new(
                 [-2.5, -7.0, -2.5],
-                [4.0, 7.0, 5.0],
+                [4.0, 9.0, 5.0],
                 [78.0, 29.0],
                 tex,
                 0.0,
@@ -109,7 +120,7 @@ impl HorseModel {
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-2.5, -15.0, -2.0],
+                [-2.5, -15.1, -2.0],
                 [4.0, 3.0, 4.0],
                 [78.0, 51.0],
                 tex,
@@ -117,10 +128,10 @@ impl HorseModel {
             ));
 
         // Back right leg
-        let back_right_leg = ModelPart::new([-4.0, 15.0, 9.0])
+        let back_right_leg = ModelPart::new([-4.0, 15.0, 11.0])
             .with_box(ModelBox::new(
                 [-1.5, -7.0, -2.5],
-                [4.0, 7.0, 5.0],
+                [4.0, 9.0, 5.0],
                 [96.0, 29.0],
                 tex,
                 0.0,
@@ -133,18 +144,18 @@ impl HorseModel {
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-1.5, -15.0, -2.0],
+                [-1.5, -15.1, -2.0],
                 [4.0, 3.0, 4.0],
                 [96.0, 51.0],
                 tex,
                 0.0,
             ));
 
-        // Front left leg
+        // Front left leg (MCP: pivot (4, 9, -8))
         let front_left_leg = ModelPart::new([4.0, 15.0, -8.0])
             .with_box(ModelBox::new(
                 [-1.9, -7.0, -2.1],
-                [3.0, 7.0, 4.0],
+                [3.0, 8.0, 4.0],
                 [44.0, 29.0],
                 tex,
                 0.0,
@@ -157,7 +168,7 @@ impl HorseModel {
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-2.4, -15.0, -2.1],
+                [-2.4, -15.1, -2.1],
                 [4.0, 3.0, 4.0],
                 [44.0, 51.0],
                 tex,
@@ -168,7 +179,7 @@ impl HorseModel {
         let front_right_leg = ModelPart::new([-4.0, 15.0, -8.0])
             .with_box(ModelBox::new(
                 [-1.1, -7.0, -2.1],
-                [3.0, 7.0, 4.0],
+                [3.0, 8.0, 4.0],
                 [60.0, 29.0],
                 tex,
                 0.0,
@@ -181,41 +192,40 @@ impl HorseModel {
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-1.6, -15.0, -2.1],
+                [-1.6, -15.1, -2.1],
                 [4.0, 3.0, 4.0],
                 [60.0, 51.0],
                 tex,
                 0.0,
             ));
 
-        // Tail
-        let mut tail = ModelPart::new([0.0, 16.0, 12.0])
+        // Tail (MCP: pivot (0, 3, 14), rot -1.134464 rad)
+        let mut tail = ModelPart::new([0.0, 21.0, 14.0])
             .with_box(ModelBox::new(
-                [-1.0, -2.0, 0.0],
+                [-1.0, -1.0, 0.0],
                 [2.0, 2.0, 3.0],
                 [44.0, 0.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-1.5, -6.0, 3.0],
+                [-1.5, -2.0, 3.0],
                 [3.0, 4.0, 7.0],
                 [38.0, 7.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-1.5, -10.0, 7.0],
+                [-1.5, 0.5, 9.0],
                 [3.0, 4.0, 7.0],
                 [24.0, 3.0],
                 tex,
                 0.0,
             ));
-        tail.rotation[0] = 0.4;
+        tail.rotation[0] = 1.134464;
 
         Self {
             body,
-            neck,
             head,
             back_left_leg,
             back_right_leg,
@@ -234,7 +244,7 @@ impl HorseModel {
         head_pitch: f32,
     ) {
         self.head.rotation[1] = head_yaw.to_radians();
-        self.head.rotation[0] = -std::f32::consts::FRAC_PI_6 + head_pitch.to_radians();
+        self.head.rotation[0] = -std::f32::consts::FRAC_PI_6 - head_pitch.to_radians();
 
         let swing = (limb_angle * 0.6662).cos() * 0.8 * limb_distance;
         self.back_left_leg.rotation[0] = swing;
@@ -251,7 +261,6 @@ impl HorseModel {
         let root = Mat4::from_scale(Vec3::splat(scale));
 
         self.body.emit(root, &mut out);
-        self.neck.emit(root, &mut out);
         self.head.emit(root, &mut out);
         self.back_left_leg.emit(root, &mut out);
         self.back_right_leg.emit(root, &mut out);

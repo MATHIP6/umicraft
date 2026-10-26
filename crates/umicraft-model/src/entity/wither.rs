@@ -120,7 +120,7 @@ impl WitherModel {
         let yaw_rad = head_yaw.to_radians();
         let pitch_rad = head_pitch.to_radians();
         self.center_head.rotation[1] = yaw_rad;
-        self.center_head.rotation[0] = pitch_rad;
+        self.center_head.rotation[0] = -pitch_rad;
 
         // Side heads look around slightly
         let sway = (anim_time * 0.1).cos();
@@ -131,8 +131,8 @@ impl WitherModel {
         self.spine.rotation[0] = spine_angle;
         self.tail.pivot = [
             0.0,
-            10.0 - spine_angle.cos() * 6.0,
-            -spine_angle.sin() * 6.0,
+            10.0 - spine_angle.cos() * 10.0,
+            spine_angle.sin() * 10.0,
         ];
         self.tail.rotation[0] = (0.265 + 0.1 * sway) * std::f32::consts::PI;
     }

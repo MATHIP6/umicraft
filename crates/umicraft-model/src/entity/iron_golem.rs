@@ -119,7 +119,7 @@ impl IronGolemModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        self.head.rotation[0] = head_pitch.to_radians();
+        self.head.rotation[0] = -head_pitch.to_radians();
         self.head.rotation[1] = head_yaw.to_radians();
 
         let leg_angle = (limb_swing * 0.6662).cos() * 1.0 * limb_swing_amount;

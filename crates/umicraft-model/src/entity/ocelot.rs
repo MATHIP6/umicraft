@@ -148,7 +148,7 @@ impl OcelotModel {
         head_pitch: f32,
     ) {
         self.head.rotation[1] = head_yaw.to_radians();
-        self.head.rotation[0] = head_pitch.to_radians();
+        self.head.rotation[0] = -head_pitch.to_radians();
 
         let swing = (limb_angle * 0.6662).cos() * 1.0 * limb_distance;
         self.back_left_leg.rotation[0] = swing;

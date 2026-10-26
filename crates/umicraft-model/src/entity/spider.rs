@@ -157,7 +157,7 @@ impl SpiderModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        self.head.rotation[0] = head_pitch.to_radians();
+        self.head.rotation[0] = -head_pitch.to_radians();
         self.head.rotation[1] = head_yaw.to_radians();
 
         let pi_4 = std::f32::consts::PI / 4.0;
