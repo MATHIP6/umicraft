@@ -194,6 +194,43 @@ fn position_random([x, y, z]: [i32; 3]) -> i64 {
         .wrapping_add(mixed.wrapping_mul(11))
 }
 
+/// 1.8 `Block.EnumOffsetType`: random XZ/XYZ shift for vegetation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OffsetType {
+    None,
+    Xz,
+    Xyz,
+}
+
+/// Returns the offset type for a block state following the 1.8 overrides:
+/// `BlockTallGrass` → XYZ, `BlockFlower`/`BlockDoublePlant` → XZ.
+fn offset_type(state: BlockState) -> OffsetType {
+    match state.id() {
+        31 => OffsetType::Xyz,
+        37 | 38 | 175 => OffsetType::Xz,
+        _ => OffsetType::None,
+    }
+}
+
+/// 1.8 position-based random offset from `BlockModelRenderer`.
+///
+/// Uses the same hash as `MathHelper.getCoordinateRandom` (reused from
+/// `select_variant`). XZ range: ±0.25 blocks. Y (XYZ only): −0.2..0.
+fn block_offset(position: [i32; 3], kind: OffsetType) -> [f32; 3] {
+    if kind == OffsetType::None {
+        return [0.0; 3];
+    }
+    let hash = position_random(position);
+    let ox = ((((hash >> 16) & 15) as f32) / 15.0 - 0.5) * 0.5;
+    let oz = ((((hash >> 24) & 15) as f32) / 15.0 - 0.5) * 0.5;
+    let oy = if kind == OffsetType::Xyz {
+        ((((hash >> 20) & 15) as f32) / 15.0 - 1.0) * 0.2
+    } else {
+        0.0
+    };
+    [ox, oy, oz]
+}
+
 /// Emits every quad of `variant` at `position`, offset by the block position.
 ///
 /// `state` is the block rendered by the quad; it is only needed for the
@@ -207,6 +244,7 @@ fn emit_model_quads<S: BlockSource + ?Sized>(
     position: [i32; 3],
 ) {
     let [x, y, z] = position;
+    let [ox, oy, oz] = block_offset(position, offset_type(state));
     // Tint is constant per block, so compute the 3×3 biome average at most
     // once and reuse it for every tinted quad (grass top + side overlay,
     // six leaf faces, ...). Untinted quads never sample the colormaps.
@@ -245,9 +283,9 @@ fn emit_model_quads<S: BlockSource + ?Sized>(
             let corner = quad.positions[index];
             Vertex {
                 position: [
-                    x as f32 + corner[0],
-                    y as f32 + corner[1],
-                    z as f32 + corner[2],
+                    x as f32 + corner[0] + ox,
+                    y as f32 + corner[1] + oy,
+                    z as f32 + corner[2] + oz,
                 ],
                 normal: quad.normal,
                 uv: quad.uvs[index],

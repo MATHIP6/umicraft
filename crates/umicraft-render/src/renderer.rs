@@ -70,8 +70,10 @@ struct CameraUniform {
     fog_start: f32,
     /// End of the fog band in blocks.
     fog_end: f32,
+    /// 1.8 brightness gamma in `0..=1` (Moody → Bright).
+    gamma: f32,
     /// Explicit tail padding: the WGSL `Camera` struct is 112 bytes.
-    _pad: [f32; 3],
+    _pad: [f32; 2],
 }
 
 /// GPU vertex and index buffers for one pass of a chunk mesh.
@@ -981,7 +983,8 @@ impl Renderer {
             fog_color: sky.fog_color,
             fog_start,
             fog_end,
-            _pad: [0.0; 3],
+            gamma: self.environment.gamma,
+            _pad: [0.0; 2],
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -1555,7 +1558,8 @@ mod tests {
             fog_color: [0.25, 0.5, 0.75],
             fog_start: 96.0,
             fog_end: 128.0,
-            _pad: [0.0; 3],
+            gamma: 0.5,
+            _pad: [0.0; 2],
         };
         let bytes = bytemuck::bytes_of(&uniform);
         assert_eq!(bytes.len(), 112);

@@ -17,6 +17,11 @@ pub struct RenderEnvironment {
     pub partial_tick: f32,
     /// Requested view distance in chunks, used for the fog range.
     pub view_distance: u8,
+    /// 1.8 brightness gamma in `0.0..=1.0` (Moody=0 → Bright=1).
+    ///
+    /// Applied to the lightmap as `1-(1-x)^4`, matching
+    /// `EntityRenderer.updateLightmap`.
+    pub gamma: f32,
 }
 
 impl RenderEnvironment {
@@ -26,6 +31,7 @@ impl RenderEnvironment {
         world_time: 6_000,
         partial_tick: 0.0,
         view_distance: 8,
+        gamma: 0.5,
     };
 
     /// Builds an environment, clamping `partial_tick` to `0.0..1.0`.
@@ -36,6 +42,7 @@ impl RenderEnvironment {
             world_time,
             partial_tick: partial_tick.clamp(0.0, 1.0),
             view_distance,
+            gamma: 0.5,
         }
     }
 }

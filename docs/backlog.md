@@ -8,15 +8,6 @@ picked up, and delete it when it is done.
 
 ## Rendering
 
-### Face shade factors of ordinary blocks
-- **Problem:** `face_shade` in `crates/umicraft-render/src/terrain.wgsl`
-  darkens the bottom face to 0.45 and the west/east faces to 0.65. The 1.8
-  client uses 0.5 (down), 1.0 (up), 0.8 (north/south) and 0.6 (west/east).
-- **Reference:** the same factors `BlockFluidRenderer` uses, already applied to
-  liquids in `crates/umicraft-mesh/src/fluid.rs` (ADR-0015). Check the block
-  model renderer of MCP for the ordinary blocks before changing the shader.
-- **Size:** small; the GPU acceptance shots must be re-checked.
-
 ### Animated textures (AST-6)
 - **Problem:** water, lava, fire, portals and every texture with a `.mcmeta`
   animation show their first frame only.

@@ -29,11 +29,12 @@ struct Camera {
     fog_color: vec3<f32>,
     fog_start: f32,
     fog_end: f32,
+    // 1.8 brightness gamma (Moody=0, Bright=1).
+    gamma: f32,
     // Explicit tail padding keeps the Rust `CameraUniform` and this struct at
     // the same 112-byte, 16-byte-aligned layout.
     _pad0: f32,
     _pad1: f32,
-    _pad2: f32,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -70,18 +71,27 @@ fn light_brightness(level: f32) -> f32 {
     return level / (3.0 * (1.0 - level) + 1.0);
 }
 
-// 1.8 face shading: top is full bright, bottom darkest, the two horizontal
-// axes in between. Used only when the mesher sets the vertex `shade` bit;
-// crosses, plants and torches keep their model brightness.
+// 1.8 brightness gamma curve from `EntityRenderer.updateLightmap`.
+// corrected = 1 - (1 - raw)^4, result = lerp(raw, corrected, gamma).
+fn gamma_correct(value: f32) -> f32 {
+    let inv = 1.0 - value;
+    let corrected = 1.0 - inv * inv * inv * inv;
+    return value * (1.0 - camera.gamma) + corrected * camera.gamma;
+}
+
+// 1.8 face shading from `BlockModelRenderer.EnumNeighborInfo`: top 1.0,
+// bottom 0.5, north/south 0.8, west/east 0.6. Used only when the mesher
+// sets the vertex `shade` bit; crosses, plants and torches keep their
+// model brightness.
 fn face_shade(normal: vec3<f32>) -> f32 {
     if (normal.y > 0.5) {
         return 1.0;
     }
     if (normal.y < -0.5) {
-        return 0.45;
+        return 0.5;
     }
     if (abs(normal.x) > 0.5) {
-        return 0.65;
+        return 0.6;
     }
     return 0.8;
 }
@@ -101,7 +111,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
 
     let block = light_brightness(f32(in.light & 0xFu) / 15.0);
     let sky = light_brightness(f32((in.light >> 4u) & 0xFu) / 15.0) * camera.sun_brightness;
-    out.light = min(1.0, sky + block);
+    out.light = gamma_correct(min(1.0, sky + block));
     out.ao = 0.2 + 0.8 * (f32((in.light >> 8u) & 0xFu) / 15.0);
 
     let shaded = (in.light & (1u << 12u)) != 0u;
