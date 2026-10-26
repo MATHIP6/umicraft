@@ -508,6 +508,8 @@ impl App {
         let hud = HudState {
             debug_lines: lines.to_vec(),
             chat_lines,
+            // The tab list shows while the key is held and no screen is open.
+            show_tab_list: self.screen() == Screen::None && self.keys.contains(&KeyCode::Tab),
             ..game_hud
         };
         draw_hud(&mut self.overlay, &hud, width, height);

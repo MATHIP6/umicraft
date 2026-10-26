@@ -560,6 +560,7 @@ impl Game {
             title: self.title_view(),
             sidebar: self.sidebar_view(),
             tab_list: self.tab_list_view(),
+            show_tab_list: false,
             completions: self.completions.clone(),
         }
     }

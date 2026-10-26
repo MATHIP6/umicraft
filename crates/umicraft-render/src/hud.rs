@@ -164,6 +164,8 @@ pub struct HudState {
     pub sidebar: Option<SidebarView>,
     /// The tab list, filled whether or not the player holds the key.
     pub tab_list: Option<TabListView>,
+    /// Whether the player holds the tab-list key.
+    pub show_tab_list: bool,
     /// The tab completions the server offered for the open chat line.
     pub completions: Vec<String>,
 }
@@ -228,6 +230,7 @@ impl Default for HudState {
             title: None,
             sidebar: None,
             tab_list: None,
+            show_tab_list: false,
             completions: Vec::new(),
         }
     }
@@ -575,6 +578,7 @@ pub fn draw(overlay: &mut Overlay, state: &HudState, width: u32, height: u32) {
     draw_chat(overlay, state, &layout);
     draw_crosshair(overlay, state, &layout);
     draw_debug(overlay, state, &layout);
+    crate::social_hud::draw(overlay, state, &layout);
 }
 
 fn draw_hotbar(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {

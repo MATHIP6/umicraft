@@ -22,6 +22,7 @@ mod hud;
 mod overlay;
 mod renderer;
 mod sky;
+mod social_hud;
 mod texture;
 mod ui_pass;
 
