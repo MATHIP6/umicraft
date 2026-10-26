@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
+use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{
     container_layout, player_inventory_layout, slot, ContainerLayout, InventoryLayout, SlotItem,
 };
@@ -32,6 +33,7 @@ use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
+use crate::screen::Screen;
 use crate::terrain_textures::TerrainTextures;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
@@ -86,18 +88,20 @@ struct App {
     select_slot: Option<u8>,
     break_block: bool,
     place_block: bool,
-    /// Whether the chat input is open.
-    chat_open: bool,
-    /// The line the player is typing.
+    /// The screen that owns the keyboard and the mouse (ADR-0017). A server
+    /// container shows the inventory screen without setting this field, see
+    /// [`App::screen`].
+    screen: Screen,
+    /// The line the player is typing while [`Screen::Chat`] is current.
     chat_input: String,
-    /// Whether the player inventory is open (E key toggle).
-    inventory_open: bool,
-    /// Whether the M4 debug screen is open.
-    show_debug_screen: bool,
     /// The immediate-mode context, owned by the render thread.
     ui: Ui,
-    /// The acceptance screen shown while `show_debug_screen` is set.
+    /// The acceptance screen shown while [`Screen::Debug`] is current.
     debug_screen: DebugScreen,
+    /// The menu shown while [`Screen::GameMenu`] is current.
+    game_menu: GameMenu,
+    /// The entry the player clicked in the last UI frame, applied by `redraw`.
+    menu_action: Option<GameMenuAction>,
     /// The winit events waiting for the next UI frame.
     ui_input: UiInputTranslator,
     /// The font loaded at startup, before the renderer exists.
@@ -140,12 +144,12 @@ impl App {
             select_slot: None,
             break_block: false,
             place_block: false,
-            chat_open: false,
+            screen: Screen::None,
             chat_input: String::new(),
-            inventory_open: false,
-            show_debug_screen: false,
             ui: Ui::new(ui_viewport),
             debug_screen: DebugScreen::new(),
+            game_menu: GameMenu::new(),
+            menu_action: None,
             ui_input: UiInputTranslator::new(),
             font,
             terrain,
@@ -180,48 +184,44 @@ impl App {
         // Releases are swallowed as well, so no F2 event ever reaches the UI.
         if code == KeyCode::F2 {
             if is_debug_toggle(code, event.state, event.repeat) {
-                self.toggle_debug_screen();
+                self.set_screen(self.screen().after_debug_toggle());
             }
             return;
         }
-        if self.show_debug_screen {
-            self.ui_input.key(code, event.state, event.text.as_deref());
-            return;
-        }
-        if self.chat_open {
-            self.handle_chat_key(event);
-            return;
-        }
-        if self.inventory_open || self.container_is_open() {
-            self.handle_inventory_key(event_loop, event);
-            return;
+        match self.screen() {
+            Screen::Debug => {
+                self.ui_input.key(code, event.state, event.text.as_deref());
+                return;
+            }
+            Screen::Chat => {
+                self.handle_chat_key(event);
+                return;
+            }
+            Screen::Inventory => {
+                self.handle_inventory_key(event_loop, event);
+                return;
+            }
+            Screen::GameMenu => {
+                self.handle_menu_key(event);
+                return;
+            }
+            Screen::None => {}
         }
         match event.state {
             ElementState::Pressed => {
                 if !event.repeat {
                     match code {
-                        KeyCode::Escape => {
-                            if self.mouse_captured {
-                                self.capture_mouse(false);
-                            } else {
-                                event_loop.exit();
-                            }
-                        }
+                        KeyCode::Escape => self.set_screen(Screen::None.after_escape()),
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
                         KeyCode::F4 => self.reload_resources(),
                         KeyCode::KeyT => {
                             if self.keys.contains(&KeyCode::F3) {
                                 self.reload_resources();
                             } else {
-                                self.chat_open = true;
-                                self.chat_input.clear();
-                                self.capture_mouse(false);
+                                self.set_screen(Screen::Chat);
                             }
                         }
-                        KeyCode::KeyE => {
-                            self.inventory_open = true;
-                            self.capture_mouse(false);
-                        }
+                        KeyCode::KeyE => self.set_screen(Screen::Inventory),
                         _ => {}
                     }
                     if let Some(slot) = hotbar_slot(code) {
@@ -257,25 +257,55 @@ impl App {
         tracing::info!("resource packs reloaded");
     }
 
-    /// Opens or closes the M4 debug screen.
+    /// The screen that owns the input right now.
     ///
-    /// Opening releases the cursor grab and clears the game input so no held
-    /// key, look delta or click leaks into the game while the UI owns the
-    /// mouse and keyboard. The game and network threads keep running; the
-    /// screen only reads the render-side snapshot.
-    fn toggle_debug_screen(&mut self) {
-        self.show_debug_screen = !self.show_debug_screen;
+    /// A container the server opened is shown by the inventory screen even
+    /// though the player did not press the inventory key, so it is derived
+    /// from the world view when no screen is set.
+    fn screen(&self) -> Screen {
+        if self.screen == Screen::None && self.container_is_open() {
+            Screen::Inventory
+        } else {
+            self.screen
+        }
+    }
+
+    /// Switches to `screen`.
+    ///
+    /// Every transition drops the pending input so no held key, look delta or
+    /// click leaks across screens (a key released while another screen owned
+    /// the keyboard would otherwise stay "held"). A screen that blocks the
+    /// game also releases the cursor grab. The game and network threads keep
+    /// running; the screens only read the render-side snapshot.
+    fn set_screen(&mut self, screen: Screen) {
+        if screen == self.screen {
+            return;
+        }
+        self.screen = screen;
         self.ui_input.clear();
-        if self.show_debug_screen {
-            self.chat_open = false;
-            self.chat_input.clear();
-            self.keys.clear();
-            self.select_slot = None;
-            self.break_block = false;
-            self.place_block = false;
-            self.look = (0.0, 0.0);
+        self.chat_input.clear();
+        self.keys.clear();
+        self.select_slot = None;
+        self.break_block = false;
+        self.place_block = false;
+        self.look = (0.0, 0.0);
+        if screen.blocks_game_input() {
             self.capture_mouse(false);
         }
+    }
+
+    /// Handles a key press while the game menu is open.
+    fn handle_menu_key(&mut self, event: KeyEvent) {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return;
+        };
+        if code == KeyCode::Escape {
+            if event.state == ElementState::Pressed && !event.repeat {
+                self.set_screen(Screen::GameMenu.after_escape());
+            }
+            return;
+        }
+        self.ui_input.key(code, event.state, event.text.as_deref());
     }
 
     /// Whether a server-opened container is currently displayed.
@@ -305,10 +335,10 @@ impl App {
 
     /// Closes the inventory or container screen.
     fn close_inventory(&mut self) {
-        if self.inventory_open || self.container_is_open() {
+        if self.screen() == Screen::Inventory {
             let _ = self.session.events().try_send(GameEvent::CloseInventory);
         }
-        self.inventory_open = false;
+        self.set_screen(Screen::None);
         self.ui_input.clear();
     }
 
@@ -319,13 +349,10 @@ impl App {
         };
         match event.state {
             ElementState::Pressed => match code {
-                KeyCode::Escape => {
-                    self.chat_open = false;
-                    self.chat_input.clear();
-                }
+                KeyCode::Escape => self.set_screen(Screen::Chat.after_escape()),
                 KeyCode::Enter => {
                     let message = std::mem::take(&mut self.chat_input);
-                    self.chat_open = false;
+                    self.set_screen(Screen::None);
                     if !message.is_empty() {
                         let _ = self.session.events().try_send(GameEvent::Chat(message));
                     }
@@ -365,10 +392,8 @@ impl App {
 
     /// The key state of the window.
     fn key_state(&self) -> InputState {
-        let show_inventory = self.inventory_open || self.container_is_open();
-        if self.chat_open || self.show_debug_screen || show_inventory {
-            // While the chat, debug screen or inventory is open the movement
-            // keys do not steer the player.
+        if self.screen().blocks_game_input() {
+            // While a screen is open the movement keys do not steer the player.
             return InputState::default();
         }
         let mut state = InputState::default();
@@ -472,12 +497,12 @@ impl App {
                 position.x, position.y, position.z, yaw, pitch
             ),
             "WASD MOVE  SPACE JUMP  SHIFT SNEAK  CTRL SPRINT".to_string(),
-            "LEFT BREAK  RIGHT PLACE  1-9 HOTBAR  ESC RELEASE CURSOR".to_string(),
+            "LEFT BREAK  RIGHT PLACE  1-9 HOTBAR  ESC MENU".to_string(),
         ];
         // The HUD owns the debug block, the crosshair and the bottom stack;
         // the client only feeds it the lines it already tracks.
         let mut chat_lines = game_hud.chat_lines.clone();
-        if self.chat_open {
+        if self.screen == Screen::Chat {
             chat_lines.push(format!("> {}", self.chat_input));
         }
         let hud = HudState {
@@ -507,21 +532,30 @@ impl App {
     /// caller recycles the returned output after the renderer consumed the
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
-        let show_inventory = self.inventory_open || self.container_is_open();
-        if !self.show_debug_screen && !show_inventory {
+        let screen = self.screen();
+        if !screen.uses_ui() {
             return None;
         }
         let atlas = self.ui_atlas.as_ref()?;
         let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
         let input = self.ui_input.take();
         self.ui.begin_frame(viewport, input);
-        if self.show_debug_screen {
-            self.debug_screen.show(&mut self.ui, atlas);
-        } else if show_inventory {
-            let wv = self.world.as_ref().map(|w| w.window_view().clone());
-            if let Some(wv) = wv {
-                draw_inventory_overlay(&mut self.ui, atlas, viewport, &wv, self.gui_atlas.as_ref());
+        match screen {
+            Screen::Debug => self.debug_screen.show(&mut self.ui, atlas),
+            Screen::GameMenu => self.menu_action = self.game_menu.show(&mut self.ui, atlas),
+            Screen::Inventory => {
+                let wv = self.world.as_ref().map(|w| w.window_view().clone());
+                if let Some(wv) = wv {
+                    draw_inventory_overlay(
+                        &mut self.ui,
+                        atlas,
+                        viewport,
+                        &wv,
+                        self.gui_atlas.as_ref(),
+                    );
+                }
             }
+            Screen::None | Screen::Chat => {}
         }
         Some(self.ui.end_frame())
     }
@@ -567,6 +601,17 @@ impl App {
             .as_ref()
             .map_or((self.args.width, self.args.height), Renderer::size);
         let ui_frame = self.build_ui_frame(width, height);
+        match self.menu_action.take() {
+            Some(GameMenuAction::Resume) => {
+                self.set_screen(Screen::None);
+                self.capture_mouse(true);
+            }
+            Some(GameMenuAction::Quit) => {
+                event_loop.exit();
+                return;
+            }
+            None => {}
+        }
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -872,15 +917,16 @@ impl ApplicationHandler for App {
                 // open the screen before the next mouse movement, and the first
                 // click must use the physical cursor, not the initial origin.
                 self.ui_input.pointer_moved(position);
-                let show_inventory = self.inventory_open || self.container_is_open();
-                if !self.show_debug_screen && !show_inventory {
+                if !self.screen().uses_ui() {
                     self.ui_input.clear();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                let show_inventory = self.inventory_open || self.container_is_open();
-                if self.show_debug_screen || show_inventory {
+                let screen = self.screen();
+                if screen.uses_ui() {
                     self.ui_input.pointer_button(state, button);
+                } else if screen.blocks_game_input() {
+                    // The chat has no pointer interaction yet.
                 } else {
                     match button {
                         MouseButton::Left => {
@@ -902,14 +948,12 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let show_inventory = self.inventory_open || self.container_is_open();
-                if self.show_debug_screen || show_inventory {
+                if self.screen().uses_ui() {
                     self.ui_input.wheel(delta);
                 }
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
-                let show_inventory = self.inventory_open || self.container_is_open();
-                if self.show_debug_screen || show_inventory {
+                if self.screen().uses_ui() {
                     self.ui_input.text(&text);
                 }
             }
@@ -930,8 +974,7 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            let show_inventory = self.inventory_open || self.container_is_open();
-            if self.mouse_captured && !self.show_debug_screen && !show_inventory {
+            if self.mouse_captured && !self.screen().blocks_game_input() {
                 // A positive delta moves the mouse to the right and down; the
                 // game logic turns right and looks down with it.
                 self.look.0 += delta.0 as f32 * MOUSE_SENSITIVITY;

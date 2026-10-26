@@ -37,6 +37,7 @@
 pub mod context;
 pub mod debug_screen;
 pub mod draw;
+pub mod game_menu;
 pub mod geom;
 pub mod id;
 pub mod input;

@@ -28,6 +28,7 @@ pub mod mesher;
 pub mod model_resources;
 pub mod network;
 mod official;
+pub mod screen;
 pub mod screenshot;
 pub mod setup_cli;
 pub mod terrain_textures;
