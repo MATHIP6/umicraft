@@ -58,9 +58,9 @@ impl VillagerModel {
                 tex,
                 0.0,
             ))
-            // Nose: 2×4×2 extending forward
+            // Nose: 2×4×2 extending forward, hanging 1px below chin (MCP ModelVillager: pivot Y=-2, box Y=-1..3 -> Umicraft Y=-1..3)
             .with_box(ModelBox::new(
-                [-1.0, 0.0, -6.0],
+                [-1.0, -1.0, -6.0],
                 [2.0, 4.0, 2.0],
                 [24.0, 0.0],
                 tex,
@@ -68,9 +68,9 @@ impl VillagerModel {
             ));
 
         if is_witch {
-            // Mole on nose (MCP: 1x1x1 at z = -6.75)
+            // Mole on nose (MCP ModelWitch: 1x1x1 at Y=0..1, Z=-6.75 with -0.25 dilation)
             head = head.with_box(ModelBox::new(
-                [0.0, 1.0, -6.75],
+                [0.0, 0.0, -6.75],
                 [1.0, 1.0, 1.0],
                 [0.0, 0.0],
                 tex,

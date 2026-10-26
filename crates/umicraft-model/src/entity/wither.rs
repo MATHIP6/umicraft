@@ -29,76 +29,76 @@ impl WitherModel {
     pub fn new() -> Self {
         let tex = [64.0, 64.0];
 
-        // Center head: 8×8×8
+        // Center head: 8×8×8 at pivot [0, 24, 0], box [-4, -4, -4] (MCP ModelWither: field_82904_b[0])
         let center_head = ModelPart::new([0.0, 24.0, 0.0]).with_box(ModelBox::new(
-            [-4.0, 0.0, -4.0],
+            [-4.0, -4.0, -4.0],
             [8.0, 8.0, 8.0],
             [0.0, 0.0],
             tex,
             0.0,
         ));
 
-        // Right side head: 6×6×6
-        let right_head = ModelPart::new([-9.0, 20.0, 0.0]).with_box(ModelBox::new(
-            [-3.0, 0.0, -3.0],
+        // Right side head: 6×6×6 at pivot [-8, 20, 0], box [-4, -2, -4] (MCP ModelWither: field_82904_b[1])
+        let right_head = ModelPart::new([-8.0, 20.0, 0.0]).with_box(ModelBox::new(
+            [-4.0, -2.0, -4.0],
             [6.0, 6.0, 6.0],
             [32.0, 0.0],
             tex,
             0.0,
         ));
 
-        // Left side head: 6×6×6
-        let left_head = ModelPart::new([9.0, 20.0, 0.0]).with_box(ModelBox::new(
-            [-3.0, 0.0, -3.0],
+        // Left side head: 6×6×6 at pivot [10, 20, 0], box [-4, -2, -4] (MCP ModelWither: field_82904_b[2])
+        let left_head = ModelPart::new([10.0, 20.0, 0.0]).with_box(ModelBox::new(
+            [-4.0, -2.0, -4.0],
             [6.0, 6.0, 6.0],
             [32.0, 0.0],
             tex,
             0.0,
         ));
 
-        // Shoulders bar: 20×3×3 (Y = 17.1..20.1)
+        // Shoulders bar: 20×3×3 (MCP: addBox(-10, 3.9, -0.5, 20, 3, 3))
         let shoulders = ModelPart::new([0.0, 24.0, 0.0]).with_box(ModelBox::new(
-            [-10.0, -6.9, -1.5],
+            [-10.0, -6.9, -0.5],
             [20.0, 3.0, 3.0],
             [0.0, 16.0],
             tex,
             0.0,
         ));
 
-        // Spine and 3 ribs extending down from shoulders pivot at Y = 17.1
-        let spine = ModelPart::new([0.0, 17.1, 0.0])
+        // Spine and 3 ribs extending down from shoulders (MCP: setRotationPoint(-2, 6.9, -0.5))
+        let spine = ModelPart::new([-2.0, 17.1, -0.5])
             .with_box(ModelBox::new(
-                [-1.5, -10.0, -1.5],
+                [0.0, -10.0, 0.0],
                 [3.0, 10.0, 3.0],
                 [0.0, 22.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-5.5, -3.5, -1.0],
+                [-4.0, -3.5, 0.5],
                 [11.0, 2.0, 2.0],
                 [24.0, 22.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-5.5, -6.0, -1.0],
+                [-4.0, -6.0, 0.5],
                 [11.0, 2.0, 2.0],
                 [24.0, 22.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-5.5, -8.5, -1.0],
+                [-4.0, -8.5, 0.5],
                 [11.0, 2.0, 2.0],
                 [24.0, 22.0],
                 tex,
                 0.0,
             ));
 
-        // Tail spine (3×6×3) connected seamlessly at bottom of spine (Y = 7.1)
-        let tail = ModelPart::new([0.0, 7.1, 0.0]).with_box(ModelBox::new(
-            [-1.5, -6.0, -1.5],
+        // Tail spine (3×6×3) connected at bottom of spine
+        let tail = ModelPart::new([-2.0, 7.1, -0.5]).with_box(ModelBox::new(
+            [0.0, -6.0, 0.0],
             [3.0, 6.0, 3.0],
             [12.0, 22.0],
             tex,
@@ -128,13 +128,13 @@ impl WitherModel {
         self.left_head.rotation[1] = yaw_rad + (anim_time * 0.5 + 1.0).sin() * 0.2;
 
         let spine_angle = (0.065 + 0.05 * sway) * std::f32::consts::PI;
-        self.spine.rotation[0] = spine_angle;
+        self.spine.rotation[0] = -spine_angle;
         self.tail.pivot = [
-            0.0,
+            -2.0,
             17.1 - spine_angle.cos() * 10.0,
-            spine_angle.sin() * 10.0,
+            -0.5 + spine_angle.sin() * 10.0,
         ];
-        self.tail.rotation[0] = (0.265 + 0.1 * sway) * std::f32::consts::PI;
+        self.tail.rotation[0] = -(0.265 + 0.1 * sway) * std::f32::consts::PI;
     }
 
     /// Emits the wither mesh vertices transformed into world units.

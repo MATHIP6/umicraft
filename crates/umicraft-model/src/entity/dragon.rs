@@ -2,49 +2,60 @@
 
 //! Ender Dragon box model matching MCP 1.8 `ModelDragon.java`.
 
+use std::f32::consts::PI;
+
 use glam::{Mat4, Vec3};
 
 use super::{ModelBox, ModelPart, ModelVertex};
 
-/// Ender Dragon boss model (256×256 texture sheet) with head, jaw, neck, body, wings, articulated legs and tail.
+/// Ender Dragon boss model (256×256 texture sheet) with head, jaw, neck, body, wings, articulated 3-part legs and tail.
 #[derive(Debug, Clone)]
 pub struct DragonModel {
     /// Head part with horns and nostrils.
     pub head: ModelPart,
-    /// Articulated lower jaw.
+    /// Articulated lower jaw (child of `head`).
     pub jaw: ModelPart,
-    /// Neck segments connecting body to head.
+    /// 5 neck segments connecting body to head.
     pub neck: Vec<ModelPart>,
     /// Massive 24×24×64 body torso with dorsal spines.
     pub body: ModelPart,
-    /// Left inner wing bone and membrane.
-    pub left_wing: ModelPart,
-    /// Left outer wing tip.
-    pub left_wing_tip: ModelPart,
-    /// Right inner wing bone and membrane.
-    pub right_wing: ModelPart,
-    /// Right outer wing tip.
-    pub right_wing_tip: ModelPart,
-    /// Left hind leg.
-    pub rear_left_leg: ModelPart,
-    /// Right hind leg.
-    pub rear_right_leg: ModelPart,
-    /// Left front leg.
-    pub front_left_leg: ModelPart,
-    /// Right front leg.
-    pub front_right_leg: ModelPart,
-    /// Tail segments.
+    /// Inner wing bone and membrane (rendered on right and mirrored on left).
+    pub wing: ModelPart,
+    /// Outer wing tip bone and membrane (child of `wing`).
+    pub wing_tip: ModelPart,
+    /// Upper front leg (thigh).
+    pub front_leg: ModelPart,
+    /// Lower front leg (shin, child of `front_leg`).
+    pub front_leg_tip: ModelPart,
+    /// Front foot (child of `front_leg_tip`).
+    pub front_foot: ModelPart,
+    /// Upper rear leg (thigh).
+    pub rear_leg: ModelPart,
+    /// Lower rear leg (shin, child of `rear_leg`).
+    pub rear_leg_tip: ModelPart,
+    /// Rear foot (child of `rear_leg_tip`).
+    pub rear_foot: ModelPart,
+    /// 12 tail segments trailing behind body.
     pub tail: Vec<ModelPart>,
 }
 
 impl DragonModel {
-    /// Creates a new dragon model.
+    /// Creates a new dragon model matching `ModelDragon.java`.
     #[must_use]
     pub fn new() -> Self {
         let tex = [256.0, 256.0];
-
-        // Head centered at Z = -34.0, Y = 20.0 (MCP ModelDragon.java:71-79)
-        let head = ModelPart::new([0.0, 20.0, -34.0])
+        // MCP f = -16.0
+        // Using exact isomorphism: MCP addBox(ox, oy, oz, w, h, d) -> Umicraft origin [ox, -(oy + h), oz]
+        let head = ModelPart::new([0.0, 4.0, -62.0])
+            // upperlip: addBox(-6, -1, -24, 12, 5, 16) at (176, 44)
+            .with_box(ModelBox::new(
+                [-6.0, -4.0, -24.0],
+                [12.0, 5.0, 16.0],
+                [176.0, 44.0],
+                tex,
+                0.0,
+            ))
+            // upperhead: addBox(-8, -8, -10, 16, 16, 16) at (112, 30)
             .with_box(ModelBox::new(
                 [-8.0, -8.0, -10.0],
                 [16.0, 16.0, 16.0],
@@ -52,141 +63,101 @@ impl DragonModel {
                 tex,
                 0.0,
             ))
+            // scale (mirrored): addBox(-5, -12, -4, 2, 4, 6) at (0, 0)
+            .with_box(
+                ModelBox::new([-5.0, 8.0, -4.0], [2.0, 4.0, 6.0], [0.0, 0.0], tex, 0.0).mirrored(),
+            )
+            // nostril (mirrored): addBox(-5, -3, -22, 2, 2, 4) at (112, 0)
+            .with_box(
+                ModelBox::new([-5.0, 1.0, -22.0], [2.0, 2.0, 4.0], [112.0, 0.0], tex, 0.0)
+                    .mirrored(),
+            )
+            // scale: addBox(3, -12, -4, 2, 4, 6) at (0, 0)
             .with_box(ModelBox::new(
-                [-6.0, -1.0, -26.0],
-                [12.0, 5.0, 16.0],
-                [176.0, 44.0],
-                tex,
-                0.0,
-            ))
-            // Horns (scales)
-            .with_box(ModelBox::new(
-                [-5.0, 8.0, -6.0],
+                [3.0, 8.0, -4.0],
                 [2.0, 4.0, 6.0],
                 [0.0, 0.0],
                 tex,
                 0.0,
             ))
+            // nostril: addBox(3, -3, -22, 2, 2, 4) at (112, 0)
             .with_box(ModelBox::new(
-                [3.0, 8.0, -6.0],
-                [2.0, 4.0, 6.0],
-                [0.0, 0.0],
-                tex,
-                0.0,
-            ))
-            // Nostrils
-            .with_box(ModelBox::new(
-                [-5.0, 1.0, -24.0],
-                [2.0, 2.0, 4.0],
-                [112.0, 0.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [3.0, 1.0, -24.0],
+                [3.0, 1.0, -22.0],
                 [2.0, 2.0, 4.0],
                 [112.0, 0.0],
                 tex,
                 0.0,
             ));
 
-        // Lower jaw (12×4×16) child of head at [0, -4, -8]
-        let jaw = ModelPart::new([0.0, 16.0, -34.0]).with_box(ModelBox::new(
-            [-6.0, -4.0, -26.0],
+        // Lower jaw: child of head at MCP (0, 4, -8), addBox(-6, 0, -16, 12, 4, 16) at (176, 65)
+        let jaw = ModelPart::new([0.0, -4.0, -8.0]).with_box(ModelBox::new(
+            [-6.0, -4.0, -16.0],
             [12.0, 4.0, 16.0],
             [176.0, 65.0],
             tex,
             0.0,
         ));
 
-        // Neck (5 segments connecting body at Z = -14 to head at Z = -34)
+        let make_spine_segment = |pivot: [f32; 3]| {
+            ModelPart::new(pivot)
+                // neck.box: addBox(-5, -5, -5, 10, 10, 10) at (192, 104)
+                .with_box(ModelBox::new(
+                    [-5.0, -5.0, -5.0],
+                    [10.0, 10.0, 10.0],
+                    [192.0, 104.0],
+                    tex,
+                    0.0,
+                ))
+                // neck.scale: addBox(-1, -9, -3, 2, 4, 6) at (48, 0)
+                .with_box(ModelBox::new(
+                    [-1.0, 5.0, -3.0],
+                    [2.0, 4.0, 6.0],
+                    [48.0, 0.0],
+                    tex,
+                    0.0,
+                ))
+        };
+
         let neck = (0..5)
-            .map(|i| {
-                let z = -14.0 - (i as f32) * 4.0;
-                ModelPart::new([0.0, 20.0, z])
-                    .with_box(ModelBox::new(
-                        [-5.0, -5.0, -5.0],
-                        [10.0, 10.0, 10.0],
-                        [192.0, 104.0],
-                        tex,
-                        0.0,
-                    ))
-                    .with_box(ModelBox::new(
-                        [-1.0, 5.0, -3.0],
-                        [2.0, 4.0, 6.0],
-                        [48.0, 0.0],
-                        tex,
-                        0.0,
-                    ))
-            })
+            .map(|i| make_spine_segment([0.0, 4.0, -12.0 - (i as f32) * 10.0]))
             .collect();
 
-        // Body (24×24×64) centered at Z = 16.0
-        let body = ModelPart::new([0.0, 20.0, 16.0])
+        // Body: MCP setRotationPoint(0, 4, 8) -> Umicraft [0, 20, 8]
+        // addBox(-12, 0, -16, 24, 24, 64) -> origin [-12, -24, -16]
+        let body = ModelPart::new([0.0, 20.0, 8.0])
             .with_box(ModelBox::new(
-                [-12.0, -12.0, -32.0],
+                [-12.0, -24.0, -16.0],
                 [24.0, 24.0, 64.0],
                 [0.0, 0.0],
                 tex,
                 0.0,
             ))
+            // 3 dorsal scales: addBox(-1, -6, -10 / 10 / 30, 2, 6, 12) at (220, 53)
             .with_box(ModelBox::new(
-                [-1.0, 12.0, -26.0],
+                [-1.0, 0.0, -10.0],
                 [2.0, 6.0, 12.0],
                 [220.0, 53.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-1.0, 12.0, -6.0],
+                [-1.0, 0.0, 10.0],
                 [2.0, 6.0, 12.0],
                 [220.0, 53.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-1.0, 12.0, 14.0],
+                [-1.0, 0.0, 30.0],
                 [2.0, 6.0, 12.0],
                 [220.0, 53.0],
                 tex,
                 0.0,
             ));
 
-        // Left Wing (MCP wing at [12, 5, 2], bone + skin membrane)
-        let left_wing = ModelPart::new([12.0, 21.0, 10.0])
-            .with_box(ModelBox::new(
-                [0.0, -4.0, -4.0],
-                [56.0, 8.0, 8.0],
-                [112.0, 88.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [0.0, 0.0, 2.0],
-                [56.0, 0.1, 56.0],
-                [-56.0, 88.0],
-                tex,
-                0.0,
-            ));
-
-        let left_wing_tip = ModelPart::new([56.0, 0.0, 0.0])
-            .with_box(ModelBox::new(
-                [0.0, -2.0, -2.0],
-                [56.0, 4.0, 4.0],
-                [112.0, 136.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [0.0, 0.0, 2.0],
-                [56.0, 0.1, 56.0],
-                [-56.0, 144.0],
-                tex,
-                0.0,
-            ));
-
-        // Right Wing (mirrored along X)
-        let right_wing = ModelPart::new([-12.0, 21.0, 10.0])
+        // Wing: MCP setRotationPoint(-12, 5, 2) -> Umicraft [-12, 19, 2]
+        let wing = ModelPart::new([-12.0, 19.0, 2.0])
+            // wing.bone: addBox(-56, -4, -4, 56, 8, 8) at (112, 88)
             .with_box(ModelBox::new(
                 [-56.0, -4.0, -4.0],
                 [56.0, 8.0, 8.0],
@@ -194,15 +165,18 @@ impl DragonModel {
                 tex,
                 0.0,
             ))
+            // wing.skin: addBox(-56, 0, 2, 56, 0, 56) at (-56, 88)
             .with_box(ModelBox::new(
                 [-56.0, 0.0, 2.0],
-                [56.0, 0.1, 56.0],
+                [56.0, 0.0, 56.0],
                 [-56.0, 88.0],
                 tex,
                 0.0,
             ));
 
-        let right_wing_tip = ModelPart::new([-56.0, 0.0, 0.0])
+        // WingTip: child of wing at (-56, 0, 0)
+        let wing_tip = ModelPart::new([-56.0, 0.0, 0.0])
+            // wingtip.bone: addBox(-56, -2, -2, 56, 4, 4) at (112, 136)
             .with_box(ModelBox::new(
                 [-56.0, -2.0, -2.0],
                 [56.0, 4.0, 4.0],
@@ -210,166 +184,144 @@ impl DragonModel {
                 tex,
                 0.0,
             ))
+            // wingtip.skin: addBox(-56, 0, 2, 56, 0, 56) at (-56, 144)
             .with_box(ModelBox::new(
                 [-56.0, 0.0, 2.0],
-                [56.0, 0.1, 56.0],
+                [56.0, 0.0, 56.0],
                 [-56.0, 144.0],
                 tex,
                 0.0,
             ));
 
-        // Front Legs (thigh, shin, foot)
-        let front_left_leg = ModelPart::new([12.0, 16.0, 2.0])
-            .with_box(ModelBox::new(
-                [-4.0, -20.0, -4.0],
-                [8.0, 20.0, 8.0],
-                [112.0, 104.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-3.0, -38.0, -3.0],
-                [6.0, 20.0, 6.0],
-                [226.0, 138.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-4.0, -42.0, -12.0],
-                [8.0, 4.0, 16.0],
-                [144.0, 104.0],
-                tex,
-                0.0,
-            ));
+        // Front leg 3-segment hierarchy:
+        // 1. frontLeg at MCP (-12, 20, 2) -> Umicraft [-12, 4, 2], box (-4, -4, -4, 8, 24, 8)
+        let front_leg = ModelPart::new([-12.0, 4.0, 2.0]).with_box(ModelBox::new(
+            [-4.0, -20.0, -4.0],
+            [8.0, 24.0, 8.0],
+            [112.0, 104.0],
+            tex,
+            0.0,
+        ));
+        // 2. frontLegTip child at MCP (0, 20, -1) -> Umicraft [0, -20, -1], box (-3, -1, -3, 6, 24, 6)
+        let front_leg_tip = ModelPart::new([0.0, -20.0, -1.0]).with_box(ModelBox::new(
+            [-3.0, -23.0, -3.0],
+            [6.0, 24.0, 6.0],
+            [226.0, 138.0],
+            tex,
+            0.0,
+        ));
+        // 3. frontFoot child at MCP (0, 23, 0) -> Umicraft [0, -23, 0], box (-4, 0, -12, 8, 4, 16)
+        let front_foot = ModelPart::new([0.0, -23.0, 0.0]).with_box(ModelBox::new(
+            [-4.0, -4.0, -12.0],
+            [8.0, 4.0, 16.0],
+            [144.0, 104.0],
+            tex,
+            0.0,
+        ));
 
-        let front_right_leg = ModelPart::new([-12.0, 16.0, 2.0])
-            .with_box(ModelBox::new(
-                [-4.0, -20.0, -4.0],
-                [8.0, 20.0, 8.0],
-                [112.0, 104.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-3.0, -38.0, -3.0],
-                [6.0, 20.0, 6.0],
-                [226.0, 138.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-4.0, -42.0, -12.0],
-                [8.0, 4.0, 16.0],
-                [144.0, 104.0],
-                tex,
-                0.0,
-            ));
+        // Rear leg 3-segment hierarchy:
+        // 1. rearLeg at MCP (-16, 16, 42) -> Umicraft [-16, 8, 42], box (-8, -4, -8, 16, 32, 16)
+        let rear_leg = ModelPart::new([-16.0, 8.0, 42.0]).with_box(ModelBox::new(
+            [-8.0, -28.0, -8.0],
+            [16.0, 32.0, 16.0],
+            [0.0, 0.0],
+            tex,
+            0.0,
+        ));
+        // 2. rearLegTip child at MCP (0, 32, -4) -> Umicraft [0, -32, -4], box (-6, -2, 0, 12, 32, 12)
+        let rear_leg_tip = ModelPart::new([0.0, -32.0, -4.0]).with_box(ModelBox::new(
+            [-6.0, -30.0, 0.0],
+            [12.0, 32.0, 12.0],
+            [196.0, 0.0],
+            tex,
+            0.0,
+        ));
+        // 3. rearFoot child at MCP (0, 31, 4) -> Umicraft [0, -31, 4], box (-9, 0, -20, 18, 6, 24)
+        let rear_foot = ModelPart::new([0.0, -31.0, 4.0]).with_box(ModelBox::new(
+            [-9.0, -6.0, -20.0],
+            [18.0, 6.0, 24.0],
+            [112.0, 0.0],
+            tex,
+            0.0,
+        ));
 
-        // Hind Legs (thigh, shin, foot)
-        let rear_left_leg = ModelPart::new([16.0, 16.0, 36.0])
-            .with_box(ModelBox::new(
-                [-8.0, -24.0, -8.0],
-                [16.0, 24.0, 16.0],
-                [0.0, 0.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-6.0, -42.0, -6.0],
-                [12.0, 20.0, 12.0],
-                [196.0, 0.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-9.0, -46.0, -18.0],
-                [18.0, 6.0, 24.0],
-                [112.0, 0.0],
-                tex,
-                0.0,
-            ));
-
-        let rear_right_leg = ModelPart::new([-16.0, 16.0, 36.0])
-            .with_box(ModelBox::new(
-                [-8.0, -24.0, -8.0],
-                [16.0, 24.0, 16.0],
-                [0.0, 0.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-6.0, -42.0, -6.0],
-                [12.0, 20.0, 12.0],
-                [196.0, 0.0],
-                tex,
-                0.0,
-            ))
-            .with_box(ModelBox::new(
-                [-9.0, -46.0, -18.0],
-                [18.0, 6.0, 24.0],
-                [112.0, 0.0],
-                tex,
-                0.0,
-            ));
-
-        // Tail (12 segments trailing behind body)
         let tail = (0..12)
-            .map(|i| {
-                let z = 48.0 + (i as f32) * 9.0;
-                ModelPart::new([0.0, 20.0, z])
-                    .with_box(ModelBox::new(
-                        [-5.0, -5.0, -5.0],
-                        [10.0, 10.0, 10.0],
-                        [192.0, 104.0],
-                        tex,
-                        0.0,
-                    ))
-                    .with_box(ModelBox::new(
-                        [-1.0, 5.0, -3.0],
-                        [2.0, 4.0, 6.0],
-                        [48.0, 0.0],
-                        tex,
-                        0.0,
-                    ))
-            })
+            .map(|k| make_spine_segment([0.0, 14.0, 60.0 + (k as f32) * 10.0]))
             .collect();
 
-        Self {
+        let mut model = Self {
             head,
             jaw,
             neck,
             body,
-            left_wing,
-            left_wing_tip,
-            right_wing,
-            right_wing_tip,
-            rear_left_leg,
-            rear_right_leg,
-            front_left_leg,
-            front_right_leg,
+            wing,
+            wing_tip,
+            front_leg,
+            front_leg_tip,
+            front_foot,
+            rear_leg,
+            rear_leg_tip,
+            rear_foot,
             tail,
-        }
+        };
+        model.set_angles(0.0);
+        model
     }
 
-    /// Sets wing flapping and tail undulation animation angles.
+    /// Sets wing flapping, leg folding, neck undulation and tail undulation matching `ModelDragon.render`.
     pub fn set_angles(&mut self, anim_time: f32) {
-        let flap = (anim_time * 0.8).cos() * 0.35;
-        self.left_wing.rotation[2] = -flap;
-        self.left_wing_tip.rotation[2] = -flap * 0.5;
-        self.right_wing.rotation[2] = flap;
-        self.right_wing_tip.rotation[2] = flap * 0.5;
+        // Phase offset 2.85 rad so at anim_time = 0.0 both wings show their full membrane and finger bones
+        let f8 = 2.85 + anim_time * 0.1 * PI * 2.0;
 
-        // Jaw opening slightly with flapping
-        self.jaw.rotation[0] = ((anim_time * 0.8).sin() + 1.0) * 0.1;
+        // Jaw opening (MCP ModelDragon.java:143)
+        self.jaw.rotation[0] = -((f8.sin() + 1.0) * 0.15);
 
-        // Tail swaying
-        for (i, seg) in self.tail.iter_mut().enumerate() {
-            seg.rotation[1] = (anim_time * 0.5 + i as f32 * 0.3).sin() * 0.12;
-        }
+        let mut f1 = (f8 - 1.0).sin() + 1.0;
+        f1 = (f1 * f1 + f1 * 2.0) * 0.05;
 
-        // Neck swaying
+        // 5-segment neck chain leading to head (MCP ModelDragon.java:156-180)
+        let mut f2 = 20.0_f32;
+        let mut f3 = -12.0_f32;
+        let mut f4 = 0.0_f32;
         for (i, seg) in self.neck.iter_mut().enumerate() {
-            seg.rotation[1] = (anim_time * 0.5 - i as f32 * 0.2).sin() * 0.08;
+            let rx_mcp = (i as f32 * 0.45 + f8).cos() * 0.15;
+            let ry_mcp = 0.0_f32;
+            seg.pivot = [f4, 24.0 - f2, f3];
+            seg.rotation = [-rx_mcp, ry_mcp, 0.0];
+            f2 += rx_mcp.sin() * 10.0;
+            f3 -= ry_mcp.cos() * rx_mcp.cos() * 10.0;
+            f4 -= ry_mcp.sin() * rx_mcp.cos() * 10.0;
+        }
+        self.head.pivot = [f4, 24.0 - f2, f3];
+
+        // Wings and legs flight pose (MCP ModelDragon.java:192-202)
+        self.wing.rotation[0] = -(0.125 - f8.cos() * 0.2);
+        self.wing.rotation[1] = 0.25;
+        self.wing.rotation[2] = -((f8.sin() + 0.125) * 0.8);
+        self.wing_tip.rotation[2] = ((f8 + 2.0).sin() + 0.5) * 0.75;
+
+        self.rear_leg.rotation[0] = -(1.0 + f1 * 0.1);
+        self.rear_leg_tip.rotation[0] = -(0.5 + f1 * 0.1);
+        self.rear_foot.rotation[0] = -(0.75 + f1 * 0.1);
+
+        self.front_leg.rotation[0] = -(1.3 + f1 * 0.1);
+        self.front_leg_tip.rotation[0] = 0.5 + f1 * 0.1;
+        self.front_foot.rotation[0] = -(0.75 + f1 * 0.1);
+
+        // 12-segment tail chain (MCP ModelDragon.java:219-238)
+        let mut f10 = 0.0_f32;
+        f2 = 10.0;
+        f3 = 60.0;
+        f4 = 0.0;
+        for (k, seg) in self.tail.iter_mut().enumerate() {
+            f10 += (k as f32 * 0.45 + f8).sin() * 0.05;
+            let rx_mcp = f10;
+            let ry_mcp = PI + (k as f32 * 0.25 + anim_time * 0.2).sin() * 0.15;
+            seg.pivot = [f4, 24.0 - f2, f3];
+            seg.rotation = [-rx_mcp, ry_mcp, 0.0];
+            f2 += rx_mcp.sin() * 10.0;
+            f3 -= ry_mcp.cos() * rx_mcp.cos() * 10.0;
+            f4 -= ry_mcp.sin() * rx_mcp.cos() * 10.0;
         }
     }
 
@@ -380,25 +332,37 @@ impl DragonModel {
         let scale = 1.0 / 16.0;
         let root = Mat4::from_scale(Vec3::splat(scale));
 
-        self.head.emit(root, &mut out);
-        self.jaw.emit(root, &mut out);
         for seg in &self.neck {
             seg.emit(root, &mut out);
         }
+
+        let head_t = self.head.transform(root);
+        self.head.emit(root, &mut out);
+        self.jaw.emit(head_t, &mut out);
+
         self.body.emit(root, &mut out);
 
-        let lw_t = self.left_wing.transform(root);
-        self.left_wing.emit(root, &mut out);
-        self.left_wing_tip.emit(lw_t, &mut out);
+        // Emit right side (j = 0) and X-mirrored left side (j = 1), matching ModelDragon.java:189-212
+        for side in [1.0_f32, -1.0_f32] {
+            let side_root = root * Mat4::from_scale(Vec3::new(side, 1.0, 1.0));
 
-        let rw_t = self.right_wing.transform(root);
-        self.right_wing.emit(root, &mut out);
-        self.right_wing_tip.emit(rw_t, &mut out);
+            let wing_t = self.wing.transform(side_root);
+            self.wing.emit(side_root, &mut out);
+            self.wing_tip.emit(wing_t, &mut out);
 
-        self.rear_left_leg.emit(root, &mut out);
-        self.rear_right_leg.emit(root, &mut out);
-        self.front_left_leg.emit(root, &mut out);
-        self.front_right_leg.emit(root, &mut out);
+            let fl_t = self.front_leg.transform(side_root);
+            self.front_leg.emit(side_root, &mut out);
+            let fl_tip_t = self.front_leg_tip.transform(fl_t);
+            self.front_leg_tip.emit(fl_t, &mut out);
+            self.front_foot.emit(fl_tip_t, &mut out);
+
+            let rl_t = self.rear_leg.transform(side_root);
+            self.rear_leg.emit(side_root, &mut out);
+            let rl_tip_t = self.rear_leg_tip.transform(rl_t);
+            self.rear_leg_tip.emit(rl_t, &mut out);
+            self.rear_foot.emit(rl_tip_t, &mut out);
+        }
+
         for seg in &self.tail {
             seg.emit(root, &mut out);
         }

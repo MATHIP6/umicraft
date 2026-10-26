@@ -31,8 +31,8 @@ impl BatModel {
     pub fn new() -> Self {
         let tex = [64.0, 64.0];
 
-        // Head with ears (MCP ModelBat: head at [0, 0, 0], box [-3, -3, -3, 6, 6, 6])
-        let head = ModelPart::new([0.0, 16.0, 0.0])
+        // Head with ears (MCP ModelBat: head at [0, 0, 0], box [-3, -3, -3, 6, 6, 6], ears [-4, -6, -2, 3, 4, 1] and [1, -6, -2, 3, 4, 1])
+        let head = ModelPart::new([0.0, 24.0, 0.0])
             .with_box(ModelBox::new(
                 [-3.0, -3.0, -3.0],
                 [6.0, 6.0, 6.0],
@@ -41,22 +41,19 @@ impl BatModel {
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-4.0, 3.0, -2.0],
+                [-4.0, 2.0, -2.0],
                 [3.0, 4.0, 1.0],
                 [24.0, 0.0],
                 tex,
                 0.0,
             ))
-            .with_box(ModelBox::new(
-                [1.0, 3.0, -2.0],
-                [3.0, 4.0, 1.0],
-                [24.0, 0.0],
-                tex,
-                0.0,
-            ));
+            .with_box(
+                ModelBox::new([1.0, 2.0, -2.0], [3.0, 4.0, 1.0], [24.0, 0.0], tex, 0.0)
+                    .mirrored(),
+            );
 
-        // Body and tail membrane (MCP ModelBat: body at [0, 0, 0], box [-3, 4, -3, 6, 12, 6])
-        let body = ModelPart::new([0.0, 16.0, 0.0])
+        // Body and tail membrane (MCP ModelBat: body at [0, 0, 0], box [-3, 4, -3, 6, 12, 6] and [-5, 16, 0, 10, 6, 1])
+        let body = ModelPart::new([0.0, 24.0, 0.0])
             .with_box(ModelBox::new(
                 [-3.0, -16.0, -3.0],
                 [6.0, 12.0, 6.0],
@@ -91,22 +88,14 @@ impl BatModel {
         ));
 
         // Inner left wing (mirror of right wing)
-        let left_wing = ModelPart::new([0.0, 0.0, 0.0]).with_box(ModelBox::new(
-            [2.0, -17.0, 1.5],
-            [10.0, 16.0, 1.0],
-            [42.0, 0.0],
-            tex,
-            0.0,
-        ));
+        let left_wing = ModelPart::new([0.0, 0.0, 0.0]).with_box(
+            ModelBox::new([2.0, -17.0, 1.5], [10.0, 16.0, 1.0], [42.0, 0.0], tex, 0.0).mirrored(),
+        );
 
         // Outer left wing (child of left wing at [12, 1, 1.5], box [0, 1, 0, 8, 12, 1])
-        let outer_left_wing = ModelPart::new([12.0, -1.0, 1.5]).with_box(ModelBox::new(
-            [0.0, -13.0, 0.0],
-            [8.0, 12.0, 1.0],
-            [24.0, 16.0],
-            tex,
-            0.0,
-        ));
+        let outer_left_wing = ModelPart::new([12.0, -1.0, 1.5]).with_box(
+            ModelBox::new([0.0, -13.0, 0.0], [8.0, 12.0, 1.0], [24.0, 16.0], tex, 0.0).mirrored(),
+        );
 
         Self {
             head,
@@ -120,21 +109,22 @@ impl BatModel {
 
     /// Sets the wing flapping animation angles and forward body tilt.
     pub fn set_angles(&mut self, anim_time: f32) {
-        // In flight, body is pitched forward ~45 degrees (MCP ModelBat.java:103)
-        self.body.rotation[0] = FRAC_PI_4 + (anim_time * 0.1).cos() * 0.15;
+        // In flight, body is pitched forward ~45 degrees so chest faces down/forward and tail trails behind (MCP ModelBat.java:103)
+        self.body.rotation[0] = -FRAC_PI_4 - (anim_time * 0.1).cos() * 0.15;
 
-        let flap = (anim_time * 1.3).cos() * std::f32::consts::PI * 0.25;
+        // Use sin(anim_time) so at anim_time = 0.0 both wings are spread wide open
+        let flap = (anim_time * 1.3).sin() * std::f32::consts::PI * 0.25;
         self.right_wing.rotation[1] = flap;
         self.left_wing.rotation[1] = -flap;
         self.outer_right_wing.rotation[1] = flap * 0.5;
         self.outer_left_wing.rotation[1] = -flap * 0.5;
     }
 
-    /// Emits the bat mesh vertices transformed into world units.
+    /// Emits the bat mesh vertices transformed into world units (with MCP RenderBat 0.35x scale).
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
         let mut out = Vec::new();
-        let scale = 1.0 / 16.0;
+        let scale = 0.35 / 16.0;
         let root = Mat4::from_scale(Vec3::splat(scale));
 
         self.head.emit(root, &mut out);
