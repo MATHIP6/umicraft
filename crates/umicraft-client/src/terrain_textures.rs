@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use umicraft_assets::BlockAtlas;
+use umicraft_assets::{BlockAtlas, GuiAtlas};
 use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, Mesh, ModelMeshContext};
 use umicraft_render::{BlockAtlasError, Renderer};
 use umicraft_world::ChunkPos;
@@ -72,6 +72,8 @@ pub enum TerrainTextures {
         atlas: BlockAtlas,
         /// The model-meshing context whose layout matches `atlas`.
         context: Arc<ModelMeshContext>,
+        /// The GUI texture atlas built from the jar's `textures/gui/` PNGs.
+        gui_atlas: GuiAtlas,
     },
 }
 
@@ -130,6 +132,7 @@ impl TerrainTextures {
         Self::Official {
             atlas: resources.atlas().clone(),
             context: resources.context(),
+            gui_atlas: resources.resources().gui_atlas().clone(),
         }
     }
 
@@ -140,7 +143,11 @@ impl TerrainTextures {
     pub fn install(self, target: &mut impl BlockTextureTarget) -> InstalledTerrain {
         match self {
             Self::Procedural => install_procedural(target),
-            Self::Official { atlas, context } => {
+            Self::Official {
+                atlas,
+                context,
+                gui_atlas,
+            } => {
                 let bound = target.set_block_atlas(
                     atlas.width(),
                     atlas.height(),
@@ -155,6 +162,7 @@ impl TerrainTextures {
                         );
                         InstalledTerrain {
                             mesher: TerrainMesher(MesherKind::Models(context)),
+                            gui_atlas: Some(gui_atlas),
                         }
                     }
                     Err(error) => {
@@ -174,6 +182,7 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
     target.use_procedural_blocks();
     InstalledTerrain {
         mesher: TerrainMesher(MesherKind::Procedural),
+        gui_atlas: None,
     }
 }
 
@@ -184,6 +193,7 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
 #[derive(Debug, Clone)]
 pub struct InstalledTerrain {
     mesher: TerrainMesher,
+    gui_atlas: Option<GuiAtlas>,
 }
 
 impl InstalledTerrain {
@@ -197,6 +207,12 @@ impl InstalledTerrain {
     #[must_use]
     pub fn mesher(&self) -> TerrainMesher {
         self.mesher.clone()
+    }
+
+    /// The GUI texture atlas, if the official assets were loaded.
+    #[must_use]
+    pub fn gui_atlas(&self) -> Option<&GuiAtlas> {
+        self.gui_atlas.as_ref()
     }
 }
 
@@ -258,6 +274,7 @@ mod tests {
                 atlas: Arc::new(layout),
                 tints: None,
             }),
+            gui_atlas: GuiAtlas::empty(),
         }
     }
 

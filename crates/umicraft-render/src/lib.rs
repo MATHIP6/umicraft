@@ -38,4 +38,4 @@ pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};
 pub use sky::SkyState;
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};
-pub use ui_pass::{fallback_atlas, FontAtlasError, UiPass};
+pub use ui_pass::{fallback_atlas, FontAtlasError, UiBatch, UiBatchKind, UiPass};

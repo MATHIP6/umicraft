@@ -23,14 +23,18 @@
 //! (0x1A), `Set Experience` (0x1F), `Chunk Data` (0x21), `Multi Block
 //! Change` (0x22), `Block Change` (0x23), `Block Action` (0x24), `Block
 //! Break Animation` (0x25), `Map Chunk Bulk` (0x26), `Change Game State`
-//! (0x2B), `Disconnect` (0x40).
+//! (0x2B), `Open Window` (0x2D), `Close Window` (0x2E), `Set Slot`
+//! (0x2F), `Window Items` (0x30), `Window Property` (0x31), `Confirm
+//! Transaction` (0x32), `Disconnect` (0x40).
 //!
 //! Serverbound: `Keep Alive` (0x00), `Chat Message` (0x01), `Use Entity`
 //! (0x02), `Player Position` (0x04), `Player Look` (0x05), `Player
 //! Position and Look` (0x06), `Player Digging` (0x07), `Player Block
 //! Placement` (0x08), `Held Item Change` (0x09), `Animation` (0x0A),
-//! `Entity Action` (0x0B), `Input` (0x0C), `Client Settings` (0x15),
-//! `Plugin Message` (0x17).
+//! `Entity Action` (0x0B), `Input` (0x0C), `Close Window` (0x0D),
+//! `Click Window` (0x0E), `Confirm Transaction` (0x0F), `Creative
+//! Inventory Action` (0x10), `Client Settings` (0x15), `Plugin Message`
+//! (0x17).
 //!
 //! Ids outside this subset are rejected as [`ProtocolError::UnknownPacket`]
 //! and skipped by the caller (see `umicraft-net`'s play loop). `Entity
@@ -125,6 +129,18 @@ pub enum PlayClientbound {
     MapChunkBulk(clientbound::MapChunkBulk),
     /// `Change Game State` (0x2B): a global game-state value changed.
     ChangeGameState(clientbound::ChangeGameState),
+    /// `Open Window` (0x2D): the server opens a container GUI.
+    OpenWindow(clientbound::OpenWindow),
+    /// `Close Window` (0x2E): the server closes a container GUI.
+    CloseWindow(clientbound::CloseWindow),
+    /// `Set Slot` (0x2F): the server updates a single slot.
+    SetSlot(clientbound::SetSlot),
+    /// `Window Items` (0x30): the server sends all slots of a window.
+    WindowItems(clientbound::WindowItems),
+    /// `Window Property` (0x31): a container property changed.
+    WindowProperty(clientbound::WindowProperty),
+    /// `Confirm Transaction` (0x32): the server confirms or rejects a click.
+    ConfirmTransaction(clientbound::ConfirmTransaction),
     /// `Disconnect` (0x40): reason as chat JSON; the socket closes after.
     Disconnect(clientbound::Disconnect),
 }
@@ -167,6 +183,12 @@ impl PlayClientbound {
             Self::BlockBreakAnim(_) => clientbound::BlockBreakAnim::ID,
             Self::MapChunkBulk(_) => clientbound::MapChunkBulk::ID,
             Self::ChangeGameState(_) => clientbound::ChangeGameState::ID,
+            Self::OpenWindow(_) => clientbound::OpenWindow::ID,
+            Self::CloseWindow(_) => clientbound::CloseWindow::ID,
+            Self::SetSlot(_) => clientbound::SetSlot::ID,
+            Self::WindowItems(_) => clientbound::WindowItems::ID,
+            Self::WindowProperty(_) => clientbound::WindowProperty::ID,
+            Self::ConfirmTransaction(_) => clientbound::ConfirmTransaction::ID,
             Self::Disconnect(_) => clientbound::Disconnect::ID,
         }
     }
@@ -210,6 +232,12 @@ impl PlayClientbound {
             Self::BlockBreakAnim(packet) => packet.encode_body(writer),
             Self::MapChunkBulk(packet) => packet.encode_body(writer),
             Self::ChangeGameState(packet) => packet.encode_body(writer),
+            Self::OpenWindow(packet) => packet.encode_body(writer),
+            Self::CloseWindow(packet) => packet.encode_body(writer),
+            Self::SetSlot(packet) => packet.encode_body(writer),
+            Self::WindowItems(packet) => packet.encode_body(writer),
+            Self::WindowProperty(packet) => packet.encode_body(writer),
+            Self::ConfirmTransaction(packet) => packet.encode_body(writer),
             Self::Disconnect(packet) => packet.encode_body(writer),
         }
     }
@@ -303,6 +331,22 @@ impl PlayClientbound {
             clientbound::ChangeGameState::ID => {
                 Self::ChangeGameState(clientbound::ChangeGameState::decode(reader)?)
             }
+            clientbound::OpenWindow::ID => {
+                Self::OpenWindow(clientbound::OpenWindow::decode(reader)?)
+            }
+            clientbound::CloseWindow::ID => {
+                Self::CloseWindow(clientbound::CloseWindow::decode(reader)?)
+            }
+            clientbound::SetSlot::ID => Self::SetSlot(clientbound::SetSlot::decode(reader)?),
+            clientbound::WindowItems::ID => {
+                Self::WindowItems(clientbound::WindowItems::decode(reader)?)
+            }
+            clientbound::WindowProperty::ID => {
+                Self::WindowProperty(clientbound::WindowProperty::decode(reader)?)
+            }
+            clientbound::ConfirmTransaction::ID => {
+                Self::ConfirmTransaction(clientbound::ConfirmTransaction::decode(reader)?)
+            }
             clientbound::Disconnect::ID => {
                 Self::Disconnect(clientbound::Disconnect::decode(reader)?)
             }
@@ -343,6 +387,14 @@ pub enum PlayServerbound {
     EntityAction(serverbound::EntityAction),
     /// `Input` (0x0C): the player's movement keys.
     Input(serverbound::Input),
+    /// `Close Window` (0x0D): the client closes a container GUI.
+    CloseWindow(serverbound::CloseWindow),
+    /// `Click Window` (0x0E): the client clicked in a window.
+    ClickWindow(serverbound::ClickWindow),
+    /// `Confirm Transaction` (0x0F): the client echoes a rejected transaction.
+    ConfirmTransaction(serverbound::ConfirmTransaction),
+    /// `Creative Inventory Action` (0x10): the client sets a slot in creative mode.
+    CreativeInventoryAction(serverbound::CreativeInventoryAction),
     /// `Client Settings` (0x15): required before some servers release content.
     ClientSettings(serverbound::ClientSettings),
     /// `Plugin Message` (0x17): client brand channel payload.
@@ -366,6 +418,10 @@ impl PlayServerbound {
             Self::Animation(_) => serverbound::Animation::ID,
             Self::EntityAction(_) => serverbound::EntityAction::ID,
             Self::Input(_) => serverbound::Input::ID,
+            Self::CloseWindow(_) => serverbound::CloseWindow::ID,
+            Self::ClickWindow(_) => serverbound::ClickWindow::ID,
+            Self::ConfirmTransaction(_) => serverbound::ConfirmTransaction::ID,
+            Self::CreativeInventoryAction(_) => serverbound::CreativeInventoryAction::ID,
             Self::ClientSettings(_) => serverbound::ClientSettings::ID,
             Self::Brand(_) => serverbound::Brand::ID,
         }
@@ -403,6 +459,18 @@ impl PlayServerbound {
                 Self::EntityAction(serverbound::EntityAction::decode(reader)?)
             }
             serverbound::Input::ID => Self::Input(serverbound::Input::decode(reader)?),
+            serverbound::CloseWindow::ID => {
+                Self::CloseWindow(serverbound::CloseWindow::decode(reader)?)
+            }
+            serverbound::ClickWindow::ID => {
+                Self::ClickWindow(serverbound::ClickWindow::decode(reader)?)
+            }
+            serverbound::ConfirmTransaction::ID => {
+                Self::ConfirmTransaction(serverbound::ConfirmTransaction::decode(reader)?)
+            }
+            serverbound::CreativeInventoryAction::ID => {
+                Self::CreativeInventoryAction(serverbound::CreativeInventoryAction::decode(reader)?)
+            }
             serverbound::ClientSettings::ID => {
                 Self::ClientSettings(serverbound::ClientSettings::decode(reader)?)
             }
@@ -434,6 +502,10 @@ impl PlayServerbound {
             Self::Animation(packet) => packet.encode_body(writer),
             Self::EntityAction(packet) => packet.encode_body(writer),
             Self::Input(packet) => packet.encode_body(writer),
+            Self::CloseWindow(packet) => packet.encode_body(writer),
+            Self::ClickWindow(packet) => packet.encode_body(writer),
+            Self::ConfirmTransaction(packet) => packet.encode_body(writer),
+            Self::CreativeInventoryAction(packet) => packet.encode_body(writer),
             Self::ClientSettings(packet) => packet.encode_body(writer),
             Self::Brand(packet) => packet.encode_body(writer),
         }

@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
+use umicraft_game::inventory::WindowView;
 use umicraft_game::RenderState;
 use umicraft_mesh::{ChunkSnapshot, Mesh};
 use umicraft_render::{Camera, HudState, RenderEnvironment, Renderer};
@@ -58,6 +59,7 @@ pub struct WorldView {
     /// Faces of every chunk whose current mesh is not empty.
     faces: HashMap<ChunkPos, usize>,
     hud: HudState,
+    window_view: WindowView,
     status: GameStatus,
     ended: Option<String>,
     frames: usize,
@@ -79,6 +81,12 @@ impl WorldView {
             pending: HashSet::new(),
             faces: HashMap::new(),
             hud: HudState::default(),
+            window_view: WindowView {
+                player_slots: std::array::from_fn(|_| None),
+                container: None,
+                cursor: None,
+                selected_slot: 0,
+            },
             status: GameStatus::default(),
             ended: None,
             frames: 0,
@@ -129,6 +137,12 @@ impl WorldView {
     #[must_use]
     pub fn hud(&self) -> &HudState {
         &self.hud
+    }
+
+    /// The newest inventory/container state the game thread published.
+    #[must_use]
+    pub fn window_view(&self) -> &WindowView {
+        &self.window_view
     }
 
     /// The newest session statistics.
@@ -185,6 +199,7 @@ impl WorldView {
                 self.view.push(frame);
             }
             RenderEvent::Hud(hud) => self.hud = *hud,
+            RenderEvent::Inventory(view) => self.window_view = *view,
             RenderEvent::Status(status) => self.status = *status,
             RenderEvent::Ended(reason) => self.ended = Some(reason),
             RenderEvent::Reset => self.reset(target),

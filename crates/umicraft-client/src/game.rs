@@ -29,6 +29,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
 use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityStore};
 use umicraft_game::input::RawInput;
+use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SURVIVAL_REACH};
 use umicraft_game::shapes::Aabb;
 use umicraft_game::{GameState, RenderState, ServerCorrection};
@@ -136,6 +137,8 @@ pub enum GameEvent {
     Chat(String),
     /// Request to re-mesh every loaded chunk column (e.g. after a resource pack reload).
     ReMeshAll,
+    /// The client closes a container or the player inventory (E / Escape).
+    CloseInventory,
 }
 
 /// One simulation frame published to the render thread.
@@ -194,6 +197,8 @@ pub enum RenderEvent {
     Frame(Frame),
     /// The HUD state changed.
     Hud(Box<HudState>),
+    /// The inventory/container state changed.
+    Inventory(Box<WindowView>),
     /// The statistics changed.
     Status(Box<GameStatus>),
     /// The world was replaced; the render thread drops its meshes.
@@ -407,6 +412,8 @@ struct Game {
     hud_dirty: bool,
     /// Entities in the world (mobs, players, objects).
     entities: EntityStore,
+    /// The inventory and container window model.
+    windows: WindowManager,
 }
 
 impl Game {
@@ -444,6 +451,7 @@ impl Game {
             status_data: GameStatus::default(),
             hud_dirty: true,
             entities: EntityStore::new(),
+            windows: WindowManager::new(),
         }
     }
 
@@ -505,16 +513,14 @@ impl Game {
 
     /// The HUD state of the session.
     fn hud(&self) -> HudState {
-        let mut hotbar = [None; 9];
-        if let Some(item) = self.held_item.as_ref() {
-            if item.item_id >= 0 {
-                hotbar[(self.selected_slot as usize).min(8)] = Some(ItemStack {
-                    item_id: i32::from(item.item_id),
-                    damage: item.damage,
-                    count: u8::try_from(item.stack_size).unwrap_or(0),
-                });
-            }
-        }
+        let wm_hotbar = self.windows.hotbar();
+        let hotbar = std::array::from_fn(|i| {
+            wm_hotbar[i].as_ref().map(|item| ItemStack {
+                item_id: i32::from(item.item_id),
+                damage: item.damage,
+                count: u8::try_from(item.stack_size).unwrap_or(0),
+            })
+        });
         HudState {
             health: self.health,
             food: self.food,
@@ -710,6 +716,13 @@ fn handle_event(
             }
             false
         }
+        GameEvent::CloseInventory => {
+            let window_id = game.windows.container().map_or(0_i8, |c| c.window_id as i8);
+            game.windows.close_window(window_id as u8);
+            queue.push(ClientCommand::CloseWindow { window_id });
+            publish_inventory(game, frames);
+            false
+        }
     }
 }
 
@@ -834,6 +847,7 @@ fn handle_net(
         PlayEvent::HeldItemChange(slot) => {
             if (0..9).contains(&slot) {
                 game.selected_slot = slot as u8;
+                game.windows.set_selected_slot(slot as u8);
                 game.hud_dirty = true;
             }
         }
@@ -1045,6 +1059,44 @@ fn handle_net(
             // between packets (ADR-0008 §4).
             game.world_time = packet.time_of_day;
         }
+        PlayEvent::OpenWindow(packet) => {
+            if let Some(kind) = WindowKind::from_type_string(&packet.window_type) {
+                game.windows
+                    .open_window(packet.window_id, kind, packet.title, packet.slot_count);
+                publish_inventory(game, frames);
+            } else {
+                tracing::warn!(
+                    window_type = %packet.window_type,
+                    "unknown container type, ignoring"
+                );
+            }
+        }
+        PlayEvent::CloseWindow { window_id } => {
+            game.windows.close_window(window_id);
+            publish_inventory(game, frames);
+        }
+        PlayEvent::SetSlot(packet) => {
+            game.windows
+                .apply_set_slot(packet.window_id, packet.slot, packet.item);
+            game.hud_dirty = true;
+            publish_inventory(game, frames);
+        }
+        PlayEvent::WindowItems(packet) => {
+            game.windows
+                .apply_window_items(packet.window_id, &packet.items);
+            game.hud_dirty = true;
+            publish_inventory(game, frames);
+        }
+        PlayEvent::WindowProperty(packet) => {
+            game.windows
+                .apply_property(packet.window_id, packet.property, packet.value);
+            publish_inventory(game, frames);
+        }
+        PlayEvent::ConfirmTransaction(_packet) => {
+            // The reply (rejection echo) is already sent by the session layer.
+            // The model does not need to act on accepted transactions for now;
+            // rollback on rejection is a follow-up.
+        }
     }
 }
 
@@ -1210,6 +1262,7 @@ fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) 
     if let Some(slot) = update.select_slot {
         if slot < 9 && slot != game.selected_slot {
             game.selected_slot = slot;
+            game.windows.set_selected_slot(slot);
             game.hud_dirty = true;
             queue.push(ClientCommand::HeldItemChange {
                 slot: i16::from(slot),
@@ -1285,7 +1338,12 @@ fn place_block(game: &mut Game, queue: &mut CommandQueue) {
             return;
         }
     }
-    let item = game.held_item.clone().unwrap_or(WireItemStack::EMPTY);
+    let item = game
+        .windows
+        .selected_item()
+        .cloned()
+        .or_else(|| game.held_item.clone())
+        .unwrap_or(WireItemStack::EMPTY);
     queue.push(ClientCommand::PlayerBlockPlacement {
         x: hit.block.x,
         y: hit.block.y,
@@ -1517,6 +1575,11 @@ fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
             Err(mpsc::TrySendError::Disconnected(_)) => break,
         }
     }
+}
+
+/// Publishes the inventory state to the render thread.
+fn publish_inventory(game: &Game, frames: &SyncSender<RenderEvent>) {
+    let _ = frames.try_send(RenderEvent::Inventory(Box::new(game.windows.view())));
 }
 
 /// Publishes the statistics of the session.

@@ -24,11 +24,17 @@ pub(crate) mod style;
 mod util;
 
 pub mod button;
+pub mod inventory;
 pub mod list;
 pub mod panel;
+pub mod slot;
 pub mod text_field;
 
 pub use button::button;
+pub use inventory::{
+    container_layout, gui_scale, player_inventory_layout, ContainerLayout, InventoryLayout,
+};
 pub use list::{list, ListState, ROW_HEIGHT, SCROLLBAR_WIDTH};
 pub use panel::{panel, PANEL_INSET};
+pub use slot::{slot, SlotItem};
 pub use text_field::{text_field, TextFieldState};

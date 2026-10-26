@@ -117,7 +117,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 RenderEvent::Ended(reason) => {
                     report.error = Some(reason);
                 }
-                RenderEvent::Reset => {}
+                RenderEvent::Inventory(_) | RenderEvent::Reset => {}
             }
             if report.error.is_some() {
                 break;

@@ -25,6 +25,7 @@ use crate::atlas::BlockAtlas;
 use crate::client_jar::ClientJar;
 use crate::colormap::{BiomeColormaps, Colormap, COLORMAP_PREFIX, FOLIAGE_PATH, GRASS_PATH};
 use crate::error::image_error;
+use crate::gui_atlas::{pack_gui_atlas, GuiAtlas, GuiImage};
 use crate::AssetsResult;
 
 /// Prefix of the 1.8 blockstate documents inside the client jar.
@@ -35,6 +36,8 @@ const MODELS_PREFIX: &str = "assets/minecraft/models/block/";
 const BLOCK_TEXTURES_PREFIX: &str = "assets/minecraft/textures/blocks/";
 /// Prefix of the 1.8 item textures inside the client jar.
 const ITEM_TEXTURES_PREFIX: &str = "assets/minecraft/textures/items/";
+/// Prefix of the 1.8 GUI textures (backgrounds, widgets, icons).
+const GUI_TEXTURES_PREFIX: &str = "assets/minecraft/textures/gui/";
 /// Prefix shared by every texture key.
 const TEXTURES_ROOT: &str = "assets/minecraft/textures/";
 
@@ -219,13 +222,15 @@ struct TextureLayer {
 }
 
 /// Every blockstate, block model and block/item texture of one client jar,
-/// plus the optional biome colormaps.
+/// plus the optional biome colormaps and the GUI texture atlas.
 #[derive(Debug, Clone)]
 pub struct ClientResources {
     files: BTreeMap<String, Vec<u8>>,
     raw_colormaps: BTreeMap<String, Vec<u8>>,
+    raw_gui: BTreeMap<String, Vec<u8>>,
     atlas: BlockAtlas,
     colormaps: Option<BiomeColormaps>,
+    gui_atlas: GuiAtlas,
 }
 
 impl ClientResources {
@@ -254,13 +259,17 @@ impl ClientResources {
             BLOCK_TEXTURES_PREFIX,
             ITEM_TEXTURES_PREFIX,
             COLORMAP_PREFIX,
+            GUI_TEXTURES_PREFIX,
         ])?;
 
         let mut files = BTreeMap::new();
         let mut raw_colormaps = BTreeMap::new();
+        let mut raw_gui = BTreeMap::new();
         for (path, bytes) in entries {
             if path == GRASS_PATH || path == FOLIAGE_PATH {
                 raw_colormaps.insert(path, bytes);
+            } else if is_gui_texture(&path) {
+                raw_gui.insert(path, bytes);
             } else if is_json_resource(&path)
                 || is_texture_metadata(&path)
                 || texture_key(&path).is_some()
@@ -269,7 +278,7 @@ impl ClientResources {
             }
         }
 
-        Self::build_internal(files, raw_colormaps)
+        Self::build_internal(files, raw_colormaps, raw_gui)
     }
 
     /// Builds a new [`ClientResources`] instance by layering resource packs
@@ -284,10 +293,13 @@ impl ClientResources {
     pub fn apply_packs(&self, packs: &[crate::resource_pack::ResourcePack]) -> AssetsResult<Self> {
         let mut files = self.files.clone();
         let mut raw_colormaps = self.raw_colormaps.clone();
+        let mut raw_gui = self.raw_gui.clone();
         for pack in packs {
             for (path, bytes) in pack.files() {
                 if path == GRASS_PATH || path == FOLIAGE_PATH {
                     raw_colormaps.insert(path.clone(), bytes.clone());
+                } else if is_gui_texture(path) {
+                    raw_gui.insert(path.clone(), bytes.clone());
                 } else if is_json_resource(path)
                     || is_texture_metadata(path)
                     || texture_key(path).is_some()
@@ -296,13 +308,14 @@ impl ClientResources {
                 }
             }
         }
-        Self::build_internal(files, raw_colormaps)
+        Self::build_internal(files, raw_colormaps, raw_gui)
     }
 
     /// Internal builder that constructs a complete [`ClientResources`].
     fn build_internal(
         files: BTreeMap<String, Vec<u8>>,
         raw_colormaps: BTreeMap<String, Vec<u8>>,
+        raw_gui: BTreeMap<String, Vec<u8>>,
     ) -> AssetsResult<Self> {
         let mut textures = Vec::new();
         for (path, bytes) in &files {
@@ -321,13 +334,17 @@ impl ClientResources {
             decoded_colormaps.insert(path.clone(), DecodedPng::decode(path, bytes)?);
         }
 
+        let gui_images = decode_gui_textures(&raw_gui)?;
         let atlas = build_atlas(textures)?;
         let colormaps = decode_colormaps(&mut decoded_colormaps)?;
+        let gui_atlas = pack_gui_atlas(gui_images);
         Ok(Self {
             files,
             raw_colormaps,
+            raw_gui,
             atlas,
             colormaps,
+            gui_atlas,
         })
     }
 
@@ -350,6 +367,12 @@ impl ClientResources {
     #[must_use]
     pub fn atlas(&self) -> &BlockAtlas {
         &self.atlas
+    }
+
+    /// The GUI texture atlas built from `textures/gui/` entries in the jar.
+    #[must_use]
+    pub fn gui_atlas(&self) -> &GuiAtlas {
+        &self.gui_atlas
     }
 
     /// The grass and foliage colormaps, when the jar contains both.
@@ -422,6 +445,41 @@ fn texture_key(path: &str) -> Option<String> {
         return None;
     }
     Some(relative.to_string())
+}
+
+/// True for a GUI texture PNG (container backgrounds, widgets, icons).
+fn is_gui_texture(path: &str) -> bool {
+    path.starts_with(GUI_TEXTURES_PREFIX) && path.ends_with(".png")
+}
+
+/// The region name for a GUI texture path, e.g.
+/// `"assets/minecraft/textures/gui/container/inventory.png"` → `"container/inventory"`.
+fn gui_texture_name(path: &str) -> Option<String> {
+    let relative = path
+        .strip_prefix(GUI_TEXTURES_PREFIX)?
+        .strip_suffix(".png")?;
+    if relative.is_empty() {
+        return None;
+    }
+    Some(relative.to_string())
+}
+
+/// Decodes all GUI PNGs into images ready for atlas packing.
+fn decode_gui_textures(raw: &BTreeMap<String, Vec<u8>>) -> AssetsResult<Vec<GuiImage>> {
+    let mut images = Vec::with_capacity(raw.len());
+    for (path, bytes) in raw {
+        let Some(name) = gui_texture_name(path) else {
+            continue;
+        };
+        let decoded = DecodedPng::decode(path, bytes)?;
+        images.push(GuiImage {
+            name,
+            width: decoded.width,
+            height: decoded.height,
+            pixels: decoded.pixels,
+        });
+    }
+    Ok(images)
 }
 
 /// Builds the deterministic atlas from decoded textures.
@@ -549,6 +607,29 @@ mod tests {
         assert_eq!(
             texture_key("assets/minecraft/models/block/stone.json"),
             None
+        );
+    }
+
+    #[test]
+    fn gui_textures_are_recognised_and_named() {
+        assert!(is_gui_texture(
+            "assets/minecraft/textures/gui/container/inventory.png"
+        ));
+        assert!(is_gui_texture("assets/minecraft/textures/gui/widgets.png"));
+        assert!(!is_gui_texture(
+            "assets/minecraft/textures/gui/container/inventory.png.mcmeta"
+        ));
+        assert!(!is_gui_texture(
+            "assets/minecraft/textures/blocks/stone.png"
+        ));
+
+        assert_eq!(
+            gui_texture_name("assets/minecraft/textures/gui/container/inventory.png").as_deref(),
+            Some("container/inventory")
+        );
+        assert_eq!(
+            gui_texture_name("assets/minecraft/textures/gui/widgets.png").as_deref(),
+            Some("widgets")
         );
     }
 

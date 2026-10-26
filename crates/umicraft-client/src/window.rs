@@ -14,6 +14,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
+use umicraft_ui::widgets::{
+    container_layout, player_inventory_layout, slot, ContainerLayout, InventoryLayout, SlotItem,
+};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -87,6 +90,8 @@ struct App {
     chat_open: bool,
     /// The line the player is typing.
     chat_input: String,
+    /// Whether the player inventory is open (E key toggle).
+    inventory_open: bool,
     /// Whether the M4 debug screen is open.
     show_debug_screen: bool,
     /// The immediate-mode context, owned by the render thread.
@@ -101,6 +106,8 @@ struct App {
     terrain: Option<TerrainTextures>,
     /// The atlas the renderer accepted; the UI metrics must match it.
     ui_atlas: Option<FontAtlas>,
+    /// The GUI texture atlas for inventory/container backgrounds.
+    gui_atlas: Option<umicraft_assets::GuiAtlas>,
     /// Entity textures bound for GPU rendering.
     entity_textures: Option<EntityTextures>,
     last_frame: Instant,
@@ -135,6 +142,7 @@ impl App {
             place_block: false,
             chat_open: false,
             chat_input: String::new(),
+            inventory_open: false,
             show_debug_screen: false,
             ui: Ui::new(ui_viewport),
             debug_screen: DebugScreen::new(),
@@ -142,6 +150,7 @@ impl App {
             font,
             terrain,
             ui_atlas: None,
+            gui_atlas: None,
             entity_textures: None,
             last_frame: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
@@ -183,6 +192,10 @@ impl App {
             self.handle_chat_key(event);
             return;
         }
+        if self.inventory_open || self.container_is_open() {
+            self.handle_inventory_key(event_loop, event);
+            return;
+        }
         match event.state {
             ElementState::Pressed => {
                 if !event.repeat {
@@ -205,6 +218,10 @@ impl App {
                                 self.capture_mouse(false);
                             }
                         }
+                        KeyCode::KeyE => {
+                            self.inventory_open = true;
+                            self.capture_mouse(false);
+                        }
                         _ => {}
                     }
                     if let Some(slot) = hotbar_slot(code) {
@@ -226,6 +243,8 @@ impl App {
         let terrain = TerrainTextures::load_with_packs(&self.args.resource_packs);
         if let Some(renderer) = self.renderer.as_mut() {
             let installed = terrain.install(renderer);
+            upload_gui_atlas(renderer, installed.gui_atlas());
+            self.gui_atlas = installed.gui_atlas().cloned();
             self.entity_textures = Some(EntityTextures::load(renderer));
             if let Some(world) = self.world.as_mut() {
                 world.reload_terrain(&installed, default_worker_count(), renderer);
@@ -257,6 +276,40 @@ impl App {
             self.look = (0.0, 0.0);
             self.capture_mouse(false);
         }
+    }
+
+    /// Whether a server-opened container is currently displayed.
+    fn container_is_open(&self) -> bool {
+        self.world
+            .as_ref()
+            .is_some_and(|w| w.window_view().container.is_some())
+    }
+
+    /// Handles a key press while the inventory or a container screen is open.
+    fn handle_inventory_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return;
+        };
+        if event.state == ElementState::Pressed && !event.repeat {
+            match code {
+                KeyCode::Escape | KeyCode::KeyE => {
+                    self.close_inventory();
+                }
+                _ => {}
+            }
+        }
+        // Forward to the UI translator so slot-click-by-number-key works.
+        self.ui_input.key(code, event.state, event.text.as_deref());
+        let _ = event_loop;
+    }
+
+    /// Closes the inventory or container screen.
+    fn close_inventory(&mut self) {
+        if self.inventory_open || self.container_is_open() {
+            let _ = self.session.events().try_send(GameEvent::CloseInventory);
+        }
+        self.inventory_open = false;
+        self.ui_input.clear();
     }
 
     /// Handles a key press while the chat input is open.
@@ -312,9 +365,10 @@ impl App {
 
     /// The key state of the window.
     fn key_state(&self) -> InputState {
-        if self.chat_open || self.show_debug_screen {
-            // While the chat or the debug screen is open the movement keys do
-            // not steer the player.
+        let show_inventory = self.inventory_open || self.container_is_open();
+        if self.chat_open || self.show_debug_screen || show_inventory {
+            // While the chat, debug screen or inventory is open the movement
+            // keys do not steer the player.
             return InputState::default();
         }
         let mut state = InputState::default();
@@ -446,21 +500,29 @@ impl App {
     }
 
     /// Builds one UI frame from the render-side snapshot, or returns `None`
-    /// while the debug screen is closed.
+    /// while no UI modal is open.
     ///
     /// The frame is built on the render thread during redraw, after the HUD
     /// overlay, so the UI never touches the game thread or its state. The
     /// caller recycles the returned output after the renderer consumed the
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
-        if !self.show_debug_screen {
+        let show_inventory = self.inventory_open || self.container_is_open();
+        if !self.show_debug_screen && !show_inventory {
             return None;
         }
         let atlas = self.ui_atlas.as_ref()?;
         let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
         let input = self.ui_input.take();
         self.ui.begin_frame(viewport, input);
-        self.debug_screen.show(&mut self.ui, atlas);
+        if self.show_debug_screen {
+            self.debug_screen.show(&mut self.ui, atlas);
+        } else if show_inventory {
+            let wv = self.world.as_ref().map(|w| w.window_view().clone());
+            if let Some(wv) = wv {
+                draw_inventory_overlay(&mut self.ui, atlas, viewport, &wv, self.gui_atlas.as_ref());
+            }
+        }
         Some(self.ui.end_frame())
     }
 
@@ -544,6 +606,170 @@ fn is_debug_toggle(code: KeyCode, state: ElementState, repeat: bool) -> bool {
     code == KeyCode::F2 && state == ElementState::Pressed && !repeat
 }
 
+/// Uploads the GUI atlas to the renderer, if available.
+fn upload_gui_atlas(renderer: &mut Renderer, gui_atlas: Option<&umicraft_assets::GuiAtlas>) {
+    if let Some(atlas) = gui_atlas {
+        if !atlas.is_empty() {
+            renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels());
+            tracing::info!(
+                regions = atlas.regions().len(),
+                "{}x{} GUI texture atlas uploaded",
+                atlas.width(),
+                atlas.height()
+            );
+        }
+    }
+}
+
+/// Draws the inventory or container screen as a modal overlay.
+fn draw_inventory_overlay(
+    ui: &mut umicraft_ui::Ui,
+    atlas: &FontAtlas,
+    viewport: Rect,
+    wv: &umicraft_game::inventory::WindowView,
+    gui_atlas: Option<&umicraft_assets::GuiAtlas>,
+) {
+    let bg_color = [0.0_f32, 0.0, 0.0, 0.55];
+    ui.draw().rect(viewport, bg_color);
+
+    let textured = gui_atlas.is_some();
+
+    match &wv.container {
+        Some(container) => {
+            let layout = container_layout(viewport, container.slots.len());
+            let texture_name = gui_texture_for_container(container.slots.len());
+            let rows = container.slots.len().div_ceil(9);
+            let container_bg_h = 114 + rows as u32 * 18;
+            draw_gui_background(
+                ui,
+                gui_atlas,
+                texture_name,
+                &layout.background,
+                (176, container_bg_h),
+            );
+            draw_container_slots(
+                ui,
+                atlas,
+                &layout,
+                &container.slots,
+                &wv.player_slots,
+                textured,
+            );
+        }
+        None => {
+            let layout = player_inventory_layout(viewport);
+            draw_gui_background(
+                ui,
+                gui_atlas,
+                "container/inventory",
+                &layout.background,
+                (176, 166),
+            );
+            draw_player_inventory(ui, atlas, &layout, &wv.player_slots, textured);
+        }
+    }
+}
+
+/// Draws the GUI texture background for an inventory or container screen.
+///
+/// `gui_pixel_size` is the unscaled pixel dimensions of the GUI content inside
+/// the texture (e.g. 176×166 for the player inventory). Vanilla's GUI PNGs are
+/// often larger than the visible area (256×256 for inventory.png, which also
+/// holds potion effect icons), so `sub_region` extracts just the GUI portion.
+///
+/// Falls back to a solid rectangle when the GUI atlas is not loaded or the
+/// texture is not found.
+fn draw_gui_background(
+    ui: &mut umicraft_ui::Ui,
+    gui_atlas: Option<&umicraft_assets::GuiAtlas>,
+    name: &str,
+    background: &Rect,
+    gui_pixel_size: (u32, u32),
+) {
+    let region = gui_atlas.and_then(|a| a.region(name));
+    match region {
+        Some(region) => {
+            let src = region.sub_region(0, 0, gui_pixel_size.0, gui_pixel_size.1);
+            ui.draw().image(src, *background, [1.0, 1.0, 1.0, 1.0]);
+        }
+        None => {
+            ui.draw().rect(*background, [0.12, 0.12, 0.15, 0.92]);
+        }
+    }
+}
+
+/// Returns the GUI texture name for a container given its slot count.
+fn gui_texture_for_container(slot_count: usize) -> &'static str {
+    match slot_count {
+        27 => "container/generic_27",
+        54 => "container/generic_54",
+        3 => "container/furnace",
+        9 => "container/dispenser",
+        5 => "container/hopper",
+        _ => "container/generic_27",
+    }
+}
+
+/// Converts a protocol `ItemStack` into the widget's `SlotItem`.
+fn slot_item(item: &umicraft_protocol::packets::play::ItemStack) -> SlotItem {
+    SlotItem {
+        item_id: i32::from(item.item_id),
+        count: u8::try_from(item.stack_size).unwrap_or(0),
+        damage: item.damage,
+        max_durability: 0,
+    }
+}
+
+/// Draws the player inventory (45 slots) using the layout grid.
+fn draw_player_inventory(
+    ui: &mut umicraft_ui::Ui,
+    atlas: &FontAtlas,
+    layout: &InventoryLayout,
+    player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
+    textured: bool,
+) {
+    let mut label = String::with_capacity(8);
+    for (i, rect) in layout.slots.iter().enumerate() {
+        label.clear();
+        std::fmt::Write::write_fmt(&mut label, format_args!("inv{i}")).unwrap();
+        let id = ui.id(&label);
+        let item = player_slots[i].as_ref().map(slot_item);
+        slot(ui, id, *rect, atlas, item.as_ref(), textured);
+    }
+}
+
+/// Draws a container screen: container slots on top, player main+hotbar below.
+fn draw_container_slots(
+    ui: &mut umicraft_ui::Ui,
+    atlas: &FontAtlas,
+    layout: &ContainerLayout,
+    container_slots: &[Option<umicraft_protocol::packets::play::ItemStack>],
+    player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
+    textured: bool,
+) {
+    let mut label = String::with_capacity(8);
+    for (i, rect) in layout.container_slots.iter().enumerate() {
+        label.clear();
+        std::fmt::Write::write_fmt(&mut label, format_args!("cs{i}")).unwrap();
+        let id = ui.id(&label);
+        let item = container_slots
+            .get(i)
+            .and_then(|s| s.as_ref())
+            .map(slot_item);
+        slot(ui, id, *rect, atlas, item.as_ref(), textured);
+    }
+    for (i, &(inv_idx, rect)) in layout.player_slots.iter().enumerate() {
+        label.clear();
+        std::fmt::Write::write_fmt(&mut label, format_args!("ps{i}")).unwrap();
+        let id = ui.id(&label);
+        let item = player_slots
+            .get(inv_idx)
+            .and_then(|s| s.as_ref())
+            .map(slot_item);
+        slot(ui, id, rect, atlas, item.as_ref(), textured);
+    }
+}
+
 /// The hotbar slot of a number key.
 fn hotbar_slot(code: KeyCode) -> Option<u8> {
     match code {
@@ -611,6 +837,8 @@ impl ApplicationHandler for App {
             .take()
             .unwrap_or(TerrainTextures::Procedural)
             .install(&mut renderer);
+        upload_gui_atlas(&mut renderer, terrain.gui_atlas());
+        self.gui_atlas = terrain.gui_atlas().cloned();
         match WorldView::new(&terrain, default_worker_count()) {
             Ok(world) => self.world = Some(world),
             Err(error) => {
@@ -644,12 +872,14 @@ impl ApplicationHandler for App {
                 // open the screen before the next mouse movement, and the first
                 // click must use the physical cursor, not the initial origin.
                 self.ui_input.pointer_moved(position);
-                if !self.show_debug_screen {
+                let show_inventory = self.inventory_open || self.container_is_open();
+                if !self.show_debug_screen && !show_inventory {
                     self.ui_input.clear();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if self.show_debug_screen {
+                let show_inventory = self.inventory_open || self.container_is_open();
+                if self.show_debug_screen || show_inventory {
                     self.ui_input.pointer_button(state, button);
                 } else {
                     match button {
@@ -672,12 +902,14 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                if self.show_debug_screen {
+                let show_inventory = self.inventory_open || self.container_is_open();
+                if self.show_debug_screen || show_inventory {
                     self.ui_input.wheel(delta);
                 }
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
-                if self.show_debug_screen {
+                let show_inventory = self.inventory_open || self.container_is_open();
+                if self.show_debug_screen || show_inventory {
                     self.ui_input.text(&text);
                 }
             }
@@ -698,7 +930,8 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            if self.mouse_captured && !self.show_debug_screen {
+            let show_inventory = self.inventory_open || self.container_is_open();
+            if self.mouse_captured && !self.show_debug_screen && !show_inventory {
                 // A positive delta moves the mouse to the right and down; the
                 // game logic turns right and looks down with it.
                 self.look.0 += delta.0 as f32 * MOUSE_SENSITIVITY;

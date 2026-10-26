@@ -36,7 +36,7 @@ use crate::error::RenderError;
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::sky::{SkyRenderer, SkyState};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
-use crate::ui_pass::{self, FontAtlasError, UiPass};
+use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
 
 /// Depth attachment format. The sky pipeline in [`crate::sky`] uses the same
 /// format so it can draw in the main pass.
@@ -153,16 +153,24 @@ pub struct Renderer {
     /// official atlas replaced it.
     procedural_blocks: wgpu::TextureView,
     overlay_pipeline: wgpu::RenderPipeline,
+    /// Pipeline for GUI texture quads (RGBA, no coverage threshold).
+    gui_overlay_pipeline: wgpu::RenderPipeline,
     /// Layout and sampler shared by every font texture, so
     /// [`Renderer::set_font_atlas`] can bind a replacement texture without
     /// recreating the overlay pipeline.
     overlay_layout: wgpu::BindGroupLayout,
+    /// Layout for the RGBA GUI atlas, same entries as `overlay_layout` but
+    /// paired with `gui_overlay_pipeline`.
+    gui_overlay_layout: wgpu::BindGroupLayout,
     font_sampler: wgpu::Sampler,
     /// Fallback-atlas binding kept for the M3 HUD (`Overlay::text`).
     overlay_bind_group: wgpu::BindGroup,
     /// Binding for the UI pass; starts on the fallback atlas and is replaced
     /// once by [`Renderer::set_font_atlas`].
     ui_bind_group: wgpu::BindGroup,
+    /// Binding for the RGBA GUI texture atlas; `None` until
+    /// [`Renderer::set_gui_atlas`] is called.
+    gui_bind_group: Option<wgpu::BindGroup>,
     /// Metrics of the atlas bound to `ui_bind_group`; immutable after upload.
     ui_atlas: FontAtlas,
     ui_pass: UiPass,
@@ -440,6 +448,34 @@ impl Renderer {
         );
         let overlay_pipeline =
             create_overlay_pipeline(&device, &overlay_shader, &overlay_layout, format);
+        let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("gui overlay shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gui_overlay.wgsl").into()),
+        });
+        let gui_overlay_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("gui overlay bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let gui_overlay_pipeline =
+            create_overlay_pipeline(&device, &gui_overlay_shader, &gui_overlay_layout, format);
         let sky = SkyRenderer::new(&device, format);
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -500,10 +536,13 @@ impl Renderer {
             block_sampler,
             procedural_blocks: block_view,
             overlay_pipeline,
+            gui_overlay_pipeline,
             overlay_layout,
+            gui_overlay_layout,
             font_sampler,
             overlay_bind_group,
             ui_bind_group,
+            gui_bind_group: None,
             ui_atlas,
             ui_pass: UiPass::new(width, height),
             overlay_buffer,
@@ -643,6 +682,57 @@ impl Renderer {
         );
         self.ui_atlas = atlas.clone();
         Ok(())
+    }
+
+    /// Uploads the RGBA GUI texture atlas for inventory/container backgrounds.
+    ///
+    /// The atlas is built by `umicraft-assets` from the `textures/gui/` PNGs
+    /// in the client jar. Call once at startup, after load. The GUI pipeline
+    /// samples this texture for every `DrawCommand::Image` in the UI pass.
+    pub fn set_gui_atlas(&mut self, width: u32, height: u32, pixels: &[u8]) {
+        if width == 0 || height == 0 || pixels.len() != (width as usize * height as usize * 4) {
+            return;
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("gui atlas"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.gui_bind_group = Some(create_font_bind_group(
+            &self.device,
+            &self.gui_overlay_layout,
+            &self.font_sampler,
+            &view,
+        ));
     }
 
     /// Uploads the block/item texture array built from the user's installation
@@ -1151,19 +1241,33 @@ impl Renderer {
         }
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
-            pass.set_pipeline(&self.overlay_pipeline);
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
-            // Both vertex ranges live in the same buffer, in submission
-            // order. The HUD and the UI may use different atlases, so they
-            // are two draw calls with different bind groups.
+            // The HUD uses the overlay pipeline with its own fallback atlas.
             if !overlay.is_empty() {
+                pass.set_pipeline(&self.overlay_pipeline);
                 pass.set_bind_group(0, &self.overlay_bind_group, &[]);
                 pass.draw(0..overlay.vertex_count(), 0..1);
             }
-            if !self.ui_pass.is_empty() {
-                pass.set_bind_group(0, &self.ui_bind_group, &[]);
-                let first = overlay.vertex_count();
-                let end = first + self.ui_pass.vertex_count();
+            // UI batches alternate between the font and GUI pipelines.
+            let hud_offset = overlay.vertex_count();
+            for batch in self.ui_pass.batches() {
+                let first = hud_offset + batch.first;
+                let end = first + batch.count;
+                match batch.kind {
+                    UiBatchKind::Font => {
+                        pass.set_pipeline(&self.overlay_pipeline);
+                        pass.set_bind_group(0, &self.ui_bind_group, &[]);
+                    }
+                    UiBatchKind::Gui => {
+                        if let Some(gui_bg) = &self.gui_bind_group {
+                            pass.set_pipeline(&self.gui_overlay_pipeline);
+                            pass.set_bind_group(0, gui_bg, &[]);
+                        } else {
+                            // No GUI atlas uploaded — skip this batch.
+                            continue;
+                        }
+                    }
+                }
                 pass.draw(first..end, 0..1);
             }
         }

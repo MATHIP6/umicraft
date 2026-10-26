@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 glam = "0.34"
+umicraft-protocol.workspace = true
 umicraft-world.workspace = true
 
 [lints]

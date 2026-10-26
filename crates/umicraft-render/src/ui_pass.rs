@@ -168,6 +168,26 @@ pub(crate) fn validate_font_atlas(
     Ok(())
 }
 
+/// Which pipeline a batch of vertices should be drawn with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiBatchKind {
+    /// Font atlas pipeline (R8, coverage threshold).
+    Font,
+    /// GUI atlas pipeline (RGBA, direct sampling).
+    Gui,
+}
+
+/// One contiguous run of vertices drawn with the same pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UiBatch {
+    /// Which pipeline to use.
+    pub kind: UiBatchKind,
+    /// Index of the first vertex in the combined buffer.
+    pub first: u32,
+    /// Number of vertices in this batch.
+    pub count: u32,
+}
+
 /// Turns one [`DrawList`] into overlay vertices.
 ///
 /// The pass owns a reusable vertex buffer: [`UiPass::rebuild`] clears it and
@@ -175,6 +195,9 @@ pub(crate) fn validate_font_atlas(
 /// allocation. The resulting vertices are in the same NDC space and use the
 /// same [`OverlayVertex`] layout as [`Overlay`], and therefore draw with the
 /// existing overlay pipeline.
+///
+/// `Image` commands produce vertices in a separate batch that the renderer
+/// draws with the GUI overlay pipeline instead of the font pipeline.
 ///
 /// # Example
 ///
@@ -196,6 +219,7 @@ pub struct UiPass {
     overlay: Overlay,
     clip: Option<Rect>,
     clip_stack: Vec<Option<Rect>>,
+    batches: Vec<UiBatch>,
 }
 
 impl UiPass {
@@ -212,6 +236,7 @@ impl UiPass {
             overlay: Overlay::new(pixel_width, pixel_height),
             clip: Some(Rect::new(0.0, 0.0, width, height)),
             clip_stack: Vec::new(),
+            batches: Vec::new(),
         }
     }
 
@@ -229,6 +254,7 @@ impl UiPass {
         self.overlay.clear();
         self.clip = Some(Rect::new(0.0, 0.0, self.width, self.height));
         self.clip_stack.clear();
+        self.batches.clear();
     }
 
     /// True when the last rebuild produced no geometry.
@@ -258,20 +284,69 @@ impl UiPass {
     /// `'\n'` have no glyph and no advance. `PushClip` intersects the current
     /// scope with its rectangle, `PopClip` restores the previous one, and an
     /// empty intersection suppresses every command until the scope is popped.
+    ///
+    /// `Image` commands are interleaved with font commands: each contiguous
+    /// run of the same pipeline kind becomes one [`UiBatch`], available via
+    /// [`UiPass::batches`].
     pub fn rebuild(&mut self, draw_list: &DrawList, atlas: &FontAtlas) {
         self.clear();
+        let mut current_kind = UiBatchKind::Font;
+        let mut batch_start: u32 = 0;
+
         for command in draw_list.commands() {
             match command {
-                DrawCommand::Rect { rect, color } => self.push_rect(*rect, *color, atlas),
+                DrawCommand::Rect { rect, color } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Font,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_rect(*rect, *color, atlas);
+                }
                 DrawCommand::Text {
                     position,
                     text,
                     style,
-                } => self.push_text(*position, text, style.scale, style.color, atlas),
+                } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Font,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_text(*position, text, style.scale, style.color, atlas);
+                }
+                DrawCommand::Image { src, dst, color } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Gui,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_image(*src, *dst, *color);
+                }
                 DrawCommand::PushClip { rect } => self.push_clip(*rect),
                 DrawCommand::PopClip => self.pop_clip(),
             }
         }
+
+        // Close the last open batch.
+        let total = self.overlay.vertex_count();
+        if total > batch_start {
+            self.batches.push(UiBatch {
+                kind: current_kind,
+                first: batch_start,
+                count: total - batch_start,
+            });
+        }
+    }
+
+    /// The draw batches produced by the last [`UiPass::rebuild`].
+    ///
+    /// Each batch records the pipeline kind and the vertex range. The
+    /// renderer iterates these, switching between the font and GUI pipelines
+    /// as needed.
+    #[must_use]
+    pub fn batches(&self) -> &[UiBatch] {
+        &self.batches
     }
 
     fn push_rect(&mut self, rect: Rect, color: [f32; 4], atlas: &FontAtlas) {
@@ -288,6 +363,49 @@ impl UiPass {
             uv,
             color,
         );
+    }
+
+    fn push_image(&mut self, src: [f32; 4], dst: Rect, color: [f32; 4]) {
+        let (Some(visible), Some(clip)) = (drawable(dst), self.clip) else {
+            return;
+        };
+        let Some(visible) = visible.intersect(clip) else {
+            return;
+        };
+        let [u_min, v_min, u_max, v_max] = src;
+        let u_span = u_max - u_min;
+        let v_span = v_max - v_min;
+        let cu0 = u_min + (visible.x - dst.x) / dst.width * u_span;
+        let cv0 = v_min + (visible.y - dst.y) / dst.height * v_span;
+        let cu1 = u_min + (visible.right() - dst.x) / dst.width * u_span;
+        let cv1 = v_min + (visible.bottom() - dst.y) / dst.height * v_span;
+        self.overlay.push_quad(
+            [visible.x, visible.y, visible.width, visible.height],
+            [cu0, cv0],
+            [cu1, cv1],
+            color,
+        );
+    }
+
+    fn flush_batch_if_needed(
+        &mut self,
+        needed: UiBatchKind,
+        current: &mut UiBatchKind,
+        start: &mut u32,
+    ) {
+        if *current == needed {
+            return;
+        }
+        let total = self.overlay.vertex_count();
+        if total > *start {
+            self.batches.push(UiBatch {
+                kind: *current,
+                first: *start,
+                count: total - *start,
+            });
+        }
+        *current = needed;
+        *start = total;
     }
 
     fn push_text(

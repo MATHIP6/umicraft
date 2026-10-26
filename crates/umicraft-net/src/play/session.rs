@@ -10,8 +10,9 @@
 use umicraft_protocol::packets::play::clientbound::{
     self, Animation, AttachEntity, BlockChange, ChunkData, DestroyEntities, EntityEquipment,
     EntityHeadLook, EntityLook, EntityLookMove, EntityMetadata, EntityRelativeMove, EntityStatus,
-    EntityTeleport, EntityVelocity, MapChunkBulk, MultiBlockChange, PositionLook, Respawn,
-    SetExperience, SpawnMob, SpawnObject, SpawnPlayer, SpawnPosition, TimeUpdate, UpdateHealth,
+    EntityTeleport, EntityVelocity, MapChunkBulk, MultiBlockChange, OpenWindow, PositionLook,
+    Respawn, SetExperience, SpawnMob, SpawnObject, SpawnPlayer, SpawnPosition, TimeUpdate,
+    UpdateHealth, WindowItems, WindowProperty,
 };
 use umicraft_protocol::packets::play::serverbound::{Brand, ClientSettings, KeepAlive};
 use umicraft_protocol::varint::write_var_u32;
@@ -175,6 +176,21 @@ pub enum PlayEvent {
     BlockChange(BlockChange),
     /// Batched block updates in one chunk.
     MultiBlockChange(MultiBlockChange),
+    /// The server opened a container GUI.
+    OpenWindow(OpenWindow),
+    /// The server closed a container GUI.
+    CloseWindow {
+        /// The window id that was closed.
+        window_id: u8,
+    },
+    /// The server updated a single slot.
+    SetSlot(clientbound::SetSlot),
+    /// The server sent all slots of a window.
+    WindowItems(WindowItems),
+    /// A container property changed (e.g. furnace progress).
+    WindowProperty(WindowProperty),
+    /// The server confirmed or rejected a click transaction.
+    ConfirmTransaction(clientbound::ConfirmTransaction),
 }
 
 /// What one clientbound packet produced.
@@ -354,6 +370,45 @@ impl PlaySession {
             }
             clientbound::MultiBlockChange::ID => {
                 Reaction::event(PlayEvent::MultiBlockChange(MultiBlockChange::decode(body)?))
+            }
+            clientbound::OpenWindow::ID => {
+                Reaction::event(PlayEvent::OpenWindow(OpenWindow::decode(body)?))
+            }
+            clientbound::CloseWindow::ID => {
+                let packet = clientbound::CloseWindow::decode(body)?;
+                Reaction::event(PlayEvent::CloseWindow {
+                    window_id: packet.window_id,
+                })
+            }
+            clientbound::SetSlot::ID => {
+                Reaction::event(PlayEvent::SetSlot(clientbound::SetSlot::decode(body)?))
+            }
+            clientbound::WindowItems::ID => {
+                Reaction::event(PlayEvent::WindowItems(WindowItems::decode(body)?))
+            }
+            clientbound::WindowProperty::ID => {
+                Reaction::event(PlayEvent::WindowProperty(WindowProperty::decode(body)?))
+            }
+            clientbound::ConfirmTransaction::ID => {
+                let packet = clientbound::ConfirmTransaction::decode(body)?;
+                if packet.accepted {
+                    Reaction::event(PlayEvent::ConfirmTransaction(packet))
+                } else {
+                    Reaction {
+                        event: Some(PlayEvent::ConfirmTransaction(packet)),
+                        replies: [
+                            Some(PlayServerbound::ConfirmTransaction(
+                                umicraft_protocol::packets::play::serverbound::ConfirmTransaction {
+                                    window_id: packet.window_id as i8,
+                                    action_number: packet.action_number,
+                                    accepted: false,
+                                },
+                            )),
+                            None,
+                        ],
+                        kick_reason: None,
+                    }
+                }
             }
             clientbound::Disconnect::ID => {
                 let packet = clientbound::Disconnect::decode(body)?;
@@ -735,6 +790,109 @@ mod tests {
         assert_eq!(reaction.kick_reason(), Some("session over"));
         assert_eq!(reaction.replies().count(), 0);
         assert_eq!(reaction.into_event(), None);
+    }
+
+    #[test]
+    fn open_window_becomes_its_event() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let packet = clientbound::OpenWindow {
+            window_id: 1,
+            window_type: "minecraft:chest".to_string(),
+            title: r#"{"text":"Chest"}"#.to_string(),
+            slot_count: 27,
+            entity_id: None,
+        };
+        let ev = event(&mut session, PlayClientbound::OpenWindow(packet.clone()));
+        assert_eq!(ev, PlayEvent::OpenWindow(packet));
+    }
+
+    #[test]
+    fn close_window_carries_the_window_id() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let ev = event(
+            &mut session,
+            PlayClientbound::CloseWindow(clientbound::CloseWindow { window_id: 3 }),
+        );
+        assert_eq!(ev, PlayEvent::CloseWindow { window_id: 3 });
+    }
+
+    #[test]
+    fn set_slot_becomes_its_event() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let packet = clientbound::SetSlot {
+            window_id: 0,
+            slot: 36,
+            item: ItemStack {
+                item_id: 276,
+                stack_size: 1,
+                damage: 0,
+                nbt: None,
+            },
+        };
+        let ev = event(&mut session, PlayClientbound::SetSlot(packet.clone()));
+        assert_eq!(ev, PlayEvent::SetSlot(packet));
+    }
+
+    #[test]
+    fn window_items_becomes_its_event() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let packet = clientbound::WindowItems {
+            window_id: 0,
+            items: vec![ItemStack::EMPTY; 45],
+        };
+        let ev = event(&mut session, PlayClientbound::WindowItems(packet.clone()));
+        assert_eq!(ev, PlayEvent::WindowItems(packet));
+    }
+
+    #[test]
+    fn window_property_becomes_its_event() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let packet = clientbound::WindowProperty {
+            window_id: 1,
+            property: 0,
+            value: 200,
+        };
+        let ev = event(&mut session, PlayClientbound::WindowProperty(packet));
+        assert_eq!(ev, PlayEvent::WindowProperty(packet));
+    }
+
+    #[test]
+    fn an_accepted_transaction_is_forwarded_without_a_reply() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let packet = clientbound::ConfirmTransaction {
+            window_id: 0,
+            action_number: 1,
+            accepted: true,
+        };
+        let ev = event(&mut session, PlayClientbound::ConfirmTransaction(packet));
+        assert_eq!(ev, PlayEvent::ConfirmTransaction(packet));
+    }
+
+    #[test]
+    fn a_rejected_transaction_is_echoed_back_and_forwarded() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let packet = clientbound::ConfirmTransaction {
+            window_id: 2,
+            action_number: 5,
+            accepted: false,
+        };
+        let reaction = react(&mut session, PlayClientbound::ConfirmTransaction(packet));
+        let replies: Vec<_> = reaction.replies().cloned().collect();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(
+            replies[0],
+            PlayServerbound::ConfirmTransaction(
+                umicraft_protocol::packets::play::serverbound::ConfirmTransaction {
+                    window_id: 2,
+                    action_number: 5,
+                    accepted: false,
+                }
+            )
+        );
+        assert_eq!(
+            reaction.into_event(),
+            Some(PlayEvent::ConfirmTransaction(packet))
+        );
     }
 
     #[test]

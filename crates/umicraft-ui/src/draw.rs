@@ -63,6 +63,19 @@ pub enum DrawCommand {
         /// Scale and colour of the run.
         style: TextStyle,
     },
+    /// Draw a sub-region of the GUI texture atlas onto `dst`.
+    ///
+    /// `src` is `[u_min, v_min, u_max, v_max]` in normalised atlas
+    /// coordinates. The renderer samples the RGBA GUI atlas (not the font
+    /// atlas) and multiplies by `color` for tinting.
+    Image {
+        /// Source UV rectangle in the GUI atlas.
+        src: [f32; 4],
+        /// Destination rectangle in physical pixels.
+        dst: Rect,
+        /// Tint colour multiplied with the texel (white = unmodified).
+        color: Color,
+    },
     /// Clip every following command to `rect` until the matching
     /// [`DrawCommand::PopClip`].
     PushClip {
@@ -149,6 +162,14 @@ impl DrawList {
             text: text.into(),
             style,
         });
+    }
+
+    /// Appends a textured rectangle from the GUI atlas.
+    ///
+    /// `src` is `[u_min, v_min, u_max, v_max]` in normalised atlas
+    /// coordinates. `color` tints the texel (`[1.0; 4]` = unmodified).
+    pub fn image(&mut self, src: [f32; 4], dst: Rect, color: Color) {
+        self.commands.push(DrawCommand::Image { src, dst, color });
     }
 
     /// Starts a clip scope.

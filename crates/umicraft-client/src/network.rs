@@ -18,8 +18,9 @@ use umicraft_net::login::login_offline;
 use umicraft_net::play::{drive, PlayOptions, PlaySession, SessionCounters, SessionEnd};
 use umicraft_net::{Connection, NetError};
 use umicraft_protocol::packets::play::serverbound::{
-    self, DiggingStatus, HeldItemChange as ServerHeldItemChange, Input, PlayerBlockPlacement,
-    PlayerDigging, PlayerLook, PlayerPosition, PositionLook as ServerPositionLook,
+    self, ClickWindow as ServerClickWindow, CloseWindow as ServerCloseWindow, DiggingStatus,
+    HeldItemChange as ServerHeldItemChange, Input, PlayerBlockPlacement, PlayerDigging, PlayerLook,
+    PlayerPosition, PositionLook as ServerPositionLook,
 };
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_protocol::PlayServerbound;
@@ -163,6 +164,26 @@ pub enum ClientCommand {
         /// The message, with the leading slash of a command.
         message: String,
     },
+    /// `Close Window` (0x0D): the client closes a container window.
+    CloseWindow {
+        /// The window id (0 for the player inventory).
+        window_id: i8,
+    },
+    /// `Click Window` (0x0E): a slot interaction.
+    ClickWindow {
+        /// The window id.
+        window_id: i8,
+        /// The clicked slot (-999 for outside).
+        slot: i16,
+        /// The button (left=0, right=1, …).
+        button: i8,
+        /// The action number for transaction tracking.
+        action_number: i16,
+        /// The click mode.
+        mode: i8,
+        /// The item in the clicked slot.
+        clicked_item: ItemStack,
+    },
 }
 
 impl ClientCommand {
@@ -259,6 +280,24 @@ impl ClientCommand {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
             }
             Self::Chat { message } => PlayServerbound::Chat(serverbound::Chat { message }),
+            Self::CloseWindow { window_id } => {
+                PlayServerbound::CloseWindow(ServerCloseWindow { window_id })
+            }
+            Self::ClickWindow {
+                window_id,
+                slot,
+                button,
+                action_number,
+                mode,
+                clicked_item,
+            } => PlayServerbound::ClickWindow(ServerClickWindow {
+                window_id,
+                slot,
+                button,
+                action_number,
+                mode,
+                clicked_item,
+            }),
         }
     }
 }
