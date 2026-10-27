@@ -442,6 +442,10 @@ Native dynamic libraries run with the user's privileges. Therefore:
 
 ## 12. Roadmap
 
+> **Superseded 2026-10-26.** The accepted roadmap is [`ROADMAP.md`](ROADMAP.md):
+> vanilla 1.8.8 parity first (P0–P13), then accounts, performance, modding and
+> release (F1–F4). The milestone plan below is kept for traceability only.
+
 Each milestone has **deliverables** and **acceptance criteria**. Do not start a milestone's optimization work before its functional criteria pass.
 
 ### 12.1 Milestone order
