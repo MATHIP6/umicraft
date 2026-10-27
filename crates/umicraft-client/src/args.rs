@@ -96,7 +96,8 @@ options:
   --collect-secs N    world collection time for screenshots (default: 8)
   --headless          run a scripted session without a window and print a report
   --play-secs N       duration of the headless session (default: 60)
-  --script NAME       headless script: default (walk, break, place) or idle
+  --script NAME       headless script: default (walk, break, place), idle, or
+                      movement (the 60 s parity-harness script)
   --chat MESSAGE      chat line the headless session sends when it is placed
   --ui-demo           drive the scripted M4 debug screen without a server or GPU;
                       combine with --screenshot to render the same screen offscreen
@@ -116,7 +117,7 @@ options:
   --help, -h          print this help";
 
 /// The scripted sessions the headless mode knows.
-pub const SCRIPTS: [&str; 2] = ["default", "idle"];
+pub const SCRIPTS: [&str; 3] = ["default", "idle", "movement"];
 
 /// The top-level mode selected by the parsed arguments.
 ///
