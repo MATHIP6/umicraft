@@ -19,8 +19,8 @@ use umicraft_net::play::{drive, PlayOptions, PlaySession, SessionCounters, Sessi
 use umicraft_net::{Connection, NetError};
 use umicraft_protocol::packets::play::serverbound::{
     self, ClickWindow as ServerClickWindow, CloseWindow as ServerCloseWindow, DiggingStatus,
-    HeldItemChange as ServerHeldItemChange, Input, PlayerBlockPlacement, PlayerDigging, PlayerLook,
-    PlayerPosition, PositionLook as ServerPositionLook,
+    EntityActionKind, HeldItemChange as ServerHeldItemChange, Input, PlayerBlockPlacement,
+    PlayerDigging, PlayerLook, PlayerPosition, PositionLook as ServerPositionLook,
 };
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_protocol::PlayServerbound;
@@ -51,8 +51,9 @@ pub struct NetworkConfig {
 /// A serverbound packet the game thread wants the socket to send.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientCommand {
-    /// `Input` (0x0C): the movement keys of the current tick.
+    /// `Steer Vehicle` (0x0C): the movement keys of a riding player.
     ///
+    /// Vanilla only sends it while riding (MCP `EntityPlayerSP.onUpdate`).
     /// The values are the raw wire values: the sneak scaling of MCP
     /// `MovementInputFromOptions.java` is already applied, the `0.98` damping
     /// of `EntityLivingBase.java:2020` is applied by the game logic and
@@ -66,6 +67,18 @@ pub enum ClientCommand {
         jumping: bool,
         /// Whether the sneak key is held.
         sneaking: bool,
+    },
+    /// `Player` (0x03): a tick without movement or turn, only the ground flag.
+    Player {
+        /// Whether the player rests on the ground.
+        on_ground: bool,
+    },
+    /// `Entity Action` (0x0B): a sprint or sneak transition of the player.
+    EntityAction {
+        /// The entity id of the player.
+        entity_id: i32,
+        /// The transition.
+        action: EntityActionKind,
     },
     /// `Player Position` (0x04): the feet position and the ground flag.
     PlayerPosition {
@@ -202,6 +215,16 @@ impl ClientCommand {
                 jumping,
                 sneaking,
             }),
+            Self::Player { on_ground } => {
+                PlayServerbound::Player(serverbound::Player { on_ground })
+            }
+            Self::EntityAction { entity_id, action } => {
+                PlayServerbound::EntityAction(serverbound::EntityAction {
+                    entity_id,
+                    action,
+                    aux_data: 0,
+                })
+            }
             Self::PlayerPosition { x, y, z, on_ground } => {
                 PlayServerbound::PlayerPosition(PlayerPosition { x, y, z, on_ground })
             }
