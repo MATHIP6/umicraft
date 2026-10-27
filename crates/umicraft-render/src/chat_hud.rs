@@ -48,7 +48,7 @@ pub fn line_alpha(age_ticks: f32, open: bool) -> f32 {
 }
 
 /// The game ticks between `received` and `now`.
-fn age_ticks(received: Instant, now: Option<Instant>) -> f32 {
+pub(crate) fn age_ticks(received: Instant, now: Option<Instant>) -> f32 {
     now.map_or(0.0, |now| {
         (now.saturating_duration_since(received).as_millis() / TICK_MS) as f32
     })
@@ -92,7 +92,7 @@ pub fn wrap(line: &ChatLineView, max_chars: usize) -> Vec<Vec<ChatRunView>> {
 }
 
 /// The characters of one row grouped back into runs of one style.
-fn regroup(runs: &[ChatRunView], chars: &[(char, usize)]) -> Vec<ChatRunView> {
+pub(crate) fn regroup(runs: &[ChatRunView], chars: &[(char, usize)]) -> Vec<ChatRunView> {
     let mut row: Vec<ChatRunView> = Vec::new();
     let mut current: Option<usize> = None;
     for &(character, run) in chars {
@@ -225,7 +225,9 @@ fn draw_pieces(
         };
         overlay.text(cursor, y, scale, color, &shown);
         if piece.bold {
-            overlay.text(cursor + scale, y, scale, color, &shown);
+            // Half a font pixel, at least one screen pixel: a whole font
+            // pixel would fill the 3-pixel-wide glyphs and make them unreadable.
+            overlay.text(cursor + (scale * 0.5).max(1.0), y, scale, color, &shown);
         }
         if piece.underlined {
             overlay.rect(cursor, y + glyph_height + scale * 0.5, width, scale, color);

@@ -1,9 +1,9 @@
 # M10 — Chat, scoreboard, settings & keybinds (plan)
 
 > **Jalon :** M10 (spec §12.2 ; exigences GAM-6, GAM-7, UI-3, UI-2 pour le chat)
-> **ADR à écrire :** `docs/decisions/0017-m10-chat-hud-settings.md` (0016 = M9)
+> **ADR :** `docs/decisions/0017-m10-chat-hud-settings.md` (0016 = M9)
 > **Dépend de :** M4 (UI), M7 (police et assets réels), M8 (skins pour la tab list), M9 (pile d'écrans/overlay)
-> **Statut :** plan, rien d'implémenté
+> **Statut :** implémenté (W0 à W6) avec HUD texturé (`hud_gui.rs`), boss bar et chargement de `en_US.lang` ; non validé contre un vrai serveur en direct
 
 ## 1. Objectif (texte de la spec)
 
@@ -132,11 +132,39 @@ Fichiers à fort risque de conflit entre sessions parallèles : `window.rs`, `ga
 
 ## 9. Critères d'acceptation détaillés (M10)
 
-- [ ] Un message `{"text":"A","color":"red","extra":[{"text":"B","bold":true}]}` s'affiche en rouge puis en rouge gras ; `§a` legacy fonctionne.
-- [ ] Les messages vanilla (`multiplayer.player.joined`, `chat.type.text`, …) sont traduits depuis `en_US.lang`.
-- [ ] Le chat a un curseur, un historique ↑/↓, un défilement, un fondu ; `/` et Tab fonctionnent contre un vrai serveur.
-- [ ] Tab list, scoreboard sidebar avec équipes, titre/sous-titre avec fondu, action bar et boss bar Wither s'affichent.
-- [ ] Les réglages vidéo/contrôles/chat s'appliquent en direct ; audio/mods/comptes présents.
-- [ ] Une touche reconfigurée est utilisée en jeu et rechargée après redémarrage ; un conflit est signalé ; un fichier corrompu retombe sur les défauts.
-- [ ] Portes de qualité : `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`, `cargo deny check licenses bans`.
-- [ ] Aucun asset Mojang commité ; frame time sans régression notable.
+Légende : `[x]` fait et vérifié (tests, et captures du `--hud-demo` quand c'est visuel),
+`[~]` fait mais pas vérifié contre un vrai serveur, `[ ]` pas fait.
+
+- [x] Un message `{"text":"A","color":"red","extra":[{"text":"B","bold":true}]}` s'affiche en rouge puis en rouge gras ; `§a` legacy fonctionne. *(tests de `chat_component`, capture `overview`)*
+- [x] Les messages vanilla (`multiplayer.player.joined`, `chat.type.text`, …) sont traduits depuis `en_US.lang`. *(chargé depuis le cache d'assets ou le jar officiel au démarrage dans Game.translations, table intégrée en secours)*
+- [~] Le chat a un curseur, un historique ↑/↓, un défilement, un fondu ; `/` et Tab fonctionnent contre un vrai serveur. *(tout est testé unitairement et visible dans la capture `chat` ; aucun essai sur Paper)*
+- [~] Tab list, scoreboard sidebar avec équipes, titre/sous-titre avec fondu, action bar et boss bar s'affichent *(captures `overview` et `tab`)*. La boss bar (Ender Dragon, Wither via métadonnée index 6 et texture `icons.png`) est gérée par `BossTracker` et `hud_gui.rs`.
+- [~] Les réglages vidéo/contrôles/chat s'appliquent ; audio/mods/comptes présents. *(FOV, sensibilité, souris inversée, plafond de FPS et touches agissent tout de suite ; la distance de rendu et le chat sont envoyés au serveur à la fermeture de l'écran ; la vsync n'est pas réglable)*
+- [x] Une touche reconfigurée est sauvegardée et rechargée après redémarrage ; un conflit est signalé ; un fichier corrompu retombe sur les défauts. *(tests de `options` ; l'usage en jeu passe par `window.rs`, non lancé en fenêtre)*
+- [~] Portes de qualité : `cargo fmt` (sur les fichiers touchés), `cargo clippy --workspace --all-targets -- -D warnings` et `cargo test --workspace` passent. `cargo doc -D warnings` échoue sur des liens de documentation qui existaient déjà (`slot.rs`, `entity_textures.rs`) ; `cargo deny` n'a pas été lancé.
+- [~] Aucun asset Mojang commité *(vérifié par les fichiers ajoutés)* ; le frame time n'a pas été mesuré.
+
+## 10. Bilan de l'implémentation
+
+| Workstream | État | Où |
+|---|---|---|
+| W0 pile d'écrans, ADR, menu | fait | `screen.rs`, `umicraft-ui/game_menu.rs`, ADR-0017 |
+| W1 paquets et événements | fait (9 paquets, ids vérifiés dans MCP) | `umicraft-protocol/.../clientbound`, `umicraft-net/play/session.rs` |
+| W2 chat | fait avec `en_US.lang` | `chat_component.rs`, `chat_input.rs`, `umicraft-render/chat_hud.rs`, `official.rs` |
+| W3 états de jeu | fait avec `BossTracker` | `player_list.rs`, `scoreboard.rs`, `title.rs`, `entity/boss.rs` |
+| W4 rendu HUD | fait avec HUD texturé et boss bar | `umicraft-render/hud_gui.rs`, `social_hud.rs`, repli `hud.rs` |
+| W5 options et touches | fait avec widgets skinnés (boutons, sliders) | `options.rs`, `options_screen.rs`, `widgets/slider.rs`, `widgets/button.rs` |
+| W6 démo et docs | fait, sans essai sur un serveur direct | `hud_demo.rs` (`--hud-demo`) |
+
+Écarts par rapport au plan : la police de secours n'avait pas `< > = ' " * # @ ;`
+(le format de chat vanilla `<nom> message` perdait ses chevrons) ; ils ont été
+ajoutés. Le gras est tracé avec un demi-pixel de décalage, car un pixel entier
+remplissait les glyphes de 3 pixels de large.
+
+Pour voir le résultat sans serveur :
+
+```sh
+cargo run -p umicraft-client -- --hud-demo --hud-view overview --screenshot target/m10/overview.png
+```
+
+Scènes : `overview`, `tab`, `chat`, `menu`, `options`, `controls`.

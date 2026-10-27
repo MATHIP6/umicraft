@@ -11,10 +11,12 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use umicraft_game::chat_input::{push_sent, ChatInput, TabOutcome};
-use umicraft_render::{draw_hud, Camera, ChatInputView, HudState, Overlay, Renderer};
+use umicraft_render::{
+    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudState, Overlay, Renderer,
+};
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{
     container_layout, player_inventory_layout, slot, ContainerLayout, InventoryLayout, SlotItem,
@@ -36,13 +38,20 @@ use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
+use crate::options::{self, Action, Options};
+use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
 use crate::screen::Screen;
 use crate::terrain_textures::TerrainTextures;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
 
+/// The look speed at the default sensitivity, in radians per pixel; the
+/// sensitivity option scales it.
 const MOUSE_SENSITIVITY: f32 = 0.0022;
+/// The render distance `--view-distance` has when it is not given. Any other
+/// value on the command line overrides the saved option.
+const CLI_DEFAULT_VIEW_DISTANCE: u8 = 8;
 /// How long the chat caret stays on, then off, in milliseconds (6 ticks).
 const CARET_BLINK_MS: u128 = 300;
 /// Rows a Page Up or Page Down scrolls the open chat.
@@ -63,15 +72,27 @@ pub fn run(args: Args) -> Result<(), ClientError> {
     let (host, port) = args.server().ok_or_else(|| {
         ClientError::Network("the windowed client needs a host and port".to_string())
     })?;
+    let options_path = options::default_path();
+    let mut options = options_path
+        .as_deref()
+        .map(Options::load)
+        .unwrap_or_default();
+    // A render distance typed on the command line wins over the saved one.
+    if args.view_distance != CLI_DEFAULT_VIEW_DISTANCE {
+        options.video.render_distance = args.view_distance;
+        options.clamp();
+    }
     let session = Session::start(NetworkConfig {
         host: host.to_string(),
         port,
         name: args.name.clone(),
-        view_distance: args.view_distance,
+        view_distance: options.video.render_distance,
+        chat_mode: options.chat.visibility.wire(),
+        chat_colors: options.chat.colors,
     })?;
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new(args, session)?;
+    let mut app = App::new(args, session, options, options_path)?;
     event_loop
         .run_app(&mut app)
         .map_err(|error| ClientError::Window(error.to_string()))?;
@@ -83,6 +104,17 @@ pub fn run(args: Args) -> Result<(), ClientError> {
 
 struct App {
     args: Args,
+    /// The user's options: video, mouse, chat and the key bindings.
+    options: Options,
+    /// Where the options are saved, when the platform has a data folder.
+    options_path: Option<std::path::PathBuf>,
+    /// The options as they are on disk and known to the server, to tell what
+    /// changed when the options screen closes.
+    saved_options: Options,
+    /// The options screen, shown while [`Screen::Options`] is current.
+    options_screen: OptionsScreen,
+    /// What the options screen did in the last UI frame, applied by `redraw`.
+    options_outcome: OptionsOutcome,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     camera: Camera,
@@ -143,7 +175,12 @@ struct App {
 }
 
 impl App {
-    fn new(args: Args, session: Session) -> Result<Self, ClientError> {
+    fn new(
+        args: Args,
+        session: Session,
+        options: Options,
+        options_path: Option<std::path::PathBuf>,
+    ) -> Result<Self, ClientError> {
         // Assets are loaded once, before any worker or GPU resource exists.
         // A missing/corrupt installation picks the procedural set.
         let terrain = Some(TerrainTextures::load_with_packs(&args.resource_packs));
@@ -151,6 +188,11 @@ impl App {
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
             args,
+            saved_options: options.clone(),
+            options,
+            options_path,
+            options_screen: OptionsScreen::new(),
+            options_outcome: OptionsOutcome::default(),
             window: None,
             renderer: None,
             camera: Camera::default(),
@@ -231,6 +273,10 @@ impl App {
                 self.handle_menu_key(event);
                 return;
             }
+            Screen::Options => {
+                self.handle_options_key(event);
+                return;
+            }
             Screen::None => {}
         }
         match event.state {
@@ -240,25 +286,45 @@ impl App {
                         KeyCode::Escape => self.set_screen(Screen::None.after_escape()),
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
                         KeyCode::F4 => self.reload_resources(),
-                        KeyCode::KeyT => {
-                            if self.keys.contains(&KeyCode::F3) {
-                                self.reload_resources();
-                            } else {
-                                self.open_chat("");
-                            }
+                        // F3 + T reloads the resource packs, whatever the
+                        // chat key is bound to.
+                        KeyCode::KeyT if self.keys.contains(&KeyCode::F3) => {
+                            self.reload_resources();
                         }
-                        KeyCode::Slash => self.open_chat("/"),
-                        KeyCode::KeyE => self.set_screen(Screen::Inventory),
-                        _ => {}
-                    }
-                    if let Some(slot) = hotbar_slot(code) {
-                        self.select_slot = Some(slot);
+                        _ => self.press_bound_key(code),
                     }
                 }
                 self.keys.insert(code);
             }
             ElementState::Released => {
                 self.keys.remove(&code);
+            }
+        }
+    }
+
+    /// Whether the key bound to `action`, or its left/right twin, is held.
+    fn held(&self, action: Action) -> bool {
+        let key = self.options.keys.get(action);
+        self.keys.contains(&key) || modifier_twin(key).is_some_and(|twin| self.keys.contains(&twin))
+    }
+
+    /// Runs the actions bound to a key that was just pressed.
+    fn press_bound_key(&mut self, code: KeyCode) {
+        let actions: Vec<Action> = self.options.keys.actions_for(code).collect();
+        for action in actions {
+            // An action that opened a screen takes the key; the others wait.
+            if self.screen != Screen::None {
+                break;
+            }
+            match action {
+                Action::Chat => self.open_chat(""),
+                Action::Command => self.open_chat("/"),
+                Action::Inventory => self.set_screen(Screen::Inventory),
+                other => {
+                    if let Some(slot) = other.hotbar_slot() {
+                        self.select_slot = Some(slot);
+                    }
+                }
             }
         }
     }
@@ -321,6 +387,68 @@ impl App {
         }
     }
 
+    /// Handles a key while the options screen is open. While a key binding
+    /// waits for its key, the next press is the key (Escape gives up).
+    fn handle_options_key(&mut self, event: KeyEvent) {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return;
+        };
+        let pressed = event.state == ElementState::Pressed && !event.repeat;
+        if self.options_screen.capturing().is_some() {
+            if pressed {
+                if code == KeyCode::Escape {
+                    self.options_screen.cancel_capture();
+                } else {
+                    self.options_screen.capture_key(&mut self.options, code);
+                }
+            }
+            return;
+        }
+        if pressed && code == KeyCode::Escape {
+            self.close_options();
+            return;
+        }
+        self.ui_input.key(code, event.state, event.text.as_deref());
+    }
+
+    /// Writes the options to disk when they changed since the last write.
+    fn save_options(&mut self) {
+        if self.options == self.saved_options {
+            return;
+        }
+        if let Some(path) = &self.options_path {
+            if let Err(error) = self.options.save(path) {
+                tracing::warn!(path = %path.display(), %error, "could not save the options");
+            }
+        }
+        self.saved_options = self.options.clone();
+    }
+
+    /// Closes the options screen: saves the options, tells the server about
+    /// a changed render distance or chat setting, and goes back to the menu.
+    fn close_options(&mut self) {
+        self.options_screen.cancel_capture();
+        self.options.clamp();
+        let server_settings = |options: &Options| {
+            (
+                options.video.render_distance,
+                options.chat.visibility.wire(),
+                options.chat.colors,
+            )
+        };
+        let changed = server_settings(&self.options) != server_settings(&self.saved_options);
+        self.save_options();
+        if changed {
+            let (view_distance, chat_mode, chat_colors) = server_settings(&self.options);
+            let _ = self.session.events().try_send(GameEvent::ClientSettings {
+                view_distance,
+                chat_mode,
+                chat_colors,
+            });
+        }
+        self.set_screen(Screen::GameMenu);
+    }
+
     /// Handles a key press while the game menu is open.
     fn handle_menu_key(&mut self, event: KeyEvent) {
         let PhysicalKey::Code(code) = event.physical_key else {
@@ -347,13 +475,9 @@ impl App {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
-        if event.state == ElementState::Pressed && !event.repeat {
-            match code {
-                KeyCode::Escape | KeyCode::KeyE => {
-                    self.close_inventory();
-                }
-                _ => {}
-            }
+        let closes = code == KeyCode::Escape || code == self.options.keys.get(Action::Inventory);
+        if event.state == ElementState::Pressed && !event.repeat && closes {
+            self.close_inventory();
         }
         // Forward to the UI translator so slot-click-by-number-key works.
         self.ui_input.key(code, event.state, event.text.as_deref());
@@ -488,23 +612,21 @@ impl App {
             return InputState::default();
         }
         let mut state = InputState::default();
-        if self.keys.contains(&KeyCode::KeyW) {
+        if self.held(Action::Forward) {
             state.forward += 1.0;
         }
-        if self.keys.contains(&KeyCode::KeyS) {
+        if self.held(Action::Back) {
             state.forward -= 1.0;
         }
-        if self.keys.contains(&KeyCode::KeyA) {
+        if self.held(Action::Left) {
             state.strafe += 1.0;
         }
-        if self.keys.contains(&KeyCode::KeyD) {
+        if self.held(Action::Right) {
             state.strafe -= 1.0;
         }
-        state.jump = self.keys.contains(&KeyCode::Space);
-        state.sneak =
-            self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
-        state.sprint =
-            self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
+        state.jump = self.held(Action::Jump);
+        state.sneak = self.held(Action::Sneak);
+        state.sprint = self.held(Action::Sprint);
         state
     }
 
@@ -569,11 +691,12 @@ impl App {
         }
         let meshes = self.renderer.as_ref().map_or(0, Renderer::mesh_count);
         let faces = self.world.as_ref().map_or(0, WorldView::face_count);
-        let game_hud = self
+        let mut game_hud = self
             .world
             .as_ref()
             .map(|world| world.hud().clone())
             .unwrap_or_default();
+        self.options.chat.apply(&mut game_hud);
         let position = self.camera.position;
         let yaw = self.camera.yaw.to_degrees();
         let pitch = self.camera.pitch.to_degrees();
@@ -605,10 +728,17 @@ impl App {
             }),
             now: Some(Instant::now()),
             // The tab list shows while the key is held and no screen is open.
-            show_tab_list: self.screen() == Screen::None && self.keys.contains(&KeyCode::Tab),
+            show_tab_list: self.screen() == Screen::None && self.held(Action::PlayerList),
             ..game_hud
         };
-        draw_hud(&mut self.overlay, &hud, width, height);
+
+        let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
+        if self.ui_atlas.is_some() && sheets.is_complete() {
+            draw_debug_only(&mut self.overlay, &hud, width, height);
+        } else {
+            draw_hud(&mut self.overlay, &hud, width, height);
+        }
+
         let graph_width = 240.0_f32.min(width as f32 - 20.0);
         let graph_height = 40.0_f32.min(height as f32 - 70.0);
         if graph_width > 0.0 && graph_height > 0.0 {
@@ -623,24 +753,59 @@ impl App {
     }
 
     /// Builds one UI frame from the render-side snapshot, or returns `None`
-    /// while no UI modal is open.
+    /// while no UI modal is open and the textured HUD is inactive.
     ///
     /// The frame is built on the render thread during redraw, after the HUD
     /// overlay, so the UI never touches the game thread or its state. The
     /// caller recycles the returned output after the renderer consumed the
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
+        let atlas = self.ui_atlas.as_ref()?;
+        let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
         let screen = self.screen();
-        if !screen.uses_ui() {
+        let textured_hud = sheets.is_complete();
+        if !textured_hud && !screen.uses_ui() {
             return None;
         }
-        let atlas = self.ui_atlas.as_ref()?;
+
         let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
         let input = self.ui_input.take();
         self.ui.begin_frame(viewport, input);
+        self.ui.set_widgets_sheet(sheets.widgets);
+
+        if textured_hud {
+            let mut game_hud = self
+                .world
+                .as_ref()
+                .map(|world| world.hud().clone())
+                .unwrap_or_default();
+            self.options.chat.apply(&mut game_hud);
+            let chatting = self.screen == Screen::Chat;
+            let hud = HudState {
+                debug_lines: Vec::new(),
+                chat_open: chatting,
+                chat_scroll: self.chat_scroll,
+                chat_input: chatting.then(|| ChatInputView {
+                    text: self.chat_input.text(),
+                    caret: self.chat_input.caret(),
+                    caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
+                        .is_multiple_of(2),
+                }),
+                now: Some(Instant::now()),
+                show_tab_list: self.screen() == Screen::None && self.held(Action::PlayerList),
+                ..game_hud
+            };
+            draw_hud_gui(self.ui.draw(), &hud, (width, height), atlas, &sheets);
+        }
+
         match screen {
             Screen::Debug => self.debug_screen.show(&mut self.ui, atlas),
             Screen::GameMenu => self.menu_action = self.game_menu.show(&mut self.ui, atlas),
+            Screen::Options => {
+                self.options_outcome =
+                    self.options_screen
+                        .show(&mut self.ui, atlas, &mut self.options);
+            }
             Screen::Inventory => {
                 let wv = self.world.as_ref().map(|w| w.window_view().clone());
                 if let Some(wv) = wv {
@@ -679,13 +844,14 @@ impl App {
             self.frame_times.remove(0);
         }
 
+        self.camera.set_fov_degrees(self.options.video.fov);
         self.sync_world(now);
         self.process_completions();
         self.publish_input();
         let environment = self
             .world
             .as_ref()
-            .map(|world| world.environment(now, self.args.view_distance))
+            .map(|world| world.environment(now, self.options.video.render_distance))
             .unwrap_or_default();
         self.build_overlay();
 
@@ -705,11 +871,16 @@ impl App {
                 self.set_screen(Screen::None);
                 self.capture_mouse(true);
             }
+            Some(GameMenuAction::Options) => self.set_screen(Screen::Options),
             Some(GameMenuAction::Quit) => {
+                self.save_options();
                 event_loop.exit();
                 return;
             }
             None => {}
+        }
+        if std::mem::take(&mut self.options_outcome).done {
+            self.close_options();
         }
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -735,6 +906,13 @@ impl App {
             self.exit_error = Some(error.to_string());
             event_loop.exit();
             return;
+        }
+        // The frame-rate cap: wait out what is left of the frame budget.
+        if self.options.video.max_fps < options::UNLIMITED_FPS {
+            let budget = Duration::from_secs_f32(1.0 / self.options.video.max_fps as f32);
+            if let Some(rest) = budget.checked_sub(now.elapsed()) {
+                std::thread::sleep(rest);
+            }
         }
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -914,18 +1092,16 @@ fn draw_container_slots(
     }
 }
 
-/// The hotbar slot of a number key.
-fn hotbar_slot(code: KeyCode) -> Option<u8> {
-    match code {
-        KeyCode::Digit1 => Some(0),
-        KeyCode::Digit2 => Some(1),
-        KeyCode::Digit3 => Some(2),
-        KeyCode::Digit4 => Some(3),
-        KeyCode::Digit5 => Some(4),
-        KeyCode::Digit6 => Some(5),
-        KeyCode::Digit7 => Some(6),
-        KeyCode::Digit8 => Some(7),
-        KeyCode::Digit9 => Some(8),
+/// The key on the other side of the keyboard that counts as the same
+/// modifier: holding either Shift, Control or Alt triggers the binding.
+fn modifier_twin(key: KeyCode) -> Option<KeyCode> {
+    match key {
+        KeyCode::ShiftLeft => Some(KeyCode::ShiftRight),
+        KeyCode::ShiftRight => Some(KeyCode::ShiftLeft),
+        KeyCode::ControlLeft => Some(KeyCode::ControlRight),
+        KeyCode::ControlRight => Some(KeyCode::ControlLeft),
+        KeyCode::AltLeft => Some(KeyCode::AltRight),
+        KeyCode::AltRight => Some(KeyCode::AltLeft),
         _ => None,
     }
 }
@@ -1005,7 +1181,10 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.save_options();
+                event_loop.exit();
+            }
             WindowEvent::Resized(size) => self.resize(size.width, size.height),
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, event),
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -1094,8 +1273,14 @@ impl ApplicationHandler for App {
             if self.mouse_captured && !self.screen().blocks_game_input() {
                 // A positive delta moves the mouse to the right and down; the
                 // game logic turns right and looks down with it.
-                self.look.0 += delta.0 as f32 * MOUSE_SENSITIVITY;
-                self.look.1 += delta.1 as f32 * MOUSE_SENSITIVITY;
+                let speed = MOUSE_SENSITIVITY * self.options.controls.look_factor();
+                let vertical = if self.options.controls.invert_mouse {
+                    -1.0
+                } else {
+                    1.0
+                };
+                self.look.0 += delta.0 as f32 * speed;
+                self.look.1 += delta.1 as f32 * speed * vertical;
             }
         }
     }

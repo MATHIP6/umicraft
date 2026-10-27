@@ -1,6 +1,6 @@
 # ADR-0017 — M10: Chat, scoreboard, settings and keybinds
 
-- Status: Accepted for W0 (2026-10-26); W1 to W6 still to implement
+- Status: Accepted (2026-10-26); implemented in W0 to W6, see "Implementation notes" for what is left
 - Date: 2026-10-26
 - Deciders: project owner
 - Supersedes: none
@@ -90,3 +90,49 @@ The first five record the choices made when the plan was approved.
 Audio behind the audio tab (M11), accounts and the server list (M12), mods
 (M15), `show_item` and `show_entity` tooltips, glyphs outside the ASCII font
 page, gamepad input.
+
+## Implementation notes (2026-10-26)
+
+What was decided above and how it landed, and what differs from the plan.
+
+- **Options storage (decision 1).** `ConfigStore` is now used: by
+  `crates/umicraft-client/src/options.rs`, in the sections `[video]`,
+  `[controls]`, `[chat]` and `[keys]` of `options.toml` in the Umicraft data
+  folder (`umicraft_assets::cache::data_dir`). `ConfigStore::save` became
+  atomic (temporary file, then rename). A section that does not parse is
+  replaced by its defaults without touching the others, and every number is
+  clamped. The registry and the event bus of `umicraft-core` stay unused.
+- **Key bindings.** 20 actions (movement, sprint, sneak, jump, inventory, chat,
+  command, tab list, hotbar 1 to 9). `Escape` and `F1` to `F4` are reserved
+  and cannot be bound; two actions on one key are allowed and flagged on the
+  controls screen. The attack and use buttons are fixed on the mouse.
+- **`--view-distance`.** A value other than its default (8) overrides the saved
+  render distance at start-up, because the argument has no "not given" state.
+- **What the server is told.** The render distance and the chat visibility and
+  colours are sent in `Client Settings` at login (`PlayOptions.chat_mode`) and
+  again when the options screen closes, only if they changed. Sending them
+  while a slider is dragged would flood the server.
+- **The HUD uses textured rendering and the official font.** When the official
+  client jar is present, the HUD is rendered via `umicraft_render::hud_gui`
+  into a `DrawList` with textures from `widgets.png` and `icons.png` (hotbar,
+  selector, hearts, food, armor, XP bar & level in 0x80FF20 with black outline,
+  crosshair, ping bars, boss bar). If the jar or textures are missing, it falls
+  back to `draw_hud` with the built-in 3x5 font on the overlay.
+- **Textured UI buttons and sliders.** `umicraft-ui` widgets (`Button` and
+  `Slider`) support an optional `widgets.png` skin (tiled in two halves to fit
+  any dimensions, with custom 8px slider handles). Tab button labels
+  automatically adapt text scale to prevent any clipping under proportional fonts.
+- **Boss bar implemented.** `BossTracker` (`umicraft_game::entity::boss`) reads
+  DataWatcher float index 6 from the Ender Dragon (max health 200.0) or Wither
+  (max health 300.0) in `EntityStore`. It drives `HudState.boss` which is drawn
+  at (w/2-91, 12) from `icons.png` with centered name.
+- **`en_US.lang` loaded at startup.** Read from the Umicraft asset cache or
+  directly from `1.8.8.jar` (`assets/minecraft/lang/en_US.lang`) and merged
+  into `Game.translations` via `extend` (builtin table as fallback).
+- **Chat clicks and hover.** `clickEvent` and `show_text` are parsed and kept
+  on each run (decisions 2 and 5), but the chat has no pointer interaction, so
+  nothing acts on them yet and `open_url` is never followed.
+- **Not verified against a live server.** Everything is covered by unit tests
+  and by the server-less `--hud-demo`, which pushes scripted packets through
+  the real game code and renders the result; no session on Paper or
+  PandaSpigot was run.

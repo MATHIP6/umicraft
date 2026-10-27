@@ -189,6 +189,19 @@ impl EntityStore {
         }
     }
 
+    /// Sets an entity's health (from data watcher index 6).
+    pub fn set_health(&mut self, id: EntityId, health: f32) {
+        if let Some(entity) = self.entities.get_mut(&id) {
+            entity.health = Some(health);
+        }
+    }
+
+    /// Borrows the tracked entity records.
+    #[must_use]
+    pub fn entities(&self) -> &BTreeMap<EntityId, EntityRecord> {
+        &self.entities
+    }
+
     /// Advances the simulation by one tick (20 Hz).
     ///
     /// Position and rotation glide toward the server target over 3 ticks,

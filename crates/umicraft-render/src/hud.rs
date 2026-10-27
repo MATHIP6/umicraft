@@ -171,6 +171,17 @@ pub struct HudState {
     pub completions: Vec<String>,
     /// Counts the completion answers, so a new answer is told from the last.
     pub completions_serial: u64,
+    /// The boss bar of a Wither or an Ender Dragon in the world.
+    pub boss: Option<BossView>,
+}
+
+/// The boss bar at the top of the screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BossView {
+    /// The name drawn above the bar.
+    pub name: String,
+    /// The health as a fraction of the maximum, `0.0..=1.0`.
+    pub health: f32,
 }
 
 /// One styled piece of a chat line.
@@ -287,6 +298,7 @@ impl Default for HudState {
             show_tab_list: false,
             completions: Vec::new(),
             completions_serial: 0,
+            boss: None,
         }
     }
 }
@@ -784,6 +796,13 @@ fn draw_crosshair(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {
         vertical.height,
         CROSSHAIR,
     );
+}
+
+/// Draws only the debug block, for the textured HUD that draws everything
+/// else itself (see `hud_gui`).
+pub fn draw_debug_only(overlay: &mut Overlay, state: &HudState, width: u32, height: u32) {
+    let layout = HudLayout::new(width, height);
+    draw_debug(overlay, state, &layout);
 }
 
 fn draw_debug(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {

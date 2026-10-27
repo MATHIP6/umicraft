@@ -56,21 +56,45 @@ use super::style;
 pub fn button(ui: &mut Ui, id: WidgetId, rect: Rect, atlas: &FontAtlas, label: &str) -> UiResponse {
     let response = ui.response(id, rect);
 
-    let fill = if response.clicked {
-        style::BUTTON_PRESSED
-    } else if response.hovered {
-        style::BUTTON_HOVER
+    if let Some(sheet) = ui.widgets_sheet() {
+        let v_y = if response.clicked || response.hovered {
+            86
+        } else {
+            66
+        };
+        let half_w = (rect.width / 2.0).floor();
+        let other_half = rect.width - half_w;
+        let left_w = (half_w as u32).min(200);
+        let right_w = (other_half as u32).min(200);
+        let src_left = sheet.sub(0, v_y, left_w, 20);
+        let src_right = sheet.sub(200 - right_w, v_y, right_w, 20);
+        let dst_left = Rect::new(rect.x, rect.y, half_w, rect.height);
+        let dst_right = Rect::new(rect.x + half_w, rect.y, other_half, rect.height);
+        ui.draw().image(src_left, dst_left, [1.0; 4]);
+        ui.draw().image(src_right, dst_right, [1.0; 4]);
     } else {
-        style::BUTTON
-    };
-    ui.draw().rect(rect, fill);
+        let fill = if response.clicked {
+            style::BUTTON_PRESSED
+        } else if response.hovered {
+            style::BUTTON_HOVER
+        } else {
+            style::BUTTON
+        };
+        ui.draw().rect(rect, fill);
+    }
 
     if label.is_empty() || rect.is_empty() {
         return response;
     }
 
-    let scale = style::TEXT_SCALE;
-    let width = atlas.measure(label, scale);
+    let pad = 6.0;
+    let available = (rect.width - pad).max(0.0);
+    let mut scale = style::TEXT_SCALE;
+    let mut width = atlas.measure(label, scale);
+    if width > available && available > 0.0 {
+        scale = (scale * available / width).max(1.0);
+        width = atlas.measure(label, scale);
+    }
     let line_height = atlas.line_height(scale);
     let position = [
         rect.x + (rect.width - width).max(0.0) * 0.5,
@@ -78,9 +102,53 @@ pub fn button(ui: &mut Ui, id: WidgetId, rect: Rect, atlas: &FontAtlas, label: &
     ];
 
     ui.push_clip(rect);
-    ui.draw()
-        .text(position, label, TextStyle::new(scale, style::TEXT));
+    if ui.widgets_sheet().is_some() {
+        let (text_color, shadow_color) = if response.hovered {
+            ([1.0, 1.0, 0.627, 1.0], [0.25, 0.25, 0.15, 1.0])
+        } else {
+            ([0.878, 0.878, 0.878, 1.0], [0.22, 0.22, 0.22, 1.0])
+        };
+        ui.draw().text(
+            [position[0] + 1.0, position[1] + 1.0],
+            label,
+            TextStyle::new(scale, shadow_color),
+        );
+        ui.draw()
+            .text(position, label, TextStyle::new(scale, text_color));
+    } else {
+        ui.draw()
+            .text(position, label, TextStyle::new(scale, style::TEXT));
+    }
     ui.pop_clip();
 
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::draw::SpriteSheet;
+    use crate::input::UiInput;
+
+    #[test]
+    fn button_with_skin_draws_images() {
+        let viewport = Rect::new(0.0, 0.0, 320.0, 240.0);
+        let mut ui = Ui::new(viewport);
+        let sheet = SpriteSheet::new(0.0, 0.0, 1.0, 1.0, 256, 256);
+        ui.set_widgets_sheet(Some(sheet));
+        ui.begin_frame(viewport, UiInput::default());
+
+        let id = ui.id("test_btn");
+        let btn_rect = Rect::new(10.0, 10.0, 200.0, 20.0);
+        button(&mut ui, id, btn_rect, &FontAtlas::fallback(), "TEST");
+
+        let output = ui.end_frame();
+        let images = output
+            .draw_list
+            .commands()
+            .iter()
+            .filter(|cmd| matches!(cmd, crate::draw::DrawCommand::Image { .. }))
+            .count();
+        assert_eq!(images, 2);
+    }
 }

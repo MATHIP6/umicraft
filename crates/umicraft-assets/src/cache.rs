@@ -259,6 +259,15 @@ impl ObjectStore for AssetCache {
     }
 }
 
+/// The `umicraft` folder of the platform data directory: where the options
+/// file lives next to the asset cache (`%APPDATA%\umicraft` on Windows).
+///
+/// `None` when the platform data directory cannot be determined.
+#[must_use]
+pub fn data_dir() -> Option<PathBuf> {
+    platform_data_dir().map(|base| base.join("umicraft"))
+}
+
 /// The platform data directory, without the application folder.
 ///
 /// * Linux and the other Unix systems: `$XDG_DATA_HOME`, falling back to

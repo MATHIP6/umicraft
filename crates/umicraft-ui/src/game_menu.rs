@@ -27,6 +27,8 @@ const TITLE_SCALE: f32 = 3.0;
 const TITLE: &str = "GAME MENU";
 /// Label of the entry that closes the menu.
 const RESUME_LABEL: &str = "BACK TO GAME";
+/// Label of the entry that opens the options.
+const OPTIONS_LABEL: &str = "OPTIONS";
 /// Label of the entry that leaves the client.
 const QUIT_LABEL: &str = "QUIT";
 
@@ -35,6 +37,8 @@ const QUIT_LABEL: &str = "QUIT";
 pub enum GameMenuAction {
     /// Close the menu and return to the game.
     Resume,
+    /// Open the options screen.
+    Options,
     /// Disconnect and leave the client.
     Quit,
 }
@@ -43,6 +47,7 @@ pub enum GameMenuAction {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GameMenu {
     resume_rect: Rect,
+    options_rect: Rect,
     quit_rect: Rect,
 }
 
@@ -62,7 +67,7 @@ impl GameMenu {
         ui.draw().rect(viewport, style::SCREEN_BACKDROP);
 
         let title_height = atlas.line_height(TITLE_SCALE);
-        let height = title_height + 2.0 * BUTTON_HEIGHT + 2.0 * SPACING + 2.0 * PANEL_INSET;
+        let height = title_height + 3.0 * BUTTON_HEIGHT + 3.0 * SPACING + 2.0 * PANEL_INSET;
         let width = BUTTON_WIDTH + 2.0 * PANEL_INSET;
         let outer = Rect::new(
             viewport.x + (viewport.width - width) * 0.5,
@@ -74,12 +79,15 @@ impl GameMenu {
         let mut layout = Layout::vertical(content).with_spacing(SPACING);
         let title_rect = layout.next_fixed(title_height);
         let resume_rect = layout.next(content.width, BUTTON_HEIGHT);
+        let options_rect = layout.next(content.width, BUTTON_HEIGHT);
         let quit_rect = layout.next(content.width, BUTTON_HEIGHT);
         self.resume_rect = resume_rect;
+        self.options_rect = options_rect;
         self.quit_rect = quit_rect;
 
         ui.push_id("game-menu");
         let resume_id = ui.id("resume");
+        let options_id = ui.id("options");
         let quit_id = ui.id("quit");
         ui.draw().text(
             [title_rect.x, title_rect.y],
@@ -87,11 +95,14 @@ impl GameMenu {
             TextStyle::new(TITLE_SCALE, style::TITLE),
         );
         let resume = button(ui, resume_id, resume_rect, atlas, RESUME_LABEL).clicked;
+        let options = button(ui, options_id, options_rect, atlas, OPTIONS_LABEL).clicked;
         let quit = button(ui, quit_id, quit_rect, atlas, QUIT_LABEL).clicked;
         ui.pop_id();
 
         if resume {
             Some(GameMenuAction::Resume)
+        } else if options {
+            Some(GameMenuAction::Options)
         } else if quit {
             Some(GameMenuAction::Quit)
         } else {
@@ -103,6 +114,12 @@ impl GameMenu {
     #[must_use]
     pub fn resume_rect(&self) -> Rect {
         self.resume_rect
+    }
+
+    /// The rectangle of the options button in the last frame.
+    #[must_use]
+    pub fn options_rect(&self) -> Rect {
+        self.options_rect
     }
 
     /// The rectangle of the quit button in the last frame.
@@ -142,7 +159,16 @@ mod tests {
         let mut menu = GameMenu::new();
         assert_eq!(frame(&mut menu, UiInput::default()), None);
         assert!(!menu.resume_rect().is_empty());
-        assert!(menu.quit_rect().y > menu.resume_rect().y);
+        assert!(menu.options_rect().y > menu.resume_rect().y);
+        assert!(menu.quit_rect().y > menu.options_rect().y);
+    }
+
+    #[test]
+    fn clicking_options_reports_the_options_action() {
+        let mut menu = GameMenu::new();
+        frame(&mut menu, UiInput::default());
+        let input = click_at(menu.options_rect());
+        assert_eq!(frame(&mut menu, input), Some(GameMenuAction::Options));
     }
 
     #[test]

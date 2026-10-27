@@ -22,7 +22,7 @@
 //! allocations. Widgets are not retained: an ID is stable only as long as the
 //! ID stack and the widget label are stable.
 
-use crate::draw::DrawList;
+use crate::draw::{DrawList, SpriteSheet};
 use crate::geom::Rect;
 use crate::id::WidgetId;
 use crate::input::{InputEvent, Key, PointerButton, UiInput};
@@ -87,6 +87,8 @@ pub struct Ui {
     primary_pressed: Option<[f32; 2]>,
     /// The press was claimed by a widget, so it no longer clears the focus.
     click_consumed: bool,
+    /// The optional widgets sprite sheet used for skinning buttons and sliders.
+    widgets_sheet: Option<SpriteSheet>,
 }
 
 impl Ui {
@@ -106,6 +108,7 @@ impl Ui {
             pointer: None,
             primary_pressed: None,
             click_consumed: false,
+            widgets_sheet: None,
         }
     }
 
@@ -245,6 +248,17 @@ impl Ui {
     /// intersects the viewport.
     pub fn draw(&mut self) -> &mut DrawList {
         &mut self.draw
+    }
+
+    /// Sets the widgets sprite sheet for textured UI widgets (buttons, sliders).
+    pub fn set_widgets_sheet(&mut self, sheet: Option<SpriteSheet>) {
+        self.widgets_sheet = sheet;
+    }
+
+    /// The active widgets sprite sheet, if any.
+    #[must_use]
+    pub fn widgets_sheet(&self) -> Option<SpriteSheet> {
+        self.widgets_sheet
     }
 
     /// Pushes a child scope onto the ID stack.

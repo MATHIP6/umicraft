@@ -50,7 +50,8 @@ pub mod title;
 use glam::{DVec3, Vec3};
 
 pub use entity::{
-    EntityFlags, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot, EntityStore,
+    BossInfo, BossTracker, EntityFlags, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
+    EntityStore,
 };
 pub use input::InputIntent;
 pub use physics::Player;

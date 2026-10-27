@@ -21,7 +21,7 @@ pub const WHITE_SLOT: usize = 63;
 
 type Glyph = (char, [u8; 5]);
 
-const GLYPHS: [Glyph; 51] = [
+const GLYPHS: [Glyph; 60] = [
     (' ', [0b000, 0b000, 0b000, 0b000, 0b000]),
     ('0', [0b111, 0b101, 0b101, 0b101, 0b111]),
     ('1', [0b010, 0b110, 0b010, 0b010, 0b111]),
@@ -73,6 +73,17 @@ const GLYPHS: [Glyph; 51] = [
     ('_', [0b000, 0b000, 0b000, 0b000, 0b111]),
     ('?', [0b111, 0b001, 0b010, 0b000, 0b010]),
     ('!', [0b010, 0b010, 0b010, 0b000, 0b010]),
+    // The characters of the vanilla chat format (`<name> message`) and of
+    // the usual server messages.
+    ('<', [0b001, 0b010, 0b100, 0b010, 0b001]),
+    ('>', [0b100, 0b010, 0b001, 0b010, 0b100]),
+    ('=', [0b000, 0b111, 0b000, 0b111, 0b000]),
+    ('\'', [0b010, 0b010, 0b000, 0b000, 0b000]),
+    ('"', [0b101, 0b101, 0b000, 0b000, 0b000]),
+    ('*', [0b101, 0b010, 0b111, 0b010, 0b101]),
+    ('#', [0b101, 0b111, 0b101, 0b111, 0b101]),
+    ('@', [0b111, 0b101, 0b111, 0b100, 0b111]),
+    (';', [0b000, 0b010, 0b000, 0b010, 0b100]),
 ];
 
 /// Builds the R8 font atlas (row-major, top-left origin).
@@ -164,6 +175,14 @@ mod tests {
             data[((y + CELL_HEIGHT - 1) * ATLAS_WIDTH + x + CELL_WIDTH - 1) as usize],
             255
         );
+    }
+
+    #[test]
+    fn the_chat_format_characters_have_glyphs() {
+        for character in ['<', '>', '=', '\'', '"', '*', '#', '@', ';'] {
+            assert_ne!(slot(character), slot(' '), "{character:?} has no glyph");
+        }
+        assert_ne!(slot('<'), slot('>'));
     }
 
     #[test]
