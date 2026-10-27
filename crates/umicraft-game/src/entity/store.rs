@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use glam::{DVec3, Vec3};
 
 use crate::physics::EYE_HEIGHT;
+use crate::view::ViewEffects;
 use crate::RenderState;
 
 use super::types::{
@@ -129,6 +130,7 @@ impl EntityStore {
             yaw: lerp(record.previous_head_yaw, record.head_yaw).to_radians(),
             pitch: lerp(record.previous_pitch, record.pitch).to_radians(),
             on_ground: record.on_ground,
+            effects: ViewEffects::default(),
         })
     }
 

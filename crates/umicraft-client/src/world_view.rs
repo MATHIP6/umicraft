@@ -125,6 +125,7 @@ impl WorldView {
         let (yaw, pitch) = camera_angles(&state);
         camera.yaw = yaw;
         camera.pitch = pitch;
+        camera.set_view_effects(state.effects.fov_modifier, state.effects.bob.matrix());
     }
 
     /// The sky, fog and light environment for `now`, in step with the camera.
@@ -354,6 +355,7 @@ impl View {
             yaw: current.yaw,
             pitch: current.pitch,
             on_ground: current.on_ground,
+            effects: previous.effects.lerp(current.effects, alpha),
         })
     }
 }
@@ -540,6 +542,7 @@ mod tests {
                 yaw: 0.0,
                 pitch: 0.0,
                 on_ground: true,
+                effects: umicraft_game::view::ViewEffects::default(),
             },
             tick_time,
             world_time,

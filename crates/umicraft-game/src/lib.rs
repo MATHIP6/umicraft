@@ -49,6 +49,7 @@ pub mod raycast;
 pub mod server;
 pub mod shapes;
 pub mod traffic;
+pub mod view;
 
 use glam::{DVec3, Vec3};
 
@@ -121,6 +122,8 @@ pub struct RenderState {
     pub pitch: f32,
     /// Whether the player rests on the ground.
     pub on_ground: bool,
+    /// The first-person view bobbing and field-of-view modifier.
+    pub effects: view::ViewEffects,
 }
 
 /// The mutable game state owned by the game thread.
@@ -266,6 +269,7 @@ impl GameState {
             yaw: self.player.yaw,
             pitch: self.player.pitch,
             on_ground: self.player.on_ground,
+            effects: view::ViewEffects::at(&self.player, alpha as f32),
         }
     }
 

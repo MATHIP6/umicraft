@@ -21,6 +21,7 @@ use glam::DVec3;
 use crate::collision::{self, MoveOptions};
 use crate::input::{InputIntent, SPRINT_FORWARD_THRESHOLD};
 use crate::shapes::{is_normal_cube, Aabb, BlockSource};
+use crate::view;
 use umicraft_world::BlockState;
 
 /// The width of the player bounding box (MCP `Entity.java:259`).
@@ -180,6 +181,26 @@ pub struct Player {
     /// The ticks the double-tap flight window still lasts
     /// (MCP `EntityPlayerSP.flyToggleTimer`, line 112).
     pub fly_toggle_timer: u32,
+    /// The distance walked, scaled for the view bobbing
+    /// (MCP `Entity.distanceWalkedModified`: 0.6 per block).
+    pub walk_distance: f32,
+    /// [`Player::walk_distance`] of the previous tick.
+    pub prev_walk_distance: f32,
+    /// The smoothed horizontal speed that drives the sway
+    /// (MCP `EntityPlayer.cameraYaw`).
+    pub camera_sway: f32,
+    /// [`Player::camera_sway`] of the previous tick.
+    pub prev_camera_sway: f32,
+    /// The smoothed vertical-speed tilt in degrees
+    /// (MCP `EntityPlayer.cameraPitch`).
+    pub camera_tilt: f32,
+    /// [`Player::camera_tilt`] of the previous tick.
+    pub prev_camera_tilt: f32,
+    /// The smoothed field-of-view modifier
+    /// (MCP `EntityRenderer.fovModifierHand`).
+    pub fov_modifier: f32,
+    /// [`Player::fov_modifier`] of the previous tick.
+    pub prev_fov_modifier: f32,
 }
 
 impl Default for Player {
@@ -204,6 +225,14 @@ impl Default for Player {
             no_clip: false,
             previous_jump: false,
             fly_toggle_timer: 0,
+            walk_distance: 0.0,
+            prev_walk_distance: 0.0,
+            camera_sway: 0.0,
+            prev_camera_sway: 0.0,
+            camera_tilt: 0.0,
+            prev_camera_tilt: 0.0,
+            fov_modifier: 1.0,
+            prev_fov_modifier: 1.0,
         }
     }
 }
@@ -271,6 +300,9 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     player.yaw = intent.yaw;
     player.pitch = intent.pitch;
     player.sneaking = intent.sneak;
+    player.prev_walk_distance = player.walk_distance;
+    player.prev_camera_sway = player.camera_sway;
+    player.prev_camera_tilt = player.camera_tilt;
 
     update_sprint(player, intent);
 
@@ -329,6 +361,33 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     } else {
         1.0
     };
+    update_view_effects(player);
+}
+
+/// Refreshes the camera sway and the FOV modifier after the movement.
+///
+/// MCP `EntityPlayer.onLivingUpdate`, lines 636-654: the sway follows the
+/// horizontal speed (capped, zero in the air) and the tilt follows the
+/// vertical speed (zero on the ground). MCP `EntityRenderer`
+/// `updateFovModifierHand` smooths the FOV modifier of the player.
+fn update_view_effects(player: &mut Player) {
+    let speed = player.velocity.x.hypot(player.velocity.z) as f32;
+    let sway = if player.on_ground {
+        speed.min(view::MAX_SWAY_SPEED)
+    } else {
+        0.0
+    };
+    let tilt = if player.on_ground {
+        0.0
+    } else {
+        ((-player.velocity.y * 0.2).atan() * view::TILT_DEGREES) as f32
+    };
+    player.camera_sway += (sway - player.camera_sway) * view::SWAY_SMOOTHING;
+    player.camera_tilt += (tilt - player.camera_tilt) * view::TILT_SMOOTHING;
+
+    player.prev_fov_modifier = player.fov_modifier;
+    let target = view::target_fov_modifier(player.flying, player.speed_multiplier);
+    player.fov_modifier = view::smooth_fov_modifier(player.fov_modifier, target);
 }
 
 /// The slipperiness of a block (MCP `Block.slipperiness`): ice and packed ice
@@ -596,6 +655,11 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
         },
     );
     player.position += result.delta;
+    if !player.flying {
+        // MCP `Entity.moveEntity` line 862, skipped while flying
+        // (`EntityPlayer.canTriggerWalking`).
+        player.walk_distance += result.delta.x.hypot(result.delta.z) as f32 * 0.6;
+    }
     player.collided_horizontally = result.blocked_horizontally;
     player.on_ground = result.on_ground;
     if result.blocked_x {
@@ -1134,5 +1198,59 @@ mod tests {
         }
         assert!(player.position.y < 0.0, "y = {}", player.position.y);
         assert!(player.flying, "a spectator keeps flying");
+    }
+
+    #[test]
+    fn walking_accumulates_the_bobbing_distance_and_sway() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        for _ in 0..20 {
+            step(&mut player, &InputIntent::walking(0.0), &world);
+        }
+        // About 0.22 blocks per tick at the end, 0.6 per block.
+        assert!(player.walk_distance > 1.0, "{}", player.walk_distance);
+        assert!(player.camera_sway > 0.05, "{}", player.camera_sway);
+        assert!(player.prev_walk_distance < player.walk_distance);
+    }
+
+    #[test]
+    fn a_standing_player_does_not_bob() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        for _ in 0..20 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+        }
+        assert_eq!(player.walk_distance, 0.0);
+        assert!(player.camera_sway < 1e-3);
+    }
+
+    #[test]
+    fn a_flight_does_not_count_as_walking() {
+        let world = TestBlocks::default();
+        let mut player = flying_player();
+        player.flying = true;
+        for _ in 0..10 {
+            step(&mut player, &InputIntent::walking(0.0), &world);
+        }
+        assert_eq!(player.walk_distance, 0.0);
+        assert!(player.fov_modifier > 1.0, "flying widens the view");
+    }
+
+    #[test]
+    fn sprinting_converges_to_the_wider_field_of_view() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        let sprint = InputIntent {
+            sprint: true,
+            ..InputIntent::walking(0.0)
+        };
+        for _ in 0..30 {
+            step(&mut player, &sprint, &world);
+        }
+        assert!(
+            (player.fov_modifier - 1.15).abs() < 0.01,
+            "{}",
+            player.fov_modifier
+        );
     }
 }
