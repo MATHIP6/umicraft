@@ -18,21 +18,18 @@ use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_world::BlockPos;
 
+use crate::digging::{self, Digger};
 use crate::gamemode::GameMode;
 use crate::raycast::{Face, RayHit};
-use crate::shapes::Aabb;
+use crate::shapes::{Aabb, BlockSource};
 
-/// The number of ticks between the start and the stop of a block break.
-///
-/// The server destroys the block when the stop packet arrives and the
-/// accumulated break progress `hardness * (ticks + 1)` reaches `0.7`
-/// (MCP `ItemInWorldManager.func_180785_a`). The effective hardness of the
-/// softest block is 0.054 for a player without the right tool, so the stop
-/// needs about thirteen server ticks. **Measured** against the local 1.8
-/// server: a stop after six ticks did not destroy the block, a stop after
-/// twelve ticks did (see `docs/sources.md`). A fixed stand-in for the vanilla
-/// progress that the hold-to-break work of milestone P2 replaces.
-pub const BREAK_TICKS: u64 = 12;
+/// The ticks between two creative breaks and after a survival one
+/// (MCP `PlayerControllerMP.blockHitDelay`, lines 224, 292, 324).
+const BLOCK_HIT_DELAY: u8 = 5;
+
+/// The ticks the attack button is ignored after a swing in the air
+/// (MCP `Minecraft.leftClickCounter`, line 1513).
+const MISS_DELAY: u8 = 10;
 
 /// The position the acknowledgement of a server placement repeats.
 const SAME_POSITION_TOLERANCE: f64 = 1e-6;
@@ -62,6 +59,8 @@ pub enum Outgoing {
     },
     /// `Player Position and Look` (0x06) answering a server placement.
     AckPosition(PositionAck),
+    /// `Animation` (0x0A): the arm swings (MCP `EntityPlayerSP.swingItem`).
+    Swing,
 }
 
 /// The acknowledgement of a position the server imposed.
@@ -90,19 +89,62 @@ pub enum BlockAck {
     Placement,
 }
 
-/// A break in progress.
+/// The cracks of the block being dug (MCP `sendBlockBreakProgress`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BreakProgress {
+    /// The block that cracks.
+    pub block: BlockPos,
+    /// The crack stage `0..=9`, `-1` when the cracks go away.
+    pub stage: i8,
+}
+
+/// What the attack button does during one tick.
 #[derive(Debug, Clone, Copy)]
+pub struct AttackTick<'a, W: BlockSource + ?Sized> {
+    /// The gamemode of the player.
+    pub mode: GameMode,
+    /// Whether the button went down during this tick.
+    pub pressed: bool,
+    /// Whether the button is down.
+    pub held: bool,
+    /// The block under the crosshair.
+    pub target: Option<RayHit>,
+    /// The loaded world.
+    pub world: &'a W,
+    /// The state that decides how fast the player digs.
+    pub digger: Digger<'a>,
+}
+
+/// The result of one tick of the attack button.
+#[derive(Debug, Default, PartialEq)]
+pub struct AttackOutput {
+    /// The packets to send, in order.
+    pub packets: Vec<Outgoing>,
+    /// The blocks the client removes at once, before the server confirms.
+    pub broken: Vec<BlockPos>,
+    /// The new crack stage of the block being dug, if it changed.
+    pub progress: Option<BreakProgress>,
+}
+
+/// The block being dug (MCP `PlayerControllerMP.currentBlock` and friends).
+#[derive(Debug, Clone)]
 struct Digging {
     block: BlockPos,
-    face: Facing,
-    /// The tick at which the stop packet must be sent.
-    stop_at: u64,
+    /// The item held when the dig started.
+    item: Option<ItemStack>,
+    /// The accumulated progress, the block breaks at 1.
+    damage: f32,
 }
 
 /// The interaction state of the local player.
 #[derive(Debug, Default)]
 pub struct Interaction {
+    /// The block that is being dug, `None` when no dig is in progress.
     digging: Option<Digging>,
+    /// Ticks before the next block may be dug (`blockHitDelay`).
+    hit_delay: u8,
+    /// Ticks before the attack button reacts (`leftClickCounter`).
+    click_delay: u8,
     /// The block whose break the server is expected to confirm.
     expected_break: Option<BlockPos>,
     /// The block whose placement the server is expected to confirm.
@@ -118,46 +160,49 @@ impl Interaction {
         Self::default()
     }
 
-    /// The block that is being broken.
+    /// The block that is being dug.
     #[must_use]
     pub fn digging_block(&self) -> Option<BlockPos> {
-        self.digging.map(|digging| digging.block)
+        self.digging.as_ref().map(|digging| digging.block)
     }
 
-    /// Starts breaking the targeted block.
+    /// Runs one tick of the attack button: the click, then the held button.
     ///
-    /// Returns the start packet, or `None` when the mode forbids breaking.
-    /// In creative mode only the start packet exists (the block breaks at
-    /// once, MCP `PlayerControllerMP.clickBlock`) and the caller removes the
-    /// block locally; in the other modes the stop packet follows
-    /// [`BREAK_TICKS`] ticks later (see [`Interaction::finish_break`]).
-    pub fn start_break(&mut self, mode: GameMode, hit: &RayHit, tick: u64) -> Option<Outgoing> {
-        if !mode.can_break() {
-            return None;
+    /// MCP `Minecraft.runTick` counts `leftClickCounter` down, `clickMouse`
+    /// handles a press and `sendClickBlockToController` handles the held
+    /// button, which digs with `PlayerControllerMP.onPlayerDamageBlock` or
+    /// aborts the dig. Every swing also sends `Animation`
+    /// (`EntityPlayerSP.swingItem`).
+    pub fn attack<W: BlockSource + ?Sized>(&mut self, tick: &AttackTick<'_, W>) -> AttackOutput {
+        let mut run = AttackRun {
+            interaction: self,
+            tick,
+            output: AttackOutput::default(),
+        };
+        run.interaction.click_delay = run.interaction.click_delay.saturating_sub(1);
+        if tick.pressed && run.interaction.click_delay == 0 {
+            run.click();
         }
-        let face = wire_face(hit.face);
-        self.digging = (!mode.instant_break()).then_some(Digging {
-            block: hit.block,
-            face,
-            stop_at: tick + BREAK_TICKS,
-        });
-        self.expected_break = Some(hit.block);
-        Some(Outgoing::Dig {
-            status: DiggingStatus::StartDestroyBlock,
-            block: hit.block,
-            face,
-        })
+        run.hold();
+        run.output
     }
 
-    /// Returns the stop packet of a running break once its time has come.
-    pub fn finish_break(&mut self, tick: u64) -> Option<Outgoing> {
-        let digging = self.digging.filter(|digging| tick >= digging.stop_at)?;
-        self.digging = None;
-        Some(Outgoing::Dig {
-            status: DiggingStatus::StopDestroyBlock,
-            block: digging.block,
-            face: digging.face,
-        })
+    /// Stops digging, telling the server (MCP
+    /// `PlayerControllerMP.resetBlockRemoving`).
+    pub fn abort(&mut self) -> AttackOutput {
+        let mut output = AttackOutput::default();
+        if let Some(digging) = self.digging.take() {
+            output.packets.push(Outgoing::Dig {
+                status: DiggingStatus::AbortDestroyBlock,
+                block: digging.block,
+                face: Facing::Down,
+            });
+            output.progress = Some(BreakProgress {
+                block: digging.block,
+                stage: -1,
+            });
+        }
+        output
     }
 
     /// Places a block against the targeted face.
@@ -231,6 +276,184 @@ impl Interaction {
         }
         self.last_acknowledged = Some(ack);
         Some(Outgoing::AckPosition(ack))
+    }
+}
+
+/// One tick of the attack button, with the state it reads and writes.
+struct AttackRun<'a, 'b, W: BlockSource + ?Sized> {
+    interaction: &'a mut Interaction,
+    tick: &'a AttackTick<'b, W>,
+    output: AttackOutput,
+}
+
+impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
+    /// The id of a block, air once the client removed it this tick.
+    fn block_id(&self, position: BlockPos) -> u16 {
+        if self.output.broken.contains(&position) {
+            return 0;
+        }
+        self.tick
+            .world
+            .block(position.x, position.y, position.z)
+            .id()
+    }
+
+    fn swing(&mut self) {
+        self.output.packets.push(Outgoing::Swing);
+    }
+
+    /// MCP `Minecraft.clickMouse`.
+    fn click(&mut self) {
+        self.swing();
+        match self.tick.target {
+            Some(hit) if self.block_id(hit.block) != 0 => {
+                self.click_block(&hit);
+            }
+            _ if self.tick.mode != GameMode::Creative => self.interaction.click_delay = MISS_DELAY,
+            _ => {}
+        }
+    }
+
+    /// MCP `Minecraft.sendClickBlockToController`.
+    fn hold(&mut self) {
+        if !self.tick.held {
+            self.interaction.click_delay = 0;
+        }
+        if self.interaction.click_delay > 0 {
+            return;
+        }
+        match self.tick.target {
+            Some(hit) if self.tick.held && self.block_id(hit.block) != 0 => {
+                if self.damage_block(&hit) {
+                    self.swing();
+                }
+            }
+            _ => self.reset(),
+        }
+    }
+
+    fn reset(&mut self) {
+        let aborted = self.interaction.abort();
+        self.output.packets.extend(aborted.packets);
+        if aborted.progress.is_some() {
+            self.output.progress = aborted.progress;
+        }
+    }
+
+    /// MCP `PlayerControllerMP.onPlayerDestroyBlock`: the client removes the
+    /// block before the server confirms. A creative player with a sword
+    /// cannot.
+    fn destroy(&mut self, block: BlockPos) {
+        let sword = self
+            .tick
+            .digger
+            .held
+            .is_some_and(|stack| digging::is_sword(stack.item_id));
+        if self.tick.mode == GameMode::Creative && sword {
+            return;
+        }
+        self.output.broken.push(block);
+        self.interaction.digging = None;
+    }
+
+    fn send_dig(&mut self, status: DiggingStatus, block: BlockPos, face: Facing) {
+        self.output.packets.push(Outgoing::Dig {
+            status,
+            block,
+            face,
+        });
+    }
+
+    /// MCP `PlayerControllerMP.clickBlock`.
+    fn click_block(&mut self, hit: &RayHit) -> bool {
+        if !self.tick.mode.can_break() {
+            return false;
+        }
+        let face = wire_face(hit.face);
+        let block = hit.block;
+        if self.tick.mode.instant_break() {
+            self.interaction.expected_break = Some(block);
+            self.send_dig(DiggingStatus::StartDestroyBlock, block, face);
+            self.destroy(block);
+            self.interaction.hit_delay = BLOCK_HIT_DELAY;
+        } else if !self.is_digging(block) {
+            if let Some(current) = self.interaction.digging_block() {
+                self.send_dig(DiggingStatus::AbortDestroyBlock, current, face);
+            }
+            self.interaction.expected_break = Some(block);
+            self.send_dig(DiggingStatus::StartDestroyBlock, block, face);
+            let id = self.block_id(block);
+            if id != 0 && digging::relative_hardness(id, &self.tick.digger) >= 1.0 {
+                self.destroy(block);
+            } else {
+                self.interaction.digging = Some(Digging {
+                    block,
+                    item: self.tick.digger.held.cloned(),
+                    damage: 0.0,
+                });
+                self.output.progress = Some(BreakProgress { block, stage: -1 });
+            }
+        }
+        true
+    }
+
+    /// MCP `PlayerControllerMP.onPlayerDamageBlock`.
+    fn damage_block(&mut self, hit: &RayHit) -> bool {
+        let block = hit.block;
+        if self.interaction.hit_delay > 0 {
+            self.interaction.hit_delay -= 1;
+            return true;
+        }
+        if self.tick.mode.instant_break() {
+            self.interaction.hit_delay = BLOCK_HIT_DELAY;
+            let face = wire_face(hit.face);
+            self.interaction.expected_break = Some(block);
+            self.send_dig(DiggingStatus::StartDestroyBlock, block, face);
+            self.destroy(block);
+            return true;
+        }
+        if !self.is_digging(block) {
+            return self.click_block(hit);
+        }
+        let id = self.block_id(block);
+        let per_tick = digging::relative_hardness(id, &self.tick.digger);
+        let Some(digging) = self.interaction.digging.as_mut() else {
+            return false;
+        };
+        digging.damage += per_tick;
+        let damage = digging.damage;
+        if damage >= 1.0 {
+            self.send_dig(DiggingStatus::StopDestroyBlock, block, wire_face(hit.face));
+            self.destroy(block);
+            self.interaction.hit_delay = BLOCK_HIT_DELAY;
+        }
+        // MCP line 327: `(int) (damage * 10) - 1`, also after the break
+        // (the damage is back to 0 then).
+        let shown = if damage >= 1.0 { 0.0 } else { damage };
+        self.output.progress = Some(BreakProgress {
+            block,
+            stage: ((shown * 10.0) as i32 - 1).clamp(-1, 9) as i8,
+        });
+        true
+    }
+
+    /// MCP `PlayerControllerMP.isHittingPosition`: the dig is on this block
+    /// and the player still holds the item it started with.
+    fn is_digging(&self, block: BlockPos) -> bool {
+        let Some(digging) = self.interaction.digging.as_ref() else {
+            return false;
+        };
+        let held = self.tick.digger.held;
+        let same_item = match (digging.item.as_ref(), held) {
+            (None, None) => true,
+            (Some(started), Some(now)) => {
+                started.item_id == now.item_id
+                    && started.nbt == now.nbt
+                    && (started.damage == now.damage || digging::is_damageable_tool(now.item_id))
+            }
+            _ => false,
+        };
+        digging.block == block && same_item
     }
 }
 
@@ -324,55 +547,364 @@ mod tests {
         assert_eq!(face_offset(Facing::West), BlockPos::new(-1, 0, 0));
     }
 
-    #[test]
-    fn a_survival_break_sends_start_then_stop_after_the_delay() {
-        let mut interaction = Interaction::new();
-        let start = interaction.start_break(GameMode::Survival, &stone(), 100);
-        assert_eq!(
-            start,
-            Some(Outgoing::Dig {
-                status: DiggingStatus::StartDestroyBlock,
-                block: BlockPos::new(3, 4, 5),
-                face: Facing::Up,
+    /// A world with one block id at the target and air elsewhere.
+    struct One(BlockPos, u16);
+
+    impl BlockSource for One {
+        fn block(&self, x: i32, y: i32, z: i32) -> umicraft_world::BlockState {
+            if BlockPos::new(x, y, z) == self.0 {
+                umicraft_world::BlockState::new(self.1, 0)
+            } else {
+                umicraft_world::BlockState::AIR
+            }
+        }
+    }
+
+    const DIRT: u16 = 3;
+    const STONE: u16 = 1;
+    const TALL_GRASS: u16 = 31;
+
+    fn tick(
+        interaction: &mut Interaction,
+        mode: GameMode,
+        world: &One,
+        target: Option<RayHit>,
+        pressed: bool,
+        held: bool,
+    ) -> AttackOutput {
+        let digger = Digger {
+            on_ground: true,
+            ..Digger::default()
+        };
+        interaction.attack(&AttackTick {
+            mode,
+            pressed,
+            held,
+            target,
+            world,
+            digger,
+        })
+    }
+
+    fn dig_status(output: &AttackOutput) -> Vec<DiggingStatus> {
+        output
+            .packets
+            .iter()
+            .filter_map(|packet| match packet {
+                Outgoing::Dig { status, .. } => Some(*status),
+                _ => None,
             })
+            .collect()
+    }
+
+    #[test]
+    fn a_held_click_digs_dirt_in_the_vanilla_time() {
+        let world = One(BlockPos::new(3, 4, 5), DIRT);
+        let mut interaction = Interaction::new();
+        let first = tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            true,
+            true,
+        );
+        assert_eq!(dig_status(&first), [DiggingStatus::StartDestroyBlock]);
+        // clickMouse swings, so does the held button.
+        assert_eq!(
+            first
+                .packets
+                .iter()
+                .filter(|packet| **packet == Outgoing::Swing)
+                .count(),
+            2
         );
         assert_eq!(interaction.digging_block(), Some(BlockPos::new(3, 4, 5)));
-        assert_eq!(interaction.finish_break(100 + BREAK_TICKS - 1), None);
-        let stop = interaction.finish_break(100 + BREAK_TICKS);
-        assert!(matches!(
-            stop,
-            Some(Outgoing::Dig {
-                status: DiggingStatus::StopDestroyBlock,
-                ..
-            })
-        ));
+
+        let mut ticks = 1;
+        let last = loop {
+            ticks += 1;
+            let output = tick(
+                &mut interaction,
+                GameMode::Survival,
+                &world,
+                Some(stone()),
+                false,
+                true,
+            );
+            assert!(ticks < 40, "the block never broke");
+            if !output.broken.is_empty() {
+                break output;
+            }
+        };
+        // 1 / (1 / 0.5 / 30) = 15 ticks of progress, the first one in tick 1.
+        assert!((15..=16).contains(&ticks), "{ticks} ticks");
+        assert_eq!(dig_status(&last), [DiggingStatus::StopDestroyBlock]);
+        assert_eq!(last.broken, [BlockPos::new(3, 4, 5)]);
         assert_eq!(interaction.digging_block(), None);
-        assert_eq!(interaction.finish_break(1000), None);
     }
 
     #[test]
-    fn a_creative_break_sends_no_stop_packet() {
+    fn the_cracks_grow_with_the_progress() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
         let mut interaction = Interaction::new();
-        assert!(interaction
-            .start_break(GameMode::Creative, &stone(), 0)
-            .is_some());
-        assert_eq!(interaction.digging_block(), None);
-        assert_eq!(interaction.finish_break(1000), None);
-    }
-
-    #[test]
-    fn adventure_and_spectator_never_start_a_break() {
-        let mut interaction = Interaction::new();
-        for mode in [GameMode::Adventure, GameMode::Spectator] {
-            assert_eq!(interaction.start_break(mode, &stone(), 0), None);
+        let mut stages = Vec::new();
+        for index in 0..30 {
+            let output = tick(
+                &mut interaction,
+                GameMode::Survival,
+                &world,
+                Some(stone()),
+                index == 0,
+                true,
+            );
+            stages.extend(output.progress.map(|progress| progress.stage));
         }
-        assert_eq!(interaction.acknowledge_block(BlockPos::new(3, 4, 5)), None);
+        assert_eq!(stages[0], -1, "the dig starts without cracks");
+        assert!(stages.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(stages.iter().all(|stage| (-1..=9).contains(stage)));
+    }
+
+    #[test]
+    fn a_block_that_breaks_at_once_has_no_stop_packet() {
+        let world = One(BlockPos::new(3, 4, 5), TALL_GRASS);
+        let mut interaction = Interaction::new();
+        let output = tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            true,
+            true,
+        );
+        assert_eq!(dig_status(&output), [DiggingStatus::StartDestroyBlock]);
+        assert_eq!(output.broken, [BlockPos::new(3, 4, 5)]);
+        assert_eq!(interaction.digging_block(), None);
+    }
+
+    #[test]
+    fn releasing_the_button_aborts_the_dig() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
+        let mut interaction = Interaction::new();
+        tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            true,
+            true,
+        );
+        let output = tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            false,
+            false,
+        );
+        assert_eq!(dig_status(&output), [DiggingStatus::AbortDestroyBlock]);
+        assert_eq!(
+            output.progress,
+            Some(BreakProgress {
+                block: BlockPos::new(3, 4, 5),
+                stage: -1
+            })
+        );
+        assert_eq!(interaction.digging_block(), None);
+        let again = tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            false,
+            false,
+        );
+        assert!(again.packets.is_empty(), "nothing to abort twice");
+    }
+
+    #[test]
+    fn looking_at_another_block_aborts_and_starts_again() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
+        let mut interaction = Interaction::new();
+        tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            true,
+            true,
+        );
+        let other = hit(BlockPos::new(3, 4, 5), Face::North);
+        let moved = RayHit {
+            block: BlockPos::new(3, 4, 6),
+            ..other
+        };
+        let world = One(BlockPos::new(3, 4, 6), STONE);
+        let output = tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(moved),
+            false,
+            true,
+        );
+        assert_eq!(
+            dig_status(&output),
+            [
+                DiggingStatus::AbortDestroyBlock,
+                DiggingStatus::StartDestroyBlock
+            ]
+        );
+        assert_eq!(interaction.digging_block(), Some(BlockPos::new(3, 4, 6)));
+    }
+
+    #[test]
+    fn a_creative_player_breaks_a_block_every_six_ticks_without_a_stop_packet() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
+        let mut interaction = Interaction::new();
+        let mut starts = Vec::new();
+        for index in 0..13 {
+            let output = tick(
+                &mut interaction,
+                GameMode::Creative,
+                &world,
+                Some(stone()),
+                index == 0,
+                true,
+            );
+            assert!(!dig_status(&output).contains(&DiggingStatus::StopDestroyBlock));
+            if dig_status(&output).contains(&DiggingStatus::StartDestroyBlock) {
+                starts.push(index);
+                assert_eq!(output.broken.len(), 1);
+            }
+        }
+        assert_eq!(starts, [0, 6, 12]);
+        assert_eq!(interaction.digging_block(), None);
+    }
+
+    #[test]
+    fn a_creative_sword_does_not_break_blocks() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
+        let sword = ItemStack {
+            item_id: 276,
+            stack_size: 1,
+            damage: 0,
+            nbt: None,
+        };
+        let mut interaction = Interaction::new();
+        let output = interaction.attack(&AttackTick {
+            mode: GameMode::Creative,
+            pressed: true,
+            held: true,
+            target: Some(stone()),
+            world: &world,
+            digger: Digger {
+                held: Some(&sword),
+                on_ground: true,
+                ..Digger::default()
+            },
+        });
+        assert!(output.broken.is_empty());
+    }
+
+    #[test]
+    fn adventure_and_spectator_never_start_a_dig() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
+        for mode in [GameMode::Adventure, GameMode::Spectator] {
+            let mut interaction = Interaction::new();
+            let output = tick(&mut interaction, mode, &world, Some(stone()), true, true);
+            assert!(dig_status(&output).is_empty());
+            assert!(output.broken.is_empty());
+            assert_eq!(interaction.acknowledge_block(BlockPos::new(3, 4, 5)), None);
+        }
+    }
+
+    #[test]
+    fn a_swing_in_the_air_blocks_the_button_for_ten_ticks() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
+        let mut interaction = Interaction::new();
+        let miss = tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            None,
+            true,
+            true,
+        );
+        assert_eq!(miss.packets, [Outgoing::Swing]);
+        for _ in 0..9 {
+            let output = tick(
+                &mut interaction,
+                GameMode::Survival,
+                &world,
+                Some(stone()),
+                true,
+                true,
+            );
+            assert!(output.packets.is_empty());
+        }
+        let ready = tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            true,
+            true,
+        );
+        assert!(dig_status(&ready).contains(&DiggingStatus::StartDestroyBlock));
+    }
+
+    #[test]
+    fn changing_the_held_item_restarts_the_dig() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
+        let pickaxe = ItemStack {
+            item_id: 270,
+            stack_size: 1,
+            damage: 0,
+            nbt: None,
+        };
+        let mut interaction = Interaction::new();
+        tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            true,
+            true,
+        );
+        let output = interaction.attack(&AttackTick {
+            mode: GameMode::Survival,
+            pressed: false,
+            held: true,
+            target: Some(stone()),
+            world: &world,
+            digger: Digger {
+                held: Some(&pickaxe),
+                on_ground: true,
+                ..Digger::default()
+            },
+        });
+        assert_eq!(
+            dig_status(&output),
+            [
+                DiggingStatus::AbortDestroyBlock,
+                DiggingStatus::StartDestroyBlock
+            ]
+        );
     }
 
     #[test]
     fn the_server_confirms_a_break_once() {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
         let mut interaction = Interaction::new();
-        interaction.start_break(GameMode::Survival, &stone(), 0);
+        tick(
+            &mut interaction,
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            true,
+            true,
+        );
         let position = BlockPos::new(3, 4, 5);
         assert_eq!(
             interaction.acknowledge_block(position),

@@ -85,6 +85,8 @@ struct App {
     look: (f32, f32),
     select_slot: Option<u8>,
     break_block: bool,
+    /// The attack button is down.
+    attack_held: bool,
     place_block: bool,
     /// The perspective key was pressed since the last input update.
     toggle_perspective: bool,
@@ -141,6 +143,7 @@ impl App {
             look: (0.0, 0.0),
             select_slot: None,
             break_block: false,
+            attack_held: false,
             place_block: false,
             toggle_perspective: false,
             chat_open: false,
@@ -393,6 +396,7 @@ impl App {
             self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
         state.sprint =
             self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
+        state.attack = self.attack_held;
         state
     }
 
@@ -892,6 +896,8 @@ impl ApplicationHandler for App {
                 } else {
                     match button {
                         MouseButton::Left => {
+                            self.attack_held =
+                                state == ElementState::Pressed && self.mouse_captured;
                             if state == ElementState::Pressed {
                                 if self.mouse_captured {
                                     self.break_block = true;

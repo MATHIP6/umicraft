@@ -178,6 +178,8 @@ pub enum ClientCommand {
         /// The walking speed.
         walk_speed: f32,
     },
+    /// `Animation` (0x0A): the arm swings.
+    Swing,
     /// `Held Item Change` (0x09): the selected hotbar slot.
     HeldItemChange {
         /// The slot index.
@@ -323,6 +325,7 @@ impl ClientCommand {
                 }
                 .with_flying(flying),
             ),
+            Self::Swing => PlayServerbound::Animation(serverbound::Animation),
             Self::HeldItemChange { slot } => {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
             }

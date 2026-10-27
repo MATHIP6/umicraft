@@ -28,6 +28,8 @@ pub struct InputState {
     pub sneak: bool,
     /// Whether the sprint key is held.
     pub sprint: bool,
+    /// Whether the attack / break button is held.
+    pub attack: bool,
 }
 
 impl InputState {
@@ -44,6 +46,7 @@ impl InputState {
             jump: false,
             sneak: false,
             sprint: true,
+            attack: false,
         }
     }
 }
@@ -99,7 +102,7 @@ pub enum ScriptStep {
     /// Look around: turn right, then left, alternating every second, while
     /// the pitch is steered towards the phase's pitch.
     LookAround,
-    /// Break the block under the crosshair.
+    /// Hold the attack button on the block under the crosshair.
     Break,
     /// Place a block against the targeted face.
     Place,
@@ -219,6 +222,9 @@ impl Script {
                 };
             }
             ScriptStep::Break => {
+                // Hold the button for the whole phase: a block takes
+                // several ticks to dig and releasing aborts the dig.
+                update.state.attack = true;
                 if !self.fired {
                     self.fired = true;
                     break_block = true;

@@ -41,6 +41,6 @@ gamemodes and the spectator camera.
 
 - Adventure mode never starts a break because item NBT (`CanDestroy`) is not
   parsed yet (P3).
-- The break is still the fixed 12-tick stand-in; hold-to-break is the next
-  P2 item.
+- The break follows the vanilla progress (hold-to-break). The block table is generated from the reference by `docs/tools/gen_block_data.py`; tools are a hand-written list of ids until the P3 item registry.
+- The cracks are tracked (own ones in `ServerState`, others from 0x25) but not drawn yet, and the arm swing is sent but not rendered (no first-person hand yet).
 - Not done: first-person hand (needs item models, P3); skin, arm swing and body-yaw lag of the local body (P5).

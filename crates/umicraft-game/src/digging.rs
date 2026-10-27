@@ -304,6 +304,21 @@ pub fn relative_hardness(block: u16, digger: &Digger<'_>) -> f32 {
     digger.efficiency(block, data.material) / data.hardness / divisor
 }
 
+/// Whether an item is a tool whose damage changes while it is used, so that
+/// a changed damage value is still "the same item" (MCP
+/// `ItemStack.isItemStackDamageable`, reduced to the tools).
+#[must_use]
+pub fn is_damageable_tool(item_id: i16) -> bool {
+    tool(item_id).is_some()
+}
+
+/// Whether an item is a sword (MCP `ItemSword`): a creative player holding
+/// one cannot break blocks.
+#[must_use]
+pub fn is_sword(item_id: i16) -> bool {
+    tool(item_id).is_some_and(|tool| tool.kind == ToolKind::Sword)
+}
+
 /// Whether a block is air for the digging rules (MCP `Material.air`).
 #[must_use]
 pub fn is_air(block: u16) -> bool {

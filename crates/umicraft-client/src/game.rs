@@ -27,12 +27,13 @@ use std::time::{Duration, Instant};
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
+use umicraft_game::digging::{enchantment_level, Digger, AQUA_AFFINITY, HASTE, MINING_FATIGUE};
 use umicraft_game::entity::{
     EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityStore,
 };
 use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::input::RawInput;
-use umicraft_game::interaction::{BlockAck, Interaction, Outgoing, PositionAck};
+use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::physics::DEFAULT_FLY_SPEED;
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
@@ -43,7 +44,9 @@ use umicraft_game::view::{camera_pose, Perspective};
 use umicraft_game::{GameState, InputIntent, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_net::play::{PlayEvent, SessionCounters};
-use umicraft_protocol::packets::play::clientbound::{ChunkData, Explosion, MapChunkBulk};
+use umicraft_protocol::packets::play::clientbound::{
+    BlockBreakAnim, ChunkData, Explosion, MapChunkBulk,
+};
 use umicraft_protocol::packets::play::ItemStack as WireItemStack;
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{HudState, ItemStack, OutlineBox};
@@ -68,6 +71,13 @@ const FRAME_CAPACITY: usize = 32;
 
 /// Bounded queue of the chunk snapshots the render thread polls.
 const CHUNK_CAPACITY: usize = 64;
+
+/// The block ids of water (MCP `Blocks.flowing_water`, `Blocks.water`).
+const WATER_FLOWING: u16 = 8;
+const WATER_STILL: u16 = 9;
+
+/// A `Block Break Animation` stage that removes the cracks.
+const CLEAR_BREAK_STAGE: u8 = 255;
 
 /// The number of chat lines the HUD keeps.
 const CHAT_HISTORY: usize = 10;
@@ -382,6 +392,8 @@ struct Game {
     interaction: Interaction,
     /// Where the camera sits (`F5`).
     perspective: Perspective,
+    /// The attack button went down since the last tick.
+    attack_pressed: bool,
     /// The body of the local player, animated like any other player; drawn
     /// in the third-person perspectives.
     body: EntityRecord,
@@ -426,6 +438,7 @@ impl Game {
             vehicle: None,
             interaction: Interaction::new(),
             perspective: Perspective::default(),
+            attack_pressed: false,
             body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
             status_data: GameStatus::default(),
             hud_dirty: true,
@@ -1451,33 +1464,74 @@ fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) 
     if update.toggle_perspective {
         game.perspective = game.perspective.next();
     }
-    if update.break_block {
-        start_break(game, queue);
-    }
+    game.attack_pressed |= update.break_block;
     if update.place_block {
         place_block(game, queue);
     }
 }
 
-/// Starts breaking the targeted block.
-fn start_break(game: &mut Game, queue: &mut CommandQueue) {
-    let Some(hit) = game.target() else {
+/// Runs one tick of the attack button (`umicraft_game::interaction`).
+///
+/// The client removes the blocks it breaks at once, like MCP
+/// `PlayerControllerMP.onPlayerDestroyBlock`; the server confirms or
+/// restores them with a block change.
+fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
+    let pressed = std::mem::take(&mut game.attack_pressed);
+    if game.spectating() {
+        return;
+    }
+    let target = game.target();
+    let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
         return;
     };
-    let tick = game.status_data.ticks;
-    let Some(outgoing) = game.interaction.start_break(game.gamemode, &hit, tick) else {
-        return;
+    let player = state.player();
+    let eye = player.eye_position();
+    let water = world.block(BlockPos::new(
+        eye.x.floor() as i32,
+        eye.y.floor() as i32,
+        eye.z.floor() as i32,
+    ));
+    let effects = game.server.effects();
+    let amplifier = |id: u8| effects.get(id).map(|effect| effect.amplifier);
+    let digger = Digger {
+        held: game.windows.selected_item().or(game.held_item.as_ref()),
+        haste: amplifier(HASTE),
+        fatigue: amplifier(MINING_FATIGUE),
+        in_water: matches!(water.id(), WATER_FLOWING | WATER_STILL),
+        aqua_affinity: game
+            .windows
+            .helmet()
+            .and_then(|helmet| helmet.nbt.as_deref())
+            .is_some_and(|nbt| enchantment_level(nbt, AQUA_AFFINITY) > 0),
+        on_ground: player.on_ground,
     };
-    queue.push(command_of(outgoing));
-    if game.gamemode.instant_break() {
-        // MCP `PlayerControllerMP.clickBlockCreative`: the block disappears
-        // at once, the server confirms with a block change.
-        if let Some(world) = game.world.as_mut() {
+    let output = game.interaction.attack(&AttackTick {
+        mode: game.gamemode,
+        pressed,
+        held: game.input.attack,
+        target,
+        world,
+        digger,
+    });
+    for outgoing in output.packets {
+        queue.push(command_of(outgoing));
+    }
+    if let Some(world) = game.world.as_mut() {
+        for position in output.broken {
+            tracing::info!(block = ?position, "breaking a block");
             game.dirty
-                .extend(world.apply_block_change(hit.block, BlockState::AIR));
+                .extend(world.apply_block_change(position, BlockState::AIR));
         }
     }
-    tracing::info!(block = ?hit.block, face = ?hit.face, "breaking a block");
+    if let Some(progress) = output.progress {
+        game.server.apply_block_break_anim(&BlockBreakAnim {
+            entity_id: game.entity_id,
+            x: progress.block.x,
+            y: progress.block.y,
+            z: progress.block.z,
+            stage: u8::try_from(progress.stage).unwrap_or(CLEAR_BREAK_STAGE),
+        });
+    }
 }
 
 /// Places a block against the targeted face.
@@ -1535,6 +1589,7 @@ fn command_of(outgoing: Outgoing) -> ClientCommand {
             cursor_y,
             cursor_z,
         },
+        Outgoing::Swing => ClientCommand::Swing,
         Outgoing::AckPosition(ack) => ClientCommand::AckPosition {
             x: ack.x,
             y: ack.y,
@@ -1555,6 +1610,7 @@ fn tick(
     tick_time: Instant,
 ) {
     game.status_data.ticks += 1;
+    run_attack(game, queue);
 
     // The intent of the tick: the raw key state with the yaw and the pitch
     // the player is looking at.
@@ -1596,9 +1652,6 @@ fn tick(
     // itself, like the vanilla client (`umicraft_game::physics`); it is
     // never lifted.
 
-    if let Some(outgoing) = game.interaction.finish_break(game.status_data.ticks) {
-        queue.push(command_of(outgoing));
-    }
     report_movement(game, &intent, queue);
     publish_chunks(game, chunks);
 
@@ -2024,16 +2077,60 @@ mod tests {
         ));
     }
 
+    fn digging_commands(queue: &CommandQueue) -> usize {
+        queue
+            .ordered
+            .iter()
+            .filter(|command| matches!(command, ClientCommand::PlayerDigging { .. }))
+            .count()
+    }
+
+    #[test]
+    fn a_held_survival_click_digs_the_block_over_several_ticks_and_cracks_it() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        game.entity_id = 1;
+        game.pitch = 1.5;
+        game.input.attack = true;
+        game.attack_pressed = true;
+        let block = BlockPos::new(0, 63, 0);
+        let mut statuses = Vec::new();
+        // The player never landed in this fixture, so the dig is five times
+        // slower (airborne): 0.6 hardness takes about 90 ticks.
+        for _ in 0..300 {
+            run_attack(&mut game, &mut queue);
+            while let Some(command) = queue.ordered.pop_front() {
+                if let ClientCommand::PlayerDigging { status, .. } = command {
+                    statuses.push(status);
+                }
+            }
+            if game.world.as_ref().expect("world").block(block) == BlockState::AIR {
+                break;
+            }
+        }
+        assert_eq!(
+            statuses.first(),
+            Some(&umicraft_protocol::packets::play::serverbound::DiggingStatus::StartDestroyBlock)
+        );
+        assert_eq!(
+            statuses.last(),
+            Some(&umicraft_protocol::packets::play::serverbound::DiggingStatus::StopDestroyBlock)
+        );
+        assert!(game.world.as_ref().expect("world").block(block).is_air());
+    }
+
     #[test]
     fn a_creative_break_removes_the_block_at_once_and_sends_only_the_start() {
         let mut game = game_on_floor_with(BlockState::AIR);
         let mut queue = CommandQueue::default();
         game.gamemode = GameMode::Creative;
         game.pitch = 1.5;
-        start_break(&mut game, &mut queue);
+        game.attack_pressed = true;
+        game.input.attack = true;
+        run_attack(&mut game, &mut queue);
         let world = game.world.as_ref().expect("world");
         assert_eq!(world.block(BlockPos::new(0, 63, 0)), BlockState::AIR);
-        assert_eq!(queue.ordered.len(), 1);
+        assert_eq!(digging_commands(&queue), 1);
         assert_eq!(game.interaction.digging_block(), None);
     }
 
@@ -2043,8 +2140,10 @@ mod tests {
         let mut queue = CommandQueue::default();
         game.gamemode = GameMode::Spectator;
         game.pitch = 1.5;
-        start_break(&mut game, &mut queue);
-        assert!(queue.ordered.is_empty());
+        game.attack_pressed = true;
+        game.input.attack = true;
+        run_attack(&mut game, &mut queue);
+        assert_eq!(digging_commands(&queue), 0);
     }
 
     #[test]

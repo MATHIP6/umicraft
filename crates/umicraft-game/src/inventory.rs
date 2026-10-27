@@ -26,6 +26,9 @@ pub const PLAYER_SLOT_COUNT: usize = 45;
 /// First hotbar slot index in the player inventory.
 const HOTBAR_START: usize = 36;
 
+/// The window slot of the helmet.
+const HELMET_SLOT: usize = 5;
+
 /// Number of hotbar slots.
 const HOTBAR_LEN: usize = 9;
 
@@ -395,6 +398,12 @@ impl WindowManager {
     pub fn selected_item(&self) -> Option<&ItemStack> {
         self.inventory
             .slot(HOTBAR_START + self.selected_slot as usize)
+    }
+
+    /// The helmet in the armor slot (slot 5 of the player window).
+    #[must_use]
+    pub fn helmet(&self) -> Option<&ItemStack> {
+        self.inventory.slot(HELMET_SLOT)
     }
 
     /// Sets the selected hotbar slot (0–8).
