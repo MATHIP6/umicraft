@@ -27,6 +27,7 @@ pub mod button;
 pub mod inventory;
 pub mod list;
 pub mod panel;
+pub mod slider;
 pub mod slot;
 pub mod text_field;
 
@@ -36,5 +37,6 @@ pub use inventory::{
 };
 pub use list::{list, ListState, ROW_HEIGHT, SCROLLBAR_WIDTH};
 pub use panel::{panel, PANEL_INSET};
+pub use slider::{slider, SliderState};
 pub use slot::{slot, SlotItem};
 pub use text_field::{text_field, TextFieldState};

@@ -98,6 +98,9 @@ pub struct PlayOptions {
     pub view_distance: u8,
     /// Whether colors are rendered in chat.
     pub chat_colors: bool,
+    /// The chat visibility byte announced in `Client Settings`: `0` every
+    /// message, `1` commands only, `2` hidden.
+    pub chat_mode: u8,
     /// Client brand sent on the `MC|Brand` channel (spec NET-9).
     pub brand: String,
 }
@@ -108,6 +111,7 @@ impl Default for PlayOptions {
             locale: "en_us".to_string(),
             view_distance: 8,
             chat_colors: true,
+            chat_mode: 0,
             brand: "umicraft".to_string(),
         }
     }
@@ -503,7 +507,7 @@ impl PlaySession {
         let settings = ClientSettings {
             locale: self.options.locale.clone(),
             view_distance: self.options.view_distance,
-            chat_mode: 0,
+            chat_mode: self.options.chat_mode,
             chat_colors: self.options.chat_colors,
             skin_parts: ALL_SKIN_PARTS,
         };
@@ -672,6 +676,7 @@ mod tests {
             locale: "fr_fr".to_string(),
             view_distance: 12,
             chat_colors: false,
+            chat_mode: 2,
             brand: "test".to_string(),
         };
         let mut session = PlaySession::new(options);
@@ -684,7 +689,7 @@ mod tests {
                 PlayServerbound::ClientSettings(ClientSettings {
                     locale: "fr_fr".to_string(),
                     view_distance: 12,
-                    chat_mode: 0,
+                    chat_mode: 2,
                     chat_colors: false,
                     skin_parts: ALL_SKIN_PARTS,
                 }),

@@ -84,10 +84,23 @@ impl ConfigStore {
     /// [`CoreError::ConfigIo`] when writing fails.
     pub fn save(&self, path: &Path) -> Result<(), CoreError> {
         let text = toml::to_string(&self.doc)?;
-        fs::write(path, text).map_err(|source| CoreError::ConfigIo {
+        let io_error = |source| CoreError::ConfigIo {
             path: path.display().to_string(),
             source,
-        })?;
+        };
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(io_error)?;
+        }
+        // Write a sibling file and rename it over the target, so a crash in
+        // the middle of the write cannot leave a half-written configuration.
+        let mut temporary = path.as_os_str().to_owned();
+        temporary.push(".tmp");
+        let temporary = std::path::PathBuf::from(temporary);
+        fs::write(&temporary, text).map_err(io_error)?;
+        fs::rename(&temporary, path).map_err(io_error)?;
         Ok(())
     }
 }
@@ -138,5 +151,28 @@ mod tests {
         assert_eq!(hooks, Some(Hooks { tick_hz: 42 }));
 
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_creates_the_folder_replaces_the_file_and_leaves_no_temporary() {
+        let folder =
+            std::env::temp_dir().join(format!("umicraft-config-atomic-{}", std::process::id()));
+        let path = folder.join("nested").join("options.toml");
+        let mut store = ConfigStore::default();
+        store
+            .set_section("scheduler", &Hooks { tick_hz: 1 })
+            .unwrap();
+        store.save(&path).unwrap();
+        store
+            .set_section("scheduler", &Hooks { tick_hz: 2 })
+            .unwrap();
+        store.save(&path).unwrap();
+
+        let loaded = ConfigStore::from_path(&path).unwrap();
+        let hooks: Option<Hooks> = loaded.section("scheduler").unwrap();
+        assert_eq!(hooks, Some(Hooks { tick_hz: 2 }));
+        assert!(!path.with_extension("toml.tmp").exists());
+
+        let _ = fs::remove_dir_all(&folder);
     }
 }

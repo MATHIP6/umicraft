@@ -22,6 +22,8 @@ pub enum Screen {
     Inventory,
     /// The menu opened with Escape.
     GameMenu,
+    /// The options, opened from the game menu.
+    Options,
     /// The M4 debug screen (F2).
     Debug,
 }
@@ -30,7 +32,10 @@ impl Screen {
     /// Whether the immediate-mode UI receives the pointer and the keys.
     #[must_use]
     pub const fn uses_ui(self) -> bool {
-        matches!(self, Self::Inventory | Self::GameMenu | Self::Debug)
+        matches!(
+            self,
+            Self::Inventory | Self::GameMenu | Self::Options | Self::Debug
+        )
     }
 
     /// Whether the game ignores movement, look and click input.
@@ -42,13 +47,15 @@ impl Screen {
     /// The screen after a fresh Escape press.
     ///
     /// With no screen, Escape opens the game menu. The chat, the inventory and
-    /// the menu close. The debug screen is closed by F2 only, because Escape is
-    /// a key its widgets may consume.
+    /// the menu close; the options go back to the menu they were opened from.
+    /// The debug screen is closed by F2 only, because Escape is a key its
+    /// widgets may consume.
     #[must_use]
     pub const fn after_escape(self) -> Self {
         match self {
             Self::None => Self::GameMenu,
             Self::Chat | Self::Inventory | Self::GameMenu => Self::None,
+            Self::Options => Self::GameMenu,
             Self::Debug => Self::Debug,
         }
     }
@@ -75,6 +82,7 @@ mod tests {
             Screen::Chat,
             Screen::Inventory,
             Screen::GameMenu,
+            Screen::Options,
             Screen::Debug,
         ] {
             assert!(screen.blocks_game_input(), "{screen:?} must own the input");
@@ -87,6 +95,7 @@ mod tests {
         assert!(!Screen::Chat.uses_ui());
         assert!(Screen::Inventory.uses_ui());
         assert!(Screen::GameMenu.uses_ui());
+        assert!(Screen::Options.uses_ui());
         assert!(Screen::Debug.uses_ui());
     }
 
@@ -96,6 +105,7 @@ mod tests {
         assert_eq!(Screen::GameMenu.after_escape(), Screen::None);
         assert_eq!(Screen::Chat.after_escape(), Screen::None);
         assert_eq!(Screen::Inventory.after_escape(), Screen::None);
+        assert_eq!(Screen::Options.after_escape(), Screen::GameMenu);
         assert_eq!(Screen::Debug.after_escape(), Screen::Debug);
     }
 
