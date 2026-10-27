@@ -1,11 +1,11 @@
-# ADR-0015 — Water and lava are drawn by a fluid mesher, not as cubes
+# ADR-0018 — Water and lava are drawn by a fluid mesher, not as cubes
 
 - Status: Implemented
 - Date: 2026-10-25
 - Deciders: project owner
 - Supersedes: the liquid case of the model-less fallback of ADR-0007
 - Related: ADR-0008 (transparency), ADR-0009 (biome tints), ADR-0012
-  (terrain textures), ADR-0014 (movement media)
+  (terrain textures), ADR-0017 (movement media)
 
 ## Context
 

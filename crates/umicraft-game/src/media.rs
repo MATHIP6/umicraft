@@ -2,7 +2,7 @@
 
 //! What the blocks around the player do to its movement, beyond their
 //! collision boxes: water and its current, lava, ladders and vines, cobwebs
-//! and soul sand (ADR-0014).
+//! and soul sand (ADR-0017).
 //!
 //! Each query reads the block at the position the reference reads it, so
 //! the client and the server agree on which rules apply in a tick.
