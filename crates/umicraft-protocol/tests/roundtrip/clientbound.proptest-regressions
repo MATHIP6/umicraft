@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f5e84f6ee2658808d5c13c3083addbcbef567969df39030d52839ab28c70b89b # shrinks to value = SpawnObject { entity_id: 0, object_type: 0, x: 0, y: 0, z: 0, pitch: 0, yaw: 0, data: 0, velocity_x: 0, velocity_y: 0, velocity_z: 1 }
