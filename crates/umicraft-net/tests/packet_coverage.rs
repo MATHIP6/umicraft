@@ -10,25 +10,18 @@
 //!
 //! Each id is in exactly one state ([`Coverage`]):
 //!
-//! - `Handled`: clientbound, the session decodes it and forwards an event or
-//!   a reply; serverbound, the client encodes it and sends it when vanilla
-//!   would.
+//! - `Handled`: clientbound, the session decodes it and the client acts on
+//!   it; serverbound, the client encodes it and sends it when vanilla would.
+//! - `Forwarded`: clientbound only; decoded and forwarded, its state kept by
+//!   the game thread, the consumer arrives in the named milestone.
+//! - `Encoded`: serverbound only; encodable, the feature that sends it
+//!   arrives in the named milestone.
 //! - `Ignored`: deliberately not acted on; the reason says why it is safe.
-//! - `Dropped`: clientbound only; the session decodes it but the data is
-//!   discarded (by the session or by the game thread). This is a gap.
-//! - `Missing`: not decoded, not encoded, or never sent. This is a gap.
 //!
-//! The tests that run in CI keep the tables honest (complete, ordered, and in
-//! agreement with the session and with `PlayServerbound`). The audit itself,
-//! [`every_protocol_47_id_is_handled_or_intentionally_ignored`], fails on the
-//! known gaps, so it is `#[ignore]`d. Run it with:
-//!
-//! ```text
-//! cargo test -p umicraft-net --test packet_coverage -- --ignored
-//! ```
-//!
-//! P1 (ROADMAP.md) must close the gaps, make the audit pass and then remove
-//! the `#[ignore]`.
+//! P1 (ROADMAP.md, ADR-0020) closed the gaps of `docs/roadmap-review.md`
+//! §3.1: no id is silently skipped any more. The tests keep the tables
+//! honest — complete, ordered, in agreement with the session and with
+//! `PlayServerbound`, and every deferred row names its owner milestone.
 
 use umicraft_net::play::{PlayOptions, PlaySession, Reaction};
 use umicraft_protocol::packets::play::serverbound;
@@ -40,25 +33,41 @@ enum Coverage {
     Handled,
     /// Intentionally not acted on; the reason says why that is safe.
     Ignored(&'static str),
-    /// Decoded but its data is discarded; the text says where and what is lost.
-    Dropped(&'static str),
-    /// Not supported; the text says what is missing and which milestone owns it.
-    Missing(&'static str),
+    /// Clientbound: decoded and forwarded (its state kept by the game
+    /// thread); the text names the milestone of its consumer (ADR-0020 §5).
+    Forwarded(&'static str),
+    /// Serverbound: encodable; the text names the milestone of the feature
+    /// that sends it (ADR-0020 §5).
+    Encoded(&'static str),
 }
 
 impl Coverage {
-    /// The explanation of a gap, or `None` when the id needs no work.
-    fn gap(self) -> Option<&'static str> {
+    /// Why the row is wrong for its direction, or `None` when it is valid.
+    ///
+    /// A deferred row must name the milestone that owns the rest of the work
+    /// (`(P<n>)`), and each deferral kind belongs to one direction.
+    fn problem(self, serverbound: bool) -> Option<&'static str> {
         match self {
             Self::Handled | Self::Ignored(_) => None,
-            Self::Dropped(why) | Self::Missing(why) => Some(why),
+            Self::Forwarded(_) if serverbound => Some("Forwarded is clientbound only"),
+            Self::Encoded(_) if !serverbound => Some("Encoded is serverbound only"),
+            Self::Forwarded(why) | Self::Encoded(why) => {
+                (!names_milestone(why)).then_some("the deferral names no owner milestone")
+            }
         }
     }
 
     /// Whether the clientbound session runs the packet's decoder.
     fn session_decodes(self) -> bool {
-        matches!(self, Self::Handled | Self::Dropped(_))
+        matches!(self, Self::Handled | Self::Forwarded(_))
     }
+}
+
+/// Whether a deferral text names a parity milestone, e.g. `(P5)` or `(P2, P9)`.
+fn names_milestone(why: &str) -> bool {
+    why.split('P')
+        .skip(1)
+        .any(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
 }
 
 /// One row of a coverage table.
@@ -91,15 +100,15 @@ const CLIENTBOUND: [Row; 0x4A] = [
     Row::new(0x07, "Respawn", Coverage::Handled),
     Row::new(0x08, "Player Position And Look", Coverage::Handled),
     Row::new(0x09, "Held Item Change", Coverage::Handled),
-    Row::new(0x0A, "Use Bed", Coverage::Missing("not decoded; sleeping pose needs it (P1)")),
-    Row::new(0x0B, "Animation", Coverage::Dropped("forwarded as PlayEvent::Animation but the game thread ignores it (game.rs, P1/M8)")),
+    Row::new(0x0A, "Use Bed", Coverage::Forwarded("sleeping pose (P5)")),
+    Row::new(0x0B, "Animation", Coverage::Forwarded("swing, hurt and crit animations (P5)")),
     Row::new(0x0C, "Spawn Player", Coverage::Handled),
-    Row::new(0x0D, "Collect Item", Coverage::Missing("not decoded; pickup animation (P1)")),
+    Row::new(0x0D, "Collect Item", Coverage::Forwarded("pickup animation (P5)")),
     Row::new(0x0E, "Spawn Object", Coverage::Handled),
     Row::new(0x0F, "Spawn Mob", Coverage::Handled),
-    Row::new(0x10, "Spawn Painting", Coverage::Missing("not decoded; paintings are never spawned (P1)")),
-    Row::new(0x11, "Spawn Experience Orb", Coverage::Missing("not decoded; XP orbs are never spawned (P1)")),
-    Row::new(0x12, "Entity Velocity", Coverage::Dropped("applied to other entities only; the local player never receives knockback (P1)")),
+    Row::new(0x10, "Spawn Painting", Coverage::Forwarded("paintings (P5)")),
+    Row::new(0x11, "Spawn Experience Orb", Coverage::Forwarded("experience orbs (P5)")),
+    Row::new(0x12, "Entity Velocity", Coverage::Forwarded("local knockback (P2); other entities' motion (P5)")),
     Row::new(0x13, "Destroy Entities", Coverage::Handled),
     Row::new(0x14, "Entity", Coverage::Ignored("the base S14PacketEntity carries only an entity id and moves nothing; vanilla's handler adds a zero delta")),
     Row::new(0x15, "Entity Relative Move", Coverage::Handled),
@@ -107,54 +116,54 @@ const CLIENTBOUND: [Row; 0x4A] = [
     Row::new(0x17, "Entity Look And Move", Coverage::Handled),
     Row::new(0x18, "Entity Teleport", Coverage::Handled),
     Row::new(0x19, "Entity Head Look", Coverage::Handled),
-    Row::new(0x1A, "Entity Status", Coverage::Dropped("forwarded but the game thread ignores it: no hurt/death/eat statuses (P1/M8)")),
-    Row::new(0x1B, "Attach Entity", Coverage::Dropped("forwarded but the game thread ignores it: no riding or leashes (P1/M8)")),
+    Row::new(0x1A, "Entity Status", Coverage::Forwarded("hurt, death and eating statuses (P5)")),
+    Row::new(0x1B, "Attach Entity", Coverage::Forwarded("local riding drives the traffic; passengers and leashes (P5)")),
     Row::new(0x1C, "Entity Metadata", Coverage::Handled),
-    Row::new(0x1D, "Entity Effect", Coverage::Missing("not decoded; potion effects (speed, jump, blindness...) (P1)")),
-    Row::new(0x1E, "Remove Entity Effect", Coverage::Missing("not decoded; potion effects (P1)")),
+    Row::new(0x1D, "Entity Effect", Coverage::Forwarded("kept in ServerState; effects in movement (P2) and the HUD (P9)")),
+    Row::new(0x1E, "Remove Entity Effect", Coverage::Forwarded("kept in ServerState; effects in movement (P2)")),
     Row::new(0x1F, "Set Experience", Coverage::Handled),
-    Row::new(0x20, "Entity Properties", Coverage::Missing("not decoded; movement speed attribute for sprint/slowness (P1)")),
+    Row::new(0x20, "Entity Properties", Coverage::Forwarded("kept in ServerState; movement speed attribute (P2)")),
     Row::new(0x21, "Chunk Data", Coverage::Handled),
     Row::new(0x22, "Multi Block Change", Coverage::Handled),
     Row::new(0x23, "Block Change", Coverage::Handled),
-    Row::new(0x24, "Block Action", Coverage::Missing("decoder exists in umicraft-protocol but PlaySession::react skips the id; chest lids, note blocks, pistons (P1)")),
-    Row::new(0x25, "Block Break Animation", Coverage::Missing("decoder exists in umicraft-protocol but PlaySession::react skips the id; other players' crack overlay (P1)")),
+    Row::new(0x24, "Block Action", Coverage::Forwarded("chest lids, note blocks, pistons (P7)")),
+    Row::new(0x25, "Block Break Animation", Coverage::Forwarded("kept in ServerState; crack overlay (P2)")),
     Row::new(0x26, "Map Chunk Bulk", Coverage::Handled),
-    Row::new(0x27, "Explosion", Coverage::Missing("not decoded; block removal and explosion knockback (P1)")),
-    Row::new(0x28, "Effect", Coverage::Missing("not decoded; block-break/door/record effects (P1)")),
-    Row::new(0x29, "Sound Effect", Coverage::Missing("not decoded; nearly all 1.8 sounds, needs the audio milestone (M11)")),
-    Row::new(0x2A, "Particles", Coverage::Missing("not decoded; server particles (P1)")),
-    Row::new(0x2B, "Change Game State", Coverage::Missing("decoder exists in umicraft-protocol but PlaySession::react skips the id; rain, gamemode change, credits (P1)")),
-    Row::new(0x2C, "Spawn Global Entity", Coverage::Missing("not decoded; lightning (P1)")),
+    Row::new(0x27, "Explosion", Coverage::Forwarded("blocks removed on the client; knockback (P2), particles (P8)")),
+    Row::new(0x28, "Effect", Coverage::Forwarded("block-break, door and record effects (P8, P11)")),
+    Row::new(0x29, "Sound Effect", Coverage::Forwarded("sounds (P11)")),
+    Row::new(0x2A, "Particles", Coverage::Forwarded("server particles (P8)")),
+    Row::new(0x2B, "Change Game State", Coverage::Forwarded("kept in ServerState; weather (P7), gamemode (P2)")),
+    Row::new(0x2C, "Spawn Global Entity", Coverage::Forwarded("lightning (P5)")),
     Row::new(0x2D, "Open Window", Coverage::Handled),
     Row::new(0x2E, "Close Window", Coverage::Handled),
     Row::new(0x2F, "Set Slot", Coverage::Handled),
     Row::new(0x30, "Window Items", Coverage::Handled),
     Row::new(0x31, "Window Property", Coverage::Handled),
     Row::new(0x32, "Confirm Transaction", Coverage::Handled),
-    Row::new(0x33, "Update Sign", Coverage::Missing("not decoded; sign text (P1)")),
-    Row::new(0x34, "Maps", Coverage::Missing("not decoded; maps in hand and item frames (P1)")),
-    Row::new(0x35, "Update Tile Entity", Coverage::Missing("not decoded; skulls, banners, spawners, flower pots (P1)")),
-    Row::new(0x36, "Open Sign Editor", Coverage::Missing("not decoded; sign editing (P1)")),
-    Row::new(0x37, "Statistics", Coverage::Missing("not decoded; statistics screen (P1)")),
-    Row::new(0x38, "Player List Item", Coverage::Missing("not decoded; tab list, skins, others' gamemode and ping (P1/M10)")),
-    Row::new(0x39, "Player Abilities", Coverage::Missing("not decoded; flying, fly speed, invulnerability (P1)")),
-    Row::new(0x3A, "Tab Complete", Coverage::Missing("not decoded; chat completion (M10)")),
-    Row::new(0x3B, "Scoreboard Objective", Coverage::Missing("not decoded; scoreboard (M10)")),
-    Row::new(0x3C, "Update Score", Coverage::Missing("not decoded; scoreboard (M10)")),
-    Row::new(0x3D, "Display Scoreboard", Coverage::Missing("not decoded; scoreboard (M10)")),
-    Row::new(0x3E, "Teams", Coverage::Missing("not decoded; team prefixes, colours, name-tag visibility (M10)")),
-    Row::new(0x3F, "Custom Payload", Coverage::Missing("not decoded; MC")),
+    Row::new(0x33, "Update Sign", Coverage::Forwarded("kept in ServerState; sign text rendering (P7)")),
+    Row::new(0x34, "Maps", Coverage::Forwarded("kept in ServerState; maps in hand and frames (P3, P7)")),
+    Row::new(0x35, "Update Tile Entity", Coverage::Forwarded("kept in ServerState; skulls, banners, spawners (P7)")),
+    Row::new(0x36, "Open Sign Editor", Coverage::Forwarded("kept in ServerState; sign editor screen (P10)")),
+    Row::new(0x37, "Statistics", Coverage::Forwarded("kept in ServerState; statistics screen (P10)")),
+    Row::new(0x38, "Player List Item", Coverage::Forwarded("kept in ServerState; tab list (P9), skins (P5)")),
+    Row::new(0x39, "Player Abilities", Coverage::Forwarded("kept in ServerState; flying and creative movement (P2)")),
+    Row::new(0x3A, "Tab Complete", Coverage::Forwarded("chat completion (P9)")),
+    Row::new(0x3B, "Scoreboard Objective", Coverage::Forwarded("kept in ServerState; sidebar (P9)")),
+    Row::new(0x3C, "Update Score", Coverage::Forwarded("kept in ServerState; sidebar (P9)")),
+    Row::new(0x3D, "Display Scoreboard", Coverage::Forwarded("kept in ServerState; sidebar (P9)")),
+    Row::new(0x3E, "Teams", Coverage::Forwarded("kept in ServerState; prefixes and name tags (P5, P9)")),
+    Row::new(0x3F, "Custom Payload", Coverage::Forwarded("server brand kept in ServerState; other channels (P4, P12)")),
     Row::new(0x40, "Disconnect", Coverage::Handled),
-    Row::new(0x41, "Server Difficulty", Coverage::Missing("not decoded; options screen (P1)")),
-    Row::new(0x42, "Combat Event", Coverage::Missing("not decoded; death message and death screen (P1)")),
-    Row::new(0x43, "Camera", Coverage::Missing("not decoded; spectator camera (P1)")),
-    Row::new(0x44, "World Border", Coverage::Missing("not decoded; border rendering (P1)")),
-    Row::new(0x45, "Title", Coverage::Missing("not decoded; titles, subtitles, action bar (M10)")),
-    Row::new(0x46, "Set Compression", Coverage::Missing("not decoded; compression change in play state (P1)")),
-    Row::new(0x47, "Player List Header And Footer", Coverage::Missing("not decoded; tab list header and footer (M10)")),
-    Row::new(0x48, "Resource Pack Send", Coverage::Missing("not decoded; server resource packs, and no status reply is sent (P1)")),
-    Row::new(0x49, "Update Entity NBT", Coverage::Missing("not decoded; rare (P1)")),
+    Row::new(0x41, "Server Difficulty", Coverage::Forwarded("kept in ServerState; options screen (P10)")),
+    Row::new(0x42, "Combat Event", Coverage::Forwarded("death message kept in ServerState; death screen (P2)")),
+    Row::new(0x43, "Camera", Coverage::Forwarded("kept in ServerState; spectator camera (P2)")),
+    Row::new(0x44, "World Border", Coverage::Forwarded("kept in ServerState; border rendering (P7)")),
+    Row::new(0x45, "Title", Coverage::Forwarded("kept in ServerState; title rendering (P9)")),
+    Row::new(0x46, "Set Compression", Coverage::Handled),
+    Row::new(0x47, "Player List Header And Footer", Coverage::Forwarded("kept in ServerState; tab list (P9)")),
+    Row::new(0x48, "Resource Pack Send", Coverage::Handled),
+    Row::new(0x49, "Update Entity NBT", Coverage::Forwarded("no 1.8 server entity uses it on the client (P5)")),
 ];
 
 /// Serverbound play packets, ids `0x00..=0x19`.
@@ -164,15 +173,9 @@ const SERVERBOUND: [Row; 0x1A] = [
     Row::new(
         0x02,
         "Use Entity",
-        Coverage::Missing("encoded but never built by the client: no attack, no interact (P1)"),
+        Coverage::Encoded("attack and interact (P6)"),
     ),
-    Row::new(
-        0x03,
-        "Player",
-        Coverage::Missing(
-            "not encoded; vanilla sends the on-ground-only packet every tick without movement (P1)",
-        ),
-    ),
+    Row::new(0x03, "Player", Coverage::Handled),
     Row::new(0x04, "Player Position", Coverage::Handled),
     Row::new(0x05, "Player Look", Coverage::Handled),
     Row::new(0x06, "Player Position And Look", Coverage::Handled),
@@ -182,77 +185,59 @@ const SERVERBOUND: [Row; 0x1A] = [
     Row::new(
         0x0A,
         "Animation",
-        Coverage::Missing(
-            "encoded but never built by the client: the arm swing is never announced (P1)",
-        ),
+        Coverage::Encoded("arm swing with the hold-to-break rework (P2)"),
     ),
-    Row::new(
-        0x0B,
-        "Entity Action",
-        Coverage::Missing(
-            "encoded but never built by the client: sprint and sneak are never announced (P1)",
-        ),
-    ),
-    Row::new(
-        0x0C,
-        "Steer Vehicle",
-        Coverage::Missing("sent every tick by the client; vanilla sends it only while riding (P1)"),
-    ),
+    Row::new(0x0B, "Entity Action", Coverage::Handled),
+    Row::new(0x0C, "Steer Vehicle", Coverage::Handled),
     Row::new(0x0D, "Close Window", Coverage::Handled),
     Row::new(
         0x0E,
         "Click Window",
-        Coverage::Missing(
-            "encoded and ClientCommand::ClickWindow exists, but no code builds it (M9)",
-        ),
+        Coverage::Encoded("inventory clicks (P4)"),
     ),
     Row::new(0x0F, "Confirm Transaction", Coverage::Handled),
     Row::new(
         0x10,
         "Creative Inventory Action",
-        Coverage::Missing("encoded but never built by the client (P1)"),
+        Coverage::Encoded("creative inventory (P4)"),
     ),
     Row::new(
         0x11,
         "Enchant Item",
-        Coverage::Missing("not encoded; enchanting table (P1)"),
+        Coverage::Encoded("enchanting table (P4)"),
     ),
     Row::new(
         0x12,
         "Update Sign",
-        Coverage::Missing("not encoded; sign writing (P1)"),
+        Coverage::Encoded("sign editor screen (P10)"),
     ),
     Row::new(
         0x13,
         "Player Abilities",
-        Coverage::Missing("not encoded; toggling flight (P1)"),
+        Coverage::Encoded("creative flight toggle (P2)"),
     ),
     Row::new(
         0x14,
         "Tab Complete",
-        Coverage::Missing("not encoded; chat completion (M10)"),
+        Coverage::Encoded("chat completion (P9)"),
     ),
     Row::new(0x15, "Client Settings", Coverage::Handled),
     Row::new(
         0x16,
         "Client Status",
-        Coverage::Missing("not encoded; respawn after death, statistics (P1)"),
+        Coverage::Encoded("death screen respawn, statistics (P2, P10)"),
     ),
     Row::new(0x17, "Plugin Message", Coverage::Handled),
     Row::new(
         0x18,
         "Spectate",
-        Coverage::Missing("not encoded; spectator teleport (P1)"),
+        Coverage::Encoded("spectator teleport (P2)"),
     ),
-    Row::new(
-        0x19,
-        "Resource Pack Status",
-        Coverage::Missing("not encoded; servers requiring a pack (P1)"),
-    ),
+    Row::new(0x19, "Resource Pack Status", Coverage::Handled),
 ];
 
 /// The ids `PlayServerbound` can encode (its variants' `ID` constants).
-const ENCODABLE: [u8; 18] = [
+const ENCODABLE: [u8; 26] = [
     serverbound::KeepAlive::ID,
     serverbound::Chat::ID,
     serverbound::UseEntity::ID,
@@ -271,6 +256,14 @@ const ENCODABLE: [u8; 18] = [
     serverbound::CreativeInventoryAction::ID,
     serverbound::ClientSettings::ID,
     serverbound::Brand::ID,
+    serverbound::Player::ID,
+    serverbound::EnchantItem::ID,
+    serverbound::UpdateSign::ID,
+    serverbound::PlayerAbilities::ID,
+    serverbound::TabComplete::ID,
+    serverbound::ClientStatus::ID,
+    serverbound::Spectate::ID,
+    serverbound::ResourcePackStatus::ID,
 ];
 
 fn assert_contiguous(table: &[Row], direction: &str) {
@@ -341,25 +334,26 @@ fn handled_serverbound_ids_are_encodable() {
 }
 
 #[test]
-#[ignore = "known protocol gaps; closed by P1 (ROADMAP.md)"]
-fn every_protocol_47_id_is_handled_or_intentionally_ignored() {
-    let gaps: Vec<String> = [
-        ("clientbound", &CLIENTBOUND[..]),
-        ("serverbound", &SERVERBOUND[..]),
-    ]
-    .into_iter()
-    .flat_map(|(direction, table)| {
-        table.iter().filter_map(move |row| {
-            row.coverage
-                .gap()
-                .map(|why| format!("0x{:02X} {} ({direction}): {why}", row.id, row.name))
+fn every_protocol_47_id_is_handled_or_deferred_to_a_milestone() {
+    let problems: Vec<String> = [(false, &CLIENTBOUND[..]), (true, &SERVERBOUND[..])]
+        .into_iter()
+        .flat_map(|(serverbound, table)| {
+            table.iter().filter_map(move |row| {
+                row.coverage.problem(serverbound).map(|why| {
+                    let direction = if serverbound {
+                        "serverbound"
+                    } else {
+                        "clientbound"
+                    };
+                    format!("0x{:02X} {} ({direction}): {why}", row.id, row.name)
+                })
+            })
         })
-    })
-    .collect();
+        .collect();
     assert!(
-        gaps.is_empty(),
-        "{} protocol-47 packet gaps:\n{}",
-        gaps.len(),
-        gaps.join("\n")
+        problems.is_empty(),
+        "{} invalid coverage rows:\n{}",
+        problems.len(),
+        problems.join("\n")
     );
 }
