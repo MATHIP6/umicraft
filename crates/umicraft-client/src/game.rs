@@ -27,7 +27,9 @@ use std::time::{Duration, Instant};
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
-use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityKind, EntityStore};
+use umicraft_game::entity::{
+    EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityStore,
+};
 use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{BlockAck, Interaction, Outgoing, PositionAck};
@@ -380,6 +382,9 @@ struct Game {
     interaction: Interaction,
     /// Where the camera sits (`F5`).
     perspective: Perspective,
+    /// The body of the local player, animated like any other player; drawn
+    /// in the third-person perspectives.
+    body: EntityRecord,
     /// The statistics of the session.
     status_data: GameStatus,
     /// Whether the HUD has to be published again.
@@ -421,6 +426,7 @@ impl Game {
             vehicle: None,
             interaction: Interaction::new(),
             perspective: Perspective::default(),
+            body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
             status_data: GameStatus::default(),
             hud_dirty: true,
             entities: EntityStore::new(),
@@ -754,7 +760,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     let view = followed.unwrap_or_else(|| third_person_view(game, state.interpolated(1.0)));
     let mut entities = game.entities.frame_data();
     if followed.is_none() && game.perspective.shows_player() {
-        entities.push(local_player_frame(game, state));
+        entities.push(game.body.frame_data());
     }
     let _ = frames.try_send(RenderEvent::Frame(Frame {
         state: view,
@@ -782,34 +788,22 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
     }
 }
 
-/// The local player as an entity, so that the renderer draws its body in the
-/// third-person perspectives.
+/// Moves the body of the local player to where the tick left the player.
 ///
-/// The limb animation of the local player is not simulated yet, so the body
-/// stands still while walking.
-fn local_player_frame(game: &Game, state: &GameState) -> EntityFrameData {
-    let feet = |position: DVec3| position.as_vec3();
-    let yaw = game.yaw.to_degrees();
-    let pitch = game.pitch.to_degrees();
+/// The body is animated every tick, also in first person, so that a switch
+/// to the third person does not start from a standing pose.
+fn follow_body(game: &mut Game) {
+    let Some(state) = game.state.as_ref() else {
+        return;
+    };
     let sneaking = if state.player().sneaking { 0x02 } else { 0 };
-    EntityFrameData {
-        id: EntityId(game.entity_id),
-        kind: EntityKind::Player,
-        prev_position: feet(state.previous_position()),
-        position: feet(state.position()),
-        prev_yaw: yaw,
-        yaw,
-        prev_pitch: pitch,
-        pitch,
-        prev_head_yaw: yaw,
-        head_yaw: yaw,
-        limb_swing: 0.0,
-        prev_limb_swing_amount: 0.0,
-        limb_swing_amount: 0.0,
-        uuid: None,
-        held_item: None,
-        flags: EntityFlags::new(sneaking, 0x7F),
-    }
+    game.body.id = EntityId(game.entity_id);
+    game.body.follow(
+        state.position(),
+        game.yaw.to_degrees(),
+        game.pitch.to_degrees(),
+        EntityFlags::new(sneaking, 0x7F),
+    );
 }
 
 /// Handles one decoded clientbound packet.
@@ -1595,6 +1589,7 @@ fn tick(
         }
     }
     report_flight(game, was_flying, queue);
+    follow_body(game);
     game.entities.tick();
     game.server.tick();
     // A player inside a block is pushed out sideways by the simulation
@@ -2107,6 +2102,7 @@ mod tests {
             }
         };
 
+        follow_body(&mut game);
         let first = frame(&game);
         assert!(first.entities.is_empty(), "no body in first person");
 
@@ -2127,6 +2123,49 @@ mod tests {
             frame(&game).entities.is_empty(),
             "the cycle is back to first person"
         );
+    }
+
+    #[test]
+    fn the_local_body_swings_its_limbs_while_walking() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        game.playing = true;
+        game.input.forward = 1.0;
+        // The simulation only runs once the 3x3 columns around the player
+        // are loaded.
+        let payload = vec![0u8; umicraft_world::chunk::payload_len(0b1000, true, true)];
+        let world = game.world.as_mut().expect("world");
+        for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
+            if (x, z) != (0, 0) {
+                let column = umicraft_world::ChunkPayload {
+                    primary_bit_mask: 0b1000,
+                    ground_up: true,
+                    data: &payload,
+                };
+                world
+                    .apply_chunk(ChunkPos::new(x, z), column)
+                    .expect("an empty column");
+            }
+        }
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(64);
+        let (chunks, _chunk_received) = mpsc::sync_channel(64);
+        for _ in 0..10 {
+            tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        }
+        let walking = game.body.frame_data();
+        assert!(
+            walking.limb_swing_amount > 0.1,
+            "{}",
+            walking.limb_swing_amount
+        );
+        assert!(walking.limb_swing > 0.0);
+
+        game.input.forward = 0.0;
+        for _ in 0..60 {
+            tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        }
+        assert!(game.body.frame_data().limb_swing_amount < 0.05);
     }
 
     #[test]

@@ -35,7 +35,7 @@ gamemodes and the spectator camera.
    F5 perspectives are resolved on the game thread (`view::camera_pose`); the
    local body is published as an entity.
 6. The block selection outline is a `LineList` pass fed by `Frame.selection`
-   (1 px: wgpu has no wider lines).
+   (wgpu has no wider lines, so each edge is a quad widened in the vertex shader).
 
 ## Consequences
 
@@ -43,4 +43,4 @@ gamemodes and the spectator camera.
   parsed yet (P3).
 - The break is still the fixed 12-tick stand-in; hold-to-break is the next
   P2 item.
-- Not done: first-person hand (needs item models, P3), skin and limb animation of the local body.
+- Not done: first-person hand (needs item models, P3); skin, arm swing and body-yaw lag of the local body (P5).

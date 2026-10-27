@@ -279,6 +279,14 @@ clicks.
   (`fetch_mojang_skin` is implemented but unused), slim model from the
   profile, skin layers from metadata, name tags with team rules.
 - Armour layers and held items in third person.
+- Local player body (F5 views, added in P2 with limb swing from the predicted
+  movement): still missing the vanilla body-yaw lag (`renderYawOffset`), the
+  arm swing on attack/break, the held item, the player's own skin and cape
+  (it uses the default skin), and the sneaking and flying poses. The limb
+  smoothing shared with remote entities (`EntityRecord::update_limbs`) is an
+  approximation of `EntityLivingBase.moveEntityWithHeading`
+  (`limbSwingAmount` is not accumulated the vanilla way); fix it once for
+  every entity.
 - Objects: every `Spawn Object` type (boats, minecarts, TNT, falling blocks,
   arrows, snowballs, eggs, pearls, potions, fireballs, fishing bobber,
   ender crystal, fireworks, leash knot, item frames, armour stands), XP

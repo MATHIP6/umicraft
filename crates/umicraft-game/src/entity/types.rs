@@ -232,6 +232,58 @@ pub struct EntityRecord {
 }
 
 impl EntityRecord {
+    /// Advances the limb animation by the horizontal distance moved during
+    /// the tick (`previous_position` to `position`).
+    pub fn update_limbs(&mut self) {
+        let dx = self.position.x - self.previous_position.x;
+        let dz = self.position.z - self.previous_position.z;
+        let speed = (dx * dx + dz * dz).sqrt() as f32;
+
+        self.previous_limb_swing_amount = self.limb_swing_amount;
+        self.limb_swing += speed * 4.0;
+        let target_amount = (speed * 4.0).clamp(0.0, 1.0);
+        self.limb_swing_amount += (target_amount - self.limb_swing_amount) * 0.4;
+    }
+
+    /// Moves the entity to where the simulation put it this tick, without
+    /// interpolation, and animates its limbs. For the local player, whose
+    /// position is already the predicted one.
+    pub fn follow(&mut self, position: DVec3, yaw: f32, pitch: f32, flags: EntityFlags) {
+        self.previous_position = self.position;
+        self.position = position;
+        self.previous_yaw = self.yaw;
+        self.previous_head_yaw = self.head_yaw;
+        self.previous_pitch = self.pitch;
+        self.yaw = yaw;
+        self.head_yaw = yaw;
+        self.pitch = pitch;
+        self.flags = flags;
+        self.update_limbs();
+    }
+
+    /// The data the render thread interpolates between two ticks.
+    #[must_use]
+    pub fn frame_data(&self) -> EntityFrameData {
+        EntityFrameData {
+            id: self.id,
+            kind: self.kind,
+            prev_position: self.previous_position.as_vec3(),
+            position: self.position.as_vec3(),
+            prev_yaw: self.previous_yaw,
+            yaw: self.yaw,
+            prev_pitch: self.previous_pitch,
+            pitch: self.pitch,
+            prev_head_yaw: self.previous_head_yaw,
+            head_yaw: self.head_yaw,
+            limb_swing: self.limb_swing,
+            prev_limb_swing_amount: self.previous_limb_swing_amount,
+            limb_swing_amount: self.limb_swing_amount,
+            uuid: self.uuid,
+            held_item: self.held_item,
+            flags: self.flags,
+        }
+    }
+
     /// Creates a new entity record at the given initial position.
     #[must_use]
     pub fn new(id: EntityId, kind: EntityKind, position: DVec3, yaw: f32, pitch: f32) -> Self {

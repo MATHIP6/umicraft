@@ -572,9 +572,10 @@ impl Renderer {
     ///
     /// `boxes` are world-space boxes (the targeted block's selection shape);
     /// an empty slice hides the outline. The outline is drawn after the
-    /// terrain and before the HUD, one pixel wide (see the `outline` module).
+    /// terrain and before the HUD, a few pixels wide (see the `outline` module).
     pub fn set_selection_outline(&mut self, boxes: &[OutlineBox]) {
-        self.outline.set_boxes(&self.queue, boxes);
+        self.outline
+            .set_boxes(&self.queue, boxes, (self.width, self.height));
     }
 
     /// Draws one frame with the M3 HUD overlay only.

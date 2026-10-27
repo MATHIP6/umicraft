@@ -241,14 +241,7 @@ impl EntityStore {
                 entity.interpolation_steps -= 1;
             }
 
-            let dx = entity.position.x - entity.previous_position.x;
-            let dz = entity.position.z - entity.previous_position.z;
-            let speed = (dx * dx + dz * dz).sqrt() as f32;
-
-            entity.previous_limb_swing_amount = entity.limb_swing_amount;
-            entity.limb_swing += speed * 4.0;
-            let target_amount = (speed * 4.0).clamp(0.0, 1.0);
-            entity.limb_swing_amount += (target_amount - entity.limb_swing_amount) * 0.4;
+            entity.update_limbs();
         }
     }
 
@@ -308,36 +301,7 @@ impl EntityStore {
     pub fn frame_data(&self) -> Vec<EntityFrameData> {
         self.entities
             .values()
-            .map(|e| {
-                let prev_position = Vec3::new(
-                    e.previous_position.x as f32,
-                    e.previous_position.y as f32,
-                    e.previous_position.z as f32,
-                );
-                let position = Vec3::new(
-                    e.position.x as f32,
-                    e.position.y as f32,
-                    e.position.z as f32,
-                );
-                EntityFrameData {
-                    id: e.id,
-                    kind: e.kind,
-                    prev_position,
-                    position,
-                    prev_yaw: e.previous_yaw,
-                    yaw: e.yaw,
-                    prev_pitch: e.previous_pitch,
-                    pitch: e.pitch,
-                    prev_head_yaw: e.previous_head_yaw,
-                    head_yaw: e.head_yaw,
-                    limb_swing: e.limb_swing,
-                    prev_limb_swing_amount: e.previous_limb_swing_amount,
-                    limb_swing_amount: e.limb_swing_amount,
-                    uuid: e.uuid,
-                    held_item: e.held_item,
-                    flags: e.flags,
-                }
-            })
+            .map(EntityRecord::frame_data)
             .collect()
     }
 }
