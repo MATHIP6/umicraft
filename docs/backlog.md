@@ -25,16 +25,6 @@ picked up, and delete it when it is done.
 
 ## Game logic
 
-### Interaction rules in `umicraft-game` (architecture review, track 2)
-- **Problem:** digging, placement, the placement acknowledgement and the
-  position report are free functions over a private 27-field `Game` in
-  `crates/umicraft-client/src/game.rs`, built from shallow `umicraft-game`
-  pieces. None of `start_break`, `place_block`, `finish_break`,
-  `acknowledge_block`, `apply_placement` or `apply_correction` is tested.
-- **Proposal:** `umicraft-game` takes the inputs and the server events and
-  returns the packets to send; the client keeps the channels only. Needed
-  before M8 (entities) and M9 (inventory) build on it.
-
 ### Respawn after death
 - **Problem:** the client never sends the respawn request. A dead player stays
   dead, also after a reconnect, and its position reports make the server

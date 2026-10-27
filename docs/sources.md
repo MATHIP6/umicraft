@@ -182,3 +182,13 @@ observations that motivated them.
 | 2026-10-26 | Maps | `S34PacketMaps.setMapdataTo`, `handleMaps` | Scale set, decorations replaced, the column patch copied to `x + j + (z + k) * 128`. The reference does not bounds-check; Umicraft drops a patch that leaves the 128x128 buffer or has too little data. |
 | 2026-10-26 | Break animation, signs, block entities | `RenderGlobal.sendBlockBreakProgress`, `handleUpdateSign`, `handleUpdateTileEntity` | Per breaker id the block and stage `0..=9` are kept, any other stage removes the animation. Sign and tile entity updates are kept per position until a block entity store exists. |
 | 2026-10-26 | Camera, statistics, brand, death | `handleCamera`, `handleStatistics`, `handleCustomPayload`, `handleCombatEvent` | Camera switches the render view (ignored for unknown entities; the local player means normal view). Statistics are name to value. `MC|Brand` carries a VarInt-length string. Only the death of the local player matters for the death screen message. |
+
+## P2 interaction rules, gamemodes and camera
+
+| Date | Topic | Source | Finding |
+|---|---|---|---|
+| 2026-10-27 | Interaction rules | `PlayerControllerMP.clickBlock`, `onPlayerRightClick` | Creative sends only the start packet and removes the block locally (`clickBlockCreative`), delay 5 ticks; spectator and (without `CanDestroy`) adventure never start a break. The placement packet is sent in every mode; a spectator never places. Implemented in `umicraft_game::interaction` and `umicraft_game::gamemode`. |
+| 2026-10-27 | Join Game gamemode | `S01PacketJoinGame.readPacketData` | The hardcore bit (8) is masked out (`i & -9`) before `GameType.getByID`; unknown ids mean survival. |
+| 2026-10-27 | Flying | `EntityPlayerSP.onLivingUpdate`, `EntityPlayer.moveEntityWithHeading`, `PlayerCapabilities` | A second jump press within 7 ticks toggles `isFlying` when `allowFlying` (a spectator always flies) and sends `C13`; jump / sneak add / subtract `flySpeed * 3` of vertical motion; the air control becomes `flySpeed` (doubled while sprinting) and the vertical motion keeps 60 % of its pre-move value; touching the ground ends the flight except for a spectator. Implemented in `umicraft_game::physics`. |
+| 2026-10-27 | No-clip | `Entity.moveEntity`, `EntityPlayerSP.pushOutOfBlocks` | A no-clip player moves by its motion without collision and is never pushed out of blocks. |
+| 2026-10-27 | Spectate camera | `NetHandlerPlayClient.handleCamera`, `EntityPlayerSP.isCurrentViewEntity` | While the view entity is not the local player, movement input is zeroed and no position report is sent. |
