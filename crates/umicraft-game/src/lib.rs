@@ -37,7 +37,9 @@
 //! for later milestones (tab list, scoreboard, effects, border, titles) in
 //! [`server`].
 
+mod block_data;
 pub mod collision;
+pub mod digging;
 pub mod entity;
 pub mod gamemode;
 pub mod input;
