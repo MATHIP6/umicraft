@@ -9,9 +9,19 @@
 //! them into the values of one frame. They are plain data so that the render
 //! thread can interpolate two frames without game types.
 
-use glam::{Mat4, Vec3};
+use glam::{DVec3, Mat4, Vec3};
 
 use crate::physics::Player;
+use crate::raycast::{look_direction, raycast};
+use crate::shapes::BlockSource;
+
+/// The distance of the third-person camera behind the eyes, in blocks
+/// (MCP `EntityRenderer.thirdPersonDistance`, line 123).
+pub const THIRD_PERSON_DISTANCE: f64 = 4.0;
+
+/// The half-size of the box the third-person camera keeps clear of blocks
+/// (MCP `EntityRenderer.orientCamera`, line 679: the eight corners at ±0.1).
+const CAMERA_MARGIN: f64 = 0.1;
 
 /// The smoothing factor of the sway amplitude (MCP `EntityPlayer.java:653`).
 pub const SWAY_SMOOTHING: f32 = 0.4;
@@ -34,6 +44,102 @@ pub const FOV_MODIFIER_RANGE: (f32, f32) = (0.1, 1.5);
 
 /// The extra FOV factor of a flying player (MCP `AbstractClientPlayer.java:115`).
 const FLYING_FOV_FACTOR: f32 = 1.1;
+
+/// Where the camera sits (`F5`, MCP `GameSettings.thirdPersonView`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Perspective {
+    /// In the eyes of the player.
+    #[default]
+    FirstPerson,
+    /// Behind the player, looking the same way.
+    ThirdPersonBack,
+    /// In front of the player, looking back at it.
+    ThirdPersonFront,
+}
+
+impl Perspective {
+    /// The next perspective of the `F5` cycle
+    /// (MCP `Minecraft.java`: `thirdPersonView = (thirdPersonView + 1) % 3`).
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            Self::FirstPerson => Self::ThirdPersonBack,
+            Self::ThirdPersonBack => Self::ThirdPersonFront,
+            Self::ThirdPersonFront => Self::FirstPerson,
+        }
+    }
+
+    /// Whether the player body is drawn.
+    #[must_use]
+    pub fn shows_player(self) -> bool {
+        self != Self::FirstPerson
+    }
+}
+
+/// The position and angles the camera renders from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CameraPose {
+    /// The camera position.
+    pub position: DVec3,
+    /// The yaw in radians, in the angles of the game logic.
+    pub yaw: f32,
+    /// The pitch in radians, in the angles of the game logic.
+    pub pitch: f32,
+}
+
+/// The pose of the camera for a perspective.
+///
+/// MCP `EntityRenderer.orientCamera`: the third-person camera moves 4 blocks
+/// back along the view (forward in front view, where the view also turns by
+/// half a turn and the pitch flips). Eight rays from the corners of a 0.2
+/// box shorten the distance when a block is in the way, so the camera never
+/// ends up inside a wall.
+#[must_use]
+pub fn camera_pose<S: BlockSource + ?Sized>(
+    perspective: Perspective,
+    eye: DVec3,
+    yaw: f32,
+    pitch: f32,
+    world: &S,
+) -> CameraPose {
+    if perspective == Perspective::FirstPerson {
+        return CameraPose {
+            position: eye,
+            yaw,
+            pitch,
+        };
+    }
+    let front = perspective == Perspective::ThirdPersonFront;
+    let direction = look_direction(yaw, pitch) * if front { 1.0 } else { -1.0 };
+    let distance = clear_distance(eye, direction, world);
+    CameraPose {
+        position: eye + direction * distance,
+        yaw: if front {
+            yaw + std::f32::consts::PI
+        } else {
+            yaw
+        },
+        pitch: if front { -pitch } else { pitch },
+    }
+}
+
+/// How far the camera can move from `eye` along `direction` before a block
+/// stops one of the corners of its box.
+fn clear_distance<S: BlockSource + ?Sized>(eye: DVec3, direction: DVec3, world: &S) -> f64 {
+    let mut distance = THIRD_PERSON_DISTANCE;
+    for corner in 0..8 {
+        let offset = DVec3::new(
+            f64::from((corner & 1) * 2 - 1),
+            f64::from((corner >> 1 & 1) * 2 - 1),
+            f64::from((corner >> 2 & 1) * 2 - 1),
+        ) * CAMERA_MARGIN;
+        let target = direction * THIRD_PERSON_DISTANCE;
+        if let Some(hit) = raycast(eye + offset, target, THIRD_PERSON_DISTANCE, world) {
+            distance = distance.min(hit.position.distance(eye));
+        }
+    }
+    distance
+}
 
 /// The camera sway of a walking player, as the vanilla view-bobbing matrix
 /// parts (MCP `EntityRenderer.setupViewBobbing`).
@@ -151,6 +257,86 @@ pub fn smooth_fov_modifier(current: f32, target: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct Blocks(std::collections::HashSet<(i32, i32, i32)>);
+
+    impl BlockSource for Blocks {
+        fn block(&self, x: i32, y: i32, z: i32) -> umicraft_world::BlockState {
+            if self.0.contains(&(x, y, z)) {
+                umicraft_world::BlockState::new(1, 0)
+            } else {
+                umicraft_world::BlockState::AIR
+            }
+        }
+    }
+
+    #[test]
+    fn f5_cycles_through_the_three_perspectives() {
+        let mut perspective = Perspective::default();
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            seen.push(perspective);
+            perspective = perspective.next();
+        }
+        assert_eq!(seen[0], seen[3]);
+        assert_ne!(seen[0], seen[1]);
+        assert_ne!(seen[1], seen[2]);
+        assert!(!Perspective::FirstPerson.shows_player());
+        assert!(Perspective::ThirdPersonBack.shows_player());
+    }
+
+    #[test]
+    fn the_first_person_pose_is_the_eye() {
+        let eye = DVec3::new(1.0, 65.0, 2.0);
+        let pose = camera_pose(Perspective::FirstPerson, eye, 0.3, 0.2, &Blocks::default());
+        assert_eq!(pose.position, eye);
+        assert_eq!((pose.yaw, pose.pitch), (0.3, 0.2));
+    }
+
+    #[test]
+    fn the_back_view_sits_four_blocks_behind_the_eyes() {
+        // Yaw zero looks towards +Z, so the camera is at -Z.
+        let eye = DVec3::new(0.5, 65.0, 0.5);
+        let pose = camera_pose(
+            Perspective::ThirdPersonBack,
+            eye,
+            0.0,
+            0.0,
+            &Blocks::default(),
+        );
+        assert!((pose.position - DVec3::new(0.5, 65.0, -3.5)).length() < 1e-9);
+        assert_eq!((pose.yaw, pose.pitch), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_front_view_looks_back_at_the_player() {
+        let eye = DVec3::new(0.5, 65.0, 0.5);
+        let pose = camera_pose(
+            Perspective::ThirdPersonFront,
+            eye,
+            0.0,
+            0.2,
+            &Blocks::default(),
+        );
+        assert!(pose.position.z > eye.z + 3.0);
+        assert!((pose.yaw - std::f32::consts::PI).abs() < 1e-6);
+        assert!((pose.pitch + 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_wall_pulls_the_third_person_camera_in() {
+        let eye = DVec3::new(0.5, 65.5, 0.5);
+        let mut world = Blocks::default();
+        for y in 60..70 {
+            for x in -3..4 {
+                world.0.insert((x, y, -2));
+            }
+        }
+        let pose = camera_pose(Perspective::ThirdPersonBack, eye, 0.0, 0.0, &world);
+        assert!(pose.position.z > -1.1, "z = {}", pose.position.z);
+        assert!(pose.position.z < eye.z);
+    }
 
     #[test]
     fn a_standing_player_has_no_bobbing() {
