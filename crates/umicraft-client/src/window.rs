@@ -573,6 +573,7 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+        renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
 
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())
