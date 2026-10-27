@@ -28,7 +28,7 @@ use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
 use umicraft_game::chat_component::{self, Translations};
-use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityStore};
+use umicraft_game::entity::{BossTracker, EntityFlags, EntityFrameData, EntityId, EntityStore};
 use umicraft_game::input::RawInput;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::player_list::PlayerList;
@@ -44,8 +44,8 @@ use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack as WireItemStack};
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{
-    ChatLineView, ChatRunView, HudState, ItemStack, SidebarView, TabEntryView, TabListView,
-    TitleView,
+    BossView, ChatLineView, ChatRunView, HudState, ItemStack, SidebarView, TabEntryView,
+    TabListView, TitleView,
 };
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
@@ -148,6 +148,16 @@ pub enum GameEvent {
     Chat(String),
     /// The player pressed Tab: ask the server to complete this text.
     TabComplete(String),
+    /// The player changed an option the server must know: the render
+    /// distance, the chat visibility or the chat colours.
+    ClientSettings {
+        /// The render distance in chunks.
+        view_distance: u8,
+        /// The chat visibility byte.
+        chat_mode: u8,
+        /// Whether the chat shows colours.
+        chat_colors: bool,
+    },
     /// A line the client shows in its own chat (the completion list).
     LocalChat(String),
     /// Request to re-mesh every loaded chunk column (e.g. after a resource pack reload).
@@ -452,6 +462,10 @@ struct Game {
 
 impl Game {
     fn new() -> Self {
+        let mut translations = Translations::builtin();
+        if let Some(lang) = crate::official::load_en_us_lang() {
+            translations.extend(Translations::from_lang(&lang));
+        }
         Self {
             world: None,
             dirty: BTreeSet::new(),
@@ -475,7 +489,7 @@ impl Game {
             equipment: std::array::from_fn(|_| None),
             selected_slot: 0,
             chat: VecDeque::new(),
-            translations: Translations::builtin(),
+            translations,
             completions_serial: 0,
             last_position: None,
             last_rotation: (0.0, 0.0),
@@ -581,8 +595,17 @@ impl Game {
             show_tab_list: false,
             completions: self.completions.clone(),
             completions_serial: self.completions_serial,
+            boss: self.boss_view(),
             ..HudState::default()
         }
+    }
+
+    /// The active boss bar, if any boss is in the world.
+    fn boss_view(&self) -> Option<BossView> {
+        BossTracker::find_boss(&self.entities).map(|b| BossView {
+            name: b.name,
+            health: b.health_fraction,
+        })
     }
 
     /// The action bar message with its opacity, while one is displayed.
@@ -652,6 +675,27 @@ impl Game {
             entries,
         })
     }
+}
+
+/// The HUD a session would show after the server sent `events`, with the
+/// title and the action bar advanced by `ticks` game ticks.
+///
+/// The server-less `--hud-demo` uses it: the packets go through the same
+/// [`handle_net`] and the same views as in a real session, so the demo shows
+/// what the player would see rather than a hand-built picture.
+pub(crate) fn hud_after(events: Vec<PlayEvent>, own_name: &str, ticks: u32) -> HudState {
+    let mut game = Game::new();
+    game.own_name = own_name.to_string();
+    let mut queue = CommandQueue::default();
+    let (frames, _received) = mpsc::sync_channel(16);
+    for event in events {
+        handle_net(&mut game, event, &mut queue, &frames);
+    }
+    for _ in 0..ticks {
+        game.title.tick();
+        game.action_bar.tick();
+    }
+    game.hud()
 }
 
 /// A chat message from the chat JSON of the server.
@@ -876,6 +920,18 @@ fn handle_event(
             if message.chars().count() <= MAX_CHAT_CHARS {
                 queue.push(ClientCommand::TabComplete { message });
             }
+            false
+        }
+        GameEvent::ClientSettings {
+            view_distance,
+            chat_mode,
+            chat_colors,
+        } => {
+            queue.push(ClientCommand::ClientSettings {
+                view_distance,
+                chat_mode,
+                chat_colors,
+            });
             false
         }
         GameEvent::LocalChat(text) => {
@@ -1196,6 +1252,9 @@ fn handle_net(
                 vel,
                 flags,
             );
+            if let Some(health) = m.metadata.get_float(6) {
+                game.entities.set_health(EntityId(m.entity_id), health);
+            }
         }
         PlayEvent::SpawnObject(o) => {
             let pos = DVec3::new(
@@ -1260,6 +1319,9 @@ fn handle_net(
                 m.metadata.get_byte(10).unwrap_or(0),
             );
             game.entities.set_flags(EntityId(m.entity_id), flags);
+            if let Some(health) = m.metadata.get_float(6) {
+                game.entities.set_health(EntityId(m.entity_id), health);
+            }
         }
         PlayEvent::AttachEntity(_) | PlayEvent::EntityStatus(_) | PlayEvent::Animation(_) => {
             // Unused or visual-only 1.8 packets.
@@ -2489,6 +2551,85 @@ mod tests {
         assert!(
             hud.tab_list.is_some(),
             "the tab list belongs to the connection"
+        );
+    }
+
+    #[test]
+    fn boss_mob_spawn_and_metadata_updates_hud_boss_bar() {
+        use umicraft_protocol::packets::play::clientbound::{
+            DestroyEntities, EntityMetadata, SpawnMob,
+        };
+        use umicraft_protocol::packets::play::metadata::{Metadata, WatchedObject};
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+
+        // Spawn Ender Dragon (mob type 63) with full health (200.0)
+        let mut metadata = Metadata::default();
+        metadata.objects.push(WatchedObject {
+            type_id: 3,
+            index: 6,
+            value: 200.0_f32.to_be_bytes().to_vec(),
+        });
+        handle_net(
+            &mut game,
+            PlayEvent::SpawnMob(SpawnMob {
+                entity_id: 500,
+                mob_type: 63,
+                x: 0,
+                y: 64 * 32,
+                z: 0,
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                velocity_x: 0,
+                velocity_y: 0,
+                velocity_z: 0,
+                metadata,
+            }),
+            &mut queue,
+            &frames,
+        );
+
+        let hud = game.hud();
+        let boss = hud.boss.expect("boss bar present after dragon spawn");
+        assert_eq!(boss.name, "Ender Dragon");
+        assert_eq!(boss.health, 1.0);
+
+        // Update health via EntityMetadata to 100.0 (half health)
+        let mut update_meta = Metadata::default();
+        update_meta.objects.push(WatchedObject {
+            type_id: 3,
+            index: 6,
+            value: 100.0_f32.to_be_bytes().to_vec(),
+        });
+        handle_net(
+            &mut game,
+            PlayEvent::EntityMetadata(EntityMetadata {
+                entity_id: 500,
+                metadata: update_meta,
+            }),
+            &mut queue,
+            &frames,
+        );
+
+        let hud = game.hud();
+        let boss = hud.boss.expect("boss bar present after damage");
+        assert_eq!(boss.health, 0.5);
+
+        // Destroy dragon
+        handle_net(
+            &mut game,
+            PlayEvent::DestroyEntities(DestroyEntities {
+                entity_ids: vec![500],
+            }),
+            &mut queue,
+            &frames,
+        );
+        assert!(
+            game.hud().boss.is_none(),
+            "boss bar disappears when dragon is destroyed"
         );
     }
 }

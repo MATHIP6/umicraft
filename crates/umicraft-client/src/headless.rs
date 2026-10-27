@@ -65,6 +65,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         port,
         name: args.name.clone(),
         view_distance: args.view_distance,
+        chat_mode: 0,
+        chat_colors: true,
     })?;
 
     let mut script = Script::new(phases(&args.script));

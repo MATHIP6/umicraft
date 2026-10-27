@@ -84,10 +84,11 @@ impl DemoView {
 pub const USAGE: &str = "\
 usage: umicraft-client <host> <port> [options]
        umicraft-client --ui-demo [--screenshot PATH] [options]
+       umicraft-client --hud-demo [--hud-view NAME] [--screenshot PATH] [options]
        umicraft-client --block-demo [--screenshot PATH] [options]
        umicraft-client --entity-demo [--screenshot PATH] [options]
   <host> <port>       Minecraft 1.8 server (protocol 47); not needed with
-                      --ui-demo, --block-demo or --entity-demo
+                      --ui-demo, --hud-demo, --block-demo or --entity-demo
 
 options:
   --name NAME         offline username (default: umicraft)
@@ -100,6 +101,11 @@ options:
   --chat MESSAGE      chat line the headless session sends when it is placed
   --ui-demo           drive the scripted M4 debug screen without a server or GPU;
                       combine with --screenshot to render the same screen offscreen
+  --hud-demo          build the M10 HUD (styled chat, sidebar, tab list, title,
+                      action bar) and the options screens from scripted server
+                      packets; no server or GPU unless --screenshot is given
+  --hud-view NAME     scene of --hud-demo: overview, tab, chat, menu, options,
+                      controls (default: overview)
   --block-demo        mesh and report the M5/M6 acceptance blocks from the official
                       1.8.8 jar; no server or GPU unless --screenshot is given
   --entity-demo       mesh and report the M8 acceptance entities (Steve, Alex,
@@ -114,6 +120,9 @@ options:
   --width N           framebuffer width (default: 1280)
   --height N          framebuffer height (default: 720)
   --help, -h          print this help";
+
+/// The scenes of `--hud-demo`.
+pub const HUD_VIEWS: [&str; 6] = ["overview", "tab", "chat", "menu", "options", "controls"];
 
 /// The scripted sessions the headless mode knows.
 pub const SCRIPTS: [&str; 2] = ["default", "idle"];
@@ -133,6 +142,8 @@ pub enum Mode {
     Headless,
     /// The server-less scripted UI acceptance run.
     UiDemo,
+    /// The server-less M10 HUD, chat and options acceptance run.
+    HudDemo,
     /// The server-less M5 block-model acceptance run.
     BlockDemo,
     /// The server-less M8 entity acceptance run.
@@ -166,6 +177,10 @@ pub struct Args {
     pub chat: Option<String>,
     /// Whether the server-less scripted UI acceptance run is requested.
     pub ui_demo: bool,
+    /// Whether the server-less M10 HUD acceptance run is requested.
+    pub hud_demo: bool,
+    /// The scene of `--hud-demo`; one of [`HUD_VIEWS`].
+    pub hud_view: String,
     /// Whether the server-less M5/M6 block acceptance run is requested.
     pub block_demo: bool,
     /// Whether the server-less M8 entity acceptance run is requested.
@@ -212,6 +227,8 @@ impl Args {
             Mode::SetupAssets
         } else if self.ui_demo {
             Mode::UiDemo
+        } else if self.hud_demo {
+            Mode::HudDemo
         } else if self.block_demo {
             Mode::BlockDemo
         } else if self.entity_demo || self.mob.is_some() || self.dump_mobs.is_some() {
@@ -243,6 +260,8 @@ impl Args {
         let mut script = "default".to_string();
         let mut chat = None;
         let mut ui_demo = false;
+        let mut hud_demo = false;
+        let mut hud_view = HUD_VIEWS[0].to_string();
         let mut block_demo = false;
         let mut entity_demo = false;
         let mut mob = None;
@@ -304,6 +323,21 @@ impl Args {
                 "--ui-demo" => {
                     ui_demo = true;
                     index += 1;
+                }
+                "--hud-demo" => {
+                    hud_demo = true;
+                    index += 1;
+                }
+                "--hud-view" => {
+                    let value = words.get(index + 1).ok_or_else(help)?;
+                    if !HUD_VIEWS.contains(&value.as_str()) {
+                        return Err(format!(
+                            "--hud-view must be one of {}, got {value}\n{USAGE}",
+                            HUD_VIEWS.join(", ")
+                        ));
+                    }
+                    hud_view = value.clone();
+                    index += 2;
                 }
                 "--block-demo" => {
                     block_demo = true;
@@ -401,6 +435,7 @@ impl Args {
         // server. Every other mode keeps the M1-M3 contract of an explicit
         // host and port.
         let (host, port) = if ui_demo
+            || hud_demo
             || block_demo
             || entity_demo
             || mob.is_some()
@@ -424,6 +459,8 @@ impl Args {
             script,
             chat,
             ui_demo,
+            hud_demo,
+            hud_view,
             block_demo,
             entity_demo,
             mob,
@@ -531,6 +568,45 @@ mod tests {
         assert_eq!(args.server(), None);
         assert_eq!(args.mode(), Mode::UiDemo);
         assert_eq!((args.width, args.height), (1280, 720));
+    }
+
+    #[test]
+    fn parses_the_hud_demo_without_a_server_and_with_a_view() {
+        let args = Args::parse(&words(&["--hud-demo"])).expect("the hud demo needs no server");
+        assert!(args.hud_demo);
+        assert_eq!(args.hud_view, "overview");
+        assert_eq!(args.server(), None);
+        assert_eq!(args.mode(), Mode::HudDemo);
+
+        let args = Args::parse(&words(&[
+            "--hud-demo",
+            "--hud-view",
+            "controls",
+            "--screenshot",
+            "/tmp/m10-controls.png",
+        ]))
+        .expect("a hud demo with a view and a screenshot");
+        assert_eq!(args.hud_view, "controls");
+        assert_eq!(args.mode(), Mode::HudDemo);
+        assert!(args.screenshot.is_some());
+    }
+
+    #[test]
+    fn the_hud_demo_rejects_an_unknown_view_and_every_listed_view_parses() {
+        assert!(Args::parse(&words(&["--hud-demo", "--hud-view", "nope"])).is_err());
+        assert!(Args::parse(&words(&["--hud-demo", "--hud-view"])).is_err());
+        for view in HUD_VIEWS {
+            let args = Args::parse(&words(&["--hud-demo", "--hud-view", view])).expect(view);
+            assert_eq!(args.hud_view, view);
+        }
+    }
+
+    #[test]
+    fn the_ui_demo_wins_over_the_hud_demo_which_wins_over_the_block_demo() {
+        let ui = Args::parse(&words(&["--hud-demo", "--ui-demo"])).expect("both");
+        assert_eq!(ui.mode(), Mode::UiDemo);
+        let hud = Args::parse(&words(&["--block-demo", "--hud-demo"])).expect("both");
+        assert_eq!(hud.mode(), Mode::HudDemo);
     }
 
     #[test]

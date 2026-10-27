@@ -40,6 +40,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         port,
         name: args.name.clone(),
         view_distance: args.view_distance,
+        chat_mode: 0,
+        chat_colors: true,
     })?;
 
     let deadline = Instant::now() + args.collect;
