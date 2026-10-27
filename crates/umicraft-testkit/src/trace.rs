@@ -27,7 +27,8 @@
 //! `EntityPlayerSP.onUpdate` and `onUpdateWalkingPlayer`): on foot, every
 //! client tick ends with exactly one movement packet (0x03 `Player`, 0x04
 //! `Player Position`, 0x05 `Player Look` or 0x06 `Player Position And
-//! Look`); while riding, it ends with 0x05 followed by 0x0C `Steer Vehicle`.
+//! Look`); while riding, it ends with 0x05 followed, in the same few
+//! milliseconds, by 0x0C `Steer Vehicle`.
 //! The mouse and keyboard actions of `Minecraft.runTick` (`clickMouse`,
 //! `rightClickMouse`, `sendClickBlockToController`) run before
 //! `theWorld.updateEntities()`, so they belong to the tick whose movement
@@ -66,6 +67,14 @@ const PLAYER_DIGGING: u8 = 0x07;
 const ENTITY_ACTION: u8 = 0x0B;
 /// `Steer Vehicle` (0x0C, serverbound, play).
 const STEER_VEHICLE: u8 = 0x0C;
+/// Largest gap between the two packets of one riding tick, in milliseconds.
+///
+/// Vanilla queues the riding 0x05 and 0x0C back to back in one
+/// `EntityPlayerSP.onUpdate`, so they reach the proxy within a millisecond or
+/// so; a 0x0C a full 50 ms tick later starts the next tick. Without this
+/// bound, a client that sends 0x0C *before* its movement packet would have
+/// each look tick glued to the next tick's 0x0C.
+const SAME_TICK_MS: u64 = 20;
 
 /// Why a capture could not be turned into a trace.
 #[derive(Debug, Error)]
@@ -234,7 +243,10 @@ impl Trace {
             }
             let ends_tick = packet.is_movement();
             let riding = packet.id == PLAYER_LOOK
-                && iter.peek().is_some_and(|next| next.id == STEER_VEHICLE);
+                && iter.peek().is_some_and(|next| {
+                    next.id == STEER_VEHICLE
+                        && next.timestamp_ms.saturating_sub(packet.timestamp_ms) <= SAME_TICK_MS
+                });
             current.push(packet);
             if riding {
                 if let Some(steer) = iter.next() {
@@ -564,6 +576,26 @@ pub(crate) mod tests {
         ]);
         assert_eq!(trace.ticks.len(), 2);
         assert_eq!(trace.ticks[0].signature(), "0x05 0x0C");
+    }
+
+    #[test]
+    fn a_steer_vehicle_one_tick_later_starts_the_next_tick() {
+        // Regression: Umicraft sends 0x0C before its movement packet, so a
+        // look tick followed 50 ms later by the next tick's 0x0C is not a
+        // riding tick.
+        let at = |id, timestamp_ms| TracePacket {
+            id,
+            timestamp_ms,
+            body: Vec::new(),
+        };
+        let trace = Trace::from_packets(vec![
+            at(0x06, 0),
+            at(0x05, 50),
+            at(0x0C, 100),
+            at(0x04, 100),
+        ]);
+        let signatures: Vec<String> = trace.ticks.iter().map(Tick::signature).collect();
+        assert_eq!(signatures, ["0x05", "0x0C 0x04"]);
     }
 
     #[test]
