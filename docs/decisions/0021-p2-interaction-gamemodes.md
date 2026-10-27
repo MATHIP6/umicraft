@@ -29,9 +29,18 @@ gamemodes and the spectator camera.
 4. `Camera` (0x43): `EntityStore::camera_view` gives the eye of the followed
    entity; the frame uses it and the local movement is suspended.
 
+5. Camera effects: the player state keeps the vanilla inputs of view bobbing
+   and the FOV modifier; `RenderState.effects` carries the values of a tick
+   and the render thread interpolates two frames. `Camera` applies them.
+   F5 perspectives are resolved on the game thread (`view::camera_pose`); the
+   local body is published as an entity.
+6. The block selection outline is a `LineList` pass fed by `Frame.selection`
+   (1 px: wgpu has no wider lines).
+
 ## Consequences
 
 - Adventure mode never starts a break because item NBT (`CanDestroy`) is not
   parsed yet (P3).
 - The break is still the fixed 12-tick stand-in; hold-to-break is the next
   P2 item.
+- Not done: first-person hand (needs item models, P3), skin and limb animation of the local body.

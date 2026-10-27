@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
-use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityStore};
+use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityKind, EntityStore};
 use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{BlockAck, Interaction, Outgoing, PositionAck};
@@ -37,6 +37,7 @@ use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
+use umicraft_game::view::{camera_pose, Perspective};
 use umicraft_game::{GameState, InputIntent, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_net::play::{PlayEvent, SessionCounters};
@@ -377,6 +378,8 @@ struct Game {
     vehicle: Option<i32>,
     /// The dig, placement and acknowledgement rules.
     interaction: Interaction,
+    /// Where the camera sits (`F5`).
+    perspective: Perspective,
     /// The statistics of the session.
     status_data: GameStatus,
     /// Whether the HUD has to be published again.
@@ -417,6 +420,7 @@ impl Game {
             server_view: ServerView::default(),
             vehicle: None,
             interaction: Interaction::new(),
+            perspective: Perspective::default(),
             status_data: GameStatus::default(),
             hud_dirty: true,
             entities: EntityStore::new(),
@@ -744,18 +748,68 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     let Some(state) = game.state.as_ref() else {
         return;
     };
-    let view = game
+    let followed = game
         .camera_entity()
-        .and_then(|id| game.entities.camera_view(id, 1.0))
-        .unwrap_or_else(|| state.interpolated(1.0));
+        .and_then(|id| game.entities.camera_view(id, 1.0));
+    let view = followed.unwrap_or_else(|| third_person_view(game, state.interpolated(1.0)));
+    let mut entities = game.entities.frame_data();
+    if followed.is_none() && game.perspective.shows_player() {
+        entities.push(local_player_frame(game, state));
+    }
     let _ = frames.try_send(RenderEvent::Frame(Frame {
         state: view,
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
-        entities: game.entities.frame_data().into(),
+        entities: entities.into(),
         selection: game.selection_outline().into(),
     }));
+}
+
+/// Moves the first-person view of the player to the camera of the chosen
+/// perspective (MCP `EntityRenderer.orientCamera`).
+fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
+    let Some(world) = game.world.as_ref() else {
+        return first_person;
+    };
+    let eye = first_person.position.as_dvec3();
+    let pose = camera_pose(game.perspective, eye, game.yaw, game.pitch, world);
+    RenderState {
+        position: pose.position.as_vec3(),
+        yaw: pose.yaw,
+        pitch: pose.pitch,
+        ..first_person
+    }
+}
+
+/// The local player as an entity, so that the renderer draws its body in the
+/// third-person perspectives.
+///
+/// The limb animation of the local player is not simulated yet, so the body
+/// stands still while walking.
+fn local_player_frame(game: &Game, state: &GameState) -> EntityFrameData {
+    let feet = |position: DVec3| position.as_vec3();
+    let yaw = game.yaw.to_degrees();
+    let pitch = game.pitch.to_degrees();
+    let sneaking = if state.player().sneaking { 0x02 } else { 0 };
+    EntityFrameData {
+        id: EntityId(game.entity_id),
+        kind: EntityKind::Player,
+        prev_position: feet(state.previous_position()),
+        position: feet(state.position()),
+        prev_yaw: yaw,
+        yaw,
+        prev_pitch: pitch,
+        pitch,
+        prev_head_yaw: yaw,
+        head_yaw: yaw,
+        limb_swing: 0.0,
+        prev_limb_swing_amount: 0.0,
+        limb_swing_amount: 0.0,
+        uuid: None,
+        held_item: None,
+        flags: EntityFlags::new(sneaking, 0x7F),
+    }
 }
 
 /// Handles one decoded clientbound packet.
@@ -1400,6 +1454,9 @@ fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) 
         }
     }
 
+    if update.toggle_perspective {
+        game.perspective = game.perspective.next();
+    }
     if update.break_block {
         start_break(game, queue);
     }
@@ -2034,6 +2091,42 @@ mod tests {
             &frames,
         );
         assert!(!game.spectating(), "the local player is the view again");
+    }
+
+    #[test]
+    fn f5_moves_the_camera_back_and_shows_the_player_body() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        let mut queue = CommandQueue::default();
+        let (frames, received) = mpsc::sync_channel(16);
+        let frame = |game: &Game| {
+            publish_frame(game, &frames, Instant::now());
+            match received.try_recv() {
+                Ok(RenderEvent::Frame(frame)) => frame,
+                _ => panic!("a frame was expected"),
+            }
+        };
+
+        let first = frame(&game);
+        assert!(first.entities.is_empty(), "no body in first person");
+
+        let toggle = InputUpdate {
+            toggle_perspective: true,
+            ..InputUpdate::default()
+        };
+        handle_input(&mut game, toggle, &mut queue);
+        let third = frame(&game);
+        assert_eq!(third.entities.len(), 1);
+        assert_eq!(third.entities[0].id, EntityId(1));
+        let moved = (third.state.position - first.state.position).length();
+        assert!((moved - 4.0).abs() < 0.5, "moved {moved}");
+
+        handle_input(&mut game, toggle, &mut queue);
+        handle_input(&mut game, toggle, &mut queue);
+        assert!(
+            frame(&game).entities.is_empty(),
+            "the cycle is back to first person"
+        );
     }
 
     #[test]

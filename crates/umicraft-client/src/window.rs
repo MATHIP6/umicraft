@@ -86,6 +86,8 @@ struct App {
     select_slot: Option<u8>,
     break_block: bool,
     place_block: bool,
+    /// The perspective key was pressed since the last input update.
+    toggle_perspective: bool,
     /// Whether the chat input is open.
     chat_open: bool,
     /// The line the player is typing.
@@ -140,6 +142,7 @@ impl App {
             select_slot: None,
             break_block: false,
             place_block: false,
+            toggle_perspective: false,
             chat_open: false,
             chat_input: String::new(),
             inventory_open: false,
@@ -209,6 +212,7 @@ impl App {
                         }
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
                         KeyCode::F4 => self.reload_resources(),
+                        KeyCode::F5 => self.toggle_perspective = true,
                         KeyCode::KeyT => {
                             if self.keys.contains(&KeyCode::F3) {
                                 self.reload_resources();
@@ -402,7 +406,8 @@ impl App {
             || self.look != (0.0, 0.0)
             || self.select_slot.is_some()
             || self.break_block
-            || self.place_block;
+            || self.place_block
+            || self.toggle_perspective;
         if !changed {
             return;
         }
@@ -413,6 +418,7 @@ impl App {
             select_slot: self.select_slot,
             break_block: self.break_block,
             place_block: self.place_block,
+            toggle_perspective: self.toggle_perspective,
         };
         if self
             .session
@@ -425,6 +431,7 @@ impl App {
             self.select_slot = None;
             self.break_block = false;
             self.place_block = false;
+            self.toggle_perspective = false;
         }
     }
 

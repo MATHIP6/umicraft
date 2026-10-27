@@ -292,6 +292,12 @@ impl GameState {
         &self.player
     }
 
+    /// The feet position of the player on the previous tick.
+    #[must_use]
+    pub fn previous_position(&self) -> DVec3 {
+        self.previous_position
+    }
+
     /// The feet position of the player.
     #[must_use]
     pub fn position(&self) -> DVec3 {

@@ -66,6 +66,8 @@ pub struct InputUpdate {
     pub break_block: bool,
     /// Whether the player placed a block against the targeted face.
     pub place_block: bool,
+    /// Whether the player pressed the perspective key (`F5`).
+    pub toggle_perspective: bool,
 }
 
 /// The yaw the script turns per update, in radians.
