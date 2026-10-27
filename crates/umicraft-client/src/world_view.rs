@@ -18,7 +18,7 @@ use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
 use umicraft_game::inventory::WindowView;
 use umicraft_game::RenderState;
 use umicraft_mesh::{ChunkSnapshot, Mesh};
-use umicraft_render::{Camera, HudState, RenderEnvironment, Renderer};
+use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer};
 use umicraft_world::ChunkPos;
 
 use crate::error::ClientError;
@@ -65,6 +65,8 @@ pub struct WorldView {
     frames: usize,
     /// Active living entities interpolation data from the latest frame.
     entities: Arc<[EntityFrameData]>,
+    /// Selection outline boxes from the latest frame.
+    selection: Arc<[OutlineBox]>,
 }
 
 impl WorldView {
@@ -91,6 +93,7 @@ impl WorldView {
             ended: None,
             frames: 0,
             entities: Arc::from([]),
+            selection: Arc::from([]),
         })
     }
 
@@ -185,6 +188,13 @@ impl WorldView {
         self.entities.iter().map(|e| e.interpolate(alpha)).collect()
     }
 
+    /// The world-space boxes of the block selection outline in the newest
+    /// frame; empty when no block is targeted.
+    #[must_use]
+    pub fn selection(&self) -> &[OutlineBox] {
+        &self.selection
+    }
+
     /// The number of active living entities in the newest frame.
     #[must_use]
     pub fn entity_count(&self) -> usize {
@@ -196,6 +206,7 @@ impl WorldView {
             RenderEvent::Frame(frame) => {
                 self.frames += 1;
                 self.entities = Arc::clone(&frame.entities);
+                self.selection = Arc::clone(&frame.selection);
                 self.view.push(frame);
             }
             RenderEvent::Hud(hud) => self.hud = *hud,
@@ -545,6 +556,7 @@ mod tests {
             world_time,
             dimension: -1,
             entities: Arc::from([]),
+            selection: Arc::from([]),
         }
     }
 
@@ -609,5 +621,35 @@ mod tests {
                 .partial_tick,
             1.0
         );
+    }
+
+    #[test]
+    fn the_newest_frame_decides_the_selection_outline() {
+        let mut harness = Harness::new();
+        let outline = OutlineBox {
+            min: [0.0; 3],
+            max: [1.0; 3],
+        };
+        let mut selected = frame(glam::Vec3::ZERO, Instant::now(), 0);
+        selected.selection = Arc::from([outline]);
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(selected))
+            .expect("frame queue");
+        harness.sync();
+        assert_eq!(harness.world_view.selection(), &[outline]);
+
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(frame(
+                glam::Vec3::ZERO,
+                Instant::now(),
+                0,
+            )))
+            .expect("frame queue");
+        harness.sync();
+        assert!(harness.world_view.selection().is_empty());
     }
 }

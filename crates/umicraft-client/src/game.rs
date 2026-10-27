@@ -32,7 +32,7 @@ use umicraft_game::input::RawInput;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SURVIVAL_REACH};
 use umicraft_game::server::ServerState;
-use umicraft_game::shapes::Aabb;
+use umicraft_game::shapes::{selection_shape, Aabb};
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::{GameState, InputIntent, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
@@ -41,7 +41,7 @@ use umicraft_protocol::packets::play::clientbound::{ChunkData, Explosion, MapChu
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack as WireItemStack};
 use umicraft_protocol::PlayServerbound;
-use umicraft_render::{HudState, ItemStack};
+use umicraft_render::{HudState, ItemStack, OutlineBox};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
 use crate::error::ClientError;
@@ -137,6 +137,9 @@ pub enum GameEvent {
     CloseInventory,
 }
 
+/// The spectator gamemode id.
+const SPECTATOR: u8 = 3;
+
 /// One simulation frame published to the render thread.
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -156,6 +159,9 @@ pub struct Frame {
     pub dimension: i8,
     /// Per-entity interpolation data for the render thread.
     pub entities: Arc<[EntityFrameData]>,
+    /// World-space boxes of the block selection outline; empty when the
+    /// player looks at no block or is a spectator.
+    pub selection: Arc<[OutlineBox]>,
 }
 
 /// The statistics the debug overlay shows.
@@ -477,6 +483,36 @@ impl Game {
         raycast(eye, direction, self.reach(), self.world.as_ref()?)
     }
 
+    /// The boxes of the selection outline of the targeted block.
+    ///
+    /// MCP `EntityRenderer.isDrawBlockOutline` hides the outline for a
+    /// spectator unless a container is targeted (not modelled: spectators
+    /// never get an outline), and `RenderGlobal.drawSelectionBox` draws the
+    /// block's selected bounding box, offset to its position.
+    fn selection_outline(&self) -> Vec<OutlineBox> {
+        if self.gamemode == SPECTATOR {
+            return Vec::new();
+        }
+        let (Some(hit), Some(world)) = (self.target(), self.world.as_ref()) else {
+            return Vec::new();
+        };
+        let origin = DVec3::new(
+            f64::from(hit.block.x),
+            f64::from(hit.block.y),
+            f64::from(hit.block.z),
+        );
+        let state = world.block(hit.block);
+        let shape = selection_shape(state, world, hit.block);
+        shape
+            .boxes()
+            .iter()
+            .map(|aabb| OutlineBox {
+                min: (aabb.min + origin).as_vec3().to_array(),
+                max: (aabb.max + origin).as_vec3().to_array(),
+            })
+            .collect()
+    }
+
     /// True when the chunks around the player are loaded.
     ///
     /// The simulation must not run on an incomplete world: the collision
@@ -738,6 +774,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         world_time: game.world_time,
         dimension: game.dimension,
         entities: game.entities.frame_data().into(),
+        selection: game.selection_outline().into(),
     }));
 }
 
@@ -1971,6 +2008,44 @@ mod tests {
         game.world = Some(world);
         game.state = Some(GameState::new(DVec3::new(0.5, 64.0, 0.5)));
         game
+    }
+
+    #[test]
+    fn looking_at_the_floor_selects_the_floor_block() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        let boxes = game.selection_outline();
+        assert_eq!(
+            boxes,
+            vec![OutlineBox {
+                min: [0.0, 63.0, 0.0],
+                max: [1.0, 64.0, 1.0],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_selection_is_offset_by_the_block_position_and_follows_its_shape() {
+        // A stone slab (id 44) at (0, 64, 0) seen from beside it: it is
+        // half a block high, so the outline must not be the full block.
+        let mut game = game_on_floor_with(BlockState::new(44, 0));
+        game.state = Some(GameState::new(DVec3::new(0.5, 64.0, 3.5)));
+        game.pitch = 0.45;
+        game.yaw = std::f32::consts::PI;
+        let boxes = game.selection_outline();
+        assert_eq!(boxes.len(), 1);
+        assert_eq!(boxes[0].min, [0.0, 64.0, 0.0]);
+        assert_eq!(boxes[0].max, [1.0, 64.5, 1.0]);
+    }
+
+    #[test]
+    fn looking_at_the_sky_or_being_a_spectator_selects_nothing() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.pitch = -std::f32::consts::FRAC_PI_2;
+        assert!(game.selection_outline().is_empty());
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        game.gamemode = SPECTATOR;
+        assert!(game.selection_outline().is_empty());
     }
 
     /// Regression: every tick lifted a player standing in a plant, in water

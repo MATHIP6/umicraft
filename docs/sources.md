@@ -182,3 +182,9 @@ observations that motivated them.
 | 2026-10-26 | Maps | `S34PacketMaps.setMapdataTo`, `handleMaps` | Scale set, decorations replaced, the column patch copied to `x + j + (z + k) * 128`. The reference does not bounds-check; Umicraft drops a patch that leaves the 128x128 buffer or has too little data. |
 | 2026-10-26 | Break animation, signs, block entities | `RenderGlobal.sendBlockBreakProgress`, `handleUpdateSign`, `handleUpdateTileEntity` | Per breaker id the block and stage `0..=9` are kept, any other stage removes the animation. Sign and tile entity updates are kept per position until a block entity store exists. |
 | 2026-10-26 | Camera, statistics, brand, death | `handleCamera`, `handleStatistics`, `handleCustomPayload`, `handleCombatEvent` | Camera switches the render view (ignored for unknown entities; the local player means normal view). Statistics are name to value. `MC|Brand` carries a VarInt-length string. Only the death of the local player matters for the death screen message. |
+
+## P2 interaction rules, gamemodes and camera
+
+| Date | Area | Source | Behaviour |
+|---|---|---|---|
+| 2026-10-27 | Block selection outline | `RenderGlobal.drawSelectionBox` (`:1869-1896`), `drawOutlinedBoundingBox` (`func_181561_a`, `:1898`), `EntityRenderer.isDrawBlockOutline` | Drawn only when the ray hits a block: line width 2, colour (0, 0, 0, 0.4), alpha blend (SRC_ALPHA, ONE_MINUS_SRC_ALPHA), depth test on, depth write off. The block selection box is grown by 0.002 on every side and drawn as 12 edges. Umicraft: `umicraft-render/src/outline.rs` (`LineList` pipeline, after terrain and entities, before the HUD). wgpu has no line width above one pixel, so the outline is 1 px wide instead of 2. Spectators get no outline. |

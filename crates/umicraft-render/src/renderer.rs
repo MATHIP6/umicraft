@@ -33,6 +33,7 @@ use crate::camera::Camera;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
+use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::sky::{SkyRenderer, SkyState};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
@@ -180,6 +181,7 @@ pub struct Renderer {
     chunks: HashMap<ChunkPos, GpuMesh>,
     camera_bind_group: wgpu::BindGroup,
     entity_renderer: EntityRenderer,
+    outline: OutlineRenderer,
     entity_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
 }
 
@@ -500,6 +502,7 @@ impl Renderer {
             }],
         });
         let entity_renderer = EntityRenderer::new(&device, &camera_layout, format);
+        let outline = OutlineRenderer::new(&device, &camera_layout, format);
 
         let overlay_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("overlay vertices"),
@@ -551,6 +554,7 @@ impl Renderer {
             chunks: HashMap::new(),
             camera_bind_group,
             entity_renderer,
+            outline,
             entity_batches: Vec::new(),
         })
     }
@@ -562,6 +566,15 @@ impl Renderer {
     /// plain data and does not allocate.
     pub fn set_environment(&mut self, environment: RenderEnvironment) {
         self.environment = environment;
+    }
+
+    /// Sets the block selection outline for the following frames.
+    ///
+    /// `boxes` are world-space boxes (the targeted block's selection shape);
+    /// an empty slice hides the outline. The outline is drawn after the
+    /// terrain and before the HUD, one pixel wide (see the `outline` module).
+    pub fn set_selection_outline(&mut self, boxes: &[OutlineBox]) {
+        self.outline.set_boxes(&self.queue, boxes);
     }
 
     /// Draws one frame with the M3 HUD overlay only.
@@ -1239,6 +1252,8 @@ impl Renderer {
                 }
             }
         }
+
+        self.outline.draw(&mut pass, &self.camera_bind_group);
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));

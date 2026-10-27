@@ -19,6 +19,7 @@ mod environment;
 mod error;
 mod font;
 mod hud;
+mod outline;
 mod overlay;
 mod renderer;
 mod sky;
@@ -34,6 +35,7 @@ pub use hud::{
     draw as draw_hud, selected_index, status_fills, Fill, HudLayout, HudState, ItemStack, Rect,
     StatusRow,
 };
+pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};
 pub use sky::SkyState;
