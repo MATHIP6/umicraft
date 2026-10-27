@@ -185,8 +185,8 @@ order as vanilla; the fuzzers run 10 minutes without a panic (documented).
   Depth Strider, **local knockback** from `Entity Velocity` and `Explosion`.
 - Item use: right-click hold and release, use-item slowdown, pick block
   (middle click), drop item (Q, Ctrl+Q).
-- Camera: first-person hand, view bobbing, FOV modifiers, F5 perspectives,
-  block selection outline.
+- Camera: first-person hand (arm and swing; held items come with P3), view
+  bobbing, FOV modifiers, F5 perspectives, block selection outline.
 - Riding: mount, dismount, passenger offset, `Steer Vehicle`.
 
 **Known problems fixed:** `docs/roadmap-review.md` §3.2.

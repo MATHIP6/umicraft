@@ -42,6 +42,7 @@ pub mod collision;
 pub mod digging;
 pub mod entity;
 pub mod gamemode;
+pub mod hand;
 pub mod input;
 pub mod interaction;
 pub mod inventory;

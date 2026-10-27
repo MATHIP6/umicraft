@@ -8,6 +8,11 @@ use glam::{Mat4, Vec3};
 const DEFAULT_FOV: f32 = 70.0_f32 * std::f32::consts::PI / 180.0;
 const NEAR: f32 = 0.1;
 const FAR: f32 = 512.0;
+/// The near plane of the hand projection (MCP `EntityRenderer.java:1236`).
+const HAND_NEAR: f32 = 0.05;
+const HAND_FAR: f32 = 16.0;
+/// The part of the depth range the hand is squeezed into.
+pub const HAND_DEPTH_RANGE: f32 = 1.0e-4;
 const MAX_PITCH: f32 = 89.0_f32 * std::f32::consts::PI / 180.0;
 
 /// Perspective camera with a Minecraft-style yaw/pitch.
@@ -130,6 +135,30 @@ impl Camera {
         }
     }
 
+    /// The projection of the first-person hand.
+    ///
+    /// MCP `EntityRenderer.renderHand` uses the base field of view (no
+    /// sprint or flight modifier), a near plane of 0.05 and clears the depth
+    /// buffer first. The depth is instead squeezed into the first
+    /// [`HAND_DEPTH_RANGE`] of the range, so the hand always wins the depth
+    /// test against the world while its own parts still sort correctly.
+    #[must_use]
+    pub fn hand_projection(&self) -> Mat4 {
+        let projection = glam::camera::rh::proj::directx::perspective(
+            self.fov_y,
+            self.aspect,
+            HAND_NEAR,
+            HAND_FAR,
+        );
+        Mat4::from_scale(Vec3::new(1.0, 1.0, HAND_DEPTH_RANGE)) * projection
+    }
+
+    /// The view bobbing transform of this frame (identity when still).
+    #[must_use]
+    pub fn view_bob(&self) -> Mat4 {
+        self.view_bob
+    }
+
     /// View-projection matrix for wgpu's 0..1 depth range.
     #[must_use]
     pub fn view_projection(&self) -> Mat4 {
@@ -199,6 +228,21 @@ mod tests {
         assert!(after.y < before.y, "the camera dips, the scene rises");
         // The eye position itself does not move.
         assert_eq!(camera.position, Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_hand_stays_in_front_of_any_world_depth() {
+        let camera = Camera::default();
+        // A point at the far plane of the hand still has a tiny depth.
+        let far = camera
+            .hand_projection()
+            .project_point3(Vec3::new(0.0, 0.0, -10.0));
+        assert!(far.z >= 0.0 && far.z <= HAND_DEPTH_RANGE, "{}", far.z);
+        // The world's depth for a block 1 m away is far above that.
+        let world = camera
+            .view_projection()
+            .project_point3(camera.position + camera.forward());
+        assert!(world.z > HAND_DEPTH_RANGE * 10.0);
     }
 
     #[test]

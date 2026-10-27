@@ -32,6 +32,7 @@ use umicraft_game::entity::{
     EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityStore,
 };
 use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
+use umicraft_game::hand::{HandPose, HandState, SwingEffects};
 use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
@@ -416,6 +417,8 @@ struct Game {
     perspective: Perspective,
     /// The attack button went down since the last tick.
     attack_pressed: bool,
+    /// The animation state of the first-person hand.
+    hand: HandState,
     /// The body of the local player, animated like any other player; drawn
     /// in the third-person perspectives.
     body: EntityRecord,
@@ -463,6 +466,7 @@ impl Game {
             interaction: Interaction::new(),
             perspective: Perspective::default(),
             attack_pressed: false,
+            hand: HandState::new(),
             body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
             status_data: GameStatus::default(),
             hud_dirty: true,
@@ -838,6 +842,15 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     if followed.is_none() && game.dead() {
         view.effects = view.effects.with_death(game.death_time as f32);
     }
+    // MCP `EntityRenderer.renderHand`: only the first-person view of a
+    // player who plays shows the hand.
+    view.effects.hand = HandPose {
+        shows_arm: game.hand.pose().shows_arm
+            && followed.is_none()
+            && game.perspective == Perspective::FirstPerson
+            && game.gamemode != GameMode::Spectator,
+        ..game.hand.pose()
+    };
     let mut entities = game.entities.frame_data();
     if followed.is_none() && game.perspective.shows_player() {
         entities.push(game.body.frame_data());
@@ -1319,6 +1332,29 @@ fn apply_mode_rules(game: &mut Game) {
     state.set_no_clip(game.gamemode.no_clip());
 }
 
+/// The Haste and Mining Fatigue effects that change the arm swing speed.
+fn swing_effects(game: &Game) -> SwingEffects {
+    let effects = game.server.effects();
+    let amplifier = |id: u8| effects.get(id).map(|effect| effect.amplifier);
+    SwingEffects {
+        haste: amplifier(HASTE),
+        fatigue: amplifier(MINING_FATIGUE),
+    }
+}
+
+/// Advances the first-person hand by one tick (arm swing, equip animation
+/// and sway).
+fn tick_hand(game: &mut Game) {
+    let effects = swing_effects(game);
+    let held = game.windows.selected_item().or(game.held_item.as_ref());
+    game.hand.tick(
+        held,
+        game.yaw.to_degrees(),
+        game.pitch.to_degrees(),
+        effects,
+    );
+}
+
 /// Hands the speed attribute, the effects and the food level of the server
 /// state to the simulation (`umicraft_game::movement`).
 fn apply_movement_stats(game: &mut Game) {
@@ -1625,7 +1661,11 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
         world,
         digger,
     });
+    let effects = swing_effects(game);
     for outgoing in output.packets {
+        if outgoing == Outgoing::Swing {
+            game.hand.swing(effects);
+        }
         queue.push(command_of(outgoing));
     }
     if let Some(world) = game.world.as_mut() {
@@ -1664,6 +1704,7 @@ fn place_block(game: &mut Game, queue: &mut CommandQueue) {
         .cloned()
         .or_else(|| game.held_item.clone())
         .unwrap_or(WireItemStack::EMPTY);
+    let holds_item = item.item_id >= 0;
     let Some(outgoing) = game
         .interaction
         .place_block(game.gamemode, &hit, player.as_ref(), item)
@@ -1672,6 +1713,12 @@ fn place_block(game: &mut Game, queue: &mut CommandQueue) {
         return;
     };
     queue.push(command_of(outgoing));
+    if holds_item && game.gamemode.can_place() {
+        // MCP `Minecraft.rightClickMouse`: a used item swings the arm.
+        queue.push(ClientCommand::Swing);
+        let effects = swing_effects(game);
+        game.hand.swing(effects);
+    }
     tracing::info!(block = ?hit.block, face = ?hit.face, held = ?game.held_item, "placing a block");
 }
 
@@ -1726,6 +1773,7 @@ fn tick(
 ) {
     game.status_data.ticks += 1;
     run_attack(game, queue);
+    tick_hand(game);
 
     // The intent of the tick: the raw key state with the yaw and the pitch
     // the player is looking at.
@@ -2625,6 +2673,86 @@ mod tests {
         assert!((player.movement_speed - 0.14).abs() < 1e-6);
         assert_eq!(player.jump_boost, 1);
         assert!(!player.well_fed, "6 food points are not enough to sprint");
+    }
+
+    #[test]
+    fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        game.pitch = 1.5;
+        game.input.attack = true;
+        game.attack_pressed = true;
+        run_attack(&mut game, &mut queue);
+        tick_hand(&mut game);
+        assert!(game.hand.pose().swing > 0.0 || game.hand.swing_progress(1.0) >= 0.0);
+        assert!(queue
+            .ordered
+            .iter()
+            .any(|command| matches!(command, ClientCommand::Swing)));
+
+        // Placing with an item swings; with an empty hand it does not.
+        let mut empty = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        // Aim ahead of the feet: the block below the player cannot be built on.
+        empty.pitch = 1.0;
+        place_block(&mut empty, &mut queue);
+        assert!(!queue
+            .ordered
+            .iter()
+            .any(|command| matches!(command, ClientCommand::Swing)));
+        empty.held_item = Some(WireItemStack {
+            item_id: 1,
+            stack_size: 8,
+            damage: 0,
+            nbt: None,
+        });
+        place_block(&mut empty, &mut queue);
+        assert!(queue
+            .ordered
+            .iter()
+            .any(|command| matches!(command, ClientCommand::Swing)));
+    }
+
+    #[test]
+    fn the_frame_shows_the_arm_only_in_first_person_with_an_empty_hand() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        let mut queue = CommandQueue::default();
+        let (frames, received) = mpsc::sync_channel(32);
+        let frame = |game: &Game| {
+            publish_frame(game, &frames, Instant::now());
+            match received.try_recv() {
+                Ok(RenderEvent::Frame(frame)) => frame,
+                _ => panic!("a frame was expected"),
+            }
+        };
+        tick_hand(&mut game);
+        assert!(frame(&game).state.effects.hand.shows_arm);
+
+        game.gamemode = GameMode::Spectator;
+        assert!(!frame(&game).state.effects.hand.shows_arm);
+        game.gamemode = GameMode::Survival;
+
+        let toggle = InputUpdate {
+            toggle_perspective: true,
+            ..InputUpdate::default()
+        };
+        handle_input(&mut game, toggle, &mut queue);
+        assert!(!frame(&game).state.effects.hand.shows_arm, "third person");
+        handle_input(&mut game, toggle, &mut queue);
+        handle_input(&mut game, toggle, &mut queue);
+
+        // Holding an item hides the bare arm once the item is shown.
+        game.held_item = Some(WireItemStack {
+            item_id: 276,
+            stack_size: 1,
+            damage: 0,
+            nbt: None,
+        });
+        for _ in 0..10 {
+            tick_hand(&mut game);
+        }
+        assert!(!frame(&game).state.effects.hand.shows_arm);
     }
 
     #[test]

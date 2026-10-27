@@ -664,6 +664,7 @@ impl App {
             (self.entity_textures.as_ref(), self.world.as_ref())
         {
             entity_textures.mesh_and_upload(&world.entities(now), renderer);
+            entity_textures.upload_hand(&world.hand_pose(now), self.camera.view_bob(), renderer);
         }
 
         let rendered = match ui_frame.as_ref() {

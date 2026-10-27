@@ -53,6 +53,6 @@ gamemodes and the spectator camera.
   parsed yet (P3).
 - The break follows the vanilla progress (hold-to-break). The block table is generated from the reference by `docs/tools/gen_block_data.py`; tools are a hand-written list of ids until the P3 item registry.
 - The cracks (own ones and the 0x25 ones of other players, all in `ServerState`) are drawn over the terrain by a dedicated pipeline; the arm swing is sent but not rendered (no first-person hand yet).
-- Not done: first-person hand (needs item models, P3); skin, arm swing and body-yaw lag of the local body (P5).
+- First-person hand: the bare arm, its swing and the equip animation are drawn; the held item needs the P3 item models. The arm uses the default skin (profile skins: P5). Not done: body-yaw lag and arm swing of the third-person body (P5).
 - The death screen's "Title Screen" button waits for the P10 title screen; hardcore variants are missing.
 - Depth Strider needs fluid movement, which the physics does not have (backlog).

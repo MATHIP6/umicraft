@@ -58,6 +58,9 @@ const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
 const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
 
+/// A fog distance the hand never reaches.
+const HAND_FOG_FREE: f32 = 1.0e6;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
@@ -137,6 +140,12 @@ pub struct Renderer {
     crack_pipeline: wgpu::RenderPipeline,
     /// The crack quads of every block being dug, rebuilt by the client.
     crack_mesh: Option<GpuMeshPass>,
+    /// The camera of the first-person hand: eye-space vertices, a squeezed
+    /// depth range, no fog.
+    hand_camera_buffer: wgpu::Buffer,
+    hand_camera_bind_group: wgpu::BindGroup,
+    /// The vertices of the hand and its skin texture, if one is drawn.
+    hand: Option<(wgpu::Buffer, u32, wgpu::BindGroup)>,
     terrain_bind_group: wgpu::BindGroup,
     /// Layout of the terrain camera + texture binding, kept so
     /// [`Renderer::set_block_atlas`] can bind a replacement array without
@@ -511,6 +520,20 @@ impl Renderer {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
+        let hand_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hand camera uniform"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let hand_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("hand camera bind group"),
+            layout: &camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: hand_camera_buffer.as_entire_binding(),
+            }],
+        });
         let entity_renderer = EntityRenderer::new(&device, &camera_layout, format);
         let outline = OutlineRenderer::new(&device, &camera_layout, format);
 
@@ -543,6 +566,9 @@ impl Renderer {
             terrain_transparent_pipeline,
             crack_pipeline,
             crack_mesh: None,
+            hand_camera_buffer,
+            hand_camera_bind_group,
+            hand: None,
             terrain_bind_group,
             terrain_layout,
             transparent_order: Vec::with_capacity(64),
@@ -995,6 +1021,30 @@ impl Renderer {
         }
     }
 
+    /// Sets the first-person hand for the following frames.
+    ///
+    /// `vertices` are in camera space (the camera at the origin looking down
+    /// −Z, the view bobbing already applied) and use the skin texture of
+    /// `bind_group`; an empty slice hides the hand. It is drawn on top of the
+    /// world and under the HUD.
+    pub fn set_hand(&mut self, vertices: &[EntityVertex], bind_group: &wgpu::BindGroup) {
+        self.hand = (!vertices.is_empty()).then(|| {
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("hand vertices"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            (buffer, vertices.len() as u32, bind_group.clone())
+        });
+    }
+
+    /// Hides the first-person hand.
+    pub fn clear_hand(&mut self) {
+        self.hand = None;
+    }
+
     /// Clears any queued entity batches.
     pub fn clear_entities(&mut self) {
         self.entity_batches.clear();
@@ -1113,6 +1163,20 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+
+        // The hand lives in camera space, far from any fog.
+        let hand_uniform = CameraUniform {
+            view_proj: camera.hand_projection().to_cols_array_2d(),
+            camera_pos: [0.0; 3],
+            fog_start: HAND_FOG_FREE,
+            fog_end: HAND_FOG_FREE * 2.0,
+            ..uniform
+        };
+        self.queue.write_buffer(
+            &self.hand_camera_buffer,
+            0,
+            bytemuck::bytes_of(&hand_uniform),
+        );
     }
 
     fn upload_overlay(&mut self, overlay: &Overlay) {
@@ -1282,6 +1346,15 @@ impl Renderer {
         }
 
         self.outline.draw(&mut pass, &self.camera_bind_group);
+
+        // The hand: camera-space vertices under a squeezed depth range.
+        if let Some((buffer, count, texture)) = self.hand.as_ref() {
+            self.entity_renderer.render(
+                &mut pass,
+                &self.hand_camera_bind_group,
+                [(buffer, *count, texture)],
+            );
+        }
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));

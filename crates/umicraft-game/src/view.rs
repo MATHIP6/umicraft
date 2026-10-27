@@ -11,6 +11,7 @@
 
 use glam::{DVec3, Mat4, Vec3};
 
+use crate::hand::HandPose;
 use crate::physics::Player;
 use crate::raycast::{look_direction, raycast};
 use crate::shapes::BlockSource;
@@ -200,6 +201,8 @@ pub struct ViewEffects {
     pub fov_modifier: f32,
     /// The view bobbing.
     pub bob: ViewBob,
+    /// The first-person hand.
+    pub hand: HandPose,
 }
 
 impl Default for ViewEffects {
@@ -207,6 +210,7 @@ impl Default for ViewEffects {
         Self {
             fov_modifier: 1.0,
             bob: ViewBob::default(),
+            hand: HandPose::default(),
         }
     }
 }
@@ -224,6 +228,7 @@ impl ViewEffects {
                 mix(player.prev_camera_sway, player.camera_sway),
                 mix(player.prev_camera_tilt, player.camera_tilt),
             ),
+            hand: HandPose::default(),
         }
     }
 
@@ -245,6 +250,7 @@ impl ViewEffects {
         Self {
             fov_modifier: self.fov_modifier + (other.fov_modifier - self.fov_modifier) * alpha,
             bob: self.bob.lerp(other.bob, alpha),
+            hand: self.hand.lerp(other.hand, alpha),
         }
     }
 }
@@ -421,6 +427,7 @@ mod tests {
         let b = ViewEffects {
             fov_modifier: 1.2,
             bob: ViewBob::new(0.3, 0.1, 0.0),
+            hand: HandPose::default(),
         };
         assert!((a.lerp(b, 0.5).fov_modifier - 1.1).abs() < 1e-6);
         assert_eq!(a.lerp(b, 1.0), b);

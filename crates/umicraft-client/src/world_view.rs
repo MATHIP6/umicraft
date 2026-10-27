@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
+use umicraft_game::hand::HandPose;
 use umicraft_game::inventory::WindowView;
 use umicraft_game::RenderState;
 use umicraft_mesh::{ChunkSnapshot, Mesh, Vertex};
@@ -139,6 +140,14 @@ impl WorldView {
         camera.yaw = yaw;
         camera.pitch = pitch;
         camera.set_view_effects(state.effects.fov_modifier, state.effects.bob.matrix());
+    }
+
+    /// The pose of the first-person hand for `now`.
+    #[must_use]
+    pub fn hand_pose(&self, now: Instant) -> HandPose {
+        self.view
+            .sample(now)
+            .map_or_else(HandPose::default, |state| state.effects.hand)
     }
 
     /// The sky, fog and light environment for `now`, in step with the camera.

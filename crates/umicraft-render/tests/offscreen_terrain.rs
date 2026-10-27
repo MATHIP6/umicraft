@@ -406,3 +406,57 @@ fn a_crack_darkens_the_surface_below_it_and_clearing_removes_it() {
     ));
     assert_eq!(removed, plain);
 }
+
+/// A camera-space triangle fan covering the middle of the screen.
+fn hand_quad(z: f32) -> Vec<umicraft_render::EntityVertex> {
+    let vertex = |x: f32, y: f32| umicraft_render::EntityVertex {
+        position: [x, y, z],
+        normal: [0.0, 0.0, 1.0],
+        uv: [0.5, 0.5],
+        light: 0xFF,
+    };
+    vec![
+        vertex(-0.2, -0.2),
+        vertex(0.2, -0.2),
+        vertex(0.2, 0.2),
+        vertex(-0.2, -0.2),
+        vertex(0.2, 0.2),
+        vertex(-0.2, 0.2),
+    ]
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn the_hand_is_drawn_over_a_nearer_world_block_and_can_be_hidden() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    // A wall half a block in front of the eyes, closer than the hand.
+    renderer.upload_mesh(
+        ChunkPos::new(0, 0),
+        &quad(-0.5, (-8.0, 8.0), (60.0, 100.0), 0, TORCH),
+    );
+    let wall = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+
+    let skin = renderer.create_entity_texture(&[255, 0, 0, 255], 1, 1);
+    renderer.set_hand(&hand_quad(-0.6), skin.bind_group());
+    let with_hand = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(
+        with_hand[0] > 150 && with_hand[1] < 80,
+        "the hand must cover the wall: wall {wall:?}, with hand {with_hand:?}"
+    );
+
+    renderer.clear_hand();
+    let hidden = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert_eq!(hidden, wall);
+}
