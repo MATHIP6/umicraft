@@ -31,7 +31,10 @@
 //! The rules are the 1.8 ones and every constant is cited in
 //! `docs/sources.md`; the physics itself is documented in [`physics`], the
 //! collision in [`collision`], the block geometry in [`shapes`], the
-//! reconciliation in [`prediction`] and the block targeting in [`raycast`].
+//! reconciliation in [`prediction`], the block targeting in [`raycast`] and
+//! the serverbound packets of a tick in [`traffic`] and the protocol state kept
+//! for later milestones (tab list, scoreboard, effects, border, titles) in
+//! [`server`].
 
 pub mod collision;
 pub mod entity;
@@ -40,7 +43,9 @@ pub mod inventory;
 pub mod physics;
 pub mod prediction;
 pub mod raycast;
+pub mod server;
 pub mod shapes;
+pub mod traffic;
 
 use glam::{DVec3, Vec3};
 
