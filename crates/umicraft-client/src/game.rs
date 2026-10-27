@@ -52,6 +52,7 @@ use umicraft_protocol::PlayServerbound;
 use umicraft_render::{HudState, ItemStack, OutlineBox};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
+use crate::cracks::Crack;
 use crate::error::ClientError;
 use crate::input::InputUpdate;
 use crate::network::{self, ClientCommand, NetworkConfig};
@@ -163,6 +164,8 @@ pub struct Frame {
     /// World-space boxes of the block selection outline; empty when the
     /// player looks at no block or is a spectator.
     pub selection: Arc<[OutlineBox]>,
+    /// The cracks of every block being dug, by this player and by others.
+    pub cracks: Arc<[Crack]>,
 }
 
 /// The statistics the debug overlay shows.
@@ -512,6 +515,31 @@ impl Game {
             .collect()
     }
 
+    /// The cracks of the blocks being dug (`Block Break Animation`, and the
+    /// local dig which is recorded the same way).
+    ///
+    /// A block that is already air has no shape and no cracks.
+    fn cracks(&self) -> Vec<Crack> {
+        let Some(world) = self.world.as_ref() else {
+            return Vec::new();
+        };
+        let mut cracks = Vec::new();
+        for (_, progress) in self.server.block_entities().break_animations() {
+            let (x, y, z) = progress.pos;
+            let position = BlockPos::new(x, y, z);
+            let origin = DVec3::new(f64::from(x), f64::from(y), f64::from(z));
+            let shape = selection_shape(world.block(position), world, position);
+            cracks.extend(shape.boxes().iter().map(|aabb| Crack {
+                bounds: OutlineBox {
+                    min: (aabb.min + origin).as_vec3().to_array(),
+                    max: (aabb.max + origin).as_vec3().to_array(),
+                },
+                stage: progress.stage,
+            }));
+        }
+        cracks
+    }
+
     /// True when the chunks around the player are loaded.
     ///
     /// The simulation must not run on an incomplete world: the collision
@@ -782,6 +810,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         dimension: game.dimension,
         entities: entities.into(),
         selection: game.selection_outline().into(),
+        cracks: game.cracks().into(),
     }));
 }
 
@@ -2265,6 +2294,40 @@ mod tests {
             tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
         }
         assert!(game.body.frame_data().limb_swing_amount < 0.05);
+    }
+
+    #[test]
+    fn the_cracks_follow_every_breaker_and_vanish_with_the_block() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let anim = |breaker: i32, stage: u8, game: &mut Game| {
+            game.server.apply_block_break_anim(&BlockBreakAnim {
+                entity_id: breaker,
+                x: 0,
+                y: 63,
+                z: 0,
+                stage,
+            });
+        };
+        assert!(game.cracks().is_empty());
+        anim(7, 4, &mut game);
+        let cracks = game.cracks();
+        assert_eq!(cracks.len(), 1);
+        assert_eq!(cracks[0].stage, 4);
+        assert_eq!(cracks[0].bounds.min, [0.0, 63.0, 0.0]);
+        assert_eq!(cracks[0].bounds.max, [1.0, 64.0, 1.0]);
+
+        // A second player digging elsewhere is drawn as well.
+        game.server.apply_block_break_anim(&BlockBreakAnim {
+            entity_id: 8,
+            x: 1,
+            y: 63,
+            z: 0,
+            stage: 2,
+        });
+        assert_eq!(game.cracks().len(), 2);
+
+        anim(7, 255, &mut game);
+        assert_eq!(game.cracks().len(), 1, "stage > 9 clears the breaker");
     }
 
     #[test]

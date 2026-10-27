@@ -17,10 +17,11 @@ use std::time::Instant;
 use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
 use umicraft_game::inventory::WindowView;
 use umicraft_game::RenderState;
-use umicraft_mesh::{ChunkSnapshot, Mesh};
+use umicraft_mesh::{ChunkSnapshot, Mesh, Vertex};
 use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer};
 use umicraft_world::ChunkPos;
 
+use crate::cracks::{crack_mesh, Crack, STAGES};
 use crate::error::ClientError;
 use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, TICK};
 use crate::mesher::{MeshPool, MeshResult};
@@ -67,6 +68,12 @@ pub struct WorldView {
     entities: Arc<[EntityFrameData]>,
     /// Selection outline boxes from the latest frame.
     selection: Arc<[OutlineBox]>,
+    /// The cracks of the newest frame, and the mesh built from them.
+    cracks: Arc<[Crack]>,
+    /// The texture layer of each destroy stage, when the terrain has them.
+    destroy_layers: Option<[u32; STAGES]>,
+    /// A crack mesh the renderer has not received yet.
+    crack_mesh: Option<(Vec<Vertex>, Vec<u32>)>,
 }
 
 impl WorldView {
@@ -94,6 +101,9 @@ impl WorldView {
             frames: 0,
             entities: Arc::from([]),
             selection: Arc::from([]),
+            cracks: Arc::from([]),
+            destroy_layers: terrain.mesher().destroy_layers(),
+            crack_mesh: None,
         })
     }
 
@@ -196,6 +206,12 @@ impl WorldView {
         &self.selection
     }
 
+    /// The crack mesh built since the last call, for the renderer; empty
+    /// vectors remove the cracks.
+    pub fn take_crack_mesh(&mut self) -> Option<(Vec<Vertex>, Vec<u32>)> {
+        self.crack_mesh.take()
+    }
+
     /// The number of active living entities in the newest frame.
     #[must_use]
     pub fn entity_count(&self) -> usize {
@@ -208,6 +224,13 @@ impl WorldView {
                 self.frames += 1;
                 self.entities = Arc::clone(&frame.entities);
                 self.selection = Arc::clone(&frame.selection);
+                if *self.cracks != *frame.cracks {
+                    self.cracks = Arc::clone(&frame.cracks);
+                    self.crack_mesh = self
+                        .destroy_layers
+                        .as_ref()
+                        .map(|layers| crack_mesh(&self.cracks, layers));
+                }
                 self.view.push(frame);
             }
             RenderEvent::Hud(hud) => self.hud = *hud,
@@ -230,6 +253,10 @@ impl WorldView {
         if let Ok(pool) = MeshPool::new(worker_count, terrain) {
             self.pool = pool;
         }
+        // The new array has other layers: rebuild the cracks with the next
+        // frame.
+        self.destroy_layers = terrain.mesher().destroy_layers();
+        self.cracks = Arc::from([]);
     }
 
     /// Forgets the replaced world, including the jobs still in flight.
@@ -560,6 +587,7 @@ mod tests {
             dimension: -1,
             entities: Arc::from([]),
             selection: Arc::from([]),
+            cracks: Arc::from([]),
         }
     }
 
@@ -624,6 +652,64 @@ mod tests {
                 .partial_tick,
             1.0
         );
+    }
+
+    #[test]
+    fn a_changed_crack_set_rebuilds_the_crack_mesh_once() {
+        let mut harness = Harness::new();
+        harness.world_view.destroy_layers = Some([5; STAGES]);
+        let crack = Crack {
+            bounds: OutlineBox {
+                min: [0.0, 64.0, 0.0],
+                max: [1.0, 65.0, 1.0],
+            },
+            stage: 4,
+        };
+        let send = |harness: &mut Harness, cracks: &[Crack]| {
+            let mut next = frame(glam::Vec3::ZERO, Instant::now(), 0);
+            next.cracks = Arc::from(cracks);
+            harness
+                .frames
+                .0
+                .send(RenderEvent::Frame(next))
+                .expect("frame queue");
+            harness.sync();
+        };
+
+        send(&mut harness, &[crack]);
+        let (vertices, _) = harness.world_view.take_crack_mesh().expect("a mesh");
+        assert_eq!(vertices.len(), 24);
+        assert!(harness.world_view.take_crack_mesh().is_none());
+
+        send(&mut harness, &[crack]);
+        assert!(
+            harness.world_view.take_crack_mesh().is_none(),
+            "the same cracks need no new mesh"
+        );
+
+        send(&mut harness, &[]);
+        let (vertices, indices) = harness.world_view.take_crack_mesh().expect("a clear");
+        assert!(vertices.is_empty() && indices.is_empty());
+    }
+
+    #[test]
+    fn the_procedural_terrain_draws_no_cracks() {
+        let mut harness = Harness::new();
+        let mut next = frame(glam::Vec3::ZERO, Instant::now(), 0);
+        next.cracks = Arc::from([Crack {
+            bounds: OutlineBox {
+                min: [0.0; 3],
+                max: [1.0; 3],
+            },
+            stage: 0,
+        }]);
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(next))
+            .expect("frame queue");
+        harness.sync();
+        assert!(harness.world_view.take_crack_mesh().is_none());
     }
 
     #[test]

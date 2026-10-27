@@ -153,3 +153,15 @@ fn fs_transparent(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
     return vec4<f32>(shade_fragment(in, texel), texel.a);
 }
+
+// Break cracks: the destroy-stage texel is multiplied twice into the colour
+// below by the pipeline's blend (DstColor, SrcColor). Alpha test 0.1 like
+// the reference.
+@fragment
+fn fs_crack(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    if (texel.a < 0.1) {
+        discard;
+    }
+    return vec4<f32>(texel.rgb, 1.0);
+}

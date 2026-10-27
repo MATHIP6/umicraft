@@ -585,6 +585,10 @@ impl App {
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
+        if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
+        {
+            renderer.set_block_cracks(&vertices, &indices);
+        }
 
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())

@@ -22,6 +22,8 @@ use std::sync::Arc;
 use umicraft_assets::{BlockAtlas, GuiAtlas};
 use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, Mesh, ModelMeshContext};
 use umicraft_render::{BlockAtlasError, Renderer};
+
+use crate::cracks::STAGES;
 use umicraft_world::ChunkPos;
 
 use crate::model_resources::ModelResources;
@@ -229,6 +231,22 @@ enum MesherKind {
 }
 
 impl TerrainMesher {
+    /// The texture-array layer of each destroy-stage texture, or `None` for
+    /// the procedural set, which has none (the cracks are not drawn).
+    #[must_use]
+    pub fn destroy_layers(&self) -> Option<[u32; STAGES]> {
+        let MesherKind::Models(context) = &self.0 else {
+            return None;
+        };
+        let mut layers = [0; STAGES];
+        for (stage, layer) in layers.iter_mut().enumerate() {
+            *layer = context
+                .atlas
+                .layer(&format!("blocks/destroy_stage_{stage}"))?;
+        }
+        Some(layers)
+    }
+
     /// Meshes one chunk column from its immutable snapshot.
     #[must_use]
     pub fn mesh(&self, pos: ChunkPos, snapshot: &ChunkSnapshot) -> Mesh {

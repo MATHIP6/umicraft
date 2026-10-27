@@ -134,6 +134,9 @@ pub struct Renderer {
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
     terrain_transparent_pipeline: wgpu::RenderPipeline,
+    crack_pipeline: wgpu::RenderPipeline,
+    /// The crack quads of every block being dug, rebuilt by the client.
+    crack_mesh: Option<GpuMeshPass>,
     terrain_bind_group: wgpu::BindGroup,
     /// Layout of the terrain camera + texture binding, kept so
     /// [`Renderer::set_block_atlas`] can bind a replacement array without
@@ -448,6 +451,13 @@ impl Renderer {
             format,
             TerrainPipelineState::transparent(),
         );
+        let crack_pipeline = create_terrain_pipeline(
+            &device,
+            &terrain_shader,
+            &terrain_layout,
+            format,
+            TerrainPipelineState::cracks(),
+        );
         let overlay_pipeline =
             create_overlay_pipeline(&device, &overlay_shader, &overlay_layout, format);
         let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -531,6 +541,8 @@ impl Renderer {
             camera_buffer,
             terrain_pipeline,
             terrain_transparent_pipeline,
+            crack_pipeline,
+            crack_mesh: None,
             terrain_bind_group,
             terrain_layout,
             transparent_order: Vec::with_capacity(64),
@@ -566,6 +578,15 @@ impl Renderer {
     /// plain data and does not allocate.
     pub fn set_environment(&mut self, environment: RenderEnvironment) {
         self.environment = environment;
+    }
+
+    /// Replaces the break cracks drawn over the terrain.
+    ///
+    /// `vertices` and `indices` are the faces of the blocks being dug, with
+    /// the layer of their destroy-stage texture; empty slices remove the
+    /// cracks.
+    pub fn set_block_cracks(&mut self, vertices: &[Vertex], indices: &[u32]) {
+        self.crack_mesh = create_gpu_mesh_pass(&self.device, "block cracks", vertices, indices);
     }
 
     /// Sets the block selection outline for the following frames.
@@ -1254,6 +1275,12 @@ impl Renderer {
             }
         }
 
+        if let Some(cracks) = self.crack_mesh.as_ref() {
+            pass.set_pipeline(&self.crack_pipeline);
+            pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+            draw_gpu_pass(&mut pass, cracks);
+        }
+
         self.outline.draw(&mut pass, &self.camera_bind_group);
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
@@ -1391,6 +1418,7 @@ struct TerrainPipelineState {
     depth_write: bool,
     depth_compare: wgpu::CompareFunction,
     blend: wgpu::BlendState,
+    bias: wgpu::DepthBiasState,
 }
 
 impl TerrainPipelineState {
@@ -1403,6 +1431,7 @@ impl TerrainPipelineState {
             depth_write: true,
             depth_compare: wgpu::CompareFunction::Less,
             blend: wgpu::BlendState::REPLACE,
+            bias: wgpu::DepthBiasState::default(),
         }
     }
 
@@ -1426,6 +1455,38 @@ impl TerrainPipelineState {
                     dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
                     operation: wgpu::BlendOperation::Add,
                 },
+            },
+            bias: wgpu::DepthBiasState::default(),
+        }
+    }
+
+    /// Break cracks: the destroy-stage texture multiplies the colour below
+    /// it twice (`DstColor`/`SrcColor`) and is pulled towards the camera so
+    /// it does not fight the block faces (MCP
+    /// `RenderGlobal.drawBlockDamageTexture`: `tryBlendFuncSeparate(774, 768,
+    /// 1, 0)`, `doPolygonOffset(-3, -3)`).
+    fn cracks() -> Self {
+        Self {
+            label: "terrain crack pipeline",
+            fragment_entry: "fs_crack",
+            depth_write: false,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            blend: wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::Dst,
+                    dst_factor: wgpu::BlendFactor::Src,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            },
+            bias: wgpu::DepthBiasState {
+                constant: -3,
+                slope_scale: -3.0,
+                clamp: 0.0,
             },
         }
     }
@@ -1470,7 +1531,7 @@ fn create_terrain_pipeline(
             depth_write_enabled: Some(state.depth_write),
             depth_compare: Some(state.depth_compare),
             stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
+            bias: state.bias,
         }),
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
@@ -1800,5 +1861,25 @@ mod tests {
         assert_eq!(image.rgba.len(), 70 * 48 * 4);
         let first = &image.rgba[..3];
         assert!(image.rgba.chunks_exact(4).any(|pixel| &pixel[..3] != first));
+    }
+
+    /// The terrain shader is only compiled on a GPU device; this parses and
+    /// validates it (all three fragment entry points) without one.
+    #[test]
+    fn the_terrain_shader_is_valid_wgsl() {
+        let module =
+            naga::front::wgsl::parse_str(include_str!("terrain.wgsl")).expect("the shader parses");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("the shader validates");
+        for entry in ["fs_main", "fs_transparent", "fs_crack"] {
+            assert!(
+                module.entry_points.iter().any(|point| point.name == entry),
+                "missing {entry}"
+            );
+        }
     }
 }
