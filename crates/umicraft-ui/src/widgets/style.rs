@@ -29,6 +29,8 @@ pub(crate) const PANEL: Color = [0.05, 0.06, 0.09, 0.94];
 
 /// Button fill in its idle state.
 pub(crate) const BUTTON: Color = [0.18, 0.20, 0.26, 1.0];
+/// Button fill when it cannot be pressed.
+pub(crate) const BUTTON_DISABLED: Color = [0.12, 0.13, 0.17, 1.0];
 /// Button fill while the pointer is over it.
 pub(crate) const BUTTON_HOVER: Color = [0.27, 0.30, 0.38, 1.0];
 /// Button fill on the frame of the press.

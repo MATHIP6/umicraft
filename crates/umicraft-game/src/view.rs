@@ -227,6 +227,18 @@ impl ViewEffects {
         }
     }
 
+    /// The effects of a dead player, `death_ticks` after the death.
+    ///
+    /// MCP `EntityRenderer.hurtCameraEffect` rolls the view by
+    /// `40 - 8000 / (t + 200)` degrees and `getFOVModifier` narrows the
+    /// field of view by `(1 - 500 / (t + 500)) * 2 + 1`.
+    #[must_use]
+    pub fn with_death(mut self, death_ticks: f32) -> Self {
+        self.bob.roll_degrees += 40.0 - 8000.0 / (death_ticks + 200.0);
+        self.fov_modifier /= (1.0 - 500.0 / (death_ticks + 500.0)) * 2.0 + 1.0;
+        self
+    }
+
     /// The blend of two frames of effects.
     #[must_use]
     pub fn lerp(self, other: Self, alpha: f32) -> Self {
@@ -388,6 +400,19 @@ mod tests {
         assert!((smooth_fov_modifier(1.0, 1.15) - 1.075).abs() < 1e-6);
         assert_eq!(smooth_fov_modifier(1.0, 10.0), 1.5);
         assert_eq!(smooth_fov_modifier(1.0, -10.0), 0.1);
+    }
+
+    #[test]
+    fn a_dead_player_sees_a_tilted_and_narrowed_view() {
+        let start = ViewEffects::default().with_death(0.0);
+        let end = ViewEffects::default().with_death(20.0);
+        // 40 - 8000 / 200 = 0 degrees at the moment of death.
+        assert!(start.bob.roll_degrees.abs() < 1e-4);
+        assert!((start.fov_modifier - 1.0).abs() < 1e-6);
+        // Then the view rolls on and the field of view closes in.
+        assert!((end.bob.roll_degrees - (40.0 - 8000.0 / 220.0)).abs() < 1e-4);
+        assert!(end.bob.roll_degrees > 3.0);
+        assert!(end.fov_modifier < 1.0 && end.fov_modifier > 0.9);
     }
 
     #[test]

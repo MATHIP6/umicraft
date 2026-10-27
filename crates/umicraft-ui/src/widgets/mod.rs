@@ -24,6 +24,7 @@ pub(crate) mod style;
 mod util;
 
 pub mod button;
+pub mod death;
 pub mod inventory;
 pub mod list;
 pub mod panel;
@@ -31,6 +32,7 @@ pub mod slot;
 pub mod text_field;
 
 pub use button::button;
+pub use death::{death_layout, death_screen, DeathAction, DeathLayout, BUTTON_DELAY_TICKS};
 pub use inventory::{
     container_layout, gui_scale, player_inventory_layout, ContainerLayout, InventoryLayout,
 };

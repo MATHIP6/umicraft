@@ -15,7 +15,8 @@ use std::time::Instant;
 
 use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
 use umicraft_ui::widgets::{
-    container_layout, player_inventory_layout, slot, ContainerLayout, InventoryLayout, SlotItem,
+    container_layout, death_screen, player_inventory_layout, slot, ContainerLayout, DeathAction,
+    InventoryLayout, SlotItem, BUTTON_DELAY_TICKS,
 };
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
@@ -87,6 +88,10 @@ struct App {
     break_block: bool,
     /// The attack button is down.
     attack_held: bool,
+    /// When the death screen opened; `None` while the player lives.
+    death_started: Option<Instant>,
+    /// The player pressed "Respawn" and waits for the server.
+    respawn_requested: bool,
     place_block: bool,
     /// The perspective key was pressed since the last input update.
     toggle_perspective: bool,
@@ -144,6 +149,8 @@ impl App {
             select_slot: None,
             break_block: false,
             attack_held: false,
+            death_started: None,
+            respawn_requested: false,
             place_block: false,
             toggle_perspective: false,
             chat_open: false,
@@ -196,6 +203,10 @@ impl App {
         }
         if self.chat_open {
             self.handle_chat_key(event);
+            return;
+        }
+        if self.death_screen_visible() {
+            // MCP `GuiGameOver.keyTyped` does nothing: Escape does not close it.
             return;
         }
         if self.inventory_open || self.container_is_open() {
@@ -292,6 +303,48 @@ impl App {
             .is_some_and(|w| w.window_view().container.is_some())
     }
 
+    /// True while the local player is dead (MCP `getHealth() <= 0`).
+    fn player_dead(&self) -> bool {
+        self.world
+            .as_ref()
+            .is_some_and(|world| world.hud().health <= 0.0)
+    }
+
+    /// True while the death screen is shown: the player is dead and has not
+    /// asked to respawn yet.
+    fn death_screen_visible(&self) -> bool {
+        self.death_started.is_some() && !self.respawn_requested
+    }
+
+    /// True while a screen takes the keyboard and the mouse from the game.
+    fn modal_screen_open(&self) -> bool {
+        self.inventory_open || self.container_is_open() || self.death_screen_visible()
+    }
+
+    /// Opens or closes the death screen as the health changes
+    /// (MCP `Minecraft.runTick`: a dead player gets a `GuiGameOver`).
+    fn update_death_screen(&mut self, now: Instant) {
+        if !self.player_dead() {
+            self.death_started = None;
+            self.respawn_requested = false;
+            return;
+        }
+        if self.death_started.is_none() {
+            self.death_started = Some(now);
+            self.chat_open = false;
+            self.inventory_open = false;
+            self.attack_held = false;
+            self.capture_mouse(false);
+        }
+    }
+
+    /// Whether the death-screen buttons accept clicks yet.
+    fn death_buttons_enabled(&self, now: Instant) -> bool {
+        self.death_started.is_some_and(|started| {
+            now.duration_since(started) >= crate::game::TICK * BUTTON_DELAY_TICKS
+        })
+    }
+
     /// Handles a key press while the inventory or a container screen is open.
     fn handle_inventory_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
         let PhysicalKey::Code(code) = event.physical_key else {
@@ -308,6 +361,16 @@ impl App {
         // Forward to the UI translator so slot-click-by-number-key works.
         self.ui_input.key(code, event.state, event.text.as_deref());
         let _ = event_loop;
+    }
+
+    /// Asks the server to respawn and gives the game back to the player.
+    fn respawn(&mut self) {
+        // MCP `GuiGameOver.actionPerformed` (button 0): `respawnPlayer`, then
+        // the screen closes at once.
+        let _ = self.session.events().try_send(GameEvent::Respawn);
+        self.respawn_requested = true;
+        self.ui_input.clear();
+        self.capture_mouse(true);
     }
 
     /// Closes the inventory or container screen.
@@ -372,7 +435,7 @@ impl App {
 
     /// The key state of the window.
     fn key_state(&self) -> InputState {
-        let show_inventory = self.inventory_open || self.container_is_open();
+        let show_inventory = self.modal_screen_open();
         if self.chat_open || self.show_debug_screen || show_inventory {
             // While the chat, debug screen or inventory is open the movement
             // keys do not steer the player.
@@ -518,7 +581,7 @@ impl App {
     /// caller recycles the returned output after the renderer consumed the
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
-        let show_inventory = self.inventory_open || self.container_is_open();
+        let show_inventory = self.modal_screen_open();
         if !self.show_debug_screen && !show_inventory {
             return None;
         }
@@ -526,7 +589,13 @@ impl App {
         let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
         let input = self.ui_input.take();
         self.ui.begin_frame(viewport, input);
-        if self.show_debug_screen {
+        if self.death_screen_visible() {
+            let score = self.world.as_ref().map_or(0, |world| world.hud().score);
+            let enabled = self.death_buttons_enabled(Instant::now());
+            if death_screen(&mut self.ui, atlas, viewport, score, enabled) == DeathAction::Respawn {
+                self.respawn();
+            }
+        } else if self.show_debug_screen {
             self.debug_screen.show(&mut self.ui, atlas);
         } else if show_inventory {
             let wv = self.world.as_ref().map(|w| w.window_view().clone());
@@ -559,6 +628,7 @@ impl App {
         }
 
         self.sync_world(now);
+        self.update_death_screen(now);
         self.publish_input();
         let environment = self
             .world
@@ -888,13 +958,13 @@ impl ApplicationHandler for App {
                 // open the screen before the next mouse movement, and the first
                 // click must use the physical cursor, not the initial origin.
                 self.ui_input.pointer_moved(position);
-                let show_inventory = self.inventory_open || self.container_is_open();
+                let show_inventory = self.modal_screen_open();
                 if !self.show_debug_screen && !show_inventory {
                     self.ui_input.clear();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                let show_inventory = self.inventory_open || self.container_is_open();
+                let show_inventory = self.modal_screen_open();
                 if self.show_debug_screen || show_inventory {
                     self.ui_input.pointer_button(state, button);
                 } else {
@@ -920,13 +990,13 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let show_inventory = self.inventory_open || self.container_is_open();
+                let show_inventory = self.modal_screen_open();
                 if self.show_debug_screen || show_inventory {
                     self.ui_input.wheel(delta);
                 }
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
-                let show_inventory = self.inventory_open || self.container_is_open();
+                let show_inventory = self.modal_screen_open();
                 if self.show_debug_screen || show_inventory {
                     self.ui_input.text(&text);
                 }
@@ -948,7 +1018,7 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            let show_inventory = self.inventory_open || self.container_is_open();
+            let show_inventory = self.modal_screen_open();
             if self.mouse_captured && !self.show_debug_screen && !show_inventory {
                 // A positive delta moves the mouse to the right and down; the
                 // game logic turns right and looks down with it.

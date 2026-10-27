@@ -80,6 +80,13 @@ const WATER_STILL: u16 = 9;
 /// A `Block Break Animation` stage that removes the cracks.
 const CLEAR_BREAK_STAGE: u8 = 255;
 
+/// The ticks the death animation runs before it stops
+/// (MCP `EntityLivingBase.onDeathUpdate`: `deathTime == 20`).
+const DEATH_TICKS: u32 = 20;
+
+/// The data watcher index of the player score (MCP `EntityPlayer` line 160).
+const SCORE_WATCHER: u8 = 18;
+
 /// The number of chat lines the HUD keeps.
 const CHAT_HISTORY: usize = 10;
 
@@ -140,6 +147,8 @@ pub enum GameEvent {
     ReMeshAll,
     /// The client closes a container or the player inventory (E / Escape).
     CloseInventory,
+    /// The player pressed "Respawn" on the death screen.
+    Respawn,
 }
 
 /// One simulation frame published to the render thread.
@@ -379,6 +388,11 @@ struct Game {
     experience: f32,
     /// The experience level.
     level: i32,
+    /// The score of the death screen (data watcher 18 of the local player).
+    score: i32,
+    /// The ticks since the death, up to [`DEATH_TICKS`]
+    /// (MCP `EntityLivingBase.deathTime`).
+    death_time: u32,
     /// The item the player holds, as the server described it.
     held_item: Option<WireItemStack>,
     /// The equipped armour pieces, indexed by the 1.8 equipment slot.
@@ -433,6 +447,8 @@ impl Game {
             armor: 0.0,
             experience: 0.0,
             level: 0,
+            score: 0,
+            death_time: 0,
             held_item: None,
             equipment: std::array::from_fn(|_| None),
             selected_slot: 0,
@@ -457,6 +473,11 @@ impl Game {
     /// in creative.
     fn reach(&self) -> f64 {
         self.gamemode.reach()
+    }
+
+    /// Whether the local player is dead (MCP `EntityLivingBase.getHealth() <= 0`).
+    fn dead(&self) -> bool {
+        self.health <= 0.0
     }
 
     /// The entity the view follows (`Camera`, 0x43), if it is another one
@@ -586,6 +607,7 @@ impl Game {
             armor: self.armor,
             experience: self.experience,
             level: self.level,
+            score: self.score,
             hotbar,
             selected_slot: self.selected_slot,
             crosshair: true,
@@ -783,6 +805,15 @@ fn handle_event(
             publish_inventory(game, frames);
             false
         }
+        GameEvent::Respawn => {
+            // MCP `GuiGameOver.actionPerformed`: `respawnPlayer` sends
+            // `Client Status` (PERFORM_RESPAWN); the server answers with
+            // `Respawn` and a new health.
+            if game.dead() {
+                queue.push(ClientCommand::Respawn);
+            }
+            false
+        }
     }
 }
 
@@ -798,7 +829,10 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     let followed = game
         .camera_entity()
         .and_then(|id| game.entities.camera_view(id, 1.0));
-    let view = followed.unwrap_or_else(|| third_person_view(game, state.interpolated(1.0)));
+    let mut view = followed.unwrap_or_else(|| third_person_view(game, state.interpolated(1.0)));
+    if followed.is_none() && game.dead() {
+        view.effects = view.effects.with_death(game.death_time as f32);
+    }
     let mut entities = game.entities.frame_data();
     if followed.is_none() && game.perspective.shows_player() {
         entities.push(game.body.frame_data());
@@ -1154,6 +1188,13 @@ fn handle_net(
                 m.metadata.get_byte(0).unwrap_or(0),
                 m.metadata.get_byte(10).unwrap_or(0),
             );
+            if m.entity_id == game.entity_id {
+                // MCP `EntityPlayer.getScore`: data watcher 18.
+                if let Some(score) = m.metadata.get_int(SCORE_WATCHER) {
+                    game.score = score;
+                    game.hud_dirty = true;
+                }
+            }
             game.entities.set_flags(EntityId(m.entity_id), flags);
         }
         PlayEvent::AttachEntity(packet) => {
@@ -1506,7 +1547,7 @@ fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) 
 /// restores them with a block change.
 fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     let pressed = std::mem::take(&mut game.attack_pressed);
-    if game.spectating() {
+    if game.spectating() || game.dead() {
         return;
     }
     let target = game.target();
@@ -1565,6 +1606,9 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
 
 /// Places a block against the targeted face.
 fn place_block(game: &mut Game, queue: &mut CommandQueue) {
+    if game.dead() {
+        return;
+    }
     let Some(hit) = game.target() else {
         return;
     };
@@ -1656,10 +1700,16 @@ fn tick(
 
     // A player who spectates another entity does not control its own body
     // (MCP `EntityPlayerSP.updateEntityActionState`, `isCurrentViewEntity`).
-    let intent = if game.spectating() {
+    // A dead player does not move either (`EntityLivingBase.isMovementBlocked`).
+    let intent = if game.spectating() || game.dead() {
         InputIntent::still(intent.yaw)
     } else {
         intent
+    };
+    game.death_time = if game.dead() {
+        (game.death_time + 1).min(DEATH_TICKS)
+    } else {
+        0
     };
     let was_flying = game
         .state
@@ -2335,6 +2385,126 @@ mod tests {
 
         anim(7, 255, &mut game);
         assert_eq!(game.cracks().len(), 1, "stage > 9 clears the breaker");
+    }
+
+    fn health_update(health: f32) -> PlayEvent {
+        PlayEvent::UpdateHealth(
+            umicraft_protocol::packets::play::clientbound::UpdateHealth {
+                health,
+                food: 20,
+                saturation: 5.0,
+            },
+        )
+    }
+
+    #[test]
+    fn a_dead_player_neither_moves_attacks_nor_places() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.playing = true;
+        game.input.forward = 1.0;
+        game.input.attack = true;
+        game.attack_pressed = true;
+        game.pitch = 1.5;
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let (chunks, _chunk_received) = mpsc::sync_channel(8);
+        handle_net(&mut game, health_update(0.0), &mut queue, &frames);
+        assert!(game.dead());
+        let before = game.state.as_ref().expect("placed").position();
+        for _ in 0..5 {
+            tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        }
+        let after = game.state.as_ref().expect("placed").position();
+        assert_eq!(before.x, after.x);
+        assert_eq!(before.z, after.z);
+        assert_eq!(digging_commands(&queue), 0);
+        place_block(&mut game, &mut queue);
+        assert!(!queue
+            .ordered
+            .iter()
+            .any(|command| matches!(command, ClientCommand::PlayerBlockPlacement { .. })));
+    }
+
+    #[test]
+    fn the_death_animation_runs_twenty_ticks_and_stops_with_the_respawn() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(64);
+        let (chunks, _chunk_received) = mpsc::sync_channel(64);
+        handle_net(&mut game, health_update(0.0), &mut queue, &frames);
+        for _ in 0..30 {
+            tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        }
+        assert_eq!(game.death_time, DEATH_TICKS);
+        handle_net(&mut game, health_update(20.0), &mut queue, &frames);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        assert_eq!(game.death_time, 0);
+    }
+
+    #[test]
+    fn the_dead_view_rolls_and_narrows() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, received) = mpsc::sync_channel(64);
+        let (chunks, _chunk_received) = mpsc::sync_channel(64);
+        handle_net(&mut game, health_update(0.0), &mut queue, &frames);
+        for _ in 0..20 {
+            tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        }
+        let mut last = None;
+        while let Ok(event) = received.try_recv() {
+            if let RenderEvent::Frame(frame) = event {
+                last = Some(frame);
+            }
+        }
+        let frame = last.expect("a frame");
+        assert!(frame.state.effects.bob.roll_degrees > 3.0);
+        assert!(frame.state.effects.fov_modifier < 1.0);
+    }
+
+    #[test]
+    fn the_respawn_button_sends_the_request_only_to_a_dead_player() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_event(&mut game, GameEvent::Respawn, &mut queue, &frames);
+        assert!(queue.ordered.is_empty(), "a living player cannot respawn");
+
+        handle_net(&mut game, health_update(0.0), &mut queue, &frames);
+        handle_event(&mut game, GameEvent::Respawn, &mut queue, &frames);
+        assert!(matches!(
+            queue.ordered.front(),
+            Some(ClientCommand::Respawn)
+        ));
+    }
+
+    #[test]
+    fn the_score_comes_from_the_local_player_metadata() {
+        use umicraft_protocol::packets::play::clientbound::EntityMetadata;
+        use umicraft_protocol::packets::play::metadata::WatchedObject;
+        use umicraft_protocol::packets::play::Metadata;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 3;
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let metadata = |entity_id, score: i32| {
+            PlayEvent::EntityMetadata(EntityMetadata {
+                entity_id,
+                metadata: Metadata {
+                    objects: vec![WatchedObject {
+                        type_id: 2,
+                        index: 18,
+                        value: score.to_be_bytes().to_vec(),
+                    }],
+                },
+            })
+        };
+        handle_net(&mut game, metadata(9, 100), &mut queue, &frames);
+        assert_eq!(game.score, 0, "another entity's score is not ours");
+        handle_net(&mut game, metadata(3, 57), &mut queue, &frames);
+        assert_eq!(game.score, 57);
+        assert_eq!(game.hud().score, 57);
     }
 
     #[test]

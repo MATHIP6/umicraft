@@ -180,6 +180,8 @@ pub enum ClientCommand {
     },
     /// `Animation` (0x0A): the arm swings.
     Swing,
+    /// `Client Status` (0x16): the respawn request of the death screen.
+    Respawn,
     /// `Held Item Change` (0x09): the selected hotbar slot.
     HeldItemChange {
         /// The slot index.
@@ -326,6 +328,9 @@ impl ClientCommand {
                 .with_flying(flying),
             ),
             Self::Swing => PlayServerbound::Animation(serverbound::Animation),
+            Self::Respawn => PlayServerbound::ClientStatus(serverbound::ClientStatus {
+                action: serverbound::ClientStatusAction::PerformRespawn,
+            }),
             Self::HeldItemChange { slot } => {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
             }

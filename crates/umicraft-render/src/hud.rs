@@ -156,6 +156,8 @@ pub struct HudState {
     pub chat_lines: Vec<String>,
     /// Debug lines, top to bottom.
     pub debug_lines: Vec<String>,
+    /// The score shown on the death screen (MCP `EntityPlayer.getScore`).
+    pub score: i32,
 }
 
 impl Default for HudState {
@@ -172,6 +174,7 @@ impl Default for HudState {
             crosshair: true,
             chat_lines: Vec::new(),
             debug_lines: Vec::new(),
+            score: 0,
         }
     }
 }
