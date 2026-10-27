@@ -32,10 +32,15 @@ picked up, and delete it when it is done.
 - **Reference:** `C16PacketClientStatus` (`PERFORM_RESPAWN`) and the death
   screen of the 1.8 client; the server answers with `Respawn` (0x07).
 
-### Effects and enchantments in the movement
-- **Problem:** Depth Strider (`Player.depth_strider`, ADR-0017), Speed,
-  Slowness and Jump Boost are not applied.
-- **Milestone:** M8 (entity effects) and M9 (inventory).
+### Fluid, ladder and web movement (Depth Strider)
+- **Problem:** `umicraft_game::physics` has no water, lava, ladder, vine or
+  cobweb movement, so Depth Strider (enchantment 8 on the boots) has nothing
+  to act on. Speed, Slowness, Jump Boost, Blindness and the food rule are done
+  (ADR-0021).
+- **Reference:** `EntityLivingBase.moveEntityWithHeading` (water and lava
+  branches, `EnchantmentHelper.getDepthStriderModifier`), `Entity.moveEntity`
+  (web, ladder clamp), `Entity.handleWaterMovement`.
+- **Milestone:** P2 follow-up (movement) or P7 with the fluid rendering.
 
 ## Performance (spec §7, ahead of M14)
 

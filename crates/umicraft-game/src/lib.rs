@@ -45,6 +45,7 @@ pub mod gamemode;
 pub mod input;
 pub mod interaction;
 pub mod inventory;
+pub mod movement;
 pub mod physics;
 pub mod prediction;
 pub mod raycast;
@@ -281,6 +282,33 @@ impl GameState {
         self.player.allow_flying = allow_flying;
         self.player.flying = flying;
         self.player.fly_speed = fly_speed;
+    }
+
+    /// Applies the movement stats of the server state (speed attribute, Jump
+    /// Boost, Blindness), the walking speed of the abilities and whether the
+    /// food level allows a sprint.
+    pub fn set_movement(
+        &mut self,
+        stats: movement::MovementStats,
+        walk_speed: f32,
+        well_fed: bool,
+    ) {
+        self.player.movement_speed = stats.speed;
+        self.player.jump_boost = stats.jump_boost;
+        self.player.blinded = stats.blinded;
+        self.player.walk_speed = walk_speed;
+        self.player.well_fed = well_fed;
+    }
+
+    /// Replaces the motion of the player (`Entity Velocity`, MCP
+    /// `Entity.setVelocity`).
+    pub fn set_velocity(&mut self, velocity: DVec3) {
+        self.player.velocity = velocity;
+    }
+
+    /// Adds to the motion of the player (the push of an `Explosion`).
+    pub fn add_velocity(&mut self, velocity: DVec3) {
+        self.player.velocity += velocity;
     }
 
     /// Makes the player walk through blocks (spectator mode).

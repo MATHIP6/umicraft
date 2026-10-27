@@ -47,6 +47,17 @@ pub const WALK_SPEED: f64 = 0.1;
 /// (MCP `EntityLivingBase.java:57`: `0.3` with operation `2`, multiply total).
 pub const SPRINT_SPEED_BONUS: f64 = 0.3;
 
+/// The default walking speed of the abilities
+/// (MCP `PlayerCapabilities.walkSpeed`, line 26).
+pub const DEFAULT_WALK_SPEED: f32 = 0.1;
+
+/// The upwards motion a Jump Boost level adds (MCP `EntityLivingBase.java:1562`).
+const JUMP_BOOST_PER_LEVEL: f64 = 0.1;
+
+/// The food level above which the player may sprint
+/// (MCP `EntityPlayerSP.java:799`: `foodLevel > 6`).
+pub const SPRINT_FOOD_LIMIT: f32 = 6.0;
+
 /// The default flying speed (MCP `PlayerCapabilities.flySpeed`, line 25).
 pub const DEFAULT_FLY_SPEED: f32 = 0.05;
 
@@ -156,6 +167,20 @@ pub struct Player {
     /// The ticks before the player may jump again
     /// (MCP `EntityLivingBase.jumpTicks`, line 186).
     pub jump_ticks: u32,
+    /// The movement speed attribute without the sprint boost
+    /// (MCP `generic.movementSpeed`): the walk speed plus the effects and
+    /// modifiers of the server. See [`crate::movement`].
+    pub movement_speed: f64,
+    /// The walking speed of the abilities (MCP `PlayerCapabilities.walkSpeed`),
+    /// the reference of the FOV modifier.
+    pub walk_speed: f32,
+    /// The level of the Jump Boost effect, `0` without it
+    /// (`amplifier + 1`).
+    pub jump_boost: u8,
+    /// Whether the food level lets the player sprint (above 6 points).
+    pub well_fed: bool,
+    /// Whether the Blindness effect stops a sprint from starting.
+    pub blinded: bool,
     /// The sprint multiplier in effect for the current tick.
     ///
     /// The vanilla code refreshes the movement speed attribute *after* the
@@ -216,6 +241,11 @@ impl Default for Player {
             sprinting_ticks_left: 0,
             sprint_toggle_timer: 0,
             jump_ticks: 0,
+            movement_speed: WALK_SPEED,
+            walk_speed: DEFAULT_WALK_SPEED,
+            jump_boost: 0,
+            well_fed: true,
+            blinded: false,
             speed_multiplier: 1.0,
             previous_forward: 0.0,
             collided_horizontally: false,
@@ -331,7 +361,7 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     }
     if intent.jump {
         if player.on_ground && player.jump_ticks == 0 {
-            player.velocity.y = JUMP_MOTION;
+            player.velocity.y = JUMP_MOTION + f64::from(player.jump_boost) * JUMP_BOOST_PER_LEVEL;
             if player.sprinting {
                 let (sin_yaw, cos_yaw) = player.yaw.sin_cos();
                 player.velocity.x -= f64::from(sin_yaw) * SPRINT_JUMP_BOOST;
@@ -386,7 +416,10 @@ fn update_view_effects(player: &mut Player) {
     player.camera_tilt += (tilt - player.camera_tilt) * view::TILT_SMOOTHING;
 
     player.prev_fov_modifier = player.fov_modifier;
-    let target = view::target_fov_modifier(player.flying, player.speed_multiplier);
+    let target = view::target_fov_modifier(
+        player.flying,
+        player.movement_speed * player.speed_multiplier / f64::from(player.walk_speed),
+    );
     player.fov_modifier = view::smooth_fov_modifier(player.fov_modifier, target);
 }
 
@@ -526,9 +559,16 @@ fn update_sprint(player: &mut Player, intent: &InputIntent) {
     let was_above_threshold = player.previous_forward >= SPRINT_FORWARD_THRESHOLD;
     let above_threshold = intent.forward >= SPRINT_FORWARD_THRESHOLD;
 
+    // MCP `EntityPlayerSP.java:799`: sprinting needs food above 6 points
+    // (or the ability to fly); Blindness only stops a sprint from starting
+    // (lines 801 and 811).
+    let may_sprint = player.well_fed || player.allow_flying;
+    let may_start = may_sprint && !player.blinded;
+
     // The double tap: the forward input crossed the threshold while the
     // player is on the ground and does not sneak.
-    if player.on_ground
+    if may_start
+        && player.on_ground
         && !intent.sneak
         && !was_above_threshold
         && above_threshold
@@ -542,12 +582,12 @@ fn update_sprint(player: &mut Player, intent: &InputIntent) {
     }
 
     // The sprint key starts the sprint on its own.
-    if !player.sprinting && above_threshold && intent.sprint {
+    if may_start && !player.sprinting && above_threshold && intent.sprint {
         player.set_sprinting(true);
     }
 
     // The sprint ends when the player slows down or hits a wall.
-    if player.sprinting && (!above_threshold || player.collided_horizontally) {
+    if player.sprinting && (!above_threshold || player.collided_horizontally || !may_sprint) {
         player.set_sprinting(false);
     }
 
@@ -609,7 +649,7 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
         f64::from(player.fly_speed) * if player.sprinting { 2.0 } else { 1.0 }
     } else if player.on_ground {
         // MCP `EntityLivingBase.java:1606-1612`.
-        WALK_SPEED
+        player.movement_speed
             * player.speed_multiplier
             * (MOVE_SPEED_NUMERATOR / (friction * friction * friction))
     } else {
@@ -1252,5 +1292,85 @@ mod tests {
             "{}",
             player.fov_modifier
         );
+    }
+
+    fn sprint_intent() -> InputIntent {
+        InputIntent {
+            sprint: true,
+            ..InputIntent::walking(0.0)
+        }
+    }
+
+    #[test]
+    fn a_hungry_player_cannot_sprint_and_loses_a_running_sprint() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        for _ in 0..5 {
+            step(&mut player, &sprint_intent(), &world);
+        }
+        assert!(player.sprinting);
+
+        player.well_fed = false;
+        step(&mut player, &sprint_intent(), &world);
+        assert!(!player.sprinting, "food at 6 or less ends the sprint");
+        for _ in 0..5 {
+            step(&mut player, &sprint_intent(), &world);
+        }
+        assert!(!player.sprinting, "and it does not start again");
+
+        // The ability to fly lifts the hunger rule (MCP `|| allowFlying`).
+        player.allow_flying = true;
+        step(&mut player, &sprint_intent(), &world);
+        assert!(player.sprinting);
+    }
+
+    #[test]
+    fn blindness_stops_a_sprint_from_starting_but_not_a_running_one() {
+        let world = flat_world();
+        let mut blind = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        blind.blinded = true;
+        for _ in 0..5 {
+            step(&mut blind, &sprint_intent(), &world);
+        }
+        assert!(!blind.sprinting);
+
+        let mut runner = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        for _ in 0..5 {
+            step(&mut runner, &sprint_intent(), &world);
+        }
+        runner.blinded = true;
+        step(&mut runner, &sprint_intent(), &world);
+        assert!(runner.sprinting);
+    }
+
+    #[test]
+    fn jump_boost_adds_a_tenth_per_level_to_the_jump() {
+        let world = flat_world();
+        let jump = |level: u8| {
+            let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+            for _ in 0..3 {
+                step(&mut player, &InputIntent::still(0.0), &world);
+            }
+            player.jump_boost = level;
+            let before = player.position.y;
+            step(&mut player, &jump_intent(true), &world);
+            player.position.y - before
+        };
+        assert!(jump(2) > jump(0) + 0.15, "{} vs {}", jump(2), jump(0));
+    }
+
+    #[test]
+    fn the_movement_speed_attribute_scales_the_walk() {
+        let world = flat_world();
+        let distance = |speed: f64| {
+            let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+            player.movement_speed = speed;
+            for _ in 0..20 {
+                step(&mut player, &InputIntent::walking(0.0), &world);
+            }
+            player.position.z - 0.5
+        };
+        let ratio = distance(0.14) / distance(0.1);
+        assert!((ratio - 1.4).abs() < 0.02, "{ratio}");
     }
 }

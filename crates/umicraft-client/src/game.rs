@@ -35,7 +35,8 @@ use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
-use umicraft_game::physics::DEFAULT_FLY_SPEED;
+use umicraft_game::movement::movement_stats;
+use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
@@ -86,6 +87,10 @@ const DEATH_TICKS: u32 = 20;
 
 /// The data watcher index of the player score (MCP `EntityPlayer` line 160).
 const SCORE_WATCHER: u8 = 18;
+
+/// The wire units of `Entity Velocity` per block per tick
+/// (MCP `handleEntityVelocity`: `/ 8000`).
+const VELOCITY_UNITS: f64 = 8000.0;
 
 /// The number of chat lines the HUD keeps.
 const CHAT_HISTORY: usize = 10;
@@ -1175,6 +1180,17 @@ fn handle_net(
             let head_yaw = f32::from(h.head_yaw) * 360.0 / 256.0;
             game.entities.set_head_yaw(EntityId(h.entity_id), head_yaw);
         }
+        PlayEvent::EntityVelocity(v) if v.entity_id == game.entity_id => {
+            // MCP `handleEntityVelocity` sets the motion of the local player:
+            // the knockback of a hit, a fishing rod, a piston.
+            if let Some(state) = game.state.as_mut() {
+                state.set_velocity(DVec3::new(
+                    f64::from(v.velocity_x) / VELOCITY_UNITS,
+                    f64::from(v.velocity_y) / VELOCITY_UNITS,
+                    f64::from(v.velocity_z) / VELOCITY_UNITS,
+                ));
+            }
+        }
         PlayEvent::EntityVelocity(v) => {
             let vel = Vec3::new(
                 f32::from(v.velocity_x) / 8000.0,
@@ -1303,6 +1319,24 @@ fn apply_mode_rules(game: &mut Game) {
     state.set_no_clip(game.gamemode.no_clip());
 }
 
+/// Hands the speed attribute, the effects and the food level of the server
+/// state to the simulation (`umicraft_game::movement`).
+fn apply_movement_stats(game: &mut Game) {
+    let Some(state) = game.state.as_mut() else {
+        return;
+    };
+    let walk_speed = game
+        .server
+        .abilities()
+        .map_or(DEFAULT_WALK_SPEED, |abilities| abilities.walk_speed);
+    let stats = movement_stats(
+        game.server.attributes(),
+        game.server.effects(),
+        f64::from(walk_speed),
+    );
+    state.set_movement(stats, walk_speed, game.food > SPRINT_FOOD_LIMIT);
+}
+
 /// Tells the server about a change of the flying state.
 ///
 /// MCP `EntityPlayerSP.sendPlayerAbilities` (`C13PacketPlayerAbilities`)
@@ -1328,6 +1362,14 @@ fn report_flight(game: &Game, was_flying: bool, queue: &mut CommandQueue) {
 /// on the client, which sets every affected block to air before the server's
 /// block changes arrive. The player's knockback from the packet is P2.
 fn apply_explosion(game: &mut Game, packet: &Explosion) {
+    // MCP `handleExplosion`: the push is added to the motion of the player.
+    if let Some(state) = game.state.as_mut() {
+        state.add_velocity(DVec3::new(
+            f64::from(packet.player_motion_x),
+            f64::from(packet.player_motion_y),
+            f64::from(packet.player_motion_z),
+        ));
+    }
     let Some(world) = game.world.as_mut() else {
         return;
     };
@@ -1711,6 +1753,7 @@ fn tick(
     } else {
         0
     };
+    apply_movement_stats(game);
     let was_flying = game
         .state
         .as_ref()
@@ -2505,6 +2548,83 @@ mod tests {
         handle_net(&mut game, metadata(3, 57), &mut queue, &frames);
         assert_eq!(game.score, 57);
         assert_eq!(game.hud().score, 57);
+    }
+
+    #[test]
+    fn the_velocity_of_the_local_player_replaces_its_motion_and_others_do_not() {
+        use umicraft_protocol::packets::play::clientbound::EntityVelocity;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let velocity = |entity_id| {
+            PlayEvent::EntityVelocity(EntityVelocity {
+                entity_id,
+                velocity_x: 4000,
+                velocity_y: 2400,
+                velocity_z: -8000,
+            })
+        };
+        handle_net(&mut game, velocity(2), &mut queue, &frames);
+        let motion = game.state.as_ref().expect("placed").player().velocity;
+        assert_eq!(motion, DVec3::ZERO, "another entity is not us");
+
+        handle_net(&mut game, velocity(1), &mut queue, &frames);
+        let motion = game.state.as_ref().expect("placed").player().velocity;
+        assert!((motion - DVec3::new(0.5, 0.3, -1.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn an_explosion_pushes_the_local_player() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.state
+            .as_mut()
+            .expect("placed")
+            .set_velocity(DVec3::new(0.1, 0.0, 0.0));
+        apply_explosion(
+            &mut game,
+            &Explosion {
+                x: 0.0,
+                y: 64.0,
+                z: 0.0,
+                strength: 3.0,
+                records: Vec::new(),
+                player_motion_x: 0.5,
+                player_motion_y: 0.25,
+                player_motion_z: -0.5,
+            },
+        );
+        let motion = game.state.as_ref().expect("placed").player().velocity;
+        assert!((motion - DVec3::new(0.6, 0.25, -0.5)).length() < 1e-6);
+    }
+
+    #[test]
+    fn the_server_state_drives_the_movement_stats() {
+        use umicraft_protocol::packets::play::clientbound::EntityEffect;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 6.0;
+        game.server.on_join(1);
+        game.server.apply_entity_effect(&EntityEffect {
+            entity_id: 1,
+            effect_id: 1,
+            amplifier: 1,
+            duration: 600,
+            hide_particles: 0,
+        });
+        game.server.apply_entity_effect(&EntityEffect {
+            entity_id: 1,
+            effect_id: 8,
+            amplifier: 0,
+            duration: 600,
+            hide_particles: 0,
+        });
+        apply_movement_stats(&mut game);
+        let player = game.state.as_ref().expect("placed").player();
+        assert!((player.movement_speed - 0.14).abs() < 1e-6);
+        assert_eq!(player.jump_boost, 1);
+        assert!(!player.well_fed, "6 food points are not enough to sprint");
     }
 
     #[test]

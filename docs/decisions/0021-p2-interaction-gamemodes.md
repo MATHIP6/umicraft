@@ -42,6 +42,11 @@ gamemodes and the spectator camera.
    sends `Client Status` and blocks the dead player's input. The screen is
    a widget of `umicraft-ui` so that its layout and clicks are unit-tested.
 
+8. Movement stats: `umicraft_game::movement` merges the `Entity Properties`
+   attribute and the effects of the server by modifier UUID; the player
+   state keeps the result (`movement_speed`, `jump_boost`, `well_fed`,
+   `blinded`). `Entity Velocity` and `Explosion` change the local motion.
+
 ## Consequences
 
 - Adventure mode never starts a break because item NBT (`CanDestroy`) is not
@@ -50,3 +55,4 @@ gamemodes and the spectator camera.
 - The cracks (own ones and the 0x25 ones of other players, all in `ServerState`) are drawn over the terrain by a dedicated pipeline; the arm swing is sent but not rendered (no first-person hand yet).
 - Not done: first-person hand (needs item models, P3); skin, arm swing and body-yaw lag of the local body (P5).
 - The death screen's "Title Screen" button waits for the P10 title screen; hardcore variants are missing.
+- Depth Strider needs fluid movement, which the physics does not have (backlog).
