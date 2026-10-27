@@ -474,39 +474,91 @@ impl PlayClientbound {
                 Self::ConfirmTransaction(clientbound::ConfirmTransaction::decode(reader)?)
             }
             clientbound::UseBed::ID => Self::UseBed(clientbound::UseBed::decode(reader)?),
-            clientbound::CollectItem::ID => Self::CollectItem(clientbound::CollectItem::decode(reader)?),
-            clientbound::SpawnPainting::ID => Self::SpawnPainting(clientbound::SpawnPainting::decode(reader)?),
-            clientbound::SpawnXpOrb::ID => Self::SpawnXpOrb(clientbound::SpawnXpOrb::decode(reader)?),
-            clientbound::EntityEffect::ID => Self::EntityEffect(clientbound::EntityEffect::decode(reader)?),
-            clientbound::RemoveEntityEffect::ID => Self::RemoveEntityEffect(clientbound::RemoveEntityEffect::decode(reader)?),
-            clientbound::EntityProperties::ID => Self::EntityProperties(clientbound::EntityProperties::decode(reader)?),
+            clientbound::CollectItem::ID => {
+                Self::CollectItem(clientbound::CollectItem::decode(reader)?)
+            }
+            clientbound::SpawnPainting::ID => {
+                Self::SpawnPainting(clientbound::SpawnPainting::decode(reader)?)
+            }
+            clientbound::SpawnXpOrb::ID => {
+                Self::SpawnXpOrb(clientbound::SpawnXpOrb::decode(reader)?)
+            }
+            clientbound::EntityEffect::ID => {
+                Self::EntityEffect(clientbound::EntityEffect::decode(reader)?)
+            }
+            clientbound::RemoveEntityEffect::ID => {
+                Self::RemoveEntityEffect(clientbound::RemoveEntityEffect::decode(reader)?)
+            }
+            clientbound::EntityProperties::ID => {
+                Self::EntityProperties(clientbound::EntityProperties::decode(reader)?)
+            }
             clientbound::Explosion::ID => Self::Explosion(clientbound::Explosion::decode(reader)?),
             clientbound::Effect::ID => Self::Effect(clientbound::Effect::decode(reader)?),
-            clientbound::SoundEffect::ID => Self::SoundEffect(clientbound::SoundEffect::decode(reader)?),
+            clientbound::SoundEffect::ID => {
+                Self::SoundEffect(clientbound::SoundEffect::decode(reader)?)
+            }
             clientbound::Particle::ID => Self::Particle(clientbound::Particle::decode(reader)?),
-            clientbound::SpawnGlobalEntity::ID => Self::SpawnGlobalEntity(clientbound::SpawnGlobalEntity::decode(reader)?),
-            clientbound::UpdateSign::ID => Self::UpdateSign(clientbound::UpdateSign::decode(reader)?),
+            clientbound::SpawnGlobalEntity::ID => {
+                Self::SpawnGlobalEntity(clientbound::SpawnGlobalEntity::decode(reader)?)
+            }
+            clientbound::UpdateSign::ID => {
+                Self::UpdateSign(clientbound::UpdateSign::decode(reader)?)
+            }
             clientbound::Maps::ID => Self::Maps(clientbound::Maps::decode(reader)?),
-            clientbound::UpdateBlockEntity::ID => Self::UpdateBlockEntity(clientbound::UpdateBlockEntity::decode(reader)?),
-            clientbound::SignEditorOpen::ID => Self::SignEditorOpen(clientbound::SignEditorOpen::decode(reader)?),
-            clientbound::Statistics::ID => Self::Statistics(clientbound::Statistics::decode(reader)?),
-            clientbound::PlayerListItem::ID => Self::PlayerListItem(clientbound::PlayerListItem::decode(reader)?),
-            clientbound::PlayerAbilities::ID => Self::PlayerAbilities(clientbound::PlayerAbilities::decode(reader)?),
-            clientbound::TabComplete::ID => Self::TabComplete(clientbound::TabComplete::decode(reader)?),
-            clientbound::ScoreboardObjective::ID => Self::ScoreboardObjective(clientbound::ScoreboardObjective::decode(reader)?),
-            clientbound::UpdateScore::ID => Self::UpdateScore(clientbound::UpdateScore::decode(reader)?),
-            clientbound::DisplayScoreboard::ID => Self::DisplayScoreboard(clientbound::DisplayScoreboard::decode(reader)?),
+            clientbound::UpdateBlockEntity::ID => {
+                Self::UpdateBlockEntity(clientbound::UpdateBlockEntity::decode(reader)?)
+            }
+            clientbound::SignEditorOpen::ID => {
+                Self::SignEditorOpen(clientbound::SignEditorOpen::decode(reader)?)
+            }
+            clientbound::Statistics::ID => {
+                Self::Statistics(clientbound::Statistics::decode(reader)?)
+            }
+            clientbound::PlayerListItem::ID => {
+                Self::PlayerListItem(clientbound::PlayerListItem::decode(reader)?)
+            }
+            clientbound::PlayerAbilities::ID => {
+                Self::PlayerAbilities(clientbound::PlayerAbilities::decode(reader)?)
+            }
+            clientbound::TabComplete::ID => {
+                Self::TabComplete(clientbound::TabComplete::decode(reader)?)
+            }
+            clientbound::ScoreboardObjective::ID => {
+                Self::ScoreboardObjective(clientbound::ScoreboardObjective::decode(reader)?)
+            }
+            clientbound::UpdateScore::ID => {
+                Self::UpdateScore(clientbound::UpdateScore::decode(reader)?)
+            }
+            clientbound::DisplayScoreboard::ID => {
+                Self::DisplayScoreboard(clientbound::DisplayScoreboard::decode(reader)?)
+            }
             clientbound::Teams::ID => Self::Teams(clientbound::Teams::decode(reader)?),
-            clientbound::PluginMessage::ID => Self::PluginMessage(clientbound::PluginMessage::decode(reader)?),
-            clientbound::ServerDifficulty::ID => Self::ServerDifficulty(clientbound::ServerDifficulty::decode(reader)?),
-            clientbound::CombatEvent::ID => Self::CombatEvent(clientbound::CombatEvent::decode(reader)?),
+            clientbound::PluginMessage::ID => {
+                Self::PluginMessage(clientbound::PluginMessage::decode(reader)?)
+            }
+            clientbound::ServerDifficulty::ID => {
+                Self::ServerDifficulty(clientbound::ServerDifficulty::decode(reader)?)
+            }
+            clientbound::CombatEvent::ID => {
+                Self::CombatEvent(clientbound::CombatEvent::decode(reader)?)
+            }
             clientbound::Camera::ID => Self::Camera(clientbound::Camera::decode(reader)?),
-            clientbound::WorldBorder::ID => Self::WorldBorder(clientbound::WorldBorder::decode(reader)?),
+            clientbound::WorldBorder::ID => {
+                Self::WorldBorder(clientbound::WorldBorder::decode(reader)?)
+            }
             clientbound::Title::ID => Self::Title(clientbound::Title::decode(reader)?),
-            clientbound::SetCompression::ID => Self::SetCompression(clientbound::SetCompression::decode(reader)?),
-            clientbound::PlayerListHeaderFooter::ID => Self::PlayerListHeaderFooter(clientbound::PlayerListHeaderFooter::decode(reader)?),
-            clientbound::ResourcePackSend::ID => Self::ResourcePackSend(clientbound::ResourcePackSend::decode(reader)?),
-            clientbound::UpdateEntityNbt::ID => Self::UpdateEntityNbt(clientbound::UpdateEntityNbt::decode(reader)?),
+            clientbound::SetCompression::ID => {
+                Self::SetCompression(clientbound::SetCompression::decode(reader)?)
+            }
+            clientbound::PlayerListHeaderFooter::ID => {
+                Self::PlayerListHeaderFooter(clientbound::PlayerListHeaderFooter::decode(reader)?)
+            }
+            clientbound::ResourcePackSend::ID => {
+                Self::ResourcePackSend(clientbound::ResourcePackSend::decode(reader)?)
+            }
+            clientbound::UpdateEntityNbt::ID => {
+                Self::UpdateEntityNbt(clientbound::UpdateEntityNbt::decode(reader)?)
+            }
             clientbound::Disconnect::ID => {
                 Self::Disconnect(clientbound::Disconnect::decode(reader)?)
             }
@@ -832,9 +884,10 @@ mod tests {
 
     #[test]
     fn dispatch_rejects_unknown_play_ids() {
+        // 0x4A is the first id past the protocol-47 clientbound table.
         let mut empty: &[u8] = &[];
-        let err = PlayClientbound::decode(0x42, &mut empty).unwrap_err();
-        assert!(matches!(err, ProtocolError::UnknownPacket { id: 0x42, .. }));
+        let err = PlayClientbound::decode(0x4A, &mut empty).unwrap_err();
+        assert!(matches!(err, ProtocolError::UnknownPacket { id: 0x4A, .. }));
 
         let mut empty: &[u8] = &[];
         let err = PlayServerbound::decode(0x42, &mut empty).unwrap_err();
