@@ -68,13 +68,18 @@ impl ChunkPos {
     }
 
     /// The four horizontal neighbours, in west/east/north/south order.
+    ///
+    /// The coordinates come from the server, so a column at the `i32` edge
+    /// is possible: its outer neighbour wraps to the opposite edge instead of
+    /// overflowing. That column is never loaded, so callers that look it up
+    /// find nothing (found by the `chunk_parser` fuzz target).
     #[must_use]
     pub const fn neighbours(self) -> [Self; 4] {
         [
-            Self::new(self.x - 1, self.z),
-            Self::new(self.x + 1, self.z),
-            Self::new(self.x, self.z - 1),
-            Self::new(self.x, self.z + 1),
+            Self::new(self.x.wrapping_sub(1), self.z),
+            Self::new(self.x.wrapping_add(1), self.z),
+            Self::new(self.x, self.z.wrapping_sub(1)),
+            Self::new(self.x, self.z.wrapping_add(1)),
         ]
     }
 }
@@ -89,6 +94,22 @@ mod tests {
         assert_eq!(pos.chunk(), ChunkPos::new(-1, -2));
         assert_eq!(pos.local_x(), 15);
         assert_eq!(pos.local_z(), 15);
+    }
+
+    #[test]
+    fn neighbours_of_an_edge_column_do_not_overflow() {
+        // Regression: a hostile `Chunk Data` at x = i32::MIN panicked in
+        // debug builds.
+        let edge = ChunkPos::new(i32::MIN, i32::MAX);
+        assert_eq!(
+            edge.neighbours(),
+            [
+                ChunkPos::new(i32::MAX, i32::MAX),
+                ChunkPos::new(i32::MIN + 1, i32::MAX),
+                ChunkPos::new(i32::MIN, i32::MAX - 1),
+                ChunkPos::new(i32::MIN, i32::MIN),
+            ]
+        );
     }
 
     #[test]
