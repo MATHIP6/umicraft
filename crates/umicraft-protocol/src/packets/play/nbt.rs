@@ -104,9 +104,8 @@ impl<R: Read> Skipper<'_, R> {
     /// the byte length is never smaller, so the budget is at least as strict.
     fn skip_string(&mut self) -> Result<u64, ProtocolError> {
         let len = read_i16(self.reader)?;
-        let len = u16::try_from(len).map_err(|_| {
-            ProtocolError::Invariant(format!("negative NBT string length {len}"))
-        })?;
+        let len = u16::try_from(len)
+            .map_err(|_| ProtocolError::Invariant(format!("negative NBT string length {len}")))?;
         skip_bytes(self.reader, usize::from(len))?;
         Ok(u64::from(len))
     }
