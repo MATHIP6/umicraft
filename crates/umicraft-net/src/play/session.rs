@@ -14,7 +14,9 @@ use umicraft_protocol::packets::play::clientbound::{
     Respawn, SetExperience, SpawnMob, SpawnObject, SpawnPlayer, SpawnPosition, TimeUpdate,
     UpdateHealth, WindowItems, WindowProperty,
 };
-use umicraft_protocol::packets::play::serverbound::{Brand, ClientSettings, KeepAlive};
+use umicraft_protocol::packets::play::serverbound::{
+    Brand, ClientSettings, KeepAlive, ResourcePackResult, ResourcePackStatus,
+};
 use umicraft_protocol::varint::write_var_u32;
 use umicraft_protocol::{PlayServerbound, ProtocolError};
 
@@ -191,6 +193,78 @@ pub enum PlayEvent {
     WindowProperty(WindowProperty),
     /// The server confirmed or rejected a click transaction.
     ConfirmTransaction(clientbound::ConfirmTransaction),
+    /// `Use Bed` (0x0A): a player went to sleep in a bed.
+    UseBed(clientbound::UseBed),
+    /// `Collect Item` (0x0D): an entity picked up an item or orb.
+    CollectItem(clientbound::CollectItem),
+    /// `Spawn Painting` (0x10): a painting was spawned.
+    SpawnPainting(clientbound::SpawnPainting),
+    /// `Spawn Experience Orb` (0x11): an experience orb was spawned.
+    SpawnXpOrb(clientbound::SpawnXpOrb),
+    /// `Entity Effect` (0x1D): a status effect was applied.
+    EntityEffect(clientbound::EntityEffect),
+    /// `Remove Entity Effect` (0x1E): a status effect ended.
+    RemoveEntityEffect(clientbound::RemoveEntityEffect),
+    /// `Entity Properties` (0x20): attribute values and modifiers.
+    EntityProperties(clientbound::EntityProperties),
+    /// `Block Action` (0x24): a chest lid, note block or piston moved.
+    BlockAction(clientbound::BlockAction),
+    /// `Block Break Animation` (0x25): another player's crack stage.
+    BlockBreakAnim(clientbound::BlockBreakAnim),
+    /// `Explosion` (0x27): blocks destroyed and the knockback of the player.
+    Explosion(clientbound::Explosion),
+    /// `Effect` (0x28): a sound or particle effect at a block.
+    Effect(clientbound::Effect),
+    /// `Sound Effect` (0x29): a named sound at a position.
+    SoundEffect(clientbound::SoundEffect),
+    /// `Particle` (0x2A): server-spawned particles.
+    Particle(clientbound::Particle),
+    /// `Change Game State` (0x2B): rain, gamemode, credits, fade…
+    ChangeGameState(clientbound::ChangeGameState),
+    /// `Spawn Global Entity` (0x2C): a lightning bolt.
+    SpawnGlobalEntity(clientbound::SpawnGlobalEntity),
+    /// `Update Sign` (0x33): the four lines of a sign.
+    UpdateSign(Box<clientbound::UpdateSign>),
+    /// `Maps` (0x34): map icons and pixel columns.
+    Maps(clientbound::Maps),
+    /// `Update Block Entity` (0x35): the NBT of a block entity.
+    UpdateBlockEntity(clientbound::UpdateBlockEntity),
+    /// `Sign Editor Open` (0x36): the player placed a sign to write.
+    SignEditorOpen(clientbound::SignEditorOpen),
+    /// `Statistics` (0x37): the answer to a statistics request.
+    Statistics(clientbound::Statistics),
+    /// `Player List Item` (0x38): tab-list entries and profiles.
+    PlayerListItem(clientbound::PlayerListItem),
+    /// `Player Abilities` (0x39): flying, invulnerability and speeds.
+    PlayerAbilities(clientbound::PlayerAbilities),
+    /// `Tab-Complete` (0x3A): chat completion matches.
+    TabComplete(clientbound::TabComplete),
+    /// `Scoreboard Objective` (0x3B): an objective was created, removed or renamed.
+    ScoreboardObjective(clientbound::ScoreboardObjective),
+    /// `Update Score` (0x3C): a score changed or was removed.
+    UpdateScore(clientbound::UpdateScore),
+    /// `Display Scoreboard` (0x3D): an objective was put in a display slot.
+    DisplayScoreboard(clientbound::DisplayScoreboard),
+    /// `Teams` (0x3E): a team or its members changed.
+    Teams(Box<clientbound::Teams>),
+    /// `Plugin Message` (0x3F): a payload on a named channel.
+    PluginMessage(clientbound::PluginMessage),
+    /// `Server Difficulty` (0x41): the difficulty changed.
+    ServerDifficulty(clientbound::ServerDifficulty),
+    /// `Combat Event` (0x42): combat start, end or a death.
+    CombatEvent(clientbound::CombatEvent),
+    /// `Camera` (0x43): the entity the view follows.
+    Camera(clientbound::Camera),
+    /// `World Border` (0x44): the world border changed.
+    WorldBorder(clientbound::WorldBorder),
+    /// `Title` (0x45): a title, subtitle or their timing.
+    Title(clientbound::Title),
+    /// `Player List Header/Footer` (0x47): the tab-list texts.
+    PlayerListHeaderFooter(clientbound::PlayerListHeaderFooter),
+    /// `Resource Pack Send` (0x48): the server offers a resource pack.
+    ResourcePackSend(clientbound::ResourcePackSend),
+    /// `Update Entity NBT` (0x49): raw entity NBT.
+    UpdateEntityNbt(clientbound::UpdateEntityNbt),
 }
 
 /// What one clientbound packet produced.
@@ -203,6 +277,7 @@ pub struct Reaction {
     event: Option<PlayEvent>,
     replies: [Option<PlayServerbound>; MAX_REPLIES],
     kick_reason: Option<String>,
+    compression_threshold: Option<i32>,
 }
 
 impl Reaction {
@@ -223,6 +298,17 @@ impl Reaction {
     #[must_use]
     pub fn kick_reason(&self) -> Option<&str> {
         self.kick_reason.as_deref()
+    }
+
+    /// The threshold of a play-state `Set Compression` (0x46).
+    ///
+    /// The caller applies it to the connection after writing the replies:
+    /// every later frame uses the new framing (MCP
+    /// `NetHandlerPlayClient.handleSetCompressionLevel`). Some proxies send
+    /// it after the login.
+    #[must_use]
+    pub fn compression_threshold(&self) -> Option<i32> {
+        self.compression_threshold
     }
 
     /// The event for the game thread, consuming the reaction.
@@ -406,9 +492,123 @@ impl PlaySession {
                             )),
                             None,
                         ],
-                        kick_reason: None,
+                        ..Reaction::default()
                     }
                 }
+            }
+            clientbound::UseBed::ID => {
+                Reaction::event(PlayEvent::UseBed(clientbound::UseBed::decode(body)?))
+            }
+            clientbound::CollectItem::ID => Reaction::event(PlayEvent::CollectItem(
+                clientbound::CollectItem::decode(body)?,
+            )),
+            clientbound::SpawnPainting::ID => Reaction::event(PlayEvent::SpawnPainting(
+                clientbound::SpawnPainting::decode(body)?,
+            )),
+            clientbound::SpawnXpOrb::ID => Reaction::event(PlayEvent::SpawnXpOrb(
+                clientbound::SpawnXpOrb::decode(body)?,
+            )),
+            clientbound::EntityEffect::ID => Reaction::event(PlayEvent::EntityEffect(
+                clientbound::EntityEffect::decode(body)?,
+            )),
+            clientbound::RemoveEntityEffect::ID => Reaction::event(PlayEvent::RemoveEntityEffect(
+                clientbound::RemoveEntityEffect::decode(body)?,
+            )),
+            clientbound::EntityProperties::ID => Reaction::event(PlayEvent::EntityProperties(
+                clientbound::EntityProperties::decode(body)?,
+            )),
+            clientbound::BlockAction::ID => Reaction::event(PlayEvent::BlockAction(
+                clientbound::BlockAction::decode(body)?,
+            )),
+            clientbound::BlockBreakAnim::ID => Reaction::event(PlayEvent::BlockBreakAnim(
+                clientbound::BlockBreakAnim::decode(body)?,
+            )),
+            clientbound::Explosion::ID => {
+                Reaction::event(PlayEvent::Explosion(clientbound::Explosion::decode(body)?))
+            }
+            clientbound::Effect::ID => {
+                Reaction::event(PlayEvent::Effect(clientbound::Effect::decode(body)?))
+            }
+            clientbound::SoundEffect::ID => Reaction::event(PlayEvent::SoundEffect(
+                clientbound::SoundEffect::decode(body)?,
+            )),
+            clientbound::Particle::ID => {
+                Reaction::event(PlayEvent::Particle(clientbound::Particle::decode(body)?))
+            }
+            clientbound::ChangeGameState::ID => Reaction::event(PlayEvent::ChangeGameState(
+                clientbound::ChangeGameState::decode(body)?,
+            )),
+            clientbound::SpawnGlobalEntity::ID => Reaction::event(PlayEvent::SpawnGlobalEntity(
+                clientbound::SpawnGlobalEntity::decode(body)?,
+            )),
+            clientbound::UpdateSign::ID => Reaction::event(PlayEvent::UpdateSign(Box::new(
+                clientbound::UpdateSign::decode(body)?,
+            ))),
+            clientbound::Maps::ID => {
+                Reaction::event(PlayEvent::Maps(clientbound::Maps::decode(body)?))
+            }
+            clientbound::UpdateBlockEntity::ID => Reaction::event(PlayEvent::UpdateBlockEntity(
+                clientbound::UpdateBlockEntity::decode(body)?,
+            )),
+            clientbound::SignEditorOpen::ID => Reaction::event(PlayEvent::SignEditorOpen(
+                clientbound::SignEditorOpen::decode(body)?,
+            )),
+            clientbound::Statistics::ID => Reaction::event(PlayEvent::Statistics(
+                clientbound::Statistics::decode(body)?,
+            )),
+            clientbound::PlayerListItem::ID => Reaction::event(PlayEvent::PlayerListItem(
+                clientbound::PlayerListItem::decode(body)?,
+            )),
+            clientbound::PlayerAbilities::ID => Reaction::event(PlayEvent::PlayerAbilities(
+                clientbound::PlayerAbilities::decode(body)?,
+            )),
+            clientbound::TabComplete::ID => Reaction::event(PlayEvent::TabComplete(
+                clientbound::TabComplete::decode(body)?,
+            )),
+            clientbound::ScoreboardObjective::ID => Reaction::event(
+                PlayEvent::ScoreboardObjective(clientbound::ScoreboardObjective::decode(body)?),
+            ),
+            clientbound::UpdateScore::ID => Reaction::event(PlayEvent::UpdateScore(
+                clientbound::UpdateScore::decode(body)?,
+            )),
+            clientbound::DisplayScoreboard::ID => Reaction::event(PlayEvent::DisplayScoreboard(
+                clientbound::DisplayScoreboard::decode(body)?,
+            )),
+            clientbound::Teams::ID => Reaction::event(PlayEvent::Teams(Box::new(
+                clientbound::Teams::decode(body)?,
+            ))),
+            clientbound::PluginMessage::ID => Reaction::event(PlayEvent::PluginMessage(
+                clientbound::PluginMessage::decode(body)?,
+            )),
+            clientbound::ServerDifficulty::ID => Reaction::event(PlayEvent::ServerDifficulty(
+                clientbound::ServerDifficulty::decode(body)?,
+            )),
+            clientbound::CombatEvent::ID => Reaction::event(PlayEvent::CombatEvent(
+                clientbound::CombatEvent::decode(body)?,
+            )),
+            clientbound::Camera::ID => {
+                Reaction::event(PlayEvent::Camera(clientbound::Camera::decode(body)?))
+            }
+            clientbound::WorldBorder::ID => Reaction::event(PlayEvent::WorldBorder(
+                clientbound::WorldBorder::decode(body)?,
+            )),
+            clientbound::Title::ID => {
+                Reaction::event(PlayEvent::Title(clientbound::Title::decode(body)?))
+            }
+            clientbound::PlayerListHeaderFooter::ID => {
+                Reaction::event(PlayEvent::PlayerListHeaderFooter(
+                    clientbound::PlayerListHeaderFooter::decode(body)?,
+                ))
+            }
+            clientbound::UpdateEntityNbt::ID => Reaction::event(PlayEvent::UpdateEntityNbt(
+                clientbound::UpdateEntityNbt::decode(body)?,
+            )),
+            clientbound::SetCompression::ID => Reaction {
+                compression_threshold: Some(clientbound::SetCompression::decode(body)?.threshold),
+                ..Reaction::default()
+            },
+            clientbound::ResourcePackSend::ID => {
+                Self::resource_pack(clientbound::ResourcePackSend::decode(body)?)
             }
             clientbound::Disconnect::ID => {
                 let packet = clientbound::Disconnect::decode(body)?;
@@ -418,10 +618,30 @@ impl PlaySession {
                 }
             }
             other => {
-                tracing::trace!(id = other, bytes = body.len(), "skipped play packet");
+                // Every protocol-47 id is matched above; only a server that
+                // speaks another protocol gets here.
+                tracing::debug!(id = other, bytes = body.len(), "unknown play packet id");
                 Reaction::default()
             }
         })
+    }
+
+    /// Declines a server resource pack and forwards the offer.
+    ///
+    /// Vanilla answers `Declined` at once when the server-pack option of the
+    /// server entry is *disabled* (MCP `NetHandlerPlayClient.handleResourcePack`);
+    /// without the prompt of P12 that is the only vanilla answer the client
+    /// can give (ADR-0020 §2).
+    fn resource_pack(packet: clientbound::ResourcePackSend) -> Reaction {
+        let reply = PlayServerbound::ResourcePackStatus(ResourcePackStatus {
+            hash: packet.hash.clone(),
+            result: ResourcePackResult::Declined,
+        });
+        Reaction {
+            event: Some(PlayEvent::ResourcePackSend(packet)),
+            replies: [Some(reply), None],
+            ..Reaction::default()
+        }
     }
 
     /// Forwards `Join Game` and, the first time only, answers with the entry
@@ -896,12 +1116,80 @@ mod tests {
     }
 
     #[test]
-    fn an_unconsumed_id_produces_an_empty_reaction() {
+    fn an_id_outside_protocol_47_produces_an_empty_reaction() {
         let mut session = PlaySession::new(PlayOptions::default());
-        // `Block Action` (0x24) is decoded by the protocol crate but not
-        // consumed by the client session yet; its body is not even read.
-        let reaction = session.handle(0x24, &[0xFF]).expect("skipped, not failed");
+        // 0x4A is past the last 1.8 clientbound id; its body is not read.
+        let reaction = session.handle(0x4A, &[0xFF]).expect("skipped, not failed");
         assert_eq!(reaction, Reaction::default());
+    }
+
+    #[test]
+    fn the_formerly_dropped_world_packets_are_forwarded() {
+        // Regression: 0x24, 0x25 and 0x2B were decoded by the protocol crate
+        // but skipped by the session (docs/roadmap-review.md §3.1).
+        let mut session = PlaySession::new(PlayOptions::default());
+        let action = clientbound::BlockAction {
+            x: 1,
+            y: 2,
+            z: 3,
+            instrument: 1,
+            pitch: 1,
+            block_id: 54,
+        };
+        assert_eq!(
+            event(&mut session, PlayClientbound::BlockAction(action)),
+            PlayEvent::BlockAction(action)
+        );
+        let rain = clientbound::ChangeGameState {
+            reason: 1,
+            value: 0.0,
+        };
+        assert_eq!(
+            event(&mut session, PlayClientbound::ChangeGameState(rain)),
+            PlayEvent::ChangeGameState(rain)
+        );
+    }
+
+    #[test]
+    fn a_play_set_compression_carries_the_threshold_and_no_event() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let reaction = react(
+            &mut session,
+            PlayClientbound::SetCompression(clientbound::SetCompression { threshold: 256 }),
+        );
+        assert_eq!(reaction.compression_threshold(), Some(256));
+        assert_eq!(reaction.replies().count(), 0);
+        assert_eq!(reaction.into_event(), None);
+    }
+
+    #[test]
+    fn a_resource_pack_offer_is_declined_and_forwarded() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let offer = clientbound::ResourcePackSend {
+            url: "http://example.invalid/pack.zip".to_string(),
+            hash: "0123456789abcdef0123456789abcdef01234567".to_string(),
+        };
+        let reaction = react(
+            &mut session,
+            PlayClientbound::ResourcePackSend(offer.clone()),
+        );
+        let replies: Vec<_> = reaction.replies().cloned().collect();
+        assert_eq!(
+            replies,
+            [PlayServerbound::ResourcePackStatus(ResourcePackStatus {
+                hash: offer.hash.clone(),
+                result: ResourcePackResult::Declined,
+            })]
+        );
+        assert_eq!(
+            reaction.into_event(),
+            Some(PlayEvent::ResourcePackSend(offer))
+        );
+    }
+
+    #[test]
+    fn large_packets_are_boxed_to_keep_the_inbox_small() {
+        assert!(std::mem::size_of::<PlayEvent>() <= 72);
     }
 
     #[test]

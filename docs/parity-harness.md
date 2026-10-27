@@ -135,3 +135,23 @@ stopped sprinting (`0x0B:stop_sprint` before it), while the Umicraft script
 goes from sprint straight to jump with W held, so Umicraft keeps sprinting
 (vanilla does the same when W stays held). The jump phase speeds therefore
 differ (3.9 vs 6.1 block/s) and are not compared.
+
+## P1 run (2026-10-26)
+
+Umicraft re-recorded with the P1 traffic (`umicraft_game::traffic`) on the
+owner's offline server, compared with `vanilla-movement.umcapt`:
+
+| Behaviour | Vanilla | Umicraft (P1) |
+|---|---|---|
+| Idle tick | `0x03`, `0x04` after 20 bare ticks | same |
+| `Steer Vehicle` 0x0C on foot | never | never |
+| Before the column loads | nothing | nothing |
+| Sneak transitions | `0x0B` start/stop in the tick of the change, before the movement packet | same order |
+| Sprint transitions | `0x0B` start/stop | none in this run |
+
+The `umicraft` player started where an earlier run left it, against terrain
+at (-51.7, 65.6, 237.3): it walked 16 ticks and was then blocked for the
+rest of the script, so its ticks are `0x03` where vanilla's are `0x04`, and
+a blocked player never starts sprinting. The packet ids and their order
+within a tick match vanilla; the moving and sprint ticks still need a run
+from a clear spot (`/tp umicraft …` by an operator before recording).

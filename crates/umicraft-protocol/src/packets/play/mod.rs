@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Play state (`State::Play`): the packet set needed to join a 1.8 server,
-//! stay connected, receive world data (M2), and move and interact in the
-//! world (M3).
+//! Play state (`State::Play`): every protocol-47 play packet (P1,
+//! ADR-0020).
 //!
 //! Direction convention: `clientbound` flows server → client (inbound on a
 //! client), `serverbound` flows client → server (outbound on a client).
@@ -13,38 +12,29 @@
 //! registered at 0x1A, while 0x19 belongs to `S19PacketEntityHeadLook`
 //! (ADR-0005 §A.4).
 //!
-//! Clientbound: `Keep Alive` (0x00), `Join Game` (0x01), `Chat Message`
-//! (0x02), `Time Update` (0x03), `Entity Equipment` (0x04), `Spawn
-//! Position` (0x05), `Update Health` (0x06), `Respawn` (0x07), `Player
-//! Position and Look` (0x08), `Held Item Change` (0x09), `Animation`
-//! (0x0B), `Spawn Player` (0x0C), `Destroy Entities` (0x13), `Entity`
-//! (0x14), `Entity Relative Move` (0x15), `Entity Look` (0x16), `Entity
-//! Look and Move` (0x17), `Entity Teleport` (0x18), `Entity Status`
-//! (0x1A), `Set Experience` (0x1F), `Chunk Data` (0x21), `Multi Block
-//! Change` (0x22), `Block Change` (0x23), `Block Action` (0x24), `Block
-//! Break Animation` (0x25), `Map Chunk Bulk` (0x26), `Change Game State`
-//! (0x2B), `Open Window` (0x2D), `Close Window` (0x2E), `Set Slot`
-//! (0x2F), `Window Items` (0x30), `Window Property` (0x31), `Confirm
-//! Transaction` (0x32), `Disconnect` (0x40).
+//! Clientbound: every id `0x00..=0x49` (one module per packet in
+//! [`clientbound`]).
 //!
 //! Serverbound: `Keep Alive` (0x00), `Chat Message` (0x01), `Use Entity`
-//! (0x02), `Player Position` (0x04), `Player Look` (0x05), `Player
+//! (0x02), `Player` (0x03), `Player Position` (0x04), `Player Look` (0x05), `Player
 //! Position and Look` (0x06), `Player Digging` (0x07), `Player Block
 //! Placement` (0x08), `Held Item Change` (0x09), `Animation` (0x0A),
 //! `Entity Action` (0x0B), `Input` (0x0C), `Close Window` (0x0D),
 //! `Click Window` (0x0E), `Confirm Transaction` (0x0F), `Creative
-//! Inventory Action` (0x10), `Client Settings` (0x15), `Plugin Message`
-//! (0x17).
+//! Inventory Action` (0x10), `Enchant Item` (0x11), `Update Sign` (0x12),
+//! `Player Abilities` (0x13), `Tab Complete` (0x14), `Client Settings`
+//! (0x15), `Client Status` (0x16), `Plugin Message` (0x17), `Spectate`
+//! (0x18), `Resource Pack Status` (0x19).
 //!
-//! Ids outside this subset are rejected as [`ProtocolError::UnknownPacket`]
-//! and skipped by the caller (see `umicraft-net`'s play loop). `Entity
-//! Metadata` (0x1C) and `Entity Properties` (0x1D) are out of scope for M3
-//! (ADR-0005 §A.4).
+//! Ids outside the protocol-47 tables are rejected as
+//! [`ProtocolError::UnknownPacket`] and skipped by the caller (see
+//! `umicraft-net`'s play loop).
 
 pub mod clientbound;
 pub mod facing;
 pub mod item_stack;
 pub mod metadata;
+mod nbt;
 mod position;
 pub mod serverbound;
 mod wire;
@@ -141,6 +131,74 @@ pub enum PlayClientbound {
     WindowProperty(clientbound::WindowProperty),
     /// `Confirm Transaction` (0x32): the server confirms or rejects a click.
     ConfirmTransaction(clientbound::ConfirmTransaction),
+    /// `Use Bed` (0x0A): a player went to sleep in a bed.
+    UseBed(clientbound::UseBed),
+    /// `Collect Item` (0x0D): an entity picked up an item or orb.
+    CollectItem(clientbound::CollectItem),
+    /// `Spawn Painting` (0x10): a painting was spawned.
+    SpawnPainting(clientbound::SpawnPainting),
+    /// `Spawn Experience Orb` (0x11): an experience orb was spawned.
+    SpawnXpOrb(clientbound::SpawnXpOrb),
+    /// `Entity Effect` (0x1D): a status effect was applied.
+    EntityEffect(clientbound::EntityEffect),
+    /// `Remove Entity Effect` (0x1E): a status effect ended.
+    RemoveEntityEffect(clientbound::RemoveEntityEffect),
+    /// `Entity Properties` (0x20): attribute values and modifiers.
+    EntityProperties(clientbound::EntityProperties),
+    /// `Explosion` (0x27): blocks destroyed and the knockback of the player.
+    Explosion(clientbound::Explosion),
+    /// `Effect` (0x28): a sound or particle effect at a block.
+    Effect(clientbound::Effect),
+    /// `Sound Effect` (0x29): a named sound at a position.
+    SoundEffect(clientbound::SoundEffect),
+    /// `Particle` (0x2A): server-spawned particles.
+    Particle(clientbound::Particle),
+    /// `Spawn Global Entity` (0x2C): a lightning bolt.
+    SpawnGlobalEntity(clientbound::SpawnGlobalEntity),
+    /// `Update Sign` (0x33): the four lines of a sign.
+    UpdateSign(clientbound::UpdateSign),
+    /// `Maps` (0x34): map icons and pixel columns.
+    Maps(clientbound::Maps),
+    /// `Update Block Entity` (0x35): the NBT of a block entity.
+    UpdateBlockEntity(clientbound::UpdateBlockEntity),
+    /// `Sign Editor Open` (0x36): the player placed a sign to write.
+    SignEditorOpen(clientbound::SignEditorOpen),
+    /// `Statistics` (0x37): the answer to a statistics request.
+    Statistics(clientbound::Statistics),
+    /// `Player List Item` (0x38): tab-list entries and profiles.
+    PlayerListItem(clientbound::PlayerListItem),
+    /// `Player Abilities` (0x39): flying, invulnerability and speeds.
+    PlayerAbilities(clientbound::PlayerAbilities),
+    /// `Tab-Complete` (0x3A): chat completion matches.
+    TabComplete(clientbound::TabComplete),
+    /// `Scoreboard Objective` (0x3B): an objective was created, removed or renamed.
+    ScoreboardObjective(clientbound::ScoreboardObjective),
+    /// `Update Score` (0x3C): a score changed or was removed.
+    UpdateScore(clientbound::UpdateScore),
+    /// `Display Scoreboard` (0x3D): an objective was put in a display slot.
+    DisplayScoreboard(clientbound::DisplayScoreboard),
+    /// `Teams` (0x3E): a team or its members changed.
+    Teams(clientbound::Teams),
+    /// `Plugin Message` (0x3F): a payload on a named channel.
+    PluginMessage(clientbound::PluginMessage),
+    /// `Server Difficulty` (0x41): the difficulty changed.
+    ServerDifficulty(clientbound::ServerDifficulty),
+    /// `Combat Event` (0x42): combat start, end or a death.
+    CombatEvent(clientbound::CombatEvent),
+    /// `Camera` (0x43): the entity the view follows.
+    Camera(clientbound::Camera),
+    /// `World Border` (0x44): the world border changed.
+    WorldBorder(clientbound::WorldBorder),
+    /// `Title` (0x45): a title, subtitle or their timing.
+    Title(clientbound::Title),
+    /// `Set Compression` (0x46): the compression threshold changed.
+    SetCompression(clientbound::SetCompression),
+    /// `Player List Header/Footer` (0x47): the tab-list texts.
+    PlayerListHeaderFooter(clientbound::PlayerListHeaderFooter),
+    /// `Resource Pack Send` (0x48): the server offers a resource pack.
+    ResourcePackSend(clientbound::ResourcePackSend),
+    /// `Update Entity NBT` (0x49): raw entity NBT.
+    UpdateEntityNbt(clientbound::UpdateEntityNbt),
     /// `Disconnect` (0x40): reason as chat JSON; the socket closes after.
     Disconnect(clientbound::Disconnect),
 }
@@ -189,6 +247,40 @@ impl PlayClientbound {
             Self::WindowItems(_) => clientbound::WindowItems::ID,
             Self::WindowProperty(_) => clientbound::WindowProperty::ID,
             Self::ConfirmTransaction(_) => clientbound::ConfirmTransaction::ID,
+            Self::UseBed(_) => clientbound::UseBed::ID,
+            Self::CollectItem(_) => clientbound::CollectItem::ID,
+            Self::SpawnPainting(_) => clientbound::SpawnPainting::ID,
+            Self::SpawnXpOrb(_) => clientbound::SpawnXpOrb::ID,
+            Self::EntityEffect(_) => clientbound::EntityEffect::ID,
+            Self::RemoveEntityEffect(_) => clientbound::RemoveEntityEffect::ID,
+            Self::EntityProperties(_) => clientbound::EntityProperties::ID,
+            Self::Explosion(_) => clientbound::Explosion::ID,
+            Self::Effect(_) => clientbound::Effect::ID,
+            Self::SoundEffect(_) => clientbound::SoundEffect::ID,
+            Self::Particle(_) => clientbound::Particle::ID,
+            Self::SpawnGlobalEntity(_) => clientbound::SpawnGlobalEntity::ID,
+            Self::UpdateSign(_) => clientbound::UpdateSign::ID,
+            Self::Maps(_) => clientbound::Maps::ID,
+            Self::UpdateBlockEntity(_) => clientbound::UpdateBlockEntity::ID,
+            Self::SignEditorOpen(_) => clientbound::SignEditorOpen::ID,
+            Self::Statistics(_) => clientbound::Statistics::ID,
+            Self::PlayerListItem(_) => clientbound::PlayerListItem::ID,
+            Self::PlayerAbilities(_) => clientbound::PlayerAbilities::ID,
+            Self::TabComplete(_) => clientbound::TabComplete::ID,
+            Self::ScoreboardObjective(_) => clientbound::ScoreboardObjective::ID,
+            Self::UpdateScore(_) => clientbound::UpdateScore::ID,
+            Self::DisplayScoreboard(_) => clientbound::DisplayScoreboard::ID,
+            Self::Teams(_) => clientbound::Teams::ID,
+            Self::PluginMessage(_) => clientbound::PluginMessage::ID,
+            Self::ServerDifficulty(_) => clientbound::ServerDifficulty::ID,
+            Self::CombatEvent(_) => clientbound::CombatEvent::ID,
+            Self::Camera(_) => clientbound::Camera::ID,
+            Self::WorldBorder(_) => clientbound::WorldBorder::ID,
+            Self::Title(_) => clientbound::Title::ID,
+            Self::SetCompression(_) => clientbound::SetCompression::ID,
+            Self::PlayerListHeaderFooter(_) => clientbound::PlayerListHeaderFooter::ID,
+            Self::ResourcePackSend(_) => clientbound::ResourcePackSend::ID,
+            Self::UpdateEntityNbt(_) => clientbound::UpdateEntityNbt::ID,
             Self::Disconnect(_) => clientbound::Disconnect::ID,
         }
     }
@@ -238,6 +330,40 @@ impl PlayClientbound {
             Self::WindowItems(packet) => packet.encode_body(writer),
             Self::WindowProperty(packet) => packet.encode_body(writer),
             Self::ConfirmTransaction(packet) => packet.encode_body(writer),
+            Self::UseBed(packet) => packet.encode_body(writer),
+            Self::CollectItem(packet) => packet.encode_body(writer),
+            Self::SpawnPainting(packet) => packet.encode_body(writer),
+            Self::SpawnXpOrb(packet) => packet.encode_body(writer),
+            Self::EntityEffect(packet) => packet.encode_body(writer),
+            Self::RemoveEntityEffect(packet) => packet.encode_body(writer),
+            Self::EntityProperties(packet) => packet.encode_body(writer),
+            Self::Explosion(packet) => packet.encode_body(writer),
+            Self::Effect(packet) => packet.encode_body(writer),
+            Self::SoundEffect(packet) => packet.encode_body(writer),
+            Self::Particle(packet) => packet.encode_body(writer),
+            Self::SpawnGlobalEntity(packet) => packet.encode_body(writer),
+            Self::UpdateSign(packet) => packet.encode_body(writer),
+            Self::Maps(packet) => packet.encode_body(writer),
+            Self::UpdateBlockEntity(packet) => packet.encode_body(writer),
+            Self::SignEditorOpen(packet) => packet.encode_body(writer),
+            Self::Statistics(packet) => packet.encode_body(writer),
+            Self::PlayerListItem(packet) => packet.encode_body(writer),
+            Self::PlayerAbilities(packet) => packet.encode_body(writer),
+            Self::TabComplete(packet) => packet.encode_body(writer),
+            Self::ScoreboardObjective(packet) => packet.encode_body(writer),
+            Self::UpdateScore(packet) => packet.encode_body(writer),
+            Self::DisplayScoreboard(packet) => packet.encode_body(writer),
+            Self::Teams(packet) => packet.encode_body(writer),
+            Self::PluginMessage(packet) => packet.encode_body(writer),
+            Self::ServerDifficulty(packet) => packet.encode_body(writer),
+            Self::CombatEvent(packet) => packet.encode_body(writer),
+            Self::Camera(packet) => packet.encode_body(writer),
+            Self::WorldBorder(packet) => packet.encode_body(writer),
+            Self::Title(packet) => packet.encode_body(writer),
+            Self::SetCompression(packet) => packet.encode_body(writer),
+            Self::PlayerListHeaderFooter(packet) => packet.encode_body(writer),
+            Self::ResourcePackSend(packet) => packet.encode_body(writer),
+            Self::UpdateEntityNbt(packet) => packet.encode_body(writer),
             Self::Disconnect(packet) => packet.encode_body(writer),
         }
     }
@@ -347,6 +473,92 @@ impl PlayClientbound {
             clientbound::ConfirmTransaction::ID => {
                 Self::ConfirmTransaction(clientbound::ConfirmTransaction::decode(reader)?)
             }
+            clientbound::UseBed::ID => Self::UseBed(clientbound::UseBed::decode(reader)?),
+            clientbound::CollectItem::ID => {
+                Self::CollectItem(clientbound::CollectItem::decode(reader)?)
+            }
+            clientbound::SpawnPainting::ID => {
+                Self::SpawnPainting(clientbound::SpawnPainting::decode(reader)?)
+            }
+            clientbound::SpawnXpOrb::ID => {
+                Self::SpawnXpOrb(clientbound::SpawnXpOrb::decode(reader)?)
+            }
+            clientbound::EntityEffect::ID => {
+                Self::EntityEffect(clientbound::EntityEffect::decode(reader)?)
+            }
+            clientbound::RemoveEntityEffect::ID => {
+                Self::RemoveEntityEffect(clientbound::RemoveEntityEffect::decode(reader)?)
+            }
+            clientbound::EntityProperties::ID => {
+                Self::EntityProperties(clientbound::EntityProperties::decode(reader)?)
+            }
+            clientbound::Explosion::ID => Self::Explosion(clientbound::Explosion::decode(reader)?),
+            clientbound::Effect::ID => Self::Effect(clientbound::Effect::decode(reader)?),
+            clientbound::SoundEffect::ID => {
+                Self::SoundEffect(clientbound::SoundEffect::decode(reader)?)
+            }
+            clientbound::Particle::ID => Self::Particle(clientbound::Particle::decode(reader)?),
+            clientbound::SpawnGlobalEntity::ID => {
+                Self::SpawnGlobalEntity(clientbound::SpawnGlobalEntity::decode(reader)?)
+            }
+            clientbound::UpdateSign::ID => {
+                Self::UpdateSign(clientbound::UpdateSign::decode(reader)?)
+            }
+            clientbound::Maps::ID => Self::Maps(clientbound::Maps::decode(reader)?),
+            clientbound::UpdateBlockEntity::ID => {
+                Self::UpdateBlockEntity(clientbound::UpdateBlockEntity::decode(reader)?)
+            }
+            clientbound::SignEditorOpen::ID => {
+                Self::SignEditorOpen(clientbound::SignEditorOpen::decode(reader)?)
+            }
+            clientbound::Statistics::ID => {
+                Self::Statistics(clientbound::Statistics::decode(reader)?)
+            }
+            clientbound::PlayerListItem::ID => {
+                Self::PlayerListItem(clientbound::PlayerListItem::decode(reader)?)
+            }
+            clientbound::PlayerAbilities::ID => {
+                Self::PlayerAbilities(clientbound::PlayerAbilities::decode(reader)?)
+            }
+            clientbound::TabComplete::ID => {
+                Self::TabComplete(clientbound::TabComplete::decode(reader)?)
+            }
+            clientbound::ScoreboardObjective::ID => {
+                Self::ScoreboardObjective(clientbound::ScoreboardObjective::decode(reader)?)
+            }
+            clientbound::UpdateScore::ID => {
+                Self::UpdateScore(clientbound::UpdateScore::decode(reader)?)
+            }
+            clientbound::DisplayScoreboard::ID => {
+                Self::DisplayScoreboard(clientbound::DisplayScoreboard::decode(reader)?)
+            }
+            clientbound::Teams::ID => Self::Teams(clientbound::Teams::decode(reader)?),
+            clientbound::PluginMessage::ID => {
+                Self::PluginMessage(clientbound::PluginMessage::decode(reader)?)
+            }
+            clientbound::ServerDifficulty::ID => {
+                Self::ServerDifficulty(clientbound::ServerDifficulty::decode(reader)?)
+            }
+            clientbound::CombatEvent::ID => {
+                Self::CombatEvent(clientbound::CombatEvent::decode(reader)?)
+            }
+            clientbound::Camera::ID => Self::Camera(clientbound::Camera::decode(reader)?),
+            clientbound::WorldBorder::ID => {
+                Self::WorldBorder(clientbound::WorldBorder::decode(reader)?)
+            }
+            clientbound::Title::ID => Self::Title(clientbound::Title::decode(reader)?),
+            clientbound::SetCompression::ID => {
+                Self::SetCompression(clientbound::SetCompression::decode(reader)?)
+            }
+            clientbound::PlayerListHeaderFooter::ID => {
+                Self::PlayerListHeaderFooter(clientbound::PlayerListHeaderFooter::decode(reader)?)
+            }
+            clientbound::ResourcePackSend::ID => {
+                Self::ResourcePackSend(clientbound::ResourcePackSend::decode(reader)?)
+            }
+            clientbound::UpdateEntityNbt::ID => {
+                Self::UpdateEntityNbt(clientbound::UpdateEntityNbt::decode(reader)?)
+            }
             clientbound::Disconnect::ID => {
                 Self::Disconnect(clientbound::Disconnect::decode(reader)?)
             }
@@ -397,6 +609,22 @@ pub enum PlayServerbound {
     CreativeInventoryAction(serverbound::CreativeInventoryAction),
     /// `Client Settings` (0x15): required before some servers release content.
     ClientSettings(serverbound::ClientSettings),
+    /// `Player` (0x03): on-ground flag on ticks without movement.
+    Player(serverbound::Player),
+    /// `Enchant Item` (0x11): the player chose an enchantment.
+    EnchantItem(serverbound::EnchantItem),
+    /// `Update Sign` (0x12): the player edited a sign.
+    UpdateSign(serverbound::UpdateSign),
+    /// `Player Abilities` (0x13): flying state and speeds.
+    PlayerAbilities(serverbound::PlayerAbilities),
+    /// `Tab Complete` (0x14): the player asked for completions.
+    TabComplete(serverbound::TabComplete),
+    /// `Client Status` (0x16): respawn or statistics request.
+    ClientStatus(serverbound::ClientStatus),
+    /// `Spectate` (0x18): teleport to an entity in spectator mode.
+    Spectate(serverbound::Spectate),
+    /// `Resource Pack Status` (0x19): answer to a resource pack offer.
+    ResourcePackStatus(serverbound::ResourcePackStatus),
     /// `Plugin Message` (0x17): client brand channel payload.
     Brand(serverbound::Brand),
 }
@@ -423,6 +651,14 @@ impl PlayServerbound {
             Self::ConfirmTransaction(_) => serverbound::ConfirmTransaction::ID,
             Self::CreativeInventoryAction(_) => serverbound::CreativeInventoryAction::ID,
             Self::ClientSettings(_) => serverbound::ClientSettings::ID,
+            Self::Player(_) => serverbound::Player::ID,
+            Self::EnchantItem(_) => serverbound::EnchantItem::ID,
+            Self::UpdateSign(_) => serverbound::UpdateSign::ID,
+            Self::PlayerAbilities(_) => serverbound::PlayerAbilities::ID,
+            Self::TabComplete(_) => serverbound::TabComplete::ID,
+            Self::ClientStatus(_) => serverbound::ClientStatus::ID,
+            Self::Spectate(_) => serverbound::Spectate::ID,
+            Self::ResourcePackStatus(_) => serverbound::ResourcePackStatus::ID,
             Self::Brand(_) => serverbound::Brand::ID,
         }
     }
@@ -475,6 +711,26 @@ impl PlayServerbound {
                 Self::ClientSettings(serverbound::ClientSettings::decode(reader)?)
             }
             serverbound::Brand::ID => Self::Brand(serverbound::Brand::decode(reader)?),
+            serverbound::Player::ID => Self::Player(serverbound::Player::decode(reader)?),
+            serverbound::EnchantItem::ID => {
+                Self::EnchantItem(serverbound::EnchantItem::decode(reader)?)
+            }
+            serverbound::UpdateSign::ID => {
+                Self::UpdateSign(serverbound::UpdateSign::decode(reader)?)
+            }
+            serverbound::PlayerAbilities::ID => {
+                Self::PlayerAbilities(serverbound::PlayerAbilities::decode(reader)?)
+            }
+            serverbound::TabComplete::ID => {
+                Self::TabComplete(serverbound::TabComplete::decode(reader)?)
+            }
+            serverbound::ClientStatus::ID => {
+                Self::ClientStatus(serverbound::ClientStatus::decode(reader)?)
+            }
+            serverbound::Spectate::ID => Self::Spectate(serverbound::Spectate::decode(reader)?),
+            serverbound::ResourcePackStatus::ID => {
+                Self::ResourcePackStatus(serverbound::ResourcePackStatus::decode(reader)?)
+            }
             _ => {
                 return Err(ProtocolError::UnknownPacket {
                     id,
@@ -507,6 +763,14 @@ impl PlayServerbound {
             Self::ConfirmTransaction(packet) => packet.encode_body(writer),
             Self::CreativeInventoryAction(packet) => packet.encode_body(writer),
             Self::ClientSettings(packet) => packet.encode_body(writer),
+            Self::Player(packet) => packet.encode_body(writer),
+            Self::EnchantItem(packet) => packet.encode_body(writer),
+            Self::UpdateSign(packet) => packet.encode_body(writer),
+            Self::PlayerAbilities(packet) => packet.encode_body(writer),
+            Self::TabComplete(packet) => packet.encode_body(writer),
+            Self::ClientStatus(packet) => packet.encode_body(writer),
+            Self::Spectate(packet) => packet.encode_body(writer),
+            Self::ResourcePackStatus(packet) => packet.encode_body(writer),
             Self::Brand(packet) => packet.encode_body(writer),
         }
     }
@@ -620,9 +884,10 @@ mod tests {
 
     #[test]
     fn dispatch_rejects_unknown_play_ids() {
+        // 0x4A is the first id past the protocol-47 clientbound table.
         let mut empty: &[u8] = &[];
-        let err = PlayClientbound::decode(0x42, &mut empty).unwrap_err();
-        assert!(matches!(err, ProtocolError::UnknownPacket { id: 0x42, .. }));
+        let err = PlayClientbound::decode(0x4A, &mut empty).unwrap_err();
+        assert!(matches!(err, ProtocolError::UnknownPacket { id: 0x4A, .. }));
 
         let mut empty: &[u8] = &[];
         let err = PlayServerbound::decode(0x42, &mut empty).unwrap_err();
@@ -771,6 +1036,47 @@ mod tests {
             packet.encode_body(&mut buffer).unwrap();
             assert_eq!(
                 PlayServerbound::decode(id, &mut &buffer[..]).unwrap(),
+                packet
+            );
+        }
+    }
+
+    /// The P1 serverbound packets round-trip through the dispatch table.
+    #[test]
+    fn p1_serverbound_packets_round_trip() {
+        let play = vec![
+            PlayServerbound::Player(serverbound::Player { on_ground: true }),
+            PlayServerbound::EnchantItem(serverbound::EnchantItem {
+                window_id: 3,
+                enchantment: 1,
+            }),
+            PlayServerbound::UpdateSign(serverbound::UpdateSign {
+                x: 1,
+                y: 70,
+                z: -2,
+                lines: ["\"a\"".into(), "\"\"".into(), "\"\"".into(), "\"b\"".into()],
+            }),
+            PlayServerbound::PlayerAbilities(
+                serverbound::PlayerAbilities::new(0.05, 0.1).with_flying(true),
+            ),
+            PlayServerbound::TabComplete(serverbound::TabComplete {
+                text: "/he".into(),
+                target_block: Some((4, 65, 9)),
+            }),
+            PlayServerbound::ClientStatus(serverbound::ClientStatus {
+                action: serverbound::ClientStatusAction::PerformRespawn,
+            }),
+            PlayServerbound::Spectate(serverbound::Spectate { uuid: 0xABCD }),
+            PlayServerbound::ResourcePackStatus(serverbound::ResourcePackStatus {
+                hash: "0123".into(),
+                result: serverbound::ResourcePackResult::Declined,
+            }),
+        ];
+        for packet in play {
+            let mut buffer = Vec::new();
+            packet.encode_body(&mut buffer).unwrap();
+            assert_eq!(
+                PlayServerbound::decode(packet.packet_id(), &mut &buffer[..]).unwrap(),
                 packet
             );
         }

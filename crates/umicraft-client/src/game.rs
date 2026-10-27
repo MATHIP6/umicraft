@@ -31,11 +31,13 @@ use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityStore}
 use umicraft_game::input::RawInput;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SURVIVAL_REACH};
+use umicraft_game::server::ServerState;
 use umicraft_game::shapes::Aabb;
-use umicraft_game::{GameState, RenderState, ServerCorrection};
+use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
+use umicraft_game::{GameState, InputIntent, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_net::play::{PlayEvent, SessionCounters};
-use umicraft_protocol::packets::play::clientbound::{ChunkData, MapChunkBulk};
+use umicraft_protocol::packets::play::clientbound::{ChunkData, Explosion, MapChunkBulk};
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack as WireItemStack};
 use umicraft_protocol::PlayServerbound;
@@ -81,12 +83,6 @@ const BREAK_TICKS: u64 = 12;
 
 /// The largest pitch the view may reach, in radians.
 const MAX_PITCH: f32 = 89.0_f32.to_radians();
-
-/// The squared distance above which the position counts as changed.
-///
-/// MCP `EntityPlayerSP.onUpdateWalkingPlayer` compares the squared distance
-/// with `9.0E-4`, i.e. three centimetres.
-const MOVE_EPSILON: f64 = 9.0e-4;
 
 /// The armour points of every 1.8 armour piece.
 ///
@@ -392,12 +388,10 @@ struct Game {
     selected_slot: u8,
     /// The chat lines, oldest first.
     chat: VecDeque<String>,
-    /// The last reported position.
-    last_position: Option<(f64, f64, f64)>,
-    /// The last reported view angles, in radians.
-    last_rotation: (f32, f32),
-    /// The ticks since the last position report.
-    ticks_since_report: u32,
+    /// What the server was last told about the player's movement.
+    server_view: ServerView,
+    /// The vehicle the player rides (`Attach Entity`), `None` on foot.
+    vehicle: Option<i32>,
     /// The block that is being broken.
     digging: Option<Digging>,
     /// The last position the client acknowledged to the server.
@@ -414,6 +408,8 @@ struct Game {
     entities: EntityStore,
     /// The inventory and container window model.
     windows: WindowManager,
+    /// The session state kept for later consumers (ADR-0020 §3).
+    server: ServerState,
 }
 
 impl Game {
@@ -441,9 +437,8 @@ impl Game {
             equipment: std::array::from_fn(|_| None),
             selected_slot: 0,
             chat: VecDeque::new(),
-            last_position: None,
-            last_rotation: (0.0, 0.0),
-            ticks_since_report: 0,
+            server_view: ServerView::default(),
+            vehicle: None,
             digging: None,
             last_acknowledged: None,
             expected_break: None,
@@ -452,6 +447,7 @@ impl Game {
             hud_dirty: true,
             entities: EntityStore::new(),
             windows: WindowManager::new(),
+            server: ServerState::new(),
         }
     }
 
@@ -560,7 +556,8 @@ impl CommandQueue {
     fn push(&mut self, command: ClientCommand) {
         match command {
             ClientCommand::Input { .. } => self.input = Some(command),
-            ClientCommand::PlayerPosition { .. }
+            ClientCommand::Player { .. }
+            | ClientCommand::PlayerPosition { .. }
             | ClientCommand::PlayerLook { .. }
             | ClientCommand::PositionLook { .. } => self.position = Some(command),
             other => self.ordered.push_back(other),
@@ -757,6 +754,9 @@ fn handle_net(
             game.dirty.clear();
             game.entities.clear();
             game.entity_id = info.entity_id;
+            game.server.on_join(info.entity_id);
+            game.server_view = ServerView::default();
+            game.vehicle = None;
             game.gamemode = info.gamemode;
             game.dimension = info.dimension;
             // The world clock of the new session is unknown until the first
@@ -852,6 +852,11 @@ fn handle_net(
             }
         }
         PlayEvent::Respawn(packet) => {
+            // A respawned player stands on foot and has told the server
+            // nothing yet (MCP `handleRespawn` creates a new player entity,
+            // whose sprint and sneak states start off).
+            game.vehicle = None;
+            game.server_view = ServerView::default();
             // The server keeps the chunks of the dimension, so only a change
             // of the dimension replaces the world.
             let dimension = packet.dimension as i8;
@@ -859,6 +864,7 @@ fn handle_net(
                 .world
                 .as_ref()
                 .is_none_or(|world| world.dimension() != dimension);
+            game.server.on_respawn(changed);
             if changed {
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
@@ -1042,8 +1048,16 @@ fn handle_net(
             );
             game.entities.set_flags(EntityId(m.entity_id), flags);
         }
-        PlayEvent::AttachEntity(_) | PlayEvent::EntityStatus(_) | PlayEvent::Animation(_) => {
-            // Unused or visual-only 1.8 packets.
+        PlayEvent::AttachEntity(packet) => {
+            // MCP `NetHandlerPlayClient.handleEntityAttach`: leash 0 mounts
+            // (vehicle -1 dismounts); only the local player's riding changes
+            // the serverbound traffic. Passengers of other entities are P5.
+            if packet.leash == 0 && packet.entity_id == game.entity_id {
+                game.vehicle = (packet.vehicle_id != -1).then_some(packet.vehicle_id);
+            }
+        }
+        PlayEvent::EntityStatus(_) | PlayEvent::Animation(_) => {
+            // Visual-only 1.8 packets; their consumer is P5.
         }
         PlayEvent::SpawnPosition(packet) => {
             game.spawn = Some((packet.x, packet.y, packet.z));
@@ -1097,6 +1111,60 @@ fn handle_net(
             // The model does not need to act on accepted transactions for now;
             // rollback on rejection is a follow-up.
         }
+        PlayEvent::Explosion(packet) => apply_explosion(game, &packet),
+        other => apply_server_state(&mut game.server, &other),
+    }
+}
+
+/// Removes the blocks of an explosion from the world.
+///
+/// MCP `NetHandlerPlayClient.handleExplosion` runs `Explosion.doExplosionB`
+/// on the client, which sets every affected block to air before the server's
+/// block changes arrive. The player's knockback from the packet is P2.
+fn apply_explosion(game: &mut Game, packet: &Explosion) {
+    let Some(world) = game.world.as_mut() else {
+        return;
+    };
+    for (x, y, z) in packet.affected_blocks() {
+        game.dirty
+            .extend(world.apply_block_change(BlockPos::new(x, y, z), BlockState::AIR));
+    }
+}
+
+/// Keeps the state of the packets whose consumers arrive in later
+/// milestones (ADR-0020 §3); purely visual or audible events are dropped
+/// here until their milestone (P5 entities, P8 particles, P11 audio).
+fn apply_server_state(server: &mut ServerState, event: &PlayEvent) {
+    match event {
+        PlayEvent::PlayerAbilities(packet) => server.apply_abilities(packet),
+        PlayEvent::EntityEffect(packet) => server.apply_entity_effect(packet),
+        PlayEvent::RemoveEntityEffect(packet) => server.apply_remove_entity_effect(packet),
+        PlayEvent::EntityProperties(packet) => server.apply_entity_properties(packet),
+        PlayEvent::ChangeGameState(packet) => server.apply_game_state(packet),
+        PlayEvent::ServerDifficulty(packet) => server.apply_difficulty(packet),
+        PlayEvent::WorldBorder(packet) => server.apply_world_border(packet),
+        PlayEvent::PlayerListItem(packet) => server.apply_player_list(packet),
+        PlayEvent::PlayerListHeaderFooter(packet) => server.apply_header_footer(packet),
+        PlayEvent::ScoreboardObjective(packet) => server.apply_objective(packet),
+        PlayEvent::UpdateScore(packet) => server.apply_score(packet),
+        PlayEvent::DisplayScoreboard(packet) => server.apply_display(packet),
+        PlayEvent::Teams(packet) => server.apply_team(packet),
+        PlayEvent::Title(packet) => server.apply_title(packet),
+        PlayEvent::UpdateSign(packet) => server.apply_sign(packet),
+        PlayEvent::UpdateBlockEntity(packet) => server.apply_block_entity(packet),
+        PlayEvent::BlockBreakAnim(packet) => server.apply_block_break_anim(packet),
+        PlayEvent::Maps(packet) => server.apply_map(packet),
+        PlayEvent::Statistics(packet) => server.apply_statistics(packet),
+        PlayEvent::Camera(packet) => server.apply_camera(packet),
+        PlayEvent::PluginMessage(packet) => server.apply_plugin_message(packet),
+        PlayEvent::CombatEvent(packet) => server.apply_combat_event(packet),
+        PlayEvent::SignEditorOpen(packet) => server.apply_sign_editor_open(packet),
+        PlayEvent::ResourcePackSend(packet) => server.apply_resource_pack_offer(packet),
+        // Use Bed, Collect Item, the painting/orb/lightning spawns, Effect,
+        // Sound Effect, Particle, Block Action, Tab-Complete and Update
+        // Entity NBT are events, not state: their consumers render or play
+        // them when they arrive.
+        _ => {}
     }
 }
 
@@ -1230,7 +1298,7 @@ fn apply_placement(
             on_ground: true,
         });
     }
-    game.last_position = None;
+    game.server_view.forget_position();
 }
 
 /// Applies an authoritative correction from the server.
@@ -1250,7 +1318,7 @@ fn apply_correction(game: &mut Game, correction: &ServerCorrection, queue: &mut 
         pitch: correction.pitch.to_degrees(),
         on_ground: correction.on_ground,
     });
-    game.last_position = None;
+    game.server_view.forget_position();
 }
 
 /// Handles one input update.
@@ -1432,26 +1500,13 @@ fn tick(
         }
     }
     game.entities.tick();
+    game.server.tick();
     // A player inside a block is pushed out sideways by the simulation
     // itself, like the vanilla client (`umicraft_game::physics`); it is
     // never lifted.
 
-    // The input packet carries the raw wire values; the 0.98 damping of
-    // `EntityLivingBase.java:2020` is applied by the game logic and by the
-    // server, so it must not be applied twice. It is only sent once the
-    // server is in the play state and the player is placed: a play packet
-    // that arrives during the login makes the server log `Bad packet id`.
-    if game.playing && game.state.is_some() {
-        queue.push(ClientCommand::Input {
-            strafe: intent.strafe,
-            forward: intent.forward,
-            jumping: intent.jump,
-            sneaking: intent.sneak,
-        });
-    }
-
-    report_position(game, queue);
     finish_break(game, queue);
+    report_movement(game, &intent, queue);
     publish_chunks(game, chunks);
 
     publish_frame(game, frames, tick_time);
@@ -1470,63 +1525,99 @@ fn tick(
     }
 }
 
-/// Sends the position report of the tick.
+/// Sends the movement packets of the tick (`umicraft_game::traffic`).
 ///
-/// The report follows MCP `EntityPlayerSP.onUpdateWalkingPlayer`: the
-/// position is sent when it moved by more than three centimetres or when
-/// twenty ticks passed, and the view angles are sent when they changed.
-/// Walking covers about 0.22 blocks per tick, so the delta of a report stays
-/// well below the 0.25 blocks the server tolerates (ADR-0005 §A.5).
-fn report_position(game: &mut Game, queue: &mut CommandQueue) {
-    let Some(state) = game.state.as_ref() else {
+/// Nothing is sent before the server is in the play state and the player is
+/// placed (a play packet that arrives during the login makes the server log
+/// `Bad packet id`), nor while the chunk under the player is missing: MCP
+/// `EntityPlayerSP.onUpdate` skips the whole update until
+/// `World.isBlockLoaded` holds for the player's column. The steer packet carries the raw wire values; the 0.98
+/// damping of `EntityLivingBase.java:2020` is applied by the game logic and
+/// by the server, so it must not be applied twice.
+fn report_movement(game: &mut Game, intent: &InputIntent, queue: &mut CommandQueue) {
+    let Some(state) = game.state.as_ref().filter(|_| game.playing) else {
         return;
     };
     let position = state.position();
-    let on_ground = state.player().on_ground;
-
-    let moved = match game.last_position {
-        Some((x, y, z)) => {
-            let dx = position.x - x;
-            let dy = position.y - y;
-            let dz = position.z - z;
-            dx * dx + dy * dy + dz * dz > MOVE_EPSILON
-        }
-        None => true,
-    };
-    let looked = game.last_rotation.0 != game.yaw || game.last_rotation.1 != game.pitch;
-    let timed_out = game.ticks_since_report >= 20;
-
-    if moved || timed_out {
-        if looked {
-            queue.push(ClientCommand::PositionLook {
-                x: position.x,
-                y: position.y,
-                z: position.z,
-                yaw: game.yaw.to_degrees(),
-                pitch: game.pitch.to_degrees(),
-                on_ground,
-            });
-        } else {
-            queue.push(ClientCommand::PlayerPosition {
-                x: position.x,
-                y: position.y,
-                z: position.z,
-                on_ground,
-            });
-        }
-        game.last_position = Some((position.x, position.y, position.z));
-        game.last_rotation = (game.yaw, game.pitch);
-        game.ticks_since_report = 0;
-        game.status_data.position_reports += 1;
-    } else if looked {
-        queue.push(ClientCommand::PlayerLook {
-            yaw: game.yaw.to_degrees(),
-            pitch: game.pitch.to_degrees(),
-            on_ground,
-        });
-        game.last_rotation = (game.yaw, game.pitch);
+    let column = ChunkPos::new(
+        (position.x.floor() as i32).div_euclid(16),
+        (position.z.floor() as i32).div_euclid(16),
+    );
+    if game
+        .world
+        .as_ref()
+        .and_then(|world| world.chunk(column))
+        .is_none()
+    {
+        return;
     }
-    game.ticks_since_report += 1;
+    let player = state.player();
+    let snapshot = TickSnapshot {
+        position,
+        yaw: game.yaw.to_degrees(),
+        pitch: game.pitch.to_degrees(),
+        on_ground: player.on_ground,
+        sprinting: player.sprinting,
+        sneaking: player.sneaking,
+        riding: game.vehicle.map(|_| SteerInput {
+            strafe: intent.strafe,
+            forward: intent.forward,
+            jump: intent.jump,
+            sneak: intent.sneak,
+        }),
+    };
+    let packets = game.server_view.tick(&snapshot);
+    if packets.reports_position() {
+        game.status_data.position_reports += 1;
+    }
+    for packet in packets.iter() {
+        queue.push(movement_command(*packet, game.entity_id));
+    }
+}
+
+/// The command of one movement packet of the tick.
+fn movement_command(packet: TickPacket, entity_id: i32) -> ClientCommand {
+    match packet {
+        TickPacket::EntityAction(action) => ClientCommand::EntityAction { entity_id, action },
+        TickPacket::PositionLook {
+            position,
+            yaw,
+            pitch,
+            on_ground,
+        } => ClientCommand::PositionLook {
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            yaw,
+            pitch,
+            on_ground,
+        },
+        TickPacket::Position {
+            position,
+            on_ground,
+        } => ClientCommand::PlayerPosition {
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            on_ground,
+        },
+        TickPacket::Look {
+            yaw,
+            pitch,
+            on_ground,
+        } => ClientCommand::PlayerLook {
+            yaw,
+            pitch,
+            on_ground,
+        },
+        TickPacket::Ground { on_ground } => ClientCommand::Player { on_ground },
+        TickPacket::SteerVehicle(steer) => ClientCommand::Input {
+            strafe: steer.strafe,
+            forward: steer.forward,
+            jumping: steer.jump,
+            sneaking: steer.sneak,
+        },
+    }
 }
 
 /// Sends the stop packet of a running block break.
@@ -1650,50 +1741,102 @@ mod tests {
         assert_eq!(face_offset(Facing::West), BlockPos::new(-1, 0, 0));
     }
 
-    #[test]
-    fn the_position_report_follows_the_vanilla_rule() {
-        let mut game = Game::new();
-        game.state = Some(GameState::new(DVec3::new(0.0, 4.0, 0.0)));
-        let mut queue = CommandQueue::default();
-
-        // The first report always happens.
-        report_position(&mut game, &mut queue);
-        assert_eq!(game.status_data.position_reports, 1);
-
-        // Standing still does not report again before the twenty ticks are
-        // over.
-        for _ in 0..19 {
-            report_position(&mut game, &mut queue);
-        }
-        assert_eq!(game.status_data.position_reports, 1);
-        report_position(&mut game, &mut queue);
-        assert_eq!(game.status_data.position_reports, 2);
+    /// A placed, playing game on the floor of a loaded chunk, for the
+    /// traffic tests.
+    fn placed_game() -> Game {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.playing = true;
+        game
     }
 
     #[test]
-    fn a_moving_player_reports_every_tick() {
+    fn nothing_is_sent_while_the_player_column_is_not_loaded() {
+        // Regression: Umicraft sent bursts of packets before the world
+        // loaded; vanilla stays silent until the column is there.
         let mut game = Game::new();
+        game.playing = true;
+        game.state = Some(GameState::new(DVec3::new(0.0, 4.0, 0.0)));
+        game.world = Some(World::new(0));
         let mut queue = CommandQueue::default();
-        let world = umicraft_world::World::new(0);
-        let intent = RawInput {
-            forward: 1.0,
-            ..RawInput::default()
-        }
-        .to_intent();
-        let mut state = GameState::new(DVec3::new(0.0, 4.0, 0.0));
-        game.state = Some(state.clone());
-        // The first tick does not move the player: the motion epsilon drops
-        // the zero gravity motion.
-        state.tick(&intent, &world);
-        game.state = Some(state.clone());
-        report_position(&mut game, &mut queue);
-        let baseline = game.status_data.position_reports;
-        for _ in 0..10 {
-            state.tick(&intent, &world);
-            game.state = Some(state.clone());
-            report_position(&mut game, &mut queue);
-        }
-        assert_eq!(game.status_data.position_reports, baseline + 10);
+        report_movement(&mut game, &InputIntent::still(0.0), &mut queue);
+        assert!(queue.position.is_none() && queue.ordered.is_empty());
+    }
+
+    #[test]
+    fn an_idle_tick_sends_the_bare_player_packet_and_no_steer() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let still = InputIntent::still(0.0);
+        report_movement(&mut game, &still, &mut queue);
+        assert_eq!(game.status_data.position_reports, 1);
+        report_movement(&mut game, &still, &mut queue);
+        // Regression: `Steer Vehicle` used to be sent on every tick on foot.
+        assert!(queue.input.is_none());
+        assert_eq!(
+            queue.position,
+            Some(ClientCommand::Player { on_ground: false })
+        );
+    }
+
+    #[test]
+    fn a_riding_tick_sends_look_then_steer() {
+        let mut game = placed_game();
+        game.vehicle = Some(42);
+        let mut queue = CommandQueue::default();
+        report_movement(&mut game, &InputIntent::still(0.0), &mut queue);
+        assert!(matches!(
+            queue.position,
+            Some(ClientCommand::PlayerLook { .. })
+        ));
+        assert!(matches!(queue.input, Some(ClientCommand::Input { .. })));
+        assert_eq!(game.status_data.position_reports, 0);
+    }
+
+    #[test]
+    fn a_sneak_transition_is_announced_before_the_movement() {
+        let mut game = placed_game();
+        game.entity_id = 7;
+        let mut queue = CommandQueue::default();
+        let mut sneaking = GameState::new(DVec3::new(0.0, 4.0, 0.0));
+        sneaking.tick(
+            &RawInput {
+                sneak: true,
+                ..RawInput::default()
+            }
+            .to_intent(),
+            &umicraft_world::World::new(0),
+        );
+        game.state = Some(sneaking);
+        report_movement(&mut game, &InputIntent::still(0.0), &mut queue);
+        assert_eq!(
+            queue.ordered.front(),
+            Some(&ClientCommand::EntityAction {
+                entity_id: 7,
+                action:
+                    umicraft_protocol::packets::play::serverbound::EntityActionKind::StartSneaking,
+            })
+        );
+    }
+
+    #[test]
+    fn mounting_and_dismounting_follow_attach_entity() {
+        let mut game = placed_game();
+        game.entity_id = 7;
+        let mut queue = CommandQueue::default();
+        let (frames, _rx) = mpsc::sync_channel(8);
+        let attach = |vehicle_id| {
+            PlayEvent::AttachEntity(
+                umicraft_protocol::packets::play::clientbound::AttachEntity {
+                    leash: 0,
+                    entity_id: 7,
+                    vehicle_id,
+                },
+            )
+        };
+        handle_net(&mut game, attach(42), &mut queue, &frames);
+        assert_eq!(game.vehicle, Some(42));
+        handle_net(&mut game, attach(-1), &mut queue, &frames);
+        assert_eq!(game.vehicle, None);
     }
 
     #[test]

@@ -44,12 +44,12 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Connection | status ping, offline login, compression, keep-alive, disconnect reason | Partial — not verified against vanilla | P1 | — | Done per review; fuzzing missing (M1). |
+| Connection | status ping, offline login, compression, keep-alive, disconnect reason | Partial — not verified against vanilla | P1 | `docs/fuzzing.md`, `umicraft-protocol/tests/roundtrip.rs` | Fuzzed (10 min per target) and property-tested in P1; compression switched in play state too (0x46). |
 | Connection | online-mode login (Microsoft auth, session join, encryption) | Missing | P12 | — |  |
 | Connection | brand + client settings | Partial — not verified against vanilla | P1 | — | Skin-layer bits move to P10. |
 | Connection | plugin channels (MC\|Brand in, REGISTER, BungeeCord) | Missing | P12 | — |  |
 | Connection | proxy server switch (dimension-swap respawn trick) | Unverified | P12 | — |  |
-| Connection | server resource packs | Missing | P12 | — |  |
+| Connection | server resource packs | Missing | P12 | — | P1 declines every offer, as vanilla with server packs disabled (ADR-0020). |
 
 ## Movement
 
@@ -61,7 +61,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Movement | flying, creative, spectator | Missing | P2 | — |  |
 | Movement | knockback (velocity, explosion) | Missing | P2 | — |  |
 | Movement | riding (boat, minecart, horse, pig) | Missing | P2 | — | Objects and vehicles rendering in P5. |
-| Movement | serverbound traffic identical to vanilla (0x03, 0x0B, no 0x0C) | Missing | P1 | First harness run, 2026-10-26 ([parity-harness.md](parity-harness.md#first-run-2026-10-26-umicraft-only)) | Today 0x0C is sent every tick, no 0x0B on sneak/sprint, no 0x03 on idle ticks. |
+| Movement | serverbound traffic identical to vanilla (0x03, 0x0B, no 0x0C) | Partial | P1 | P1 run, 2026-10-26 ([parity-harness.md](parity-harness.md#p1-run-2026-10-26)) | Implemented in `umicraft_game::traffic`: 0x03 on idle ticks, 0x0B sprint/sneak transitions before the movement packet, 0x0C only while riding, silence until the player's column loads. The live run had the player blocked by terrain, so the moving and sprint ticks still have to be compared from a clear spot. |
 
 ## Interaction
 
