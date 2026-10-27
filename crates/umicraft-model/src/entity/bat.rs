@@ -48,8 +48,7 @@ impl BatModel {
                 0.0,
             ))
             .with_box(
-                ModelBox::new([1.0, 2.0, -2.0], [3.0, 4.0, 1.0], [24.0, 0.0], tex, 0.0)
-                    .mirrored(),
+                ModelBox::new([1.0, 2.0, -2.0], [3.0, 4.0, 1.0], [24.0, 0.0], tex, 0.0).mirrored(),
             );
 
         // Body and tail membrane (MCP ModelBat: body at [0, 0, 0], box [-3, 4, -3, 6, 12, 6] and [-5, 16, 0, 10, 6, 1])

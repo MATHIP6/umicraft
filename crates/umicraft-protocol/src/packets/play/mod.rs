@@ -45,6 +45,7 @@ pub mod clientbound;
 pub mod facing;
 pub mod item_stack;
 pub mod metadata;
+mod nbt;
 mod position;
 pub mod serverbound;
 mod wire;
