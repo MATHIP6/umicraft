@@ -2124,6 +2124,7 @@ mod tests {
         game.attack_pressed = true;
         let block = BlockPos::new(0, 63, 0);
         let mut statuses = Vec::new();
+        let mut cracked = false;
         // The player never landed in this fixture, so the dig is five times
         // slower (airborne): 0.6 hardness takes about 90 ticks.
         for _ in 0..300 {
@@ -2136,7 +2137,13 @@ mod tests {
             if game.world.as_ref().expect("world").block(block) == BlockState::AIR {
                 break;
             }
+            // Once the progress passes 10 % the block shows cracks.
+            if !game.cracks().is_empty() {
+                cracked = true;
+            }
         }
+        assert!(cracked, "the block never showed a crack while it was dug");
+        assert!(game.cracks().is_empty(), "the cracks go with the block");
         assert_eq!(
             statuses.first(),
             Some(&umicraft_protocol::packets::play::serverbound::DiggingStatus::StartDestroyBlock)

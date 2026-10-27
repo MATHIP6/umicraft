@@ -121,10 +121,12 @@ fn face_vertices(bounds: &OutlineBox, face: &Face, layer: u32) -> [Vertex; 4] {
             position,
             normal,
             // The texture covers the block, so a partial box shows the part
-            // of the cracks that lies over it; v = 0 is the top.
+            // of the cracks that lies over it; v = 0 is the top. The
+            // coordinates are taken from the block corner: wrapping them
+            // would send the far side of a block (x = 1.0) back to 0.
             uv: [
-                position[face.u].rem_euclid(1.0),
-                1.0 - position[face.v].rem_euclid(1.0),
+                position[face.u] - bounds.min[face.u].floor(),
+                1.0 - (position[face.v] - bounds.min[face.v].floor()),
             ],
             layer,
             light: VertexLight::DAY.pack(),
@@ -211,6 +213,41 @@ mod tests {
             assert!((0.0..=1.0).contains(&vertex.uv[0]));
             assert!((0.0..=1.0).contains(&vertex.uv[1]));
         }
+    }
+
+    /// Regression: the far side of a block (x = 1.0) wrapped back to 0, so
+    /// the texture collapsed onto a line and no crack showed.
+    #[test]
+    fn a_whole_block_shows_the_whole_texture_on_each_face() {
+        let (vertices, _) = crack_mesh(&[block(7.0)], &LAYERS);
+        for quad in vertices.chunks(4) {
+            let us: Vec<f32> = quad.iter().map(|v| v.uv[0]).collect();
+            let vs: Vec<f32> = quad.iter().map(|v| v.uv[1]).collect();
+            let spans = |values: &[f32]| {
+                values.iter().copied().fold(f32::MIN, f32::max)
+                    - values.iter().copied().fold(f32::MAX, f32::min)
+            };
+            assert!((spans(&us) - 1.0).abs() < 1e-5, "u spans {us:?}");
+            assert!((spans(&vs) - 1.0).abs() < 1e-5, "v spans {vs:?}");
+        }
+    }
+
+    #[test]
+    fn a_half_block_shows_half_of_the_texture() {
+        let slab = Crack {
+            bounds: OutlineBox {
+                min: [3.0, 64.0, 5.0],
+                max: [4.0, 64.5, 6.0],
+            },
+            stage: 0,
+        };
+        let (vertices, _) = crack_mesh(&[slab], &LAYERS);
+        // The +X face spans z (u) fully and y (v) by half.
+        let side = &vertices[4..8];
+        let vs: Vec<f32> = side.iter().map(|v| v.uv[1]).collect();
+        let span = vs.iter().copied().fold(f32::MIN, f32::max)
+            - vs.iter().copied().fold(f32::MAX, f32::min);
+        assert!((span - 0.5).abs() < 1e-5, "{vs:?}");
     }
 
     #[test]
