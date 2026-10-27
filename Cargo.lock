@@ -3407,6 +3407,8 @@ name = "umicraft-testkit"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "png",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "tracing-subscriber",

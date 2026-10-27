@@ -17,7 +17,19 @@
 //!   reference and later replay work.
 //! - `umicraft-capture-inspect` / `umicraft-capture-replay` — CLI wrappers
 //!   over the two modules above.
+//! - [`screenshot`] — PNG screenshot comparison against a vanilla reference
+//!   (`umicraft-screenshot-diff`); references stay outside the repository.
+//! - [`trace`] — serverbound play packets of a capture, grouped by client
+//!   tick (parity harness, ROADMAP.md P0).
+//! - [`tick_diff`] — per-tick comparison of a vanilla and a Umicraft trace
+//!   (`umicraft-trace-diff`).
+//! - [`trajectory`] — per-tick reported positions and their comparison
+//!   (`umicraft-trajectory-diff`, `umicraft-movement-probe --trajectory`).
 
 pub mod capture;
 pub mod fake_server;
 pub mod replay;
+pub mod screenshot;
+pub mod tick_diff;
+pub mod trace;
+pub mod trajectory;
