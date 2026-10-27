@@ -98,3 +98,40 @@ sprint transitions, and no `0x03` on idle ticks (Umicraft sends nothing when
 vanilla sends `Player`). Diffing the capture against itself returns
 `SAME SHAPES` / `WITHIN TOLERANCE`. No vanilla capture exists yet: recording
 it (step 2) is the remaining owner step of the P0 acceptance.
+
+## Vanilla comparison (2026-10-26)
+
+The owner recorded `vanilla-movement.umcapt` with the vanilla 1.8.8 client,
+following the timeline by hand (approximate timing), on the same server in
+peaceful difficulty. Umicraft was re-recorded on the same server.
+
+**Serverbound traffic** (`umicraft-trace-diff`, verdict `SHAPES DIFFER`):
+
+| Behaviour | Vanilla | Umicraft | Owner |
+|---|---|---|---|
+| Idle tick | `0x03` 19 ticks out of 20, `0x04` every 20th | nothing, `0x04` every 20th | P1 |
+| `Steer Vehicle` 0x0C on foot | never | every tick, before the movement packet; bursts of up to 20 before the world loads | P1 |
+| Sneak / sprint transitions | one `0x0B` start and stop each, in the tick of the change, before `0x04` | none | P1 |
+| Moving tick | `0x04` every tick (`0x06` when the look also changed) | same | matches |
+| Look-only tick | `0x05` | same | matches |
+| Keep-alive answers | outside the ticks | same | matches |
+
+**Ground speed per phase** (median, from the reported positions):
+
+| Phase | Vanilla | Umicraft |
+|---|---|---|
+| walk | 0.2159 block/tick | 0.2159 |
+| sneak | 0.0648 | 0.0000 before the fix, 0.0648 after |
+| sprint | 0.2806 | 0.2806 |
+
+The sneak row found a bug: the sneak edge guard of
+`umicraft_game::collision::move_entity` returned its unused X argument for
+the Z axis, so a sneaking player never moved along Z (yaw 0 walks towards
++Z). Fixed with regression tests; a new live run confirms 1.30 block/s while
+sneaking, as vanilla.
+
+Script difference, not a defect: in the jump phase the vanilla player had
+stopped sprinting (`0x0B:stop_sprint` before it), while the Umicraft script
+goes from sprint straight to jump with W held, so Umicraft keeps sprinting
+(vanilla does the same when W stays held). The jump phase speeds therefore
+differ (3.9 vs 6.1 block/s) and are not compared.

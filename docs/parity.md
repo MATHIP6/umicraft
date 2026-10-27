@@ -55,8 +55,8 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Movement | walk/sprint/sneak/jump/swim/ladder/web/soul sand/ice/slime | Partial — not verified against vanilla | P2 | — | Not verified on a live server; trajectory diff needed (P0 harness). |
-| Movement | sneak edge clamp | Missing | P2 | — |  |
+| Movement | walk/sprint/sneak/jump/swim/ladder/web/soul sand/ice/slime | Partial | P2 | Vanilla vs Umicraft movement run, 2026-10-26 ([parity-harness.md](parity-harness.md#vanilla-comparison-2026-10-26)) | Ground speeds of walk (0.2159), sneak (0.0648) and sprint (0.2806 block/tick) match vanilla on the live server; swim/ladder/web/soul sand/ice/slime not compared yet. |
+| Movement | sneak edge clamp | Partial | P2 | — | Implemented in `umicraft_game::collision` (the review missed it); its Z axis cancelled every sneaking Z move until 2026-10-26 (fixed, regression test). Edge behaviour not yet compared with vanilla. |
 | Movement | hunger sprint rule, effects (Speed/Slowness/Jump), Depth Strider | Missing | P2 | — |  |
 | Movement | flying, creative, spectator | Missing | P2 | — |  |
 | Movement | knockback (velocity, explosion) | Missing | P2 | — |  |
