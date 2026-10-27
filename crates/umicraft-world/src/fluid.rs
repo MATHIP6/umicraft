@@ -2,7 +2,7 @@
 
 //! The rules of the 1.8 liquids that both the physics and the renderer read:
 //! which blocks are water or lava, how full a liquid block is, which way it
-//! flows, and the two material properties the flow depends on (ADR-0014).
+//! flows, and the two material properties the flow depends on (ADR-0017).
 //!
 //! The functions take a block accessor instead of a world type, so the game
 //! thread's world and the mesher's chunk snapshots share one implementation.

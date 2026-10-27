@@ -43,7 +43,7 @@ picked up, and delete it when it is done.
   screen of the 1.8 client; the server answers with `Respawn` (0x07).
 
 ### Effects and enchantments in the movement
-- **Problem:** Depth Strider (`Player.depth_strider`, ADR-0014), Speed,
+- **Problem:** Depth Strider (`Player.depth_strider`, ADR-0017), Speed,
   Slowness and Jump Boost are not applied.
 - **Milestone:** M8 (entity effects) and M9 (inventory).
 

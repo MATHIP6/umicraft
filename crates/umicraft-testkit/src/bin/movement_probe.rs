@@ -9,6 +9,7 @@
 //! ```text
 //! umicraft-movement-probe <host> <port> [--name NAME] [--ticks N]
 //!                         [--forward V] [--report] [--lag N] [--scale R]
+//!                         [--trajectory FILE.csv]
 //! ```
 //!
 //! * the probe logs in offline, waits for the world chunks, and sends one
@@ -23,7 +24,13 @@
 //! and the server disagree on a rule (the input damping, the friction, the
 //! speed factor), and the M3 acceptance criterion — a prediction error below
 //! 0.05 block — cannot hold.
+//!
+//! `--trajectory FILE.csv` also writes the predicted per-tick trajectory, so
+//! `umicraft-trajectory-diff` can compare it tick by tick with the
+//! trajectory of a vanilla capture of the same input (parity harness,
+//! ROADMAP.md P0).
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use umicraft_game::{GameState, InputIntent};
@@ -32,9 +39,10 @@ use umicraft_net::play::{PlayEvent, PlayOptions, PlaySession};
 use umicraft_net::Connection;
 use umicraft_protocol::packets::play::serverbound::Input;
 use umicraft_protocol::PlayServerbound;
+use umicraft_testkit::trajectory::{Sample as TrajectorySample, Trajectory};
 use umicraft_world::{ChunkPayload, ChunkPos, World};
 
-const USAGE: &str = "usage: umicraft-movement-probe <host> <port> [--name NAME] [--ticks N] [--forward V] [--report]";
+const USAGE: &str = "usage: umicraft-movement-probe <host> <port> [--name NAME] [--ticks N] [--forward V] [--report] [--trajectory FILE.csv]";
 
 /// Tick period of the 1.8 server and of the client simulation.
 const TICK: Duration = Duration::from_millis(50);
@@ -66,6 +74,8 @@ struct Args {
     /// session. The scale that survives the longest is the server's own
     /// speed, which is what the probe is after.
     scale: f64,
+    /// Where to write the predicted per-tick trajectory as CSV.
+    trajectory: Option<PathBuf>,
 }
 
 fn parse_args(argv: Vec<String>) -> Result<Args, String> {
@@ -78,6 +88,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     let mut lag = 10_u32;
     let mut scale = 1.0_f64;
     let mut trace = false;
+    let mut trajectory = None;
     let mut index = 0;
     while index < argv.len() {
         match argv[index].as_str() {
@@ -105,6 +116,10 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             "--report" => {
                 report = true;
                 index += 1;
+            }
+            "--trajectory" => {
+                trajectory = Some(PathBuf::from(argv.get(index + 1).ok_or("missing value")?));
+                index += 2;
             }
             "--trace" => {
                 trace = true;
@@ -147,6 +162,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
         lag,
         scale,
         trace,
+        trajectory,
     })
 }
 
@@ -185,6 +201,7 @@ async fn main() -> Result<(), String> {
     let mut tick = 0_u32;
     let mut model: Option<GameState> = None;
     let mut history: Vec<(f64, f64, f64)> = Vec::new();
+    let mut predicted = Trajectory::default();
     let warmup_until = Instant::now() + WARMUP;
     let intent = InputIntent {
         forward: args.forward,
@@ -296,6 +313,14 @@ async fn main() -> Result<(), String> {
         state.tick(&intent, &world);
 
         history.push((state.position().x, state.position().y, state.position().z));
+        predicted.samples.push(TrajectorySample {
+            x: state.position().x,
+            y: state.position().y,
+            z: state.position().z,
+            yaw: intent.yaw.to_degrees(),
+            pitch: intent.pitch.to_degrees(),
+            on_ground: state.interpolated(1.0).on_ground,
+        });
         if args.trace && tick.is_multiple_of(10) {
             let position = state.position();
             println!(
@@ -342,6 +367,16 @@ async fn main() -> Result<(), String> {
         tokio::time::sleep(TICK).await;
     }
 
+    if let Some(path) = &args.trajectory {
+        predicted
+            .save_csv(path)
+            .map_err(|error| format!("trajectory: {error}"))?;
+        println!(
+            "trajectory: {} ticks -> {}",
+            predicted.samples.len(),
+            path.display()
+        );
+    }
     report(&samples, model.as_ref().expect("model"), args.ticks);
     Ok(())
 }

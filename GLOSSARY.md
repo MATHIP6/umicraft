@@ -34,7 +34,7 @@ game thread answers it with a position acknowledgement. ADR-0005 §A.5.
 
 **Medium** — what the player moves through in a tick and whose rules apply:
 land (with ladders), water or lava (`umicraft_game::media`). Cobwebs and
-soul sand are not media; they act on the motion after the move. ADR-0014.
+soul sand are not media; they act on the motion after the move. ADR-0017.
 
 ## Rendering
 

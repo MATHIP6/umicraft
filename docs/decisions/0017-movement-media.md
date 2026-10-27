@@ -1,4 +1,4 @@
-# ADR-0014 — Movement through water, lava, ladders, cobwebs and soul sand
+# ADR-0017 — Movement through water, lava, ladders, cobwebs and soul sand
 
 - Status: Implemented
 - Date: 2026-10-24

@@ -11,9 +11,11 @@
 
 Umicraft is **not affiliated with, endorsed by, or connected to Mojang Studios or Microsoft**.
 
+**First goal: parity with the vanilla Minecraft 1.8.8 client.** Every feature a 1.8 player uses MUST behave as it does in the vanilla client, on the same server, before optimisation, modding or multi-account work is prioritised. Parity is tracked in [`docs/parity.md`](docs/parity.md), verified with the parity harness (§6.14) and signed off at milestone P13 of [`ROADMAP.md`](ROADMAP.md) (§1 of that file states the goal).
+
 ### 1.1 Vision
 
-A fast, modern, hackable client for people who play on 1.8 servers (PvP, minigames, private servers) and want:
+A client that plays like vanilla 1.8.8 on 1.8 servers (PvP, minigames, private servers) and, once parity is signed off (P13), goes beyond it with:
 
 - far better frame times and lower latency than the official client,
 - the ability to change almost anything through mods,
@@ -21,11 +23,11 @@ A fast, modern, hackable client for people who play on 1.8 servers (PvP, minigam
 
 ### 1.2 Goals
 
-1. Connect to and play on standard 1.8 servers (Paper/Spigot/vanilla, behind BungeeCord/Velocity proxies).
-2. Be the fastest 1.8-compatible client we can build (see §7).
+1. Reach parity with the vanilla 1.8.8 client and connect to and play on standard 1.8 servers (Paper/Spigot/vanilla, behind BungeeCord/Velocity proxies).
+2. After parity sign-off: be the fastest 1.8-compatible client we can build (see §7).
 3. Be fully multithreaded with a clear, documented threading model.
-4. Provide a powerful, versioned native modding API (dynamic libraries).
-5. Provide a multi-account system (Microsoft/premium and offline accounts) with live switching.
+4. After parity sign-off: provide a powerful, versioned native modding API (dynamic libraries).
+5. After parity sign-off: provide a multi-account system (Microsoft/premium and offline accounts) with live switching.
 6. Never redistribute Mojang/Microsoft assets or code (see §3).
 
 ### 1.3 Non-goals
@@ -57,16 +59,14 @@ A fast, modern, hackable client for people who play on 1.8 servers (PvP, minigam
 
 ## 3. Legal & Clean-Room Constraints (MUST READ)
 
-> **Amended 2026-10-20 by ADR-0001** (`docs/decisions/0001-reference-source-policy.md`):
-> the project owner has explicitly waived rule 1 (decompiled sources as reference) for
-> local development with the MCP 1.8 tree. Every other constraint in this section —
-> no Mojang assets in repo or releases, no asset mirroring, branding discipline,
-> license compatibility, EULA review before any release — remains binding.
+> **Note (2026-10-20, ADR-0001):** rule 1 was relaxed by the project owner; see
+> `docs/decisions/0001-reference-source-policy.md`. Every other constraint in this
+> section remains binding.
 
 These rules are **hard constraints** for every contributor and agent.
 
-1. **No Mojang/Microsoft code.** Do **not** decompile, deobfuscate, copy, translate or paraphrase the official client/server code. Do not use decompiled sources as a reference.
-2. **Clean-room method.** Behavior must be derived from: public protocol documentation maintained by the community, observation of network traffic, black-box behavior testing against a running server, and original design. Document the source of any non-obvious behavior in code comments or `docs/sources.md`.
+1. **No Mojang/Microsoft code in the repository.** Per ADR-0001, the local MCP 1.8.8 tree in `mcp/` (gitignored, never committed) MAY be read as a reference for behavior. Do **not** copy or commit Mojang code verbatim, do not add decompiled sources or mappings to the repository, and do not claim clean-room provenance for knowledge taken from `mcp/`. Rules 2–8 still bind.
+2. **Reference method.** Behavior must be derived from: the local MCP 1.8.8 tree (ADR-0001), public protocol documentation maintained by the community, observation of network traffic, black-box behavior testing against a running server, and original design. Implementations are written in original Rust. Document the source of any non-obvious behavior (including the MCP class and method) in code comments and `docs/sources.md`.
 3. **No Mojang assets in the repository or in releases.** No textures, sounds, fonts, language files, shaders, models, or logos from Minecraft. The repository MUST contain only original assets (e.g. a minimal built-in fallback texture set and UI font under a free license).
 4. **Assets are downloaded by the user** at first run, from Mojang's official distribution endpoints (see §6.2). Umicraft never mirrors or re-hosts them.
 5. **Naming.** The product is called **Umicraft**. Do not use "Minecraft" as part of the product name, binary name, or logo, and do not use Mojang logos/branding. Descriptive references ("compatible with Minecraft 1.8 servers") are acceptable.
@@ -164,7 +164,7 @@ Rules:
 
 ## 6. Functional Requirements
 
-Priority: **P0** = required for first usable release (v0.1), **P1** = required for v1.0, **P2** = later.
+Priority: **P0** = required for first usable release (v0.1), **P1** = required for v1.0, **P2** = later. This Priority column is unrelated to the milestone names P0–P13 of [`ROADMAP.md`](ROADMAP.md). With parity with vanilla 1.8.8 as the goal, RND-10, AUD-2, NET-10 and NET-11 are **P1**.
 
 ### 6.1 Networking & protocol (protocol 47)
 
@@ -180,7 +180,7 @@ Priority: **P0** = required for first usable release (v0.1), **P1** = required f
 | NET-8 | Entity packets (spawn, move, metadata, equipment, destroy, velocity) | P1 |
 | NET-9 | Plugin messages (incl. client brand `vanilla`-style or configurable brand) and client settings packet | P0 |
 | NET-10 | Proxy compatibility (BungeeCord/Velocity server switching, reconnect handling) | P1 |
-| NET-11 | Resource-pack-from-server prompt (accept/deny, SHA-1 check) | P2 |
+| NET-11 | Resource-pack-from-server prompt (accept/deny, SHA-1 check) | P1 |
 | NET-12 | Packet capture/replay tooling for tests | P0 |
 | NET-13 | Robust parsing: malformed or unexpected packets MUST NOT panic; connection is closed cleanly with a log | P0 |
 
@@ -232,7 +232,7 @@ Notes for implementers:
 | RND-7 | Transparency (water, glass, leaves) with correct ordering | P1 |
 | RND-8 | Sky, sun/moon, clouds, fog, weather | P1 |
 | RND-9 | Entity rendering: players (skins), items, common mobs, armor, held items | P1 |
-| RND-10 | Particles | P2 |
+| RND-10 | Particles | P1 |
 | RND-11 | Configurable render distance, FOV, vsync, FPS cap, quality presets | P0 |
 | RND-12 | Render graph architecture so mods can add/replace passes and shaders | P1 |
 | RND-13 | Shaderpack-like extensibility through mods | P2 |
@@ -266,7 +266,105 @@ Notes for implementers:
 | ID | Requirement | Priority |
 |---|---|---|
 | AUD-1 | Sound effect playback with 3D positioning, volume categories | P1 |
-| AUD-2 | Music/ambient playback | P2 |
+| AUD-2 | Music/ambient playback | P1 |
+
+### 6.8 Combat (CMB)
+
+Derived from ROADMAP.md P2, P6.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| CMB-1 | Entity ray-cast with the vanilla reach and hitbox expansion, and the vanilla priority between blocks and entities | P1 |
+| CMB-2 | Attack sends the arm swing then `Use Entity` in the vanilla order; interact and interact-at (e.g. armour stands) | P1 |
+| CMB-3 | Sprint reset on hit (motion x 0.6, sprint stopped) | P1 |
+| CMB-4 | Knockback received from `Entity Velocity` and `Explosion`, applied to the local player | P1 |
+| CMB-5 | Hurt camera tilt and heart flash on damage | P1 |
+| CMB-6 | Critical-hit and sharpness particles | P1 |
+| CMB-7 | Sword blocking, bow charge with FOV zoom, fishing rod, snowballs, eggs, ender pearls and splash potions use the vanilla serverbound sequence | P1 |
+| CMB-8 | Death screen with the death message from `Combat Event`, respawn via `Client Status` | P1 |
+| CMB-9 | Hold-to-break digging with the vanilla progress (hardness, tool, Efficiency, Haste, Mining Fatigue, water, airborne), abort and break cracks | P1 |
+| CMB-10 | Gamemodes: survival, creative (instant break, flight), adventure, spectator (no-clip, `Camera`) | P1 |
+
+### 6.9 Items (ITM)
+
+Derived from ROADMAP.md P3, P4.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| ITM-1 | 1.8 item registry: id, name, max stack, max damage, block item, armour material, tool tier, food values | P1 |
+| ITM-2 | Item model parsing (`models/item`): generated layers, `builtin/entity`, block items, display transforms (GUI, first and third person, ground, head, fixed) | P1 |
+| ITM-3 | Item rendering in the GUI: icon, count, durability bar, enchantment glint | P1 |
+| ITM-4 | Item rendering in the world: dropped items (bob, spin, stack size), held items, item frames | P1 |
+| ITM-5 | Item NBT for display: custom name, lore, enchantments, leather colour, skull owner, potion type; vanilla tooltip layout | P1 |
+| ITM-6 | Item use: right-click hold and release, use-item slowdown, pick block, drop (Q, Ctrl+Q) | P1 |
+| ITM-7 | Inventory click modes (normal, shift, number key, middle, drop, drag, double-click) with predicted item and rollback on a rejected `Confirm Transaction` | P1 |
+| ITM-8 | Container screens: chest, ender chest, crafting table, furnace, brewing stand, dispenser/dropper, hopper, enchanting table, anvil, beacon, villager trading, horse inventory, book, sign editing | P1 |
+| ITM-9 | Creative inventory: tabs, search, `Creative Inventory Action` | P1 |
+
+### 6.10 Effects (EFX)
+
+Derived from ROADMAP.md P2, P6, P8.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| EFX-1 | Status effects (Speed, Slowness, Jump Boost, others) from `Entity Effect` / `Entity Properties`, applied to movement, with the active-effects list | P1 |
+| EFX-2 | Particle engine (billboards, physics, lighting, the particle setting) | P1 |
+| EFX-3 | Particles from `Particle` and `Effect` packets and client-side particles (digging, sprint, rain splash, drips, torch, fire, portal, potion swirls, crits, explosions) | P1 |
+| EFX-4 | Screen overlays: underwater, in-wall, fire, pumpkin, portal, vignette | P1 |
+| EFX-5 | Camera effects: view bobbing, FOV modifiers, hurt tilt | P1 |
+
+### 6.11 Entities (ENT)
+
+Derived from ROADMAP.md P5.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| ENT-1 | Animation maths: limb swing, body yaw, 3-tick teleport interpolation, head pitch | P1 |
+| ENT-2 | Hurt tint, death fall, arm swing, sleeping, eating, item-use poses, sneaking pose | P1 |
+| ENT-3 | Typed metadata per entity class and variants (baby, sheep colour, slime size, creeper fuse, villager profession, horse variants, taming, custom name, armour-stand flags, absorption) | P1 |
+| ENT-4 | Entity lighting from the world at the entity position, shadows, fire overlay, invisibility | P1 |
+| ENT-5 | Player skins and capes via `Player List Item` profiles; slim model and skin layers; name tags with team rules | P1 |
+| ENT-6 | Armour layers and held items in third person | P1 |
+| ENT-7 | Every `Spawn Object` type, XP orbs, paintings, lightning; client-side motion for projectiles, items and falling blocks; `Collect Item` animation | P1 |
+| ENT-8 | Riding, vehicles and leashes (`Attach Entity`, `Steer Vehicle` only while riding) | P1 |
+
+### 6.12 Block entities (BLE)
+
+Derived from ROADMAP.md P7.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| BLE-1 | Chests, ender chests and trapped chests with the lid animation (`Block Action`) | P1 |
+| BLE-2 | Sign text rendering from `Update Sign` / `Update Block Entity` | P1 |
+| BLE-3 | Skulls (with player skins) and banners | P1 |
+| BLE-4 | Beacon beam, end portal, enchanting-table book, spawner mob, moving pistons, flower-pot contents | P1 |
+| BLE-5 | Neighbour-dependent block states (`getActualState`): fences, panes, walls, stairs, doors, double plants, vines, redstone wire, tripwire | P1 |
+
+### 6.13 Screens (SCR)
+
+Derived from ROADMAP.md P9, P10.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| SCR-1 | Pause menu, death screen, connecting and disconnect screens | P1 |
+| SCR-2 | Title screen and multiplayer server list (ping, add, edit, delete, direct connect) | P1 |
+| SCR-3 | Options screens: video, controls with rebinding, chat, skin customisation, sounds, resource packs, language; persisted to disk | P1 |
+| SCR-4 | Statistics screen | P2 |
+| SCR-5 | Vanilla HUD from `widgets.png` and `icons.png` at all GUI scales | P1 |
+| SCR-6 | Tab list, scoreboard sidebar and objectives, teams, titles, action bar, boss bar | P1 |
+| SCR-7 | Vanilla F3 debug screen; the Umicraft debug data lives on another key | P1 |
+
+### 6.14 Parity verification (PAR)
+
+Derived from ROADMAP.md P0, P13.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| PAR-1 | Packet-trace capture of the vanilla client and of Umicraft for the same scripted session on a local Paper 1.8.8 server, and a diff tool reporting serverbound packets per tick | P0 |
+| PAR-2 | Trajectory comparison against vanilla within a documented tolerance (ADR-0019) | P0 |
+| PAR-3 | Screenshot comparison against reference images kept outside the repository (they contain Mojang assets, §3) | P1 |
+| PAR-4 | Packet-coverage test listing every protocol-47 id as handled or intentionally ignored with a reason | P0 |
+| PAR-5 | `docs/parity.md`: parity register with one row per feature, its state and evidence; every row is "Matches vanilla" or an owner-approved deviation at P13 | P0 |
 
 ---
 
@@ -434,6 +532,7 @@ Native dynamic libraries run with the user's privileges. Therefore:
 - **Integration tests**: CI spins up a local Paper 1.8 server (offline-mode) and runs scripted scenarios (login, receive chunks, move, chat). A headless mode of the client is required for this.
 - **Packet capture/replay** from `umicraft-testkit` for regression tests.
 - **Physics conformance tests**: recorded trajectories compared with expected positions from a real server.
+- **Parity harness** (ROADMAP.md P0, §6.14): packet-trace, trajectory and screenshot comparison against the vanilla 1.8.8 client, and the parity register `docs/parity.md`.
 - **Benchmarks** (`criterion`) for meshing, decoding, chunk storage; CI warns on regressions.
 - **CI**: `cargo fmt`, `clippy -D warnings`, tests, `cargo deny`, builds for Win/Linux/macOS.
 - **Docs**: every public crate API documented; `docs/` kept in sync with behavior.
@@ -442,7 +541,7 @@ Native dynamic libraries run with the user's privileges. Therefore:
 
 ## 12. Roadmap
 
-> **Superseded 2026-10-26.** The accepted roadmap is [`ROADMAP.md`](ROADMAP.md):
+> **Superseded 2026-10-26.** The accepted roadmap is [`ROADMAP.md`](ROADMAP.md) (this section no longer governs the plan):
 > vanilla 1.8.8 parity first (P0–P13), then accounts, performance, modding and
 > release (F1–F4). The milestone plan below is kept for traceability only.
 
@@ -608,7 +707,7 @@ Each decision: write a short ADR (context, options, decision, consequences).
 
 ## 14. Working Rules for Agents & Contributors
 
-1. **Read §3 first.** If a task would require looking at Mojang's code or bundling their assets, stop and flag it instead.
+1. **Read §3 and ADR-0001 first.** The local MCP tree may be read as a reference; if a task would require bundling Mojang assets, committing Mojang code, or anything else §3 still forbids, stop and flag it instead.
 2. Work **milestone by milestone**; keep PRs small and focused; each PR includes tests and docs updates.
 3. **No `unwrap()`/`expect()` on external data.** Server and file input is untrusted.
 4. **Never log or serialize secrets.** Token-holding types must not implement `Debug`/`Display` revealing contents.
