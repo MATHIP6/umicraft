@@ -370,4 +370,31 @@ mod tests {
         assert_eq!(messages.len(), 1, "expected one warning, got {messages:?}");
         assert!(messages[0].contains("procedural terrain textures"));
     }
+
+    /// The real jar carries the ten destroy-stage textures and the atlas
+    /// holds them, one distinct layer each (needs the official 1.8.8
+    /// installation, like the other `ModelResources` tests).
+    #[test]
+    #[ignore = "requires the official 1.8.8 installation in ~/.minecraft"]
+    fn the_official_atlas_has_the_ten_destroy_stage_layers() {
+        let TerrainTextures::Official { context, .. } = TerrainTextures::load() else {
+            panic!("the official 1.8.8 set did not load");
+        };
+        let mesher = TerrainMesher(MesherKind::Models(context));
+        let layers = mesher.destroy_layers().expect("the destroy stages");
+        let mut sorted = layers.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), STAGES);
+        assert!(
+            !layers.contains(&0),
+            "layer 0 is the missing-texture checker"
+        );
+    }
+
+    #[test]
+    fn the_procedural_set_has_no_destroy_stage_layers() {
+        let installed = TerrainTextures::Procedural.install(&mut Target::default());
+        assert!(installed.mesher().destroy_layers().is_none());
+    }
 }
