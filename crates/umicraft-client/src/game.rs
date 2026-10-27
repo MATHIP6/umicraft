@@ -28,18 +28,19 @@ use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
 use umicraft_game::entity::{EntityFlags, EntityFrameData, EntityId, EntityStore};
+use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::input::RawInput;
+use umicraft_game::interaction::{BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
-use umicraft_game::raycast::{look_direction, raycast, RayHit, CREATIVE_REACH, SURVIVAL_REACH};
+use umicraft_game::physics::DEFAULT_FLY_SPEED;
+use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::server::ServerState;
-use umicraft_game::shapes::Aabb;
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::{GameState, InputIntent, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_net::play::{PlayEvent, SessionCounters};
 use umicraft_protocol::packets::play::clientbound::{ChunkData, Explosion, MapChunkBulk};
-use umicraft_protocol::packets::play::serverbound::DiggingStatus;
-use umicraft_protocol::packets::play::{Facing, ItemStack as WireItemStack};
+use umicraft_protocol::packets::play::ItemStack as WireItemStack;
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{HudState, ItemStack};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
@@ -69,17 +70,6 @@ const CHAT_HISTORY: usize = 10;
 
 /// The number of ticks between two status updates.
 const STATUS_PERIOD: u64 = 20;
-
-/// The number of ticks between the start and the stop of a block break.
-///
-/// The server destroys the block when the stop packet arrives and the
-/// accumulated break progress `hardness * (ticks + 1)` reaches `0.7`
-/// (MCP `ItemInWorldManager.func_180785_a`). The effective hardness of the
-/// softest block is 0.054 for a player without the right tool, so the stop
-/// needs about thirteen server ticks. **Measured** against the local 1.8
-/// server: a stop after six ticks did not destroy the block, a stop after
-/// twelve ticks did (see `docs/sources.md`).
-const BREAK_TICKS: u64 = 12;
 
 /// The largest pitch the view may reach, in radians.
 const MAX_PITCH: f32 = 89.0_f32.to_radians();
@@ -328,17 +318,6 @@ fn spawn_game_thread(
         .map_err(|error| ClientError::Worker(format!("spawn game thread: {error}")))
 }
 
-/// The state of a block-breaking interaction.
-#[derive(Debug, Clone, Copy)]
-struct Digging {
-    /// The block that is being broken.
-    block: BlockPos,
-    /// The face of the block that was hit.
-    face: Facing,
-    /// The tick at which the stop packet must be sent.
-    stop_at: u64,
-}
-
 /// The game state owned by the game thread.
 struct Game {
     /// The loaded world; `None` before `Join Game`.
@@ -349,8 +328,8 @@ struct Game {
     status: String,
     /// The entity id of the local player.
     entity_id: i32,
-    /// The gamemode of the local player; `1` is creative.
-    gamemode: u8,
+    /// The gamemode of the local player.
+    gamemode: GameMode,
     /// The current dimension; `0` is the overworld.
     dimension: i8,
     /// The latest signed time of day from `Time Update`.
@@ -392,14 +371,8 @@ struct Game {
     server_view: ServerView,
     /// The vehicle the player rides (`Attach Entity`), `None` on foot.
     vehicle: Option<i32>,
-    /// The block that is being broken.
-    digging: Option<Digging>,
-    /// The last position the client acknowledged to the server.
-    last_acknowledged: Option<(f64, f64, f64)>,
-    /// The block whose break the server is expected to confirm.
-    expected_break: Option<BlockPos>,
-    /// The block whose placement the server is expected to confirm.
-    expected_placement: Option<BlockPos>,
+    /// The dig, placement and acknowledgement rules.
+    interaction: Interaction,
     /// The statistics of the session.
     status_data: GameStatus,
     /// Whether the HUD has to be published again.
@@ -419,7 +392,7 @@ impl Game {
             dirty: BTreeSet::new(),
             status: "CONNECTING".to_string(),
             entity_id: 0,
-            gamemode: 0,
+            gamemode: GameMode::Survival,
             dimension: 0,
             world_time: 0,
             playing: false,
@@ -439,10 +412,7 @@ impl Game {
             chat: VecDeque::new(),
             server_view: ServerView::default(),
             vehicle: None,
-            digging: None,
-            last_acknowledged: None,
-            expected_break: None,
-            expected_placement: None,
+            interaction: Interaction::new(),
             status_data: GameStatus::default(),
             hud_dirty: true,
             entities: EntityStore::new(),
@@ -456,11 +426,19 @@ impl Game {
     /// MCP `PlayerControllerMP.java:340-343`: 4.5 blocks in survival and 5.0
     /// in creative.
     fn reach(&self) -> f64 {
-        if self.gamemode == 1 {
-            CREATIVE_REACH
-        } else {
-            SURVIVAL_REACH
-        }
+        self.gamemode.reach()
+    }
+
+    /// The entity the view follows (`Camera`, 0x43), if it is another one
+    /// than the local player.
+    fn camera_entity(&self) -> Option<EntityId> {
+        self.server.camera_target().map(EntityId)
+    }
+
+    /// True while the view follows another entity.
+    fn spectating(&self) -> bool {
+        self.camera_entity()
+            .is_some_and(|id| self.entities.camera_view(id, 1.0).is_some())
     }
 
     /// The eye position of the player.
@@ -732,8 +710,12 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     let Some(state) = game.state.as_ref() else {
         return;
     };
+    let view = game
+        .camera_entity()
+        .and_then(|id| game.entities.camera_view(id, 1.0))
+        .unwrap_or_else(|| state.interpolated(1.0));
     let _ = frames.try_send(RenderEvent::Frame(Frame {
-        state: state.interpolated(1.0),
+        state: view,
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
@@ -757,12 +739,11 @@ fn handle_net(
             game.server.on_join(info.entity_id);
             game.server_view = ServerView::default();
             game.vehicle = None;
-            game.gamemode = info.gamemode;
+            set_gamemode(game, GameMode::from_wire(info.gamemode));
             game.dimension = info.dimension;
             // The world clock of the new session is unknown until the first
             // `Time Update`; start at the beginning of the cycle.
             game.world_time = 0;
-            game.status_data.gamemode = info.gamemode;
             game.playing = true;
             game.status = "PLAYING".to_string();
             game.status_data.status = game.status.clone();
@@ -852,6 +833,8 @@ fn handle_net(
             }
         }
         PlayEvent::Respawn(packet) => {
+            // MCP `handleRespawn` sets the gamemode of the new player.
+            set_gamemode(game, GameMode::from_wire(packet.game_mode));
             // A respawned player stands on foot and has told the server
             // nothing yet (MCP `handleRespawn` creates a new player entity,
             // whose sprint and sneak states start off).
@@ -1112,7 +1095,64 @@ fn handle_net(
             // rollback on rejection is a follow-up.
         }
         PlayEvent::Explosion(packet) => apply_explosion(game, &packet),
+        PlayEvent::PlayerAbilities(packet) => {
+            game.server.apply_abilities(&packet);
+            apply_mode_rules(game);
+        }
+        PlayEvent::ChangeGameState(packet) => {
+            game.server.apply_game_state(&packet);
+            if packet.reason == GAMEMODE_REASON {
+                set_gamemode(game, GameMode::from_state_value(packet.value));
+            }
+        }
         other => apply_server_state(&mut game.server, &other),
+    }
+}
+
+/// Switches the gamemode of the local player.
+///
+/// The server announces the abilities of the new mode in a separate
+/// `Player Abilities` packet; the no-clip flag only depends on the mode.
+fn set_gamemode(game: &mut Game, mode: GameMode) {
+    game.gamemode = mode;
+    game.status_data.gamemode = mode.id();
+    game.hud_dirty = true;
+    apply_mode_rules(game);
+}
+
+/// Hands the abilities of the server and the rules of the gamemode to the
+/// player simulation.
+///
+/// MCP `PlayerCapabilities` is what the server last sent; a spectator
+/// always may fly and never collides (`EntityPlayerSP.onLivingUpdate`).
+fn apply_mode_rules(game: &mut Game) {
+    let Some(state) = game.state.as_mut() else {
+        return;
+    };
+    let abilities = game.server.abilities();
+    let allow_flying = abilities.is_some_and(|a| a.allow_flying()) || game.gamemode.allows_flight();
+    let flying = abilities.is_some_and(|a| a.flying());
+    let fly_speed = abilities.map_or(DEFAULT_FLY_SPEED, |a| a.fly_speed);
+    state.set_abilities(allow_flying, flying, fly_speed);
+    state.set_no_clip(game.gamemode.no_clip());
+}
+
+/// Tells the server about a change of the flying state.
+///
+/// MCP `EntityPlayerSP.sendPlayerAbilities` (`C13PacketPlayerAbilities`)
+/// repeats the capabilities with the new `isFlying`.
+fn report_flight(game: &Game, was_flying: bool, queue: &mut CommandQueue) {
+    let (Some(state), Some(abilities)) = (game.state.as_ref(), game.server.abilities()) else {
+        return;
+    };
+    let flying = state.player().flying;
+    if flying != was_flying {
+        queue.push(ClientCommand::PlayerAbilities {
+            flags: abilities.flags,
+            flying,
+            fly_speed: abilities.fly_speed,
+            walk_speed: abilities.walk_speed,
+        });
     }
 }
 
@@ -1136,11 +1176,9 @@ fn apply_explosion(game: &mut Game, packet: &Explosion) {
 /// here until their milestone (P5 entities, P8 particles, P11 audio).
 fn apply_server_state(server: &mut ServerState, event: &PlayEvent) {
     match event {
-        PlayEvent::PlayerAbilities(packet) => server.apply_abilities(packet),
         PlayEvent::EntityEffect(packet) => server.apply_entity_effect(packet),
         PlayEvent::RemoveEntityEffect(packet) => server.apply_remove_entity_effect(packet),
         PlayEvent::EntityProperties(packet) => server.apply_entity_properties(packet),
-        PlayEvent::ChangeGameState(packet) => server.apply_game_state(packet),
         PlayEvent::ServerDifficulty(packet) => server.apply_difficulty(packet),
         PlayEvent::WorldBorder(packet) => server.apply_world_border(packet),
         PlayEvent::PlayerListItem(packet) => server.apply_player_list(packet),
@@ -1212,23 +1250,24 @@ fn total_armor(equipment: &[Option<WireItemStack>; 5]) -> u8 {
 /// Counts a block change the server confirmed.
 fn acknowledge_block(game: &mut Game, position: BlockPos, block_state: u16) {
     tracing::debug!(?position, block_state, "block change applied");
-    if game.expected_break == Some(position) {
-        game.expected_break = None;
-        game.status_data.breaks_acknowledged += 1;
-        tracing::info!(
-            ?position,
-            block_state,
-            "the server confirmed the block break"
-        );
-    }
-    if game.expected_placement == Some(position) {
-        game.expected_placement = None;
-        game.status_data.placements_acknowledged += 1;
-        tracing::info!(
-            ?position,
-            block_state,
-            "the server confirmed the block placement"
-        );
+    match game.interaction.acknowledge_block(position) {
+        Some(BlockAck::Break) => {
+            game.status_data.breaks_acknowledged += 1;
+            tracing::info!(
+                ?position,
+                block_state,
+                "the server confirmed the block break"
+            );
+        }
+        Some(BlockAck::Placement) => {
+            game.status_data.placements_acknowledged += 1;
+            tracing::info!(
+                ?position,
+                block_state,
+                "the server confirmed the block placement"
+            );
+        }
+        None => {}
     }
 }
 
@@ -1247,6 +1286,7 @@ fn apply_placement(
             game.state = Some(GameState::new(position));
             game.yaw = yaw;
             game.pitch = pitch;
+            apply_mode_rules(game);
         }
         Some(state) => {
             let correction = ServerCorrection::new(
@@ -1274,29 +1314,16 @@ fn apply_placement(
     }
 
     // The server expects the acknowledgement of the placement.
-    //
-    // The acknowledgement is a position packet itself, and the server
-    // answers every position packet it does not accept with a resync. A
-    // server that keeps resyncing the same position (for example because the
-    // player stands inside a block) would therefore get an acknowledgement
-    // per resync, and the two would feed each other until the packet limiter
-    // of the server kicks the client. The client acknowledges a position only
-    // once.
-    let acknowledged = game.last_acknowledged.is_some_and(|(x, y, z)| {
-        (x - placement.x).abs() < 1e-6
-            && (y - placement.y).abs() < 1e-6
-            && (z - placement.z).abs() < 1e-6
-    });
-    if !acknowledged {
-        game.last_acknowledged = Some((placement.x, placement.y, placement.z));
-        queue.push(ClientCommand::AckPosition {
-            x: placement.x,
-            y: placement.y,
-            z: placement.z,
-            yaw: placement.yaw,
-            pitch: placement.pitch,
-            on_ground: true,
-        });
+    let ack = PositionAck {
+        x: placement.x,
+        y: placement.y,
+        z: placement.z,
+        yaw: placement.yaw,
+        pitch: placement.pitch,
+        on_ground: true,
+    };
+    if let Some(outgoing) = game.interaction.acknowledge_position(ack) {
+        queue.push(command_of(outgoing));
     }
     game.server_view.forget_position();
 }
@@ -1351,26 +1378,20 @@ fn start_break(game: &mut Game, queue: &mut CommandQueue) {
     let Some(hit) = game.target() else {
         return;
     };
-    let face = facing(hit.face);
-    queue.push(ClientCommand::PlayerDigging {
-        status: DiggingStatus::StartDestroyBlock,
-        x: hit.block.x,
-        y: hit.block.y,
-        z: hit.block.z,
-        face,
-    });
-    game.digging = Some(Digging {
-        block: hit.block,
-        face,
-        stop_at: game.status_data.ticks + BREAK_TICKS,
-    });
-    game.expected_break = Some(hit.block);
-    let distance = game.spawn.map_or(0.0, |(x, _, z)| {
-        let dx = f64::from(hit.block.x - x);
-        let dz = f64::from(hit.block.z - z);
-        (dx * dx + dz * dz).sqrt()
-    });
-    tracing::info!(block = ?hit.block, ?face, distance, "breaking a block");
+    let tick = game.status_data.ticks;
+    let Some(outgoing) = game.interaction.start_break(game.gamemode, &hit, tick) else {
+        return;
+    };
+    queue.push(command_of(outgoing));
+    if game.gamemode.instant_break() {
+        // MCP `PlayerControllerMP.clickBlockCreative`: the block disappears
+        // at once, the server confirms with a block change.
+        if let Some(world) = game.world.as_mut() {
+            game.dirty
+                .extend(world.apply_block_change(hit.block, BlockState::AIR));
+        }
+    }
+    tracing::info!(block = ?hit.block, face = ?hit.face, "breaking a block");
 }
 
 /// Places a block against the targeted face.
@@ -1378,94 +1399,64 @@ fn place_block(game: &mut Game, queue: &mut CommandQueue) {
     let Some(hit) = game.target() else {
         return;
     };
-    let face = facing(hit.face);
-    let offset = face_offset(face);
-    let target = BlockPos::new(
-        hit.block.x + offset.x,
-        hit.block.y + offset.y,
-        hit.block.z + offset.z,
-    );
-    // A block inside the player would suffocate it (the server applies the
-    // suffocation damage), so the placement is skipped.
-    if let Some(state) = game.state.as_ref() {
-        let player = state.player().bounding_box();
-        let block = Aabb::new(
-            DVec3::new(
-                f64::from(target.x),
-                f64::from(target.y),
-                f64::from(target.z),
-            ),
-            DVec3::new(
-                f64::from(target.x) + 1.0,
-                f64::from(target.y) + 1.0,
-                f64::from(target.z) + 1.0,
-            ),
-        );
-        if player.intersects(&block) {
-            tracing::debug!(?target, "the placement would hit the player");
-            return;
-        }
-    }
+    let player = game
+        .state
+        .as_ref()
+        .map(|state| state.player().bounding_box());
     let item = game
         .windows
         .selected_item()
         .cloned()
         .or_else(|| game.held_item.clone())
         .unwrap_or(WireItemStack::EMPTY);
-    queue.push(ClientCommand::PlayerBlockPlacement {
-        x: hit.block.x,
-        y: hit.block.y,
-        z: hit.block.z,
-        face,
-        item,
-        cursor_x: cursor(hit.position.x - f64::from(hit.block.x)),
-        cursor_y: cursor(hit.position.y - f64::from(hit.block.y)),
-        cursor_z: cursor(hit.position.z - f64::from(hit.block.z)),
-    });
-    game.expected_placement = Some(target);
-    tracing::info!(
-        block = ?hit.block,
-        ?face,
-        ?target,
-        held = ?game.held_item,
-        target_block = ?game.world.as_ref().map(|world| world.block(target)),
-        "placing a block",
-    );
+    let Some(outgoing) = game
+        .interaction
+        .place_block(game.gamemode, &hit, player.as_ref(), item)
+    else {
+        tracing::debug!(block = ?hit.block, "the placement would hit the player");
+        return;
+    };
+    queue.push(command_of(outgoing));
+    tracing::info!(block = ?hit.block, face = ?hit.face, held = ?game.held_item, "placing a block");
 }
 
-/// The offset of a face, in blocks.
-fn face_offset(face: Facing) -> BlockPos {
-    match face {
-        Facing::Down => BlockPos::new(0, -1, 0),
-        Facing::Up => BlockPos::new(0, 1, 0),
-        Facing::North => BlockPos::new(0, 0, -1),
-        Facing::South => BlockPos::new(0, 0, 1),
-        Facing::West => BlockPos::new(-1, 0, 0),
-        Facing::East => BlockPos::new(1, 0, 0),
-    }
-}
-
-/// The click offset in sixteenths of a block.
-fn cursor(offset: f64) -> u8 {
-    let value = (offset * 16.0).floor();
-    if value <= 0.0 {
-        0
-    } else if value >= 15.0 {
-        15
-    } else {
-        value as u8
-    }
-}
-
-/// The wire face of a ray-cast face.
-fn facing(face: umicraft_game::raycast::Face) -> Facing {
-    match face {
-        umicraft_game::raycast::Face::West => Facing::West,
-        umicraft_game::raycast::Face::East => Facing::East,
-        umicraft_game::raycast::Face::Down => Facing::Down,
-        umicraft_game::raycast::Face::Up => Facing::Up,
-        umicraft_game::raycast::Face::North => Facing::North,
-        umicraft_game::raycast::Face::South => Facing::South,
+/// The network command of a packet the interaction rules produced.
+fn command_of(outgoing: Outgoing) -> ClientCommand {
+    match outgoing {
+        Outgoing::Dig {
+            status,
+            block,
+            face,
+        } => ClientCommand::PlayerDigging {
+            status,
+            x: block.x,
+            y: block.y,
+            z: block.z,
+            face,
+        },
+        Outgoing::Place {
+            block,
+            face,
+            item,
+            cursor: [cursor_x, cursor_y, cursor_z],
+        } => ClientCommand::PlayerBlockPlacement {
+            x: block.x,
+            y: block.y,
+            z: block.z,
+            face,
+            item,
+            cursor_x,
+            cursor_y,
+            cursor_z,
+        },
+        Outgoing::AckPosition(ack) => ClientCommand::AckPosition {
+            x: ack.x,
+            y: ack.y,
+            z: ack.z,
+            yaw: ack.yaw,
+            pitch: ack.pitch,
+            on_ground: ack.on_ground,
+        },
     }
 }
 
@@ -1492,6 +1483,18 @@ fn tick(
     }
     .to_intent();
 
+    // A player who spectates another entity does not control its own body
+    // (MCP `EntityPlayerSP.updateEntityActionState`, `isCurrentViewEntity`).
+    let intent = if game.spectating() {
+        InputIntent::still(intent.yaw)
+    } else {
+        intent
+    };
+    let was_flying = game
+        .state
+        .as_ref()
+        .is_some_and(|state| state.player().flying);
+
     // The simulation only runs on a loaded world.
     let ready = game.world_ready();
     if ready {
@@ -1499,13 +1502,16 @@ fn tick(
             state.tick(&intent, world);
         }
     }
+    report_flight(game, was_flying, queue);
     game.entities.tick();
     game.server.tick();
     // A player inside a block is pushed out sideways by the simulation
     // itself, like the vanilla client (`umicraft_game::physics`); it is
     // never lifted.
 
-    finish_break(game, queue);
+    if let Some(outgoing) = game.interaction.finish_break(game.status_data.ticks) {
+        queue.push(command_of(outgoing));
+    }
     report_movement(game, &intent, queue);
     publish_chunks(game, chunks);
 
@@ -1535,7 +1541,11 @@ fn tick(
 /// damping of `EntityLivingBase.java:2020` is applied by the game logic and
 /// by the server, so it must not be applied twice.
 fn report_movement(game: &mut Game, intent: &InputIntent, queue: &mut CommandQueue) {
-    let Some(state) = game.state.as_ref().filter(|_| game.playing) else {
+    let Some(state) = game
+        .state
+        .as_ref()
+        .filter(|_| game.playing && !game.spectating())
+    else {
         return;
     };
     let position = state.position();
@@ -1620,24 +1630,6 @@ fn movement_command(packet: TickPacket, entity_id: i32) -> ClientCommand {
     }
 }
 
-/// Sends the stop packet of a running block break.
-fn finish_break(game: &mut Game, queue: &mut CommandQueue) {
-    let Some(digging) = game.digging else {
-        return;
-    };
-    if game.status_data.ticks < digging.stop_at {
-        return;
-    }
-    game.digging = None;
-    queue.push(ClientCommand::PlayerDigging {
-        status: DiggingStatus::StopDestroyBlock,
-        x: digging.block.x,
-        y: digging.block.y,
-        z: digging.block.z,
-        face: digging.face,
-    });
-}
-
 /// Sends the snapshots of the chunks whose geometry changed.
 fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
     if game.dirty.is_empty() {
@@ -1684,7 +1676,6 @@ fn publish_status(game: &mut Game, frames: &SyncSender<RenderEvent>) {
 mod tests {
     use super::*;
     use crate::input::InputState;
-    use umicraft_game::raycast::Face;
 
     #[test]
     fn the_armour_points_follow_the_reference_table() {
@@ -1715,30 +1706,6 @@ mod tests {
             nbt: None,
         });
         assert_eq!(total_armor(&equipment), 11);
-    }
-
-    #[test]
-    fn the_cursor_is_clamped_to_a_block() {
-        assert_eq!(cursor(-0.5), 0);
-        assert_eq!(cursor(0.0), 0);
-        assert_eq!(cursor(0.5), 8);
-        assert_eq!(cursor(1.5), 15);
-    }
-
-    #[test]
-    fn the_raycast_faces_map_to_the_wire_faces() {
-        assert_eq!(facing(Face::Up), Facing::Up);
-        assert_eq!(facing(Face::Down), Facing::Down);
-        assert_eq!(facing(Face::North), Facing::North);
-        assert_eq!(facing(Face::South), Facing::South);
-        assert_eq!(facing(Face::West), Facing::West);
-        assert_eq!(facing(Face::East), Facing::East);
-    }
-
-    #[test]
-    fn the_face_offsets_point_away_from_the_block() {
-        assert_eq!(face_offset(Facing::Up), BlockPos::new(0, 1, 0));
-        assert_eq!(face_offset(Facing::West), BlockPos::new(-1, 0, 0));
     }
 
     /// A placed, playing game on the floor of a loaded chunk, for the
@@ -1901,6 +1868,137 @@ mod tests {
             &mut queue,
         );
         assert_eq!(queue.ordered.len(), 1);
+    }
+
+    #[test]
+    fn a_game_state_change_switches_the_gamemode() {
+        use umicraft_protocol::packets::play::clientbound::ChangeGameState;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let change = |reason, value| PlayEvent::ChangeGameState(ChangeGameState { reason, value });
+        handle_net(&mut game, change(3, 3.0), &mut queue, &frames);
+        assert_eq!(game.gamemode, GameMode::Spectator);
+        assert_eq!(game.status_data.gamemode, 3);
+        let player = game.state.as_ref().expect("placed").player();
+        assert!(player.no_clip && player.allow_flying);
+
+        handle_net(&mut game, change(3, 0.0), &mut queue, &frames);
+        assert_eq!(game.gamemode, GameMode::Survival);
+        assert!(!game.state.as_ref().expect("placed").player().no_clip);
+
+        // Rain is not a gamemode.
+        handle_net(&mut game, change(1, 3.0), &mut queue, &frames);
+        assert_eq!(game.gamemode, GameMode::Survival);
+    }
+
+    #[test]
+    fn the_server_abilities_let_a_creative_player_fly() {
+        use umicraft_protocol::packets::play::clientbound::PlayerAbilities;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let abilities = PlayEvent::PlayerAbilities(PlayerAbilities {
+            flags: 0b1101,
+            fly_speed: 0.1,
+            walk_speed: 0.1,
+        });
+        handle_net(&mut game, abilities, &mut queue, &frames);
+        let player = game.state.as_ref().expect("placed").player();
+        assert!(player.allow_flying);
+        assert!(!player.flying);
+        assert_eq!(player.fly_speed, 0.1);
+    }
+
+    #[test]
+    fn a_change_of_the_flying_state_is_reported_to_the_server() {
+        use umicraft_protocol::packets::play::clientbound::PlayerAbilities;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        game.server.apply_abilities(&PlayerAbilities {
+            flags: 0b1100,
+            fly_speed: 0.05,
+            walk_speed: 0.1,
+        });
+        report_flight(&game, false, &mut queue);
+        assert!(queue.ordered.is_empty(), "nothing changed");
+
+        game.state
+            .as_mut()
+            .expect("placed")
+            .set_abilities(true, true, 0.05);
+        report_flight(&game, false, &mut queue);
+        assert!(matches!(
+            queue.ordered.front(),
+            Some(ClientCommand::PlayerAbilities { flying: true, .. })
+        ));
+    }
+
+    #[test]
+    fn a_creative_break_removes_the_block_at_once_and_sends_only_the_start() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        game.gamemode = GameMode::Creative;
+        game.pitch = 1.5;
+        start_break(&mut game, &mut queue);
+        let world = game.world.as_ref().expect("world");
+        assert_eq!(world.block(BlockPos::new(0, 63, 0)), BlockState::AIR);
+        assert_eq!(queue.ordered.len(), 1);
+        assert_eq!(game.interaction.digging_block(), None);
+    }
+
+    #[test]
+    fn a_spectator_cannot_break_blocks() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        game.gamemode = GameMode::Spectator;
+        game.pitch = 1.5;
+        start_break(&mut game, &mut queue);
+        assert!(queue.ordered.is_empty());
+    }
+
+    #[test]
+    fn the_camera_packet_moves_the_view_to_the_entity() {
+        use umicraft_protocol::packets::play::clientbound::camera::Camera;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, received) = mpsc::sync_channel(16);
+        game.entity_id = 1;
+        game.server.on_join(1);
+        game.entities.spawn_mob(
+            EntityId(9),
+            90,
+            DVec3::new(40.0, 70.0, 40.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::Camera(Camera { entity_id: 9 }),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.spectating());
+        publish_frame(&game, &frames, Instant::now());
+        let Ok(RenderEvent::Frame(frame)) = received.try_recv() else {
+            panic!("a frame was expected");
+        };
+        assert!((frame.state.position.x - 40.0).abs() < 1e-3);
+
+        handle_net(
+            &mut game,
+            PlayEvent::Camera(Camera { entity_id: 1 }),
+            &mut queue,
+            &frames,
+        );
+        assert!(!game.spectating(), "the local player is the view again");
     }
 
     #[test]

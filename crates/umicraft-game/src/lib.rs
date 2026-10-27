@@ -32,13 +32,16 @@
 //! `docs/sources.md`; the physics itself is documented in [`physics`], the
 //! collision in [`collision`], the block geometry in [`shapes`], the
 //! reconciliation in [`prediction`], the block targeting in [`raycast`] and
-//! the serverbound packets of a tick in [`traffic`] and the protocol state kept
+//! the gamemodes in [`gamemode`], the block interaction rules in
+//! [`interaction`], the serverbound packets of a tick in [`traffic`] and the protocol state kept
 //! for later milestones (tab list, scoreboard, effects, border, titles) in
 //! [`server`].
 
 pub mod collision;
 pub mod entity;
+pub mod gamemode;
 pub mod input;
+pub mod interaction;
 pub mod inventory;
 pub mod physics;
 pub mod prediction;
@@ -264,6 +267,19 @@ impl GameState {
             pitch: self.player.pitch,
             on_ground: self.player.on_ground,
         }
+    }
+
+    /// Applies the flight abilities the server announced
+    /// (`Player Abilities`, 0x39) and the no-clip flag of the gamemode.
+    pub fn set_abilities(&mut self, allow_flying: bool, flying: bool, fly_speed: f32) {
+        self.player.allow_flying = allow_flying;
+        self.player.flying = flying;
+        self.player.fly_speed = fly_speed;
+    }
+
+    /// Makes the player walk through blocks (spectator mode).
+    pub fn set_no_clip(&mut self, no_clip: bool) {
+        self.player.no_clip = no_clip;
     }
 
     /// The kinematic state of the player.

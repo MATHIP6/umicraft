@@ -7,6 +7,9 @@ use std::collections::BTreeMap;
 
 use glam::{DVec3, Vec3};
 
+use crate::physics::EYE_HEIGHT;
+use crate::RenderState;
+
 use super::types::{
     EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
 };
@@ -106,6 +109,27 @@ impl EntityStore {
         for &id in entity_ids {
             self.entities.remove(&EntityId(id));
         }
+    }
+
+    /// The view of an entity for the spectator camera (`Camera`, 0x43).
+    ///
+    /// The eye sits at the player eye height above the interpolated feet;
+    /// the view turns with the head yaw and the pitch (MCP
+    /// `EntityRenderer.orientCamera` follows the view entity). `None` when
+    /// the entity is not tracked, so the caller keeps the local view.
+    #[must_use]
+    pub fn camera_view(&self, id: EntityId, alpha: f32) -> Option<RenderState> {
+        let record = self.entities.get(&id)?;
+        let alpha_f64 = f64::from(alpha.clamp(0.0, 1.0));
+        let feet = record.previous_position.lerp(record.position, alpha_f64);
+        let eye = feet + DVec3::Y * EYE_HEIGHT;
+        let lerp = |from: f32, to: f32| from + (to - from) * alpha.clamp(0.0, 1.0);
+        Some(RenderState {
+            position: Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32),
+            yaw: lerp(record.previous_head_yaw, record.head_yaw).to_radians(),
+            pitch: lerp(record.previous_pitch, record.pitch).to_radians(),
+            on_ground: record.on_ground,
+        })
     }
 
     /// Applies a relative movement delta to an entity.
@@ -428,5 +452,29 @@ mod tests {
         // After tick 1: prev=0.0, current=1.0 → alpha 0.5 gives 0.5
         let mid = store.snapshots(0.5);
         assert!((mid[0].position.x - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_camera_view_sits_at_the_eyes_of_the_entity() {
+        let mut store = EntityStore::new();
+        let id = EntityId(5);
+        store.spawn_player(
+            id,
+            [2u8; 16],
+            DVec3::new(1.0, 64.0, 2.0),
+            90.0,
+            45.0,
+            None,
+            EntityFlags::default(),
+        );
+        let view = store.camera_view(id, 1.0).expect("tracked entity");
+        assert!((view.position.y - 65.62).abs() < 1e-4);
+        assert!((view.position.x - 1.0).abs() < 1e-4);
+        assert!((view.pitch - 45f32.to_radians()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_camera_view_of_an_unknown_entity_is_none() {
+        assert!(EntityStore::new().camera_view(EntityId(9), 1.0).is_none());
     }
 }

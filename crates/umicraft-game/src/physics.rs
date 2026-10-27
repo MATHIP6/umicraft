@@ -46,6 +46,21 @@ pub const WALK_SPEED: f64 = 0.1;
 /// (MCP `EntityLivingBase.java:57`: `0.3` with operation `2`, multiply total).
 pub const SPRINT_SPEED_BONUS: f64 = 0.3;
 
+/// The default flying speed (MCP `PlayerCapabilities.flySpeed`, line 25).
+pub const DEFAULT_FLY_SPEED: f32 = 0.05;
+
+/// The ticks in which a second jump press toggles flight
+/// (MCP `EntityPlayerSP.java:834`).
+pub const FLY_TOGGLE_TICKS: u32 = 7;
+
+/// The vertical flying acceleration per unit of flying speed
+/// (MCP `EntityPlayerSP.java:852,857`).
+const FLY_VERTICAL_FACTOR: f64 = 3.0;
+
+/// The part of the vertical motion a flying player keeps each tick
+/// (MCP `EntityPlayer.java:1800`).
+const FLY_VERTICAL_KEEP: f64 = 0.6;
+
 /// The upwards motion of a jump (MCP `EntityLivingBase.java:1550`).
 pub const JUMP_MOTION: f64 = 0.42;
 
@@ -150,6 +165,21 @@ pub struct Player {
     pub previous_forward: f32,
     /// Whether the last move was blocked horizontally.
     pub collided_horizontally: bool,
+    /// Whether the player may toggle flight
+    /// (MCP `PlayerCapabilities.allowFlying`).
+    pub allow_flying: bool,
+    /// Whether the player is flying (MCP `PlayerCapabilities.isFlying`).
+    pub flying: bool,
+    /// The flying speed (MCP `PlayerCapabilities.flySpeed`).
+    pub fly_speed: f32,
+    /// Whether the player moves through blocks (MCP `Entity.noClip`).
+    pub no_clip: bool,
+    /// Whether the jump key was held on the previous tick, for the
+    /// double-tap flight toggle.
+    pub previous_jump: bool,
+    /// The ticks the double-tap flight window still lasts
+    /// (MCP `EntityPlayerSP.flyToggleTimer`, line 112).
+    pub fly_toggle_timer: u32,
 }
 
 impl Default for Player {
@@ -168,6 +198,12 @@ impl Default for Player {
             speed_multiplier: 1.0,
             previous_forward: 0.0,
             collided_horizontally: false,
+            allow_flying: false,
+            flying: false,
+            fly_speed: DEFAULT_FLY_SPEED,
+            no_clip: false,
+            previous_jump: false,
+            fly_toggle_timer: 0,
         }
     }
 }
@@ -238,8 +274,13 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
 
     update_sprint(player, intent);
 
-    // MCP `EntityPlayerSP.java:795-798`, before the living update.
-    push_out_of_blocks(player, world);
+    update_flight(player, intent);
+
+    // MCP `EntityPlayerSP.java:795-798`, before the living update; the
+    // override of `pushOutOfBlocks` returns early for a no-clip player.
+    if !player.no_clip {
+        push_out_of_blocks(player, world);
+    }
 
     // Drop the tiny motions, MCP `EntityLivingBase.java:1963-1976`.
     if player.velocity.x.abs() < MOTION_EPSILON {
@@ -274,6 +315,12 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     let strafe = f64::from(intent.strafe) * INPUT_DAMPING;
     let forward = f64::from(intent.forward) * INPUT_DAMPING;
     travel(player, strafe, forward, world);
+
+    // MCP `EntityPlayerSP.java:904-907`: touching the ground ends a flight,
+    // except for a spectator.
+    if player.on_ground && player.flying && !player.no_clip {
+        player.flying = false;
+    }
 
     // The movement speed attribute is refreshed after the movement,
     // MCP `EntityPlayer.java:627-634`.
@@ -448,6 +495,41 @@ fn update_sprint(player: &mut Player, intent: &InputIntent) {
     player.previous_forward = intent.forward;
 }
 
+/// The flight toggle and the vertical flying input.
+///
+/// MCP `EntityPlayerSP.onLivingUpdate`, lines 823-861: a spectator always
+/// flies; otherwise the second press of the jump key within
+/// [`FLY_TOGGLE_TICKS`] ticks toggles the flight. While flying, jump and
+/// sneak accelerate upwards and downwards.
+fn update_flight(player: &mut Player, intent: &InputIntent) {
+    if player.fly_toggle_timer > 0 {
+        player.fly_toggle_timer -= 1;
+    }
+    if player.allow_flying {
+        if player.no_clip {
+            player.flying = true;
+        } else if !player.previous_jump && intent.jump {
+            if player.fly_toggle_timer == 0 {
+                player.fly_toggle_timer = FLY_TOGGLE_TICKS;
+            } else {
+                player.flying = !player.flying;
+                player.fly_toggle_timer = 0;
+            }
+        }
+    }
+    player.previous_jump = intent.jump;
+
+    if player.flying {
+        let lift = f64::from(player.fly_speed) * FLY_VERTICAL_FACTOR;
+        if intent.sneak {
+            player.velocity.y -= lift;
+        }
+        if intent.jump {
+            player.velocity.y += lift;
+        }
+    }
+}
+
 /// The horizontal and vertical integration of one tick.
 ///
 /// MCP `net/minecraft/entity/EntityLivingBase.java:1591-1672`.
@@ -460,7 +542,13 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
     } else {
         GROUND_FRICTION
     };
-    let speed = if player.on_ground {
+    let flying = player.flying;
+    let kept_vertical = player.velocity.y;
+    let speed = if flying && !player.on_ground {
+        // MCP `EntityPlayer.java:1798`: the flying speed replaces the air
+        // control and doubles while sprinting.
+        f64::from(player.fly_speed) * if player.sprinting { 2.0 } else { 1.0 }
+    } else if player.on_ground {
         // MCP `EntityLivingBase.java:1606-1612`.
         WALK_SPEED
             * player.speed_multiplier
@@ -489,6 +577,14 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
     }
 
     // `moveEntity`, MCP `net/minecraft/entity/Entity.java:588-844`.
+    if player.no_clip {
+        // MCP `Entity.java:595-600`: no collision at all.
+        player.position += player.velocity;
+        player.on_ground = false;
+        player.collided_horizontally = false;
+        finish_travel(player, friction, flying, kept_vertical);
+        return;
+    }
     let result = collision::move_entity(
         player.bounding_box(),
         player.velocity,
@@ -512,11 +608,20 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
         land(player, world);
     }
 
-    // Gravity and friction, MCP `EntityLivingBase.java:1666-1671`.
+    finish_travel(player, friction, flying, kept_vertical);
+}
+
+/// Gravity and friction, MCP `EntityLivingBase.java:1666-1671`; a flying
+/// player keeps 60 % of the vertical motion it had before the move instead
+/// (MCP `EntityPlayer.java:1800`).
+fn finish_travel(player: &mut Player, friction: f64, flying: bool, kept_vertical: f64) {
     player.velocity.y -= GRAVITY;
     player.velocity.y *= VERTICAL_DAMPING;
     player.velocity.x *= friction;
     player.velocity.z *= friction;
+    if flying {
+        player.velocity.y = kept_vertical * FLY_VERTICAL_KEEP;
+    }
 }
 
 #[cfg(test)]
@@ -934,5 +1039,100 @@ mod tests {
             step(&mut player, &InputIntent::still(0.0), &world);
         }
         assert_eq!(player.position, DVec3::new(0.5, 1.0, 0.5));
+    }
+
+    fn flying_player() -> Player {
+        let mut player = Player::new(DVec3::new(0.5, 10.0, 0.5));
+        player.allow_flying = true;
+        player
+    }
+
+    fn jump_intent(jump: bool) -> InputIntent {
+        InputIntent {
+            jump,
+            ..InputIntent::default()
+        }
+    }
+
+    #[test]
+    fn a_double_tap_of_jump_toggles_the_flight() {
+        let world = TestBlocks::default();
+        let mut player = flying_player();
+        for jump in [true, false, true] {
+            step(&mut player, &jump_intent(jump), &world);
+        }
+        assert!(player.flying);
+        for jump in [false, true] {
+            step(&mut player, &jump_intent(jump), &world);
+            step(&mut player, &jump_intent(false), &world);
+        }
+        assert!(player.flying, "one press alone does not toggle");
+    }
+
+    #[test]
+    fn a_player_who_may_not_fly_ignores_the_double_tap() {
+        let world = TestBlocks::default();
+        let mut player = Player::new(DVec3::new(0.5, 10.0, 0.5));
+        for jump in [true, false, true] {
+            step(&mut player, &jump_intent(jump), &world);
+        }
+        assert!(!player.flying);
+    }
+
+    #[test]
+    fn a_flying_player_rises_while_jump_is_held_and_hovers_after() {
+        let world = TestBlocks::default();
+        let mut player = flying_player();
+        player.flying = true;
+        for _ in 0..10 {
+            step(&mut player, &jump_intent(true), &world);
+        }
+        assert!(player.position.y > 10.5, "y = {}", player.position.y);
+        // The lift dies out (60 % per tick) instead of turning into a fall.
+        for _ in 0..30 {
+            step(&mut player, &jump_intent(false), &world);
+        }
+        let height = player.position.y;
+        for _ in 0..30 {
+            step(&mut player, &jump_intent(false), &world);
+        }
+        assert!(
+            (player.position.y - height).abs() < 0.01,
+            "the flight must not fall like a jump"
+        );
+    }
+
+    #[test]
+    fn a_flying_player_that_lands_stops_flying() {
+        let world = flat_world();
+        let mut player = flying_player();
+        player.position = DVec3::new(0.5, 1.0, 0.5);
+        player.flying = true;
+        let sneak = InputIntent {
+            sneak: true,
+            ..InputIntent::default()
+        };
+        for _ in 0..20 {
+            step(&mut player, &sneak, &world);
+        }
+        assert!(player.on_ground);
+        assert!(!player.flying);
+    }
+
+    #[test]
+    fn a_no_clip_player_flies_through_blocks_and_stays_flying() {
+        let world = flat_world();
+        let mut player = flying_player();
+        player.no_clip = true;
+        player.position = DVec3::new(0.5, 3.0, 0.5);
+        let sneak = InputIntent {
+            sneak: true,
+            ..InputIntent::default()
+        };
+        for _ in 0..40 {
+            step(&mut player, &sneak, &world);
+        }
+        assert!(player.position.y < 0.0, "y = {}", player.position.y);
+        assert!(player.flying, "a spectator keeps flying");
     }
 }

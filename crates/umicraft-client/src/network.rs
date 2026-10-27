@@ -167,6 +167,17 @@ pub enum ClientCommand {
         /// The Z offset of the click, in sixteenths of a block.
         cursor_z: u8,
     },
+    /// `Player Abilities` (0x13): the flying state changed.
+    PlayerAbilities {
+        /// The flags of the last `Player Abilities` of the server.
+        flags: u8,
+        /// Whether the player flies now.
+        flying: bool,
+        /// The flying speed.
+        fly_speed: f32,
+        /// The walking speed.
+        walk_speed: f32,
+    },
     /// `Held Item Change` (0x09): the selected hotbar slot.
     HeldItemChange {
         /// The slot index.
@@ -299,6 +310,19 @@ impl ClientCommand {
                 cursor_y,
                 cursor_z,
             }),
+            Self::PlayerAbilities {
+                flags,
+                flying,
+                fly_speed,
+                walk_speed,
+            } => PlayServerbound::PlayerAbilities(
+                serverbound::PlayerAbilities {
+                    flags,
+                    fly_speed,
+                    walk_speed,
+                }
+                .with_flying(flying),
+            ),
             Self::HeldItemChange { slot } => {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
             }
