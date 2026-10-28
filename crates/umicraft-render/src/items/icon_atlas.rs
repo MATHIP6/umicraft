@@ -6,7 +6,7 @@
 //! copied into its atlas cell, because a render pass clears depth for its
 //! whole attachment and the atlas is far larger than one icon. Meshes are in
 //! the 16x16 GUI box of `gui_pose` (origin top-left, y down, larger z
-//! farther), which the orthographic camera below maps to the whole cell.
+//! nearer), which the orthographic camera below maps to the whole cell.
 
 use std::collections::HashMap;
 

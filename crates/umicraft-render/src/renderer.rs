@@ -89,12 +89,14 @@ pub(crate) struct CameraUniform {
 
 impl CameraUniform {
     /// The icon camera: an orthographic view of the 16x16 GUI box (y down,
-    /// larger z farther), no fog, full daylight and no gamma lift.
+    /// larger z nearer), no fog, full daylight and no gamma lift.
     pub(crate) fn icon() -> Self {
         Self {
-            // x: 0..16 to -1..1; y flips (down to up); z: -D..D to 0..1.
+            // x: 0..16 to -1..1; y flips (down to up); z: -D..D to 1..0, so a
+            // larger z is nearer, as in the reference GUI projection
+            // (glOrtho 1000..3000 after translate(0, 0, -2000)).
             view_proj: (glam::Mat4::from_translation(Vec3::new(-1.0, 1.0, 0.5))
-                * glam::Mat4::from_scale(Vec3::new(1.0 / 8.0, -1.0 / 8.0, 0.5 / ICON_DEPTH)))
+                * glam::Mat4::from_scale(Vec3::new(1.0 / 8.0, -1.0 / 8.0, -0.5 / ICON_DEPTH)))
             .to_cols_array_2d(),
             camera_pos: [0.0; 3],
             sun_brightness: 1.0,

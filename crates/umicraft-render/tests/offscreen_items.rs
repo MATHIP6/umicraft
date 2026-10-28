@@ -21,8 +21,29 @@ struct FlatSprite {
     requests: u32,
 }
 
+/// Two overlapping sprites, red at z = -5 and green at z = +5.
+const LAYERED_KEY: u64 = 77;
+
 impl IconProvider for FlatSprite {
     fn build_icon(&mut self, key: u64, mesh: &mut ItemMesh) -> bool {
+        if key == LAYERED_KEY {
+            for (z, layer) in [(-5.0, 0), (5.0, 1)] {
+                let base = mesh.vertices.len() as u32;
+                for (x, y) in [(0.0, 0.0), (16.0, 0.0), (16.0, 16.0), (0.0, 16.0)] {
+                    mesh.vertices.push(Vertex {
+                        position: [x, y, z],
+                        normal: [0.0, 0.0, -1.0],
+                        uv: [x / 16.0, y / 16.0],
+                        layer,
+                        light: VertexLight::new(0, 15, 15, false).pack(),
+                        tint: tint::WHITE,
+                    });
+                }
+                mesh.indices
+                    .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+            }
+            return true;
+        }
         if key != KEY {
             return false;
         }
@@ -125,5 +146,30 @@ fn a_glint_item_is_brightened_and_tinted_only_inside_its_silhouette() {
     assert_eq!(
         [(4, 90), (60, 32)].map(|(x, y)| pixel(&mut renderer, x, y)),
         outside
+    );
+}
+
+/// Regression: the GUI projection looks along -z, so the larger z is nearer
+/// (the first version had it reversed and drew blocks upside down, seen
+/// from below).
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn the_larger_z_is_in_front_in_an_icon() {
+    let mut renderer = Renderer::new_offscreen(SIZE, SIZE).expect("offscreen renderer");
+    renderer.set_block_atlas(2, 2, 2, &atlas()).expect("atlas");
+    let mut list = DrawList::new();
+    list.item(LAYERED_KEY, Rect::new(16.0, 16.0, 32.0, 32.0), false);
+    renderer
+        .render_with_ui(
+            &Camera::default(),
+            &Overlay::new(SIZE, SIZE),
+            &list,
+            &mut FlatSprite { requests: 0 },
+        )
+        .expect("render");
+    let inside = pixel(&mut renderer, 32, 32);
+    assert!(
+        inside[1] > 200 && inside[0] < 60,
+        "green must cover red: {inside:?}"
     );
 }
