@@ -24,6 +24,8 @@ pub(crate) struct RawModel {
     pub(crate) elements: Option<Vec<Element>>,
     pub(crate) ambient_occlusion: Option<bool>,
     pub(crate) display: DisplayTransforms,
+    /// `gui3d` of this document alone (not inherited, MCP `ModelBlock.gui3d`).
+    pub(crate) gui3d: bool,
 }
 
 impl RawModel {
@@ -72,12 +74,19 @@ impl RawModel {
             Some(value) => DisplayTransforms::parse(value, path)?,
         };
 
+        let gui3d = match object.get("gui3d") {
+            None => true,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(invalid(path, "`gui3d` must be a boolean")),
+        };
+
         Ok(Self {
             parent,
             textures,
             elements,
             ambient_occlusion,
             display,
+            gui3d,
         })
     }
 }

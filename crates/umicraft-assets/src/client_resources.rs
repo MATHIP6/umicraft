@@ -31,8 +31,8 @@ use crate::AssetsResult;
 
 /// Prefix of the 1.8 blockstate documents inside the client jar.
 const BLOCKSTATES_PREFIX: &str = "assets/minecraft/blockstates/";
-/// Prefix of the 1.8 block model documents inside the client jar.
-const MODELS_PREFIX: &str = "assets/minecraft/models/block/";
+/// Prefix of the 1.8 block and item model documents inside the client jar.
+const MODELS_PREFIX: &str = "assets/minecraft/models/";
 /// Prefix of the 1.8 block textures inside the client jar.
 const BLOCK_TEXTURES_PREFIX: &str = "assets/minecraft/textures/blocks/";
 /// Prefix of the 1.8 item textures inside the client jar.
@@ -671,10 +671,11 @@ mod tests {
     }
 
     #[test]
-    fn only_the_m5_document_prefixes_are_resources() {
+    fn only_the_model_and_blockstate_prefixes_are_resources() {
         assert!(is_json_resource("assets/minecraft/blockstates/stone.json"));
         assert!(is_json_resource("assets/minecraft/models/block/stone.json"));
-        assert!(!is_json_resource("assets/minecraft/models/item/stone.json"));
+        assert!(is_json_resource("assets/minecraft/models/item/stone.json"));
+        assert!(!is_json_resource("assets/minecraft/lang/en_US.json"));
         assert!(is_texture_metadata(
             "assets/minecraft/textures/blocks/water_still.png.mcmeta"
         ));

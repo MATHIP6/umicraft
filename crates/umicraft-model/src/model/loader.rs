@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::display::DisplayTransforms;
 use crate::error::{ModelError, ModelResult};
-use crate::geometry::{bake_quad, ModelRotation, QuadSpec};
+use crate::geometry::{bake_quad, ModelQuad, ModelRotation, QuadSpec};
 
 use super::document::{invalid, model_path, resolve_texture_value, resource, Element, RawModel};
 use super::{ResolvedModel, ResourceSource};
@@ -146,29 +146,10 @@ impl<'a> ModelLoader<'a> {
         uvlock: bool,
     ) -> ModelResult<ResolvedModel> {
         let merged = self.merged(name, &mut Vec::new())?;
-        let mut quads = Vec::new();
-        if let Some(elements) = &merged.elements {
-            for element in elements.iter() {
-                for (face, spec) in &element.faces {
-                    let texture = resolve_texture_value(&merged.textures, &spec.texture, name)?;
-                    quads.push(bake_quad(&QuadSpec {
-                        face: *face,
-                        from: element.from,
-                        to: element.to,
-                        uv: spec.uv,
-                        uv_rotation: spec.rotation,
-                        cullface: spec.cullface,
-                        texture: &texture,
-                        tint: spec.tint,
-                        shade: element.shade,
-                        element_rotation: element.rotation,
-                        model_rotation: rotation,
-                        uvlock,
-                    }));
-                }
-            }
-        }
-
+        let quads = match &merged.elements {
+            Some(elements) => bake_elements(elements, &merged.textures, name, rotation, uvlock)?,
+            None => Vec::new(),
+        };
         let particle = match merged.textures.get("particle") {
             Some(value) => Some(resolve_texture_value(&merged.textures, value, name)?),
             None => None,
@@ -179,6 +160,38 @@ impl<'a> ModelLoader<'a> {
             particle,
         })
     }
+}
+
+/// Bakes the faces of `elements`, resolving their `#texture` references
+/// against `textures` (`model` names the document in errors).
+pub(crate) fn bake_elements(
+    elements: &[Element],
+    textures: &BTreeMap<String, String>,
+    model: &str,
+    rotation: ModelRotation,
+    uvlock: bool,
+) -> ModelResult<Vec<ModelQuad>> {
+    let mut quads = Vec::new();
+    for element in elements {
+        for (face, spec) in &element.faces {
+            let texture = resolve_texture_value(textures, &spec.texture, model)?;
+            quads.push(bake_quad(&QuadSpec {
+                face: *face,
+                from: element.from,
+                to: element.to,
+                uv: spec.uv,
+                uv_rotation: spec.rotation,
+                cullface: spec.cullface,
+                texture: &texture,
+                tint: spec.tint,
+                shade: element.shade,
+                element_rotation: element.rotation,
+                model_rotation: rotation,
+                uvlock,
+            }));
+        }
+    }
+    Ok(quads)
 }
 
 /// A model after parent merging.
@@ -238,7 +251,9 @@ impl MergedModel {
 /// The marker model for a `builtin/*` name, `None` for any other name.
 fn builtin_marker(name: &str) -> Option<Builtin> {
     match name.strip_prefix("builtin/")? {
-        "generated" => Some(Builtin::Generated),
+        // `ModelBakery` runs the compass and the clock through the same
+        // generator as `builtin/generated`; only their sprite is animated.
+        "generated" | "compass" | "clock" => Some(Builtin::Generated),
         "entity" => Some(Builtin::Entity),
         _ => None,
     }
