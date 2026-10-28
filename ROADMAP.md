@@ -303,6 +303,22 @@ every click mode, no full-window resync caused by a desync occurs over a
 15-minute scripted session, and the trace matches vanilla for the same
 clicks.
 
+**Status (2026-10-28): in progress, not done.** Implemented (ADR-0025,
+`docs/parity.md` "Inventory"): click prediction for every mode with rollback of
+a rejected `Confirm Transaction`, `Click Window` from the screens (left, right,
+shift, drag, double click, number keys, Q, creative middle), the armour bar
+from the armour slots, cursor item, tooltips, and the screens of the player
+inventory, chests, crafting table, furnace, dispenser, dropper and hopper.
+
+**Remaining before P4 is done**
+- Screens and protocol of the brewing stand, enchanting table (`Enchant Item`),
+  anvil (`MC|ItemName`), beacon (`MC|Beacon`), villager (`MC|TrList`,
+  `MC|TrSel`), horse inventory, book and quill, sign editing.
+- Creative inventory (tabs, search, `Creative Inventory Action`).
+- Active effects list in the inventory.
+- A live-server session: the 15-minute scripted trace comparison with vanilla.
+- Language file loader for tooltips (English table today).
+
 ### P5 — Entities (finishes M8)
 
 **Features**

@@ -75,3 +75,17 @@ is replaced by `screens/player.rs` and `screens/layout.rs`.
   of the held item and of the armour bar (supersedes the ADR-0016 amendment).
 - P4d (anvil, beacon, merchant, horse, book, sign, enchanting) and P4e
   (creative) build on the same `SlotKind`/`ContainerScreen` interfaces.
+
+## Addendum (2026-10-28, P4a-P4c delivered)
+
+- Screens are data: `ScreenSpec` (texture, size, slots, background pieces) and
+  `Decoration` sprites for dynamic parts (furnace flame and arrow). `ScreenKind`
+  is `#[non_exhaustive]`; window kinds without a screen fall back to a chest
+  layout until P4d. `gui_scale` moved to `screens::scale`; `Ui::pointer()` was
+  added for the cursor item.
+- Input is a pure state machine (`umicraft_client::inventory_input`) on the
+  render thread; it emits `GameEvent::Inventory`. The game thread filters the
+  drag slots (`WindowManager::drag_targets`) and falls back to the plain click
+  when none accepts the stack.
+- Tooltips: `inventory::tooltip` is language free; keys are resolved by the
+  renderer from an English table until a language loader exists.

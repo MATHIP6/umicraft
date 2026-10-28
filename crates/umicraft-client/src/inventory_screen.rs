@@ -16,7 +16,9 @@ use umicraft_ui::screens::{ScreenKind, ScreenLayout, SpriteRect};
 use umicraft_ui::widgets::slot;
 use umicraft_ui::{draw_item, FontAtlas, Rect, Ui};
 
+use crate::inventory_input::Context;
 use crate::item_icons::{slot_item, ItemView};
+use crate::tooltip_draw::draw_tooltip;
 
 /// Number of backpack and hotbar slots after a container's own slots.
 const PLAYER_PART_LEN: usize = 36;
@@ -46,6 +48,29 @@ pub fn screen_kind(container: Option<&ContainerView>) -> ScreenKind {
         _ => ScreenKind::Chest {
             rows: rows(container.slots.len()),
         },
+    }
+}
+
+/// The creative game mode id of `Change Game State`.
+const CREATIVE_GAMEMODE: u8 = 1;
+
+/// The layout of the open screen in `viewport` and what the input layer needs
+/// to know about the window (`gamemode` is the wire id of the game mode).
+pub fn screen_input(viewport: Rect, view: &WindowView, gamemode: u8) -> (ScreenLayout, Context) {
+    let layout = ScreenLayout::new(viewport, screen_kind(view.container.as_ref()));
+    let context = Context {
+        cursor_has_item: view.cursor.is_some(),
+        creative: gamemode == CREATIVE_GAMEMODE,
+    };
+    (layout, context)
+}
+
+/// The number of slots the container adds in front of the player part.
+fn own_slot_count(layout: &ScreenLayout, kind: ScreenKind) -> usize {
+    if kind == ScreenKind::Player {
+        0
+    } else {
+        layout.slots.len().saturating_sub(PLAYER_PART_LEN)
     }
 }
 
@@ -91,12 +116,7 @@ pub fn draw_inventory_overlay(
         None => ui.draw().rect(layout.background, FALLBACK_BACKGROUND),
     }
 
-    let own_len = layout.slots.len().saturating_sub(PLAYER_PART_LEN);
-    let own_len = if kind == ScreenKind::Player {
-        0
-    } else {
-        own_len
-    };
+    let own_len = own_slot_count(&layout, kind);
     let textured = region.is_some();
     let mut label = String::with_capacity(12);
     for &(index, rect) in &layout.slots {
@@ -107,6 +127,41 @@ pub fn draw_inventory_overlay(
         slot(ui, id, rect, atlas, item.as_ref(), textured);
     }
     draw_cursor_item(ui, atlas, &layout, view.cursor.as_ref(), items);
+    if view.cursor.is_none() {
+        draw_hovered_tooltip(
+            ui,
+            atlas,
+            viewport,
+            &layout,
+            hovered_stack(ui, &layout, view, own_len),
+        );
+    }
+}
+
+/// The stack under the pointer, if any.
+fn hovered_stack<'a>(
+    ui: &Ui,
+    layout: &ScreenLayout,
+    view: &'a WindowView,
+    own_len: usize,
+) -> Option<&'a ItemStack> {
+    let [x, y] = ui.pointer()?;
+    stack_at(view, own_len, layout.slot_at((x, y))?)
+}
+
+/// Draws the tooltip of `stack` next to the pointer.
+fn draw_hovered_tooltip(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    viewport: Rect,
+    layout: &ScreenLayout,
+    stack: Option<&ItemStack>,
+) {
+    let (Some(stack), Some(pointer)) = (stack, ui.pointer()) else {
+        return;
+    };
+    let lines = umicraft_game::inventory::tooltip::tooltip(stack);
+    draw_tooltip(ui, atlas, viewport, layout.scale as f32, pointer, &lines);
 }
 
 /// Draws one texture sub-rectangle.

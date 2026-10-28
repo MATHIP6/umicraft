@@ -19,6 +19,7 @@ pub mod transfer;
 use umicraft_protocol::packets::play::ItemStack;
 
 use super::space::ClickSpace;
+pub(super) use drag::drag_targets;
 pub use drag::{drag_sequence, DragButton, DragState};
 
 /// The slot id that means "outside the window".

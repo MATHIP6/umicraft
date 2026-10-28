@@ -26,7 +26,9 @@ pub mod error;
 pub mod game;
 pub mod headless;
 pub mod input;
+pub mod inventory_input;
 mod inventory_screen;
+mod inventory_winit;
 pub mod item_icons;
 pub mod item_tints;
 pub mod item_world;
@@ -40,6 +42,7 @@ pub mod terrain_textures;
 #[cfg(test)]
 mod test_support;
 pub mod texture_animator;
+mod tooltip_draw;
 pub mod ui_demo;
 pub mod ui_font;
 pub mod ui_input;

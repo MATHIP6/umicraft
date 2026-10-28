@@ -5,7 +5,7 @@
 use umicraft_protocol::packets::play::ItemStack;
 
 use super::armor;
-use super::click::{slot_click, ClickRequest, DragState};
+use super::click::{drag_targets, slot_click, ClickRequest, DragState};
 use super::kind::{
     resolve_container_slot, SlotTarget, WindowKind, HOTBAR_LEN, HOTBAR_START, MAIN_INV_LEN,
     PLAYER_SLOT_COUNT,
@@ -212,6 +212,28 @@ impl WindowManager {
     }
 
     fn apply_click(&mut self, request: ClickRequest, creative: bool) -> Option<ItemStack> {
+        self.with_space(|space, cursor, drag| slot_click(space, cursor, drag, request, creative))
+    }
+
+    /// The slots of a drag split over `slots` that can take the cursor
+    /// stack, in order (empty when the cursor is empty).
+    ///
+    /// The window cannot say this before the drag ends, so the input layer
+    /// collects every crossed slot and asks here.
+    pub fn drag_targets(&mut self, slots: &[i16]) -> Vec<i16> {
+        self.with_space(|space, cursor, _| {
+            cursor
+                .as_ref()
+                .map_or_else(Vec::new, |held| drag_targets(space, held, slots))
+        })
+    }
+
+    /// Runs `f` on the whole window as one slot list, with the cursor and
+    /// the drag state.
+    fn with_space<R>(
+        &mut self,
+        f: impl FnOnce(&mut ClickSpace<'_>, &mut Option<ItemStack>, &mut DragState) -> R,
+    ) -> R {
         let Self {
             inventory,
             container,
@@ -226,12 +248,12 @@ impl WindowManager {
                     &mut window.container_slots,
                     &window.kinds,
                 );
-                slot_click(&mut space, cursor, drag, request, creative)
+                f(&mut space, cursor, drag)
             }
             None => {
                 let kinds = player_window_kinds();
                 let mut space = ClickSpace::player_window(inventory, &kinds);
-                slot_click(&mut space, cursor, drag, request, creative)
+                f(&mut space, cursor, drag)
             }
         }
     }

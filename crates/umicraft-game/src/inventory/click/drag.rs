@@ -160,6 +160,22 @@ impl DragState {
     }
 }
 
+/// The slots of `slots` a drag of `held` can really fill, in order.
+///
+/// This is the filter vanilla applies while the pointer crosses slots
+/// (`GuiContainer.mouseClickMove`): the slot must take the item and there
+/// must be an item left for it (`stackSize > dragSplittingSlots.size()`).
+pub(crate) fn drag_targets(space: &ClickSpace<'_>, held: &ItemStack, slots: &[i16]) -> Vec<i16> {
+    let mut accepted: Vec<i16> = Vec::new();
+    for &slot in slots {
+        let fits = usize::try_from(slot).is_ok_and(|index| can_add(space, index, held));
+        if fits && count(held) > accepted.len() as i32 && !accepted.contains(&slot) {
+            accepted.push(slot);
+        }
+    }
+    accepted
+}
+
 /// `canAddItemToSlot(.., true)` and `isItemValid`.
 fn can_add(space: &ClickSpace<'_>, index: usize, held: &ItemStack) -> bool {
     if index >= space.len() || !space.kind(index).accepts(held) {
@@ -241,6 +257,16 @@ mod tests {
         assert!(w.inv.slot(5).is_none());
         assert_eq!(w.inv.slot(10).map(count), Some(2));
         assert_eq!(w.inv.slot(11).map(count), Some(2));
+    }
+
+    #[test]
+    fn targets_skip_refusing_slots_and_stop_when_the_stack_runs_out() {
+        let mut w = TestWindow::player();
+        w.inv.set_slot(11, Some(stack(2, 1)));
+        let held = stack(1, 2);
+        // Slot 5 is armour (refuses), 11 holds another item, 12 repeats.
+        let targets = drag_targets(&w.space(), &held, &[5, 11, 10, 12, 10, 13]);
+        assert_eq!(targets, vec![10, 12]);
     }
 
     #[test]

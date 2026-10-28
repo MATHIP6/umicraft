@@ -61,7 +61,12 @@ use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 use crate::cracks::Crack;
 use crate::error::ClientError;
 use crate::input::InputUpdate;
+use crate::inventory_input::InventoryAction;
 use crate::network::{self, ClientCommand, NetworkConfig};
+
+#[path = "inventory_events.rs"]
+mod inventory_events;
+use inventory_events::apply_inventory_action;
 
 /// The tick period of the simulation: 20 Hz, as the 1.8 server (spec GAM-1).
 pub const TICK: Duration = Duration::from_millis(50);
@@ -149,6 +154,8 @@ pub enum GameEvent {
     ReMeshAll,
     /// The client closes a container or the player inventory (E / Escape).
     CloseInventory,
+    /// A slot interaction of the open inventory or container screen.
+    Inventory(InventoryAction),
     /// The player pressed "Respawn" on the death screen.
     Respawn,
 }
@@ -821,6 +828,10 @@ fn handle_event(
             game.windows.close_window(window_id as u8);
             queue.push(ClientCommand::CloseWindow { window_id });
             publish_inventory(game, frames);
+            false
+        }
+        GameEvent::Inventory(action) => {
+            apply_inventory_action(game, action, queue, frames);
             false
         }
         GameEvent::Respawn => {
@@ -2115,7 +2126,7 @@ mod tests {
 
     /// A placed, playing game on the floor of a loaded chunk, for the
     /// traffic tests.
-    fn placed_game() -> Game {
+    pub(super) fn placed_game() -> Game {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.playing = true;
         game

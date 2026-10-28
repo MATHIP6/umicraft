@@ -19,9 +19,11 @@ use umicraft_render::{
     draw_hud, Camera, HudLayout, HudState, NoIcons, Overlay, RenderEnvironment, Renderer, SkyState,
 };
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
-use umicraft_ui::{debug_screen::DebugScreen, draw_item, FontAtlas, Rect, Ui, UiOutput};
+use umicraft_ui::{
+    debug_screen::DebugScreen, draw_item, FontAtlas, Rect, ScreenLayout, Ui, UiOutput,
+};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -33,7 +35,9 @@ use crate::entity_textures::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
-use crate::inventory_screen::draw_inventory_overlay;
+use crate::inventory_input::{Context, InventoryAction, InventoryInput};
+use crate::inventory_screen::{draw_inventory_overlay, screen_input};
+use crate::inventory_winit;
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{push_held_item, ItemLayers, WorldItems};
 use crate::mesher::default_worker_count;
@@ -122,6 +126,8 @@ struct App {
     debug_screen: DebugScreen,
     /// The winit events waiting for the next UI frame.
     ui_input: UiInputTranslator,
+    /// Turns the mouse and keys on the inventory screen into slot clicks.
+    inventory_input: InventoryInput,
     /// The font loaded at startup, before the renderer exists.
     font: LoadedFont,
     /// The terrain textures loaded at start-up, until the renderer binds them.
@@ -188,6 +194,7 @@ impl App {
             ui: Ui::new(ui_viewport),
             debug_screen: DebugScreen::new(),
             ui_input: UiInputTranslator::new(),
+            inventory_input: InventoryInput::new(),
             font,
             terrain,
             ui_atlas: None,
@@ -411,7 +418,9 @@ impl App {
                 _ => {}
             }
         }
-        // Forward to the UI translator so slot-click-by-number-key works.
+        if event.state == ElementState::Pressed && !event.repeat {
+            self.inventory_key(code);
+        }
         self.ui_input.key(code, event.state, event.text.as_deref());
         let _ = event_loop;
     }
@@ -432,7 +441,68 @@ impl App {
             let _ = self.session.events().try_send(GameEvent::CloseInventory);
         }
         self.inventory_open = false;
+        self.inventory_input.reset();
         self.ui_input.clear();
+    }
+
+    /// The layout and input context of the open inventory screen, if any.
+    fn inventory_screen(&self) -> Option<(ScreenLayout, Context)> {
+        if !(self.inventory_open || self.container_is_open()) {
+            return None;
+        }
+        let size = self.window.as_ref()?.inner_size();
+        let viewport = Rect::new(0.0, 0.0, size.width as f32, size.height as f32);
+        let world = self.world.as_ref()?;
+        Some(screen_input(
+            viewport,
+            world.window_view(),
+            world.status().gamemode,
+        ))
+    }
+
+    /// Sends the slot interaction of the inventory input to the game thread.
+    fn send_inventory(&self, action: Option<InventoryAction>) {
+        if let Some(action) = action {
+            let _ = self.session.events().try_send(GameEvent::Inventory(action));
+        }
+    }
+
+    /// Feeds a pointer move to the inventory input.
+    fn inventory_pointer(&mut self, position: PhysicalPosition<f64>) {
+        if let Some((layout, context)) = self.inventory_screen() {
+            let point = (position.x as f32, position.y as f32);
+            self.inventory_input.pointer_moved(&layout, point, context);
+        }
+    }
+
+    /// Feeds a mouse button to the inventory input.
+    fn inventory_button(&mut self, state: ElementState, button: MouseButton) {
+        let (Some((layout, context)), Some(button)) =
+            (self.inventory_screen(), inventory_winit::button(button))
+        else {
+            return;
+        };
+        let action = match state {
+            ElementState::Pressed => {
+                self.inventory_input
+                    .button_pressed(&layout, button, context, Instant::now())
+            }
+            ElementState::Released => self
+                .inventory_input
+                .button_released(&layout, button, context),
+        };
+        self.send_inventory(action);
+    }
+
+    /// Feeds a key press (number keys, Q) to the inventory input.
+    fn inventory_key(&mut self, code: KeyCode) {
+        let (Some((layout, context)), Some(key)) =
+            (self.inventory_screen(), inventory_winit::key(code))
+        else {
+            return;
+        };
+        let action = self.inventory_input.key_pressed(&layout, key, context);
+        self.send_inventory(action);
     }
 
     /// Handles a key press while the chat input is open.
@@ -991,12 +1061,16 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, event),
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.ui_input.modifiers(modifiers.state());
+                let state = modifiers.state();
+                self.inventory_input
+                    .set_modifiers(state.shift_key(), state.control_key());
             }
             WindowEvent::CursorMoved { position, .. } => {
                 // Keep the pointer current even while the UI is closed: F2 can
                 // open the screen before the next mouse movement, and the first
                 // click must use the physical cursor, not the initial origin.
                 self.ui_input.pointer_moved(position);
+                self.inventory_pointer(position);
                 let show_inventory = self.modal_screen_open();
                 if !self.show_debug_screen && !show_inventory {
                     self.ui_input.clear();
@@ -1006,6 +1080,7 @@ impl ApplicationHandler for App {
                 let show_inventory = self.modal_screen_open();
                 if self.show_debug_screen || show_inventory {
                     self.ui_input.pointer_button(state, button);
+                    self.inventory_button(state, button);
                 } else {
                     match button {
                         MouseButton::Left => {

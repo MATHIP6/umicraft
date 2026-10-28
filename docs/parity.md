@@ -96,8 +96,12 @@ session is [`parity-harness.md`](parity-harness.md).
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
 | Inventory | window protocol decode | Partial — not verified against vanilla | P4 | — |  |
-| Inventory | slot interaction (all click modes) | Missing | P4 | — | `Click Window` never sent today. |
-| Inventory | container-specific screens | Missing | P4 | — |  |
+| Inventory | slot interaction: left, right, shift, drag, double click, number keys, Q / Ctrl+Q, creative middle | Partial — not verified against vanilla | P4 | unit tests, no live trace yet | Shift + double click does not shift-click every matching slot; pick-block key over a slot, touchscreen mode and the empty-cursor outside click (mode 4, −999) are not sent. Middle click is filtered client side in survival. |
+| Inventory | click prediction and rollback of a rejected `Confirm Transaction` | Partial — not verified against vanilla | P4 | `inventory::transactions` tests | No recipe book: the crafting result is server driven, taking it consumes one item per ingredient; no furnace fuel / brewing ingredient validation; shift-click uses a generic plan outside the player window, crafting table and plain inventories (ADR-0025). |
+| Inventory | armour bar from the armour slots | Partial — not verified against vanilla | P4 | `armour_bar_follows_the_armour_slots` | `Entity Equipment` of the local player is ignored. |
+| Inventory | container screens: chest (single, double, ender), crafting table, furnace (progress), dispenser, dropper, hopper | Partial — not verified against vanilla | P4 | `umicraft-ui` screen tests | Screenshot diff pending. |
+| Inventory | container screens: brewing stand, enchanting table, anvil, beacon, villager, horse, book, sign | Missing | P4 | — | Fall back to a chest layout (P4d). |
+| Inventory | item tooltips (name by rarity, enchantments, lore, attack damage, unbreakable) | Partial — not verified against vanilla | P4 | `inventory::tooltip` tests | English table only until a language file loader exists; no potion, book, map, firework or banner lines; solid tooltip border. |
 | Inventory | creative inventory | Missing | P4 | — |  |
 
 ## Entities
