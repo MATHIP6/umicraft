@@ -198,11 +198,17 @@ impl ItemResources {
         let tints = layer_tints(item_id, damage, color, self.grass_color);
         let style = ItemStyle {
             atlas: &self.atlas,
-            // Flat sprites are drawn unlit; lit blocks keep the face shade.
-            light: VertexLight::new(0, 15, 15, model.gui_3d),
+            // Full light: lit blocks get the GUI lights baked into the tint
+            // (`push_quads_gui`), flat sprites stay unlit.
+            light: VertexLight::new(0, 15, 15, false),
             tints: &tints,
         };
-        mesh.push_quads(quads, &gui_pose(model), &style);
+        let pose = gui_pose(model);
+        if model.gui_3d {
+            mesh.push_quads_gui(quads, &pose, &style);
+        } else {
+            mesh.push_quads(quads, &pose, &style);
+        }
         !mesh.is_empty()
     }
 }

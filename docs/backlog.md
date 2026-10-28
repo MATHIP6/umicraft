@@ -35,6 +35,7 @@ picked up, and delete it when it is done.
   `crates/umicraft-client/src/tooltip_draw.rs`, commit f379d02); every other
   coloured UI element (coloured chat and HUD text, button and slot fills, the
   death screen, the debug screen) still has it.
+- **Also suspected:** every multiplicative brightness factor applied to a texel in the shaders (world face shade 0.6 / 0.8 / 0.5, entity shade, item lighting) is multiplied in linear space, so it darkens less than the vanilla factor does on 8-bit values. The GUI block icons are fixed by converting the factor (`gui_face_factor` in `crates/umicraft-mesh/src/item.rs`); check the terrain and entity shaders against the vanilla screenshots.
 - **Fix to investigate:** convert the vertex colour in the shader
   (`pow(rgb, 2.4)` piecewise sRGB decode); tinting a texel by a colour is exact
   in linear space. Then remove the CPU conversion of the tooltip, and re-tune any

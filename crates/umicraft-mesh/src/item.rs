@@ -60,11 +60,31 @@ impl ItemMesh {
     /// outside faces. A texture missing from the atlas uses layer 0, the
     /// missing-texture checker.
     pub fn push_quads(&mut self, quads: &[ModelQuad], pose: &Mat4, style: &ItemStyle<'_>) {
+        self.push(quads, pose, style, |_| 1.0);
+    }
+
+    /// Appends the quads of a lit block icon placed by the GUI `pose`.
+    ///
+    /// The reference lights GUI blocks with two fixed lights
+    /// (`RenderHelper.enableGUIStandardItemLighting`), not with the world
+    /// face shade, so each face gets its [`gui_face_factor`] baked into the
+    /// vertex tint. `style.light` must not ask for the world shade.
+    pub fn push_quads_gui(&mut self, quads: &[ModelQuad], pose: &Mat4, style: &ItemStyle<'_>) {
+        self.push(quads, pose, style, |quad| gui_face_factor(quad.normal));
+    }
+
+    fn push(
+        &mut self,
+        quads: &[ModelQuad],
+        pose: &Mat4,
+        style: &ItemStyle<'_>,
+        factor: impl Fn(&ModelQuad) -> f32,
+    ) {
         let mirrored = pose.determinant() < 0.0;
         let light = style.light.pack();
         for quad in quads {
             let layer = style.atlas.layer(&quad.texture).unwrap_or(0);
-            let tint = quad_tint(quad, style.tints);
+            let tint = scale_tint(quad_tint(quad, style.tints), factor(quad));
             let base = self.vertices.len() as u32;
             self.vertices.extend((0..4).map(|corner| {
                 Vertex {
@@ -86,6 +106,43 @@ impl ItemMesh {
             self.indices.extend(order.map(|offset| base + offset));
         }
     }
+}
+
+/// The brightness the two fixed GUI lights give a face of a block icon.
+///
+/// Computed from `RenderHelper.enableStandardItemLighting` (two lights of
+/// 0.6 and ambient 0.4) and the GUI pose of a block (rotate X 210, Y -135, then
+/// the model `gui` rotation 30 / 225): the top face is fully lit, the two
+/// visible sides get 0.592 (west and east) and 0.4 (north and south). These
+/// are the 8-bit values the fixed pipeline multiplies in, so they are
+/// converted to the linear space the sRGB target blends in.
+#[must_use]
+pub fn gui_face_factor(normal: [f32; 3]) -> f32 {
+    let srgb: f32 = if normal[1] > 0.5 {
+        1.0
+    } else if normal[1] < -0.5 || normal[2].abs() > 0.5 {
+        0.4
+    } else {
+        0.592
+    };
+    srgb_to_linear(srgb)
+}
+
+fn srgb_to_linear(value: f32) -> f32 {
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Multiplies the three channels of a `0x00RRGGBB` tint by `factor`.
+fn scale_tint(tint: u32, factor: f32) -> u32 {
+    let channel = |shift: u32| {
+        let value = ((tint >> shift) & 0xFF) as f32 * factor;
+        (value.round() as u32).min(0xFF) << shift
+    };
+    channel(16) | channel(8) | channel(0)
 }
 
 fn quad_tint(quad: &ModelQuad, tints: &[u32]) -> u32 {
@@ -135,6 +192,26 @@ mod tests {
         assert_eq!(mesh.vertices[2].position, [11.0, 1.0, 0.0]);
         assert_eq!(mesh.vertices[0].normal, [0.0, 0.0, -1.0]);
         assert_eq!(mesh.vertices[0].layer, 1);
+    }
+
+    #[test]
+    fn gui_lighting_darkens_the_sides_like_the_fixed_lights() {
+        assert_eq!(gui_face_factor([0.0, 1.0, 0.0]), 1.0);
+        let west = gui_face_factor([-1.0, 0.0, 0.0]);
+        let north = gui_face_factor([0.0, 0.0, -1.0]);
+        assert!((west - 0.30).abs() < 0.01, "0.592 in sRGB is 0.30 linear");
+        assert!((north - 0.133).abs() < 0.01, "0.4 in sRGB is 0.133 linear");
+        assert_eq!(gui_face_factor([1.0, 0.0, 0.0]), west);
+    }
+
+    #[test]
+    fn push_quads_gui_bakes_the_face_factor_into_the_tint() {
+        let atlas = AtlasLayout::from_keys(["items/apple"]);
+        let mut mesh = ItemMesh::default();
+        // The test quad faces north (-z).
+        mesh.push_quads_gui(&[quad(None)], &Mat4::IDENTITY, &style(&atlas, &[]));
+        let channel = (mesh.vertices[0].tint & 0xFF) as f32 / 255.0;
+        assert!((channel - gui_face_factor([0.0, 0.0, -1.0])).abs() < 0.01);
     }
 
     #[test]
