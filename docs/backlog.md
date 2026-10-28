@@ -25,6 +25,29 @@ picked up, and delete it when it is done.
 - **Where:** `dirty_for_block` / `dirty_for_edges` in
   `crates/umicraft-world/src/world.rs`.
 
+### UI vertex colours are not linearised for the sRGB target
+- **Problem:** `gui_overlay.wgsl` returns `texel * vertex_color` and the render
+  target is sRGB (`Rgba8UnormSrgb` headless, the adapter default on a window),
+  so a colour written for a plain 8-bit framebuffer comes out too light: the
+  vanilla tooltip background `0x100010` showed as a bright purple and the
+  blue `0x5555FF` text as periwinkle. White and black are unaffected. Only the
+  tooltip is fixed, on the CPU (`linear` / `vanilla` in
+  `crates/umicraft-client/src/tooltip_draw.rs`, commit f379d02); every other
+  coloured UI element (coloured chat and HUD text, button and slot fills, the
+  death screen, the debug screen) still has it.
+- **Fix to investigate:** convert the vertex colour in the shader
+  (`pow(rgb, 2.4)` piecewise sRGB decode); tinting a texel by a colour is exact
+  in linear space. Then remove the CPU conversion of the tooltip, and re-tune any
+  colour that was adjusted by eye. Alpha blending also happens in linear space
+  while vanilla blends the sRGB values, so translucent fills (dimming
+  `0.55` black, drag highlight) differ slightly; decide whether to emulate the
+  vanilla blend or accept it. Compare with the vanilla screenshots
+  (owner's set, outside the repository, spec §3).
+- **Where:** `crates/umicraft-render/src/gui_overlay.wgsl`,
+  `crates/umicraft-render/src/ui_pass.rs`; the surface format is chosen in
+  `Renderer::new_windowed`.
+- **Milestone:** P9 / P10 (HUD, screens) or the screenshot comparison of P13.
+
 ## Game logic
 
 ### Respawn after death

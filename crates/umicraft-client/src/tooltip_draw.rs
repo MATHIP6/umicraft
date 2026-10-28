@@ -212,6 +212,29 @@ pub fn draw_tooltip(
     }
 }
 
+/// Draws a vertical gradient as one strip per GUI pixel row.
+///
+/// The colours are interpolated as vanilla does, on the sRGB channels, and
+/// each strip is then linearised for the render target.
+fn gradient_column(
+    draw: &mut umicraft_ui::DrawList,
+    origin: [f32; 2],
+    size: [f32; 2],
+    top: Color,
+    bottom: Color,
+) {
+    let rows = (size[1] / size[0]).round().max(1.0) as u32;
+    let strip = size[1] / rows as f32;
+    for row in 0..rows {
+        let t = (row as f32 + 0.5) / rows as f32;
+        let color = std::array::from_fn(|i| top[i] + (bottom[i] - top[i]) * t);
+        draw.rect(
+            Rect::new(origin[0], origin[1] + strip * row as f32, size[0], strip),
+            vanilla(color),
+        );
+    }
+}
+
 /// The dark background with the purple border around a text block.
 fn draw_box(ui: &mut Ui, origin: [f32; 2], size: [f32; 2], scale: f32) {
     let pad = PADDING * scale;
@@ -241,13 +264,24 @@ fn draw_box(ui: &mut Ui, origin: [f32; 2], size: [f32; 2], scale: f32) {
         ),
         background,
     );
-    // Border, inside the body: vanilla fades it from top to bottom.
-    let side: Color = std::array::from_fn(|i| (border_top[i] + border_bottom[i]) * 0.5);
+    // Border, inside the body: the sides fade from the top colour to the
+    // bottom one (`GuiScreen.drawHoveringText` draws them with
+    // `drawGradientRect`).
     let inner_h = h + 2.0 * pad - 2.0 * scale;
-    draw.rect(Rect::new(x - pad, y - pad + scale, scale, inner_h), side);
-    draw.rect(
-        Rect::new(x + w + pad - scale, y - pad + scale, scale, inner_h),
-        side,
+    let top = y - pad + scale;
+    gradient_column(
+        draw,
+        [x - pad, top],
+        [scale, inner_h],
+        BORDER_TOP,
+        BORDER_BOTTOM,
+    );
+    gradient_column(
+        draw,
+        [x + w + pad - scale, top],
+        [scale, inner_h],
+        BORDER_TOP,
+        BORDER_BOTTOM,
     );
     draw.rect(
         Rect::new(x - pad, y - pad, w + 2.0 * pad, scale),
@@ -280,6 +314,30 @@ mod tests {
         assert_eq!(background[3], 0.94);
         assert_eq!(rgba(0xFF_FF_FF, 1.0), [1.0, 1.0, 1.0, 1.0]);
         assert!(rgba(0x55_55_FF, 1.0)[0] < 0.1);
+    }
+
+    #[test]
+    fn a_gradient_column_has_one_strip_per_gui_pixel_and_ends_on_the_borders() {
+        let mut draw = umicraft_ui::DrawList::new();
+        // Scale 2: a 2 px wide column, 20 px tall = 10 GUI pixel rows.
+        gradient_column(
+            &mut draw,
+            [0.0, 0.0],
+            [2.0, 20.0],
+            BORDER_TOP,
+            BORDER_BOTTOM,
+        );
+        assert_eq!(draw.len(), 10);
+        let colors: Vec<Color> = draw
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                umicraft_ui::DrawCommand::Rect { color, .. } => Some(*color),
+                _ => None,
+            })
+            .collect();
+        assert!(colors[0][2] > colors[9][2], "blue fades towards the bottom");
+        assert!((colors[0][2] - vanilla(BORDER_TOP)[2]).abs() < 0.1);
     }
 
     #[test]
