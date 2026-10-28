@@ -19,6 +19,7 @@ pub mod click;
 pub mod kind;
 mod manager;
 pub mod player;
+pub mod preview;
 pub mod slot;
 pub mod space;
 pub mod stack;
@@ -32,4 +33,5 @@ pub use kind::{
 };
 pub use manager::{ClickCommand, ContainerWindow, WindowManager};
 pub use player::PlayerInventory;
+pub use preview::{drag_preview, DragPreview};
 pub use view::{ContainerView, WindowView};

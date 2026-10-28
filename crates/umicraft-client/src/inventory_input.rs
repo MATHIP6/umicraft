@@ -132,6 +132,15 @@ impl InventoryInput {
         self.ctrl = ctrl;
     }
 
+    /// The drag split in progress: the slots crossed so far and the button,
+    /// once at least two slots were crossed (vanilla then shows the preview).
+    #[must_use]
+    pub fn drag_in_progress(&self) -> Option<(&[i16], DragButton)> {
+        let press = self.press.as_ref()?;
+        let slots = press.drag.as_deref().filter(|slots| slots.len() > 1)?;
+        Some((slots, press.button.drag_button()))
+    }
+
     /// Forgets the press and the last click, for when the screen closes.
     pub fn reset(&mut self) {
         self.press = None;

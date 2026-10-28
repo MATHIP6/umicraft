@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use umicraft_game::inventory::HOTBAR_START;
+use umicraft_game::inventory::{drag_preview, DragPreview, WindowView, HOTBAR_START};
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
     draw_hud, Camera, HudLayout, HudState, NoIcons, Overlay, RenderEnvironment, Renderer, SkyState,
@@ -476,6 +476,13 @@ impl App {
         ))
     }
 
+    /// The stacks a drag split in progress will leave in the slots.
+    fn inventory_drag_preview(&self, view: &WindowView) -> Option<DragPreview> {
+        let (slots, button) = self.inventory_input.drag_in_progress()?;
+        let creative = self.world.as_ref()?.status().gamemode == 1;
+        drag_preview(view, slots, button, creative)
+    }
+
     /// Sends the slot interaction of the inventory input to the game thread.
     fn send_inventory(&self, action: Option<InventoryAction>) {
         if let Some(action) = action {
@@ -760,6 +767,7 @@ impl App {
         } else if show_inventory {
             let wv = self.world.as_ref().map(|w| w.window_view().clone());
             if let Some(wv) = wv {
+                let drag = self.inventory_drag_preview(&wv);
                 draw_inventory_overlay(
                     &mut self.ui,
                     atlas,
@@ -767,6 +775,7 @@ impl App {
                     &wv,
                     self.gui_atlas.as_ref(),
                     ItemView::new(self.items.as_deref(), self.dials.frames()),
+                    drag.as_ref(),
                 );
             }
         }

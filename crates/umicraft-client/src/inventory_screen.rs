@@ -9,7 +9,7 @@
 
 use umicraft_assets::GuiAtlas;
 use umicraft_game::inventory::{
-    resolve_container_slot, ContainerView, SlotTarget, WindowKind, WindowView,
+    resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
 };
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_ui::screens::{ScreenKind, ScreenLayout, SpriteRect};
@@ -29,6 +29,8 @@ const DIMMING: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
 /// Fill used when the GUI texture is missing.
 const FALLBACK_BACKGROUND: [f32; 4] = [0.12, 0.12, 0.15, 0.92];
 const WHITE: [f32; 4] = [1.0; 4];
+/// Tint over the slots of a drag preview (vanilla 0x80FFFFFF).
+const DRAG_HIGHLIGHT: [f32; 4] = [1.0, 1.0, 1.0, 0.5];
 
 /// Chooses the screen of an open window.
 ///
@@ -95,6 +97,7 @@ pub fn draw_inventory_overlay(
     view: &WindowView,
     gui_atlas: Option<&GuiAtlas>,
     items: ItemView<'_>,
+    drag: Option<&DragPreview>,
 ) {
     ui.draw().rect(viewport, DIMMING);
     let kind = screen_kind(view.container.as_ref());
@@ -123,10 +126,18 @@ pub fn draw_inventory_overlay(
         label.clear();
         std::fmt::Write::write_fmt(&mut label, format_args!("win{index}")).ok();
         let id = ui.id(&label);
-        let item = stack_at(view, own_len, index).map(|stack| slot_item(items, stack));
+        let previewed = drag.and_then(|d| d.slots.iter().find(|(i, _)| *i == index));
+        let stack = previewed
+            .map(|(_, s)| s)
+            .or_else(|| stack_at(view, own_len, index));
+        let item = stack.map(|stack| slot_item(items, stack));
         slot(ui, id, rect, atlas, item.as_ref(), textured);
+        if previewed.is_some() {
+            ui.draw().rect(rect, DRAG_HIGHLIGHT);
+        }
     }
-    draw_cursor_item(ui, atlas, &layout, view.cursor.as_ref(), items);
+    let cursor = drag.map_or(view.cursor.as_ref(), |d| d.cursor.as_ref());
+    draw_cursor_item(ui, atlas, &layout, cursor, items);
     if view.cursor.is_none() {
         draw_hovered_tooltip(
             ui,
