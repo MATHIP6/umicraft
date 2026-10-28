@@ -17,8 +17,8 @@
 //! [`SpriteLookup`].
 
 pub mod generated;
-pub mod pose;
 mod names;
+pub mod pose;
 pub mod set;
 pub mod special;
 

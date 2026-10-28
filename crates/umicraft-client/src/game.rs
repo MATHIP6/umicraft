@@ -55,7 +55,7 @@ use umicraft_protocol::packets::play::clientbound::{
 };
 use umicraft_protocol::packets::play::ItemStack as WireItemStack;
 use umicraft_protocol::PlayServerbound;
-use umicraft_render::{HudState, ItemStack, OutlineBox};
+use umicraft_render::{HudState, OutlineBox};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
 use crate::cracks::Crack;
@@ -619,14 +619,6 @@ impl Game {
 
     /// The HUD state of the session.
     fn hud(&self) -> HudState {
-        let wm_hotbar = self.windows.hotbar();
-        let hotbar = std::array::from_fn(|i| {
-            wm_hotbar[i].as_ref().map(|item| ItemStack {
-                item_id: i32::from(item.item_id),
-                damage: item.damage,
-                count: u8::try_from(item.stack_size).unwrap_or(0),
-            })
-        });
         HudState {
             health: self.health,
             food: self.food,
@@ -634,7 +626,6 @@ impl Game {
             experience: self.experience,
             level: self.level,
             score: self.score,
-            hotbar,
             selected_slot: self.selected_slot,
             crosshair: true,
             chat_lines: self.chat.iter().cloned().collect(),

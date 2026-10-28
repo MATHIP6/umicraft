@@ -22,8 +22,9 @@ use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
+use umicraft_mesh::item::ItemMesh;
 use umicraft_mesh::{Mesh, Vertex, TEXTURE_LAYERS};
-use umicraft_ui::{DrawList, FontAtlas};
+use umicraft_ui::{DrawCommand, DrawList, FontAtlas};
 use umicraft_world::ChunkPos;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -33,6 +34,7 @@ use crate::camera::Camera;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
+use crate::items::{IconAtlas, IconProvider};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::sky::{SkyRenderer, SkyState};
@@ -58,12 +60,15 @@ const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
 const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
 
+/// Half the depth range of the icon camera, in GUI pixels; a lit block's
+/// rotated corners stay within about 17.
+const ICON_DEPTH: f32 = 32.0;
 /// A fog distance the hand never reaches.
 const HAND_FOG_FREE: f32 = 1.0e6;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct CameraUniform {
+pub(crate) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     camera_pos: [f32; 3],
     /// Sun-light factor from [`SkyState::sun_brightness`].
@@ -80,8 +85,28 @@ struct CameraUniform {
     _pad: [f32; 2],
 }
 
+impl CameraUniform {
+    /// The icon camera: an orthographic view of the 16x16 GUI box (y down,
+    /// larger z farther), no fog, full daylight and no gamma lift.
+    pub(crate) fn icon() -> Self {
+        Self {
+            // x: 0..16 to -1..1; y flips (down to up); z: -D..D to 0..1.
+            view_proj: (glam::Mat4::from_translation(Vec3::new(-1.0, 1.0, 0.5))
+                * glam::Mat4::from_scale(Vec3::new(1.0 / 8.0, -1.0 / 8.0, 0.5 / ICON_DEPTH)))
+            .to_cols_array_2d(),
+            camera_pos: [0.0; 3],
+            sun_brightness: 1.0,
+            fog_color: [0.0; 3],
+            fog_start: HAND_FOG_FREE,
+            fog_end: HAND_FOG_FREE * 2.0,
+            gamma: 0.0,
+            _pad: [0.0; 2],
+        }
+    }
+}
+
 /// GPU vertex and index buffers for one pass of a chunk mesh.
-struct GpuMeshPass {
+pub(crate) struct GpuMeshPass {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
@@ -190,6 +215,16 @@ pub struct Renderer {
     /// Metrics of the atlas bound to `ui_bind_group`; immutable after upload.
     ui_atlas: FontAtlas,
     ui_pass: UiPass,
+    /// Item icons rendered through the terrain pipeline, drawn as UI quads.
+    icon_atlas: IconAtlas,
+    /// Terrain pipeline without culling, for icon rendering.
+    icon_pipeline: wgpu::RenderPipeline,
+    /// The icon camera over the current block texture array.
+    icon_bind_group: wgpu::BindGroup,
+    /// Binding that samples the icon atlas from the GUI overlay pipeline.
+    icon_gui_bind_group: wgpu::BindGroup,
+    /// Reused geometry buffer of the icon being rendered.
+    icon_mesh: ItemMesh,
     overlay_buffer: wgpu::Buffer,
     overlay_capacity: u64,
     offscreen: Option<OffscreenTarget>,
@@ -554,6 +589,28 @@ impl Renderer {
         };
         let depth_view = create_depth(&device, width, height);
 
+        let icon_atlas = IconAtlas::new(&device, &queue, format);
+        let icon_pipeline = create_terrain_pipeline(
+            &device,
+            &terrain_shader,
+            &terrain_layout,
+            format,
+            TerrainPipelineState::icon(),
+        );
+        let icon_bind_group = create_terrain_bind_group(
+            &device,
+            &terrain_layout,
+            icon_atlas.camera_buffer(),
+            &block_sampler,
+            &block_view,
+        );
+        let icon_gui_bind_group = create_font_bind_group(
+            &device,
+            &gui_overlay_layout,
+            &font_sampler,
+            icon_atlas.view(),
+        );
+
         Ok(Self {
             instance,
             window,
@@ -590,6 +647,11 @@ impl Renderer {
             gui_bind_group: None,
             ui_atlas,
             ui_pass: UiPass::new(width, height),
+            icon_atlas,
+            icon_pipeline,
+            icon_bind_group,
+            icon_gui_bind_group,
+            icon_mesh: ItemMesh::default(),
             overlay_buffer,
             overlay_capacity: OVERLAY_MIN_BYTES,
             offscreen,
@@ -648,14 +710,45 @@ impl Renderer {
     /// [`Renderer::set_font_atlas`], or the built-in fallback atlas when none
     /// was set. The UI is drawn above the HUD and shares the overlay pipeline,
     /// so no extra pass or thread is introduced.
+    ///
+    /// `Item` commands draw from the icon atlas; an icon not rendered yet is
+    /// built by `icons` and rendered first (once per key), so a steady-state
+    /// frame renders no item geometry.
     pub fn render_with_ui(
         &mut self,
         camera: &Camera,
         overlay: &Overlay,
         draw_list: &DrawList,
+        icons: &mut dyn IconProvider,
     ) -> Result<(), RenderError> {
-        self.ui_pass.rebuild(draw_list, &self.ui_atlas);
+        self.prepare_icons(draw_list, icons);
+        let atlas = &self.icon_atlas;
+        self.ui_pass
+            .rebuild_with_icons(draw_list, &self.ui_atlas, &|key| atlas.uv(key));
         self.render_frame(camera, overlay)
+    }
+
+    /// Renders the icons `draw_list` asks for that the atlas lacks.
+    fn prepare_icons(&mut self, draw_list: &DrawList, icons: &mut dyn IconProvider) {
+        for command in draw_list.commands() {
+            let DrawCommand::Item { key, .. } = command else {
+                continue;
+            };
+            if self.icon_atlas.contains(*key) {
+                continue;
+            }
+            self.icon_mesh.clear();
+            if icons.build_icon(*key, &mut self.icon_mesh) {
+                self.icon_atlas.render(
+                    &self.device,
+                    &self.queue,
+                    &self.icon_pipeline,
+                    &self.icon_bind_group,
+                    *key,
+                    &self.icon_mesh,
+                );
+            }
+        }
     }
 
     fn render_frame(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
@@ -886,6 +979,7 @@ impl Renderer {
             &self.block_sampler,
             &view,
         );
+        self.rebind_icons(&view);
         self.official_blocks = Some((texture, width, height));
         Ok(())
     }
@@ -945,6 +1039,21 @@ impl Renderer {
             &self.block_sampler,
             &self.procedural_blocks,
         );
+        let view = self.procedural_blocks.clone();
+        self.rebind_icons(&view);
+    }
+
+    /// Points the icon camera at a replaced block array and forgets the
+    /// icons rendered from the old one.
+    fn rebind_icons(&mut self, block_view: &wgpu::TextureView) {
+        self.icon_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            self.icon_atlas.camera_buffer(),
+            &self.block_sampler,
+            block_view,
+        );
+        self.icon_atlas.invalidate();
     }
 
     /// Replaces the GPU mesh for `pos`, or removes it when both passes are
@@ -1420,6 +1529,10 @@ impl Renderer {
                         pass.set_pipeline(&self.overlay_pipeline);
                         pass.set_bind_group(0, &self.ui_bind_group, &[]);
                     }
+                    UiBatchKind::Icon => {
+                        pass.set_pipeline(&self.gui_overlay_pipeline);
+                        pass.set_bind_group(0, &self.icon_gui_bind_group, &[]);
+                    }
                     UiBatchKind::Gui => {
                         if let Some(gui_bg) = &self.gui_bind_group {
                             pass.set_pipeline(&self.gui_overlay_pipeline);
@@ -1538,6 +1651,7 @@ struct TerrainPipelineState {
     depth_compare: wgpu::CompareFunction,
     blend: wgpu::BlendState,
     bias: wgpu::DepthBiasState,
+    cull_mode: Option<wgpu::Face>,
 }
 
 impl TerrainPipelineState {
@@ -1551,6 +1665,17 @@ impl TerrainPipelineState {
             depth_compare: wgpu::CompareFunction::Less,
             blend: wgpu::BlendState::REPLACE,
             bias: wgpu::DepthBiasState::default(),
+            cull_mode: Some(wgpu::Face::Back),
+        }
+    }
+
+    /// Item icons: the opaque pass without back-face culling, because the
+    /// GUI chains mirror space and the reference draws icons uncullled.
+    fn icon() -> Self {
+        Self {
+            label: "icon pipeline",
+            cull_mode: None,
+            ..Self::opaque()
         }
     }
 
@@ -1576,6 +1701,7 @@ impl TerrainPipelineState {
                 },
             },
             bias: wgpu::DepthBiasState::default(),
+            cull_mode: Some(wgpu::Face::Back),
         }
     }
 
@@ -1607,6 +1733,7 @@ impl TerrainPipelineState {
                 slope_scale: -3.0,
                 clamp: 0.0,
             },
+            cull_mode: Some(wgpu::Face::Back),
         }
     }
 }
@@ -1640,7 +1767,7 @@ fn create_terrain_pipeline(
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
+            cull_mode: state.cull_mode,
             unclipped_depth: false,
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
@@ -1674,7 +1801,7 @@ fn create_terrain_pipeline(
 /// Both slices are required: wgpu rejects a zero-sized buffer, and a malformed
 /// pass with indices but no vertices cannot be drawn. Valid `umicraft-mesh`
 /// output always has four vertices per face.
-fn create_gpu_mesh_pass(
+pub(crate) fn create_gpu_mesh_pass(
     device: &wgpu::Device,
     label: &str,
     vertices: &[Vertex],
@@ -1701,7 +1828,7 @@ fn create_gpu_mesh_pass(
 }
 
 /// Binds and draws one uploaded mesh pass.
-fn draw_gpu_pass(pass: &mut wgpu::RenderPass<'_>, mesh: &GpuMeshPass) {
+pub(crate) fn draw_gpu_pass(pass: &mut wgpu::RenderPass<'_>, mesh: &GpuMeshPass) {
     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
     pass.draw_indexed(0..mesh.index_count, 0, 0..1);

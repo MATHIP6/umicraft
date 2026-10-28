@@ -299,8 +299,8 @@ and `crates/umicraft-client/src/entity_textures.rs`):
   item, so the acceptance criterion "items can be moved" is not met.
 - `Confirm Transaction`: rejected ids are echoed (good), but there is no
   rollback of the local prediction (`game.rs:1095` "follow-up").
-- Slots show the **item id as text**, not an icon; the HUD hotbar does the
-  same (`crates/umicraft-render/src/hud.rs:546`). Item models
+- Slots show the **item id as text**, not an icon (historical: the HUD no longer
+  draws items, the UI crate does, P3). Item models
   (`models/item`, generated layers, block-as-item) are not implemented.
 - Durability uses one reference constant instead of each item's maximum
   damage.

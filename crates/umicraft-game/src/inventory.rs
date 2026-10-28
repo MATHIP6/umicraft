@@ -24,7 +24,7 @@ use umicraft_protocol::packets::play::ItemStack;
 pub const PLAYER_SLOT_COUNT: usize = 45;
 
 /// First hotbar slot index in the player inventory.
-const HOTBAR_START: usize = 36;
+pub const HOTBAR_START: usize = 36;
 
 /// The window slot of the helmet.
 const HELMET_SLOT: usize = 5;

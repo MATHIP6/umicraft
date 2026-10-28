@@ -26,6 +26,7 @@ use umicraft_render::{BlockAtlasError, Renderer};
 use crate::cracks::STAGES;
 use umicraft_world::ChunkPos;
 
+use crate::item_icons::ItemResources;
 use crate::model_resources::ModelResources;
 
 /// Where the terrain texture array is bound: the renderer, or a test double.
@@ -76,6 +77,8 @@ pub enum TerrainTextures {
         context: Arc<ModelMeshContext>,
         /// The GUI texture atlas built from the jar's `textures/gui/` PNGs.
         gui_atlas: GuiAtlas,
+        /// The baked item models over the same atlas layout.
+        items: Arc<ItemResources>,
     },
 }
 
@@ -135,6 +138,7 @@ impl TerrainTextures {
             atlas: resources.atlas().clone(),
             context: resources.context(),
             gui_atlas: resources.resources().gui_atlas().clone(),
+            items: resources.items(),
         }
     }
 
@@ -149,6 +153,7 @@ impl TerrainTextures {
                 atlas,
                 context,
                 gui_atlas,
+                items,
             } => {
                 let bound = target.set_block_atlas(
                     atlas.width(),
@@ -165,6 +170,7 @@ impl TerrainTextures {
                         InstalledTerrain {
                             mesher: TerrainMesher(MesherKind::Models(context)),
                             gui_atlas: Some(gui_atlas),
+                            items: Some(items),
                             animations: atlas.animations().to_vec(),
                         }
                     }
@@ -186,6 +192,7 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
     InstalledTerrain {
         mesher: TerrainMesher(MesherKind::Procedural),
         gui_atlas: None,
+        items: None,
         animations: Vec::new(),
     }
 }
@@ -198,6 +205,7 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
 pub struct InstalledTerrain {
     mesher: TerrainMesher,
     gui_atlas: Option<GuiAtlas>,
+    items: Option<Arc<ItemResources>>,
     /// The animated layers of the bound array (empty for the procedural set).
     animations: Vec<TextureAnimation>,
 }
@@ -220,6 +228,12 @@ impl InstalledTerrain {
     #[must_use]
     pub fn animations(&self) -> &[TextureAnimation] {
         &self.animations
+    }
+
+    /// The baked item models, if the official assets were loaded.
+    #[must_use]
+    pub fn items(&self) -> Option<Arc<ItemResources>> {
+        self.items.clone()
     }
 
     /// The GUI texture atlas, if the official assets were loaded.
@@ -304,6 +318,7 @@ mod tests {
                 tints: None,
             }),
             gui_atlas: GuiAtlas::empty(),
+            items: Arc::new(ItemResources::empty()),
         }
     }
 

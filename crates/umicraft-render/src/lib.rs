@@ -19,6 +19,7 @@ mod environment;
 mod error;
 mod font;
 mod hud;
+mod items;
 mod outline;
 mod overlay;
 mod renderer;
@@ -32,9 +33,9 @@ pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use hud::{
-    draw as draw_hud, selected_index, status_fills, Fill, HudLayout, HudState, ItemStack, Rect,
-    StatusRow,
+    draw as draw_hud, selected_index, status_fills, Fill, HudLayout, HudState, Rect, StatusRow,
 };
+pub use items::{IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE};
 pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};

@@ -26,6 +26,7 @@ mod util;
 pub mod button;
 pub mod death;
 pub mod inventory;
+pub mod item_overlay;
 pub mod list;
 pub mod panel;
 pub mod slot;
@@ -36,6 +37,7 @@ pub use death::{death_layout, death_screen, DeathAction, DeathLayout, BUTTON_DEL
 pub use inventory::{
     container_layout, gui_scale, player_inventory_layout, ContainerLayout, InventoryLayout,
 };
+pub use item_overlay::{draw_item, durability_bar, DurabilityBar};
 pub use list::{list, ListState, ROW_HEIGHT, SCROLLBAR_WIDTH};
 pub use panel::{panel, PANEL_INSET};
 pub use slot::{slot, SlotItem};

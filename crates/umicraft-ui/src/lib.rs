@@ -49,3 +49,4 @@ pub use geom::{Axis, Insets, Layout, Rect, ScrollArea};
 pub use id::WidgetId;
 pub use input::{InputEvent, Key, Modifiers, PointerButton, UiInput};
 pub use text::{FontAtlas, FontError, Glyph};
+pub use widgets::{draw_item, SlotItem};

@@ -13,13 +13,14 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use umicraft_game::inventory::HOTBAR_START;
 use umicraft_game::item_use::DropKind;
-use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
+use umicraft_render::{draw_hud, Camera, HudLayout, HudState, NoIcons, Overlay, Renderer};
 use umicraft_ui::widgets::{
     container_layout, death_screen, player_inventory_layout, slot, ContainerLayout, DeathAction,
-    InventoryLayout, SlotItem, BUTTON_DELAY_TICKS,
+    InventoryLayout, BUTTON_DELAY_TICKS,
 };
-use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui, UiOutput};
+use umicraft_ui::{debug_screen::DebugScreen, draw_item, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, WindowEvent};
@@ -32,6 +33,7 @@ use crate::entity_textures::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
+use crate::item_icons::{slot_item, IconSource, ItemResources};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::terrain_textures::TerrainTextures;
@@ -126,6 +128,8 @@ struct App {
     ui_atlas: Option<FontAtlas>,
     /// The GUI texture atlas for inventory/container backgrounds.
     gui_atlas: Option<umicraft_assets::GuiAtlas>,
+    /// The baked item models, once the official assets are bound.
+    items: Option<std::sync::Arc<ItemResources>>,
     /// Steps the water, lava and fire textures once per game tick.
     texture_animator: TextureAnimator,
     /// Entity textures bound for GPU rendering.
@@ -178,6 +182,7 @@ impl App {
             terrain,
             ui_atlas: None,
             gui_atlas: None,
+            items: None,
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
             last_frame: Instant::now(),
@@ -291,6 +296,7 @@ impl App {
             let installed = terrain.install(renderer);
             upload_gui_atlas(renderer, installed.gui_atlas());
             self.gui_atlas = installed.gui_atlas().cloned();
+            self.items = installed.items();
             self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
             self.entity_textures = Some(EntityTextures::load(renderer));
             if let Some(world) = self.world.as_mut() {
@@ -615,8 +621,9 @@ impl App {
         }
     }
 
-    /// Builds one UI frame from the render-side snapshot, or returns `None`
-    /// while no UI modal is open.
+    /// Builds one UI frame from the render-side snapshot: the hotbar items
+    /// while a world is shown, and the modal screen on top when one is open.
+    /// Returns `None` when there is nothing to draw.
     ///
     /// The frame is built on the render thread during redraw, after the HUD
     /// overlay, so the UI never touches the game thread or its state. The
@@ -624,13 +631,22 @@ impl App {
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
         let show_inventory = self.modal_screen_open();
-        if !self.show_debug_screen && !show_inventory {
+        if self.world.is_none() && !self.show_debug_screen && !show_inventory {
             return None;
         }
         let atlas = self.ui_atlas.as_ref()?;
         let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
         let input = self.ui_input.take();
         self.ui.begin_frame(viewport, input);
+        if let Some(world) = self.world.as_ref() {
+            draw_hotbar_items(
+                &mut self.ui,
+                atlas,
+                &world.window_view().player_slots,
+                self.items.as_deref(),
+                (width, height),
+            );
+        }
         if self.death_screen_visible() {
             let score = self.world.as_ref().map_or(0, |world| world.hud().score);
             let enabled = self.death_buttons_enabled(Instant::now());
@@ -642,7 +658,14 @@ impl App {
         } else if show_inventory {
             let wv = self.world.as_ref().map(|w| w.window_view().clone());
             if let Some(wv) = wv {
-                draw_inventory_overlay(&mut self.ui, atlas, viewport, &wv, self.gui_atlas.as_ref());
+                draw_inventory_overlay(
+                    &mut self.ui,
+                    atlas,
+                    viewport,
+                    &wv,
+                    self.gui_atlas.as_ref(),
+                    self.items.as_deref(),
+                );
             }
         }
         Some(self.ui.end_frame())
@@ -713,9 +736,17 @@ impl App {
             entity_textures.upload_hand(&world.hand_pose(now), self.camera.view_bob(), renderer);
         }
 
-        let rendered = match ui_frame.as_ref() {
-            Some(frame) => renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list),
-            None => renderer.render(&self.camera, &self.overlay),
+        let rendered = match (ui_frame.as_ref(), self.items.as_deref()) {
+            (Some(frame), Some(items)) => renderer.render_with_ui(
+                &self.camera,
+                &self.overlay,
+                &frame.draw_list,
+                &mut IconSource(items),
+            ),
+            (Some(frame), None) => {
+                renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list, &mut NoIcons)
+            }
+            (None, _) => renderer.render(&self.camera, &self.overlay),
         };
         if let Some(frame) = ui_frame {
             self.ui.recycle_output(frame);
@@ -761,6 +792,7 @@ fn draw_inventory_overlay(
     viewport: Rect,
     wv: &umicraft_game::inventory::WindowView,
     gui_atlas: Option<&umicraft_assets::GuiAtlas>,
+    items: Option<&ItemResources>,
 ) {
     let bg_color = [0.0_f32, 0.0, 0.0, 0.55];
     ui.draw().rect(viewport, bg_color);
@@ -787,6 +819,7 @@ fn draw_inventory_overlay(
                 &container.slots,
                 &wv.player_slots,
                 textured,
+                items,
             );
         }
         None => {
@@ -798,7 +831,7 @@ fn draw_inventory_overlay(
                 &layout.background,
                 (176, 166),
             );
-            draw_player_inventory(ui, atlas, &layout, &wv.player_slots, textured);
+            draw_player_inventory(ui, atlas, &layout, &wv.player_slots, textured, items);
         }
     }
 }
@@ -843,13 +876,30 @@ fn gui_texture_for_container(slot_count: usize) -> &'static str {
     }
 }
 
-/// Converts a protocol `ItemStack` into the widget's `SlotItem`.
-fn slot_item(item: &umicraft_protocol::packets::play::ItemStack) -> SlotItem {
-    SlotItem {
-        item_id: i32::from(item.item_id),
-        count: u8::try_from(item.stack_size).unwrap_or(0),
-        damage: item.damage,
-        max_durability: 0,
+/// Draws the item icons, counts and durability bars of the hotbar over the
+/// HUD frame, centred in each of its slots.
+fn draw_hotbar_items(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
+    items: Option<&ItemResources>,
+    (width, height): (u32, u32),
+) {
+    let layout = HudLayout::new(width, height);
+    let icon = 16.0 * layout.scale();
+    for (index, stack) in player_slots[HOTBAR_START..HOTBAR_START + 9]
+        .iter()
+        .enumerate()
+    {
+        let Some(stack) = stack else { continue };
+        let slot = layout.slot_rect(index);
+        let cell = Rect::new(
+            slot.x + (slot.width - icon) * 0.5,
+            slot.y + (slot.height - icon) * 0.5,
+            icon,
+            icon,
+        );
+        draw_item(ui.draw(), atlas, cell, &slot_item(items, stack));
     }
 }
 
@@ -860,13 +910,16 @@ fn draw_player_inventory(
     layout: &InventoryLayout,
     player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
     textured: bool,
+    items: Option<&ItemResources>,
 ) {
     let mut label = String::with_capacity(8);
     for (i, rect) in layout.slots.iter().enumerate() {
         label.clear();
         std::fmt::Write::write_fmt(&mut label, format_args!("inv{i}")).unwrap();
         let id = ui.id(&label);
-        let item = player_slots[i].as_ref().map(slot_item);
+        let item = player_slots[i]
+            .as_ref()
+            .map(|stack| slot_item(items, stack));
         slot(ui, id, *rect, atlas, item.as_ref(), textured);
     }
 }
@@ -879,6 +932,7 @@ fn draw_container_slots(
     container_slots: &[Option<umicraft_protocol::packets::play::ItemStack>],
     player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
     textured: bool,
+    items: Option<&ItemResources>,
 ) {
     let mut label = String::with_capacity(8);
     for (i, rect) in layout.container_slots.iter().enumerate() {
@@ -888,7 +942,7 @@ fn draw_container_slots(
         let item = container_slots
             .get(i)
             .and_then(|s| s.as_ref())
-            .map(slot_item);
+            .map(|stack| slot_item(items, stack));
         slot(ui, id, *rect, atlas, item.as_ref(), textured);
     }
     for (i, &(inv_idx, rect)) in layout.player_slots.iter().enumerate() {
@@ -898,7 +952,7 @@ fn draw_container_slots(
         let item = player_slots
             .get(inv_idx)
             .and_then(|s| s.as_ref())
-            .map(slot_item);
+            .map(|stack| slot_item(items, stack));
         slot(ui, id, rect, atlas, item.as_ref(), textured);
     }
 }
@@ -972,6 +1026,7 @@ impl ApplicationHandler for App {
             .install(&mut renderer);
         upload_gui_atlas(&mut renderer, terrain.gui_atlas());
         self.gui_atlas = terrain.gui_atlas().cloned();
+        self.items = terrain.items();
         self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
         match WorldView::new(&terrain, default_worker_count()) {
             Ok(world) => self.world = Some(world),

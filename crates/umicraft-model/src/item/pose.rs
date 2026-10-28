@@ -81,8 +81,14 @@ mod tests {
         let corner = pose.transform_point3(Vec3::new(0.0, 0.0, 0.5));
         let opposite = pose.transform_point3(Vec3::new(1.0, 1.0, 0.5));
         // 16 px wide, centred on the slot, y flipped by the 180 degree turn.
-        assert!((corner - Vec3::new(0.0, 16.0, 0.0)).length() < 1e-3, "{corner}");
-        assert!((opposite - Vec3::new(16.0, 0.0, 0.0)).length() < 1e-3, "{opposite}");
+        assert!(
+            (corner - Vec3::new(0.0, 16.0, 0.0)).length() < 1e-3,
+            "{corner}"
+        );
+        assert!(
+            (opposite - Vec3::new(16.0, 0.0, 0.0)).length() < 1e-3,
+            "{opposite}"
+        );
     }
 
     #[test]

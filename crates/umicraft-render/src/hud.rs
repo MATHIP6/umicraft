@@ -3,6 +3,8 @@
 //! The in-game HUD of spec §6.6 (UI-2): hotbar, health/food/armour rows,
 //! experience bar, crosshair, chat, and the debug block.
 //!
+//! The HUD draws no hotbar items: the UI crate draws them over the hotbar.
+//!
 //! The HUD is pure geometry. Every icon is a rectangle and every label is a
 //! glyph of the built-in 3×5 font, so the HUD adds no texture, no font and
 //! no pipeline, and the crate keeps shipping no Mojang asset (spec §3).
@@ -79,26 +81,12 @@ const DEBUG_PADDING_Y: f32 = 12.0;
 const DEBUG_GAP: f32 = 4.0;
 /// Alpha of the oldest chat line; the newest ones fade to opaque.
 const CHAT_MIN_ALPHA: f32 = 0.35;
-/// Reference maximum damage used to scale the durability bar.
-///
-/// The frozen [`ItemStack`] carries no maximum-durability field, so the bar
-/// is scaled against this reference instead of a per-item maximum.
-const DURABILITY_REFERENCE: f32 = 256.0;
-
 /// Background of the hotbar.
 const HOTBAR_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
 /// Slot separators inside the hotbar.
 const SLOT_SEPARATOR: [f32; 4] = [1.0, 1.0, 1.0, 0.08];
 /// Selection box around the selected hotbar slot.
 const SELECTION: [f32; 4] = [1.0, 1.0, 1.0, 0.9];
-/// Item id label.
-const ITEM_TEXT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-/// Stack count label.
-const COUNT_TEXT: [f32; 4] = [1.0, 1.0, 0.9, 1.0];
-/// Background of the durability bar.
-const DURABILITY_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
-/// Fill of the durability bar.
-const DURABILITY_FILL: [f32; 4] = [0.9, 0.2, 0.2, 1.0];
 /// Full health icon.
 const HEALTH_FULL: [f32; 4] = [0.85, 0.15, 0.15, 1.0];
 /// Empty health icon.
@@ -146,8 +134,6 @@ pub struct HudState {
     pub experience: f32,
     /// The current experience level, shown on the experience bar.
     pub level: i32,
-    /// The nine hotbar slots; an empty slot is `None`.
-    pub hotbar: [Option<ItemStack>; HOTBAR_SLOTS],
     /// The selected hotbar slot; values above eight are clamped.
     pub selected_slot: u8,
     /// Whether the crosshair is drawn.
@@ -161,7 +147,7 @@ pub struct HudState {
 }
 
 impl Default for HudState {
-    /// A player at full health and food, with an empty hotbar.
+    /// A player at full health and food,
     fn default() -> Self {
         Self {
             health: 20.0,
@@ -169,7 +155,6 @@ impl Default for HudState {
             armor: 0.0,
             experience: 0.0,
             level: 0,
-            hotbar: [None; HOTBAR_SLOTS],
             selected_slot: 0,
             crosshair: true,
             chat_lines: Vec::new(),
@@ -177,17 +162,6 @@ impl Default for HudState {
             score: 0,
         }
     }
-}
-
-/// A hotbar slot: item id, damage, and stack count.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ItemStack {
-    /// The 1.8 item id.
-    pub item_id: i32,
-    /// The item damage (metadata) value; zero means undamaged.
-    pub damage: i16,
-    /// The number of items in the stack.
-    pub count: u8,
 }
 
 /// A screen-space rectangle in physical pixels, with a top-left origin.
@@ -539,50 +513,6 @@ fn draw_hotbar(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {
     }
     let selected = layout.slot_rect(selected_index(state.selected_slot));
     draw_border(overlay, selected, separator, SELECTION);
-    for (index, stack) in state.hotbar.iter().enumerate() {
-        if let Some(stack) = stack {
-            draw_item(overlay, layout, index, stack);
-        }
-    }
-}
-
-fn draw_item(overlay: &mut Overlay, layout: &HudLayout, index: usize, stack: &ItemStack) {
-    let slot = layout.slot_rect(index);
-    let scale = layout.scale();
-    let advance = font::CELL_WIDTH as f32 * scale;
-
-    let id = stack.item_id.to_string();
-    let id = fit(&id, max_chars(slot.width - 2.0 * scale, advance));
-    let id_width = Overlay::text_width(&id, scale);
-    overlay.text(
-        slot.x + (slot.width - id_width) * 0.5,
-        slot.y + (slot.height - 5.0 * scale) * 0.5,
-        scale,
-        ITEM_TEXT,
-        &id,
-    );
-
-    if stack.count > 1 {
-        let count = stack.count.to_string();
-        let count_width = Overlay::text_width(&count, scale);
-        overlay.text(
-            slot.x + slot.width - count_width - scale,
-            slot.bottom() - 7.0 * scale,
-            scale,
-            COUNT_TEXT,
-            &count,
-        );
-    }
-
-    if stack.damage > 0 {
-        let height = 2.0 * scale;
-        let y = slot.bottom() - height;
-        let x = slot.x + scale;
-        let width = (slot.width - 2.0 * scale).max(0.0);
-        overlay.rect(x, y, width, height, DURABILITY_BACKGROUND);
-        let fraction = (f32::from(stack.damage) / DURABILITY_REFERENCE).clamp(0.0, 1.0);
-        overlay.rect(x, y, width * fraction, height, DURABILITY_FILL);
-    }
 }
 
 fn draw_status_rows(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {
@@ -823,13 +753,6 @@ mod tests {
         HudLayout::new(1280, 720)
     }
 
-    /// A hotbar with a single stack in it.
-    fn hotbar_with(index: usize, stack: ItemStack) -> [Option<ItemStack>; HOTBAR_SLOTS] {
-        let mut hotbar = [None; HOTBAR_SLOTS];
-        hotbar[index] = Some(stack);
-        hotbar
-    }
-
     /// The screen-space bounds of everything the overlay holds.
     fn screen_bounds(overlay: &Overlay, width: u32, height: u32) -> (f32, f32, f32, f32) {
         let mut min_x = f32::INFINITY;
@@ -993,14 +916,6 @@ mod tests {
         let (width, height) = (640_u32, 360_u32);
         let state = HudState {
             selected_slot: 200,
-            hotbar: hotbar_with(
-                0,
-                ItemStack {
-                    item_id: 264,
-                    damage: 12,
-                    count: 64,
-                },
-            ),
             ..HudState::default()
         };
         let mut overlay = Overlay::new(width, height);
@@ -1037,40 +952,6 @@ mod tests {
                 "the selection box left the slot"
             );
         }
-    }
-
-    #[test]
-    fn a_damaged_item_draws_a_durability_bar() {
-        let (width, height) = (640_u32, 360_u32);
-        let undamaged = HudState {
-            hotbar: hotbar_with(
-                0,
-                ItemStack {
-                    item_id: 256,
-                    damage: 0,
-                    count: 1,
-                },
-            ),
-            ..HudState::default()
-        };
-        let mut overlay = Overlay::new(width, height);
-        draw(&mut overlay, &undamaged, width, height);
-        let undamaged_vertices = overlay.vertex_count();
-
-        let damaged = HudState {
-            hotbar: hotbar_with(
-                0,
-                ItemStack {
-                    item_id: 256,
-                    damage: 100,
-                    count: 1,
-                },
-            ),
-            ..HudState::default()
-        };
-        let mut overlay = Overlay::new(width, height);
-        draw(&mut overlay, &damaged, width, height);
-        assert!(overlay.vertex_count() > undamaged_vertices);
     }
 
     #[test]

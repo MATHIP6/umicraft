@@ -76,6 +76,19 @@ pub enum DrawCommand {
         /// Tint colour multiplied with the texel (white = unmodified).
         color: Color,
     },
+    /// Draw the item icon registered under `key` into `dst`.
+    ///
+    /// `key` is an opaque, client-chosen identifier that the renderer maps to
+    /// a slot of its icon atlas; the UI never interprets it. `glint` asks for
+    /// the enchantment glint overlay.
+    Item {
+        /// Opaque icon key chosen by the client.
+        key: u64,
+        /// Destination rectangle in physical pixels.
+        dst: Rect,
+        /// Whether to draw the enchantment glint over the icon.
+        glint: bool,
+    },
     /// Clip every following command to `rect` until the matching
     /// [`DrawCommand::PopClip`].
     PushClip {
@@ -172,6 +185,13 @@ impl DrawList {
         self.commands.push(DrawCommand::Image { src, dst, color });
     }
 
+    /// Appends an item icon registered under `key`, drawn into `dst`.
+    ///
+    /// `glint` adds the enchantment glint. The key is opaque to the UI.
+    pub fn item(&mut self, key: u64, dst: Rect, glint: bool) {
+        self.commands.push(DrawCommand::Item { key, dst, glint });
+    }
+
     /// Starts a clip scope.
     ///
     /// The command records the intersection with the enclosing scopes, so the
@@ -228,6 +248,21 @@ mod tests {
         assert_eq!(list.len(), 4);
         assert!(matches!(list.commands()[0], DrawCommand::PushClip { .. }));
         assert!(matches!(list.commands()[3], DrawCommand::PopClip));
+    }
+
+    #[test]
+    fn item_appends_an_item_command() {
+        let mut list = DrawList::new();
+        let dst = Rect::new(1.0, 2.0, 16.0, 16.0);
+        list.item(7, dst, true);
+        assert_eq!(
+            list.commands(),
+            [DrawCommand::Item {
+                key: 7,
+                dst,
+                glint: true
+            }]
+        );
     }
 
     #[test]

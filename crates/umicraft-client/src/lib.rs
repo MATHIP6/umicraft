@@ -25,6 +25,7 @@ pub mod error;
 pub mod game;
 pub mod headless;
 pub mod input;
+pub mod item_icons;
 pub mod mesher;
 pub mod model_resources;
 pub mod network;

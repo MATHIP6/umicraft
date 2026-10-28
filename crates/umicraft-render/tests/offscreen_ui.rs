@@ -9,7 +9,7 @@
 
 use umicraft_mesh::{Mesh, Vertex, VertexLight};
 use umicraft_render::{
-    fallback_atlas, BlockAtlasError, Camera, FontAtlasError, Image, Overlay, Renderer,
+    fallback_atlas, BlockAtlasError, Camera, FontAtlasError, Image, NoIcons, Overlay, Renderer,
 };
 use umicraft_ui::{DrawList, Rect, TextStyle};
 use umicraft_world::ChunkPos;
@@ -112,7 +112,7 @@ fn ui_draw_list_renders_over_terrain_and_the_debug_overlay() {
     list.text([24.0, 34.0], "UI PASS", TextStyle::new(1.5, [1.0; 4]));
     list.pop_clip();
     renderer
-        .render_with_ui(&camera, &hud, &list)
+        .render_with_ui(&camera, &hud, &list, &mut NoIcons)
         .expect("render ui");
     let with_ui = renderer.read_pixels().expect("read ui");
     assert_ne!(
