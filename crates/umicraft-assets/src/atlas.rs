@@ -13,6 +13,7 @@
 use umicraft_model::AtlasLayout;
 
 use crate::animation::TextureAnimation;
+use crate::dial::DialSprite;
 
 /// One texture-array upload: layer-major RGBA8 pixels plus their key layout.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +23,7 @@ pub struct BlockAtlas {
     pixels: Vec<u8>,
     layout: AtlasLayout,
     animations: Vec<TextureAnimation>,
+    dials: Vec<DialSprite>,
 }
 
 impl BlockAtlas {
@@ -71,6 +73,7 @@ impl BlockAtlas {
             pixels,
             layout,
             animations: Vec::new(),
+            dials: Vec::new(),
         })
     }
 
@@ -79,6 +82,19 @@ impl BlockAtlas {
     pub(crate) fn with_animations(mut self, animations: Vec<TextureAnimation>) -> Self {
         self.animations = animations;
         self
+    }
+
+    /// Attaches the compass and clock sprites of this atlas.
+    #[must_use]
+    pub(crate) fn with_dials(mut self, dials: Vec<DialSprite>) -> Self {
+        self.dials = dials;
+        self
+    }
+
+    /// The compass and the clock, whose frame the game state chooses.
+    #[must_use]
+    pub fn dials(&self) -> &[DialSprite] {
+        &self.dials
     }
 
     /// The animated layers (water, lava, fire, portal...), each at its first

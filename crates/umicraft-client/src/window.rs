@@ -16,7 +16,9 @@ use std::time::{Duration, Instant};
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_game::item_use::DropKind;
 use umicraft_mesh::item::ItemMesh;
-use umicraft_render::{draw_hud, Camera, HudLayout, HudState, NoIcons, Overlay, Renderer};
+use umicraft_render::{
+    draw_hud, Camera, HudLayout, HudState, NoIcons, Overlay, RenderEnvironment, Renderer, SkyState,
+};
 use umicraft_ui::widgets::{
     container_layout, death_screen, player_inventory_layout, slot, ContainerLayout, DeathAction,
     InventoryLayout, BUTTON_DELAY_TICKS,
@@ -30,11 +32,12 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
 
 use crate::args::Args;
+use crate::dials::{DialAnimator, DialInputs};
 use crate::entity_textures::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
-use crate::item_icons::{slot_item, IconSource, ItemResources};
+use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{push_held_item, WorldItems};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
@@ -132,6 +135,8 @@ struct App {
     gui_atlas: Option<umicraft_assets::GuiAtlas>,
     /// The baked item models, once the official assets are bound.
     items: Option<std::sync::Arc<ItemResources>>,
+    /// The compass and clock frames of the bound block array.
+    dials: DialAnimator,
     /// The dropped-item geometry of the frame, kept for its buffers.
     world_items: WorldItems,
     /// The first-person held item geometry of the frame.
@@ -191,6 +196,7 @@ impl App {
             ui_atlas: None,
             gui_atlas: None,
             items: None,
+            dials: DialAnimator::default(),
             world_items: WorldItems::default(),
             hand_item_mesh: ItemMesh::default(),
             texture_animator: TextureAnimator::default(),
@@ -309,6 +315,7 @@ impl App {
             upload_glint_texture(renderer, installed.glint_texture());
             self.gui_atlas = installed.gui_atlas().cloned();
             self.items = installed.items();
+            self.dials = DialAnimator::new(installed.dials());
             self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
             self.entity_textures = Some(EntityTextures::load(renderer));
             if let Some(world) = self.world.as_mut() {
@@ -655,7 +662,7 @@ impl App {
                 &mut self.ui,
                 atlas,
                 &world.window_view().player_slots,
-                self.items.as_deref(),
+                ItemView::new(self.items.as_deref(), self.dials.frames()),
                 (width, height),
             );
         }
@@ -676,11 +683,37 @@ impl App {
                     viewport,
                     &wv,
                     self.gui_atlas.as_ref(),
-                    self.items.as_deref(),
+                    ItemView::new(self.items.as_deref(), self.dials.frames()),
                 );
             }
         }
         Some(self.ui.end_frame())
+    }
+
+    /// Steps the compass and the clock and writes their new frames into the
+    /// block array.
+    fn advance_dials(&mut self, elapsed: Duration, environment: RenderEnvironment) {
+        let inputs = self.world.as_ref().map(|world| {
+            let (_, spawn) = world.compass_world();
+            DialInputs {
+                surface: environment.dimension == 0,
+                position: (
+                    f64::from(self.camera.position.x),
+                    f64::from(self.camera.position.z),
+                ),
+                // The camera yaw is the server yaw turned by half a circle.
+                yaw_degrees: f64::from((self.camera.yaw - std::f32::consts::PI).to_degrees()),
+                spawn: spawn.map(|(x, _, z)| (f64::from(x), f64::from(z))),
+                celestial_angle: f64::from(SkyState::at(environment).celestial_angle),
+            }
+        });
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        self.dials
+            .advance(elapsed, inputs.as_ref(), |layer, pixels| {
+                renderer.write_block_layer(layer, pixels);
+            });
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
@@ -724,6 +757,9 @@ impl App {
             .renderer
             .as_ref()
             .map_or((self.args.width, self.args.height), Renderer::size);
+        // The dials first, so the icon keys of this frame name the frames the
+        // block array shows.
+        self.advance_dials(Duration::from_secs_f32(elapsed), environment);
         let ui_frame = self.build_ui_frame(width, height);
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -829,7 +865,7 @@ fn draw_inventory_overlay(
     viewport: Rect,
     wv: &umicraft_game::inventory::WindowView,
     gui_atlas: Option<&umicraft_assets::GuiAtlas>,
-    items: Option<&ItemResources>,
+    items: ItemView<'_>,
 ) {
     let bg_color = [0.0_f32, 0.0, 0.0, 0.55];
     ui.draw().rect(viewport, bg_color);
@@ -925,7 +961,7 @@ fn draw_hotbar_items(
     ui: &mut Ui,
     atlas: &FontAtlas,
     player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
-    items: Option<&ItemResources>,
+    items: ItemView<'_>,
     (width, height): (u32, u32),
 ) {
     let layout = HudLayout::new(width, height);
@@ -953,7 +989,7 @@ fn draw_player_inventory(
     layout: &InventoryLayout,
     player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
     textured: bool,
-    items: Option<&ItemResources>,
+    items: ItemView<'_>,
 ) {
     let mut label = String::with_capacity(8);
     for (i, rect) in layout.slots.iter().enumerate() {
@@ -975,7 +1011,7 @@ fn draw_container_slots(
     container_slots: &[Option<umicraft_protocol::packets::play::ItemStack>],
     player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
     textured: bool,
-    items: Option<&ItemResources>,
+    items: ItemView<'_>,
 ) {
     let mut label = String::with_capacity(8);
     for (i, rect) in layout.container_slots.iter().enumerate() {
@@ -1071,6 +1107,7 @@ impl ApplicationHandler for App {
         upload_glint_texture(&mut renderer, terrain.glint_texture());
         self.gui_atlas = terrain.gui_atlas().cloned();
         self.items = terrain.items();
+        self.dials = DialAnimator::new(terrain.dials());
         self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
         match WorldView::new(&terrain, default_worker_count()) {
             Ok(world) => self.world = Some(world),

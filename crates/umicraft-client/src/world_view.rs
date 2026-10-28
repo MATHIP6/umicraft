@@ -156,6 +156,12 @@ impl WorldView {
         self.view.environment(now, view_distance)
     }
 
+    /// The dimension and the spawn point of the newest frame, for the compass.
+    #[must_use]
+    pub fn compass_world(&self) -> (i8, Option<(i32, i32, i32)>) {
+        (self.view.dimension, self.view.spawn)
+    }
+
     /// The newest HUD the game thread published.
     #[must_use]
     pub fn hud(&self) -> &HudState {
@@ -345,6 +351,8 @@ struct View {
     world_time: i64,
     /// The dimension of the newest frame.
     dimension: i8,
+    /// The newest announced world spawn point.
+    spawn: Option<(i32, i32, i32)>,
 }
 
 impl View {
@@ -355,6 +363,7 @@ impl View {
         self.tick_time = Some(frame.tick_time);
         self.world_time = frame.world_time;
         self.dimension = frame.dimension;
+        self.spawn = frame.spawn;
     }
 
     /// The interpolation fraction of the two newest ticks for `now`.
@@ -594,6 +603,7 @@ mod tests {
             tick_time,
             world_time,
             dimension: -1,
+            spawn: None,
             entities: Arc::from([]),
             selection: Arc::from([]),
             cracks: Arc::from([]),

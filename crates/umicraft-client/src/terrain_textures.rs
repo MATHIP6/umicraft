@@ -19,6 +19,7 @@
 
 use std::sync::Arc;
 
+use umicraft_assets::DialSprite;
 use umicraft_assets::{BlockAtlas, GlintTexture, GuiAtlas, TextureAnimation};
 use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, Mesh, ModelMeshContext};
 use umicraft_render::{BlockAtlasError, Renderer};
@@ -177,6 +178,7 @@ impl TerrainTextures {
                             glint,
                             items: Some(items),
                             animations: atlas.animations().to_vec(),
+                            dials: atlas.dials().to_vec(),
                         }
                     }
                     Err(error) => {
@@ -200,6 +202,7 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
         glint: None,
         items: None,
         animations: Vec::new(),
+        dials: Vec::new(),
     }
 }
 
@@ -215,6 +218,8 @@ pub struct InstalledTerrain {
     items: Option<Arc<ItemResources>>,
     /// The animated layers of the bound array (empty for the procedural set).
     animations: Vec<TextureAnimation>,
+    /// The compass and clock sprites of the bound array.
+    dials: Vec<DialSprite>,
 }
 
 impl InstalledTerrain {
@@ -235,6 +240,12 @@ impl InstalledTerrain {
     #[must_use]
     pub fn animations(&self) -> &[TextureAnimation] {
         &self.animations
+    }
+
+    /// The compass and clock sprites, empty for the procedural set.
+    #[must_use]
+    pub fn dials(&self) -> &[DialSprite] {
+        &self.dials
     }
 
     /// The baked item models, if the official assets were loaded.

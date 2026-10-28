@@ -13,10 +13,10 @@
 
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::{EntityItem, EntityKind, EntityRenderSnapshot};
-use umicraft_game::hand::HandPose;
+use umicraft_game::hand::{bow_model_name, HandPose};
+use umicraft_game::item_use::UseAction;
 use umicraft_game::items;
 use umicraft_mesh::item::{ItemMesh, ItemStyle};
-use umicraft_mesh::tint::WHITE;
 use umicraft_mesh::VertexLight;
 use umicraft_model::display::DisplayContext;
 use umicraft_model::item::pose::{context_pose, ground_pose, held_pose};
@@ -79,9 +79,7 @@ fn push_dropped_item(
     let Some((model, quads)) = sprite_model(resources, item.item_id, item.damage) else {
         return;
     };
-    let tints = [resources
-        .tint(item.item_id, item.damage, item.nbt.as_deref())
-        .unwrap_or(WHITE)];
+    let tints = resources.tints(item.item_id, item.damage, item.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
         // Items are not lit by face in the world.
@@ -133,9 +131,7 @@ fn push_player_held_item(
     let body = Mat4::from_translation(entity.position + Vec3::new(0.0, lift, 0.0))
         * Mat4::from_rotation_y(-entity.yaw.to_radians());
     let pose = body * arm * hand * held_pose(model, DisplayContext::ThirdPerson);
-    let tints = [resources
-        .tint(held.item_id, held.damage, held.nbt.as_deref())
-        .unwrap_or(WHITE)];
+    let tints = resources.tints(held.item_id, held.damage, held.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
         light: VertexLight::new(0, 15, 15, false),
@@ -144,6 +140,8 @@ fn push_player_held_item(
     mesh.push_quads(quads, &pose, &style);
 }
 
+/// The bow item id.
+const BOW: i16 = 261;
 /// The item id of a filled map, which has its own frame model.
 const FILLED_MAP: i16 = 358;
 
@@ -191,9 +189,7 @@ fn push_item_frame(
         * Mat4::from_scale(Vec3::splat(0.5))
         * turn
         * context_pose(model, DisplayContext::Fixed);
-    let tints = [resources
-        .tint(item.item_id, item.damage, item.nbt.as_deref())
-        .unwrap_or(WHITE)];
+    let tints = resources.tints(item.item_id, item.damage, item.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
         light: VertexLight::new(0, 15, 15, model.gui_3d),
@@ -219,10 +215,10 @@ pub fn push_held_item(
     bob: Mat4,
     resources: &ItemResources,
 ) {
-    let Some((model, quads)) = sprite_model(resources, item_id, damage) else {
+    let Some((model, quads)) = held_model(resources, item_id, damage, hand) else {
         return;
     };
-    let tints = [resources.tint(item_id, damage, nbt).unwrap_or(WHITE)];
+    let tints = resources.tints(item_id, damage, nbt);
     let style = ItemStyle {
         atlas: resources.atlas(),
         // The hand is lit at full sky light; lit blocks keep their face shade.
@@ -231,6 +227,25 @@ pub fn push_held_item(
     };
     let pose = bob * hand.item_matrix() * held_pose(model, DisplayContext::FirstPerson);
     mesh.push_quads(quads, &pose, &style);
+}
+
+/// The model of the item in the first-person hand: the bow shows its
+/// drawing model while it is drawn (MCP `RenderItem.renderItemModelForEntity`).
+fn held_model<'a>(
+    resources: &'a ItemResources,
+    item_id: i16,
+    damage: i16,
+    hand: &HandPose,
+) -> Option<(&'a ItemModel, &'a [ModelQuad])> {
+    let drawn = hand
+        .item_use
+        .filter(|view| view.action == UseAction::Bow && item_id == BOW)
+        .and_then(|view| bow_model_name(view.ticks_used))
+        .and_then(|name| resources.models().model_by_name(name));
+    match drawn {
+        Some(model) => quads_of(model),
+        None => sprite_model(resources, item_id, damage),
+    }
 }
 
 /// The model and quads of an item that is drawn from a sprite or blocks.
@@ -243,6 +258,10 @@ fn sprite_model(
     let model = resources
         .models()
         .model(item_id as u16, damage as u16, damageable)?;
+    quads_of(model)
+}
+
+fn quads_of(model: &ItemModel) -> Option<(&ItemModel, &[ModelQuad])> {
     match &model.geometry {
         ItemGeometry::Quads(quads) => Some((model, quads)),
         ItemGeometry::Entity => None,
@@ -532,5 +551,70 @@ mod player_render_tests {
                 .and_then(|mut writer| writer.write_image_data(&image.rgba))
                 .expect("png");
         }
+    }
+}
+
+#[cfg(test)]
+mod use_render_tests {
+    use super::*;
+    use crate::model_resources::ModelResources;
+    use umicraft_game::item_use::ItemUseView;
+    use umicraft_render::{Camera, Overlay, Renderer};
+
+    fn render_hand(item: (i16, i16), pose: HandPose, dump: &str) {
+        let resources = ModelResources::load().expect("official resources");
+        let items = resources.items();
+        let atlas = resources.atlas();
+        let mut renderer = Renderer::new_offscreen(320, 180).expect("renderer");
+        renderer
+            .set_block_atlas(
+                atlas.width(),
+                atlas.height(),
+                atlas.layers(),
+                atlas.pixels(),
+            )
+            .expect("atlas");
+        let mut mesh = ItemMesh::default();
+        push_held_item(
+            &mut mesh,
+            (item.0, item.1, None),
+            &pose,
+            Mat4::IDENTITY,
+            &items,
+        );
+        assert!(!mesh.is_empty(), "the held item has geometry");
+        renderer.set_hand_items(&mesh);
+        renderer
+            .render(&Camera::default(), &Overlay::new(320, 180))
+            .expect("render");
+        let image = renderer.read_pixels().expect("readback");
+        if let Ok(dir) = std::env::var("UMICRAFT_USE_DUMP") {
+            let file = std::fs::File::create(format!("{dir}/{dump}.png")).expect("dump file");
+            let mut encoder = png::Encoder::new(file, image.width, image.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                .expect("png");
+        }
+    }
+
+    /// Renders the bow drawn, an apple being eaten and a sword blocking; set
+    /// `UMICRAFT_USE_DUMP` to a directory to keep the PNGs.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn items_in_use_render_in_hand() {
+        let using = |action, count: f32, ticks_used| HandPose {
+            item_use: Some(ItemUseView {
+                action,
+                count,
+                ticks_used,
+            }),
+            ..HandPose::default()
+        };
+        render_hand((261, 0), using(UseAction::Bow, 71_980.0, 20), "bow");
+        render_hand((260, 0), using(UseAction::Eat, 12.0, 20), "eat");
+        render_hand((276, 0), using(UseAction::Block, 71_990.0, 10), "block");
     }
 }

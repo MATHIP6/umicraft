@@ -319,6 +319,52 @@ fn a_strip_with_mcmeta_becomes_an_animated_layer() {
         .all(|pixel| pixel == [0, 255, 0, 255]));
 }
 
+/// The compass and the clock keep every frame of their strip for the game
+/// state to choose from; the layer starts on the first one and no timeline
+/// animation is created for them.
+#[test]
+fn the_compass_and_the_clock_become_dial_sprites() {
+    let dir = TempDir::new("dials");
+    let mut strip = vec![[255, 0, 0, 255]; 4];
+    strip.extend_from_slice(&[[0, 255, 0, 255]; 4]);
+    let strip_png = png_rgba(2, 4, &strip);
+    let item = |name: &str| format!("assets/minecraft/textures/items/{name}.png");
+    let compass_meta = format!("{}.mcmeta", item("compass"));
+    let jar = jar_with(
+        &dir,
+        &[
+            (item("compass").as_str(), &strip_png),
+            (compass_meta.as_str(), br#"{"animation": {}}"#),
+            (item("clock").as_str(), &strip_png),
+            (
+                item("apple").as_str(),
+                &png_rgba(2, 2, &[[1, 2, 3, 255]; 4]),
+            ),
+        ],
+    );
+
+    let resources = ClientResources::load(&jar).expect("the dials load");
+    let atlas = resources.atlas();
+    assert!(atlas.animations().is_empty());
+    let dials = atlas.dials();
+    assert_eq!(dials.len(), 2);
+    let compass = dials
+        .iter()
+        .find(|dial| dial.kind() == umicraft_assets::DialKind::Compass)
+        .expect("compass");
+    assert_eq!(
+        compass.layer(),
+        atlas.layout().layer("items/compass").unwrap()
+    );
+    assert_eq!(compass.frame_count(), 2);
+    assert_eq!(texel(atlas, compass.layer(), 0, 0), [255, 0, 0, 255]);
+    assert!(compass
+        .frame(1)
+        .unwrap()
+        .chunks_exact(4)
+        .all(|pixel| pixel == [0, 255, 0, 255]));
+}
+
 #[test]
 fn the_missing_layer_is_opaque_checker_like_and_not_empty() {
     let dir = TempDir::new("missing");

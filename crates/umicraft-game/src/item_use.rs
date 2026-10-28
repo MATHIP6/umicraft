@@ -11,9 +11,9 @@
 //! ([`crate::input::RawInput::using_item`]), ignores the other buttons and
 //! tells the server when the button is released.
 //!
-//! The 1.8 item registry does not exist yet (P3), so [`use_action`] and
-//! [`is_activatable`] hold the few item and block ids they need, taken from
-//! the reference classes cited on each table.
+//! [`use_action`] reads food and swords from the item registry; the few other
+//! item ids and the activatable blocks are tables taken from the reference
+//! classes cited on each.
 
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack};
@@ -21,6 +21,7 @@ use umicraft_world::BlockPos;
 
 use crate::gamemode::GameMode;
 use crate::interaction::{Interaction, Outgoing};
+use crate::items::{self, ItemKind, ToolKind};
 use crate::raycast::RayHit;
 use crate::shapes::{Aabb, BlockSource};
 
@@ -46,6 +47,30 @@ pub enum UseAction {
     Bow,
 }
 
+impl UseAction {
+    /// The ticks a use lasts at most (MCP `Item.getMaxItemUseDuration`: 32 for
+    /// `ItemFood`, `ItemBucketMilk` and `ItemPotion`, 72000 for `ItemBow` and
+    /// `ItemSword`).
+    #[must_use]
+    pub fn max_duration(self) -> u32 {
+        match self {
+            Self::Eat | Self::Drink => 32,
+            Self::Block | Self::Bow => 72_000,
+        }
+    }
+}
+
+/// The use of the held item as the renderer needs it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemUseView {
+    /// What the item does.
+    pub action: UseAction,
+    /// The ticks left, `max_duration - ticks_used` (MCP `itemInUseCount`).
+    pub count: f32,
+    /// The ticks the use has lasted.
+    pub ticks_used: u32,
+}
+
 /// The bow item id.
 const BOW: i16 = 261;
 
@@ -63,30 +88,24 @@ const GOLDEN_APPLE: i16 = 322;
 /// The splash bit of a potion's damage value.
 const SPLASH_BIT: i16 = 0x4000;
 
-/// The sword item ids: wooden, stone, iron, diamond and golden
-/// (MCP `Item.java:776-792`).
-const SWORDS: [i16; 5] = [268, 272, 267, 276, 283];
-
-/// The food item ids (MCP `Item.registerItems`: every `ItemFood`,
-/// `ItemSoup` and `ItemSeedFood`).
-const FOODS: &[i16] = &[
-    260, 282, 297, 319, 320, 322, 349, 350, 357, 360, 363, 364, 365, 366, 367, 375, 391, 392, 393,
-    394, 396, 400, 411, 412, 413, 423, 424,
-];
-
 /// What using `item` does, `None` for an item that starts no use.
 ///
-/// MCP `Item.getItemUseAction`; the registry-less client only knows the
-/// items that start a use on the client side (`EntityPlayer.setItemInUse`).
+/// MCP `Item.getItemUseAction`: the base class returns `NONE`; `ItemFood`
+/// (and so `ItemSoup`, `ItemAppleGold`, `ItemSeedFood`) returns `EAT`,
+/// `ItemSword` `BLOCK`, `ItemBow` `BOW`, `ItemBucketMilk` and a non-splash
+/// `ItemPotion` `DRINK`. Food and swords come from the item registry; the bow,
+/// the milk bucket and the potion are the only ids kept here.
 #[must_use]
 pub fn use_action(item: &ItemStack) -> Option<UseAction> {
     match item.item_id {
         BOW => Some(UseAction::Bow),
         MILK_BUCKET => Some(UseAction::Drink),
         POTION if item.damage & SPLASH_BIT == 0 => Some(UseAction::Drink),
-        id if SWORDS.contains(&id) => Some(UseAction::Block),
-        id if FOODS.contains(&id) => Some(UseAction::Eat),
-        _ => None,
+        id => match items::lookup(i32::from(id))?.kind {
+            ItemKind::Food(_) => Some(UseAction::Eat),
+            ItemKind::Tool(ToolKind::Sword, _) => Some(UseAction::Block),
+            _ => None,
+        },
     }
 }
 
@@ -157,6 +176,9 @@ struct InUse {
     slot: u8,
     item_id: i16,
     damage: i16,
+    action: UseAction,
+    /// Ticks since the use started (MCP `maxUseDuration - itemInUseCount`).
+    used_ticks: u32,
 }
 
 impl InUse {
@@ -227,6 +249,16 @@ impl ItemUse {
         self.using.is_some()
     }
 
+    /// The use in progress, `None` when no item is in use.
+    #[must_use]
+    pub fn view(&self) -> Option<ItemUseView> {
+        self.using.as_ref().map(|using| ItemUseView {
+            action: using.action,
+            count: (using.action.max_duration().saturating_sub(using.used_ticks)) as f32,
+            ticks_used: using.used_ticks,
+        })
+    }
+
     /// Ends the use without telling the server: the server finished it
     /// (`Entity Status` 9, MCP `EntityPlayer.handleStatusUpdate`).
     pub fn finish(&mut self) {
@@ -254,8 +286,10 @@ impl ItemUse {
         {
             self.using = None;
         }
-        if self.using.is_some() {
-            if !tick.held {
+        if let Some(using) = self.using.as_mut() {
+            if tick.held {
+                using.used_ticks += 1;
+            } else {
                 self.using = None;
                 output.packets.push(release_packet());
             }
@@ -308,19 +342,23 @@ impl ItemUse {
     /// Starts the use of `item` when the player may use it
     /// (MCP `ItemFood.onItemRightClick`, `ItemBow.onItemRightClick`, ...).
     fn start<W: BlockSource + ?Sized>(&mut self, tick: &UseTick<'_, W>, item: &ItemStack) {
-        let allowed = match use_action(item) {
-            None => false,
-            Some(UseAction::Eat) => {
+        let Some(action) = use_action(item) else {
+            return;
+        };
+        let allowed = match action {
+            UseAction::Eat => {
                 !tick.mode.invulnerable() && (tick.food < FULL_FOOD || item.item_id == GOLDEN_APPLE)
             }
-            Some(UseAction::Bow) => tick.mode == GameMode::Creative || tick.has_arrow,
-            Some(UseAction::Drink | UseAction::Block) => true,
+            UseAction::Bow => tick.mode == GameMode::Creative || tick.has_arrow,
+            UseAction::Drink | UseAction::Block => true,
         };
         if allowed {
             self.using = Some(InUse {
                 slot: tick.slot,
                 item_id: item.item_id,
                 damage: item.damage,
+                action,
+                used_ticks: 0,
             });
         }
     }
@@ -417,6 +455,62 @@ mod tests {
         // A splash potion is thrown, not drunk.
         assert_eq!(use_action(&item(373, 0x4000 | 16)), None);
         assert_eq!(use_action(&item(1, 0)), None);
+    }
+
+    #[test]
+    fn every_former_hand_kept_food_and_sword_still_maps() {
+        for id in [
+            260, 282, 297, 319, 320, 322, 349, 350, 357, 360, 363, 364, 365, 366, 367, 375, 391,
+            392, 393, 394, 396, 400, 411, 412, 413, 423, 424,
+        ] {
+            assert_eq!(use_action(&item(id, 0)), Some(UseAction::Eat), "food {id}");
+        }
+        for id in [268, 272, 267, 276, 283] {
+            assert_eq!(
+                use_action(&item(id, 0)),
+                Some(UseAction::Block),
+                "sword {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn use_durations_follow_the_reference() {
+        assert_eq!(UseAction::Eat.max_duration(), 32);
+        assert_eq!(UseAction::Drink.max_duration(), 32);
+        assert_eq!(UseAction::Bow.max_duration(), 72_000);
+        assert_eq!(UseAction::Block.max_duration(), 72_000);
+    }
+
+    #[test]
+    fn the_view_counts_the_ticks_down_while_the_button_is_held() {
+        let (mut state, mut interaction) = (ItemUse::new(), Interaction::new());
+        assert_eq!(state.view(), None);
+        let bread = item(297, 0);
+        run(
+            &mut state,
+            &mut interaction,
+            &tick(Some(&bread), true, true),
+        );
+        assert_eq!(
+            state.view(),
+            Some(ItemUseView {
+                action: UseAction::Eat,
+                count: 32.0,
+                ticks_used: 0
+            })
+        );
+        for _ in 0..3 {
+            run(
+                &mut state,
+                &mut interaction,
+                &tick(Some(&bread), false, true),
+            );
+        }
+        let view = state.view().expect("still eating");
+        assert_eq!((view.count, view.ticks_used), (29.0, 3));
+        state.finish();
+        assert_eq!(state.view(), None);
     }
 
     #[test]

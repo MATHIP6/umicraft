@@ -8,11 +8,13 @@
 //! `EntityPlayerSP.renderArmPitch` / `renderArmYaw`); [`HandState::pose`]
 //! turns it into the plain [`HandPose`] the renderer interpolates, and
 //! [`HandPose::arm_matrix`] is the chain of `ItemRenderer.func_178095_a`.
-//! Held items are drawn once the item registry exists (milestone P3); until
-//! then only the bare arm is.
+//! [`HandPose::item_matrix`] places a held item, including the use animations
+//! of eating, drinking, blocking and drawing a bow.
 
 use glam::{Mat4, Vec3};
 use umicraft_protocol::packets::play::ItemStack;
+
+use crate::item_use::{ItemUseView, UseAction};
 
 /// The ticks of an arm swing without Haste or Mining Fatigue
 /// (MCP `EntityLivingBase.getArmSwingAnimationEnd`).
@@ -151,6 +153,7 @@ impl HandState {
             swing: self.swing_progress(1.0),
             sway_pitch: self.pitch_delta,
             sway_yaw: self.yaw_delta,
+            item_use: None,
         }
     }
 }
@@ -168,6 +171,8 @@ pub struct HandPose {
     pub sway_pitch: f32,
     /// The yaw sway of the arm in degrees.
     pub sway_yaw: f32,
+    /// The item being used (eaten, drunk, blocked with, drawn), if any.
+    pub item_use: Option<ItemUseView>,
 }
 
 impl HandPose {
@@ -189,34 +194,66 @@ impl HandPose {
             swing: mix(self.swing, swing_end),
             sway_pitch: mix(self.sway_pitch, other.sway_pitch),
             sway_yaw: mix(self.sway_yaw, other.sway_yaw),
+            item_use: match (self.item_use, other.item_use) {
+                (Some(from), Some(to)) => Some(ItemUseView {
+                    count: mix(from.count, to.count),
+                    ..to
+                }),
+                (_, newer) => newer,
+            },
         }
     }
 
     /// The transform from a held item's frame to the camera space.
     ///
-    /// MCP `ItemRenderer.renderItemInFirstPerson` for an idle or swinging
-    /// hand: the sway, `func_178105_d` (the swing shift of an item),
-    /// `transformFirstPersonItem` (placement, equip drop, swing rotations and
-    /// the 0.4 scale), in the order of the `GlStateManager` calls. The item's
-    /// own first-person pose follows (`umicraft_model::item::pose::held_pose`).
+    /// MCP `ItemRenderer.renderItemInFirstPerson` with an item: the sway, then
+    /// either the idle branch (`func_178105_d`, the swing shift, and
+    /// `transformFirstPersonItem` with the swing) or, while the item is in use,
+    /// the branch of its action with a swing of 0 (no swing shift): `EAT` and
+    /// `DRINK` run `func_178104_a` first, `BLOCK` runs `func_178103_d` and
+    /// `BOW` `func_178098_a` after `transformFirstPersonItem`. The factors are
+    /// multiplied in the order of the `GlStateManager` calls. The item's own
+    /// first-person pose follows (`umicraft_model::item::pose::held_pose`).
     #[must_use]
     pub fn item_matrix(&self) -> Mat4 {
-        let swing = self.swing;
+        let sway = rotate(self.sway_pitch, Vec3::X) * rotate(self.sway_yaw, Vec3::Y);
+        sway * match self.item_use {
+            None => self.swing_shift() * self.placement(self.swing),
+            Some(ItemUseView {
+                action: action @ (UseAction::Eat | UseAction::Drink),
+                count,
+                ..
+            }) => eat_drink_motion(count, action.max_duration() as f32) * self.placement(0.0),
+            Some(ItemUseView {
+                action: UseAction::Block,
+                ..
+            }) => self.placement(0.0) * block_pose(),
+            Some(ItemUseView {
+                action: UseAction::Bow,
+                count,
+                ..
+            }) => self.placement(0.0) * bow_draw(UseAction::Bow.max_duration() as f32 - count),
+        }
+    }
+
+    /// MCP `ItemRenderer.func_178105_d`: the shift of an item with the swing.
+    fn swing_shift(&self) -> Mat4 {
+        let root = self.swing.sqrt();
+        let pi = std::f32::consts::PI;
+        translate(
+            -0.4 * (root * pi).sin(),
+            0.2 * (root * pi * 2.0).sin(),
+            -0.2 * (self.swing * pi).sin(),
+        )
+    }
+
+    /// MCP `ItemRenderer.transformFirstPersonItem(equip, swing)`.
+    fn placement(&self, swing: f32) -> Mat4 {
         let root = swing.sqrt();
         let pi = std::f32::consts::PI;
-        let translate = |x: f32, y: f32, z: f32| Mat4::from_translation(Vec3::new(x, y, z));
-        let rotate = |degrees: f32, axis: Vec3| Mat4::from_axis_angle(axis, degrees.to_radians());
         let yaw_swing = (swing * swing * pi).sin();
         let roll_swing = (root * pi).sin();
-
-        rotate(self.sway_pitch, Vec3::X)
-            * rotate(self.sway_yaw, Vec3::Y)
-            * translate(
-                -0.4 * (root * pi).sin(),
-                0.2 * (root * pi * 2.0).sin(),
-                -0.2 * (swing * pi).sin(),
-            )
-            * translate(0.56, -0.52, -0.719_999_97)
+        translate(0.56, -0.52, -0.719_999_97)
             * translate(0.0, self.equip * -0.6, 0.0)
             * rotate(45.0, Vec3::Y)
             * rotate(yaw_swing * -20.0, Vec3::Y)
@@ -259,6 +296,79 @@ impl HandPose {
             * rotate(200.0, Vec3::X)
             * rotate(-135.0, Vec3::Y)
             * translate(5.6, 0.0, 0.0)
+    }
+}
+
+fn translate(x: f32, y: f32, z: f32) -> Mat4 {
+    Mat4::from_translation(Vec3::new(x, y, z))
+}
+
+fn rotate(degrees: f32, axis: Vec3) -> Mat4 {
+    Mat4::from_axis_angle(axis, degrees.to_radians())
+}
+
+/// MCP `ItemRenderer.func_178104_a`: the bob and the lift of the hand to the
+/// mouth while eating or drinking.
+///
+/// `count` is `getItemInUseCount - partialTicks + 1` (the lerped ticks left,
+/// see [`HandPose::lerp`]); `max_duration` is `getMaxItemUseDuration`.
+fn eat_drink_motion(count: f32, max_duration: f32) -> Mat4 {
+    let progress = count / max_duration;
+    // The bob stops over the last fifth of the meal.
+    let bob = if progress >= 0.8 {
+        0.0
+    } else {
+        (count / 4.0 * std::f32::consts::PI).cos().abs() * 0.1
+    };
+    let lift = 1.0 - progress.powf(27.0);
+    translate(0.0, bob, 0.0)
+        * translate(lift * 0.6, lift * -0.5, 0.0)
+        * rotate(lift * 90.0, Vec3::Y)
+        * rotate(lift * 10.0, Vec3::X)
+        * rotate(lift * 30.0, Vec3::Z)
+}
+
+/// MCP `ItemRenderer.func_178103_d`: the fixed pose of a blocking sword.
+fn block_pose() -> Mat4 {
+    translate(-0.5, 0.2, 0.0)
+        * rotate(30.0, Vec3::Y)
+        * rotate(-80.0, Vec3::X)
+        * rotate(60.0, Vec3::Y)
+}
+
+/// MCP `ItemRenderer.func_178098_a`: the pose of a bow drawn for
+/// `ticks` (`maxUseDuration - (itemInUseCount - partialTicks + 1)`).
+fn bow_draw(ticks: f32) -> Mat4 {
+    let seconds = ticks / 20.0;
+    // The pull eases in quadratically and stops at a full draw.
+    let pull = ((seconds * seconds + seconds * 2.0) / 3.0).min(1.0);
+    let shake = if pull > 0.1 {
+        ((ticks - 0.1) * 1.3).sin() * (pull - 0.1) * 0.01
+    } else {
+        0.0
+    };
+    rotate(-18.0, Vec3::Z)
+        * rotate(-12.0, Vec3::Y)
+        * rotate(-8.0, Vec3::X)
+        * translate(-0.9, 0.2, 0.0)
+        * translate(0.0, shake, 0.0)
+        * translate(0.0, 0.0, pull * 0.1)
+        * Mat4::from_scale(Vec3::new(1.0, 1.0, 1.0 + pull * 0.2))
+}
+
+/// The model of a bow being drawn, `None` before the draw has begun.
+///
+/// MCP `RenderItem.renderItemModelForEntity`: with
+/// `i = maxItemUseDuration - itemInUseCount` the ticks used, 18 or more pick
+/// `bow_pulling_2`, over 13 `bow_pulling_1`, over 0 `bow_pulling_0`; a bow
+/// that is not drawn keeps its own model.
+#[must_use]
+pub fn bow_model_name(ticks_used: u32) -> Option<&'static str> {
+    match ticks_used {
+        18.. => Some("bow_pulling_2"),
+        14..=17 => Some("bow_pulling_1"),
+        1..=13 => Some("bow_pulling_0"),
+        0 => None,
     }
 }
 
@@ -444,5 +554,132 @@ mod tests {
         .arm_matrix()
         .transform_point3(shoulder);
         assert!((swung - rest).length() > 0.2);
+    }
+
+    fn using(action: UseAction, count: f32) -> HandPose {
+        HandPose {
+            item_use: Some(ItemUseView {
+                action,
+                count,
+                ticks_used: 0,
+            }),
+            ..HandPose::default()
+        }
+    }
+
+    fn origin(pose: &HandPose) -> Vec3 {
+        pose.item_matrix().transform_point3(Vec3::ZERO)
+    }
+
+    #[test]
+    fn a_fresh_meal_leaves_the_item_at_rest_and_a_late_one_lifts_it() {
+        let rest = origin(&HandPose::default());
+        assert!((origin(&using(UseAction::Eat, 32.0)) - rest).length() < 1e-5);
+        // Hand-computed from `func_178104_a` at f = 5: bob 0.0707 up, lift
+        // ~1 (0.15625^27 ~ 0), then Z 30, X 10, Y 90 turn the placement.
+        let lifted = origin(&using(UseAction::Eat, 5.0));
+        let expected = Vec3::new(-0.138_65, -0.472_00, -0.744_97);
+        assert!((lifted - expected).length() < 2e-3, "{lifted:?}");
+    }
+
+    #[test]
+    fn the_bob_stops_over_the_last_fifth_of_a_meal() {
+        // f = 25 is 0.78 of 32: the bob (|cos(25 pi / 4)| * 0.1) still acts.
+        let bobbing = origin(&using(UseAction::Drink, 25.0));
+        let steady = origin(&using(UseAction::Drink, 26.0));
+        // f = 26 is 0.8125: no bob, and the lift is 1 - 0.8125^27 ~ 0.996.
+        assert!((bobbing - steady).length() > 0.0);
+        let lift = 1.0 - (26.0_f32 / 32.0).powf(27.0);
+        let expected = eat_drink_motion(26.0, 32.0).transform_point3(Vec3::ZERO);
+        assert!((expected.x - lift * 0.6).abs() < 1e-5 && expected.y.abs() < 0.5);
+    }
+
+    #[test]
+    fn a_blocking_sword_has_the_fixed_pose_whatever_the_count() {
+        let pose = using(UseAction::Block, 71_990.0);
+        assert_eq!(
+            pose.item_matrix(),
+            using(UseAction::Block, 3.0).item_matrix()
+        );
+        // The origin follows the translation (-0.5, 0.2, 0), scaled by 0.4
+        // and turned by 45 degrees about Y, after the placement.
+        let local = Vec3::new(-0.2, 0.08, 0.0);
+        let (sin, cos) = 45.0_f32.to_radians().sin_cos();
+        let expected = Vec3::new(
+            0.56 + local.x * cos + local.z * sin,
+            -0.52 + local.y,
+            -0.719_999_97 - local.x * sin + local.z * cos,
+        );
+        assert!((origin(&pose) - expected).length() < 1e-5);
+    }
+
+    #[test]
+    fn a_drawn_bow_stretches_along_z_up_to_a_full_draw() {
+        let stretch = |ticks: f32| {
+            let pose = using(UseAction::Bow, 72_000.0 - ticks);
+            pose.item_matrix().transform_vector3(Vec3::Z).length()
+        };
+        assert!((stretch(0.0) - 0.4).abs() < 1e-5);
+        // 40 ticks is 2 s: (4 + 4) / 3 > 1, clamped to 1.
+        assert!((stretch(40.0) - 0.4 * 1.2).abs() < 1e-5);
+        assert!((stretch(100.0) - 0.4 * 1.2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn an_item_in_use_does_not_follow_the_swing() {
+        let swinging = HandPose {
+            swing: 0.5,
+            ..using(UseAction::Block, 100.0)
+        };
+        assert_eq!(
+            swinging.item_matrix(),
+            using(UseAction::Block, 100.0).item_matrix()
+        );
+    }
+
+    #[test]
+    fn the_use_blends_between_frames() {
+        let view = |action, count| ItemUseView {
+            action,
+            count,
+            ticks_used: 0,
+        };
+        let older = HandPose {
+            item_use: Some(view(UseAction::Eat, 10.0)),
+            ..HandPose::default()
+        };
+        let newer = HandPose {
+            item_use: Some(ItemUseView {
+                ticks_used: 22,
+                ..view(UseAction::Eat, 9.0)
+            }),
+            ..HandPose::default()
+        };
+        let mixed = older.lerp(newer, 0.25).item_use.expect("a use");
+        assert!((mixed.count - 9.75).abs() < 1e-6);
+        assert_eq!(mixed.ticks_used, 22);
+        let none = HandPose::default();
+        assert_eq!(none.lerp(newer, 0.5).item_use, newer.item_use);
+        assert_eq!(older.lerp(none, 0.5).item_use, None);
+    }
+
+    #[test]
+    fn the_bow_model_follows_the_ticks_used() {
+        let names: Vec<_> = [0, 1, 13, 14, 17, 18, 100]
+            .into_iter()
+            .map(bow_model_name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                None,
+                Some("bow_pulling_0"),
+                Some("bow_pulling_0"),
+                Some("bow_pulling_1"),
+                Some("bow_pulling_1"),
+                Some("bow_pulling_2"),
+                Some("bow_pulling_2"),
+            ]
+        );
     }
 }

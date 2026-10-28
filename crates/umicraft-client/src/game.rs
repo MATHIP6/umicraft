@@ -196,6 +196,8 @@ pub struct Frame {
     pub world_time: i64,
     /// The current dimension (`0` overworld, `-1` Nether, `1` End).
     pub dimension: i8,
+    /// The world spawn point the server announced, which the compass shows.
+    pub spawn: Option<(i32, i32, i32)>,
     /// Per-entity interpolation data for the render thread.
     pub entities: Arc<[EntityFrameData]>,
     /// World-space boxes of the block selection outline; empty when the
@@ -888,6 +890,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
             && followed.is_none()
             && game.perspective == Perspective::FirstPerson
             && game.gamemode != GameMode::Spectator,
+        item_use: game.item_use.view(),
         ..game.hand.pose()
     };
     let mut entities = game.entities.frame_data();
@@ -899,6 +902,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
+        spawn: game.spawn,
         entities: entities.into(),
         selection: game.selection_outline().into(),
         cracks: game.cracks().into(),
@@ -2122,7 +2126,7 @@ fn publish_status(game: &mut Game, frames: &SyncSender<RenderEvent>) {
 mod tests {
     use super::*;
     use crate::input::InputState;
-    use umicraft_game::item_use::DropKind;
+    use umicraft_game::item_use::{DropKind, UseAction};
     use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 
     /// An `ench` list with one enchantment, as a server would send it.
@@ -3144,6 +3148,30 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn the_published_hand_carries_the_item_use_until_it_ends() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 10.0;
+        game.held_item = Some(wire_item(297, 0));
+        game.pitch = -0.5;
+        game.input.use_item = true;
+        let mut queue = CommandQueue::default();
+        click_use(&mut game, &mut queue);
+        let (frames, received) = mpsc::sync_channel(32);
+        let frame = |game: &Game| {
+            publish_frame(game, &frames, Instant::now());
+            match received.try_recv() {
+                Ok(RenderEvent::Frame(frame)) => frame,
+                _ => panic!("a frame was expected"),
+            }
+        };
+        let using = frame(&game).state.effects.hand.item_use.expect("a use");
+        assert_eq!(using.action, UseAction::Eat);
+        assert_eq!(using.count, 32.0);
+        game.item_use.finish();
+        assert_eq!(frame(&game).state.effects.hand.item_use, None);
     }
 
     #[test]

@@ -25,6 +25,7 @@ use crate::animation::{AnimationMeta, TextureAnimation};
 use crate::atlas::BlockAtlas;
 use crate::client_jar::ClientJar;
 use crate::colormap::{BiomeColormaps, Colormap, COLORMAP_PREFIX, FOLIAGE_PATH, GRASS_PATH};
+use crate::dial::{DialKind, DialSprite};
 use crate::error::image_error;
 use crate::gui_atlas::{pack_gui_atlas, GuiAtlas, GuiImage};
 use crate::AssetsResult;
@@ -546,20 +547,30 @@ fn build_atlas(
     let edge = atlas_frame_edge(&textures)?;
     let mut layers = BTreeMap::new();
     let mut strips = Vec::new();
+    let mut dial_strips = Vec::new();
     for texture in textures {
         let TextureLayer { key, path, image } = texture;
         let count = image.frame_count(&path)?;
         let meta = files
             .get(&format!("{path}.mcmeta"))
             .and_then(|bytes| AnimationMeta::parse(bytes));
-        // Item strips are left alone: the clock and the compass carry a
-        // `.mcmeta` but the reference drives them by the world time and the
-        // heading (`TextureAtlasSpriteClock/Compass`), not by this timeline.
+        let frames = || {
+            (0..count)
+                .map(|index| image.frame_at(index, edge, &path))
+                .collect::<AssetsResult<Vec<_>>>()
+        };
+        // The clock and the compass carry an empty `.mcmeta`: the reference
+        // picks their frame from the heading and the time of day
+        // (`TextureAtlasSpriteClock/Compass`), not from a timeline.
+        if let (Some(kind), true) = (DialKind::from_key(&key), count > 1) {
+            let frames = frames()?;
+            layers.insert(key.clone(), frames[0].clone());
+            dial_strips.push((key, kind, frames));
+            continue;
+        }
         let animated = key.starts_with("blocks/");
         if let (Some(meta), true, true) = (meta, count > 1, animated) {
-            let frames = (0..count)
-                .map(|index| image.frame_at(index, edge, &path))
-                .collect::<AssetsResult<Vec<_>>>()?;
+            let frames = frames()?;
             layers.insert(key.clone(), frames[0].clone());
             strips.push((key, frames, meta));
         } else {
@@ -587,7 +598,13 @@ fn build_atlas(
         .into_iter()
         .filter_map(|(key, frames, meta)| TextureAnimation::new(layout.layer(&key)?, frames, &meta))
         .collect();
-    Ok(BlockAtlas::new(edge, edge, pixels, layout)?.with_animations(animations))
+    let dials = dial_strips
+        .into_iter()
+        .filter_map(|(key, kind, frames)| DialSprite::new(layout.layer(&key)?, kind, frames))
+        .collect();
+    Ok(BlockAtlas::new(edge, edge, pixels, layout)?
+        .with_animations(animations)
+        .with_dials(dials))
 }
 
 /// The atlas edge is the largest frame edge of any texture.

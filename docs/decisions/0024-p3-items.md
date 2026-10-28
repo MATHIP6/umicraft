@@ -58,4 +58,15 @@ GUI sampler.
 ## Known gaps
 
 Listed in `docs/parity.md` (Items). The largest are `builtin/entity` items
-(P7), item use animations and maps.
+(P7), the use animations of other players (P5) and maps.
+
+## Dials and use animations
+
+The compass and the clock keep every frame of their strip
+(`umicraft_assets::DialSprite`); `umicraft_client::dials::DialAnimator` runs the
+reference's damped spring once per 20 Hz tick and writes the chosen frame into
+the block array layer, so GUI icons, dropped and held items share it. The icon
+key of a dial item holds its frame, so the icon cache keeps one picture per
+frame. The first-person use animations live in `umicraft_game::hand`
+(`HandPose::item_use`, published with the frame); the client only picks the
+bow drawing model.

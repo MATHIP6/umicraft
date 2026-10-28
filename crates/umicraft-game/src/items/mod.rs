@@ -17,8 +17,11 @@
 //! assert!(matches!(sword.kind, ItemKind::Tool(..)));
 //! ```
 
+mod egg_table;
 pub mod kind;
+mod potion_color;
 mod table;
+pub mod tint;
 
 pub use kind::{ArmorMaterial, ArmorSlot, FoodValues, ItemKind, Tier, ToolKind};
 

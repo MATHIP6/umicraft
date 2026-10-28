@@ -15,9 +15,11 @@
 
 use umicraft_assets::ClientResources;
 use umicraft_game::item_nbt::ItemDisplay;
-use umicraft_game::items::{self, ArmorMaterial, ItemKind};
+
+use crate::dials::{is_dial, DialFrames};
+use crate::item_tints::{item_grass_color, layer_tints, nbt_color};
+use umicraft_game::items;
 use umicraft_mesh::item::{ItemMesh, ItemStyle};
-use umicraft_mesh::tint::WHITE;
 use umicraft_mesh::VertexLight;
 use umicraft_model::item::pose::gui_pose;
 use umicraft_model::item::{ItemModelSet, SpriteMask};
@@ -26,26 +28,6 @@ use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::IconProvider;
 use umicraft_ui::SlotItem;
 
-/// The colour of undyed leather armour (MCP `ItemArmor.getColor`).
-const DEFAULT_LEATHER_COLOR: u32 = 0x00A0_6540;
-/// Foliage colours of the leaf, vine and lily pad items (MCP
-/// `ColorizerFoliage.getFoliageColorBasic` / `Pine` / `Birch`,
-/// `BlockLilyPad.getRenderColor`).
-const FOLIAGE_BASIC: u32 = 4_764_952;
-const FOLIAGE_PINE: u32 = 6_396_257;
-const FOLIAGE_BIRCH: u32 = 8_431_445;
-const LILY_PAD_COLOR: u32 = 7_455_580;
-/// Climate sample of the grass colour of an item (MCP
-/// `ColorizerGrass.getGrassColor(0.5, 1.0)`).
-const GRASS_TEMPERATURE: f32 = 0.5;
-const GRASS_RAINFALL: f32 = 1.0;
-const GRASS: i16 = 2;
-const LEAVES: i16 = 18;
-const TALL_GRASS: i16 = 31;
-const VINE: i16 = 106;
-const LILY_PAD: i16 = 111;
-const LEAVES_2: i16 = 161;
-const DOUBLE_PLANT: i16 = 175;
 /// Set in the colour field of a key when the item is dyed.
 const COLOR_PRESENT: u64 = 1 << 24;
 const ID_SHIFT: u32 = 0;
@@ -83,10 +65,7 @@ impl ItemResources {
             let pixels = atlas.pixels().get(layer * size..(layer + 1) * size)?;
             SpriteMask::from_rgba(width, height, pixels)
         };
-        let grass_color = resources.colormaps().map(|maps| {
-            let [r, g, b] = maps.grass.sample(GRASS_TEMPERATURE, GRASS_RAINFALL);
-            u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
-        });
+        let grass_color = resources.colormaps().map(item_grass_color);
         Ok(Self {
             models: ItemModelSet::build(resources, &masks)?,
             atlas: atlas.layout().clone(),
@@ -104,21 +83,12 @@ impl ItemResources {
         }
     }
 
-    /// The colour that multiplies the first layer of an item's model: dyed
-    /// or default leather, and the foliage and grass block items.
-    ///
-    /// `nbt` is parsed only for leather armour, the one case that reads it.
+    /// The tint of each of the first two layers of an item's model (dyed
+    /// leather, potions, spawn eggs, firework charges, grass and foliage
+    /// block items); white for everything else.
     #[must_use]
-    pub fn tint(&self, item_id: i16, damage: i16, nbt: Option<&[u8]>) -> Option<u32> {
-        let leather = matches!(
-            items::lookup(i32::from(item_id)).map(|def| def.kind),
-            Some(ItemKind::Armor(ArmorMaterial::Leather, _))
-        );
-        if leather {
-            let dyed = nbt.and_then(|bytes| ItemDisplay::from_nbt(bytes).leather_color);
-            return Some(dyed.unwrap_or(DEFAULT_LEATHER_COLOR));
-        }
-        block_item_tint(item_id, damage, self.grass_color)
+    pub fn tints(&self, item_id: i16, damage: i16, nbt: Option<&[u8]>) -> [u32; 2] {
+        layer_tints(item_id, damage, nbt_color(item_id, nbt), self.grass_color)
     }
 
     /// The texture layers the item models index.
@@ -136,7 +106,7 @@ impl ItemResources {
     /// The widget data for a stack: its icon key, count, durability and
     /// glint.
     #[must_use]
-    pub fn slot_item(&self, stack: &ItemStack) -> SlotItem {
+    pub fn slot_item(&self, stack: &ItemStack, dials: DialFrames) -> SlotItem {
         let definition = items::lookup(i32::from(stack.item_id));
         let display = stack
             .nbt
@@ -147,7 +117,8 @@ impl ItemResources {
             key: icon_key(
                 stack,
                 definition,
-                self.tint(stack.item_id, stack.damage, stack.nbt.as_deref()),
+                nbt_color(stack.item_id, stack.nbt.as_deref()),
+                dials,
             ),
             count: u8::try_from(stack.stack_size).unwrap_or(0),
             damage: stack.damage,
@@ -158,12 +129,29 @@ impl ItemResources {
     }
 }
 
+/// What the UI needs to turn a stack into a slot: the item resources, when
+/// loaded, and the frames the dials show this frame.
+#[derive(Debug, Clone, Copy)]
+pub struct ItemView<'a> {
+    resources: Option<&'a ItemResources>,
+    dials: DialFrames,
+}
+
+impl<'a> ItemView<'a> {
+    /// A view over `resources` (`None` for the procedural fallback, which
+    /// has no item sprites).
+    #[must_use]
+    pub fn new(resources: Option<&'a ItemResources>, dials: DialFrames) -> Self {
+        Self { resources, dials }
+    }
+}
+
 /// The widget data for a stack, or an icon-less slot while no item resources
 /// are loaded (the procedural fallback has no item sprites).
 #[must_use]
-pub fn slot_item(items: Option<&ItemResources>, stack: &ItemStack) -> SlotItem {
-    match items {
-        Some(items) => items.slot_item(stack),
+pub fn slot_item(view: ItemView<'_>, stack: &ItemStack) -> SlotItem {
+    match view.resources {
+        Some(items) => items.slot_item(stack, view.dials),
         None => SlotItem {
             key: u64::MAX,
             count: u8::try_from(stack.stack_size).unwrap_or(0),
@@ -187,9 +175,11 @@ impl ItemResources {
     /// Fills `mesh` with the GUI geometry of the icon `key`, `false` when the
     /// item has no sprite model.
     fn build_icon(&self, key: u64, mesh: &mut ItemMesh) -> bool {
-        let (item_id, damage, color) = unpack_key(key);
+        let (item_id, key_damage, color) = unpack_key(key);
         let damageable =
             items::lookup(i32::from(item_id)).is_some_and(items::ItemDef::is_damageable);
+        // A dial's key holds its frame in the damage field; its model has none.
+        let damage = if is_dial(item_id) { 0 } else { key_damage };
         let Some(model) = self.models.model(item_id as u16, damage as u16, damageable) else {
             return false;
         };
@@ -197,7 +187,7 @@ impl ItemResources {
             // Entity-rendered items (chest, banner, skull) have no sprite yet.
             return false;
         };
-        let tints = [color.unwrap_or(WHITE)];
+        let tints = layer_tints(item_id, damage, color, self.grass_color);
         let style = ItemStyle {
             atlas: &self.atlas,
             // Flat sprites are drawn unlit; lit blocks keep the face shade.
@@ -210,10 +200,20 @@ impl ItemResources {
 }
 
 /// Packs what decides the picture of a stack into an icon key.
-fn icon_key(stack: &ItemStack, definition: Option<&items::ItemDef>, tint: Option<u32>) -> u64 {
-    let color = tint.map_or(0, |rgb| COLOR_PRESENT | u64::from(rgb & 0x00FF_FFFF));
-    // A damageable item looks the same at any damage: keep its key stable.
-    let damage = if definition.is_some_and(items::ItemDef::is_damageable) {
+///
+/// The damage field holds the metadata of items that look different with
+/// it, nothing for a damageable item (it looks the same at any damage) and
+/// the shown frame for the compass and the clock.
+fn icon_key(
+    stack: &ItemStack,
+    definition: Option<&items::ItemDef>,
+    color: Option<u32>,
+    dials: DialFrames,
+) -> u64 {
+    let color = color.map_or(0, |rgb| COLOR_PRESENT | u64::from(rgb & 0x00FF_FFFF));
+    let damage = if let Some(frame) = dials.frame_of(stack.item_id) {
+        frame
+    } else if definition.is_some_and(items::ItemDef::is_damageable) {
         0
     } else {
         stack.damage as u16
@@ -221,24 +221,6 @@ fn icon_key(stack: &ItemStack, definition: Option<&items::ItemDef>, tint: Option
     (u64::from(stack.item_id as u16) << ID_SHIFT)
         | (u64::from(damage) << DAMAGE_SHIFT)
         | (color << COLOR_SHIFT)
-}
-
-/// The tint of the block items that the reference colours
-/// (`Block.getRenderColor` through `ItemColored` and `ItemLeaves`).
-fn block_item_tint(item_id: i16, damage: i16, grass: Option<u32>) -> Option<u32> {
-    match item_id {
-        GRASS => grass,
-        TALL_GRASS if damage != 0 => grass,
-        DOUBLE_PLANT if matches!(damage & 7, 2 | 3) => grass,
-        LEAVES => Some(match damage & 3 {
-            1 => FOLIAGE_PINE,
-            2 => FOLIAGE_BIRCH,
-            _ => FOLIAGE_BASIC,
-        }),
-        LEAVES_2 | VINE => Some(FOLIAGE_BASIC),
-        LILY_PAD => Some(LILY_PAD_COLOR),
-        _ => None,
-    }
 }
 
 /// The inverse of [`icon_key`]: item id, damage and the dye colour.
@@ -277,37 +259,37 @@ mod tests {
 
     #[test]
     fn a_key_round_trips_id_damage_and_tint() {
-        let key = icon_key(&stack(298, 12), items::lookup(298), Some(0x12_3456));
+        let key = icon_key(
+            &stack(298, 12),
+            items::lookup(298),
+            Some(0x12_3456),
+            DialFrames::default(),
+        );
         assert_eq!(unpack_key(key), (298, 0, Some(0x12_3456)));
-        let key = icon_key(&stack(1, 3), items::lookup(1), None);
+        let key = icon_key(&stack(1, 3), items::lookup(1), None, DialFrames::default());
         assert_eq!(unpack_key(key), (1, 3, None));
     }
 
     #[test]
     fn damage_only_changes_the_key_of_items_without_durability() {
-        let sword = |damage| icon_key(&stack(276, damage), items::lookup(276), None);
+        let sword = |damage| {
+            icon_key(
+                &stack(276, damage),
+                items::lookup(276),
+                None,
+                DialFrames::default(),
+            )
+        };
         assert_eq!(sword(0), sword(900));
-        let wool = |damage| icon_key(&stack(35, damage), items::lookup(35), None);
+        let wool = |damage| {
+            icon_key(
+                &stack(35, damage),
+                items::lookup(35),
+                None,
+                DialFrames::default(),
+            )
+        };
         assert_ne!(wool(0), wool(14));
-    }
-
-    #[test]
-    fn foliage_and_grass_items_are_tinted_like_the_reference() {
-        let grass = Some(0x0091_BD59);
-        assert_eq!(block_item_tint(2, 0, grass), grass);
-        assert_eq!(block_item_tint(31, 0, grass), None, "dead bush stays white");
-        assert_eq!(block_item_tint(31, 1, grass), grass);
-        assert_eq!(block_item_tint(175, 2, grass), grass);
-        assert_eq!(
-            block_item_tint(175, 0, grass),
-            None,
-            "sunflower is untinted"
-        );
-        assert_eq!(block_item_tint(18, 1, None), Some(FOLIAGE_PINE));
-        assert_eq!(block_item_tint(18, 2, None), Some(FOLIAGE_BIRCH));
-        assert_eq!(block_item_tint(18, 0, None), Some(FOLIAGE_BASIC));
-        assert_eq!(block_item_tint(111, 0, None), Some(LILY_PAD_COLOR));
-        assert_eq!(block_item_tint(1, 0, grass), None);
     }
 
     #[test]
@@ -354,23 +336,31 @@ mod render_tests {
             )
             .expect("atlas");
         let stacks = [
-            stack(276, 0),
-            stack(1, 0),
-            stack(2, 0),
-            stack(260, 0),
+            stack(373, 8197),
+            stack(373, 8194),
+            stack(373, 16453),
+            stack(383, 50),
+            stack(383, 91),
             stack(298, 0),
-            stack(35, 14),
-            stack(18, 0),
-            stack(18, 1),
-            stack(322, 0),
-            stack(31, 1),
+            stack(345, 0),
+            stack(347, 0),
+            stack(402, 0),
+            stack(261, 0),
         ];
         let mut list = DrawList::new();
         for (index, item) in stacks.iter().enumerate() {
             let x = 8.0 + (index % 5) as f32 * 60.0;
             let y = 8.0 + (index / 5) as f32 * 44.0;
             list.item(
-                items.slot_item(item).key,
+                items
+                    .slot_item(
+                        item,
+                        DialFrames {
+                            compass: 8,
+                            clock: 20,
+                        },
+                    )
+                    .key,
                 Rect::new(x, y, 48.0, 48.0),
                 false,
             );
