@@ -3,13 +3,16 @@
 //! The block/item texture array payload shared with the renderer.
 //!
 //! Every layer is an RGBA8 image of the same size. The builder normalises each
-//! texture to its first square frame and scales it to the largest frame edge in
-//! the source (32×32 for the 1.8.8 jar), but the type keeps the dimensions
+//! texture to its first square frame (the animated block textures keep the other
+//! frames in a [`crate::TextureAnimation`]) and scales it to the largest frame
+//! edge in the source (32×32 for the 1.8.8 jar), but the type keeps the dimensions
 //! explicit so a resource pack can use a different size. The layout (and
 //! therefore the layer order) is the deterministic [`AtlasLayout`] from
 //! `umicraft-model`; layer zero is the original missing-texture checker.
 
 use umicraft_model::AtlasLayout;
+
+use crate::animation::TextureAnimation;
 
 /// One texture-array upload: layer-major RGBA8 pixels plus their key layout.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +21,7 @@ pub struct BlockAtlas {
     height: u32,
     pixels: Vec<u8>,
     layout: AtlasLayout,
+    animations: Vec<TextureAnimation>,
 }
 
 impl BlockAtlas {
@@ -66,7 +70,22 @@ impl BlockAtlas {
             height,
             pixels,
             layout,
+            animations: Vec::new(),
         })
+    }
+
+    /// Attaches the animated layers of this atlas.
+    #[must_use]
+    pub(crate) fn with_animations(mut self, animations: Vec<TextureAnimation>) -> Self {
+        self.animations = animations;
+        self
+    }
+
+    /// The animated layers (water, lava, fire, portal...), each at its first
+    /// step. Clone them to get an independent timeline.
+    #[must_use]
+    pub fn animations(&self) -> &[TextureAnimation] {
+        &self.animations
     }
 
     /// Edge length of one layer in texels.

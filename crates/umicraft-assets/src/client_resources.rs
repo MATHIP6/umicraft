@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 
 use umicraft_model::{AtlasLayout, ModelError, ModelResult, ResourceSource};
 
+use crate::animation::{AnimationMeta, TextureAnimation};
 use crate::atlas::BlockAtlas;
 use crate::client_jar::ClientJar;
 use crate::colormap::{BiomeColormaps, Colormap, COLORMAP_PREFIX, FOLIAGE_PATH, GRASS_PATH};
@@ -140,15 +141,20 @@ impl DecodedPng {
         ))
     }
 
-    /// Returns the first frame scaled to `edge`×`edge` with nearest-neighbour
-    /// sampling.
+    /// How many square frames the image holds (1 unless it is an animation strip).
+    fn frame_count(&self, path: &str) -> AssetsResult<u32> {
+        Ok(self.height / self.frame_edge(path)?)
+    }
+
+    /// Returns frame number `index` scaled to `edge`×`edge` with
+    /// nearest-neighbour sampling.
     ///
-    /// A square image uses its whole area. An animation strip contributes only
-    /// its top `width`×`width` frame, so a 16×512 strip yields one 16×16 frame
-    /// and a 32×1024 strip yields one full 32×32 frame. The frame is then
-    /// replicated or sampled to the atlas edge; integer scale factors preserve
-    /// every source pixel and its alpha exactly.
-    fn frame_at(&self, edge: u32, path: &str) -> AssetsResult<Vec<u8>> {
+    /// A square image has the single frame 0. An animation strip stacks
+    /// `width`×`width` frames, so a 16×512 strip yields 32 frames of 16×16 and a
+    /// 32×1024 strip yields 32 full 32×32 frames. The frame is then replicated
+    /// or sampled to the atlas edge; integer scale factors preserve every
+    /// source pixel and its alpha exactly.
+    fn frame_at(&self, index: u32, edge: u32, path: &str) -> AssetsResult<Vec<u8>> {
         let frame_edge = self.frame_edge(path)?;
         let source_edge = usize::try_from(frame_edge)
             .map_err(|_| image_error(path, "the frame size does not fit into memory"))?;
@@ -165,7 +171,10 @@ impl DecodedPng {
         let frame_len = pixel_bytes(frame_edge, frame_edge)
             .ok_or_else(|| image_error(path, "the frame size overflows"))?;
         let mut frame = Vec::with_capacity(frame_len);
-        for row in 0..frame_edge {
+        let first_row = index
+            .checked_mul(frame_edge)
+            .ok_or_else(|| image_error(path, "the frame row overflows"))?;
+        for row in first_row..first_row.saturating_add(frame_edge) {
             let start = source_stride
                 .checked_mul(
                     usize::try_from(row)
@@ -335,7 +344,7 @@ impl ClientResources {
         }
 
         let gui_images = decode_gui_textures(&raw_gui)?;
-        let atlas = build_atlas(textures)?;
+        let atlas = build_atlas(textures, &files)?;
         let colormaps = decode_colormaps(&mut decoded_colormaps)?;
         let gui_atlas = pack_gui_atlas(gui_images);
         Ok(Self {
@@ -483,12 +492,36 @@ fn decode_gui_textures(raw: &BTreeMap<String, Vec<u8>>) -> AssetsResult<Vec<GuiI
 }
 
 /// Builds the deterministic atlas from decoded textures.
-fn build_atlas(textures: Vec<TextureLayer>) -> AssetsResult<BlockAtlas> {
+///
+/// A texture whose `.mcmeta` describes an animation keeps its first frame in
+/// the layer and hands all its frames to a [`TextureAnimation`]; a strip
+/// without metadata stays on its first frame, as in the reference.
+fn build_atlas(
+    textures: Vec<TextureLayer>,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> AssetsResult<BlockAtlas> {
     let edge = atlas_frame_edge(&textures)?;
     let mut layers = BTreeMap::new();
+    let mut strips = Vec::new();
     for texture in textures {
-        let frame = texture.image.frame_at(edge, &texture.path)?;
-        layers.insert(texture.key, frame);
+        let TextureLayer { key, path, image } = texture;
+        let count = image.frame_count(&path)?;
+        let meta = files
+            .get(&format!("{path}.mcmeta"))
+            .and_then(|bytes| AnimationMeta::parse(bytes));
+        // Item strips are left alone: the clock and the compass carry a
+        // `.mcmeta` but the reference drives them by the world time and the
+        // heading (`TextureAtlasSpriteClock/Compass`), not by this timeline.
+        let animated = key.starts_with("blocks/");
+        if let (Some(meta), true, true) = (meta, count > 1, animated) {
+            let frames = (0..count)
+                .map(|index| image.frame_at(index, edge, &path))
+                .collect::<AssetsResult<Vec<_>>>()?;
+            layers.insert(key.clone(), frames[0].clone());
+            strips.push((key, frames, meta));
+        } else {
+            layers.insert(key, image.frame_at(0, edge, &path)?);
+        }
     }
 
     let layout = AtlasLayout::from_keys(layers.keys().cloned());
@@ -507,7 +540,11 @@ fn build_atlas(textures: Vec<TextureLayer>) -> AssetsResult<BlockAtlas> {
         pixels.extend_from_slice(&frame);
     }
 
-    BlockAtlas::new(edge, edge, pixels, layout)
+    let animations = strips
+        .into_iter()
+        .filter_map(|(key, frames, meta)| TextureAnimation::new(layout.layer(&key)?, frames, &meta))
+        .collect();
+    Ok(BlockAtlas::new(edge, edge, pixels, layout)?.with_animations(animations))
 }
 
 /// The atlas edge is the largest frame edge of any texture.

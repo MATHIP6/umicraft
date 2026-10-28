@@ -165,6 +165,9 @@ pub struct Renderer {
     /// [`Renderer::use_procedural_blocks`] can bind it again after an
     /// official atlas replaced it.
     procedural_blocks: wgpu::TextureView,
+    /// The official block array and its layer size, kept so animated layers
+    /// can be rewritten in place; `None` while the procedural array is bound.
+    official_blocks: Option<(wgpu::Texture, u32, u32)>,
     overlay_pipeline: wgpu::RenderPipeline,
     /// Pipeline for GUI texture quads (RGBA, no coverage threshold).
     gui_overlay_pipeline: wgpu::RenderPipeline,
@@ -576,6 +579,7 @@ impl Renderer {
             environment: RenderEnvironment::default(),
             block_sampler,
             procedural_blocks: block_view,
+            official_blocks: None,
             overlay_pipeline,
             gui_overlay_pipeline,
             overlay_layout,
@@ -882,7 +886,48 @@ impl Renderer {
             &self.block_sampler,
             &view,
         );
+        self.official_blocks = Some((texture, width, height));
         Ok(())
+    }
+
+    /// Rewrites one layer of the official block array (an animation frame).
+    ///
+    /// `pixels` is one tightly packed RGBA8 layer. Returns `false` and writes
+    /// nothing when no official array is bound, the layer does not exist or
+    /// the buffer has the wrong length, so a stale animation after a resource
+    /// reload cannot corrupt the new array.
+    pub fn write_block_layer(&self, layer: u32, pixels: &[u8]) -> bool {
+        let Some((texture, width, height)) = &self.official_blocks else {
+            return false;
+        };
+        let expected = u64::from(*width) * u64::from(*height) * 4;
+        if layer >= texture.depth_or_array_layers() || pixels.len() as u64 != expected {
+            return false;
+        }
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: layer,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(*height),
+            },
+            wgpu::Extent3d {
+                width: *width,
+                height: *height,
+                depth_or_array_layers: 1,
+            },
+        );
+        true
     }
 
     /// Binds the built-in procedural block array again.
@@ -892,6 +937,7 @@ impl Renderer {
     /// uploads such meshes. The renderer starts on this array, so a call on a
     /// fresh renderer changes nothing.
     pub fn use_procedural_blocks(&mut self) {
+        self.official_blocks = None;
         self.terrain_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,

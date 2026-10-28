@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use umicraft_assets::{BlockAtlas, GuiAtlas};
+use umicraft_assets::{BlockAtlas, GuiAtlas, TextureAnimation};
 use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, Mesh, ModelMeshContext};
 use umicraft_render::{BlockAtlasError, Renderer};
 
@@ -165,6 +165,7 @@ impl TerrainTextures {
                         InstalledTerrain {
                             mesher: TerrainMesher(MesherKind::Models(context)),
                             gui_atlas: Some(gui_atlas),
+                            animations: atlas.animations().to_vec(),
                         }
                     }
                     Err(error) => {
@@ -185,6 +186,7 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
     InstalledTerrain {
         mesher: TerrainMesher(MesherKind::Procedural),
         gui_atlas: None,
+        animations: Vec::new(),
     }
 }
 
@@ -196,6 +198,8 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
 pub struct InstalledTerrain {
     mesher: TerrainMesher,
     gui_atlas: Option<GuiAtlas>,
+    /// The animated layers of the bound array (empty for the procedural set).
+    animations: Vec<TextureAnimation>,
 }
 
 impl InstalledTerrain {
@@ -209,6 +213,13 @@ impl InstalledTerrain {
     #[must_use]
     pub fn mesher(&self) -> TerrainMesher {
         self.mesher.clone()
+    }
+
+    /// The animated layers (water, lava, fire...) of the bound array, each at
+    /// its first step. Empty for the procedural set.
+    #[must_use]
+    pub fn animations(&self) -> &[TextureAnimation] {
+        &self.animations
     }
 
     /// The GUI texture atlas, if the official assets were loaded.

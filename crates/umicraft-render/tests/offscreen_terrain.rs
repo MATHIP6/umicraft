@@ -460,3 +460,39 @@ fn the_hand_is_drawn_over_a_nearer_world_block_and_can_be_hidden() {
     ));
     assert_eq!(hidden, wall);
 }
+
+/// An animation frame written into one layer shows up in the next render.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn rewriting_a_block_layer_changes_the_next_frame() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    assert!(
+        !renderer.write_block_layer(0, &[0; 4]),
+        "the procedural array is not animated"
+    );
+    renderer
+        .set_block_atlas(1, 1, 1, &synthetic_atlas(&[[255, 0, 0, 255]]))
+        .expect("upload synthetic atlas");
+    renderer.upload_mesh(
+        ChunkPos::new(0, 0),
+        &quad(-5.0, (-8.0, 8.0), (60.0, 100.0), 0, TORCH),
+    );
+    let before = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(renderer.write_block_layer(0, &[0, 255, 0, 255]));
+    assert!(
+        !renderer.write_block_layer(1, &[0, 255, 0, 255]),
+        "no such layer"
+    );
+    assert!(!renderer.write_block_layer(0, &[0, 255]), "short buffer");
+    let after = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(before[0] > 150 && before[1] < 60, "red before: {before:?}");
+    assert!(after[1] > 150 && after[0] < 60, "green after: {after:?}");
+}

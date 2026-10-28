@@ -285,6 +285,40 @@ fn a_tall_animation_strip_contributes_only_its_first_frame() {
         .any(|pixel| pixel == [0, 255, 0, 255]));
 }
 
+/// An animation strip with `.mcmeta` animates its layer (water, lava, fire),
+/// and one without metadata stays on its first frame.
+#[test]
+fn a_strip_with_mcmeta_becomes_an_animated_layer() {
+    let dir = TempDir::new("animated-layer");
+    let mut strip = vec![[255, 0, 0, 255]; 4];
+    strip.extend_from_slice(&[[0, 255, 0, 255]; 4]);
+    let strip_png = png_rgba(2, 4, &strip);
+    let meta_path = format!("{}.mcmeta", block_path("water"));
+    let jar = jar_with(
+        &dir,
+        &[
+            (block_path("water").as_str(), &strip_png),
+            (meta_path.as_str(), br#"{"animation": {"frametime": 2}}"#),
+            (block_path("plain").as_str(), &strip_png),
+        ],
+    );
+
+    let resources = ClientResources::load(&jar).expect("the animation loads");
+    let atlas = resources.atlas();
+    let water = atlas.layout().layer("blocks/water").expect("water layer");
+    let mut animations = atlas.animations().to_vec();
+    assert_eq!(animations.len(), 1, "only the strip with metadata animates");
+    assert_eq!(animations[0].layer(), water);
+    // The layer starts on frame 0 and the second frame arrives after 2 ticks.
+    assert_eq!(texel(atlas, water, 0, 0), [255, 0, 0, 255]);
+    assert!(animations[0].tick().is_none());
+    let second = animations[0].tick().expect("the frame changes");
+    assert_eq!(second.len(), 2 * 2 * 4);
+    assert!(second
+        .chunks_exact(4)
+        .all(|pixel| pixel == [0, 255, 0, 255]));
+}
+
 #[test]
 fn the_missing_layer_is_opaque_checker_like_and_not_empty() {
     let dir = TempDir::new("missing");
@@ -579,6 +613,34 @@ fn official_1_8_8_counts() {
         .iter()
         .filter(|path| path.ends_with(".mcmeta"))
         .count();
+
+    // Water, lava, fire and portal animate (the live-game regression: they
+    // showed a frozen first frame).
+    let animated: Vec<_> = resources
+        .atlas()
+        .animations()
+        .iter()
+        .filter_map(|animation| {
+            resources
+                .atlas()
+                .layout()
+                .keys()
+                .get(animation.layer() as usize)
+        })
+        .collect();
+    println!("animated layers   : {animated:?}");
+    for key in [
+        "blocks/water_still",
+        "blocks/water_flow",
+        "blocks/lava_still",
+        "blocks/lava_flow",
+    ] {
+        assert!(animated.iter().any(|animated| *animated == key), "{key}");
+    }
+    assert!(
+        animated.iter().all(|key| key.starts_with("blocks/")),
+        "the clock and the compass are not timeline-driven"
+    );
 
     println!(
         "blockstates       : {blockstates}\n\
