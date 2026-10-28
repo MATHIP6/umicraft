@@ -50,6 +50,10 @@ const SEARCH_COLOR: u32 = 0xFF_FF_FF;
 const TITLE_POSITION: (i32, i32) = (8, 6);
 /// Where the search text starts (`new GuiTextField(..., guiLeft + 82, guiTop + 6, ...)`).
 const SEARCH_POSITION: (i32, i32) = (82, 6);
+/// The longest search text (`searchField.setMaxStringLength(15)`).
+const SEARCH_MAX_LENGTH: usize = 15;
+/// Glyph height of the vanilla font, in GUI pixels.
+const SEARCH_FONT_HEIGHT: f32 = 8.0;
 /// Offset of a tab's icon from the button (`l + 6`, `i1 + 8 + (top ? 1 : -1)`).
 const ICON_OFFSET_X: i32 = 6;
 const ICON_OFFSET_Y: i32 = 8;
@@ -73,6 +77,8 @@ pub struct CreativeScene<'a> {
     pub gui_atlas: Option<&'a GuiAtlas>,
     /// The item icons.
     pub items: ItemView<'a>,
+    /// Whether the search caret is in the visible half of its blink.
+    pub caret_visible: bool,
 }
 
 /// Where the tab button of `tab` is drawn, as scaled pixels relative to the
@@ -264,6 +270,22 @@ fn draw_text(
         .text([x, y], text, TextStyle::new(scale, text_color(rgb)));
 }
 
+/// Draws the blinking search caret after the text: an underscore, or a
+/// vertical bar once the text is at its maximum length
+/// (`GuiTextField.drawTextBox`, `drawCursorVertical`). `text_width` is the
+/// width of the text in unscaled GUI pixels.
+fn draw_caret(ui: &mut Ui, layout: &CreativeLayout, text_width: f32, full: bool) {
+    let at = (SEARCH_POSITION.0 + text_width as i32, SEARCH_POSITION.1);
+    if full {
+        let scale = layout.scale() as f32;
+        let [x, y] = layout.position(at.0, at.1);
+        let bar = Rect::new(x, y - scale, scale, (SEARCH_FONT_HEIGHT + 2.0) * scale);
+        ui.draw().rect(bar, WHITE);
+    } else {
+        draw_text(ui, layout, at, "_".to_owned(), SEARCH_COLOR, true);
+    }
+}
+
 /// The language-key text of a one-line tooltip.
 fn key_line(key: &str) -> TooltipLine {
     TooltipLine {
@@ -314,7 +336,12 @@ pub fn draw_creative_overlay(
     draw_tab(ui, atlas, layout, scene, tabs, selected);
     if scene.creative.tab.shows_search_box() {
         let text = scene.creative.search.clone();
+        let full = text.chars().count() >= SEARCH_MAX_LENGTH;
+        let caret_x = atlas.measure(&text, 1.0);
         draw_text(ui, layout, SEARCH_POSITION, text, SEARCH_COLOR, true);
+        if scene.caret_visible {
+            draw_caret(ui, layout, caret_x, full);
+        }
     }
     draw_slots(ui, atlas, layout, scene, textured);
     if scene.creative.tab.shows_title() {
@@ -380,6 +407,7 @@ mod tests {
             creative,
             gui_atlas: None,
             items: ItemView::new(None, Default::default()),
+            caret_visible: false,
         }
     }
 
@@ -395,12 +423,33 @@ mod tests {
             creative: &creative,
             gui_atlas: None,
             items: ItemView::new(None, Default::default()),
+            caret_visible: false,
         };
         assert_eq!(id_in(&scene, CreativeSlot::Grid(4)), Some(7));
         assert_eq!(id_in(&scene, CreativeSlot::Grid(5)), None);
         assert_eq!(id_in(&scene, CreativeSlot::Hotbar(0)), Some(1));
         assert_eq!(id_in(&scene, CreativeSlot::Player(9)), Some(2));
         assert_eq!(id_in(&scene, CreativeSlot::Trash), None);
+    }
+
+    #[test]
+    fn the_caret_is_an_underscore_and_a_bar_once_the_text_is_full() {
+        let layout = CreativeLayout::new(800, 600);
+        let viewport = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let mut ui = Ui::new(viewport);
+        draw_caret(&mut ui, &layout, 10.0, false);
+        let underscore = ui
+            .draw()
+            .commands()
+            .iter()
+            .any(|c| matches!(c, umicraft_ui::DrawCommand::Text { text, .. } if text == "_"));
+        assert!(underscore);
+        let mut ui = Ui::new(viewport);
+        draw_caret(&mut ui, &layout, 10.0, true);
+        assert!(matches!(
+            ui.draw().commands(),
+            [umicraft_ui::DrawCommand::Rect { .. }]
+        ));
     }
 
     #[test]

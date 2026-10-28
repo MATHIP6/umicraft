@@ -801,6 +801,8 @@ impl App {
                     creative,
                     gui_atlas: self.gui_atlas.as_ref(),
                     items: ItemView::new(self.items.as_deref(), self.dials.frames()),
+                    // Vanilla toggles every 6 ticks (`cursorCounter / 6 % 2`).
+                    caret_visible: (self.started.elapsed().as_millis() / 300).is_multiple_of(2),
                 };
                 let layout = CreativeLayout::new(width, height);
                 draw_creative_overlay(&mut self.ui, atlas, viewport, &layout, &scene);
