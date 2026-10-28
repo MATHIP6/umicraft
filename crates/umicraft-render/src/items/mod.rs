@@ -8,8 +8,10 @@
 //! backgrounds, icons, stack counts and tooltips keep their command order
 //! and a steady-state frame renders no item geometry at all.
 
+mod dynamic_mesh;
 mod icon_atlas;
 
+pub(crate) use dynamic_mesh::DynamicMesh;
 pub(crate) use icon_atlas::IconAtlas;
 pub use icon_atlas::{ICON_ATLAS_SIZE, ICON_CELL_SIZE};
 

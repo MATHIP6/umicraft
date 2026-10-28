@@ -64,7 +64,7 @@ pub mod view;
 use glam::{DVec3, Vec3};
 
 pub use entity::{
-    EntityFlags, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot, EntityStore,
+    EntityFlags, EntityId, EntityItem, EntityKind, EntityRecord, EntityRenderSnapshot, EntityStore,
 };
 pub use input::InputIntent;
 pub use physics::Player;

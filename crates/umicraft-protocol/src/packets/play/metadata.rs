@@ -144,6 +144,16 @@ impl Metadata {
             .map(|obj| f32::from_be_bytes([obj.value[0], obj.value[1], obj.value[2], obj.value[3]]))
     }
 
+    /// Reads an item stack value (type id 5) at the given index.
+    ///
+    /// `None` when the entry is missing, has another type, or does not decode.
+    #[must_use]
+    pub fn get_item_stack(&self, index: u8) -> Option<ItemStack> {
+        self.get(index)
+            .filter(|obj| obj.type_id == 5)
+            .and_then(|obj| ItemStack::decode(&mut obj.value.as_slice()).ok())
+    }
+
     /// Reads a string value at the given index.
     ///
     /// The raw `value` includes the VarInt length prefix; this method skips it
@@ -387,6 +397,42 @@ mod tests {
             metadata.objects[0].value,
             vec![0x00, 0x01, 0x40, 0x00, 0x00, 0x00]
         );
+    }
+
+    #[test]
+    fn an_item_stack_is_read_with_and_without_nbt() {
+        let bytes = [
+            0xA8, 0x01, 0x16, 0x02, 0x00, 0x03, 0x00, // index 8: id 278, 2 items, damage 3
+            0xAA, 0x00, 0x05, 0x01, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00, // index 10 with NBT
+            0x7F,
+        ];
+        let metadata = Metadata::decode(&mut &bytes[..]).unwrap();
+        let plain = metadata.get_item_stack(8).unwrap();
+        assert_eq!((plain.item_id, plain.stack_size, plain.damage), (278, 2, 3));
+        assert_eq!(plain.nbt, None);
+        let tagged = metadata.get_item_stack(10).unwrap();
+        assert_eq!(tagged.item_id, 5);
+        assert_eq!(tagged.nbt, Some(vec![0x0A, 0x00, 0x00, 0x00]));
+    }
+
+    #[test]
+    fn a_wrong_type_or_missing_index_is_no_item_stack() {
+        let bytes = [0x08, 0x01, 0x7F]; // byte at index 8
+        let metadata = Metadata::decode(&mut &bytes[..]).unwrap();
+        assert_eq!(metadata.get_item_stack(8), None);
+        assert_eq!(metadata.get_item_stack(9), None);
+    }
+
+    #[test]
+    fn a_corrupt_item_stack_value_is_none() {
+        let metadata = Metadata {
+            objects: vec![WatchedObject {
+                type_id: 5,
+                index: 8,
+                value: vec![0x00],
+            }],
+        };
+        assert_eq!(metadata.get_item_stack(8), None);
     }
 
     #[test]

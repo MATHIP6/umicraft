@@ -61,6 +61,31 @@ pub fn context_pose(model: &ItemModel, context: DisplayContext) -> Mat4 {
     pre * model.transform(context).matrix() * centre_model()
 }
 
+/// Model space to the frame of an item held in a hand
+/// (`ItemRenderer.renderItem` and `renderItemModelTransform`).
+///
+/// Both branches of the reference double the size: lit blocks in
+/// `renderItem`, flat sprites in `preTransform`.
+#[must_use]
+pub fn held_pose(model: &ItemModel, context: DisplayContext) -> Mat4 {
+    Mat4::from_scale(Vec3::splat(2.0)) * model.transform(context).matrix() * centre_model()
+}
+
+/// Model space to the frame of a dropped item (`RenderEntityItem`).
+///
+/// Lit blocks are halved first (the extra `scale(0.5)` of the 3D branch);
+/// flat sprites are not doubled here, unlike [`context_pose`], because the
+/// entity renderer calls `renderItem` directly.
+#[must_use]
+pub fn ground_pose(model: &ItemModel) -> Mat4 {
+    let pre = if model.gui_3d {
+        Mat4::from_scale(Vec3::splat(0.5))
+    } else {
+        Mat4::IDENTITY
+    };
+    pre * model.transform(DisplayContext::Ground).matrix() * centre_model()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +127,22 @@ mod tests {
                     assert!((-1.0..=17.0).contains(&point.y), "{point}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_dropped_flat_sprite_is_half_a_block_and_a_block_a_quarter() {
+        let flat = ground_pose(&model(false));
+        let block = ground_pose(&model(true));
+        assert!((flat.transform_vector3(Vec3::X).length() - 0.5).abs() < 1e-5);
+        assert!((block.transform_vector3(Vec3::X).length() - 0.25).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_held_item_is_doubled_whatever_its_kind() {
+        for gui_3d in [false, true] {
+            let pose = held_pose(&model(gui_3d), DisplayContext::FirstPerson);
+            assert!((pose.transform_vector3(Vec3::X).length() - 1.0).abs() < 1e-5);
         }
     }
 

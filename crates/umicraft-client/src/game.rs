@@ -31,7 +31,7 @@ use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
 use umicraft_game::entity::{
-    EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityStore,
+    EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord, EntityStore,
 };
 use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::hand::{HandPose, HandState, SwingEffects};
@@ -54,6 +54,7 @@ use umicraft_protocol::packets::play::clientbound::{
     BlockBreakAnim, ChunkData, Explosion, MapChunkBulk,
 };
 use umicraft_protocol::packets::play::ItemStack as WireItemStack;
+use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{HudState, OutlineBox};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
@@ -99,6 +100,16 @@ const DEATH_TICKS: u32 = 20;
 
 /// The data watcher index of the player score (MCP `EntityPlayer` line 160).
 const SCORE_WATCHER: u8 = 18;
+
+/// Data watcher of the stack of a dropped item (MCP `EntityItem`, watcher 10).
+const DROPPED_ITEM_WATCHER: u8 = 10;
+
+/// Data watcher of the stack inside an item frame (MCP `EntityItemFrame`, 8).
+const FRAME_ITEM_WATCHER: u8 = 8;
+
+/// Data watcher of the rotation step inside an item frame (MCP
+/// `EntityItemFrame`, 9); only the low three bits are meaningful.
+const FRAME_ROTATION_WATCHER: u8 = 9;
 
 /// The wire units of `Entity Velocity` per block per tick
 /// (MCP `handleEntityVelocity`: `/ 8000`).
@@ -773,6 +784,26 @@ fn run(
 /// Handles one message of the inbox.
 ///
 /// Returns `true` when the session must end.
+/// Applies the item-carrying data watchers of dropped items and item frames.
+fn apply_item_metadata(entities: &mut EntityStore, id: EntityId, metadata: &Metadata) {
+    match entities.kind(id) {
+        Some(EntityKind::Item) => {
+            if let Some(stack) = metadata.get_item_stack(DROPPED_ITEM_WATCHER) {
+                entities.set_item(id, EntityItem::from_stack(&stack));
+            }
+        }
+        Some(EntityKind::ItemFrame) => {
+            if let Some(stack) = metadata.get_item_stack(FRAME_ITEM_WATCHER) {
+                entities.set_item(id, EntityItem::from_stack(&stack));
+            }
+            if let Some(rotation) = metadata.get_byte(FRAME_ROTATION_WATCHER) {
+                entities.set_frame_rotation(id, rotation);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn handle_event(
     game: &mut Game,
     event: GameEvent,
@@ -1094,13 +1125,10 @@ fn handle_net(
                     game.hud_dirty = true;
                 }
             } else if packet.slot == 0 {
-                let item_id = if packet.item.item_id > 0 {
-                    Some(packet.item.item_id as u16)
-                } else {
-                    None
-                };
-                game.entities
-                    .set_held_item(EntityId(packet.entity_id), item_id);
+                game.entities.set_held(
+                    EntityId(packet.entity_id),
+                    EntityItem::from_stack(&packet.item),
+                );
             }
         }
         PlayEvent::SpawnPlayer(p) => {
@@ -1111,11 +1139,13 @@ fn handle_net(
             );
             let yaw = f32::from(p.yaw) * 360.0 / 256.0;
             let pitch = f32::from(p.pitch) * 360.0 / 256.0;
-            let held = if p.held_item > 0 {
-                Some(p.held_item as u16)
-            } else {
-                None
-            };
+            // `Spawn Player` carries an item id only: no damage, count or NBT.
+            let held = (p.held_item > 0).then_some(EntityItem {
+                item_id: p.held_item,
+                damage: 0,
+                count: 1,
+                nbt: None,
+            });
             let flags = EntityFlags::new(
                 p.metadata.get_byte(0).unwrap_or(0),
                 p.metadata.get_byte(10).unwrap_or(0),
@@ -1165,8 +1195,15 @@ fn handle_net(
                 f32::from(o.velocity_y) / 8000.0,
                 f32::from(o.velocity_z) / 8000.0,
             );
-            game.entities
-                .spawn_object(EntityId(o.entity_id), o.object_type, pos, pitch, yaw, vel);
+            game.entities.spawn_object(
+                EntityId(o.entity_id),
+                o.object_type,
+                pos,
+                pitch,
+                yaw,
+                vel,
+                o.data,
+            );
         }
         PlayEvent::DestroyEntities(d) => {
             game.entities.destroy(&d.entity_ids);
@@ -1232,7 +1269,9 @@ fn handle_net(
                     game.hud_dirty = true;
                 }
             }
-            game.entities.set_flags(EntityId(m.entity_id), flags);
+            let id = EntityId(m.entity_id);
+            game.entities.set_flags(id, flags);
+            apply_item_metadata(&mut game.entities, id, &m.metadata);
         }
         PlayEvent::AttachEntity(packet) => {
             // MCP `NetHandlerPlayClient.handleEntityAttach`: leash 0 mounts
@@ -2687,7 +2726,6 @@ mod tests {
     fn the_score_comes_from_the_local_player_metadata() {
         use umicraft_protocol::packets::play::clientbound::EntityMetadata;
         use umicraft_protocol::packets::play::metadata::WatchedObject;
-        use umicraft_protocol::packets::play::Metadata;
 
         let mut game = game_on_floor_with(BlockState::AIR);
         game.entity_id = 3;
@@ -2710,6 +2748,127 @@ mod tests {
         handle_net(&mut game, metadata(3, 57), &mut queue, &frames);
         assert_eq!(game.score, 57);
         assert_eq!(game.hud().score, 57);
+    }
+
+    fn spawn_object_event(entity_id: i32, object_type: u8, data: i32) -> PlayEvent {
+        use umicraft_protocol::packets::play::clientbound::SpawnObject;
+
+        PlayEvent::SpawnObject(SpawnObject {
+            entity_id,
+            object_type,
+            x: 0,
+            y: 0,
+            z: 0,
+            pitch: 0,
+            yaw: 0,
+            data,
+            velocity_x: 0,
+            velocity_y: 0,
+            velocity_z: 0,
+        })
+    }
+
+    fn stack_watcher(
+        index: u8,
+        stack: &WireItemStack,
+    ) -> umicraft_protocol::packets::play::metadata::WatchedObject {
+        let mut value = Vec::new();
+        stack.encode(&mut value).expect("encodes");
+        umicraft_protocol::packets::play::metadata::WatchedObject {
+            type_id: 5,
+            index,
+            value,
+        }
+    }
+
+    fn metadata_event(
+        entity_id: i32,
+        objects: Vec<umicraft_protocol::packets::play::metadata::WatchedObject>,
+    ) -> PlayEvent {
+        use umicraft_protocol::packets::play::clientbound::EntityMetadata;
+
+        PlayEvent::EntityMetadata(EntityMetadata {
+            entity_id,
+            metadata: Metadata { objects },
+        })
+    }
+
+    #[test]
+    fn the_stack_of_a_dropped_item_comes_from_watcher_ten() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, spawn_object_event(7, 2, 1), &mut queue, &frames);
+        let event = metadata_event(7, vec![stack_watcher(10, &wire_item(264, 0))]);
+        handle_net(&mut game, event, &mut queue, &frames);
+        let snapshot = &game.entities.snapshots(0.0)[0];
+        let item = snapshot.item.as_ref().expect("stack");
+        assert_eq!((item.item_id, item.count), (264, 1));
+    }
+
+    #[test]
+    fn an_item_frame_takes_its_stack_rotation_and_direction() {
+        use umicraft_protocol::packets::play::metadata::WatchedObject;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, spawn_object_event(8, 71, 2), &mut queue, &frames);
+        let rotation = WatchedObject {
+            type_id: 0,
+            index: 9,
+            value: vec![0x0B],
+        };
+        let event = metadata_event(8, vec![stack_watcher(8, &wire_item(276, 4)), rotation]);
+        handle_net(&mut game, event, &mut queue, &frames);
+        let snapshot = &game.entities.snapshots(0.0)[0];
+        assert_eq!(snapshot.frame_direction, 2);
+        assert_eq!(snapshot.frame_rotation, 3);
+        let item = snapshot.item.as_ref().expect("stack");
+        assert_eq!((item.item_id, item.damage), (276, 4));
+    }
+
+    #[test]
+    fn dropped_item_watchers_do_not_leak_onto_other_kinds() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, spawn_object_event(9, 60, 0), &mut queue, &frames);
+        let event = metadata_event(9, vec![stack_watcher(10, &wire_item(264, 0))]);
+        handle_net(&mut game, event, &mut queue, &frames);
+        assert_eq!(game.entities.snapshots(0.0)[0].item, None);
+    }
+
+    #[test]
+    fn the_equipment_of_another_entity_sets_its_held_stack() {
+        use umicraft_protocol::packets::play::clientbound::EntityEquipment;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        game.entities.spawn_player(
+            EntityId(4),
+            [0; 16],
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        let equip = |item| {
+            PlayEvent::EntityEquipment(EntityEquipment {
+                entity_id: 4,
+                slot: 0,
+                item,
+            })
+        };
+        handle_net(&mut game, equip(wire_item(276, 9)), &mut queue, &frames);
+        let held = game.entities.snapshots(0.0)[0].held.clone().expect("held");
+        assert_eq!((held.item_id, held.damage), (276, 9));
+
+        handle_net(&mut game, equip(WireItemStack::EMPTY), &mut queue, &frames);
+        assert_eq!(game.entities.snapshots(0.0)[0].held, None);
     }
 
     #[test]

@@ -26,6 +26,7 @@ pub mod game;
 pub mod headless;
 pub mod input;
 pub mod item_icons;
+pub mod item_world;
 pub mod mesher;
 pub mod model_resources;
 pub mod network;

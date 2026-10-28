@@ -28,11 +28,10 @@ use umicraft_assets::skin::{
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_game::hand::HandPose;
 use umicraft_model::entity::{
-    emit_block_item_cube, BatModel, BlazeModel, ChickenModel, CreeperModel, DragonModel,
-    EndermanModel, EndermiteModel, GhastModel, GuardianModel, HorseModel, HumanoidModel,
-    IronGolemModel, MeshLayer, ModelVertex, OcelotModel, QuadrupedModel, RabbitModel, SheepModel,
-    SilverfishModel, SlimeModel, SnowmanModel, SpiderModel, SquidModel, TextureSlot, VillagerModel,
-    WitherModel, WolfModel,
+    BatModel, BlazeModel, ChickenModel, CreeperModel, DragonModel, EndermanModel, EndermiteModel,
+    GhastModel, GuardianModel, HorseModel, HumanoidModel, IronGolemModel, MeshLayer, ModelVertex,
+    OcelotModel, QuadrupedModel, RabbitModel, SheepModel, SilverfishModel, SlimeModel,
+    SnowmanModel, SpiderModel, SquidModel, TextureSlot, VillagerModel, WitherModel, WolfModel,
 };
 use umicraft_render::{EntityTexture, EntityVertex, Renderer};
 
@@ -224,11 +223,6 @@ fn texture_specs() -> Vec<TextureSpec> {
             slot: TextureSlot::Wither,
             jar_path: "assets/minecraft/textures/entity/wither/wither.png",
             fallback: || (procedural_wither_texture(), 64, 64),
-        },
-        TextureSpec {
-            slot: TextureSlot::Item,
-            jar_path: "assets/minecraft/textures/blocks/dirt.png",
-            fallback: || (procedural_dirt_texture(), 16, 16),
         },
     ]
 }
@@ -669,14 +663,6 @@ fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
                 vertices: model.emit_mesh(),
             }]
         }
-        EntityKind::Item => {
-            let mut verts = Vec::new();
-            emit_block_item_cube(2.0, Mat4::IDENTITY, &mut verts);
-            vec![MeshLayer {
-                slot: TextureSlot::Item,
-                vertices: verts,
-            }]
-        }
         _ => vec![],
     }
 }
@@ -700,26 +686,10 @@ pub fn mesh_entities(
             world_pos
         };
 
-        let is_item = ent.kind == EntityKind::Item;
-
         for layer in build_entity_layers(ent) {
             let batch = batches.entry(layer.slot).or_default();
-            if is_item {
-                let item_rot = rot * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
-                for mv in layer.vertices {
-                    let p = item_rot.transform_point3(Vec3::from(mv.position));
-                    let n = item_rot.transform_vector3(Vec3::from(mv.normal));
-                    batch.push(EntityVertex {
-                        position: [p.x + pos.x, p.y + pos.y, p.z + pos.z],
-                        normal: n.to_array(),
-                        uv: mv.uv,
-                        light: 0x00FF_00FF,
-                    });
-                }
-            } else {
-                for mv in layer.vertices {
-                    batch.push(transform_vertex(mv, rot, pos));
-                }
+            for mv in layer.vertices {
+                batch.push(transform_vertex(mv, rot, pos));
             }
         }
     }
@@ -792,7 +762,11 @@ mod tests {
                 limb_swing: 0.5,
                 limb_swing_amount: 0.3,
                 uuid: Some([0; 16]),
-                held_item: None,
+                held: None,
+                item: None,
+                age: 0.0,
+                frame_direction: 0,
+                frame_rotation: 0,
                 flags: EntityFlags::default(),
             },
             EntityRenderSnapshot {
@@ -805,7 +779,11 @@ mod tests {
                 limb_swing: 0.0,
                 limb_swing_amount: 0.0,
                 uuid: None,
-                held_item: None,
+                held: None,
+                item: None,
+                age: 0.0,
+                frame_direction: 0,
+                frame_rotation: 0,
                 flags: EntityFlags::default(),
             },
             EntityRenderSnapshot {
@@ -818,9 +796,14 @@ mod tests {
                 limb_swing: 1.0,
                 limb_swing_amount: 0.5,
                 uuid: None,
-                held_item: None,
+                held: None,
+                item: None,
+                age: 0.0,
+                frame_direction: 0,
+                frame_rotation: 0,
                 flags: EntityFlags::default(),
             },
+            // A dropped item has no entity mesh: P3 draws it from its item model.
             EntityRenderSnapshot {
                 id: EntityId(4),
                 kind: EntityKind::Item,
@@ -831,7 +814,11 @@ mod tests {
                 limb_swing: 0.0,
                 limb_swing_amount: 0.0,
                 uuid: None,
-                held_item: None,
+                held: None,
+                item: None,
+                age: 0.0,
+                frame_direction: 0,
+                frame_rotation: 0,
                 flags: EntityFlags::default(),
             },
         ];
@@ -840,7 +827,7 @@ mod tests {
         assert_eq!(batches[&TextureSlot::Steve].len(), 432);
         assert_eq!(batches[&TextureSlot::Zombie].len(), 432);
         assert_eq!(batches[&TextureSlot::Cow].len(), 324);
-        assert_eq!(batches[&TextureSlot::Item].len(), 36);
+        assert_eq!(batches.len(), 3, "the dropped item adds no entity batch");
         assert!(!batches.contains_key(&TextureSlot::Alex));
     }
 

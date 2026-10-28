@@ -34,7 +34,7 @@ use crate::camera::Camera;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
-use crate::items::{IconAtlas, IconProvider};
+use crate::items::{DynamicMesh, IconAtlas, IconProvider};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::sky::{SkyRenderer, SkyState};
@@ -46,6 +46,8 @@ use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Initial overlay vertex-buffer capacity (64 KiB, about 4,000 glyphs).
 const OVERLAY_MIN_BYTES: u64 = 64 * 1024;
+/// Initial capacity of the per-frame item buffers.
+pub(crate) const MIN_DYNAMIC_BYTES: u64 = 16 * 1024;
 /// WebGPU requires 256-byte row alignment for buffer↔texture copies.
 const ROW_ALIGNMENT: u32 = 256;
 
@@ -225,6 +227,12 @@ pub struct Renderer {
     icon_gui_bind_group: wgpu::BindGroup,
     /// Reused geometry buffer of the icon being rendered.
     icon_mesh: ItemMesh,
+    /// Dropped items and other world-space item geometry, rewritten per frame.
+    world_items: DynamicMesh,
+    /// The held item in camera space, drawn with the hand's depth range.
+    hand_items: DynamicMesh,
+    /// The hand camera over the current block texture array.
+    hand_item_bind_group: wgpu::BindGroup,
     overlay_buffer: wgpu::Buffer,
     overlay_capacity: u64,
     offscreen: Option<OffscreenTarget>,
@@ -604,6 +612,15 @@ impl Renderer {
             &block_sampler,
             &block_view,
         );
+        let world_items = DynamicMesh::new(&device, "world items");
+        let hand_items = DynamicMesh::new(&device, "hand items");
+        let hand_item_bind_group = create_terrain_bind_group(
+            &device,
+            &terrain_layout,
+            &hand_camera_buffer,
+            &block_sampler,
+            &block_view,
+        );
         let icon_gui_bind_group = create_font_bind_group(
             &device,
             &gui_overlay_layout,
@@ -652,6 +669,9 @@ impl Renderer {
             icon_bind_group,
             icon_gui_bind_group,
             icon_mesh: ItemMesh::default(),
+            world_items,
+            hand_items,
+            hand_item_bind_group,
             overlay_buffer,
             overlay_capacity: OVERLAY_MIN_BYTES,
             offscreen,
@@ -726,6 +746,17 @@ impl Renderer {
         self.ui_pass
             .rebuild_with_icons(draw_list, &self.ui_atlas, &|key| atlas.uv(key));
         self.render_frame(camera, overlay)
+    }
+
+    /// Replaces the world-space item geometry drawn after the entities
+    /// (dropped items, frames), already positioned in world coordinates.
+    pub fn set_world_items(&mut self, mesh: &ItemMesh) {
+        self.world_items.update(&self.device, &self.queue, mesh);
+    }
+
+    /// Replaces the first-person held item, in camera space like the hand.
+    pub fn set_hand_items(&mut self, mesh: &ItemMesh) {
+        self.hand_items.update(&self.device, &self.queue, mesh);
     }
 
     /// Renders the icons `draw_list` asks for that the atlas lacks.
@@ -1050,6 +1081,13 @@ impl Renderer {
             &self.device,
             &self.terrain_layout,
             self.icon_atlas.camera_buffer(),
+            &self.block_sampler,
+            block_view,
+        );
+        self.hand_item_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.hand_camera_buffer,
             &self.block_sampler,
             block_view,
         );
@@ -1478,6 +1516,11 @@ impl Renderer {
                 .render(&mut pass, &self.camera_bind_group, batches);
         }
 
+        // Dropped items share the terrain pipeline and its texture array.
+        pass.set_pipeline(&self.terrain_pipeline);
+        pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+        self.world_items.draw(&mut pass);
+
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
@@ -1510,6 +1553,10 @@ impl Renderer {
                 [(buffer, *count, texture)],
             );
         }
+
+        pass.set_pipeline(&self.terrain_pipeline);
+        pass.set_bind_group(0, &self.hand_item_bind_group, &[]);
+        self.hand_items.draw(&mut pass);
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
@@ -1829,9 +1876,24 @@ pub(crate) fn create_gpu_mesh_pass(
 
 /// Binds and draws one uploaded mesh pass.
 pub(crate) fn draw_gpu_pass(pass: &mut wgpu::RenderPass<'_>, mesh: &GpuMeshPass) {
-    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-    pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+    draw_gpu_pass_buffers(
+        pass,
+        &mesh.vertex_buffer,
+        &mesh.index_buffer,
+        mesh.index_count,
+    );
+}
+
+/// Binds and draws the first `index_count` indices of two mesh buffers.
+pub(crate) fn draw_gpu_pass_buffers(
+    pass: &mut wgpu::RenderPass<'_>,
+    vertices: &wgpu::Buffer,
+    indices: &wgpu::Buffer,
+    index_count: u32,
+) {
+    pass.set_vertex_buffer(0, vertices.slice(..));
+    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+    pass.draw_indexed(0..index_count, 0, 0..1);
 }
 
 /// The chunk centre used for transparent sorting: the middle of the 16×16

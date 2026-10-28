@@ -192,6 +192,39 @@ impl HandPose {
         }
     }
 
+    /// The transform from a held item's frame to the camera space.
+    ///
+    /// MCP `ItemRenderer.renderItemInFirstPerson` for an idle or swinging
+    /// hand: the sway, `func_178105_d` (the swing shift of an item),
+    /// `transformFirstPersonItem` (placement, equip drop, swing rotations and
+    /// the 0.4 scale), in the order of the `GlStateManager` calls. The item's
+    /// own first-person pose follows (`umicraft_model::item::pose::held_pose`).
+    #[must_use]
+    pub fn item_matrix(&self) -> Mat4 {
+        let swing = self.swing;
+        let root = swing.sqrt();
+        let pi = std::f32::consts::PI;
+        let translate = |x: f32, y: f32, z: f32| Mat4::from_translation(Vec3::new(x, y, z));
+        let rotate = |degrees: f32, axis: Vec3| Mat4::from_axis_angle(axis, degrees.to_radians());
+        let yaw_swing = (swing * swing * pi).sin();
+        let roll_swing = (root * pi).sin();
+
+        rotate(self.sway_pitch, Vec3::X)
+            * rotate(self.sway_yaw, Vec3::Y)
+            * translate(
+                -0.4 * (root * pi).sin(),
+                0.2 * (root * pi * 2.0).sin(),
+                -0.2 * (swing * pi).sin(),
+            )
+            * translate(0.56, -0.52, -0.719_999_97)
+            * translate(0.0, self.equip * -0.6, 0.0)
+            * rotate(45.0, Vec3::Y)
+            * rotate(yaw_swing * -20.0, Vec3::Y)
+            * rotate(roll_swing * -20.0, Vec3::Z)
+            * rotate(roll_swing * -80.0, Vec3::X)
+            * Mat4::from_scale(Vec3::splat(0.4))
+    }
+
     /// The transform from the arm model (vanilla model space, in blocks) to
     /// the camera space.
     ///
@@ -244,6 +277,28 @@ mod tests {
 
     fn idle() -> SwingEffects {
         SwingEffects::default()
+    }
+
+    #[test]
+    fn a_resting_item_sits_in_the_lower_right_of_the_view() {
+        let rest = HandPose::default();
+        let centre = rest.item_matrix().transform_point3(Vec3::ZERO);
+        assert!((centre - Vec3::new(0.56, -0.52, -0.719_999_97)).length() < 1e-5);
+        let lowered = HandPose { equip: 1.0, ..rest };
+        assert!((lowered.item_matrix().transform_point3(Vec3::ZERO).y + 1.12).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_swinging_item_moves_away_from_its_resting_place() {
+        let swinging = HandPose {
+            swing: 0.5,
+            ..HandPose::default()
+        };
+        let moved = swinging.item_matrix().transform_point3(Vec3::ZERO);
+        let rest = HandPose::default()
+            .item_matrix()
+            .transform_point3(Vec3::ZERO);
+        assert!((moved - rest).length() > 0.1);
     }
 
     #[test]

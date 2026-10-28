@@ -7,5 +7,6 @@ pub mod types;
 
 pub use store::EntityStore;
 pub use types::{
-    EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
+    EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
+    EntityRenderSnapshot,
 };

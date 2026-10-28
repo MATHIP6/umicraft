@@ -104,22 +104,27 @@ impl ItemResources {
         }
     }
 
-    /// The colour that multiplies the first layer of the stack's icon: dyed
+    /// The colour that multiplies the first layer of an item's model: dyed
     /// or default leather, and the foliage and grass block items.
-    fn tint(
-        &self,
-        stack: &ItemStack,
-        definition: Option<&items::ItemDef>,
-        display: &ItemDisplay,
-    ) -> Option<u32> {
+    ///
+    /// `nbt` is parsed only for leather armour, the one case that reads it.
+    #[must_use]
+    pub fn tint(&self, item_id: i16, damage: i16, nbt: Option<&[u8]>) -> Option<u32> {
         let leather = matches!(
-            definition.map(|def| def.kind),
+            items::lookup(i32::from(item_id)).map(|def| def.kind),
             Some(ItemKind::Armor(ArmorMaterial::Leather, _))
         );
         if leather {
-            return Some(display.leather_color.unwrap_or(DEFAULT_LEATHER_COLOR));
+            let dyed = nbt.and_then(|bytes| ItemDisplay::from_nbt(bytes).leather_color);
+            return Some(dyed.unwrap_or(DEFAULT_LEATHER_COLOR));
         }
-        block_item_tint(stack.item_id, stack.damage, self.grass_color)
+        block_item_tint(item_id, damage, self.grass_color)
+    }
+
+    /// The texture layers the item models index.
+    #[must_use]
+    pub fn atlas(&self) -> &AtlasLayout {
+        &self.atlas
     }
 
     /// The model set.
@@ -139,7 +144,11 @@ impl ItemResources {
             .map(ItemDisplay::from_nbt)
             .unwrap_or_default();
         SlotItem {
-            key: icon_key(stack, definition, self.tint(stack, definition, &display)),
+            key: icon_key(
+                stack,
+                definition,
+                self.tint(stack.item_id, stack.damage, stack.nbt.as_deref()),
+            ),
             count: u8::try_from(stack.stack_size).unwrap_or(0),
             damage: stack.damage,
             max_durability: definition

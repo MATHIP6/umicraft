@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_game::item_use::DropKind;
+use umicraft_mesh::item::ItemMesh;
 use umicraft_render::{draw_hud, Camera, HudLayout, HudState, NoIcons, Overlay, Renderer};
 use umicraft_ui::widgets::{
     container_layout, death_screen, player_inventory_layout, slot, ContainerLayout, DeathAction,
@@ -34,6 +35,7 @@ use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
 use crate::item_icons::{slot_item, IconSource, ItemResources};
+use crate::item_world::{push_held_item, WorldItems};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::terrain_textures::TerrainTextures;
@@ -130,6 +132,10 @@ struct App {
     gui_atlas: Option<umicraft_assets::GuiAtlas>,
     /// The baked item models, once the official assets are bound.
     items: Option<std::sync::Arc<ItemResources>>,
+    /// The dropped-item geometry of the frame, kept for its buffers.
+    world_items: WorldItems,
+    /// The first-person held item geometry of the frame.
+    hand_item_mesh: ItemMesh,
     /// Steps the water, lava and fire textures once per game tick.
     texture_animator: TextureAnimator,
     /// Entity textures bound for GPU rendering.
@@ -183,6 +189,8 @@ impl App {
             ui_atlas: None,
             gui_atlas: None,
             items: None,
+            world_items: WorldItems::default(),
+            hand_item_mesh: ItemMesh::default(),
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
             last_frame: Instant::now(),
@@ -732,8 +740,25 @@ impl App {
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())
         {
-            entity_textures.mesh_and_upload(&world.entities(now), renderer);
-            entity_textures.upload_hand(&world.hand_pose(now), self.camera.view_bob(), renderer);
+            let entities = world.entities(now);
+            let hand = world.hand_pose(now);
+            entity_textures.mesh_and_upload(&entities, renderer);
+            entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer);
+            if let Some(items) = self.items.as_deref() {
+                renderer.set_world_items(self.world_items.build(&entities, items));
+                self.hand_item_mesh.clear();
+                if let Some(stack) = held_stack(world) {
+                    let nbt = stack.nbt.as_deref();
+                    push_held_item(
+                        &mut self.hand_item_mesh,
+                        (stack.item_id, stack.damage, nbt),
+                        &hand,
+                        self.camera.view_bob(),
+                        items,
+                    );
+                }
+                renderer.set_hand_items(&self.hand_item_mesh);
+            }
         }
 
         let rendered = match (ui_frame.as_ref(), self.items.as_deref()) {
@@ -874,6 +899,12 @@ fn gui_texture_for_container(slot_count: usize) -> &'static str {
         5 => "container/hopper",
         _ => "container/generic_27",
     }
+}
+
+/// The stack in the selected hotbar slot of the local player.
+fn held_stack(world: &WorldView) -> Option<&umicraft_protocol::packets::play::ItemStack> {
+    let selected = usize::from(world.hud().selected_slot).min(8);
+    world.window_view().player_slots[HOTBAR_START + selected].as_ref()
 }
 
 /// Draws the item icons, counts and durability bars of the hotbar over the
