@@ -138,10 +138,35 @@ fn tooltip_origin(pointer: [f32; 2], size: [f32; 2], viewport: Rect, scale: f32)
     [x, y]
 }
 
+/// The sRGB to linear transfer function, the inverse of what the sRGB render
+/// target applies on write.
+///
+/// The UI pass hands vertex colours to an sRGB target as they are, so a
+/// vanilla colour (written for a plain 8-bit framebuffer) has to be linearised
+/// first or it comes out too light: the tooltip background 0x100010 showed as
+/// a bright purple.
+fn linear(channel: f32) -> f32 {
+    if channel <= 0.04045 {
+        channel / 12.92
+    } else {
+        ((channel + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// A vanilla colour (straight sRGB channels and alpha) as the UI pass wants it.
+fn vanilla(color: Color) -> Color {
+    [
+        linear(color[0]),
+        linear(color[1]),
+        linear(color[2]),
+        color[3],
+    ]
+}
+
 /// The text colour as straight RGBA.
 fn rgba(rgb: u32, factor: f32) -> Color {
     let channel = |shift: u32| ((rgb >> shift) & 0xFF) as f32 / 255.0 * factor;
-    [channel(16), channel(8), channel(0), 1.0]
+    vanilla([channel(16), channel(8), channel(0), 1.0])
 }
 
 /// Draws `lines` in a vanilla tooltip box next to `pointer`.
@@ -191,6 +216,11 @@ pub fn draw_tooltip(
 fn draw_box(ui: &mut Ui, origin: [f32; 2], size: [f32; 2], scale: f32) {
     let pad = PADDING * scale;
     let (x, y, w, h) = (origin[0], origin[1], size[0], size[1]);
+    let (background, border_top, border_bottom) = (
+        vanilla(BACKGROUND),
+        vanilla(BORDER_TOP),
+        vanilla(BORDER_BOTTOM),
+    );
     let draw = ui.draw();
     // Background: the body plus a one-pixel rim on every side.
     draw.rect(
@@ -200,7 +230,7 @@ fn draw_box(ui: &mut Ui, origin: [f32; 2], size: [f32; 2], scale: f32) {
             w + 2.0 * pad + 2.0 * scale,
             h + 2.0 * pad,
         ),
-        BACKGROUND,
+        background,
     );
     draw.rect(
         Rect::new(
@@ -209,10 +239,10 @@ fn draw_box(ui: &mut Ui, origin: [f32; 2], size: [f32; 2], scale: f32) {
             w + 2.0 * pad,
             h + 2.0 * pad + 2.0 * scale,
         ),
-        BACKGROUND,
+        background,
     );
     // Border, inside the body: vanilla fades it from top to bottom.
-    let side: Color = std::array::from_fn(|i| (BORDER_TOP[i] + BORDER_BOTTOM[i]) * 0.5);
+    let side: Color = std::array::from_fn(|i| (border_top[i] + border_bottom[i]) * 0.5);
     let inner_h = h + 2.0 * pad - 2.0 * scale;
     draw.rect(Rect::new(x - pad, y - pad + scale, scale, inner_h), side);
     draw.rect(
@@ -221,11 +251,11 @@ fn draw_box(ui: &mut Ui, origin: [f32; 2], size: [f32; 2], scale: f32) {
     );
     draw.rect(
         Rect::new(x - pad, y - pad, w + 2.0 * pad, scale),
-        BORDER_TOP,
+        border_top,
     );
     draw.rect(
         Rect::new(x - pad, y + h + pad - scale, w + 2.0 * pad, scale),
-        BORDER_BOTTOM,
+        border_bottom,
     );
 }
 
@@ -240,6 +270,16 @@ mod tests {
             key: key.into(),
             args: Vec::new(),
         }
+    }
+
+    #[test]
+    fn vanilla_colours_are_linearised_for_the_srgb_target() {
+        let background = vanilla(BACKGROUND);
+        // 0x10 / 255 in sRGB is about 0.005 linear, not 0.0625.
+        assert!((background[0] - 0.0052).abs() < 0.001);
+        assert_eq!(background[3], 0.94);
+        assert_eq!(rgba(0xFF_FF_FF, 1.0), [1.0, 1.0, 1.0, 1.0]);
+        assert!(rgba(0x55_55_FF, 1.0)[0] < 0.1);
     }
 
     #[test]
