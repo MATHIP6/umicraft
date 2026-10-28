@@ -83,6 +83,14 @@ impl ItemResources {
         }
     }
 
+    /// Whether an item shows the enchantment glint; `nbt` is parsed only when
+    /// present.
+    #[must_use]
+    pub fn glints(&self, item_id: i16, damage: i16, nbt: Option<&[u8]>) -> bool {
+        let display = nbt.map(ItemDisplay::from_nbt).unwrap_or_default();
+        has_glint(item_id, damage, &display)
+    }
+
     /// The tint of each of the first two layers of an item's model (dyed
     /// leather, potions, spawn eggs, firework charges, grass and foliage
     /// block items); white for everything else.
@@ -124,7 +132,7 @@ impl ItemResources {
             damage: stack.damage,
             max_durability: definition
                 .map_or(0, |def| i16::try_from(def.max_damage).unwrap_or(i16::MAX)),
-            glint: has_glint(stack, &display),
+            glint: has_glint(stack.item_id, stack.damage, &display),
         }
     }
 }
@@ -235,10 +243,10 @@ fn unpack_key(key: u64) -> (i16, i16, Option<u32>) {
 /// Whether the stack shows the enchantment glint (MCP `Item.hasEffect` and
 /// its overrides for the golden apple, enchanted book, experience bottle and
 /// nether star).
-fn has_glint(stack: &ItemStack, display: &ItemDisplay) -> bool {
+fn has_glint(item_id: i16, damage: i16, display: &ItemDisplay) -> bool {
     display.has_glint()
-        || match stack.item_id {
-            GOLDEN_APPLE => stack.damage > 0,
+        || match item_id {
+            GOLDEN_APPLE => damage > 0,
             ENCHANTED_BOOK | EXPERIENCE_BOTTLE | NETHER_STAR => true,
             _ => false,
         }
@@ -295,10 +303,10 @@ mod tests {
     #[test]
     fn intrinsic_glints_follow_the_reference() {
         let none = ItemDisplay::default();
-        assert!(!has_glint(&stack(322, 0), &none));
-        assert!(has_glint(&stack(322, 1), &none));
-        assert!(has_glint(&stack(399, 0), &none));
-        assert!(!has_glint(&stack(1, 0), &none));
+        assert!(!has_glint(322, 0, &none));
+        assert!(has_glint(322, 1, &none));
+        assert!(has_glint(399, 0, &none));
+        assert!(!has_glint(1, 0, &none));
     }
 }
 

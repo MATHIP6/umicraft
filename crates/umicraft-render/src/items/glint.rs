@@ -19,6 +19,13 @@ use wgpu::util::DeviceExt;
 
 use crate::renderer::create_overlay_pipeline;
 
+/// The GUI glint shader: the shared maths (WGSL has no includes) maths followed by
+/// `gui_glint.wgsl`.
+pub(crate) const GUI_GLINT_WGSL: &str = concat!(
+    include_str!("../glint_common.wgsl"),
+    include_str!("../gui_glint.wgsl")
+);
+
 /// Scroll period and rotation (degrees) of the two layers, and the scroll
 /// direction of each (MC 1.8 `RenderItem.renderEffect`).
 const LAYERS: [(f32, f32, f32); 2] = [(3.0, -50.0, 1.0), (4.873, 10.0, -1.0)];
@@ -71,7 +78,7 @@ impl GlintPass {
     pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gui glint shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../gui_glint.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(GUI_GLINT_WGSL.into()),
         });
         let texture_entry = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -147,8 +154,9 @@ impl GlintPass {
 
     /// Uploads the glint texture and binds it with the icon atlas.
     ///
-    /// A zero size or a pixel buffer that is not `width * height * 4` bytes is
-    /// ignored and keeps the previous texture.
+    /// Returns the new texture's view so the world glint can share it. A zero
+    /// size or a pixel buffer that is not `width * height * 4` bytes is
+    /// ignored, keeps the previous texture and returns `None`.
     pub(crate) fn set_texture(
         &mut self,
         device: &wgpu::Device,
@@ -157,10 +165,10 @@ impl GlintPass {
         icon_sampler: &wgpu::Sampler,
         size: (u32, u32),
         rgba: &[u8],
-    ) {
+    ) -> Option<wgpu::TextureView> {
         let (width, height) = size;
         if width == 0 || height == 0 || rgba.len() != width as usize * height as usize * 4 {
-            return;
+            return None;
         }
         let texture = device.create_texture_with_data(
             queue,
@@ -208,6 +216,17 @@ impl GlintPass {
                 },
             ],
         }));
+        Some(glint_view)
+    }
+
+    /// The repeating sampler of the glint texture.
+    pub(crate) fn sampler(&self) -> &wgpu::Sampler {
+        &self.glint_sampler
+    }
+
+    /// The buffer holding the [`GlintUniform`] of the current clock.
+    pub(crate) fn uniform(&self) -> &wgpu::Buffer {
+        &self.uniform
     }
 
     /// Writes the layer transforms for the clock reading `seconds`.
@@ -269,5 +288,22 @@ mod tests {
     fn the_scroll_wraps_at_the_period() {
         let [first, _] = GlintUniform::at(3.75).layers;
         close(first.offset[0], 0.25);
+    }
+
+    #[test]
+    fn the_glint_shader_is_valid_wgsl() {
+        let module = naga::front::wgsl::parse_str(GUI_GLINT_WGSL).expect("the shader parses");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("the shader validates");
+        for entry in ["vs_main", "fs_main"] {
+            assert!(
+                module.entry_points.iter().any(|point| point.name == entry),
+                "missing {entry}"
+            );
+        }
     }
 }

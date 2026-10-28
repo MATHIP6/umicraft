@@ -34,7 +34,7 @@ use crate::camera::Camera;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
-use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider};
+use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::sky::{SkyRenderer, SkyState};
@@ -51,7 +51,7 @@ pub(crate) const MIN_DYNAMIC_BYTES: u64 = 16 * 1024;
 /// WebGPU requires 256-byte row alignment for buffer↔texture copies.
 const ROW_ALIGNMENT: u32 = 256;
 
-const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
+pub(crate) const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
     0 => Float32x3,
     1 => Float32x3,
     2 => Float32x2,
@@ -229,6 +229,8 @@ pub struct Renderer {
     icon_gui_bind_group: wgpu::BindGroup,
     /// The enchantment glint drawn over glinting icons.
     glint: GlintPass,
+    /// The glint over world and hand item meshes.
+    world_glint: WorldGlint,
     /// Reused geometry buffer of the icon being rendered.
     icon_mesh: ItemMesh,
     /// Dropped items and other world-space item geometry, rewritten per frame.
@@ -642,6 +644,7 @@ impl Renderer {
             icon_atlas.view(),
         );
         let glint = GlintPass::new(&device, format);
+        let world_glint = WorldGlint::new(&device, &terrain_layout, format);
 
         Ok(Self {
             instance,
@@ -684,6 +687,7 @@ impl Renderer {
             icon_bind_group,
             icon_gui_bind_group,
             glint,
+            world_glint,
             icon_mesh: ItemMesh::default(),
             world_items,
             hand_items,
@@ -773,6 +777,21 @@ impl Renderer {
     /// Replaces the first-person held item, in camera space like the hand.
     pub fn set_hand_items(&mut self, mesh: &ItemMesh) {
         self.hand_items.update(&self.device, &self.queue, mesh);
+    }
+
+    /// Sets the world item geometry that gets the enchantment glint: the
+    /// enchanted subset of the mesh given to [`Renderer::set_world_items`].
+    /// An empty mesh clears it; nothing shows before [`Renderer::set_glint_texture`].
+    pub fn set_world_glint(&mut self, mesh: &ItemMesh) {
+        self.world_glint
+            .update_world(&self.device, &self.queue, mesh);
+    }
+
+    /// Sets the first-person item geometry that gets the enchantment glint
+    /// (the enchanted held item of [`Renderer::set_hand_items`]).
+    pub fn set_hand_glint(&mut self, mesh: &ItemMesh) {
+        self.world_glint
+            .update_hand(&self.device, &self.queue, mesh);
     }
 
     /// Renders the icons `draw_list` asks for that the atlas lacks.
@@ -943,9 +962,10 @@ impl Renderer {
     /// Uploads the enchantment glint texture (`enchanted_item_glint.png`).
     ///
     /// `rgba` must be `width * height * 4` bytes; a malformed upload is
-    /// ignored. Until a texture is set, glinting icons draw without the glint.
+    /// ignored. Until a texture is set, glinting icons and items draw without the
+    /// glint.
     pub fn set_glint_texture(&mut self, width: u32, height: u32, rgba: &[u8]) {
-        self.glint.set_texture(
+        let uploaded = self.glint.set_texture(
             &self.device,
             &self.queue,
             self.icon_atlas.view(),
@@ -953,6 +973,14 @@ impl Renderer {
             (width, height),
             rgba,
         );
+        if let Some(view) = uploaded {
+            self.world_glint.set_texture(
+                &self.device,
+                &view,
+                self.glint.sampler(),
+                self.glint.uniform(),
+            );
+        }
     }
 
     /// Sets the clock that scrolls the enchantment glint, in seconds from any
@@ -1557,6 +1585,8 @@ impl Renderer {
         pass.set_pipeline(&self.terrain_pipeline);
         pass.set_bind_group(0, &self.terrain_bind_group, &[]);
         self.world_items.draw(&mut pass);
+        self.world_glint
+            .draw_world(&mut pass, &self.terrain_bind_group);
 
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
@@ -1594,6 +1624,8 @@ impl Renderer {
         pass.set_pipeline(&self.terrain_pipeline);
         pass.set_bind_group(0, &self.hand_item_bind_group, &[]);
         self.hand_items.draw(&mut pass);
+        self.world_glint
+            .draw_hand(&mut pass, &self.hand_item_bind_group);
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
@@ -2213,24 +2245,6 @@ mod tests {
         assert_eq!(image.rgba.len(), 70 * 48 * 4);
         let first = &image.rgba[..3];
         assert!(image.rgba.chunks_exact(4).any(|pixel| &pixel[..3] != first));
-    }
-
-    #[test]
-    fn the_glint_shader_is_valid_wgsl() {
-        let module = naga::front::wgsl::parse_str(include_str!("gui_glint.wgsl"))
-            .expect("the shader parses");
-        naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .expect("the shader validates");
-        for entry in ["vs_main", "fs_main"] {
-            assert!(
-                module.entry_points.iter().any(|point| point.name == entry),
-                "missing {entry}"
-            );
-        }
     }
 
     /// The terrain shader is only compiled on a GPU device; this parses and

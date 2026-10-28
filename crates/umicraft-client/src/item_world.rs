@@ -38,40 +38,68 @@ const SCATTER_SEED: u64 = 187;
 /// The item geometry of one frame's dropped items.
 #[derive(Debug, Default)]
 pub struct WorldItems {
-    mesh: ItemMesh,
+    layers: ItemLayers,
 }
 
 impl WorldItems {
-    /// Rebuilds the mesh from the entity snapshots and returns it.
+    /// Rebuilds the meshes from the entity snapshots and returns them.
     ///
     /// The buffers of the previous frame are reused. Entities that are not
-    /// dropped items, or whose item has no sprite model, add nothing.
+    /// dropped items, items in a frame or players holding an item, or whose
+    /// item has no sprite model, add nothing.
     pub fn build(
         &mut self,
         snapshots: &[EntityRenderSnapshot],
         items: &ItemResources,
-    ) -> &ItemMesh {
-        self.mesh.clear();
+    ) -> &ItemLayers {
+        self.layers.clear();
         for entity in snapshots {
             match (entity.kind, entity.item.as_ref(), entity.held.as_ref()) {
                 (EntityKind::Item, Some(item), _) => {
-                    push_dropped_item(&mut self.mesh, entity, item, items);
+                    push_dropped_item(&mut self.layers, entity, item, items);
                 }
                 (EntityKind::Player, _, Some(held)) => {
-                    push_player_held_item(&mut self.mesh, entity, held, items);
+                    push_player_held_item(&mut self.layers, entity, held, items);
                 }
                 (EntityKind::ItemFrame, framed, _) => {
-                    push_item_frame(&mut self.mesh, entity, framed, items);
+                    push_item_frame(&mut self.layers, entity, framed, items);
                 }
                 _ => {}
             }
         }
-        &self.mesh
+        &self.layers
+    }
+}
+
+/// The item geometry of a frame, and the part of it that shows the
+/// enchantment glint (drawn a second time with the glint texture).
+#[derive(Debug, Default)]
+pub struct ItemLayers {
+    /// Every item.
+    pub items: ItemMesh,
+    /// The enchanted items only, same geometry.
+    pub glint: ItemMesh,
+}
+
+impl ItemLayers {
+    /// Empties both meshes and keeps their allocations.
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.glint.clear();
+    }
+
+    /// Appends `quads` placed by `pose`, also to the glint layer when the
+    /// item is enchanted.
+    fn push(&mut self, quads: &[ModelQuad], pose: &Mat4, style: &ItemStyle<'_>, glint: bool) {
+        self.items.push_quads(quads, pose, style);
+        if glint {
+            self.glint.push_quads(quads, pose, style);
+        }
     }
 }
 
 fn push_dropped_item(
-    mesh: &mut ItemMesh,
+    layers: &mut ItemLayers,
     entity: &EntityRenderSnapshot,
     item: &EntityItem,
     resources: &ItemResources,
@@ -86,8 +114,9 @@ fn push_dropped_item(
         light: VertexLight::new(0, 15, 15, false),
         tints: &tints,
     };
+    let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
     for pose in copy_poses(entity, item.count, model) {
-        mesh.push_quads(quads, &pose, &style);
+        layers.push(quads, &pose, &style, glint);
     }
 }
 
@@ -102,7 +131,7 @@ fn push_dropped_item(
 /// chain is conjugated by a y flip (the arm boxes are the same boxes with
 /// negated y).
 fn push_player_held_item(
-    mesh: &mut ItemMesh,
+    layers: &mut ItemLayers,
     entity: &EntityRenderSnapshot,
     held: &EntityItem,
     resources: &ItemResources,
@@ -137,7 +166,8 @@ fn push_player_held_item(
         light: VertexLight::new(0, 15, 15, false),
         tints: &tints,
     };
-    mesh.push_quads(quads, &pose, &style);
+    let glint = resources.glints(held.item_id, held.damage, held.nbt.as_deref());
+    layers.push(quads, &pose, &style, glint);
 }
 
 /// The bow item id.
@@ -153,7 +183,7 @@ const FILLED_MAP: i16 = 358;
 /// rotation step, halved and posed for the `fixed` context. Flat sprites are
 /// turned to face outwards. Maps are not drawn yet (P7).
 fn push_item_frame(
-    mesh: &mut ItemMesh,
+    layers: &mut ItemLayers,
     entity: &EntityRenderSnapshot,
     framed: Option<&EntityItem>,
     resources: &ItemResources,
@@ -167,7 +197,7 @@ fn push_item_frame(
         light: VertexLight::new(0, 15, 15, true),
         tints: &[],
     };
-    mesh.push_quads(
+    layers.items.push_quads(
         resources.models().frame_quads(holds_map),
         &(base * Mat4::from_translation(Vec3::splat(-0.5))),
         &wood,
@@ -195,7 +225,8 @@ fn push_item_frame(
         light: VertexLight::new(0, 15, 15, model.gui_3d),
         tints: &tints,
     };
-    mesh.push_quads(quads, &pose, &style);
+    let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
+    layers.push(quads, &pose, &style, glint);
 }
 
 /// The blocks whose item uses the torch pose in a hand (`getRenderType() == 2`).
@@ -203,13 +234,13 @@ fn is_torch(item_id: i16) -> bool {
     matches!(item_id, 50 | 75 | 76)
 }
 
-/// Appends the first-person held item to `mesh`, in camera space.
+/// Appends the first-person held item to `layers`, in camera space.
 ///
 /// `bob` is the view-bobbing transform of the frame, applied to the hand
 /// as well (MCP `EntityRenderer.renderHand`). Items without a sprite model
 /// (a chest, a banner) are not drawn yet.
 pub fn push_held_item(
-    mesh: &mut ItemMesh,
+    layers: &mut ItemLayers,
     (item_id, damage, nbt): (i16, i16, Option<&[u8]>),
     hand: &HandPose,
     bob: Mat4,
@@ -226,7 +257,7 @@ pub fn push_held_item(
         tints: &tints,
     };
     let pose = bob * hand.item_matrix() * held_pose(model, DisplayContext::FirstPerson);
-    mesh.push_quads(quads, &pose, &style);
+    layers.push(quads, &pose, &style, resources.glints(item_id, damage, nbt));
 }
 
 /// The model of the item in the first-person hand: the bow shows its
@@ -353,6 +384,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_enchanted_items_reach_the_glint_layer() {
+        let atlas = umicraft_model::AtlasLayout::from_keys(["items/apple"]);
+        let style = ItemStyle {
+            atlas: &atlas,
+            light: VertexLight::new(0, 15, 15, false),
+            tints: &[],
+        };
+        let quad = ModelQuad {
+            positions: [[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            normal: [0.0, 0.0, 1.0],
+            uvs: [[0.0; 2]; 4],
+            texture: "items/apple".to_string(),
+            cullface: None,
+            shade: false,
+            tint: None,
+        };
+        let mut layers = ItemLayers::default();
+        layers.push(std::slice::from_ref(&quad), &Mat4::IDENTITY, &style, false);
+        assert_eq!(
+            (layers.items.vertices.len(), layers.glint.vertices.len()),
+            (4, 0)
+        );
+        layers.push(&[quad], &Mat4::IDENTITY, &style, true);
+        assert_eq!(
+            (layers.items.vertices.len(), layers.glint.vertices.len()),
+            (8, 4)
+        );
+        layers.clear();
+        assert!(layers.items.is_empty() && layers.glint.is_empty());
+    }
+
+    #[test]
     fn stacks_grow_the_copy_count_at_the_reference_thresholds() {
         let counts: Vec<usize> = [1, 2, 16, 17, 32, 33, 48, 49, 64]
             .into_iter()
@@ -454,8 +517,8 @@ mod render_tests {
             snapshots.push(frame);
         }
         let mut world = WorldItems::default();
-        renderer.set_world_items(world.build(&snapshots, &items));
-        let mut hand = ItemMesh::default();
+        renderer.set_world_items(&world.build(&snapshots, &items).items);
+        let mut hand = ItemLayers::default();
         push_held_item(
             &mut hand,
             (276, 0, None),
@@ -463,7 +526,7 @@ mod render_tests {
             Mat4::IDENTITY,
             &items,
         );
-        renderer.set_hand_items(&hand);
+        renderer.set_hand_items(&hand.items);
         renderer
             .render(&Camera::default(), &Overlay::new(320, 180))
             .expect("render");
@@ -536,7 +599,7 @@ mod player_render_tests {
         let snapshots = [player(1, -1.0, 276, false), player(2, 1.0, 50, true)];
         EntityTextures::load(&renderer).mesh_and_upload(&snapshots, &mut renderer);
         let mut world = WorldItems::default();
-        renderer.set_world_items(world.build(&snapshots, &items));
+        renderer.set_world_items(&world.build(&snapshots, &items).items);
         renderer
             .render(&Camera::default(), &Overlay::new(320, 180))
             .expect("render");
@@ -574,7 +637,7 @@ mod use_render_tests {
                 atlas.pixels(),
             )
             .expect("atlas");
-        let mut mesh = ItemMesh::default();
+        let mut mesh = ItemLayers::default();
         push_held_item(
             &mut mesh,
             (item.0, item.1, None),
@@ -582,8 +645,8 @@ mod use_render_tests {
             Mat4::IDENTITY,
             &items,
         );
-        assert!(!mesh.is_empty(), "the held item has geometry");
-        renderer.set_hand_items(&mesh);
+        assert!(!mesh.items.is_empty(), "the held item has geometry");
+        renderer.set_hand_items(&mesh.items);
         renderer
             .render(&Camera::default(), &Overlay::new(320, 180))
             .expect("render");
@@ -616,5 +679,120 @@ mod use_render_tests {
         render_hand((261, 0), using(UseAction::Bow, 71_980.0, 20), "bow");
         render_hand((260, 0), using(UseAction::Eat, 12.0, 20), "eat");
         render_hand((276, 0), using(UseAction::Block, 71_990.0, 10), "block");
+    }
+}
+
+#[cfg(test)]
+mod glint_render_tests {
+    use super::*;
+    use crate::model_resources::ModelResources;
+    use std::sync::Arc;
+    use umicraft_game::entity::{EntityFlags, EntityId};
+    use umicraft_render::{Camera, Overlay, Renderer};
+
+    /// `{ench: [{id: 16, lvl: 5}]}` as a server sends it.
+    fn enchanted_nbt() -> Arc<[u8]> {
+        let mut nbt = vec![10, 0, 0, 9, 0, 4];
+        nbt.extend(b"ench");
+        nbt.extend([10, 0, 0, 0, 1, 2, 0, 2]);
+        nbt.extend(b"id");
+        nbt.extend(16_i16.to_be_bytes());
+        nbt.extend([2, 0, 3]);
+        nbt.extend(b"lvl");
+        nbt.extend(5_i16.to_be_bytes());
+        nbt.extend([0, 0]);
+        nbt.into()
+    }
+
+    fn dropped(
+        id: i32,
+        x: f32,
+        item_id: i16,
+        damage: i16,
+        nbt: Option<Arc<[u8]>>,
+    ) -> EntityRenderSnapshot {
+        EntityRenderSnapshot {
+            id: EntityId(id),
+            kind: EntityKind::Item,
+            position: Vec3::new(x, 79.6, -2.5),
+            yaw: 0.0,
+            pitch: 0.0,
+            head_yaw: 0.0,
+            limb_swing: 0.0,
+            limb_swing_amount: 0.0,
+            uuid: None,
+            held: None,
+            item: Some(EntityItem {
+                item_id,
+                damage,
+                count: 1,
+                nbt,
+            }),
+            age: 3.0,
+            frame_direction: 0,
+            frame_rotation: 0,
+            flags: EntityFlags::default(),
+        }
+    }
+
+    /// Renders enchanted and plain items with the glint; set
+    /// `UMICRAFT_GLINT_DUMP` to a path to keep the PNG.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn enchanted_items_glint_in_the_world_and_in_hand() {
+        let resources = ModelResources::load().expect("official resources");
+        let items = resources.items();
+        let atlas = resources.atlas();
+        let mut renderer = Renderer::new_offscreen(320, 180).expect("renderer");
+        renderer
+            .set_block_atlas(
+                atlas.width(),
+                atlas.height(),
+                atlas.layers(),
+                atlas.pixels(),
+            )
+            .expect("atlas");
+        let glint = resources
+            .resources()
+            .glint_texture()
+            .expect("the jar has the glint texture");
+        renderer.set_glint_texture(glint.width, glint.height, &glint.pixels);
+        renderer.set_glint_time(1.3);
+        let snapshots = [
+            dropped(1, -1.5, 276, 0, Some(enchanted_nbt())),
+            dropped(2, -0.5, 276, 0, None),
+            dropped(3, 0.5, 322, 1, None),
+            dropped(4, 1.5, 322, 0, None),
+        ];
+        let mut world = WorldItems::default();
+        let layers = world.build(&snapshots, &items);
+        renderer.set_world_items(&layers.items);
+        renderer.set_world_glint(&layers.glint);
+        let mut hand = ItemLayers::default();
+        let nbt = enchanted_nbt();
+        push_held_item(
+            &mut hand,
+            (276, 0, Some(&nbt)),
+            &HandPose::default(),
+            Mat4::IDENTITY,
+            &items,
+        );
+        renderer.set_hand_items(&hand.items);
+        renderer.set_hand_glint(&hand.glint);
+        assert!(!layers.glint.is_empty() && !hand.glint.is_empty());
+        renderer
+            .render(&Camera::default(), &Overlay::new(320, 180))
+            .expect("render");
+        let image = renderer.read_pixels().expect("readback");
+        if let Ok(path) = std::env::var("UMICRAFT_GLINT_DUMP") {
+            let file = std::fs::File::create(path).expect("dump file");
+            let mut encoder = png::Encoder::new(file, image.width, image.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                .expect("png");
+        }
     }
 }

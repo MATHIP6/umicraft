@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_game::item_use::DropKind;
-use umicraft_mesh::item::ItemMesh;
 use umicraft_render::{
     draw_hud, Camera, HudLayout, HudState, NoIcons, Overlay, RenderEnvironment, Renderer, SkyState,
 };
@@ -38,7 +37,7 @@ use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
-use crate::item_world::{push_held_item, WorldItems};
+use crate::item_world::{push_held_item, ItemLayers, WorldItems};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::terrain_textures::TerrainTextures;
@@ -140,7 +139,7 @@ struct App {
     /// The dropped-item geometry of the frame, kept for its buffers.
     world_items: WorldItems,
     /// The first-person held item geometry of the frame.
-    hand_item_mesh: ItemMesh,
+    hand_layers: ItemLayers,
     /// Steps the water, lava and fire textures once per game tick.
     texture_animator: TextureAnimator,
     /// Entity textures bound for GPU rendering.
@@ -198,7 +197,7 @@ impl App {
             items: None,
             dials: DialAnimator::default(),
             world_items: WorldItems::default(),
-            hand_item_mesh: ItemMesh::default(),
+            hand_layers: ItemLayers::default(),
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
             last_frame: Instant::now(),
@@ -786,19 +785,22 @@ impl App {
             entity_textures.mesh_and_upload(&entities, renderer);
             entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer);
             if let Some(items) = self.items.as_deref() {
-                renderer.set_world_items(self.world_items.build(&entities, items));
-                self.hand_item_mesh.clear();
+                let dropped = self.world_items.build(&entities, items);
+                renderer.set_world_items(&dropped.items);
+                renderer.set_world_glint(&dropped.glint);
+                self.hand_layers.clear();
                 if let Some(stack) = held_stack(world) {
                     let nbt = stack.nbt.as_deref();
                     push_held_item(
-                        &mut self.hand_item_mesh,
+                        &mut self.hand_layers,
                         (stack.item_id, stack.damage, nbt),
                         &hand,
                         self.camera.view_bob(),
                         items,
                     );
                 }
-                renderer.set_hand_items(&self.hand_item_mesh);
+                renderer.set_hand_items(&self.hand_layers.items);
+                renderer.set_hand_glint(&self.hand_layers.glint);
             }
         }
 

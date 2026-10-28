@@ -7,6 +7,7 @@
 //! Run with `cargo test -p umicraft-render --test offscreen_items -- --ignored`
 //! on a machine with a wgpu adapter.
 
+use glam::Vec3;
 use umicraft_mesh::item::ItemMesh;
 use umicraft_mesh::{tint, Vertex, VertexLight};
 use umicraft_render::{Camera, IconProvider, Overlay, Renderer};
@@ -172,4 +173,93 @@ fn the_larger_z_is_in_front_in_an_icon() {
         inside[1] > 200 && inside[0] < 60,
         "green must cover red: {inside:?}"
     );
+}
+
+/// A lit sprite of `half` extent in the plane `z`, wound
+/// counter-clockwise as seen from +z so the back-face cull keeps it.
+fn quad(z: f32, half: f32) -> ItemMesh {
+    let mut mesh = ItemMesh::default();
+    for (x, y) in [(-half, -half), (half, -half), (half, half), (-half, half)] {
+        mesh.vertices.push(Vertex {
+            position: [x, y, z],
+            normal: [0.0, 0.0, 1.0],
+            uv: [x / (2.0 * half) + 0.5, y / (2.0 * half) + 0.5],
+            layer: 1,
+            light: VertexLight::new(0, 15, 15, false).pack(),
+            tint: tint::WHITE,
+        });
+    }
+    mesh.indices.extend([0, 1, 2, 0, 2, 3]);
+    mesh
+}
+
+/// Renders once and returns the centre pixel and two corner pixels.
+fn probe(renderer: &mut Renderer) -> [[u8; 3]; 3] {
+    renderer
+        .render(
+            &Camera::new(Vec3::ZERO, 0.0, 0.0),
+            &Overlay::new(SIZE, SIZE),
+        )
+        .expect("render");
+    let image = renderer.read_pixels().expect("readback");
+    [(SIZE / 2, SIZE / 2), (2, 2), (SIZE - 3, SIZE - 3)].map(|(x, y)| {
+        let index = ((y * image.width + x) * 4) as usize;
+        [
+            image.rgba[index],
+            image.rgba[index + 1],
+            image.rgba[index + 2],
+        ]
+    })
+}
+
+fn assert_glint_only_on_quad(plain: [[u8; 3]; 3], glowing: [[u8; 3]; 3]) {
+    let widen = |pixel: [u8; 3]| pixel.map(u32::from);
+    let (before, after) = (widen(plain[0]), widen(glowing[0]));
+    assert!(after[2] > before[2] + 40, "blue {before:?} -> {after:?}");
+    assert!(after[0] > before[0] + 10, "red {before:?} -> {after:?}");
+    assert!(after[2] > after[0], "purplish {after:?}");
+    assert_eq!(plain[1..], glowing[1..], "outside the quad");
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_world_item_glints_only_on_its_visible_surface() {
+    let mut renderer = Renderer::new_offscreen(SIZE, SIZE).expect("offscreen renderer");
+    renderer.set_block_atlas(2, 2, 2, &atlas()).expect("atlas");
+    renderer.set_glint_texture(4, 4, &[255; 4 * 4 * 4]);
+    renderer.set_glint_time(1.0);
+    // `probe` looks along -z from the origin.
+    let mesh = quad(-3.0, 1.0);
+    renderer.set_world_items(&mesh);
+    let plain = probe(&mut renderer);
+    renderer.set_world_glint(&mesh);
+    let glowing = probe(&mut renderer);
+    assert_glint_only_on_quad(plain, glowing);
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_hand_item_glints_only_on_its_visible_surface() {
+    let mut renderer = Renderer::new_offscreen(SIZE, SIZE).expect("offscreen renderer");
+    renderer.set_block_atlas(2, 2, 2, &atlas()).expect("atlas");
+    renderer.set_glint_texture(4, 4, &[255; 4 * 4 * 4]);
+    renderer.set_glint_time(1.0);
+    let mesh = quad(-1.0, 0.4);
+    renderer.set_hand_items(&mesh);
+    let plain = probe(&mut renderer);
+    renderer.set_hand_glint(&mesh);
+    let glowing = probe(&mut renderer);
+    assert_glint_only_on_quad(plain, glowing);
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn glint_meshes_draw_nothing_without_a_glint_texture() {
+    let mut renderer = Renderer::new_offscreen(SIZE, SIZE).expect("offscreen renderer");
+    renderer.set_block_atlas(2, 2, 2, &atlas()).expect("atlas");
+    let mesh = quad(-3.0, 1.0);
+    renderer.set_world_items(&mesh);
+    let plain = probe(&mut renderer);
+    renderer.set_world_glint(&mesh);
+    assert_eq!(probe(&mut renderer), plain);
 }

@@ -7,16 +7,19 @@
 //! The UI then draws them as ordinary textured rectangles, so slot
 //! backgrounds, icons, stack counts and tooltips keep their command order
 //! and a steady-state frame renders no item geometry at all. Enchanted items
-//! get the scrolling glint of [`glint`] drawn over their icon quad.
+//! get the scrolling glint of [`glint`] drawn over their icon quad, and over
+//! their world and hand meshes through [`world_glint`].
 
 mod dynamic_mesh;
 mod glint;
 mod icon_atlas;
+mod world_glint;
 
 pub(crate) use dynamic_mesh::DynamicMesh;
 pub(crate) use glint::GlintPass;
 pub(crate) use icon_atlas::IconAtlas;
 pub use icon_atlas::{ICON_ATLAS_SIZE, ICON_CELL_SIZE};
+pub(crate) use world_glint::WorldGlint;
 
 use umicraft_mesh::item::ItemMesh;
 
