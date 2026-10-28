@@ -312,12 +312,40 @@ inventory, chests, crafting table, furnace, dispenser, dropper and hopper, and
 the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 
 **Remaining before P4 is done**
-- Screens and protocol of the brewing stand, enchanting table (`Enchant Item`),
-  anvil (`MC|ItemName`), beacon (`MC|Beacon`), villager (`MC|TrList`,
-  `MC|TrSel`), horse inventory, book and quill, sign editing.
-- Active effects list in the inventory.
-- A live-server session: the 15-minute scripted trace comparison with vanilla.
-- Language file loader for tooltips (English table today).
+- **P4d, container screens and protocol (not started):** brewing stand,
+  enchanting table (`Enchant Item`, `Window Property` 0-9), anvil
+  (`MC|ItemName`), beacon (`MC|Beacon`), villager (`MC|TrList`, `MC|TrSel`),
+  horse inventory, book and quill (`MC|BEdit`, `MC|BSign`), sign editing.
+  They open today with a chest layout (`ScreenKind` fallback) and the slot
+  rules of `inventory::slot`; each needs its `ScreenKind` (a file in
+  `umicraft-ui/src/screens/`), its decorations and its packets. The window
+  kinds whose `Open Window` announces 0 slots are handled in
+  `WindowKind::implicit_slot_count`; check the horse (entity id in the packet).
+- **Player model** (`GuiInventory.drawEntityOnScreen`) in the inventory (51, 75,
+  scale 30) and in the creative Inventory tab (43, 45, scale 20): not done. It
+  needs a per-frame offscreen render of the player through the entity pipeline
+  and a UI draw command, like the icon atlas.
+- **Active effects list** in the inventory (needs the `Entity Effect` state of
+  P1/P2 drawn left of the window, `GuiInventory.drawActivePotionEffects`).
+- **Creative inventory gaps:** tab-name line in the Search tooltip, Shift +
+  double click, middle-button drag, double click outside the Inventory tab,
+  search by variant name (needs per-metadata names in `tooltip.rs`), banner
+  patterns.
+- **Survival gaps:** Shift + double click (collect every matching slot), pick
+  block key over a slot, touchscreen mode, empty-cursor outside click (mode 4).
+- **Language file loader** for tooltips and screen titles (English table
+  today, `tooltip_draw::resolve`); `tooltip.rs` uses `item.<name>.name` keys
+  without per-metadata names.
+- **Fidelity to verify against vanilla screenshots:** tooltip colours (fixed
+  for the tooltip only, see the sRGB entry of `docs/backlog.md`), the gradient
+  border, GUI block lighting and glass icons (fixed, unverified), creative
+  textures present in the GUI atlas, the drag preview.
+- **Live-server validation:** the 15-minute scripted session with the trace
+  comparison against vanilla (`Click Window` sequence per click mode, no
+  desync resync), and the screenshot diff of a reference inventory.
+- **Code hygiene:** `window.rs` (1240 lines), `game.rs` (3490) and
+  `inventory/tooltip.rs` (835) are over the size the project aims for;
+  `docs/roadmap-review.md` §3.4 still lists the M9 defects as open.
 
 ### P5 — Entities (finishes M8)
 
