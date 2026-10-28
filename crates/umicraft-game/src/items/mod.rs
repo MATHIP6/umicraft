@@ -20,10 +20,12 @@
 mod egg_table;
 pub mod kind;
 mod potion_color;
+mod potion_variants;
 mod table;
 pub mod tint;
 
 pub use kind::{ArmorMaterial, ArmorSlot, FoodValues, ItemKind, Tier, ToolKind};
+pub use potion_variants::potion_creative_damages;
 
 /// The static description of one item id.
 #[derive(Debug, Clone, Copy, PartialEq)]

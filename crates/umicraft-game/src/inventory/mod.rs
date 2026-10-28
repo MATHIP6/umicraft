@@ -16,6 +16,7 @@
 
 pub mod armor;
 pub mod click;
+pub mod creative;
 pub mod kind;
 mod manager;
 pub mod player;

@@ -213,6 +213,22 @@ impl WindowManager {
         }
     }
 
+    /// Applies a click to the local window without a `Click Window` packet or
+    /// a transaction.
+    ///
+    /// The creative inventory works this way: vanilla calls
+    /// `Container.slotClick` locally and reports the changed slots with
+    /// `Creative Inventory Action` instead of `Click Window`.
+    pub fn click_local(&mut self, request: ClickRequest, creative: bool) {
+        self.apply_click(request, creative);
+    }
+
+    /// Replaces the cursor stack (`InventoryPlayer.setItemStack`); a stack
+    /// without items clears it.
+    pub fn set_cursor(&mut self, stack: Option<ItemStack>) {
+        self.cursor = super::stack::normalize(stack);
+    }
+
     fn apply_click(&mut self, request: ClickRequest, creative: bool) -> Option<ItemStack> {
         self.with_space(|space, cursor, drag| slot_click(space, cursor, drag, request, creative))
     }
