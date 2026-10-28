@@ -167,6 +167,19 @@ pub enum ClientCommand {
         /// The Z offset of the click, in sixteenths of a block.
         cursor_z: u8,
     },
+    /// `Player Block Placement` (0x08) without a target: the use of the held
+    /// item (MCP `PlayerControllerMP.sendUseItem`).
+    UseItem {
+        /// The item the player holds.
+        item: ItemStack,
+    },
+    /// `Creative Inventory Action` (0x10): the creative client sets a slot.
+    CreativeSlot {
+        /// The slot index of the player window.
+        slot: i16,
+        /// The item placed in the slot.
+        item: ItemStack,
+    },
     /// `Player Abilities` (0x13): the flying state changed.
     PlayerAbilities {
         /// The flags of the last `Player Abilities` of the server.
@@ -308,12 +321,21 @@ impl ClientCommand {
                 x,
                 y,
                 z,
-                face,
+                face: Some(face),
                 item,
                 cursor_x,
                 cursor_y,
                 cursor_z,
             }),
+            Self::UseItem { item } => {
+                PlayServerbound::PlayerBlockPlacement(PlayerBlockPlacement::use_item(item))
+            }
+            Self::CreativeSlot { slot, item } => {
+                PlayServerbound::CreativeInventoryAction(serverbound::CreativeInventoryAction {
+                    slot,
+                    item,
+                })
+            }
             Self::PlayerAbilities {
                 flags,
                 flying,
@@ -519,7 +541,20 @@ mod tests {
                 },
                 0x08,
             ),
+            (
+                ClientCommand::UseItem {
+                    item: ItemStack::EMPTY,
+                },
+                0x08,
+            ),
             (ClientCommand::HeldItemChange { slot: 3 }, 0x09),
+            (
+                ClientCommand::CreativeSlot {
+                    slot: 36,
+                    item: ItemStack::EMPTY,
+                },
+                0x10,
+            ),
         ];
         for (command, id) in cases {
             let packet = command.into_packet();

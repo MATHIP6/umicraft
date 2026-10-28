@@ -14,6 +14,13 @@
 /// `moveStrafe` and `moveForward` by `0.3` when the sneak key is held.
 pub const SNEAK_INPUT_SCALE: f32 = 0.3;
 
+/// The factor the movement axes are scaled by while an item is in use.
+///
+/// MCP `net/minecraft/client/entity/EntityPlayerSP.java:788-792` multiplies
+/// `moveStrafe` and `moveForward` by `0.2` while `isUsingItem()` and the
+/// player does not ride.
+pub const USING_ITEM_INPUT_SCALE: f32 = 0.2;
+
 /// The forward input from which the player may sprint.
 ///
 /// MCP `net/minecraft/client/entity/EntityPlayerSP.java:784-785` compares the
@@ -81,6 +88,9 @@ pub struct RawInput {
     pub sneak: bool,
     /// Whether the sprint key is held.
     pub sprint: bool,
+    /// Whether the player uses an item (eats, drinks, blocks, draws a bow)
+    /// on foot, which slows it down.
+    pub using_item: bool,
     /// The horizontal view angle in radians.
     pub yaw: f32,
     /// The vertical view angle in radians.
@@ -90,8 +100,9 @@ pub struct RawInput {
 impl RawInput {
     /// Converts the raw state into an [`InputIntent`].
     ///
-    /// The movement axes are clamped to `[-1, 1]` and scaled by
-    /// [`SNEAK_INPUT_SCALE`] while the sneak key is held, which is what MCP
+    /// The movement axes are clamped to `[-1, 1]`, scaled by
+    /// [`SNEAK_INPUT_SCALE`] while the sneak key is held and then by
+    /// [`USING_ITEM_INPUT_SCALE`] while an item is in use, which is what MCP
     /// `net/minecraft/util/MovementInputFromOptions.java:42-46` does before
     /// the input reaches the entity.
     #[must_use]
@@ -101,6 +112,10 @@ impl RawInput {
         if self.sneak {
             forward *= SNEAK_INPUT_SCALE;
             strafe *= SNEAK_INPUT_SCALE;
+        }
+        if self.using_item {
+            forward *= USING_ITEM_INPUT_SCALE;
+            strafe *= USING_ITEM_INPUT_SCALE;
         }
         InputIntent {
             forward,
@@ -143,6 +158,23 @@ mod tests {
         assert!((intent.forward - 0.3).abs() < 1e-6);
         assert!((intent.strafe - 0.3).abs() < 1e-6);
         assert!(intent.sneak);
+    }
+
+    /// MCP `EntityPlayerSP.java:788-792`: 0.2 while an item is in use,
+    /// applied after the sneak scale.
+    #[test]
+    fn using_an_item_slows_the_movement_axes() {
+        let raw = RawInput {
+            forward: 1.0,
+            strafe: -1.0,
+            using_item: true,
+            ..RawInput::default()
+        };
+        let intent = raw.to_intent();
+        assert!((intent.forward - 0.2).abs() < 1e-6);
+        assert!((intent.strafe + 0.2).abs() < 1e-6);
+        let sneaking = RawInput { sneak: true, ..raw };
+        assert!((sneaking.to_intent().forward - 0.06).abs() < 1e-6);
     }
 
     #[test]

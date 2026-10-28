@@ -27,7 +27,9 @@ use std::time::{Duration, Instant};
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
-use umicraft_game::digging::{enchantment_level, Digger, AQUA_AFFINITY, HASTE, MINING_FATIGUE};
+use umicraft_game::digging::{
+    enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
+};
 use umicraft_game::entity::{
     EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityStore,
 };
@@ -36,8 +38,10 @@ use umicraft_game::hand::{HandPose, HandState, SwingEffects};
 use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
+use umicraft_game::item_use::{drop_item, ItemUse, UseTick};
 use umicraft_game::movement::movement_stats;
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
+use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
@@ -74,6 +78,13 @@ const FRAME_CAPACITY: usize = 32;
 
 /// Bounded queue of the chunk snapshots the render thread polls.
 const CHUNK_CAPACITY: usize = 64;
+
+/// The arrow item id (MCP `Items.arrow`): a bow needs one to be drawn.
+const ARROW: i16 = 262;
+
+/// The `Entity Status` that ends the use of an item
+/// (MCP `EntityPlayer.handleStatusUpdate`, id 9).
+const ITEM_USE_FINISHED: i8 = 9;
 
 /// The block ids of water (MCP `Blocks.flowing_water`, `Blocks.water`).
 const WATER_FLOWING: u16 = 8;
@@ -413,6 +424,10 @@ struct Game {
     vehicle: Option<i32>,
     /// The dig, placement and acknowledgement rules.
     interaction: Interaction,
+    /// The use of the held item (eating, blocking, drawing a bow).
+    item_use: ItemUse,
+    /// The use button went down since the last tick.
+    use_pressed: bool,
     /// Where the camera sits (`F5`).
     perspective: Perspective,
     /// The attack button went down since the last tick.
@@ -464,6 +479,8 @@ impl Game {
             server_view: ServerView::default(),
             vehicle: None,
             interaction: Interaction::new(),
+            item_use: ItemUse::new(),
+            use_pressed: false,
             perspective: Perspective::default(),
             attack_pressed: false,
             hand: HandState::new(),
@@ -1234,8 +1251,15 @@ fn handle_net(
                 game.vehicle = (packet.vehicle_id != -1).then_some(packet.vehicle_id);
             }
         }
-        PlayEvent::EntityStatus(_) | PlayEvent::Animation(_) => {
-            // Visual-only 1.8 packets; their consumer is P5.
+        PlayEvent::EntityStatus(status) => {
+            // MCP `EntityPlayer.handleStatusUpdate`: 9 finishes the use of
+            // the item. The other statuses are visual; their consumer is P5.
+            if status.status == ITEM_USE_FINISHED && status.entity_id == game.entity_id {
+                game.item_use.finish();
+            }
+        }
+        PlayEvent::Animation(_) => {
+            // Visual-only 1.8 packet; its consumer is P5.
         }
         PlayEvent::SpawnPosition(packet) => {
             game.spawn = Some((packet.x, packet.y, packet.z));
@@ -1371,6 +1395,12 @@ fn apply_movement_stats(game: &mut Game) {
         f64::from(walk_speed),
     );
     state.set_movement(stats, walk_speed, game.food > SPRINT_FOOD_LIMIT);
+    let strider = game
+        .windows
+        .boots()
+        .and_then(|boots| boots.nbt.as_deref())
+        .map_or(0, |nbt| enchantment_level(nbt, DEPTH_STRIDER));
+    state.set_depth_strider(u8::try_from(strider).unwrap_or(u8::MAX));
 }
 
 /// Tells the server about a change of the flying state.
@@ -1599,22 +1629,22 @@ fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) 
     game.pitch = (game.pitch + update.look_pitch).clamp(-MAX_PITCH, MAX_PITCH);
 
     if let Some(slot) = update.select_slot {
-        if slot < 9 && slot != game.selected_slot {
-            game.selected_slot = slot;
-            game.windows.set_selected_slot(slot);
-            game.hud_dirty = true;
-            queue.push(ClientCommand::HeldItemChange {
-                slot: i16::from(slot),
-            });
-        }
+        select_slot(game, slot, queue);
     }
 
     if update.toggle_perspective {
         game.perspective = game.perspective.next();
     }
     game.attack_pressed |= update.break_block;
-    if update.place_block {
-        place_block(game, queue);
+    game.use_pressed |= update.place_block;
+    if update.pick_block {
+        pick_block(game, queue);
+    }
+    if let Some(outgoing) = update
+        .drop_item
+        .and_then(|kind| drop_item(game.gamemode, kind))
+    {
+        queue.push(command_of(outgoing));
     }
 }
 
@@ -1625,7 +1655,9 @@ fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) 
 /// restores them with a block change.
 fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     let pressed = std::mem::take(&mut game.attack_pressed);
-    if game.spectating() || game.dead() {
+    // MCP `Minecraft.runTick` lines 2098-2121: the attack button does
+    // nothing while an item is in use.
+    if game.spectating() || game.dead() || game.item_use.is_using() {
         return;
     }
     let target = game.target();
@@ -1686,40 +1718,111 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     }
 }
 
-/// Places a block against the targeted face.
-fn place_block(game: &mut Game, queue: &mut CommandQueue) {
+/// Runs one tick of the use button (`umicraft_game::item_use`): the click on
+/// a block or in the air, the held button and the release.
+fn run_use(game: &mut Game, queue: &mut CommandQueue) {
+    let pressed = std::mem::take(&mut game.use_pressed);
     if game.dead() {
         return;
     }
-    let Some(hit) = game.target() else {
+    let target = game.target();
+    let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
         return;
     };
-    let player = game
-        .state
-        .as_ref()
-        .map(|state| state.player().bounding_box());
     let item = game
         .windows
         .selected_item()
-        .cloned()
-        .or_else(|| game.held_item.clone())
-        .unwrap_or(WireItemStack::EMPTY);
-    let holds_item = item.item_id >= 0;
-    let Some(outgoing) = game
-        .interaction
-        .place_block(game.gamemode, &hit, player.as_ref(), item)
-    else {
-        tracing::debug!(block = ?hit.block, "the placement would hit the player");
-        return;
-    };
-    queue.push(command_of(outgoing));
-    if holds_item && game.gamemode.can_place() {
+        .or(game.held_item.as_ref())
+        .cloned();
+    let has_arrow = game
+        .windows
+        .main_inventory()
+        .iter()
+        .flatten()
+        .any(|stack| stack.item_id == ARROW);
+    let player = state.player();
+    let output = game.item_use.tick(
+        &mut game.interaction,
+        &UseTick {
+            mode: game.gamemode,
+            pressed,
+            held: game.input.use_item,
+            target,
+            world,
+            player: Some(player.bounding_box()),
+            sneaking: player.sneaking,
+            slot: game.selected_slot,
+            item: item.as_ref(),
+            food: game.food as i32,
+            has_arrow,
+        },
+    );
+    for outgoing in output.packets {
+        queue.push(command_of(outgoing));
+    }
+    if output.swing {
         // MCP `Minecraft.rightClickMouse`: a used item swings the arm.
         queue.push(ClientCommand::Swing);
         let effects = swing_effects(game);
         game.hand.swing(effects);
     }
-    tracing::info!(block = ?hit.block, face = ?hit.face, held = ?game.held_item, "placing a block");
+}
+
+/// Picks the targeted block into the hotbar (the middle button).
+///
+/// MCP `Minecraft.middleClickMouse`: the hotbar slot that holds the item is
+/// selected; a creative player gets the item in the first free slot and
+/// tells the server about the slot.
+fn pick_block(game: &mut Game, queue: &mut CommandQueue) {
+    if game.dead() {
+        return;
+    }
+    let (Some(hit), Some(world)) = (game.target(), game.world.as_ref()) else {
+        return;
+    };
+    let Some(picked) = picked_item(world.block(hit.block)) else {
+        return;
+    };
+    let creative = game.gamemode == GameMode::Creative;
+    let pick = pick_in(
+        &game.windows.main_inventory(),
+        game.selected_slot,
+        picked,
+        creative,
+    );
+    for (index, stack) in pick.changed {
+        game.windows
+            .apply_set_slot(0, window_slot(index), stack.clone());
+        if creative && index == usize::from(pick.select.unwrap_or(game.selected_slot)) {
+            queue.push(ClientCommand::CreativeSlot {
+                slot: window_slot(index),
+                item: stack,
+            });
+        }
+    }
+    if let Some(slot) = pick.select {
+        select_slot(game, slot, queue);
+    }
+}
+
+/// The slot of the player window that holds a main inventory index
+/// (the hotbar is the last row of the window).
+fn window_slot(index: usize) -> i16 {
+    let slot = if index < 9 { 36 + index } else { index };
+    slot as i16
+}
+
+/// Selects a hotbar slot and tells the server
+/// (MCP `PlayerControllerMP.syncCurrentPlayItem`).
+fn select_slot(game: &mut Game, slot: u8, queue: &mut CommandQueue) {
+    if slot < 9 && slot != game.selected_slot {
+        game.selected_slot = slot;
+        game.windows.set_selected_slot(slot);
+        game.hud_dirty = true;
+        queue.push(ClientCommand::HeldItemChange {
+            slot: i16::from(slot),
+        });
+    }
 }
 
 /// The network command of a packet the interaction rules produced.
@@ -1751,6 +1854,7 @@ fn command_of(outgoing: Outgoing) -> ClientCommand {
             cursor_y,
             cursor_z,
         },
+        Outgoing::UseItem { item } => ClientCommand::UseItem { item },
         Outgoing::Swing => ClientCommand::Swing,
         Outgoing::AckPosition(ack) => ClientCommand::AckPosition {
             x: ack.x,
@@ -1773,6 +1877,7 @@ fn tick(
 ) {
     game.status_data.ticks += 1;
     run_attack(game, queue);
+    run_use(game, queue);
     tick_hand(game);
 
     // The intent of the tick: the raw key state with the yaw and the pitch
@@ -1783,6 +1888,7 @@ fn tick(
         jump: game.input.jump,
         sneak: game.input.sneak,
         sprint: game.input.sprint,
+        using_item: game.item_use.is_using() && game.vehicle.is_none(),
         yaw: game.yaw,
         pitch: game.pitch,
     }
@@ -1986,6 +2092,23 @@ fn publish_status(game: &mut Game, frames: &SyncSender<RenderEvent>) {
 mod tests {
     use super::*;
     use crate::input::InputState;
+    use umicraft_game::item_use::DropKind;
+    use umicraft_protocol::packets::play::serverbound::DiggingStatus;
+
+    /// An `ench` list with one enchantment, as a server would send it.
+    fn enchanted_nbt(id: i16, level: i16) -> Vec<u8> {
+        let mut nbt = vec![10, 0, 0, 9, 0, 4];
+        nbt.extend(b"ench");
+        nbt.extend([10, 0, 0, 0, 1]);
+        nbt.extend([2, 0, 2]);
+        nbt.extend(b"id");
+        nbt.extend(id.to_be_bytes());
+        nbt.extend([2, 0, 3]);
+        nbt.extend(b"lvl");
+        nbt.extend(level.to_be_bytes());
+        nbt.extend([0, 0]);
+        nbt
+    }
 
     #[test]
     fn the_armour_points_follow_the_reference_table() {
@@ -2509,7 +2632,7 @@ mod tests {
         assert_eq!(before.x, after.x);
         assert_eq!(before.z, after.z);
         assert_eq!(digging_commands(&queue), 0);
-        place_block(&mut game, &mut queue);
+        click_use(&mut game, &mut queue);
         assert!(!queue
             .ordered
             .iter()
@@ -2695,7 +2818,7 @@ mod tests {
         let mut queue = CommandQueue::default();
         // Aim ahead of the feet: the block below the player cannot be built on.
         empty.pitch = 1.0;
-        place_block(&mut empty, &mut queue);
+        click_use(&mut empty, &mut queue);
         assert!(!queue
             .ordered
             .iter()
@@ -2706,7 +2829,7 @@ mod tests {
             damage: 0,
             nbt: None,
         });
-        place_block(&mut empty, &mut queue);
+        click_use(&mut empty, &mut queue);
         assert!(queue
             .ordered
             .iter()
@@ -2823,6 +2946,210 @@ mod tests {
         game.world = Some(world);
         game.state = Some(GameState::new(DVec3::new(0.5, 64.0, 0.5)));
         game
+    }
+
+    /// Presses the use button once and runs the tick of the button.
+    fn click_use(game: &mut Game, queue: &mut CommandQueue) {
+        game.use_pressed = true;
+        run_use(game, queue);
+    }
+
+    fn wire_item(item_id: i16, damage: i16) -> WireItemStack {
+        WireItemStack {
+            item_id,
+            stack_size: 1,
+            damage,
+            nbt: None,
+        }
+    }
+
+    fn commands(queue: &CommandQueue) -> Vec<&ClientCommand> {
+        queue.ordered.iter().collect()
+    }
+
+    /// A hungry player who holds bread starts eating on the click, walks at
+    /// a fifth of the speed while the button is held, and releases it.
+    #[test]
+    fn holding_the_use_button_eats_slowly_and_releasing_tells_the_server() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 10.0;
+        game.held_item = Some(wire_item(297, 0));
+        game.pitch = -0.5;
+        let mut queue = CommandQueue::default();
+        game.input.use_item = true;
+        click_use(&mut game, &mut queue);
+        assert!(game.item_use.is_using());
+        assert!(matches!(
+            commands(&queue)[0],
+            ClientCommand::UseItem { item } if item.item_id == 297
+        ));
+
+        game.input.use_item = false;
+        run_use(&mut game, &mut queue);
+        assert!(!game.item_use.is_using());
+        assert!(commands(&queue).iter().any(|command| matches!(
+            command,
+            ClientCommand::PlayerDigging {
+                status: DiggingStatus::ReleaseUseItem,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn the_server_finishing_the_meal_ends_the_use() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 10.0;
+        game.entity_id = 7;
+        game.held_item = Some(wire_item(297, 0));
+        game.pitch = -0.5;
+        game.input.use_item = true;
+        let mut queue = CommandQueue::default();
+        click_use(&mut game, &mut queue);
+        let (frames, _received) = mpsc::sync_channel(8);
+        let status = PlayEvent::EntityStatus(
+            umicraft_protocol::packets::play::clientbound::EntityStatus {
+                entity_id: 7,
+                status: 9,
+            },
+        );
+        handle_net(&mut game, status, &mut queue, &frames);
+        assert!(!game.item_use.is_using());
+    }
+
+    #[test]
+    fn a_player_who_uses_an_item_walks_at_a_fifth_of_the_speed() {
+        let walk = |using: bool| {
+            let mut game = game_on_floor_with(BlockState::AIR);
+            // The simulation waits for the nine columns around the player.
+            let world = game.world.as_mut().expect("a world");
+            let payload = vec![0u8; umicraft_world::chunk::payload_len(0b1000, true, true)];
+            for (x, z) in [
+                (-1, -1),
+                (-1, 0),
+                (-1, 1),
+                (0, -1),
+                (0, 1),
+                (1, -1),
+                (1, 0),
+                (1, 1),
+            ] {
+                world
+                    .apply_chunk(
+                        ChunkPos::new(x, z),
+                        umicraft_world::ChunkPayload {
+                            primary_bit_mask: 0b1000,
+                            ground_up: true,
+                            data: &payload,
+                        },
+                    )
+                    .expect("an empty column");
+            }
+            game.playing = true;
+            game.food = 10.0;
+            game.input.forward = 1.0;
+            game.input.use_item = using;
+            game.held_item = Some(wire_item(267, 0));
+            game.pitch = -0.5;
+            game.yaw = 0.0;
+            let mut queue = CommandQueue::default();
+            let (frames, _received) = mpsc::sync_channel(8);
+            let (chunks, _chunk_received) = mpsc::sync_channel(8);
+            for _ in 0..10 {
+                tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+            }
+            let position = game.state.as_ref().expect("placed").position();
+            position.z - 0.5
+        };
+        let free = walk(false);
+        let slowed = walk(true);
+        assert!(slowed > 0.0, "the player still moves");
+        assert!((slowed / free - 0.2).abs() < 0.03, "{slowed} vs {free}");
+    }
+
+    #[test]
+    fn q_and_ctrl_q_send_the_drop_packets() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        for kind in [DropKind::One, DropKind::Stack] {
+            let update = InputUpdate {
+                drop_item: Some(kind),
+                ..InputUpdate::default()
+            };
+            handle_input(&mut game, update, &mut queue);
+        }
+        let statuses: Vec<_> = commands(&queue)
+            .iter()
+            .filter_map(|command| match command {
+                ClientCommand::PlayerDigging { status, .. } => Some(*status),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![DiggingStatus::DropItem, DiggingStatus::DropAllItems]
+        );
+        game.gamemode = GameMode::Spectator;
+        let before = queue.ordered.len();
+        let update = InputUpdate {
+            drop_item: Some(DropKind::One),
+            ..InputUpdate::default()
+        };
+        handle_input(&mut game, update, &mut queue);
+        assert_eq!(queue.ordered.len(), before);
+    }
+
+    /// Looks straight down at the grass floor (id 2).
+    #[test]
+    fn the_middle_button_selects_the_hotbar_slot_of_the_block() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        game.windows.apply_set_slot(0, 38, wire_item(2, 0));
+        let mut queue = CommandQueue::default();
+        pick_block(&mut game, &mut queue);
+        assert_eq!(game.selected_slot, 2);
+        assert!(commands(&queue)
+            .iter()
+            .any(|command| matches!(command, ClientCommand::HeldItemChange { slot: 2 })));
+    }
+
+    #[test]
+    fn a_creative_pick_fills_a_free_slot_and_tells_the_server() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.gamemode = GameMode::Creative;
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        let mut queue = CommandQueue::default();
+        pick_block(&mut game, &mut queue);
+        let given = game.windows.selected_item().expect("an item was given");
+        assert_eq!(given.item_id, 2);
+        assert!(commands(&queue).iter().any(|command| matches!(
+            command,
+            ClientCommand::CreativeSlot { slot: 36, item } if item.item_id == 2
+        )));
+    }
+
+    #[test]
+    fn a_survival_pick_without_the_item_changes_nothing() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        let mut queue = CommandQueue::default();
+        pick_block(&mut game, &mut queue);
+        assert!(queue.ordered.is_empty());
+    }
+
+    /// Depth Strider on the worn boots reaches the physics.
+    #[test]
+    fn the_depth_strider_of_the_boots_reaches_the_player() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut boots = wire_item(313, 0);
+        // `ench` list of one compound: `id` = 8 (Depth Strider), `lvl` = 3.
+        boots.nbt = Some(enchanted_nbt(8, 3));
+        game.windows.apply_set_slot(0, 8, boots);
+        apply_movement_stats(&mut game);
+        assert_eq!(
+            game.state.as_ref().expect("placed").player().depth_strider,
+            3
+        );
     }
 
     #[test]

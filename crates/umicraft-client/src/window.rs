@@ -11,8 +11,9 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use umicraft_game::item_use::DropKind;
 use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
 use umicraft_ui::widgets::{
     container_layout, death_screen, player_inventory_layout, slot, ContainerLayout, DeathAction,
@@ -34,6 +35,7 @@ use crate::input::{InputState, InputUpdate};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::terrain_textures::TerrainTextures;
+use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
@@ -92,7 +94,14 @@ struct App {
     death_started: Option<Instant>,
     /// The player pressed "Respawn" and waits for the server.
     respawn_requested: bool,
+    /// The use button went down since the last input update.
     place_block: bool,
+    /// The use (right) button is down.
+    use_held: bool,
+    /// The pick block (middle) button went down since the last input update.
+    pick_block: bool,
+    /// The drop key was pressed since the last input update.
+    drop_item: Option<DropKind>,
     /// The perspective key was pressed since the last input update.
     toggle_perspective: bool,
     /// Whether the chat input is open.
@@ -117,6 +126,8 @@ struct App {
     ui_atlas: Option<FontAtlas>,
     /// The GUI texture atlas for inventory/container backgrounds.
     gui_atlas: Option<umicraft_assets::GuiAtlas>,
+    /// Steps the water, lava and fire textures once per game tick.
+    texture_animator: TextureAnimator,
     /// Entity textures bound for GPU rendering.
     entity_textures: Option<EntityTextures>,
     last_frame: Instant,
@@ -152,6 +163,9 @@ impl App {
             death_started: None,
             respawn_requested: false,
             place_block: false,
+            use_held: false,
+            pick_block: false,
+            drop_item: None,
             toggle_perspective: false,
             chat_open: false,
             chat_input: String::new(),
@@ -164,6 +178,7 @@ impl App {
             terrain,
             ui_atlas: None,
             gui_atlas: None,
+            texture_animator: TextureAnimator::default(),
             entity_textures: None,
             last_frame: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
@@ -236,6 +251,9 @@ impl App {
                                 self.capture_mouse(false);
                             }
                         }
+                        KeyCode::KeyQ if self.mouse_captured => {
+                            self.drop_item = Some(self.drop_kind());
+                        }
                         KeyCode::KeyE => {
                             self.inventory_open = true;
                             self.capture_mouse(false);
@@ -254,6 +272,16 @@ impl App {
         }
     }
 
+    /// What the drop key drops: the whole stack with Ctrl held
+    /// (MCP `Minecraft.runTick` line 2084, `GuiScreen.isCtrlKeyDown`).
+    fn drop_kind(&self) -> DropKind {
+        if self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight) {
+            DropKind::Stack
+        } else {
+            DropKind::One
+        }
+    }
+
     /// Hot-reloads the active resource packs, rebinding the block atlas and
     /// re-meshing all loaded chunk columns.
     fn reload_resources(&mut self) {
@@ -263,6 +291,7 @@ impl App {
             let installed = terrain.install(renderer);
             upload_gui_atlas(renderer, installed.gui_atlas());
             self.gui_atlas = installed.gui_atlas().cloned();
+            self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
             self.entity_textures = Some(EntityTextures::load(renderer));
             if let Some(world) = self.world.as_mut() {
                 world.reload_terrain(&installed, default_worker_count(), renderer);
@@ -291,6 +320,8 @@ impl App {
             self.select_slot = None;
             self.break_block = false;
             self.place_block = false;
+            self.pick_block = false;
+            self.drop_item = None;
             self.look = (0.0, 0.0);
             self.capture_mouse(false);
         }
@@ -419,6 +450,10 @@ impl App {
 
     fn capture_mouse(&mut self, capture: bool) {
         self.mouse_captured = capture;
+        if !capture {
+            self.attack_held = false;
+            self.use_held = false;
+        }
         if let Some(window) = &self.window {
             if capture {
                 // Locked is preferred (infinite relative motion); fall back to
@@ -460,6 +495,7 @@ impl App {
         state.sprint =
             self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
         state.attack = self.attack_held;
+        state.use_item = self.use_held;
         state
     }
 
@@ -474,6 +510,8 @@ impl App {
             || self.select_slot.is_some()
             || self.break_block
             || self.place_block
+            || self.pick_block
+            || self.drop_item.is_some()
             || self.toggle_perspective;
         if !changed {
             return;
@@ -485,6 +523,8 @@ impl App {
             select_slot: self.select_slot,
             break_block: self.break_block,
             place_block: self.place_block,
+            pick_block: self.pick_block,
+            drop_item: self.drop_item,
             toggle_perspective: self.toggle_perspective,
         };
         if self
@@ -498,6 +538,8 @@ impl App {
             self.select_slot = None;
             self.break_block = false;
             self.place_block = false;
+            self.pick_block = false;
+            self.drop_item = None;
             self.toggle_perspective = false;
         }
     }
@@ -654,6 +696,10 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+        self.texture_animator
+            .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
+                renderer.write_block_layer(layer, pixels);
+            });
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
         if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
         {
@@ -926,6 +972,7 @@ impl ApplicationHandler for App {
             .install(&mut renderer);
         upload_gui_atlas(&mut renderer, terrain.gui_atlas());
         self.gui_atlas = terrain.gui_atlas().cloned();
+        self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
         match WorldView::new(&terrain, default_worker_count()) {
             Ok(world) => self.world = Some(world),
             Err(error) => {
@@ -981,10 +1028,16 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        MouseButton::Right
+                        MouseButton::Right => {
+                            self.use_held = state == ElementState::Pressed && self.mouse_captured;
+                            if self.use_held {
+                                self.place_block = true;
+                            }
+                        }
+                        MouseButton::Middle
                             if state == ElementState::Pressed && self.mouse_captured =>
                         {
-                            self.place_block = true;
+                            self.pick_block = true;
                         }
                         _ => {}
                     }

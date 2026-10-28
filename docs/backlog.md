@@ -8,12 +8,14 @@ picked up, and delete it when it is done.
 
 ## Rendering
 
-### Animated textures (AST-6)
-- **Problem:** water, lava, fire, portals and every texture with a `.mcmeta`
-  animation show their first frame only.
-- **Where:** the atlas build (`crates/umicraft-assets/src/atlas.rs`) and the
-  renderer's texture array; liquids already sample the still/flowing layers.
-- **Milestone:** M7 (first-run assets and resource packs) or a dedicated task.
+### Item animations (clock, compass)
+- **Problem:** the block textures animate (ADR-0023) but the clock and the
+  compass item textures stay on their first frame. The reference drives them
+  by the world time and the heading (`TextureAtlasSpriteClock/Compass`), not by
+  the `.mcmeta` timeline, and no item is drawn before P3 anyway.
+- **Where:** `build_atlas` in `crates/umicraft-assets/src/client_resources.rs`
+  skips every key outside `blocks/`.
+- **Milestone:** P3 (item models).
 
 ### Liquid corners at a diagonal chunk boundary
 - **Problem:** a liquid corner height averages the four columns that share the
@@ -32,15 +34,14 @@ picked up, and delete it when it is done.
 - **Reference:** `C16PacketClientStatus` (`PERFORM_RESPAWN`) and the death
   screen of the 1.8 client; the server answers with `Respawn` (0x07).
 
-### Fluid, ladder and web movement (Depth Strider)
-- **Problem:** `umicraft_game::physics` has no water, lava, ladder, vine or
-  cobweb movement, so Depth Strider (enchantment 8 on the boots) has nothing
-  to act on. Speed, Slowness, Jump Boost, Blindness and the food rule are done
-  (ADR-0021).
-- **Reference:** `EntityLivingBase.moveEntityWithHeading` (water and lava
-  branches, `EnchantmentHelper.getDepthStriderModifier`), `Entity.moveEntity`
-  (web, ladder clamp), `Entity.handleWaterMovement`.
-- **Milestone:** P2 follow-up (movement) or P7 with the fluid rendering.
+### Item use and pick block gaps (ADR-0022)
+- **Problem:** the use and pick tables are hand-written (item ids for food,
+  drinks, swords and the bow; block-to-item redirects and variant masks). Items
+  whose `onItemUse` succeeds locally (hoes, seeds, signs, doors, bone meal)
+  still send the in-air use packet after the block one, and do not swing.
+  Picking an entity (creative) and the `Ctrl` + pick block-entity copy are
+  missing; the bow draw animation, its FOV zoom and the item models need P3.
+- **Milestone:** P3 (item registry) removes the tables; entity picking is P6.
 
 ## Performance (spec §7, ahead of M14)
 

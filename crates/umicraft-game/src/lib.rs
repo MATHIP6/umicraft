@@ -46,8 +46,11 @@ pub mod hand;
 pub mod input;
 pub mod interaction;
 pub mod inventory;
+pub mod item_use;
+pub mod media;
 pub mod movement;
 pub mod physics;
+pub mod pick;
 pub mod prediction;
 pub mod raycast;
 pub mod server;
@@ -299,6 +302,11 @@ impl GameState {
         self.player.blinded = stats.blinded;
         self.player.walk_speed = walk_speed;
         self.player.well_fed = well_fed;
+    }
+
+    /// Sets the Depth Strider level of the worn boots.
+    pub fn set_depth_strider(&mut self, level: u8) {
+        self.player.depth_strider = level;
     }
 
     /// Replaces the motion of the player (`Entity Velocity`, MCP

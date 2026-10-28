@@ -993,7 +993,7 @@ mod tests {
                     x: 1,
                     y: 64,
                     z: -2,
-                    face: Facing::North,
+                    face: Some(Facing::North),
                     item: ItemStack {
                         item_id: 1,
                         stack_size: 64,

@@ -102,7 +102,7 @@ play_roundtrips!(PlayServerbound, serverbound, SERVERBOUND_COVERED, {
     PositionLook, DEFAULT => (f64s(), f64s(), f64s(), f32s(), f32s(), any::<bool>())
         .prop_map(|(x, y, z, yaw, pitch, on_ground)| serverbound::PositionLook { x, y, z, yaw, pitch, on_ground });
     PlayerDigging, DEFAULT => player_digging();
-    PlayerBlockPlacement, DEFAULT => (block_pos(), facing(), item_stack(), any::<u8>(), any::<u8>(), any::<u8>())
+    PlayerBlockPlacement, DEFAULT => (block_pos(), proptest::option::of(facing()), item_stack(), any::<u8>(), any::<u8>(), any::<u8>())
         .prop_map(|((x, y, z), face, item, cursor_x, cursor_y, cursor_z)| serverbound::PlayerBlockPlacement {
             x, y, z, face, item, cursor_x, cursor_y, cursor_z,
         });

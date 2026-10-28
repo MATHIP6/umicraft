@@ -55,4 +55,4 @@ gamemodes and the spectator camera.
 - The cracks (own ones and the 0x25 ones of other players, all in `ServerState`) are drawn over the terrain by a dedicated pipeline; the arm swing is sent but not rendered (no first-person hand yet).
 - First-person hand: the bare arm, its swing and the equip animation are drawn; the held item needs the P3 item models. The arm uses the default skin (profile skins: P5). Not done: body-yaw lag and arm swing of the third-person body (P5).
 - The death screen's "Title Screen" button waits for the P10 title screen; hardcore variants are missing.
-- Depth Strider needs fluid movement, which the physics does not have (backlog).
+- Depth Strider is read from the boots and acts in the water branch (ADR-0022).

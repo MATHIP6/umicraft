@@ -109,6 +109,14 @@ impl GameMode {
         self != Self::Spectator
     }
 
+    /// Whether the player takes no damage, so that eating is pointless
+    /// (MCP `PlayerCapabilities.disableDamage`, set for creative and
+    /// spectator).
+    #[must_use]
+    pub fn invulnerable(self) -> bool {
+        matches!(self, Self::Creative | Self::Spectator)
+    }
+
     /// Whether the player may toggle flight (`PlayerCapabilities.allowFlying`
     /// as the vanilla server sets it for the mode).
     #[must_use]

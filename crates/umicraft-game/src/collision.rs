@@ -110,7 +110,7 @@ pub fn move_entity<S: BlockSource + ?Sized>(
         requested.z = sneak_shorten(original, requested.z, |z| DVec3::new(0.0, -1.0, z), world);
         while requested.x != 0.0
             && requested.z != 0.0
-            && !has_ground_below(
+            && !any_collision(
                 original.offset(DVec3::new(requested.x, -1.0, requested.z)),
                 world,
             )
@@ -267,7 +267,7 @@ fn sneak_shorten<S: BlockSource + ?Sized>(
     world: &S,
 ) -> f64 {
     let mut value = value;
-    while value != 0.0 && !has_ground_below(original.offset(offset(value)), world) {
+    while value != 0.0 && !any_collision(original.offset(offset(value)), world) {
         value = sneak_step(value);
     }
     value
@@ -285,7 +285,7 @@ fn sneak_step(value: f64) -> f64 {
 }
 
 /// True when any block collides with the given box.
-fn has_ground_below<S: BlockSource + ?Sized>(bounding_box: Aabb, world: &S) -> bool {
+pub(crate) fn any_collision<S: BlockSource + ?Sized>(bounding_box: Aabb, world: &S) -> bool {
     let range = BlockRange::of(bounding_box);
     let mut found = false;
     for_each_collision_box(&range, &bounding_box, world, |_| {

@@ -29,6 +29,9 @@ const HOTBAR_START: usize = 36;
 /// The window slot of the helmet.
 const HELMET_SLOT: usize = 5;
 
+/// The player window slot of the boots.
+const BOOTS_SLOT: usize = 8;
+
 /// Number of hotbar slots.
 const HOTBAR_LEN: usize = 9;
 
@@ -404,6 +407,26 @@ impl WindowManager {
     #[must_use]
     pub fn helmet(&self) -> Option<&ItemStack> {
         self.inventory.slot(HELMET_SLOT)
+    }
+
+    /// The 36 slots of the main inventory in vanilla order: the hotbar first,
+    /// then the three rows of the backpack (MCP `InventoryPlayer.mainInventory`).
+    #[must_use]
+    pub fn main_inventory(&self) -> [Option<ItemStack>; 36] {
+        std::array::from_fn(|index| {
+            let slot = if index < HOTBAR_LEN {
+                HOTBAR_START + index
+            } else {
+                index
+            };
+            self.inventory.slot(slot).cloned()
+        })
+    }
+
+    /// The boots in the armor slot (slot 8 of the player window).
+    #[must_use]
+    pub fn boots(&self) -> Option<&ItemStack> {
+        self.inventory.slot(BOOTS_SLOT)
     }
 
     /// Sets the selected hotbar slot (0–8).

@@ -27,6 +27,9 @@ pub const EFFICIENCY: i16 = 32;
 /// The enchantment id of Aqua Affinity (MCP `Enchantment.aquaAffinity`).
 pub const AQUA_AFFINITY: i16 = 6;
 
+/// The enchantment id of Depth Strider (MCP `Enchantment.depthStrider`).
+pub const DEPTH_STRIDER: i16 = 8;
+
 const WEB: u16 = 30;
 const WOOL: u16 = 35;
 const REDSTONE_WIRE: u16 = 55;

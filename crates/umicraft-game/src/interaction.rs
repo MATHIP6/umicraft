@@ -57,6 +57,12 @@ pub enum Outgoing {
         /// The click offset in sixteenths of a block, as `[x, y, z]`.
         cursor: [u8; 3],
     },
+    /// `Player Block Placement` (0x08) without a target: the use of the held
+    /// item (MCP `PlayerControllerMP.sendUseItem`).
+    UseItem {
+        /// The item the player holds.
+        item: ItemStack,
+    },
     /// `Player Position and Look` (0x06) answering a server placement.
     AckPosition(PositionAck),
     /// `Animation` (0x0A): the arm swings (MCP `EntityPlayerSP.swingItem`).

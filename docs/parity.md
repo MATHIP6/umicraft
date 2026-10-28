@@ -55,9 +55,9 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Movement | walk/sprint/sneak/jump/swim/ladder/web/soul sand/ice/slime | Partial | P2 | Vanilla vs Umicraft movement run, 2026-10-26 ([parity-harness.md](parity-harness.md#vanilla-comparison-2026-10-26)) | Ground speeds of walk (0.2159), sneak (0.0648) and sprint (0.2806 block/tick) match vanilla on the live server; swim/ladder/web/soul sand/ice/slime not compared yet. |
+| Movement | walk/sprint/sneak/jump/swim/ladder/web/soul sand/ice/slime | Partial | P2 | Vanilla vs Umicraft movement run, 2026-10-26 ([parity-harness.md](parity-harness.md#vanilla-comparison-2026-10-26)) | Ground speeds of walk (0.2159), sneak (0.0648) and sprint (0.2806 block/tick) match vanilla on the live server; swim/lava/ladder/web/soul sand are unit-tested against the reference formulas but not compared on a live server yet (they were removed by mistake in commit 05f0cc1 and restored on 2026-10-28). |
 | Movement | sneak edge clamp | Partial | P2 | — | Implemented in `umicraft_game::collision` (the review missed it); its Z axis cancelled every sneaking Z move until 2026-10-26 (fixed, regression test). Edge behaviour not yet compared with vanilla. |
-| Movement | hunger sprint rule, effects (Speed/Slowness/Jump), Depth Strider | Missing | P2 | — |  |
+| Movement | hunger sprint rule, effects (Speed/Slowness/Jump), Depth Strider | Partial | P2 | Unit tests (`physics`, `game`) | Depth Strider reads the `ench` NBT of the boots. Not compared with vanilla on a live server. |
 | Movement | flying, creative, spectator | Missing | P2 | — |  |
 | Movement | knockback (velocity, explosion) | Missing | P2 | — |  |
 | Movement | riding (boat, minecart, horse, pig) | Missing | P2 | — | Objects and vehicles rendering in P5. |
@@ -69,8 +69,8 @@ session is [`parity-harness.md`](parity-harness.md).
 |---|---|---|---|---|---|
 | Interaction | hold-to-break with vanilla progress, cracks, particles | Missing | P2 | — | Today a fixed 12-tick break; particles in P8. |
 | Interaction | place blocks | Partial — not verified against vanilla | P2 | — |  |
-| Interaction | use items (food, potions, bow, sword block, rod, throwables, buckets) | Missing | P2 | — | Combat items finish in P6. |
-| Interaction | pick block, drop item, swap hotbar | Partial | P2 | — | Only hotbar swap exists. |
+| Interaction | use items (food, potions, bow, sword block, rod, throwables, buckets) | Partial | P2 | Unit tests (`item_use`, `game`) | Right button held and released, repeat every 4 ticks, 0.2 slowdown, `Entity Status` 9. Eat / drink / bow / sword start a local use; throwables, buckets and rods only send the use packet. Hoes, seeds, signs and doors also send it after their block use (harmless). Bow draw animation and FOV zoom, and the item models, wait for P3 / P6. |
+| Interaction | pick block, drop item, swap hotbar | Partial | P2 | Unit tests (`pick`, `game`) | Middle button picks a block (creative fills a free slot and sends 0x10); Q / Ctrl+Q send the drop packets. The block-to-item table is hand-written until the P3 registry; picking an entity (creative) waits for P5 / P6. |
 | Interaction | signs, books, beds | Missing | P4 | — | Sign and book editing in P4; bed (`Use Bed`) in P1/P5. |
 
 ## Combat
@@ -120,8 +120,8 @@ session is [`parity-harness.md`](parity-harness.md).
 | World render | block models and textures | Partial — not verified against vanilla | P7 | — |  |
 | World render | neighbour-dependent shapes (fences, panes, walls, stairs, doors…) | Missing | P7 | — |  |
 | World render | block entities | Missing | P7 | — |  |
-| World render | animated textures | Missing | P7 | — |  |
-| World render | smooth lighting, AO, transparency, biome tint, fluids | Partial — not verified against vanilla | P7 | — | Frame time never measured (M6 criterion). |
+| World render | animated textures (water, lava, fire, portal, prismarine, sea lantern) | Partial | P7 | Unit tests (`animation`, `texture_animator`, `client_resources`) | Stepped once per 20 Hz tick from the `.mcmeta` timeline, with interpolation; not compared with vanilla frame by frame. Clock and compass wait for P3. |
+| World render | smooth lighting, AO, transparency, biome tint, fluids (sloped surface, flow direction, biome tint; restored 2026-10-28) | Partial — not verified against vanilla | P7 | — | Frame time never measured (M6 criterion). |
 | World render | vanilla sky/sun/moon/clouds/stars textures | Missing | P7 | — | Procedural sky today. |
 | World render | fog parity (water/lava/blindness) | Unverified | P7 | — |  |
 | World render | weather, lightning, world border | Missing | P7 | — |  |
@@ -160,7 +160,7 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Resources | resource packs (stack, reload) | Partial — not verified against vanilla | P7 | — | Animated textures in P7. |
+| Resources | resource packs (stack, reload) | Partial — not verified against vanilla | P7 | — | Animated block textures follow the pack `.mcmeta` (ADR-0023). |
 | Resources | language files | Missing | P9 | — | Downloaded files unused (AST-8). |
 
 ## Approved deviations

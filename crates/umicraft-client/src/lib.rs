@@ -34,6 +34,7 @@ pub mod setup_cli;
 pub mod terrain_textures;
 #[cfg(test)]
 mod test_support;
+pub mod texture_animator;
 pub mod ui_demo;
 pub mod ui_font;
 pub mod ui_input;

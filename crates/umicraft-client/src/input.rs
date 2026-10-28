@@ -11,6 +11,8 @@
 
 use std::time::{Duration, Instant};
 
+use umicraft_game::item_use::DropKind;
+
 /// The movement key state, sampled by an input source.
 ///
 /// The axes are the analogue values of the movement keys. The sign of the
@@ -30,6 +32,8 @@ pub struct InputState {
     pub sprint: bool,
     /// Whether the attack / break button is held.
     pub attack: bool,
+    /// Whether the use (right) button is held.
+    pub use_item: bool,
 }
 
 impl InputState {
@@ -47,6 +51,7 @@ impl InputState {
             sneak: false,
             sprint: true,
             attack: false,
+            use_item: false,
         }
     }
 }
@@ -67,8 +72,12 @@ pub struct InputUpdate {
     pub select_slot: Option<u8>,
     /// Whether the player started breaking the targeted block.
     pub break_block: bool,
-    /// Whether the player placed a block against the targeted face.
+    /// Whether the use (right) button went down since the last update.
     pub place_block: bool,
+    /// Whether the pick block (middle) button went down.
+    pub pick_block: bool,
+    /// The drop the player asked for with the drop key, if any.
+    pub drop_item: Option<DropKind>,
     /// Whether the player pressed the perspective key (`F5`).
     pub toggle_perspective: bool,
 }
