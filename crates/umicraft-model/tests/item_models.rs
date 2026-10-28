@@ -62,6 +62,18 @@ fn source() -> Source {
                 "elements": [{"from": [0, 0, 0], "to": [16, 16, 16],
                   "faces": {"down": {"texture": "#all"}, "up": {"texture": "#all"}}}]}"##,
         ),
+        (
+            "block/item_frame",
+            r##"{"textures": {"wood": "blocks/planks_oak"},
+                "elements": [{"from": [3, 3, 15.5], "to": [13, 13, 16],
+                  "faces": {"north": {"texture": "#wood"}}}]}"##,
+        ),
+        (
+            "block/item_frame_map",
+            r##"{"textures": {"wood": "blocks/planks_oak"},
+                "elements": [{"from": [2, 2, 15.5], "to": [14, 14, 16],
+                  "faces": {"north": {"texture": "#wood"}}}]}"##,
+        ),
         ("item/chest", r#"{"parent": "builtin/entity"}"#),
         // The real jar parents the compass and the clock on these markers.
         (
@@ -171,4 +183,13 @@ fn the_compass_is_generated_like_a_flat_item() {
     };
     assert!(!quads.is_empty());
     assert!(!compass.gui_3d);
+}
+
+#[test]
+fn the_item_frame_models_are_baked_for_the_entity_renderer() {
+    let set = set();
+    assert_eq!(set.frame_quads(false).len(), 1);
+    assert_eq!(set.frame_quads(true).len(), 1);
+    assert_ne!(set.frame_quads(false), set.frame_quads(true));
+    assert!(set.texture_keys().contains("blocks/planks_oak"));
 }

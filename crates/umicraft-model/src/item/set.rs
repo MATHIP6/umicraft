@@ -15,6 +15,11 @@ use crate::geometry::{ModelQuad, ModelRotation};
 use crate::model::loader::{bake_elements, Builtin, MergedModel, ModelLoader};
 use crate::model::ResourceSource;
 
+/// The model of an item frame (`blockstates/item_frame.json`, variant `normal`).
+const FRAME_MODEL: &str = "block/item_frame";
+/// The model of an item frame holding a map (variant `map`).
+const MAP_FRAME_MODEL: &str = "block/item_frame_map";
+
 use super::generated::{generate_elements, SpriteMask, MAX_LAYERS};
 use super::names::ITEM_MODEL_NAMES;
 use super::special::{special_model_name, SPECIAL_MODEL_NAMES};
@@ -56,6 +61,8 @@ pub type SpriteLookup<'a> = &'a dyn Fn(&str) -> Option<SpriteMask>;
 pub struct ItemModelSet {
     by_name: HashMap<&'static str, Arc<ItemModel>>,
     texture_keys: BTreeSet<String>,
+    frame: Vec<ModelQuad>,
+    map_frame: Vec<ModelQuad>,
 }
 
 impl ItemModelSet {
@@ -80,6 +87,8 @@ impl ItemModelSet {
                 set.by_name.insert(name, Arc::new(model));
             }
         }
+        set.frame = set.bake_block_model(&mut loader, FRAME_MODEL)?;
+        set.map_frame = set.bake_block_model(&mut loader, MAP_FRAME_MODEL)?;
         Ok(set)
     }
 
@@ -108,6 +117,19 @@ impl ItemModelSet {
             display: merged.display.clone(),
             gui_3d: own_gui_3d && merged.builtin != Some(Builtin::Generated),
         })
+    }
+
+    /// Bakes a block model that is drawn by an entity renderer, not through
+    /// a blockstate, and records its textures.
+    fn bake_block_model(
+        &mut self,
+        loader: &mut ModelLoader<'_>,
+        key: &str,
+    ) -> ModelResult<Vec<ModelQuad>> {
+        let quads = loader.bake(key, ModelRotation::new(0, 0), false)?.quads;
+        self.texture_keys
+            .extend(quads.iter().map(|quad| quad.texture.clone()));
+        Ok(quads)
     }
 
     /// Extrudes the `layerN` sprites of a `builtin/generated` model.
@@ -142,6 +164,18 @@ impl ItemModelSet {
         let name = special_model_name(item_id, damage)
             .or_else(|| table_name(item_id, if damageable { 0 } else { damage }))?;
         self.by_name.get(name).map(Arc::as_ref)
+    }
+
+    /// The wooden frame of an item frame entity (MCP `RenderItemFrame`:
+    /// `item_frame#normal`, or `item_frame#map` when it holds a map), in
+    /// block space around the block centre shifted by half a block.
+    #[must_use]
+    pub fn frame_quads(&self, holds_map: bool) -> &[ModelQuad] {
+        if holds_map {
+            &self.map_frame
+        } else {
+            &self.frame
+        }
     }
 
     /// The model with a given name, e.g. the in-use `bow_pulling_1`.

@@ -19,7 +19,7 @@ use umicraft_mesh::item::{ItemMesh, ItemStyle};
 use umicraft_mesh::tint::WHITE;
 use umicraft_mesh::VertexLight;
 use umicraft_model::display::DisplayContext;
-use umicraft_model::item::pose::{ground_pose, held_pose};
+use umicraft_model::item::pose::{context_pose, ground_pose, held_pose};
 use umicraft_model::item::{ItemGeometry, ItemModel};
 use umicraft_model::ModelQuad;
 
@@ -59,6 +59,9 @@ impl WorldItems {
                 }
                 (EntityKind::Player, _, Some(held)) => {
                     push_player_held_item(&mut self.mesh, entity, held, items);
+                }
+                (EntityKind::ItemFrame, framed, _) => {
+                    push_item_frame(&mut self.mesh, entity, framed, items);
                 }
                 _ => {}
             }
@@ -136,6 +139,64 @@ fn push_player_held_item(
     let style = ItemStyle {
         atlas: resources.atlas(),
         light: VertexLight::new(0, 15, 15, false),
+        tints: &tints,
+    };
+    mesh.push_quads(quads, &pose, &style);
+}
+
+/// The item id of a filled map, which has its own frame model.
+const FILLED_MAP: i16 = 358;
+
+/// Appends an item frame and the item inside it (MCP `RenderItemFrame`).
+///
+/// The entity position of a frame is its block; the frame is drawn around the
+/// block centre, turned by `180 - yaw` (the yaw is 90 per horizontal
+/// direction), with its item pushed out 7/16 of a block, rolled by 45 per
+/// rotation step, halved and posed for the `fixed` context. Flat sprites are
+/// turned to face outwards. Maps are not drawn yet (P7).
+fn push_item_frame(
+    mesh: &mut ItemMesh,
+    entity: &EntityRenderSnapshot,
+    framed: Option<&EntityItem>,
+    resources: &ItemResources,
+) {
+    let holds_map = framed.is_some_and(|item| item.item_id == FILLED_MAP);
+    let yaw = f32::from(entity.frame_direction) * 90.0;
+    let base = Mat4::from_translation(entity.position.floor() + Vec3::splat(0.5))
+        * Mat4::from_rotation_y((180.0 - yaw).to_radians());
+    let wood = ItemStyle {
+        atlas: resources.atlas(),
+        light: VertexLight::new(0, 15, 15, true),
+        tints: &[],
+    };
+    mesh.push_quads(
+        resources.models().frame_quads(holds_map),
+        &(base * Mat4::from_translation(Vec3::splat(-0.5))),
+        &wood,
+    );
+    let Some(item) = framed.filter(|_| !holds_map) else {
+        return;
+    };
+    let Some((model, quads)) = sprite_model(resources, item.item_id, item.damage) else {
+        return;
+    };
+    let turn = if model.gui_3d {
+        Mat4::IDENTITY
+    } else {
+        Mat4::from_rotation_y(std::f32::consts::PI)
+    };
+    let pose = base
+        * Mat4::from_translation(Vec3::new(0.0, 0.0, 0.4375))
+        * Mat4::from_rotation_z(f32::from(entity.frame_rotation) * std::f32::consts::FRAC_PI_4)
+        * Mat4::from_scale(Vec3::splat(0.5))
+        * turn
+        * context_pose(model, DisplayContext::Fixed);
+    let tints = [resources
+        .tint(item.item_id, item.damage, item.nbt.as_deref())
+        .unwrap_or(WHITE)];
+    let style = ItemStyle {
+        atlas: resources.atlas(),
+        light: VertexLight::new(0, 15, 15, model.gui_3d),
         tints: &tints,
     };
     mesh.push_quads(quads, &pose, &style);
@@ -358,12 +419,21 @@ mod render_tests {
                 atlas.pixels(),
             )
             .expect("atlas");
-        let snapshots = [
+        let mut snapshots = vec![
             dropped(1, -1.5, 276, 1),
             dropped(2, -0.5, 1, 40),
             dropped(3, 0.5, 260, 20),
             dropped(4, 1.5, 2, 1),
         ];
+        // Frames on the south face of blocks behind the dropped items.
+        for (id, x, item_id, rotation) in [(10, -1, 276, 0), (11, 0, 1, 0), (12, 1, 260, 2)] {
+            let mut frame = dropped(id, 0.0, item_id, 1);
+            frame.kind = EntityKind::ItemFrame;
+            frame.position = Vec3::new(x as f32, 79.0, -6.0);
+            frame.frame_direction = 0;
+            frame.frame_rotation = rotation;
+            snapshots.push(frame);
+        }
         let mut world = WorldItems::default();
         renderer.set_world_items(world.build(&snapshots, &items));
         let mut hand = ItemMesh::default();

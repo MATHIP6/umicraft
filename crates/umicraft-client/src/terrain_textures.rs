@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use umicraft_assets::{BlockAtlas, GuiAtlas, TextureAnimation};
+use umicraft_assets::{BlockAtlas, GlintTexture, GuiAtlas, TextureAnimation};
 use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, Mesh, ModelMeshContext};
 use umicraft_render::{BlockAtlasError, Renderer};
 
@@ -72,11 +72,13 @@ pub enum TerrainTextures {
     /// The user's 1.8.8 atlas and the model mesher that indexes it.
     Official {
         /// The texture array to bind.
-        atlas: BlockAtlas,
+        atlas: Box<BlockAtlas>,
         /// The model-meshing context whose layout matches `atlas`.
         context: Arc<ModelMeshContext>,
         /// The GUI texture atlas built from the jar's `textures/gui/` PNGs.
         gui_atlas: GuiAtlas,
+        /// The enchantment glint texture, when the assets provide it.
+        glint: Option<Arc<GlintTexture>>,
         /// The baked item models over the same atlas layout.
         items: Arc<ItemResources>,
     },
@@ -135,9 +137,10 @@ impl TerrainTextures {
     #[must_use]
     pub fn official(resources: &ModelResources) -> Self {
         Self::Official {
-            atlas: resources.atlas().clone(),
+            atlas: Box::new(resources.atlas().clone()),
             context: resources.context(),
             gui_atlas: resources.resources().gui_atlas().clone(),
+            glint: resources.resources().glint_texture().cloned().map(Arc::new),
             items: resources.items(),
         }
     }
@@ -153,6 +156,7 @@ impl TerrainTextures {
                 atlas,
                 context,
                 gui_atlas,
+                glint,
                 items,
             } => {
                 let bound = target.set_block_atlas(
@@ -170,6 +174,7 @@ impl TerrainTextures {
                         InstalledTerrain {
                             mesher: TerrainMesher(MesherKind::Models(context)),
                             gui_atlas: Some(gui_atlas),
+                            glint,
                             items: Some(items),
                             animations: atlas.animations().to_vec(),
                         }
@@ -192,6 +197,7 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
     InstalledTerrain {
         mesher: TerrainMesher(MesherKind::Procedural),
         gui_atlas: None,
+        glint: None,
         items: None,
         animations: Vec::new(),
     }
@@ -205,6 +211,7 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
 pub struct InstalledTerrain {
     mesher: TerrainMesher,
     gui_atlas: Option<GuiAtlas>,
+    glint: Option<Arc<GlintTexture>>,
     items: Option<Arc<ItemResources>>,
     /// The animated layers of the bound array (empty for the procedural set).
     animations: Vec<TextureAnimation>,
@@ -240,6 +247,12 @@ impl InstalledTerrain {
     #[must_use]
     pub fn gui_atlas(&self) -> Option<&GuiAtlas> {
         self.gui_atlas.as_ref()
+    }
+
+    /// The enchantment glint texture, if the official assets provide it.
+    #[must_use]
+    pub fn glint_texture(&self) -> Option<&GlintTexture> {
+        self.glint.as_deref()
     }
 }
 
@@ -311,13 +324,14 @@ mod tests {
         let atlas = BlockAtlas::new(1, 1, vec![255; 4], layout.clone()).expect("atlas");
         let models = BlockModelSet::build(&NoResources, &[]).expect("empty model set");
         TerrainTextures::Official {
-            atlas,
+            atlas: Box::new(atlas),
             context: Arc::new(ModelMeshContext {
                 models: Arc::new(models),
                 atlas: Arc::new(layout),
                 tints: None,
             }),
             gui_atlas: GuiAtlas::empty(),
+            glint: None,
             items: Arc::new(ItemResources::empty()),
         }
     }

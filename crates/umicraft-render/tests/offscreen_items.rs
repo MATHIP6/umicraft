@@ -92,3 +92,38 @@ fn an_item_command_draws_the_provided_icon_once() {
     assert_eq!(provider.requests, 1);
     assert_eq!(pixel(&mut renderer, 32, 32), inside);
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_glint_item_is_brightened_and_tinted_only_inside_its_silhouette() {
+    let mut renderer = Renderer::new_offscreen(SIZE, SIZE).expect("offscreen renderer");
+    renderer.set_block_atlas(2, 2, 2, &atlas()).expect("atlas");
+    // An all-white glint texture makes the result independent of the scroll.
+    renderer.set_glint_texture(4, 4, &[255; 4 * 4 * 4]);
+    renderer.set_glint_time(1.0);
+    let camera = Camera::default();
+    let overlay = Overlay::new(SIZE, SIZE);
+    let mut provider = FlatSprite { requests: 0 };
+
+    let mut plain = DrawList::new();
+    plain.item(KEY, Rect::new(16.0, 16.0, 32.0, 32.0), false);
+    renderer
+        .render_with_ui(&camera, &overlay, &plain, &mut provider)
+        .expect("render");
+    let icon = pixel(&mut renderer, 32, 32);
+    let outside = [(4, 90), (60, 32)].map(|(x, y)| pixel(&mut renderer, x, y));
+
+    let mut glinting = DrawList::new();
+    glinting.item(KEY, Rect::new(16.0, 16.0, 32.0, 32.0), true);
+    renderer
+        .render_with_ui(&camera, &overlay, &glinting, &mut provider)
+        .expect("render");
+    let glowing = pixel(&mut renderer, 32, 32);
+    assert!(glowing[0] > icon[0] + 60, "red {icon:?} -> {glowing:?}");
+    assert!(glowing[2] > icon[2] + 100, "blue {icon:?} -> {glowing:?}");
+    assert!(glowing[2] > glowing[0], "purplish {glowing:?}");
+    assert_eq!(
+        [(4, 90), (60, 32)].map(|(x, y)| pixel(&mut renderer, x, y)),
+        outside
+    );
+}

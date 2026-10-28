@@ -141,6 +141,8 @@ struct App {
     /// Entity textures bound for GPU rendering.
     entity_textures: Option<EntityTextures>,
     last_frame: Instant,
+    /// Origin of the clock that scrolls the enchantment glint.
+    started: Instant,
     frame_times: Vec<f32>,
     frame_ms: f32,
     fps: f32,
@@ -194,6 +196,7 @@ impl App {
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
             last_frame: Instant::now(),
+            started: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
             fps: 0.0,
@@ -303,6 +306,7 @@ impl App {
         if let Some(renderer) = self.renderer.as_mut() {
             let installed = terrain.install(renderer);
             upload_gui_atlas(renderer, installed.gui_atlas());
+            upload_glint_texture(renderer, installed.glint_texture());
             self.gui_atlas = installed.gui_atlas().cloned();
             self.items = installed.items();
             self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
@@ -727,6 +731,7 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+        renderer.set_glint_time((now - self.started).as_secs_f32());
         self.texture_animator
             .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
                 renderer.write_block_layer(layer, pixels);
@@ -807,6 +812,13 @@ fn upload_gui_atlas(renderer: &mut Renderer, gui_atlas: Option<&umicraft_assets:
                 atlas.height()
             );
         }
+    }
+}
+
+/// Uploads the enchantment glint texture to the renderer, if available.
+fn upload_glint_texture(renderer: &mut Renderer, glint: Option<&umicraft_assets::GlintTexture>) {
+    if let Some(glint) = glint {
+        renderer.set_glint_texture(glint.width, glint.height, &glint.pixels);
     }
 }
 
@@ -1056,6 +1068,7 @@ impl ApplicationHandler for App {
             .unwrap_or(TerrainTextures::Procedural)
             .install(&mut renderer);
         upload_gui_atlas(&mut renderer, terrain.gui_atlas());
+        upload_glint_texture(&mut renderer, terrain.glint_texture());
         self.gui_atlas = terrain.gui_atlas().cloned();
         self.items = terrain.items();
         self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());

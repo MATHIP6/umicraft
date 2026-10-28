@@ -34,7 +34,7 @@ use crate::camera::Camera;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
-use crate::items::{DynamicMesh, IconAtlas, IconProvider};
+use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::sky::{SkyRenderer, SkyState};
@@ -225,6 +225,8 @@ pub struct Renderer {
     icon_bind_group: wgpu::BindGroup,
     /// Binding that samples the icon atlas from the GUI overlay pipeline.
     icon_gui_bind_group: wgpu::BindGroup,
+    /// The enchantment glint drawn over glinting icons.
+    glint: GlintPass,
     /// Reused geometry buffer of the icon being rendered.
     icon_mesh: ItemMesh,
     /// Dropped items and other world-space item geometry, rewritten per frame.
@@ -513,8 +515,13 @@ impl Renderer {
             format,
             TerrainPipelineState::cracks(),
         );
-        let overlay_pipeline =
-            create_overlay_pipeline(&device, &overlay_shader, &overlay_layout, format);
+        let overlay_pipeline = create_overlay_pipeline(
+            &device,
+            &overlay_shader,
+            &overlay_layout,
+            format,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
         let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gui overlay shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gui_overlay.wgsl").into()),
@@ -541,8 +548,13 @@ impl Renderer {
                     },
                 ],
             });
-        let gui_overlay_pipeline =
-            create_overlay_pipeline(&device, &gui_overlay_shader, &gui_overlay_layout, format);
+        let gui_overlay_pipeline = create_overlay_pipeline(
+            &device,
+            &gui_overlay_shader,
+            &gui_overlay_layout,
+            format,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
         let sky = SkyRenderer::new(&device, format);
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -627,6 +639,7 @@ impl Renderer {
             &font_sampler,
             icon_atlas.view(),
         );
+        let glint = GlintPass::new(&device, format);
 
         Ok(Self {
             instance,
@@ -668,6 +681,7 @@ impl Renderer {
             icon_pipeline,
             icon_bind_group,
             icon_gui_bind_group,
+            glint,
             icon_mesh: ItemMesh::default(),
             world_items,
             hand_items,
@@ -922,6 +936,27 @@ impl Renderer {
             &self.font_sampler,
             &view,
         ));
+    }
+
+    /// Uploads the enchantment glint texture (`enchanted_item_glint.png`).
+    ///
+    /// `rgba` must be `width * height * 4` bytes; a malformed upload is
+    /// ignored. Until a texture is set, glinting icons draw without the glint.
+    pub fn set_glint_texture(&mut self, width: u32, height: u32, rgba: &[u8]) {
+        self.glint.set_texture(
+            &self.device,
+            &self.queue,
+            self.icon_atlas.view(),
+            &self.font_sampler,
+            (width, height),
+            rgba,
+        );
+    }
+
+    /// Sets the clock that scrolls the enchantment glint, in seconds from any
+    /// fixed origin. Call once per frame.
+    pub fn set_glint_time(&self, seconds: f32) {
+        self.glint.set_time(&self.queue, seconds);
     }
 
     /// Uploads the block/item texture array built from the user's installation
@@ -1580,6 +1615,11 @@ impl Renderer {
                         pass.set_pipeline(&self.gui_overlay_pipeline);
                         pass.set_bind_group(0, &self.icon_gui_bind_group, &[]);
                     }
+                    UiBatchKind::IconGlint => {
+                        if !self.glint.bind(&mut pass) {
+                            continue;
+                        }
+                    }
                     UiBatchKind::Gui => {
                         if let Some(gui_bg) = &self.gui_bind_group {
                             pass.set_pipeline(&self.gui_overlay_pipeline);
@@ -1986,11 +2026,13 @@ fn create_font_bind_group(
     })
 }
 
-fn create_overlay_pipeline(
+/// Builds a UI overlay pipeline over [`OverlayVertex`] quads with `blend`.
+pub(crate) fn create_overlay_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     bind_group_layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
+    blend: wgpu::BlendState,
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("overlay pipeline layout"),
@@ -2025,7 +2067,7 @@ fn create_overlay_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -2169,6 +2211,24 @@ mod tests {
         assert_eq!(image.rgba.len(), 70 * 48 * 4);
         let first = &image.rgba[..3];
         assert!(image.rgba.chunks_exact(4).any(|pixel| &pixel[..3] != first));
+    }
+
+    #[test]
+    fn the_glint_shader_is_valid_wgsl() {
+        let module = naga::front::wgsl::parse_str(include_str!("gui_glint.wgsl"))
+            .expect("the shader parses");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("the shader validates");
+        for entry in ["vs_main", "fs_main"] {
+            assert!(
+                module.entry_points.iter().any(|point| point.name == entry),
+                "missing {entry}"
+            );
+        }
     }
 
     /// The terrain shader is only compiled on a GPU device; this parses and
