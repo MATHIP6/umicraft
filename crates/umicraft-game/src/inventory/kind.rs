@@ -74,6 +74,22 @@ impl WindowKind {
     }
 }
 
+impl WindowKind {
+    /// The number of own slots of a container whose `Open Window` carries no
+    /// size: the server sends 0 for the crafting table, the enchanting table
+    /// and the anvil (`EntityPlayerMP.displayGui`, the three-argument
+    /// `S2DPacketOpenWindow`).
+    #[must_use]
+    pub fn implicit_slot_count(self) -> Option<usize> {
+        match self {
+            Self::CraftingTable => Some(10),
+            Self::EnchantingTable => Some(2),
+            Self::Anvil => Some(3),
+            _ => None,
+        }
+    }
+}
+
 /// Where a window-relative slot index maps to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotTarget {

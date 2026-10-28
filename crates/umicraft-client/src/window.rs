@@ -118,6 +118,8 @@ struct App {
     chat_input: String,
     /// Whether the player inventory is open (E key toggle).
     inventory_open: bool,
+    /// Whether a server container was displayed on the previous frame.
+    container_was_open: bool,
     /// Whether the M4 debug screen is open.
     show_debug_screen: bool,
     /// The immediate-mode context, owned by the render thread.
@@ -190,6 +192,7 @@ impl App {
             chat_open: false,
             chat_input: String::new(),
             inventory_open: false,
+            container_was_open: false,
             show_debug_screen: false,
             ui: Ui::new(ui_viewport),
             debug_screen: DebugScreen::new(),
@@ -433,6 +436,19 @@ impl App {
         self.respawn_requested = true;
         self.ui_input.clear();
         self.capture_mouse(true);
+    }
+
+    /// Frees the mouse while a server container is displayed and takes it
+    /// back when it closes (MCP `displayGuiScreen` ungrabs / grabs the mouse).
+    fn update_container_cursor(&mut self) {
+        let open = self.container_is_open();
+        if open != self.container_was_open {
+            self.container_was_open = open;
+            self.ui_input.clear();
+            self.inventory_input.reset();
+            let free = open || self.inventory_open || self.chat_open || self.death_screen_visible();
+            self.capture_mouse(!free);
+        }
     }
 
     /// Closes the inventory or container screen.
@@ -806,6 +822,7 @@ impl App {
 
         self.sync_world(now);
         self.update_death_screen(now);
+        self.update_container_cursor();
         self.publish_input();
         let environment = self
             .world

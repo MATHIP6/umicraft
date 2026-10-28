@@ -137,7 +137,9 @@ impl WindowManager {
 
     /// Opens a new container window, replacing any previous one.
     pub fn open_window(&mut self, window_id: u8, kind: WindowKind, title: String, slot_count: u8) {
-        let own = usize::from(slot_count);
+        let own = kind
+            .implicit_slot_count()
+            .unwrap_or_else(|| usize::from(slot_count));
         self.container = Some(ContainerWindow {
             window_id,
             kind,
@@ -460,6 +462,21 @@ mod tests {
         let container = wm.container().unwrap();
         assert_eq!(container.container_slots[0], None);
         assert!(container.properties.is_empty());
+    }
+
+    /// Regression: the server announces 0 slots for the crafting table, so the
+    /// 46 items of `Window Items` used to land in the wrong slots.
+    #[test]
+    fn a_crafting_table_has_ten_own_slots_whatever_the_packet_says() {
+        let mut wm = WindowManager::new();
+        wm.open_window(1, WindowKind::CraftingTable, String::new(), 0);
+        assert_eq!(wm.container().unwrap().container_slots.len(), 10);
+        let mut items = vec![ItemStack::EMPTY; 46];
+        items[10] = stack(1, 3);
+        items[45] = stack(2, 4);
+        wm.apply_window_items(1, &items);
+        assert_eq!(wm.inventory().slot(9), Some(&stack(1, 3)));
+        assert_eq!(wm.hotbar()[8], Some(stack(2, 4)));
     }
 
     #[test]
