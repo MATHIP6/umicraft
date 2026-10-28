@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 glam = "0.34"
+thiserror.workspace = true
 umicraft-protocol.workspace = true
 umicraft-world.workspace = true
 

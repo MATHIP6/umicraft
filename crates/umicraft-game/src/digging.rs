@@ -14,6 +14,7 @@
 use umicraft_protocol::packets::play::ItemStack;
 
 use crate::block_data::{Material, BLOCKS};
+use crate::item_nbt::ItemDisplay;
 
 /// The potion id of Haste (MCP `Potion.digSpeed`).
 pub const HASTE: u8 = 3;
@@ -329,147 +330,14 @@ pub fn is_air(block: u16) -> bool {
 }
 
 /// The level of an enchantment in the NBT of a stack, `0` when absent or
-/// when the NBT is malformed.
-///
-/// The NBT comes from the server, so every read is bounds-checked and the
-/// nesting depth is limited. Only the `ench` list of compounds with a `short`
-/// `id` and `lvl` is looked at (MCP `EnchantmentHelper.getEnchantmentLevel`).
+/// when the NBT is malformed (MCP `EnchantmentHelper.getEnchantmentLevel`).
 #[must_use]
 pub fn enchantment_level(nbt: &[u8], id: i16) -> u32 {
-    let mut reader = NbtReader { data: nbt, pos: 0 };
-    reader.find_enchantment(id).unwrap_or(0)
-}
-
-/// The deepest NBT nesting that is skipped.
-const MAX_NBT_DEPTH: u32 = 32;
-
-/// A bounds-checked cursor over NBT bytes.
-struct NbtReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl NbtReader<'_> {
-    fn take(&mut self, count: usize) -> Option<&[u8]> {
-        let end = self.pos.checked_add(count)?;
-        let bytes = self.data.get(self.pos..end)?;
-        self.pos = end;
-        Some(bytes)
-    }
-
-    fn byte(&mut self) -> Option<u8> {
-        self.take(1).map(|bytes| bytes[0])
-    }
-
-    fn short(&mut self) -> Option<i16> {
-        let bytes = self.take(2)?;
-        Some(i16::from_be_bytes([bytes[0], bytes[1]]))
-    }
-
-    fn length(&mut self) -> Option<usize> {
-        let bytes = self.take(4)?;
-        usize::try_from(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])).ok()
-    }
-
-    fn name(&mut self) -> Option<&[u8]> {
-        let length = usize::from(self.short()? as u16);
-        self.take(length)
-    }
-
-    /// Skips the payload of a tag of type `tag`.
-    fn skip(&mut self, tag: u8, depth: u32) -> Option<()> {
-        if depth > MAX_NBT_DEPTH {
-            return None;
-        }
-        match tag {
-            1 => self.take(1).map(drop),
-            2 => self.take(2).map(drop),
-            3 | 5 => self.take(4).map(drop),
-            4 | 6 => self.take(8).map(drop),
-            7 => {
-                let length = self.length()?;
-                self.take(length).map(drop)
-            }
-            8 => self.name().map(drop),
-            9 => {
-                let item = self.byte()?;
-                for _ in 0..self.length()? {
-                    self.skip(item, depth + 1)?;
-                }
-                Some(())
-            }
-            10 => loop {
-                let tag = self.byte()?;
-                if tag == 0 {
-                    return Some(());
-                }
-                self.name()?;
-                self.skip(tag, depth + 1)?;
-            },
-            11 => {
-                let length = self.length()?;
-                self.take(length.checked_mul(4)?).map(drop)
-            }
-            _ => None,
-        }
-    }
-
-    /// Finds the level of enchantment `id` in the root compound.
-    fn find_enchantment(&mut self, id: i16) -> Option<u32> {
-        if self.byte()? != 10 {
-            return None;
-        }
-        self.name()?;
-        loop {
-            let tag = self.byte()?;
-            if tag == 0 {
-                return None;
-            }
-            let is_list = tag == 9 && self.name()? == b"ench";
-            if tag != 9 {
-                self.name()?;
-            }
-            if is_list {
-                return self.enchantment_in_list(id);
-            }
-            if tag != 9 {
-                self.skip(tag, 1)?;
-            } else {
-                self.skip(9, 1)?;
-            }
-        }
-    }
-
-    /// Reads an `ench` list; returns the level of `id`.
-    fn enchantment_in_list(&mut self, id: i16) -> Option<u32> {
-        if self.byte()? != 10 {
-            return None;
-        }
-        for _ in 0..self.length()? {
-            let (mut found, mut level) = (None, 0);
-            loop {
-                let tag = self.byte()?;
-                if tag == 0 {
-                    break;
-                }
-                let name = self.name()?.to_vec();
-                if tag == 2 {
-                    let value = self.short()?;
-                    match name.as_slice() {
-                        b"id" => found = Some(value),
-                        b"lvl" => level = u32::from(value.max(0) as u16),
-                        _ => {}
-                    }
-                } else {
-                    self.skip(tag, 2)?;
-                }
-            }
-            if found == Some(id) {
-                return Some(level);
-            }
-        }
-        None
-    }
+    ItemDisplay::from_nbt(nbt)
+        .enchantments
+        .iter()
+        .find_map(|enchantment| (enchantment.id == id).then_some(enchantment.level))
+        .map_or(0, u32::from)
 }
 
 #[cfg(test)]
