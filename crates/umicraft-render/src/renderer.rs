@@ -1795,6 +1795,7 @@ impl TerrainPipelineState {
     fn icon() -> Self {
         Self {
             label: "icon pipeline",
+            fragment_entry: "fs_icon",
             cull_mode: None,
             ..Self::opaque()
         }
@@ -2259,7 +2260,7 @@ mod tests {
         )
         .validate(&module)
         .expect("the shader validates");
-        for entry in ["fs_main", "fs_transparent", "fs_crack"] {
+        for entry in ["fs_main", "fs_icon", "fs_transparent", "fs_crack"] {
             assert!(
                 module.entry_points.iter().any(|point| point.name == entry),
                 "missing {entry}"
