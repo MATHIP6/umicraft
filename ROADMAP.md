@@ -229,6 +229,49 @@ dropped items drawn as a generic cube.
 ground; the screenshot diff of a reference hotbar and inventory is within
 the agreed threshold.
 
+**Status (2026-10-28): in progress, not done.** Implemented (ADR-0024,
+`docs/parity.md` "Items"): the registry, the item NBT display data, all 512
+item models of the 1.8.8 jar, GUI icons with stack count, durability bar and
+enchantment glint, dropped items, the first-person item (idle, swing, eating,
+drinking, sword block, bow draw), items in a remote player's hand, item
+frames, tints (leather, potions, spawn eggs, firework charges, grass and
+foliage block items), and the animated compass and clock.
+
+**Remaining before P3 is done**
+- Screenshot diff of a reference hotbar and inventory against the vanilla
+  client within the agreed threshold (needs the owner's reference set,
+  kept outside the repository; harness: `umicraft-testkit/screenshot.rs`).
+- `builtin/entity` items have no icon and are not drawn in hand: chests,
+  ender chests, trapped chests, skulls (with `SkullOwner` skins) and banners
+  (needs the block-entity renderers of P7).
+- Use animations of other players: arm pose while eating, drinking,
+  blocking and drawing a bow, the bow drawing model in their hand, and the
+  fishing rod cast model (`fishing_rod_cast`) for any player (shares the
+  entity animation work of P5).
+- Filled maps: the item icon, the map in hand and in a frame
+  (`item_frame_map`) are not drawn.
+- Items held by mobs (zombies, skeletons, pigmen, villagers, witches):
+  only players hang an item on the right arm today.
+- World lighting on dropped, framed and held items: they are drawn full
+  bright instead of using the light at their position.
+- Dropped item hover phase comes from the entity id, not a random draw per
+  entity; the compass and clock targets outside the overworld use a
+  fixed-seed generator. Decide whether to keep these approved deviations or
+  match the reference randomness.
+- Enchantment glint mapping ignores the sprite offset inside the vanilla
+  atlas, so two sprites show the same part of the glint texture.
+- Fish food values: the registry table stores 0 for raw and cooked fish,
+  which vanilla derives from the metadata.
+- Item tooltips (`ItemStack.getTooltip`: name colour by rarity, lore,
+  enchantment names, attribute modifiers, durability line) are not
+  drawn; their layout is finished with the inventory in P4.
+- The item registry is not yet used by every module that still holds its own
+  id lists: the block-to-item table of `pick.rs` and the tool table of
+  `digging.rs`.
+- Entity-demo tool (`--entity-demo`) lost its dropped-item cube with the old
+  mesher; its catalogue now has 35 entities.
+
+
 ### P4 — Inventory & containers (finishes M9)
 
 **Features**
