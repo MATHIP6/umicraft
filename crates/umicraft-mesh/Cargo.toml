@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 bytemuck.workspace = true
+glam = "0.34"
 umicraft-model.workspace = true
 umicraft-world.workspace = true
 

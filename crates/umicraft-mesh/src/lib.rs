@@ -67,6 +67,7 @@ use umicraft_world::{BlockKind, BlockPos, BlockState, ChunkColumn, ChunkPos, Lig
 use std::sync::Arc;
 
 pub mod fluid;
+pub mod item;
 pub mod models;
 pub mod tint;
 

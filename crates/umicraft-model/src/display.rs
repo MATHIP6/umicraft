@@ -7,6 +7,7 @@
 //! block, clamped to 1.5; scale clamped to 4) and `ModelBlock.func_181681_a`
 //! (a context the child leaves at its default is inherited from the parent).
 
+use glam::{Mat4, Vec3};
 use serde_json::{Map, Value};
 
 use crate::error::{ModelError, ModelResult};
@@ -80,6 +81,19 @@ impl ItemTransform {
         translation: [0.0; 3],
         scale: [1.0; 3],
     };
+
+    /// The matrix `ItemCameraTransforms.applyTransform` builds with its GL
+    /// calls: translate, rotate Y, rotate X, rotate Z, scale (each call
+    /// multiplies on the right).
+    #[must_use]
+    pub fn matrix(&self) -> Mat4 {
+        let [rx, ry, rz] = self.rotation;
+        Mat4::from_translation(Vec3::from(self.translation))
+            * Mat4::from_rotation_y(ry.to_radians())
+            * Mat4::from_rotation_x(rx.to_radians())
+            * Mat4::from_rotation_z(rz.to_radians())
+            * Mat4::from_scale(Vec3::from(self.scale))
+    }
 
     fn parse(value: &Value, path: &str, context: &str) -> ModelResult<Self> {
         let object = value
@@ -185,6 +199,19 @@ mod tests {
         assert_eq!(gui.translation, [1.0, -1.5, 0.0]);
         assert_eq!(gui.scale, [4.0, 0.5, 1.0]);
         assert_eq!(gui.rotation, [0.0; 3]);
+    }
+
+    #[test]
+    fn the_matrix_applies_scale_first_then_rotation_then_translation() {
+        let pose = ItemTransform {
+            rotation: [0.0, 90.0, 0.0],
+            translation: [1.0, 0.0, 0.0],
+            scale: [2.0, 2.0, 2.0],
+        };
+        // (1,0,0) scales to (2,0,0), a quarter turn about Y sends +x to -z.
+        let moved = pose.matrix().transform_point3(Vec3::X);
+        assert!((moved - Vec3::new(1.0, 0.0, -2.0)).length() < 1e-5);
+        assert_eq!(ItemTransform::IDENTITY.matrix(), Mat4::IDENTITY);
     }
 
     #[test]
