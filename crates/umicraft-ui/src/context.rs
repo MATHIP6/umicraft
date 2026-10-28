@@ -237,6 +237,13 @@ impl Ui {
         &self.input
     }
 
+    /// The last known pointer position in physical pixels, if the pointer has
+    /// moved at all yet.
+    #[must_use]
+    pub fn pointer(&self) -> Option<[f32; 2]> {
+        self.pointer
+    }
+
     /// Mutable access to the draw list, for widgets that need a primitive
     /// instead of a helper.
     ///

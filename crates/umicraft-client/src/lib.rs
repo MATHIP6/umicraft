@@ -26,6 +26,7 @@ pub mod error;
 pub mod game;
 pub mod headless;
 pub mod input;
+mod inventory_screen;
 pub mod item_icons;
 pub mod item_tints;
 pub mod item_world;

@@ -53,7 +53,6 @@ use umicraft_net::play::{PlayEvent, SessionCounters};
 use umicraft_protocol::packets::play::clientbound::{
     BlockBreakAnim, ChunkData, Explosion, MapChunkBulk,
 };
-use umicraft_protocol::packets::play::ItemStack as WireItemStack;
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{HudState, OutlineBox};
@@ -123,31 +122,6 @@ const STATUS_PERIOD: u64 = 20;
 
 /// The largest pitch the view may reach, in radians.
 const MAX_PITCH: f32 = 89.0_f32.to_radians();
-
-/// The armour points of every 1.8 armour piece.
-///
-/// MCP `ItemArmor.ArmorMaterial` lists the damage reduction of the four
-/// pieces as {head, chest, legs, feet}; the item ids are the registration
-/// order of MCP `Item.java` (leather 298-301, chainmail 302-305, iron
-/// 306-309, diamond 310-313, gold 314-317).
-const ARMOR_POINTS: [u8; 20] = [
-    1, 3, 2, 1, // 298 leather helmet, chestplate, leggings, boots
-    2, 5, 4, 1, // 302 chainmail
-    2, 6, 5, 2, // 306 iron
-    3, 8, 6, 3, // 310 diamond
-    2, 5, 3, 1, // 314 gold
-];
-
-/// The armour points of an item, `None` when the item is not armour.
-#[must_use]
-pub fn armor_points(item_id: i16) -> Option<u8> {
-    let index = i32::from(item_id) - 298;
-    if (0..ARMOR_POINTS.len() as i32).contains(&index) {
-        Some(ARMOR_POINTS[index as usize])
-    } else {
-        None
-    }
-}
 
 /// The camera angles of a player state, in radians.
 ///
@@ -423,10 +397,6 @@ struct Game {
     /// The ticks since the death, up to [`DEATH_TICKS`]
     /// (MCP `EntityLivingBase.deathTime`).
     death_time: u32,
-    /// The item the player holds, as the server described it.
-    held_item: Option<WireItemStack>,
-    /// The equipped armour pieces, indexed by the 1.8 equipment slot.
-    equipment: [Option<WireItemStack>; 5],
     /// The selected hotbar slot.
     selected_slot: u8,
     /// The chat lines, oldest first.
@@ -485,8 +455,6 @@ impl Game {
             level: 0,
             score: 0,
             death_time: 0,
-            held_item: None,
-            equipment: std::array::from_fn(|_| None),
             selected_slot: 0,
             chat: VecDeque::new(),
             server_view: ServerView::default(),
@@ -1119,15 +1087,8 @@ fn handle_net(
         }
         PlayEvent::EntityEquipment(packet) => {
             if packet.entity_id == game.entity_id {
-                let slot = usize::try_from(packet.slot).unwrap_or(usize::MAX);
-                if slot < game.equipment.len() {
-                    game.equipment[slot] = Some(packet.item.clone());
-                    if slot == 0 {
-                        game.held_item = Some(packet.item.clone());
-                    }
-                    game.armor = f32::from(total_armor(&game.equipment));
-                    game.hud_dirty = true;
-                }
+                // The local player's items come from the inventory windows
+                // (ADR-0025), never from `Entity Equipment`.
             } else if packet.slot == 0 {
                 game.entities.set_held(
                     EntityId(packet.entity_id),
@@ -1328,13 +1289,13 @@ fn handle_net(
         PlayEvent::SetSlot(packet) => {
             game.windows
                 .apply_set_slot(packet.window_id, packet.slot, packet.item);
-            game.hud_dirty = true;
+            sync_armor(game);
             publish_inventory(game, frames);
         }
         PlayEvent::WindowItems(packet) => {
             game.windows
                 .apply_window_items(packet.window_id, &packet.items);
-            game.hud_dirty = true;
+            sync_armor(game);
             publish_inventory(game, frames);
         }
         PlayEvent::WindowProperty(packet) => {
@@ -1342,10 +1303,16 @@ fn handle_net(
                 .apply_property(packet.window_id, packet.property, packet.value);
             publish_inventory(game, frames);
         }
-        PlayEvent::ConfirmTransaction(_packet) => {
-            // The reply (rejection echo) is already sent by the session layer.
-            // The model does not need to act on accepted transactions for now;
-            // rollback on rejection is a follow-up.
+        PlayEvent::ConfirmTransaction(packet) => {
+            // The session layer already echoed a rejection; here the
+            // prediction is confirmed or rolled back.
+            game.windows.confirm_transaction(
+                packet.window_id,
+                packet.action_number,
+                packet.accepted,
+            );
+            sync_armor(game);
+            publish_inventory(game, frames);
         }
         PlayEvent::Explosion(packet) => apply_explosion(game, &packet),
         PlayEvent::PlayerAbilities(packet) => {
@@ -1404,7 +1371,7 @@ fn swing_effects(game: &Game) -> SwingEffects {
 /// and sway).
 fn tick_hand(game: &mut Game) {
     let effects = swing_effects(game);
-    let held = game.windows.selected_item().or(game.held_item.as_ref());
+    let held = game.windows.selected_item();
     game.hand.tick(
         held,
         game.yaw.to_degrees(),
@@ -1545,14 +1512,10 @@ fn bulk_payloads(packet: &MapChunkBulk) -> Vec<(ChunkPos, ChunkPayload<'_>)> {
         .collect()
 }
 
-/// The sum of the armour points of the four armour pieces.
-fn total_armor(equipment: &[Option<WireItemStack>; 5]) -> u8 {
-    equipment
-        .iter()
-        .skip(1)
-        .filter_map(|item| item.as_ref())
-        .filter_map(|item| armor_points(item.item_id))
-        .sum()
+/// Recomputes the armour bar from the armour slots of the inventory.
+fn sync_armor(game: &mut Game) {
+    game.armor = f32::from(game.windows.armor_value());
+    game.hud_dirty = true;
 }
 
 /// Counts a block change the server confirmed.
@@ -1708,7 +1671,7 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     let effects = game.server.effects();
     let amplifier = |id: u8| effects.get(id).map(|effect| effect.amplifier);
     let digger = Digger {
-        held: game.windows.selected_item().or(game.held_item.as_ref()),
+        held: game.windows.selected_item(),
         haste: amplifier(HASTE),
         fatigue: amplifier(MINING_FATIGUE),
         in_water: matches!(water.id(), WATER_FLOWING | WATER_STILL),
@@ -1763,11 +1726,7 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
     let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
         return;
     };
-    let item = game
-        .windows
-        .selected_item()
-        .or(game.held_item.as_ref())
-        .cloned();
+    let item = game.windows.selected_item().cloned();
     let has_arrow = game
         .windows
         .main_inventory()
@@ -2128,6 +2087,7 @@ mod tests {
     use crate::input::InputState;
     use umicraft_game::item_use::{DropKind, UseAction};
     use umicraft_protocol::packets::play::serverbound::DiggingStatus;
+    use umicraft_protocol::packets::play::ItemStack as WireItemStack;
 
     /// An `ench` list with one enchantment, as a server would send it.
     fn enchanted_nbt(id: i16, level: i16) -> Vec<u8> {
@@ -2145,34 +2105,12 @@ mod tests {
     }
 
     #[test]
-    fn the_armour_points_follow_the_reference_table() {
-        // Leather helmet, chainmail chestplate, iron leggings, diamond boots,
-        // gold helmet.
-        assert_eq!(armor_points(298), Some(1));
-        assert_eq!(armor_points(303), Some(5));
-        assert_eq!(armor_points(308), Some(5));
-        assert_eq!(armor_points(313), Some(3));
-        assert_eq!(armor_points(314), Some(2));
-        assert_eq!(armor_points(297), None);
-        assert_eq!(armor_points(-1), None);
-    }
-
-    #[test]
-    fn the_equipment_adds_up_to_the_armour_value() {
-        let mut equipment: [Option<WireItemStack>; 5] = std::array::from_fn(|_| None);
-        equipment[1] = Some(WireItemStack {
-            item_id: 310,
-            stack_size: 1,
-            damage: 0,
-            nbt: None,
-        });
-        equipment[2] = Some(WireItemStack {
-            item_id: 311,
-            stack_size: 1,
-            damage: 0,
-            nbt: None,
-        });
-        assert_eq!(total_armor(&equipment), 11);
+    fn the_armour_bar_follows_the_armour_slots() {
+        let mut game = placed_game();
+        game.windows.apply_set_slot(0, 5, wire_item(310, 0));
+        game.windows.apply_set_slot(0, 6, wire_item(311, 0));
+        sync_armor(&mut game);
+        assert_eq!(game.armor, 11.0);
     }
 
     /// A placed, playing game on the floor of a loaded chunk, for the
@@ -2977,12 +2915,16 @@ mod tests {
             .ordered
             .iter()
             .any(|command| matches!(command, ClientCommand::Swing)));
-        empty.held_item = Some(WireItemStack {
-            item_id: 1,
-            stack_size: 8,
-            damage: 0,
-            nbt: None,
-        });
+        empty.windows.apply_set_slot(
+            0,
+            36,
+            WireItemStack {
+                item_id: 1,
+                stack_size: 8,
+                damage: 0,
+                nbt: None,
+            },
+        );
         click_use(&mut empty, &mut queue);
         assert!(queue
             .ordered
@@ -3020,12 +2962,16 @@ mod tests {
         handle_input(&mut game, toggle, &mut queue);
 
         // Holding an item hides the bare arm once the item is shown.
-        game.held_item = Some(WireItemStack {
-            item_id: 276,
-            stack_size: 1,
-            damage: 0,
-            nbt: None,
-        });
+        game.windows.apply_set_slot(
+            0,
+            36,
+            WireItemStack {
+                item_id: 276,
+                stack_size: 1,
+                damage: 0,
+                nbt: None,
+            },
+        );
         for _ in 0..10 {
             tick_hand(&mut game);
         }
@@ -3127,7 +3073,7 @@ mod tests {
     fn holding_the_use_button_eats_slowly_and_releasing_tells_the_server() {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.food = 10.0;
-        game.held_item = Some(wire_item(297, 0));
+        game.windows.apply_set_slot(0, 36, wire_item(297, 0));
         game.pitch = -0.5;
         let mut queue = CommandQueue::default();
         game.input.use_item = true;
@@ -3154,7 +3100,7 @@ mod tests {
     fn the_published_hand_carries_the_item_use_until_it_ends() {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.food = 10.0;
-        game.held_item = Some(wire_item(297, 0));
+        game.windows.apply_set_slot(0, 36, wire_item(297, 0));
         game.pitch = -0.5;
         game.input.use_item = true;
         let mut queue = CommandQueue::default();
@@ -3179,7 +3125,7 @@ mod tests {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.food = 10.0;
         game.entity_id = 7;
-        game.held_item = Some(wire_item(297, 0));
+        game.windows.apply_set_slot(0, 36, wire_item(297, 0));
         game.pitch = -0.5;
         game.input.use_item = true;
         let mut queue = CommandQueue::default();
@@ -3227,7 +3173,7 @@ mod tests {
             game.food = 10.0;
             game.input.forward = 1.0;
             game.input.use_item = using;
-            game.held_item = Some(wire_item(267, 0));
+            game.windows.apply_set_slot(0, 36, wire_item(267, 0));
             game.pitch = -0.5;
             game.yaw = 0.0;
             let mut queue = CommandQueue::default();

@@ -3,7 +3,7 @@
 //! A slot draws one inventory cell: a background rectangle, the item icon with
 //! its stack count and durability bar (see [`super::item_overlay`]) and the
 //! hover highlight. The slot rectangle is the 16x16 GUI-pixel item area, which
-//! is what the layouts in [`super::inventory`] produce. Hover and click
+//! is what the layouts in [`crate::screens`] produce. Hover and click
 //! detection follow the same [`crate::Ui::response`] path as the other M4
 //! widgets.
 

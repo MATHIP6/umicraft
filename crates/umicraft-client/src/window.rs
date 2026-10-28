@@ -18,10 +18,7 @@ use umicraft_game::item_use::DropKind;
 use umicraft_render::{
     draw_hud, Camera, HudLayout, HudState, NoIcons, Overlay, RenderEnvironment, Renderer, SkyState,
 };
-use umicraft_ui::widgets::{
-    container_layout, death_screen, player_inventory_layout, slot, ContainerLayout, DeathAction,
-    InventoryLayout, BUTTON_DELAY_TICKS,
-};
+use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{debug_screen::DebugScreen, draw_item, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -36,6 +33,7 @@ use crate::entity_textures::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
+use crate::inventory_screen::draw_inventory_overlay;
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{push_held_item, ItemLayers, WorldItems};
 use crate::mesher::default_worker_count;
@@ -860,97 +858,6 @@ fn upload_glint_texture(renderer: &mut Renderer, glint: Option<&umicraft_assets:
     }
 }
 
-/// Draws the inventory or container screen as a modal overlay.
-fn draw_inventory_overlay(
-    ui: &mut umicraft_ui::Ui,
-    atlas: &FontAtlas,
-    viewport: Rect,
-    wv: &umicraft_game::inventory::WindowView,
-    gui_atlas: Option<&umicraft_assets::GuiAtlas>,
-    items: ItemView<'_>,
-) {
-    let bg_color = [0.0_f32, 0.0, 0.0, 0.55];
-    ui.draw().rect(viewport, bg_color);
-
-    let textured = gui_atlas.is_some();
-
-    match &wv.container {
-        Some(container) => {
-            let layout = container_layout(viewport, container.slots.len());
-            let texture_name = gui_texture_for_container(container.slots.len());
-            let rows = container.slots.len().div_ceil(9);
-            let container_bg_h = 114 + rows as u32 * 18;
-            draw_gui_background(
-                ui,
-                gui_atlas,
-                texture_name,
-                &layout.background,
-                (176, container_bg_h),
-            );
-            draw_container_slots(
-                ui,
-                atlas,
-                &layout,
-                &container.slots,
-                &wv.player_slots,
-                textured,
-                items,
-            );
-        }
-        None => {
-            let layout = player_inventory_layout(viewport);
-            draw_gui_background(
-                ui,
-                gui_atlas,
-                "container/inventory",
-                &layout.background,
-                (176, 166),
-            );
-            draw_player_inventory(ui, atlas, &layout, &wv.player_slots, textured, items);
-        }
-    }
-}
-
-/// Draws the GUI texture background for an inventory or container screen.
-///
-/// `gui_pixel_size` is the unscaled pixel dimensions of the GUI content inside
-/// the texture (e.g. 176×166 for the player inventory). Vanilla's GUI PNGs are
-/// often larger than the visible area (256×256 for inventory.png, which also
-/// holds potion effect icons), so `sub_region` extracts just the GUI portion.
-///
-/// Falls back to a solid rectangle when the GUI atlas is not loaded or the
-/// texture is not found.
-fn draw_gui_background(
-    ui: &mut umicraft_ui::Ui,
-    gui_atlas: Option<&umicraft_assets::GuiAtlas>,
-    name: &str,
-    background: &Rect,
-    gui_pixel_size: (u32, u32),
-) {
-    let region = gui_atlas.and_then(|a| a.region(name));
-    match region {
-        Some(region) => {
-            let src = region.sub_region(0, 0, gui_pixel_size.0, gui_pixel_size.1);
-            ui.draw().image(src, *background, [1.0, 1.0, 1.0, 1.0]);
-        }
-        None => {
-            ui.draw().rect(*background, [0.12, 0.12, 0.15, 0.92]);
-        }
-    }
-}
-
-/// Returns the GUI texture name for a container given its slot count.
-fn gui_texture_for_container(slot_count: usize) -> &'static str {
-    match slot_count {
-        27 => "container/generic_27",
-        54 => "container/generic_54",
-        3 => "container/furnace",
-        9 => "container/dispenser",
-        5 => "container/hopper",
-        _ => "container/generic_27",
-    }
-}
-
 /// The stack in the selected hotbar slot of the local player.
 fn held_stack(world: &WorldView) -> Option<&umicraft_protocol::packets::play::ItemStack> {
     let selected = usize::from(world.hud().selected_slot).min(8);
@@ -981,60 +888,6 @@ fn draw_hotbar_items(
             icon,
         );
         draw_item(ui.draw(), atlas, cell, &slot_item(items, stack));
-    }
-}
-
-/// Draws the player inventory (45 slots) using the layout grid.
-fn draw_player_inventory(
-    ui: &mut umicraft_ui::Ui,
-    atlas: &FontAtlas,
-    layout: &InventoryLayout,
-    player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
-    textured: bool,
-    items: ItemView<'_>,
-) {
-    let mut label = String::with_capacity(8);
-    for (i, rect) in layout.slots.iter().enumerate() {
-        label.clear();
-        std::fmt::Write::write_fmt(&mut label, format_args!("inv{i}")).unwrap();
-        let id = ui.id(&label);
-        let item = player_slots[i]
-            .as_ref()
-            .map(|stack| slot_item(items, stack));
-        slot(ui, id, *rect, atlas, item.as_ref(), textured);
-    }
-}
-
-/// Draws a container screen: container slots on top, player main+hotbar below.
-fn draw_container_slots(
-    ui: &mut umicraft_ui::Ui,
-    atlas: &FontAtlas,
-    layout: &ContainerLayout,
-    container_slots: &[Option<umicraft_protocol::packets::play::ItemStack>],
-    player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
-    textured: bool,
-    items: ItemView<'_>,
-) {
-    let mut label = String::with_capacity(8);
-    for (i, rect) in layout.container_slots.iter().enumerate() {
-        label.clear();
-        std::fmt::Write::write_fmt(&mut label, format_args!("cs{i}")).unwrap();
-        let id = ui.id(&label);
-        let item = container_slots
-            .get(i)
-            .and_then(|s| s.as_ref())
-            .map(|stack| slot_item(items, stack));
-        slot(ui, id, *rect, atlas, item.as_ref(), textured);
-    }
-    for (i, &(inv_idx, rect)) in layout.player_slots.iter().enumerate() {
-        label.clear();
-        std::fmt::Write::write_fmt(&mut label, format_args!("ps{i}")).unwrap();
-        let id = ui.id(&label);
-        let item = player_slots
-            .get(inv_idx)
-            .and_then(|s| s.as_ref())
-            .map(|stack| slot_item(items, stack));
-        slot(ui, id, rect, atlas, item.as_ref(), textured);
     }
 }
 
