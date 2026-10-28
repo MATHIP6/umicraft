@@ -39,6 +39,8 @@ const BLOCK_TEXTURES_PREFIX: &str = "assets/minecraft/textures/blocks/";
 const ITEM_TEXTURES_PREFIX: &str = "assets/minecraft/textures/items/";
 /// Prefix of the 1.8 GUI textures (backgrounds, widgets, icons).
 const GUI_TEXTURES_PREFIX: &str = "assets/minecraft/textures/gui/";
+/// The enchantment glint texture, drawn additively over enchanted items.
+const GLINT_PATH: &str = "assets/minecraft/textures/misc/enchanted_item_glint.png";
 /// Prefix shared by every texture key.
 const TEXTURES_ROOT: &str = "assets/minecraft/textures/";
 
@@ -230,6 +232,17 @@ struct TextureLayer {
     image: DecodedPng,
 }
 
+/// The decoded enchantment glint texture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlintTexture {
+    /// Pixel width.
+    pub width: u32,
+    /// Pixel height.
+    pub height: u32,
+    /// Tightly packed RGBA8 pixels, `width * height * 4` bytes.
+    pub pixels: Vec<u8>,
+}
+
 /// Every blockstate, block model and block/item texture of one client jar,
 /// plus the optional biome colormaps and the GUI texture atlas.
 #[derive(Debug, Clone)]
@@ -237,9 +250,11 @@ pub struct ClientResources {
     files: BTreeMap<String, Vec<u8>>,
     raw_colormaps: BTreeMap<String, Vec<u8>>,
     raw_gui: BTreeMap<String, Vec<u8>>,
+    raw_glint: Option<Vec<u8>>,
     atlas: BlockAtlas,
     colormaps: Option<BiomeColormaps>,
     gui_atlas: GuiAtlas,
+    glint: Option<GlintTexture>,
 }
 
 impl ClientResources {
@@ -269,13 +284,17 @@ impl ClientResources {
             ITEM_TEXTURES_PREFIX,
             COLORMAP_PREFIX,
             GUI_TEXTURES_PREFIX,
+            GLINT_PATH,
         ])?;
 
         let mut files = BTreeMap::new();
         let mut raw_colormaps = BTreeMap::new();
         let mut raw_gui = BTreeMap::new();
+        let mut raw_glint = None;
         for (path, bytes) in entries {
-            if path == GRASS_PATH || path == FOLIAGE_PATH {
+            if path == GLINT_PATH {
+                raw_glint = Some(bytes);
+            } else if path == GRASS_PATH || path == FOLIAGE_PATH {
                 raw_colormaps.insert(path, bytes);
             } else if is_gui_texture(&path) {
                 raw_gui.insert(path, bytes);
@@ -287,7 +306,7 @@ impl ClientResources {
             }
         }
 
-        Self::build_internal(files, raw_colormaps, raw_gui)
+        Self::build_internal(files, raw_colormaps, raw_gui, raw_glint)
     }
 
     /// Builds a new [`ClientResources`] instance by layering resource packs
@@ -303,9 +322,12 @@ impl ClientResources {
         let mut files = self.files.clone();
         let mut raw_colormaps = self.raw_colormaps.clone();
         let mut raw_gui = self.raw_gui.clone();
+        let mut raw_glint = self.raw_glint.clone();
         for pack in packs {
             for (path, bytes) in pack.files() {
-                if path == GRASS_PATH || path == FOLIAGE_PATH {
+                if path == GLINT_PATH {
+                    raw_glint = Some(bytes.clone());
+                } else if path == GRASS_PATH || path == FOLIAGE_PATH {
                     raw_colormaps.insert(path.clone(), bytes.clone());
                 } else if is_gui_texture(path) {
                     raw_gui.insert(path.clone(), bytes.clone());
@@ -317,7 +339,7 @@ impl ClientResources {
                 }
             }
         }
-        Self::build_internal(files, raw_colormaps, raw_gui)
+        Self::build_internal(files, raw_colormaps, raw_gui, raw_glint)
     }
 
     /// Internal builder that constructs a complete [`ClientResources`].
@@ -325,6 +347,7 @@ impl ClientResources {
         files: BTreeMap<String, Vec<u8>>,
         raw_colormaps: BTreeMap<String, Vec<u8>>,
         raw_gui: BTreeMap<String, Vec<u8>>,
+        raw_glint: Option<Vec<u8>>,
     ) -> AssetsResult<Self> {
         let mut textures = Vec::new();
         for (path, bytes) in &files {
@@ -347,13 +370,24 @@ impl ClientResources {
         let atlas = build_atlas(textures, &files)?;
         let colormaps = decode_colormaps(&mut decoded_colormaps)?;
         let gui_atlas = pack_gui_atlas(gui_images);
+        let glint = raw_glint
+            .as_deref()
+            .map(|bytes| DecodedPng::decode(GLINT_PATH, bytes))
+            .transpose()?
+            .map(|png| GlintTexture {
+                width: png.width,
+                height: png.height,
+                pixels: png.pixels,
+            });
         Ok(Self {
             files,
             raw_colormaps,
             raw_gui,
+            raw_glint,
             atlas,
             colormaps,
             gui_atlas,
+            glint,
         })
     }
 
@@ -382,6 +416,15 @@ impl ClientResources {
     #[must_use]
     pub fn gui_atlas(&self) -> &GuiAtlas {
         &self.gui_atlas
+    }
+
+    /// The enchantment glint texture, when the jar or a pack provides it.
+    ///
+    /// `None` is not an error: enchanted items then simply draw without the
+    /// glint overlay.
+    #[must_use]
+    pub fn glint_texture(&self) -> Option<&GlintTexture> {
+        self.glint.as_ref()
     }
 
     /// The grass and foliage colormaps, when the jar contains both.
@@ -645,6 +688,52 @@ mod tests {
             texture_key("assets/minecraft/models/block/stone.json"),
             None
         );
+    }
+
+    fn png_bytes(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("header");
+        writer.write_image_data(rgba).expect("data");
+        writer.finish().expect("finish");
+        out
+    }
+
+    #[test]
+    fn the_glint_texture_is_decoded_when_present_and_optional_otherwise() {
+        let bytes = png_bytes(2, 1, &[1, 2, 3, 255, 4, 5, 6, 255]);
+        let resources = ClientResources::build_internal(
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            Some(bytes),
+        )
+        .expect("build");
+        let glint = resources.glint_texture().expect("glint");
+        assert_eq!((glint.width, glint.height), (2, 1));
+        assert_eq!(glint.pixels, [1, 2, 3, 255, 4, 5, 6, 255]);
+
+        let empty = ClientResources::build_internal(
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            None,
+        )
+        .expect("build");
+        assert!(empty.glint_texture().is_none());
+    }
+
+    #[test]
+    fn a_corrupt_glint_texture_is_an_image_error() {
+        let result = ClientResources::build_internal(
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            Some(vec![1, 2, 3]),
+        );
+        assert!(matches!(result, Err(AssetsError::Image { .. })));
     }
 
     #[test]

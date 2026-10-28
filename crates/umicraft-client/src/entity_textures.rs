@@ -323,6 +323,27 @@ impl EntityTextures {
 // Per-entity mesh building
 // ---------------------------------------------------------------------------
 
+/// The posed humanoid model of a player snapshot, and whether it has slim
+/// arms. Shared by the body mesh and by the held item, which hangs on the
+/// posed right arm.
+pub(crate) fn posed_player(ent: &EntityRenderSnapshot) -> (HumanoidModel, bool) {
+    let is_slim = ent
+        .uuid
+        .is_some_and(|u| SkinModel::default_for_uuid(u).is_slim());
+    let mut model = HumanoidModel::new(is_slim);
+    model.set_angles(
+        ent.limb_swing,
+        ent.limb_swing_amount,
+        ent.head_yaw - ent.yaw,
+        ent.pitch,
+        false,
+    );
+    if ent.flags.is_sneaking() {
+        model.apply_sneaking();
+    }
+    (model, is_slim)
+}
+
 /// Builds mesh layers for a single entity snapshot.
 ///
 /// Each layer is tagged with a [`TextureSlot`] so the batching loop can route
@@ -333,20 +354,7 @@ fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
 
     match ent.kind {
         EntityKind::Player => {
-            let is_slim = ent
-                .uuid
-                .is_some_and(|u| SkinModel::default_for_uuid(u).is_slim());
-            let mut model = HumanoidModel::new(is_slim);
-            model.set_angles(
-                ent.limb_swing,
-                ent.limb_swing_amount,
-                head_yaw,
-                head_pitch,
-                false,
-            );
-            if ent.flags.is_sneaking() {
-                model.apply_sneaking();
-            }
+            let (model, is_slim) = posed_player(ent);
             let slot = if is_slim {
                 TextureSlot::Alex
             } else {

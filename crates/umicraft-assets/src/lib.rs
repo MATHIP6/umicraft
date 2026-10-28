@@ -82,7 +82,7 @@ mod zip;
 
 pub use animation::TextureAnimation;
 pub use atlas::BlockAtlas;
-pub use client_resources::ClientResources;
+pub use client_resources::{ClientResources, GlintTexture};
 pub use colormap::{BiomeColormaps, Colormap};
 pub use error::{AssetsError, AssetsResult};
 pub use gui_atlas::{GuiAtlas, GuiRegion};
