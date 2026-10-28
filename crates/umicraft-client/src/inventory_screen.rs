@@ -25,10 +25,10 @@ const PLAYER_PART_LEN: usize = 36;
 /// Item icon edge in unscaled GUI pixels.
 const ICON_SIZE: f32 = 16.0;
 /// Dimming drawn behind every modal screen.
-const DIMMING: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
+pub(crate) const DIMMING: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
 /// Fill used when the GUI texture is missing.
-const FALLBACK_BACKGROUND: [f32; 4] = [0.12, 0.12, 0.15, 0.92];
-const WHITE: [f32; 4] = [1.0; 4];
+pub(crate) const FALLBACK_BACKGROUND: [f32; 4] = [0.12, 0.12, 0.15, 0.92];
+pub(crate) const WHITE: [f32; 4] = [1.0; 4];
 /// Tint over the slots of a drag preview (vanilla 0x80FFFFFF).
 const DRAG_HIGHLIGHT: [f32; 4] = [1.0, 1.0, 1.0, 0.5];
 
@@ -54,7 +54,7 @@ pub fn screen_kind(container: Option<&ContainerView>) -> ScreenKind {
 }
 
 /// The creative game mode id of `Change Game State`.
-const CREATIVE_GAMEMODE: u8 = 1;
+pub(crate) const CREATIVE_GAMEMODE: u8 = 1;
 
 /// The layout of the open screen in `viewport` and what the input layer needs
 /// to know about the window (`gamemode` is the wire id of the game mode).
@@ -137,7 +137,7 @@ pub fn draw_inventory_overlay(
         }
     }
     let cursor = drag.map_or(view.cursor.as_ref(), |d| d.cursor.as_ref());
-    draw_cursor_item(ui, atlas, &layout, cursor, items);
+    draw_cursor_item(ui, atlas, layout.scale, cursor, items);
     if view.cursor.is_none() {
         draw_hovered_tooltip(
             ui,
@@ -183,17 +183,17 @@ fn draw_sprite(ui: &mut Ui, region: &umicraft_assets::GuiRegion, sprite: &Sprite
 }
 
 /// Draws the stack held by the cursor centred on the pointer, like vanilla.
-fn draw_cursor_item(
+pub(crate) fn draw_cursor_item(
     ui: &mut Ui,
     atlas: &FontAtlas,
-    layout: &ScreenLayout,
+    scale: u32,
     cursor: Option<&ItemStack>,
     items: ItemView<'_>,
 ) {
     let (Some(stack), Some([x, y])) = (cursor, ui.pointer()) else {
         return;
     };
-    let size = ICON_SIZE * layout.scale as f32;
+    let size = ICON_SIZE * scale as f32;
     let rect = Rect::new(x - size * 0.5, y - size * 0.5, size, size);
     draw_item(ui.draw(), atlas, rect, &slot_item(items, stack));
 }

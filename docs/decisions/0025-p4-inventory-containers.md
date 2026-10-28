@@ -89,3 +89,13 @@ is replaced by `screens/player.rs` and `screens/layout.rs`.
   when none accepts the stack.
 - Tooltips: `inventory::tooltip` is language free; keys are resolved by the
   renderer from an English table until a language loader exists.
+
+## Addendum (2026-10-28, P4e)
+
+- The creative screen is a pure state machine (`inventory::creative`) over
+  `WindowManager`; it runs on the game thread and returns `CreativeAction`s,
+  sent as `Creative Inventory Action` (no `Click Window`). The render thread
+  only holds a `CreativeView` snapshot, so one stale frame after a tab change
+  is possible.
+- `WindowManager` gained `click_local` (a click without packet or transaction)
+  and `set_cursor`.

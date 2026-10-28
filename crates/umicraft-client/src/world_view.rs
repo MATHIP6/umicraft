@@ -23,6 +23,7 @@ use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer}
 use umicraft_world::ChunkPos;
 
 use crate::cracks::{crack_mesh, Crack, STAGES};
+use crate::creative_view::CreativeView;
 use crate::error::ClientError;
 use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, TICK};
 use crate::mesher::{MeshPool, MeshResult};
@@ -62,6 +63,8 @@ pub struct WorldView {
     faces: HashMap<ChunkPos, usize>,
     hud: HudState,
     window_view: WindowView,
+    /// The newest creative screen snapshot, once one was published.
+    creative: Option<CreativeView>,
     status: GameStatus,
     ended: Option<String>,
     frames: usize,
@@ -97,6 +100,7 @@ impl WorldView {
                 cursor: None,
                 selected_slot: 0,
             },
+            creative: None,
             status: GameStatus::default(),
             ended: None,
             frames: 0,
@@ -172,6 +176,12 @@ impl WorldView {
     #[must_use]
     pub fn window_view(&self) -> &WindowView {
         &self.window_view
+    }
+
+    /// The newest creative inventory snapshot the game thread published.
+    #[must_use]
+    pub fn creative_view(&self) -> Option<&CreativeView> {
+        self.creative.as_ref()
     }
 
     /// The newest session statistics.
@@ -250,6 +260,7 @@ impl WorldView {
             }
             RenderEvent::Hud(hud) => self.hud = *hud,
             RenderEvent::Inventory(view) => self.window_view = *view,
+            RenderEvent::Creative(view) => self.creative = Some(*view),
             RenderEvent::Status(status) => self.status = *status,
             RenderEvent::Ended(reason) => self.ended = Some(reason),
             RenderEvent::Reset => self.reset(target),

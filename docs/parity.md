@@ -102,7 +102,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Inventory | container screens: chest (single, double, ender), crafting table, furnace (progress), dispenser, dropper, hopper | Partial — not verified against vanilla | P4 | `umicraft-ui` screen tests | Screenshot diff pending. |
 | Inventory | container screens: brewing stand, enchanting table, anvil, beacon, villager, horse, book, sign | Missing | P4 | — | Fall back to a chest layout (P4d). |
 | Inventory | item tooltips (name by rarity, enchantments, lore, attack damage, unbreakable) | Partial — not verified against vanilla | P4 | `inventory::tooltip` tests | English table only until a language file loader exists; no potion, book, map, firework or banner lines; solid tooltip border. |
-| Inventory | creative inventory | Missing | P4 | — |  |
+| Inventory | creative inventory (12 tabs, scrolling, search, trash, hotbar, `Creative Inventory Action`) | Partial — not verified against vanilla | P4 | `inventory::creative` and `creative_*` client tests | E opens it in game mode 1. Gaps: player model of the Inventory tab, search caret, tab-name line in the Search tooltip, Shift + double click, middle-button drag, double click outside the Inventory tab, banners without patterns. Search matches `item.<name>.name` only, so variants (granite, red wool) are not found by name until the tooltip names get per-metadata keys. Hotbar number-key swap reports both slots (vanilla resends only one). |
 
 ## Entities
 

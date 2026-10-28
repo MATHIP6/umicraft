@@ -86,6 +86,12 @@ fn translate(key: &str, args: &[String]) -> String {
             return (*english).to_owned();
         }
     }
+    if let Some(name) = item_group_name(key) {
+        return name.to_owned();
+    }
+    if key == "inventory.binSlot" {
+        return "Delete Items".to_owned();
+    }
     if let Some(record) = key
         .strip_prefix("item.record.")
         .and_then(|k| k.strip_suffix(".desc"))
@@ -93,6 +99,26 @@ fn translate(key: &str, args: &[String]) -> String {
         return format!("C418 - {record}");
     }
     humanise(key)
+}
+
+/// The English name of a creative tab (`itemGroup.<label>` in `en_US.lang`).
+fn item_group_name(key: &str) -> Option<&'static str> {
+    let name = match key.strip_prefix("itemGroup.")? {
+        "buildingBlocks" => "Building Blocks",
+        "decorations" => "Decoration Blocks",
+        "redstone" => "Redstone",
+        "transportation" => "Transportation",
+        "misc" => "Miscellaneous",
+        "search" => "Search Items",
+        "food" => "Foodstuffs",
+        "tools" => "Tools",
+        "combat" => "Combat",
+        "brewing" => "Brewing",
+        "materials" => "Materials",
+        "inventory" => "Survival Inventory",
+        _ => return None,
+    };
+    Some(name)
 }
 
 /// The key's most telling segment in title case: `item.diamond_sword.name`
@@ -167,6 +193,11 @@ fn vanilla(color: Color) -> Color {
 fn rgba(rgb: u32, factor: f32) -> Color {
     let channel = |shift: u32| ((rgb >> shift) & 0xFF) as f32 / 255.0 * factor;
     vanilla([channel(16), channel(8), channel(0), 1.0])
+}
+
+/// A vanilla text colour (`0xRRGGBB`) as the UI pass wants it.
+pub(crate) fn text_color(rgb: u32) -> Color {
+    rgba(rgb, 1.0)
 }
 
 /// Draws `lines` in a vanilla tooltip box next to `pointer`.
@@ -401,5 +432,19 @@ mod tests {
             tooltip_origin([100.0, 598.0], [50.0, 20.0], viewport, 2.0)[1],
             600.0 - 20.0 - 12.0
         );
+    }
+
+    #[test]
+    fn creative_tab_names_and_the_bin_slot_have_english_text() {
+        let text = |key: &str| {
+            resolve(&TooltipText::Translation {
+                key: key.to_owned(),
+                args: Vec::new(),
+            })
+        };
+        assert_eq!(text("itemGroup.buildingBlocks"), "Building Blocks");
+        assert_eq!(text("itemGroup.misc"), "Miscellaneous");
+        assert_eq!(text("itemGroup.inventory"), "Survival Inventory");
+        assert_eq!(text("inventory.binSlot"), "Delete Items");
     }
 }

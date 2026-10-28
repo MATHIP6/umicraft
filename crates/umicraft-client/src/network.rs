@@ -225,6 +225,14 @@ pub enum ClientCommand {
         /// The item in the clicked slot.
         clicked_item: ItemStack,
     },
+    /// `Creative Inventory Action` (0x10): the creative screen sets a slot of
+    /// the player window, or drops a stack when `slot` is -1.
+    CreativeInventoryAction {
+        /// The player-window slot, or -1 to drop the stack.
+        slot: i16,
+        /// The new content of the slot.
+        stack: ItemStack,
+    },
 }
 
 impl ClientCommand {
@@ -375,6 +383,12 @@ impl ClientCommand {
                 mode,
                 clicked_item,
             }),
+            Self::CreativeInventoryAction { slot, stack } => {
+                PlayServerbound::CreativeInventoryAction(serverbound::CreativeInventoryAction {
+                    slot,
+                    item: stack,
+                })
+            }
         }
     }
 }

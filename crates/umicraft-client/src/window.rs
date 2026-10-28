@@ -30,12 +30,16 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
 
 use crate::args::Args;
+use crate::creative_input::CreativeInput;
+use crate::creative_layout::CreativeLayout;
+use crate::creative_screen::{draw_creative_overlay, CreativeScene};
 use crate::dials::{DialAnimator, DialInputs};
 use crate::entity_textures::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
 use crate::inventory_input::{Context, InventoryAction, InventoryInput};
+
 use crate::inventory_screen::{draw_inventory_overlay, screen_input};
 use crate::inventory_winit;
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
@@ -47,6 +51,9 @@ use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
+
+#[path = "creative_window.rs"]
+mod creative_window;
 
 const MOUSE_SENSITIVITY: f32 = 0.0022;
 const FRAME_HISTORY: usize = 120;
@@ -118,6 +125,10 @@ struct App {
     chat_input: String,
     /// Whether the player inventory is open (E key toggle).
     inventory_open: bool,
+    /// Whether the creative inventory is open (E key toggle in creative mode).
+    creative_open: bool,
+    /// Turns the mouse and keys on the creative screen into game events.
+    creative_input: CreativeInput,
     /// Whether a server container was displayed on the previous frame.
     container_was_open: bool,
     /// Whether the M4 debug screen is open.
@@ -192,6 +203,8 @@ impl App {
             chat_open: false,
             chat_input: String::new(),
             inventory_open: false,
+            creative_open: false,
+            creative_input: CreativeInput::new(),
             container_was_open: false,
             show_debug_screen: false,
             ui: Ui::new(ui_viewport),
@@ -253,6 +266,10 @@ impl App {
             // MCP `GuiGameOver.keyTyped` does nothing: Escape does not close it.
             return;
         }
+        if self.creative_screen_visible() {
+            self.handle_creative_key(&event);
+            return;
+        }
         if self.inventory_open || self.container_is_open() {
             self.handle_inventory_key(event_loop, event);
             return;
@@ -284,8 +301,7 @@ impl App {
                             self.drop_item = Some(self.drop_kind());
                         }
                         KeyCode::KeyE => {
-                            self.inventory_open = true;
-                            self.capture_mouse(false);
+                            self.open_inventory();
                         }
                         _ => {}
                     }
@@ -381,7 +397,10 @@ impl App {
 
     /// True while a screen takes the keyboard and the mouse from the game.
     fn modal_screen_open(&self) -> bool {
-        self.inventory_open || self.container_is_open() || self.death_screen_visible()
+        self.inventory_open
+            || self.container_is_open()
+            || self.creative_screen_visible()
+            || self.death_screen_visible()
     }
 
     /// Opens or closes the death screen as the health changes
@@ -396,6 +415,7 @@ impl App {
             self.death_started = Some(now);
             self.chat_open = false;
             self.inventory_open = false;
+            self.creative_open = false;
             self.attack_held = false;
             self.capture_mouse(false);
         }
@@ -446,18 +466,24 @@ impl App {
             self.container_was_open = open;
             self.ui_input.clear();
             self.inventory_input.reset();
-            let free = open || self.inventory_open || self.chat_open || self.death_screen_visible();
+            let free = open
+                || self.inventory_open
+                || self.creative_open
+                || self.chat_open
+                || self.death_screen_visible();
             self.capture_mouse(!free);
         }
     }
 
     /// Closes the inventory or container screen.
     fn close_inventory(&mut self) {
-        if self.inventory_open || self.container_is_open() {
+        if self.inventory_open || self.container_is_open() || self.creative_open {
             let _ = self.session.events().try_send(GameEvent::CloseInventory);
         }
         self.inventory_open = false;
+        self.creative_open = false;
         self.inventory_input.reset();
+        self.creative_input.reset();
         self.ui_input.clear();
     }
 
@@ -764,6 +790,21 @@ impl App {
             }
         } else if self.show_debug_screen {
             self.debug_screen.show(&mut self.ui, atlas);
+        } else if self.creative_screen_visible() {
+            if let Some((world, creative)) = self
+                .world
+                .as_ref()
+                .and_then(|world| Some((world, world.creative_view()?)))
+            {
+                let scene = CreativeScene {
+                    window: world.window_view(),
+                    creative,
+                    gui_atlas: self.gui_atlas.as_ref(),
+                    items: ItemView::new(self.items.as_deref(), self.dials.frames()),
+                };
+                let layout = CreativeLayout::new(width, height);
+                draw_creative_overlay(&mut self.ui, atlas, viewport, &layout, &scene);
+            }
         } else if show_inventory {
             let wv = self.world.as_ref().map(|w| w.window_view().clone());
             if let Some(wv) = wv {
@@ -1090,6 +1131,8 @@ impl ApplicationHandler for App {
                 let state = modifiers.state();
                 self.inventory_input
                     .set_modifiers(state.shift_key(), state.control_key());
+                self.creative_input
+                    .set_modifiers(state.shift_key(), state.control_key());
             }
             WindowEvent::CursorMoved { position, .. } => {
                 // Keep the pointer current even while the UI is closed: F2 can
@@ -1097,6 +1140,7 @@ impl ApplicationHandler for App {
                 // click must use the physical cursor, not the initial origin.
                 self.ui_input.pointer_moved(position);
                 self.inventory_pointer(position);
+                self.creative_pointer(position);
                 let show_inventory = self.modal_screen_open();
                 if !self.show_debug_screen && !show_inventory {
                     self.ui_input.clear();
@@ -1107,6 +1151,7 @@ impl ApplicationHandler for App {
                 if self.show_debug_screen || show_inventory {
                     self.ui_input.pointer_button(state, button);
                     self.inventory_button(state, button);
+                    self.creative_button(state, button);
                 } else {
                     match button {
                         MouseButton::Left => {
@@ -1139,6 +1184,7 @@ impl ApplicationHandler for App {
                 let show_inventory = self.modal_screen_open();
                 if self.show_debug_screen || show_inventory {
                     self.ui_input.wheel(delta);
+                    self.creative_wheel(delta);
                 }
             }
             WindowEvent::Ime(Ime::Commit(text)) => {

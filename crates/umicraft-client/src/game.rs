@@ -37,6 +37,7 @@ use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::hand::{HandPose, HandState, SwingEffects};
 use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
+use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::item_use::{drop_item, ItemUse, UseTick};
 use umicraft_game::movement::movement_stats;
@@ -59,11 +60,16 @@ use umicraft_render::{HudState, OutlineBox};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
 use crate::cracks::Crack;
+use crate::creative_input::CreativeEvent;
+use crate::creative_view::CreativeView;
 use crate::error::ClientError;
 use crate::input::InputUpdate;
 use crate::inventory_input::InventoryAction;
 use crate::network::{self, ClientCommand, NetworkConfig};
 
+#[path = "creative_events.rs"]
+mod creative_events;
+use creative_events::apply_creative_event;
 #[path = "inventory_events.rs"]
 mod inventory_events;
 use inventory_events::apply_inventory_action;
@@ -156,6 +162,8 @@ pub enum GameEvent {
     CloseInventory,
     /// A slot interaction of the open inventory or container screen.
     Inventory(InventoryAction),
+    /// An interaction with the creative inventory screen.
+    Creative(CreativeEvent),
     /// The player pressed "Respawn" on the death screen.
     Respawn,
 }
@@ -225,6 +233,8 @@ pub enum RenderEvent {
     Hud(Box<HudState>),
     /// The inventory/container state changed.
     Inventory(Box<WindowView>),
+    /// The creative inventory screen changed.
+    Creative(Box<CreativeView>),
     /// The statistics changed.
     Status(Box<GameStatus>),
     /// The world was replaced; the render thread drops its meshes.
@@ -435,6 +445,8 @@ struct Game {
     entities: EntityStore,
     /// The inventory and container window model.
     windows: WindowManager,
+    /// The state of the creative inventory screen.
+    creative: CreativeScreen,
     /// The session state kept for later consumers (ADR-0020 §3).
     server: ServerState,
 }
@@ -477,6 +489,7 @@ impl Game {
             hud_dirty: true,
             entities: EntityStore::new(),
             windows: WindowManager::new(),
+            creative: CreativeScreen::new(),
             server: ServerState::new(),
         }
     }
@@ -832,6 +845,10 @@ fn handle_event(
         }
         GameEvent::Inventory(action) => {
             apply_inventory_action(game, action, queue, frames);
+            false
+        }
+        GameEvent::Creative(event) => {
+            apply_creative_event(game, event, queue, frames);
             false
         }
         GameEvent::Respawn => {

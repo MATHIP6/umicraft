@@ -308,13 +308,13 @@ clicks.
 a rejected `Confirm Transaction`, `Click Window` from the screens (left, right,
 shift, drag, double click, number keys, Q, creative middle), the armour bar
 from the armour slots, cursor item, tooltips, and the screens of the player
-inventory, chests, crafting table, furnace, dispenser, dropper and hopper.
+inventory, chests, crafting table, furnace, dispenser, dropper and hopper, and
+the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 
 **Remaining before P4 is done**
 - Screens and protocol of the brewing stand, enchanting table (`Enchant Item`),
   anvil (`MC|ItemName`), beacon (`MC|Beacon`), villager (`MC|TrList`,
   `MC|TrSel`), horse inventory, book and quill, sign editing.
-- Creative inventory (tabs, search, `Creative Inventory Action`).
 - Active effects list in the inventory.
 - A live-server session: the 15-minute scripted trace comparison with vanilla.
 - Language file loader for tooltips (English table today).
