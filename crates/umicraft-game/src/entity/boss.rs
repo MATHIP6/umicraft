@@ -11,8 +11,8 @@
 //! max health; `BossStatus.java` renders the health scale and formatted boss
 //! name.
 
-use super::store::EntityStore;
 use super::kind::EntityKind;
+use super::store::EntityStore;
 
 /// Maximum health of an Ender Dragon in Minecraft 1.8.
 pub const DRAGON_MAX_HEALTH: f32 = 200.0;
