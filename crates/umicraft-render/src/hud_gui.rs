@@ -313,8 +313,9 @@ fn wrap_proportional(
 
 fn draw_chat(list: &mut DrawList, state: &HudState, gw: f32, gh: f32, sf: f32, font: &FontAtlas) {
     let open = state.chat_open;
-    let chat_width = 320.0_f32.min(gw - 4.0);
-    let text_max_w = chat_width - 4.0;
+    // `GuiNewChat`: the text wraps at 320 and the band is `l + 4` wide, from x = 2.
+    let text_max_w = 320.0_f32.min(gw - 4.0);
+    let chat_width = text_max_w + 4.0;
 
     let mut rows: Vec<ChatRow> = Vec::new();
     for line in &state.chat {
@@ -349,7 +350,7 @@ fn draw_chat(list: &mut DrawList, state: &HudState, gw: f32, gh: f32, sf: f32, f
         let band_rect = Rect::new(2.0 * sf, line_y * sf, chat_width * sf, 9.0 * sf);
         list.rect(band_rect, [0.0, 0.0, 0.0, row.alpha * 0.5]);
 
-        let mut cur_x = 4.0;
+        let mut cur_x = 2.0;
         let text_y = line_y + 1.0;
         for (run_idx, run) in row.pieces.iter().enumerate() {
             let run_text: String = if run.obfuscated {
@@ -429,32 +430,84 @@ fn draw_chat(list: &mut DrawList, state: &HudState, gw: f32, gh: f32, sf: f32, f
         }
     }
 
+    if open {
+        draw_chat_scrollbar(list, rows.len(), visible.len(), scroll, base_y, sf);
+    }
+
     // Chat input bar
     if let Some(input) = &state.chat_input {
         let input_rect = Rect::new(2.0 * sf, (gh - 14.0) * sf, (gw - 4.0) * sf, 12.0 * sf);
         list.rect(input_rect, [0.0, 0.0, 0.0, 0.5]);
 
+        // `GuiTextField`: 0xE0E0E0 with a shadow, at (4, h - 12).
         let text = &input.text;
+        let ink: Color = [0.878, 0.878, 0.878, 1.0];
         list.text(
             [(4.0 + 1.0) * sf, (gh - 12.0 + 1.0) * sf],
             text,
-            TextStyle::new(sf, [0.25, 0.25, 0.25, 1.0]),
+            TextStyle::new(sf, [0.22, 0.22, 0.22, 1.0]),
         );
-        list.text(
-            [4.0 * sf, (gh - 12.0) * sf],
-            text,
-            TextStyle::new(sf, [1.0, 1.0, 1.0, 1.0]),
-        );
+        list.text([4.0 * sf, (gh - 12.0) * sf], text, TextStyle::new(sf, ink));
 
         if input.caret_visible {
             let caret_idx = input.caret.min(text.len());
-            let caret_offset = font.measure(&text[..caret_idx], 1.0);
-            list.rect(
-                Rect::new((4.0 + caret_offset) * sf, (gh - 12.0) * sf, sf, 9.0 * sf),
-                [1.0, 1.0, 1.0, 1.0],
-            );
+            let caret_x = 4.0 + font.measure(&text[..caret_idx], 1.0);
+            if caret_idx == text.len() {
+                // At the end vanilla draws an underscore, not a bar.
+                list.text(
+                    [(caret_x + 1.0) * sf, (gh - 12.0 + 1.0) * sf],
+                    "_",
+                    TextStyle::new(sf, [0.22, 0.22, 0.22, 1.0]),
+                );
+                list.text(
+                    [caret_x * sf, (gh - 12.0) * sf],
+                    "_",
+                    TextStyle::new(sf, ink),
+                );
+            } else {
+                // `-3092272` = 0xFFD0D0D0, one unit wide, ten tall.
+                list.rect(
+                    Rect::new(caret_x * sf, (gh - 13.0) * sf, sf, 10.0 * sf),
+                    [0.816, 0.816, 0.816, 1.0],
+                );
+            }
         }
     }
+}
+
+/// The scrollbar `GuiNewChat.drawChat` draws at the left of an open chat.
+fn draw_chat_scrollbar(
+    list: &mut DrawList,
+    total: usize,
+    shown: usize,
+    scroll: usize,
+    base_y: f32,
+    sf: f32,
+) {
+    if total == 0 {
+        return;
+    }
+    let (k, j) = (total as f32, shown as f32);
+    let full = k * 10.0;
+    let window = j * 10.0;
+    if (full - window).abs() < f32::EPSILON {
+        return;
+    }
+    let offset = (scroll as f32 * window / k).floor();
+    let thumb = (window * window / full).floor();
+    let alpha = if offset > 0.0 { 170.0 } else { 96.0 } / 255.0;
+    let (top, height) = (base_y - offset - thumb, thumb);
+    // 0xCC3333 while scrolled back, 0x33332A at the bottom.
+    let fill: Color = if scroll > 0 {
+        [0.8, 0.2, 0.2, alpha]
+    } else {
+        [0.2, 0.2, 0.165, alpha]
+    };
+    list.rect(Rect::new(-sf, top * sf, 2.0 * sf, height * sf), fill);
+    list.rect(
+        Rect::new(sf, top * sf, sf, height * sf),
+        [0.8, 0.8, 0.8, alpha],
+    );
 }
 
 fn draw_overlays(
@@ -497,7 +550,8 @@ fn draw_sidebar(
         return;
     }
     let row_h = 9.0;
-    let right = gw - 3.0;
+    // `renderScoreboard`: the bands end at `width - 3 + 2`.
+    let right = gw - 1.0;
 
     let mut inner = font.measure(&sidebar.title, 1.0);
     for (name, score) in &sidebar.lines {
@@ -547,6 +601,16 @@ fn draw_sidebar(
         ),
         [0.0, 0.0, 0.0, 0.376],
     );
+    // The 1-unit strip between the title band and the first row (`0x50000000`).
+    list.rect(
+        Rect::new(
+            (left - 2.0) * sf,
+            (top - 1.0) * sf,
+            (right - left + 2.0) * sf,
+            sf,
+        ),
+        [0.0, 0.0, 0.0, 0.3125],
+    );
     list.text(
         [(left + (inner - title_w) * 0.5) * sf, (top - row_h) * sf],
         &sidebar.title,
@@ -557,7 +621,8 @@ fn draw_sidebar(
 fn draw_title(list: &mut DrawList, title: &TitleView, gw: f32, gh: f32, sf: f32, font: &FontAtlas) {
     let alpha = title.alpha.clamp(0.0, 1.0);
     let color: Color = [1.0, 1.0, 1.0, alpha];
-    let shadow: Color = [0.25, 0.25, 0.25, alpha];
+    // The shadow is one scaled pixel away: 4 units for the title, 2 for the subtitle.
+    let shadow: Color = [0.247, 0.247, 0.247, alpha];
 
     if !title.title.is_empty() {
         let scale = 4.0;
@@ -565,7 +630,7 @@ fn draw_title(list: &mut DrawList, title: &TitleView, gw: f32, gh: f32, sf: f32,
         let x = (gw * 0.5 - w * 0.5) * sf;
         let y = (gh * 0.5 - 40.0) * sf;
         list.text(
-            [x + 2.0 * sf, y + 2.0 * sf],
+            [x + 4.0 * sf, y + 4.0 * sf],
             &title.title,
             TextStyle::new(scale * sf, shadow),
         );
@@ -578,7 +643,7 @@ fn draw_title(list: &mut DrawList, title: &TitleView, gw: f32, gh: f32, sf: f32,
         let x = (gw * 0.5 - w * 0.5) * sf;
         let y = (gh * 0.5 + 10.0) * sf;
         list.text(
-            [x + sf, y + sf],
+            [x + 2.0 * sf, y + 2.0 * sf],
             &title.subtitle,
             TextStyle::new(scale * sf, shadow),
         );
@@ -600,6 +665,18 @@ fn draw_action_bar(
     let x = (gw * 0.5 - w * 0.5) * sf;
     let y = (gh - 72.0) * sf;
     list.text([x, y], text, TextStyle::new(sf, [1.0, 1.0, 1.0, alpha]));
+}
+
+/// `drawStringWithShadow`: the shadow is one scaled pixel away, at a quarter
+/// of the colour (`(c & 0xFCFCFC) >> 2`), with the alpha of the text.
+fn shadowed_text(list: &mut DrawList, at: [f32; 2], text: &str, scale: f32, color: Color) {
+    let shadow = [color[0] * 0.25, color[1] * 0.25, color[2] * 0.25, color[3]];
+    list.text(
+        [at[0] + scale, at[1] + scale],
+        text,
+        TextStyle::new(scale, shadow),
+    );
+    list.text(at, text, TextStyle::new(scale, color));
 }
 
 fn draw_tab_list(
@@ -645,10 +722,12 @@ fn draw_tab_list(
         );
         for (i, line) in header_lines.iter().enumerate() {
             let lw = font.measure(line, 1.0);
-            list.text(
+            shadowed_text(
+                list,
                 [(gw * 0.5 - lw * 0.5) * sf, (y + i as f32 * row_h) * sf],
-                *line,
-                TextStyle::new(sf, [1.0, 1.0, 1.0, 1.0]),
+                line,
+                sf,
+                [1.0; 4],
             );
         }
         y += header_lines.len() as f32 * row_h + 1.0;
@@ -685,7 +764,7 @@ fn draw_tab_list(
         } else {
             [1.0, 1.0, 1.0, 1.0]
         };
-        list.text([cx * sf, cy * sf], &entry.name, TextStyle::new(sf, color));
+        shadowed_text(list, [cx * sf, cy * sf], &entry.name, sf, color);
 
         if let Some(icons) = icons {
             let j = if entry.ping < 0 {
@@ -725,10 +804,12 @@ fn draw_tab_list(
         );
         for (i, line) in footer_lines.iter().enumerate() {
             let lw = font.measure(line, 1.0);
-            list.text(
+            shadowed_text(
+                list,
                 [(gw * 0.5 - lw * 0.5) * sf, (y + i as f32 * row_h) * sf],
-                *line,
-                TextStyle::new(sf, [1.0, 1.0, 1.0, 1.0]),
+                line,
+                sf,
+                [1.0; 4],
             );
         }
     }
