@@ -350,9 +350,9 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 ### P5 — Entities (finishes M8)
 
 **Status:** P5a (module split), P5b (limb swing, body yaw, 3-tick teleport) and
-P5c (hurt, death, arm swing, sleeping, crouch, sword and bow poses) and P5d
-(typed metadata, babies, coats, wool, creeper swell) are done; P5e onwards
-remain. Eating has no third-person pose in 1.8 beyond the held item.
+P5c (hurt, death, arm swing, sleeping, crouch, sword and bow poses) P5d
+(typed metadata, babies, coats, wool, creeper swell) and P5e (profiles,
+skins, capes, name tags) are done; P5f onwards remain. Eating has no third-person pose in 1.8 beyond the held item.
 
 **Features**
 - Animation maths: limb swing (vanilla smoothing), body yaw

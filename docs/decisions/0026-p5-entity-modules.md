@@ -72,6 +72,20 @@ shader needs, so the vertex layout is unchanged: bit 8 hurt tint, bits 9-12
 white flash level, bit 13 dye tint with its colour in bits 14-17. Horse coats
 are composed on first use and cached under `TextureSlot::HorseCoat`.
 
+### P5e additions
+
+`entity/{profile,cape,nametag}.rs` (game), `umicraft-assets/src/profile_textures.rs`
+(parsing, trusted download, worker thread and disk cache),
+`umicraft-client/src/{profiles,nametag_draw}.rs`,
+`entity_render/skins.rs`, `umicraft-model/src/entity/cape.rs`.
+
+Skins and capes are fetched on a worker thread; the render thread asks and
+collects through `entity_render::skins`, and meshing stays pure through the
+`SkinLookup` trait. Textures are keyed `TextureSlot::Skin(n)` / `Cape(n)`.
+Name tags are computed on the game thread (teams change at any time) and
+travel in the snapshot; the render thread only projects and draws them
+through the UI.
+
 ## Consequences
 
 P5a changes no behaviour (same tests, same vertex counts). `game.rs` only

@@ -1,7 +1,7 @@
 # P5 — Entities: plan and architecture
 
-Status: **P5a to P5d are done** (P5a to P5c: commits `18d3a0e` to `29010d0`;
-P5d is described below). P5e onwards remain. The decision record is
+Status: **P5a to P5e are done** (P5a to P5c: commits `18d3a0e` to `29010d0`;
+P5d and P5e are described below). P5f onwards remain. The decision record is
 `docs/decisions/0026-p5-entity-modules.md`; the MCP sources used are listed in
 `docs/sources.md` (rows dated 2026-10-29). The roadmap entry is `ROADMAP.md`
 §P5.
@@ -35,8 +35,8 @@ possible, and tests its maths against the MCP formulas.
 | `anim.rs` | `Animation`: hurt, death, arm swing, `BedPose` |
 | `store.rs` | `EntityStore`: owns the records, applies packets, ticks, snapshots |
 
-`meta/` holds one typed decoder per family (P5d). Planned: `objects.rs`,
-`ride.rs`, `players.rs`.
+`meta/` holds one typed decoder per family (P5d); `profile.rs`, `cape.rs` and
+`nametag.rs` serve P5e. Planned: `objects.rs`, `ride.rs`.
 
 ### Client — `umicraft-client/src/entity_render/`
 
@@ -51,10 +51,12 @@ possible, and tests its maths against the MCP formulas.
 | `hand.rs` | first-person arm |
 | `animals.rs`, `creatures.rs` | families of mobs: babies, coats, wool, collar, slime size, creeper swell |
 | `variants.rs` | texture of a wolf, ocelot, rabbit, villager or horse variant |
+| `skins.rs` | downloads of skins and capes, `SkinLookup` |
 | `specs.rs`, `horse_coat.rs` | texture table; composed horse coats |
 
-Planned: `layers/` (armour, held item, cape, fire, wool, horse gear, …),
-`objects.rs`, `nametag.rs`, `shadow.rs`, `lighting.rs`, `skin_cache.rs`.
+Planned: `layers/` (armour, held item for mobs, fire, horse gear, …),
+`objects.rs`, `shadow.rs`, `lighting.rs`. Name tags are drawn by
+`umicraft-client/src/nametag_draw.rs` through the UI.
 
 ### Model crate — `umicraft-model/src/entity/`
 
@@ -100,6 +102,8 @@ Done:
 
 | P5d | Typed metadata for every class (merged from partial updates, health 0 starts the death fall) and the variants it changes: babies (proper head and body proportions), sheep colour and shearing, wolf tame, angry and collar, ocelot, rabbit, villager professions, horse type and composed coats, wither skeleton, zombie villager, slime size, creeper swell and white flash |
 
+| P5e | Player profiles from the tab list, skins and capes (trusted download on a worker thread, disk cache, slim arms from the profile, 64x32 conversion), skin layers from the metadata, the cape with its swing, name tags with the team rules (prefix, suffix, visibility) |
+
 What P5d stores but does not draw yet: custom name (P5e), potion colour (P8
 particles), arrows in the body, absorption hearts (P6), creeper charge layer,
 pig saddle, horse armour and chest, enderman carried block (all P5f), armour
@@ -109,7 +113,6 @@ Remaining, in order:
 
 | | Content | Notes |
 |---|---|---|
-| P5e | Players: `Player List Item` profiles, skin and cape fetch and cache (`fetch_mojang_skin` exists, unused), slim model from the profile, skin layers from metadata, name tags with team rules | `players.rs`, `skin_cache.rs`, `nametag.rs` |
 | P5f | Layers: armour, third-person held item for mobs, fire overlay, invisibility | `layers/` |
 | P5g | World lighting at the entity position, shadows | `lighting.rs`, `shadow.rs`; replaces the fixed `0x00FF_00FF` light |
 | P5h | Objects: boats, minecarts, TNT, falling blocks, arrows, projectiles, fishing bobber, ender crystal, fireworks, leash knot, item frames, armour stands, XP orbs, paintings, lightning; client-side motion; `Collect Item`; riding and leashes (`Attach Entity`) | `objects.rs`, `ride.rs` |
@@ -120,6 +123,12 @@ Work in small commits, one milestone at a time. Before finishing a milestone:
 `cargo test --workspace`, and update `docs/sources.md`.
 
 ## Known gaps and open questions
+
+- P5e: the download was tested offline only (URL parsing and whitelist, cache,
+  decoding); no live server or Mojang texture host was reached. A tag shows
+  through terrain (vanilla fades it there); the below-name score and riders
+  are not handled; the cape's walking bob is left out (it is zero for remote
+  players); the local player still wears the default skin until P5i.
 
 - P5d approximations: a foal is the whole horse at half size (the vanilla model
   shrinks it part by part); slimes ignore the squish; wolves and ocelots do not
