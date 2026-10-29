@@ -17,8 +17,8 @@ use umicraft_game::chat_input::{push_sent, ChatInput, TabOutcome};
 use umicraft_game::inventory::{drag_preview, DragPreview, WindowView, HOTBAR_START};
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
-    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudLayout, HudState, NoIcons,
-    Overlay, RenderEnvironment, Renderer, SkyState,
+    draw_debug_only, draw_hud, draw_hud_gui, gui_scale, Camera, ChatInputView, HudLayout, HudState,
+    NoIcons, Overlay, RenderEnvironment, Renderer, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
@@ -1050,6 +1050,7 @@ impl App {
                 &world.window_view().player_slots,
                 ItemView::new(self.items.as_deref(), self.dials.frames()),
                 (width, height),
+                textured_hud,
             );
             if !matches!(screen, Screen::Inventory | Screen::Creative) {
                 let entities = world.entities(Instant::now());
@@ -1320,30 +1321,55 @@ fn held_stack(world: &WorldView) -> Option<&umicraft_protocol::packets::play::It
 }
 
 /// Draws the item icons, counts and durability bars of the hotbar over the
-/// HUD frame, centred in each of its slots.
+/// HUD frame. `textured` selects the vanilla layout of the `widgets.png` HUD;
+/// otherwise the items follow the placeholder HUD.
 fn draw_hotbar_items(
     ui: &mut Ui,
     atlas: &FontAtlas,
     player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
     items: ItemView<'_>,
     (width, height): (u32, u32),
+    textured: bool,
 ) {
-    let layout = HudLayout::new(width, height);
-    let icon = 16.0 * layout.scale();
     for (index, stack) in player_slots[HOTBAR_START..HOTBAR_START + 9]
         .iter()
         .enumerate()
     {
         let Some(stack) = stack else { continue };
-        let slot = layout.slot_rect(index);
-        let cell = Rect::new(
-            slot.x + (slot.width - icon) * 0.5,
-            slot.y + (slot.height - icon) * 0.5,
-            icon,
-            icon,
-        );
+        let cell = if textured {
+            vanilla_hotbar_cell(index, (width, height))
+        } else {
+            placeholder_hotbar_cell(index, (width, height))
+        };
         draw_item(ui.draw(), atlas, cell, &slot_item(items, stack));
     }
+}
+
+/// The 16×16 item cell of hotbar slot `index` in the vanilla HUD: the hotbar
+/// starts at `W/2 - 91` and its items 3 GUI pixels in, 20 apart, 19 above the
+/// bottom (MCP `GuiIngame.renderHotbarItem`).
+fn vanilla_hotbar_cell(index: usize, (width, height): (u32, u32)) -> Rect {
+    let scale = gui_scale(width, height) as f32;
+    let (gui_width, gui_height) = (width as f32 / scale, height as f32 / scale);
+    Rect::new(
+        (gui_width * 0.5 - 88.0 + index as f32 * 20.0) * scale,
+        (gui_height - 19.0) * scale,
+        16.0 * scale,
+        16.0 * scale,
+    )
+}
+
+/// The item cell of hotbar slot `index`, centred in the placeholder HUD slot.
+fn placeholder_hotbar_cell(index: usize, (width, height): (u32, u32)) -> Rect {
+    let layout = HudLayout::new(width, height);
+    let icon = 16.0 * layout.scale();
+    let slot = layout.slot_rect(index);
+    Rect::new(
+        slot.x + (slot.width - icon) * 0.5,
+        slot.y + (slot.height - icon) * 0.5,
+        icon,
+        icon,
+    )
 }
 
 /// The key on the other side of the keyboard that counts as the same
@@ -1581,5 +1607,15 @@ mod tests {
         assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, true));
         assert!(!is_debug_toggle(KeyCode::F2, ElementState::Released, false));
         assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
+    }
+
+    #[test]
+    fn hotbar_items_sit_inside_the_vanilla_hotbar_slots() {
+        // 1920x1080 is GUI scale 4 (the placeholder HUD caps at 3), where the
+        // items used to drift away from their slots.
+        let first = vanilla_hotbar_cell(0, (1920, 1080));
+        let last = vanilla_hotbar_cell(8, (1920, 1080));
+        assert_eq!((first.x, first.y, first.width), (608.0, 1004.0, 64.0));
+        assert_eq!(last.x - first.x, 8.0 * 20.0 * 4.0);
     }
 }
