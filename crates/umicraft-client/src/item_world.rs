@@ -122,6 +122,11 @@ fn push_dropped_item(
 
 /// The frame of the right hand of a player in the world, in which the held
 /// item is placed (MCP `LayerHeldItem`, up to the item's own pose).
+///
+/// Vanilla places the item inside the frame of the model, which is drawn
+/// through `scale(-1, -1, 1)`; the y half is the y flip of the arm chain and
+/// the x half is the model mirror, applied once on the outside. The item is
+/// *not* mirrored back: its display transforms are authored for that frame.
 fn hand_frame(entity: &EntityRenderSnapshot, torch: bool) -> Mat4 {
     let (humanoid, _) = posed_player(entity);
     let arm = humanoid
@@ -161,11 +166,8 @@ fn push_player_held_item(
     let Some((model, quads)) = sprite_model(resources, held.item_id, held.damage) else {
         return;
     };
-    // The arm is in the mirrored model space (see `x_mirror`); the item is
-    // not, so the chain is conjugated by the mirror.
-    let pose = hand_frame(entity, is_torch(held.item_id))
-        * held_pose(model, DisplayContext::ThirdPerson)
-        * x_mirror();
+    let pose =
+        hand_frame(entity, is_torch(held.item_id)) * held_pose(model, DisplayContext::ThirdPerson);
     let tints = resources.tints(held.item_id, held.damage, held.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
