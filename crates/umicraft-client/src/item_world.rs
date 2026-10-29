@@ -120,6 +120,28 @@ fn push_dropped_item(
     }
 }
 
+/// The frame of the right hand of a player in the world, in which the held
+/// item is placed (MCP `LayerHeldItem`, up to the item's own pose).
+fn hand_frame(entity: &EntityRenderSnapshot, torch: bool) -> Mat4 {
+    let (humanoid, _) = posed_player(entity);
+    let arm = humanoid
+        .right_arm
+        .transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)))
+        * Mat4::from_scale(Vec3::splat(16.0))
+        * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
+    let mut hand = Mat4::from_translation(Vec3::new(-0.0625, 0.4375, 0.0625));
+    if torch {
+        hand *= Mat4::from_translation(Vec3::new(0.0, 0.1875, -0.3125))
+            * Mat4::from_rotation_x(20.0_f32.to_radians())
+            * Mat4::from_rotation_y(45.0_f32.to_radians())
+            * Mat4::from_scale(Vec3::new(-0.375, -0.375, 0.375));
+    }
+    if entity.flags.is_sneaking() {
+        hand *= Mat4::from_translation(Vec3::new(0.0, 0.203_125, 0.0));
+    }
+    body_matrix(entity) * x_mirror() * arm * hand
+}
+
 /// Appends the item in a remote player's right hand
 /// (MCP `LayerHeldItem`).
 ///
@@ -139,28 +161,11 @@ fn push_player_held_item(
     let Some((model, quads)) = sprite_model(resources, held.item_id, held.damage) else {
         return;
     };
-    let (humanoid, _) = posed_player(entity);
-    let sneaking = entity.flags.is_sneaking();
-    let arm = humanoid
-        .right_arm
-        .transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)))
-        * Mat4::from_scale(Vec3::splat(16.0))
-        * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
-    let mut hand = Mat4::from_translation(Vec3::new(-0.0625, 0.4375, 0.0625));
-    if is_torch(held.item_id) {
-        hand *= Mat4::from_translation(Vec3::new(0.0, 0.1875, -0.3125))
-            * Mat4::from_rotation_x(20.0_f32.to_radians())
-            * Mat4::from_rotation_y(45.0_f32.to_radians())
-            * Mat4::from_scale(Vec3::new(-0.375, -0.375, 0.375));
-    }
-    if sneaking {
-        hand *= Mat4::from_translation(Vec3::new(0.0, 0.203_125, 0.0));
-    }
-    let pose = body_matrix(entity)
-        * arm
-        * x_mirror()
-        * hand
-        * held_pose(model, DisplayContext::ThirdPerson);
+    // The arm is in the mirrored model space (see `x_mirror`); the item is
+    // not, so the chain is conjugated by the mirror.
+    let pose = hand_frame(entity, is_torch(held.item_id))
+        * held_pose(model, DisplayContext::ThirdPerson)
+        * x_mirror();
     let tints = resources.tints(held.item_id, held.damage, held.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
@@ -588,6 +593,18 @@ mod player_render_tests {
             frame_rotation: 0,
             flags: EntityFlags::new(if sneaking { 0x02 } else { 0 }, 0),
         }
+    }
+
+    #[test]
+    fn the_item_is_in_the_right_hand_of_the_player() {
+        // A player facing south (yaw 0) has the right hand to the west (-X).
+        let mut entity = player(1, 0.0, 276, false);
+        entity.yaw = 0.0;
+        entity.body_yaw = 0.0;
+        entity.head_yaw = 0.0;
+        entity.limb_swing_amount = 0.0;
+        let hand = hand_frame(&entity, false).transform_point3(Vec3::ZERO);
+        assert!(hand.x < entity.position.x - 0.2, "{hand}");
     }
 
     /// Renders two players holding a sword and a torch; set
