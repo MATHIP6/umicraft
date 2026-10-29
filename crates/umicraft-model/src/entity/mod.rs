@@ -6,6 +6,7 @@
 //! ([`ModelVertex`], [`ModelBox`], [`ModelPart`]) and the texture-slot
 //! registry ([`TextureSlot`], [`MeshLayer`]) are defined here.
 
+mod armor;
 mod bat;
 mod blaze;
 mod cape;
@@ -34,6 +35,7 @@ mod villager;
 mod wither;
 mod wolf;
 
+pub use armor::ArmorMaterial;
 pub use bat::BatModel;
 pub use blaze::BlazeModel;
 pub use cape::CapeModel;
@@ -42,12 +44,12 @@ pub use creeper::CreeperModel;
 pub use dragon::DragonModel;
 pub use enderman::EndermanModel;
 pub use endermite::EndermiteModel;
-pub use ghast::GhastModel;
+pub use ghast::{GhastModel, RENDER_SCALE as GHAST_SCALE};
 pub use guardian::GuardianModel;
 pub use horse::HorseModel;
 pub use humanoid::HumanoidModel;
 pub use iron_golem::IronGolemModel;
-pub use ocelot::OcelotModel;
+pub use ocelot::{OcelotModel, OcelotPose};
 pub use pose::{ArmPose, HumanoidPose};
 pub use quadruped::QuadrupedModel;
 pub use rabbit::RabbitModel;
@@ -475,6 +477,14 @@ pub enum TextureSlot {
     Cow,
     /// Pig mob texture.
     Pig,
+    /// The saddle drawn over a pig (`pig_saddle.png`).
+    PigSaddle,
+    /// The red mushroom block texture (`mushroom_red.png`), drawn on a mooshroom.
+    MushroomRed,
+    /// The ghast while it charges a fireball (`ghast_shooting.png`).
+    GhastShooting,
+    /// A strip of flames, `0` for `fire_layer_0` and `1` for `fire_layer_1`.
+    Fire(u8),
     /// Sheep base body texture (`sheep.png`).
     Sheep,
     /// Sheep wool overlay texture (`sheep_fur.png`).
@@ -584,6 +594,37 @@ pub enum TextureSlot {
     /// A horse coat composed from a base colour and a marking, keyed by the
     /// metadata variant (`base | marking << 8`).
     HorseCoat(u16),
+    /// The armour texture of a material; `leggings` picks `layer_2`.
+    Armor {
+        /// The material.
+        material: ArmorMaterial,
+        /// Whether it is the leggings texture (`layer_2`).
+        leggings: bool,
+    },
+    /// The `leather` texture multiplied by a dye colour (`0xRRGGBB`).
+    LeatherArmor {
+        /// Whether it is the leggings texture (`layer_2`).
+        leggings: bool,
+        /// The dye colour.
+        color: u32,
+    },
+    /// The undyed leather overlay texture.
+    LeatherOverlay {
+        /// Whether it is the leggings texture (`layer_2`).
+        leggings: bool,
+    },
+}
+
+impl TextureSlot {
+    /// Whether this is an armour texture, which stays visible on an invisible
+    /// entity.
+    #[must_use]
+    pub const fn is_armor(self) -> bool {
+        matches!(
+            self,
+            Self::Armor { .. } | Self::LeatherArmor { .. } | Self::LeatherOverlay { .. }
+        )
+    }
 }
 
 /// A mesh layer tagged with its texture slot.

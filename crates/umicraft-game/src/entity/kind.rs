@@ -116,6 +116,20 @@ impl EntityKind {
         }
     }
 
+    /// The width of the hitbox in blocks (MCP `Entity.width`), which sizes the
+    /// flames of a burning entity. Unlisted kinds count as player-wide.
+    #[must_use]
+    pub const fn width(self) -> f32 {
+        match self {
+            Self::Cow | Self::Mooshroom | Self::Pig | Self::Sheep => 0.9,
+            Self::Chicken => 0.4,
+            Self::Spider | Self::IronGolem | Self::Horse => 1.4,
+            Self::CaveSpider | Self::Snowman => 0.7,
+            Self::Giant => 3.6,
+            _ => 0.6,
+        }
+    }
+
     /// True for living entities, which have a body yaw and swing their limbs;
     /// false for the objects (dropped items, arrows, item frames).
     #[must_use]

@@ -12,7 +12,7 @@ use glam::{Mat4, Vec3};
 use umicraft_assets::skin::{
     procedural_cow_texture, procedural_fallback_skin, procedural_zombie_skin, SkinModel,
 };
-use umicraft_game::entity::{EntityFlags, EntityId, EntityKind, EntityRenderSnapshot};
+use umicraft_game::entity::{EntityFlags, EntityId, EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::{
     emit_block_item_cube, HumanoidModel, HumanoidPose, ModelVertex, QuadrupedModel,
 };
@@ -442,6 +442,7 @@ fn make_snapshot(
         profile: None,
         uuid,
         held: None,
+        armor: [None, None, None, None],
         item: None,
         age: 0.0,
         frame_direction: 0,
@@ -954,10 +955,10 @@ pub static MOB_CATALOG: &[MobCatalogEntry] = &[
         display_name: "Ghast",
         kind: EntityKind::Ghast,
         uuid: None,
-        world_y_offset: 2.0,
-        camera_dist: 9.0,
-        camera_y: 3.50,
-        camera_pitch: -0.08,
+        world_y_offset: 0.0,
+        camera_dist: 17.0,
+        camera_y: 2.0,
+        camera_pitch: -0.02,
         yaw_deg: 25.0,
     },
     MobCatalogEntry {
@@ -1014,6 +1015,40 @@ pub fn find_mob(query: &str) -> Option<&'static MobCatalogEntry> {
     })
 }
 
+/// What a mob wears in the dump: nothing, armour, or flames.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Look {
+    Plain,
+    Armored,
+    Burning,
+    Chested,
+    Sitting,
+}
+
+/// A different set of armour per mob, to see every material in the dump:
+/// diamond, iron, gold, chainmail, then red-dyed leather.
+fn demo_armor(index: usize) -> [Option<EntityItem>; 4] {
+    const FIRST_ITEM: [i16; 5] = [310, 306, 314, 302, 298];
+    let first = FIRST_ITEM[index % FIRST_ITEM.len()];
+    // Item ids run helmet, chestplate, leggings, boots; the slots run boots first.
+    let piece = |offset: i16| {
+        let leather = first == 298;
+        Some(EntityItem {
+            item_id: first + offset,
+            damage: 0,
+            count: 1,
+            nbt: leather.then(|| std::sync::Arc::from(RED_LEATHER)),
+        })
+    };
+    [piece(3), piece(2), piece(1), piece(0)]
+}
+
+/// NBT of `{display: {color: 0xCC2222}}`.
+const RED_LEATHER: &[u8] = &[
+    10, 0, 0, 10, 0, 7, b'd', b'i', b's', b'p', b'l', b'a', b'y', 3, 0, 5, b'c', b'o', b'l', b'o',
+    b'r', 0, 0xCC, 0x22, 0x22, 0, 0,
+];
+
 /// Renders every single entity in [`MOB_CATALOG`] one by one into the given directory.
 ///
 /// # Errors
@@ -1048,10 +1083,84 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
         "CLEAN-ROOM PROCEDURAL TEXTURES"
     };
 
-    for (index, mob) in MOB_CATALOG.iter().enumerate() {
+    // The dump camera looks towards +Z, so the flames face -Z.
+    entity_textures.set_view_yaw(std::f32::consts::PI);
+    let variants = MOB_CATALOG
+        .iter()
+        .enumerate()
+        .flat_map(|(index, mob)| {
+            let armored = matches!(
+                mob.kind,
+                EntityKind::Player
+                    | EntityKind::Zombie
+                    | EntityKind::Skeleton
+                    | EntityKind::ZombiePigman
+                    | EntityKind::Giant
+                    | EntityKind::Pig
+                    | EntityKind::Horse
+            );
+            let burning = matches!(
+                mob.kind,
+                EntityKind::Zombie | EntityKind::Cow | EntityKind::Creeper | EntityKind::Giant
+            );
+            let chested = mob.kind == EntityKind::Horse;
+            let sitting = matches!(mob.kind, EntityKind::Wolf | EntityKind::Ocelot);
+            [(index, mob, Look::Plain)]
+                .into_iter()
+                .chain(armored.then_some((index, mob, Look::Armored)))
+                .chain(burning.then_some((index, mob, Look::Burning)))
+                .chain(chested.then_some((index, mob, Look::Chested)))
+                .chain(sitting.then_some((index, mob, Look::Sitting)))
+        })
+        .collect::<Vec<_>>();
+    for (index, mob, look) in variants {
         let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
         let mut snapshot = make_snapshot((index + 1) as i32, mob.kind, pos, mob.uuid);
         face_the_camera(&mut snapshot, mob.yaw_deg);
+        if look == Look::Burning {
+            snapshot.flags = EntityFlags::new(0x01, 0x7F);
+        }
+        if look == Look::Sitting {
+            use umicraft_game::entity::meta::{OcelotMeta, Variant, WolfMeta};
+            snapshot.meta.variant = match mob.kind {
+                EntityKind::Wolf => Variant::Wolf(WolfMeta {
+                    sitting: true,
+                    tamed: true,
+                    ..WolfMeta::default()
+                }),
+                _ => Variant::Ocelot(OcelotMeta {
+                    sitting: true,
+                    tamed: true,
+                    ..OcelotMeta::default()
+                }),
+            };
+        }
+        if look == Look::Chested {
+            snapshot.meta.variant = umicraft_game::entity::meta::Variant::Horse(
+                umicraft_game::entity::meta::HorseMeta {
+                    kind: 1,
+                    variant: 0,
+                    armor: 0,
+                    flags: 4 | 8,
+                },
+            );
+        }
+        if look == Look::Armored {
+            snapshot.armor = demo_armor(index);
+            if mob.kind == EntityKind::Horse {
+                snapshot.meta.variant = umicraft_game::entity::meta::Variant::Horse(
+                    umicraft_game::entity::meta::HorseMeta {
+                        kind: 0,
+                        variant: 0x0102,
+                        armor: 3,
+                        flags: 4,
+                    },
+                );
+            }
+            if mob.kind == EntityKind::Pig {
+                snapshot.meta.variant = umicraft_game::entity::meta::Variant::Pig { saddled: true };
+            }
+        }
 
         let batches = mesh_entities(&[snapshot.clone()]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();
@@ -1075,7 +1184,14 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
 
         renderer.render(&camera, &overlay)?;
         let image = renderer.read_pixels()?;
-        let out_path = output_dir.join(format!("{}.png", mob.id));
+        let suffix = match look {
+            Look::Plain => "",
+            Look::Armored => "_armored",
+            Look::Burning => "_burning",
+            Look::Chested => "_chested",
+            Look::Sitting => "_sitting",
+        };
+        let out_path = output_dir.join(format!("{}{suffix}.png", mob.id));
         write_png(&out_path, &image.rgba, image.width, image.height)?;
 
         println!(

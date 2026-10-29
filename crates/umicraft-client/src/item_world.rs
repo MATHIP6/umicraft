@@ -27,6 +27,8 @@ use umicraft_world::LightLevel;
 
 use crate::item_icons::ItemResources;
 
+mod carried;
+mod head;
 mod held;
 
 /// Hover height offset per unit of the ground scale (`RenderEntityItem`).
@@ -67,6 +69,8 @@ impl WorldItems {
                 (_, _, Some(held)) => held::push(&mut self.layers, entity, held, items),
                 _ => {}
             }
+            head::push(&mut self.layers, entity, items);
+            carried::push(&mut self.layers, entity, items);
         }
         &self.layers
     }
@@ -453,6 +457,7 @@ mod render_tests {
             age: 3.0,
             frame_direction: 0,
             frame_rotation: 0,
+            armor: [None, None, None, None],
             use_ticks: 0,
             fishing: false,
             flags: EntityFlags::default(),
@@ -557,6 +562,7 @@ mod player_render_tests {
                 count: 1,
                 nbt: None,
             }),
+            armor: [None, None, None, None],
             item: None,
             age: 0.0,
             frame_direction: 0,
@@ -745,6 +751,7 @@ mod glint_render_tests {
             age: 3.0,
             frame_direction: 0,
             frame_rotation: 0,
+            armor: [None, None, None, None],
             use_ticks: 0,
             fishing: false,
             flags: EntityFlags::default(),

@@ -68,6 +68,8 @@ pub struct EntityFrameData {
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
     pub held: Option<EntityItem>,
+    /// The worn armour, boots first.
+    pub armor: [Option<EntityItem>; 4],
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use.
@@ -123,6 +125,7 @@ impl EntityFrameData {
             profile: self.profile.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
+            armor: self.armor.clone(),
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.fishing,
@@ -180,6 +183,8 @@ pub struct EntityRenderSnapshot {
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
     pub held: Option<EntityItem>,
+    /// The worn armour, boots first.
+    pub armor: [Option<EntityItem>; 4],
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use: picks the bow drawing model.
@@ -224,6 +229,7 @@ impl EntityRenderSnapshot {
             uuid: None,
             held: None,
             item: None,
+            armor: [None, None, None, None],
             use_ticks: 0,
             fishing: false,
             age: 0.0,

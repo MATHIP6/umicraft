@@ -72,6 +72,8 @@ pub struct EntityRecord {
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
     pub held: Option<EntityItem>,
+    /// The worn armour, boots first (`Entity Equipment` slots 1 to 4).
+    pub armor: [Option<EntityItem>; 4],
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use (MCP `getItemInUseDuration` of
@@ -144,6 +146,7 @@ impl EntityRecord {
             profile: self.profile.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
+            armor: self.armor.clone(),
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.bobber.is_some(),
@@ -184,6 +187,7 @@ impl EntityRecord {
             uuid: None,
             held: None,
             item: None,
+            armor: [None, None, None, None],
             use_ticks: 0,
             bobber: None,
             age_ticks: 0,

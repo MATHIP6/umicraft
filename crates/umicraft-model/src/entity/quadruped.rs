@@ -115,6 +115,18 @@ impl QuadrupedModel {
     /// Creates a pig model (64×32 texture) following MCP `ModelPig.java` / `ModelQuadruped.java`.
     #[must_use]
     pub fn pig() -> Self {
+        Self::pig_shell(0.0)
+    }
+
+    /// The pig saddle layer: the pig model inflated by half a pixel
+    /// (MCP `LayerSaddle`, `new ModelPig(0.5F)`).
+    #[must_use]
+    pub fn pig_saddle() -> Self {
+        Self::pig_shell(0.5)
+    }
+
+    /// The pig model with every box inflated by `grow` pixels.
+    fn pig_shell(grow: f32) -> Self {
         let tex = [64.0, 32.0];
 
         let head = ModelPart::new([0.0, 12.0, -6.0])
@@ -123,14 +135,14 @@ impl QuadrupedModel {
                 [8.0, 8.0, 8.0],
                 [0.0, 0.0],
                 tex,
-                0.0,
+                grow,
             ))
             .with_box(ModelBox::new(
                 [-2.0, -3.0, -9.0],
                 [4.0, 3.0, 1.0],
                 [16.0, 16.0],
                 tex,
-                0.0,
+                grow,
             ));
 
         let mut body = ModelPart::new([0.0, 7.0, 2.0]).with_box(ModelBox::new(
@@ -138,7 +150,7 @@ impl QuadrupedModel {
             [10.0, 16.0, 8.0],
             [28.0, 8.0],
             tex,
-            0.0,
+            grow,
         ));
         body.rotation[0] = PI / 2.0;
 
@@ -147,28 +159,28 @@ impl QuadrupedModel {
             [4.0, 6.0, 4.0],
             [0.0, 16.0],
             tex,
-            0.0,
+            grow,
         ));
         let leg2 = ModelPart::new([3.0, 6.0, 7.0]).with_box(ModelBox::new(
             [-2.0, -6.0, -2.0],
             [4.0, 6.0, 4.0],
             [0.0, 16.0],
             tex,
-            0.0,
+            grow,
         ));
         let leg3 = ModelPart::new([-3.0, 6.0, -5.0]).with_box(ModelBox::new(
             [-2.0, -6.0, -2.0],
             [4.0, 6.0, 4.0],
             [0.0, 16.0],
             tex,
-            0.0,
+            grow,
         ));
         let leg4 = ModelPart::new([3.0, 6.0, -5.0]).with_box(ModelBox::new(
             [-2.0, -6.0, -2.0],
             [4.0, 6.0, 4.0],
             [0.0, 16.0],
             tex,
-            0.0,
+            grow,
         ));
 
         Self {

@@ -16,10 +16,13 @@
 //! 3. Add the kind to the matching family builder in [`mobs`].
 
 mod animals;
+mod armor;
 mod creatures;
+mod fire;
 mod hand;
 mod horse_coat;
 mod mobs;
+mod mushrooms;
 mod player;
 mod pose;
 mod skins;
@@ -47,13 +50,14 @@ pub(crate) use transform::{body_matrix, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(snapshots, &skins::NoSkins)
+    mesh_entities_with(snapshots, &skins::NoSkins, 0.0)
 }
 
 /// [`mesh_entities`] with the downloaded skins and capes of players.
 fn mesh_entities_with(
     snapshots: &[EntityRenderSnapshot],
     skins: &dyn skins::SkinLookup,
+    view_yaw: f32,
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
     let mut batches: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
@@ -70,6 +74,7 @@ fn mesh_entities_with(
                     .map(|vertex| transform_vertex(vertex, &matrix, light)),
             );
         }
+        fire::add_fire(&mut batches, ent, view_yaw);
     }
 
     batches
@@ -183,6 +188,7 @@ mod tests {
                 profile: None,
                 uuid: Some([0; 16]),
                 held: None,
+                armor: [None, None, None, None],
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -213,6 +219,7 @@ mod tests {
                 profile: None,
                 uuid: None,
                 held: None,
+                armor: [None, None, None, None],
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -243,6 +250,7 @@ mod tests {
                 profile: None,
                 uuid: None,
                 held: None,
+                armor: [None, None, None, None],
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -274,6 +282,7 @@ mod tests {
                 profile: None,
                 uuid: None,
                 held: None,
+                armor: [None, None, None, None],
                 item: None,
                 age: 0.0,
                 frame_direction: 0,

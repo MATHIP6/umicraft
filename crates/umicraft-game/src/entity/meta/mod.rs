@@ -79,6 +79,11 @@ pub enum Variant {
     },
     /// Enderman carried block and scream.
     Enderman(EndermanMeta),
+    /// Ghast charging a fireball (entry 16).
+    Ghast {
+        /// True while the ghast attacks: its face shows the shooting texture.
+        attacking: bool,
+    },
     /// Armour stand flags and pose.
     ArmorStand(ArmorStandMeta),
 }
@@ -105,6 +110,7 @@ impl EntityMeta {
                 monsters::apply_zombie(&mut variant, metadata);
             }
             EntityKind::Enderman => monsters::apply_enderman(&mut variant, metadata),
+            EntityKind::Ghast => monsters::apply_ghast(&mut variant, metadata),
             EntityKind::Villager => monsters::apply_villager(&mut variant, metadata),
             EntityKind::ArmorStand => armor_stand::apply(&mut variant, metadata),
             _ => {}

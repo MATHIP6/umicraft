@@ -8,7 +8,7 @@ use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{
     BatModel, BlazeModel, CreeperModel, DragonModel, EndermiteModel, GhastModel, GuardianModel,
-    SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot, WitherModel,
+    SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot, WitherModel, GHAST_SCALE,
 };
 
 use super::mobs::{one, EntityLayer, Pose};
@@ -68,8 +68,18 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         }
         EntityKind::Ghast => {
             let mut model = GhastModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Ghast, model.emit_mesh())
+            model.set_angles(ent.age);
+            let mut mesh = model.emit_mesh();
+            scale_mesh(&mut mesh, GHAST_SCALE);
+            let attacking = matches!(ent.meta.variant, Variant::Ghast { attacking: true });
+            one(
+                if attacking {
+                    TextureSlot::GhastShooting
+                } else {
+                    TextureSlot::Ghast
+                },
+                mesh,
+            )
         }
         EntityKind::Guardian => {
             let mut model = GuardianModel::new();

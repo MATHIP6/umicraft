@@ -5,7 +5,7 @@
 //!
 //! The table lives in `specs`; horse coats are composed on first use.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use glam::Mat4;
@@ -16,6 +16,7 @@ use umicraft_game::hand::HandPose;
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, Renderer};
 
+use super::armor::armor_texture;
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
@@ -73,6 +74,8 @@ pub struct EntityTextures {
     jar: Option<ClientJar>,
     /// The skins and capes of players.
     skins: RefCell<SkinSet>,
+    /// The camera yaw the flames of burning entities face.
+    view_yaw: Cell<f32>,
 }
 
 impl EntityTextures {
@@ -89,7 +92,14 @@ impl EntityTextures {
             textures: RefCell::new(textures),
             jar,
             skins: RefCell::new(SkinSet::new()),
+            view_yaw: Cell::new(0.0),
         }
+    }
+
+    /// Sets the camera yaw (radians, `umicraft_render::Camera` convention)
+    /// that the flames of burning entities face.
+    pub fn set_view_yaw(&self, yaw: f32) {
+        self.view_yaw.set(yaw);
     }
 
     /// Uploads the first-person hand, or hides it when `pose` shows no arm.
@@ -110,7 +120,7 @@ impl EntityTextures {
         self.skins
             .borrow_mut()
             .collect(renderer, &mut self.textures.borrow_mut());
-        let batches = mesh_entities_with(snapshots, self);
+        let batches = mesh_entities_with(snapshots, self, self.view_yaw.get());
         self.compose_missing_coats(batches.keys(), renderer);
         let textures = self.textures.borrow();
         let pairs: Vec<_> = batches
@@ -134,13 +144,18 @@ impl EntityTextures {
         renderer: &Renderer,
     ) {
         for slot in slots {
-            let TextureSlot::HorseCoat(variant) = *slot else {
-                continue;
-            };
             if self.textures.borrow().contains_key(slot) {
                 continue;
             }
-            let (rgba, w, h) = horse_coat(self.jar.as_ref(), variant);
+            let (rgba, w, h) = match *slot {
+                TextureSlot::HorseCoat(variant) => horse_coat(self.jar.as_ref(), variant),
+                // A missing armour texture leaves the piece undrawn.
+                TextureSlot::Armor { .. }
+                | TextureSlot::LeatherArmor { .. }
+                | TextureSlot::LeatherOverlay { .. } => armor_texture(self.jar.as_ref(), *slot)
+                    .unwrap_or((vec![0; 64 * 32 * 4], 64, 32)),
+                _ => continue,
+            };
             let texture = renderer.create_entity_texture(&rgba, w, h);
             self.textures.borrow_mut().insert(*slot, texture);
         }

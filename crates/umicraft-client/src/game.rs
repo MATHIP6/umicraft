@@ -1483,6 +1483,12 @@ fn apply_net_event(
                     EntityId(packet.entity_id),
                     EntityItem::from_stack(&packet.item),
                 );
+            } else {
+                game.entities.set_armor(
+                    EntityId(packet.entity_id),
+                    packet.slot,
+                    EntityItem::from_stack(&packet.item),
+                );
             }
         }
         PlayEvent::SpawnPlayer(p) => {

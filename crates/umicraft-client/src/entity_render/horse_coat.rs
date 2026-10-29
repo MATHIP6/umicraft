@@ -26,6 +26,14 @@ const MARKINGS: [&str; 5] = [
     "horse_markings_blackdots",
 ];
 
+/// Armour textures by the armour index (`0` none, `1` iron, `2` gold, `3` diamond).
+const ARMORS: [&str; 4] = [
+    "",
+    "horse_armor_iron",
+    "horse_armor_gold",
+    "horse_armor_diamond",
+];
+
 /// The jar path of a horse texture.
 fn path(name: &str) -> String {
     format!("assets/minecraft/textures/entity/horse/{name}.png")
@@ -35,7 +43,7 @@ fn path(name: &str) -> String {
 /// first entry, as the modulo of `EntityHorse.getHorseTexturePaths` does.
 fn names(variant: u16) -> (&'static str, &'static str) {
     let base = BASES[usize::from(variant & 255) % BASES.len()];
-    let marking = MARKINGS[usize::from(variant >> 8) % MARKINGS.len()];
+    let marking = MARKINGS[usize::from((variant >> 8) & 0xF) % MARKINGS.len()];
     (base, marking)
 }
 
@@ -71,6 +79,19 @@ pub(super) fn horse_coat(jar: Option<&ClientJar>, variant: u16) -> (Vec<u8>, u32
             if (w, h) == (width, height) {
                 composite(&mut rgba, &over);
             }
+        }
+    }
+    // MCP `EntityHorse.setHorseTexturePaths`: the armour is the third layer.
+    if let Some(armor) = ARMORS
+        .get(usize::from(variant >> 12))
+        .filter(|name| !name.is_empty())
+    {
+        let armor_path = format!("assets/minecraft/textures/entity/horse/armor/{armor}.png");
+        let over = jar
+            .and_then(|jar| jar.read_entry(&armor_path).ok())
+            .and_then(|bytes| decode_png_bytes(&bytes).ok());
+        if let Some((over, _, _)) = over.filter(|(_, w, h)| (*w, *h) == (width, height)) {
+            composite(&mut rgba, &over);
         }
     }
     (rgba, width, height)

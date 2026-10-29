@@ -23,6 +23,9 @@ pub struct HorseModel {
     pub front_right_leg: ModelPart,
     /// Tail.
     pub tail: ModelPart,
+    /// Whether the head wears the long, tilted ears of a donkey or a mule
+    /// (MCP `muleLeftEar` / `muleRightEar`) instead of the horse ears.
+    mule_ears: bool,
 }
 
 impl HorseModel {
@@ -232,7 +235,37 @@ impl HorseModel {
             front_left_leg,
             front_right_leg,
             tail,
+            mule_ears: false,
         }
+    }
+
+    /// The model of a donkey or a mule: a horse with long ears.
+    #[must_use]
+    pub fn mule() -> Self {
+        let mut model = Self::new();
+        // The two horse ears are the last boxes of the head.
+        let kept = model.head.boxes.len() - 2;
+        model.head.boxes.truncate(kept);
+        model.mule_ears = true;
+        model
+    }
+
+    /// The two long ears, which tilt outwards and follow the head (MCP
+    /// `ModelHorse` `muleLeftEar`, `muleRightEar`: a box of 2 x 7 x 1 and a
+    /// roll of 15 degrees, negated here with the y axis).
+    fn mule_ear_parts(&self) -> [ModelPart; 2] {
+        let ear = |x: f32, roll: f32| {
+            let mut part = ModelPart::new(self.head.pivot).with_box(ModelBox::new(
+                [x, 9.0, 4.0],
+                [2.0, 7.0, 1.0],
+                [0.0, 12.0],
+                [128.0, 128.0],
+                0.0,
+            ));
+            part.rotation = [self.head.rotation[0], self.head.rotation[1], roll];
+            part
+        };
+        [ear(-2.0, -0.261_799_4), ear(0.0, 0.261_799_4)]
     }
 
     /// Sets galloping/walking leg swing and head animation angles.
@@ -253,6 +286,115 @@ impl HorseModel {
         self.front_right_leg.rotation[0] = swing;
     }
 
+    /// The saddle, bridle and chests, in the resting pose (MCP `ModelHorse`
+    /// `horseSaddle*`, `horseFaceRopes`, `horse*FaceMetal`, `mule*Chest`). The
+    /// bridle follows the head; the saddle ropes do not swing and the reins
+    /// (drawn only for a ridden horse) are left out. Adults only: the caller
+    /// skips a foal.
+    #[must_use]
+    pub fn emit_gear(&self, saddled: bool, chested: bool) -> Vec<ModelVertex> {
+        let tex = [128.0, 128.0];
+        let part = |pivot: [f32; 3], origin: [f32; 3], size: [f32; 3], uv: [f32; 2], grow: f32| {
+            ModelPart::new(pivot).with_box(ModelBox::new(origin, size, uv, tex, grow))
+        };
+        let mut out = Vec::new();
+        let root = Mat4::from_scale(Vec3::splat(1.0 / 16.0));
+        if saddled {
+            // The vanilla y axis points down: a box at `y` with height `h`
+            // starts at `-(y + h)` here, and the pivot is `24 - y`.
+            let mut bridle = [
+                part(
+                    [0.0, 20.0, -10.0],
+                    [-2.5, 5.1, -7.0],
+                    [5.0, 5.0, 12.0],
+                    [80.0, 12.0],
+                    0.2,
+                ),
+                part(
+                    [0.0, 20.0, -10.0],
+                    [1.5, 6.0, -4.0],
+                    [1.0, 2.0, 2.0],
+                    [74.0, 13.0],
+                    0.0,
+                ),
+                part(
+                    [0.0, 20.0, -10.0],
+                    [-2.5, 6.0, -4.0],
+                    [1.0, 2.0, 2.0],
+                    [74.0, 13.0],
+                    0.0,
+                ),
+            ];
+            for piece in &mut bridle {
+                piece.rotation = self.head.rotation;
+            }
+            let saddle = [
+                part(
+                    [0.0, 22.0, 2.0],
+                    [-5.0, -1.0, -3.0],
+                    [10.0, 1.0, 8.0],
+                    [80.0, 0.0],
+                    0.0,
+                ),
+                part(
+                    [0.0, 22.0, 2.0],
+                    [-1.5, 0.0, -3.0],
+                    [3.0, 1.0, 2.0],
+                    [106.0, 9.0],
+                    0.0,
+                ),
+                part(
+                    [0.0, 22.0, 2.0],
+                    [-4.0, 0.0, 3.0],
+                    [8.0, 1.0, 2.0],
+                    [80.0, 9.0],
+                    0.0,
+                ),
+                part(
+                    [5.0, 21.0, 2.0],
+                    [-0.5, -6.0, -0.5],
+                    [1.0, 6.0, 1.0],
+                    [70.0, 0.0],
+                    0.0,
+                ),
+                part(
+                    [5.0, 21.0, 2.0],
+                    [-0.5, -8.0, -1.0],
+                    [1.0, 2.0, 2.0],
+                    [74.0, 0.0],
+                    0.0,
+                ),
+                part(
+                    [-5.0, 21.0, 2.0],
+                    [-0.5, -6.0, -0.5],
+                    [1.0, 6.0, 1.0],
+                    [80.0, 0.0],
+                    0.0,
+                ),
+                part(
+                    [-5.0, 21.0, 2.0],
+                    [-0.5, -8.0, -1.0],
+                    [1.0, 2.0, 2.0],
+                    [74.0, 4.0],
+                    0.0,
+                ),
+            ];
+            for piece in bridle.iter().chain(&saddle) {
+                piece.emit(root, &mut out);
+            }
+        }
+        if chested {
+            let side = |x: f32, uv: [f32; 2]| {
+                let mut chest = part([x, 21.0, 10.0], [-3.0, -8.0, 0.0], [8.0, 8.0, 3.0], uv, 0.0);
+                chest.rotation[1] = std::f32::consts::FRAC_PI_2;
+                chest
+            };
+            side(-7.5, [0.0, 34.0]).emit(root, &mut out);
+            side(4.5, [0.0, 47.0]).emit(root, &mut out);
+        }
+        out
+    }
+
     /// Emits the horse mesh vertices transformed into world units.
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
@@ -262,6 +404,11 @@ impl HorseModel {
 
         self.body.emit(root, &mut out);
         self.head.emit(root, &mut out);
+        if self.mule_ears {
+            for ear in self.mule_ear_parts() {
+                ear.emit(root, &mut out);
+            }
+        }
         self.back_left_leg.emit(root, &mut out);
         self.back_right_leg.emit(root, &mut out);
         self.front_left_leg.emit(root, &mut out);
@@ -275,5 +422,49 @@ impl HorseModel {
 impl Default for HorseModel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_gear_adds_one_box_per_vanilla_part() {
+        let model = HorseModel::new();
+        assert!(model.emit_gear(false, false).is_empty());
+        // Bridle (3), saddle (3), ropes and metal (4): 10 boxes of 36 vertices.
+        assert_eq!(model.emit_gear(true, false).len(), 10 * 36);
+        assert_eq!(model.emit_gear(false, true).len(), 2 * 36);
+        assert_eq!(model.emit_gear(true, true).len(), 12 * 36);
+    }
+
+    #[test]
+    fn the_bridle_turns_with_the_head_and_the_saddle_does_not() {
+        let mut model = HorseModel::new();
+        model.set_angles(0.0, 0.0, 0.0, 0.0);
+        let straight = model.emit_gear(true, false);
+        model.set_angles(0.0, 0.0, 90.0, 0.0);
+        let turned = model.emit_gear(true, false);
+        // The first three boxes are the bridle, the rest the saddle.
+        assert_ne!(straight[..3 * 36], turned[..3 * 36]);
+        assert_eq!(straight[3 * 36..], turned[3 * 36..]);
+    }
+
+    #[test]
+    fn a_mule_swaps_the_horse_ears_for_two_long_ones() {
+        let horse = HorseModel::new();
+        let mule = HorseModel::mule();
+        // Two boxes out, two boxes in: the vertex count stays the same.
+        assert_eq!(mule.emit_mesh().len(), horse.emit_mesh().len());
+        assert_eq!(mule.head.boxes.len() + 2, horse.head.boxes.len());
+        let top = |model: &HorseModel| {
+            model
+                .emit_mesh()
+                .iter()
+                .map(|v| v.position[1])
+                .fold(f32::MIN, f32::max)
+        };
+        assert!(top(&mule) > top(&horse), "the long ears reach higher");
     }
 }

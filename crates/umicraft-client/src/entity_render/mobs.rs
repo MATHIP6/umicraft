@@ -14,6 +14,7 @@ use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{CapeModel, HumanoidModel, ModelVertex, TextureSlot};
 
 use super::animals::animal_layers;
+use super::armor::armor_layers;
 use super::creatures::{creature_layers, creeper_layers};
 use super::player::posed_player;
 use super::pose::humanoid_pose;
@@ -83,10 +84,16 @@ pub(super) fn build_entity_layers(
     if ent.kind == EntityKind::Creeper {
         return creeper_layers(ent, pose);
     }
-    humanoid_layers(ent, skins)
+    let mut layers = humanoid_layers(ent, skins)
         .or_else(|| animal_layers(ent, pose))
         .or_else(|| creature_layers(ent, pose))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // An invisible entity draws no body, only what it wears (MCP
+    // `RendererLivingEntity.doRender` skips `renderModel` but not the layers).
+    if ent.flags.is_invisible() {
+        layers.retain(|layer| layer.slot.is_armor());
+    }
+    layers
 }
 
 /// Two-legged, two-armed models.
@@ -95,6 +102,7 @@ fn humanoid_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -> Option
         let (model, is_slim) = posed_player(ent);
         let slot = skin_slot(ent, is_slim, skins);
         let mut layers = one(slot, model.emit_mesh());
+        layers.extend(armor_layers(ent, 1.0));
         layers.extend(cape_layer(ent, skins));
         return Some(layers);
     }
@@ -105,7 +113,9 @@ fn humanoid_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -> Option
         model.emit_mesh()
     };
     scale_mesh(&mut vertices, scale);
-    Some(one(slot, vertices))
+    let mut layers = one(slot, vertices);
+    layers.extend(armor_layers(ent, scale));
+    Some(layers)
 }
 
 /// The posed model of a zombie-like or skeleton-like mob.
@@ -244,7 +254,7 @@ mod tests {
         assert_eq!(slots(&player(0x7E), &Ready), vec![TextureSlot::Skin(3)]);
         let mut invisible = player(0x7F);
         invisible.flags = EntityFlags::new(0x20, 0x7F);
-        assert_eq!(slots(&invisible, &Ready), vec![TextureSlot::Skin(3)]);
+        assert!(slots(&invisible, &Ready).is_empty(), "no body, no cape");
     }
 
     #[test]
@@ -257,5 +267,71 @@ mod tests {
             slots(&slim, &super::super::skins::NoSkins),
             vec![TextureSlot::Alex]
         );
+    }
+
+    #[test]
+    fn an_invisible_entity_keeps_only_its_armour() {
+        use umicraft_game::entity::EntityItem;
+        let mut zombie =
+            EntityRenderSnapshot::new(EntityId(5), EntityKind::Zombie, glam::Vec3::ZERO);
+        zombie.flags = EntityFlags::new(0x20, 0x7F);
+        assert!(slots(&zombie, &Ready).is_empty(), "no body, nothing worn");
+        zombie.armor[3] = Some(EntityItem {
+            item_id: 310,
+            damage: 0,
+            count: 1,
+            nbt: None,
+        });
+        let kept = slots(&zombie, &Ready);
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].is_armor());
+        let mut cow = EntityRenderSnapshot::new(EntityId(6), EntityKind::Cow, glam::Vec3::ZERO);
+        cow.flags = EntityFlags::new(0x20, 0x7F);
+        assert!(slots(&cow, &Ready).is_empty());
+    }
+
+    #[test]
+    fn a_saddled_pig_draws_its_saddle_over_the_body() {
+        let mut pig = EntityRenderSnapshot::new(EntityId(7), EntityKind::Pig, glam::Vec3::ZERO);
+        assert_eq!(slots(&pig, &Ready), vec![TextureSlot::Pig]);
+        pig.meta.variant = Variant::Pig { saddled: true };
+        assert_eq!(
+            slots(&pig, &Ready),
+            vec![TextureSlot::Pig, TextureSlot::PigSaddle]
+        );
+    }
+
+    #[test]
+    fn a_ghast_shows_the_shooting_face_while_it_attacks() {
+        let mut ghast = EntityRenderSnapshot::new(EntityId(8), EntityKind::Ghast, glam::Vec3::ZERO);
+        assert_eq!(slots(&ghast, &Ready), vec![TextureSlot::Ghast]);
+        ghast.meta.variant = Variant::Ghast { attacking: true };
+        assert_eq!(slots(&ghast, &Ready), vec![TextureSlot::GhastShooting]);
+    }
+
+    #[test]
+    fn a_sitting_wolf_and_ocelot_change_their_pose() {
+        use umicraft_game::entity::meta::{OcelotMeta, WolfMeta};
+        let vertices = |ent: &EntityRenderSnapshot| {
+            build_entity_layers(ent, &Ready)
+                .into_iter()
+                .flat_map(|layer| layer.vertices)
+                .map(|v| v.position)
+                .collect::<Vec<_>>()
+        };
+        let mut wolf = EntityRenderSnapshot::new(EntityId(9), EntityKind::Wolf, glam::Vec3::ZERO);
+        let standing = vertices(&wolf);
+        wolf.meta.variant = Variant::Wolf(WolfMeta {
+            sitting: true,
+            ..WolfMeta::default()
+        });
+        assert_ne!(vertices(&wolf), standing);
+        let mut cat = EntityRenderSnapshot::new(EntityId(10), EntityKind::Ocelot, glam::Vec3::ZERO);
+        let standing = vertices(&cat);
+        cat.meta.variant = Variant::Ocelot(OcelotMeta {
+            sitting: true,
+            ..OcelotMeta::default()
+        });
+        assert_ne!(vertices(&cat), standing);
     }
 }

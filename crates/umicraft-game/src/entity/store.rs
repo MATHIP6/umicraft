@@ -303,6 +303,17 @@ impl EntityStore {
         }
     }
 
+    /// Updates a piece of worn armour: `slot` is the `Entity Equipment` slot
+    /// (1 boots to 4 helmet); other slots are ignored.
+    pub fn set_armor(&mut self, id: EntityId, slot: i16, item: Option<EntityItem>) {
+        let Some(index) = usize::try_from(slot - 1).ok().filter(|&i| i < 4) else {
+            return;
+        };
+        if let Some(entity) = self.entities.get_mut(&id) {
+            entity.armor[index] = item;
+        }
+    }
+
     /// Updates the stack an entity holds in its hand.
     pub fn set_held(&mut self, id: EntityId, held: Option<EntityItem>) {
         if let Some(entity) = self.entities.get_mut(&id) {
@@ -511,6 +522,33 @@ mod tests {
             .age_ticks = u32::MAX;
         store.tick();
         assert_eq!(store.entities[&EntityId(1)].age_ticks, u32::MAX);
+    }
+
+    #[test]
+    fn equipment_slots_one_to_four_fill_the_armor_boots_first() {
+        let mut store = EntityStore::new();
+        let id = EntityId(10);
+        store.spawn_player(
+            id,
+            [1u8; 16],
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        store.set_armor(id, 4, Some(sword()));
+        store.set_armor(id, 1, Some(sword()));
+        store.set_armor(id, 5, Some(sword()));
+        store.set_armor(id, 0, Some(sword()));
+        let armor = &store.snapshots(0.0)[0].armor;
+        assert!(armor[0].is_some() && armor[3].is_some());
+        assert!(
+            armor[1].is_none() && armor[2].is_none(),
+            "slots 0 and 5 are not armour"
+        );
+        store.set_armor(id, 4, None);
+        assert!(store.snapshots(0.0)[0].armor[3].is_none());
     }
 
     #[test]

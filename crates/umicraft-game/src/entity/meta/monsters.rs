@@ -19,6 +19,7 @@ const ZOMBIE_CHILD: u8 = 12;
 const ZOMBIE_VILLAGER: u8 = 13;
 const ZOMBIE_CONVERTING: u8 = 14;
 /// Enderman entries: carried block state, screaming.
+const GHAST_ATTACKING: u8 = 16;
 const ENDERMAN_CARRIED: u8 = 16;
 const ENDERMAN_SCREAMING: u8 = 18;
 /// Villager entry: profession.
@@ -63,6 +64,14 @@ pub struct EndermanMeta {
     pub carried: u16,
     /// Staring at a player: the mouth opens.
     pub screaming: bool,
+}
+
+pub(super) fn apply_ghast(variant: &mut Variant, metadata: &Metadata) {
+    if let Some(attacking) = metadata.get_byte(GHAST_ATTACKING) {
+        *variant = Variant::Ghast {
+            attacking: attacking != 0,
+        };
+    }
 }
 
 pub(super) fn apply_slime(variant: &mut Variant, metadata: &Metadata) {

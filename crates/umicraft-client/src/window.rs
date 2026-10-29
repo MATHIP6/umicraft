@@ -1229,6 +1229,7 @@ impl App {
         {
             let entities = world.entities(now);
             let hand = world.hand_pose(now);
+            entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.mesh_and_upload(&entities, renderer);
             entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer);
             if let Some(items) = self.items.as_deref() {

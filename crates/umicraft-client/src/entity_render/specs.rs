@@ -62,6 +62,29 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (procedural_cow_texture(), 64, 32),
         },
         TextureSpec {
+            slot: TextureSlot::MushroomRed,
+            jar_path: "assets/minecraft/textures/blocks/mushroom_red.png",
+            // No original stand-in: without the jar the mushrooms are not drawn.
+            fallback: || (vec![0; 16 * 16 * 4], 16, 16),
+        },
+        TextureSpec {
+            slot: TextureSlot::Fire(0),
+            jar_path: "assets/minecraft/textures/blocks/fire_layer_0.png",
+            // No original stand-in for the flames: without the jar they are not drawn.
+            fallback: || (vec![0; 16 * 512 * 4], 16, 512),
+        },
+        TextureSpec {
+            slot: TextureSlot::Fire(1),
+            jar_path: "assets/minecraft/textures/blocks/fire_layer_1.png",
+            fallback: || (vec![0; 16 * 512 * 4], 16, 512),
+        },
+        TextureSpec {
+            slot: TextureSlot::PigSaddle,
+            jar_path: "assets/minecraft/textures/entity/pig/pig_saddle.png",
+            // No original stand-in for the saddle: without the jar it is not drawn.
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
             slot: TextureSlot::Pig,
             jar_path: "assets/minecraft/textures/entity/pig/pig.png",
             fallback: || (procedural_pig_texture(), 64, 32),
@@ -174,6 +197,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
         TextureSpec {
             slot: TextureSlot::Ghast,
             jar_path: "assets/minecraft/textures/entity/ghast/ghast.png",
+            fallback: || (procedural_ghast_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::GhastShooting,
+            jar_path: "assets/minecraft/textures/entity/ghast/ghast_shooting.png",
             fallback: || (procedural_ghast_texture(), 64, 32),
         },
         TextureSpec {

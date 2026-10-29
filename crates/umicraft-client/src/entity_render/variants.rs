@@ -64,7 +64,10 @@ pub(super) fn horse(horse: HorseMeta) -> TextureSlot {
         2 => TextureSlot::HorseMule,
         3 => TextureSlot::HorseZombie,
         4 => TextureSlot::HorseSkeleton,
-        _ => TextureSlot::HorseCoat((horse.variant & 0xFFFF) as u16),
+        // The coat in the low 12 bits, the armour index above it.
+        _ => TextureSlot::HorseCoat(
+            (horse.variant & 0x0FFF) as u16 | (u16::from(horse.armor & 3) << 12),
+        ),
     }
 }
 
@@ -120,5 +123,23 @@ mod tests {
         assert_eq!(horse(kind(1, 0)), TextureSlot::HorseDonkey);
         assert_eq!(horse(kind(4, 0)), TextureSlot::HorseSkeleton);
         assert_eq!(horse(kind(0, 0x0203)), TextureSlot::HorseCoat(0x0203));
+    }
+
+    #[test]
+    fn the_horse_armour_goes_above_the_coat_bits() {
+        let horse = |armor| HorseMeta {
+            kind: 0,
+            variant: 0x0102,
+            armor,
+            flags: 0,
+        };
+        assert_eq!(super::horse(horse(0)), TextureSlot::HorseCoat(0x0102));
+        assert_eq!(super::horse(horse(3)), TextureSlot::HorseCoat(0x3102));
+        // A donkey ignores the coat and the armour.
+        let donkey = HorseMeta {
+            kind: 1,
+            ..horse(3)
+        };
+        assert_eq!(super::horse(donkey), TextureSlot::HorseDonkey);
     }
 }
