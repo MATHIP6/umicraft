@@ -257,6 +257,9 @@ fn run_options(
         let rect = screen.rect_of(id).unwrap_or(Rect::ZERO);
         let output = frame(&mut screen, &mut ui, click(rect));
         ui.recycle_output(output);
+        // A click can change the page: lay the new one out before the next.
+        let output = frame(&mut screen, &mut ui, UiInput::default());
+        ui.recycle_output(output);
     }
     let output = frame(&mut screen, &mut ui, UiInput::default());
     (screen, output.draw_list)
@@ -274,7 +277,11 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
             let output = ui.end_frame();
             Demo {
                 lines: vec![
-                    ("buttons", "BACK TO GAME, OPTIONS, QUIT".to_string()),
+                    (
+                        "buttons",
+                        "Back to Game, Achievements, Statistics, Options..., Open to LAN, Disconnect"
+                            .to_string(),
+                    ),
                     ("draw commands", output.draw_list.len().to_string()),
                 ],
                 scene: Scene::Screen(output.draw_list),
@@ -288,7 +295,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                 run_options(width, height, atlas, &mut options, &[], sheets.widgets);
             Demo {
                 lines: vec![
-                    ("tab", format!("{:?}", screen.tab())),
+                    ("page", format!("{:?}", screen.page())),
                     ("fov", options.video.fov.to_string()),
                     ("render distance", options.video.render_distance.to_string()),
                     ("max fps", options.video.max_fps.to_string()),
@@ -297,17 +304,34 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                 scene: Scene::Screen(draw_list),
             }
         }
+        "video" | "chat-options" => {
+            let mut options = Options::default();
+            let click = if view == "video" {
+                "nav:video"
+            } else {
+                "nav:chat"
+            };
+            let (screen, draw_list) =
+                run_options(width, height, atlas, &mut options, &[click], sheets.widgets);
+            Demo {
+                lines: vec![
+                    ("page", format!("{:?}", screen.page())),
+                    ("draw commands", draw_list.len().to_string()),
+                ],
+                scene: Scene::Screen(draw_list),
+            }
+        }
         "controls" => {
             let mut options = Options::default();
-            // Two actions on one key show the conflict bar; a click on Jump
+            // Two actions on one key show the conflict bar; a click on Hotbar Slot 3
             // leaves it waiting for a key.
-            options.keys.set(Action::Back, KeyCode::KeyW);
+            options.keys.set(Action::Hotbar2, KeyCode::Digit1);
             let (screen, draw_list) = run_options(
                 width,
                 height,
                 atlas,
                 &mut options,
-                &["tab:controls", "key:jump"],
+                &["nav:controls", "key:hotbar3"],
                 sheets.widgets,
             );
             let conflicts = Action::ALL
@@ -316,7 +340,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                 .count();
             Demo {
                 lines: vec![
-                    ("tab", format!("{:?}", screen.tab())),
+                    ("page", format!("{:?}", screen.page())),
                     (
                         "waiting for a key",
                         screen
@@ -557,7 +581,7 @@ mod tests {
     #[test]
     fn the_controls_view_waits_for_a_key_and_flags_the_conflict() {
         let text = report("controls");
-        assert!(text.contains("waiting for a key : JUMP"), "{text}");
+        assert!(text.contains("waiting for a key : HOTBAR 3"), "{text}");
         assert!(text.contains("actions in conflict: 2"), "{text}");
     }
 

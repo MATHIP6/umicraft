@@ -75,8 +75,15 @@ pub fn slider(
     state: &mut SliderState,
 ) -> (f32, bool) {
     let response = ui.response(id, rect);
-    let travel = (rect.width - HANDLE_WIDTH).max(1.0);
-    let to_value = |x: f32| ((x - rect.x - HANDLE_WIDTH * 0.5) / travel).clamp(0.0, 1.0);
+    // With the real texture the handle and text follow the GUI scale, as in vanilla.
+    let skin = if ui.widgets_sheet().is_some() {
+        (rect.height / 20.0).round().max(1.0)
+    } else {
+        1.0
+    };
+    let handle_width = HANDLE_WIDTH * skin;
+    let travel = (rect.width - handle_width).max(1.0);
+    let to_value = |x: f32| ((x - rect.x - handle_width * 0.5) / travel).clamp(0.0, 1.0);
 
     let start = if value.is_finite() {
         value.clamp(0.0, 1.0)
@@ -122,14 +129,19 @@ pub fn slider(
     }
 
     if let Some(sheet) = ui.widgets_sheet() {
-        let half_w = (rect.width / 2.0).floor();
-        let other_half = rect.width - half_w;
-        let left_w = (half_w as u32).min(200);
-        let right_w = (other_half as u32).min(200);
-        let src_left = sheet.sub(0, 46, left_w, 20);
-        let src_right = sheet.sub(200 - right_w, 46, right_w, 20);
-        let dst_left = Rect::new(rect.x, rect.y, half_w, rect.height);
-        let dst_right = Rect::new(rect.x + half_w, rect.y, other_half, rect.height);
+        // The texture is cut in texels (GUI units), then scaled, as vanilla does.
+        let texels = (rect.width / skin).round().min(400.0);
+        let half = (texels / 2.0).floor();
+        let other = texels - half;
+        let src_left = sheet.sub(0, 46, half as u32, 20);
+        let src_right = sheet.sub(200 - other as u32, 46, other as u32, 20);
+        let dst_left = Rect::new(rect.x, rect.y, half * skin, rect.height);
+        let dst_right = Rect::new(
+            rect.x + half * skin,
+            rect.y,
+            rect.width - half * skin,
+            rect.height,
+        );
         ui.draw().image(src_left, dst_left, [1.0; 4]);
         ui.draw().image(src_right, dst_right, [1.0; 4]);
 
@@ -139,8 +151,8 @@ pub fn slider(
             66
         };
         let handle_x = rect.x + value * travel;
-        let handle_left = Rect::new(handle_x, rect.y, 4.0, rect.height);
-        let handle_right = Rect::new(handle_x + 4.0, rect.y, 4.0, rect.height);
+        let handle_left = Rect::new(handle_x, rect.y, 4.0 * skin, rect.height);
+        let handle_right = Rect::new(handle_x + 4.0 * skin, rect.y, 4.0 * skin, rect.height);
         let src_h_left = sheet.sub(0, handle_v_y, 4, 20);
         let src_h_right = sheet.sub(196, handle_v_y, 4, 20);
         ui.draw().image(src_h_left, handle_left, [1.0; 4]);
@@ -152,27 +164,35 @@ pub fn slider(
             style::BUTTON
         };
         ui.draw().rect(rect, fill);
-        let handle = Rect::new(rect.x + value * travel, rect.y, HANDLE_WIDTH, rect.height);
+        let handle = Rect::new(rect.x + value * travel, rect.y, handle_width, rect.height);
         ui.draw().rect(handle, style::BUTTON_PRESSED);
     }
 
     if !label.is_empty() && !rect.is_empty() {
         let pad = 6.0;
         let available = (rect.width - pad).max(0.0);
-        let mut scale = style::TEXT_SCALE;
+        let mut scale = if skin > 1.0 || ui.widgets_sheet().is_some() {
+            skin
+        } else {
+            style::TEXT_SCALE
+        };
         let mut width = atlas.measure(label, scale);
         if width > available && available > 0.0 {
             scale = (scale * available / width).max(1.0);
             width = atlas.measure(label, scale);
         }
-        let line_height = atlas.line_height(scale);
+        let line_height = if ui.widgets_sheet().is_some() {
+            8.0 * scale
+        } else {
+            atlas.line_height(scale)
+        };
         let pos = [
-            rect.x + (rect.width - width) * 0.5,
-            rect.y + (rect.height - line_height) * 0.5,
+            (rect.x + (rect.width - width) * 0.5).round(),
+            (rect.y + (rect.height - line_height) * 0.5).round(),
         ];
         if ui.widgets_sheet().is_some() {
             ui.draw().text(
-                [pos[0] + 1.0, pos[1] + 1.0],
+                [pos[0] + scale, pos[1] + scale],
                 label,
                 TextStyle::new(scale, [0.22, 0.22, 0.22, 1.0]),
             );

@@ -122,7 +122,16 @@ options:
   --help, -h          print this help";
 
 /// The scenes of `--hud-demo`.
-pub const HUD_VIEWS: [&str; 6] = ["overview", "tab", "chat", "menu", "options", "controls"];
+pub const HUD_VIEWS: [&str; 8] = [
+    "overview",
+    "tab",
+    "chat",
+    "menu",
+    "options",
+    "video",
+    "controls",
+    "chat-options",
+];
 
 /// The scripted sessions the headless mode knows.
 pub const SCRIPTS: [&str; 2] = ["default", "idle"];

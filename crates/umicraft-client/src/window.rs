@@ -427,7 +427,7 @@ impl App {
     /// Closes the options screen: saves the options, tells the server about
     /// a changed render distance or chat setting, and goes back to the menu.
     fn close_options(&mut self) {
-        self.options_screen.cancel_capture();
+        self.options_screen.reset();
         self.options.clamp();
         let server_settings = |options: &Options| {
             (
@@ -872,6 +872,9 @@ impl App {
                 self.capture_mouse(true);
             }
             Some(GameMenuAction::Options) => self.set_screen(Screen::Options),
+            Some(GameMenuAction::Achievements) | Some(GameMenuAction::Stats) => {
+                // Not yet implemented: vanilla opens GuiAchievements / GuiStats.
+            }
             Some(GameMenuAction::Quit) => {
                 self.save_options();
                 event_loop.exit();

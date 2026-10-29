@@ -33,6 +33,8 @@ pub(crate) const BUTTON: Color = [0.18, 0.20, 0.26, 1.0];
 pub(crate) const BUTTON_HOVER: Color = [0.27, 0.30, 0.38, 1.0];
 /// Button fill on the frame of the press.
 pub(crate) const BUTTON_PRESSED: Color = [0.12, 0.38, 0.62, 1.0];
+/// Button fill in its disabled state.
+pub(crate) const BUTTON_DISABLED: Color = [0.12, 0.13, 0.17, 0.7];
 
 /// Text-field outline while it is unfocused.
 pub(crate) const FIELD_BORDER: Color = [0.24, 0.26, 0.32, 1.0];

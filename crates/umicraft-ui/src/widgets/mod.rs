@@ -31,7 +31,7 @@ pub mod slider;
 pub mod slot;
 pub mod text_field;
 
-pub use button::button;
+pub use button::{button, button_enabled, button_tinted};
 pub use inventory::{
     container_layout, gui_scale, player_inventory_layout, ContainerLayout, InventoryLayout,
 };
