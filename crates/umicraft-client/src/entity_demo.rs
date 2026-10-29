@@ -385,6 +385,10 @@ pub fn build_walk_cycle_scene() -> DemoScene {
     }
 }
 
+/// The demo cameras sit north of the mobs, which face south at yaw 0 (as in
+/// Minecraft): turn them half a turn to face the camera.
+const FACE_NORTH: f32 = 180.0;
+
 fn make_snapshot(
     id: i32,
     kind: EntityKind,
@@ -395,9 +399,9 @@ fn make_snapshot(
         id: EntityId(id),
         kind,
         position: pos,
-        yaw: 0.0,
+        yaw: FACE_NORTH,
         pitch: 0.0,
-        head_yaw: 0.0,
+        head_yaw: FACE_NORTH,
         limb_swing: 0.0,
         limb_swing_amount: 0.0,
         uuid,
@@ -1028,8 +1032,8 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
     for (index, mob) in MOB_CATALOG.iter().enumerate() {
         let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
         let mut snapshot = make_snapshot((index + 1) as i32, mob.kind, pos, mob.uuid);
-        snapshot.yaw = mob.yaw_deg;
-        snapshot.head_yaw = mob.yaw_deg;
+        snapshot.yaw = FACE_NORTH + mob.yaw_deg;
+        snapshot.head_yaw = FACE_NORTH + mob.yaw_deg;
 
         let batches = mesh_entities(&[snapshot]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();
@@ -1133,8 +1137,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
         let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
         let mut snapshot = make_snapshot(1, mob.kind, pos, mob.uuid);
-        snapshot.yaw = mob.yaw_deg;
-        snapshot.head_yaw = mob.yaw_deg;
+        snapshot.yaw = FACE_NORTH + mob.yaw_deg;
+        snapshot.head_yaw = FACE_NORTH + mob.yaw_deg;
 
         let batches = mesh_entities(&[snapshot]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();
@@ -1455,8 +1459,8 @@ mod tests {
         for mob in MOB_CATALOG {
             let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
             let mut snapshot = make_snapshot(1, mob.kind, pos, mob.uuid);
-            snapshot.yaw = mob.yaw_deg;
-            snapshot.head_yaw = mob.yaw_deg;
+            snapshot.yaw = FACE_NORTH + mob.yaw_deg;
+            snapshot.head_yaw = FACE_NORTH + mob.yaw_deg;
             let batches = mesh_entities(&[snapshot]);
             let total_vertices: usize = batches.values().map(|v| v.len()).sum();
             assert!(

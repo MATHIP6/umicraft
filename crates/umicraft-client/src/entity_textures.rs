@@ -678,7 +678,9 @@ pub fn mesh_entities(
     for ent in snapshots {
         let world_pos = ent.position;
         let yaw_rad = ent.yaw.to_radians();
-        let rot = Mat4::from_rotation_y(-yaw_rad);
+        // `RendererLivingEntity.rotateCorpse`: rotate(180 - yaw). The model faces -Z,
+        // and a Minecraft yaw of zero looks towards +Z.
+        let rot = Mat4::from_rotation_y(std::f32::consts::PI - yaw_rad);
 
         let sneaking = ent.kind == EntityKind::Player && ent.flags.is_sneaking();
         let pos = if sneaking {
@@ -729,6 +731,32 @@ fn transform_vertex(mv: ModelVertex, rot: Mat4, world_pos: Vec3) -> EntityVertex
 mod tests {
     use super::*;
     use umicraft_game::entity::{EntityFlags, EntityId};
+
+    #[test]
+    fn a_mob_with_yaw_zero_reaches_out_towards_south() {
+        // Minecraft looks towards +Z at yaw 0, and a zombie holds its arms forward.
+        let zombie = |yaw| EntityRenderSnapshot {
+            id: EntityId(1),
+            kind: EntityKind::Zombie,
+            position: Vec3::ZERO,
+            yaw,
+            pitch: 0.0,
+            head_yaw: yaw,
+            limb_swing: 0.0,
+            limb_swing_amount: 0.0,
+            uuid: None,
+            held_item: None,
+            flags: EntityFlags::default(),
+        };
+        let reach = |yaw: f32| {
+            let batches = mesh_entities(&[zombie(yaw)]);
+            let z = batches.values().flatten().map(|v| v.position[2]);
+            let (min, max) = z.fold((f32::MAX, f32::MIN), |(lo, hi), z| (lo.min(z), hi.max(z)));
+            max + min
+        };
+        assert!(reach(0.0) > 0.1, "faces +Z at yaw 0");
+        assert!(reach(180.0) < -0.1, "faces -Z at yaw 180");
+    }
 
     #[test]
     fn empty_snapshots_produce_empty_batches() {
