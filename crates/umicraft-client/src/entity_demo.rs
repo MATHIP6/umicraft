@@ -436,13 +436,15 @@ fn make_snapshot(
         death_time: 0.0,
         bed: None,
         meta: Default::default(),
+        cape: Default::default(),
+        profile: None,
         uuid,
         held: None,
         item: None,
         age: 0.0,
         frame_direction: 0,
         frame_rotation: 0,
-        flags: EntityFlags::default(),
+        flags: EntityFlags::new(0, 0x7F),
     }
 }
 

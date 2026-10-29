@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use std::sync::Arc;
+
 use glam::{DVec3, Vec3};
 use umicraft_protocol::packets::play::Metadata;
 
@@ -14,7 +16,7 @@ use crate::RenderState;
 
 use super::{
     BedPose, BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
-    EntityRenderSnapshot, Variant,
+    EntityRenderSnapshot, PlayerProfile, Variant,
 };
 
 /// Data watcher entry of the entity flags (MCP `Entity.entityInit`).
@@ -243,6 +245,18 @@ impl EntityStore {
         entity.meta.apply(entity.kind, metadata);
         if entity.kind.is_living() && metadata.get_float(LIVING_HEALTH).is_some_and(|h| h <= 0.0) {
             entity.animation.die();
+        }
+    }
+
+    /// Gives every tracked player with `uuid` a profile (name, skin, cape).
+    ///
+    /// Used when a player spawns before or after its tab list entry.
+    pub fn set_profile(&mut self, uuid: [u8; 16], profile: PlayerProfile) {
+        let profile = Arc::new(profile);
+        for entity in self.entities.values_mut() {
+            if entity.uuid == Some(uuid) {
+                entity.profile = Some(Arc::clone(&profile));
+            }
         }
     }
 
@@ -753,6 +767,29 @@ mod tests {
         };
         store.apply_metadata(id, &update);
         assert_eq!(store.snapshots(0.0)[0].flags.skin_parts, 0);
+    }
+
+    #[test]
+    fn a_profile_reaches_the_players_with_its_uuid_only() {
+        let mut store = EntityStore::new();
+        for (id, uuid) in [(1, [1u8; 16]), (2, [2u8; 16])] {
+            store.spawn_player(
+                EntityId(id),
+                uuid,
+                DVec3::ZERO,
+                0.0,
+                0.0,
+                None,
+                EntityFlags::default(),
+            );
+        }
+        store.set_profile([2u8; 16], PlayerProfile::named("Alex"));
+        let snapshots = store.snapshots(1.0);
+        assert!(snapshots[0].profile.is_none());
+        assert_eq!(
+            snapshots[1].profile.as_ref().map(|p| &*p.name),
+            Some("Alex")
+        );
     }
 
     #[test]

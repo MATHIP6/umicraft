@@ -5,6 +5,7 @@
 //! - [`textures`]: the texture registry and its GPU upload.
 //! - [`mobs`]: one builder per mob family, mapping a snapshot to mesh layers.
 //! - [`player`]: the posed player model, shared with held items.
+//! - `skins`: the downloads of player skins and capes.
 //! - [`pose`]: the humanoid pose of a snapshot.
 //! - [`transform`]: where a model stands, turns, falls and sleeps.
 //! - [`hand`]: the first-person arm.
@@ -21,6 +22,7 @@ mod horse_coat;
 mod mobs;
 mod player;
 mod pose;
+mod skins;
 mod specs;
 mod textures;
 mod transform;
@@ -43,12 +45,20 @@ pub(crate) use transform::{body_matrix, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
+    mesh_entities_with(snapshots, &skins::NoSkins)
+}
+
+/// [`mesh_entities`] with the downloaded skins and capes of players.
+fn mesh_entities_with(
+    snapshots: &[EntityRenderSnapshot],
+    skins: &dyn skins::SkinLookup,
+) -> HashMap<TextureSlot, Vec<EntityVertex>> {
     let mut batches: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
         let matrix = transform::model_matrix(ent);
         let light = entity_light(ent);
-        for layer in mobs::build_entity_layers(ent) {
+        for layer in mobs::build_entity_layers(ent, skins) {
             let light = light | dye_bits(layer.dye);
             let batch = batches.entry(layer.slot).or_default();
             batch.extend(
@@ -165,13 +175,15 @@ mod tests {
                 death_time: 0.0,
                 bed: None,
                 meta: Default::default(),
+                cape: Default::default(),
+                profile: None,
                 uuid: Some([0; 16]),
                 held: None,
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
-                flags: EntityFlags::default(),
+                flags: EntityFlags::new(0, 0x7F),
             },
             EntityRenderSnapshot {
                 id: EntityId(2),
@@ -189,6 +201,8 @@ mod tests {
                 death_time: 0.0,
                 bed: None,
                 meta: Default::default(),
+                cape: Default::default(),
+                profile: None,
                 uuid: None,
                 held: None,
                 item: None,
@@ -213,6 +227,8 @@ mod tests {
                 death_time: 0.0,
                 bed: None,
                 meta: Default::default(),
+                cape: Default::default(),
+                profile: None,
                 uuid: None,
                 held: None,
                 item: None,
@@ -238,6 +254,8 @@ mod tests {
                 death_time: 0.0,
                 bed: None,
                 meta: Default::default(),
+                cape: Default::default(),
+                profile: None,
                 uuid: None,
                 held: None,
                 item: None,

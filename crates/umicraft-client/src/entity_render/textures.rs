@@ -18,7 +18,8 @@ use umicraft_render::{EntityTexture, Renderer};
 
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
-use super::mesh_entities;
+use super::mesh_entities_with;
+use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
 
 /// Loads official textures from the jar if available, or falls back to procedural assets.
@@ -70,6 +71,8 @@ pub struct EntityTextures {
     textures: RefCell<HashMap<TextureSlot, EntityTexture>>,
     /// The jar the coats are composed from.
     jar: Option<ClientJar>,
+    /// The skins and capes of players.
+    skins: RefCell<SkinSet>,
 }
 
 impl EntityTextures {
@@ -85,6 +88,7 @@ impl EntityTextures {
         Self {
             textures: RefCell::new(textures),
             jar,
+            skins: RefCell::new(SkinSet::new()),
         }
     }
 
@@ -103,7 +107,10 @@ impl EntityTextures {
 
     /// Meshes all visible entities and uploads them to the GPU renderer.
     pub fn mesh_and_upload(&self, snapshots: &[EntityRenderSnapshot], renderer: &mut Renderer) {
-        let batches = mesh_entities(snapshots);
+        self.skins
+            .borrow_mut()
+            .collect(renderer, &mut self.textures.borrow_mut());
+        let batches = mesh_entities_with(snapshots, self);
         self.compose_missing_coats(batches.keys(), renderer);
         let textures = self.textures.borrow();
         let pairs: Vec<_> = batches
@@ -137,5 +144,15 @@ impl EntityTextures {
             let texture = renderer.create_entity_texture(&rgba, w, h);
             self.textures.borrow_mut().insert(*slot, texture);
         }
+    }
+}
+
+impl SkinLookup for EntityTextures {
+    fn skin(&self, url: &str) -> Option<u32> {
+        self.skins.borrow_mut().lookup(url, SkinKind::Skin)
+    }
+
+    fn cape(&self, url: &str) -> Option<u32> {
+        self.skins.borrow_mut().lookup(url, SkinKind::Cape)
     }
 }

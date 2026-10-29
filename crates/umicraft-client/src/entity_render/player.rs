@@ -13,9 +13,16 @@ use super::pose::humanoid_pose;
 /// posed right arm.
 pub(crate) fn posed_player(ent: &EntityRenderSnapshot) -> (HumanoidModel, bool) {
     let is_slim = ent
-        .uuid
-        .is_some_and(|u| SkinModel::default_for_uuid(u).is_slim());
+        .profile
+        .as_ref()
+        .and_then(|profile| profile.slim)
+        .or_else(|| {
+            ent.uuid
+                .map(|uuid| SkinModel::default_for_uuid(uuid).is_slim())
+        })
+        .unwrap_or(false);
     let mut model = HumanoidModel::new(is_slim);
+    model.show_skin_layers(ent.flags.skin_parts);
     model.set_pose(&humanoid_pose(ent, false));
     (model, is_slim)
 }

@@ -2,15 +2,19 @@
 
 //! Interpolation data shipped to the render thread, and the snapshots it yields.
 
+use std::sync::Arc;
+
 use glam::Vec3;
 
 use super::angle::lerp_degrees;
 use super::anim::{Animation, BedPose};
+use super::cape::{cape_angles, CapeAngles};
 use super::flags::EntityFlags;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
 use super::meta::EntityMeta;
+use super::profile::PlayerProfile;
 
 /// Per-entity interpolation data sent to the render thread each tick.
 ///
@@ -48,6 +52,12 @@ pub struct EntityFrameData {
     pub animation: Animation,
     /// The typed metadata.
     pub meta: EntityMeta,
+    /// The cape position one tick ago.
+    pub prev_cape_chase: Vec3,
+    /// The cape position now.
+    pub cape_chase: Vec3,
+    /// The profile of a player.
+    pub profile: Option<Arc<PlayerProfile>>,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -93,6 +103,12 @@ impl EntityFrameData {
             death_time: self.animation.death_time_at(a),
             bed: self.animation.bed,
             meta: self.meta.clone(),
+            cape: cape_angles(
+                self.prev_cape_chase.lerp(self.cape_chase, a) - position,
+                body_yaw,
+                self.flags.is_sneaking(),
+            ),
+            profile: self.profile.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
@@ -138,6 +154,10 @@ pub struct EntityRenderSnapshot {
     pub bed: Option<BedPose>,
     /// The typed metadata: variant, age, name, health.
     pub meta: EntityMeta,
+    /// The swing of the cape.
+    pub cape: CapeAngles,
+    /// The profile of a player: name, skin and cape.
+    pub profile: Option<Arc<PlayerProfile>>,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -175,6 +195,8 @@ impl EntityRenderSnapshot {
             death_time: 0.0,
             bed: None,
             meta: EntityMeta::default(),
+            cape: CapeAngles::default(),
+            profile: None,
             uuid: None,
             held: None,
             item: None,

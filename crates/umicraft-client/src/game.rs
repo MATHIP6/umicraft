@@ -56,6 +56,7 @@ use umicraft_game::view::{camera_pose, Perspective};
 use umicraft_game::{GameState, InputIntent, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_net::play::{PlayEvent, SessionCounters};
+use umicraft_protocol::packets::play::clientbound::player_list_item::PlayerListItem;
 use umicraft_protocol::packets::play::clientbound::{
     BlockBreakAnim, ChunkData, Explosion, MapChunkBulk, UseBed,
 };
@@ -74,6 +75,7 @@ use crate::error::ClientError;
 use crate::input::InputUpdate;
 use crate::inventory_input::InventoryAction;
 use crate::network::{self, ClientCommand, NetworkConfig};
+use crate::profiles::profile_from_properties;
 
 #[path = "creative_events.rs"]
 mod creative_events;
@@ -1439,6 +1441,23 @@ fn handle_net(
             game.entities
                 .spawn_player(id, p.uuid, pos, yaw, pitch, held, EntityFlags::default());
             game.entities.apply_metadata(id, &p.metadata);
+            let listed = game
+                .server
+                .player_list()
+                .get(u128::from_be_bytes(p.uuid))
+                .map(|info| profile_from_properties(&info.name, &info.properties));
+            if let Some(profile) = listed {
+                game.entities.set_profile(p.uuid, profile);
+            }
+        }
+        PlayEvent::PlayerListItem(packet) => {
+            game.server.apply_player_list(&packet);
+            if let PlayerListItem::AddPlayer(entries) = &packet {
+                for entry in entries {
+                    let profile = profile_from_properties(&entry.name, &entry.properties);
+                    game.entities.set_profile(entry.uuid.to_be_bytes(), profile);
+                }
+            }
         }
         PlayEvent::SpawnMob(m) => {
             let pos = DVec3::new(
@@ -3144,6 +3163,45 @@ mod tests {
 
         handle_net(&mut game, equip(WireItemStack::EMPTY), &mut queue, &frames);
         assert_eq!(game.entities.snapshots(0.0)[0].held, None);
+    }
+
+    #[test]
+    fn a_tab_list_entry_gives_the_spawned_player_its_name() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let uuid = [7u8; 16];
+        game.entities.spawn_player(
+            EntityId(4),
+            uuid,
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        let entry = AddPlayerEntry {
+            uuid: u128::from_be_bytes(uuid),
+            name: "Notch".to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping: 0,
+            display_name: None,
+        };
+        let event = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![entry]));
+        handle_net(&mut game, event, &mut queue, &frames);
+        let profile = game.entities.snapshots(0.0)[0].profile.clone();
+        assert_eq!(
+            profile.map(|p| p.name.to_string()),
+            Some("Notch".to_owned())
+        );
+        assert_eq!(
+            game.server.player_list().len(),
+            1,
+            "the tab list still updates"
+        );
     }
 
     #[test]

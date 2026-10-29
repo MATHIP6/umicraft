@@ -2,15 +2,19 @@
 
 //! The mutable per-entity state owned by the game thread.
 
+use std::sync::Arc;
+
 use glam::{DVec3, Vec3};
 
 use super::anim::Animation;
 use super::body_yaw::BodyYaw;
+use super::cape::CapeChase;
 use super::flags::EntityFlags;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
 use super::meta::EntityMeta;
+use super::profile::PlayerProfile;
 use super::snapshot::EntityFrameData;
 
 /// Full mutable record of an entity owned by the game thread.
@@ -57,6 +61,10 @@ pub struct EntityRecord {
     pub animation: Animation,
     /// The typed metadata (variants, age, name, health).
     pub meta: EntityMeta,
+    /// The position the cape trails behind.
+    pub cape: CapeChase,
+    /// The profile of a player: name, skin and cape.
+    pub profile: Option<Arc<PlayerProfile>>,
     /// Player UUID if this is a player entity.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -110,6 +118,9 @@ impl EntityRecord {
             limbs: self.limbs,
             animation: self.animation,
             meta: self.meta.clone(),
+            prev_cape_chase: self.cape.previous.as_vec3(),
+            cape_chase: self.cape.current.as_vec3(),
+            profile: self.profile.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
@@ -144,6 +155,8 @@ impl EntityRecord {
             body_yaw: BodyYaw::new(yaw),
             animation: Animation::default(),
             meta: EntityMeta::default(),
+            cape: CapeChase::at(position),
+            profile: None,
             uuid: None,
             held: None,
             item: None,

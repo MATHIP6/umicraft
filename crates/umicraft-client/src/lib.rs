@@ -44,6 +44,7 @@ mod official;
 pub mod options;
 pub mod options_screen;
 pub mod screen;
+pub mod profiles;
 pub mod screenshot;
 pub mod setup_cli;
 pub mod terrain_textures;

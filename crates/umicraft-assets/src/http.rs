@@ -203,6 +203,41 @@ impl HttpClient {
         Ok(bytes.to_vec())
     }
 
+    /// Downloads `url` into memory, refusing a body larger than `max_bytes`.
+    ///
+    /// For untrusted-size bodies (player textures): the body is read in
+    /// chunks and the download stops as soon as the limit is crossed.
+    ///
+    /// # Errors
+    ///
+    /// [`AssetsError::Http`], [`AssetsError::HttpStatus`], or
+    /// [`AssetsError::Image`] when the body is larger than `max_bytes`.
+    pub async fn get_bytes_limited(&self, url: &str, max_bytes: usize) -> AssetsResult<Vec<u8>> {
+        let http_error = |source| AssetsError::Http {
+            url: url.to_string(),
+            source,
+        };
+        let mut response = self.client.get(url).send().await.map_err(http_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(AssetsError::HttpStatus {
+                url: url.to_string(),
+                status: status.as_u16(),
+            });
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(http_error)? {
+            if body.len() + chunk.len() > max_bytes {
+                return Err(crate::error::image_error(
+                    url,
+                    format!("larger than {max_bytes} bytes"),
+                ));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    }
+
     /// Downloads `url` into `dest`, verifying the SHA-1 and the size while
     /// the bytes stream in.
     ///

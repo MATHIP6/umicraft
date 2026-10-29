@@ -332,6 +332,26 @@ impl HumanoidModel {
         out
     }
 
+    /// Hides the outer skin layers that `skin_parts` does not enable
+    /// (MCP `EnumPlayerModelParts`: bit 1 jacket, 2 left sleeve, 3 right
+    /// sleeve, 4 left pants, 5 right pants, 6 hat).
+    pub fn show_skin_layers(&mut self, skin_parts: u8) {
+        let layers = [
+            (&mut self.body, 0x02),
+            (&mut self.left_arm, 0x04),
+            (&mut self.right_arm, 0x08),
+            (&mut self.left_leg, 0x10),
+            (&mut self.right_leg, 0x20),
+            (&mut self.head, 0x40),
+        ];
+        for (part, bit) in layers {
+            if skin_parts & bit == 0 {
+                // The first box is the skin, the second the layer over it.
+                part.boxes.truncate(1);
+            }
+        }
+    }
+
     /// Emits a baby: the head at three quarters, the rest halved
     /// (MCP `ModelBiped.render` with `isChild`).
     #[must_use]
@@ -374,6 +394,21 @@ mod tests {
             values.clone().fold(f32::MAX, f32::min),
             values.fold(f32::MIN, f32::max),
         )
+    }
+
+    #[test]
+    fn the_skin_layers_follow_the_skin_parts() {
+        let all = HumanoidModel::new(false);
+        let mut none = HumanoidModel::new(false);
+        none.show_skin_layers(0);
+        assert_eq!(none.emit_mesh().len(), all.emit_mesh().len() / 2);
+        let mut hat_only = HumanoidModel::new(false);
+        hat_only.show_skin_layers(0x40);
+        assert_eq!(hat_only.head.boxes.len(), 2);
+        assert_eq!(hat_only.body.boxes.len(), 1);
+        let mut everything = HumanoidModel::new(false);
+        everything.show_skin_layers(0x7F);
+        assert_eq!(everything.emit_mesh().len(), all.emit_mesh().len());
     }
 
     #[test]

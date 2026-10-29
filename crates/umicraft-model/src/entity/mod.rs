@@ -8,6 +8,7 @@
 
 mod bat;
 mod blaze;
+mod cape;
 mod chicken;
 pub mod child;
 mod creeper;
@@ -35,6 +36,7 @@ mod wolf;
 
 pub use bat::BatModel;
 pub use blaze::BlazeModel;
+pub use cape::CapeModel;
 pub use chicken::ChickenModel;
 pub use creeper::CreeperModel;
 pub use dragon::DragonModel;
@@ -575,6 +577,10 @@ pub enum TextureSlot {
     HorseZombie,
     /// Skeleton horse.
     HorseSkeleton,
+    /// The skin of a player, by the index the texture cache gave it.
+    Skin(u32),
+    /// The cape of a player, by the index the texture cache gave it.
+    Cape(u32),
     /// A horse coat composed from a base colour and a marking, keyed by the
     /// metadata variant (`base | marking << 8`).
     HorseCoat(u16),
