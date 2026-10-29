@@ -178,13 +178,18 @@ fn the_larger_z_is_in_front_in_an_icon() {
 /// A lit sprite of `half` extent in the plane `z`, wound
 /// counter-clockwise as seen from +z so the back-face cull keeps it.
 fn quad(z: f32, half: f32) -> ItemMesh {
+    quad_on_layer(z, half, 1)
+}
+
+/// [`quad`] sampling atlas layer `layer`.
+fn quad_on_layer(z: f32, half: f32, layer: u32) -> ItemMesh {
     let mut mesh = ItemMesh::default();
     for (x, y) in [(-half, -half), (half, -half), (half, half), (-half, half)] {
         mesh.vertices.push(Vertex {
             position: [x, y, z],
             normal: [0.0, 0.0, 1.0],
             uv: [x / (2.0 * half) + 0.5, y / (2.0 * half) + 0.5],
-            layer: 1,
+            layer,
             light: VertexLight::new(0, 15, 15, false).pack(),
             tint: tint::WHITE,
         });
@@ -262,4 +267,31 @@ fn glint_meshes_draw_nothing_without_a_glint_texture() {
     let plain = probe(&mut renderer);
     renderer.set_world_glint(&mesh);
     assert_eq!(probe(&mut renderer), plain);
+}
+
+/// The glow a quad on atlas `layer` gains from a glint texture that differs
+/// per texel: the added colour, centre pixel.
+fn glow_on_layer(layer: u32) -> [i32; 3] {
+    let mut renderer = Renderer::new_offscreen(SIZE, SIZE).expect("offscreen renderer");
+    renderer.set_block_atlas(2, 2, 2, &atlas()).expect("atlas");
+    // 4x4 texels with a distinct grey per texel.
+    let texels: Vec<u8> = (0..16u8)
+        .flat_map(|texel| [texel * 16, texel * 16, texel * 16, 255])
+        .collect();
+    renderer.set_glint_texture(4, 4, &texels);
+    renderer.set_glint_time(1.0);
+    let mesh = quad_on_layer(-3.0, 1.0, layer);
+    renderer.set_world_items(&mesh);
+    let plain = probe(&mut renderer)[0];
+    renderer.set_world_glint(&mesh);
+    let glowing = probe(&mut renderer)[0];
+    [0, 1, 2].map(|channel| i32::from(glowing[channel]) - i32::from(plain[channel]))
+}
+
+/// Regression: the glint ignored where the sprite sits in the atlas, so two
+/// sprites showed the same part of the glint texture.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn sprites_at_different_atlas_cells_show_different_parts_of_the_glint() {
+    assert_ne!(glow_on_layer(0), glow_on_layer(1));
 }

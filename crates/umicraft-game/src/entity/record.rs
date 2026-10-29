@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use glam::{DVec3, Vec3};
+use umicraft_world::LightLevel;
 
 use super::anim::Animation;
 use super::body_yaw::BodyYaw;
@@ -107,6 +108,7 @@ impl EntityRecord {
         EntityFrameData {
             id: self.id,
             kind: self.kind,
+            light: LightLevel::FULL_SKY,
             prev_position: self.previous_position.as_vec3(),
             position: self.position.as_vec3(),
             prev_yaw: self.previous_yaw,

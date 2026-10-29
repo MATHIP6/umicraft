@@ -31,6 +31,7 @@ use umicraft_game::chat_component::{self, Translations};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
+use umicraft_game::entity::light::{eye_light, light_entities};
 use umicraft_game::entity::nametag::{mob_tag, player_tag};
 use umicraft_game::entity::{
     BossTracker, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
@@ -67,7 +68,7 @@ use umicraft_render::{
     BossView, ChatLineView, ChatRunView, HudState, OutlineBox, SidebarView, TabEntryView,
     TabListView, TitleView,
 };
-use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
+use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, LightLevel, World};
 
 use crate::cracks::Crack;
 use crate::creative_input::CreativeEvent;
@@ -218,6 +219,9 @@ pub struct Frame {
     pub spawn: Option<(i32, i32, i32)>,
     /// Per-entity interpolation data for the render thread.
     pub entities: Arc<[EntityFrameData]>,
+    /// The light at the eye of the local player, which lights the
+    /// first-person item (MCP `ItemRenderer.func_178109_a`).
+    pub hand_light: LightLevel,
     /// World-space boxes of the block selection outline; empty when the
     /// player looks at no block or is a spectator.
     pub selection: Arc<[OutlineBox]>,
@@ -1130,6 +1134,12 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     if followed.is_none() && game.perspective.shows_player() {
         entities.push(game.body.frame_data());
     }
+    // Items are lit by the block they are in; before the first chunk the
+    // default (full sky) stays.
+    let hand_light = game.world.as_ref().map_or(LightLevel::FULL_SKY, |world| {
+        light_entities(world, &mut entities);
+        eye_light(world, view.position)
+    });
     let _ = frames.try_send(RenderEvent::Frame(Frame {
         state: view,
         tick_time,
@@ -1137,6 +1147,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         dimension: game.dimension,
         spawn: game.spawn,
         entities: entities.into(),
+        hand_light,
         selection: game.selection_outline().into(),
         cracks: game.cracks().into(),
     }));

@@ -20,6 +20,9 @@ struct VertexOut {
     @location(1) color: vec4<f32>,
 };
 
+// Cells per side of the 2048 px icon atlas of 64 px cells.
+const ICON_CELLS = 32.0;
+
 @group(0) @binding(0) var icon_atlas: texture_2d<f32>;
 @group(0) @binding(1) var icon_sampler: sampler;
 @group(0) @binding(2) var glint_texture: texture_2d<f32>;
@@ -35,14 +38,17 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
-fn glow(layer: Layer, local: vec2<f32>) -> vec3<f32> {
-    return layer_glow(textureSample(glint_texture, glint_sampler, layer_uv(layer, local)).rgb);
+fn glow(layer: Layer, local: vec2<f32>, cell: vec2<f32>) -> vec3<f32> {
+    return layer_glow(textureSample(glint_texture, glint_sampler, layer_uv(layer, local, cell)).rgb);
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let mask = textureSample(icon_atlas, icon_sampler, in.uv).a;
     let local = (in.uv - in.color.xy) / (in.color.zw - in.color.xy);
-    let glow = glow(glint.layers[0], local) + glow(glint.layers[1], local);
+    // The icon atlas holds 32x32 cells, so the rectangle origin is the cell:
+    // each icon takes its own part of the glint texture.
+    let cell = round(in.color.xy * ICON_CELLS);
+    let glow = glow(glint.layers[0], local, cell) + glow(glint.layers[1], local, cell);
     return vec4<f32>(glow * mask, 0.0);
 }

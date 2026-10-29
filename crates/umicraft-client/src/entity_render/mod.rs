@@ -162,6 +162,7 @@ mod tests {
             EntityRenderSnapshot {
                 id: EntityId(1),
                 kind: EntityKind::Player,
+                light: umicraft_world::LightLevel::FULL_SKY,
                 position: Vec3::new(10.0, 64.0, 10.0),
                 yaw: 0.0,
                 body_yaw: 0.0,
@@ -189,6 +190,7 @@ mod tests {
             EntityRenderSnapshot {
                 id: EntityId(2),
                 kind: EntityKind::Zombie,
+                light: umicraft_world::LightLevel::FULL_SKY,
                 position: Vec3::new(12.0, 64.0, 10.0),
                 yaw: 90.0,
                 body_yaw: 90.0,
@@ -216,6 +218,7 @@ mod tests {
             EntityRenderSnapshot {
                 id: EntityId(3),
                 kind: EntityKind::Cow,
+                light: umicraft_world::LightLevel::FULL_SKY,
                 position: Vec3::new(14.0, 64.0, 10.0),
                 yaw: 180.0,
                 body_yaw: 180.0,
@@ -244,6 +247,7 @@ mod tests {
             EntityRenderSnapshot {
                 id: EntityId(4),
                 kind: EntityKind::Item,
+                light: umicraft_world::LightLevel::FULL_SKY,
                 position: Vec3::new(16.0, 64.25, 10.0),
                 yaw: 45.0,
                 body_yaw: 45.0,

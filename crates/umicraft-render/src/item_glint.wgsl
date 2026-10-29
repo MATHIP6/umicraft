@@ -11,8 +11,8 @@
 @group(1) @binding(1) var glint_sampler: sampler;
 @group(1) @binding(2) var<uniform> glint: Glint;
 
-fn glow(layer: Layer, local: vec2<f32>) -> vec3<f32> {
-    return layer_glow(textureSample(glint_texture, glint_sampler, layer_uv(layer, local)).rgb);
+fn glow(layer: Layer, local: vec2<f32>, cell: vec2<f32>) -> vec3<f32> {
+    return layer_glow(textureSample(glint_texture, glint_sampler, layer_uv(layer, local, cell)).rgb);
 }
 
 @fragment
@@ -21,5 +21,9 @@ fn fs_glint(in: VertexOut) -> @location(0) vec4<f32> {
     if (texel.a < 0.5) {
         discard;
     }
-    return vec4<f32>(glow(glint.layers[0], in.uv) + glow(glint.layers[1], in.uv), 0.0);
+    let cell = sprite_cell(in.layer);
+    return vec4<f32>(
+        glow(glint.layers[0], in.uv, cell) + glow(glint.layers[1], in.uv, cell),
+        0.0,
+    );
 }

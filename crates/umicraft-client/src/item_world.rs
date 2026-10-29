@@ -22,6 +22,7 @@ use umicraft_model::display::DisplayContext;
 use umicraft_model::item::pose::{context_pose, ground_pose, held_pose};
 use umicraft_model::item::{ItemGeometry, ItemModel};
 use umicraft_model::ModelQuad;
+use umicraft_world::LightLevel;
 
 use crate::entity_render::{body_matrix, posed_player, x_mirror};
 use crate::item_icons::ItemResources;
@@ -111,7 +112,7 @@ fn push_dropped_item(
     let style = ItemStyle {
         atlas: resources.atlas(),
         // Items are not lit by face in the world.
-        light: VertexLight::new(0, 15, 15, false),
+        light: world_light(entity.light, false),
         tints: &tints,
     };
     let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
@@ -171,11 +172,17 @@ fn push_player_held_item(
     let tints = resources.tints(held.item_id, held.damage, held.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
-        light: VertexLight::new(0, 15, 15, false),
+        light: world_light(entity.light, false),
         tints: &tints,
     };
     let glint = resources.glints(held.item_id, held.damage, held.nbt.as_deref());
     layers.push(quads, &pose, &style, glint);
+}
+
+/// The vertex light of an item in the world: the `light` of the block it is in,
+/// without ambient occlusion, and with the face shade when `shaded`.
+fn world_light(light: LightLevel, shaded: bool) -> VertexLight {
+    VertexLight::new(light.block, light.sky, 15, shaded)
 }
 
 /// The bow item id.
@@ -202,7 +209,7 @@ fn push_item_frame(
         * Mat4::from_rotation_y((180.0 - yaw).to_radians());
     let wood = ItemStyle {
         atlas: resources.atlas(),
-        light: VertexLight::new(0, 15, 15, true),
+        light: world_light(entity.light, true),
         tints: &[],
     };
     layers.items.push_quads(
@@ -230,7 +237,7 @@ fn push_item_frame(
     let tints = resources.tints(item.item_id, item.damage, item.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
-        light: VertexLight::new(0, 15, 15, model.gui_3d),
+        light: world_light(entity.light, model.gui_3d),
         tints: &tints,
     };
     let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
@@ -244,14 +251,14 @@ fn is_torch(item_id: i16) -> bool {
 
 /// Appends the first-person held item to `layers`, in camera space.
 ///
-/// `bob` is the view-bobbing transform of the frame, applied to the hand
-/// as well (MCP `EntityRenderer.renderHand`). Items without a sprite model
+/// `(bob, light)` is the view-bobbing transform of the frame, applied to the
+/// hand as well (MCP `EntityRenderer.renderHand`), and the light at the eye. Items without a sprite model
 /// (a chest, a banner) are not drawn yet.
 pub fn push_held_item(
     layers: &mut ItemLayers,
     (item_id, damage, nbt): (i16, i16, Option<&[u8]>),
     hand: &HandPose,
-    bob: Mat4,
+    (bob, light): (Mat4, LightLevel),
     resources: &ItemResources,
 ) {
     let Some((model, quads)) = held_model(resources, item_id, damage, hand) else {
@@ -260,8 +267,8 @@ pub fn push_held_item(
     let tints = resources.tints(item_id, damage, nbt);
     let style = ItemStyle {
         atlas: resources.atlas(),
-        // The hand is lit at full sky light; lit blocks keep their face shade.
-        light: VertexLight::new(0, 15, 15, model.gui_3d),
+        // Lit by the world at the eye; lit blocks keep their face shade.
+        light: world_light(light, model.gui_3d),
         tints: &tints,
     };
     let pose = bob * hand.item_matrix() * held_pose(model, DisplayContext::FirstPerson);
@@ -424,6 +431,16 @@ mod tests {
     }
 
     #[test]
+    fn items_take_the_light_of_their_block_and_no_ambient_occlusion() {
+        let lit = world_light(LightLevel::new(7, 3), true);
+        assert_eq!(lit, VertexLight::new(7, 3, 15, true));
+        assert_eq!(
+            world_light(LightLevel::DARK, false),
+            VertexLight::new(0, 0, 15, false)
+        );
+    }
+
+    #[test]
     fn stacks_grow_the_copy_count_at_the_reference_thresholds() {
         let counts: Vec<usize> = [1, 2, 16, 17, 32, 33, 48, 49, 64]
             .into_iter()
@@ -471,6 +488,7 @@ mod render_tests {
         EntityRenderSnapshot {
             id: EntityId(id),
             kind: EntityKind::Item,
+            light: LightLevel::FULL_SKY,
             position: Vec3::new(x, 79.6, -3.0),
             yaw: 0.0,
             body_yaw: 0.0,
@@ -541,7 +559,7 @@ mod render_tests {
             &mut hand,
             (276, 0, None),
             &HandPose::default(),
-            Mat4::IDENTITY,
+            (Mat4::IDENTITY, LightLevel::FULL_SKY),
             &items,
         );
         renderer.set_hand_items(&hand.items);
@@ -576,6 +594,7 @@ mod player_render_tests {
         EntityRenderSnapshot {
             id: EntityId(id),
             kind: EntityKind::Player,
+            light: LightLevel::FULL_SKY,
             position: Vec3::new(x, 78.4, -4.0),
             yaw: -70.0,
             body_yaw: -70.0,
@@ -682,7 +701,7 @@ mod use_render_tests {
             &mut mesh,
             (item.0, item.1, None),
             &pose,
-            Mat4::IDENTITY,
+            (Mat4::IDENTITY, LightLevel::FULL_SKY),
             &items,
         );
         assert!(!mesh.items.is_empty(), "the held item has geometry");
@@ -754,6 +773,7 @@ mod glint_render_tests {
         EntityRenderSnapshot {
             id: EntityId(id),
             kind: EntityKind::Item,
+            light: LightLevel::FULL_SKY,
             position: Vec3::new(x, 79.6, -2.5),
             yaw: 0.0,
             body_yaw: 0.0,
@@ -824,7 +844,7 @@ mod glint_render_tests {
             &mut hand,
             (276, 0, Some(&nbt)),
             &HandPose::default(),
-            Mat4::IDENTITY,
+            (Mat4::IDENTITY, LightLevel::FULL_SKY),
             &items,
         );
         renderer.set_hand_items(&hand.items);

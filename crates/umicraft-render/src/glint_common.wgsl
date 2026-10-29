@@ -23,9 +23,23 @@ const GLINT_COLOR = vec3<f32>(0.5019608, 0.2509804, 0.8);
 // Glint texture span covered by the icon: a 16 px sprite over a 64 px texture.
 const GLINT_SPAN = 0.25;
 
-// The texture coordinate of one layer for a sprite-local position.
-fn layer_uv(layer: Layer, local: vec2<f32>) -> vec2<f32> {
-    return mat2x2<f32>(layer.rotation.xy, layer.rotation.zw) * (local * GLINT_SPAN)
+// Sprites per row of the virtual 512 px atlas of 16 px sprites. The original
+// feeds the glint with atlas coordinates, so the sprite's position in the atlas
+// moves its part of the glint texture (the rotation applies to that offset
+// too). The stitched positions are not reproducible with a texture array, so a
+// sprite takes the cell its layer index has in a row-major grid of this width:
+// distinct sprites still sample distinct parts of the glint, like the original.
+const SPRITE_COLUMNS = 32u;
+
+// The grid cell (column, row) of a texture-array layer.
+fn sprite_cell(index: u32) -> vec2<f32> {
+    return vec2<f32>(f32(index % SPRITE_COLUMNS), f32(index / SPRITE_COLUMNS));
+}
+
+// The texture coordinate of one layer for a sprite-local position inside the
+// sprite at grid cell `cell`.
+fn layer_uv(layer: Layer, local: vec2<f32>, cell: vec2<f32>) -> vec2<f32> {
+    return mat2x2<f32>(layer.rotation.xy, layer.rotation.zw) * ((cell + local) * GLINT_SPAN)
         + layer.offset.xy;
 }
 

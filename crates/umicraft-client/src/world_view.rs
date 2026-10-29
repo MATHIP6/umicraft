@@ -20,7 +20,7 @@ use umicraft_game::inventory::WindowView;
 use umicraft_game::RenderState;
 use umicraft_mesh::{ChunkSnapshot, Mesh, Vertex};
 use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer};
-use umicraft_world::ChunkPos;
+use umicraft_world::{ChunkPos, LightLevel};
 
 use crate::cracks::{crack_mesh, Crack, STAGES};
 use crate::creative_view::CreativeView;
@@ -70,6 +70,8 @@ pub struct WorldView {
     frames: usize,
     /// Active living entities interpolation data from the latest frame.
     entities: Arc<[EntityFrameData]>,
+    /// The light at the eye of the local player in the latest frame.
+    hand_light: LightLevel,
     /// Selection outline boxes from the latest frame.
     selection: Arc<[OutlineBox]>,
     /// The cracks of the newest frame, and the mesh built from them.
@@ -105,6 +107,7 @@ impl WorldView {
             ended: None,
             frames: 0,
             entities: Arc::from([]),
+            hand_light: LightLevel::FULL_SKY,
             selection: Arc::from([]),
             cracks: Arc::from([]),
             destroy_layers: terrain.mesher().destroy_layers(),
@@ -224,6 +227,12 @@ impl WorldView {
         self.entities.iter().map(|e| e.interpolate(alpha)).collect()
     }
 
+    /// The light that lights the first-person item in the newest frame.
+    #[must_use]
+    pub fn hand_light(&self) -> LightLevel {
+        self.hand_light
+    }
+
     /// The world-space boxes of the block selection outline in the newest
     /// frame; empty when no block is targeted.
     #[must_use]
@@ -248,6 +257,7 @@ impl WorldView {
             RenderEvent::Frame(frame) => {
                 self.frames += 1;
                 self.entities = Arc::clone(&frame.entities);
+                self.hand_light = frame.hand_light;
                 self.selection = Arc::clone(&frame.selection);
                 if *self.cracks != *frame.cracks {
                     self.cracks = Arc::clone(&frame.cracks);
@@ -616,6 +626,7 @@ mod tests {
             dimension: -1,
             spawn: None,
             entities: Arc::from([]),
+            hand_light: LightLevel::FULL_SKY,
             selection: Arc::from([]),
             cracks: Arc::from([]),
         }

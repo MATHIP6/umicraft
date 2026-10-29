@@ -423,6 +423,7 @@ fn make_snapshot(
     EntityRenderSnapshot {
         id: EntityId(id),
         kind,
+        light: umicraft_world::LightLevel::FULL_SKY,
         position: pos,
         yaw: 180.0,
         body_yaw: 180.0,

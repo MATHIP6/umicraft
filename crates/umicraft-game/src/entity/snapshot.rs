@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use glam::Vec3;
+use umicraft_world::LightLevel;
 
 use super::angle::lerp_degrees;
 use super::anim::{Animation, BedPose};
@@ -26,6 +27,9 @@ pub struct EntityFrameData {
     pub id: EntityId,
     /// Entity category.
     pub kind: EntityKind,
+    /// The world light at the entity (see [`super::light`]); full sky until
+    /// the game thread samples it.
+    pub light: LightLevel,
     /// Position at the previous simulation tick.
     pub prev_position: Vec3,
     /// Position at the current simulation tick.
@@ -92,6 +96,7 @@ impl EntityFrameData {
         EntityRenderSnapshot {
             id: self.id,
             kind: self.kind,
+            light: self.light,
             position,
             yaw,
             body_yaw,
@@ -130,6 +135,8 @@ pub struct EntityRenderSnapshot {
     pub id: EntityId,
     /// Entity category.
     pub kind: EntityKind,
+    /// The world light the entity is drawn with.
+    pub light: LightLevel,
     /// Interpolated world space position.
     pub position: Vec3,
     /// Interpolated facing direction in degrees.
@@ -187,6 +194,7 @@ impl EntityRenderSnapshot {
         Self {
             id,
             kind,
+            light: LightLevel::FULL_SKY,
             position,
             yaw: 0.0,
             body_yaw: 0.0,

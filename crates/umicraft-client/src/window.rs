@@ -1242,7 +1242,7 @@ impl App {
                         &mut self.hand_layers,
                         (stack.item_id, stack.damage, nbt),
                         &hand,
-                        self.camera.view_bob(),
+                        (self.camera.view_bob(), world.hand_light()),
                         items,
                     );
                 }
