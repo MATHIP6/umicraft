@@ -1225,6 +1225,9 @@ fn put_to_bed(game: &mut Game, packet: &UseBed) {
     game.entities.sleep(EntityId(packet.entity_id), bed, facing);
 }
 
+/// The game mode a tab list entry has for a player in spectator mode.
+const SPECTATOR_WIRE: i32 = 3;
+
 /// Handles one decoded clientbound packet.
 fn handle_net(
     game: &mut Game,
@@ -1244,6 +1247,12 @@ fn handle_net(
     );
     apply_net_event(game, event, queue, frames);
     if changes_name_tags {
+        let players = &game.player_list;
+        game.entities.refresh_spectators(|uuid| {
+            players
+                .get(&u128::from_be_bytes(*uuid))
+                .is_some_and(|entry| entry.game_mode == SPECTATOR_WIRE)
+        });
         let (scoreboard, own_name) = (&game.scoreboard, game.own_name.as_str());
         game.entities
             .refresh_name_tags(|entity| entity_tag(scoreboard, own_name, entity));

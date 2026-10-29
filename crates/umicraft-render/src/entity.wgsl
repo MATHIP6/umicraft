@@ -27,7 +27,7 @@ struct VertexIn {
 };
 
 struct VertexOut {
-    @builtin(position) clip_position: vec4<f32>,
+    @invariant @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) light: f32,
@@ -104,13 +104,8 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
-@fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let tex = textureSample(entity_texture, entity_sampler, in.uv);
-    if (tex.a < 0.1) {
-        discard;
-    }
-
+// The colour of a lit texel: hurt tint, flash, light, shade and fog.
+fn lit_colour(in: VertexOut, tex: vec4<f32>) -> vec3<f32> {
     // A hurt or dying entity is blended 30 % towards red before the light is
     // applied (MCP `RendererLivingEntity.setBrightness`: (1, 0, 0, 0.3)).
     var base = mix(tex.rgb * in.dye, vec3<f32>(1.0, 0.0, 0.0), 0.3 * in.hurt);
@@ -120,7 +115,79 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let lit = base * in.light * in.shade;
     let dist = distance(in.world_position, camera.camera_pos);
     let fog = clamp((dist - camera.fog_start) / (camera.fog_end - camera.fog_start), 0.0, 1.0);
-    let final_rgb = mix(lit, camera.fog_color, fog);
-
-    return vec4<f32>(final_rgb, tex.a);
+    return mix(lit, camera.fog_color, fog);
 }
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    let tex = textureSample(entity_texture, entity_sampler, in.uv);
+    if (tex.a < 0.1) {
+        discard;
+    }
+    return vec4<f32>(lit_colour(in, tex), tex.a);
+}
+
+// An invisible entity seen by a spectator: its model is drawn at 15 % opacity
+// (MCP `RendererLivingEntity.renderModel`: colour alpha 0.15, alpha test above
+// 1/255).
+@fragment
+fn fs_ghost(in: VertexOut) -> @location(0) vec4<f32> {
+    let tex = textureSample(entity_texture, entity_sampler, in.uv);
+    if (tex.a < 0.003921569) {
+        discard;
+    }
+    return vec4<f32>(lit_colour(in, tex), tex.a * 0.15);
+}
+
+// Glowing layers (MCP `blendFunc(1, 1)`): the spider, enderman and dragon eyes,
+// the creeper charge, the wither aura and the enchantment glint. Their colour
+// is added to the frame, so there is no light, no shade and no alpha test.
+//
+// `light` is repurposed: bits 0..=7 are the red, 8..=15 the green and 16..=23
+// the blue of the tint, and bit 24 squares the colour
+// (`blendFunc(GL_SRC_COLOR, GL_ONE)` of the glint).
+struct AdditiveOut {
+    @invariant @builtin(position) clip_position: vec4<f32>,
+    @location(0) world_position: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) @interpolate(flat) tint: vec3<f32>,
+    @location(3) @interpolate(flat) squared: f32,
+};
+
+@vertex
+fn vs_additive(in: VertexIn) -> AdditiveOut {
+    var out: AdditiveOut;
+    out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
+    out.world_position = in.position;
+    out.uv = in.uv;
+    out.tint = vec3<f32>(
+        f32(in.light & 0xFFu),
+        f32((in.light >> 8u) & 0xFFu),
+        f32((in.light >> 16u) & 0xFFu),
+    ) / 255.0;
+    out.squared = f32((in.light >> 24u) & 1u);
+    return out;
+}
+
+@fragment
+fn fs_additive(in: AdditiveOut) -> @location(0) vec4<f32> {
+    let tex = textureSample(entity_texture, entity_sampler, in.uv);
+    // The reference multiplies and squares the colour as stored (sRGB) and adds
+    // it to the frame in that space; the target here blends in linear space.
+    var rgb = pow(tex.rgb, vec3<f32>(1.0 / 2.2)) * in.tint;
+    if (in.squared > 0.5) {
+        // The glint is added over mid-tone armour, where adding the value as
+        // stored shows up as the reference does and adding its linear
+        // equivalent would almost vanish.
+        rgb = rgb * rgb;
+    } else {
+        // Eyes and swirls are added over dark bodies, where the exact
+        // conversion matches the reference.
+        rgb = pow(rgb, vec3<f32>(2.2));
+    }
+    // A glow fades into the fog like everything else.
+    let dist = distance(in.world_position, camera.camera_pos);
+    let fog = clamp((dist - camera.fog_start) / (camera.fog_end - camera.fog_start), 0.0, 1.0);
+    return vec4<f32>(rgb * (1.0 - fog), 1.0);
+}
+

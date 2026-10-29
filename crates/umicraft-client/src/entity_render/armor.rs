@@ -14,6 +14,7 @@ use umicraft_game::item_nbt::ItemDisplay;
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{ArmorMaterial, HumanoidModel, TextureSlot};
 
+use super::glow::glint_layers;
 use super::mobs::EntityLayer;
 use super::pose::humanoid_pose;
 
@@ -44,6 +45,10 @@ pub(super) fn armor_layers(ent: &EntityRenderSnapshot, scale: f32) -> Vec<Entity
         };
         scale_mesh(&mut vertices, scale);
         let leggings = slot == 2;
+        let glint = item
+            .nbt
+            .as_deref()
+            .is_some_and(|nbt| ItemDisplay::from_nbt(nbt).has_glint());
         if material == ArmorMaterial::Leather {
             let color = item
                 .nbt
@@ -57,13 +62,17 @@ pub(super) fn armor_layers(ent: &EntityRenderSnapshot, scale: f32) -> Vec<Entity
             ));
             layers.push(EntityLayer::new(
                 TextureSlot::LeatherOverlay { leggings },
-                vertices,
+                vertices.clone(),
             ));
         } else {
             layers.push(EntityLayer::new(
                 TextureSlot::Armor { material, leggings },
-                vertices,
+                vertices.clone(),
             ));
+        }
+        // An enchanted piece glows over its texture, in two passes.
+        if glint {
+            layers.extend(glint_layers(&vertices, ent.age));
         }
     }
     layers

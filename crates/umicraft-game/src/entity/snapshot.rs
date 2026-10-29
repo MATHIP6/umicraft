@@ -70,6 +70,8 @@ pub struct EntityFrameData {
     pub held: Option<EntityItem>,
     /// The worn armour, boots first.
     pub armor: [Option<EntityItem>; 4],
+    /// Whether the player is in spectator mode: only the head is drawn.
+    pub spectator: bool,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use.
@@ -126,6 +128,7 @@ impl EntityFrameData {
             uuid: self.uuid,
             held: self.held.clone(),
             armor: self.armor.clone(),
+            spectator: self.spectator,
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.fishing,
@@ -185,6 +188,8 @@ pub struct EntityRenderSnapshot {
     pub held: Option<EntityItem>,
     /// The worn armour, boots first.
     pub armor: [Option<EntityItem>; 4],
+    /// Whether the player is in spectator mode: only the head is drawn.
+    pub spectator: bool,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use: picks the bow drawing model.
@@ -230,6 +235,7 @@ impl EntityRenderSnapshot {
             held: None,
             item: None,
             armor: [None, None, None, None],
+            spectator: false,
             use_ticks: 0,
             fishing: false,
             age: 0.0,

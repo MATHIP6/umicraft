@@ -74,6 +74,9 @@ pub struct EntityRecord {
     pub held: Option<EntityItem>,
     /// The worn armour, boots first (`Entity Equipment` slots 1 to 4).
     pub armor: [Option<EntityItem>; 4],
+    /// Whether the tab list says this player is in spectator mode (shown as
+    /// a head only).
+    pub spectator: bool,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use (MCP `getItemInUseDuration` of
@@ -147,6 +150,7 @@ impl EntityRecord {
             uuid: self.uuid,
             held: self.held.clone(),
             armor: self.armor.clone(),
+            spectator: self.spectator,
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.bobber.is_some(),
@@ -188,6 +192,7 @@ impl EntityRecord {
             held: None,
             item: None,
             armor: [None, None, None, None],
+            spectator: false,
             use_ticks: 0,
             bobber: None,
             age_ticks: 0,

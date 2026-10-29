@@ -25,6 +25,17 @@ pub(crate) fn model_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
     body_matrix(entity) * x_mirror()
 }
 
+/// `ModelRenderer.postRender(0.0625)` of a part: its pivot and angles, taking a
+/// point of the vanilla frame (y down) of the part to the model space of this
+/// crate (y up). The models of this crate are the vanilla ones with the y axis
+/// flipped, so the chain is conjugated by a y flip.
+#[must_use]
+pub(crate) fn part_frame(part: &umicraft_model::entity::ModelPart) -> Mat4 {
+    part.transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)))
+        * Mat4::from_scale(Vec3::splat(16.0))
+        * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0))
+}
+
 /// The vanilla model space is drawn through `scale(-1, -1, 1)`; the models of
 /// this crate undo the y half (y up) but keep the box layout and the UVs of
 /// the vanilla model space, so they are mirrored along x to be seen as in

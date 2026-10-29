@@ -61,6 +61,44 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             jar_path: "assets/minecraft/textures/entity/cow/cow.png",
             fallback: || (procedural_cow_texture(), 64, 32),
         },
+        // The glowing layers have no original stand-in: without the jar they
+        // add nothing.
+        TextureSpec {
+            slot: TextureSlot::Arrow,
+            jar_path: "assets/minecraft/textures/entity/arrow.png",
+            // No original stand-in: without the jar the arrows are not drawn.
+            fallback: || (vec![0; 32 * 32 * 4], 32, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::SpiderEyes,
+            jar_path: "assets/minecraft/textures/entity/spider_eyes.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::EndermanEyes,
+            jar_path: "assets/minecraft/textures/entity/enderman/enderman_eyes.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::DragonEyes,
+            jar_path: "assets/minecraft/textures/entity/enderdragon/dragon_eyes.png",
+            fallback: || (vec![0; 256 * 256 * 4], 256, 256),
+        },
+        TextureSpec {
+            slot: TextureSlot::CreeperCharge,
+            jar_path: "assets/minecraft/textures/entity/creeper/creeper_armor.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::WitherAura,
+            jar_path: "assets/minecraft/textures/entity/wither/wither_armor.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::EnchantGlint,
+            jar_path: "assets/minecraft/textures/misc/enchanted_item_glint.png",
+            fallback: || (vec![0; 64 * 64 * 4], 64, 64),
+        },
         TextureSpec {
             slot: TextureSlot::MushroomRed,
             jar_path: "assets/minecraft/textures/blocks/mushroom_red.png",
@@ -228,6 +266,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             slot: TextureSlot::Silverfish,
             jar_path: "assets/minecraft/textures/entity/silverfish.png",
             fallback: || (procedural_silverfish_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::WitherInvulnerable,
+            jar_path: "assets/minecraft/textures/entity/wither/wither_invulnerable.png",
+            fallback: || (procedural_wither_texture(), 64, 64),
         },
         TextureSpec {
             slot: TextureSlot::Wither,

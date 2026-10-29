@@ -17,8 +17,10 @@
 
 mod animals;
 mod armor;
+mod arrows;
 mod creatures;
 mod fire;
+mod glow;
 mod hand;
 mod horse_coat;
 mod mobs;
@@ -26,6 +28,7 @@ mod mushrooms;
 mod player;
 mod pose;
 mod skins;
+mod skull;
 mod specs;
 mod textures;
 mod transform;
@@ -43,14 +46,25 @@ pub use hand::hand_vertices;
 pub(crate) use mobs::posed_humanoid_mob;
 pub(crate) use player::posed_player;
 pub use textures::{load_or_fallback, procedural_dirt_texture, EntityTextures};
-pub(crate) use transform::{body_matrix, x_mirror};
+pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 
 /// Meshes entity snapshots into batched vertex lists grouped by [`TextureSlot`].
 #[must_use]
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(snapshots, &skins::NoSkins, 0.0)
+    mesh_entities_with(snapshots, &skins::NoSkins, 0.0, false).solid
+}
+
+/// The meshes of a frame: the lit entities, and the glowing layers that are
+/// added over them.
+struct MeshedEntities {
+    solid: HashMap<TextureSlot, Vec<EntityVertex>>,
+    additive: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The glint of armour, drawn only where the armour is.
+    glint: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The invisible entities a spectator sees, drawn translucent.
+    ghost: HashMap<TextureSlot, Vec<EntityVertex>>,
 }
 
 /// [`mesh_entities`] with the downloaded skins and capes of players.
@@ -58,26 +72,55 @@ fn mesh_entities_with(
     snapshots: &[EntityRenderSnapshot],
     skins: &dyn skins::SkinLookup,
     view_yaw: f32,
-) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    let mut batches: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    viewer_is_spectator: bool,
+) -> MeshedEntities {
+    let mut solid: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut additive: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut glint: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut ghost: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
         let matrix = transform::model_matrix(ent);
         let light = entity_light(ent);
-        for layer in mobs::build_entity_layers(ent, skins) {
+        for layer in mobs::build_entity_layers_for(ent, skins, viewer_is_spectator) {
+            if let Some(glow) = layer.glow {
+                let word = glow.light_word();
+                let target = if glow.equal_depth {
+                    &mut glint
+                } else {
+                    &mut additive
+                };
+                target
+                    .entry(layer.slot)
+                    .or_default()
+                    .extend(layer.vertices.into_iter().map(|mut vertex| {
+                        vertex.uv = glow.uv.apply(vertex.uv);
+                        transform_vertex(vertex, &matrix, word)
+                    }));
+                continue;
+            }
             let light = light | dye_bits(layer.dye);
-            let batch = batches.entry(layer.slot).or_default();
-            batch.extend(
+            let target = if layer.translucent {
+                &mut ghost
+            } else {
+                &mut solid
+            };
+            target.entry(layer.slot).or_default().extend(
                 layer
                     .vertices
                     .into_iter()
                     .map(|vertex| transform_vertex(vertex, &matrix, light)),
             );
         }
-        fire::add_fire(&mut batches, ent, view_yaw);
+        fire::add_fire(&mut solid, ent, view_yaw);
     }
 
-    batches
+    MeshedEntities {
+        solid,
+        additive,
+        glint,
+        ghost,
+    }
 }
 
 /// Bit of [`EntityVertex::light`] that tints the vertex red, as the hurt and
@@ -189,6 +232,7 @@ mod tests {
                 uuid: Some([0; 16]),
                 held: None,
                 armor: [None, None, None, None],
+                spectator: false,
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -220,6 +264,7 @@ mod tests {
                 uuid: None,
                 held: None,
                 armor: [None, None, None, None],
+                spectator: false,
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -251,6 +296,7 @@ mod tests {
                 uuid: None,
                 held: None,
                 armor: [None, None, None, None],
+                spectator: false,
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -283,6 +329,7 @@ mod tests {
                 uuid: None,
                 held: None,
                 armor: [None, None, None, None],
+                spectator: false,
                 item: None,
                 age: 0.0,
                 frame_direction: 0,

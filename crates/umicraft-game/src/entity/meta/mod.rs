@@ -79,6 +79,11 @@ pub enum Variant {
     },
     /// Enderman carried block and scream.
     Enderman(EndermanMeta),
+    /// Wither spawn countdown (entry 20), the ticks of invulnerability left.
+    Wither {
+        /// `0` for a wither that is not being spawned.
+        invulnerable: i32,
+    },
     /// Ghast charging a fireball (entry 16).
     Ghast {
         /// True while the ghast attacks: its face shows the shooting texture.
@@ -111,6 +116,7 @@ impl EntityMeta {
             }
             EntityKind::Enderman => monsters::apply_enderman(&mut variant, metadata),
             EntityKind::Ghast => monsters::apply_ghast(&mut variant, metadata),
+            EntityKind::Wither => monsters::apply_wither(&mut variant, metadata),
             EntityKind::Villager => monsters::apply_villager(&mut variant, metadata),
             EntityKind::ArmorStand => armor_stand::apply(&mut variant, metadata),
             _ => {}

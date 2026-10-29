@@ -443,6 +443,7 @@ fn make_snapshot(
         uuid,
         held: None,
         armor: [None, None, None, None],
+        spectator: false,
         item: None,
         age: 0.0,
         frame_direction: 0,
@@ -966,10 +967,10 @@ pub static MOB_CATALOG: &[MobCatalogEntry] = &[
         display_name: "Wither",
         kind: EntityKind::Wither,
         uuid: None,
-        world_y_offset: 1.0,
-        camera_dist: 4.5,
-        camera_y: 1.80,
-        camera_pitch: -0.06,
+        world_y_offset: 0.0,
+        camera_dist: 9.0,
+        camera_y: 2.4,
+        camera_pitch: -0.02,
         yaw_deg: 25.0,
     },
     MobCatalogEntry {
@@ -1015,6 +1016,19 @@ pub fn find_mob(query: &str) -> Option<&'static MobCatalogEntry> {
     })
 }
 
+/// The skull type a biped wears in the dump, a different one for each:
+/// skeleton, wither skeleton, zombie, player and creeper.
+fn skull_type(mob: &MobCatalogEntry) -> Option<i16> {
+    match mob.display_name {
+        "Steve" => Some(0),
+        "Alex" => Some(4),
+        "Zombie" => Some(1),
+        "Skeleton" => Some(3),
+        "Zombie Pigman" => Some(2),
+        _ => None,
+    }
+}
+
 /// What a mob wears in the dump: nothing, armour, or flames.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Look {
@@ -1023,6 +1037,12 @@ enum Look {
     Burning,
     Chested,
     Sitting,
+    Glowing,
+    Skull,
+    Arrows,
+    Ghost,
+    Spectator,
+    Spawning,
 }
 
 /// A different set of armour per mob, to see every material in the dump:
@@ -1037,11 +1057,23 @@ fn demo_armor(index: usize) -> [Option<EntityItem>; 4] {
             item_id: first + offset,
             damage: 0,
             count: 1,
-            nbt: leather.then(|| std::sync::Arc::from(RED_LEATHER)),
+            nbt: if leather {
+                Some(std::sync::Arc::from(RED_LEATHER))
+            } else if first == 310 {
+                Some(std::sync::Arc::from(ENCHANTED))
+            } else {
+                None
+            },
         })
     };
     [piece(3), piece(2), piece(1), piece(0)]
 }
+
+/// NBT of `{ench: [{id: 16, lvl: 1}]}`: an enchanted piece with a glint.
+const ENCHANTED: &[u8] = &[
+    10, 0, 0, 9, 0, 4, b'e', b'n', b'c', b'h', 10, 0, 0, 0, 1, 2, 0, 2, b'i', b'd', 0, 16, 2, 0, 3,
+    b'l', b'v', b'l', 0, 1, 0, 0,
+];
 
 /// NBT of `{display: {color: 0xCC2222}}`.
 const RED_LEATHER: &[u8] = &[
@@ -1105,12 +1137,23 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
             );
             let chested = mob.kind == EntityKind::Horse;
             let sitting = matches!(mob.kind, EntityKind::Wolf | EntityKind::Ocelot);
+            let glowing = matches!(mob.kind, EntityKind::Creeper | EntityKind::Wither);
+            let skull = skull_type(mob).is_some();
+            let arrowed = mob.kind == EntityKind::Player;
+            let ghost = matches!(mob.kind, EntityKind::Player | EntityKind::Cow);
+            let spawning = mob.kind == EntityKind::Wither;
             [(index, mob, Look::Plain)]
                 .into_iter()
                 .chain(armored.then_some((index, mob, Look::Armored)))
                 .chain(burning.then_some((index, mob, Look::Burning)))
                 .chain(chested.then_some((index, mob, Look::Chested)))
                 .chain(sitting.then_some((index, mob, Look::Sitting)))
+                .chain(glowing.then_some((index, mob, Look::Glowing)))
+                .chain(skull.then_some((index, mob, Look::Skull)))
+                .chain(arrowed.then_some((index, mob, Look::Arrows)))
+                .chain(ghost.then_some((index, mob, Look::Ghost)))
+                .chain(spawning.then_some((index, mob, Look::Spawning)))
+                .chain(arrowed.then_some((index, mob, Look::Spectator)))
         })
         .collect::<Vec<_>>();
     for (index, mob, look) in variants {
@@ -1119,6 +1162,43 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
         face_the_camera(&mut snapshot, mob.yaw_deg);
         if look == Look::Burning {
             snapshot.flags = EntityFlags::new(0x01, 0x7F);
+        }
+        // The glow layers move with the age: pick a tick away from zero.
+        snapshot.age = 37.0;
+        // An invisible entity is seen by a spectator, who sees it translucent.
+        if matches!(look, Look::Ghost | Look::Spectator) {
+            snapshot.flags = EntityFlags::new(0x20, 0x7F);
+        }
+        if look == Look::Spawning {
+            snapshot.meta.variant =
+                umicraft_game::entity::meta::Variant::Wither { invulnerable: 150 };
+        }
+        if look == Look::Spectator {
+            snapshot.spectator = true;
+        }
+        entity_textures.set_viewer_spectator(matches!(look, Look::Ghost | Look::Spectator));
+        if look == Look::Arrows {
+            snapshot.meta.living.arrows = 12;
+        }
+        if look == Look::Skull {
+            snapshot.armor[3] = skull_type(mob).map(|damage| EntityItem {
+                item_id: 397,
+                damage,
+                count: 1,
+                nbt: None,
+            });
+        }
+        if look == Look::Glowing {
+            use umicraft_game::entity::meta::{CreeperMeta, Variant};
+            match mob.kind {
+                EntityKind::Creeper => {
+                    snapshot.meta.variant = Variant::Creeper(CreeperMeta {
+                        powered: true,
+                        ..CreeperMeta::default()
+                    });
+                }
+                _ => snapshot.meta.living.health = 100.0,
+            }
         }
         if look == Look::Sitting {
             use umicraft_game::entity::meta::{OcelotMeta, Variant, WolfMeta};
@@ -1190,6 +1270,12 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
             Look::Burning => "_burning",
             Look::Chested => "_chested",
             Look::Sitting => "_sitting",
+            Look::Glowing => "_glowing",
+            Look::Skull => "_skull",
+            Look::Arrows => "_arrows",
+            Look::Ghost => "_ghost",
+            Look::Spawning => "_spawning",
+            Look::Spectator => "_spectator",
         };
         let out_path = output_dir.join(format!("{}{suffix}.png", mob.id));
         write_png(&out_path, &image.rgba, image.width, image.height)?;

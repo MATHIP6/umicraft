@@ -15,10 +15,13 @@ use umicraft_model::entity::{CapeModel, HumanoidModel, ModelVertex, TextureSlot}
 
 use super::animals::animal_layers;
 use super::armor::armor_layers;
+use super::arrows::arrow_layers;
 use super::creatures::{creature_layers, creeper_layers};
+use super::glow::Glow;
 use super::player::posed_player;
 use super::pose::humanoid_pose;
 use super::skins::SkinLookup;
+use super::skull::skull_layers;
 
 /// The animation inputs every model's `set_angles` takes.
 #[derive(Clone, Copy)]
@@ -50,6 +53,11 @@ pub(super) struct EntityLayer {
     /// Dye (`0..=15`, MCP `EnumDyeColor` metadata) that multiplies the
     /// texture: the sheep wool and the wolf collar.
     pub(super) dye: Option<u8>,
+    /// How the layer glows, when it is added over the frame instead of lit.
+    pub(super) glow: Option<Glow>,
+    /// Drawn at 15 % opacity: the model of an invisible entity a spectator
+    /// sees.
+    pub(super) translucent: bool,
 }
 
 impl EntityLayer {
@@ -59,6 +67,8 @@ impl EntityLayer {
             slot,
             vertices,
             dye: None,
+            glow: None,
+            translucent: false,
         }
     }
 
@@ -75,24 +85,47 @@ pub(super) fn one(slot: TextureSlot, vertices: Vec<ModelVertex>) -> Vec<EntityLa
 }
 
 /// Builds mesh layers for a single entity snapshot (empty for kinds with no
-/// entity model, such as dropped items).
+/// entity model, such as dropped items), for a viewer who is not a spectator.
+#[cfg(test)]
 pub(super) fn build_entity_layers(
     ent: &EntityRenderSnapshot,
     skins: &dyn SkinLookup,
 ) -> Vec<EntityLayer> {
+    build_entity_layers_for(ent, skins, false)
+}
+
+/// [`build_entity_layers`] for a viewer who is, or is not, a spectator: a
+/// spectator sees the model of an invisible entity at 15 % opacity.
+pub(super) fn build_entity_layers_for(
+    ent: &EntityRenderSnapshot,
+    skins: &dyn SkinLookup,
+    viewer_is_spectator: bool,
+) -> Vec<EntityLayer> {
     let pose = Pose::of(ent);
-    if ent.kind == EntityKind::Creeper {
-        return creeper_layers(ent, pose);
-    }
-    let mut layers = humanoid_layers(ent, skins)
-        .or_else(|| animal_layers(ent, pose))
-        .or_else(|| creature_layers(ent, pose))
-        .unwrap_or_default();
+    let mut layers = if ent.kind == EntityKind::Creeper {
+        creeper_layers(ent, pose)
+    } else {
+        humanoid_layers(ent, skins)
+            .or_else(|| animal_layers(ent, pose))
+            .or_else(|| creature_layers(ent, pose))
+            .unwrap_or_default()
+    };
     // An invisible entity draws no body, only what it wears (MCP
     // `RendererLivingEntity.doRender` skips `renderModel` but not the layers).
+    // A spectator sees the main model, the first layer, as a ghost
+    // (`isInvisibleToPlayer`).
     if ent.flags.is_invisible() {
-        layers.retain(|layer| layer.slot.is_armor());
+        let ghost = (viewer_is_spectator && !layers.is_empty()).then(|| layers.remove(0));
+        layers.retain(|layer| layer.slot.is_armor() || layer.slot == TextureSlot::EnchantGlint);
+        if let Some(mut body) = ghost {
+            body.translucent = true;
+            layers.insert(0, body);
+        }
     }
+    // A skull on the head is drawn even when its wearer is invisible.
+    layers.extend(skull_layers(ent));
+    // Arrows in the body are drawn on an invisible player too.
+    layers.extend(arrow_layers(ent));
     layers
 }
 
@@ -333,5 +366,150 @@ mod tests {
             ..OcelotMeta::default()
         });
         assert_ne!(vertices(&cat), standing);
+    }
+
+    /// NBT of `{ench: [{id: 16, lvl: 1}]}`.
+    const ENCHANTED: &[u8] = &[
+        10, 0, 0, 9, 0, 4, b'e', b'n', b'c', b'h', 10, 0, 0, 0, 1, 2, 0, 2, b'i', b'd', 0, 16, 2,
+        0, 3, b'l', b'v', b'l', 0, 1, 0, 0,
+    ];
+
+    fn glowing_slots(entity: &EntityRenderSnapshot) -> Vec<TextureSlot> {
+        build_entity_layers(entity, &Ready)
+            .into_iter()
+            .filter(|layer| layer.glow.is_some())
+            .map(|layer| layer.slot)
+            .collect()
+    }
+
+    #[test]
+    fn spiders_endermen_and_the_dragon_glow_with_their_eyes() {
+        for (kind, eyes) in [
+            (EntityKind::Spider, TextureSlot::SpiderEyes),
+            (EntityKind::CaveSpider, TextureSlot::SpiderEyes),
+            (EntityKind::Enderman, TextureSlot::EndermanEyes),
+            (EntityKind::Dragon, TextureSlot::DragonEyes),
+        ] {
+            let ent = EntityRenderSnapshot::new(EntityId(11), kind, glam::Vec3::ZERO);
+            assert_eq!(glowing_slots(&ent), vec![eyes], "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_charged_creeper_wears_the_swirl_and_it_moves_with_the_age() {
+        use umicraft_game::entity::meta::CreeperMeta;
+        let mut creeper =
+            EntityRenderSnapshot::new(EntityId(12), EntityKind::Creeper, glam::Vec3::ZERO);
+        assert!(glowing_slots(&creeper).is_empty());
+        creeper.meta.variant = Variant::Creeper(CreeperMeta {
+            powered: true,
+            ..CreeperMeta::default()
+        });
+        assert_eq!(glowing_slots(&creeper), vec![TextureSlot::CreeperCharge]);
+        let mut shift = |age: f32| {
+            creeper.age = age;
+            build_entity_layers(&creeper, &Ready)
+                .into_iter()
+                .find_map(|layer| layer.glow)
+                .expect("glow")
+                .uv
+                .shift
+        };
+        assert_eq!(shift(0.0), [0.0, 0.0]);
+        assert_eq!(shift(100.0), [1.0, 1.0]);
+    }
+
+    #[test]
+    fn a_wither_shows_its_aura_at_half_health_and_is_twice_as_large() {
+        let mut wither =
+            EntityRenderSnapshot::new(EntityId(13), EntityKind::Wither, glam::Vec3::ZERO);
+        wither.meta.living.health = 300.0;
+        assert!(glowing_slots(&wither).is_empty());
+        wither.meta.living.health = 150.0;
+        assert_eq!(glowing_slots(&wither), vec![TextureSlot::WitherAura]);
+        let height = |ent: &EntityRenderSnapshot| {
+            build_entity_layers(ent, &Ready)
+                .into_iter()
+                .next()
+                .expect("body")
+                .vertices
+                .iter()
+                .map(|v| v.position[1])
+                .fold(f32::MIN, f32::max)
+        };
+        // The model is under 2 blocks tall; scaled by 2 it passes 2.
+        assert!(height(&wither) > 2.0);
+    }
+
+    #[test]
+    fn enchanted_armour_glints_in_two_passes_and_an_invisible_wearer_keeps_them() {
+        use umicraft_game::entity::EntityItem;
+        let mut player = player(0x7F);
+        player.armor[3] = Some(EntityItem {
+            item_id: 306,
+            damage: 0,
+            count: 1,
+            nbt: Some(std::sync::Arc::from(ENCHANTED)),
+        });
+        let glints = glowing_slots(&player);
+        assert_eq!(glints, vec![TextureSlot::EnchantGlint; 2]);
+        let equal: Vec<bool> = build_entity_layers(&player, &Ready)
+            .into_iter()
+            .filter_map(|layer| layer.glow.map(|glow| glow.equal_depth))
+            .collect();
+        assert_eq!(equal, vec![true, true], "only where the armour is");
+        player.flags = EntityFlags::new(0x20, 0x7F);
+        assert_eq!(glowing_slots(&player), glints);
+        // A plain piece does not glint.
+        player.armor[3].as_mut().expect("helmet").nbt = None;
+        assert!(glowing_slots(&player).is_empty());
+    }
+
+    #[test]
+    fn a_spectator_sees_the_model_of_an_invisible_entity_as_a_ghost() {
+        use umicraft_game::entity::EntityItem;
+        let mut zombie =
+            EntityRenderSnapshot::new(EntityId(14), EntityKind::Zombie, glam::Vec3::ZERO);
+        zombie.flags = EntityFlags::new(0x20, 0x7F);
+        zombie.armor[3] = Some(EntityItem {
+            item_id: 306,
+            damage: 0,
+            count: 1,
+            nbt: None,
+        });
+        // Anyone else sees only the armour.
+        let others = build_entity_layers_for(&zombie, &Ready, false);
+        assert!(others.iter().all(|layer| !layer.translucent));
+        assert_eq!(others.len(), 1);
+        // A spectator also sees the body, translucent, under the armour.
+        let ghosts = build_entity_layers_for(&zombie, &Ready, true);
+        assert_eq!(ghosts.len(), 2);
+        assert!(ghosts[0].translucent && ghosts[0].slot == TextureSlot::Zombie);
+        assert!(!ghosts[1].translucent && ghosts[1].slot.is_armor());
+        // A visible entity is never a ghost.
+        zombie.flags = EntityFlags::new(0, 0x7F);
+        assert!(build_entity_layers_for(&zombie, &Ready, true)
+            .iter()
+            .all(|layer| !layer.translucent));
+    }
+
+    #[test]
+    fn an_invisible_creeper_is_hidden_too() {
+        let mut creeper =
+            EntityRenderSnapshot::new(EntityId(15), EntityKind::Creeper, glam::Vec3::ZERO);
+        creeper.flags = EntityFlags::new(0x20, 0x7F);
+        assert!(build_entity_layers_for(&creeper, &Ready, false).is_empty());
+        assert_eq!(build_entity_layers_for(&creeper, &Ready, true).len(), 1);
+    }
+
+    #[test]
+    fn a_player_in_spectator_mode_is_only_a_head_and_its_hat() {
+        let mut player = player(0x7F);
+        let boxes =
+            |ent: &EntityRenderSnapshot| build_entity_layers(ent, &Ready)[0].vertices.len() / 36;
+        let whole = boxes(&player);
+        player.spectator = true;
+        assert_eq!(boxes(&player), 2, "the head and the hat of {whole} boxes");
+        assert!(whole > 2);
     }
 }

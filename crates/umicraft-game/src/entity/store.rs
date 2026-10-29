@@ -296,6 +296,14 @@ impl EntityStore {
         }
     }
 
+    /// Marks which players are in spectator mode, as the tab list says
+    /// (`is_spectator` takes the UUID of a player).
+    pub fn refresh_spectators(&mut self, is_spectator: impl Fn(&[u8; 16]) -> bool) {
+        for entity in self.entities.values_mut() {
+            entity.spectator = entity.uuid.as_ref().is_some_and(&is_spectator);
+        }
+    }
+
     /// Updates an entity's visual flags.
     pub fn set_flags(&mut self, id: EntityId, flags: EntityFlags) {
         if let Some(entity) = self.entities.get_mut(&id) {
@@ -549,6 +557,27 @@ mod tests {
         );
         store.set_armor(id, 4, None);
         assert!(store.snapshots(0.0)[0].armor[3].is_none());
+    }
+
+    #[test]
+    fn the_tab_list_decides_which_players_are_spectators() {
+        let mut store = EntityStore::new();
+        for (id, uuid) in [(1, [1u8; 16]), (2, [2u8; 16])] {
+            store.spawn_player(
+                EntityId(id),
+                uuid,
+                DVec3::ZERO,
+                0.0,
+                0.0,
+                None,
+                EntityFlags::default(),
+            );
+        }
+        store.refresh_spectators(|uuid| uuid[0] == 2);
+        let flags: Vec<bool> = store.snapshots(0.0).iter().map(|s| s.spectator).collect();
+        assert_eq!(flags.iter().filter(|&&spectator| spectator).count(), 1);
+        store.refresh_spectators(|_| false);
+        assert!(store.snapshots(0.0).iter().all(|s| !s.spectator));
     }
 
     #[test]

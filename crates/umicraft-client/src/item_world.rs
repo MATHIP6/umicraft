@@ -26,6 +26,7 @@ use umicraft_model::ModelQuad;
 use umicraft_world::LightLevel;
 
 use crate::item_icons::ItemResources;
+use crate::java_random::JavaRandom;
 
 mod carried;
 mod head;
@@ -311,30 +312,6 @@ fn hover_phase(entity_id: i32) -> f32 {
     (hash >> 8) as f32 / (1u32 << 24) as f32 * std::f32::consts::TAU
 }
 
-/// The 48-bit linear congruential generator of `java.util.Random`, enough
-/// for the seeded scatter of stacked blocks.
-struct JavaRandom(u64);
-
-impl JavaRandom {
-    const MULTIPLIER: u64 = 0x5_DEEC_E66D;
-    const MASK: u64 = (1 << 48) - 1;
-
-    fn new(seed: u64) -> Self {
-        Self((seed ^ Self::MULTIPLIER) & Self::MASK)
-    }
-
-    /// `Random.nextFloat`: 24 random bits as a fraction.
-    fn next_float(&mut self) -> f32 {
-        self.0 = (self.0.wrapping_mul(Self::MULTIPLIER).wrapping_add(0xB)) & Self::MASK;
-        (self.0 >> 24) as f32 / (1u32 << 24) as f32
-    }
-
-    /// `nextFloat() * 2 - 1`, the `-1..1` draw of the scatter.
-    fn next_signed_float(&mut self) -> f32 {
-        self.next_float() * 2.0 - 1.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,6 +435,7 @@ mod render_tests {
             frame_direction: 0,
             frame_rotation: 0,
             armor: [None, None, None, None],
+            spectator: false,
             use_ticks: 0,
             fishing: false,
             flags: EntityFlags::default(),
@@ -563,6 +541,7 @@ mod player_render_tests {
                 nbt: None,
             }),
             armor: [None, None, None, None],
+            spectator: false,
             item: None,
             age: 0.0,
             frame_direction: 0,
@@ -752,6 +731,7 @@ mod glint_render_tests {
             frame_direction: 0,
             frame_rotation: 0,
             armor: [None, None, None, None],
+            spectator: false,
             use_ticks: 0,
             fishing: false,
             flags: EntityFlags::default(),

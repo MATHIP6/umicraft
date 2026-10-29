@@ -76,6 +76,8 @@ pub struct EntityTextures {
     skins: RefCell<SkinSet>,
     /// The camera yaw the flames of burning entities face.
     view_yaw: Cell<f32>,
+    /// Whether the local player is a spectator, who sees invisible entities.
+    viewer_is_spectator: Cell<bool>,
 }
 
 impl EntityTextures {
@@ -86,13 +88,20 @@ impl EntityTextures {
         let mut textures = HashMap::new();
         for spec in texture_specs() {
             let (rgba, w, h) = load_or_fallback(jar.as_ref(), spec.jar_path, spec.fallback);
-            textures.insert(spec.slot, renderer.create_entity_texture(&rgba, w, h));
+            // The glowing layers scroll their coordinates past the edge.
+            let texture = if spec.slot.is_additive() {
+                renderer.create_repeating_entity_texture(&rgba, w, h)
+            } else {
+                renderer.create_entity_texture(&rgba, w, h)
+            };
+            textures.insert(spec.slot, texture);
         }
         Self {
             textures: RefCell::new(textures),
             jar,
             skins: RefCell::new(SkinSet::new()),
             view_yaw: Cell::new(0.0),
+            viewer_is_spectator: Cell::new(false),
         }
     }
 
@@ -100,6 +109,12 @@ impl EntityTextures {
     /// that the flames of burning entities face.
     pub fn set_view_yaw(&self, yaw: f32) {
         self.view_yaw.set(yaw);
+    }
+
+    /// Tells whether the local player is a spectator, who sees the invisible
+    /// entities as ghosts (MCP `isInvisibleToPlayer`).
+    pub fn set_viewer_spectator(&self, spectator: bool) {
+        self.viewer_is_spectator.set(spectator);
     }
 
     /// Uploads the first-person hand, or hides it when `pose` shows no arm.
@@ -120,21 +135,58 @@ impl EntityTextures {
         self.skins
             .borrow_mut()
             .collect(renderer, &mut self.textures.borrow_mut());
-        let batches = mesh_entities_with(snapshots, self, self.view_yaw.get());
-        self.compose_missing_coats(batches.keys(), renderer);
+        let meshed = mesh_entities_with(
+            snapshots,
+            self,
+            self.view_yaw.get(),
+            self.viewer_is_spectator.get(),
+        );
+        self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
-        let pairs: Vec<_> = batches
+        let solid: Vec<_> = meshed
+            .solid
             .iter()
+            .filter(|(_, verts)| !verts.is_empty())
             .filter_map(|(slot, verts)| {
-                if verts.is_empty() {
-                    return None;
-                }
                 textures
                     .get(slot)
                     .map(|tex| (verts.as_slice(), tex.bind_group()))
             })
             .collect();
-        renderer.upload_entities(&pairs);
+        renderer.upload_entities(&solid);
+        let additive: Vec<_> = meshed
+            .additive
+            .iter()
+            .filter(|(_, verts)| !verts.is_empty())
+            .filter_map(|(slot, verts)| {
+                textures
+                    .get(slot)
+                    .map(|tex| (verts.as_slice(), tex.bind_group()))
+            })
+            .collect();
+        renderer.upload_additive_entities(&additive);
+        let glint: Vec<_> = meshed
+            .glint
+            .iter()
+            .filter(|(_, verts)| !verts.is_empty())
+            .filter_map(|(slot, verts)| {
+                textures
+                    .get(slot)
+                    .map(|tex| (verts.as_slice(), tex.bind_group()))
+            })
+            .collect();
+        renderer.upload_glint_entities(&glint);
+        let ghost: Vec<_> = meshed
+            .ghost
+            .iter()
+            .filter(|(_, verts)| !verts.is_empty())
+            .filter_map(|(slot, verts)| {
+                textures
+                    .get(slot)
+                    .map(|tex| (verts.as_slice(), tex.bind_group()))
+            })
+            .collect();
+        renderer.upload_ghost_entities(&ghost);
     }
 
     /// Creates the texture of every horse coat in `slots` that is not there yet.

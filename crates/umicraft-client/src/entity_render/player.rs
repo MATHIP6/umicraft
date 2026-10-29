@@ -22,7 +22,11 @@ pub(crate) fn posed_player(ent: &EntityRenderSnapshot) -> (HumanoidModel, bool) 
         })
         .unwrap_or(false);
     let mut model = HumanoidModel::new(is_slim);
-    model.show_skin_layers(ent.flags.skin_parts);
+    if ent.spectator {
+        model.keep_head_only();
+    } else {
+        model.show_skin_layers(ent.flags.skin_parts);
+    }
     model.set_pose(&humanoid_pose(ent, false));
     (model, is_slim)
 }

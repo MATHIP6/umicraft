@@ -13,7 +13,7 @@ use umicraft_model::entity::{ArmorMaterial, ModelPart, SnowmanModel};
 use umicraft_model::item::pose::held_pose;
 
 use super::{sprite_model, world_light, ItemLayers};
-use crate::entity_render::{body_matrix, posed_humanoid_mob, posed_player, x_mirror};
+use crate::entity_render::{body_matrix, part_frame, posed_humanoid_mob, posed_player, x_mirror};
 use crate::item_icons::ItemResources;
 
 /// The pumpkin block item id.
@@ -131,9 +131,7 @@ fn biped_frame(entity: &EntityRenderSnapshot) -> Option<Mat4> {
 /// `ModelRenderer.postRender(0.0625)` of a head: its pivot and angles, in the
 /// vanilla frame (the y-up models are conjugated by a y flip).
 fn head_chain(head: &ModelPart) -> Mat4 {
-    head.transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)))
-        * Mat4::from_scale(Vec3::splat(16.0))
-        * y_flip()
+    part_frame(head)
 }
 
 fn y_flip() -> Mat4 {

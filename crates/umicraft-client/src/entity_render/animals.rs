@@ -10,6 +10,7 @@ use umicraft_model::entity::{
     QuadrupedModel, RabbitModel, SheepModel, SpiderModel, TextureSlot, VillagerModel, WolfModel,
 };
 
+use super::glow::{glowing, Glow};
 use super::mobs::{one, EntityLayer, Pose};
 use super::mushrooms::mushroom_vertices;
 use super::variants;
@@ -137,13 +138,24 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
             WITCH_SCALE
         ),
         EntityKind::Horse => horse_layers(ent, pose),
-        EntityKind::Spider => walker!(SpiderModel::new(), TextureSlot::Spider, 1.0, 1.0),
-        EntityKind::CaveSpider => walker!(
-            SpiderModel::with_scale(0.7),
-            TextureSlot::CaveSpider,
-            1.0,
-            1.0
-        ),
+        EntityKind::Spider => {
+            let mut model = SpiderModel::new();
+            model.set_angles(swing, amount, head_yaw, head_pitch);
+            with_eyes(
+                TextureSlot::Spider,
+                TextureSlot::SpiderEyes,
+                model.emit_mesh(),
+            )
+        }
+        EntityKind::CaveSpider => {
+            let mut model = SpiderModel::with_scale(0.7);
+            model.set_angles(swing, amount, head_yaw, head_pitch);
+            with_eyes(
+                TextureSlot::CaveSpider,
+                TextureSlot::SpiderEyes,
+                model.emit_mesh(),
+            )
+        }
         EntityKind::Enderman => {
             let mut model = EndermanModel::new();
             if let Variant::Enderman(enderman) = &ent.meta.variant {
@@ -151,11 +163,28 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
                 model.is_attacking = enderman.screaming;
             }
             model.set_angles(swing, amount, head_yaw, head_pitch);
-            one(TextureSlot::Enderman, model.emit_mesh())
+            with_eyes(
+                TextureSlot::Enderman,
+                TextureSlot::EndermanEyes,
+                model.emit_mesh(),
+            )
         }
         EntityKind::IronGolem => walker!(IronGolemModel::new(), TextureSlot::IronGolem, 1.0, 1.0),
         _ => return None,
     })
+}
+
+/// A body with the glowing eyes of the same shape drawn over it (MCP
+/// `LayerSpiderEyes`, `LayerEndermanEyes`).
+pub(super) fn with_eyes(
+    body: TextureSlot,
+    eyes: TextureSlot,
+    mesh: Vec<umicraft_model::entity::ModelVertex>,
+) -> Vec<EntityLayer> {
+    vec![
+        EntityLayer::new(body, mesh.clone()),
+        glowing(eyes, mesh, Glow::EYES),
+    ]
 }
 
 /// The sheep: its body, and its wool in the dye colour unless shorn.

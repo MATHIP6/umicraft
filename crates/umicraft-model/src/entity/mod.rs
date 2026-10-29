@@ -426,6 +426,14 @@ impl ModelPart {
         }
     }
 
+    /// Inflates every box of this part by `amount` pixels (the `modelSize`
+    /// argument of the vanilla model constructors).
+    pub fn grow(&mut self, amount: f32) {
+        for shape in &mut self.boxes {
+            shape.dilation += amount;
+        }
+    }
+
     /// Adds a box to this part.
     pub fn with_box(mut self, b: ModelBox) -> Self {
         self.boxes.push(b);
@@ -481,8 +489,24 @@ pub enum TextureSlot {
     PigSaddle,
     /// The red mushroom block texture (`mushroom_red.png`), drawn on a mooshroom.
     MushroomRed,
+    /// The wither while it is being spawned (`wither_invulnerable.png`).
+    WitherInvulnerable,
+    /// The arrow (`arrow.png`), flying or stuck in a body.
+    Arrow,
     /// The ghast while it charges a fireball (`ghast_shooting.png`).
     GhastShooting,
+    /// The glowing eyes of a spider (`spider_eyes.png`), added over its body.
+    SpiderEyes,
+    /// The glowing eyes of an enderman (`enderman_eyes.png`).
+    EndermanEyes,
+    /// The glowing eyes of the dragon (`dragon_eyes.png`).
+    DragonEyes,
+    /// The swirl of a charged creeper (`creeper_armor.png`).
+    CreeperCharge,
+    /// The swirl of a wounded wither (`wither_armor.png`).
+    WitherAura,
+    /// The enchantment glint (`enchanted_item_glint.png`).
+    EnchantGlint,
     /// A strip of flames, `0` for `fire_layer_0` and `1` for `fire_layer_1`.
     Fire(u8),
     /// Sheep base body texture (`sheep.png`).
@@ -616,6 +640,21 @@ pub enum TextureSlot {
 }
 
 impl TextureSlot {
+    /// Whether the texture is added over the frame (the glowing layers) and
+    /// repeats, instead of replacing it.
+    #[must_use]
+    pub const fn is_additive(self) -> bool {
+        matches!(
+            self,
+            Self::SpiderEyes
+                | Self::EndermanEyes
+                | Self::DragonEyes
+                | Self::CreeperCharge
+                | Self::WitherAura
+                | Self::EnchantGlint
+        )
+    }
+
     /// Whether this is an armour texture, which stays visible on an invisible
     /// entity.
     #[must_use]

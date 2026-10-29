@@ -24,6 +24,24 @@ pub struct WitherModel {
 }
 
 impl WitherModel {
+    /// The shell of a wounded wither: the model inflated by half a pixel (MCP
+    /// `LayerWitherAura`, `new ModelWither(0.5F)`).
+    #[must_use]
+    pub fn aura() -> Self {
+        let mut model = Self::new();
+        for part in [
+            &mut model.center_head,
+            &mut model.right_head,
+            &mut model.left_head,
+            &mut model.shoulders,
+            &mut model.spine,
+            &mut model.tail,
+        ] {
+            part.grow(0.5);
+        }
+        model
+    }
+
     /// Creates a new wither model.
     #[must_use]
     pub fn new() -> Self {
