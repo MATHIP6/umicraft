@@ -467,6 +467,7 @@ impl App {
         if screen == self.screen {
             return;
         }
+        let was_blocking = self.screen.blocks_game_input();
         self.screen = screen;
         self.ui_input.clear();
         self.chat_scroll = 0;
@@ -479,6 +480,10 @@ impl App {
         self.look = (0.0, 0.0);
         if screen.blocks_game_input() {
             self.capture_mouse(false);
+        } else if was_blocking && !self.container_is_open() && !self.death_screen_visible() {
+            // MCP `displayGuiScreen(null)` grabs the mouse again, so closing
+            // the chat hides the cursor without a click.
+            self.capture_mouse(true);
         }
     }
 
