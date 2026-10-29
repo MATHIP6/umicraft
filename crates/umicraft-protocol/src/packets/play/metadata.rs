@@ -144,6 +144,20 @@ impl Metadata {
             .map(|obj| f32::from_be_bytes([obj.value[0], obj.value[1], obj.value[2], obj.value[3]]))
     }
 
+    /// Reads a rotation value (type id 7: three `f32`, in degrees) at the
+    /// given index.
+    #[must_use]
+    pub fn get_rotations(&self, index: u8) -> Option<[f32; 3]> {
+        let object = self
+            .get(index)
+            .filter(|obj| obj.type_id == 7 && obj.value.len() == 12)?;
+        let mut angles = [0.0; 3];
+        for (angle, bytes) in angles.iter_mut().zip(object.value.chunks_exact(4)) {
+            *angle = f32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        }
+        Some(angles)
+    }
+
     /// Reads an item stack value (type id 5) at the given index.
     ///
     /// `None` when the entry is missing, has another type, or does not decode.

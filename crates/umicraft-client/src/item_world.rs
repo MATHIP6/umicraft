@@ -482,6 +482,7 @@ mod render_tests {
             hurt: false,
             death_time: 0.0,
             bed: None,
+            meta: Default::default(),
             uuid: None,
             held: None,
             item: Some(EntityItem {
@@ -582,6 +583,7 @@ mod player_render_tests {
             hurt: false,
             death_time: 0.0,
             bed: None,
+            meta: Default::default(),
             uuid: Some([1; 16]),
             held: Some(EntityItem {
                 item_id: held,
@@ -755,6 +757,7 @@ mod glint_render_tests {
             hurt: false,
             death_time: 0.0,
             bed: None,
+            meta: Default::default(),
             uuid: None,
             held: None,
             item: Some(EntityItem {

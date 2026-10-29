@@ -10,6 +10,7 @@ use super::flags::EntityFlags;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
+use super::meta::EntityMeta;
 use super::snapshot::EntityFrameData;
 
 /// Full mutable record of an entity owned by the game thread.
@@ -54,6 +55,8 @@ pub struct EntityRecord {
     pub body_yaw: BodyYaw,
     /// The hurt flash, death fall, arm swing and bed.
     pub animation: Animation,
+    /// The typed metadata (variants, age, name, health).
+    pub meta: EntityMeta,
     /// Player UUID if this is a player entity.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -106,6 +109,7 @@ impl EntityRecord {
             body_yaw: self.body_yaw.offset,
             limbs: self.limbs,
             animation: self.animation,
+            meta: self.meta.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
@@ -139,6 +143,7 @@ impl EntityRecord {
             limbs: LimbSwing::default(),
             body_yaw: BodyYaw::new(yaw),
             animation: Animation::default(),
+            meta: EntityMeta::default(),
             uuid: None,
             held: None,
             item: None,

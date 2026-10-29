@@ -83,6 +83,8 @@ pub enum EntityKind {
     Arrow,
     /// Item frame hanging on a wall.
     ItemFrame,
+    /// Armour stand (object type 78).
+    ArmorStand,
     /// Other mob or entity type by raw numeric identifier.
     Other(u8),
 }
@@ -142,6 +144,7 @@ impl EntityKind {
             2 => Self::Item,
             60 => Self::Arrow,
             71 => Self::ItemFrame,
+            78 => Self::ArmorStand,
             other => Self::Other(other),
         }
     }

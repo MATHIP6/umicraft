@@ -1435,12 +1435,10 @@ fn handle_net(
                 count: 1,
                 nbt: None,
             });
-            let flags = EntityFlags::new(
-                p.metadata.get_byte(0).unwrap_or(0),
-                p.metadata.get_byte(10).unwrap_or(0),
-            );
+            let id = EntityId(p.entity_id);
             game.entities
-                .spawn_player(EntityId(p.entity_id), p.uuid, pos, yaw, pitch, held, flags);
+                .spawn_player(id, p.uuid, pos, yaw, pitch, held, EntityFlags::default());
+            game.entities.apply_metadata(id, &p.metadata);
         }
         PlayEvent::SpawnMob(m) => {
             let pos = DVec3::new(
@@ -1456,22 +1454,20 @@ fn handle_net(
                 f32::from(m.velocity_y) / 8000.0,
                 f32::from(m.velocity_z) / 8000.0,
             );
-            let flags = EntityFlags::new(
-                m.metadata.get_byte(0).unwrap_or(0),
-                m.metadata.get_byte(10).unwrap_or(0),
-            );
+            let id = EntityId(m.entity_id);
             game.entities.spawn_mob(
-                EntityId(m.entity_id),
+                id,
                 m.mob_type,
                 pos,
                 yaw,
                 pitch,
                 head_yaw,
                 vel,
-                flags,
+                EntityFlags::default(),
             );
+            game.entities.apply_metadata(id, &m.metadata);
             if let Some(health) = m.metadata.get_float(6) {
-                game.entities.set_health(EntityId(m.entity_id), health);
+                game.entities.set_health(id, health);
             }
         }
         PlayEvent::SpawnObject(o) => {
@@ -1550,10 +1546,6 @@ fn handle_net(
             game.entities.set_velocity(EntityId(v.entity_id), vel);
         }
         PlayEvent::EntityMetadata(m) => {
-            let flags = EntityFlags::new(
-                m.metadata.get_byte(0).unwrap_or(0),
-                m.metadata.get_byte(10).unwrap_or(0),
-            );
             if m.entity_id == game.entity_id {
                 // MCP EntityPlayer.getScore: data watcher 18.
                 if let Some(score) = m.metadata.get_int(SCORE_WATCHER) {
@@ -1562,7 +1554,7 @@ fn handle_net(
                 }
             }
             let id = EntityId(m.entity_id);
-            game.entities.set_flags(id, flags);
+            game.entities.apply_metadata(id, &m.metadata);
             apply_item_metadata(&mut game.entities, id, &m.metadata);
             if let Some(health) = m.metadata.get_float(6) {
                 game.entities.set_health(id, health);

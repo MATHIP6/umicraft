@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 
 use glam::{DVec3, Vec3};
+use umicraft_protocol::packets::play::Metadata;
 
 use crate::physics::EYE_HEIGHT;
 use crate::view::ViewEffects;
@@ -15,6 +16,13 @@ use super::{
     BedPose, BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityRenderSnapshot,
 };
+
+/// Data watcher entry of the entity flags (MCP `Entity.entityInit`).
+const ENTITY_FLAGS: u8 = 0;
+/// Data watcher entry of the player skin parts (MCP `EntityPlayer.entityInit`).
+const PLAYER_SKIN_PARTS: u8 = 10;
+/// Data watcher entry of the health (MCP `EntityLivingBase.entityInit`).
+const LIVING_HEALTH: u8 = 6;
 
 /// The limb swing amplitude a hurt entity jolts to
 /// (MCP `EntityLivingBase.handleStatusUpdate`, `limbSwingAmount = 1.5`).
@@ -210,6 +218,31 @@ impl EntityStore {
     pub fn set_velocity(&mut self, id: EntityId, velocity: Vec3) {
         if let Some(entity) = self.entities.get_mut(&id) {
             entity.velocity = velocity;
+        }
+    }
+
+    /// Merges a data watcher list into an entity: the visual flags (entry
+    /// 0 and, for players, the skin parts in entry 10) and the typed
+    /// metadata. A health of zero or less starts the death fall, as in
+    /// vanilla (MCP `EntityLivingBase.onUpdate` on a dead entity).
+    ///
+    /// The list holds only the entries that changed; the others keep their
+    /// value.
+    pub fn apply_metadata(&mut self, id: EntityId, metadata: &Metadata) {
+        let Some(entity) = self.entities.get_mut(&id) else {
+            return;
+        };
+        if let Some(flags) = metadata.get_byte(ENTITY_FLAGS) {
+            entity.flags.flags = flags;
+        }
+        if entity.kind == EntityKind::Player {
+            if let Some(parts) = metadata.get_byte(PLAYER_SKIN_PARTS) {
+                entity.flags.skin_parts = parts;
+            }
+        }
+        entity.meta.apply(entity.kind, metadata);
+        if entity.kind.is_living() && metadata.get_float(LIVING_HEALTH).is_some_and(|h| h <= 0.0) {
+            entity.animation.die();
         }
     }
 
@@ -656,6 +689,65 @@ mod tests {
         assert!((asleep.position.z - 20.9).abs() < 1e-4);
         store.play_animation(id, 2);
         assert!(store.snapshots(1.0)[0].bed.is_none());
+    }
+
+    fn watched(
+        index: u8,
+        type_id: u8,
+        value: Vec<u8>,
+    ) -> umicraft_protocol::packets::play::metadata::WatchedObject {
+        umicraft_protocol::packets::play::metadata::WatchedObject {
+            type_id,
+            index,
+            value,
+        }
+    }
+
+    #[test]
+    fn a_partial_metadata_update_keeps_the_other_flags() {
+        let mut store = EntityStore::new();
+        let id = EntityId(8);
+        store.spawn_player(
+            id,
+            [4u8; 16],
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::new(0x02, 0x7F),
+        );
+        // Only the health changes: the sneak flag and the skin parts stay.
+        let update = Metadata {
+            objects: vec![watched(6, 3, 10.0f32.to_be_bytes().to_vec())],
+        };
+        store.apply_metadata(id, &update);
+        let snapshot = &store.snapshots(1.0)[0];
+        assert!(snapshot.flags.is_sneaking());
+        assert_eq!(snapshot.flags.skin_parts, 0x7F);
+        assert_eq!(snapshot.meta.living.health, 10.0);
+    }
+
+    #[test]
+    fn zero_health_in_the_metadata_kills_the_entity() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        let update = Metadata {
+            objects: vec![watched(6, 3, 0.0f32.to_be_bytes().to_vec())],
+        };
+        store.apply_metadata(id, &update);
+        store.tick();
+        assert!(store.snapshots(0.0)[0].death_time > 0.0);
+    }
+
+    #[test]
+    fn the_skin_parts_entry_of_a_non_player_is_not_a_skin() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        let update = Metadata {
+            objects: vec![watched(10, 0, vec![0x7F])],
+        };
+        store.apply_metadata(id, &update);
+        assert_eq!(store.snapshots(0.0)[0].flags.skin_parts, 0);
     }
 
     #[test]

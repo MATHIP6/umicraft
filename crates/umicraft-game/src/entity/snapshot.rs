@@ -10,6 +10,7 @@ use super::flags::EntityFlags;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
+use super::meta::EntityMeta;
 
 /// Per-entity interpolation data sent to the render thread each tick.
 ///
@@ -45,6 +46,8 @@ pub struct EntityFrameData {
     pub limbs: LimbSwing,
     /// The hurt flash, death fall, arm swing and bed.
     pub animation: Animation,
+    /// The typed metadata.
+    pub meta: EntityMeta,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -88,6 +91,7 @@ impl EntityFrameData {
             hurt: self.animation.is_flashing(),
             death_time: self.animation.death_time_at(a),
             bed: self.animation.bed,
+            meta: self.meta.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
@@ -129,6 +133,8 @@ pub struct EntityRenderSnapshot {
     pub death_time: f32,
     /// The bed the entity sleeps in.
     pub bed: Option<BedPose>,
+    /// The typed metadata: variant, age, name, health.
+    pub meta: EntityMeta,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -164,6 +170,7 @@ impl EntityRenderSnapshot {
             hurt: false,
             death_time: 0.0,
             bed: None,
+            meta: EntityMeta::default(),
             uuid: None,
             held: None,
             item: None,

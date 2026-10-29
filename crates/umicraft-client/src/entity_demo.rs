@@ -434,6 +434,7 @@ fn make_snapshot(
         hurt: false,
         death_time: 0.0,
         bed: None,
+        meta: Default::default(),
         uuid,
         held: None,
         item: None,
