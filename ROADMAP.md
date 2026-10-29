@@ -204,6 +204,21 @@ edges, break stone with and without a pickaxe, place, eat, die, respawn, fly
 in creative, ride a boat) has no kick and no rubber-banding, and its trace
 matches vanilla for the same script; the extracted rules have unit tests.
 
+**Status (2026-10-29): code complete, live validation open.** Implemented
+(ADR-0021, ADR-0022, ADR-0027, `docs/parity.md`): the rules in `umicraft-game`,
+hold-to-break and cracks, death and respawn, the four gamemodes, movement
+stats, knockback, item use, pick block, drop, the camera effects, riding
+(seat of the vehicle, `Steer Vehicle`), the vanilla selection box, no liquid
+targeting, and the held item of the local body in F5.
+
+**Remaining before P2 is done**
+- The 30-minute live survival session and its trace diff against vanilla
+  (needs a server and the parity harness).
+- Horse rearing offset and horse jump (`Entity Action` 5); sitting pose of a
+  rider body and vehicle rendering (P5).
+- Adventure `CanDestroy` (P3 NBT), the Title Screen button (P10) and the
+  hardcore death screen.
+
 ### P3 — Items: registry, models & rendering
 
 **Features**

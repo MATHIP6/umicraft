@@ -58,16 +58,16 @@ session is [`parity-harness.md`](parity-harness.md).
 | Movement | walk/sprint/sneak/jump/swim/ladder/web/soul sand/ice/slime | Partial | P2 | Vanilla vs Umicraft movement run, 2026-10-26 ([parity-harness.md](parity-harness.md#vanilla-comparison-2026-10-26)) | Ground speeds of walk (0.2159), sneak (0.0648) and sprint (0.2806 block/tick) match vanilla on the live server; swim/lava/ladder/web/soul sand are unit-tested against the reference formulas but not compared on a live server yet (they were removed by mistake in commit 05f0cc1 and restored on 2026-10-28). |
 | Movement | sneak edge clamp | Partial | P2 | — | Implemented in `umicraft_game::collision` (the review missed it); its Z axis cancelled every sneaking Z move until 2026-10-26 (fixed, regression test). Edge behaviour not yet compared with vanilla. |
 | Movement | hunger sprint rule, effects (Speed/Slowness/Jump), Depth Strider | Partial | P2 | Unit tests (`physics`, `game`) | Depth Strider reads the `ench` NBT of the boots. Not compared with vanilla on a live server. |
-| Movement | flying, creative, spectator | Missing | P2 | — |  |
-| Movement | knockback (velocity, explosion) | Missing | P2 | — |  |
-| Movement | riding (boat, minecart, horse, pig) | Missing | P2 | — | Objects and vehicles rendering in P5. |
+| Movement | flying, creative, spectator | Partial | P2 | Unit tests (`physics`, `gamemode`, `game`) | `Player Abilities`, double-tap-space flight, no-clip and the `Camera` view (ADR-0021). Not compared with vanilla on a live server. |
+| Movement | knockback (velocity, explosion) | Partial | P2 | Unit tests (`game`) | `Entity Velocity` and `Explosion` change the local motion (ADR-0021). Not compared with vanilla on a live server. |
+| Movement | riding (boat, minecart, horse, pig) | Partial | P2 | Unit tests (`riding`, `game`) | The rider has no physics and sits on the seat of the vehicle (`umicraft_game::riding`, ADR-0027); `Steer Vehicle` is sent. Horse rearing offset, horse jump (`Entity Action` 5), the sitting body pose and the vehicle rendering (P5) are missing. Not run on a live server. |
 | Movement | serverbound traffic identical to vanilla (0x03, 0x0B, no 0x0C) | Partial | P1 | P1 run, 2026-10-26 ([parity-harness.md](parity-harness.md#p1-run-2026-10-26)) | Implemented in `umicraft_game::traffic`: 0x03 on idle ticks, 0x0B sprint/sneak transitions before the movement packet, 0x0C only while riding, silence until the player's column loads. The live run had the player blocked by terrain, so the moving and sprint ticks still have to be compared from a clear spot. |
 
 ## Interaction
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Interaction | hold-to-break with vanilla progress, cracks, particles | Missing | P2 | — | Today a fixed 12-tick break; particles in P8. |
+| Interaction | hold-to-break with vanilla progress, cracks, particles | Partial | P2 | Unit tests (`digging`, `interaction`, `game`) | Vanilla progress (hardness, tool, Efficiency, Haste, fatigue, water, air), own and 0x25 cracks, abort. Particles in P8. Not compared with vanilla on a live server. |
 | Interaction | place blocks | Partial — not verified against vanilla | P2 | — |  |
 | Interaction | use items (food, potions, bow, sword block, rod, throwables, buckets) | Partial | P2 | Unit tests (`item_use`, `game`) | Right button held and released, repeat every 4 ticks, 0.2 slowdown, `Entity Status` 9. Eat / drink / bow / sword start a local use; throwables, buckets and rods only send the use packet. Hoes, seeds, signs and doors also send it after their block use (harmless). Bow draw animation and FOV zoom, and the item models, wait for P3 / P6. |
 | Interaction | pick block, drop item, swap hotbar | Partial | P2 | Unit tests (`pick`, `game`) | Middle button picks a block (creative fills a free slot and sends 0x10); Q / Ctrl+Q send the drop packets. The block-to-item table is hand-written until the P3 registry; picking an entity (creative) waits for P5 / P6. |
@@ -81,7 +81,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Combat | sprint reset on hit (vanilla `motion *= 0.6`, sprint off) | Missing | P6 | — |  |
 | Combat | hurt camera tilt, red hurt tint, death animation | Missing | P6 | — | Hurt tint and death fall on entities in P5. |
 | Combat | crit/sharpness particles, bow charge FOV | Missing | P6 | — | Particles need P8. |
-| Combat | death screen, respawn, combat event message | Missing | P2 | — | Combat-event message in P6. |
+| Combat | death screen, respawn, combat event message | Partial | P2 | Unit tests (`game`, `umicraft-ui`) | Death screen and `Client Status` respawn (ADR-0021). Combat-event message in P6; the Title Screen button in P10. |
 
 ## Items
 
@@ -131,7 +131,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | World render | vanilla sky/sun/moon/clouds/stars textures | Missing | P7 | — | Procedural sky today. |
 | World render | fog parity (water/lava/blindness) | Unverified | P7 | — |  |
 | World render | weather, lightning, world border | Missing | P7 | — |  |
-| World render | block outline, first-person hand, view bobbing, F5 | Missing | P2 | — |  |
+| World render | block outline, first-person hand, view bobbing, F5 | Partial | P2 | Unit tests (`game`, `selection`) | Outline = vanilla selected bounding box (`umicraft_game::selection`), liquids are never targeted, hand, bobbing, FOV, F5 with the held item in the local body. |
 
 ## Effects
 

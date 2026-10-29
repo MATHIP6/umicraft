@@ -51,13 +51,6 @@ picked up, and delete it when it is done.
 
 ## Game logic
 
-### Respawn after death
-- **Problem:** the client never sends the respawn request. A dead player stays
-  dead, also after a reconnect, and its position reports make the server
-  correct it every tick (1 774 resyncs in 90 s were measured).
-- **Reference:** `C16PacketClientStatus` (`PERFORM_RESPAWN`) and the death
-  screen of the 1.8 client; the server answers with `Respawn` (0x07).
-
 ### Item use and pick block gaps (ADR-0022)
 - **Problem:** the use and pick tables are hand-written (item ids for food,
   drinks, swords and the bow; block-to-item redirects and variant masks). Items
