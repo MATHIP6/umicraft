@@ -6,6 +6,7 @@ use std::f32::consts::PI;
 
 use glam::{Mat4, Vec3};
 
+use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
 /// 1.8 Chicken model following MCP `ModelChicken.java`.
@@ -144,6 +145,22 @@ impl ChickenModel {
         let wing_angle = (limb_swing * 0.6662).cos() * 0.4 * limb_swing_amount;
         self.right_wing.rotation[2] = wing_angle;
         self.left_wing.rotation[2] = -wing_angle;
+    }
+
+    /// Emits a chick: the head at full size, the rest halved.
+    #[must_use]
+    pub fn emit_child_mesh(&self) -> Vec<ModelVertex> {
+        emit_child(
+            &[&self.head, &self.bill, &self.chin],
+            &[
+                &self.body,
+                &self.right_leg,
+                &self.left_leg,
+                &self.right_wing,
+                &self.left_wing,
+            ],
+            ChildLayout::SMALL_ANIMAL,
+        )
     }
 
     /// Emits all vertices.

@@ -6,6 +6,7 @@ use std::f32::consts::PI;
 
 use glam::{Mat4, Vec3};
 
+use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
 /// 1.8 Sheep model following MCP `ModelSheep2.java` (body) and `ModelSheep1.java` (wool).
@@ -218,6 +219,32 @@ impl SheepModel {
         self.leg3.emit(root, &mut out);
         self.leg4.emit(root, &mut out);
         out
+    }
+
+    /// Emits a lamb's body: the head at full size, the rest halved.
+    #[must_use]
+    pub fn emit_child_body_mesh(&self) -> Vec<ModelVertex> {
+        emit_child(
+            &[&self.head],
+            &[&self.body, &self.leg1, &self.leg2, &self.leg3, &self.leg4],
+            ChildLayout::QUADRUPED,
+        )
+    }
+
+    /// Emits a lamb's wool overlay with the same proportions.
+    #[must_use]
+    pub fn emit_child_wool_mesh(&self) -> Vec<ModelVertex> {
+        emit_child(
+            &[&self.wool_head],
+            &[
+                &self.wool_body,
+                &self.wool_leg1,
+                &self.wool_leg2,
+                &self.wool_leg3,
+                &self.wool_leg4,
+            ],
+            ChildLayout::QUADRUPED,
+        )
     }
 
     /// Emits the wool overlay mesh (for `sheep_fur.png`).

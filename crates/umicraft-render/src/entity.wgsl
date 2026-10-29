@@ -33,7 +33,30 @@ struct VertexOut {
     @location(2) light: f32,
     @location(3) shade: f32,
     @location(4) @interpolate(flat) hurt: f32,
+    @location(5) @interpolate(flat) flash: f32,
+    @location(6) @interpolate(flat) dye: vec3<f32>,
 };
+
+// Dye colours of the sheep wool and the wolf collar, by metadata value
+// (MCP `EntitySheep.DYE_TO_RGB`).
+var<private> DYES = array<vec3<f32>, 16>(
+    vec3<f32>(1.0, 1.0, 1.0),
+    vec3<f32>(0.85, 0.5, 0.2),
+    vec3<f32>(0.7, 0.3, 0.85),
+    vec3<f32>(0.4, 0.6, 0.85),
+    vec3<f32>(0.9, 0.9, 0.2),
+    vec3<f32>(0.5, 0.8, 0.1),
+    vec3<f32>(0.95, 0.5, 0.65),
+    vec3<f32>(0.3, 0.3, 0.3),
+    vec3<f32>(0.6, 0.6, 0.6),
+    vec3<f32>(0.3, 0.5, 0.6),
+    vec3<f32>(0.5, 0.25, 0.7),
+    vec3<f32>(0.2, 0.3, 0.7),
+    vec3<f32>(0.4, 0.3, 0.2),
+    vec3<f32>(0.4, 0.5, 0.2),
+    vec3<f32>(0.6, 0.2, 0.2),
+    vec3<f32>(0.1, 0.1, 0.1),
+);
 
 fn light_brightness(level: f32) -> f32 {
     return level / (3.0 * (1.0 - level) + 1.0);
@@ -71,7 +94,12 @@ fn vs_main(in: VertexIn) -> VertexOut {
     let sky_light = light_brightness(sky_nibble) * camera.sun_brightness;
     out.light = gamma_correct(clamp(block_light + sky_light, 0.05, 1.0));
     out.shade = face_shade(in.normal);
+    // Bit 8: hurt tint. Bits 9..=12: white flash level (the creeper fuse).
+    // Bit 13: dye tint, bits 14..=17 the dye.
     out.hurt = f32((in.light >> 8u) & 1u);
+    out.flash = f32((in.light >> 9u) & 15u) / 15.0;
+    let dyed = (in.light >> 13u) & 1u;
+    out.dye = select(vec3<f32>(1.0), DYES[(in.light >> 14u) & 15u], dyed == 1u);
 
     return out;
 }
@@ -85,7 +113,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
     // A hurt or dying entity is blended 30 % towards red before the light is
     // applied (MCP `RendererLivingEntity.setBrightness`: (1, 0, 0, 0.3)).
-    let base = mix(tex.rgb, vec3<f32>(1.0, 0.0, 0.0), 0.3 * in.hurt);
+    var base = mix(tex.rgb * in.dye, vec3<f32>(1.0, 0.0, 0.0), 0.3 * in.hurt);
+    // The creeper about to explode flashes white, at most 20 %
+    // (MCP `RenderCreeper.getColorMultiplier`).
+    base = mix(base, vec3<f32>(1.0), 0.2 * in.flash);
     let lit = base * in.light * in.shade;
     let dist = distance(in.world_position, camera.camera_pos);
     let fog = clamp((dist - camera.fog_start) / (camera.fog_end - camera.fog_start), 0.0, 1.0);

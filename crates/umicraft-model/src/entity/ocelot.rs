@@ -4,6 +4,7 @@
 
 use glam::{Mat4, Vec3};
 
+use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
 /// Ocelot / Cat model (64×32 texture sheet) with head, body, 4 legs and jointed tail.
@@ -159,6 +160,24 @@ impl OcelotModel {
 
         self.tail1.rotation[0] = -0.9 + (limb_angle * 0.6662).cos() * 0.2 * limb_distance;
         self.tail2.rotation[0] = -1.7278761 + (limb_angle * 0.6662).cos() * 0.3 * limb_distance;
+    }
+
+    /// Emits a kitten: the head at three quarters, the rest halved.
+    #[must_use]
+    pub fn emit_child_mesh(&self) -> Vec<ModelVertex> {
+        emit_child(
+            &[&self.head],
+            &[
+                &self.body,
+                &self.back_left_leg,
+                &self.back_right_leg,
+                &self.front_left_leg,
+                &self.front_right_leg,
+                &self.tail1,
+                &self.tail2,
+            ],
+            ChildLayout::OCELOT,
+        )
     }
 
     /// Emits the ocelot mesh vertices transformed into world units.

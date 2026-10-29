@@ -88,6 +88,7 @@ impl EntityFrameData {
             limb_swing: self.limbs.swing_at(a),
             limb_swing_amount: self.limbs.amount_at(a),
             swing_progress: self.animation.swing_progress_at(a),
+            fuse_flash: self.animation.fuse_flash_at(a),
             hurt: self.animation.is_flashing(),
             death_time: self.animation.death_time_at(a),
             bed: self.animation.bed,
@@ -127,6 +128,8 @@ pub struct EntityRenderSnapshot {
     pub limb_swing_amount: f32,
     /// Arm swing progress `0..=1` (MCP `getSwingProgress`).
     pub swing_progress: f32,
+    /// The creeper fuse flash, `0..=1` (above 1 at the end of the fuse).
+    pub fuse_flash: f32,
     /// True while the red hurt or death flash shows.
     pub hurt: bool,
     /// Ticks into the death fall plus the partial tick, `0` while alive.
@@ -167,6 +170,7 @@ impl EntityRenderSnapshot {
             limb_swing: 0.0,
             limb_swing_amount: 0.0,
             swing_progress: 0.0,
+            fuse_flash: 0.0,
             hurt: false,
             death_time: 0.0,
             bed: None,

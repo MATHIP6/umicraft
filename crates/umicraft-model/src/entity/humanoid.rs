@@ -4,6 +4,7 @@
 
 use glam::{Mat4, Vec3};
 
+use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
 /// 1.8 Humanoid model (Player, Zombie, Skeleton) supporting Steve and Alex arm widths.
@@ -329,6 +330,23 @@ impl HumanoidModel {
             vertex.normal = roll.transform_vector3(Vec3::new(nx, -ny, nz)).to_array();
         }
         out
+    }
+
+    /// Emits a baby: the head at three quarters, the rest halved
+    /// (MCP `ModelBiped.render` with `isChild`).
+    #[must_use]
+    pub fn emit_child_mesh(&self) -> Vec<ModelVertex> {
+        emit_child(
+            &[&self.head],
+            &[
+                &self.body,
+                &self.right_arm,
+                &self.left_arm,
+                &self.right_leg,
+                &self.left_leg,
+            ],
+            ChildLayout::BIPED,
+        )
     }
 
     /// Generates the complete vertex mesh in blocks (1 unit = 1/16 block).

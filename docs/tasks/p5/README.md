@@ -1,8 +1,7 @@
 # P5 — Entities: plan and architecture
 
-Status at the end of the session of 2026-10-29: **P5a, P5b and P5c are done**
-(commits `18d3a0e`, `7ad7f68`, `ff2efaf`, `5242b73`, `4cd5647`, `29010d0`).
-P5d onwards remain. The decision record is
+Status: **P5a to P5d are done** (P5a to P5c: commits `18d3a0e` to `29010d0`;
+P5d is described below). P5e onwards remain. The decision record is
 `docs/decisions/0026-p5-entity-modules.md`; the MCP sources used are listed in
 `docs/sources.md` (rows dated 2026-10-29). The roadmap entry is `ROADMAP.md`
 §P5.
@@ -36,8 +35,8 @@ possible, and tests its maths against the MCP formulas.
 | `anim.rs` | `Animation`: hurt, death, arm swing, `BedPose` |
 | `store.rs` | `EntityStore`: owns the records, applies packets, ticks, snapshots |
 
-Planned: `meta/` (one typed decoder per family), `objects.rs`, `ride.rs`,
-`players.rs`.
+`meta/` holds one typed decoder per family (P5d). Planned: `objects.rs`,
+`ride.rs`, `players.rs`.
 
 ### Client — `umicraft-client/src/entity_render/`
 
@@ -50,6 +49,9 @@ Planned: `meta/` (one typed decoder per family), `objects.rs`, `ride.rs`,
 | `pose.rs` | snapshot to `HumanoidPose` (arm pose from held item and use flag) |
 | `transform.rs` | `model_matrix` / `body_matrix` / `x_mirror`: orientation, death fall, bed, player scale, crouch |
 | `hand.rs` | first-person arm |
+| `animals.rs`, `creatures.rs` | families of mobs: babies, coats, wool, collar, slime size, creeper swell |
+| `variants.rs` | texture of a wolf, ocelot, rabbit, villager or horse variant |
+| `specs.rs`, `horse_coat.rs` | texture table; composed horse coats |
 
 Planned: `layers/` (armour, held item, cape, fire, wool, horse gear, …),
 `objects.rs`, `nametag.rs`, `shadow.rs`, `lighting.rs`, `skin_cache.rs`.
@@ -96,11 +98,17 @@ Done:
 | P5b | Vanilla limb swing, body yaw (`renderYawOffset`), 3-tick teleport, head look applied at once |
 | P5c | Hurt flash and death fall (`Entity Status` 2/3), arm swing, sleeping (`Use Bed`), sneak, sword block and bow poses, entity orientation fix (`180 - yaw`), model mirror, player scale 0.9375, held item on the right hand |
 
+| P5d | Typed metadata for every class (merged from partial updates, health 0 starts the death fall) and the variants it changes: babies (proper head and body proportions), sheep colour and shearing, wolf tame, angry and collar, ocelot, rabbit, villager professions, horse type and composed coats, wither skeleton, zombie villager, slime size, creeper swell and white flash |
+
+What P5d stores but does not draw yet: custom name (P5e), potion colour (P8
+particles), arrows in the body, absorption hearts (P6), creeper charge layer,
+pig saddle, horse armour and chest, enderman carried block (all P5f), armour
+stand pose (P5h).
+
 Remaining, in order:
 
 | | Content | Notes |
 |---|---|---|
-| P5d | Typed metadata and mob variants: baby, sheep colour and shear, slime size, creeper fuse and charge, wither skeleton, zombie villager, villager profession, horse type/variant/armour, wolf and ocelot taming and collar, custom name, armour-stand flags and pose, potion colour, arrows in body, absorption | One decoder per family under `meta/`, one agent per family |
 | P5e | Players: `Player List Item` profiles, skin and cape fetch and cache (`fetch_mojang_skin` exists, unused), slim model from the profile, skin layers from metadata, name tags with team rules | `players.rs`, `skin_cache.rs`, `nametag.rs` |
 | P5f | Layers: armour, third-person held item for mobs, fire overlay, invisibility | `layers/` |
 | P5g | World lighting at the entity position, shadows | `lighting.rs`, `shadow.rs`; replaces the fixed `0x00FF_00FF` light |
@@ -112,6 +120,10 @@ Work in small commits, one milestone at a time. Before finishing a milestone:
 `cargo test --workspace`, and update `docs/sources.md`.
 
 ## Known gaps and open questions
+
+- P5d approximations: a foal is the whole horse at half size (the vanilla model
+  shrinks it part by part); slimes ignore the squish; wolves and ocelots do not
+  sit or beg yet; the white flash is a constant mix of the texture.
 
 - `docs/backlog.md` (Entities): the extra 0.125 sink of remote crouching
   players (needs an "is local" flag on the snapshot); crit particles

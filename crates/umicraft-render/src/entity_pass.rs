@@ -15,7 +15,8 @@ pub struct EntityVertex {
     /// Texture coordinates (0.0 to 1.0).
     pub uv: [f32; 2],
     /// Packed block and sky light nibbles (bits 0..=7); bit 8 tints the
-    /// vertex red for the hurt flash.
+    /// vertex red for the hurt flash, bits 9..=12 are the white flash level
+    /// of a fusing creeper, bit 13 enables the dye tint of bits 14..=17.
     pub light: u32,
 }
 

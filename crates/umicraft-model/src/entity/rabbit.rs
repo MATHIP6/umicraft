@@ -4,6 +4,7 @@
 
 use glam::{Mat4, Vec3};
 
+use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
 /// Rabbit model (64×32 texture sheet) with long ears, crouching thighs and hind feet.
@@ -183,6 +184,25 @@ impl RabbitModel {
         self.right_arm.rotation[0] = -0.174 - hop;
         self.left_thigh.rotation[0] = -0.349 - hop;
         self.right_thigh.rotation[0] = -0.349 + hop;
+    }
+
+    /// Emits a kit: the head and ears at full size, the rest halved.
+    #[must_use]
+    pub fn emit_child_mesh(&self) -> Vec<ModelVertex> {
+        emit_child(
+            &[&self.head, &self.right_ear, &self.left_ear],
+            &[
+                &self.left_foot,
+                &self.right_foot,
+                &self.left_thigh,
+                &self.right_thigh,
+                &self.body,
+                &self.left_arm,
+                &self.right_arm,
+                &self.tail,
+            ],
+            ChildLayout::SMALL_ANIMAL,
+        )
     }
 
     /// Emits the rabbit mesh vertices transformed into world units.

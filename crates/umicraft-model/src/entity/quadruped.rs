@@ -6,6 +6,7 @@ use std::f32::consts::PI;
 
 use glam::{Mat4, Vec3};
 
+use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
 /// Quadruped model (Cow, Pig).
@@ -196,6 +197,16 @@ impl QuadrupedModel {
         self.leg2.rotation[0] = leg_angle;
         self.leg3.rotation[0] = leg_angle;
         self.leg4.rotation[0] = -leg_angle;
+    }
+
+    /// Emits a baby: the head at full size, the rest halved.
+    #[must_use]
+    pub fn emit_child_mesh(&self) -> Vec<ModelVertex> {
+        emit_child(
+            &[&self.head],
+            &[&self.body, &self.leg1, &self.leg2, &self.leg3, &self.leg4],
+            ChildLayout::QUADRUPED,
+        )
     }
 
     /// Emits all vertices.

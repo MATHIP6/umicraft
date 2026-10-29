@@ -14,12 +14,17 @@
 //! 2. Add an entry in `textures::texture_specs` with the jar path and fallback.
 //! 3. Add the kind to the matching family builder in [`mobs`].
 
+mod animals;
+mod creatures;
 mod hand;
+mod horse_coat;
 mod mobs;
 mod player;
 mod pose;
+mod specs;
 mod textures;
 mod transform;
+mod variants;
 
 use std::collections::HashMap;
 
@@ -44,6 +49,7 @@ pub fn mesh_entities(
         let matrix = transform::model_matrix(ent);
         let light = entity_light(ent);
         for layer in mobs::build_entity_layers(ent) {
+            let light = light | dye_bits(layer.dye);
             let batch = batches.entry(layer.slot).or_default();
             batch.extend(
                 layer
@@ -60,18 +66,35 @@ pub fn mesh_entities(
 /// Bit of [`EntityVertex::light`] that tints the vertex red, as the hurt and
 /// death flash does (read by `entity.wgsl`).
 const HURT_BIT: u32 = 1 << 8;
-
-/// The packed light of an entity's vertices.
-fn entity_light(entity: &EntityRenderSnapshot) -> u32 {
-    if entity.hurt {
-        FULL_LIGHT | HURT_BIT
-    } else {
-        FULL_LIGHT
-    }
-}
+/// Shift of the 4-bit white flash level (the fusing creeper).
+const FLASH_SHIFT: u32 = 9;
+/// Bit that enables the dye tint, and the shift of its 4-bit colour.
+const DYE_BIT: u32 = 1 << 13;
+const DYE_SHIFT: u32 = 14;
 
 /// Full block and sky light: entities are not lit by the world yet.
-const FULL_LIGHT: u32 = 0x00FF_00FF;
+const FULL_LIGHT: u32 = 0x0000_00FF;
+
+/// The packed light of an entity's vertices: light, hurt tint and creeper
+/// flash.
+fn entity_light(entity: &EntityRenderSnapshot) -> u32 {
+    let hurt = if entity.hurt { HURT_BIT } else { 0 };
+    FULL_LIGHT | hurt | (flash_level(entity.fuse_flash) << FLASH_SHIFT)
+}
+
+/// The white flash of a creeper as a level `0..=15`: it blinks, white every
+/// other tenth of the fuse (MCP `RenderCreeper.getColorMultiplier`).
+fn flash_level(fuse_flash: f32) -> u32 {
+    if fuse_flash <= 0.0 || (fuse_flash * 10.0) as i32 % 2 == 0 {
+        return 0;
+    }
+    (fuse_flash.min(1.0) * 15.0).round() as u32
+}
+
+/// The dye tint bits of a layer.
+fn dye_bits(dye: Option<u8>) -> u32 {
+    dye.map_or(0, |color| DYE_BIT | (u32::from(color & 15) << DYE_SHIFT))
+}
 
 fn transform_vertex(mv: ModelVertex, matrix: &Mat4, light: u32) -> EntityVertex {
     EntityVertex {
@@ -82,6 +105,33 @@ fn transform_vertex(mv: ModelVertex, matrix: &Mat4, light: u32) -> EntityVertex 
             .to_array(),
         uv: mv.uv,
         light,
+    }
+}
+
+#[cfg(test)]
+mod light_tests {
+    use super::*;
+
+    #[test]
+    fn the_flash_blinks_and_grows_with_the_fuse() {
+        assert_eq!(flash_level(0.0), 0);
+        assert_eq!(flash_level(0.05), 0, "the first tenth is dark");
+        assert!(flash_level(0.15) > 0, "the second tenth is white");
+        assert_eq!(flash_level(0.25), 0);
+        assert_eq!(flash_level(0.95), 14);
+    }
+
+    #[test]
+    fn a_dye_is_packed_above_the_hurt_and_flash_bits() {
+        assert_eq!(dye_bits(None), 0);
+        assert_eq!(dye_bits(Some(0)), DYE_BIT);
+        assert_eq!(dye_bits(Some(14)), DYE_BIT | (14 << DYE_SHIFT));
+        let entity = EntityRenderSnapshot::new(
+            umicraft_game::entity::EntityId(1),
+            umicraft_game::entity::EntityKind::Sheep,
+            Vec3::ZERO,
+        );
+        assert_eq!(entity_light(&entity) & !0xFF, 0);
     }
 }
 
@@ -110,6 +160,7 @@ mod tests {
                 limb_swing: 0.5,
                 limb_swing_amount: 0.3,
                 swing_progress: 0.0,
+                fuse_flash: 0.0,
                 hurt: false,
                 death_time: 0.0,
                 bed: None,
@@ -133,6 +184,7 @@ mod tests {
                 limb_swing: 0.0,
                 limb_swing_amount: 0.0,
                 swing_progress: 0.0,
+                fuse_flash: 0.0,
                 hurt: false,
                 death_time: 0.0,
                 bed: None,
@@ -156,6 +208,7 @@ mod tests {
                 limb_swing: 1.0,
                 limb_swing_amount: 0.5,
                 swing_progress: 0.0,
+                fuse_flash: 0.0,
                 hurt: false,
                 death_time: 0.0,
                 bed: None,
@@ -180,6 +233,7 @@ mod tests {
                 limb_swing: 0.0,
                 limb_swing_amount: 0.0,
                 swing_progress: 0.0,
+                fuse_flash: 0.0,
                 hurt: false,
                 death_time: 0.0,
                 bed: None,

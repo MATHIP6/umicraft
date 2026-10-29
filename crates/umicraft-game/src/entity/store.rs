@@ -14,7 +14,7 @@ use crate::RenderState;
 
 use super::{
     BedPose, BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
-    EntityRenderSnapshot,
+    EntityRenderSnapshot, Variant,
 };
 
 /// Data watcher entry of the entity flags (MCP `Entity.entityInit`).
@@ -341,6 +341,11 @@ impl EntityStore {
             entity.glide_to_target();
             entity.animate();
             entity.animation.tick();
+            if let Variant::Creeper(creeper) = &entity.meta.variant {
+                // A lit creeper fuses whatever its state says.
+                let state = if creeper.ignited { 1 } else { creeper.state };
+                entity.animation.tick_fuse(state);
+            }
             entity.age_ticks = entity.age_ticks.saturating_add(1);
         }
         self.entities

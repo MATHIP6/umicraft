@@ -2,29 +2,30 @@
 
 //! Mesh builders for every mob, grouped by model family.
 //!
-//! Each family function returns `None` for kinds it does not own, so
+//! The families live in `animals` and `creatures`, the humanoids here. Each
+//! family function returns `None` for kinds it does not own, so
 //! [`build_entity_layers`] chains them. Each layer is tagged with a
-//! [`TextureSlot`] so the batching loop routes vertices to the right texture.
+//! [`TextureSlot`] so the batching loop routes vertices to the right texture,
+//! and with the dye that tints it, if any.
 
+use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
-use umicraft_model::entity::{
-    BatModel, BlazeModel, ChickenModel, CreeperModel, DragonModel, EndermanModel, EndermiteModel,
-    GhastModel, GuardianModel, HorseModel, HumanoidModel, IronGolemModel, MeshLayer, OcelotModel,
-    QuadrupedModel, RabbitModel, SheepModel, SilverfishModel, SlimeModel, SnowmanModel,
-    SpiderModel, SquidModel, TextureSlot, VillagerModel, WitherModel, WolfModel,
-};
+use umicraft_model::entity::child::scale_mesh;
+use umicraft_model::entity::{HumanoidModel, ModelVertex, TextureSlot};
 
+use super::animals::animal_layers;
+use super::creatures::{creature_layers, creeper_layers};
 use super::player::posed_player;
 use super::pose::humanoid_pose;
 
 /// The animation inputs every model's `set_angles` takes.
 #[derive(Clone, Copy)]
-struct Pose {
-    swing: f32,
-    amount: f32,
+pub(super) struct Pose {
+    pub(super) swing: f32,
+    pub(super) amount: f32,
     /// Head yaw relative to the body, in degrees.
-    head_yaw: f32,
-    head_pitch: f32,
+    pub(super) head_yaw: f32,
+    pub(super) head_pitch: f32,
 }
 
 impl Pose {
@@ -38,23 +39,54 @@ impl Pose {
     }
 }
 
+/// A mesh with its texture and an optional dye tint.
+pub(super) struct EntityLayer {
+    /// The texture the vertices use.
+    pub(super) slot: TextureSlot,
+    /// Model-space vertices.
+    pub(super) vertices: Vec<ModelVertex>,
+    /// Dye (`0..=15`, MCP `EnumDyeColor` metadata) that multiplies the
+    /// texture: the sheep wool and the wolf collar.
+    pub(super) dye: Option<u8>,
+}
+
+impl EntityLayer {
+    /// An untinted layer.
+    pub(super) fn new(slot: TextureSlot, vertices: Vec<ModelVertex>) -> Self {
+        Self {
+            slot,
+            vertices,
+            dye: None,
+        }
+    }
+
+    /// The layer tinted with the dye `color`.
+    pub(super) fn dyed(mut self, color: u8) -> Self {
+        self.dye = Some(color & 15);
+        self
+    }
+}
+
 /// A single-layer mesh on `slot`.
-fn one(slot: TextureSlot, vertices: Vec<umicraft_model::entity::ModelVertex>) -> Vec<MeshLayer> {
-    vec![MeshLayer { slot, vertices }]
+pub(super) fn one(slot: TextureSlot, vertices: Vec<ModelVertex>) -> Vec<EntityLayer> {
+    vec![EntityLayer::new(slot, vertices)]
 }
 
 /// Builds mesh layers for a single entity snapshot (empty for kinds with no
 /// entity model, such as dropped items).
-pub(super) fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
+pub(super) fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<EntityLayer> {
     let pose = Pose::of(ent);
+    if ent.kind == EntityKind::Creeper {
+        return creeper_layers(ent, pose);
+    }
     humanoid_layers(ent)
-        .or_else(|| animal_layers(ent.kind, pose))
-        .or_else(|| creature_layers(ent.kind, pose))
+        .or_else(|| animal_layers(ent, pose))
+        .or_else(|| creature_layers(ent, pose))
         .unwrap_or_default()
 }
 
 /// Two-legged, two-armed models.
-fn humanoid_layers(ent: &EntityRenderSnapshot) -> Option<Vec<MeshLayer>> {
+fn humanoid_layers(ent: &EntityRenderSnapshot) -> Option<Vec<EntityLayer>> {
     if ent.kind == EntityKind::Player {
         let (model, is_slim) = posed_player(ent);
         let slot = if is_slim {
@@ -64,11 +96,22 @@ fn humanoid_layers(ent: &EntityRenderSnapshot) -> Option<Vec<MeshLayer>> {
         };
         return Some(one(slot, model.emit_mesh()));
     }
+    let wither = matches!(ent.meta.variant, Variant::Skeleton { wither: true });
     let (mut model, slot, scale) = match ent.kind {
+        EntityKind::Zombie if ent.meta.is_zombie_villager() => (
+            HumanoidModel::zombie_villager(),
+            TextureSlot::ZombieVillager,
+            1.0,
+        ),
         EntityKind::Zombie => (HumanoidModel::zombie(), TextureSlot::Zombie, 1.0),
+        EntityKind::Skeleton if wither => (
+            HumanoidModel::skeleton(),
+            TextureSlot::SkeletonWither,
+            WITHER_SKELETON_SCALE,
+        ),
         EntityKind::Skeleton => (HumanoidModel::skeleton(), TextureSlot::Skeleton, 1.0),
         EntityKind::ZombiePigman => (HumanoidModel::zombie(), TextureSlot::ZombiePigman, 1.0),
-        EntityKind::Giant => (HumanoidModel::zombie(), TextureSlot::Zombie, 6.0),
+        EntityKind::Giant => (HumanoidModel::zombie(), TextureSlot::Zombie, GIANT_SCALE),
         EntityKind::ZombieVillager => (
             HumanoidModel::zombie_villager(),
             TextureSlot::ZombieVillager,
@@ -78,133 +121,16 @@ fn humanoid_layers(ent: &EntityRenderSnapshot) -> Option<Vec<MeshLayer>> {
     };
     // `ModelSkeleton` extends `ModelZombie`: all of them hold the arms forward.
     model.set_pose(&humanoid_pose(ent, true));
-    let mut vertices = model.emit_mesh();
-    if scale != 1.0 {
-        for vertex in &mut vertices {
-            vertex.position = vertex.position.map(|c| c * scale);
-        }
-    }
+    let mut vertices = if ent.meta.baby {
+        model.emit_child_mesh()
+    } else {
+        model.emit_mesh()
+    };
+    scale_mesh(&mut vertices, scale);
     Some(one(slot, vertices))
 }
 
-/// Animals, villagers and the other limb-swinging ground mobs.
-fn animal_layers(kind: EntityKind, pose: Pose) -> Option<Vec<MeshLayer>> {
-    let Pose {
-        swing,
-        amount,
-        head_yaw,
-        head_pitch,
-    } = pose;
-    macro_rules! walker {
-        ($model:expr, $slot:expr) => {{
-            let mut model = $model;
-            model.set_angles(swing, amount, head_yaw, head_pitch);
-            one($slot, model.emit_mesh())
-        }};
-    }
-    Some(match kind {
-        EntityKind::Creeper => walker!(CreeperModel::new(), TextureSlot::Creeper),
-        EntityKind::Cow => walker!(QuadrupedModel::cow(), TextureSlot::Cow),
-        EntityKind::Mooshroom => walker!(QuadrupedModel::cow(), TextureSlot::Mooshroom),
-        EntityKind::Pig => walker!(QuadrupedModel::pig(), TextureSlot::Pig),
-        EntityKind::Chicken => walker!(ChickenModel::new(), TextureSlot::Chicken),
-        EntityKind::Spider => walker!(SpiderModel::new(), TextureSlot::Spider),
-        EntityKind::CaveSpider => walker!(SpiderModel::with_scale(0.7), TextureSlot::CaveSpider),
-        EntityKind::Enderman => walker!(EndermanModel::new(), TextureSlot::Enderman),
-        EntityKind::Villager => walker!(VillagerModel::villager(), TextureSlot::Villager),
-        EntityKind::Witch => walker!(VillagerModel::witch(), TextureSlot::Witch),
-        EntityKind::IronGolem => walker!(IronGolemModel::new(), TextureSlot::IronGolem),
-        EntityKind::Wolf => walker!(WolfModel::new(), TextureSlot::Wolf),
-        EntityKind::Horse => walker!(HorseModel::new(), TextureSlot::Horse),
-        EntityKind::Ocelot => walker!(OcelotModel::new(), TextureSlot::Ocelot),
-        EntityKind::Rabbit => walker!(RabbitModel::new(), TextureSlot::Rabbit),
-        EntityKind::Sheep => {
-            let mut model = SheepModel::new();
-            model.set_angles(swing, amount, head_yaw, head_pitch);
-            vec![
-                MeshLayer {
-                    slot: TextureSlot::Sheep,
-                    vertices: model.emit_body_mesh(),
-                },
-                MeshLayer {
-                    slot: TextureSlot::SheepWool,
-                    vertices: model.emit_wool_mesh(),
-                },
-            ]
-        }
-        _ => return None,
-    })
-}
-
-/// Slimes, flyers, swimmers and the other models driven by fewer inputs.
-fn creature_layers(kind: EntityKind, pose: Pose) -> Option<Vec<MeshLayer>> {
-    let Pose {
-        swing,
-        head_yaw,
-        head_pitch,
-        ..
-    } = pose;
-    Some(match kind {
-        EntityKind::Slime => {
-            let model = SlimeModel::slime(1.0);
-            let mut vertices = model.emit_inner_mesh();
-            vertices.extend(model.emit_outer_mesh());
-            one(TextureSlot::Slime, vertices)
-        }
-        EntityKind::MagmaCube => one(
-            TextureSlot::MagmaCube,
-            SlimeModel::magma_cube(1.0).emit_inner_mesh(),
-        ),
-        EntityKind::Snowman => {
-            let mut model = SnowmanModel::new();
-            model.set_angles(head_yaw, head_pitch);
-            one(TextureSlot::Snowman, model.emit_mesh())
-        }
-        EntityKind::Squid => {
-            let mut model = SquidModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Squid, model.emit_mesh())
-        }
-        EntityKind::Bat => {
-            let mut model = BatModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Bat, model.emit_mesh())
-        }
-        EntityKind::Blaze => {
-            let mut model = BlazeModel::new();
-            model.set_angles(swing, head_yaw, head_pitch);
-            one(TextureSlot::Blaze, model.emit_mesh())
-        }
-        EntityKind::Dragon => {
-            let mut model = DragonModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Dragon, model.emit_mesh())
-        }
-        EntityKind::Endermite => {
-            let mut model = EndermiteModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Endermite, model.emit_mesh())
-        }
-        EntityKind::Ghast => {
-            let mut model = GhastModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Ghast, model.emit_mesh())
-        }
-        EntityKind::Guardian => {
-            let mut model = GuardianModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Guardian, model.emit_mesh())
-        }
-        EntityKind::Silverfish => {
-            let mut model = SilverfishModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Silverfish, model.emit_mesh())
-        }
-        EntityKind::Wither => {
-            let mut model = WitherModel::new();
-            model.set_angles(swing, head_yaw, head_pitch);
-            one(TextureSlot::Wither, model.emit_mesh())
-        }
-        _ => return None,
-    })
-}
+/// Scale of a wither skeleton (MCP `RenderSkeleton.preRenderCallback`).
+const WITHER_SKELETON_SCALE: f32 = 1.2;
+/// Scale of a giant (MCP `RenderGiantZombie`).
+const GIANT_SCALE: f32 = 6.0;

@@ -21,8 +21,19 @@ pub struct Animation {
     dying: bool,
     death_time: u8,
     swing: ArmSwing,
+    fuse: Fuse,
     /// The bed the entity sleeps in, if any.
     pub bed: Option<BedPose>,
+}
+
+/// Ticks a creeper fuse takes (MCP `EntityCreeper.fuseTime`).
+const FUSE_TICKS: i8 = 30;
+
+/// The swelling of a creeper (MCP `timeSinceIgnited`, `lastActiveTime`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Fuse {
+    ticks: i8,
+    previous_ticks: i8,
 }
 
 /// The progress of an arm swing (MCP `swingProgressInt`, `swingProgress`).
@@ -106,6 +117,23 @@ impl Animation {
             swing.ticks = 0;
         }
         swing.progress = f32::from(swing.ticks) / f32::from(SWING_TICKS);
+    }
+
+    /// Advances a creeper's fuse one tick: it grows while the state is `1`
+    /// and shrinks while it is `-1` (MCP `EntityCreeper.onUpdate`).
+    pub fn tick_fuse(&mut self, state: i8) {
+        let fuse = &mut self.fuse;
+        fuse.previous_ticks = fuse.ticks;
+        fuse.ticks = fuse.ticks.saturating_add(state).clamp(0, FUSE_TICKS);
+    }
+
+    /// The creeper flash `alpha` of the way into the tick, `0..=1`
+    /// (MCP `EntityCreeper.getCreeperFlashIntensity`).
+    #[must_use]
+    pub fn fuse_flash_at(&self, alpha: f32) -> f32 {
+        let from = f32::from(self.fuse.previous_ticks);
+        let to = f32::from(self.fuse.ticks);
+        (from + (to - from) * alpha) / f32::from(FUSE_TICKS - 2)
     }
 
     /// True once the death fall is over and the entity is removed.
@@ -242,6 +270,32 @@ mod tests {
         animation.swing_item();
         run(&mut animation, 2);
         assert!((animation.swing_progress_at(1.0) - 1.0 / 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_fusing_creeper_swells_to_the_full_flash_and_a_calm_one_deflates() {
+        let mut animation = Animation::default();
+        for _ in 0..40 {
+            animation.tick_fuse(1);
+        }
+        assert!(
+            animation.fuse_flash_at(1.0) > 1.0,
+            "30 / 28 at the end of the fuse"
+        );
+        animation.tick_fuse(-1);
+        let calmer = animation.fuse_flash_at(1.0);
+        for _ in 0..40 {
+            animation.tick_fuse(-1);
+        }
+        assert_eq!(animation.fuse_flash_at(1.0), 0.0);
+        assert!(calmer < 30.0 / 28.0);
+    }
+
+    #[test]
+    fn the_flash_interpolates_between_ticks() {
+        let mut animation = Animation::default();
+        animation.tick_fuse(1);
+        assert!((animation.fuse_flash_at(0.5) - 0.5 / 28.0).abs() < 1e-6);
     }
 
     #[test]

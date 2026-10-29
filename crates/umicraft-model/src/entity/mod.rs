@@ -9,6 +9,7 @@
 mod bat;
 mod blaze;
 mod chicken;
+pub mod child;
 mod creeper;
 mod dragon;
 mod enderman;
@@ -528,6 +529,55 @@ pub enum TextureSlot {
     Silverfish,
     /// Wither boss texture.
     Wither,
+    /// Tamed wolf texture.
+    WolfTame,
+    /// Angry wolf texture.
+    WolfAngry,
+    /// Wolf collar overlay, tinted with the collar dye.
+    WolfCollar,
+    /// Black (tuxedo) ocelot.
+    OcelotBlack,
+    /// Red (tabby) ocelot.
+    OcelotRed,
+    /// Siamese ocelot.
+    OcelotSiamese,
+    /// White rabbit.
+    RabbitWhite,
+    /// Black rabbit.
+    RabbitBlack,
+    /// Gold rabbit.
+    RabbitGold,
+    /// Salt and pepper rabbit.
+    RabbitSalt,
+    /// Black and white rabbit.
+    RabbitWhiteSplotched,
+    /// The rabbit named Toast.
+    RabbitToast,
+    /// The killer bunny.
+    RabbitCaerbannog,
+    /// Plain villager (no profession texture).
+    VillagerPlain,
+    /// Librarian villager.
+    VillagerLibrarian,
+    /// Priest villager.
+    VillagerPriest,
+    /// Smith villager.
+    VillagerSmith,
+    /// Butcher villager.
+    VillagerButcher,
+    /// Wither skeleton.
+    SkeletonWither,
+    /// Donkey.
+    HorseDonkey,
+    /// Mule.
+    HorseMule,
+    /// Zombie horse.
+    HorseZombie,
+    /// Skeleton horse.
+    HorseSkeleton,
+    /// A horse coat composed from a base colour and a marking, keyed by the
+    /// metadata variant (`base | marking << 8`).
+    HorseCoat(u16),
 }
 
 /// A mesh layer tagged with its texture slot.

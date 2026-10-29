@@ -60,6 +60,18 @@ head turned the wrong way, the right arm was on the left and skins were
 mirrored. Attachments given in the vanilla frame (the held item) hang on
 `body_matrix` and apply the mirror themselves.
 
+### P5d additions
+
+`entity/meta/` (one decoder per family: `common`, `animals`, `horse`,
+`monsters`, `armor_stand`), `entity_render/{animals,creatures,variants,
+specs,horse_coat}.rs`, `umicraft-model/src/entity/child.rs`.
+
+Typed metadata lives on `EntityRecord::meta` and travels in the snapshot.
+The vertex `light` word of `EntityVertex` carries the per-vertex effects the
+shader needs, so the vertex layout is unchanged: bit 8 hurt tint, bits 9-12
+white flash level, bit 13 dye tint with its colour in bits 14-17. Horse coats
+are composed on first use and cached under `TextureSlot::HorseCoat`.
+
 ## Consequences
 
 P5a changes no behaviour (same tests, same vertex counts). `game.rs` only

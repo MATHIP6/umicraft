@@ -4,6 +4,7 @@
 
 use glam::{Mat4, Vec3};
 
+use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
 /// Wolf model (64×32 texture sheet) with head, ears, snout, mane, body, 4 legs and tail.
@@ -159,6 +160,18 @@ impl WolfModel {
         self.leg2.rotation[0] = leg_angle;
         self.leg3.rotation[0] = leg_angle;
         self.leg4.rotation[0] = -leg_angle;
+    }
+
+    /// Emits a pup: the head at full size, the rest halved.
+    #[must_use]
+    pub fn emit_child_mesh(&self) -> Vec<ModelVertex> {
+        emit_child(
+            &[&self.head],
+            &[
+                &self.body, &self.mane, &self.leg1, &self.leg2, &self.leg3, &self.leg4, &self.tail,
+            ],
+            ChildLayout::SMALL_ANIMAL,
+        )
     }
 
     /// Emits all mesh vertices.

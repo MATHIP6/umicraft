@@ -431,6 +431,7 @@ fn make_snapshot(
         limb_swing: 0.0,
         limb_swing_amount: 0.0,
         swing_progress: 0.0,
+        fuse_flash: 0.0,
         hurt: false,
         death_time: 0.0,
         bed: None,
