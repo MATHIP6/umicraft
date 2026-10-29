@@ -59,7 +59,9 @@ pub mod pick;
 pub mod player_list;
 pub mod prediction;
 pub mod raycast;
+pub mod riding;
 pub mod scoreboard;
+pub mod selection;
 pub mod server;
 pub mod shapes;
 pub mod title;
@@ -329,6 +331,19 @@ impl GameState {
         self.player.velocity += velocity;
     }
 
+    /// Puts the player on the seat of its vehicle instead of simulating it.
+    ///
+    /// MCP `EntityPlayerSP.onUpdate` calls `Entity.updateRidden` while the
+    /// player rides: the motion is cleared and the vehicle sets the position.
+    /// The prediction history is dropped, the server never corrects a rider.
+    pub fn ride(&mut self, feet: DVec3) {
+        self.previous_position = self.player.position;
+        self.player.position = feet;
+        self.player.velocity = DVec3::ZERO;
+        self.tick += 1;
+        self.history.clear();
+    }
+
     /// Makes the player walk through blocks (spectator mode).
     pub fn set_no_clip(&mut self, no_clip: bool) {
         self.player.no_clip = no_clip;
@@ -404,6 +419,16 @@ mod tests {
                 .copied()
                 .unwrap_or(BlockState::AIR)
         }
+    }
+
+    #[test]
+    fn a_rider_is_put_on_the_seat_and_its_motion_is_cleared() {
+        let mut state = GameState::new(DVec3::new(0.0, 5.0, 0.0));
+        state.set_velocity(DVec3::new(0.3, 0.2, 0.1));
+        state.ride(DVec3::new(4.0, 6.0, 4.0));
+        assert_eq!(state.position(), DVec3::new(4.0, 6.0, 4.0));
+        assert_eq!(state.previous_position(), DVec3::new(0.0, 5.0, 0.0));
+        assert_eq!(state.player().velocity, DVec3::ZERO);
     }
 
     #[test]

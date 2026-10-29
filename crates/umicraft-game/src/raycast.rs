@@ -127,7 +127,7 @@ pub fn raycast<S: BlockSource + ?Sized>(
 
     for _ in 0..MAX_VISITED_CELLS {
         let state = world.block(cell.x, cell.y, cell.z);
-        if !state.is_air() {
+        if is_targetable(state) {
             let block_origin = DVec3::new(cell.x as f64, cell.y as f64, cell.z as f64);
             for local in selection_shape(state, world, cell).boxes() {
                 let shape_box = Aabb::new(local.min + block_origin, local.max + block_origin);
@@ -163,6 +163,19 @@ pub fn raycast<S: BlockSource + ?Sized>(
     }
 
     None
+}
+
+/// Whether the ray may stop at a block.
+///
+/// MCP `EntityLivingBase.rayTrace` calls `World.rayTraceBlocks(start, end,
+/// false, ...)`: `stopOnLiquid` is false, so a ray looks through water and
+/// lava and a liquid is never targeted, outlined or dug. Only the bucket
+/// (`Item.getMovingObjectPositionFromPlayer`) asks for liquids.
+fn is_targetable(state: umicraft_world::BlockState) -> bool {
+    !matches!(
+        state.kind(),
+        umicraft_world::BlockKind::Air | umicraft_world::BlockKind::Liquid
+    )
 }
 
 /// The step of the cell walk along one axis.
@@ -292,6 +305,20 @@ mod tests {
         assert_eq!(hit.face, Face::North);
         assert!((hit.distance - 2.5).abs() < 1e-9);
         assert!((hit.position.z - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_ray_looks_through_liquids() {
+        // Regression: water (8, 9) and lava (10, 11) used to be targeted.
+        for id in 8..=11 {
+            let world = TestBlocks::with(&[
+                (0, 0, 2, BlockState::new(id, 0)),
+                (0, 0, 3, BlockState::new(1, 0)),
+            ]);
+            let hit = raycast(DVec3::new(0.5, 0.5, 0.5), DVec3::Z, 4.5, &world)
+                .expect("the ray must reach the stone behind the liquid");
+            assert_eq!(hit.block, BlockPos::new(0, 0, 3));
+        }
     }
 
     #[test]

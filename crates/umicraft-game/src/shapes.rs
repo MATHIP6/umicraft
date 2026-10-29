@@ -511,21 +511,16 @@ pub fn is_normal_cube(state: BlockState) -> bool {
 
 /// The shape used for block targeting.
 ///
-/// It is the collision shape of the block, except for decorations: a
-/// decoration has no collision box but must still be targetable, so it falls
-/// back to the full cube. Air is never targetable.
+/// Vanilla targets the block's selection bounds, not its collision boxes, so
+/// this delegates to [`crate::selection::selection_shape`]. Air and liquids
+/// are never targetable.
 #[must_use]
 pub fn selection_shape<S: BlockSource + ?Sized>(
     state: BlockState,
     world: &S,
     pos: BlockPos,
 ) -> BlockShape {
-    let shape = shape_of(state, world, pos);
-    if shape.is_empty() && !state.is_air() {
-        BlockShape::cube()
-    } else {
-        shape
-    }
+    crate::selection::selection_shape(state, world, pos)
 }
 
 /// The two collision boxes of a stair block.
