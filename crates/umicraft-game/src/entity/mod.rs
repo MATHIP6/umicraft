@@ -9,5 +9,6 @@ pub mod types;
 pub use boss::{BossInfo, BossTracker, DRAGON_MAX_HEALTH, WITHER_MAX_HEALTH};
 pub use store::EntityStore;
 pub use types::{
-    EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
+    EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
+    EntityRenderSnapshot,
 };

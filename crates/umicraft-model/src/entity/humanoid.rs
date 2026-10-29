@@ -344,6 +344,41 @@ impl HumanoidModel {
         self.head.pivot[1] = 23.0;
     }
 
+    /// The right arm and its sleeve as the first-person view draws them
+    /// (MCP `RenderPlayer.renderRightArm`), in the vanilla model space with
+    /// the y axis down and the unit a block.
+    ///
+    /// The model of this crate has the y axis up, so the vertices are
+    /// mirrored back, and the arm gets the small roll the idle animation
+    /// gives it (`ModelBiped.setRotationAngles` with an age of 0:
+    /// `rotateAngleZ = 0.1`).
+    #[must_use]
+    pub fn first_person_arm(is_slim: bool) -> Vec<ModelVertex> {
+        const PIVOT: [f32; 3] = [-5.0, 2.0, 0.0];
+        const IDLE_ROLL: f32 = 0.1;
+        const MODEL_HEIGHT: f32 = 24.0;
+
+        let model = Self::new(is_slim);
+        let mut out = Vec::new();
+        model
+            .right_arm
+            .emit(Mat4::from_scale(Vec3::splat(1.0 / 16.0)), &mut out);
+
+        let pivot = Vec3::from(PIVOT) / 16.0;
+        let roll = Mat4::from_translation(pivot)
+            * Mat4::from_rotation_z(IDLE_ROLL)
+            * Mat4::from_translation(-pivot);
+        for vertex in &mut out {
+            let [x, y, z] = vertex.position;
+            vertex.position = roll
+                .transform_point3(Vec3::new(x, MODEL_HEIGHT / 16.0 - y, z))
+                .to_array();
+            let [nx, ny, nz] = vertex.normal;
+            vertex.normal = roll.transform_vector3(Vec3::new(nx, -ny, nz)).to_array();
+        }
+        out
+    }
+
     /// Generates the complete vertex mesh in blocks (1 unit = 1/16 block).
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
@@ -356,5 +391,53 @@ impl HumanoidModel {
         self.right_leg.emit(root, &mut out);
         self.left_leg.emit(root, &mut out);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extent(vertices: &[ModelVertex], axis: usize) -> (f32, f32) {
+        let values = vertices.iter().map(|vertex| vertex.position[axis]);
+        (
+            values.clone().fold(f32::MAX, f32::min),
+            values.fold(f32::MIN, f32::max),
+        )
+    }
+
+    #[test]
+    fn the_first_person_arm_is_the_arm_and_its_sleeve() {
+        let arm = HumanoidModel::first_person_arm(false);
+        assert_eq!(arm.len(), 72, "two boxes of 36 vertices");
+    }
+
+    #[test]
+    fn the_first_person_arm_hangs_down_from_the_shoulder_in_vanilla_space() {
+        let arm = HumanoidModel::first_person_arm(false);
+        // Vanilla space: y down, the arm spans 12 pixels below the shoulder
+        // line (0.75 block) plus the sleeve dilation of 0.25 pixel.
+        let (top, bottom) = extent(&arm, 1);
+        assert!(top < 0.0 && top > -0.05, "{top}");
+        assert!((bottom - 0.75).abs() < 0.06, "{bottom}");
+        // The arm is 4 pixels wide, to the right of the body (x < 0).
+        let (left, right) = extent(&arm, 0);
+        assert!(left > -0.6 && right < -0.2, "{left} {right}");
+        assert!(right - left > 0.24);
+    }
+
+    #[test]
+    fn the_slim_arm_is_one_pixel_narrower() {
+        let wide = extent(&HumanoidModel::first_person_arm(false), 0);
+        let slim = extent(&HumanoidModel::first_person_arm(true), 0);
+        assert!(((wide.1 - wide.0) - (slim.1 - slim.0) - 1.0 / 16.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_arm_normals_stay_unit_length() {
+        for vertex in HumanoidModel::first_person_arm(false) {
+            let length = Vec3::from(vertex.normal).length();
+            assert!((length - 1.0).abs() < 1e-4, "{length}");
+        }
     }
 }

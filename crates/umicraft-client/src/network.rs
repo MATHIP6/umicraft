@@ -19,8 +19,8 @@ use umicraft_net::play::{drive, PlayOptions, PlaySession, SessionCounters, Sessi
 use umicraft_net::{Connection, NetError};
 use umicraft_protocol::packets::play::serverbound::{
     self, ClickWindow as ServerClickWindow, CloseWindow as ServerCloseWindow, DiggingStatus,
-    HeldItemChange as ServerHeldItemChange, Input, PlayerBlockPlacement, PlayerDigging, PlayerLook,
-    PlayerPosition, PositionLook as ServerPositionLook,
+    EntityActionKind, HeldItemChange as ServerHeldItemChange, Input, PlayerBlockPlacement,
+    PlayerDigging, PlayerLook, PlayerPosition, PositionLook as ServerPositionLook,
 };
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_protocol::PlayServerbound;
@@ -55,8 +55,9 @@ pub struct NetworkConfig {
 /// A serverbound packet the game thread wants the socket to send.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientCommand {
-    /// `Input` (0x0C): the movement keys of the current tick.
+    /// `Steer Vehicle` (0x0C): the movement keys of a riding player.
     ///
+    /// Vanilla only sends it while riding (MCP `EntityPlayerSP.onUpdate`).
     /// The values are the raw wire values: the sneak scaling of MCP
     /// `MovementInputFromOptions.java` is already applied, the `0.98` damping
     /// of `EntityLivingBase.java:2020` is applied by the game logic and
@@ -70,6 +71,18 @@ pub enum ClientCommand {
         jumping: bool,
         /// Whether the sneak key is held.
         sneaking: bool,
+    },
+    /// `Player` (0x03): a tick without movement or turn, only the ground flag.
+    Player {
+        /// Whether the player rests on the ground.
+        on_ground: bool,
+    },
+    /// `Entity Action` (0x0B): a sprint or sneak transition of the player.
+    EntityAction {
+        /// The entity id of the player.
+        entity_id: i32,
+        /// The transition.
+        action: EntityActionKind,
     },
     /// `Player Position` (0x04): the feet position and the ground flag.
     PlayerPosition {
@@ -158,6 +171,34 @@ pub enum ClientCommand {
         /// The Z offset of the click, in sixteenths of a block.
         cursor_z: u8,
     },
+    /// `Player Block Placement` (0x08) without a target: the use of the held
+    /// item (MCP `PlayerControllerMP.sendUseItem`).
+    UseItem {
+        /// The item the player holds.
+        item: ItemStack,
+    },
+    /// `Creative Inventory Action` (0x10): the creative client sets a slot.
+    CreativeSlot {
+        /// The slot index of the player window.
+        slot: i16,
+        /// The item placed in the slot.
+        item: ItemStack,
+    },
+    /// `Player Abilities` (0x13): the flying state changed.
+    PlayerAbilities {
+        /// The flags of the last `Player Abilities` of the server.
+        flags: u8,
+        /// Whether the player flies now.
+        flying: bool,
+        /// The flying speed.
+        fly_speed: f32,
+        /// The walking speed.
+        walk_speed: f32,
+    },
+    /// `Animation` (0x0A): the arm swings.
+    Swing,
+    /// `Client Status` (0x16): the respawn request of the death screen.
+    Respawn,
     /// `Held Item Change` (0x09): the selected hotbar slot.
     HeldItemChange {
         /// The slot index.
@@ -203,6 +244,14 @@ pub enum ClientCommand {
         /// The item in the clicked slot.
         clicked_item: ItemStack,
     },
+    /// `Creative Inventory Action` (0x10): the creative screen sets a slot of
+    /// the player window, or drops a stack when `slot` is -1.
+    CreativeInventoryAction {
+        /// The player-window slot, or -1 to drop the stack.
+        slot: i16,
+        /// The new content of the slot.
+        stack: ItemStack,
+    },
 }
 
 impl ClientCommand {
@@ -221,6 +270,16 @@ impl ClientCommand {
                 jumping,
                 sneaking,
             }),
+            Self::Player { on_ground } => {
+                PlayServerbound::Player(serverbound::Player { on_ground })
+            }
+            Self::EntityAction { entity_id, action } => {
+                PlayServerbound::EntityAction(serverbound::EntityAction {
+                    entity_id,
+                    action,
+                    aux_data: 0,
+                })
+            }
             Self::PlayerPosition { x, y, z, on_ground } => {
                 PlayServerbound::PlayerPosition(PlayerPosition { x, y, z, on_ground })
             }
@@ -289,11 +348,37 @@ impl ClientCommand {
                 x,
                 y,
                 z,
-                face,
+                face: Some(face),
                 item,
                 cursor_x,
                 cursor_y,
                 cursor_z,
+            }),
+            Self::UseItem { item } => {
+                PlayServerbound::PlayerBlockPlacement(PlayerBlockPlacement::use_item(item))
+            }
+            Self::CreativeSlot { slot, item } => {
+                PlayServerbound::CreativeInventoryAction(serverbound::CreativeInventoryAction {
+                    slot,
+                    item,
+                })
+            }
+            Self::PlayerAbilities {
+                flags,
+                flying,
+                fly_speed,
+                walk_speed,
+            } => PlayServerbound::PlayerAbilities(
+                serverbound::PlayerAbilities {
+                    flags,
+                    fly_speed,
+                    walk_speed,
+                }
+                .with_flying(flying),
+            ),
+            Self::Swing => PlayServerbound::Animation(serverbound::Animation),
+            Self::Respawn => PlayServerbound::ClientStatus(serverbound::ClientStatus {
+                action: serverbound::ClientStatusAction::PerformRespawn,
             }),
             Self::HeldItemChange { slot } => {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
@@ -313,7 +398,7 @@ impl ClientCommand {
             }),
             Self::TabComplete { message } => {
                 PlayServerbound::TabComplete(serverbound::TabComplete {
-                    message,
+                    text: message,
                     target_block: None,
                 })
             }
@@ -335,6 +420,12 @@ impl ClientCommand {
                 mode,
                 clicked_item,
             }),
+            Self::CreativeInventoryAction { slot, stack } => {
+                PlayServerbound::CreativeInventoryAction(serverbound::CreativeInventoryAction {
+                    slot,
+                    item: stack,
+                })
+            }
         }
     }
 }
@@ -503,7 +594,20 @@ mod tests {
                 },
                 0x08,
             ),
+            (
+                ClientCommand::UseItem {
+                    item: ItemStack::EMPTY,
+                },
+                0x08,
+            ),
             (ClientCommand::HeldItemChange { slot: 3 }, 0x09),
+            (
+                ClientCommand::CreativeSlot {
+                    slot: 36,
+                    item: ItemStack::EMPTY,
+                },
+                0x10,
+            ),
         ];
         for (command, id) in cases {
             let packet = command.into_packet();

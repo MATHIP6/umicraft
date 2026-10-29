@@ -11,6 +11,8 @@
 
 use std::time::{Duration, Instant};
 
+use umicraft_game::item_use::DropKind;
+
 /// The movement key state, sampled by an input source.
 ///
 /// The axes are the analogue values of the movement keys. The sign of the
@@ -28,6 +30,10 @@ pub struct InputState {
     pub sneak: bool,
     /// Whether the sprint key is held.
     pub sprint: bool,
+    /// Whether the attack / break button is held.
+    pub attack: bool,
+    /// Whether the use (right) button is held.
+    pub use_item: bool,
 }
 
 impl InputState {
@@ -44,6 +50,8 @@ impl InputState {
             jump: false,
             sneak: false,
             sprint: true,
+            attack: false,
+            use_item: false,
         }
     }
 }
@@ -64,8 +72,14 @@ pub struct InputUpdate {
     pub select_slot: Option<u8>,
     /// Whether the player started breaking the targeted block.
     pub break_block: bool,
-    /// Whether the player placed a block against the targeted face.
+    /// Whether the use (right) button went down since the last update.
     pub place_block: bool,
+    /// Whether the pick block (middle) button went down.
+    pub pick_block: bool,
+    /// The drop the player asked for with the drop key, if any.
+    pub drop_item: Option<DropKind>,
+    /// Whether the player pressed the perspective key (`F5`).
+    pub toggle_perspective: bool,
 }
 
 /// The yaw the script turns per update, in radians.
@@ -83,6 +97,8 @@ pub enum ScriptStep {
     Walk,
     /// Walk forward while sprinting.
     Sprint,
+    /// Walk forward while sneaking.
+    Sneak,
     /// Walk forward and jump once a second.
     Jump,
     /// Steer the view down towards the ground in front of the player.
@@ -92,7 +108,10 @@ pub enum ScriptStep {
     /// Turn to the right, so the walk does not run into the block the script
     /// placed.
     Turn,
-    /// Break the block under the crosshair.
+    /// Look around: turn right, then left, alternating every second, while
+    /// the pitch is steered towards the phase's pitch.
+    LookAround,
+    /// Hold the attack button on the block under the crosshair.
     Break,
     /// Place a block against the targeted face.
     Place,
@@ -186,6 +205,10 @@ impl Script {
                 update.state.forward = 1.0;
                 update.state.sprint = true;
             }
+            ScriptStep::Sneak => {
+                update.state.forward = 1.0;
+                update.state.sneak = true;
+            }
             ScriptStep::Jump => {
                 update.state.forward = 1.0;
                 if now.duration_since(self.last_jump) >= Duration::from_millis(500) {
@@ -199,7 +222,18 @@ impl Script {
                 // does not run into the block it placed.
                 update.look_yaw = TURN_RATE;
             }
+            ScriptStep::LookAround => {
+                let second = now.duration_since(self.phase_started).as_secs();
+                update.look_yaw = if second.is_multiple_of(2) {
+                    TURN_RATE
+                } else {
+                    -TURN_RATE
+                };
+            }
             ScriptStep::Break => {
+                // Hold the button for the whole phase: a block takes
+                // several ticks to dig and releasing aborts the dig.
+                update.state.attack = true;
                 if !self.fired {
                     self.fired = true;
                     break_block = true;
@@ -301,6 +335,33 @@ pub fn default_script() -> Vec<ScriptPhase> {
     phases
 }
 
+/// The 60-second movement script of the parity harness (ROADMAP.md P0):
+/// stand, walk, sneak, sprint, jump, look around, walk, stand.
+///
+/// The owner plays the same timeline by hand with the vanilla client
+/// (`docs/parity-harness.md`), so the two serverbound traces can be compared
+/// with `umicraft-trace-diff`. Changing a phase here means changing that
+/// document too.
+#[must_use]
+pub fn movement_script() -> Vec<ScriptPhase> {
+    let phase = |step, seconds, pitch| ScriptPhase {
+        step,
+        duration: Duration::from_secs(seconds),
+        pitch,
+    };
+    vec![
+        phase(ScriptStep::Idle, 5, 0.0),
+        phase(ScriptStep::Walk, 8, 0.0),
+        phase(ScriptStep::Sneak, 8, 0.0),
+        phase(ScriptStep::Sprint, 8, 0.0),
+        phase(ScriptStep::Jump, 8, 0.0),
+        phase(ScriptStep::LookAround, 5, 0.5),
+        phase(ScriptStep::LookAround, 5, -0.5),
+        phase(ScriptStep::Walk, 8, 0.0),
+        phase(ScriptStep::Idle, 5, 0.0),
+    ]
+}
+
 /// The scripted session that only stands still.
 ///
 /// It is used to measure the idle traffic of a session (the keepalives and
@@ -353,6 +414,37 @@ mod tests {
         }
         assert!(saw_break, "the break phase must request a dig");
         assert!(saw_place, "the place phase must request a placement");
+    }
+
+    #[test]
+    fn the_movement_script_lasts_sixty_seconds() {
+        let total: Duration = movement_script().iter().map(|phase| phase.duration).sum();
+        assert_eq!(total, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn the_sneak_phase_sneaks_forward() {
+        let mut script = Script::new(vec![ScriptPhase {
+            step: ScriptStep::Sneak,
+            duration: Duration::from_secs(10),
+            pitch: 0.0,
+        }]);
+        let update = script.update(Instant::now());
+        assert_eq!(update.state.forward, 1.0);
+        assert!(update.state.sneak);
+    }
+
+    #[test]
+    fn the_look_around_phase_turns_both_ways() {
+        let mut script = Script::new(vec![ScriptPhase {
+            step: ScriptStep::LookAround,
+            duration: Duration::from_secs(10),
+            pitch: 0.0,
+        }]);
+        let start = Instant::now();
+        let right = script.update(start).look_yaw;
+        let left = script.update(start + Duration::from_millis(1500)).look_yaw;
+        assert!(right > 0.0 && left < 0.0, "{right} then {left}");
     }
 
     #[test]

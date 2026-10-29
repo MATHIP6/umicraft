@@ -21,23 +21,27 @@ use std::collections::BTreeMap;
 
 use umicraft_model::{AtlasLayout, ModelError, ModelResult, ResourceSource};
 
+use crate::animation::{AnimationMeta, TextureAnimation};
 use crate::atlas::BlockAtlas;
 use crate::client_jar::ClientJar;
 use crate::colormap::{BiomeColormaps, Colormap, COLORMAP_PREFIX, FOLIAGE_PATH, GRASS_PATH};
+use crate::dial::{DialKind, DialSprite};
 use crate::error::image_error;
 use crate::gui_atlas::{pack_gui_atlas, GuiAtlas, GuiImage};
 use crate::AssetsResult;
 
 /// Prefix of the 1.8 blockstate documents inside the client jar.
 const BLOCKSTATES_PREFIX: &str = "assets/minecraft/blockstates/";
-/// Prefix of the 1.8 block model documents inside the client jar.
-const MODELS_PREFIX: &str = "assets/minecraft/models/block/";
+/// Prefix of the 1.8 block and item model documents inside the client jar.
+const MODELS_PREFIX: &str = "assets/minecraft/models/";
 /// Prefix of the 1.8 block textures inside the client jar.
 const BLOCK_TEXTURES_PREFIX: &str = "assets/minecraft/textures/blocks/";
 /// Prefix of the 1.8 item textures inside the client jar.
 const ITEM_TEXTURES_PREFIX: &str = "assets/minecraft/textures/items/";
 /// Prefix of the 1.8 GUI textures (backgrounds, widgets, icons).
 const GUI_TEXTURES_PREFIX: &str = "assets/minecraft/textures/gui/";
+/// The enchantment glint texture, drawn additively over enchanted items.
+const GLINT_PATH: &str = "assets/minecraft/textures/misc/enchanted_item_glint.png";
 /// Prefix shared by every texture key.
 const TEXTURES_ROOT: &str = "assets/minecraft/textures/";
 
@@ -140,15 +144,20 @@ impl DecodedPng {
         ))
     }
 
-    /// Returns the first frame scaled to `edge`×`edge` with nearest-neighbour
-    /// sampling.
+    /// How many square frames the image holds (1 unless it is an animation strip).
+    fn frame_count(&self, path: &str) -> AssetsResult<u32> {
+        Ok(self.height / self.frame_edge(path)?)
+    }
+
+    /// Returns frame number `index` scaled to `edge`×`edge` with
+    /// nearest-neighbour sampling.
     ///
-    /// A square image uses its whole area. An animation strip contributes only
-    /// its top `width`×`width` frame, so a 16×512 strip yields one 16×16 frame
-    /// and a 32×1024 strip yields one full 32×32 frame. The frame is then
-    /// replicated or sampled to the atlas edge; integer scale factors preserve
-    /// every source pixel and its alpha exactly.
-    fn frame_at(&self, edge: u32, path: &str) -> AssetsResult<Vec<u8>> {
+    /// A square image has the single frame 0. An animation strip stacks
+    /// `width`×`width` frames, so a 16×512 strip yields 32 frames of 16×16 and a
+    /// 32×1024 strip yields 32 full 32×32 frames. The frame is then replicated
+    /// or sampled to the atlas edge; integer scale factors preserve every
+    /// source pixel and its alpha exactly.
+    fn frame_at(&self, index: u32, edge: u32, path: &str) -> AssetsResult<Vec<u8>> {
         let frame_edge = self.frame_edge(path)?;
         let source_edge = usize::try_from(frame_edge)
             .map_err(|_| image_error(path, "the frame size does not fit into memory"))?;
@@ -165,7 +174,10 @@ impl DecodedPng {
         let frame_len = pixel_bytes(frame_edge, frame_edge)
             .ok_or_else(|| image_error(path, "the frame size overflows"))?;
         let mut frame = Vec::with_capacity(frame_len);
-        for row in 0..frame_edge {
+        let first_row = index
+            .checked_mul(frame_edge)
+            .ok_or_else(|| image_error(path, "the frame row overflows"))?;
+        for row in first_row..first_row.saturating_add(frame_edge) {
             let start = source_stride
                 .checked_mul(
                     usize::try_from(row)
@@ -221,6 +233,17 @@ struct TextureLayer {
     image: DecodedPng,
 }
 
+/// The decoded enchantment glint texture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlintTexture {
+    /// Pixel width.
+    pub width: u32,
+    /// Pixel height.
+    pub height: u32,
+    /// Tightly packed RGBA8 pixels, `width * height * 4` bytes.
+    pub pixels: Vec<u8>,
+}
+
 /// Every blockstate, block model and block/item texture of one client jar,
 /// plus the optional biome colormaps and the GUI texture atlas.
 #[derive(Debug, Clone)]
@@ -228,9 +251,11 @@ pub struct ClientResources {
     files: BTreeMap<String, Vec<u8>>,
     raw_colormaps: BTreeMap<String, Vec<u8>>,
     raw_gui: BTreeMap<String, Vec<u8>>,
+    raw_glint: Option<Vec<u8>>,
     atlas: BlockAtlas,
     colormaps: Option<BiomeColormaps>,
     gui_atlas: GuiAtlas,
+    glint: Option<GlintTexture>,
 }
 
 impl ClientResources {
@@ -260,13 +285,17 @@ impl ClientResources {
             ITEM_TEXTURES_PREFIX,
             COLORMAP_PREFIX,
             GUI_TEXTURES_PREFIX,
+            GLINT_PATH,
         ])?;
 
         let mut files = BTreeMap::new();
         let mut raw_colormaps = BTreeMap::new();
         let mut raw_gui = BTreeMap::new();
+        let mut raw_glint = None;
         for (path, bytes) in entries {
-            if path == GRASS_PATH || path == FOLIAGE_PATH {
+            if path == GLINT_PATH {
+                raw_glint = Some(bytes);
+            } else if path == GRASS_PATH || path == FOLIAGE_PATH {
                 raw_colormaps.insert(path, bytes);
             } else if is_gui_texture(&path) {
                 raw_gui.insert(path, bytes);
@@ -278,7 +307,7 @@ impl ClientResources {
             }
         }
 
-        Self::build_internal(files, raw_colormaps, raw_gui)
+        Self::build_internal(files, raw_colormaps, raw_gui, raw_glint)
     }
 
     /// Builds a new [`ClientResources`] instance by layering resource packs
@@ -294,9 +323,12 @@ impl ClientResources {
         let mut files = self.files.clone();
         let mut raw_colormaps = self.raw_colormaps.clone();
         let mut raw_gui = self.raw_gui.clone();
+        let mut raw_glint = self.raw_glint.clone();
         for pack in packs {
             for (path, bytes) in pack.files() {
-                if path == GRASS_PATH || path == FOLIAGE_PATH {
+                if path == GLINT_PATH {
+                    raw_glint = Some(bytes.clone());
+                } else if path == GRASS_PATH || path == FOLIAGE_PATH {
                     raw_colormaps.insert(path.clone(), bytes.clone());
                 } else if is_gui_texture(path) {
                     raw_gui.insert(path.clone(), bytes.clone());
@@ -308,7 +340,7 @@ impl ClientResources {
                 }
             }
         }
-        Self::build_internal(files, raw_colormaps, raw_gui)
+        Self::build_internal(files, raw_colormaps, raw_gui, raw_glint)
     }
 
     /// Internal builder that constructs a complete [`ClientResources`].
@@ -316,6 +348,7 @@ impl ClientResources {
         files: BTreeMap<String, Vec<u8>>,
         raw_colormaps: BTreeMap<String, Vec<u8>>,
         raw_gui: BTreeMap<String, Vec<u8>>,
+        raw_glint: Option<Vec<u8>>,
     ) -> AssetsResult<Self> {
         let mut textures = Vec::new();
         for (path, bytes) in &files {
@@ -335,16 +368,27 @@ impl ClientResources {
         }
 
         let gui_images = decode_gui_textures(&raw_gui)?;
-        let atlas = build_atlas(textures)?;
+        let atlas = build_atlas(textures, &files)?;
         let colormaps = decode_colormaps(&mut decoded_colormaps)?;
         let gui_atlas = pack_gui_atlas(gui_images);
+        let glint = raw_glint
+            .as_deref()
+            .map(|bytes| DecodedPng::decode(GLINT_PATH, bytes))
+            .transpose()?
+            .map(|png| GlintTexture {
+                width: png.width,
+                height: png.height,
+                pixels: png.pixels,
+            });
         Ok(Self {
             files,
             raw_colormaps,
             raw_gui,
+            raw_glint,
             atlas,
             colormaps,
             gui_atlas,
+            glint,
         })
     }
 
@@ -373,6 +417,15 @@ impl ClientResources {
     #[must_use]
     pub fn gui_atlas(&self) -> &GuiAtlas {
         &self.gui_atlas
+    }
+
+    /// The enchantment glint texture, when the jar or a pack provides it.
+    ///
+    /// `None` is not an error: enchanted items then simply draw without the
+    /// glint overlay.
+    #[must_use]
+    pub fn glint_texture(&self) -> Option<&GlintTexture> {
+        self.glint.as_ref()
     }
 
     /// The grass and foliage colormaps, when the jar contains both.
@@ -501,12 +554,46 @@ fn decode_gui_textures(raw: &BTreeMap<String, Vec<u8>>) -> AssetsResult<Vec<GuiI
 }
 
 /// Builds the deterministic atlas from decoded textures.
-fn build_atlas(textures: Vec<TextureLayer>) -> AssetsResult<BlockAtlas> {
+///
+/// A texture whose `.mcmeta` describes an animation keeps its first frame in
+/// the layer and hands all its frames to a [`TextureAnimation`]; a strip
+/// without metadata stays on its first frame, as in the reference.
+fn build_atlas(
+    textures: Vec<TextureLayer>,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> AssetsResult<BlockAtlas> {
     let edge = atlas_frame_edge(&textures)?;
     let mut layers = BTreeMap::new();
+    let mut strips = Vec::new();
+    let mut dial_strips = Vec::new();
     for texture in textures {
-        let frame = texture.image.frame_at(edge, &texture.path)?;
-        layers.insert(texture.key, frame);
+        let TextureLayer { key, path, image } = texture;
+        let count = image.frame_count(&path)?;
+        let meta = files
+            .get(&format!("{path}.mcmeta"))
+            .and_then(|bytes| AnimationMeta::parse(bytes));
+        let frames = || {
+            (0..count)
+                .map(|index| image.frame_at(index, edge, &path))
+                .collect::<AssetsResult<Vec<_>>>()
+        };
+        // The clock and the compass carry an empty `.mcmeta`: the reference
+        // picks their frame from the heading and the time of day
+        // (`TextureAtlasSpriteClock/Compass`), not from a timeline.
+        if let (Some(kind), true) = (DialKind::from_key(&key), count > 1) {
+            let frames = frames()?;
+            layers.insert(key.clone(), frames[0].clone());
+            dial_strips.push((key, kind, frames));
+            continue;
+        }
+        let animated = key.starts_with("blocks/");
+        if let (Some(meta), true, true) = (meta, count > 1, animated) {
+            let frames = frames()?;
+            layers.insert(key.clone(), frames[0].clone());
+            strips.push((key, frames, meta));
+        } else {
+            layers.insert(key, image.frame_at(0, edge, &path)?);
+        }
     }
 
     let layout = AtlasLayout::from_keys(layers.keys().cloned());
@@ -525,7 +612,17 @@ fn build_atlas(textures: Vec<TextureLayer>) -> AssetsResult<BlockAtlas> {
         pixels.extend_from_slice(&frame);
     }
 
-    BlockAtlas::new(edge, edge, pixels, layout)
+    let animations = strips
+        .into_iter()
+        .filter_map(|(key, frames, meta)| TextureAnimation::new(layout.layer(&key)?, frames, &meta))
+        .collect();
+    let dials = dial_strips
+        .into_iter()
+        .filter_map(|(key, kind, frames)| DialSprite::new(layout.layer(&key)?, kind, frames))
+        .collect();
+    Ok(BlockAtlas::new(edge, edge, pixels, layout)?
+        .with_animations(animations)
+        .with_dials(dials))
 }
 
 /// The atlas edge is the largest frame edge of any texture.
@@ -628,6 +725,52 @@ mod tests {
         );
     }
 
+    fn png_bytes(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("header");
+        writer.write_image_data(rgba).expect("data");
+        writer.finish().expect("finish");
+        out
+    }
+
+    #[test]
+    fn the_glint_texture_is_decoded_when_present_and_optional_otherwise() {
+        let bytes = png_bytes(2, 1, &[1, 2, 3, 255, 4, 5, 6, 255]);
+        let resources = ClientResources::build_internal(
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            Some(bytes),
+        )
+        .expect("build");
+        let glint = resources.glint_texture().expect("glint");
+        assert_eq!((glint.width, glint.height), (2, 1));
+        assert_eq!(glint.pixels, [1, 2, 3, 255, 4, 5, 6, 255]);
+
+        let empty = ClientResources::build_internal(
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            None,
+        )
+        .expect("build");
+        assert!(empty.glint_texture().is_none());
+    }
+
+    #[test]
+    fn a_corrupt_glint_texture_is_an_image_error() {
+        let result = ClientResources::build_internal(
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            Some(vec![1, 2, 3]),
+        );
+        assert!(matches!(result, Err(AssetsError::Image { .. })));
+    }
+
     #[test]
     fn gui_textures_are_recognised_and_named() {
         assert!(is_gui_texture(
@@ -652,10 +795,11 @@ mod tests {
     }
 
     #[test]
-    fn only_the_m5_document_prefixes_are_resources() {
+    fn only_the_model_and_blockstate_prefixes_are_resources() {
         assert!(is_json_resource("assets/minecraft/blockstates/stone.json"));
         assert!(is_json_resource("assets/minecraft/models/block/stone.json"));
-        assert!(!is_json_resource("assets/minecraft/models/item/stone.json"));
+        assert!(is_json_resource("assets/minecraft/models/item/stone.json"));
+        assert!(!is_json_resource("assets/minecraft/lang/en_US.json"));
         assert!(is_texture_metadata(
             "assets/minecraft/textures/blocks/water_still.png.mcmeta"
         ));

@@ -1,28 +1,24 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `Tab-Complete` (0x3A, clientbound, play): the completions the server
-//! offers for the text the player is typing.
+//! `Tab-Complete` (0x3A, clientbound, play): completion candidates.
 //!
-//! Layout (MCP `S3APacketTabComplete`, `readPacketData`): a VarInt count, then
-//! that many strings (cap 32767 chars each).
+//! Layout (MCP `S3APacketTabComplete`, `readPacketData`): a VarInt count and
+//! that many strings (up to 32767 chars each).
 
 use std::io::{Read, Write};
 
+use super::statistics::read_list_len;
 use crate::error::ProtocolError;
 use crate::packets::EncodablePacket;
-use crate::types::{read_string, write_string, MAX_JSON_CHARS};
-use crate::varint::{read_var_i32, write_var_u32};
+use crate::types::{read_string, write_string};
+use crate::varint::write_var_u32;
 
-/// Maximum number of completions accepted in one packet.
-///
-/// Every string costs at least one byte and a whole packet is capped at
-/// 2 MiB, so a bigger count can only come from a hostile server.
-const MAX_MATCHES: usize = 4096;
+const MAX_MATCH_CHARS: usize = 32767;
 
 /// `Tab-Complete` (0x3A, clientbound, play).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TabComplete {
-    /// The suggested completions, in server order.
+    /// Completion candidates in wire order.
     pub matches: Vec<String>,
 }
 
@@ -33,19 +29,12 @@ impl TabComplete {
     /// Reads the body.
     ///
     /// # Errors
-    /// [`ProtocolError`] on truncation, a negative or oversized count, or an
-    /// invalid string.
+    /// [`ProtocolError`] on truncation, a bad count or an invalid string.
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        let count = read_var_i32(reader)?;
-        let count = usize::try_from(count)
-            .ok()
-            .filter(|count| *count <= MAX_MATCHES)
-            .ok_or_else(|| {
-                ProtocolError::Invariant(format!("completion count {count} is out of range"))
-            })?;
-        let mut matches = Vec::with_capacity(count);
-        for _ in 0..count {
-            matches.push(read_string(reader, MAX_JSON_CHARS)?);
+        let len = read_list_len(reader)?;
+        let mut matches = Vec::new();
+        for _ in 0..len {
+            matches.push(read_string(reader, MAX_MATCH_CHARS)?);
         }
         Ok(Self { matches })
     }
@@ -58,8 +47,8 @@ impl EncodablePacket for TabComplete {
 
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
         write_var_u32(writer, self.matches.len() as u32)?;
-        for completion in &self.matches {
-            write_string(writer, completion, MAX_JSON_CHARS)?;
+        for candidate in &self.matches {
+            write_string(writer, candidate, MAX_MATCH_CHARS)?;
         }
         Ok(())
     }
@@ -70,27 +59,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn completions_round_trip() {
+    fn tab_complete_wire_shape() {
         let packet = TabComplete {
-            matches: vec!["/help".to_string(), "/hat".to_string()],
+            matches: vec!["/gamemode".to_string(), "/give".to_string()],
         };
+        let mut expected = vec![2, 9];
+        expected.extend(b"/gamemode");
+        expected.push(5);
+        expected.extend(b"/give");
         let mut buffer = Vec::new();
         packet.encode_body(&mut buffer).unwrap();
-        assert_eq!(TabComplete::decode(&mut &buffer[..]).unwrap(), packet);
+        assert_eq!(buffer, expected);
+        assert_eq!(TabComplete::decode(&mut &expected[..]).unwrap(), packet);
     }
 
     #[test]
-    fn an_empty_list_is_valid() {
-        let packet = TabComplete { matches: vec![] };
-        let mut buffer = Vec::new();
-        packet.encode_body(&mut buffer).unwrap();
-        assert_eq!(buffer, [0]);
-        assert_eq!(TabComplete::decode(&mut &buffer[..]).unwrap(), packet);
-    }
-
-    #[test]
-    fn an_oversized_count_is_rejected_before_allocation() {
-        // VarInt 5000 = 0x88 0x27.
-        assert!(TabComplete::decode(&mut &[0x88u8, 0x27][..]).is_err());
+    fn hostile_tab_complete_is_an_error() {
+        assert!(TabComplete::decode(&mut &[][..]).is_err());
+        assert!(TabComplete::decode(&mut &[1, 5, b'a'][..]).is_err());
+        assert!(TabComplete::decode(&mut &[0xFF, 0xFF, 0xFF, 0xFF, 0x0F][..]).is_err());
     }
 }

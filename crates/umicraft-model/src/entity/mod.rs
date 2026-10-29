@@ -526,8 +526,6 @@ pub enum TextureSlot {
     Silverfish,
     /// Wither boss texture.
     Wither,
-    /// Dropped item block texture.
-    Item,
 }
 
 /// A mesh layer tagged with its texture slot.

@@ -405,12 +405,16 @@ fn make_snapshot(
         limb_swing: 0.0,
         limb_swing_amount: 0.0,
         uuid,
-        held_item: None,
+        held: None,
+        item: None,
+        age: 0.0,
+        frame_direction: 0,
+        frame_rotation: 0,
         flags: EntityFlags::default(),
     }
 }
 
-/// Builds an exhibition scene featuring all 29 Minecraft 1.8 mobs plus Steve, Alex, and Dropped Item.
+/// Builds an exhibition scene featuring all 29 Minecraft 1.8 mobs plus Steve and Alex.
 #[must_use]
 pub fn build_all_mobs_scene() -> (Vec<EntityRenderSnapshot>, EntityDemoReport) {
     let mut snapshots = Vec::new();
@@ -521,17 +525,6 @@ pub fn build_all_mobs_scene() -> (Vec<EntityRenderSnapshot>, EntityDemoReport) {
         model_kind: "Ender Dragon boss",
         vertex_count: 0,
     });
-    id += 1;
-
-    // Dropped Item
-    let item_pos = Vec3::new(0.0, 64.25, 1.0);
-    snapshots.push(make_snapshot(id, EntityKind::Item, item_pos, None));
-    summaries.push(EntitySummary {
-        name: "Dropped Item",
-        position: [item_pos.x, item_pos.y, item_pos.z],
-        model_kind: "Floating item cuboid",
-        vertex_count: 0,
-    });
 
     let batches = mesh_entities(&snapshots);
     let total_vertices: usize = batches.values().map(|v| v.len()).sum();
@@ -575,7 +568,7 @@ pub struct MobCatalogEntry {
     pub yaw_deg: f32,
 }
 
-/// Catalog of all 36 Minecraft 1.8 entities with tailored camera framing.
+/// Catalog of all 35 Minecraft 1.8 entities with tailored camera framing.
 pub static MOB_CATALOG: &[MobCatalogEntry] = &[
     MobCatalogEntry {
         id: "chicken",
@@ -962,17 +955,6 @@ pub static MOB_CATALOG: &[MobCatalogEntry] = &[
         camera_pitch: -0.26,
         yaw_deg: 38.0,
     },
-    MobCatalogEntry {
-        id: "item",
-        display_name: "Dropped Item",
-        kind: EntityKind::Item,
-        uuid: None,
-        world_y_offset: 0.25,
-        camera_dist: 1.4,
-        camera_y: 0.35,
-        camera_pitch: -0.15,
-        yaw_deg: 25.0,
-    },
 ];
 
 /// Finds a mob entry by query string, accepting aliases and ignoring case/spaces/dashes.
@@ -991,7 +973,6 @@ pub fn find_mob(query: &str) -> Option<&'static MobCatalogEntry> {
             || (m.id == "magma_cube" && clean == "magma")
             || (m.id == "snowman" && clean == "snowgolem")
             || (m.id == "zombie_pigman" && clean == "pigman")
-            || (m.id == "item" && (clean == "droppeditem" || clean == "dirt"))
     })
 }
 
@@ -1008,7 +989,7 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
     })?;
 
     println!(
-        "Rendering all 36 Minecraft 1.8 entities 1-by-1 to {}...",
+        "Rendering all 35 Minecraft 1.8 entities 1-by-1 to {}...",
         output_dir.display()
     );
 
@@ -1035,7 +1016,7 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
         snapshot.yaw = FACE_NORTH + mob.yaw_deg;
         snapshot.head_yaw = FACE_NORTH + mob.yaw_deg;
 
-        let batches = mesh_entities(&[snapshot]);
+        let batches = mesh_entities(&[snapshot.clone()]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();
 
         entity_textures.mesh_and_upload(&[snapshot], &mut renderer);
@@ -1071,7 +1052,7 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
     }
 
     println!(
-        "\nSuccessfully rendered all 36 entities 1-by-1 to {}!",
+        "\nSuccessfully rendered all 35 entities 1-by-1 to {}!",
         output_dir.display()
     );
     Ok(())
@@ -1116,7 +1097,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
     if let Some(mob_query) = args.mob.as_deref() {
         if mob_query.eq_ignore_ascii_case("list") {
-            println!("=== UMICRAFT M8 ENTITY CATALOG (36 ENTITIES) ===");
+            println!("=== UMICRAFT M8 ENTITY CATALOG (35 ENTITIES) ===");
             for (idx, m) in MOB_CATALOG.iter().enumerate() {
                 println!(
                     "  {:2}. {:<16} [id: {:<14}] (kind: {:?})",
@@ -1131,7 +1112,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
         let mob = find_mob(mob_query).ok_or_else(|| {
             ClientError::Screenshot(format!(
-                "unknown mob {mob_query:?}; use '--mob list' to see all 36 available mobs"
+                "unknown mob {mob_query:?}; use '--mob list' to see all 35 available mobs"
             ))
         })?;
 
@@ -1140,7 +1121,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         snapshot.yaw = FACE_NORTH + mob.yaw_deg;
         snapshot.head_yaw = FACE_NORTH + mob.yaw_deg;
 
-        let batches = mesh_entities(&[snapshot]);
+        let batches = mesh_entities(&[snapshot.clone()]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();
 
         let report = EntityDemoReport {
@@ -1421,8 +1402,8 @@ mod tests {
     }
 
     #[test]
-    fn mob_catalog_contains_36_entities_without_duplicates() {
-        assert_eq!(MOB_CATALOG.len(), 36);
+    fn mob_catalog_contains_35_entities_without_duplicates() {
+        assert_eq!(MOB_CATALOG.len(), 35);
         let mut ids = std::collections::HashSet::new();
         for mob in MOB_CATALOG {
             assert!(ids.insert(mob.id), "duplicate mob id: {}", mob.id);
@@ -1450,7 +1431,6 @@ mod tests {
         assert_eq!(find_mob("snowgolem").unwrap().id, "snowman");
         assert_eq!(find_mob("alex").unwrap().id, "alex");
         assert_eq!(find_mob("steve").unwrap().id, "steve");
-        assert_eq!(find_mob("dirt").unwrap().id, "item");
         assert!(find_mob("unknown_nonexistent").is_none());
     }
 

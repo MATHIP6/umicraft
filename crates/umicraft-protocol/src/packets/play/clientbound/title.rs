@@ -1,29 +1,38 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `Title` (0x45, clientbound, play): set or clear the on-screen title.
+//! `Title` (0x45, clientbound, play): on-screen titles.
 //!
-//! Layout (MCP `S45PacketTitle`, `readPacketData`): a VarInt action ordinal
-//! (`TITLE` 0, `SUBTITLE` 1, `TIMES` 2, `CLEAR` 3, `RESET` 4), then for
-//! `TITLE` and `SUBTITLE` a chat JSON string, and for `TIMES` three plain
-//! big-endian `i32` values (fade in, stay, fade out, in ticks). An ordinal
-//! outside `0..=4` makes the reference client throw, so it is an error here.
+//! Layout (MCP `S45PacketTitle`, `readPacketData`): a VarInt action
+//! (0 title, 1 subtitle, 2 times, 3 clear, 4 reset), then for title and
+//! subtitle a chat JSON string (up to 32767 chars), for times three i32
+//! (fade in, stay, fade out, in ticks). The reference client indexes an enum
+//! with the action and crashes on an unknown one; here it is
+//! [`ProtocolError::Invariant`].
 
 use std::io::{Read, Write};
 
 use crate::error::ProtocolError;
 use crate::packets::codec::read_i32;
 use crate::packets::EncodablePacket;
-use crate::types::{read_string, write_string, MAX_JSON_CHARS};
+use crate::types::{read_string, write_string};
 use crate::varint::{read_var_i32, write_var_u32};
+
+const MAX_CHAT_CHARS: usize = 32767;
 
 /// `Title` (0x45, clientbound, play).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Title {
-    /// Show this chat JSON as the title.
-    Title(String),
-    /// Show this chat JSON as the subtitle.
-    Subtitle(String),
-    /// Set the display timings, in ticks.
+    /// Sets and shows the main title.
+    Title {
+        /// Chat JSON.
+        json: String,
+    },
+    /// Sets the subtitle.
+    Subtitle {
+        /// Chat JSON.
+        json: String,
+    },
+    /// Sets the display timings, in ticks.
     Times {
         /// Fade-in duration.
         fade_in: i32,
@@ -32,9 +41,9 @@ pub enum Title {
         /// Fade-out duration.
         fade_out: i32,
     },
-    /// Hide the current title.
+    /// Hides the current title.
     Clear,
-    /// Hide the title and restore the default timings.
+    /// Hides the title and restores the default timings.
     Reset,
 }
 
@@ -42,38 +51,29 @@ impl Title {
     /// Wire packet id.
     pub const ID: u8 = 0x45;
 
-    /// The action ordinal on the wire.
-    const fn ordinal(&self) -> u32 {
-        match self {
-            Self::Title(_) => 0,
-            Self::Subtitle(_) => 1,
-            Self::Times { .. } => 2,
-            Self::Clear => 3,
-            Self::Reset => 4,
-        }
-    }
-
     /// Reads the body.
     ///
     /// # Errors
-    /// [`ProtocolError`] on truncation, an unknown action or an invalid string.
+    /// [`ProtocolError`] on truncation, an invalid string or an unknown action.
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        Ok(match read_var_i32(reader)? {
-            0 => Self::Title(read_string(reader, MAX_JSON_CHARS)?),
-            1 => Self::Subtitle(read_string(reader, MAX_JSON_CHARS)?),
-            2 => Self::Times {
+        match read_var_i32(reader)? {
+            0 => Ok(Self::Title {
+                json: read_string(reader, MAX_CHAT_CHARS)?,
+            }),
+            1 => Ok(Self::Subtitle {
+                json: read_string(reader, MAX_CHAT_CHARS)?,
+            }),
+            2 => Ok(Self::Times {
                 fade_in: read_i32(reader)?,
                 stay: read_i32(reader)?,
                 fade_out: read_i32(reader)?,
-            },
-            3 => Self::Clear,
-            4 => Self::Reset,
-            other => {
-                return Err(ProtocolError::Invariant(format!(
-                    "unknown title action {other}"
-                )))
-            }
-        })
+            }),
+            3 => Ok(Self::Clear),
+            4 => Ok(Self::Reset),
+            other => Err(ProtocolError::Invariant(format!(
+                "unknown title action {other}"
+            ))),
+        }
     }
 }
 
@@ -83,20 +83,28 @@ impl EncodablePacket for Title {
     }
 
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        write_var_u32(writer, self.ordinal())?;
         match self {
-            Self::Title(json) | Self::Subtitle(json) => write_string(writer, json, MAX_JSON_CHARS),
+            Self::Title { json } => {
+                write_var_u32(writer, 0)?;
+                write_string(writer, json, MAX_CHAT_CHARS)
+            }
+            Self::Subtitle { json } => {
+                write_var_u32(writer, 1)?;
+                write_string(writer, json, MAX_CHAT_CHARS)
+            }
             Self::Times {
                 fade_in,
                 stay,
                 fade_out,
             } => {
-                writer.write_all(&fade_in.to_be_bytes())?;
-                writer.write_all(&stay.to_be_bytes())?;
-                writer.write_all(&fade_out.to_be_bytes())?;
+                write_var_u32(writer, 2)?;
+                for value in [fade_in, stay, fade_out] {
+                    writer.write_all(&value.to_be_bytes())?;
+                }
                 Ok(())
             }
-            Self::Clear | Self::Reset => Ok(()),
+            Self::Clear => write_var_u32(writer, 3),
+            Self::Reset => write_var_u32(writer, 4),
         }
     }
 }
@@ -105,44 +113,45 @@ impl EncodablePacket for Title {
 mod tests {
     use super::*;
 
-    fn round_trip(packet: &Title) -> Title {
+    fn check(packet: Title, expected: &[u8]) {
         let mut buffer = Vec::new();
         packet.encode_body(&mut buffer).unwrap();
-        Title::decode(&mut &buffer[..]).unwrap()
+        assert_eq!(buffer, expected);
+        assert_eq!(Title::decode(&mut &expected[..]).unwrap(), packet);
     }
 
     #[test]
-    fn every_action_round_trips() {
-        for packet in [
-            Title::Title(r#"{"text":"Hi"}"#.to_string()),
-            Title::Subtitle(r#"{"text":"Sub"}"#.to_string()),
+    fn title_wire_shapes() {
+        check(
+            Title::Title {
+                json: "{}".to_string(),
+            },
+            &[0, 2, b'{', b'}'],
+        );
+        check(
+            Title::Subtitle {
+                json: "{}".to_string(),
+            },
+            &[1, 2, b'{', b'}'],
+        );
+        check(
             Title::Times {
                 fade_in: 10,
                 stay: 70,
                 fade_out: 20,
             },
-            Title::Clear,
-            Title::Reset,
-        ] {
-            assert_eq!(round_trip(&packet), packet);
-        }
+            &[2, 0, 0, 0, 10, 0, 0, 0, 70, 0, 0, 0, 20],
+        );
+        check(Title::Clear, &[3]);
+        check(Title::Reset, &[4]);
     }
 
     #[test]
-    fn times_use_plain_big_endian_ints_after_the_action() {
-        let mut buffer = Vec::new();
-        Title::Times {
-            fade_in: 1,
-            stay: 2,
-            fade_out: 3,
-        }
-        .encode_body(&mut buffer)
-        .unwrap();
-        assert_eq!(buffer, [2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3]);
-    }
-
-    #[test]
-    fn an_unknown_action_is_rejected() {
-        assert!(Title::decode(&mut &[9u8][..]).is_err());
+    fn hostile_title_is_an_error() {
+        assert!(Title::decode(&mut &[][..]).is_err());
+        assert!(Title::decode(&mut &[5][..]).is_err());
+        assert!(Title::decode(&mut &[0xFF, 0xFF, 0xFF, 0xFF, 0x0F][..]).is_err());
+        assert!(Title::decode(&mut &[2, 0, 0, 0, 10][..]).is_err());
+        assert!(Title::decode(&mut &[0, 2, b'{'][..]).is_err());
     }
 }

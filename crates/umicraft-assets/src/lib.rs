@@ -60,11 +60,13 @@
 //! # }
 //! ```
 
+pub mod animation;
 pub mod atlas;
 pub mod cache;
 pub mod client_jar;
 pub mod client_resources;
 pub mod colormap;
+pub mod dial;
 pub mod error;
 pub mod gui_atlas;
 pub mod hash;
@@ -79,9 +81,11 @@ pub mod skin;
 
 mod zip;
 
+pub use animation::TextureAnimation;
 pub use atlas::BlockAtlas;
-pub use client_resources::ClientResources;
+pub use client_resources::{ClientResources, GlintTexture};
 pub use colormap::{BiomeColormaps, Colormap};
+pub use dial::{DialKind, DialSprite};
 pub use error::{AssetsError, AssetsResult};
 pub use gui_atlas::{GuiAtlas, GuiRegion};
 pub use progress::{Progress, ProgressSnapshot};

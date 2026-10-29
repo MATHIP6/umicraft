@@ -8,12 +8,14 @@ picked up, and delete it when it is done.
 
 ## Rendering
 
-### Animated textures (AST-6)
-- **Problem:** water, lava, fire, portals and every texture with a `.mcmeta`
-  animation show their first frame only.
-- **Where:** the atlas build (`crates/umicraft-assets/src/atlas.rs`) and the
-  renderer's texture array; liquids already sample the still/flowing layers.
-- **Milestone:** M7 (first-run assets and resource packs) or a dedicated task.
+### Item animations (clock, compass)
+- **Problem:** the block textures animate (ADR-0023) but the clock and the
+  compass item textures stay on their first frame. The reference drives them
+  by the world time and the heading (`TextureAtlasSpriteClock/Compass`), not by
+  the `.mcmeta` timeline, and no item is drawn before P3 anyway.
+- **Where:** `build_atlas` in `crates/umicraft-assets/src/client_resources.rs`
+  skips every key outside `blocks/`.
+- **Milestone:** P3 (item models).
 
 ### Liquid corners at a diagonal chunk boundary
 - **Problem:** a liquid corner height averages the four columns that share the
@@ -23,17 +25,31 @@ picked up, and delete it when it is done.
 - **Where:** `dirty_for_block` / `dirty_for_edges` in
   `crates/umicraft-world/src/world.rs`.
 
-## Game logic
+### UI vertex colours are not linearised for the sRGB target
+- **Problem:** `gui_overlay.wgsl` returns `texel * vertex_color` and the render
+  target is sRGB (`Rgba8UnormSrgb` headless, the adapter default on a window),
+  so a colour written for a plain 8-bit framebuffer comes out too light: the
+  vanilla tooltip background `0x100010` showed as a bright purple and the
+  blue `0x5555FF` text as periwinkle. White and black are unaffected. Only the
+  tooltip is fixed, on the CPU (`linear` / `vanilla` in
+  `crates/umicraft-client/src/tooltip_draw.rs`, commit f379d02); every other
+  coloured UI element (coloured chat and HUD text, button and slot fills, the
+  death screen, the debug screen) still has it.
+- **Also suspected:** every multiplicative brightness factor applied to a texel in the shaders (world face shade 0.6 / 0.8 / 0.5, entity shade, item lighting) is multiplied in linear space, so it darkens less than the vanilla factor does on 8-bit values. The GUI block icons are fixed by converting the factor (`gui_face_factor` in `crates/umicraft-mesh/src/item.rs`); check the terrain and entity shaders against the vanilla screenshots.
+- **Fix to investigate:** convert the vertex colour in the shader
+  (`pow(rgb, 2.4)` piecewise sRGB decode); tinting a texel by a colour is exact
+  in linear space. Then remove the CPU conversion of the tooltip, and re-tune any
+  colour that was adjusted by eye. Alpha blending also happens in linear space
+  while vanilla blends the sRGB values, so translucent fills (dimming
+  `0.55` black, drag highlight) differ slightly; decide whether to emulate the
+  vanilla blend or accept it. Compare with the vanilla screenshots
+  (owner's set, outside the repository, spec §3).
+- **Where:** `crates/umicraft-render/src/gui_overlay.wgsl`,
+  `crates/umicraft-render/src/ui_pass.rs`; the surface format is chosen in
+  `Renderer::new_windowed`.
+- **Milestone:** P9 / P10 (HUD, screens) or the screenshot comparison of P13.
 
-### Interaction rules in `umicraft-game` (architecture review, track 2)
-- **Problem:** digging, placement, the placement acknowledgement and the
-  position report are free functions over a private 27-field `Game` in
-  `crates/umicraft-client/src/game.rs`, built from shallow `umicraft-game`
-  pieces. None of `start_break`, `place_block`, `finish_break`,
-  `acknowledge_block`, `apply_placement` or `apply_correction` is tested.
-- **Proposal:** `umicraft-game` takes the inputs and the server events and
-  returns the packets to send; the client keeps the channels only. Needed
-  before M8 (entities) and M9 (inventory) build on it.
+## Game logic
 
 ### Respawn after death
 - **Problem:** the client never sends the respawn request. A dead player stays
@@ -42,10 +58,14 @@ picked up, and delete it when it is done.
 - **Reference:** `C16PacketClientStatus` (`PERFORM_RESPAWN`) and the death
   screen of the 1.8 client; the server answers with `Respawn` (0x07).
 
-### Effects and enchantments in the movement
-- **Problem:** Depth Strider (`Player.depth_strider`, ADR-0014), Speed,
-  Slowness and Jump Boost are not applied.
-- **Milestone:** M8 (entity effects) and M9 (inventory).
+### Item use and pick block gaps (ADR-0022)
+- **Problem:** the use and pick tables are hand-written (item ids for food,
+  drinks, swords and the bow; block-to-item redirects and variant masks). Items
+  whose `onItemUse` succeeds locally (hoes, seeds, signs, doors, bone meal)
+  still send the in-air use packet after the block one, and do not swing.
+  Picking an entity (creative) and the `Ctrl` + pick block-entity copy are
+  missing; the bow draw animation, its FOV zoom and the item models need P3.
+- **Milestone:** P3 (item registry) removes the tables; entity picking is P6.
 
 ## Performance (spec §7, ahead of M14)
 

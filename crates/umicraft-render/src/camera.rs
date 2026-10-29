@@ -8,6 +8,11 @@ use glam::{Mat4, Vec3};
 const DEFAULT_FOV: f32 = 70.0_f32 * std::f32::consts::PI / 180.0;
 const NEAR: f32 = 0.1;
 const FAR: f32 = 512.0;
+/// The near plane of the hand projection (MCP `EntityRenderer.java:1236`).
+const HAND_NEAR: f32 = 0.05;
+const HAND_FAR: f32 = 16.0;
+/// The part of the depth range the hand is squeezed into.
+pub const HAND_DEPTH_RANGE: f32 = 1.0e-4;
 const MAX_PITCH: f32 = 89.0_f32 * std::f32::consts::PI / 180.0;
 
 /// Perspective camera with a Minecraft-style yaw/pitch.
@@ -25,6 +30,10 @@ pub struct Camera {
     pub pitch: f32,
     fov_y: f32,
     aspect: f32,
+    /// The factor applied to the field of view (sprint, flight).
+    fov_modifier: f32,
+    /// The view bobbing, applied in camera space after the view rotation.
+    view_bob: Mat4,
 }
 
 impl Default for Camera {
@@ -35,6 +44,8 @@ impl Default for Camera {
             pitch: -0.15,
             fov_y: DEFAULT_FOV,
             aspect: 16.0 / 9.0,
+            fov_modifier: 1.0,
+            view_bob: Mat4::IDENTITY,
         }
     }
 }
@@ -61,6 +72,16 @@ impl Camera {
             yaw_degrees.to_radians() + std::f32::consts::PI,
             -pitch_degrees.to_radians(),
         )
+    }
+
+    /// Sets the first-person effects of the frame.
+    ///
+    /// `fov_modifier` scales the base field of view (MCP
+    /// `EntityRenderer.getFOVModifier`); `view_bob` is the camera-space
+    /// transform of `EntityRenderer.setupViewBobbing`.
+    pub fn set_view_effects(&mut self, fov_modifier: f32, view_bob: Mat4) {
+        self.fov_modifier = fov_modifier;
+        self.view_bob = view_bob;
     }
 
     /// Updates the aspect ratio (viewport width / height).
@@ -128,13 +149,42 @@ impl Camera {
         }
     }
 
+    /// The projection of the first-person hand.
+    ///
+    /// MCP `EntityRenderer.renderHand` uses the base field of view (no
+    /// sprint or flight modifier), a near plane of 0.05 and clears the depth
+    /// buffer first. The depth is instead squeezed into the first
+    /// [`HAND_DEPTH_RANGE`] of the range, so the hand always wins the depth
+    /// test against the world while its own parts still sort correctly.
+    #[must_use]
+    pub fn hand_projection(&self) -> Mat4 {
+        let projection = glam::camera::rh::proj::directx::perspective(
+            self.fov_y,
+            self.aspect,
+            HAND_NEAR,
+            HAND_FAR,
+        );
+        Mat4::from_scale(Vec3::new(1.0, 1.0, HAND_DEPTH_RANGE)) * projection
+    }
+
+    /// The view bobbing transform of this frame (identity when still).
+    #[must_use]
+    pub fn view_bob(&self) -> Mat4 {
+        self.view_bob
+    }
+
     /// View-projection matrix for wgpu's 0..1 depth range.
     #[must_use]
     pub fn view_projection(&self) -> Mat4 {
         // WebGPU NDC is Y-up with Z in 0..1, i.e. the DirectX convention.
-        let view = glam::camera::rh::view::look_to_mat4(self.position, self.forward(), Vec3::Y);
-        let projection =
-            glam::camera::rh::proj::directx::perspective(self.fov_y, self.aspect, NEAR, FAR);
+        let view = self.view_bob
+            * glam::camera::rh::view::look_to_mat4(self.position, self.forward(), Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            self.fov_y * self.fov_modifier,
+            self.aspect,
+            NEAR,
+            FAR,
+        );
         projection * view
     }
 }
@@ -170,6 +220,43 @@ mod tests {
         let mut camera = Camera::new(Vec3::ZERO, 0.0, 0.0);
         camera.move_local(1.0, 1.0, 0.0, 10.0, 1.0);
         assert!((camera.position.length() - 10.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_wider_field_of_view_shrinks_the_projected_offset() {
+        let point = Vec3::new(3.0, 0.0, -10.0);
+        let project = |camera: &Camera| camera.view_projection().project_point3(point).x;
+        let mut camera = Camera::new(Vec3::ZERO, 0.0, 0.0);
+        let normal = project(&camera);
+        camera.set_view_effects(1.15, Mat4::IDENTITY);
+        assert!(project(&camera) < normal);
+    }
+
+    #[test]
+    fn the_view_bob_moves_the_scene_in_camera_space() {
+        let mut camera = Camera::new(Vec3::ZERO, 0.0, 0.0);
+        let point = Vec3::new(0.0, 0.0, -10.0);
+        let before = camera.view_projection().project_point3(point);
+        camera.set_view_effects(1.0, Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)));
+        let after = camera.view_projection().project_point3(point);
+        assert!(after.y < before.y, "the camera dips, the scene rises");
+        // The eye position itself does not move.
+        assert_eq!(camera.position, Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_hand_stays_in_front_of_any_world_depth() {
+        let camera = Camera::default();
+        // A point at the far plane of the hand still has a tiny depth.
+        let far = camera
+            .hand_projection()
+            .project_point3(Vec3::new(0.0, 0.0, -10.0));
+        assert!(far.z >= 0.0 && far.z <= HAND_DEPTH_RANGE, "{}", far.z);
+        // The world's depth for a block 1 m away is far above that.
+        let world = camera
+            .view_projection()
+            .project_point3(camera.position + camera.forward());
+        assert!(world.z > HAND_DEPTH_RANGE * 10.0);
     }
 
     #[test]

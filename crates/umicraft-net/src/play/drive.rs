@@ -68,8 +68,9 @@ enum Incoming {
 /// Runs the play state of a logged-in connection until it ends.
 ///
 /// Each clientbound packet goes through `session`; its replies are written at
-/// once, its event is handed to `on_event`. The `commands` are written in the
-/// order they arrive. `on_event` runs on the loop's task: a callback that
+/// once, a new compression threshold is applied after them, and its event is
+/// handed to `on_event`. The `commands` are written in the order they
+/// arrive. `on_event` runs on the loop's task: a callback that
 /// blocks (for example a full bounded channel) slows the socket down, which
 /// is the intended backpressure.
 ///
@@ -113,6 +114,9 @@ pub async fn drive(
                     if matches!(reply, PlayServerbound::KeepAlive(_)) {
                         counters.keepalives_answered.fetch_add(1, Ordering::Relaxed);
                     }
+                }
+                if let Some(threshold) = reaction.compression_threshold() {
+                    connection.set_compression_threshold(threshold);
                 }
                 if let Some(reason) = reaction.kick_reason() {
                     return Ok(SessionEnd::Kicked(reason.to_string()));
@@ -220,6 +224,40 @@ mod tests {
         assert_eq!(counters.packets_received(), 2);
         assert_eq!(counters.packets_sent(), 1);
         assert_eq!(counters.keepalives_answered(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_play_set_compression_switches_the_framing_of_both_directions() {
+        // Some proxies enable compression after the login (0x46 in play);
+        // every later frame, read or written, uses the new framing.
+        let (mut client, mut server) = pair().await;
+        let server = tokio::spawn(async move {
+            let compress =
+                PlayClientbound::SetCompression(clientbound::SetCompression { threshold: 16 });
+            server.write_packet(&compress).await.expect("write");
+            server.set_compression_threshold(16);
+            let keepalive = PlayClientbound::KeepAlive(clientbound::KeepAlive { id: 9 });
+            server.write_packet(&keepalive).await.expect("write");
+            let answer = read_serverbound(&mut server).await;
+            let kick = PlayClientbound::Disconnect(clientbound::Disconnect {
+                reason: r#"{"text":"done"}"#.to_string(),
+            });
+            server.write_packet(&kick).await.expect("write");
+            answer
+        });
+
+        let (_sender, mut commands) = mpsc::channel(4);
+        let mut session = PlaySession::new(PlayOptions::default());
+        let counters = SessionCounters::default();
+        let end = drive(&mut client, &mut session, &mut commands, &counters, |_| {})
+            .await
+            .expect("clean end");
+
+        assert_eq!(end, SessionEnd::Kicked("done".to_string()));
+        assert!(matches!(
+            server.await.expect("server task"),
+            PlayServerbound::KeepAlive(answer) if answer.id == 9
+        ));
     }
 
     #[tokio::test]

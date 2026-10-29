@@ -146,10 +146,35 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(shade_fragment(in, texel), 1.0);
 }
 
+// Item icons: the reference draws GUI items with alpha test 0.1 and alpha
+// blending (`RenderItem.renderItemModelIntoGUI`), so the translucent interior
+// of stained glass keeps its colour. The icon is rendered into a transparent
+// cell that the UI pass later blends, so the straight alpha is stored as is.
+@fragment
+fn fs_icon(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    if (texel.a < 0.1) {
+        discard;
+    }
+    return vec4<f32>(shade_fragment(in, texel), texel.a);
+}
+
 // Transparent pass: water/glass/leaves keep their real texture alpha and are
 // blended with SrcAlpha/OneMinusSrcAlpha. No cutout: water uses partial alpha.
 @fragment
 fn fs_transparent(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
     return vec4<f32>(shade_fragment(in, texel), texel.a);
+}
+
+// Break cracks: the destroy-stage texel is multiplied twice into the colour
+// below by the pipeline's blend (DstColor, SrcColor). Alpha test 0.1 like
+// the reference.
+@fragment
+fn fs_crack(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    if (texel.a < 0.1) {
+        discard;
+    }
+    return vec4<f32>(texel.rgb, 1.0);
 }

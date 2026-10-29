@@ -1,139 +1,167 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `Teams` (0x3E, clientbound, play): create, update or remove a scoreboard
-//! team and change its members.
+//! `Teams` (0x3E, clientbound, play): scoreboard team management.
 //!
-//! Layout (MCP `S3EPacketTeams`, `readPacketData`): the team name (cap 16), a
-//! mode byte, then:
-//!
-//! - modes `0` (create) and `2` (update): display name (cap 32), prefix
-//!   (cap 16), suffix (cap 16), friendly-fire flags byte, name-tag
-//!   visibility string (cap 32), colour byte;
-//! - modes `0`, `3` (add players) and `4` (remove players): a VarInt member
-//!   count and that many member names (cap 40).
-//!
-//! Mode `1` removes the team. The reference client ignores any other mode
-//! byte, so the mode is kept raw.
+//! Layout (MCP `S3EPacketTeams`, `readPacketData`): the team name (up to 16
+//! chars) and a signed mode byte: 0 create, 1 remove, 2 update info, 3 add
+//! players, 4 remove players. Modes 0 and 2 carry the team info: display
+//! name (32 chars), prefix (16), suffix (16), a friendly-flags byte
+//! (bit 0 friendly fire, bit 1 see invisible teammates), the name-tag
+//! visibility string (32) and a colour byte (-1 = none). Modes 0, 3 and 4
+//! then carry a VarInt count and that many player names (up to 40 chars).
+//! The reference client ignores any other mode byte; this decoder reports
+//! [`ProtocolError::Invariant`] instead.
 
 use std::io::{Read, Write};
 
+use super::statistics::read_list_len;
 use crate::error::ProtocolError;
 use crate::packets::play::wire::{read_i8, write_i8};
 use crate::packets::EncodablePacket;
 use crate::types::{read_string, write_string};
-use crate::varint::{read_var_i32, write_var_u32};
+use crate::varint::write_var_u32;
 
-/// The mode byte that creates a team.
-pub const MODE_CREATE: i8 = 0;
-/// The mode byte that removes a team.
-pub const MODE_REMOVE: i8 = 1;
-/// The mode byte that updates the display of a team.
-pub const MODE_UPDATE: i8 = 2;
-/// The mode byte that adds members to a team.
-pub const MODE_ADD_PLAYERS: i8 = 3;
-/// The mode byte that removes members from a team.
-pub const MODE_REMOVE_PLAYERS: i8 = 4;
+const MAX_NAME_CHARS: usize = 16;
+const MAX_DISPLAY_CHARS: usize = 32;
+const MAX_AFFIX_CHARS: usize = 16;
+const MAX_VISIBILITY_CHARS: usize = 32;
+const MAX_PLAYER_CHARS: usize = 40;
 
-/// Maximum number of members accepted in one packet.
-///
-/// Every name costs at least one byte and a whole packet is capped at 2 MiB,
-/// so a bigger count can only come from a hostile server.
-const MAX_MEMBERS: usize = 4096;
-/// Maximum characters of a team name.
-const NAME_CHARS: usize = 16;
-/// Maximum characters of a team display name or name-tag visibility.
-const DISPLAY_CHARS: usize = 32;
-/// Maximum characters of a team prefix or suffix.
-const AFFIX_CHARS: usize = 16;
-/// Maximum characters of a member name.
-const MEMBER_CHARS: usize = 40;
-
-/// The display fields that only the create and update modes carry.
+/// Display and behaviour settings of a team (modes 0 and 2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamInfo {
-    /// The team display name.
+    /// Display name.
     pub display_name: String,
-    /// Text drawn before the member names.
+    /// Text put before member names.
     pub prefix: String,
-    /// Text drawn after the member names.
+    /// Text put after member names.
     pub suffix: String,
-    /// Bit 0: friendly fire; bit 1: see invisible team mates.
+    /// Bit 0 friendly fire, bit 1 see invisible teammates.
     pub friendly_flags: i8,
-    /// When name tags are visible: `always`, `never`, `hideForOtherTeams`, …
+    /// Name-tag visibility rule: `always`, `never`, `hideForOtherTeams` or
+    /// `hideForOwnTeam`.
     pub name_tag_visibility: String,
-    /// The team colour as a chat formatting index, `-1` for none.
+    /// Chat colour index of the team, -1 for none.
     pub color: i8,
+}
+
+impl TeamInfo {
+    fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
+        Ok(Self {
+            display_name: read_string(reader, MAX_DISPLAY_CHARS)?,
+            prefix: read_string(reader, MAX_AFFIX_CHARS)?,
+            suffix: read_string(reader, MAX_AFFIX_CHARS)?,
+            friendly_flags: read_i8(reader)?,
+            name_tag_visibility: read_string(reader, MAX_VISIBILITY_CHARS)?,
+            color: read_i8(reader)?,
+        })
+    }
+
+    fn encode(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
+        write_string(writer, &self.display_name, MAX_DISPLAY_CHARS)?;
+        write_string(writer, &self.prefix, MAX_AFFIX_CHARS)?;
+        write_string(writer, &self.suffix, MAX_AFFIX_CHARS)?;
+        write_i8(writer, self.friendly_flags)?;
+        write_string(writer, &self.name_tag_visibility, MAX_VISIBILITY_CHARS)?;
+        write_i8(writer, self.color)
+    }
+}
+
+fn read_players(reader: &mut impl Read) -> Result<Vec<String>, ProtocolError> {
+    let len = read_list_len(reader)?;
+    let mut players = Vec::new();
+    for _ in 0..len {
+        players.push(read_string(reader, MAX_PLAYER_CHARS)?);
+    }
+    Ok(players)
+}
+
+fn write_players(writer: &mut impl Write, players: &[String]) -> Result<(), ProtocolError> {
+    write_var_u32(writer, players.len() as u32)?;
+    for player in players {
+        write_string(writer, player, MAX_PLAYER_CHARS)?;
+    }
+    Ok(())
 }
 
 /// `Teams` (0x3E, clientbound, play).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Teams {
-    /// The team name.
-    pub name: String,
-    /// The raw mode byte; see the `MODE_*` constants.
-    pub mode: i8,
-    /// The display fields, present exactly for the create and update modes.
-    pub info: Option<TeamInfo>,
-    /// The members, present for the create, add and remove-players modes.
-    pub players: Vec<String>,
+pub enum Teams {
+    /// Mode 0: creates a team with its first members.
+    Create {
+        /// Team name.
+        name: String,
+        /// Team settings.
+        info: TeamInfo,
+        /// Initial members.
+        players: Vec<String>,
+    },
+    /// Mode 1: removes a team.
+    Remove {
+        /// Team name.
+        name: String,
+    },
+    /// Mode 2: changes the team settings.
+    Update {
+        /// Team name.
+        name: String,
+        /// New settings.
+        info: TeamInfo,
+    },
+    /// Mode 3: adds members.
+    AddPlayers {
+        /// Team name.
+        name: String,
+        /// Members to add.
+        players: Vec<String>,
+    },
+    /// Mode 4: removes members.
+    RemovePlayers {
+        /// Team name.
+        name: String,
+        /// Members to remove.
+        players: Vec<String>,
+    },
 }
 
 impl Teams {
     /// Wire packet id.
     pub const ID: u8 = 0x3E;
 
-    /// Whether `mode` carries the display fields.
-    #[must_use]
-    pub const fn mode_has_info(mode: i8) -> bool {
-        mode == MODE_CREATE || mode == MODE_UPDATE
-    }
-
-    /// Whether `mode` carries a member list.
-    #[must_use]
-    pub const fn mode_has_players(mode: i8) -> bool {
-        mode == MODE_CREATE || mode == MODE_ADD_PLAYERS || mode == MODE_REMOVE_PLAYERS
-    }
-
     /// Reads the body.
     ///
     /// # Errors
-    /// [`ProtocolError`] on truncation, an over-long string or a member count
-    /// that is negative or above the budget.
+    /// [`ProtocolError`] on truncation, a bad count, an invalid string or an
+    /// unknown mode.
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        let name = read_string(reader, NAME_CHARS)?;
-        let mode = read_i8(reader)?;
-        let info = if Self::mode_has_info(mode) {
-            Some(TeamInfo {
-                display_name: read_string(reader, DISPLAY_CHARS)?,
-                prefix: read_string(reader, AFFIX_CHARS)?,
-                suffix: read_string(reader, AFFIX_CHARS)?,
-                friendly_flags: read_i8(reader)?,
-                name_tag_visibility: read_string(reader, DISPLAY_CHARS)?,
-                color: read_i8(reader)?,
-            })
-        } else {
-            None
-        };
-        let mut players = Vec::new();
-        if Self::mode_has_players(mode) {
-            let count = read_var_i32(reader)?;
-            let count = usize::try_from(count)
-                .ok()
-                .filter(|count| *count <= MAX_MEMBERS)
-                .ok_or_else(|| {
-                    ProtocolError::Invariant(format!("team member count {count} is out of range"))
-                })?;
-            players.reserve(count);
-            for _ in 0..count {
-                players.push(read_string(reader, MEMBER_CHARS)?);
+        let name = read_string(reader, MAX_NAME_CHARS)?;
+        match read_i8(reader)? {
+            0 => {
+                let info = TeamInfo::decode(reader)?;
+                let players = read_players(reader)?;
+                Ok(Self::Create {
+                    name,
+                    info,
+                    players,
+                })
             }
+            1 => Ok(Self::Remove { name }),
+            2 => Ok(Self::Update {
+                name,
+                info: TeamInfo::decode(reader)?,
+            }),
+            3 => Ok(Self::AddPlayers {
+                name,
+                players: read_players(reader)?,
+            }),
+            4 => Ok(Self::RemovePlayers {
+                name,
+                players: read_players(reader)?,
+            }),
+            other => Err(ProtocolError::Invariant(format!(
+                "unknown team mode {other}"
+            ))),
         }
-        Ok(Self {
-            name,
-            mode,
-            info,
-            players,
-        })
     }
 }
 
@@ -143,26 +171,37 @@ impl EncodablePacket for Teams {
     }
 
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        write_string(writer, &self.name, NAME_CHARS)?;
-        write_i8(writer, self.mode)?;
-        if Self::mode_has_info(self.mode) {
-            let info = self.info.as_ref().ok_or_else(|| {
-                ProtocolError::Invariant("team mode needs its display fields".to_string())
-            })?;
-            write_string(writer, &info.display_name, DISPLAY_CHARS)?;
-            write_string(writer, &info.prefix, AFFIX_CHARS)?;
-            write_string(writer, &info.suffix, AFFIX_CHARS)?;
-            write_i8(writer, info.friendly_flags)?;
-            write_string(writer, &info.name_tag_visibility, DISPLAY_CHARS)?;
-            write_i8(writer, info.color)?;
-        }
-        if Self::mode_has_players(self.mode) {
-            write_var_u32(writer, self.players.len() as u32)?;
-            for player in &self.players {
-                write_string(writer, player, MEMBER_CHARS)?;
+        match self {
+            Self::Create {
+                name,
+                info,
+                players,
+            } => {
+                write_string(writer, name, MAX_NAME_CHARS)?;
+                write_i8(writer, 0)?;
+                info.encode(writer)?;
+                write_players(writer, players)
+            }
+            Self::Remove { name } => {
+                write_string(writer, name, MAX_NAME_CHARS)?;
+                write_i8(writer, 1)
+            }
+            Self::Update { name, info } => {
+                write_string(writer, name, MAX_NAME_CHARS)?;
+                write_i8(writer, 2)?;
+                info.encode(writer)
+            }
+            Self::AddPlayers { name, players } => {
+                write_string(writer, name, MAX_NAME_CHARS)?;
+                write_i8(writer, 3)?;
+                write_players(writer, players)
+            }
+            Self::RemovePlayers { name, players } => {
+                write_string(writer, name, MAX_NAME_CHARS)?;
+                write_i8(writer, 4)?;
+                write_players(writer, players)
             }
         }
-        Ok(())
     }
 }
 
@@ -172,78 +211,80 @@ mod tests {
 
     fn info() -> TeamInfo {
         TeamInfo {
-            display_name: "Red".to_string(),
-            prefix: "[R] ".to_string(),
-            suffix: String::new(),
+            display_name: "D".to_string(),
+            prefix: "P".to_string(),
+            suffix: "S".to_string(),
             friendly_flags: 3,
             name_tag_visibility: "always".to_string(),
-            color: 12,
+            color: -1,
         }
     }
 
-    fn round_trip(packet: &Teams) -> Teams {
+    fn info_bytes() -> Vec<u8> {
+        let mut bytes = vec![1, b'D', 1, b'P', 1, b'S', 3, 6];
+        bytes.extend(b"always");
+        bytes.push(0xFF);
+        bytes
+    }
+
+    fn check(packet: Teams, expected: &[u8]) {
         let mut buffer = Vec::new();
         packet.encode_body(&mut buffer).unwrap();
-        Teams::decode(&mut &buffer[..]).unwrap()
+        assert_eq!(buffer, expected);
+        assert_eq!(Teams::decode(&mut &expected[..]).unwrap(), packet);
     }
 
     #[test]
-    fn create_carries_the_display_fields_and_the_members() {
-        let packet = Teams {
-            name: "red".to_string(),
-            mode: MODE_CREATE,
-            info: Some(info()),
-            players: vec!["Steve".to_string(), "Alex".to_string()],
-        };
-        assert_eq!(round_trip(&packet), packet);
-    }
-
-    #[test]
-    fn update_has_the_display_fields_but_no_members() {
-        let packet = Teams {
-            name: "red".to_string(),
-            mode: MODE_UPDATE,
-            info: Some(info()),
-            players: vec![],
-        };
-        assert_eq!(round_trip(&packet), packet);
-    }
-
-    #[test]
-    fn add_and_remove_players_have_members_but_no_display_fields() {
-        for mode in [MODE_ADD_PLAYERS, MODE_REMOVE_PLAYERS] {
-            let packet = Teams {
-                name: "red".to_string(),
-                mode,
-                info: None,
-                players: vec!["Steve".to_string()],
-            };
-            assert_eq!(round_trip(&packet), packet);
-        }
-    }
-
-    #[test]
-    fn remove_and_unknown_modes_carry_nothing() {
-        for mode in [MODE_REMOVE, 9] {
-            let packet = Teams {
-                name: "red".to_string(),
-                mode,
-                info: None,
+    fn teams_wire_shapes() {
+        let mut create = vec![1, b't', 0];
+        create.extend(info_bytes());
+        create.extend([1, 1, b'a']);
+        check(
+            Teams::Create {
+                name: "t".to_string(),
+                info: info(),
+                players: vec!["a".to_string()],
+            },
+            &create,
+        );
+        check(
+            Teams::Remove {
+                name: "t".to_string(),
+            },
+            &[1, b't', 1],
+        );
+        let mut update = vec![1, b't', 2];
+        update.extend(info_bytes());
+        check(
+            Teams::Update {
+                name: "t".to_string(),
+                info: info(),
+            },
+            &update,
+        );
+        check(
+            Teams::AddPlayers {
+                name: "t".to_string(),
+                players: vec!["a".to_string(), "b".to_string()],
+            },
+            &[1, b't', 3, 2, 1, b'a', 1, b'b'],
+        );
+        check(
+            Teams::RemovePlayers {
+                name: "t".to_string(),
                 players: vec![],
-            };
-            let mut buffer = Vec::new();
-            packet.encode_body(&mut buffer).unwrap();
-            assert_eq!(buffer.len(), 1 + 3 + 1);
-            assert_eq!(round_trip(&packet), packet);
-        }
+            },
+            &[1, b't', 4, 0],
+        );
     }
 
     #[test]
-    fn an_oversized_member_count_is_rejected_before_allocation() {
-        let mut buffer = Vec::new();
-        write_string(&mut buffer, "t", NAME_CHARS).unwrap();
-        buffer.push(MODE_ADD_PLAYERS as u8);
-        buffer.extend([0x88, 0x27]); // VarInt 5000
-        assert!(Teams::decode(&mut &buffer[..]).is_err());
+    fn hostile_teams_are_errors() {
+        assert!(Teams::decode(&mut &[][..]).is_err());
+        assert!(Teams::decode(&mut &[1, b't'][..]).is_err());
+        assert!(Teams::decode(&mut &[1, b't', 5][..]).is_err());
+        assert!(Teams::decode(&mut &[1, b't', 0, 1, b'D'][..]).is_err());
+        assert!(Teams::decode(&mut &[1, b't', 3, 2, 1, b'a'][..]).is_err());
+        assert!(Teams::decode(&mut &[1, b't', 3, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F][..]).is_err());
     }
 }

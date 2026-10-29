@@ -106,11 +106,11 @@ pub fn move_entity<S: BlockSource + ?Sized>(
     // shortened in 0.05 steps until there is ground under the box
     // (MCP `net/minecraft/entity/Entity.java:616`).
     if options.sneaking && options.on_ground {
-        requested.x = sneak_shorten(original, requested.x, 0.0, world);
-        requested.z = sneak_shorten(original, 0.0, requested.z, world);
+        requested.x = sneak_shorten(original, requested.x, |x| DVec3::new(x, -1.0, 0.0), world);
+        requested.z = sneak_shorten(original, requested.z, |z| DVec3::new(0.0, -1.0, z), world);
         while requested.x != 0.0
             && requested.z != 0.0
-            && !has_ground_below(
+            && !any_collision(
                 original.offset(DVec3::new(requested.x, -1.0, requested.z)),
                 world,
             )
@@ -257,13 +257,20 @@ fn step_up<S: BlockSource + ?Sized>(
 /// Shortens one horizontal axis of a sneaking player until there is ground
 /// below the box.
 ///
-/// MCP `net/minecraft/entity/Entity.java:622` and `:638`.
-fn sneak_shorten<S: BlockSource + ?Sized>(original: Aabb, x: f64, z: f64, world: &S) -> f64 {
-    let mut x = x;
-    while x != 0.0 && !has_ground_below(original.offset(DVec3::new(x, -1.0, z)), world) {
-        x = sneak_step(x);
+/// `offset` turns the axis value into the probe offset of the box (the value
+/// on its own axis, -1 below). MCP `net/minecraft/entity/Entity.java:622`
+/// (X) and `:638` (Z).
+fn sneak_shorten<S: BlockSource + ?Sized>(
+    original: Aabb,
+    value: f64,
+    offset: impl Fn(f64) -> DVec3,
+    world: &S,
+) -> f64 {
+    let mut value = value;
+    while value != 0.0 && !any_collision(original.offset(offset(value)), world) {
+        value = sneak_step(value);
     }
-    x
+    value
 }
 
 /// Moves a horizontal movement one sneak step towards zero.
@@ -278,7 +285,7 @@ fn sneak_step(value: f64) -> f64 {
 }
 
 /// True when any block collides with the given box.
-fn has_ground_below<S: BlockSource + ?Sized>(bounding_box: Aabb, world: &S) -> bool {
+pub(crate) fn any_collision<S: BlockSource + ?Sized>(bounding_box: Aabb, world: &S) -> bool {
     let range = BlockRange::of(bounding_box);
     let mut found = false;
     for_each_collision_box(&range, &bounding_box, world, |_| {
@@ -446,6 +453,50 @@ mod tests {
         );
         assert_eq!(result.delta.x, 0.7, "the player is stopped by the wall");
         assert_eq!(result.delta.y, 0.0);
+    }
+
+    #[test]
+    fn a_sneaking_player_walks_along_z_on_flat_ground() {
+        // Regression: the Z guard returned its unused X argument (0.0), so a
+        // sneaking player could not move along Z at all. Found by the parity
+        // harness: the vanilla trace sneaks at 0.0648 block/tick, Umicraft
+        // stood still (docs/parity-harness.md).
+        let floor: Vec<_> = (-2..=2)
+            .flat_map(|x| (-2..=2).map(move |z| (x, 0, z, BlockState::new(1, 0))))
+            .collect();
+        let world = TestBlocks::with(&floor);
+        let player = Aabb::new(DVec3::new(0.2, 1.0, 0.2), DVec3::new(0.8, 2.8, 0.8));
+        let options = MoveOptions {
+            step_height: 0.0,
+            sneaking: true,
+            on_ground: true,
+        };
+        for delta in [DVec3::new(0.0, 0.0, 0.06), DVec3::new(0.0, 0.0, -0.06)] {
+            let moved = move_entity(player, delta, &world, options);
+            assert!(
+                (moved.delta.z - delta.z).abs() < 1e-9,
+                "{delta} -> {}",
+                moved.delta
+            );
+        }
+    }
+
+    #[test]
+    fn a_sneaking_player_does_not_walk_off_a_ledge_along_z() {
+        // The only ground ends at z = 0; the box is 0.6 deep from -0.8.
+        let world = TestBlocks::with(&[(0, 0, -1, BlockState::new(1, 0))]);
+        let player = Aabb::new(DVec3::new(0.2, 1.0, -0.8), DVec3::new(0.8, 2.8, -0.2));
+        let moved = move_entity(
+            player,
+            DVec3::new(0.0, 0.0, 1.2),
+            &world,
+            MoveOptions {
+                step_height: 0.0,
+                sneaking: true,
+                on_ground: true,
+            },
+        );
+        assert!((moved.delta.z - 0.8).abs() < 1e-9, "got {}", moved.delta.z);
     }
 
     #[test]

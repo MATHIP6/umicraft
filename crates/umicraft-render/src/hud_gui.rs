@@ -60,7 +60,7 @@ pub fn draw_hud_gui(
     let gh = viewport.1 as f32 / sf;
 
     if let Some(widgets) = &sheets.widgets {
-        draw_hotbar(list, state, gw, gh, sf, font, widgets);
+        draw_hotbar(list, state, gw, gh, sf, widgets);
     }
 
     if let Some(icons) = &sheets.icons {
@@ -77,7 +77,6 @@ fn draw_hotbar(
     gw: f32,
     gh: f32,
     sf: f32,
-    font: &FontAtlas,
     widgets: &SpriteSheet,
 ) {
     let x = gw * 0.5 - 91.0;
@@ -95,28 +94,7 @@ fn draw_hotbar(
     let sel_src = widgets.sub(0, 22, 24, 24);
     let sel_dst = Rect::new(sel_x * sf, sel_y * sf, 24.0 * sf, 24.0 * sf);
     list.image(sel_src, sel_dst, [1.0; 4]);
-
-    // Hotbar item stack counts
-    for (i, stack) in state.hotbar.iter().enumerate() {
-        if let Some(stack) = stack {
-            if stack.count > 1 {
-                let count_str = stack.count.to_string();
-                let count_w = font.measure(&count_str, 1.0);
-                let cx = (x + i as f32 * 20.0 + 20.0 - count_w - 1.0) * sf;
-                let cy = (y + 22.0 - 8.0) * sf;
-                list.text(
-                    [cx + sf, cy + sf],
-                    &count_str,
-                    TextStyle::new(sf, [0.25, 0.25, 0.25, 1.0]),
-                );
-                list.text(
-                    [cx, cy],
-                    &count_str,
-                    TextStyle::new(sf, [1.0, 1.0, 1.0, 1.0]),
-                );
-            }
-        }
-    }
+    // The items and their counts are drawn by the UI layer over the hotbar.
 }
 
 fn draw_icons_layer(

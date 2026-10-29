@@ -22,8 +22,9 @@ use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
+use umicraft_mesh::item::ItemMesh;
 use umicraft_mesh::{Mesh, Vertex, TEXTURE_LAYERS};
-use umicraft_ui::{DrawList, FontAtlas};
+use umicraft_ui::{DrawCommand, DrawList, FontAtlas};
 use umicraft_world::ChunkPos;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -33,6 +34,8 @@ use crate::camera::Camera;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
+use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
+use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::sky::{SkyRenderer, SkyState};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
@@ -43,10 +46,12 @@ use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Initial overlay vertex-buffer capacity (64 KiB, about 4,000 glyphs).
 const OVERLAY_MIN_BYTES: u64 = 64 * 1024;
+/// Initial capacity of the per-frame item buffers.
+pub(crate) const MIN_DYNAMIC_BYTES: u64 = 16 * 1024;
 /// WebGPU requires 256-byte row alignment for buffer↔texture copies.
 const ROW_ALIGNMENT: u32 = 256;
 
-const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
+pub(crate) const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
     0 => Float32x3,
     1 => Float32x3,
     2 => Float32x2,
@@ -57,9 +62,15 @@ const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
 const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
 
+/// Half the depth range of the icon camera, in GUI pixels; a lit block's
+/// rotated corners stay within about 17.
+const ICON_DEPTH: f32 = 32.0;
+/// A fog distance the hand never reaches.
+const HAND_FOG_FREE: f32 = 1.0e6;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct CameraUniform {
+pub(crate) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     camera_pos: [f32; 3],
     /// Sun-light factor from [`SkyState::sun_brightness`].
@@ -76,8 +87,30 @@ struct CameraUniform {
     _pad: [f32; 2],
 }
 
+impl CameraUniform {
+    /// The icon camera: an orthographic view of the 16x16 GUI box (y down,
+    /// larger z nearer), no fog, full daylight and no gamma lift.
+    pub(crate) fn icon() -> Self {
+        Self {
+            // x: 0..16 to -1..1; y flips (down to up); z: -D..D to 1..0, so a
+            // larger z is nearer, as in the reference GUI projection
+            // (glOrtho 1000..3000 after translate(0, 0, -2000)).
+            view_proj: (glam::Mat4::from_translation(Vec3::new(-1.0, 1.0, 0.5))
+                * glam::Mat4::from_scale(Vec3::new(1.0 / 8.0, -1.0 / 8.0, -0.5 / ICON_DEPTH)))
+            .to_cols_array_2d(),
+            camera_pos: [0.0; 3],
+            sun_brightness: 1.0,
+            fog_color: [0.0; 3],
+            fog_start: HAND_FOG_FREE,
+            fog_end: HAND_FOG_FREE * 2.0,
+            gamma: 0.0,
+            _pad: [0.0; 2],
+        }
+    }
+}
+
 /// GPU vertex and index buffers for one pass of a chunk mesh.
-struct GpuMeshPass {
+pub(crate) struct GpuMeshPass {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
@@ -133,6 +166,15 @@ pub struct Renderer {
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
     terrain_transparent_pipeline: wgpu::RenderPipeline,
+    crack_pipeline: wgpu::RenderPipeline,
+    /// The crack quads of every block being dug, rebuilt by the client.
+    crack_mesh: Option<GpuMeshPass>,
+    /// The camera of the first-person hand: eye-space vertices, a squeezed
+    /// depth range, no fog.
+    hand_camera_buffer: wgpu::Buffer,
+    hand_camera_bind_group: wgpu::BindGroup,
+    /// The vertices of the hand and its skin texture, if one is drawn.
+    hand: Option<(wgpu::Buffer, u32, wgpu::BindGroup)>,
     terrain_bind_group: wgpu::BindGroup,
     /// Layout of the terrain camera + texture binding, kept so
     /// [`Renderer::set_block_atlas`] can bind a replacement array without
@@ -152,6 +194,9 @@ pub struct Renderer {
     /// [`Renderer::use_procedural_blocks`] can bind it again after an
     /// official atlas replaced it.
     procedural_blocks: wgpu::TextureView,
+    /// The official block array and its layer size, kept so animated layers
+    /// can be rewritten in place; `None` while the procedural array is bound.
+    official_blocks: Option<(wgpu::Texture, u32, u32)>,
     overlay_pipeline: wgpu::RenderPipeline,
     /// Pipeline for GUI texture quads (RGBA, no coverage threshold).
     gui_overlay_pipeline: wgpu::RenderPipeline,
@@ -174,12 +219,33 @@ pub struct Renderer {
     /// Metrics of the atlas bound to `ui_bind_group`; immutable after upload.
     ui_atlas: FontAtlas,
     ui_pass: UiPass,
+    /// Item icons rendered through the terrain pipeline, drawn as UI quads.
+    icon_atlas: IconAtlas,
+    /// Terrain pipeline without culling, for icon rendering.
+    icon_pipeline: wgpu::RenderPipeline,
+    /// The icon camera over the current block texture array.
+    icon_bind_group: wgpu::BindGroup,
+    /// Binding that samples the icon atlas from the GUI overlay pipeline.
+    icon_gui_bind_group: wgpu::BindGroup,
+    /// The enchantment glint drawn over glinting icons.
+    glint: GlintPass,
+    /// The glint over world and hand item meshes.
+    world_glint: WorldGlint,
+    /// Reused geometry buffer of the icon being rendered.
+    icon_mesh: ItemMesh,
+    /// Dropped items and other world-space item geometry, rewritten per frame.
+    world_items: DynamicMesh,
+    /// The held item in camera space, drawn with the hand's depth range.
+    hand_items: DynamicMesh,
+    /// The hand camera over the current block texture array.
+    hand_item_bind_group: wgpu::BindGroup,
     overlay_buffer: wgpu::Buffer,
     overlay_capacity: u64,
     offscreen: Option<OffscreenTarget>,
     chunks: HashMap<ChunkPos, GpuMesh>,
     camera_bind_group: wgpu::BindGroup,
     entity_renderer: EntityRenderer,
+    outline: OutlineRenderer,
     entity_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
 }
 
@@ -446,8 +512,20 @@ impl Renderer {
             format,
             TerrainPipelineState::transparent(),
         );
-        let overlay_pipeline =
-            create_overlay_pipeline(&device, &overlay_shader, &overlay_layout, format);
+        let crack_pipeline = create_terrain_pipeline(
+            &device,
+            &terrain_shader,
+            &terrain_layout,
+            format,
+            TerrainPipelineState::cracks(),
+        );
+        let overlay_pipeline = create_overlay_pipeline(
+            &device,
+            &overlay_shader,
+            &overlay_layout,
+            format,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
         let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gui overlay shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gui_overlay.wgsl").into()),
@@ -474,8 +552,13 @@ impl Renderer {
                     },
                 ],
             });
-        let gui_overlay_pipeline =
-            create_overlay_pipeline(&device, &gui_overlay_shader, &gui_overlay_layout, format);
+        let gui_overlay_pipeline = create_overlay_pipeline(
+            &device,
+            &gui_overlay_shader,
+            &gui_overlay_layout,
+            format,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
         let sky = SkyRenderer::new(&device, format);
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -499,7 +582,22 @@ impl Renderer {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
+        let hand_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hand camera uniform"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let hand_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("hand camera bind group"),
+            layout: &camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: hand_camera_buffer.as_entire_binding(),
+            }],
+        });
         let entity_renderer = EntityRenderer::new(&device, &camera_layout, format);
+        let outline = OutlineRenderer::new(&device, &camera_layout, format);
 
         let overlay_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("overlay vertices"),
@@ -515,6 +613,39 @@ impl Renderer {
         };
         let depth_view = create_depth(&device, width, height);
 
+        let icon_atlas = IconAtlas::new(&device, &queue, format);
+        let icon_pipeline = create_terrain_pipeline(
+            &device,
+            &terrain_shader,
+            &terrain_layout,
+            format,
+            TerrainPipelineState::icon(),
+        );
+        let icon_bind_group = create_terrain_bind_group(
+            &device,
+            &terrain_layout,
+            icon_atlas.camera_buffer(),
+            &block_sampler,
+            &block_view,
+        );
+        let world_items = DynamicMesh::new(&device, "world items");
+        let hand_items = DynamicMesh::new(&device, "hand items");
+        let hand_item_bind_group = create_terrain_bind_group(
+            &device,
+            &terrain_layout,
+            &hand_camera_buffer,
+            &block_sampler,
+            &block_view,
+        );
+        let icon_gui_bind_group = create_font_bind_group(
+            &device,
+            &gui_overlay_layout,
+            &font_sampler,
+            icon_atlas.view(),
+        );
+        let glint = GlintPass::new(&device, format);
+        let world_glint = WorldGlint::new(&device, &terrain_layout, format);
+
         Ok(Self {
             instance,
             window,
@@ -528,6 +659,11 @@ impl Renderer {
             camera_buffer,
             terrain_pipeline,
             terrain_transparent_pipeline,
+            crack_pipeline,
+            crack_mesh: None,
+            hand_camera_buffer,
+            hand_camera_bind_group,
+            hand: None,
             terrain_bind_group,
             terrain_layout,
             transparent_order: Vec::with_capacity(64),
@@ -535,6 +671,7 @@ impl Renderer {
             environment: RenderEnvironment::default(),
             block_sampler,
             procedural_blocks: block_view,
+            official_blocks: None,
             overlay_pipeline,
             gui_overlay_pipeline,
             overlay_layout,
@@ -545,12 +682,23 @@ impl Renderer {
             gui_bind_group: None,
             ui_atlas,
             ui_pass: UiPass::new(width, height),
+            icon_atlas,
+            icon_pipeline,
+            icon_bind_group,
+            icon_gui_bind_group,
+            glint,
+            world_glint,
+            icon_mesh: ItemMesh::default(),
+            world_items,
+            hand_items,
+            hand_item_bind_group,
             overlay_buffer,
             overlay_capacity: OVERLAY_MIN_BYTES,
             offscreen,
             chunks: HashMap::new(),
             camera_bind_group,
             entity_renderer,
+            outline,
             entity_batches: Vec::new(),
         })
     }
@@ -562,6 +710,25 @@ impl Renderer {
     /// plain data and does not allocate.
     pub fn set_environment(&mut self, environment: RenderEnvironment) {
         self.environment = environment;
+    }
+
+    /// Replaces the break cracks drawn over the terrain.
+    ///
+    /// `vertices` and `indices` are the faces of the blocks being dug, with
+    /// the layer of their destroy-stage texture; empty slices remove the
+    /// cracks.
+    pub fn set_block_cracks(&mut self, vertices: &[Vertex], indices: &[u32]) {
+        self.crack_mesh = create_gpu_mesh_pass(&self.device, "block cracks", vertices, indices);
+    }
+
+    /// Sets the block selection outline for the following frames.
+    ///
+    /// `boxes` are world-space boxes (the targeted block's selection shape);
+    /// an empty slice hides the outline. The outline is drawn after the
+    /// terrain and before the HUD, a few pixels wide (see the `outline` module).
+    pub fn set_selection_outline(&mut self, boxes: &[OutlineBox]) {
+        self.outline
+            .set_boxes(&self.queue, boxes, (self.width, self.height));
     }
 
     /// Draws one frame with the M3 HUD overlay only.
@@ -583,14 +750,71 @@ impl Renderer {
     /// [`Renderer::set_font_atlas`], or the built-in fallback atlas when none
     /// was set. The UI is drawn above the HUD and shares the overlay pipeline,
     /// so no extra pass or thread is introduced.
+    ///
+    /// `Item` commands draw from the icon atlas; an icon not rendered yet is
+    /// built by `icons` and rendered first (once per key), so a steady-state
+    /// frame renders no item geometry.
     pub fn render_with_ui(
         &mut self,
         camera: &Camera,
         overlay: &Overlay,
         draw_list: &DrawList,
+        icons: &mut dyn IconProvider,
     ) -> Result<(), RenderError> {
-        self.ui_pass.rebuild(draw_list, &self.ui_atlas);
+        self.prepare_icons(draw_list, icons);
+        let atlas = &self.icon_atlas;
+        self.ui_pass
+            .rebuild_with_icons(draw_list, &self.ui_atlas, &|key| atlas.uv(key));
         self.render_frame(camera, overlay)
+    }
+
+    /// Replaces the world-space item geometry drawn after the entities
+    /// (dropped items, frames), already positioned in world coordinates.
+    pub fn set_world_items(&mut self, mesh: &ItemMesh) {
+        self.world_items.update(&self.device, &self.queue, mesh);
+    }
+
+    /// Replaces the first-person held item, in camera space like the hand.
+    pub fn set_hand_items(&mut self, mesh: &ItemMesh) {
+        self.hand_items.update(&self.device, &self.queue, mesh);
+    }
+
+    /// Sets the world item geometry that gets the enchantment glint: the
+    /// enchanted subset of the mesh given to [`Renderer::set_world_items`].
+    /// An empty mesh clears it; nothing shows before [`Renderer::set_glint_texture`].
+    pub fn set_world_glint(&mut self, mesh: &ItemMesh) {
+        self.world_glint
+            .update_world(&self.device, &self.queue, mesh);
+    }
+
+    /// Sets the first-person item geometry that gets the enchantment glint
+    /// (the enchanted held item of [`Renderer::set_hand_items`]).
+    pub fn set_hand_glint(&mut self, mesh: &ItemMesh) {
+        self.world_glint
+            .update_hand(&self.device, &self.queue, mesh);
+    }
+
+    /// Renders the icons `draw_list` asks for that the atlas lacks.
+    fn prepare_icons(&mut self, draw_list: &DrawList, icons: &mut dyn IconProvider) {
+        for command in draw_list.commands() {
+            let DrawCommand::Item { key, .. } = command else {
+                continue;
+            };
+            if self.icon_atlas.contains(*key) {
+                continue;
+            }
+            self.icon_mesh.clear();
+            if icons.build_icon(*key, &mut self.icon_mesh) {
+                self.icon_atlas.render(
+                    &self.device,
+                    &self.queue,
+                    &self.icon_pipeline,
+                    &self.icon_bind_group,
+                    *key,
+                    &self.icon_mesh,
+                );
+            }
+        }
     }
 
     fn render_frame(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
@@ -735,6 +959,36 @@ impl Renderer {
         ));
     }
 
+    /// Uploads the enchantment glint texture (`enchanted_item_glint.png`).
+    ///
+    /// `rgba` must be `width * height * 4` bytes; a malformed upload is
+    /// ignored. Until a texture is set, glinting icons and items draw without the
+    /// glint.
+    pub fn set_glint_texture(&mut self, width: u32, height: u32, rgba: &[u8]) {
+        let uploaded = self.glint.set_texture(
+            &self.device,
+            &self.queue,
+            self.icon_atlas.view(),
+            &self.font_sampler,
+            (width, height),
+            rgba,
+        );
+        if let Some(view) = uploaded {
+            self.world_glint.set_texture(
+                &self.device,
+                &view,
+                self.glint.sampler(),
+                self.glint.uniform(),
+            );
+        }
+    }
+
+    /// Sets the clock that scrolls the enchantment glint, in seconds from any
+    /// fixed origin. Call once per frame.
+    pub fn set_glint_time(&self, seconds: f32) {
+        self.glint.set_time(&self.queue, seconds);
+    }
+
     /// Uploads the block/item texture array built from the user's installation
     /// and binds it for terrain rendering.
     ///
@@ -821,7 +1075,49 @@ impl Renderer {
             &self.block_sampler,
             &view,
         );
+        self.rebind_icons(&view);
+        self.official_blocks = Some((texture, width, height));
         Ok(())
+    }
+
+    /// Rewrites one layer of the official block array (an animation frame).
+    ///
+    /// `pixels` is one tightly packed RGBA8 layer. Returns `false` and writes
+    /// nothing when no official array is bound, the layer does not exist or
+    /// the buffer has the wrong length, so a stale animation after a resource
+    /// reload cannot corrupt the new array.
+    pub fn write_block_layer(&self, layer: u32, pixels: &[u8]) -> bool {
+        let Some((texture, width, height)) = &self.official_blocks else {
+            return false;
+        };
+        let expected = u64::from(*width) * u64::from(*height) * 4;
+        if layer >= texture.depth_or_array_layers() || pixels.len() as u64 != expected {
+            return false;
+        }
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: layer,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(*height),
+            },
+            wgpu::Extent3d {
+                width: *width,
+                height: *height,
+                depth_or_array_layers: 1,
+            },
+        );
+        true
     }
 
     /// Binds the built-in procedural block array again.
@@ -831,6 +1127,7 @@ impl Renderer {
     /// uploads such meshes. The renderer starts on this array, so a call on a
     /// fresh renderer changes nothing.
     pub fn use_procedural_blocks(&mut self) {
+        self.official_blocks = None;
         self.terrain_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
@@ -838,6 +1135,28 @@ impl Renderer {
             &self.block_sampler,
             &self.procedural_blocks,
         );
+        let view = self.procedural_blocks.clone();
+        self.rebind_icons(&view);
+    }
+
+    /// Points the icon camera at a replaced block array and forgets the
+    /// icons rendered from the old one.
+    fn rebind_icons(&mut self, block_view: &wgpu::TextureView) {
+        self.icon_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            self.icon_atlas.camera_buffer(),
+            &self.block_sampler,
+            block_view,
+        );
+        self.hand_item_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.hand_camera_buffer,
+            &self.block_sampler,
+            block_view,
+        );
+        self.icon_atlas.invalidate();
     }
 
     /// Replaces the GPU mesh for `pos`, or removes it when both passes are
@@ -960,6 +1279,30 @@ impl Renderer {
         }
     }
 
+    /// Sets the first-person hand for the following frames.
+    ///
+    /// `vertices` are in camera space (the camera at the origin looking down
+    /// −Z, the view bobbing already applied) and use the skin texture of
+    /// `bind_group`; an empty slice hides the hand. It is drawn on top of the
+    /// world and under the HUD.
+    pub fn set_hand(&mut self, vertices: &[EntityVertex], bind_group: &wgpu::BindGroup) {
+        self.hand = (!vertices.is_empty()).then(|| {
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("hand vertices"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            (buffer, vertices.len() as u32, bind_group.clone())
+        });
+    }
+
+    /// Hides the first-person hand.
+    pub fn clear_hand(&mut self) {
+        self.hand = None;
+    }
+
     /// Clears any queued entity batches.
     pub fn clear_entities(&mut self) {
         self.entity_batches.clear();
@@ -1078,6 +1421,20 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+
+        // The hand lives in camera space, far from any fog.
+        let hand_uniform = CameraUniform {
+            view_proj: camera.hand_projection().to_cols_array_2d(),
+            camera_pos: [0.0; 3],
+            fog_start: HAND_FOG_FREE,
+            fog_end: HAND_FOG_FREE * 2.0,
+            ..uniform
+        };
+        self.queue.write_buffer(
+            &self.hand_camera_buffer,
+            0,
+            bytemuck::bytes_of(&hand_uniform),
+        );
     }
 
     fn upload_overlay(&mut self, overlay: &Overlay) {
@@ -1224,6 +1581,13 @@ impl Renderer {
                 .render(&mut pass, &self.camera_bind_group, batches);
         }
 
+        // Dropped items share the terrain pipeline and its texture array.
+        pass.set_pipeline(&self.terrain_pipeline);
+        pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+        self.world_items.draw(&mut pass);
+        self.world_glint
+            .draw_world(&mut pass, &self.terrain_bind_group);
+
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
@@ -1239,6 +1603,29 @@ impl Renderer {
                 }
             }
         }
+
+        if let Some(cracks) = self.crack_mesh.as_ref() {
+            pass.set_pipeline(&self.crack_pipeline);
+            pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+            draw_gpu_pass(&mut pass, cracks);
+        }
+
+        self.outline.draw(&mut pass, &self.camera_bind_group);
+
+        // The hand: camera-space vertices under a squeezed depth range.
+        if let Some((buffer, count, texture)) = self.hand.as_ref() {
+            self.entity_renderer.render(
+                &mut pass,
+                &self.hand_camera_bind_group,
+                [(buffer, *count, texture)],
+            );
+        }
+
+        pass.set_pipeline(&self.terrain_pipeline);
+        pass.set_bind_group(0, &self.hand_item_bind_group, &[]);
+        self.hand_items.draw(&mut pass);
+        self.world_glint
+            .draw_hand(&mut pass, &self.hand_item_bind_group);
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
@@ -1257,6 +1644,15 @@ impl Renderer {
                     UiBatchKind::Font => {
                         pass.set_pipeline(&self.overlay_pipeline);
                         pass.set_bind_group(0, &self.ui_bind_group, &[]);
+                    }
+                    UiBatchKind::Icon => {
+                        pass.set_pipeline(&self.gui_overlay_pipeline);
+                        pass.set_bind_group(0, &self.icon_gui_bind_group, &[]);
+                    }
+                    UiBatchKind::IconGlint => {
+                        if !self.glint.bind(&mut pass) {
+                            continue;
+                        }
                     }
                     UiBatchKind::Gui => {
                         if let Some(gui_bg) = &self.gui_bind_group {
@@ -1375,6 +1771,8 @@ struct TerrainPipelineState {
     depth_write: bool,
     depth_compare: wgpu::CompareFunction,
     blend: wgpu::BlendState,
+    bias: wgpu::DepthBiasState,
+    cull_mode: Option<wgpu::Face>,
 }
 
 impl TerrainPipelineState {
@@ -1387,6 +1785,19 @@ impl TerrainPipelineState {
             depth_write: true,
             depth_compare: wgpu::CompareFunction::Less,
             blend: wgpu::BlendState::REPLACE,
+            bias: wgpu::DepthBiasState::default(),
+            cull_mode: Some(wgpu::Face::Back),
+        }
+    }
+
+    /// Item icons: the opaque pass without back-face culling, because the
+    /// GUI chains mirror space and the reference draws icons uncullled.
+    fn icon() -> Self {
+        Self {
+            label: "icon pipeline",
+            fragment_entry: "fs_icon",
+            cull_mode: None,
+            ..Self::opaque()
         }
     }
 
@@ -1411,6 +1822,40 @@ impl TerrainPipelineState {
                     operation: wgpu::BlendOperation::Add,
                 },
             },
+            bias: wgpu::DepthBiasState::default(),
+            cull_mode: Some(wgpu::Face::Back),
+        }
+    }
+
+    /// Break cracks: the destroy-stage texture multiplies the colour below
+    /// it twice (`DstColor`/`SrcColor`) and is pulled towards the camera so
+    /// it does not fight the block faces (MCP
+    /// `RenderGlobal.drawBlockDamageTexture`: `tryBlendFuncSeparate(774, 768,
+    /// 1, 0)`, `doPolygonOffset(-3, -3)`).
+    fn cracks() -> Self {
+        Self {
+            label: "terrain crack pipeline",
+            fragment_entry: "fs_crack",
+            depth_write: false,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            blend: wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::Dst,
+                    dst_factor: wgpu::BlendFactor::Src,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            },
+            bias: wgpu::DepthBiasState {
+                constant: -3,
+                slope_scale: -3.0,
+                clamp: 0.0,
+            },
+            cull_mode: Some(wgpu::Face::Back),
         }
     }
 }
@@ -1444,7 +1889,7 @@ fn create_terrain_pipeline(
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
+            cull_mode: state.cull_mode,
             unclipped_depth: false,
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
@@ -1454,7 +1899,7 @@ fn create_terrain_pipeline(
             depth_write_enabled: Some(state.depth_write),
             depth_compare: Some(state.depth_compare),
             stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
+            bias: state.bias,
         }),
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
@@ -1478,7 +1923,7 @@ fn create_terrain_pipeline(
 /// Both slices are required: wgpu rejects a zero-sized buffer, and a malformed
 /// pass with indices but no vertices cannot be drawn. Valid `umicraft-mesh`
 /// output always has four vertices per face.
-fn create_gpu_mesh_pass(
+pub(crate) fn create_gpu_mesh_pass(
     device: &wgpu::Device,
     label: &str,
     vertices: &[Vertex],
@@ -1505,10 +1950,25 @@ fn create_gpu_mesh_pass(
 }
 
 /// Binds and draws one uploaded mesh pass.
-fn draw_gpu_pass(pass: &mut wgpu::RenderPass<'_>, mesh: &GpuMeshPass) {
-    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-    pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+pub(crate) fn draw_gpu_pass(pass: &mut wgpu::RenderPass<'_>, mesh: &GpuMeshPass) {
+    draw_gpu_pass_buffers(
+        pass,
+        &mesh.vertex_buffer,
+        &mesh.index_buffer,
+        mesh.index_count,
+    );
+}
+
+/// Binds and draws the first `index_count` indices of two mesh buffers.
+pub(crate) fn draw_gpu_pass_buffers(
+    pass: &mut wgpu::RenderPass<'_>,
+    vertices: &wgpu::Buffer,
+    indices: &wgpu::Buffer,
+    index_count: u32,
+) {
+    pass.set_vertex_buffer(0, vertices.slice(..));
+    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+    pass.draw_indexed(0..index_count, 0, 0..1);
 }
 
 /// The chunk centre used for transparent sorting: the middle of the 16×16
@@ -1601,11 +2061,13 @@ fn create_font_bind_group(
     })
 }
 
-fn create_overlay_pipeline(
+/// Builds a UI overlay pipeline over [`OverlayVertex`] quads with `blend`.
+pub(crate) fn create_overlay_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     bind_group_layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
+    blend: wgpu::BlendState,
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("overlay pipeline layout"),
@@ -1640,7 +2102,7 @@ fn create_overlay_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -1784,5 +2246,25 @@ mod tests {
         assert_eq!(image.rgba.len(), 70 * 48 * 4);
         let first = &image.rgba[..3];
         assert!(image.rgba.chunks_exact(4).any(|pixel| &pixel[..3] != first));
+    }
+
+    /// The terrain shader is only compiled on a GPU device; this parses and
+    /// validates it (all three fragment entry points) without one.
+    #[test]
+    fn the_terrain_shader_is_valid_wgsl() {
+        let module =
+            naga::front::wgsl::parse_str(include_str!("terrain.wgsl")).expect("the shader parses");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("the shader validates");
+        for entry in ["fs_main", "fs_icon", "fs_transparent", "fs_crack"] {
+            assert!(
+                module.entry_points.iter().any(|point| point.name == entry),
+                "missing {entry}"
+            );
+        }
     }
 }

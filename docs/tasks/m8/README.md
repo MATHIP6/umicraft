@@ -1,5 +1,10 @@
 # M8 Workstream cards and launch guide
 
+> **Status note (2026-10-26):** M8 was recorded as complete, but it is partial and
+> defective (see [`docs/roadmap-review.md`](../../roadmap-review.md) §3.3). Its remaining
+> work moves to milestone P5 of [`ROADMAP.md`](../../../ROADMAP.md). The text below is kept
+> as the historical record of the original plan.
+
 M8 is the entity system, models, skins and rendering milestone (spec §12.2, ADR-0015).
 This directory holds the launch cards for the workstreams. The contract they
 compile against is

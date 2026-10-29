@@ -89,3 +89,14 @@ texture sprites in slots (the HUD's fallback text rendering is reused).
   pipeline is introduced.
 - The transaction counter and the automatic echo of rejected confirmations
   prevent the server desync that the acceptance criteria test for.
+
+## Amendment (2026-10-26)
+
+The consequence stating that the `held_item` and `equipment` fields of `Game`
+(`crates/umicraft-client/src/game.rs`) are replaced by the `WindowManager`
+does not match the code: both fields still exist. `Entity Equipment` packets
+for the local player still update them, and the armour value is still derived
+from `equipment` (`total_armor`) instead of from the inventory armour slots.
+The `WindowManager` is therefore not yet the single source of truth for the
+local player's items. Removing both fields and reading the armour bar from
+slots 5–8 is planned in milestone P4 of `ROADMAP.md`.

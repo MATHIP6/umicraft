@@ -42,9 +42,11 @@
 
 pub mod atlas;
 pub mod blockstate;
+pub mod display;
 pub mod entity;
 pub mod error;
 pub mod geometry;
+pub mod item;
 pub mod model;
 pub mod registry;
 

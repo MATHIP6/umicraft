@@ -31,27 +31,46 @@
 //! The rules are the 1.8 ones and every constant is cited in
 //! `docs/sources.md`; the physics itself is documented in [`physics`], the
 //! collision in [`collision`], the block geometry in [`shapes`], the
-//! reconciliation in [`prediction`] and the block targeting in [`raycast`].
+//! reconciliation in [`prediction`], the block targeting in [`raycast`] and
+//! the gamemodes in [`gamemode`], the block interaction rules in
+//! [`interaction`], the serverbound packets of a tick in [`traffic`] and the protocol state kept
+//! for later milestones (tab list, scoreboard, effects, border, titles) in
+//! [`server`].
 
+mod block_data;
 pub mod chat_component;
 pub mod chat_input;
 pub mod collision;
+pub mod digging;
 pub mod entity;
+pub mod gamemode;
+pub mod hand;
 pub mod input;
+pub mod interaction;
 pub mod inventory;
+pub mod item_nbt;
+pub mod item_use;
+pub mod items;
+pub mod media;
+pub mod movement;
+pub mod nbt;
 pub mod physics;
+pub mod pick;
 pub mod player_list;
 pub mod prediction;
 pub mod raycast;
 pub mod scoreboard;
+pub mod server;
 pub mod shapes;
 pub mod title;
+pub mod traffic;
+pub mod view;
 
 use glam::{DVec3, Vec3};
 
 pub use entity::{
-    BossInfo, BossTracker, EntityFlags, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
-    EntityStore,
+    BossInfo, BossTracker, EntityFlags, EntityId, EntityItem, EntityKind, EntityRecord,
+    EntityRenderSnapshot, EntityStore,
 };
 pub use input::InputIntent;
 pub use physics::Player;
@@ -119,6 +138,8 @@ pub struct RenderState {
     pub pitch: f32,
     /// Whether the player rests on the ground.
     pub on_ground: bool,
+    /// The first-person view bobbing and field-of-view modifier.
+    pub effects: view::ViewEffects,
 }
 
 /// The mutable game state owned by the game thread.
@@ -264,13 +285,65 @@ impl GameState {
             yaw: self.player.yaw,
             pitch: self.player.pitch,
             on_ground: self.player.on_ground,
+            effects: view::ViewEffects::at(&self.player, alpha as f32),
         }
+    }
+
+    /// Applies the flight abilities the server announced
+    /// (`Player Abilities`, 0x39) and the no-clip flag of the gamemode.
+    pub fn set_abilities(&mut self, allow_flying: bool, flying: bool, fly_speed: f32) {
+        self.player.allow_flying = allow_flying;
+        self.player.flying = flying;
+        self.player.fly_speed = fly_speed;
+    }
+
+    /// Applies the movement stats of the server state (speed attribute, Jump
+    /// Boost, Blindness), the walking speed of the abilities and whether the
+    /// food level allows a sprint.
+    pub fn set_movement(
+        &mut self,
+        stats: movement::MovementStats,
+        walk_speed: f32,
+        well_fed: bool,
+    ) {
+        self.player.movement_speed = stats.speed;
+        self.player.jump_boost = stats.jump_boost;
+        self.player.blinded = stats.blinded;
+        self.player.walk_speed = walk_speed;
+        self.player.well_fed = well_fed;
+    }
+
+    /// Sets the Depth Strider level of the worn boots.
+    pub fn set_depth_strider(&mut self, level: u8) {
+        self.player.depth_strider = level;
+    }
+
+    /// Replaces the motion of the player (`Entity Velocity`, MCP
+    /// `Entity.setVelocity`).
+    pub fn set_velocity(&mut self, velocity: DVec3) {
+        self.player.velocity = velocity;
+    }
+
+    /// Adds to the motion of the player (the push of an `Explosion`).
+    pub fn add_velocity(&mut self, velocity: DVec3) {
+        self.player.velocity += velocity;
+    }
+
+    /// Makes the player walk through blocks (spectator mode).
+    pub fn set_no_clip(&mut self, no_clip: bool) {
+        self.player.no_clip = no_clip;
     }
 
     /// The kinematic state of the player.
     #[must_use]
     pub fn player(&self) -> &Player {
         &self.player
+    }
+
+    /// The feet position of the player on the previous tick.
+    #[must_use]
+    pub fn previous_position(&self) -> DVec3 {
+        self.previous_position
     }
 
     /// The feet position of the player.

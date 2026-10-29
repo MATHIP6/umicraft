@@ -2,11 +2,42 @@
 
 //! Pure game-level entity types, identifiers and render snapshots.
 
+use std::sync::Arc;
+
 use glam::{DVec3, Vec3};
+use umicraft_protocol::packets::play::ItemStack;
 
 /// Unique identifier of an entity in the world (32-bit signed network ID).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EntityId(pub i32);
+
+/// An item stack as an entity carries it: held, dropped or framed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityItem {
+    /// Numeric item id (always non-negative).
+    pub item_id: i16,
+    /// Item metadata (damage value, dye colour, ...).
+    pub damage: i16,
+    /// Number of items in the stack.
+    pub count: u8,
+    /// Raw NBT compound bytes, shared so snapshots stay cheap to clone.
+    pub nbt: Option<Arc<[u8]>>,
+}
+
+impl EntityItem {
+    /// Converts a wire stack; an empty stack (item id below zero) is `None`.
+    ///
+    /// A negative stack size is clamped to zero.
+    #[must_use]
+    pub fn from_stack(stack: &ItemStack) -> Option<Self> {
+        (stack.item_id >= 0).then(|| Self {
+            item_id: stack.item_id,
+            damage: stack.damage,
+            count: u8::try_from(stack.stack_size).unwrap_or(0),
+            nbt: stack.nbt.as_deref().map(Arc::from),
+        })
+    }
+}
 
 /// The category of an entity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -83,6 +114,8 @@ pub enum EntityKind {
     Item,
     /// Projectile arrow.
     Arrow,
+    /// Item frame hanging on a wall.
+    ItemFrame,
     /// Other mob or entity type by raw numeric identifier.
     Other(u8),
 }
@@ -134,6 +167,7 @@ impl EntityKind {
         match id {
             2 => Self::Item,
             60 => Self::Arrow,
+            71 => Self::ItemFrame,
             other => Self::Other(other),
         }
     }
@@ -223,8 +257,16 @@ pub struct EntityRecord {
     pub previous_limb_swing_amount: f32,
     /// Player UUID if this is a player entity.
     pub uuid: Option<[u8; 16]>,
-    /// Numeric ID of the held item (or 0 for empty hand).
-    pub held_item: Option<u16>,
+    /// The stack in the hand (players).
+    pub held: Option<EntityItem>,
+    /// The dropped stack (items) or the stack inside the frame (item frames).
+    pub item: Option<EntityItem>,
+    /// Ticks the entity has lived since it was spawned.
+    pub age_ticks: u32,
+    /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
+    pub frame_direction: u8,
+    /// Rotation step (0..=7) of the item inside an item frame.
+    pub frame_rotation: u8,
     /// Visual flags.
     pub flags: EntityFlags,
     /// Entity health from metadata index 6 (if present).
@@ -234,6 +276,62 @@ pub struct EntityRecord {
 }
 
 impl EntityRecord {
+    /// Advances the limb animation by the horizontal distance moved during
+    /// the tick (`previous_position` to `position`).
+    pub fn update_limbs(&mut self) {
+        let dx = self.position.x - self.previous_position.x;
+        let dz = self.position.z - self.previous_position.z;
+        let speed = (dx * dx + dz * dz).sqrt() as f32;
+
+        self.previous_limb_swing_amount = self.limb_swing_amount;
+        self.limb_swing += speed * 4.0;
+        let target_amount = (speed * 4.0).clamp(0.0, 1.0);
+        self.limb_swing_amount += (target_amount - self.limb_swing_amount) * 0.4;
+    }
+
+    /// Moves the entity to where the simulation put it this tick, without
+    /// interpolation, and animates its limbs. For the local player, whose
+    /// position is already the predicted one.
+    pub fn follow(&mut self, position: DVec3, yaw: f32, pitch: f32, flags: EntityFlags) {
+        self.previous_position = self.position;
+        self.position = position;
+        self.previous_yaw = self.yaw;
+        self.previous_head_yaw = self.head_yaw;
+        self.previous_pitch = self.pitch;
+        self.yaw = yaw;
+        self.head_yaw = yaw;
+        self.pitch = pitch;
+        self.flags = flags;
+        self.update_limbs();
+    }
+
+    /// The data the render thread interpolates between two ticks.
+    #[must_use]
+    pub fn frame_data(&self) -> EntityFrameData {
+        EntityFrameData {
+            id: self.id,
+            kind: self.kind,
+            prev_position: self.previous_position.as_vec3(),
+            position: self.position.as_vec3(),
+            prev_yaw: self.previous_yaw,
+            yaw: self.yaw,
+            prev_pitch: self.previous_pitch,
+            pitch: self.pitch,
+            prev_head_yaw: self.previous_head_yaw,
+            head_yaw: self.head_yaw,
+            limb_swing: self.limb_swing,
+            prev_limb_swing_amount: self.previous_limb_swing_amount,
+            limb_swing_amount: self.limb_swing_amount,
+            uuid: self.uuid,
+            held: self.held.clone(),
+            item: self.item.clone(),
+            age_ticks: self.age_ticks,
+            frame_direction: self.frame_direction,
+            frame_rotation: self.frame_rotation,
+            flags: self.flags,
+        }
+    }
+
     /// Creates a new entity record at the given initial position.
     #[must_use]
     pub fn new(id: EntityId, kind: EntityKind, position: DVec3, yaw: f32, pitch: f32) -> Self {
@@ -258,7 +356,11 @@ impl EntityRecord {
             limb_swing_amount: 0.0,
             previous_limb_swing_amount: 0.0,
             uuid: None,
-            held_item: None,
+            held: None,
+            item: None,
+            age_ticks: 0,
+            frame_direction: 0,
+            frame_rotation: 0,
             flags: EntityFlags::default(),
             health: None,
             interpolation_steps: 0,
@@ -270,7 +372,7 @@ impl EntityRecord {
 ///
 /// Carries the previous and current tick states so the render thread can
 /// produce smoothly interpolated snapshots at any sub-tick fraction.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EntityFrameData {
     /// Unique entity ID.
     pub id: EntityId,
@@ -300,8 +402,16 @@ pub struct EntityFrameData {
     pub limb_swing_amount: f32,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
-    /// Numeric ID of the held item.
-    pub held_item: Option<u16>,
+    /// The stack in the hand (players).
+    pub held: Option<EntityItem>,
+    /// The dropped stack (items) or the stack inside the frame (item frames).
+    pub item: Option<EntityItem>,
+    /// Ticks lived at the current simulation tick.
+    pub age_ticks: u32,
+    /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
+    pub frame_direction: u8,
+    /// Rotation step (0..=7) of the item inside an item frame.
+    pub frame_rotation: u8,
     /// Entity visual flags.
     pub flags: EntityFlags,
 }
@@ -331,7 +441,11 @@ impl EntityFrameData {
             limb_swing,
             limb_swing_amount,
             uuid: self.uuid,
-            held_item: self.held_item,
+            held: self.held.clone(),
+            item: self.item.clone(),
+            age: self.age_ticks as f32 + a,
+            frame_direction: self.frame_direction,
+            frame_rotation: self.frame_rotation,
             flags: self.flags,
         }
     }
@@ -349,7 +463,7 @@ fn interpolate_angle_deg(prev: f32, current: f32, alpha: f32) -> f32 {
 }
 
 /// Immutable snapshot of one entity prepared for the render thread.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EntityRenderSnapshot {
     /// Unique entity ID.
     pub id: EntityId,
@@ -369,8 +483,45 @@ pub struct EntityRenderSnapshot {
     pub limb_swing_amount: f32,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
-    /// Numeric ID of the held item.
-    pub held_item: Option<u16>,
+    /// The stack in the hand (players).
+    pub held: Option<EntityItem>,
+    /// The dropped stack (items) or the stack inside the frame (item frames).
+    pub item: Option<EntityItem>,
+    /// Ticks lived plus the interpolation alpha, for the bob and spin of items.
+    pub age: f32,
+    /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
+    pub frame_direction: u8,
+    /// Rotation step (0..=7) of the item inside an item frame.
+    pub frame_rotation: u8,
     /// Entity visual flags.
     pub flags: EntityFlags,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_wire_stack_is_no_item() {
+        assert_eq!(EntityItem::from_stack(&ItemStack::EMPTY), None);
+    }
+
+    #[test]
+    fn a_wire_stack_converts_with_its_nbt() {
+        let stack = ItemStack {
+            item_id: 276,
+            stack_size: 3,
+            damage: 5,
+            nbt: Some(vec![10, 0, 0, 0]),
+        };
+        let item = EntityItem::from_stack(&stack).expect("not empty");
+        assert_eq!((item.item_id, item.damage, item.count), (276, 5, 3));
+        assert_eq!(item.nbt.as_deref(), Some(&[10u8, 0, 0, 0][..]));
+    }
+
+    #[test]
+    fn item_frames_are_object_type_71() {
+        assert_eq!(EntityKind::from_object_type(71), EntityKind::ItemFrame);
+        assert_eq!(EntityKind::from_object_type(2), EntityKind::Item);
+    }
 }

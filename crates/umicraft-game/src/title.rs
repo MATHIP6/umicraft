@@ -64,11 +64,11 @@ impl TitleState {
     /// Applies a `Title` packet.
     pub fn apply(&mut self, packet: &Title) {
         match packet {
-            Title::Title(json) => {
+            Title::Title { json } => {
                 self.title.clone_from(json);
                 self.remaining = self.total();
             }
-            Title::Subtitle(json) => self.subtitle.clone_from(json),
+            Title::Subtitle { json } => self.subtitle.clone_from(json),
             Title::Times {
                 fade_in,
                 stay,
@@ -206,7 +206,9 @@ mod tests {
     use super::*;
 
     fn title(json: &str) -> Title {
-        Title::Title(json.to_string())
+        Title::Title {
+            json: json.to_string(),
+        }
     }
 
     fn run(state: &mut TitleState, ticks: i32) {
@@ -230,7 +232,9 @@ mod tests {
     #[test]
     fn the_subtitle_does_not_start_the_timer() {
         let mut state = TitleState::new();
-        state.apply(&Title::Subtitle("sub".to_string()));
+        state.apply(&Title::Subtitle {
+            json: "sub".to_string(),
+        });
         assert_eq!(state.subtitle(), None);
         state.apply(&title("t"));
         assert_eq!(state.subtitle(), Some("sub"));

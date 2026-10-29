@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `Update Score` (0x3C, clientbound, play): set or remove one score line.
+//! `Update Score` (0x3C, clientbound, play): sets or removes one score.
 //!
 //! Layout (MCP `S3CPacketUpdateScore`, `readPacketData`): the score holder
-//! name (cap 40), a VarInt action (`0` change, `1` remove), the objective
-//! name (cap 16), and, unless the action removes the score, the value as a
-//! VarInt. An action ordinal other than `0` or `1` makes the reference client
-//! throw, so it is an error here.
+//! name (up to 40 chars), a VarInt action (0 change, 1 remove), the
+//! objective name (up to 16 chars) and, for a change only, a VarInt value.
+//! The reference client indexes an enum with the action and crashes on an
+//! unknown one; here it is [`ProtocolError::Invariant`].
 
 use std::io::{Read, Write};
 
@@ -15,20 +15,29 @@ use crate::packets::EncodablePacket;
 use crate::types::{read_string, write_string};
 use crate::varint::{read_var_i32, write_var_u32};
 
-/// Maximum characters of a score holder name.
-const HOLDER_CHARS: usize = 40;
-/// Maximum characters of an objective name.
-const OBJECTIVE_CHARS: usize = 16;
+const MAX_NAME_CHARS: usize = 40;
+const MAX_OBJECTIVE_CHARS: usize = 16;
 
 /// `Update Score` (0x3C, clientbound, play).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdateScore {
-    /// The score holder: a player name or an arbitrary string.
-    pub name: String,
-    /// The objective the score belongs to.
-    pub objective: String,
-    /// The new value, or `None` when the score is removed.
-    pub value: Option<i32>,
+pub enum UpdateScore {
+    /// Sets the score of `name` in `objective`.
+    Change {
+        /// Score holder (player name or entity UUID string).
+        name: String,
+        /// Objective name.
+        objective: String,
+        /// New score.
+        value: i32,
+    },
+    /// Removes the score of `name` (from `objective`, or from all objectives
+    /// when `objective` is empty).
+    Remove {
+        /// Score holder.
+        name: String,
+        /// Objective name; may be empty.
+        objective: String,
+    },
 }
 
 impl UpdateScore {
@@ -38,30 +47,22 @@ impl UpdateScore {
     /// Reads the body.
     ///
     /// # Errors
-    /// [`ProtocolError`] on truncation, an unknown action or an over-long
-    /// string.
+    /// [`ProtocolError`] on truncation, an invalid string or an unknown action.
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        let name = read_string(reader, HOLDER_CHARS)?;
-        let remove = match read_var_i32(reader)? {
-            0 => false,
-            1 => true,
-            other => {
-                return Err(ProtocolError::Invariant(format!(
-                    "unknown score action {other}"
-                )))
-            }
-        };
-        let objective = read_string(reader, OBJECTIVE_CHARS)?;
-        let value = if remove {
-            None
-        } else {
-            Some(read_var_i32(reader)?)
-        };
-        Ok(Self {
-            name,
-            objective,
-            value,
-        })
+        let name = read_string(reader, MAX_NAME_CHARS)?;
+        let action = read_var_i32(reader)?;
+        let objective = read_string(reader, MAX_OBJECTIVE_CHARS)?;
+        match action {
+            0 => Ok(Self::Change {
+                name,
+                objective,
+                value: read_var_i32(reader)?,
+            }),
+            1 => Ok(Self::Remove { name, objective }),
+            other => Err(ProtocolError::Invariant(format!(
+                "unknown score action {other}"
+            ))),
+        }
     }
 }
 
@@ -71,13 +72,23 @@ impl EncodablePacket for UpdateScore {
     }
 
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        write_string(writer, &self.name, HOLDER_CHARS)?;
-        write_var_u32(writer, u32::from(self.value.is_none()))?;
-        write_string(writer, &self.objective, OBJECTIVE_CHARS)?;
-        if let Some(value) = self.value {
-            write_var_u32(writer, value as u32)?;
+        match self {
+            Self::Change {
+                name,
+                objective,
+                value,
+            } => {
+                write_string(writer, name, MAX_NAME_CHARS)?;
+                write_var_u32(writer, 0)?;
+                write_string(writer, objective, MAX_OBJECTIVE_CHARS)?;
+                write_var_u32(writer, *value as u32)
+            }
+            Self::Remove { name, objective } => {
+                write_string(writer, name, MAX_NAME_CHARS)?;
+                write_var_u32(writer, 1)?;
+                write_string(writer, objective, MAX_OBJECTIVE_CHARS)
+            }
         }
-        Ok(())
     }
 }
 
@@ -85,39 +96,37 @@ impl EncodablePacket for UpdateScore {
 mod tests {
     use super::*;
 
-    fn round_trip(packet: &UpdateScore) -> UpdateScore {
+    fn check(packet: UpdateScore, expected: &[u8]) {
         let mut buffer = Vec::new();
         packet.encode_body(&mut buffer).unwrap();
-        UpdateScore::decode(&mut &buffer[..]).unwrap()
+        assert_eq!(buffer, expected);
+        assert_eq!(UpdateScore::decode(&mut &expected[..]).unwrap(), packet);
     }
 
     #[test]
-    fn a_change_carries_its_value_including_negative_ones() {
-        for value in [0, 7, -3, i32::MAX, i32::MIN] {
-            let packet = UpdateScore {
-                name: "Steve".to_string(),
-                objective: "kills".to_string(),
-                value: Some(value),
-            };
-            assert_eq!(round_trip(&packet), packet);
-        }
+    fn update_score_wire_shapes() {
+        check(
+            UpdateScore::Change {
+                name: "Bob".to_string(),
+                objective: "k".to_string(),
+                value: 5,
+            },
+            &[3, b'B', b'o', b'b', 0, 1, b'k', 5],
+        );
+        check(
+            UpdateScore::Remove {
+                name: "Bob".to_string(),
+                objective: String::new(),
+            },
+            &[3, b'B', b'o', b'b', 1, 0],
+        );
     }
 
     #[test]
-    fn a_removal_has_no_value() {
-        let packet = UpdateScore {
-            name: "Steve".to_string(),
-            objective: "kills".to_string(),
-            value: None,
-        };
-        assert_eq!(round_trip(&packet), packet);
-    }
-
-    #[test]
-    fn an_unknown_action_is_rejected() {
-        let mut buffer = Vec::new();
-        write_string(&mut buffer, "x", HOLDER_CHARS).unwrap();
-        buffer.push(2);
-        assert!(UpdateScore::decode(&mut &buffer[..]).is_err());
+    fn hostile_update_score_is_an_error() {
+        assert!(UpdateScore::decode(&mut &[][..]).is_err());
+        assert!(UpdateScore::decode(&mut &[1, b'B', 2, 0][..]).is_err());
+        // Change without its value.
+        assert!(UpdateScore::decode(&mut &[1, b'B', 0, 0][..]).is_err());
     }
 }

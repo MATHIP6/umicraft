@@ -175,6 +175,14 @@ pub enum UiBatchKind {
     Font,
     /// GUI atlas pipeline (RGBA, direct sampling).
     Gui,
+    /// The same pipeline as [`UiBatchKind::Gui`], bound to the item icon
+    /// atlas instead of the GUI texture.
+    Icon,
+    /// The enchantment glint over the icon quad just before it: the same
+    /// vertex layout, but the vertex colour carries the icon's atlas UV
+    /// rectangle `[u_min, v_min, u_max, v_max]` so the shader can place the
+    /// glint inside the icon. Skipped while no glint texture is uploaded.
+    IconGlint,
 }
 
 /// One contiguous run of vertices drawn with the same pipeline.
@@ -289,6 +297,19 @@ impl UiPass {
     /// run of the same pipeline kind becomes one [`UiBatch`], available via
     /// [`UiPass::batches`].
     pub fn rebuild(&mut self, draw_list: &DrawList, atlas: &FontAtlas) {
+        self.rebuild_with_icons(draw_list, atlas, &|_| None);
+    }
+
+    /// Like [`UiPass::rebuild`], and draws `Item` commands from the icon
+    /// atlas: `icon_uv` maps an icon key to its `[u_min, v_min, u_max,
+    /// v_max]` rectangle, or `None` while the icon is not rendered (the item
+    /// is skipped).
+    pub fn rebuild_with_icons(
+        &mut self,
+        draw_list: &DrawList,
+        atlas: &FontAtlas,
+        icon_uv: &dyn Fn(u64) -> Option<[f32; 4]>,
+    ) {
         self.clear();
         let mut current_kind = UiBatchKind::Font;
         let mut batch_start: u32 = 0;
@@ -322,6 +343,24 @@ impl UiPass {
                         &mut batch_start,
                     );
                     self.push_image(*src, *dst, *color);
+                }
+                DrawCommand::Item { key, dst, glint } => {
+                    if let Some(uv) = icon_uv(*key) {
+                        self.flush_batch_if_needed(
+                            UiBatchKind::Icon,
+                            &mut current_kind,
+                            &mut batch_start,
+                        );
+                        self.push_image(uv, *dst, [1.0; 4]);
+                        if *glint {
+                            self.flush_batch_if_needed(
+                                UiBatchKind::IconGlint,
+                                &mut current_kind,
+                                &mut batch_start,
+                            );
+                            self.push_image(uv, *dst, uv);
+                        }
+                    }
                 }
                 DrawCommand::PushClip { rect } => self.push_clip(*rect),
                 DrawCommand::PopClip => self.pop_clip(),
@@ -550,6 +589,49 @@ mod tests {
             (actual[0] - expected[0]).abs() < 1e-5 && (actual[1] - expected[1]).abs() < 1e-5,
             "expected {expected:?}, got {actual:?}"
         );
+    }
+
+    #[test]
+    fn items_draw_from_the_icon_atlas_in_command_order() {
+        let mut list = DrawList::new();
+        list.rect(Rect::new(0.0, 0.0, 16.0, 16.0), [1.0; 4]);
+        list.item(7, Rect::new(0.0, 0.0, 16.0, 16.0), false);
+        list.item(8, Rect::new(16.0, 0.0, 16.0, 16.0), false);
+        let mut pass = UiPass::new(64, 64);
+        pass.rebuild_with_icons(&list, &atlas(), &|key| {
+            (key == 7).then_some([0.0, 0.0, 0.5, 0.5])
+        });
+        let kinds: Vec<UiBatchKind> = pass.batches().iter().map(|batch| batch.kind).collect();
+        assert_eq!(kinds, [UiBatchKind::Font, UiBatchKind::Icon]);
+        // Key 8 has no rendered icon yet and draws nothing.
+        assert_eq!(pass.batches()[1].count, 6);
+    }
+
+    #[test]
+    fn a_glint_item_emits_an_icon_batch_then_a_glint_batch_over_the_same_quad() {
+        let mut list = DrawList::new();
+        list.item(7, Rect::new(0.0, 0.0, 16.0, 16.0), true);
+        list.item(7, Rect::new(16.0, 0.0, 16.0, 16.0), false);
+        let uv = [0.0, 0.25, 0.5, 0.75];
+        let mut pass = UiPass::new(64, 64);
+        pass.rebuild_with_icons(&list, &atlas(), &|_| Some(uv));
+        let batches: Vec<(UiBatchKind, u32)> = pass
+            .batches()
+            .iter()
+            .map(|batch| (batch.kind, batch.count))
+            .collect();
+        assert_eq!(
+            batches,
+            [
+                (UiBatchKind::Icon, 6),
+                (UiBatchKind::IconGlint, 6),
+                (UiBatchKind::Icon, 6)
+            ]
+        );
+        // The glint quad repeats the icon quad and carries the atlas rect.
+        let vertices = pass.vertices();
+        assert_eq!(vertices[0].position, vertices[6].position);
+        assert_eq!(vertices[6].color, uv);
     }
 
     #[test]

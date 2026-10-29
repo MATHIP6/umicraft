@@ -3,7 +3,10 @@
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
 (protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
 
-Status: **M8 complete**; M9 (inventory) and M10 (chat, HUD, options) have landed, see `docs/tasks/m10/README.md` for what M10 leaves out.
+Status: the project follows [`ROADMAP.md`](ROADMAP.md) (parity with the vanilla 1.8.8
+client); the current milestone is **P1** (protocol completeness and vanilla traffic). M0–M7 are
+done or nearly so; **M8 (entities) is partial and defective**, see
+[`docs/roadmap-review.md`](docs/roadmap-review.md) §3.3 — its remaining work moves to P5.
 The client logs in offline-mode, decodes chunk/block packets into a compact
 world, runs the player simulation on a game thread, meshes chunks on worker
 threads, and renders them with wgpu either in a window or to an offscreen PNG.

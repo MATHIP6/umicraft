@@ -17,7 +17,7 @@
 //! `umicraft-ui`); no Mojang asset is embedded here. The real font, when the
 //! user has one, is read at runtime by [`crate::ui_font`].
 
-use umicraft_render::{Camera, Overlay, Renderer};
+use umicraft_render::{Camera, NoIcons, Overlay, Renderer};
 use umicraft_ui::debug_screen::DebugScreen;
 use umicraft_ui::widgets::ROW_HEIGHT;
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
@@ -223,7 +223,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
     let camera = Camera::default();
     let overlay = Overlay::new(args.width, args.height);
-    renderer.render_with_ui(&camera, &overlay, &demo.draw_list)?;
+    renderer.render_with_ui(&camera, &overlay, &demo.draw_list, &mut NoIcons)?;
     let image = renderer.read_pixels()?;
     write_png(path, &image.rgba, image.width, image.height)?;
     println!(
@@ -291,7 +291,7 @@ list scroll offset: 72.0
         let camera = Camera::default();
         let overlay = Overlay::new(320, 180);
         renderer
-            .render_with_ui(&camera, &overlay, &demo.draw_list)
+            .render_with_ui(&camera, &overlay, &demo.draw_list, &mut NoIcons)
             .expect("render");
         let image = renderer.read_pixels().expect("readback");
         write_png(&path, &image.rgba, image.width, image.height).expect("png");

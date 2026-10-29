@@ -24,17 +24,18 @@ pub(crate) mod style;
 mod util;
 
 pub mod button;
-pub mod inventory;
+pub mod death;
+pub mod item_overlay;
 pub mod list;
 pub mod panel;
 pub mod slider;
 pub mod slot;
 pub mod text_field;
 
+pub use crate::screens::gui_scale;
 pub use button::{button, button_enabled, button_tinted};
-pub use inventory::{
-    container_layout, gui_scale, player_inventory_layout, ContainerLayout, InventoryLayout,
-};
+pub use death::{death_layout, death_screen, DeathAction, DeathLayout, BUTTON_DELAY_TICKS};
+pub use item_overlay::{draw_item, durability_bar, DurabilityBar};
 pub use list::{list, ListState, ROW_HEIGHT, SCROLLBAR_WIDTH};
 pub use panel::{panel, PANEL_INSET};
 pub use slider::{slider, SliderState};

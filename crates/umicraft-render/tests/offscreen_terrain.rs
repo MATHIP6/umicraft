@@ -346,3 +346,153 @@ fn a_vertex_tint_multiplies_the_texel_colour() {
         "a half-red tint must damp the red channel: {half:?}"
     );
 }
+
+/// The vertices and indices of a quad standing 1 mm in front of the quad at
+/// `z`, as the crack mesh of a block face.
+fn crack_quad(z: f32, layer: u32) -> (Vec<Vertex>, Vec<u32>) {
+    let mesh = quad(z + 0.001, (-8.0, 8.0), (60.0, 100.0), layer, TORCH);
+    (mesh.vertices, mesh.indices)
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_crack_darkens_the_surface_below_it_and_clearing_removes_it() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    renderer
+        .set_block_atlas(
+            1,
+            1,
+            3,
+            &synthetic_atlas(&[[200, 200, 200, 255], [100, 100, 100, 255], [0, 0, 0, 0]]),
+        )
+        .expect("upload synthetic atlas");
+    renderer.upload_mesh(
+        ChunkPos::new(0, 0),
+        &quad(-5.0, (-8.0, 8.0), (60.0, 100.0), 0, TORCH),
+    );
+    let plain = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+
+    let (vertices, indices) = crack_quad(-5.0, 1);
+    renderer.set_block_cracks(&vertices, &indices);
+    let cracked = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(
+        u32::from(cracked[0]) + 20 < u32::from(plain[0]),
+        "the crack must darken the surface: {plain:?} -> {cracked:?}"
+    );
+
+    // A transparent texel (alpha below the 0.1 test) leaves the surface alone.
+    let (vertices, indices) = crack_quad(-5.0, 2);
+    renderer.set_block_cracks(&vertices, &indices);
+    let clear = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert_eq!(clear, plain);
+
+    renderer.set_block_cracks(&[], &[]);
+    let removed = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert_eq!(removed, plain);
+}
+
+/// A camera-space triangle fan covering the middle of the screen.
+fn hand_quad(z: f32) -> Vec<umicraft_render::EntityVertex> {
+    let vertex = |x: f32, y: f32| umicraft_render::EntityVertex {
+        position: [x, y, z],
+        normal: [0.0, 0.0, 1.0],
+        uv: [0.5, 0.5],
+        light: 0xFF,
+    };
+    vec![
+        vertex(-0.2, -0.2),
+        vertex(0.2, -0.2),
+        vertex(0.2, 0.2),
+        vertex(-0.2, -0.2),
+        vertex(0.2, 0.2),
+        vertex(-0.2, 0.2),
+    ]
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn the_hand_is_drawn_over_a_nearer_world_block_and_can_be_hidden() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    // A wall half a block in front of the eyes, closer than the hand.
+    renderer.upload_mesh(
+        ChunkPos::new(0, 0),
+        &quad(-0.5, (-8.0, 8.0), (60.0, 100.0), 0, TORCH),
+    );
+    let wall = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+
+    let skin = renderer.create_entity_texture(&[255, 0, 0, 255], 1, 1);
+    renderer.set_hand(&hand_quad(-0.6), skin.bind_group());
+    let with_hand = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(
+        with_hand[0] > 150 && with_hand[1] < 80,
+        "the hand must cover the wall: wall {wall:?}, with hand {with_hand:?}"
+    );
+
+    renderer.clear_hand();
+    let hidden = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert_eq!(hidden, wall);
+}
+
+/// An animation frame written into one layer shows up in the next render.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn rewriting_a_block_layer_changes_the_next_frame() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    assert!(
+        !renderer.write_block_layer(0, &[0; 4]),
+        "the procedural array is not animated"
+    );
+    renderer
+        .set_block_atlas(1, 1, 1, &synthetic_atlas(&[[255, 0, 0, 255]]))
+        .expect("upload synthetic atlas");
+    renderer.upload_mesh(
+        ChunkPos::new(0, 0),
+        &quad(-5.0, (-8.0, 8.0), (60.0, 100.0), 0, TORCH),
+    );
+    let before = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(renderer.write_block_layer(0, &[0, 255, 0, 255]));
+    assert!(
+        !renderer.write_block_layer(1, &[0, 255, 0, 255]),
+        "no such layer"
+    );
+    assert!(!renderer.write_block_layer(0, &[0, 255]), "short buffer");
+    let after = center_pixel(&render(
+        &mut renderer,
+        &camera(),
+        RenderEnvironment::default(),
+    ));
+    assert!(before[0] > 150 && before[1] < 60, "red before: {before:?}");
+    assert!(after[1] > 150 && after[0] < 60, "green after: {after:?}");
+}

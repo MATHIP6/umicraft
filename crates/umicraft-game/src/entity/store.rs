@@ -7,8 +7,13 @@ use std::collections::BTreeMap;
 
 use glam::{DVec3, Vec3};
 
+use crate::physics::EYE_HEIGHT;
+use crate::view::ViewEffects;
+use crate::RenderState;
+
 use super::types::{
-    EntityFlags, EntityFrameData, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
+    EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
+    EntityRenderSnapshot,
 };
 
 /// The storage and simulation of non-local entities on the game thread.
@@ -38,6 +43,12 @@ impl EntityStore {
         self.entities.is_empty()
     }
 
+    /// The kind of a tracked entity.
+    #[must_use]
+    pub fn kind(&self, id: EntityId) -> Option<EntityKind> {
+        self.entities.get(&id).map(|entity| entity.kind)
+    }
+
     /// Clears all tracked entities.
     pub fn clear(&mut self) {
         self.entities.clear();
@@ -52,12 +63,12 @@ impl EntityStore {
         position: DVec3,
         yaw: f32,
         pitch: f32,
-        held_item: Option<u16>,
+        held: Option<EntityItem>,
         flags: EntityFlags,
     ) {
         let mut record = EntityRecord::new(id, EntityKind::Player, position, yaw, pitch);
         record.uuid = Some(uuid);
-        record.held_item = held_item;
+        record.held = held;
         record.flags = flags;
         self.entities.insert(id, record);
     }
@@ -86,6 +97,11 @@ impl EntityStore {
     }
 
     /// Spawns an object or item.
+    ///
+    /// `data` is the object-specific integer of `Spawn Object`; for an item
+    /// frame it is the wall direction (MCP `EntityHanging.facingDirection`
+    /// horizontal index), clamped to `0..=3`.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn_object(
         &mut self,
         id: EntityId,
@@ -94,10 +110,14 @@ impl EntityStore {
         pitch: f32,
         yaw: f32,
         velocity: Vec3,
+        data: i32,
     ) {
         let kind = EntityKind::from_object_type(object_type);
         let mut record = EntityRecord::new(id, kind, position, yaw, pitch);
         record.velocity = velocity;
+        if kind == EntityKind::ItemFrame {
+            record.frame_direction = data.clamp(0, 3) as u8;
+        }
         self.entities.insert(id, record);
     }
 
@@ -106,6 +126,28 @@ impl EntityStore {
         for &id in entity_ids {
             self.entities.remove(&EntityId(id));
         }
+    }
+
+    /// The view of an entity for the spectator camera (`Camera`, 0x43).
+    ///
+    /// The eye sits at the player eye height above the interpolated feet;
+    /// the view turns with the head yaw and the pitch (MCP
+    /// `EntityRenderer.orientCamera` follows the view entity). `None` when
+    /// the entity is not tracked, so the caller keeps the local view.
+    #[must_use]
+    pub fn camera_view(&self, id: EntityId, alpha: f32) -> Option<RenderState> {
+        let record = self.entities.get(&id)?;
+        let alpha_f64 = f64::from(alpha.clamp(0.0, 1.0));
+        let feet = record.previous_position.lerp(record.position, alpha_f64);
+        let eye = feet + DVec3::Y * EYE_HEIGHT;
+        let lerp = |from: f32, to: f32| from + (to - from) * alpha.clamp(0.0, 1.0);
+        Some(RenderState {
+            position: Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32),
+            yaw: lerp(record.previous_head_yaw, record.head_yaw).to_radians(),
+            pitch: lerp(record.previous_pitch, record.pitch).to_radians(),
+            on_ground: record.on_ground,
+            effects: ViewEffects::default(),
+        })
     }
 
     /// Applies a relative movement delta to an entity.
@@ -182,10 +224,24 @@ impl EntityStore {
         }
     }
 
-    /// Updates an entity's held item.
-    pub fn set_held_item(&mut self, id: EntityId, held_item: Option<u16>) {
+    /// Updates the stack an entity holds in its hand.
+    pub fn set_held(&mut self, id: EntityId, held: Option<EntityItem>) {
         if let Some(entity) = self.entities.get_mut(&id) {
-            entity.held_item = held_item;
+            entity.held = held;
+        }
+    }
+
+    /// Sets the dropped stack of an item entity or the stack inside a frame.
+    pub fn set_item(&mut self, id: EntityId, item: Option<EntityItem>) {
+        if let Some(entity) = self.entities.get_mut(&id) {
+            entity.item = item;
+        }
+    }
+
+    /// Sets the rotation step of the item inside a frame (masked to `0..=7`).
+    pub fn set_frame_rotation(&mut self, id: EntityId, rotation: u8) {
+        if let Some(entity) = self.entities.get_mut(&id) {
+            entity.frame_rotation = rotation & 7;
         }
     }
 
@@ -228,14 +284,8 @@ impl EntityStore {
                 entity.interpolation_steps -= 1;
             }
 
-            let dx = entity.position.x - entity.previous_position.x;
-            let dz = entity.position.z - entity.previous_position.z;
-            let speed = (dx * dx + dz * dz).sqrt() as f32;
-
-            entity.previous_limb_swing_amount = entity.limb_swing_amount;
-            entity.limb_swing += speed * 4.0;
-            let target_amount = (speed * 4.0).clamp(0.0, 1.0);
-            entity.limb_swing_amount += (target_amount - entity.limb_swing_amount) * 0.4;
+            entity.update_limbs();
+            entity.age_ticks = entity.age_ticks.saturating_add(1);
         }
     }
 
@@ -279,7 +329,11 @@ impl EntityStore {
                     limb_swing,
                     limb_swing_amount,
                     uuid: entity.uuid,
-                    held_item: entity.held_item,
+                    held: entity.held.clone(),
+                    item: entity.item.clone(),
+                    age: entity.age_ticks as f32 + alpha_f,
+                    frame_direction: entity.frame_direction,
+                    frame_rotation: entity.frame_rotation,
                     flags: entity.flags,
                 }
             })
@@ -295,36 +349,7 @@ impl EntityStore {
     pub fn frame_data(&self) -> Vec<EntityFrameData> {
         self.entities
             .values()
-            .map(|e| {
-                let prev_position = Vec3::new(
-                    e.previous_position.x as f32,
-                    e.previous_position.y as f32,
-                    e.previous_position.z as f32,
-                );
-                let position = Vec3::new(
-                    e.position.x as f32,
-                    e.position.y as f32,
-                    e.position.z as f32,
-                );
-                EntityFrameData {
-                    id: e.id,
-                    kind: e.kind,
-                    prev_position,
-                    position,
-                    prev_yaw: e.previous_yaw,
-                    yaw: e.yaw,
-                    prev_pitch: e.previous_pitch,
-                    pitch: e.pitch,
-                    prev_head_yaw: e.previous_head_yaw,
-                    head_yaw: e.head_yaw,
-                    limb_swing: e.limb_swing,
-                    prev_limb_swing_amount: e.previous_limb_swing_amount,
-                    limb_swing_amount: e.limb_swing_amount,
-                    uuid: e.uuid,
-                    held_item: e.held_item,
-                    flags: e.flags,
-                }
-            })
+            .map(EntityRecord::frame_data)
             .collect()
     }
 }
@@ -349,6 +374,82 @@ fn interpolate_angle(prev: f32, current: f32, alpha: f32) -> f32 {
 mod tests {
     use super::*;
 
+    fn sword() -> EntityItem {
+        EntityItem {
+            item_id: 276,
+            damage: 0,
+            count: 1,
+            nbt: None,
+        }
+    }
+
+    fn spawn_object_at_origin(store: &mut EntityStore, id: i32, object_type: u8, data: i32) {
+        store.spawn_object(
+            EntityId(id),
+            object_type,
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            data,
+        );
+    }
+
+    #[test]
+    fn an_item_frame_keeps_its_wall_direction() {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 71, 3);
+        spawn_object_at_origin(&mut store, 2, 71, 9);
+        spawn_object_at_origin(&mut store, 3, 2, 3);
+        let snaps = store.snapshots(0.0);
+        assert_eq!(snaps[0].kind, EntityKind::ItemFrame);
+        assert_eq!(snaps[0].frame_direction, 3);
+        assert_eq!(
+            snaps[1].frame_direction, 3,
+            "clamped to the horizontal range"
+        );
+        assert_eq!(snaps[2].frame_direction, 0, "only frames use the data");
+    }
+
+    #[test]
+    fn items_and_frame_rotations_reach_the_snapshot() {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 71, 0);
+        store.set_item(EntityId(1), Some(sword()));
+        store.set_frame_rotation(EntityId(1), 11);
+        let snap = &store.snapshots(0.0)[0];
+        assert_eq!(snap.item, Some(sword()));
+        assert_eq!(snap.frame_rotation, 3, "masked to 0..=7");
+
+        store.set_item(EntityId(1), None);
+        assert_eq!(store.snapshots(0.0)[0].item, None);
+    }
+
+    #[test]
+    fn the_age_grows_with_ticks_and_the_alpha() {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 2, 0);
+        assert!(store.snapshots(0.25)[0].age - 0.25 < 1e-6);
+        store.tick();
+        store.tick();
+        assert!((store.snapshots(0.5)[0].age - 2.5).abs() < 1e-6);
+        let from_frame = store.frame_data()[0].interpolate(0.5);
+        assert!((from_frame.age - 2.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_age_saturates() {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 2, 0);
+        store
+            .entities
+            .get_mut(&EntityId(1))
+            .expect("tracked")
+            .age_ticks = u32::MAX;
+        store.tick();
+        assert_eq!(store.entities[&EntityId(1)].age_ticks, u32::MAX);
+    }
+
     #[test]
     fn spawn_and_destroy_flow() {
         let mut store = EntityStore::new();
@@ -361,7 +462,7 @@ mod tests {
             DVec3::new(10.0, 64.0, 20.0),
             90.0,
             0.0,
-            Some(276), // diamond sword
+            Some(sword()), // diamond sword
             EntityFlags::default(),
         );
 
@@ -369,7 +470,7 @@ mod tests {
         let snapshots = store.snapshots(0.5);
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].id, player_id);
-        assert_eq!(snapshots[0].held_item, Some(276));
+        assert_eq!(snapshots[0].held, Some(sword()));
 
         store.destroy(&[10]);
         assert!(store.is_empty());
@@ -441,5 +542,29 @@ mod tests {
         // After tick 1: prev=0.0, current=1.0 → alpha 0.5 gives 0.5
         let mid = store.snapshots(0.5);
         assert!((mid[0].position.x - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_camera_view_sits_at_the_eyes_of_the_entity() {
+        let mut store = EntityStore::new();
+        let id = EntityId(5);
+        store.spawn_player(
+            id,
+            [2u8; 16],
+            DVec3::new(1.0, 64.0, 2.0),
+            90.0,
+            45.0,
+            None,
+            EntityFlags::default(),
+        );
+        let view = store.camera_view(id, 1.0).expect("tracked entity");
+        assert!((view.position.y - 65.62).abs() < 1e-4);
+        assert!((view.position.x - 1.0).abs() < 1e-4);
+        assert!((view.pitch - 45f32.to_radians()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_camera_view_of_an_unknown_entity_is_none() {
+        assert!(EntityStore::new().camera_view(EntityId(9), 1.0).is_none());
     }
 }

@@ -21,6 +21,8 @@ mod error;
 mod font;
 mod hud;
 pub mod hud_gui;
+mod items;
+mod outline;
 mod overlay;
 mod renderer;
 mod sky;
@@ -35,10 +37,12 @@ pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use hud::{
     draw as draw_hud, draw_debug_only, selected_index, status_fills, BossView, ChatInputView,
-    ChatLineView, ChatRunView, Fill, HudLayout, HudState, ItemStack, Rect, SidebarView, StatusRow,
+    ChatLineView, ChatRunView, Fill, HudLayout, HudState, Rect, SidebarView, StatusRow,
     TabEntryView, TabListView, TitleView,
 };
 pub use hud_gui::{draw_hud_gui, gui_scale, HudSheets};
+pub use items::{IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE};
+pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};
 pub use sky::SkyState;

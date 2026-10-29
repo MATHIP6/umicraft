@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `Scoreboard Objective` (0x3B, clientbound, play): create, remove or update
-//! a scoreboard objective.
+//! `Scoreboard Objective` (0x3B, clientbound, play): creates, removes or
+//! renames a scoreboard objective.
 //!
 //! Layout (MCP `S3BPacketScoreboardObjective`, `readPacketData`): the
-//! objective name (cap 16), a mode byte (`0` create, `1` remove, `2` update),
-//! and, only for modes `0` and `2`, the display name (cap 32) and the render
-//! type string (cap 16, `"integer"` or `"hearts"`). The reference client
-//! ignores any other mode byte instead of failing, so the mode is kept raw.
+//! objective name (up to 16 chars), a signed mode byte (0 create, 1 remove,
+//! 2 update) and, for create and update only, the display value (up to 32
+//! chars) and the render type string (up to 16 chars: `integer` or
+//! `hearts`). The reference client ignores any other mode byte; this
+//! decoder reports [`ProtocolError::Invariant`] instead, since the rest of
+//! the packet cannot be interpreted. An unknown render type falls back to
+//! `integer`, as in the reference client.
 
 use std::io::{Read, Write};
 
@@ -16,67 +19,113 @@ use crate::packets::play::wire::{read_i8, write_i8};
 use crate::packets::EncodablePacket;
 use crate::types::{read_string, write_string};
 
-/// The mode byte that creates an objective.
-pub const MODE_CREATE: i8 = 0;
-/// The mode byte that removes an objective.
-pub const MODE_REMOVE: i8 = 1;
-/// The mode byte that updates the display of an objective.
-pub const MODE_UPDATE: i8 = 2;
+const MAX_NAME_CHARS: usize = 16;
+const MAX_VALUE_CHARS: usize = 32;
+const MAX_RENDER_CHARS: usize = 16;
 
-/// Maximum characters of an objective name.
-const NAME_CHARS: usize = 16;
-/// Maximum characters of an objective display name.
-const DISPLAY_NAME_CHARS: usize = 32;
-/// Maximum characters of a render type.
-const RENDER_TYPE_CHARS: usize = 16;
+/// How an objective's score is drawn in the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectiveRenderType {
+    /// A plain number.
+    Integer,
+    /// Hearts.
+    Hearts,
+}
 
-/// The display fields that only the create and update modes carry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ObjectiveInfo {
-    /// The name shown to the player.
-    pub display_name: String,
-    /// How the score is drawn: `"integer"` or `"hearts"`.
-    pub render_type: String,
+impl ObjectiveRenderType {
+    fn wire_name(self) -> &'static str {
+        match self {
+            Self::Integer => "integer",
+            Self::Hearts => "hearts",
+        }
+    }
+
+    fn from_wire_name(name: &str) -> Self {
+        if name == "hearts" {
+            Self::Hearts
+        } else {
+            Self::Integer
+        }
+    }
 }
 
 /// `Scoreboard Objective` (0x3B, clientbound, play).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScoreboardObjective {
-    /// The internal objective name.
-    pub name: String,
-    /// The raw mode byte; see [`MODE_CREATE`], [`MODE_REMOVE`], [`MODE_UPDATE`].
-    pub mode: i8,
-    /// The display fields, present exactly for the create and update modes.
-    pub info: Option<ObjectiveInfo>,
+pub enum ScoreboardObjective {
+    /// Mode 0: creates an objective.
+    Create {
+        /// Objective name.
+        name: String,
+        /// Display name.
+        value: String,
+        /// Score rendering.
+        render_type: ObjectiveRenderType,
+    },
+    /// Mode 1: removes an objective.
+    Remove {
+        /// Objective name.
+        name: String,
+    },
+    /// Mode 2: changes the display name and rendering.
+    Update {
+        /// Objective name.
+        name: String,
+        /// Display name.
+        value: String,
+        /// Score rendering.
+        render_type: ObjectiveRenderType,
+    },
 }
 
 impl ScoreboardObjective {
     /// Wire packet id.
     pub const ID: u8 = 0x3B;
 
-    /// Whether `mode` carries the display fields.
-    #[must_use]
-    pub const fn mode_has_info(mode: i8) -> bool {
-        mode == MODE_CREATE || mode == MODE_UPDATE
-    }
-
     /// Reads the body.
     ///
     /// # Errors
-    /// [`ProtocolError`] on truncation or an over-long string.
+    /// [`ProtocolError`] on truncation, an invalid string or an unknown mode.
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
-        let name = read_string(reader, NAME_CHARS)?;
+        let name = read_string(reader, MAX_NAME_CHARS)?;
         let mode = read_i8(reader)?;
-        let info = if Self::mode_has_info(mode) {
-            Some(ObjectiveInfo {
-                display_name: read_string(reader, DISPLAY_NAME_CHARS)?,
-                render_type: read_string(reader, RENDER_TYPE_CHARS)?,
-            })
+        if mode == 1 {
+            return Ok(Self::Remove { name });
+        }
+        if mode != 0 && mode != 2 {
+            return Err(ProtocolError::Invariant(format!(
+                "unknown objective mode {mode}"
+            )));
+        }
+        let value = read_string(reader, MAX_VALUE_CHARS)?;
+        let render_type =
+            ObjectiveRenderType::from_wire_name(&read_string(reader, MAX_RENDER_CHARS)?);
+        Ok(if mode == 0 {
+            Self::Create {
+                name,
+                value,
+                render_type,
+            }
         } else {
-            None
-        };
-        Ok(Self { name, mode, info })
+            Self::Update {
+                name,
+                value,
+                render_type,
+            }
+        })
     }
+}
+
+fn write_details(
+    writer: &mut impl Write,
+    name: &str,
+    mode: i8,
+    value: &str,
+    render_type: ObjectiveRenderType,
+) -> Result<(), ProtocolError> {
+    write_string(writer, name, MAX_NAME_CHARS)?;
+    write_i8(writer, mode)?;
+    write_string(writer, value, MAX_VALUE_CHARS)?;
+    write_string(writer, render_type.wire_name(), MAX_RENDER_CHARS)
 }
 
 impl EncodablePacket for ScoreboardObjective {
@@ -85,16 +134,22 @@ impl EncodablePacket for ScoreboardObjective {
     }
 
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        write_string(writer, &self.name, NAME_CHARS)?;
-        write_i8(writer, self.mode)?;
-        if Self::mode_has_info(self.mode) {
-            let info = self.info.as_ref().ok_or_else(|| {
-                ProtocolError::Invariant("objective mode needs its display fields".to_string())
-            })?;
-            write_string(writer, &info.display_name, DISPLAY_NAME_CHARS)?;
-            write_string(writer, &info.render_type, RENDER_TYPE_CHARS)?;
+        match self {
+            Self::Create {
+                name,
+                value,
+                render_type,
+            } => write_details(writer, name, 0, value, *render_type),
+            Self::Remove { name } => {
+                write_string(writer, name, MAX_NAME_CHARS)?;
+                write_i8(writer, 1)
+            }
+            Self::Update {
+                name,
+                value,
+                render_type,
+            } => write_details(writer, name, 2, value, *render_type),
         }
-        Ok(())
     }
 }
 
@@ -102,55 +157,65 @@ impl EncodablePacket for ScoreboardObjective {
 mod tests {
     use super::*;
 
-    fn round_trip(packet: &ScoreboardObjective) -> ScoreboardObjective {
+    fn check(packet: ScoreboardObjective, expected: &[u8]) {
         let mut buffer = Vec::new();
         packet.encode_body(&mut buffer).unwrap();
-        ScoreboardObjective::decode(&mut &buffer[..]).unwrap()
+        assert_eq!(buffer, expected);
+        assert_eq!(
+            ScoreboardObjective::decode(&mut &expected[..]).unwrap(),
+            packet
+        );
     }
 
     #[test]
-    fn create_carries_the_display_fields() {
-        let packet = ScoreboardObjective {
-            name: "kills".to_string(),
-            mode: MODE_CREATE,
-            info: Some(ObjectiveInfo {
-                display_name: "Kills".to_string(),
-                render_type: "integer".to_string(),
-            }),
-        };
-        assert_eq!(round_trip(&packet), packet);
+    fn scoreboard_objective_wire_shapes() {
+        let mut create = vec![1, b'o', 0, 1, b'V', 7];
+        create.extend(b"integer");
+        check(
+            ScoreboardObjective::Create {
+                name: "o".to_string(),
+                value: "V".to_string(),
+                render_type: ObjectiveRenderType::Integer,
+            },
+            &create,
+        );
+        check(
+            ScoreboardObjective::Remove {
+                name: "o".to_string(),
+            },
+            &[1, b'o', 1],
+        );
+        let mut update = vec![1, b'o', 2, 1, b'V', 6];
+        update.extend(b"hearts");
+        check(
+            ScoreboardObjective::Update {
+                name: "o".to_string(),
+                value: "V".to_string(),
+                render_type: ObjectiveRenderType::Hearts,
+            },
+            &update,
+        );
     }
 
     #[test]
-    fn remove_carries_nothing_after_the_mode() {
-        let packet = ScoreboardObjective {
-            name: "kills".to_string(),
-            mode: MODE_REMOVE,
-            info: None,
-        };
-        let mut buffer = Vec::new();
-        packet.encode_body(&mut buffer).unwrap();
-        assert_eq!(buffer.len(), 1 + 5 + 1);
-        assert_eq!(round_trip(&packet), packet);
+    fn an_unknown_render_type_is_integer() {
+        let mut bytes = vec![1, b'o', 0, 0, 3];
+        bytes.extend(b"xyz");
+        let decoded = ScoreboardObjective::decode(&mut &bytes[..]).unwrap();
+        assert!(matches!(
+            decoded,
+            ScoreboardObjective::Create {
+                render_type: ObjectiveRenderType::Integer,
+                ..
+            }
+        ));
     }
 
     #[test]
-    fn an_unknown_mode_is_kept_raw_like_the_reference_client() {
-        let packet = ScoreboardObjective {
-            name: "x".to_string(),
-            mode: 9,
-            info: None,
-        };
-        assert_eq!(round_trip(&packet), packet);
-    }
-
-    #[test]
-    fn a_name_over_sixteen_chars_is_rejected_on_write() {
-        let packet = ScoreboardObjective {
-            name: "a".repeat(17),
-            mode: MODE_REMOVE,
-            info: None,
-        };
-        assert!(packet.encode_body(&mut Vec::new()).is_err());
+    fn hostile_scoreboard_objective_is_an_error() {
+        assert!(ScoreboardObjective::decode(&mut &[][..]).is_err());
+        assert!(ScoreboardObjective::decode(&mut &[1, b'o'][..]).is_err());
+        assert!(ScoreboardObjective::decode(&mut &[1, b'o', 3][..]).is_err());
+        assert!(ScoreboardObjective::decode(&mut &[1, b'o', 0, 1, b'V'][..]).is_err());
     }
 }

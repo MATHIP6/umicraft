@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `Display Scoreboard` (0x3D, clientbound, play): choose which objective is
-//! drawn in a display slot.
+//! `Display Scoreboard` (0x3D, clientbound, play): picks the objective shown
+//! in a scoreboard slot.
 //!
-//! Layout (MCP `S3DPacketDisplayScoreboard`, `readPacketData`): the slot as a
-//! signed byte (`0` tab list, `1` sidebar, `2` below the name, `3..=18` the
-//! sidebar of one team colour) and the objective name (cap 16; empty clears
-//! the slot).
+//! Layout (MCP `S3DPacketDisplayScoreboard`, `readPacketData`): a signed byte
+//! slot (0 list, 1 sidebar, 2 below name, 3-18 team sidebars) and the
+//! objective name (up to 16 chars; empty clears the slot).
 
 use std::io::{Read, Write};
 
@@ -15,16 +14,15 @@ use crate::packets::play::wire::{read_i8, write_i8};
 use crate::packets::EncodablePacket;
 use crate::types::{read_string, write_string};
 
-/// Maximum characters of an objective name.
-const NAME_CHARS: usize = 16;
+const MAX_OBJECTIVE_CHARS: usize = 16;
 
 /// `Display Scoreboard` (0x3D, clientbound, play).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisplayScoreboard {
-    /// The display slot.
+    /// Display slot.
     pub position: i8,
-    /// The objective to show, or an empty string to clear the slot.
-    pub name: String,
+    /// Objective name; empty removes the objective from the slot.
+    pub score_name: String,
 }
 
 impl DisplayScoreboard {
@@ -34,11 +32,11 @@ impl DisplayScoreboard {
     /// Reads the body.
     ///
     /// # Errors
-    /// [`ProtocolError`] on truncation or an over-long string.
+    /// [`ProtocolError`] on truncation or an invalid string.
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
         Ok(Self {
             position: read_i8(reader)?,
-            name: read_string(reader, NAME_CHARS)?,
+            score_name: read_string(reader, MAX_OBJECTIVE_CHARS)?,
         })
     }
 }
@@ -50,7 +48,7 @@ impl EncodablePacket for DisplayScoreboard {
 
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
         write_i8(writer, self.position)?;
-        write_string(writer, &self.name, NAME_CHARS)
+        write_string(writer, &self.score_name, MAX_OBJECTIVE_CHARS)
     }
 }
 
@@ -59,27 +57,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn display_scoreboard_round_trips() {
-        for (position, name) in [(1, "kills"), (0, ""), (18, "teamboard")] {
-            let packet = DisplayScoreboard {
-                position,
-                name: name.to_string(),
-            };
-            let mut buffer = Vec::new();
-            packet.encode_body(&mut buffer).unwrap();
-            assert_eq!(DisplayScoreboard::decode(&mut &buffer[..]).unwrap(), packet);
-        }
+    fn display_scoreboard_wire_shape() {
+        let packet = DisplayScoreboard {
+            position: 1,
+            score_name: "kills".to_string(),
+        };
+        let expected = [1, 5, b'k', b'i', b'l', b'l', b's'];
+        let mut buffer = Vec::new();
+        packet.encode_body(&mut buffer).unwrap();
+        assert_eq!(buffer, expected);
+        assert_eq!(
+            DisplayScoreboard::decode(&mut &expected[..]).unwrap(),
+            packet
+        );
     }
 
     #[test]
-    fn the_slot_comes_first_as_one_byte() {
-        let mut buffer = Vec::new();
-        DisplayScoreboard {
-            position: 1,
-            name: "a".to_string(),
-        }
-        .encode_body(&mut buffer)
-        .unwrap();
-        assert_eq!(buffer, [1, 1, b'a']);
+    fn hostile_display_scoreboard_is_an_error() {
+        assert!(DisplayScoreboard::decode(&mut &[][..]).is_err());
+        assert!(DisplayScoreboard::decode(&mut &[1, 5, b'k'][..]).is_err());
+        let mut long = vec![1, 100];
+        long.extend([b'x'; 100]);
+        assert!(DisplayScoreboard::decode(&mut &long[..]).is_err());
     }
 }

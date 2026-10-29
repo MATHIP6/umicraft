@@ -15,13 +15,13 @@
 use umicraft_game::chat_input::ChatInput;
 use umicraft_net::play::PlayEvent;
 use umicraft_protocol::packets::play::clientbound::{
-    DisplayScoreboard, ObjectiveInfo, PlayerListAdd, PlayerListHeaderFooter, PlayerListItem,
+    AddPlayerEntry, DisplayScoreboard, ObjectiveRenderType, PlayerListHeaderFooter, PlayerListItem,
     ScoreboardObjective, SpawnMob, TeamInfo, Teams, Title, UpdateScore,
 };
 use umicraft_protocol::packets::play::metadata::{Metadata, WatchedObject};
 use umicraft_render::{
-    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudSheets, HudState, ItemStack,
-    Overlay, Renderer, SpriteSheet,
+    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudSheets, HudState, Overlay,
+    Renderer, SpriteSheet,
 };
 use umicraft_ui::game_menu::GameMenu;
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
@@ -77,12 +77,12 @@ fn text(json: &str) -> PlayEvent {
     PlayEvent::Chat(json.to_string())
 }
 
-fn uuid(seed: u8) -> [u8; 16] {
-    [seed; 16]
+fn uuid(seed: u8) -> u128 {
+    u128::from_be_bytes([seed; 16])
 }
 
-fn player(seed: u8, name: &str, game_mode: i32, ping: i32) -> PlayerListAdd {
-    PlayerListAdd {
+fn player(seed: u8, name: &str, game_mode: i32, ping: i32) -> AddPlayerEntry {
+    AddPlayerEntry {
         uuid: uuid(seed),
         name: name.to_string(),
         properties: Vec::new(),
@@ -108,17 +108,16 @@ fn scripted_packets() -> Vec<PlayEvent> {
         text(r#"{"text":"Use ","color":"white","extra":[{"text":"/help","color":"green","underlined":true,"clickEvent":{"action":"suggest_command","value":"/help"}},{"text":" for the commands"}]}"#),
     ];
 
-    events.push(PlayEvent::ScoreboardObjective(ScoreboardObjective {
-        name: "kills".to_string(),
-        mode: 0,
-        info: Some(ObjectiveInfo {
-            display_name: "Kills".to_string(),
-            render_type: "integer".to_string(),
-        }),
-    }));
+    events.push(PlayEvent::ScoreboardObjective(
+        ScoreboardObjective::Create {
+            name: "kills".to_string(),
+            value: "Kills".to_string(),
+            render_type: ObjectiveRenderType::Integer,
+        },
+    ));
     events.push(PlayEvent::DisplayScoreboard(DisplayScoreboard {
         position: 1,
-        name: "kills".to_string(),
+        score_name: "kills".to_string(),
     }));
     for (name, value) in [
         ("Alex", 4),
@@ -127,25 +126,24 @@ fn scripted_packets() -> Vec<PlayEvent> {
         ("Cleo", 7),
         ("#hidden", 99),
     ] {
-        events.push(PlayEvent::UpdateScore(UpdateScore {
+        events.push(PlayEvent::UpdateScore(UpdateScore::Change {
             name: name.to_string(),
             objective: "kills".to_string(),
-            value: Some(value),
+            value,
         }));
     }
-    events.push(PlayEvent::Teams(Teams {
+    events.push(PlayEvent::Teams(Box::new(Teams::Create {
         name: "red".to_string(),
-        mode: 0,
-        info: Some(TeamInfo {
+        info: TeamInfo {
             display_name: "Red".to_string(),
             prefix: "[R] ".to_string(),
             suffix: String::new(),
             friendly_flags: 0,
             name_tag_visibility: "always".to_string(),
             color: 12,
-        }),
+        },
         players: vec![PLAYER.to_string(), "Alex".to_string()],
-    }));
+    })));
 
     let mut players = vec![
         player(1, PLAYER, 0, 22),
@@ -158,18 +156,20 @@ fn scripted_packets() -> Vec<PlayEvent> {
         players.push(player(seed, &format!("Player{seed:02}"), 0, ping));
     }
     players[2].display_name = Some(r#"{"text":"Bob the Builder","color":"gold"}"#.to_string());
-    events.push(PlayEvent::PlayerListItem(PlayerListItem::Add(players)));
+    events.push(PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(
+        players,
+    )));
     events.push(PlayEvent::PlayerListHeaderFooter(PlayerListHeaderFooter {
         header: r#"{"text":"UMICRAFT DEMO SERVER","color":"gold"}"#.to_string(),
         footer: r#"{"text":"play.example.invalid","color":"gray"}"#.to_string(),
     }));
 
-    events.push(PlayEvent::Title(Title::Title(
-        r#"{"text":"ROUND 1","color":"red","bold":true}"#.to_string(),
-    )));
-    events.push(PlayEvent::Title(Title::Subtitle(
-        r#"{"text":"FIGHT!","color":"yellow"}"#.to_string(),
-    )));
+    events.push(PlayEvent::Title(Title::Title {
+        json: r#"{"text":"ROUND 1","color":"red","bold":true}"#.to_string(),
+    }));
+    events.push(PlayEvent::Title(Title::Subtitle {
+        json: r#"{"text":"FIGHT!","color":"yellow"}"#.to_string(),
+    }));
     events.push(PlayEvent::ActionBar(
         r#"{"text":"Now playing: Umicraft theme","color":"green"}"#.to_string(),
     ));
@@ -208,13 +208,6 @@ fn scene_hud() -> HudState {
     hud.experience = 0.4;
     hud.level = 7;
     hud.selected_slot = 2;
-    for (slot, id) in [(0, 276), (1, 278), (2, 1), (3, 4), (4, 322)] {
-        hud.hotbar[slot] = Some(ItemStack {
-            item_id: id,
-            damage: 0,
-            count: if id == 1 || id == 4 { 64 } else { 1 },
-        });
-    }
     hud
 }
 
@@ -492,10 +485,10 @@ fn render_scene(
         }
         Scene::HudGui(hud, draw_list) => {
             draw_debug_only(&mut overlay, hud, viewport.0, viewport.1);
-            renderer.render_with_ui(&camera, &overlay, draw_list)?;
+            renderer.render_with_ui(&camera, &overlay, draw_list, &mut umicraft_render::NoIcons)?;
         }
         Scene::Screen(draw_list) => {
-            renderer.render_with_ui(&camera, &overlay, draw_list)?;
+            renderer.render_with_ui(&camera, &overlay, draw_list, &mut umicraft_render::NoIcons)?;
         }
     }
     Ok(())

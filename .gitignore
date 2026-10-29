@@ -19,3 +19,9 @@ Thumbs.db
 # data directory (spec §9), never in the repository.
 *.jar
 /assets/
+
+# cargo-fuzz
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/

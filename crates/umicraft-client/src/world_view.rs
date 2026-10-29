@@ -15,12 +15,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
+use umicraft_game::hand::HandPose;
 use umicraft_game::inventory::WindowView;
 use umicraft_game::RenderState;
-use umicraft_mesh::{ChunkSnapshot, Mesh};
-use umicraft_render::{Camera, HudState, RenderEnvironment, Renderer};
+use umicraft_mesh::{ChunkSnapshot, Mesh, Vertex};
+use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer};
 use umicraft_world::ChunkPos;
 
+use crate::cracks::{crack_mesh, Crack, STAGES};
+use crate::creative_view::CreativeView;
 use crate::error::ClientError;
 use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, TICK};
 use crate::mesher::{MeshPool, MeshResult};
@@ -60,11 +63,21 @@ pub struct WorldView {
     faces: HashMap<ChunkPos, usize>,
     hud: HudState,
     window_view: WindowView,
+    /// The newest creative screen snapshot, once one was published.
+    creative: Option<CreativeView>,
     status: GameStatus,
     ended: Option<String>,
     frames: usize,
     /// Active living entities interpolation data from the latest frame.
     entities: Arc<[EntityFrameData]>,
+    /// Selection outline boxes from the latest frame.
+    selection: Arc<[OutlineBox]>,
+    /// The cracks of the newest frame, and the mesh built from them.
+    cracks: Arc<[Crack]>,
+    /// The texture layer of each destroy stage, when the terrain has them.
+    destroy_layers: Option<[u32; STAGES]>,
+    /// A crack mesh the renderer has not received yet.
+    crack_mesh: Option<(Vec<Vertex>, Vec<u32>)>,
 }
 
 impl WorldView {
@@ -87,10 +100,15 @@ impl WorldView {
                 cursor: None,
                 selected_slot: 0,
             },
+            creative: None,
             status: GameStatus::default(),
             ended: None,
             frames: 0,
             entities: Arc::from([]),
+            selection: Arc::from([]),
+            cracks: Arc::from([]),
+            destroy_layers: terrain.mesher().destroy_layers(),
+            crack_mesh: None,
         })
     }
 
@@ -125,12 +143,27 @@ impl WorldView {
         let (yaw, pitch) = camera_angles(&state);
         camera.yaw = yaw;
         camera.pitch = pitch;
+        camera.set_view_effects(state.effects.fov_modifier, state.effects.bob.matrix());
+    }
+
+    /// The pose of the first-person hand for `now`.
+    #[must_use]
+    pub fn hand_pose(&self, now: Instant) -> HandPose {
+        self.view
+            .sample(now)
+            .map_or_else(HandPose::default, |state| state.effects.hand)
     }
 
     /// The sky, fog and light environment for `now`, in step with the camera.
     #[must_use]
     pub fn environment(&self, now: Instant, view_distance: u8) -> RenderEnvironment {
         self.view.environment(now, view_distance)
+    }
+
+    /// The dimension and the spawn point of the newest frame, for the compass.
+    #[must_use]
+    pub fn compass_world(&self) -> (i8, Option<(i32, i32, i32)>) {
+        (self.view.dimension, self.view.spawn)
     }
 
     /// The newest HUD the game thread published.
@@ -143,6 +176,12 @@ impl WorldView {
     #[must_use]
     pub fn window_view(&self) -> &WindowView {
         &self.window_view
+    }
+
+    /// The newest creative inventory snapshot the game thread published.
+    #[must_use]
+    pub fn creative_view(&self) -> Option<&CreativeView> {
+        self.creative.as_ref()
     }
 
     /// The newest session statistics.
@@ -185,6 +224,19 @@ impl WorldView {
         self.entities.iter().map(|e| e.interpolate(alpha)).collect()
     }
 
+    /// The world-space boxes of the block selection outline in the newest
+    /// frame; empty when no block is targeted.
+    #[must_use]
+    pub fn selection(&self) -> &[OutlineBox] {
+        &self.selection
+    }
+
+    /// The crack mesh built since the last call, for the renderer; empty
+    /// vectors remove the cracks.
+    pub fn take_crack_mesh(&mut self) -> Option<(Vec<Vertex>, Vec<u32>)> {
+        self.crack_mesh.take()
+    }
+
     /// The number of active living entities in the newest frame.
     #[must_use]
     pub fn entity_count(&self) -> usize {
@@ -196,10 +248,19 @@ impl WorldView {
             RenderEvent::Frame(frame) => {
                 self.frames += 1;
                 self.entities = Arc::clone(&frame.entities);
+                self.selection = Arc::clone(&frame.selection);
+                if *self.cracks != *frame.cracks {
+                    self.cracks = Arc::clone(&frame.cracks);
+                    self.crack_mesh = self
+                        .destroy_layers
+                        .as_ref()
+                        .map(|layers| crack_mesh(&self.cracks, layers));
+                }
                 self.view.push(frame);
             }
             RenderEvent::Hud(hud) => self.hud = *hud,
             RenderEvent::Inventory(view) => self.window_view = *view,
+            RenderEvent::Creative(view) => self.creative = Some(*view),
             RenderEvent::Status(status) => self.status = *status,
             RenderEvent::Ended(reason) => self.ended = Some(reason),
             RenderEvent::Reset => self.reset(target),
@@ -218,6 +279,10 @@ impl WorldView {
         if let Ok(pool) = MeshPool::new(worker_count, terrain) {
             self.pool = pool;
         }
+        // The new array has other layers: rebuild the cracks with the next
+        // frame.
+        self.destroy_layers = terrain.mesher().destroy_layers();
+        self.cracks = Arc::from([]);
     }
 
     /// Forgets the replaced world, including the jobs still in flight.
@@ -297,6 +362,8 @@ struct View {
     world_time: i64,
     /// The dimension of the newest frame.
     dimension: i8,
+    /// The newest announced world spawn point.
+    spawn: Option<(i32, i32, i32)>,
 }
 
 impl View {
@@ -307,6 +374,7 @@ impl View {
         self.tick_time = Some(frame.tick_time);
         self.world_time = frame.world_time;
         self.dimension = frame.dimension;
+        self.spawn = frame.spawn;
     }
 
     /// The interpolation fraction of the two newest ticks for `now`.
@@ -354,6 +422,7 @@ impl View {
             yaw: current.yaw,
             pitch: current.pitch,
             on_ground: current.on_ground,
+            effects: previous.effects.lerp(current.effects, alpha),
         })
     }
 }
@@ -540,11 +609,15 @@ mod tests {
                 yaw: 0.0,
                 pitch: 0.0,
                 on_ground: true,
+                effects: umicraft_game::view::ViewEffects::default(),
             },
             tick_time,
             world_time,
             dimension: -1,
+            spawn: None,
             entities: Arc::from([]),
+            selection: Arc::from([]),
+            cracks: Arc::from([]),
         }
     }
 
@@ -609,5 +682,93 @@ mod tests {
                 .partial_tick,
             1.0
         );
+    }
+
+    #[test]
+    fn a_changed_crack_set_rebuilds_the_crack_mesh_once() {
+        let mut harness = Harness::new();
+        harness.world_view.destroy_layers = Some([5; STAGES]);
+        let crack = Crack {
+            bounds: OutlineBox {
+                min: [0.0, 64.0, 0.0],
+                max: [1.0, 65.0, 1.0],
+            },
+            stage: 4,
+        };
+        let send = |harness: &mut Harness, cracks: &[Crack]| {
+            let mut next = frame(glam::Vec3::ZERO, Instant::now(), 0);
+            next.cracks = Arc::from(cracks);
+            harness
+                .frames
+                .0
+                .send(RenderEvent::Frame(next))
+                .expect("frame queue");
+            harness.sync();
+        };
+
+        send(&mut harness, &[crack]);
+        let (vertices, _) = harness.world_view.take_crack_mesh().expect("a mesh");
+        assert_eq!(vertices.len(), 24);
+        assert!(harness.world_view.take_crack_mesh().is_none());
+
+        send(&mut harness, &[crack]);
+        assert!(
+            harness.world_view.take_crack_mesh().is_none(),
+            "the same cracks need no new mesh"
+        );
+
+        send(&mut harness, &[]);
+        let (vertices, indices) = harness.world_view.take_crack_mesh().expect("a clear");
+        assert!(vertices.is_empty() && indices.is_empty());
+    }
+
+    #[test]
+    fn the_procedural_terrain_draws_no_cracks() {
+        let mut harness = Harness::new();
+        let mut next = frame(glam::Vec3::ZERO, Instant::now(), 0);
+        next.cracks = Arc::from([Crack {
+            bounds: OutlineBox {
+                min: [0.0; 3],
+                max: [1.0; 3],
+            },
+            stage: 0,
+        }]);
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(next))
+            .expect("frame queue");
+        harness.sync();
+        assert!(harness.world_view.take_crack_mesh().is_none());
+    }
+
+    #[test]
+    fn the_newest_frame_decides_the_selection_outline() {
+        let mut harness = Harness::new();
+        let outline = OutlineBox {
+            min: [0.0; 3],
+            max: [1.0; 3],
+        };
+        let mut selected = frame(glam::Vec3::ZERO, Instant::now(), 0);
+        selected.selection = Arc::from([outline]);
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(selected))
+            .expect("frame queue");
+        harness.sync();
+        assert_eq!(harness.world_view.selection(), &[outline]);
+
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(frame(
+                glam::Vec3::ZERO,
+                Instant::now(),
+                0,
+            )))
+            .expect("frame queue");
+        harness.sync();
+        assert!(harness.world_view.selection().is_empty());
     }
 }

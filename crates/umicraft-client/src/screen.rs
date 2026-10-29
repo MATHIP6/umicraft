@@ -20,6 +20,8 @@ pub enum Screen {
     Chat,
     /// The player inventory (a server container is shown by the same screen).
     Inventory,
+    /// The creative inventory, shown in creative mode instead of the survival one.
+    Creative,
     /// The menu opened with Escape.
     GameMenu,
     /// The options, opened from the game menu.
@@ -34,7 +36,7 @@ impl Screen {
     pub const fn uses_ui(self) -> bool {
         matches!(
             self,
-            Self::Inventory | Self::GameMenu | Self::Options | Self::Debug
+            Self::Inventory | Self::Creative | Self::GameMenu | Self::Options | Self::Debug
         )
     }
 
@@ -54,7 +56,7 @@ impl Screen {
     pub const fn after_escape(self) -> Self {
         match self {
             Self::None => Self::GameMenu,
-            Self::Chat | Self::Inventory | Self::GameMenu => Self::None,
+            Self::Chat | Self::Inventory | Self::Creative | Self::GameMenu => Self::None,
             Self::Options => Self::GameMenu,
             Self::Debug => Self::Debug,
         }
@@ -81,6 +83,7 @@ mod tests {
         for screen in [
             Screen::Chat,
             Screen::Inventory,
+            Screen::Creative,
             Screen::GameMenu,
             Screen::Options,
             Screen::Debug,

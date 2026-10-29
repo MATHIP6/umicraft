@@ -61,10 +61,13 @@
 //! [`docs/sources.md`]: ../../../docs/sources.md
 
 use bytemuck::{Pod, Zeroable};
+use umicraft_world::fluid::Liquid;
 use umicraft_world::{BlockKind, BlockPos, BlockState, ChunkColumn, ChunkPos, LightLevel, World};
 
 use std::sync::Arc;
 
+pub mod fluid;
+pub mod item;
 pub mod models;
 pub mod tint;
 
@@ -445,6 +448,15 @@ pub fn mesh_chunk<S: BlockSource + ?Sized>(pos: ChunkPos, source: &S) -> Mesh {
                 let wz = base_z + z;
                 let state = source.block(wx, y, wz);
                 if !state.is_renderable() {
+                    continue;
+                }
+                if let Some(liquid) = Liquid::of(state) {
+                    let layer = texture_layer(state, Face::Up);
+                    let layers = fluid::FluidLayers {
+                        still: layer,
+                        flow: layer,
+                    };
+                    fluid::emit_fluid(&mut mesh, source, [wx, y, wz], liquid, layers, tint::WHITE);
                     continue;
                 }
                 emit_legacy_faces(&mut mesh, source, wx, y, wz, state);

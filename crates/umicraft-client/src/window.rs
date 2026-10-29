@@ -14,16 +14,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use umicraft_game::chat_input::{push_sent, ChatInput, TabOutcome};
+use umicraft_game::inventory::{drag_preview, DragPreview, WindowView, HOTBAR_START};
+use umicraft_game::item_use::DropKind;
 use umicraft_render::{
-    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudState, Overlay, Renderer,
+    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudLayout, HudState, NoIcons,
+    Overlay, RenderEnvironment, Renderer, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
-use umicraft_ui::widgets::{
-    container_layout, player_inventory_layout, slot, ContainerLayout, InventoryLayout, SlotItem,
+use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
+use umicraft_ui::{
+    debug_screen::DebugScreen, draw_item, FontAtlas, Rect, ScreenLayout, Ui, UiOutput,
 };
-use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui, UiOutput};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{
     DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
@@ -32,19 +35,33 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
 
 use crate::args::Args;
+use crate::creative_input::CreativeInput;
+use crate::creative_layout::CreativeLayout;
+use crate::creative_screen::{draw_creative_overlay, CreativeScene};
+use crate::dials::{DialAnimator, DialInputs};
 use crate::entity_textures::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
+use crate::inventory_input::{Context, InventoryAction, InventoryInput};
+
+use crate::inventory_screen::{draw_inventory_overlay, screen_input};
+use crate::inventory_winit;
+use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
+use crate::item_world::{push_held_item, ItemLayers, WorldItems};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::options::{self, Action, Options};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
 use crate::screen::Screen;
 use crate::terrain_textures::TerrainTextures;
+use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
+
+#[path = "creative_window.rs"]
+mod creative_window;
 
 /// The look speed at the default sensitivity, in radians per pixel; the
 /// sensitivity option scales it.
@@ -130,6 +147,13 @@ struct App {
     look: (f32, f32),
     select_slot: Option<u8>,
     break_block: bool,
+    /// The attack button is down.
+    attack_held: bool,
+    /// When the death screen opened; `None` while the player lives.
+    death_started: Option<Instant>,
+    /// The player pressed "Respawn" and waits for the server.
+    respawn_requested: bool,
+    /// The use button went down since the last input update.
     place_block: bool,
     /// The screen that owns the keyboard and the mouse (ADR-0017). A server
     /// container shows the inventory screen without setting this field, see
@@ -147,6 +171,18 @@ struct App {
     seen_completions: u64,
     /// Whether a Control key is held (word movement in the chat).
     ctrl_held: bool,
+    /// The use (right) button is down.
+    use_held: bool,
+    /// The pick block (middle) button went down since the last input update.
+    pick_block: bool,
+    /// The drop key was pressed since the last input update.
+    drop_item: Option<DropKind>,
+    /// The perspective key was pressed since the last input update.
+    toggle_perspective: bool,
+    /// Turns the mouse and keys on the creative screen into game events.
+    creative_input: CreativeInput,
+    /// Whether a server container was displayed on the previous frame.
+    container_was_open: bool,
     /// The immediate-mode context, owned by the render thread.
     ui: Ui,
     /// The acceptance screen shown while [`Screen::Debug`] is current.
@@ -157,6 +193,8 @@ struct App {
     menu_action: Option<GameMenuAction>,
     /// The winit events waiting for the next UI frame.
     ui_input: UiInputTranslator,
+    /// Turns the mouse and keys on the inventory screen into slot clicks.
+    inventory_input: InventoryInput,
     /// The font loaded at startup, before the renderer exists.
     font: LoadedFont,
     /// The terrain textures loaded at start-up, until the renderer binds them.
@@ -165,9 +203,21 @@ struct App {
     ui_atlas: Option<FontAtlas>,
     /// The GUI texture atlas for inventory/container backgrounds.
     gui_atlas: Option<umicraft_assets::GuiAtlas>,
+    /// The baked item models, once the official assets are bound.
+    items: Option<std::sync::Arc<ItemResources>>,
+    /// The compass and clock frames of the bound block array.
+    dials: DialAnimator,
+    /// The dropped-item geometry of the frame, kept for its buffers.
+    world_items: WorldItems,
+    /// The first-person held item geometry of the frame.
+    hand_layers: ItemLayers,
+    /// Steps the water, lava and fire textures once per game tick.
+    texture_animator: TextureAnimator,
     /// Entity textures bound for GPU rendering.
     entity_textures: Option<EntityTextures>,
     last_frame: Instant,
+    /// Origin of the clock that scrolls the enchantment glint.
+    started: Instant,
     frame_times: Vec<f32>,
     frame_ms: f32,
     fps: f32,
@@ -206,6 +256,9 @@ impl App {
             look: (0.0, 0.0),
             select_slot: None,
             break_block: false,
+            attack_held: false,
+            death_started: None,
+            respawn_requested: false,
             place_block: false,
             screen: Screen::None,
             chat_input: ChatInput::new("", 0),
@@ -214,17 +267,30 @@ impl App {
             chat_opened: Instant::now(),
             seen_completions: 0,
             ctrl_held: false,
+            use_held: false,
+            pick_block: false,
+            drop_item: None,
+            toggle_perspective: false,
+            creative_input: CreativeInput::new(),
+            container_was_open: false,
             ui: Ui::new(ui_viewport),
             debug_screen: DebugScreen::new(),
             game_menu: GameMenu::new(),
             menu_action: None,
             ui_input: UiInputTranslator::new(),
+            inventory_input: InventoryInput::new(),
             font,
             terrain,
             ui_atlas: None,
             gui_atlas: None,
+            items: None,
+            dials: DialAnimator::default(),
+            world_items: WorldItems::default(),
+            hand_layers: ItemLayers::default(),
+            texture_animator: TextureAnimator::default(),
             entity_textures: None,
             last_frame: Instant::now(),
+            started: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
             fps: 0.0,
@@ -265,6 +331,14 @@ impl App {
                 self.handle_chat_key(event);
                 return;
             }
+            _ if self.death_screen_visible() => {
+                // MCP GuiGameOver.keyTyped does nothing: Escape does not close it.
+                return;
+            }
+            Screen::Creative => {
+                self.handle_creative_key(&event);
+                return;
+            }
             Screen::Inventory => {
                 self.handle_inventory_key(event_loop, event);
                 return;
@@ -286,10 +360,14 @@ impl App {
                         KeyCode::Escape => self.set_screen(Screen::None.after_escape()),
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
                         KeyCode::F4 => self.reload_resources(),
+                        KeyCode::F5 => self.toggle_perspective = true,
                         // F3 + T reloads the resource packs, whatever the
                         // chat key is bound to.
                         KeyCode::KeyT if self.keys.contains(&KeyCode::F3) => {
                             self.reload_resources();
+                        }
+                        KeyCode::KeyQ if self.mouse_captured => {
+                            self.drop_item = Some(self.drop_kind());
                         }
                         _ => self.press_bound_key(code),
                     }
@@ -319,13 +397,23 @@ impl App {
             match action {
                 Action::Chat => self.open_chat(""),
                 Action::Command => self.open_chat("/"),
-                Action::Inventory => self.set_screen(Screen::Inventory),
+                Action::Inventory => self.open_inventory(),
                 other => {
                     if let Some(slot) = other.hotbar_slot() {
                         self.select_slot = Some(slot);
                     }
                 }
             }
+        }
+    }
+
+    /// What the drop key drops: the whole stack with Ctrl held
+    /// (MCP Minecraft.runTick line 2084, GuiScreen.isCtrlKeyDown).
+    fn drop_kind(&self) -> DropKind {
+        if self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight) {
+            DropKind::Stack
+        } else {
+            DropKind::One
         }
     }
 
@@ -337,7 +425,11 @@ impl App {
         if let Some(renderer) = self.renderer.as_mut() {
             let installed = terrain.install(renderer);
             upload_gui_atlas(renderer, installed.gui_atlas());
+            upload_glint_texture(renderer, installed.glint_texture());
             self.gui_atlas = installed.gui_atlas().cloned();
+            self.items = installed.items();
+            self.dials = DialAnimator::new(installed.dials());
+            self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
             self.entity_textures = Some(EntityTextures::load(renderer));
             if let Some(world) = self.world.as_mut() {
                 world.reload_terrain(&installed, default_worker_count(), renderer);
@@ -381,6 +473,8 @@ impl App {
         self.select_slot = None;
         self.break_block = false;
         self.place_block = false;
+        self.pick_block = false;
+        self.drop_item = None;
         self.look = (0.0, 0.0);
         if screen.blocks_game_input() {
             self.capture_mouse(false);
@@ -470,6 +564,42 @@ impl App {
             .is_some_and(|w| w.window_view().container.is_some())
     }
 
+    /// True while the local player is dead (MCP `getHealth() <= 0`).
+    fn player_dead(&self) -> bool {
+        self.world
+            .as_ref()
+            .is_some_and(|world| world.hud().health <= 0.0)
+    }
+
+    /// True while the death screen is shown: the player is dead and has not
+    /// asked to respawn yet.
+    fn death_screen_visible(&self) -> bool {
+        self.death_started.is_some() && !self.respawn_requested
+    }
+
+    /// Opens or closes the death screen as the health changes
+    /// (MCP `Minecraft.runTick`: a dead player gets a `GuiGameOver`).
+    fn update_death_screen(&mut self, now: Instant) {
+        if !self.player_dead() {
+            self.death_started = None;
+            self.respawn_requested = false;
+            return;
+        }
+        if self.death_started.is_none() {
+            self.death_started = Some(now);
+            self.set_screen(Screen::None);
+            self.attack_held = false;
+            self.capture_mouse(false);
+        }
+    }
+
+    /// Whether the death-screen buttons accept clicks yet.
+    fn death_buttons_enabled(&self, now: Instant) -> bool {
+        self.death_started.is_some_and(|started| {
+            now.duration_since(started) >= crate::game::TICK * BUTTON_DELAY_TICKS
+        })
+    }
+
     /// Handles a key press while the inventory or a container screen is open.
     fn handle_inventory_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
         let PhysicalKey::Code(code) = event.physical_key else {
@@ -479,18 +609,112 @@ impl App {
         if event.state == ElementState::Pressed && !event.repeat && closes {
             self.close_inventory();
         }
-        // Forward to the UI translator so slot-click-by-number-key works.
+        if event.state == ElementState::Pressed && !event.repeat {
+            self.inventory_key(code);
+        }
         self.ui_input.key(code, event.state, event.text.as_deref());
         let _ = event_loop;
     }
 
+    /// Asks the server to respawn and gives the game back to the player.
+    fn respawn(&mut self) {
+        // MCP `GuiGameOver.actionPerformed` (button 0): `respawnPlayer`, then
+        // the screen closes at once.
+        let _ = self.session.events().try_send(GameEvent::Respawn);
+        self.respawn_requested = true;
+        self.ui_input.clear();
+        self.capture_mouse(true);
+    }
+
+    /// Frees the mouse while a server container is displayed and takes it
+    /// back when it closes (MCP `displayGuiScreen` ungrabs / grabs the mouse).
+    fn update_container_cursor(&mut self) {
+        let open = self.container_is_open();
+        if open != self.container_was_open {
+            self.container_was_open = open;
+            self.ui_input.clear();
+            self.inventory_input.reset();
+            let free = open || self.screen().blocks_game_input() || self.death_screen_visible();
+            self.capture_mouse(!free);
+        }
+    }
+
     /// Closes the inventory or container screen.
     fn close_inventory(&mut self) {
-        if self.screen() == Screen::Inventory {
+        if matches!(self.screen(), Screen::Inventory | Screen::Creative) {
             let _ = self.session.events().try_send(GameEvent::CloseInventory);
         }
+        self.inventory_input.reset();
+        self.creative_input.reset();
         self.set_screen(Screen::None);
         self.ui_input.clear();
+    }
+
+    /// The layout and input context of the open inventory screen, if any.
+    fn inventory_screen(&self) -> Option<(ScreenLayout, Context)> {
+        if self.screen() != Screen::Inventory {
+            return None;
+        }
+        let size = self.window.as_ref()?.inner_size();
+        let viewport = Rect::new(0.0, 0.0, size.width as f32, size.height as f32);
+        let world = self.world.as_ref()?;
+        Some(screen_input(
+            viewport,
+            world.window_view(),
+            world.status().gamemode,
+        ))
+    }
+
+    /// The stacks a drag split in progress will leave in the slots.
+    fn inventory_drag_preview(&self, view: &WindowView) -> Option<DragPreview> {
+        let (slots, button) = self.inventory_input.drag_in_progress()?;
+        let creative = self.world.as_ref()?.status().gamemode == 1;
+        drag_preview(view, slots, button, creative)
+    }
+
+    /// Sends the slot interaction of the inventory input to the game thread.
+    fn send_inventory(&self, action: Option<InventoryAction>) {
+        if let Some(action) = action {
+            let _ = self.session.events().try_send(GameEvent::Inventory(action));
+        }
+    }
+
+    /// Feeds a pointer move to the inventory input.
+    fn inventory_pointer(&mut self, position: PhysicalPosition<f64>) {
+        if let Some((layout, context)) = self.inventory_screen() {
+            let point = (position.x as f32, position.y as f32);
+            self.inventory_input.pointer_moved(&layout, point, context);
+        }
+    }
+
+    /// Feeds a mouse button to the inventory input.
+    fn inventory_button(&mut self, state: ElementState, button: MouseButton) {
+        let (Some((layout, context)), Some(button)) =
+            (self.inventory_screen(), inventory_winit::button(button))
+        else {
+            return;
+        };
+        let action = match state {
+            ElementState::Pressed => {
+                self.inventory_input
+                    .button_pressed(&layout, button, context, Instant::now())
+            }
+            ElementState::Released => self
+                .inventory_input
+                .button_released(&layout, button, context),
+        };
+        self.send_inventory(action);
+    }
+
+    /// Feeds a key press (number keys, Q) to the inventory input.
+    fn inventory_key(&mut self, code: KeyCode) {
+        let (Some((layout, context)), Some(key)) =
+            (self.inventory_screen(), inventory_winit::key(code))
+        else {
+            return;
+        };
+        let action = self.inventory_input.key_pressed(&layout, key, context);
+        self.send_inventory(action);
     }
 
     /// Handles a key press while the chat input is open.
@@ -591,6 +815,10 @@ impl App {
 
     fn capture_mouse(&mut self, capture: bool) {
         self.mouse_captured = capture;
+        if !capture {
+            self.attack_held = false;
+            self.use_held = false;
+        }
         if let Some(window) = &self.window {
             if capture {
                 // Locked is preferred (infinite relative motion); fall back to
@@ -607,7 +835,7 @@ impl App {
 
     /// The key state of the window.
     fn key_state(&self) -> InputState {
-        if self.screen().blocks_game_input() {
+        if self.screen().blocks_game_input() || self.death_screen_visible() {
             // While a screen is open the movement keys do not steer the player.
             return InputState::default();
         }
@@ -627,6 +855,8 @@ impl App {
         state.jump = self.held(Action::Jump);
         state.sneak = self.held(Action::Sneak);
         state.sprint = self.held(Action::Sprint);
+        state.attack = self.attack_held;
+        state.use_item = self.use_held;
         state
     }
 
@@ -640,7 +870,10 @@ impl App {
             || self.look != (0.0, 0.0)
             || self.select_slot.is_some()
             || self.break_block
-            || self.place_block;
+            || self.place_block
+            || self.pick_block
+            || self.drop_item.is_some()
+            || self.toggle_perspective;
         if !changed {
             return;
         }
@@ -651,6 +884,9 @@ impl App {
             select_slot: self.select_slot,
             break_block: self.break_block,
             place_block: self.place_block,
+            pick_block: self.pick_block,
+            drop_item: self.drop_item,
+            toggle_perspective: self.toggle_perspective,
         };
         if self
             .session
@@ -663,6 +899,9 @@ impl App {
             self.select_slot = None;
             self.break_block = false;
             self.place_block = false;
+            self.pick_block = false;
+            self.drop_item = None;
+            self.toggle_perspective = false;
         }
     }
 
@@ -752,8 +991,9 @@ impl App {
         }
     }
 
-    /// Builds one UI frame from the render-side snapshot, or returns `None`
-    /// while no UI modal is open and the textured HUD is inactive.
+    /// Builds one UI frame from the render-side snapshot: the textured HUD and
+    /// the hotbar items while a world is shown, and the modal screen on top
+    /// when one is open. Returns `None` when there is nothing to draw.
     ///
     /// The frame is built on the render thread during redraw, after the HUD
     /// overlay, so the UI never touches the game thread or its state. The
@@ -764,7 +1004,7 @@ impl App {
         let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
         let screen = self.screen();
         let textured_hud = sheets.is_complete();
-        if !textured_hud && !screen.uses_ui() {
+        if self.world.is_none() && !textured_hud && !screen.uses_ui() {
             return None;
         }
 
@@ -797,30 +1037,95 @@ impl App {
             };
             draw_hud_gui(self.ui.draw(), &hud, (width, height), atlas, &sheets);
         }
+        if let Some(world) = self.world.as_ref() {
+            draw_hotbar_items(
+                &mut self.ui,
+                atlas,
+                &world.window_view().player_slots,
+                ItemView::new(self.items.as_deref(), self.dials.frames()),
+                (width, height),
+            );
+        }
 
-        match screen {
-            Screen::Debug => self.debug_screen.show(&mut self.ui, atlas),
-            Screen::GameMenu => self.menu_action = self.game_menu.show(&mut self.ui, atlas),
-            Screen::Options => {
-                self.options_outcome =
-                    self.options_screen
-                        .show(&mut self.ui, atlas, &mut self.options);
+        if self.death_screen_visible() {
+            let score = self.world.as_ref().map_or(0, |world| world.hud().score);
+            let enabled = self.death_buttons_enabled(Instant::now());
+            if death_screen(&mut self.ui, atlas, viewport, score, enabled) == DeathAction::Respawn {
+                self.respawn();
             }
-            Screen::Inventory => {
-                let wv = self.world.as_ref().map(|w| w.window_view().clone());
-                if let Some(wv) = wv {
-                    draw_inventory_overlay(
-                        &mut self.ui,
-                        atlas,
-                        viewport,
-                        &wv,
-                        self.gui_atlas.as_ref(),
-                    );
+        } else {
+            match screen {
+                Screen::Debug => self.debug_screen.show(&mut self.ui, atlas),
+                Screen::GameMenu => self.menu_action = self.game_menu.show(&mut self.ui, atlas),
+                Screen::Options => {
+                    self.options_outcome =
+                        self.options_screen
+                            .show(&mut self.ui, atlas, &mut self.options);
                 }
+                Screen::Creative => {
+                    if let Some((world, creative)) = self
+                        .world
+                        .as_ref()
+                        .and_then(|world| Some((world, world.creative_view()?)))
+                    {
+                        let scene = CreativeScene {
+                            window: world.window_view(),
+                            creative,
+                            gui_atlas: self.gui_atlas.as_ref(),
+                            items: ItemView::new(self.items.as_deref(), self.dials.frames()),
+                            // Vanilla toggles every 6 ticks (cursorCounter / 6 % 2).
+                            caret_visible: (self.started.elapsed().as_millis() / 300)
+                                .is_multiple_of(2),
+                        };
+                        let layout = CreativeLayout::new(width, height);
+                        draw_creative_overlay(&mut self.ui, atlas, viewport, &layout, &scene);
+                    }
+                }
+                Screen::Inventory => {
+                    let wv = self.world.as_ref().map(|w| w.window_view().clone());
+                    if let Some(wv) = wv {
+                        let drag = self.inventory_drag_preview(&wv);
+                        draw_inventory_overlay(
+                            &mut self.ui,
+                            atlas,
+                            viewport,
+                            &wv,
+                            self.gui_atlas.as_ref(),
+                            ItemView::new(self.items.as_deref(), self.dials.frames()),
+                            drag.as_ref(),
+                        );
+                    }
+                }
+                Screen::None | Screen::Chat => {}
             }
-            Screen::None | Screen::Chat => {}
         }
         Some(self.ui.end_frame())
+    }
+
+    /// Steps the compass and the clock and writes their new frames into the
+    /// block array.
+    fn advance_dials(&mut self, elapsed: Duration, environment: RenderEnvironment) {
+        let inputs = self.world.as_ref().map(|world| {
+            let (_, spawn) = world.compass_world();
+            DialInputs {
+                surface: environment.dimension == 0,
+                position: (
+                    f64::from(self.camera.position.x),
+                    f64::from(self.camera.position.z),
+                ),
+                // The camera yaw is the server yaw turned by half a circle.
+                yaw_degrees: f64::from((self.camera.yaw - std::f32::consts::PI).to_degrees()),
+                spawn: spawn.map(|(x, _, z)| (f64::from(x), f64::from(z))),
+                celestial_angle: f64::from(SkyState::at(environment).celestial_angle),
+            }
+        });
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        self.dials
+            .advance(elapsed, inputs.as_ref(), |layer, pixels| {
+                renderer.write_block_layer(layer, pixels);
+            });
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
@@ -847,6 +1152,8 @@ impl App {
         self.camera.set_fov_degrees(self.options.video.fov);
         self.sync_world(now);
         self.process_completions();
+        self.update_death_screen(now);
+        self.update_container_cursor();
         self.publish_input();
         let environment = self
             .world
@@ -865,6 +1172,9 @@ impl App {
             .renderer
             .as_ref()
             .map_or((self.args.width, self.args.height), Renderer::size);
+        // The dials first, so the icon keys of this frame name the frames the
+        // block array shows.
+        self.advance_dials(Duration::from_secs_f32(elapsed), environment);
         let ui_frame = self.build_ui_frame(width, height);
         match self.menu_action.take() {
             Some(GameMenuAction::Resume) => {
@@ -891,16 +1201,55 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+        renderer.set_glint_time((now - self.started).as_secs_f32());
+        self.texture_animator
+            .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
+                renderer.write_block_layer(layer, pixels);
+            });
+        renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
+        if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
+        {
+            renderer.set_block_cracks(&vertices, &indices);
+        }
 
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())
         {
-            entity_textures.mesh_and_upload(&world.entities(now), renderer);
+            let entities = world.entities(now);
+            let hand = world.hand_pose(now);
+            entity_textures.mesh_and_upload(&entities, renderer);
+            entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer);
+            if let Some(items) = self.items.as_deref() {
+                let dropped = self.world_items.build(&entities, items);
+                renderer.set_world_items(&dropped.items);
+                renderer.set_world_glint(&dropped.glint);
+                self.hand_layers.clear();
+                if let Some(stack) = held_stack(world) {
+                    let nbt = stack.nbt.as_deref();
+                    push_held_item(
+                        &mut self.hand_layers,
+                        (stack.item_id, stack.damage, nbt),
+                        &hand,
+                        self.camera.view_bob(),
+                        items,
+                    );
+                }
+                renderer.set_hand_items(&self.hand_layers.items);
+                renderer.set_hand_glint(&self.hand_layers.glint);
+            }
         }
 
-        let rendered = match ui_frame.as_ref() {
-            Some(frame) => renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list),
-            None => renderer.render(&self.camera, &self.overlay),
+        let rendered = match (ui_frame.as_ref(), self.items.as_deref()) {
+            (Some(frame), Some(items)) => renderer.render_with_ui(
+                &self.camera,
+                &self.overlay,
+                &frame.draw_list,
+                &mut IconSource(items),
+            ),
+            (Some(frame), None) => {
+                renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list, &mut NoIcons)
+            }
+            (None, _) => renderer.render(&self.camera, &self.overlay),
         };
         if let Some(frame) = ui_frame {
             self.ui.recycle_output(frame);
@@ -946,152 +1295,43 @@ fn upload_gui_atlas(renderer: &mut Renderer, gui_atlas: Option<&umicraft_assets:
     }
 }
 
-/// Draws the inventory or container screen as a modal overlay.
-fn draw_inventory_overlay(
-    ui: &mut umicraft_ui::Ui,
+/// Uploads the enchantment glint texture to the renderer, if available.
+fn upload_glint_texture(renderer: &mut Renderer, glint: Option<&umicraft_assets::GlintTexture>) {
+    if let Some(glint) = glint {
+        renderer.set_glint_texture(glint.width, glint.height, &glint.pixels);
+    }
+}
+
+/// The stack in the selected hotbar slot of the local player.
+fn held_stack(world: &WorldView) -> Option<&umicraft_protocol::packets::play::ItemStack> {
+    let selected = usize::from(world.hud().selected_slot).min(8);
+    world.window_view().player_slots[HOTBAR_START + selected].as_ref()
+}
+
+/// Draws the item icons, counts and durability bars of the hotbar over the
+/// HUD frame, centred in each of its slots.
+fn draw_hotbar_items(
+    ui: &mut Ui,
     atlas: &FontAtlas,
-    viewport: Rect,
-    wv: &umicraft_game::inventory::WindowView,
-    gui_atlas: Option<&umicraft_assets::GuiAtlas>,
-) {
-    let bg_color = [0.0_f32, 0.0, 0.0, 0.55];
-    ui.draw().rect(viewport, bg_color);
-
-    let textured = gui_atlas.is_some();
-
-    match &wv.container {
-        Some(container) => {
-            let layout = container_layout(viewport, container.slots.len());
-            let texture_name = gui_texture_for_container(container.slots.len());
-            let rows = container.slots.len().div_ceil(9);
-            let container_bg_h = 114 + rows as u32 * 18;
-            draw_gui_background(
-                ui,
-                gui_atlas,
-                texture_name,
-                &layout.background,
-                (176, container_bg_h),
-            );
-            draw_container_slots(
-                ui,
-                atlas,
-                &layout,
-                &container.slots,
-                &wv.player_slots,
-                textured,
-            );
-        }
-        None => {
-            let layout = player_inventory_layout(viewport);
-            draw_gui_background(
-                ui,
-                gui_atlas,
-                "container/inventory",
-                &layout.background,
-                (176, 166),
-            );
-            draw_player_inventory(ui, atlas, &layout, &wv.player_slots, textured);
-        }
-    }
-}
-
-/// Draws the GUI texture background for an inventory or container screen.
-///
-/// `gui_pixel_size` is the unscaled pixel dimensions of the GUI content inside
-/// the texture (e.g. 176×166 for the player inventory). Vanilla's GUI PNGs are
-/// often larger than the visible area (256×256 for inventory.png, which also
-/// holds potion effect icons), so `sub_region` extracts just the GUI portion.
-///
-/// Falls back to a solid rectangle when the GUI atlas is not loaded or the
-/// texture is not found.
-fn draw_gui_background(
-    ui: &mut umicraft_ui::Ui,
-    gui_atlas: Option<&umicraft_assets::GuiAtlas>,
-    name: &str,
-    background: &Rect,
-    gui_pixel_size: (u32, u32),
-) {
-    let region = gui_atlas.and_then(|a| a.region(name));
-    match region {
-        Some(region) => {
-            let src = region.sub_region(0, 0, gui_pixel_size.0, gui_pixel_size.1);
-            ui.draw().image(src, *background, [1.0, 1.0, 1.0, 1.0]);
-        }
-        None => {
-            ui.draw().rect(*background, [0.12, 0.12, 0.15, 0.92]);
-        }
-    }
-}
-
-/// Returns the GUI texture name for a container given its slot count.
-fn gui_texture_for_container(slot_count: usize) -> &'static str {
-    match slot_count {
-        27 => "container/generic_27",
-        54 => "container/generic_54",
-        3 => "container/furnace",
-        9 => "container/dispenser",
-        5 => "container/hopper",
-        _ => "container/generic_27",
-    }
-}
-
-/// Converts a protocol `ItemStack` into the widget's `SlotItem`.
-fn slot_item(item: &umicraft_protocol::packets::play::ItemStack) -> SlotItem {
-    SlotItem {
-        item_id: i32::from(item.item_id),
-        count: u8::try_from(item.stack_size).unwrap_or(0),
-        damage: item.damage,
-        max_durability: 0,
-    }
-}
-
-/// Draws the player inventory (45 slots) using the layout grid.
-fn draw_player_inventory(
-    ui: &mut umicraft_ui::Ui,
-    atlas: &FontAtlas,
-    layout: &InventoryLayout,
     player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
-    textured: bool,
+    items: ItemView<'_>,
+    (width, height): (u32, u32),
 ) {
-    let mut label = String::with_capacity(8);
-    for (i, rect) in layout.slots.iter().enumerate() {
-        label.clear();
-        std::fmt::Write::write_fmt(&mut label, format_args!("inv{i}")).unwrap();
-        let id = ui.id(&label);
-        let item = player_slots[i].as_ref().map(slot_item);
-        slot(ui, id, *rect, atlas, item.as_ref(), textured);
-    }
-}
-
-/// Draws a container screen: container slots on top, player main+hotbar below.
-fn draw_container_slots(
-    ui: &mut umicraft_ui::Ui,
-    atlas: &FontAtlas,
-    layout: &ContainerLayout,
-    container_slots: &[Option<umicraft_protocol::packets::play::ItemStack>],
-    player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
-    textured: bool,
-) {
-    let mut label = String::with_capacity(8);
-    for (i, rect) in layout.container_slots.iter().enumerate() {
-        label.clear();
-        std::fmt::Write::write_fmt(&mut label, format_args!("cs{i}")).unwrap();
-        let id = ui.id(&label);
-        let item = container_slots
-            .get(i)
-            .and_then(|s| s.as_ref())
-            .map(slot_item);
-        slot(ui, id, *rect, atlas, item.as_ref(), textured);
-    }
-    for (i, &(inv_idx, rect)) in layout.player_slots.iter().enumerate() {
-        label.clear();
-        std::fmt::Write::write_fmt(&mut label, format_args!("ps{i}")).unwrap();
-        let id = ui.id(&label);
-        let item = player_slots
-            .get(inv_idx)
-            .and_then(|s| s.as_ref())
-            .map(slot_item);
-        slot(ui, id, rect, atlas, item.as_ref(), textured);
+    let layout = HudLayout::new(width, height);
+    let icon = 16.0 * layout.scale();
+    for (index, stack) in player_slots[HOTBAR_START..HOTBAR_START + 9]
+        .iter()
+        .enumerate()
+    {
+        let Some(stack) = stack else { continue };
+        let slot = layout.slot_rect(index);
+        let cell = Rect::new(
+            slot.x + (slot.width - icon) * 0.5,
+            slot.y + (slot.height - icon) * 0.5,
+            icon,
+            icon,
+        );
+        draw_item(ui.draw(), atlas, cell, &slot_item(items, stack));
     }
 }
 
@@ -1161,7 +1401,11 @@ impl ApplicationHandler for App {
             .unwrap_or(TerrainTextures::Procedural)
             .install(&mut renderer);
         upload_gui_atlas(&mut renderer, terrain.gui_atlas());
+        upload_glint_texture(&mut renderer, terrain.glint_texture());
         self.gui_atlas = terrain.gui_atlas().cloned();
+        self.items = terrain.items();
+        self.dials = DialAnimator::new(terrain.dials());
+        self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
         match WorldView::new(&terrain, default_worker_count()) {
             Ok(world) => self.world = Some(world),
             Err(error) => {
@@ -1193,25 +1437,36 @@ impl ApplicationHandler for App {
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.ctrl_held = modifiers.state().control_key();
                 self.ui_input.modifiers(modifiers.state());
+                let state = modifiers.state();
+                self.inventory_input
+                    .set_modifiers(state.shift_key(), state.control_key());
+                self.creative_input
+                    .set_modifiers(state.shift_key(), state.control_key());
             }
             WindowEvent::CursorMoved { position, .. } => {
                 // Keep the pointer current even while the UI is closed: F2 can
                 // open the screen before the next mouse movement, and the first
                 // click must use the physical cursor, not the initial origin.
                 self.ui_input.pointer_moved(position);
-                if !self.screen().uses_ui() {
+                self.inventory_pointer(position);
+                self.creative_pointer(position);
+                if !self.screen().uses_ui() && !self.death_screen_visible() {
                     self.ui_input.clear();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let screen = self.screen();
-                if screen.uses_ui() {
+                if screen.uses_ui() || self.death_screen_visible() {
                     self.ui_input.pointer_button(state, button);
+                    self.inventory_button(state, button);
+                    self.creative_button(state, button);
                 } else if screen.blocks_game_input() {
                     // The chat has no pointer interaction yet.
                 } else {
                     match button {
                         MouseButton::Left => {
+                            self.attack_held =
+                                state == ElementState::Pressed && self.mouse_captured;
                             if state == ElementState::Pressed {
                                 if self.mouse_captured {
                                     self.break_block = true;
@@ -1220,21 +1475,28 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        MouseButton::Right
+                        MouseButton::Right => {
+                            self.use_held = state == ElementState::Pressed && self.mouse_captured;
+                            if self.use_held {
+                                self.place_block = true;
+                            }
+                        }
+                        MouseButton::Middle
                             if state == ElementState::Pressed && self.mouse_captured =>
                         {
-                            self.place_block = true;
+                            self.pick_block = true;
                         }
                         _ => {}
                     }
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                if self.screen().uses_ui() {
+                if self.screen().uses_ui() || self.death_screen_visible() {
                     self.ui_input.wheel(delta);
+                    self.creative_wheel(delta);
                 } else if self.screen == Screen::Chat {
                     // A notch scrolls seven rows, one with Shift held
-                    // (`GuiScreen.handleMouseInput` in the reference).
+                    // (GuiScreen.handleMouseInput in the reference).
                     let notches = match delta {
                         MouseScrollDelta::LineDelta(_, y) => y,
                         MouseScrollDelta::PixelDelta(position) => position.y as f32 / 20.0,
@@ -1273,7 +1535,10 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            if self.mouse_captured && !self.screen().blocks_game_input() {
+            if self.mouse_captured
+                && !self.screen().blocks_game_input()
+                && !self.death_screen_visible()
+            {
                 // A positive delta moves the mouse to the right and down; the
                 // game logic turns right and looks down with it.
                 let speed = MOUSE_SENSITIVITY * self.options.controls.look_factor();

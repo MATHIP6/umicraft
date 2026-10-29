@@ -19,11 +19,15 @@
 
 use std::sync::Arc;
 
-use umicraft_assets::{BlockAtlas, GuiAtlas};
+use umicraft_assets::DialSprite;
+use umicraft_assets::{BlockAtlas, GlintTexture, GuiAtlas, TextureAnimation};
 use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, Mesh, ModelMeshContext};
 use umicraft_render::{BlockAtlasError, Renderer};
+
+use crate::cracks::STAGES;
 use umicraft_world::ChunkPos;
 
+use crate::item_icons::ItemResources;
 use crate::model_resources::ModelResources;
 
 /// Where the terrain texture array is bound: the renderer, or a test double.
@@ -69,11 +73,15 @@ pub enum TerrainTextures {
     /// The user's 1.8.8 atlas and the model mesher that indexes it.
     Official {
         /// The texture array to bind.
-        atlas: BlockAtlas,
+        atlas: Box<BlockAtlas>,
         /// The model-meshing context whose layout matches `atlas`.
         context: Arc<ModelMeshContext>,
         /// The GUI texture atlas built from the jar's `textures/gui/` PNGs.
         gui_atlas: GuiAtlas,
+        /// The enchantment glint texture, when the assets provide it.
+        glint: Option<Arc<GlintTexture>>,
+        /// The baked item models over the same atlas layout.
+        items: Arc<ItemResources>,
     },
 }
 
@@ -130,9 +138,11 @@ impl TerrainTextures {
     #[must_use]
     pub fn official(resources: &ModelResources) -> Self {
         Self::Official {
-            atlas: resources.atlas().clone(),
+            atlas: Box::new(resources.atlas().clone()),
             context: resources.context(),
             gui_atlas: resources.resources().gui_atlas().clone(),
+            glint: resources.resources().glint_texture().cloned().map(Arc::new),
+            items: resources.items(),
         }
     }
 
@@ -147,6 +157,8 @@ impl TerrainTextures {
                 atlas,
                 context,
                 gui_atlas,
+                glint,
+                items,
             } => {
                 let bound = target.set_block_atlas(
                     atlas.width(),
@@ -163,6 +175,10 @@ impl TerrainTextures {
                         InstalledTerrain {
                             mesher: TerrainMesher(MesherKind::Models(context)),
                             gui_atlas: Some(gui_atlas),
+                            glint,
+                            items: Some(items),
+                            animations: atlas.animations().to_vec(),
+                            dials: atlas.dials().to_vec(),
                         }
                     }
                     Err(error) => {
@@ -183,6 +199,10 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
     InstalledTerrain {
         mesher: TerrainMesher(MesherKind::Procedural),
         gui_atlas: None,
+        glint: None,
+        items: None,
+        animations: Vec::new(),
+        dials: Vec::new(),
     }
 }
 
@@ -194,6 +214,12 @@ fn install_procedural(target: &mut impl BlockTextureTarget) -> InstalledTerrain 
 pub struct InstalledTerrain {
     mesher: TerrainMesher,
     gui_atlas: Option<GuiAtlas>,
+    glint: Option<Arc<GlintTexture>>,
+    items: Option<Arc<ItemResources>>,
+    /// The animated layers of the bound array (empty for the procedural set).
+    animations: Vec<TextureAnimation>,
+    /// The compass and clock sprites of the bound array.
+    dials: Vec<DialSprite>,
 }
 
 impl InstalledTerrain {
@@ -209,10 +235,35 @@ impl InstalledTerrain {
         self.mesher.clone()
     }
 
+    /// The animated layers (water, lava, fire...) of the bound array, each at
+    /// its first step. Empty for the procedural set.
+    #[must_use]
+    pub fn animations(&self) -> &[TextureAnimation] {
+        &self.animations
+    }
+
+    /// The compass and clock sprites, empty for the procedural set.
+    #[must_use]
+    pub fn dials(&self) -> &[DialSprite] {
+        &self.dials
+    }
+
+    /// The baked item models, if the official assets were loaded.
+    #[must_use]
+    pub fn items(&self) -> Option<Arc<ItemResources>> {
+        self.items.clone()
+    }
+
     /// The GUI texture atlas, if the official assets were loaded.
     #[must_use]
     pub fn gui_atlas(&self) -> Option<&GuiAtlas> {
         self.gui_atlas.as_ref()
+    }
+
+    /// The enchantment glint texture, if the official assets provide it.
+    #[must_use]
+    pub fn glint_texture(&self) -> Option<&GlintTexture> {
+        self.glint.as_deref()
     }
 }
 
@@ -229,6 +280,22 @@ enum MesherKind {
 }
 
 impl TerrainMesher {
+    /// The texture-array layer of each destroy-stage texture, or `None` for
+    /// the procedural set, which has none (the cracks are not drawn).
+    #[must_use]
+    pub fn destroy_layers(&self) -> Option<[u32; STAGES]> {
+        let MesherKind::Models(context) = &self.0 else {
+            return None;
+        };
+        let mut layers = [0; STAGES];
+        for (stage, layer) in layers.iter_mut().enumerate() {
+            *layer = context
+                .atlas
+                .layer(&format!("blocks/destroy_stage_{stage}"))?;
+        }
+        Some(layers)
+    }
+
     /// Meshes one chunk column from its immutable snapshot.
     #[must_use]
     pub fn mesh(&self, pos: ChunkPos, snapshot: &ChunkSnapshot) -> Mesh {
@@ -268,13 +335,15 @@ mod tests {
         let atlas = BlockAtlas::new(1, 1, vec![255; 4], layout.clone()).expect("atlas");
         let models = BlockModelSet::build(&NoResources, &[]).expect("empty model set");
         TerrainTextures::Official {
-            atlas,
+            atlas: Box::new(atlas),
             context: Arc::new(ModelMeshContext {
                 models: Arc::new(models),
                 atlas: Arc::new(layout),
                 tints: None,
             }),
             gui_atlas: GuiAtlas::empty(),
+            glint: None,
+            items: Arc::new(ItemResources::empty()),
         }
     }
 
@@ -351,5 +420,32 @@ mod tests {
         assert!(matches!(textures, TerrainTextures::Procedural));
         assert_eq!(messages.len(), 1, "expected one warning, got {messages:?}");
         assert!(messages[0].contains("procedural terrain textures"));
+    }
+
+    /// The real jar carries the ten destroy-stage textures and the atlas
+    /// holds them, one distinct layer each (needs the official 1.8.8
+    /// installation, like the other `ModelResources` tests).
+    #[test]
+    #[ignore = "requires the official 1.8.8 installation in ~/.minecraft"]
+    fn the_official_atlas_has_the_ten_destroy_stage_layers() {
+        let TerrainTextures::Official { context, .. } = TerrainTextures::load() else {
+            panic!("the official 1.8.8 set did not load");
+        };
+        let mesher = TerrainMesher(MesherKind::Models(context));
+        let layers = mesher.destroy_layers().expect("the destroy stages");
+        let mut sorted = layers.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), STAGES);
+        assert!(
+            !layers.contains(&0),
+            "layer 0 is the missing-texture checker"
+        );
+    }
+
+    #[test]
+    fn the_procedural_set_has_no_destroy_stage_layers() {
+        let installed = TerrainTextures::Procedural.install(&mut Target::default());
+        assert!(installed.mesher().destroy_layers().is_none());
     }
 }

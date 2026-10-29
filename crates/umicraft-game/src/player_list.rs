@@ -9,13 +9,13 @@
 //! the 80-entry cap of `renderPlayerlist`.
 
 use umicraft_protocol::packets::play::clientbound::{
-    PlayerListAdd, PlayerListHeaderFooter, PlayerListItem,
+    AddPlayerEntry, PlayerListHeaderFooter, PlayerListItem,
 };
 
 use crate::scoreboard::Scoreboard;
 
 /// A player UUID, most significant bits first.
-pub type Uuid = [u8; 16];
+pub type Uuid = u128;
 
 /// The tab list shows at most this many players.
 pub const MAX_VISIBLE: usize = 80;
@@ -42,7 +42,7 @@ pub struct PlayerEntry {
 }
 
 impl PlayerEntry {
-    fn from_packet(add: &PlayerListAdd) -> Self {
+    fn from_packet(add: &AddPlayerEntry) -> Self {
         Self {
             uuid: add.uuid,
             name: add.name.clone(),
@@ -79,7 +79,7 @@ impl PlayerList {
     /// reference client, which looks the player up by UUID.
     pub fn apply(&mut self, packet: &PlayerListItem) {
         match packet {
-            PlayerListItem::Add(adds) => {
+            PlayerListItem::AddPlayer(adds) => {
                 for add in adds {
                     let entry = PlayerEntry::from_packet(add);
                     match self.entry_mut(&add.uuid) {
@@ -109,7 +109,7 @@ impl PlayerList {
                     }
                 }
             }
-            PlayerListItem::Remove(uuids) => {
+            PlayerListItem::RemovePlayer(uuids) => {
                 self.entries.retain(|entry| !uuids.contains(&entry.uuid));
             }
         }
@@ -180,11 +180,15 @@ impl PlayerList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use umicraft_protocol::packets::play::clientbound::{teams, PlayerProperty, TeamInfo, Teams};
+    use umicraft_protocol::packets::play::clientbound::{PlayerProperty, TeamInfo, Teams};
 
-    fn add(seed: u8, name: &str, game_mode: i32) -> PlayerListAdd {
-        PlayerListAdd {
-            uuid: [seed; 16],
+    fn id(seed: u8) -> Uuid {
+        u128::from_be_bytes([seed; 16])
+    }
+
+    fn add(seed: u8, name: &str, game_mode: i32) -> AddPlayerEntry {
+        AddPlayerEntry {
+            uuid: id(seed),
             name: name.to_string(),
             properties: vec![],
             game_mode,
@@ -193,9 +197,9 @@ mod tests {
         }
     }
 
-    fn list_of(adds: Vec<PlayerListAdd>) -> PlayerList {
+    fn list_of(adds: Vec<AddPlayerEntry>) -> PlayerList {
         let mut list = PlayerList::new();
-        list.apply(&PlayerListItem::Add(adds));
+        list.apply(&PlayerListItem::AddPlayer(adds));
         list
     }
 
@@ -208,37 +212,37 @@ mod tests {
         let mut list = list_of(vec![add(1, "Steve", 0), add(2, "Alex", 0)]);
         assert_eq!(list.len(), 2);
 
-        list.apply(&PlayerListItem::UpdateLatency(vec![([1; 16], 99)]));
-        list.apply(&PlayerListItem::UpdateGameMode(vec![([1; 16], 1)]));
+        list.apply(&PlayerListItem::UpdateLatency(vec![(id(1), 99)]));
+        list.apply(&PlayerListItem::UpdateGameMode(vec![(id(1), 1)]));
         list.apply(&PlayerListItem::UpdateDisplayName(vec![(
-            [1; 16],
+            id(1),
             Some(r#"{"text":"S"}"#.to_string()),
         )]));
-        let steve = list.get(&[1; 16]).unwrap();
+        let steve = list.get(&id(1)).unwrap();
         assert_eq!((steve.ping, steve.game_mode), (99, 1));
         assert_eq!(steve.display_name.as_deref(), Some(r#"{"text":"S"}"#));
 
-        list.apply(&PlayerListItem::UpdateDisplayName(vec![([1; 16], None)]));
-        assert_eq!(list.get(&[1; 16]).unwrap().display_name, None);
+        list.apply(&PlayerListItem::UpdateDisplayName(vec![(id(1), None)]));
+        assert_eq!(list.get(&id(1)).unwrap().display_name, None);
 
-        list.apply(&PlayerListItem::Remove(vec![[1; 16]]));
+        list.apply(&PlayerListItem::RemovePlayer(vec![id(1)]));
         assert_eq!(list.len(), 1);
-        assert!(list.get(&[1; 16]).is_none());
+        assert!(list.get(&id(1)).is_none());
     }
 
     #[test]
     fn adding_a_known_uuid_replaces_the_entry() {
         let mut list = list_of(vec![add(1, "Steve", 0)]);
-        list.apply(&PlayerListItem::Add(vec![add(1, "Steve", 2)]));
+        list.apply(&PlayerListItem::AddPlayer(vec![add(1, "Steve", 2)]));
         assert_eq!(list.len(), 1);
-        assert_eq!(list.get(&[1; 16]).unwrap().game_mode, 2);
+        assert_eq!(list.get(&id(1)).unwrap().game_mode, 2);
     }
 
     #[test]
     fn an_update_for_an_unknown_player_is_ignored() {
         let mut list = PlayerList::new();
-        list.apply(&PlayerListItem::UpdateLatency(vec![([9; 16], 5)]));
-        list.apply(&PlayerListItem::Remove(vec![[9; 16]]));
+        list.apply(&PlayerListItem::UpdateLatency(vec![(id(9), 5)]));
+        list.apply(&PlayerListItem::RemovePlayer(vec![id(9)]));
         assert!(list.is_empty());
     }
 
@@ -258,11 +262,8 @@ mod tests {
             },
         ];
         let list = list_of(vec![with_skin, add(2, "Alex", 0)]);
-        assert_eq!(
-            list.get(&[1; 16]).unwrap().textures.as_deref(),
-            Some("eyJ0")
-        );
-        assert_eq!(list.get(&[2; 16]).unwrap().textures, None);
+        assert_eq!(list.get(&id(1)).unwrap().textures.as_deref(), Some("eyJ0"));
+        assert_eq!(list.get(&id(2)).unwrap().textures, None);
     }
 
     #[test]
@@ -274,17 +275,16 @@ mod tests {
             add(4, "Cat", 0),
         ]);
         let mut board = Scoreboard::new();
-        board.apply_teams(&Teams {
+        board.apply_teams(&Teams::Create {
             name: "red".to_string(),
-            mode: teams::MODE_CREATE,
-            info: Some(TeamInfo {
+            info: TeamInfo {
                 display_name: "Red".to_string(),
                 prefix: String::new(),
                 suffix: String::new(),
                 friendly_flags: 0,
                 name_tag_visibility: "always".to_string(),
                 color: 12,
-            }),
+            },
             players: vec!["Zed".to_string()],
         });
         // No team sorts before "red"; the spectator is last of all.

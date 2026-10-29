@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use umicraft_protocol::packets::play::clientbound::{
-    scoreboard_objective, teams, DisplayScoreboard, ScoreboardObjective, Teams, UpdateScore,
+    teams, DisplayScoreboard, ObjectiveRenderType, ScoreboardObjective, Teams, UpdateScore,
 };
 
 /// The number of display slots: list, sidebar, below name and 16 team
@@ -112,33 +112,42 @@ impl Scoreboard {
 
     /// Applies an objective packet: create, remove or update.
     pub fn apply_objective(&mut self, packet: &ScoreboardObjective) {
-        match packet.mode {
-            scoreboard_objective::MODE_CREATE | scoreboard_objective::MODE_UPDATE => {
-                let Some(info) = &packet.info else {
-                    return;
+        match packet {
+            ScoreboardObjective::Create {
+                name,
+                value,
+                render_type,
+            }
+            | ScoreboardObjective::Update {
+                name,
+                value,
+                render_type,
+            } => {
+                let render_type = match render_type {
+                    ObjectiveRenderType::Integer => "integer",
+                    ObjectiveRenderType::Hearts => "hearts",
                 };
                 self.objectives.insert(
-                    packet.name.clone(),
+                    name.clone(),
                     Objective {
-                        name: packet.name.clone(),
-                        display_name: info.display_name.clone(),
-                        render_type: info.render_type.clone(),
+                        name: name.clone(),
+                        display_name: value.clone(),
+                        render_type: render_type.to_string(),
                     },
                 );
             }
-            scoreboard_objective::MODE_REMOVE => {
-                self.objectives.remove(&packet.name);
+            ScoreboardObjective::Remove { name } => {
+                self.objectives.remove(name);
                 for scores in self.scores.values_mut() {
-                    scores.remove(&packet.name);
+                    scores.remove(name);
                 }
                 self.scores.retain(|_, scores| !scores.is_empty());
                 for slot in &mut self.slots {
-                    if slot.as_deref() == Some(packet.name.as_str()) {
+                    if slot.as_deref() == Some(name.as_str()) {
                         *slot = None;
                     }
                 }
             }
-            _ => {}
         }
     }
 
@@ -147,21 +156,28 @@ impl Scoreboard {
     /// A score for an objective that does not exist is dropped, like the
     /// reference client, which looks the objective up by name.
     pub fn apply_score(&mut self, packet: &UpdateScore) {
-        if !self.objectives.contains_key(&packet.objective) {
-            return;
-        }
-        match packet.value {
-            Some(value) => {
+        match packet {
+            UpdateScore::Change {
+                name,
+                objective,
+                value,
+            } => {
+                if !self.objectives.contains_key(objective) {
+                    return;
+                }
                 self.scores
-                    .entry(packet.name.clone())
+                    .entry(name.clone())
                     .or_default()
-                    .insert(packet.objective.clone(), value);
+                    .insert(objective.clone(), *value);
             }
-            None => {
-                if let Some(scores) = self.scores.get_mut(&packet.name) {
-                    scores.remove(&packet.objective);
+            UpdateScore::Remove { name, objective } => {
+                if !self.objectives.contains_key(objective) {
+                    return;
+                }
+                if let Some(scores) = self.scores.get_mut(name) {
+                    scores.remove(objective);
                     if scores.is_empty() {
-                        self.scores.remove(&packet.name);
+                        self.scores.remove(name);
                     }
                 }
             }
@@ -179,39 +195,38 @@ impl Scoreboard {
         };
         *entry = self
             .objectives
-            .contains_key(&packet.name)
-            .then(|| packet.name.clone());
+            .contains_key(&packet.score_name)
+            .then(|| packet.score_name.clone());
     }
 
     /// Applies a team packet: create, remove, update, add or remove members.
     pub fn apply_teams(&mut self, packet: &Teams) {
-        match packet.mode {
-            teams::MODE_CREATE => {
-                if let Some(info) = &packet.info {
-                    self.set_team(&packet.name, info);
-                    self.add_members(&packet.name, &packet.players);
+        match packet {
+            Teams::Create {
+                name,
+                info,
+                players,
+            } => {
+                self.set_team(name, info);
+                self.add_members(name, players);
+            }
+            Teams::Remove { name } => {
+                self.teams.remove(name);
+                self.membership.retain(|_, team| team != name);
+            }
+            Teams::Update { name, info } => {
+                if self.teams.contains_key(name) {
+                    self.set_team(name, info);
                 }
             }
-            teams::MODE_REMOVE => {
-                self.teams.remove(&packet.name);
-                self.membership.retain(|_, team| *team != packet.name);
-            }
-            teams::MODE_UPDATE => {
-                if let Some(info) = &packet.info {
-                    if self.teams.contains_key(&packet.name) {
-                        self.set_team(&packet.name, info);
-                    }
-                }
-            }
-            teams::MODE_ADD_PLAYERS => self.add_members(&packet.name, &packet.players),
-            teams::MODE_REMOVE_PLAYERS => {
-                for player in &packet.players {
-                    if self.membership.get(player) == Some(&packet.name) {
+            Teams::AddPlayers { name, players } => self.add_members(name, players),
+            Teams::RemovePlayers { name, players } => {
+                for player in players {
+                    if self.membership.get(player) == Some(name) {
                         self.membership.remove(player);
                     }
                 }
             }
-            _ => {}
         }
     }
 
@@ -329,31 +344,34 @@ impl Scoreboard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use umicraft_protocol::packets::play::clientbound::{ObjectiveInfo, TeamInfo};
+    use umicraft_protocol::packets::play::clientbound::TeamInfo;
 
     fn create_objective(board: &mut Scoreboard, name: &str, title: &str) {
-        board.apply_objective(&ScoreboardObjective {
+        board.apply_objective(&ScoreboardObjective::Create {
             name: name.to_string(),
-            mode: scoreboard_objective::MODE_CREATE,
-            info: Some(ObjectiveInfo {
-                display_name: title.to_string(),
-                render_type: "integer".to_string(),
-            }),
+            value: title.to_string(),
+            render_type: ObjectiveRenderType::Integer,
         });
     }
 
     fn set_score(board: &mut Scoreboard, holder: &str, objective: &str, value: Option<i32>) {
-        board.apply_score(&UpdateScore {
-            name: holder.to_string(),
-            objective: objective.to_string(),
-            value,
+        board.apply_score(&match value {
+            Some(value) => UpdateScore::Change {
+                name: holder.to_string(),
+                objective: objective.to_string(),
+                value,
+            },
+            None => UpdateScore::Remove {
+                name: holder.to_string(),
+                objective: objective.to_string(),
+            },
         });
     }
 
     fn display(board: &mut Scoreboard, position: i8, name: &str) {
         board.apply_display(&DisplayScoreboard {
             position,
-            name: name.to_string(),
+            score_name: name.to_string(),
         });
     }
 
@@ -369,10 +387,9 @@ mod tests {
     }
 
     fn create_team(board: &mut Scoreboard, name: &str, info: TeamInfo, players: &[&str]) {
-        board.apply_teams(&Teams {
+        board.apply_teams(&Teams::Create {
             name: name.to_string(),
-            mode: teams::MODE_CREATE,
-            info: Some(info),
+            info,
             players: players.iter().map(|p| (*p).to_string()).collect(),
         });
     }
@@ -448,10 +465,8 @@ mod tests {
         create_objective(&mut board, "o", "O");
         display(&mut board, SLOT_SIDEBAR, "o");
         set_score(&mut board, "Steve", "o", Some(1));
-        board.apply_objective(&ScoreboardObjective {
+        board.apply_objective(&ScoreboardObjective::Remove {
             name: "o".to_string(),
-            mode: scoreboard_objective::MODE_REMOVE,
-            info: None,
         });
         assert!(board.sidebar("x").is_none());
         assert!(board.objective("o").is_none());
@@ -463,13 +478,10 @@ mod tests {
     fn updating_an_objective_changes_its_title() {
         let mut board = Scoreboard::new();
         create_objective(&mut board, "o", "Old");
-        board.apply_objective(&ScoreboardObjective {
+        board.apply_objective(&ScoreboardObjective::Update {
             name: "o".to_string(),
-            mode: scoreboard_objective::MODE_UPDATE,
-            info: Some(ObjectiveInfo {
-                display_name: "New".to_string(),
-                render_type: "hearts".to_string(),
-            }),
+            value: "New".to_string(),
+            render_type: ObjectiveRenderType::Hearts,
         });
         assert_eq!(board.objective("o").unwrap().display_name, "New");
     }
@@ -509,27 +521,21 @@ mod tests {
         let mut board = Scoreboard::new();
         create_team(&mut board, "a", team_info("", "", -1), &["Steve"]);
         create_team(&mut board, "b", team_info("", "", -1), &[]);
-        board.apply_teams(&Teams {
+        board.apply_teams(&Teams::AddPlayers {
             name: "b".to_string(),
-            mode: teams::MODE_ADD_PLAYERS,
-            info: None,
             players: vec!["Steve".to_string()],
         });
         assert_eq!(board.team_of("Steve").unwrap().name, "b");
 
         // Removing him from the team he is not in changes nothing.
-        board.apply_teams(&Teams {
+        board.apply_teams(&Teams::RemovePlayers {
             name: "a".to_string(),
-            mode: teams::MODE_REMOVE_PLAYERS,
-            info: None,
             players: vec!["Steve".to_string()],
         });
         assert_eq!(board.team_of("Steve").unwrap().name, "b");
 
-        board.apply_teams(&Teams {
+        board.apply_teams(&Teams::RemovePlayers {
             name: "b".to_string(),
-            mode: teams::MODE_REMOVE_PLAYERS,
-            info: None,
             players: vec!["Steve".to_string()],
         });
         assert!(board.team_of("Steve").is_none());
@@ -539,11 +545,8 @@ mod tests {
     fn removing_a_team_frees_its_members() {
         let mut board = Scoreboard::new();
         create_team(&mut board, "a", team_info("", "", -1), &["Steve"]);
-        board.apply_teams(&Teams {
+        board.apply_teams(&Teams::Remove {
             name: "a".to_string(),
-            mode: teams::MODE_REMOVE,
-            info: None,
-            players: vec![],
         });
         assert!(board.team_of("Steve").is_none());
     }
@@ -551,10 +554,8 @@ mod tests {
     #[test]
     fn members_cannot_join_a_team_that_does_not_exist() {
         let mut board = Scoreboard::new();
-        board.apply_teams(&Teams {
+        board.apply_teams(&Teams::AddPlayers {
             name: "ghost".to_string(),
-            mode: teams::MODE_ADD_PLAYERS,
-            info: None,
             players: vec!["Steve".to_string()],
         });
         assert!(board.team_of("Steve").is_none());
