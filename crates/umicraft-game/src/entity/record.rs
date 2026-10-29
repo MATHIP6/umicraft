@@ -61,6 +61,8 @@ pub struct EntityRecord {
     pub animation: Animation,
     /// The typed metadata (variants, age, name, health).
     pub meta: EntityMeta,
+    /// The text of the name tag above the entity, when it has one.
+    pub name_tag: Option<Arc<str>>,
     /// The position the cape trails behind.
     pub cape: CapeChase,
     /// The profile of a player: name, skin and cape.
@@ -120,6 +122,7 @@ impl EntityRecord {
             meta: self.meta.clone(),
             prev_cape_chase: self.cape.previous.as_vec3(),
             cape_chase: self.cape.current.as_vec3(),
+            name_tag: self.name_tag.clone(),
             profile: self.profile.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
@@ -155,6 +158,7 @@ impl EntityRecord {
             body_yaw: BodyYaw::new(yaw),
             animation: Animation::default(),
             meta: EntityMeta::default(),
+            name_tag: None,
             cape: CapeChase::at(position),
             profile: None,
             uuid: None,

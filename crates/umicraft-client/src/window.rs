@@ -44,6 +44,7 @@ use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
 use crate::inventory_input::{Context, InventoryAction, InventoryInput};
+use crate::nametag_draw::{draw_tags, place_tags};
 
 use crate::inventory_screen::{draw_inventory_overlay, screen_input};
 use crate::inventory_winit;
@@ -1045,6 +1046,11 @@ impl App {
                 ItemView::new(self.items.as_deref(), self.dials.frames()),
                 (width, height),
             );
+            if !matches!(screen, Screen::Inventory | Screen::Creative) {
+                let entities = world.entities(Instant::now());
+                let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
+                draw_tags(&mut self.ui, atlas, &tags);
+            }
         }
 
         if self.death_screen_visible() {

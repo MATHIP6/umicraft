@@ -56,6 +56,8 @@ pub struct EntityFrameData {
     pub prev_cape_chase: Vec3,
     /// The cape position now.
     pub cape_chase: Vec3,
+    /// The text of the name tag above the entity.
+    pub name_tag: Option<Arc<str>>,
     /// The profile of a player.
     pub profile: Option<Arc<PlayerProfile>>,
     /// Player UUID for skin lookup.
@@ -108,6 +110,7 @@ impl EntityFrameData {
                 body_yaw,
                 self.flags.is_sneaking(),
             ),
+            name_tag: self.name_tag.clone(),
             profile: self.profile.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
@@ -156,6 +159,8 @@ pub struct EntityRenderSnapshot {
     pub meta: EntityMeta,
     /// The swing of the cape.
     pub cape: CapeAngles,
+    /// The text of the name tag above the entity, with formatting codes.
+    pub name_tag: Option<Arc<str>>,
     /// The profile of a player: name, skin and cape.
     pub profile: Option<Arc<PlayerProfile>>,
     /// Player UUID for skin lookup.
@@ -196,6 +201,7 @@ impl EntityRenderSnapshot {
             bed: None,
             meta: EntityMeta::default(),
             cape: CapeAngles::default(),
+            name_tag: None,
             profile: None,
             uuid: None,
             held: None,

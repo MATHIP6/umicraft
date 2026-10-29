@@ -39,6 +39,7 @@ pub mod item_tints;
 pub mod item_world;
 pub mod mesher;
 pub mod model_resources;
+pub mod nametag_draw;
 pub mod network;
 mod official;
 pub mod options;

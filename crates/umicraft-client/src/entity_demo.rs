@@ -437,6 +437,7 @@ fn make_snapshot(
         bed: None,
         meta: Default::default(),
         cape: Default::default(),
+        name_tag: None,
         profile: None,
         uuid,
         held: None,

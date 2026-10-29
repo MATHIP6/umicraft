@@ -485,6 +485,7 @@ mod render_tests {
             bed: None,
             meta: Default::default(),
             cape: Default::default(),
+            name_tag: None,
             profile: None,
             uuid: None,
             held: None,
@@ -589,6 +590,7 @@ mod player_render_tests {
             bed: None,
             meta: Default::default(),
             cape: Default::default(),
+            name_tag: None,
             profile: None,
             uuid: Some([1; 16]),
             held: Some(EntityItem {
@@ -766,6 +768,7 @@ mod glint_render_tests {
             bed: None,
             meta: Default::default(),
             cape: Default::default(),
+            name_tag: None,
             profile: None,
             uuid: None,
             held: None,

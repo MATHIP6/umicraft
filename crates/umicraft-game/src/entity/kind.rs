@@ -90,6 +90,29 @@ pub enum EntityKind {
 }
 
 impl EntityKind {
+    /// The height of the hitbox in blocks (MCP `Entity.height`), which puts
+    /// the name tag above the head. Unlisted kinds count as player-high.
+    #[must_use]
+    pub const fn height(self) -> f32 {
+        match self {
+            Self::Zombie | Self::ZombiePigman => 1.95,
+            Self::Skeleton => 1.99,
+            Self::Creeper => 1.7,
+            Self::Cow | Self::Mooshroom => 1.4,
+            Self::Pig | Self::Spider => 0.9,
+            Self::Sheep => 1.3,
+            Self::Chicken | Self::Ocelot => 0.7,
+            Self::CaveSpider | Self::Rabbit => 0.5,
+            Self::Enderman | Self::IronGolem => 2.9,
+            Self::Wolf => 0.8,
+            Self::Horse => 1.6,
+            Self::Snowman => 1.9,
+            Self::Giant => 10.8,
+            Self::Witch | Self::Villager | Self::ZombieVillager | Self::Player => 1.8,
+            _ => 1.8,
+        }
+    }
+
     /// True for living entities, which have a body yaw and swing their limbs;
     /// false for the objects (dropped items, arrows, item frames).
     #[must_use]
@@ -153,6 +176,18 @@ impl EntityKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heights_put_the_tag_above_the_head() {
+        assert_eq!(EntityKind::Player.height(), 1.8);
+        assert_eq!(EntityKind::Enderman.height(), 2.9);
+        assert!(EntityKind::Pig.height() < EntityKind::Cow.height());
+    }
+
+    #[test]
+    fn armour_stands_are_object_type_78() {
+        assert_eq!(EntityKind::from_object_type(78), EntityKind::ArmorStand);
+    }
 
     #[test]
     fn item_frames_are_object_type_71() {

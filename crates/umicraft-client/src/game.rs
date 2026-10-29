@@ -31,6 +31,7 @@ use umicraft_game::chat_component::{self, Translations};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
+use umicraft_game::entity::nametag::{mob_tag, player_tag};
 use umicraft_game::entity::{
     BossTracker, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityStore,
@@ -480,7 +481,8 @@ struct Game {
     entities: EntityStore,
     /// The inventory and container window model.
     windows: WindowManager,
-    /// The player's own name; it picks the team sidebar of the scoreboard.
+    /// The player's own name; it picks the team sidebar of the scoreboard and
+    /// the team rules of name tags.
     own_name: String,
     /// The tab list of the server.
     player_list: PlayerList,
@@ -1173,6 +1175,18 @@ fn follow_body(game: &mut Game) {
     );
 }
 
+/// The name tag text of an entity under the team rules, if it has one.
+fn entity_tag(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> Option<String> {
+    if entity.kind == EntityKind::Player {
+        let name = &entity.profile.as_ref()?.name;
+        return player_tag(scoreboard, local, name, entity.flags.is_invisible());
+    }
+    mob_tag(
+        entity.meta.custom_name.as_deref(),
+        entity.meta.custom_name_visible,
+    )
+}
+
 /// Block id of the bed (MCP `Blocks.bed`).
 const BED_BLOCK: u16 = 26;
 
@@ -1195,6 +1209,30 @@ fn put_to_bed(game: &mut Game, packet: &UseBed) {
 
 /// Handles one decoded clientbound packet.
 fn handle_net(
+    game: &mut Game,
+    event: PlayEvent,
+    queue: &mut CommandQueue,
+    frames: &SyncSender<RenderEvent>,
+) {
+    // What a name tag shows depends on the teams, the tab list and the
+    // metadata of the entity.
+    let changes_name_tags = matches!(
+        event,
+        PlayEvent::Teams(_)
+            | PlayEvent::PlayerListItem(_)
+            | PlayEvent::SpawnPlayer(_)
+            | PlayEvent::SpawnMob(_)
+            | PlayEvent::EntityMetadata(_)
+    );
+    apply_net_event(game, event, queue, frames);
+    if changes_name_tags {
+        let (scoreboard, own_name) = (&game.scoreboard, game.own_name.as_str());
+        game.entities
+            .refresh_name_tags(|entity| entity_tag(scoreboard, own_name, entity));
+    }
+}
+
+fn apply_net_event(
     game: &mut Game,
     event: PlayEvent,
     queue: &mut CommandQueue,
@@ -1240,6 +1278,13 @@ fn handle_net(
         }
         PlayEvent::PlayerListItem(packet) => {
             game.player_list.apply(&packet);
+            game.server.apply_player_list(&packet);
+            if let PlayerListItem::AddPlayer(entries) = &packet {
+                for entry in entries {
+                    let profile = profile_from_properties(&entry.name, &entry.properties);
+                    game.entities.set_profile(entry.uuid.to_be_bytes(), profile);
+                }
+            }
             game.hud_dirty = true;
         }
         PlayEvent::PlayerListHeaderFooter(packet) => {
@@ -1448,15 +1493,6 @@ fn handle_net(
                 .map(|info| profile_from_properties(&info.name, &info.properties));
             if let Some(profile) = listed {
                 game.entities.set_profile(p.uuid, profile);
-            }
-        }
-        PlayEvent::PlayerListItem(packet) => {
-            game.server.apply_player_list(&packet);
-            if let PlayerListItem::AddPlayer(entries) = &packet {
-                for entry in entries {
-                    let profile = profile_from_properties(&entry.name, &entry.properties);
-                    game.entities.set_profile(entry.uuid.to_be_bytes(), profile);
-                }
             }
         }
         PlayEvent::SpawnMob(m) => {
@@ -3202,6 +3238,67 @@ mod tests {
             1,
             "the tab list still updates"
         );
+    }
+
+    #[test]
+    fn a_team_decides_the_name_tag_of_a_player() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+        use umicraft_protocol::packets::play::clientbound::teams::{TeamInfo, Teams};
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.own_name = "me".to_owned();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let uuid = [9u8; 16];
+        game.entities.spawn_player(
+            EntityId(4),
+            uuid,
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        let entry = AddPlayerEntry {
+            uuid: u128::from_be_bytes(uuid),
+            name: "Bob".to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping: 0,
+            display_name: None,
+        };
+        let listed = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![entry]));
+        handle_net(&mut game, listed, &mut queue, &frames);
+        let tag = |game: &Game| game.entities.snapshots(0.0)[0].name_tag.clone();
+        assert_eq!(tag(&game).as_deref(), Some("Bob"));
+
+        let team = |visibility: &str| {
+            PlayEvent::Teams(Box::new(Teams::Create {
+                name: "red".to_owned(),
+                info: TeamInfo {
+                    display_name: "Red".to_owned(),
+                    prefix: "§c".to_owned(),
+                    suffix: String::new(),
+                    friendly_flags: 0,
+                    name_tag_visibility: visibility.to_owned(),
+                    color: 12,
+                },
+                players: vec!["Bob".to_owned()],
+            }))
+        };
+        handle_net(&mut game, team("always"), &mut queue, &frames);
+        assert_eq!(tag(&game).as_deref(), Some("§cBob"));
+        handle_net(
+            &mut game,
+            PlayEvent::Teams(Box::new(Teams::Remove {
+                name: "red".to_owned(),
+            })),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(tag(&game).as_deref(), Some("Bob"));
+        handle_net(&mut game, team("never"), &mut queue, &frames);
+        assert_eq!(tag(&game), None);
     }
 
     #[test]

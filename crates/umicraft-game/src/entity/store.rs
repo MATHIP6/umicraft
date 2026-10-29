@@ -260,6 +260,20 @@ impl EntityStore {
         }
     }
 
+    /// Recomputes the name tag of every player and named mob with `rules`,
+    /// which maps an entity to its tag text (see [`nametag`](super::nametag)).
+    ///
+    /// Called before each frame is published, because teams change at any
+    /// time; the tag text is shared, so an unchanged tag costs nothing.
+    pub fn refresh_name_tags(&mut self, rules: impl Fn(&EntityRecord) -> Option<String>) {
+        for entity in self.entities.values_mut() {
+            let tag = rules(entity);
+            if entity.name_tag.as_deref() != tag.as_deref() {
+                entity.name_tag = tag.map(Arc::from);
+            }
+        }
+    }
+
     /// Updates an entity's visual flags.
     pub fn set_flags(&mut self, id: EntityId, flags: EntityFlags) {
         if let Some(entity) = self.entities.get_mut(&id) {
