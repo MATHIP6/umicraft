@@ -18,6 +18,7 @@
 //! ```
 
 mod egg_table;
+mod fish;
 pub mod kind;
 mod potion_color;
 mod potion_variants;
@@ -56,6 +57,21 @@ pub fn lookup(id: i32) -> Option<&'static ItemDef> {
     let id = u16::try_from(id).ok()?;
     let index = table::ITEMS.binary_search_by_key(&id, |def| def.id).ok()?;
     table::ITEMS.get(index)
+}
+
+/// The food values of an item stack, `None` when the item is not food.
+///
+/// Unlike `lookup(id).kind`, this honours the damage value: raw and cooked fish
+/// derive their values from it (MCP `ItemFishFood.getHealAmount`).
+pub fn food_value(id: i32, meta: i16) -> Option<FoodValues> {
+    let def = lookup(id)?;
+    if let Some(fish) = fish::fish_food(def.id, meta) {
+        return Some(fish);
+    }
+    match def.kind {
+        ItemKind::Food(values) => Some(values),
+        _ => None,
+    }
 }
 
 /// Every registered item, sorted by id.
@@ -105,5 +121,33 @@ mod tests {
             })
         );
         assert_eq!(lookup(261).expect("bow").max_damage, 384);
+    }
+
+    fn food(id: i32, meta: i16) -> (u8, f32) {
+        let values = food_value(id, meta).expect("food");
+        (values.hunger, values.saturation)
+    }
+
+    #[test]
+    fn fish_food_depends_on_the_damage_value() {
+        assert_eq!(food(349, 0), (2, 0.1));
+        assert_eq!(food(349, 1), (2, 0.1));
+        assert_eq!(food(349, 2), (1, 0.1));
+        assert_eq!(food(349, 3), (1, 0.1));
+        assert_eq!(food(350, 0), (5, 0.6));
+        assert_eq!(food(350, 1), (6, 0.8));
+    }
+
+    #[test]
+    fn an_unknown_fish_damage_is_a_cod() {
+        assert_eq!(food(349, 9), food(349, 0));
+        assert_eq!(food(350, -1), food(350, 0));
+    }
+
+    #[test]
+    fn other_food_uses_the_table_and_non_food_has_none() {
+        assert_eq!(food(322, 0), (4, 1.2));
+        assert!(food_value(276, 0).is_none());
+        assert!(food_value(-5, 0).is_none());
     }
 }

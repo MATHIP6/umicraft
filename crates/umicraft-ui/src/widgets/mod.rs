@@ -31,6 +31,7 @@ pub mod panel;
 pub mod slider;
 pub mod slot;
 pub mod text_field;
+pub mod tooltip;
 
 pub use crate::screens::gui_scale;
 pub use button::{button, button_enabled, button_tinted};

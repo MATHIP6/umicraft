@@ -16,7 +16,9 @@
 //! the `ench` list, the "Dyed" line, the lore, the attack-damage attribute
 //! block (a blank line plus `+N Attack Damage`, which 1.8 shows in normal
 //! mode), and `Unbreakable`. The `HideFlags` bits 1, 2, 4 and 32 are honoured.
-//! Advanced-only lines (id, durability, NBT size) are never produced.
+//! [`tooltip_advanced`] adds the advanced-mode (F3+H) durability line
+//! `Durability: x / y` for a damaged item; the advanced id and NBT lines are
+//! never produced.
 //!
 //! ## Limitations
 //!
@@ -243,6 +245,54 @@ impl TooltipLine {
 /// });
 /// ```
 pub fn tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
+    tooltip_advanced(stack, false)
+}
+
+/// Builds the tooltip of `stack`, with the advanced-mode (F3+H) durability
+/// line when `advanced` is set.
+///
+/// The line (`item.durability`, "Durability: %s / %s") shows the remaining and
+/// the maximum uses of a damaged item, and comes after every other line
+/// (`ItemStack.getTooltip`).
+///
+/// ```
+/// use umicraft_game::inventory::tooltip::{tooltip_advanced, TooltipText};
+/// use umicraft_protocol::packets::play::ItemStack;
+///
+/// let sword = ItemStack { item_id: 276, stack_size: 1, damage: 61, nbt: None };
+/// let lines = tooltip_advanced(&sword, true);
+/// let last = lines.last().expect("lines");
+/// assert_eq!(last.text, TooltipText::Translation {
+///     key: "item.durability".into(),
+///     args: vec![TooltipText::Literal("1500".into()), TooltipText::Literal("1561".into())],
+/// });
+/// ```
+pub fn tooltip_advanced(stack: &ItemStack, advanced: bool) -> Vec<TooltipLine> {
+    let mut lines = base_tooltip(stack);
+    if advanced {
+        lines.extend(durability_line(stack));
+    }
+    lines
+}
+
+/// `Durability: remaining / max` for a damaged item (`ItemStack.isItemDamaged`).
+fn durability_line(stack: &ItemStack) -> Option<TooltipLine> {
+    let max = items::lookup(i32::from(stack.item_id))?.max_damage;
+    if max == 0 || stack.damage <= 0 {
+        return None;
+    }
+    let remaining = i32::from(max) - i32::from(stack.damage);
+    let text = TooltipText::Translation {
+        key: "item.durability".into(),
+        args: vec![
+            TooltipText::literal(remaining.to_string()),
+            TooltipText::literal(max.to_string()),
+        ],
+    };
+    Some(TooltipLine::plain(text, TooltipColor::Gray))
+}
+
+fn base_tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
     let bytes = stack.nbt.as_deref();
     let root = bytes.and_then(|b| Nbt::parse(b).ok());
     let display = bytes.map(ItemDisplay::from_nbt).unwrap_or_default();
@@ -602,6 +652,23 @@ mod tests {
         assert!(!lines[0].italic);
         let apple = tooltip(&stack(260, 0, None));
         assert_eq!(apple.len(), 1);
+    }
+
+    #[test]
+    fn the_durability_line_is_advanced_only_and_needs_damage() {
+        let damaged = stack(276, 61, None);
+        assert_eq!(tooltip(&damaged).len(), 3);
+        let lines = tooltip_advanced(&damaged, true);
+        assert_eq!(lines.len(), 4);
+        assert_eq!(
+            lines[3].text,
+            TooltipText::Translation {
+                key: "item.durability".into(),
+                args: vec![TooltipText::literal("1500"), TooltipText::literal("1561")],
+            }
+        );
+        assert_eq!(tooltip_advanced(&stack(276, 0, None), true).len(), 3);
+        assert_eq!(tooltip_advanced(&stack(1, 5, None), true).len(), 1);
     }
 
     #[test]

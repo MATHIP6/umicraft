@@ -8,13 +8,14 @@
 //! the held tool (`Item.getStrVsBlock`, `canHarvestBlock`), the Efficiency
 //! enchantment, the Haste and Mining Fatigue effects, water and flight.
 //!
-//! The 1.8 item registry does not exist yet (milestone P3), so the tools are
-//! the 21 vanilla tool ids below.
+//! The tools (kind and material) come from the item registry in
+//! [`crate::items`].
 
 use umicraft_protocol::packets::play::ItemStack;
 
 use crate::block_data::{Material, BLOCKS};
 use crate::item_nbt::ItemDisplay;
+use crate::items::{self, ItemKind, Tier, ToolKind};
 
 /// The potion id of Haste (MCP `Potion.digSpeed`).
 pub const HASTE: u8 = 3;
@@ -56,81 +57,42 @@ const PICKAXE_BLOCKS: [u16; 25] = [
     1, 44,
 ];
 
-/// What a tool is for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolKind {
-    Shovel,
-    Pickaxe,
-    Axe,
-    Sword,
-    Shears,
-}
-
-/// A tool material (MCP `Item.ToolMaterial`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Tier {
-    /// `efficiencyOnProperMaterial`.
-    efficiency: f32,
-    /// `harvestLevel`.
-    harvest_level: u8,
-}
-
-const WOOD: Tier = Tier {
-    efficiency: 2.0,
-    harvest_level: 0,
-};
-const STONE: Tier = Tier {
-    efficiency: 4.0,
-    harvest_level: 1,
-};
-const IRON: Tier = Tier {
-    efficiency: 6.0,
-    harvest_level: 2,
-};
-const DIAMOND: Tier = Tier {
-    efficiency: 8.0,
-    harvest_level: 3,
-};
-const GOLD: Tier = Tier {
-    efficiency: 12.0,
-    harvest_level: 0,
-};
-
-/// A tool item.
+/// A tool item: the registry kind and tier of the held item.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Tool {
     kind: ToolKind,
     tier: Tier,
 }
 
-/// The tool of an item id, if it is one (MCP `Item.registerItems`).
+impl Tool {
+    /// `ToolMaterial.efficiencyOnProperMaterial`.
+    fn efficiency(self) -> f32 {
+        match self.tier {
+            Tier::Wood => 2.0,
+            Tier::Stone => 4.0,
+            Tier::Iron => 6.0,
+            Tier::Diamond => 8.0,
+            Tier::Gold => 12.0,
+        }
+    }
+
+    /// `ToolMaterial.harvestLevel`.
+    fn harvest_level(self) -> u8 {
+        match self.tier {
+            Tier::Wood | Tier::Gold => 0,
+            Tier::Stone => 1,
+            Tier::Iron => 2,
+            Tier::Diamond => 3,
+        }
+    }
+}
+
+/// The tool of an item id, if it is one (from the item registry).
 fn tool(item_id: i16) -> Option<Tool> {
-    use ToolKind::{Axe, Pickaxe, Shears, Shovel, Sword};
-    let (kind, tier) = match item_id {
-        256 => (Shovel, IRON),
-        257 => (Pickaxe, IRON),
-        258 => (Axe, IRON),
-        267 => (Sword, IRON),
-        268 => (Sword, WOOD),
-        269 => (Shovel, WOOD),
-        270 => (Pickaxe, WOOD),
-        271 => (Axe, WOOD),
-        272 => (Sword, STONE),
-        273 => (Shovel, STONE),
-        274 => (Pickaxe, STONE),
-        275 => (Axe, STONE),
-        276 => (Sword, DIAMOND),
-        277 => (Shovel, DIAMOND),
-        278 => (Pickaxe, DIAMOND),
-        279 => (Axe, DIAMOND),
-        283 => (Sword, GOLD),
-        284 => (Shovel, GOLD),
-        285 => (Pickaxe, GOLD),
-        286 => (Axe, GOLD),
-        359 => (Shears, WOOD),
-        _ => return None,
-    };
-    Some(Tool { kind, tier })
+    match items::lookup(i32::from(item_id))?.kind {
+        ItemKind::Tool(kind, tier) => Some(Tool { kind, tier }),
+        _ => None,
+    }
 }
 
 /// Whether a material needs the right tool to drop its block
@@ -151,7 +113,7 @@ fn requires_tool(material: Material) -> bool {
 impl Tool {
     /// MCP `Item.getStrVsBlock` of the tool.
     fn strength(self, block: u16, material: Material) -> f32 {
-        let tool_speed = self.tier.efficiency;
+        let tool_speed = self.efficiency();
         match self.kind {
             ToolKind::Pickaxe => {
                 if matches!(material, Material::Iron | Material::Anvil | Material::Rock)
@@ -194,6 +156,7 @@ impl Tool {
                     1.0
                 }
             }
+            ToolKind::Hoe => 1.0,
             ToolKind::Shears => {
                 if block == WEB || material == Material::Leaves {
                     15.0
@@ -208,7 +171,7 @@ impl Tool {
 
     /// MCP `Item.canHarvestBlock` of the tool.
     fn can_harvest(self, block: u16, material: Material) -> bool {
-        let level = self.tier.harvest_level;
+        let level = self.harvest_level();
         match self.kind {
             ToolKind::Pickaxe => match block {
                 OBSIDIAN => level == 3,
@@ -221,7 +184,7 @@ impl Tool {
             ToolKind::Shovel => block == SNOW_LAYER || block == SNOW,
             ToolKind::Sword => block == WEB,
             ToolKind::Shears => matches!(block, WEB | REDSTONE_WIRE | TRIPWIRE),
-            ToolKind::Axe => false,
+            ToolKind::Axe | ToolKind::Hoe => false,
         }
     }
 }

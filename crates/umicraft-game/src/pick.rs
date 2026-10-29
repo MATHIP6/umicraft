@@ -6,11 +6,13 @@
 //! MCP `Minecraft.middleClickMouse` asks the block for its item
 //! (`Block.getItem`, `Block.getDamageValue`) and `InventoryPlayer.setCurrentItem`
 //! selects the hotbar slot that holds it; a creative player who has none gets
-//! the item in the first free hotbar slot. The block-to-item table below
-//! stands in for the 1.8 item registry until P3.
+//! the item in the first free hotbar slot. Which blocks have an item at all comes
+//! from the item registry ([`crate::items`]).
 
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_world::BlockState;
+
+use crate::items;
 
 /// The slots of the main inventory in vanilla order: the hotbar first
 /// (MCP `InventoryPlayer.mainInventory`).
@@ -54,10 +56,9 @@ const REDIRECTS: &[(u16, i16)] = &[
     (197, 431), // dark oak door
 ];
 
-/// Blocks that give no item (MCP `Block.getItem` returns `null`, or the block
-/// has no item block): air, liquids, fire, portals, the spawner, the moving
-/// piston.
-const NO_ITEM: &[u16] = &[0, 8, 9, 10, 11, 36, 51, 52, 90, 119];
+/// Blocks whose item exists but that return no item when picked
+/// (`BlockMobSpawner.getItem` returns `null`).
+const NO_PICK: &[u16] = &[52];
 
 /// Blocks whose damage value is a variant of the item, with the mask
 /// `damageDropped` applies to the metadata (MCP `Block.damageDropped`).
@@ -111,7 +112,7 @@ pub struct PickedItem {
 #[must_use]
 pub fn picked_item(block: BlockState) -> Option<PickedItem> {
     let id = block.id();
-    if NO_ITEM.contains(&id) {
+    if NO_PICK.contains(&id) {
         return None;
     }
     let meta = block.metadata();
@@ -131,6 +132,9 @@ pub fn picked_item(block: BlockState) -> Option<PickedItem> {
         .iter()
         .find(|(from, _)| *from == id)
         .map_or(i16::try_from(id).ok()?, |&(_, item)| item);
+    // A block without a registered item (air, liquids, fire, portals, the
+    // moving piston) gives nothing (MCP `Block.getItem` is null).
+    items::lookup(i32::from(item_id))?;
     Some(item(item_id, mask))
 }
 
@@ -244,7 +248,7 @@ mod tests {
 
     #[test]
     fn air_and_liquids_give_nothing() {
-        for id in [0, 8, 9, 10, 11, 51, 90] {
+        for id in [0, 8, 9, 10, 11, 36, 51, 52, 90, 119] {
             assert_eq!(picked_item(BlockState::new(id, 0)), None, "{id}");
         }
     }

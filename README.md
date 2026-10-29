@@ -170,6 +170,10 @@ Total vertices: 1656
 Total triangles: 552
 ```
 
+Known gap: the dropped-item cube is counted in the report but the renderer no
+longer draws it (dropped items now go through the P3 item path, which needs a
+registry model rather than the old procedural cube).
+
 Add `--screenshot` to render an offscreen 1280×720 PNG:
 
 ```sh
