@@ -2067,6 +2067,14 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     // MCP `Minecraft.runTick` lines 2098-2121: the attack button does
     // nothing while an item is in use.
     if game.spectating() || game.dead() || game.item_use.is_using() {
+        if pressed {
+            tracing::info!(
+                spectating = game.spectating(),
+                dead = game.dead(),
+                using_item = game.item_use.is_using(),
+                "attack click ignored"
+            );
+        }
         return;
     }
     let pointed = combat::pointed(game);
