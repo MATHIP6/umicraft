@@ -103,6 +103,31 @@ impl EntityTexture {
         }
     }
 
+    /// Replaces the pixels of the texture; `rgba` must hold exactly the
+    /// `width * height * 4` bytes the texture was created with, otherwise
+    /// the upload is skipped.
+    pub fn write(&self, queue: &wgpu::Queue, rgba: &[u8]) {
+        let size = self.texture.size();
+        if rgba.len() as u64 != u64::from(size.width) * u64::from(size.height) * 4 {
+            return;
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size.width * 4),
+                rows_per_image: Some(size.height),
+            },
+            size,
+        );
+    }
+
     /// Access to bind group.
     #[must_use]
     pub fn bind_group(&self) -> &wgpu::BindGroup {

@@ -44,6 +44,7 @@ use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
 use crate::inventory_input::{Context, InventoryAction, InventoryInput};
+use crate::map_render::{map_id_of, MapTextures};
 use crate::nametag_draw::{draw_tags, place_tags};
 
 use crate::inventory_screen::{draw_inventory_overlay, screen_input};
@@ -216,6 +217,8 @@ struct App {
     texture_animator: TextureAnimator,
     /// Entity textures bound for GPU rendering.
     entity_textures: Option<EntityTextures>,
+    /// The textures of filled maps, created with the entity textures.
+    map_textures: Option<MapTextures>,
     last_frame: Instant,
     /// Origin of the clock that scrolls the enchantment glint.
     started: Instant,
@@ -290,6 +293,7 @@ impl App {
             hand_layers: ItemLayers::default(),
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
+            map_textures: None,
             last_frame: Instant::now(),
             started: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
@@ -432,6 +436,7 @@ impl App {
             self.dials = DialAnimator::new(installed.dials());
             self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
             self.entity_textures = Some(EntityTextures::load(renderer));
+            self.map_textures = Some(MapTextures::load(renderer));
             if let Some(world) = self.world.as_mut() {
                 world.reload_terrain(&installed, default_worker_count(), renderer);
                 let _ = self
@@ -1229,14 +1234,34 @@ impl App {
         {
             let entities = world.entities(now);
             let hand = world.hand_pose(now);
-            entity_textures.mesh_and_upload(&entities, renderer);
-            entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer);
+            let held_map = held_stack(world)
+                .filter(|_| hand.visible)
+                .and_then(|stack| map_id_of(stack.item_id, stack.damage));
+            let framed = self.map_textures.as_mut().map_or_else(Vec::new, |maps| {
+                maps.frame_batches(&entities, world.maps(), renderer)
+            });
+            entity_textures.mesh_and_upload_with(&entities, &framed, renderer);
+            match (held_map, self.map_textures.as_mut()) {
+                (Some(map_id), Some(maps)) => {
+                    let bob = self.camera.view_bob();
+                    let held = maps.hand_batches(
+                        world.maps(),
+                        map_id,
+                        (&hand, bob, world.hand_light()),
+                        renderer,
+                    );
+                    entity_textures.upload_hand_map(&hand, bob, &held, renderer);
+                }
+                _ => entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer),
+            }
             if let Some(items) = self.items.as_deref() {
                 let dropped = self.world_items.build(&entities, items);
                 renderer.set_world_items(&dropped.items);
                 renderer.set_world_glint(&dropped.glint);
                 self.hand_layers.clear();
-                if let Some(stack) = held_stack(world).filter(|_| hand.visible) {
+                if let Some(stack) = held_stack(world).filter(|stack| {
+                    hand.visible && map_id_of(stack.item_id, stack.damage).is_none()
+                }) {
                     let nbt = stack.nbt.as_deref();
                     push_held_item(
                         &mut self.hand_layers,
@@ -1452,6 +1477,7 @@ impl ApplicationHandler for App {
             }
         }
         self.entity_textures = Some(EntityTextures::load(&renderer));
+        self.map_textures = Some(MapTextures::load(&renderer));
         self.renderer = Some(renderer);
         self.window = Some(window.clone());
         event_loop.listen_device_events(DeviceEvents::Always);

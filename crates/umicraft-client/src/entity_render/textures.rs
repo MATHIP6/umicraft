@@ -21,6 +21,7 @@ use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
 use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
+use crate::map_render::{map_arm_vertices, MapBatch};
 
 /// Loads official textures from the jar if available, or falls back to procedural assets.
 pub fn load_or_fallback<F>(
@@ -105,15 +106,43 @@ impl EntityTextures {
         }
     }
 
+    /// Uploads the hands that hold a map: both arms, then the `map` batches.
+    pub fn upload_hand_map(
+        &self,
+        pose: &HandPose,
+        bob: Mat4,
+        map: &[MapBatch],
+        renderer: &mut Renderer,
+    ) {
+        let arms = map_arm_vertices(pose, bob, false);
+        let textures = self.textures.borrow();
+        let Some(skin) = textures.get(&TextureSlot::Steve) else {
+            return renderer.clear_hand();
+        };
+        let mut batches = vec![(arms.as_slice(), skin.bind_group())];
+        batches.extend(map.iter().map(|b| (b.vertices.as_slice(), &b.bind_group)));
+        renderer.set_hand_batches(&batches);
+    }
+
     /// Meshes all visible entities and uploads them to the GPU renderer.
     pub fn mesh_and_upload(&self, snapshots: &[EntityRenderSnapshot], renderer: &mut Renderer) {
+        self.mesh_and_upload_with(snapshots, &[], renderer);
+    }
+
+    /// [`Self::mesh_and_upload`] with extra batches, such as framed maps.
+    pub fn mesh_and_upload_with(
+        &self,
+        snapshots: &[EntityRenderSnapshot],
+        extra: &[MapBatch],
+        renderer: &mut Renderer,
+    ) {
         self.skins
             .borrow_mut()
             .collect(renderer, &mut self.textures.borrow_mut());
         let batches = mesh_entities_with(snapshots, self);
         self.compose_missing_coats(batches.keys(), renderer);
         let textures = self.textures.borrow();
-        let pairs: Vec<_> = batches
+        let mut pairs: Vec<_> = batches
             .iter()
             .filter_map(|(slot, verts)| {
                 if verts.is_empty() {
@@ -124,6 +153,7 @@ impl EntityTextures {
                     .map(|tex| (verts.as_slice(), tex.bind_group()))
             })
             .collect();
+        pairs.extend(extra.iter().map(|b| (b.vertices.as_slice(), &b.bind_group)));
         renderer.upload_entities(&pairs);
     }
 

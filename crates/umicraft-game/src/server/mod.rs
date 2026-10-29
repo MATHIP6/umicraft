@@ -28,6 +28,7 @@
 pub mod attributes;
 pub mod block_entities;
 pub mod effects;
+pub mod map_colors;
 pub mod maps;
 pub mod player_list;
 pub mod scoreboard;

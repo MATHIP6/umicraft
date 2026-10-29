@@ -7,6 +7,10 @@ use glam::{Mat4, Vec3};
 use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
+/// The small roll the idle animation gives an arm
+/// (`ModelBiped.setRotationAngles` with an age of 0: `rotateAngleZ = 0.1`).
+const IDLE_ROLL: f32 = 0.1;
+
 /// 1.8 Humanoid model (Player, Zombie, Skeleton) supporting Steve and Alex arm widths.
 #[derive(Debug, Clone)]
 pub struct HumanoidModel {
@@ -307,19 +311,29 @@ impl HumanoidModel {
     /// `rotateAngleZ = 0.1`).
     #[must_use]
     pub fn first_person_arm(is_slim: bool) -> Vec<ModelVertex> {
-        const PIVOT: [f32; 3] = [-5.0, 2.0, 0.0];
-        const IDLE_ROLL: f32 = 0.1;
+        let model = Self::new(is_slim);
+        Self::first_person_part(&model.right_arm, [-5.0, 2.0, 0.0], IDLE_ROLL)
+    }
+
+    /// The left arm and its sleeve, posed like [`Self::first_person_arm`]
+    /// with the opposite idle roll (MCP `RenderPlayer.renderLeftArm`, drawn
+    /// when a map is held in both hands).
+    #[must_use]
+    pub fn first_person_left_arm(is_slim: bool) -> Vec<ModelVertex> {
+        let model = Self::new(is_slim);
+        Self::first_person_part(&model.left_arm, [5.0, 2.0, 0.0], -IDLE_ROLL)
+    }
+
+    /// An arm in the vanilla model space (y down), rolled about `pivot`.
+    fn first_person_part(part: &ModelPart, pivot: [f32; 3], roll: f32) -> Vec<ModelVertex> {
         const MODEL_HEIGHT: f32 = 24.0;
 
-        let model = Self::new(is_slim);
         let mut out = Vec::new();
-        model
-            .right_arm
-            .emit(Mat4::from_scale(Vec3::splat(1.0 / 16.0)), &mut out);
+        part.emit(Mat4::from_scale(Vec3::splat(1.0 / 16.0)), &mut out);
 
-        let pivot = Vec3::from(PIVOT) / 16.0;
+        let pivot = Vec3::from(pivot) / 16.0;
         let roll = Mat4::from_translation(pivot)
-            * Mat4::from_rotation_z(IDLE_ROLL)
+            * Mat4::from_rotation_z(roll)
             * Mat4::from_translation(-pivot);
         for vertex in &mut out {
             let [x, y, z] = vertex.position;

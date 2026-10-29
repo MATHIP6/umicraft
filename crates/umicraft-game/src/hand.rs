@@ -65,6 +65,7 @@ pub struct HandState {
     previous_swing_progress: f32,
     sway_pitch: f32,
     sway_yaw: f32,
+    view_pitch: f32,
     pitch_delta: f32,
     yaw_delta: f32,
 }
@@ -97,6 +98,7 @@ impl HandState {
         self.tick_swing(effects);
         self.tick_equip(held);
         // MCP `EntityPlayerSP.updateEntityActionState`.
+        self.view_pitch = pitch;
         self.sway_pitch += (pitch - self.sway_pitch) * SWAY_SMOOTHING;
         self.sway_yaw += (yaw - self.sway_yaw) * SWAY_SMOOTHING;
         self.pitch_delta = (pitch - self.sway_pitch) * SWAY_SCALE;
@@ -154,6 +156,7 @@ impl HandState {
             swing: self.swing_progress(1.0),
             sway_pitch: self.pitch_delta,
             sway_yaw: self.yaw_delta,
+            view_pitch: self.view_pitch,
             item_use: None,
         }
     }
@@ -176,6 +179,8 @@ pub struct HandPose {
     pub sway_pitch: f32,
     /// The yaw sway of the arm in degrees.
     pub sway_yaw: f32,
+    /// The pitch of the view in degrees; a held map tilts with it.
+    pub view_pitch: f32,
     /// The item being used (eaten, drunk, blocked with, drawn), if any.
     pub item_use: Option<ItemUseView>,
 }
@@ -200,6 +205,7 @@ impl HandPose {
             swing: mix(self.swing, swing_end),
             sway_pitch: mix(self.sway_pitch, other.sway_pitch),
             sway_yaw: mix(self.sway_yaw, other.sway_yaw),
+            view_pitch: mix(self.view_pitch, other.view_pitch),
             item_use: match (self.item_use, other.item_use) {
                 (Some(from), Some(to)) => Some(ItemUseView {
                     count: mix(from.count, to.count),
@@ -243,7 +249,7 @@ impl HandPose {
     }
 
     /// MCP `ItemRenderer.func_178105_d`: the shift of an item with the swing.
-    fn swing_shift(&self) -> Mat4 {
+    pub(crate) fn swing_shift(&self) -> Mat4 {
         let root = self.swing.sqrt();
         let pi = std::f32::consts::PI;
         translate(
@@ -305,11 +311,11 @@ impl HandPose {
     }
 }
 
-fn translate(x: f32, y: f32, z: f32) -> Mat4 {
+pub(crate) fn translate(x: f32, y: f32, z: f32) -> Mat4 {
     Mat4::from_translation(Vec3::new(x, y, z))
 }
 
-fn rotate(degrees: f32, axis: Vec3) -> Mat4 {
+pub(crate) fn rotate(degrees: f32, axis: Vec3) -> Mat4 {
     Mat4::from_axis_angle(axis, degrees.to_radians())
 }
 

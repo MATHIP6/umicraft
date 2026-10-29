@@ -45,6 +45,7 @@ pub mod digging;
 pub mod entity;
 pub mod gamemode;
 pub mod hand;
+mod hand_map;
 pub mod input;
 pub mod interaction;
 pub mod inventory;

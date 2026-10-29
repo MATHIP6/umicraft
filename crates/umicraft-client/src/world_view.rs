@@ -17,6 +17,7 @@ use std::time::Instant;
 use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
 use umicraft_game::hand::HandPose;
 use umicraft_game::inventory::WindowView;
+use umicraft_game::server::maps::MapStore;
 use umicraft_game::RenderState;
 use umicraft_mesh::{ChunkSnapshot, Mesh, Vertex};
 use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer};
@@ -76,6 +77,8 @@ pub struct WorldView {
     selection: Arc<[OutlineBox]>,
     /// The cracks of the newest frame, and the mesh built from them.
     cracks: Arc<[Crack]>,
+    /// The maps of the newest frame.
+    maps: Arc<MapStore>,
     /// The texture layer of each destroy stage, when the terrain has them.
     destroy_layers: Option<[u32; STAGES]>,
     /// A crack mesh the renderer has not received yet.
@@ -110,6 +113,7 @@ impl WorldView {
             hand_light: LightLevel::FULL_SKY,
             selection: Arc::from([]),
             cracks: Arc::from([]),
+            maps: Arc::default(),
             destroy_layers: terrain.mesher().destroy_layers(),
             crack_mesh: None,
         })
@@ -246,6 +250,12 @@ impl WorldView {
         self.crack_mesh.take()
     }
 
+    /// The maps the server sent, as of the newest frame.
+    #[must_use]
+    pub fn maps(&self) -> &MapStore {
+        &self.maps
+    }
+
     /// The number of active living entities in the newest frame.
     #[must_use]
     pub fn entity_count(&self) -> usize {
@@ -259,6 +269,7 @@ impl WorldView {
                 self.entities = Arc::clone(&frame.entities);
                 self.hand_light = frame.hand_light;
                 self.selection = Arc::clone(&frame.selection);
+                self.maps = Arc::clone(&frame.maps);
                 if *self.cracks != *frame.cracks {
                     self.cracks = Arc::clone(&frame.cracks);
                     self.crack_mesh = self
@@ -629,6 +640,7 @@ mod tests {
             hand_light: LightLevel::FULL_SKY,
             selection: Arc::from([]),
             cracks: Arc::from([]),
+            maps: Arc::default(),
         }
     }
 

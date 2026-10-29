@@ -50,6 +50,7 @@ use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::player_list::PlayerList;
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::scoreboard::Scoreboard;
+use umicraft_game::server::maps::MapStore;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
 use umicraft_game::title::{ActionBar, TitleState};
@@ -227,6 +228,8 @@ pub struct Frame {
     pub selection: Arc<[OutlineBox]>,
     /// The cracks of every block being dug, by this player and by others.
     pub cracks: Arc<[Crack]>,
+    /// The maps the server sent (copy-on-write pixels, so cloning is cheap).
+    pub maps: Arc<MapStore>,
 }
 
 /// The statistics the debug overlay shows.
@@ -1150,6 +1153,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         hand_light,
         selection: game.selection_outline().into(),
         cracks: game.cracks().into(),
+        maps: Arc::new(game.server.maps().clone()),
     }));
 }
 
