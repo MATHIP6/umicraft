@@ -139,6 +139,8 @@ pub struct HudState {
     pub chat_scroll: usize,
     /// The chat input line, while the chat is open.
     pub chat_input: Option<ChatInputView>,
+    /// The chat options that shape the log.
+    pub chat_style: ChatStyle,
     /// The time of this frame; ages the chat lines. `None` freezes the fade.
     pub now: Option<Instant>,
     /// Debug lines, top to bottom.
@@ -170,6 +172,55 @@ pub struct BossView {
     pub name: String,
     /// The health as a fraction of the maximum, `0.0..=1.0`.
     pub health: f32,
+}
+
+/// The chat options that shape the log (`GameSettings.chat*`), as the
+/// fractions the options screen stores: `0.0..=1.0` each.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatStyle {
+    /// `chatOpacity`: the text and band alpha is `opacity * 0.9 + 0.1`.
+    pub opacity: f32,
+    /// `chatScale`: scales the whole log, `0.0` hides it.
+    pub scale: f32,
+    /// `chatWidth`: from 40 to 320 pixels.
+    pub width: f32,
+    /// `chatHeightFocused`: from 20 to 180 pixels while the chat is open.
+    pub height_focused: f32,
+    /// `chatHeightUnfocused`: from 20 to 180 pixels while it is closed.
+    pub height_unfocused: f32,
+}
+
+impl Default for ChatStyle {
+    /// The vanilla defaults.
+    fn default() -> Self {
+        Self {
+            opacity: 1.0,
+            scale: 1.0,
+            width: 1.0,
+            height_focused: 1.0,
+            height_unfocused: 0.444_444_45,
+        }
+    }
+}
+
+impl ChatStyle {
+    /// `GuiNewChat.calculateChatboxWidth`, in pixels.
+    #[must_use]
+    pub fn width_px(&self) -> i32 {
+        (self.width * 280.0 + 40.0) as i32
+    }
+
+    /// `GuiNewChat.calculateChatboxHeight` for the open chat, in pixels.
+    #[must_use]
+    pub fn height_focused_px(&self) -> i32 {
+        (self.height_focused * 160.0 + 20.0) as i32
+    }
+
+    /// `GuiNewChat.calculateChatboxHeight` for the closed chat, in pixels.
+    #[must_use]
+    pub fn height_unfocused_px(&self) -> i32 {
+        (self.height_unfocused * 160.0 + 20.0) as i32
+    }
 }
 
 /// One styled piece of a chat line.
@@ -276,6 +327,7 @@ impl Default for HudState {
             chat_open: false,
             chat_scroll: 0,
             chat_input: None,
+            chat_style: ChatStyle::default(),
             now: None,
             debug_lines: Vec::new(),
             action_bar: None,

@@ -289,22 +289,36 @@ fn wrap_proportional(
     rows
 }
 
-fn draw_chat(list: &mut DrawList, state: &HudState, gw: f32, gh: f32, sf: f32, font: &FontAtlas) {
+/// The log of `GuiNewChat.drawChat`: everything is in the units of a frame
+/// scaled by `chatScale`, from the origin (2, h - 28).
+fn draw_chat_log(list: &mut DrawList, state: &HudState, gh: f32, sf: f32, font: &FontAtlas) {
     let open = state.chat_open;
-    // `GuiNewChat`: the text wraps at 320 and the band is `l + 4` wide, from x = 2.
-    let text_max_w = 320.0_f32.min(gw - 4.0);
-    let chat_width = text_max_w + 4.0;
+    let style = state.chat_style;
+    if style.scale <= 0.0 {
+        return;
+    }
+    let opacity = style.opacity * 0.9 + 0.1;
+    let k = sf * style.scale;
+    let band = style.width_px() as f32 / style.scale;
+    // The text wraps at the floor of the width and the band is `l + 4` wide.
+    let text_max_w = band.floor();
+    let chat_width = band.ceil() + 4.0;
 
     let mut rows: Vec<ChatRow> = Vec::new();
     for line in &state.chat {
         let age = chat_hud::age_ticks(line.received, state.now);
-        let alpha = line_alpha(age, open);
+        let alpha = line_alpha(age, open) * opacity;
         for pieces in wrap_proportional(line, text_max_w, font) {
             rows.push(ChatRow { pieces, alpha });
         }
     }
 
-    let limit = if open { 20 } else { 10 };
+    let height = if open {
+        style.height_focused_px()
+    } else {
+        style.height_unfocused_px()
+    };
+    let limit = (height / 9).max(0) as usize;
     let scroll = if open {
         state.chat_scroll.min(rows.len().saturating_sub(limit))
     } else {
@@ -318,18 +332,17 @@ fn draw_chat(list: &mut DrawList, state: &HudState, gw: f32, gh: f32, sf: f32, f
         .now
         .map_or(0, |now| now.elapsed().as_millis() as usize / 50);
 
-    // Bottom of chat is at y = gh - 28. Rows are 9 units tall, drawn bottom-up.
-    let base_y = gh - 28.0;
+    let (ox, oy) = (2.0 * sf, (gh - 28.0) * sf);
     for (i, row) in visible.iter().rev().enumerate() {
         if row.alpha <= (3.0 / 255.0) {
             continue;
         }
-        let line_y = base_y - (i as f32 + 1.0) * 9.0;
-        let band_rect = Rect::new(2.0 * sf, line_y * sf, chat_width * sf, 9.0 * sf);
+        let local_y = -(i as f32 + 1.0) * 9.0;
+        let band_rect = Rect::new(ox, oy + local_y * k, chat_width * k, 9.0 * k);
         list.rect(band_rect, [0.0, 0.0, 0.0, row.alpha * 0.5]);
 
-        let mut cur_x = 2.0;
-        let text_y = line_y + 1.0;
+        let mut cur_x = 0.0;
+        let text_y = oy + (local_y + 1.0) * k;
         for (run_idx, run) in row.pieces.iter().enumerate() {
             let run_text: String = if run.obfuscated {
                 run.text
@@ -362,46 +375,33 @@ fn draw_chat(list: &mut DrawList, state: &HudState, gw: f32, gh: f32, sf: f32, f
             ];
 
             let run_w = font.measure(&run_text, 1.0);
+            let x = ox + cur_x * k;
 
             // Shadow
             list.text(
-                [(cur_x + 1.0) * sf, (text_y + 1.0) * sf],
+                [x + k, text_y + k],
                 &run_text,
-                TextStyle::new(sf, shadow_color),
+                TextStyle::new(k, shadow_color),
             );
             if run.bold {
                 list.text(
-                    [(cur_x + 2.0) * sf, (text_y + 1.0) * sf],
+                    [x + 2.0 * k, text_y + k],
                     &run_text,
-                    TextStyle::new(sf, shadow_color),
+                    TextStyle::new(k, shadow_color),
                 );
             }
 
             // Main text
-            list.text(
-                [cur_x * sf, text_y * sf],
-                &run_text,
-                TextStyle::new(sf, text_color),
-            );
+            list.text([x, text_y], &run_text, TextStyle::new(k, text_color));
             if run.bold {
-                list.text(
-                    [(cur_x + 1.0) * sf, text_y * sf],
-                    &run_text,
-                    TextStyle::new(sf, text_color),
-                );
+                list.text([x + k, text_y], &run_text, TextStyle::new(k, text_color));
             }
 
             if run.underlined {
-                list.rect(
-                    Rect::new(cur_x * sf, (text_y + 8.0) * sf, run_w * sf, sf),
-                    text_color,
-                );
+                list.rect(Rect::new(x, text_y + 8.0 * k, run_w * k, k), text_color);
             }
             if run.strikethrough {
-                list.rect(
-                    Rect::new(cur_x * sf, (text_y + 4.0) * sf, run_w * sf, sf),
-                    text_color,
-                );
+                list.rect(Rect::new(x, text_y + 4.0 * k, run_w * k, k), text_color);
             }
 
             cur_x += run_w + if run.bold { 1.0 } else { 0.0 };
@@ -409,8 +409,12 @@ fn draw_chat(list: &mut DrawList, state: &HudState, gw: f32, gh: f32, sf: f32, f
     }
 
     if open {
-        draw_chat_scrollbar(list, rows.len(), visible.len(), scroll, base_y, sf);
+        draw_chat_scrollbar(list, rows.len(), visible.len(), scroll, (ox, oy, k));
     }
+}
+
+fn draw_chat(list: &mut DrawList, state: &HudState, gw: f32, gh: f32, sf: f32, font: &FontAtlas) {
+    draw_chat_log(list, state, gh, sf, font);
 
     // Chat input bar
     if let Some(input) = &state.chat_input {
@@ -459,33 +463,29 @@ fn draw_chat_scrollbar(
     total: usize,
     shown: usize,
     scroll: usize,
-    base_y: f32,
-    sf: f32,
+    (ox, oy, k): (f32, f32, f32),
 ) {
     if total == 0 {
         return;
     }
-    let (k, j) = (total as f32, shown as f32);
-    let full = k * 10.0;
+    let (t, j) = (total as f32, shown as f32);
+    let full = t * 10.0;
     let window = j * 10.0;
     if (full - window).abs() < f32::EPSILON {
         return;
     }
-    let offset = (scroll as f32 * window / k).floor();
+    let offset = (scroll as f32 * window / t).floor();
     let thumb = (window * window / full).floor();
     let alpha = if offset > 0.0 { 170.0 } else { 96.0 } / 255.0;
-    let (top, height) = (base_y - offset - thumb, thumb);
+    let (top, height) = (oy - (offset + thumb) * k, thumb * k);
     // 0xCC3333 while scrolled back, 0x33332A at the bottom.
     let fill: Color = if scroll > 0 {
         [0.8, 0.2, 0.2, alpha]
     } else {
         [0.2, 0.2, 0.165, alpha]
     };
-    list.rect(Rect::new(-sf, top * sf, 2.0 * sf, height * sf), fill);
-    list.rect(
-        Rect::new(sf, top * sf, sf, height * sf),
-        [0.8, 0.8, 0.8, alpha],
-    );
+    list.rect(Rect::new(ox - 3.0 * k, top, 2.0 * k, height), fill);
+    list.rect(Rect::new(ox - k, top, k, height), [0.8, 0.8, 0.8, alpha]);
 }
 
 fn draw_overlays(

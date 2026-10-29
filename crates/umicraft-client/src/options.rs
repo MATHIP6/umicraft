@@ -131,6 +131,22 @@ pub struct ChatOptions {
     pub visibility: ChatVisibility,
     /// Whether the colours and styles of the chat are shown.
     pub colors: bool,
+    /// `chatLinks`: whether links in the chat are recognised.
+    pub links: bool,
+    /// `chatLinksPrompt`: whether a click on a link asks first.
+    pub links_prompt: bool,
+    /// `chatOpacity`, `0.0..=1.0`.
+    pub opacity: f32,
+    /// `chatScale`, `0.0..=1.0`.
+    pub scale: f32,
+    /// `chatHeightFocused`, `0.0..=1.0`.
+    pub height_focused: f32,
+    /// `chatHeightUnfocused`, `0.0..=1.0`.
+    pub height_unfocused: f32,
+    /// `chatWidth`, `0.0..=1.0`.
+    pub width: f32,
+    /// `reducedDebugInfo`.
+    pub reduced_debug: bool,
 }
 
 impl Default for ChatOptions {
@@ -138,6 +154,14 @@ impl Default for ChatOptions {
         Self {
             visibility: ChatVisibility::Full,
             colors: true,
+            links: true,
+            links_prompt: false,
+            opacity: 1.0,
+            scale: 1.0,
+            height_focused: 1.0,
+            height_unfocused: 0.444_444_45,
+            width: 1.0,
+            reduced_debug: false,
         }
     }
 }
@@ -147,6 +171,13 @@ impl ChatOptions {
     /// no message, and with the colours off every message is plain white
     /// text (`GameSettings.chatColours`).
     pub fn apply(&self, hud: &mut HudState) {
+        hud.chat_style = umicraft_render::ChatStyle {
+            opacity: self.opacity,
+            scale: self.scale,
+            width: self.width,
+            height_focused: self.height_focused,
+            height_unfocused: self.height_unfocused,
+        };
         if self.visibility == ChatVisibility::Hidden {
             hud.chat.clear();
         }
@@ -629,6 +660,23 @@ impl Options {
         } else {
             defaults.video.fov
         };
+        let defaults_chat = ChatOptions::default();
+        for (value, default) in [
+            (&mut self.chat.opacity, defaults_chat.opacity),
+            (&mut self.chat.scale, defaults_chat.scale),
+            (&mut self.chat.height_focused, defaults_chat.height_focused),
+            (
+                &mut self.chat.height_unfocused,
+                defaults_chat.height_unfocused,
+            ),
+            (&mut self.chat.width, defaults_chat.width),
+        ] {
+            *value = if value.is_finite() {
+                value.clamp(0.0, 1.0)
+            } else {
+                default
+            };
+        }
         self.controls.mouse_sensitivity = if self.controls.mouse_sensitivity.is_finite() {
             self.controls.mouse_sensitivity.clamp(0.0, 1.0)
         } else {

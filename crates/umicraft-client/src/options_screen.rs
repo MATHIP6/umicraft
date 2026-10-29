@@ -685,6 +685,43 @@ impl OptionsScreen {
         }
     }
 
+    /// A `GuiOptionButton` of an on/off option: "Name: ON".
+    #[allow(clippy::too_many_arguments)]
+    fn toggle(
+        &mut self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        id: &str,
+        rect: Rect,
+        name: &str,
+        value: &mut bool,
+        outcome: &mut Outcome,
+    ) {
+        let label = format!("{name}: {}", if *value { "ON" } else { "OFF" });
+        if self.button(ui, atlas, id, rect, &label, true, None) {
+            *value = !*value;
+            outcome.changed = true;
+        }
+    }
+
+    /// A `GuiOptionSlider` of an option stored as a fraction of `0.0..=1.0`.
+    #[allow(clippy::too_many_arguments)]
+    fn fraction(
+        &mut self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        id: &str,
+        rect: Rect,
+        label: &str,
+        value: &mut f32,
+        outcome: &mut Outcome,
+    ) {
+        if let Some(new) = self.slider(ui, atlas, id, rect, label, *value) {
+            *value = new;
+            outcome.changed = true;
+        }
+    }
+
     /// `ScreenChatOptions`.
     fn show_chat(
         &mut self,
@@ -697,37 +734,102 @@ impl OptionsScreen {
         Self::title(ui, atlas, gui, "Chat Settings", 20.0);
         let cx = gui.cx();
         let h6 = (gui.height / 6.0).floor();
-        for (index, entry) in CHAT_ENTRIES.iter().enumerate() {
+        for index in 0..10 {
             let x = cx - 155.0 + (index % 2) as f32 * 160.0;
             let y = h6 + 24.0 * (index / 2) as f32;
             let rect = gui.rect(x, y, HALF_W, BUTTON_H);
-            match *entry {
-                "Chat" => {
+            let chat = &mut options.chat;
+            match index {
+                0 => {
                     let label = format!(
                         "Chat: {}",
-                        match options.chat.visibility {
+                        match chat.visibility {
                             ChatVisibility::Full => "Shown",
                             ChatVisibility::Commands => "Commands Only",
                             ChatVisibility::Hidden => "Hidden",
                         }
                     );
                     if self.button(ui, atlas, "visibility", rect, &label, true, None) {
-                        options.chat.visibility = options.chat.visibility.next();
+                        chat.visibility = chat.visibility.next();
                         outcome.changed = true;
                     }
                 }
-                "Colors" => {
-                    let label =
-                        format!("Colors: {}", if options.chat.colors { "ON" } else { "OFF" });
-                    if self.button(ui, atlas, "colors", rect, &label, true, None) {
-                        options.chat.colors = !options.chat.colors;
-                        outcome.changed = true;
-                    }
+                1 => self.toggle(
+                    ui,
+                    atlas,
+                    "colors",
+                    rect,
+                    "Colors",
+                    &mut chat.colors,
+                    outcome,
+                ),
+                2 => self.toggle(
+                    ui,
+                    atlas,
+                    "links",
+                    rect,
+                    "Web Links",
+                    &mut chat.links,
+                    outcome,
+                ),
+                3 => {
+                    let label = format!("Opacity: {}%", (chat.opacity * 90.0 + 10.0) as i32);
+                    self.fraction(
+                        ui,
+                        atlas,
+                        "opacity",
+                        rect,
+                        &label,
+                        &mut chat.opacity,
+                        outcome,
+                    );
                 }
-                label => {
-                    let id = format!("chat:{index}");
-                    self.button(ui, atlas, &id, rect, label, true, None);
+                4 => self.toggle(
+                    ui,
+                    atlas,
+                    "links_prompt",
+                    rect,
+                    "Prompt on Links",
+                    &mut chat.links_prompt,
+                    outcome,
+                ),
+                5 => {
+                    let label = if chat.scale == 0.0 {
+                        "Scale: OFF".to_string()
+                    } else {
+                        format!("Scale: {}%", (chat.scale * 100.0) as i32)
+                    };
+                    self.fraction(ui, atlas, "scale", rect, &label, &mut chat.scale, outcome);
                 }
+                6 => {
+                    let label = format!(
+                        "Focused Height: {}px",
+                        (chat.height_focused * 160.0 + 20.0) as i32
+                    );
+                    let value = &mut chat.height_focused;
+                    self.fraction(ui, atlas, "height_focused", rect, &label, value, outcome);
+                }
+                7 => {
+                    let label = format!(
+                        "Unfocused Height: {}px",
+                        (chat.height_unfocused * 160.0 + 20.0) as i32
+                    );
+                    let value = &mut chat.height_unfocused;
+                    self.fraction(ui, atlas, "height_unfocused", rect, &label, value, outcome);
+                }
+                8 => {
+                    let label = format!("Width: {}px", (chat.width * 280.0 + 40.0) as i32);
+                    self.fraction(ui, atlas, "width", rect, &label, &mut chat.width, outcome);
+                }
+                _ => self.toggle(
+                    ui,
+                    atlas,
+                    "reduced_debug",
+                    rect,
+                    "Reduced Debug Info",
+                    &mut chat.reduced_debug,
+                    outcome,
+                ),
             }
         }
         let done = gui.rect(cx - 100.0, h6 + 120.0, 200.0, BUTTON_H);
@@ -776,20 +878,6 @@ const VIDEO_DISABLED: [&str; 16] = [
     "Allow Block Alternatives: ON",
     "Use VBOs: OFF",
     "Entity Shadows: ON",
-];
-
-/// `ScreenChatOptions.field_146399_a`; "Chat" and "Colors" are live.
-const CHAT_ENTRIES: [&str; 10] = [
-    "Chat",
-    "Colors",
-    "Web Links: ON",
-    "Opacity: 100%",
-    "Prompt on Links: OFF",
-    "Scale: 100%",
-    "Focused Height: 180px",
-    "Unfocused Height: 20px",
-    "Width: 320px",
-    "Reduced Debug Info: OFF",
 ];
 
 #[cfg(test)]
@@ -1000,6 +1088,32 @@ mod tests {
         // Vanilla places the right column 160 units after the left.
         let gap = screen.rect_of("colors").unwrap().x - screen.rect_of("visibility").unwrap().x;
         assert_eq!(gap, 160.0 * 3.0);
+    }
+
+    #[test]
+    fn the_chat_sliders_edit_the_options_and_name_their_pixels() {
+        let mut screen = OptionsScreen::new();
+        let mut options = Options::default();
+        click_widget(&mut screen, &mut options, "nav:chat");
+        frame(&mut screen, &mut options, vec![]);
+        let width = screen.rect_of("width").expect("a width slider");
+        // The far left of the bar is the minimum: 40 pixels.
+        let events = vec![InputEvent::PointerPressed {
+            position: [width.x + 1.0, width.y + 5.0],
+            button: PointerButton::Left,
+        }];
+        let outcome = frame(&mut screen, &mut options, events);
+        assert!(outcome.changed);
+        assert_eq!(options.chat.width, 0.0);
+        let opacity = screen.rect_of("opacity").expect("an opacity slider");
+        let events = vec![InputEvent::PointerPressed {
+            position: [opacity.x + 1.0, opacity.y + 5.0],
+            button: PointerButton::Left,
+        }];
+        frame(&mut screen, &mut options, events);
+        assert_eq!(options.chat.opacity, 0.0);
+        click_widget(&mut screen, &mut options, "links");
+        assert!(!options.chat.links);
     }
 
     #[test]
