@@ -2,8 +2,6 @@
 
 //! 1.8 Humanoid biped model (Player, Zombie, Skeleton).
 
-use std::f32::consts::PI;
-
 use glam::{Mat4, Vec3};
 
 use super::{ModelBox, ModelPart, ModelVertex};
@@ -61,8 +59,8 @@ impl HumanoidModel {
                 0.0,
             ));
 
-        let body = ModelPart::new([0.0, 12.0, 0.0]).with_box(ModelBox::new(
-            [-4.0, 0.0, -2.0],
+        let body = ModelPart::new([0.0, 24.0, 0.0]).with_box(ModelBox::new(
+            [-4.0, -12.0, -2.0],
             [8.0, 12.0, 4.0],
             [16.0, 16.0],
             tex,
@@ -132,8 +130,8 @@ impl HumanoidModel {
                 0.5,
             ));
 
-        let body = ModelPart::new([0.0, 12.0, 0.0]).with_box(ModelBox::new(
-            [-4.0, 0.0, -2.0],
+        let body = ModelPart::new([0.0, 24.0, 0.0]).with_box(ModelBox::new(
+            [-4.0, -12.0, -2.0],
             [8.0, 12.0, 4.0],
             [16.0, 16.0],
             tex,
@@ -203,16 +201,16 @@ impl HumanoidModel {
                 0.5,
             ));
 
-        let body = ModelPart::new([0.0, 12.0, 0.0])
+        let body = ModelPart::new([0.0, 24.0, 0.0])
             .with_box(ModelBox::new(
-                [-4.0, 0.0, -2.0],
+                [-4.0, -12.0, -2.0],
                 [8.0, 12.0, 4.0],
                 [16.0, 16.0],
                 tex,
                 0.0,
             ))
             .with_box(ModelBox::new(
-                [-4.0, 0.0, -2.0],
+                [-4.0, -12.0, -2.0],
                 [8.0, 12.0, 4.0],
                 [16.0, 32.0],
                 tex,
@@ -296,52 +294,6 @@ impl HumanoidModel {
             right_leg,
             left_leg,
         }
-    }
-
-    /// Sets animation angles based on limb swing and head orientation.
-    pub fn set_angles(
-        &mut self,
-        limb_swing: f32,
-        limb_swing_amount: f32,
-        head_yaw: f32,
-        head_pitch: f32,
-        is_zombie: bool,
-    ) {
-        self.head.rotation[0] = head_pitch.to_radians();
-        self.head.rotation[1] = head_yaw.to_radians();
-
-        let leg_angle = (limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount;
-        self.right_leg.rotation[0] = leg_angle;
-        self.left_leg.rotation[0] = -leg_angle;
-
-        if is_zombie {
-            self.right_arm.rotation[0] = PI / 2.0;
-            self.left_arm.rotation[0] = PI / 2.0;
-            self.right_arm.rotation[1] = -0.1;
-            self.left_arm.rotation[1] = 0.1;
-            self.right_arm.rotation[2] = 0.0;
-            self.left_arm.rotation[2] = 0.0;
-        } else {
-            let arm_angle = (limb_swing * 0.6662).cos() * 2.0 * limb_swing_amount * 0.5;
-            self.right_arm.rotation[0] = -arm_angle;
-            self.left_arm.rotation[0] = arm_angle;
-        }
-    }
-
-    /// Applies the vanilla 1.8 sneaking crouch pose (MCP `ModelBiped.setRotationAngles`).
-    ///
-    /// After calling this, the caller must also shift the world-space render
-    /// position up by 0.2 blocks to match the vanilla `GlStateManager.translate`
-    /// that prevents ground clipping.
-    pub fn apply_sneaking(&mut self) {
-        self.body.rotation[0] = 0.5;
-        self.right_arm.rotation[0] += 0.4;
-        self.left_arm.rotation[0] += 0.4;
-        self.right_leg.pivot[2] = 4.0;
-        self.left_leg.pivot[2] = 4.0;
-        self.right_leg.pivot[1] = 15.0;
-        self.left_leg.pivot[1] = 15.0;
-        self.head.pivot[1] = 23.0;
     }
 
     /// The right arm and its sleeve as the first-person view draws them

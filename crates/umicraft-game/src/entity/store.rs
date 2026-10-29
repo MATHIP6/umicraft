@@ -12,9 +12,13 @@ use crate::view::ViewEffects;
 use crate::RenderState;
 
 use super::{
-    BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
+    BedPose, BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityRenderSnapshot,
 };
+
+/// The limb swing amplitude a hurt entity jolts to
+/// (MCP `EntityLivingBase.handleStatusUpdate`, `limbSwingAmount = 1.5`).
+const HURT_LIMB_AMOUNT: f32 = 1.5;
 
 /// The storage and simulation of non-local entities on the game thread.
 #[derive(Debug, Clone, Default)]
@@ -250,6 +254,52 @@ impl EntityStore {
         &self.entities
     }
 
+    /// Applies an `Entity Status` that animates: `2` hurts (and makes the
+    /// legs jolt, MCP `handleStatusUpdate`), `3` kills. Other codes are not
+    /// animations and are ignored.
+    pub fn status(&mut self, id: EntityId, status: i8) {
+        let Some(entity) = self.entities.get_mut(&id) else {
+            return;
+        };
+        match status {
+            2 => {
+                entity.limbs.amount = HURT_LIMB_AMOUNT;
+                entity.animation.hurt();
+            }
+            3 => entity.animation.die(),
+            _ => {}
+        }
+    }
+
+    /// Applies an `Animation` packet: `0` swings the arm, `1` hurts, `2`
+    /// wakes a sleeper. The critical-hit particles (`4`, `5`) belong to the
+    /// particle system.
+    pub fn play_animation(&mut self, id: EntityId, animation: u8) {
+        let Some(entity) = self.entities.get_mut(&id) else {
+            return;
+        };
+        match animation {
+            0 => entity.animation.swing_item(),
+            1 => entity.animation.hurt(),
+            2 => entity.animation.bed = None,
+            _ => {}
+        }
+    }
+
+    /// Puts a player to bed (`Use Bed`): the player lies at the head end of
+    /// the bed block at `bed`, whose head points towards `facing`
+    /// (`0` south, `1` west, `2` north, `3` east).
+    pub fn sleep(&mut self, id: EntityId, bed: DVec3, facing: u8) {
+        if let Some(entity) = self.entities.get_mut(&id) {
+            let pose = BedPose::from_facing(facing);
+            let position = bed + pose.head_offset.as_dvec3();
+            entity.position = position;
+            entity.previous_position = position;
+            entity.target_position = position;
+            entity.animation.bed = Some(pose);
+        }
+    }
+
     /// Advances the simulation by one tick (20 Hz): glide to the server
     /// position, then animate limbs and body (MCP `EntityLivingBase.onUpdate`).
     pub fn tick(&mut self) {
@@ -257,8 +307,11 @@ impl EntityStore {
             entity.begin_tick();
             entity.glide_to_target();
             entity.animate();
+            entity.animation.tick();
             entity.age_ticks = entity.age_ticks.saturating_add(1);
         }
+        self.entities
+            .retain(|_, entity| !entity.animation.is_finished());
     }
 
     /// Produces interpolated render snapshots for all tracked entities.
@@ -534,6 +587,75 @@ mod tests {
         let snapshot = &store.snapshots(1.0)[0];
         assert!(snapshot.limb_swing_amount > 0.0);
         assert!(snapshot.limb_swing > 0.0);
+    }
+
+    #[test]
+    fn a_hurt_status_flashes_the_entity_and_jolts_its_legs() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.status(id, 2);
+        let snapshot = &store.snapshots(1.0)[0];
+        assert!(snapshot.hurt);
+        assert_eq!(snapshot.limb_swing_amount, 1.5);
+        for _ in 0..10 {
+            store.tick();
+        }
+        assert!(!store.snapshots(1.0)[0].hurt);
+    }
+
+    #[test]
+    fn a_death_status_removes_the_entity_after_the_fall() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.status(id, 3);
+        store.tick();
+        assert!(store.snapshots(0.0)[0].death_time > 0.0);
+        for _ in 0..19 {
+            store.tick();
+        }
+        assert!(store.is_empty());
+    }
+
+    #[test]
+    fn other_statuses_do_not_animate() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.status(id, 9);
+        let snapshot = &store.snapshots(1.0)[0];
+        assert!(!snapshot.hurt);
+        assert_eq!(snapshot.death_time, 0.0);
+    }
+
+    #[test]
+    fn an_animation_packet_swings_the_arm() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.play_animation(id, 0);
+        store.tick();
+        store.tick();
+        assert!(store.snapshots(1.0)[0].swing_progress > 0.0);
+    }
+
+    #[test]
+    fn a_sleeping_player_lies_in_the_bed_until_woken() {
+        let mut store = EntityStore::new();
+        let id = EntityId(7);
+        store.spawn_player(
+            id,
+            [3u8; 16],
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        store.sleep(id, DVec3::new(10.0, 64.0, 20.0), 0);
+        let asleep = &store.snapshots(1.0)[0];
+        assert_eq!(asleep.bed.map(|bed| bed.orientation), Some(90.0));
+        assert!((asleep.position.y - 64.6875).abs() < 1e-4);
+        assert!((asleep.position.z - 20.9).abs() < 1e-4);
+        store.play_animation(id, 2);
+        assert!(store.snapshots(1.0)[0].bed.is_none());
     }
 
     #[test]

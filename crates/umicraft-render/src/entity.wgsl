@@ -32,6 +32,7 @@ struct VertexOut {
     @location(1) uv: vec2<f32>,
     @location(2) light: f32,
     @location(3) shade: f32,
+    @location(4) @interpolate(flat) hurt: f32,
 };
 
 fn light_brightness(level: f32) -> f32 {
@@ -70,6 +71,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     let sky_light = light_brightness(sky_nibble) * camera.sun_brightness;
     out.light = gamma_correct(clamp(block_light + sky_light, 0.05, 1.0));
     out.shade = face_shade(in.normal);
+    out.hurt = f32((in.light >> 8u) & 1u);
 
     return out;
 }
@@ -81,7 +83,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
 
-    let lit = tex.rgb * in.light * in.shade;
+    // A hurt or dying entity is blended 30 % towards red before the light is
+    // applied (MCP `RendererLivingEntity.setBrightness`: (1, 0, 0, 0.3)).
+    let base = mix(tex.rgb, vec3<f32>(1.0, 0.0, 0.0), 0.3 * in.hurt);
+    let lit = base * in.light * in.shade;
     let dist = distance(in.world_position, camera.camera_pos);
     let fog = clamp((dist - camera.fog_start) / (camera.fog_end - camera.fog_start), 0.0, 1.0);
     let final_rgb = mix(lit, camera.fog_color, fog);

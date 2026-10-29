@@ -3,11 +3,12 @@
 //! Entity tracking, movement interpolation, and render snapshots.
 //!
 //! The data types live in small modules ([`kind`], [`flags`], [`item`],
-//! [`record`], [`snapshot`]); the animation maths in [`limbs`], [`body_yaw`]
-//! and [`motion`]; [`store`] owns the entities and drives them.
+//! [`record`], [`snapshot`]); the animation maths in [`limbs`], [`body_yaw`],
+//! [`motion`] and [`anim`]; [`store`] owns the entities and drives them.
 
 pub mod boss;
 pub mod angle;
+pub mod anim;
 pub mod body_yaw;
 pub mod flags;
 pub mod item;
@@ -19,6 +20,7 @@ pub mod snapshot;
 pub mod store;
 
 pub use boss::{BossInfo, BossTracker, DRAGON_MAX_HEALTH, WITHER_MAX_HEALTH};
+pub use anim::{Animation, BedPose};
 pub use body_yaw::BodyYaw;
 pub use flags::EntityFlags;
 pub use item::EntityItem;

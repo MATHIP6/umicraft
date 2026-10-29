@@ -13,7 +13,9 @@ use umicraft_assets::skin::{
     procedural_cow_texture, procedural_fallback_skin, procedural_zombie_skin, SkinModel,
 };
 use umicraft_game::entity::{EntityFlags, EntityId, EntityKind, EntityRenderSnapshot};
-use umicraft_model::entity::{emit_block_item_cube, HumanoidModel, ModelVertex, QuadrupedModel};
+use umicraft_model::entity::{
+    emit_block_item_cube, HumanoidModel, HumanoidPose, ModelVertex, QuadrupedModel,
+};
 use umicraft_render::{Camera, EntityVertex, HudLayout, Overlay, RenderEnvironment, Renderer};
 
 use crate::args::{Args, DemoView};
@@ -155,7 +157,7 @@ pub fn build_demo_scene() -> DemoScene {
 
     // 1. Steve (HumanoidModel, classic 4px arms, dual-layer skin)
     let mut steve_model = HumanoidModel::new(false);
-    steve_model.set_angles(0.0, 0.0, 0.0, 0.0, false);
+    steve_model.set_pose(&walking_pose(0.0, 0.0, 0.0, 0.0, false));
     let steve_pos = Vec3::new(5.0, 64.0, 6.0);
     let steve_mesh = steve_model.emit_mesh();
     let steve_count = steve_mesh.len();
@@ -172,7 +174,7 @@ pub fn build_demo_scene() -> DemoScene {
 
     // 2. Alex (HumanoidModel, slim 3px arms, walking animation pose)
     let mut alex_model = HumanoidModel::new(true);
-    alex_model.set_angles(1.0, 0.8, 15.0, 5.0, false);
+    alex_model.set_pose(&walking_pose(1.0, 0.8, 15.0, 5.0, false));
     let alex_pos = Vec3::new(7.0, 64.0, 6.0);
     let alex_mesh = alex_model.emit_mesh();
     let alex_count = alex_mesh.len();
@@ -189,7 +191,7 @@ pub fn build_demo_scene() -> DemoScene {
 
     // 3. Zombie (HumanoidModel biped, zombie arms forward)
     let mut zombie_model = HumanoidModel::zombie();
-    zombie_model.set_angles(0.0, 0.0, 0.0, 0.0, true);
+    zombie_model.set_pose(&walking_pose(0.0, 0.0, 0.0, 0.0, true));
     let zombie_pos = Vec3::new(9.0, 64.0, 6.0);
     let zombie_mesh = zombie_model.emit_mesh();
     let zombie_count = zombie_mesh.len();
@@ -286,7 +288,7 @@ pub fn build_walk_cycle_scene() -> DemoScene {
 
     // 1. Steve Step A (limb_swing = 0.0, speed = 0.6) -> Right leg forward, left arm forward
     let mut steve_a = HumanoidModel::new(false);
-    steve_a.set_angles(0.0, 0.6, 0.0, 0.0, false);
+    steve_a.set_pose(&walking_pose(0.0, 0.6, 0.0, 0.0, false));
     let pos_a = Vec3::new(2.0, 64.0, 6.0);
     for mv in steve_a.emit_mesh() {
         steve_verts.push(to_render_vertex_rot(mv, rot, pos_a));
@@ -300,7 +302,7 @@ pub fn build_walk_cycle_scene() -> DemoScene {
 
     // 2. Alex Passing Neutral (limb_swing = 2.358, speed = 0.6) -> Legs cross vertically
     let mut alex_mid = HumanoidModel::new(true);
-    alex_mid.set_angles(2.358, 0.6, 0.0, 0.0, false);
+    alex_mid.set_pose(&walking_pose(2.358, 0.6, 0.0, 0.0, false));
     let pos_mid = Vec3::new(5.0, 64.0, 6.0);
     for mv in alex_mid.emit_mesh() {
         alex_verts.push(to_render_vertex_rot(mv, rot, pos_mid));
@@ -314,7 +316,7 @@ pub fn build_walk_cycle_scene() -> DemoScene {
 
     // 3. Steve Step B (limb_swing = 4.716, speed = 0.6) -> Left leg forward, right arm forward
     let mut steve_b = HumanoidModel::new(false);
-    steve_b.set_angles(4.716, 0.6, 0.0, 0.0, false);
+    steve_b.set_pose(&walking_pose(4.716, 0.6, 0.0, 0.0, false));
     let pos_b = Vec3::new(8.0, 64.0, 6.0);
     for mv in steve_b.emit_mesh() {
         steve_verts.push(to_render_vertex_rot(mv, rot, pos_b));
@@ -385,9 +387,32 @@ pub fn build_walk_cycle_scene() -> DemoScene {
     }
 }
 
-/// The demo cameras sit north of the mobs, which face south at yaw 0 (as in
-/// Minecraft): turn them half a turn to face the camera.
-const FACE_NORTH: f32 = 180.0;
+/// A humanoid pose with the inputs the demo scenes vary.
+fn walking_pose(
+    limb_swing: f32,
+    limb_swing_amount: f32,
+    head_yaw: f32,
+    head_pitch: f32,
+    arms_forward: bool,
+) -> HumanoidPose {
+    HumanoidPose {
+        limb_swing,
+        limb_swing_amount,
+        head_yaw,
+        head_pitch,
+        arms_forward,
+        ..HumanoidPose::default()
+    }
+}
+
+/// Turns a snapshot to `yaw_deg` away from the camera's facing direction:
+/// the demo cameras look towards +Z, so an entity faces them at yaw 180.
+fn face_the_camera(snapshot: &mut EntityRenderSnapshot, yaw_deg: f32) {
+    let yaw = 180.0 + yaw_deg;
+    snapshot.yaw = yaw;
+    snapshot.body_yaw = yaw;
+    snapshot.head_yaw = yaw;
+}
 
 fn make_snapshot(
     id: i32,
@@ -399,12 +424,16 @@ fn make_snapshot(
         id: EntityId(id),
         kind,
         position: pos,
-        yaw: FACE_NORTH,
-        body_yaw: FACE_NORTH,
+        yaw: 180.0,
+        body_yaw: 180.0,
         pitch: 0.0,
-        head_yaw: FACE_NORTH,
+        head_yaw: 180.0,
         limb_swing: 0.0,
         limb_swing_amount: 0.0,
+        swing_progress: 0.0,
+        hurt: false,
+        death_time: 0.0,
+        bed: None,
         uuid,
         held: None,
         item: None,
@@ -1014,8 +1043,7 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
     for (index, mob) in MOB_CATALOG.iter().enumerate() {
         let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
         let mut snapshot = make_snapshot((index + 1) as i32, mob.kind, pos, mob.uuid);
-        snapshot.yaw = FACE_NORTH + mob.yaw_deg;
-        snapshot.head_yaw = FACE_NORTH + mob.yaw_deg;
+        face_the_camera(&mut snapshot, mob.yaw_deg);
 
         let batches = mesh_entities(&[snapshot.clone()]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();
@@ -1119,8 +1147,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
         let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
         let mut snapshot = make_snapshot(1, mob.kind, pos, mob.uuid);
-        snapshot.yaw = FACE_NORTH + mob.yaw_deg;
-        snapshot.head_yaw = FACE_NORTH + mob.yaw_deg;
+        face_the_camera(&mut snapshot, mob.yaw_deg);
 
         let batches = mesh_entities(&[snapshot.clone()]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();
@@ -1440,8 +1467,7 @@ mod tests {
         for mob in MOB_CATALOG {
             let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
             let mut snapshot = make_snapshot(1, mob.kind, pos, mob.uuid);
-            snapshot.yaw = FACE_NORTH + mob.yaw_deg;
-            snapshot.head_yaw = FACE_NORTH + mob.yaw_deg;
+            face_the_camera(&mut snapshot, mob.yaw_deg);
             let batches = mesh_entities(&[snapshot]);
             let total_vertices: usize = batches.values().map(|v| v.len()).sum();
             assert!(

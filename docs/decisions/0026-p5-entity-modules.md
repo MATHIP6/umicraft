@@ -43,6 +43,16 @@ about 400 lines and holds pure functions tested against the MCP formulas.
 Later milestones add `layers/` (armour, held item, cape, fire, hurt tint),
 `objects.rs`, `nametag.rs`, `shadow.rs` and `lighting.rs`.
 
+### P5b/P5c additions
+
+`angle.rs`, `limbs.rs`, `body_yaw.rs`, `motion.rs`, `anim.rs` (game) and
+`entity_render/{pose,transform}.rs`, `umicraft-model/src/entity/pose.rs`.
+
+Two corrections found on the way, both against vanilla: models were drawn at
+`-yaw` instead of `180 - yaw` (every entity faced backwards), and the crouch
+lifted the player instead of lowering it. The humanoid body now pivots at the
+neck like the vanilla torso, so the crouch lean is right.
+
 ## Consequences
 
 P5a changes no behaviour (same tests, same vertex counts). `game.rs` only

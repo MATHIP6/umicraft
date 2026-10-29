@@ -15,6 +15,7 @@ use umicraft_model::entity::{
 };
 
 use super::player::posed_player;
+use super::pose::humanoid_pose;
 
 /// The animation inputs every model's `set_angles` takes.
 #[derive(Clone, Copy)]
@@ -46,14 +47,14 @@ fn one(slot: TextureSlot, vertices: Vec<umicraft_model::entity::ModelVertex>) ->
 /// entity model, such as dropped items).
 pub(super) fn build_entity_layers(ent: &EntityRenderSnapshot) -> Vec<MeshLayer> {
     let pose = Pose::of(ent);
-    humanoid_layers(ent, pose)
+    humanoid_layers(ent)
         .or_else(|| animal_layers(ent.kind, pose))
         .or_else(|| creature_layers(ent.kind, pose))
         .unwrap_or_default()
 }
 
 /// Two-legged, two-armed models.
-fn humanoid_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Vec<MeshLayer>> {
+fn humanoid_layers(ent: &EntityRenderSnapshot) -> Option<Vec<MeshLayer>> {
     if ent.kind == EntityKind::Player {
         let (model, is_slim) = posed_player(ent);
         let slot = if is_slim {
@@ -63,31 +64,20 @@ fn humanoid_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Vec<MeshLay
         };
         return Some(one(slot, model.emit_mesh()));
     }
-    let (mut model, slot, arms_raised, scale) = match ent.kind {
-        EntityKind::Zombie => (HumanoidModel::zombie(), TextureSlot::Zombie, true, 1.0),
-        EntityKind::Skeleton => (HumanoidModel::skeleton(), TextureSlot::Skeleton, false, 1.0),
-        EntityKind::ZombiePigman => (
-            HumanoidModel::zombie(),
-            TextureSlot::ZombiePigman,
-            true,
-            1.0,
-        ),
-        EntityKind::Giant => (HumanoidModel::zombie(), TextureSlot::Zombie, true, 6.0),
+    let (mut model, slot, scale) = match ent.kind {
+        EntityKind::Zombie => (HumanoidModel::zombie(), TextureSlot::Zombie, 1.0),
+        EntityKind::Skeleton => (HumanoidModel::skeleton(), TextureSlot::Skeleton, 1.0),
+        EntityKind::ZombiePigman => (HumanoidModel::zombie(), TextureSlot::ZombiePigman, 1.0),
+        EntityKind::Giant => (HumanoidModel::zombie(), TextureSlot::Zombie, 6.0),
         EntityKind::ZombieVillager => (
             HumanoidModel::zombie_villager(),
             TextureSlot::ZombieVillager,
-            true,
             1.0,
         ),
         _ => return None,
     };
-    model.set_angles(
-        pose.swing,
-        pose.amount,
-        pose.head_yaw,
-        pose.head_pitch,
-        arms_raised,
-    );
+    // `ModelSkeleton` extends `ModelZombie`: all of them hold the arms forward.
+    model.set_pose(&humanoid_pose(ent, true));
     let mut vertices = model.emit_mesh();
     if scale != 1.0 {
         for vertex in &mut vertices {

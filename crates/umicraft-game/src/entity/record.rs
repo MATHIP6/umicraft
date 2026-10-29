@@ -4,6 +4,7 @@
 
 use glam::{DVec3, Vec3};
 
+use super::anim::Animation;
 use super::body_yaw::BodyYaw;
 use super::flags::EntityFlags;
 use super::item::EntityItem;
@@ -51,6 +52,8 @@ pub struct EntityRecord {
     pub limbs: LimbSwing,
     /// Where the torso points, which lags behind `yaw` and the head.
     pub body_yaw: BodyYaw,
+    /// The hurt flash, death fall, arm swing and bed.
+    pub animation: Animation,
     /// Player UUID if this is a player entity.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -102,6 +105,7 @@ impl EntityRecord {
             prev_body_yaw: self.body_yaw.previous,
             body_yaw: self.body_yaw.offset,
             limbs: self.limbs,
+            animation: self.animation,
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
@@ -134,6 +138,7 @@ impl EntityRecord {
             on_ground: true,
             limbs: LimbSwing::default(),
             body_yaw: BodyYaw::new(yaw),
+            animation: Animation::default(),
             uuid: None,
             held: None,
             item: None,

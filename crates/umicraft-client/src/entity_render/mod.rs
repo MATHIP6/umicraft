@@ -5,6 +5,8 @@
 //! - [`textures`]: the texture registry and its GPU upload.
 //! - [`mobs`]: one builder per mob family, mapping a snapshot to mesh layers.
 //! - [`player`]: the posed player model, shared with held items.
+//! - [`pose`]: the humanoid pose of a snapshot.
+//! - [`transform`]: where a model stands, turns, falls and sleeps.
 //! - [`hand`]: the first-person arm.
 //!
 //! Adding a new mob requires three steps:
@@ -15,18 +17,21 @@
 mod hand;
 mod mobs;
 mod player;
+mod pose;
 mod textures;
+mod transform;
 
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
-use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
+use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_model::entity::{ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
 pub use hand::hand_vertices;
 pub(crate) use player::posed_player;
 pub use textures::{load_or_fallback, procedural_dirt_texture, EntityTextures};
+pub(crate) use transform::model_matrix;
 
 /// Meshes entity snapshots into batched vertex lists grouped by [`TextureSlot`].
 #[must_use]
@@ -36,75 +41,54 @@ pub fn mesh_entities(
     let mut batches: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
-        let world_pos = ent.position;
-        let yaw_rad = ent.body_yaw.to_radians();
-        // `RendererLivingEntity.rotateCorpse`: rotate(180 - yaw). The model faces -Z,
-        // and a Minecraft yaw of zero looks towards +Z.
-        let rot = Mat4::from_rotation_y(std::f32::consts::PI - yaw_rad);
-
-        let sneaking = ent.kind == EntityKind::Player && ent.flags.is_sneaking();
-        let pos = if sneaking {
-            Vec3::new(world_pos.x, world_pos.y + 0.2, world_pos.z)
-        } else {
-            world_pos
-        };
-
+        let matrix = transform::model_matrix(ent);
+        let light = entity_light(ent);
         for layer in mobs::build_entity_layers(ent) {
             let batch = batches.entry(layer.slot).or_default();
-            for mv in layer.vertices {
-                batch.push(transform_vertex(mv, rot, pos));
-            }
+            batch.extend(
+                layer
+                    .vertices
+                    .into_iter()
+                    .map(|vertex| transform_vertex(vertex, &matrix, light)),
+            );
         }
     }
 
     batches
 }
 
-fn transform_vertex(mv: ModelVertex, rot: Mat4, world_pos: Vec3) -> EntityVertex {
-    let p = rot.transform_point3(Vec3::from(mv.position));
-    let n = rot.transform_vector3(Vec3::from(mv.normal));
+/// Bit of [`EntityVertex::light`] that tints the vertex red, as the hurt and
+/// death flash does (read by `entity.wgsl`).
+const HURT_BIT: u32 = 1 << 8;
+
+/// The packed light of an entity's vertices.
+fn entity_light(entity: &EntityRenderSnapshot) -> u32 {
+    if entity.hurt {
+        FULL_LIGHT | HURT_BIT
+    } else {
+        FULL_LIGHT
+    }
+}
+
+/// Full block and sky light: entities are not lit by the world yet.
+const FULL_LIGHT: u32 = 0x00FF_00FF;
+
+fn transform_vertex(mv: ModelVertex, matrix: &Mat4, light: u32) -> EntityVertex {
     EntityVertex {
-        position: [p.x + world_pos.x, p.y + world_pos.y, p.z + world_pos.z],
-        normal: n.to_array(),
+        position: matrix.transform_point3(Vec3::from(mv.position)).to_array(),
+        normal: matrix
+            .transform_vector3(Vec3::from(mv.normal))
+            .normalize_or_zero()
+            .to_array(),
         uv: mv.uv,
-        light: 0x00FF_00FF,
+        light,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use umicraft_game::entity::{EntityFlags, EntityId};
-
-    #[test]
-    fn a_mob_with_yaw_zero_reaches_out_towards_south() {
-        // Minecraft looks towards +Z at yaw 0, and a zombie holds its arms forward.
-        let zombie = |yaw| EntityRenderSnapshot {
-            id: EntityId(1),
-            kind: EntityKind::Zombie,
-            position: Vec3::ZERO,
-            yaw,
-            pitch: 0.0,
-            head_yaw: yaw,
-            limb_swing: 0.0,
-            limb_swing_amount: 0.0,
-            uuid: None,
-            held: None,
-            item: None,
-            age: 0.0,
-            frame_direction: 0,
-            frame_rotation: 0,
-            flags: EntityFlags::default(),
-        };
-        let reach = |yaw: f32| {
-            let batches = mesh_entities(&[zombie(yaw)]);
-            let z = batches.values().flatten().map(|v| v.position[2]);
-            let (min, max) = z.fold((f32::MAX, f32::MIN), |(lo, hi), z| (lo.min(z), hi.max(z)));
-            max + min
-        };
-        assert!(reach(0.0) > 0.1, "faces +Z at yaw 0");
-        assert!(reach(180.0) < -0.1, "faces -Z at yaw 180");
-    }
+    use umicraft_game::entity::{EntityFlags, EntityId, EntityKind};
 
     #[test]
     fn empty_snapshots_produce_empty_batches() {
@@ -125,6 +109,10 @@ mod tests {
                 head_yaw: 0.0,
                 limb_swing: 0.5,
                 limb_swing_amount: 0.3,
+                swing_progress: 0.0,
+                hurt: false,
+                death_time: 0.0,
+                bed: None,
                 uuid: Some([0; 16]),
                 held: None,
                 item: None,
@@ -143,6 +131,10 @@ mod tests {
                 head_yaw: 90.0,
                 limb_swing: 0.0,
                 limb_swing_amount: 0.0,
+                swing_progress: 0.0,
+                hurt: false,
+                death_time: 0.0,
+                bed: None,
                 uuid: None,
                 held: None,
                 item: None,
@@ -161,6 +153,10 @@ mod tests {
                 head_yaw: 180.0,
                 limb_swing: 1.0,
                 limb_swing_amount: 0.5,
+                swing_progress: 0.0,
+                hurt: false,
+                death_time: 0.0,
+                bed: None,
                 uuid: None,
                 held: None,
                 item: None,
@@ -180,6 +176,10 @@ mod tests {
                 head_yaw: 45.0,
                 limb_swing: 0.0,
                 limb_swing_amount: 0.0,
+                swing_progress: 0.0,
+                hurt: false,
+                death_time: 0.0,
+                bed: None,
                 uuid: None,
                 held: None,
                 item: None,

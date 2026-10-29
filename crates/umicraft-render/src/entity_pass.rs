@@ -14,7 +14,8 @@ pub struct EntityVertex {
     pub normal: [f32; 3],
     /// Texture coordinates (0.0 to 1.0).
     pub uv: [f32; 2],
-    /// Packed block and sky light nibbles.
+    /// Packed block and sky light nibbles (bits 0..=7); bit 8 tints the
+    /// vertex red for the hurt flash.
     pub light: u32,
 }
 

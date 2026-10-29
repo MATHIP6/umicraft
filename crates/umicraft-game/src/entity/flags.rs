@@ -36,6 +36,13 @@ impl EntityFlags {
         self.flags & 0x08 != 0
     }
 
+    /// Returns true while the entity eats, drinks, blocks or draws a bow
+    /// (MCP `Entity.isEating`, flag 4: the use of the held item).
+    #[must_use]
+    pub const fn is_using_item(self) -> bool {
+        self.flags & 0x10 != 0
+    }
+
     /// Returns true if the entity is invisible.
     #[must_use]
     pub const fn is_invisible(self) -> bool {

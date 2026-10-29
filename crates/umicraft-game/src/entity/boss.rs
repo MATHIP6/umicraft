@@ -12,7 +12,7 @@
 //! name.
 
 use super::store::EntityStore;
-use super::types::EntityKind;
+use super::kind::EntityKind;
 
 /// Maximum health of an Ender Dragon in Minecraft 1.8.
 pub const DRAGON_MAX_HEALTH: f32 = 200.0;
@@ -71,7 +71,7 @@ impl BossTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::types::{EntityFlags, EntityId};
+    use crate::entity::{EntityFlags, EntityId};
     use glam::{DVec3, Vec3};
 
     #[test]

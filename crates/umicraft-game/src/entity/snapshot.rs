@@ -5,6 +5,7 @@
 use glam::Vec3;
 
 use super::angle::lerp_degrees;
+use super::anim::{Animation, BedPose};
 use super::flags::EntityFlags;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
@@ -42,6 +43,8 @@ pub struct EntityFrameData {
     pub body_yaw: f32,
     /// The walking animation.
     pub limbs: LimbSwing,
+    /// The hurt flash, death fall, arm swing and bed.
+    pub animation: Animation,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -81,6 +84,10 @@ impl EntityFrameData {
             head_yaw,
             limb_swing: self.limbs.swing_at(a),
             limb_swing_amount: self.limbs.amount_at(a),
+            swing_progress: self.animation.swing_progress_at(a),
+            hurt: self.animation.is_flashing(),
+            death_time: self.animation.death_time_at(a),
+            bed: self.animation.bed,
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
@@ -114,6 +121,14 @@ pub struct EntityRenderSnapshot {
     pub limb_swing: f32,
     /// Interpolated limb swing amplitude (0.0 to 1.0).
     pub limb_swing_amount: f32,
+    /// Arm swing progress `0..=1` (MCP `getSwingProgress`).
+    pub swing_progress: f32,
+    /// True while the red hurt or death flash shows.
+    pub hurt: bool,
+    /// Ticks into the death fall plus the partial tick, `0` while alive.
+    pub death_time: f32,
+    /// The bed the entity sleeps in.
+    pub bed: Option<BedPose>,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -128,4 +143,34 @@ pub struct EntityRenderSnapshot {
     pub frame_rotation: u8,
     /// Entity visual flags.
     pub flags: EntityFlags,
+}
+
+impl EntityRenderSnapshot {
+    /// A still, upright snapshot of `kind` at `position`, facing south
+    /// (yaw 0), with no item and no flags.
+    #[must_use]
+    pub fn new(id: EntityId, kind: EntityKind, position: Vec3) -> Self {
+        Self {
+            id,
+            kind,
+            position,
+            yaw: 0.0,
+            body_yaw: 0.0,
+            pitch: 0.0,
+            head_yaw: 0.0,
+            limb_swing: 0.0,
+            limb_swing_amount: 0.0,
+            swing_progress: 0.0,
+            hurt: false,
+            death_time: 0.0,
+            bed: None,
+            uuid: None,
+            held: None,
+            item: None,
+            age: 0.0,
+            frame_direction: 0,
+            frame_rotation: 0,
+            flags: EntityFlags::default(),
+        }
+    }
 }

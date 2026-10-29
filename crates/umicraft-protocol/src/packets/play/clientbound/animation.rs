@@ -19,8 +19,8 @@ use crate::varint::{read_var_i32, write_var_u32};
 pub struct Animation {
     /// The entity that animated.
     pub entity_id: i32,
-    /// Animation type: 0 = swing the main hand, 1 = damage, 2 = swing the
-    /// off hand.
+    /// Animation type (1.8): 0 = swing the arm, 1 = damage, 2 = leave the
+    /// bed, 4 = critical hit, 5 = magical critical hit.
     pub animation: u8,
 }
 

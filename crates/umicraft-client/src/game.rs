@@ -57,7 +57,7 @@ use umicraft_game::{GameState, InputIntent, RenderState, ServerCorrection};
 use umicraft_mesh::ChunkSnapshot;
 use umicraft_net::play::{PlayEvent, SessionCounters};
 use umicraft_protocol::packets::play::clientbound::{
-    BlockBreakAnim, ChunkData, Explosion, MapChunkBulk,
+    BlockBreakAnim, ChunkData, Explosion, MapChunkBulk, UseBed,
 };
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
@@ -1171,6 +1171,26 @@ fn follow_body(game: &mut Game) {
     );
 }
 
+/// Block id of the bed (MCP `Blocks.bed`).
+const BED_BLOCK: u16 = 26;
+
+/// Lays a player in the bed of a `Use Bed` packet, facing the way the bed
+/// block's metadata says (MCP `EntityPlayer.trySleep`).
+fn put_to_bed(game: &mut Game, packet: &UseBed) {
+    let facing = game
+        .world
+        .as_ref()
+        .map(|world| world.block(BlockPos::new(packet.x, packet.y, packet.z)))
+        .filter(|state| state.id() == BED_BLOCK)
+        .map_or(0, |state| state.metadata() & 3);
+    let bed = DVec3::new(
+        f64::from(packet.x),
+        f64::from(packet.y),
+        f64::from(packet.z),
+    );
+    game.entities.sleep(EntityId(packet.entity_id), bed, facing);
+}
+
 /// Handles one decoded clientbound packet.
 fn handle_net(
     game: &mut Game,
@@ -1558,14 +1578,18 @@ fn handle_net(
         }
         PlayEvent::EntityStatus(status) => {
             // MCP `EntityPlayer.handleStatusUpdate`: 9 finishes the use of
-            // the item. The other statuses are visual; their consumer is P5.
+            // the item; 2 and 3 hurt and kill an entity.
             if status.status == ITEM_USE_FINISHED && status.entity_id == game.entity_id {
                 game.item_use.finish();
             }
+            game.entities
+                .status(EntityId(status.entity_id), status.status);
         }
-        PlayEvent::Animation(_) => {
-            // Visual-only 1.8 packet; its consumer is P5.
+        PlayEvent::Animation(packet) => {
+            game.entities
+                .play_animation(EntityId(packet.entity_id), packet.animation);
         }
+        PlayEvent::UseBed(bed) => put_to_bed(game, &bed),
         PlayEvent::SpawnPosition(packet) => {
             game.spawn = Some((packet.x, packet.y, packet.z));
         }
