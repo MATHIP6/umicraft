@@ -53,6 +53,13 @@ Two corrections found on the way, both against vanilla: models were drawn at
 lifted the player instead of lowering it. The humanoid body now pivots at the
 neck like the vanilla torso, so the crouch lean is right.
 
+The entity models are also mirrored along x when drawn
+(`entity_render::transform::x_mirror`): their boxes and UVs follow the vanilla
+model space, which vanilla draws through `scale(-1, -1, 1)`. Without it the
+head turned the wrong way, the right arm was on the left and skins were
+mirrored. Attachments given in the vanilla frame (the held item) hang on
+`body_matrix` and apply the mirror themselves.
+
 ## Consequences
 
 P5a changes no behaviour (same tests, same vertex counts). `game.rs` only

@@ -31,7 +31,7 @@ use umicraft_render::EntityVertex;
 pub use hand::hand_vertices;
 pub(crate) use player::posed_player;
 pub use textures::{load_or_fallback, procedural_dirt_texture, EntityTextures};
-pub(crate) use transform::model_matrix;
+pub(crate) use transform::{body_matrix, x_mirror};
 
 /// Meshes entity snapshots into batched vertex lists grouped by [`TextureSlot`].
 #[must_use]

@@ -18,9 +18,27 @@ const DEATH_FALL_DEGREES: f32 = 90.0;
 const DEATH_FALL_TICKS: f32 = 20.0;
 const DEATH_FALL_SPEED: f32 = 1.6;
 
-/// The matrix that carries a model of `entity` from its own space to the world.
+/// The matrix that carries the vertices of a model of `entity` to the world:
+/// [`body_matrix`] and the mirror every vanilla model gets.
 #[must_use]
 pub(crate) fn model_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
+    body_matrix(entity) * x_mirror()
+}
+
+/// The vanilla model space is drawn through `scale(-1, -1, 1)`; the models of
+/// this crate undo the y half (y up) but keep the box layout and the UVs of
+/// the vanilla model space, so they are mirrored along x to be seen as in
+/// vanilla: the right arm on the entity's right, skins not mirrored, and
+/// vanilla turns (head yaw, torso turn) in the vanilla direction.
+#[must_use]
+pub(crate) fn x_mirror() -> Mat4 {
+    Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0))
+}
+
+/// Position, turn, scale and crouch of `entity`, without the model mirror.
+/// Attachments given in the vanilla frame (the held item) hang on it.
+#[must_use]
+pub(crate) fn body_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
     let is_player = entity.kind == EntityKind::Player;
     let mut matrix = Mat4::from_translation(entity.position) * orientation(entity);
     if is_player {
@@ -83,6 +101,15 @@ mod tests {
         assert!((front(&entity) - Vec3::NEG_X).length() < 1e-5);
         entity.body_yaw = 180.0;
         assert!((front(&entity) - Vec3::NEG_Z).length() < 1e-5);
+    }
+
+    #[test]
+    fn the_right_arm_is_on_the_entitys_right() {
+        // Facing south (yaw 0) the entity's right is west (-X); the model's
+        // right arm sits at x = -5 / 16.
+        let entity = snapshot(EntityKind::Zombie);
+        let arm = model_matrix(&entity).transform_point3(Vec3::new(-5.0 / 16.0, 1.0, 0.0));
+        assert!(arm.x < entity.position.x, "{arm}");
     }
 
     #[test]

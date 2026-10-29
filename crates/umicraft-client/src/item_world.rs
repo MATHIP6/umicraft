@@ -23,7 +23,7 @@ use umicraft_model::item::pose::{context_pose, ground_pose, held_pose};
 use umicraft_model::item::{ItemGeometry, ItemModel};
 use umicraft_model::ModelQuad;
 
-use crate::entity_render::{model_matrix, posed_player};
+use crate::entity_render::{body_matrix, posed_player, x_mirror};
 use crate::item_icons::ItemResources;
 
 /// Hover height offset per unit of the ground scale (`RenderEntityItem`).
@@ -156,7 +156,11 @@ fn push_player_held_item(
     if sneaking {
         hand *= Mat4::from_translation(Vec3::new(0.0, 0.203_125, 0.0));
     }
-    let pose = model_matrix(entity) * arm * hand * held_pose(model, DisplayContext::ThirdPerson);
+    let pose = body_matrix(entity)
+        * arm
+        * x_mirror()
+        * hand
+        * held_pose(model, DisplayContext::ThirdPerson);
     let tints = resources.tints(held.item_id, held.damage, held.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),

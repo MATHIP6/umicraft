@@ -136,7 +136,5 @@ picked up, and delete it when it is done.
   not say whether an entity is the local one.
 - **Reference:** `RenderPlayer.doRender` (`d0 = y - 0.125D`).
 
-### Critical-hit particles and the left-handed model
-- **Problem:** `Animation` 4 and 5 (crits) need the particle system (P8). The
-  mob and player models are mirrored along y with their UVs mirrored in x;
-  verify left and right limbs against the vanilla recordings.
+### Critical-hit particles
+- **Problem:** `Animation` 4 and 5 (crits) need the particle system (P8).
