@@ -35,7 +35,9 @@ use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_model::entity::{ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
+pub(crate) use animals::WITCH_SCALE;
 pub use hand::hand_vertices;
+pub(crate) use mobs::posed_humanoid_mob;
 pub(crate) use player::posed_player;
 pub use textures::{load_or_fallback, procedural_dirt_texture, EntityTextures};
 pub(crate) use transform::{body_matrix, x_mirror};
@@ -185,6 +187,8 @@ mod tests {
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
+                use_ticks: 0,
+                fishing: false,
                 flags: EntityFlags::new(0, 0x7F),
             },
             EntityRenderSnapshot {
@@ -213,6 +217,8 @@ mod tests {
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
+                use_ticks: 0,
+                fishing: false,
                 flags: EntityFlags::default(),
             },
             EntityRenderSnapshot {
@@ -241,6 +247,8 @@ mod tests {
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
+                use_ticks: 0,
+                fishing: false,
                 flags: EntityFlags::default(),
             },
             // A dropped item has no entity mesh: P3 draws it from its item model.
@@ -270,6 +278,8 @@ mod tests {
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
+                use_ticks: 0,
+                fishing: false,
                 flags: EntityFlags::default(),
             },
         ];

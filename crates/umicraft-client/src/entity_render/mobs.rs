@@ -98,6 +98,30 @@ fn humanoid_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -> Option
         layers.extend(cape_layer(ent, skins));
         return Some(layers);
     }
+    let HumanoidMob { model, slot, scale } = posed_humanoid_mob(ent)?;
+    let mut vertices = if ent.meta.baby {
+        model.emit_child_mesh()
+    } else {
+        model.emit_mesh()
+    };
+    scale_mesh(&mut vertices, scale);
+    Some(one(slot, vertices))
+}
+
+/// The posed model of a zombie-like or skeleton-like mob.
+pub(crate) struct HumanoidMob {
+    /// The model with the pose of the snapshot applied.
+    pub(crate) model: HumanoidModel,
+    /// The texture it is drawn with.
+    pub(crate) slot: TextureSlot,
+    /// The uniform scale of the entity (`preRenderCallback`).
+    pub(crate) scale: f32,
+}
+
+/// The humanoid model of a mob that wears the biped skeleton, or `None` for
+/// every other kind (players have [`posed_player`]). Shared by the body mesh
+/// and by the held item, which hangs on the posed right arm.
+pub(crate) fn posed_humanoid_mob(ent: &EntityRenderSnapshot) -> Option<HumanoidMob> {
     let wither = matches!(ent.meta.variant, Variant::Skeleton { wither: true });
     let (mut model, slot, scale) = match ent.kind {
         EntityKind::Zombie if ent.meta.is_zombie_villager() => (
@@ -123,13 +147,7 @@ fn humanoid_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -> Option
     };
     // `ModelSkeleton` extends `ModelZombie`: all of them hold the arms forward.
     model.set_pose(&humanoid_pose(ent, true));
-    let mut vertices = if ent.meta.baby {
-        model.emit_child_mesh()
-    } else {
-        model.emit_mesh()
-    };
-    scale_mesh(&mut vertices, scale);
-    Some(one(slot, vertices))
+    Some(HumanoidMob { model, slot, scale })
 }
 
 /// Scale of a wither skeleton (MCP `RenderSkeleton.preRenderCallback`).

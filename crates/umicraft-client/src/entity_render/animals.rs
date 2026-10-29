@@ -16,6 +16,8 @@ use super::variants;
 /// Scale of a villager (MCP `RenderVillager.preRenderCallback`); a child
 /// is half of it.
 const VILLAGER_SCALE: f32 = 0.9375;
+/// Scale of a witch (MCP `RenderWitch.preRenderCallback`).
+pub(crate) const WITCH_SCALE: f32 = 0.9375;
 /// Scale of a donkey and of a mule (MCP `RenderHorse.preRenderCallback`).
 const DONKEY_SCALE: f32 = 0.87;
 const MULE_SCALE: f32 = 0.92;
@@ -89,7 +91,12 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
                 VILLAGER_SCALE * 0.5
             )
         }
-        EntityKind::Witch => walker!(VillagerModel::witch(), TextureSlot::Witch, 1.0, 1.0),
+        EntityKind::Witch => walker!(
+            VillagerModel::witch(),
+            TextureSlot::Witch,
+            WITCH_SCALE,
+            WITCH_SCALE
+        ),
         EntityKind::Horse => horse_layers(ent, pose),
         EntityKind::Spider => walker!(SpiderModel::new(), TextureSlot::Spider, 1.0, 1.0),
         EntityKind::CaveSpider => walker!(

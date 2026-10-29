@@ -133,6 +133,13 @@ impl EntityStore {
         if kind == EntityKind::ItemFrame {
             record.frame_direction = data.clamp(0, 3) as u8;
         }
+        if kind == EntityKind::FishHook {
+            // MCP `NetHandlerPlayClient.handleSpawnObject`: the bobber
+            // registers itself on its angler (`fishEntity`).
+            if let Some(angler) = self.entities.get_mut(&EntityId(data)) {
+                angler.bobber = Some(id);
+            }
+        }
         self.entities.insert(id, record);
     }
 
@@ -140,6 +147,14 @@ impl EntityStore {
     pub fn destroy(&mut self, entity_ids: &[i32]) {
         for &id in entity_ids {
             self.entities.remove(&EntityId(id));
+        }
+        for angler in self.entities.values_mut() {
+            if angler
+                .bobber
+                .is_some_and(|bobber| entity_ids.contains(&bobber.0))
+            {
+                angler.bobber = None;
+            }
         }
     }
 
@@ -292,6 +307,9 @@ impl EntityStore {
     pub fn set_held(&mut self, id: EntityId, held: Option<EntityItem>) {
         if let Some(entity) = self.entities.get_mut(&id) {
             entity.held = held;
+            // MCP `EntityOtherPlayerMP.onUpdate`: a use of another item
+            // starts over.
+            entity.use_ticks = 0;
         }
     }
 
@@ -335,6 +353,8 @@ impl EntityStore {
                 entity.animation.hurt();
             }
             3 => entity.animation.die(),
+            // MCP `EntityPlayer.handleStatusUpdate`: the item use finished.
+            9 => entity.use_ticks = 0,
             _ => {}
         }
     }
@@ -381,6 +401,7 @@ impl EntityStore {
                 let state = if creeper.ignited { 1 } else { creeper.state };
                 entity.animation.tick_fuse(state);
             }
+            entity.tick_use();
             entity.age_ticks = entity.age_ticks.saturating_add(1);
         }
         self.entities
@@ -816,5 +837,51 @@ mod tests {
     #[test]
     fn the_camera_view_of_an_unknown_entity_is_none() {
         assert!(EntityStore::new().camera_view(EntityId(9), 1.0).is_none());
+    }
+
+    #[test]
+    fn the_use_of_the_held_item_is_counted_while_the_flag_is_set() {
+        let mut store = EntityStore::new();
+        let id = EntityId(3);
+        store.spawn_player(
+            id,
+            [3; 16],
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            Some(sword()),
+            EntityFlags::default(),
+        );
+        store.tick();
+        assert_eq!(store.snapshots(1.0)[0].use_ticks, 0);
+        store.set_flags(id, EntityFlags::new(0x10, 0));
+        (0..5).for_each(|_| store.tick());
+        assert_eq!(store.snapshots(1.0)[0].use_ticks, 5);
+        store.status(id, 9);
+        assert_eq!(store.snapshots(1.0)[0].use_ticks, 0);
+        store.tick();
+        store.set_flags(id, EntityFlags::default());
+        store.tick();
+        assert_eq!(store.snapshots(1.0)[0].use_ticks, 0);
+    }
+
+    #[test]
+    fn a_bobber_marks_its_angler_until_it_is_destroyed() {
+        let mut store = EntityStore::new();
+        store.spawn_player(
+            EntityId(3),
+            [3; 16],
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        let fishing = |store: &EntityStore| store.snapshots(1.0)[0].fishing;
+        assert!(!fishing(&store));
+        spawn_object_at_origin(&mut store, 40, 90, 3);
+        assert!(fishing(&store));
+        store.destroy(&[40]);
+        assert!(!fishing(&store));
     }
 }

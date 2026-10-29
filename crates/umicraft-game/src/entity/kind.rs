@@ -85,6 +85,9 @@ pub enum EntityKind {
     ItemFrame,
     /// Armour stand (object type 78).
     ArmorStand,
+    /// The bobber of a fishing rod (object type 90); its `data` is the
+    /// angler's entity id.
+    FishHook,
     /// Other mob or entity type by raw numeric identifier.
     Other(u8),
 }
@@ -117,7 +120,10 @@ impl EntityKind {
     /// false for the objects (dropped items, arrows, item frames).
     #[must_use]
     pub const fn is_living(self) -> bool {
-        !matches!(self, Self::Item | Self::Arrow | Self::ItemFrame)
+        !matches!(
+            self,
+            Self::Item | Self::Arrow | Self::ItemFrame | Self::FishHook
+        )
     }
 
     /// Maps a 1.8 mob type id to an [`EntityKind`].
@@ -168,6 +174,7 @@ impl EntityKind {
             60 => Self::Arrow,
             71 => Self::ItemFrame,
             78 => Self::ArmorStand,
+            90 => Self::FishHook,
             other => Self::Other(other),
         }
     }
@@ -187,6 +194,12 @@ mod tests {
     #[test]
     fn armour_stands_are_object_type_78() {
         assert_eq!(EntityKind::from_object_type(78), EntityKind::ArmorStand);
+    }
+
+    #[test]
+    fn bobbers_are_object_type_90() {
+        assert_eq!(EntityKind::from_object_type(90), EntityKind::FishHook);
+        assert!(!EntityKind::FishHook.is_living());
     }
 
     #[test]

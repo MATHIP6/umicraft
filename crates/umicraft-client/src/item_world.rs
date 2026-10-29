@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Item meshes placed in the world: dropped items (P3).
+//! Item meshes placed in the world: dropped items, item frames and the items
+//! in the hands of players and mobs (P3).
 //!
 //! Port of MCP `RenderEntityItem`: an item hovers (`sin(age / 10 + hover) *
 //! 0.1 + 0.1`), spins (`age / 20 + hover` radians) and is drawn once, or as
@@ -24,8 +25,9 @@ use umicraft_model::item::{ItemGeometry, ItemModel};
 use umicraft_model::ModelQuad;
 use umicraft_world::LightLevel;
 
-use crate::entity_render::{body_matrix, posed_player, x_mirror};
 use crate::item_icons::ItemResources;
+
+mod held;
 
 /// Hover height offset per unit of the ground scale (`RenderEntityItem`).
 const HOVER_BASE: f32 = 0.25;
@@ -59,12 +61,10 @@ impl WorldItems {
                 (EntityKind::Item, Some(item), _) => {
                     push_dropped_item(&mut self.layers, entity, item, items);
                 }
-                (EntityKind::Player, _, Some(held)) => {
-                    push_player_held_item(&mut self.layers, entity, held, items);
-                }
                 (EntityKind::ItemFrame, framed, _) => {
                     push_item_frame(&mut self.layers, entity, framed, items);
                 }
+                (_, _, Some(held)) => held::push(&mut self.layers, entity, held, items),
                 _ => {}
             }
         }
@@ -119,64 +119,6 @@ fn push_dropped_item(
     for pose in copy_poses(entity, item.count, model) {
         layers.push(quads, &pose, &style, glint);
     }
-}
-
-/// The frame of the right hand of a player in the world, in which the held
-/// item is placed (MCP `LayerHeldItem`, up to the item's own pose).
-///
-/// Vanilla places the item inside the frame of the model, which is drawn
-/// through `scale(-1, -1, 1)`; the y half is the y flip of the arm chain and
-/// the x half is the model mirror, applied once on the outside. The item is
-/// *not* mirrored back: its display transforms are authored for that frame.
-fn hand_frame(entity: &EntityRenderSnapshot, torch: bool) -> Mat4 {
-    let (humanoid, _) = posed_player(entity);
-    let arm = humanoid
-        .right_arm
-        .transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)))
-        * Mat4::from_scale(Vec3::splat(16.0))
-        * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
-    let mut hand = Mat4::from_translation(Vec3::new(-0.0625, 0.4375, 0.0625));
-    if torch {
-        hand *= Mat4::from_translation(Vec3::new(0.0, 0.1875, -0.3125))
-            * Mat4::from_rotation_x(20.0_f32.to_radians())
-            * Mat4::from_rotation_y(45.0_f32.to_radians())
-            * Mat4::from_scale(Vec3::new(-0.375, -0.375, 0.375));
-    }
-    if entity.flags.is_sneaking() {
-        hand *= Mat4::from_translation(Vec3::new(0.0, 0.203_125, 0.0));
-    }
-    body_matrix(entity) * x_mirror() * arm * hand
-}
-
-/// Appends the item in a remote player's right hand
-/// (MCP `LayerHeldItem`).
-///
-/// The item hangs on the posed right arm, so it follows the walk swing and
-/// the sneak. Placement in the arm frame is `postRenderArm`, then
-/// translate(-1/16, 7/16, 1/16), the special pose of torches, the sneak lift
-/// and the item's own third-person pose. The arm frame of the vanilla model
-/// has y pointing down while this crate's models have it pointing up, so the
-/// chain is conjugated by a y flip (the arm boxes are the same boxes with
-/// negated y).
-fn push_player_held_item(
-    layers: &mut ItemLayers,
-    entity: &EntityRenderSnapshot,
-    held: &EntityItem,
-    resources: &ItemResources,
-) {
-    let Some((model, quads)) = sprite_model(resources, held.item_id, held.damage) else {
-        return;
-    };
-    let pose =
-        hand_frame(entity, is_torch(held.item_id)) * held_pose(model, DisplayContext::ThirdPerson);
-    let tints = resources.tints(held.item_id, held.damage, held.nbt.as_deref());
-    let style = ItemStyle {
-        atlas: resources.atlas(),
-        light: world_light(entity.light, false),
-        tints: &tints,
-    };
-    let glint = resources.glints(held.item_id, held.damage, held.nbt.as_deref());
-    layers.push(quads, &pose, &style, glint);
 }
 
 /// The vertex light of an item in the world: the `light` of the block it is in,
@@ -242,11 +184,6 @@ fn push_item_frame(
     };
     let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
     layers.push(quads, &pose, &style, glint);
-}
-
-/// The blocks whose item uses the torch pose in a hand (`getRenderType() == 2`).
-fn is_torch(item_id: i16) -> bool {
-    matches!(item_id, 50 | 75 | 76)
 }
 
 /// Appends the first-person held item to `layers`, in camera space.
@@ -516,6 +453,8 @@ mod render_tests {
             age: 3.0,
             frame_direction: 0,
             frame_rotation: 0,
+            use_ticks: 0,
+            fishing: false,
             flags: EntityFlags::default(),
         }
     }
@@ -622,6 +561,8 @@ mod player_render_tests {
             age: 0.0,
             frame_direction: 0,
             frame_rotation: 0,
+            use_ticks: 0,
+            fishing: false,
             flags: EntityFlags::new(if sneaking { 0x02 } else { 0 }, 0),
         }
     }
@@ -634,7 +575,10 @@ mod player_render_tests {
         entity.body_yaw = 0.0;
         entity.head_yaw = 0.0;
         entity.limb_swing_amount = 0.0;
-        let hand = hand_frame(&entity, false).transform_point3(Vec3::ZERO);
+        let held = entity.held.clone().expect("a held item");
+        let hand = held::hand_frame(&entity, &held)
+            .expect("a player has a hand")
+            .transform_point3(Vec3::ZERO);
         assert!(hand.x < entity.position.x - 0.2, "{hand}");
     }
 
@@ -801,6 +745,8 @@ mod glint_render_tests {
             age: 3.0,
             frame_direction: 0,
             frame_rotation: 0,
+            use_ticks: 0,
+            fishing: false,
             flags: EntityFlags::default(),
         }
     }

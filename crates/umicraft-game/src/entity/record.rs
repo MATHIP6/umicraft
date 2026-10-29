@@ -74,6 +74,11 @@ pub struct EntityRecord {
     pub held: Option<EntityItem>,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
+    /// Ticks the held item has been in use (MCP `getItemInUseDuration` of
+    /// another player), `0` while it is not.
+    pub use_ticks: u32,
+    /// The bobber this player has out, if any (MCP `EntityPlayer.fishEntity`).
+    pub bobber: Option<EntityId>,
     /// Ticks the entity has lived since it was spawned.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -100,6 +105,17 @@ impl EntityRecord {
         self.pitch = pitch;
         self.flags = flags;
         self.animate();
+    }
+
+    /// Counts one tick of item use: the held item is in use while the use
+    /// flag is set (MCP `EntityOtherPlayerMP.onUpdate` starts and ends the
+    /// use from `isEating`), and the count starts over when it stops.
+    pub(super) fn tick_use(&mut self) {
+        if self.held.is_some() && self.flags.is_using_item() {
+            self.use_ticks = self.use_ticks.saturating_add(1);
+        } else {
+            self.use_ticks = 0;
+        }
     }
 
     /// The data the render thread interpolates between two ticks.
@@ -129,6 +145,8 @@ impl EntityRecord {
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
+            use_ticks: self.use_ticks,
+            fishing: self.bobber.is_some(),
             age_ticks: self.age_ticks,
             frame_direction: self.frame_direction,
             frame_rotation: self.frame_rotation,
@@ -166,6 +184,8 @@ impl EntityRecord {
             uuid: None,
             held: None,
             item: None,
+            use_ticks: 0,
+            bobber: None,
             age_ticks: 0,
             frame_direction: 0,
             frame_rotation: 0,

@@ -446,6 +446,8 @@ fn make_snapshot(
         age: 0.0,
         frame_direction: 0,
         frame_rotation: 0,
+        use_ticks: 0,
+        fishing: false,
         flags: EntityFlags::new(0, 0x7F),
     }
 }

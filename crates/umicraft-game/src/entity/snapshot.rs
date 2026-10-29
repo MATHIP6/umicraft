@@ -70,6 +70,10 @@ pub struct EntityFrameData {
     pub held: Option<EntityItem>,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
+    /// Ticks the held item has been in use.
+    pub use_ticks: u32,
+    /// Whether the player has a bobber out.
+    pub fishing: bool,
     /// Ticks lived at the current simulation tick.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -120,6 +124,8 @@ impl EntityFrameData {
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
+            use_ticks: self.use_ticks,
+            fishing: self.fishing,
             age: self.age_ticks as f32 + a,
             frame_direction: self.frame_direction,
             frame_rotation: self.frame_rotation,
@@ -176,6 +182,10 @@ pub struct EntityRenderSnapshot {
     pub held: Option<EntityItem>,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
+    /// Ticks the held item has been in use: picks the bow drawing model.
+    pub use_ticks: u32,
+    /// Whether the player has a bobber out: the held rod shows its cast model.
+    pub fishing: bool,
     /// Ticks lived plus the interpolation alpha, for the bob and spin of items.
     pub age: f32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -214,6 +224,8 @@ impl EntityRenderSnapshot {
             uuid: None,
             held: None,
             item: None,
+            use_ticks: 0,
+            fishing: false,
             age: 0.0,
             frame_direction: 0,
             frame_rotation: 0,
