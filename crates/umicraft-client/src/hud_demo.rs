@@ -617,6 +617,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a GPU adapter"]
     fn every_scene_draws_something_visible() {
         for view in HUD_VIEWS {
             assert!(drawn_pixels(view) > 500, "{view} drew almost nothing");
