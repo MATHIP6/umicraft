@@ -18,12 +18,21 @@ struct VertexOut {
 @group(0) @binding(0) var gui_atlas: texture_2d<f32>;
 @group(0) @binding(1) var gui_sampler: sampler;
 
+// Vertex colours are authored as sRGB values (vanilla `0xFF5555` and the like)
+// but the target is an sRGB surface that encodes the linear output, so they are
+// decoded here; otherwise every tint comes out washed out.
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let low = c / 12.92;
+    let high = pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
+    return select(high, low, c <= vec3<f32>(0.04045));
+}
+
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.position = vec4<f32>(in.position, 0.0, 1.0);
     out.uv = in.uv;
-    out.color = in.color;
+    out.color = vec4<f32>(srgb_to_linear(in.color.rgb), in.color.a);
     return out;
 }
 
