@@ -23,7 +23,7 @@
 | Touches | Codées en dur dans `window.rs` (`KeyCode::KeyW`, `F1`..`F4`, `KeyE`, `KeyT`, chiffres) | Aucune table d'actions, aucune persistance |
 | Config | `umicraft-core::ConfigStore` (TOML par module) existe mais **aucun crate ne l'utilise** (backlog « Architecture ») ; `view_distance` ne vient que de la CLI | Aucun fichier d'options utilisateur |
 | Écrans | Booléens épars (`chat_open`, `inventory_open`, container) dans `window.rs` (961 lignes) | Pas de pile d'écrans ; pas de menu pause ni d'écran d'options |
-| Widgets UI | button, list, panel, text_field, slot, inventory | Manquent : slider, bouton cyclique/toggle, bouton de capture de touche, onglets |
+| Widgets UI | button, list, panel, text_field, slot, inventory | Manquent : slider, bouton cyclique/toggle, bouton de capture de touche |
 | Boss bar | Aucun paquet en 1.8 | Voir §4, c'est une entité Wither/Dragon |
 
 ## 3. Décisions d'architecture proposées (pour l'ADR-0017)
@@ -87,8 +87,8 @@
 - Tests : positions de mise en page unitaires, captures hors écran (`--screenshot`) avec un scénario synthétique.
 
 ### W5 — Réglages et touches (UI-3)
-- **Widgets** : `slider`, `cycle_button`/`toggle`, `key_capture_button`, onglets.
-- **`Options`** : vidéo (distance de rendu 2–16, FOV, FPS max/vsync, nuages, luminosité, échelle d'interface), contrôles (sensibilité, inverser Y, table de touches), chat (§W2.8), audio (curseurs stockés mais sans effet avant M11), mods et comptes (onglets informatifs, « disponible en M15 / M12 »).
+- **Widgets** : `slider`, `button_tinted` (libellé coloré), boutons ON/OFF et curseurs de fraction dans `options_screen.rs`.
+- **`Options`** : pages identiques à `GuiOptions`, `GuiVideoSettings`, `GuiControls` et `ScreenChatOptions` (hub, Video Settings, Controls, Chat Settings), en unités GUI à l'échelle vanilla. Distance de rendu, FOV, FPS max, sensibilité, souris inversée, touches et réglages du chat (opacité, échelle, hauteurs, largeur) agissent ; les autres options vanilla sont affichées avec leur valeur par défaut, sans effet. Gestionnaires de comptes (M12) et de mods (M15) : écrans à part, hors des Options vanilla.
 - **Persistance** : lecture au démarrage, écriture à la validation ou à la fermeture de l'écran ; fichier absent ou corrompu → valeurs par défaut sans plantage, sauvegarde atomique (fichier temporaire puis renommage).
 - **Application à chaud** : distance de rendu (renvoie `ClientSettings`, ajuste le monde chargé), FOV (caméra), échelle d'interface, FPS cap.
 - **Touches** : remplacer tous les `KeyCode::…` codés en dur de `window.rs` et `input.rs` par la table ; capture de touche avec Échap = annuler, détection et signalement des conflits.
@@ -119,7 +119,7 @@ Fichiers à fort risque de conflit entre sessions parallèles : `window.rs`, `ga
 | Rendu du texte stylé coûteux | Mise en cache des runs mis en page, relayout seulement quand le journal ou la largeur change |
 | Messages hostiles (JSON énorme, récursion, `open_url`) | Bornes strictes, tests dédiés, pas d'ouverture automatique |
 | Boss bar 1.8 ambiguë (entités) | Documenté en ADR, limité au Wither/Dragon le plus proche |
-| Réglages audio/mods/comptes sans backend | Onglets présents mais marqués non disponibles, valeurs stockées |
+| Options vanilla sans backend (son, langue, packs, ombres, nuages…) | Affichées à leur place avec la valeur par défaut, sans effet ; l'écran qu'elles ouvrent en vanilla n'existe pas encore |
 | Fichier d'options mal formé | Défauts + sauvegarde atomique + test de corruption |
 
 ## 8. Décisions à trancher avant de coder
