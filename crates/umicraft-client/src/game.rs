@@ -1117,11 +1117,12 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     }
     // MCP `EntityRenderer.renderHand`: only the first-person view of a
     // player who plays shows the hand.
+    let hand_visible = followed.is_none()
+        && game.perspective == Perspective::FirstPerson
+        && game.gamemode != GameMode::Spectator;
     view.effects.hand = HandPose {
-        shows_arm: game.hand.pose().shows_arm
-            && followed.is_none()
-            && game.perspective == Perspective::FirstPerson
-            && game.gamemode != GameMode::Spectator,
+        visible: hand_visible,
+        shows_arm: game.hand.pose().shows_arm && hand_visible,
         item_use: game.item_use.view(),
         ..game.hand.pose()
     };
@@ -1167,6 +1168,12 @@ fn follow_body(game: &mut Game) {
     };
     let sneaking = if state.player().sneaking { 0x02 } else { 0 };
     game.body.id = EntityId(game.entity_id);
+    // The local stack comes from the windows (ADR-0025), not from `Entity
+    // Equipment`, so the body shows the item in the second and third person.
+    game.body.held = game
+        .windows
+        .selected_item()
+        .and_then(EntityItem::from_stack);
     game.body.follow(
         state.position(),
         game.yaw.to_degrees(),
@@ -2301,8 +2308,14 @@ fn tick(
     // The simulation only runs on a loaded world.
     let ready = game.world_ready();
     if ready {
+        let seat = game
+            .vehicle
+            .and_then(|vehicle| game.entities.rider_feet(EntityId(vehicle)));
         if let (Some(state), Some(world)) = (game.state.as_mut(), game.world.as_ref()) {
-            state.tick(&intent, world);
+            match seat {
+                Some(feet) => state.ride(feet),
+                None => state.tick(&intent, world),
+            }
         }
     }
     report_flight(game, was_flying, queue);
@@ -2852,6 +2865,49 @@ mod tests {
     }
 
     #[test]
+    fn the_body_in_f5_holds_the_selected_item() {
+        // Regression: the local body was drawn with empty hands.
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        follow_body(&mut game);
+        assert_eq!(game.body.frame_data().held, None);
+        game.windows.apply_set_slot(0, 36, wire_item(276, 0));
+        follow_body(&mut game);
+        assert_eq!(
+            game.body.frame_data().held.map(|held| held.item_id),
+            Some(276)
+        );
+    }
+
+    #[test]
+    fn a_rider_follows_its_vehicle_instead_of_walking() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 7;
+        game.entities.spawn_object(
+            EntityId(42),
+            1,
+            DVec3::new(8.0, 70.0, 8.0),
+            0.0,
+            0.0,
+            glam::Vec3::ZERO,
+            0,
+        );
+        game.vehicle = Some(42);
+        load_surrounding_columns(&mut game);
+        let seat = game.entities.rider_feet(EntityId(42)).expect("tracked");
+        let mut queue = CommandQueue::default();
+        let (frames, _rx) = mpsc::sync_channel(8);
+        let (chunks, _chunk_rx) = mpsc::sync_channel(8);
+        game.input.forward = 1.0;
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        let position = game.state.as_ref().expect("state").position();
+        assert!(
+            (position - seat).length() < 1e-9,
+            "{position:?} vs {seat:?}"
+        );
+    }
+
+    #[test]
     fn f5_moves_the_camera_back_and_shows_the_player_body() {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.entity_id = 1;
@@ -2888,14 +2944,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_local_body_swings_its_limbs_while_walking() {
-        let mut game = game_on_floor_with(BlockState::AIR);
-        game.entity_id = 1;
-        game.playing = true;
-        game.input.forward = 1.0;
-        // The simulation only runs once the 3x3 columns around the player
-        // are loaded.
+    /// Loads the 3x3 columns around the player: the simulation only runs once
+    /// they are there.
+    fn load_surrounding_columns(game: &mut Game) {
         let payload = vec![0u8; umicraft_world::chunk::payload_len(0b1000, true, true)];
         let world = game.world.as_mut().expect("world");
         for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
@@ -2910,6 +2961,15 @@ mod tests {
                     .expect("an empty column");
             }
         }
+    }
+
+    #[test]
+    fn the_local_body_swings_its_limbs_while_walking() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        game.playing = true;
+        game.input.forward = 1.0;
+        load_surrounding_columns(&mut game);
         let mut queue = CommandQueue::default();
         let (frames, _received) = mpsc::sync_channel(64);
         let (chunks, _chunk_received) = mpsc::sync_channel(64);
@@ -3435,6 +3495,7 @@ mod tests {
         };
         tick_hand(&mut game);
         assert!(frame(&game).state.effects.hand.shows_arm);
+        assert!(frame(&game).state.effects.hand.visible);
 
         game.gamemode = GameMode::Spectator;
         assert!(!frame(&game).state.effects.hand.shows_arm);
@@ -3446,6 +3507,8 @@ mod tests {
         };
         handle_input(&mut game, toggle, &mut queue);
         assert!(!frame(&game).state.effects.hand.shows_arm, "third person");
+        // Regression: the first-person item stayed drawn in F5.
+        assert!(!frame(&game).state.effects.hand.visible, "third person");
         handle_input(&mut game, toggle, &mut queue);
         handle_input(&mut game, toggle, &mut queue);
 

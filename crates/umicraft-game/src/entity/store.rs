@@ -165,6 +165,13 @@ impl EntityStore {
         })
     }
 
+    /// The feet position of a rider seated on the tracked entity `id`, `None`
+    /// when the vehicle is not tracked.
+    #[must_use]
+    pub fn rider_feet(&self, id: EntityId) -> Option<DVec3> {
+        self.entities.get(&id).map(crate::riding::rider_feet)
+    }
+
     /// Applies a relative movement delta to an entity (`Entity Relative Move`).
     ///
     /// The rotation is retargeted to the current one, which stops a turn in

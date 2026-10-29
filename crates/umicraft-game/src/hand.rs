@@ -148,6 +148,7 @@ impl HandState {
     #[must_use]
     pub fn pose(&self) -> HandPose {
         HandPose {
+            visible: true,
             shows_arm: self.item.is_none(),
             equip: 1.0 - self.equipped,
             swing: self.swing_progress(1.0),
@@ -161,6 +162,10 @@ impl HandState {
 /// Where the arm is in front of the camera, as plain data.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct HandPose {
+    /// Whether the first-person hand is drawn at all, the arm and the held
+    /// item (MCP `EntityRenderer.renderHand`): off in the second and third
+    /// person, when spectating and in spectator mode.
+    pub visible: bool,
     /// Whether the bare arm is drawn (the hand is empty).
     pub shows_arm: bool,
     /// How far the hand is lowered, `0` raised to `1` out of sight.
@@ -189,6 +194,7 @@ impl HandPose {
             other.swing
         };
         Self {
+            visible: other.visible,
             shows_arm: other.shows_arm,
             equip: mix(self.equip, other.equip),
             swing: mix(self.swing, swing_end),

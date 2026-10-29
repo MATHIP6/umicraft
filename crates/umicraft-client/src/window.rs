@@ -1236,7 +1236,7 @@ impl App {
                 renderer.set_world_items(&dropped.items);
                 renderer.set_world_glint(&dropped.glint);
                 self.hand_layers.clear();
-                if let Some(stack) = held_stack(world) {
+                if let Some(stack) = held_stack(world).filter(|_| hand.visible) {
                     let nbt = stack.nbt.as_deref();
                     push_held_item(
                         &mut self.hand_layers,
