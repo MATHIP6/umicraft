@@ -14,6 +14,7 @@ use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::install::OfficialInstall;
 use umicraft_assets::manifest::VersionJson;
 use umicraft_assets::AssetsError;
+use umicraft_render::{HudSheets, SpriteSheet};
 
 /// The only game version the client supports (protocol 47, spec §1.3).
 pub(crate) const VERSION_ID: &str = "1.8.8";
@@ -63,6 +64,58 @@ pub(crate) fn find_verified_jar() -> Result<ClientJar, AssetsError> {
         what: format!("client jar of version {VERSION_ID}"),
         path: "official installation or umicraft asset cache".to_string(),
     })
+}
+
+/// Loads the official `en_US.lang` contents from the Umicraft asset cache,
+/// or from the verified client jar.
+pub(crate) fn load_en_us_lang() -> Option<String> {
+    if let Ok(cache) = umicraft_assets::cache::AssetCache::in_data_dir() {
+        if let Some(text) = umicraft_assets::objects::AssetIndex::load_en_us_lang(&cache) {
+            return Some(text);
+        }
+    }
+
+    if let Ok(jar) = find_verified_jar() {
+        if let Ok(bytes) = jar.read_entry("assets/minecraft/lang/en_US.lang") {
+            if let Ok(text) = String::from_utf8(bytes) {
+                return Some(text);
+            }
+        }
+    }
+
+    None
+}
+
+/// Loads the GUI atlas from the verified client jar if available.
+pub(crate) fn load_gui_atlas() -> Option<umicraft_assets::GuiAtlas> {
+    let jar = find_verified_jar().ok()?;
+    umicraft_assets::GuiAtlas::from_jar(&jar).ok()
+}
+
+/// Converts the GUI atlas into [`HudSheets`] for textured HUD rendering.
+pub(crate) fn hud_sheets(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> HudSheets {
+    HudSheets {
+        widgets: gui_atlas
+            .and_then(|a| a.region("widgets"))
+            .map(|r| SpriteSheet {
+                u_min: r.u_min,
+                v_min: r.v_min,
+                u_max: r.u_max,
+                v_max: r.v_max,
+                width: r.pixel_width,
+                height: r.pixel_height,
+            }),
+        icons: gui_atlas
+            .and_then(|a| a.region("icons"))
+            .map(|r| SpriteSheet {
+                u_min: r.u_min,
+                v_min: r.v_min,
+                u_max: r.u_max,
+                v_max: r.v_max,
+                width: r.pixel_width,
+                height: r.pixel_height,
+            }),
+    }
 }
 
 /// The client jar path of the installation, with a typed missing-file error.

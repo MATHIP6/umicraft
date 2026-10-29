@@ -18,6 +18,62 @@ use crate::geom::Rect;
 /// Straight-alpha RGBA colour, components in `0.0..=1.0`.
 pub type Color = [f32; 4];
 
+/// A rectangular region of a GUI texture atlas that can be subdivided into
+/// sprite rects.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpriteSheet {
+    /// Normalised UV of the top-left corner.
+    pub u_min: f32,
+    /// Normalised UV of the top-left corner.
+    pub v_min: f32,
+    /// Normalised UV of the bottom-right corner.
+    pub u_max: f32,
+    /// Normalised UV of the bottom-right corner.
+    pub v_max: f32,
+    /// Original pixel width of this texture.
+    pub width: u32,
+    /// Original pixel height of this texture.
+    pub height: u32,
+}
+
+impl SpriteSheet {
+    /// Creates a new sprite sheet definition.
+    #[must_use]
+    pub const fn new(
+        u_min: f32,
+        v_min: f32,
+        u_max: f32,
+        v_max: f32,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        Self {
+            u_min,
+            v_min,
+            u_max,
+            v_max,
+            width,
+            height,
+        }
+    }
+
+    /// Returns the normalised UV `[u_min, v_min, u_max, v_max]` for a
+    /// sub-rectangle defined in texture pixel coordinates.
+    #[must_use]
+    pub fn sub(&self, x: u32, y: u32, w: u32, h: u32) -> [f32; 4] {
+        let u_span = self.u_max - self.u_min;
+        let v_span = self.v_max - self.v_min;
+        let pw = self.width as f32;
+        let ph = self.height as f32;
+        [
+            self.u_min + x as f32 / pw * u_span,
+            self.v_min + y as f32 / ph * v_span,
+            self.u_min + (x + w) as f32 / pw * u_span,
+            self.v_min + (y + h) as f32 / ph * v_span,
+        ]
+    }
+}
+
 /// The visual parameters of a text run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextStyle {

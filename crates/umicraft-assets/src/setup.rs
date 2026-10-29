@@ -147,6 +147,11 @@ where
     let index_desc = version.require_asset_index()?;
     on_step(SetupStep::FetchingAssetIndex);
     let index = AssetIndex::fetch(&http, index_desc).await?;
+    if let Ok(bytes) = http.get_bytes(&index_desc.url).await {
+        let _ = cache.store_index(&index_desc.sha1, &bytes);
+        let id_path = cache.indexes_dir().join(format!("{}.json", index_desc.id));
+        let _ = std::fs::write(id_path, &bytes);
+    }
 
     on_step(SetupStep::DownloadingObjects);
     let report = downloader

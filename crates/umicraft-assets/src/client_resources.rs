@@ -438,6 +438,24 @@ impl ClientResources {
     }
 }
 
+impl GuiAtlas {
+    /// Builds a GUI atlas directly from the `textures/gui/` entries in `jar`.
+    ///
+    /// # Errors
+    /// [`AssetsError`] on archive read or PNG decode failure.
+    pub fn from_jar(jar: &ClientJar) -> AssetsResult<Self> {
+        let entries = jar.read_prefixes(&[GUI_TEXTURES_PREFIX])?;
+        let mut raw_gui = BTreeMap::new();
+        for (path, bytes) in entries {
+            if is_gui_texture(&path) {
+                raw_gui.insert(path, bytes);
+            }
+        }
+        let gui_images = decode_gui_textures(&raw_gui)?;
+        Ok(pack_gui_atlas(gui_images))
+    }
+}
+
 /// Builds the optional colormap pair from the decoded jar entries.
 ///
 /// Both maps are required together: `BiomeTints` samples grass and foliage

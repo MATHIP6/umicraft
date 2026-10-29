@@ -38,6 +38,8 @@
 //! [`server`].
 
 mod block_data;
+pub mod chat_component;
+pub mod chat_input;
 pub mod collision;
 pub mod digging;
 pub mod entity;
@@ -54,17 +56,21 @@ pub mod movement;
 pub mod nbt;
 pub mod physics;
 pub mod pick;
+pub mod player_list;
 pub mod prediction;
 pub mod raycast;
+pub mod scoreboard;
 pub mod server;
 pub mod shapes;
+pub mod title;
 pub mod traffic;
 pub mod view;
 
 use glam::{DVec3, Vec3};
 
 pub use entity::{
-    EntityFlags, EntityId, EntityItem, EntityKind, EntityRecord, EntityRenderSnapshot, EntityStore,
+    BossInfo, BossTracker, EntityFlags, EntityId, EntityItem, EntityKind, EntityRecord,
+    EntityRenderSnapshot, EntityStore,
 };
 pub use input::InputIntent;
 pub use physics::Player;

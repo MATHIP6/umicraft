@@ -131,6 +131,27 @@ impl AssetIndex {
         self.objects.get(path)
     }
 
+    /// Loads the `en_US.lang` contents from `cache` if an asset index document
+    /// and the object are present.
+    #[must_use]
+    pub fn load_en_us_lang(cache: &crate::cache::AssetCache) -> Option<String> {
+        let candidates = ["1.8.json", "f6ad102bcaa53b1a58358f16e376d548d44933ec.json"];
+        for name in candidates {
+            let index_path = cache.indexes_dir().join(name);
+            if let Ok(bytes) = std::fs::read(&index_path) {
+                if let Ok(index) = Self::parse(&bytes) {
+                    if let Some(obj) = index.get("minecraft/lang/en_US.lang") {
+                        let obj_path = cache.object_path(&obj.hash);
+                        if let Ok(text) = std::fs::read_to_string(&obj_path) {
+                            return Some(text);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Every object of the index, ordered by path.
     #[must_use]
     pub fn entries(&self) -> Vec<(String, AssetObject)> {

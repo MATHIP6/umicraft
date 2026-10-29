@@ -29,6 +29,7 @@
 //! ```
 
 use std::borrow::Cow;
+use std::time::Instant;
 
 use crate::font;
 use crate::overlay::Overlay;
@@ -63,8 +64,6 @@ const BOTTOM_MARGIN: f32 = 4.0;
 const LINE_HEIGHT: f32 = 8.0;
 /// Left edge of the chat block, in pixels.
 const CHAT_LEFT: f32 = 4.0;
-/// Indent of the chat text inside its background, in pixels.
-const CHAT_TEXT_INDENT: f32 = 2.0;
 /// Left edge of the debug panel, in pixels.
 const DEBUG_LEFT: f32 = 4.0;
 /// Top edge of the debug panel, in pixels.
@@ -79,8 +78,6 @@ const DEBUG_PADDING_X: f32 = 20.0;
 const DEBUG_PADDING_Y: f32 = 12.0;
 /// Gap kept between the debug panel and the bottom UI stack, in pixels.
 const DEBUG_GAP: f32 = 4.0;
-/// Alpha of the oldest chat line; the newest ones fade to opaque.
-const CHAT_MIN_ALPHA: f32 = 0.35;
 /// Background of the hotbar.
 const HOTBAR_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
 /// Slot separators inside the hotbar.
@@ -109,10 +106,6 @@ const LEVEL_TEXT: [f32; 4] = [1.0, 0.9, 0.3, 1.0];
 const LEVEL_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
 /// The crosshair.
 const CROSSHAIR: [f32; 4] = [1.0, 1.0, 1.0, 0.85];
-/// Background of one chat line.
-const CHAT_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 0.5];
-/// Chat text.
-const CHAT_TEXT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 /// Background of the debug panel.
 const DEBUG_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
 /// Debug text.
@@ -138,12 +131,185 @@ pub struct HudState {
     pub selected_slot: u8,
     /// Whether the crosshair is drawn.
     pub crosshair: bool,
-    /// Chat lines, oldest first; only the last ten are drawn.
-    pub chat_lines: Vec<String>,
+    /// The chat lines, oldest first, with their styles and arrival times.
+    pub chat: Vec<ChatLineView>,
+    /// Whether the chat input is open: every line is shown at full opacity.
+    pub chat_open: bool,
+    /// How many rows the open chat is scrolled up from the newest.
+    pub chat_scroll: usize,
+    /// The chat input line, while the chat is open.
+    pub chat_input: Option<ChatInputView>,
+    /// The chat options that shape the log.
+    pub chat_style: ChatStyle,
+    /// The time of this frame; ages the chat lines. `None` freezes the fade.
+    pub now: Option<Instant>,
     /// Debug lines, top to bottom.
     pub debug_lines: Vec<String>,
+    /// The action bar text and its opacity, when a message is displayed.
+    pub action_bar: Option<(String, f32)>,
+    /// The title and subtitle, when displayed.
+    pub title: Option<TitleView>,
+    /// The scoreboard sidebar, when an objective is assigned to it.
+    pub sidebar: Option<SidebarView>,
+    /// The tab list, filled whether or not the player holds the key.
+    pub tab_list: Option<TabListView>,
+    /// Whether the player holds the tab-list key.
+    pub show_tab_list: bool,
+    /// The tab completions the server offered for the open chat line.
+    pub completions: Vec<String>,
+    /// Counts the completion answers, so a new answer is told from the last.
+    pub completions_serial: u64,
+    /// The boss bar of a Wither or an Ender Dragon in the world.
+    pub boss: Option<BossView>,
     /// The score shown on the death screen (MCP `EntityPlayer.getScore`).
     pub score: i32,
+}
+
+/// The boss bar at the top of the screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BossView {
+    /// The name drawn above the bar.
+    pub name: String,
+    /// The health as a fraction of the maximum, `0.0..=1.0`.
+    pub health: f32,
+}
+
+/// The chat options that shape the log (`GameSettings.chat*`), as the
+/// fractions the options screen stores: `0.0..=1.0` each.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatStyle {
+    /// `chatOpacity`: the text and band alpha is `opacity * 0.9 + 0.1`.
+    pub opacity: f32,
+    /// `chatScale`: scales the whole log, `0.0` hides it.
+    pub scale: f32,
+    /// `chatWidth`: from 40 to 320 pixels.
+    pub width: f32,
+    /// `chatHeightFocused`: from 20 to 180 pixels while the chat is open.
+    pub height_focused: f32,
+    /// `chatHeightUnfocused`: from 20 to 180 pixels while it is closed.
+    pub height_unfocused: f32,
+}
+
+impl Default for ChatStyle {
+    /// The vanilla defaults.
+    fn default() -> Self {
+        Self {
+            opacity: 1.0,
+            scale: 1.0,
+            width: 1.0,
+            height_focused: 1.0,
+            height_unfocused: 0.444_444_45,
+        }
+    }
+}
+
+impl ChatStyle {
+    /// `GuiNewChat.calculateChatboxWidth`, in pixels.
+    #[must_use]
+    pub fn width_px(&self) -> i32 {
+        (self.width * 280.0 + 40.0) as i32
+    }
+
+    /// `GuiNewChat.calculateChatboxHeight` for the open chat, in pixels.
+    #[must_use]
+    pub fn height_focused_px(&self) -> i32 {
+        (self.height_focused * 160.0 + 20.0) as i32
+    }
+
+    /// `GuiNewChat.calculateChatboxHeight` for the closed chat, in pixels.
+    #[must_use]
+    pub fn height_unfocused_px(&self) -> i32 {
+        (self.height_unfocused * 160.0 + 20.0) as i32
+    }
+}
+
+/// One styled piece of a chat line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRunView {
+    /// The text.
+    pub text: String,
+    /// The colour as RGB.
+    pub color: [u8; 3],
+    /// Drawn twice, one pixel apart.
+    pub bold: bool,
+    /// Not drawn differently: the built-in font cannot be sheared.
+    pub italic: bool,
+    /// Underlined with a rectangle.
+    pub underlined: bool,
+    /// Struck through with a rectangle.
+    pub strikethrough: bool,
+    /// Replaced by glyphs that change every few ticks.
+    pub obfuscated: bool,
+}
+
+/// A chat message as it arrived, before it is wrapped to the screen width.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatLineView {
+    /// The styled pieces.
+    pub runs: Vec<ChatRunView>,
+    /// When the message arrived; the fade counts from here.
+    pub received: Instant,
+}
+
+impl ChatLineView {
+    /// The text of the message without its styles.
+    #[must_use]
+    pub fn plain(&self) -> String {
+        self.runs.iter().map(|run| run.text.as_str()).collect()
+    }
+}
+
+/// The chat input line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatInputView {
+    /// The typed text.
+    pub text: String,
+    /// The caret as a character index.
+    pub caret: usize,
+    /// Whether the caret is in the visible half of its blink.
+    pub caret_visible: bool,
+}
+
+/// The title and subtitle drawn in the middle of the screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TitleView {
+    /// The title text.
+    pub title: String,
+    /// The subtitle text; empty when there is none.
+    pub subtitle: String,
+    /// The opacity in `0.0..=1.0`.
+    pub alpha: f32,
+}
+
+/// The scoreboard sidebar: a title and lines, top line first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SidebarView {
+    /// The objective display name.
+    pub title: String,
+    /// The lines as `(name, score)`.
+    pub lines: Vec<(String, i32)>,
+}
+
+/// One player of the tab list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabEntryView {
+    /// The name drawn for the player, with its team decoration.
+    pub name: String,
+    /// The latency in milliseconds.
+    pub ping: i32,
+    /// The game mode id; 3 is spectator.
+    pub game_mode: i32,
+}
+
+/// The tab list in display order, with its header and footer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabListView {
+    /// The header text; empty when there is none.
+    pub header: String,
+    /// The footer text; empty when there is none.
+    pub footer: String,
+    /// The players, already sorted and capped.
+    pub entries: Vec<TabEntryView>,
 }
 
 impl Default for HudState {
@@ -157,8 +323,21 @@ impl Default for HudState {
             level: 0,
             selected_slot: 0,
             crosshair: true,
-            chat_lines: Vec::new(),
+            chat: Vec::new(),
+            chat_open: false,
+            chat_scroll: 0,
+            chat_input: None,
+            chat_style: ChatStyle::default(),
+            now: None,
             debug_lines: Vec::new(),
+            action_bar: None,
+            title: None,
+            sidebar: None,
+            tab_list: None,
+            show_tab_list: false,
+            completions: Vec::new(),
+            completions_serial: 0,
+            boss: None,
             score: 0,
         }
     }
@@ -492,9 +671,10 @@ pub fn draw(overlay: &mut Overlay, state: &HudState, width: u32, height: u32) {
     draw_hotbar(overlay, state, &layout);
     draw_status_rows(overlay, state, &layout);
     draw_experience(overlay, state, &layout);
-    draw_chat(overlay, state, &layout);
+    crate::chat_hud::draw(overlay, state, &layout);
     draw_crosshair(overlay, state, &layout);
     draw_debug(overlay, state, &layout);
+    crate::social_hud::draw(overlay, state, &layout);
 }
 
 fn draw_hotbar(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {
@@ -582,46 +762,6 @@ fn draw_experience(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) 
     overlay.text(x + scale, y + scale, scale, LEVEL_SHADOW, &level);
     overlay.text(x, y, scale, LEVEL_TEXT, &level);
 }
-
-fn draw_chat(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {
-    if state.chat_lines.is_empty() {
-        return;
-    }
-    let bottom = layout.content_top(state.armor > 0.0);
-    let line_height = layout.line_height();
-    let scale = layout.scale();
-    // Only the lines that fit on screen are drawn, and the oldest ones are
-    // dropped first, so the chat never leaves the viewport.
-    let max_lines = (bottom / line_height).floor().max(0.0) as usize;
-    let visible = state.chat_lines.len().min(CHAT_LINES).min(max_lines);
-    if visible == 0 {
-        return;
-    }
-    let start = state.chat_lines.len() - visible;
-    let advance = font::CELL_WIDTH as f32 * scale;
-    let max_chars = max_chars(layout.width() - CHAT_LEFT - 2.0 * CHAT_TEXT_INDENT, advance);
-    for (index, line) in state.chat_lines[start..].iter().enumerate() {
-        let band = layout.chat_line_rect(bottom, index, visible);
-        let text = fit(line, max_chars);
-        let text_width = Overlay::text_width(&text, scale);
-        let alpha = chat_alpha(index, visible);
-        overlay.rect(
-            band.x,
-            band.y,
-            text_width + 2.0 * CHAT_TEXT_INDENT,
-            band.height,
-            [0.0, 0.0, 0.0, CHAT_BACKGROUND[3] * alpha],
-        );
-        overlay.text(
-            band.x + CHAT_TEXT_INDENT,
-            band.y + (band.height - 5.0 * scale) * 0.5,
-            scale,
-            [CHAT_TEXT[0], CHAT_TEXT[1], CHAT_TEXT[2], alpha],
-            &text,
-        );
-    }
-}
-
 fn draw_crosshair(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {
     if !state.crosshair {
         return;
@@ -641,6 +781,13 @@ fn draw_crosshair(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {
         vertical.height,
         CROSSHAIR,
     );
+}
+
+/// Draws only the debug block, for the textured HUD that draws everything
+/// else itself (see `hud_gui`).
+pub fn draw_debug_only(overlay: &mut Overlay, state: &HudState, width: u32, height: u32) {
+    let layout = HudLayout::new(width, height);
+    draw_debug(overlay, state, &layout);
 }
 
 fn draw_debug(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) {
@@ -705,15 +852,6 @@ fn draw_border(overlay: &mut Overlay, rect: Rect, thickness: f32, color: [f32; 4
     );
 }
 
-/// The alpha of a chat line; the oldest line fades out towards [`CHAT_MIN_ALPHA`].
-fn chat_alpha(index: usize, visible: usize) -> f32 {
-    if visible <= 1 {
-        return 1.0;
-    }
-    let step = index as f32 / (visible - 1) as f32;
-    CHAT_MIN_ALPHA + (1.0 - CHAT_MIN_ALPHA) * step
-}
-
 /// The number of characters that fit into `width` pixels.
 fn max_chars(width: f32, advance: f32) -> usize {
     if advance <= 0.0 {
@@ -751,6 +889,22 @@ mod tests {
 
     fn layout() -> HudLayout {
         HudLayout::new(1280, 720)
+    }
+
+    /// A chat line of one white run that just arrived.
+    fn test_line(text: &str) -> ChatLineView {
+        ChatLineView {
+            runs: vec![ChatRunView {
+                text: text.to_string(),
+                color: [255, 255, 255],
+                bold: false,
+                italic: false,
+                underlined: false,
+                strikethrough: false,
+                obfuscated: false,
+            }],
+            received: Instant::now(),
+        }
     }
 
     /// The screen-space bounds of everything the overlay holds.
@@ -847,7 +1001,9 @@ mod tests {
     fn chat_lines_stay_inside_the_viewport() {
         let (width, height) = (320_u32, 240_u32);
         let state = HudState {
-            chat_lines: (0..50).map(|index| format!("line {index}")).collect(),
+            chat: (0..50)
+                .map(|index| test_line(&format!("line {index}")))
+                .collect(),
             ..HudState::default()
         };
         let mut overlay = Overlay::new(width, height);
@@ -899,7 +1055,7 @@ mod tests {
         draw(&mut bare, &state, width, height);
 
         let state = HudState {
-            chat_lines: vec!["hello".to_string()],
+            chat: vec![test_line("hello")],
             debug_lines: vec!["world".to_string()],
             ..HudState::default()
         };

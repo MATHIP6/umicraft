@@ -40,6 +40,7 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "std", "tracing-log"] }
 umicraft-assets = { path = "crates/umicraft-assets", version = "0.1.0" }
+umicraft-core = { path = "crates/umicraft-core", version = "0.1.0" }
 umicraft-model = { path = "crates/umicraft-model", version = "0.1.0" }
 umicraft-net = { path = "crates/umicraft-net", version = "0.1.0" }
 umicraft-protocol = { path = "crates/umicraft-protocol", version = "0.1.0" }

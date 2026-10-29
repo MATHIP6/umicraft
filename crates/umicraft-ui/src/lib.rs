@@ -37,6 +37,7 @@
 pub mod context;
 pub mod debug_screen;
 pub mod draw;
+pub mod game_menu;
 pub mod geom;
 pub mod id;
 pub mod input;
@@ -45,7 +46,7 @@ pub mod text;
 pub mod widgets;
 
 pub use context::{Ui, UiOutput, UiResponse};
-pub use draw::{Color, DrawCommand, DrawList, TextStyle};
+pub use draw::{Color, DrawCommand, DrawList, SpriteSheet, TextStyle};
 pub use geom::{Axis, Insets, Layout, Rect, ScrollArea};
 pub use id::WidgetId;
 pub use input::{InputEvent, Key, Modifiers, PointerButton, UiInput};

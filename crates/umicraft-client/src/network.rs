@@ -46,6 +46,10 @@ pub struct NetworkConfig {
     pub name: String,
     /// Client Settings view distance.
     pub view_distance: u8,
+    /// Client Settings chat visibility: `0` all, `1` commands, `2` hidden.
+    pub chat_mode: u8,
+    /// Client Settings chat colours.
+    pub chat_colors: bool,
 }
 
 /// A serverbound packet the game thread wants the socket to send.
@@ -203,6 +207,21 @@ pub enum ClientCommand {
     /// `Chat Message` (0x01): a line the player typed.
     Chat {
         /// The message, with the leading slash of a command.
+        message: String,
+    },
+    /// `Client Settings` (0x15): the player changed an option the server
+    /// needs to know.
+    ClientSettings {
+        /// The render distance in chunks.
+        view_distance: u8,
+        /// The chat visibility byte.
+        chat_mode: u8,
+        /// Whether the chat shows colours.
+        chat_colors: bool,
+    },
+    /// `Tab-Complete` (0x14): ask the server to complete the typed text.
+    TabComplete {
+        /// The text before the caret, with the leading slash of a command.
         message: String,
     },
     /// `Close Window` (0x0D): the client closes a container window.
@@ -365,6 +384,24 @@ impl ClientCommand {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })
             }
             Self::Chat { message } => PlayServerbound::Chat(serverbound::Chat { message }),
+            Self::ClientSettings {
+                view_distance,
+                chat_mode,
+                chat_colors,
+            } => PlayServerbound::ClientSettings(serverbound::ClientSettings {
+                locale: "en_us".to_string(),
+                view_distance,
+                chat_mode,
+                chat_colors,
+                // Every skin layer, as the entry packet sends them.
+                skin_parts: 0b0111_1111,
+            }),
+            Self::TabComplete { message } => {
+                PlayServerbound::TabComplete(serverbound::TabComplete {
+                    text: message,
+                    target_block: None,
+                })
+            }
             Self::CloseWindow { window_id } => {
                 PlayServerbound::CloseWindow(ServerCloseWindow { window_id })
             }
@@ -465,6 +502,8 @@ async fn run_session(
 
     let mut session = PlaySession::new(PlayOptions {
         view_distance: config.view_distance,
+        chat_mode: config.chat_mode,
+        chat_colors: config.chat_colors,
         ..PlayOptions::default()
     });
     // A full inbox blocks this thread in `send`, which slows the server down

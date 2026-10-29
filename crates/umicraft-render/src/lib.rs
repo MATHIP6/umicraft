@@ -14,16 +14,19 @@
 
 mod block_atlas;
 mod camera;
+mod chat_hud;
 pub mod entity_pass;
 mod environment;
 mod error;
 mod font;
 mod hud;
+pub mod hud_gui;
 mod items;
 mod outline;
 mod overlay;
 mod renderer;
 mod sky;
+mod social_hud;
 mod texture;
 mod ui_pass;
 
@@ -33,8 +36,11 @@ pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use hud::{
-    draw as draw_hud, selected_index, status_fills, Fill, HudLayout, HudState, Rect, StatusRow,
+    draw as draw_hud, draw_debug_only, selected_index, status_fills, BossView, ChatInputView,
+    ChatLineView, ChatRunView, ChatStyle, Fill, HudLayout, HudState, Rect, SidebarView, StatusRow,
+    TabEntryView, TabListView, TitleView,
 };
+pub use hud_gui::{draw_hud_gui, gui_scale, HudSheets};
 pub use items::{IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE};
 pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
@@ -42,3 +48,4 @@ pub use renderer::{Image, Renderer};
 pub use sky::SkyState;
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};
 pub use ui_pass::{fallback_atlas, FontAtlasError, UiBatch, UiBatchKind, UiPass};
+pub use umicraft_ui::SpriteSheet;

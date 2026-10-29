@@ -19,12 +19,13 @@ use crate::creative_input::{Context, CreativeEvent, Key, KeyKind, KeyOutcome};
 use crate::creative_layout::CreativeLayout;
 use crate::game::GameEvent;
 use crate::inventory_screen::CREATIVE_GAMEMODE;
+use crate::screen::Screen;
 
 impl App {
     /// Whether the creative inventory is shown (a server container replaces
     /// it).
     pub(super) fn creative_screen_visible(&self) -> bool {
-        self.creative_open && !self.container_is_open()
+        self.screen == Screen::Creative && !self.container_is_open()
     }
 
     /// Opens the inventory key's screen: the creative window in creative
@@ -35,11 +36,11 @@ impl App {
             .as_ref()
             .is_some_and(|world| world.status().gamemode == CREATIVE_GAMEMODE);
         if creative {
-            self.creative_open = true;
+            self.set_screen(Screen::Creative);
             self.creative_input.reset();
             self.send_creative(CreativeEvent::Open);
         } else {
-            self.inventory_open = true;
+            self.set_screen(Screen::Inventory);
         }
         self.capture_mouse(false);
     }

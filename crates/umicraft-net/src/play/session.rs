@@ -27,6 +27,9 @@ use crate::status::disconnect_reason;
 /// entry packets of the first `Join Game`.
 const MAX_REPLIES: usize = 2;
 
+/// The `Chat Message` position byte that routes the text to the action bar.
+const ACTION_BAR_POSITION: u8 = 2;
+
 /// Every skin layer shown, as a vanilla client announces by default.
 const ALL_SKIN_PARTS: u8 = 0b0111_1111;
 
@@ -97,6 +100,9 @@ pub struct PlayOptions {
     pub view_distance: u8,
     /// Whether colors are rendered in chat.
     pub chat_colors: bool,
+    /// The chat visibility byte announced in `Client Settings`: `0` every
+    /// message, `1` commands only, `2` hidden.
+    pub chat_mode: u8,
     /// Client brand sent on the `MC|Brand` channel (spec NET-9).
     pub brand: String,
 }
@@ -107,6 +113,7 @@ impl Default for PlayOptions {
             locale: "en_us".to_string(),
             view_distance: 8,
             chat_colors: true,
+            chat_mode: 0,
             brand: "umicraft".to_string(),
         }
     }
@@ -125,6 +132,8 @@ pub enum PlayEvent {
     Placement(PlayerPlacement),
     /// Chat/system JSON.
     Chat(String),
+    /// A message for the action bar above the hotbar (chat position 2).
+    ActionBar(String),
     /// The world clock changed (`Time Update`, 0x03).
     ///
     /// The signed time of day is preserved: a negative value means the server
@@ -376,7 +385,12 @@ impl PlaySession {
             }
             clientbound::JoinGame::ID => self.join_game(clientbound::JoinGame::decode(body)?)?,
             clientbound::Chat::ID => {
-                Reaction::event(PlayEvent::Chat(clientbound::Chat::decode(body)?.json))
+                let packet = clientbound::Chat::decode(body)?;
+                Reaction::event(if packet.position == ACTION_BAR_POSITION {
+                    PlayEvent::ActionBar(packet.json)
+                } else {
+                    PlayEvent::Chat(packet.json)
+                })
             }
             clientbound::TimeUpdate::ID => {
                 Reaction::event(PlayEvent::TimeUpdate(TimeUpdate::decode(body)?))
@@ -671,7 +685,7 @@ impl PlaySession {
         let settings = ClientSettings {
             locale: self.options.locale.clone(),
             view_distance: self.options.view_distance,
-            chat_mode: 0,
+            chat_mode: self.options.chat_mode,
             chat_colors: self.options.chat_colors,
             skin_parts: ALL_SKIN_PARTS,
         };
@@ -749,6 +763,21 @@ mod tests {
         reaction.into_event().expect("the packet becomes an event")
     }
 
+    #[test]
+    fn only_chat_position_two_becomes_an_action_bar_event() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let chat = |position| {
+            PlayClientbound::Chat(clientbound::Chat {
+                json: "{}".to_string(),
+                position,
+            })
+        };
+        let text = || "{}".to_string();
+        assert_eq!(event(&mut session, chat(0)), PlayEvent::Chat(text()));
+        assert_eq!(event(&mut session, chat(1)), PlayEvent::Chat(text()));
+        assert_eq!(event(&mut session, chat(2)), PlayEvent::ActionBar(text()));
+    }
+
     fn join_game() -> PlayClientbound {
         PlayClientbound::JoinGame(clientbound::JoinGame {
             entity_id: 42,
@@ -793,6 +822,7 @@ mod tests {
             locale: "fr_fr".to_string(),
             view_distance: 12,
             chat_colors: false,
+            chat_mode: 2,
             brand: "test".to_string(),
         };
         let mut session = PlaySession::new(options);
@@ -805,7 +835,7 @@ mod tests {
                 PlayServerbound::ClientSettings(ClientSettings {
                     locale: "fr_fr".to_string(),
                     view_distance: 12,
-                    chat_mode: 0,
+                    chat_mode: 2,
                     chat_colors: false,
                     skin_parts: ALL_SKIN_PARTS,
                 }),

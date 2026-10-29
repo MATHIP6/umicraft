@@ -95,6 +95,20 @@ impl Camera {
         self.aspect
     }
 
+    /// Sets the vertical field of view, in degrees. A value outside
+    /// `1..=170` (or not a number) is ignored so the projection stays valid.
+    pub fn set_fov_degrees(&mut self, degrees: f32) {
+        if (1.0..=170.0).contains(&degrees) {
+            self.fov_y = degrees.to_radians();
+        }
+    }
+
+    /// The vertical field of view, in degrees.
+    #[must_use]
+    pub fn fov_degrees(&self) -> f32 {
+        self.fov_y.to_degrees()
+    }
+
     /// Unit horizontal forward direction (ignores pitch).
     #[must_use]
     pub fn horizontal_forward(&self) -> Vec3 {
@@ -248,6 +262,19 @@ mod tests {
     #[test]
     fn projection_is_finite() {
         let camera = Camera::default();
+        assert!(camera.view_projection().is_finite());
+    }
+
+    #[test]
+    fn the_field_of_view_is_set_in_degrees_and_bad_values_are_ignored() {
+        let mut camera = Camera::default();
+        assert!((camera.fov_degrees() - 70.0).abs() < 1e-3);
+        camera.set_fov_degrees(95.0);
+        assert!((camera.fov_degrees() - 95.0).abs() < 1e-3);
+        for bad in [0.0, -10.0, 180.0, f32::NAN, f32::INFINITY] {
+            camera.set_fov_degrees(bad);
+            assert!((camera.fov_degrees() - 95.0).abs() < 1e-3, "{bad}");
+        }
         assert!(camera.view_projection().is_finite());
     }
 }

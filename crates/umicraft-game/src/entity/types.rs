@@ -269,6 +269,8 @@ pub struct EntityRecord {
     pub frame_rotation: u8,
     /// Visual flags.
     pub flags: EntityFlags,
+    /// Entity health from metadata index 6 (if present).
+    pub health: Option<f32>,
     /// Remaining interpolation ticks for position/rotation smoothing (vanilla: 3).
     pub interpolation_steps: u8,
 }
@@ -360,6 +362,7 @@ impl EntityRecord {
             frame_direction: 0,
             frame_rotation: 0,
             flags: EntityFlags::default(),
+            health: None,
             interpolation_steps: 0,
         }
     }

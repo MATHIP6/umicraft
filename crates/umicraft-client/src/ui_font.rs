@@ -15,6 +15,7 @@
 //! [`install`] reports to the caller.
 
 use thiserror::Error;
+#[cfg(test)]
 use umicraft_assets::install::OfficialInstall;
 use umicraft_assets::AssetsError;
 use umicraft_render::{FontAtlasError, Renderer};
@@ -80,7 +81,24 @@ enum FontLoadError {
 /// function never panics and never fails.
 #[must_use]
 pub fn load() -> LoadedFont {
-    load_from_install(OfficialInstall::from_env())
+    // The official installation first, then the Umicraft asset cache that
+    // `--setup-assets` fills; the terrain loader searches both the same way.
+    let loaded = official::find_verified_jar()
+        .map_err(FontLoadError::from)
+        .and_then(|jar| Ok(FontAtlas::from_png(&jar.read_entry(FONT_ENTRY)?)?));
+    match loaded {
+        Ok(atlas) => {
+            tracing::info!("loaded the 1.8 font from the client jar");
+            LoadedFont {
+                atlas,
+                source: FontSource::Official,
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "could not load the 1.8 font; using the built-in fallback font");
+            fallback_font()
+        }
+    }
 }
 
 /// Uploads `atlas` to `renderer`, falling back to the built-in font once.
@@ -114,6 +132,7 @@ pub fn install(
 }
 
 /// Loads from an optional installation, logging the reason on fallback.
+#[cfg(test)]
 fn load_from_install(install: Option<OfficialInstall>) -> LoadedFont {
     let Some(install) = install else {
         tracing::warn!(
@@ -144,6 +163,7 @@ fn load_from_install(install: Option<OfficialInstall>) -> LoadedFont {
 }
 
 /// Reads and decodes the font out of one official installation.
+#[cfg(test)]
 fn load_official(install: &OfficialInstall) -> Result<FontAtlas, FontLoadError> {
     let jar = official::open_client_jar(install)?;
     let png = jar.read_entry(FONT_ENTRY)?;

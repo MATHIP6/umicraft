@@ -27,11 +27,13 @@ use std::time::{Duration, Instant};
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
+use umicraft_game::chat_component::{self, Translations};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
 use umicraft_game::entity::{
-    EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord, EntityStore,
+    BossTracker, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
+    EntityStore,
 };
 use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::hand::{HandPose, HandState, SwingEffects};
@@ -43,9 +45,12 @@ use umicraft_game::item_use::{drop_item, ItemUse, UseTick};
 use umicraft_game::movement::movement_stats;
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
+use umicraft_game::player_list::PlayerList;
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
+use umicraft_game::scoreboard::Scoreboard;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
+use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::view::{camera_pose, Perspective};
 use umicraft_game::{GameState, InputIntent, RenderState, ServerCorrection};
@@ -56,7 +61,10 @@ use umicraft_protocol::packets::play::clientbound::{
 };
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
-use umicraft_render::{HudState, OutlineBox};
+use umicraft_render::{
+    BossView, ChatLineView, ChatRunView, HudState, OutlineBox, SidebarView, TabEntryView,
+    TabListView, TitleView,
+};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, World};
 
 use crate::cracks::Crack;
@@ -89,6 +97,13 @@ const FRAME_CAPACITY: usize = 32;
 
 /// Bounded queue of the chunk snapshots the render thread polls.
 const CHUNK_CAPACITY: usize = 64;
+
+/// The number of chat messages kept (MCP GuiNewChat keeps 100). The HUD
+/// wraps them and shows the newest rows that fit.
+const CHAT_HISTORY: usize = 100;
+
+/// The longest message the server accepts, in characters (C01PacketChatMessage).
+const MAX_CHAT_CHARS: usize = 100;
 
 /// The arrow item id (MCP `Items.arrow`): a bow needs one to be drawn.
 const ARROW: i16 = 262;
@@ -125,9 +140,6 @@ const FRAME_ROTATION_WATCHER: u8 = 9;
 /// (MCP `handleEntityVelocity`: `/ 8000`).
 const VELOCITY_UNITS: f64 = 8000.0;
 
-/// The number of chat lines the HUD keeps.
-const CHAT_HISTORY: usize = 10;
-
 /// The number of ticks between two status updates.
 const STATUS_PERIOD: u64 = 20;
 
@@ -156,6 +168,20 @@ pub enum GameEvent {
     Input(InputUpdate),
     /// A chat line the player typed.
     Chat(String),
+    /// The player pressed Tab: ask the server to complete this text.
+    TabComplete(String),
+    /// The player changed an option the server must know: the render
+    /// distance, the chat visibility or the chat colours.
+    ClientSettings {
+        /// The render distance in chunks.
+        view_distance: u8,
+        /// The chat visibility byte.
+        chat_mode: u8,
+        /// Whether the chat shows colours.
+        chat_colors: bool,
+    },
+    /// A line the client shows in its own chat (the completion list).
+    LocalChat(String),
     /// Request to re-mesh every loaded chunk column (e.g. after a resource pack reload).
     ReMeshAll,
     /// The client closes a container or the player inventory (E / Escape).
@@ -281,6 +307,7 @@ impl Session {
         let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(network::COMMAND_CAPACITY);
         let stop = Arc::new(AtomicBool::new(false));
         let counters = Arc::new(SessionCounters::default());
+        let own_name = config.name.clone();
 
         let network = network::spawn(
             config,
@@ -294,6 +321,7 @@ impl Session {
             chunks_tx,
             commands_tx,
             Arc::clone(&stop),
+            own_name,
         )?;
 
         Ok(Self {
@@ -361,10 +389,11 @@ fn spawn_game_thread(
     chunks: SyncSender<ChunkEvent>,
     commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
+    own_name: String,
 ) -> Result<JoinHandle<()>, ClientError> {
     std::thread::Builder::new()
         .name("umicraft-game".to_string())
-        .spawn(move || run(events, frames, chunks, commands, stop))
+        .spawn(move || run(events, frames, chunks, commands, stop, own_name))
         .map_err(|error| ClientError::Worker(format!("spawn game thread: {error}")))
 }
 
@@ -416,8 +445,12 @@ struct Game {
     death_time: u32,
     /// The selected hotbar slot.
     selected_slot: u8,
-    /// The chat lines, oldest first.
-    chat: VecDeque<String>,
+    /// The chat messages, oldest first.
+    chat: VecDeque<ChatLineView>,
+    /// The translations of the `translate` chat components.
+    translations: Translations,
+    /// Counts the tab-completion answers.
+    completions_serial: u64,
     /// What the server was last told about the player's movement.
     server_view: ServerView,
     /// The vehicle the player rides (`Attach Entity`), `None` on foot.
@@ -445,14 +478,30 @@ struct Game {
     entities: EntityStore,
     /// The inventory and container window model.
     windows: WindowManager,
+    /// The player's own name; it picks the team sidebar of the scoreboard.
+    own_name: String,
+    /// The tab list of the server.
+    player_list: PlayerList,
+    /// The scoreboard of the current world.
+    scoreboard: Scoreboard,
+    /// The title and subtitle.
+    title: TitleState,
+    /// The message above the hotbar.
+    action_bar: ActionBar,
+    /// The completions the server offered for the open chat line.
+    completions: Vec<String>,
     /// The state of the creative inventory screen.
     creative: CreativeScreen,
-    /// The session state kept for later consumers (ADR-0020 §3).
+    /// The session state kept for later consumers (ADR-0020 section 3).
     server: ServerState,
 }
 
 impl Game {
     fn new() -> Self {
+        let mut translations = Translations::builtin();
+        if let Some(lang) = crate::official::load_en_us_lang() {
+            translations.extend(Translations::from_lang(&lang));
+        }
         Self {
             world: None,
             dirty: BTreeSet::new(),
@@ -476,6 +525,8 @@ impl Game {
             death_time: 0,
             selected_slot: 0,
             chat: VecDeque::new(),
+            translations,
+            completions_serial: 0,
             server_view: ServerView::default(),
             vehicle: None,
             interaction: Interaction::new(),
@@ -489,6 +540,12 @@ impl Game {
             hud_dirty: true,
             entities: EntityStore::new(),
             windows: WindowManager::new(),
+            own_name: String::new(),
+            player_list: PlayerList::new(),
+            scoreboard: Scoreboard::new(),
+            title: TitleState::new(),
+            action_bar: ActionBar::new(),
+            completions: Vec::new(),
             creative: CreativeScreen::new(),
             server: ServerState::new(),
         }
@@ -629,10 +686,159 @@ impl Game {
             score: self.score,
             selected_slot: self.selected_slot,
             crosshair: true,
-            chat_lines: self.chat.iter().cloned().collect(),
+            chat: self.chat.iter().cloned().collect(),
             debug_lines: Vec::new(),
+            action_bar: self.action_bar_view(),
+            title: self.title_view(),
+            sidebar: self.sidebar_view(),
+            tab_list: self.tab_list_view(),
+            show_tab_list: false,
+            completions: self.completions.clone(),
+            completions_serial: self.completions_serial,
+            boss: self.boss_view(),
+            ..HudState::default()
         }
     }
+
+    /// The active boss bar, if any boss is in the world.
+    fn boss_view(&self) -> Option<BossView> {
+        BossTracker::find_boss(&self.entities).map(|b| BossView {
+            name: b.name,
+            health: b.health_fraction,
+        })
+    }
+
+    /// The action bar message with its opacity, while one is displayed.
+    fn action_bar_view(&self) -> Option<(String, f32)> {
+        let json = self.action_bar.message()?;
+        let alpha = self.action_bar.alpha(0.0);
+        (alpha > 0.0).then(|| (crate::chat::flatten(json), alpha))
+    }
+
+    /// The title and subtitle with their opacity, while they are displayed.
+    fn title_view(&self) -> Option<TitleView> {
+        let title = self.title.title();
+        let subtitle = self.title.subtitle();
+        let alpha = self.title.alpha(0.0);
+        if alpha <= 0.0 || (title.is_none() && subtitle.is_none()) {
+            return None;
+        }
+        Some(TitleView {
+            title: title.map(crate::chat::flatten).unwrap_or_default(),
+            subtitle: subtitle.map(crate::chat::flatten).unwrap_or_default(),
+            alpha,
+        })
+    }
+
+    /// The sidebar of the scoreboard, as the player sees it.
+    fn sidebar_view(&self) -> Option<SidebarView> {
+        let sidebar = self.scoreboard.sidebar(&self.own_name)?;
+        Some(SidebarView {
+            title: sidebar.title,
+            lines: sidebar
+                .lines
+                .into_iter()
+                .map(|line| (line.name, line.value))
+                .collect(),
+        })
+    }
+
+    /// The tab list in display order, once the server listed a player.
+    fn tab_list_view(&self) -> Option<TabListView> {
+        if self.player_list.is_empty() {
+            return None;
+        }
+        let entries = self
+            .player_list
+            .sorted(&self.scoreboard)
+            .into_iter()
+            .map(|entry| TabEntryView {
+                name: entry.display_name.as_deref().map_or_else(
+                    || self.scoreboard.format_name(&entry.name),
+                    crate::chat::flatten,
+                ),
+                ping: entry.ping,
+                game_mode: entry.game_mode,
+            })
+            .collect();
+        Some(TabListView {
+            header: self
+                .player_list
+                .header()
+                .map(crate::chat::flatten)
+                .unwrap_or_default(),
+            footer: self
+                .player_list
+                .footer()
+                .map(crate::chat::flatten)
+                .unwrap_or_default(),
+            entries,
+        })
+    }
+}
+
+/// The HUD a session would show after the server sent `events`, with the
+/// title and the action bar advanced by `ticks` game ticks.
+///
+/// The server-less `--hud-demo` uses it: the packets go through the same
+/// [`handle_net`] and the same views as in a real session, so the demo shows
+/// what the player would see rather than a hand-built picture.
+pub(crate) fn hud_after(events: Vec<PlayEvent>, own_name: &str, ticks: u32) -> HudState {
+    let mut game = Game::new();
+    game.own_name = own_name.to_string();
+    let mut queue = CommandQueue::default();
+    let (frames, _received) = mpsc::sync_channel(16);
+    for event in events {
+        handle_net(&mut game, event, &mut queue, &frames);
+    }
+    for _ in 0..ticks {
+        game.title.tick();
+        game.action_bar.tick();
+    }
+    game.hud()
+}
+
+/// A chat message from the chat JSON of the server.
+fn chat_line(json: &str, translations: &Translations) -> ChatLineView {
+    line_from_runs(&chat_component::parse(json, translations))
+}
+
+/// A line the client writes itself. The text is wrapped in a component so it
+/// is never mistaken for JSON (a player named `null` or `123`).
+fn local_chat_line(text: &str, translations: &Translations) -> ChatLineView {
+    let json = serde_json::json!({ "text": text }).to_string();
+    chat_line(&json, translations)
+}
+
+/// The HUD view of parsed runs, stamped with the arrival time.
+fn line_from_runs(runs: &[chat_component::Run]) -> ChatLineView {
+    ChatLineView {
+        runs: runs
+            .iter()
+            .map(|run| ChatRunView {
+                text: run.text.clone(),
+                color: run.style.color.map_or(
+                    chat_component::Color::WHITE.rgb(),
+                    chat_component::Color::rgb,
+                ),
+                bold: run.style.bold,
+                italic: run.style.italic,
+                underlined: run.style.underlined,
+                strikethrough: run.style.strikethrough,
+                obfuscated: run.style.obfuscated,
+            })
+            .collect(),
+        received: Instant::now(),
+    }
+}
+
+/// Adds a message to the chat, dropping the oldest beyond [`CHAT_HISTORY`].
+fn push_chat(game: &mut Game, line: ChatLineView) {
+    game.chat.push_back(line);
+    while game.chat.len() > CHAT_HISTORY {
+        game.chat.pop_front();
+    }
+    game.hud_dirty = true;
 }
 
 /// The commands that could not be handed to the network thread yet.
@@ -716,8 +922,10 @@ fn run(
     chunks: SyncSender<ChunkEvent>,
     commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
+    own_name: String,
 ) {
     let mut game = Game::new();
+    game.own_name = own_name;
     let mut queue = CommandQueue {
         ordered: VecDeque::new(),
         input: None,
@@ -823,9 +1031,33 @@ fn handle_event(
             false
         }
         GameEvent::Chat(message) => {
-            if !message.is_empty() && message.len() <= 100 {
+            // The server limit counts characters, not bytes.
+            if !message.is_empty() && message.chars().count() <= MAX_CHAT_CHARS {
                 queue.push(ClientCommand::Chat { message });
             }
+            false
+        }
+        GameEvent::TabComplete(message) => {
+            if message.chars().count() <= MAX_CHAT_CHARS {
+                queue.push(ClientCommand::TabComplete { message });
+            }
+            false
+        }
+        GameEvent::ClientSettings {
+            view_distance,
+            chat_mode,
+            chat_colors,
+        } => {
+            queue.push(ClientCommand::ClientSettings {
+                view_distance,
+                chat_mode,
+                chat_colors,
+            });
+            false
+        }
+        GameEvent::LocalChat(text) => {
+            let line = local_chat_line(&text, &game.translations);
+            push_chat(game, line);
             false
         }
         GameEvent::ReMeshAll => {
@@ -963,6 +1195,12 @@ fn handle_net(
             game.playing = true;
             game.status = "PLAYING".to_string();
             game.status_data.status = game.status.clone();
+            game.player_list = PlayerList::new();
+            game.scoreboard = Scoreboard::new();
+            game.title = TitleState::new();
+            game.action_bar = ActionBar::new();
+            game.completions.clear();
+            game.hud_dirty = true;
             let _ = frames.try_send(RenderEvent::Reset);
             publish_status(game, frames);
         }
@@ -971,10 +1209,44 @@ fn handle_net(
         }
         PlayEvent::Chat(json) => {
             game.status_data.chat_messages += 1;
-            game.chat.push_back(crate::chat::plain_text(&json));
-            while game.chat.len() > CHAT_HISTORY {
-                game.chat.pop_front();
-            }
+            let line = chat_line(&json, &game.translations);
+            push_chat(game, line);
+        }
+        PlayEvent::ActionBar(json) => {
+            game.action_bar.show(&json);
+            game.hud_dirty = true;
+        }
+        PlayEvent::PlayerListItem(packet) => {
+            game.player_list.apply(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::PlayerListHeaderFooter(packet) => {
+            game.player_list.set_header_footer(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::TabComplete(packet) => {
+            game.completions = packet.matches;
+            game.completions_serial += 1;
+            game.hud_dirty = true;
+        }
+        PlayEvent::ScoreboardObjective(packet) => {
+            game.scoreboard.apply_objective(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::UpdateScore(packet) => {
+            game.scoreboard.apply_score(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::DisplayScoreboard(packet) => {
+            game.scoreboard.apply_display(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::Teams(packet) => {
+            game.scoreboard.apply_teams(&packet);
+            game.hud_dirty = true;
+        }
+        PlayEvent::Title(packet) => {
+            game.title.apply(&packet);
             game.hud_dirty = true;
         }
         PlayEvent::ChunkData(packet) => {
@@ -1068,6 +1340,10 @@ fn handle_net(
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
                 game.entities.clear();
+                // A new world has its own scoreboard; the tab list belongs to
+                // the connection and stays.
+                game.scoreboard = Scoreboard::new();
+                game.hud_dirty = true;
                 // The new dimension has its own clock; the first `Time
                 // Update` of the new world arrives right after the respawn.
                 game.world_time = 0;
@@ -1174,6 +1450,9 @@ fn handle_net(
                 vel,
                 flags,
             );
+            if let Some(health) = m.metadata.get_float(6) {
+                game.entities.set_health(EntityId(m.entity_id), health);
+            }
         }
         PlayEvent::SpawnObject(o) => {
             let pos = DVec3::new(
@@ -1256,7 +1535,7 @@ fn handle_net(
                 m.metadata.get_byte(10).unwrap_or(0),
             );
             if m.entity_id == game.entity_id {
-                // MCP `EntityPlayer.getScore`: data watcher 18.
+                // MCP EntityPlayer.getScore: data watcher 18.
                 if let Some(score) = m.metadata.get_int(SCORE_WATCHER) {
                     game.score = score;
                     game.hud_dirty = true;
@@ -1265,6 +1544,9 @@ fn handle_net(
             let id = EntityId(m.entity_id);
             game.entities.set_flags(id, flags);
             apply_item_metadata(&mut game.entities, id, &m.metadata);
+            if let Some(health) = m.metadata.get_float(6) {
+                game.entities.set_health(id, health);
+            }
         }
         PlayEvent::AttachEntity(packet) => {
             // MCP `NetHandlerPlayClient.handleEntityAttach`: leash 0 mounts
@@ -1900,6 +2182,17 @@ fn tick(
     run_attack(game, queue);
     run_use(game, queue);
     tick_hand(game);
+
+    // The title and the action bar fade with the tick, so the HUD is
+    // published again on every tick while one of them is displayed.
+    if game.title.title().is_some()
+        || game.title.subtitle().is_some()
+        || game.action_bar.message().is_some()
+    {
+        game.title.tick();
+        game.action_bar.tick();
+        game.hud_dirty = true;
+    }
 
     // The intent of the tick: the raw key state with the yaw and the pitch
     // the player is looking at.
@@ -3487,5 +3780,365 @@ mod tests {
         );
         assert_eq!(game.world_time, 0);
         assert_eq!(game.dimension, -1);
+    }
+
+    #[test]
+    fn a_formatted_chat_message_keeps_its_styles_and_arrival_time() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let before = Instant::now();
+        handle_net(
+            &mut game,
+            PlayEvent::Chat(
+                r#"{"text":"Hi ","color":"red","extra":[{"text":"there","bold":true}]}"#
+                    .to_string(),
+            ),
+            &mut queue,
+            &frames,
+        );
+        let hud = game.hud();
+        assert_eq!(hud.chat.len(), 1);
+        assert_eq!(hud.chat[0].plain(), "Hi there");
+        assert_eq!(hud.chat[0].runs[0].color, [0xFF, 0x55, 0x55]);
+        assert!(!hud.chat[0].runs[0].bold);
+        assert!(hud.chat[0].runs[1].bold);
+        assert!(hud.chat[0].received >= before);
+    }
+
+    #[test]
+    fn an_empty_chat_component_is_a_blank_line_not_raw_json() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(
+            &mut game,
+            PlayEvent::Chat(r#"{"text":""}"#.to_string()),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.hud().chat[0].plain(), "");
+    }
+
+    #[test]
+    fn the_chat_keeps_the_last_one_hundred_messages() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        for number in 0..150 {
+            handle_net(
+                &mut game,
+                PlayEvent::Chat(format!(r#"{{"text":"message {number}"}}"#)),
+                &mut queue,
+                &frames,
+            );
+        }
+        let chat = game.hud().chat;
+        assert_eq!(chat.len(), CHAT_HISTORY);
+        assert_eq!(chat[0].plain(), "message 50");
+        assert_eq!(chat[99].plain(), "message 149");
+    }
+
+    #[test]
+    fn the_typed_chat_limit_counts_characters_not_bytes() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        // 100 two-byte characters: 200 bytes, but within the 100-character limit.
+        let message = "\u{e9}".repeat(100);
+        handle_event(
+            &mut game,
+            GameEvent::Chat(message.clone()),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(queue.ordered.len(), 1, "a 100-character message is sent");
+        handle_event(
+            &mut game,
+            GameEvent::Chat("\u{e9}".repeat(101)),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(queue.ordered.len(), 1, "101 characters is too long");
+    }
+
+    #[test]
+    fn a_tab_request_is_queued_and_the_answer_is_published_with_a_new_serial() {
+        use umicraft_protocol::packets::play::clientbound::TabComplete;
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_event(
+            &mut game,
+            GameEvent::TabComplete("/he".to_string()),
+            &mut queue,
+            &frames,
+        );
+        assert!(matches!(
+            queue.ordered.front(),
+            Some(ClientCommand::TabComplete { message }) if message == "/he"
+        ));
+
+        assert_eq!(game.hud().completions_serial, 0);
+        handle_net(
+            &mut game,
+            PlayEvent::TabComplete(TabComplete {
+                matches: vec!["/help".to_string()],
+            }),
+            &mut queue,
+            &frames,
+        );
+        let hud = game.hud();
+        assert_eq!(hud.completions, ["/help"]);
+        assert_eq!(hud.completions_serial, 1);
+    }
+
+    #[test]
+    fn a_local_chat_line_is_never_parsed_as_json() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        for text in ["null", "123", "Steve, Alex"] {
+            handle_event(
+                &mut game,
+                GameEvent::LocalChat(text.to_string()),
+                &mut queue,
+                &frames,
+            );
+        }
+        let plain: Vec<_> = game.hud().chat.iter().map(ChatLineView::plain).collect();
+        assert_eq!(plain, ["null", "123", "Steve, Alex"]);
+    }
+
+    #[test]
+    fn the_social_events_fill_the_hud() {
+        use umicraft_protocol::packets::play::clientbound::{
+            AddPlayerEntry, DisplayScoreboard, ObjectiveRenderType, PlayerListHeaderFooter,
+            PlayerListItem, ScoreboardObjective, Title, UpdateScore,
+        };
+
+        let mut game = Game::new();
+        game.own_name = "Steve".to_string();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let mut send = |game: &mut Game, event| handle_net(game, event, &mut queue, &frames);
+
+        send(
+            &mut game,
+            PlayEvent::ScoreboardObjective(ScoreboardObjective::Create {
+                name: "kills".to_string(),
+                value: "Kills".to_string(),
+                render_type: ObjectiveRenderType::Integer,
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::DisplayScoreboard(DisplayScoreboard {
+                position: 1,
+                score_name: "kills".to_string(),
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::UpdateScore(UpdateScore::Change {
+                name: "Alex".to_string(),
+                objective: "kills".to_string(),
+                value: 4,
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![AddPlayerEntry {
+                uuid: u128::from_be_bytes([1; 16]),
+                name: "Steve".to_string(),
+                properties: vec![],
+                game_mode: 0,
+                ping: 37,
+                display_name: None,
+            }])),
+        );
+        send(
+            &mut game,
+            PlayEvent::PlayerListHeaderFooter(PlayerListHeaderFooter {
+                header: r#"{"text":"Welcome"}"#.to_string(),
+                footer: r#"{"text":""}"#.to_string(),
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::Title(Title::Title {
+                json: r#"{"text":"Round 1"}"#.to_string(),
+            }),
+        );
+        send(
+            &mut game,
+            PlayEvent::ActionBar(r#"{"text":"Go!"}"#.to_string()),
+        );
+
+        // The title fades in from nothing, so it needs a few ticks to show.
+        for _ in 0..5 {
+            game.title.tick();
+        }
+        let hud = game.hud();
+        let sidebar = hud.sidebar.expect("the sidebar objective is displayed");
+        assert_eq!(sidebar.title, "Kills");
+        assert_eq!(sidebar.lines, [("Alex".to_string(), 4)]);
+
+        let tab_list = hud.tab_list.expect("a player is listed");
+        assert_eq!(tab_list.header, "Welcome");
+        assert_eq!(tab_list.footer, "", "an empty footer stays empty");
+        assert_eq!(tab_list.entries.len(), 1);
+        assert_eq!(tab_list.entries[0].name, "Steve");
+        assert_eq!(tab_list.entries[0].ping, 37);
+
+        let title = hud.title.expect("a title is displayed");
+        assert_eq!(title.title, "Round 1");
+        assert!(title.alpha > 0.0);
+        let (action_bar, alpha) = hud.action_bar.expect("an action bar is displayed");
+        assert_eq!(action_bar, "Go!");
+        assert!(alpha > 0.0);
+    }
+
+    #[test]
+    fn a_dimension_change_clears_the_scoreboard_but_keeps_the_tab_list() {
+        use umicraft_protocol::packets::play::clientbound::{
+            AddPlayerEntry, DisplayScoreboard, ObjectiveRenderType, PlayerListItem, Respawn,
+            ScoreboardObjective,
+        };
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(
+            &mut game,
+            PlayEvent::ScoreboardObjective(ScoreboardObjective::Create {
+                name: "o".to_string(),
+                value: "O".to_string(),
+                render_type: ObjectiveRenderType::Integer,
+            }),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::DisplayScoreboard(DisplayScoreboard {
+                position: 1,
+                score_name: "o".to_string(),
+            }),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![AddPlayerEntry {
+                uuid: u128::from_be_bytes([2; 16]),
+                name: "Alex".to_string(),
+                properties: vec![],
+                game_mode: 0,
+                ping: 5,
+                display_name: None,
+            }])),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.hud().sidebar.is_some());
+
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(Respawn {
+                dimension: -1,
+                difficulty: 0,
+                game_mode: 0,
+                world_type: "default".to_string(),
+            }),
+            &mut queue,
+            &frames,
+        );
+        let hud = game.hud();
+        assert!(hud.sidebar.is_none(), "a new world has a new scoreboard");
+        assert!(
+            hud.tab_list.is_some(),
+            "the tab list belongs to the connection"
+        );
+    }
+
+    #[test]
+    fn boss_mob_spawn_and_metadata_updates_hud_boss_bar() {
+        use umicraft_protocol::packets::play::clientbound::{
+            DestroyEntities, EntityMetadata, SpawnMob,
+        };
+        use umicraft_protocol::packets::play::metadata::{Metadata, WatchedObject};
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+
+        // Spawn Ender Dragon (mob type 63) with full health (200.0)
+        let mut metadata = Metadata::default();
+        metadata.objects.push(WatchedObject {
+            type_id: 3,
+            index: 6,
+            value: 200.0_f32.to_be_bytes().to_vec(),
+        });
+        handle_net(
+            &mut game,
+            PlayEvent::SpawnMob(SpawnMob {
+                entity_id: 500,
+                mob_type: 63,
+                x: 0,
+                y: 64 * 32,
+                z: 0,
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                velocity_x: 0,
+                velocity_y: 0,
+                velocity_z: 0,
+                metadata,
+            }),
+            &mut queue,
+            &frames,
+        );
+
+        let hud = game.hud();
+        let boss = hud.boss.expect("boss bar present after dragon spawn");
+        assert_eq!(boss.name, "Ender Dragon");
+        assert_eq!(boss.health, 1.0);
+
+        // Update health via EntityMetadata to 100.0 (half health)
+        let mut update_meta = Metadata::default();
+        update_meta.objects.push(WatchedObject {
+            type_id: 3,
+            index: 6,
+            value: 100.0_f32.to_be_bytes().to_vec(),
+        });
+        handle_net(
+            &mut game,
+            PlayEvent::EntityMetadata(EntityMetadata {
+                entity_id: 500,
+                metadata: update_meta,
+            }),
+            &mut queue,
+            &frames,
+        );
+
+        let hud = game.hud();
+        let boss = hud.boss.expect("boss bar present after damage");
+        assert_eq!(boss.health, 0.5);
+
+        // Destroy dragon
+        handle_net(
+            &mut game,
+            PlayEvent::DestroyEntities(DestroyEntities {
+                entity_ids: vec![500],
+            }),
+            &mut queue,
+            &frames,
+        );
+        assert!(
+            game.hud().boss.is_none(),
+            "boss bar disappears when dragon is destroyed"
+        );
     }
 }

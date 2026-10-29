@@ -93,9 +93,30 @@ picked up, and delete it when it is done.
 
 ## Architecture
 
-- **`umicraft-core` is not used by any crate.** The service registry and the
+- **Only the config store of `umicraft-core` is used** (by the options of M10). The service registry and the
   event bus wait for a second implementation of a service (ADR-0005 defers
   them to M15); the seams created by ADR-0010 to ADR-0013 are the candidates.
+
+## Chat, HUD and options (left by M10)
+
+- **Clicks and hover in the chat:** `clickEvent` and `show_text` are parsed and
+  kept on each run, but the chat has no pointer interaction. `open_url` must
+  stay unfollowed or ask for confirmation (ADR-0017 decision 2).
+- **Vsync option:** the renderer has no way to change the present mode.
+- **Not run against a live server:** the chat, the tab completion, the
+  scoreboard, the titles and the options screen are covered by unit tests and
+  `--hud-demo` only. Run a session on Paper or PandaSpigot 1.8.8, including a
+  `/scoreboard`, a `/title` and a Wither.
+- **Head icons in the tab list:** 1.8 draws them on encrypted connections only,
+  so they arrive with M13.
+- **Two fallback fonts:** the HUD overlay font
+  (`crates/umicraft-render/src/font.rs`) and the UI fallback font
+  (`crates/umicraft-ui/src/text.rs`) have different glyph sets; the UI one still
+  lacks `<` and `>`.
+- **Options screen on short windows:** the controls tab needs about 540 pixels
+  of height and is not scrollable.
+- **`--view-distance` has no "not given" state,** so a value of 8 cannot
+  override a saved render distance.
 
 ## Decisions needed
 
