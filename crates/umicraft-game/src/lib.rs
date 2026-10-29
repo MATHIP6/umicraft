@@ -41,6 +41,7 @@ mod block_data;
 pub mod chat_component;
 pub mod chat_input;
 pub mod collision;
+pub mod combat;
 pub mod digging;
 pub mod entity;
 pub mod gamemode;
@@ -330,6 +331,14 @@ impl GameState {
     /// Adds to the motion of the player (the push of an `Explosion`).
     pub fn add_velocity(&mut self, velocity: DVec3) {
         self.player.velocity += velocity;
+    }
+
+    /// Slows the player and stops its sprint after a hit (MCP
+    /// `EntityPlayer.attackTargetEntityWithCurrentItem`).
+    pub fn reset_sprint(&mut self, reset: combat::SprintReset) {
+        self.player.velocity.x *= reset.scale;
+        self.player.velocity.z *= reset.scale;
+        self.player.set_sprinting(false);
     }
 
     /// Puts the player on the seat of its vehicle instead of simulating it.

@@ -410,6 +410,9 @@ formulas.
 
 ### P6 — Combat & PvP
 
+**Status:** P6a (entity ray cast) and P6b (attack, interact, sprint reset) are done;
+P6c onwards remain (`docs/tasks/p6/README.md`).
+
 **Features**
 - Entity ray-cast with the vanilla reach and hitbox expansion, and the
   vanilla priority between blocks and entities.

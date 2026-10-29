@@ -18,7 +18,9 @@ use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_world::BlockPos;
 
+use crate::combat::attack_packets;
 use crate::digging::{self, Digger};
+use crate::entity::EntityId;
 use crate::gamemode::GameMode;
 use crate::raycast::{Face, RayHit};
 use crate::shapes::{Aabb, BlockSource};
@@ -67,6 +69,23 @@ pub enum Outgoing {
     AckPosition(PositionAck),
     /// `Animation` (0x0A): the arm swings (MCP `EntityPlayerSP.swingItem`).
     Swing,
+    /// `Use Entity` (0x02), attack (MCP `PlayerControllerMP.attackEntity`).
+    Attack {
+        /// The network id of the target.
+        entity: i32,
+    },
+    /// `Use Entity` (0x02), interact (MCP `interactWithEntitySendPacket`).
+    Interact {
+        /// The network id of the target.
+        entity: i32,
+    },
+    /// `Use Entity` (0x02), interact at a point (MCP `func_178894_a`).
+    InteractAt {
+        /// The network id of the target.
+        entity: i32,
+        /// The click point relative to the feet of the entity.
+        offset: [f32; 3],
+    },
 }
 
 /// The acknowledgement of a position the server imposed.
@@ -115,6 +134,9 @@ pub struct AttackTick<'a, W: BlockSource + ?Sized> {
     pub held: bool,
     /// The block under the crosshair.
     pub target: Option<RayHit>,
+    /// The entity under the crosshair, which a click attacks instead of
+    /// digging (MCP `Minecraft.clickMouse`, case `ENTITY`).
+    pub entity: Option<EntityId>,
     /// The loaded world.
     pub world: &'a W,
     /// The state that decides how fast the player digs.
@@ -310,6 +332,10 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
 
     /// MCP `Minecraft.clickMouse`.
     fn click(&mut self) {
+        if let Some(entity) = self.tick.entity {
+            self.output.packets.extend(attack_packets(entity));
+            return;
+        }
         self.swing();
         match self.tick.target {
             Some(hit) if self.block_id(hit.block) != 0 => {
@@ -583,6 +609,7 @@ mod tests {
             ..Digger::default()
         };
         interaction.attack(&AttackTick {
+            entity: None,
             mode,
             pressed,
             held,
@@ -799,6 +826,7 @@ mod tests {
         };
         let mut interaction = Interaction::new();
         let output = interaction.attack(&AttackTick {
+            entity: None,
             mode: GameMode::Creative,
             pressed: true,
             held: true,
@@ -879,6 +907,7 @@ mod tests {
             true,
         );
         let output = interaction.attack(&AttackTick {
+            entity: None,
             mode: GameMode::Survival,
             pressed: false,
             held: true,

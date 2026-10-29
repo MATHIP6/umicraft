@@ -77,8 +77,8 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Combat | attack entity (swing + Use Entity), entity ray-cast, reach | Missing | P6 | — |  |
-| Combat | sprint reset on hit (vanilla `motion *= 0.6`, sprint off) | Missing | P6 | — |  |
+| Combat | attack entity (swing + Use Entity), entity ray-cast, reach | Partial | P6 | Unit tests (`combat`, `item_use`, `interaction`, `game`) | `getMouseOver` ported: block reach, 3-block survival entity reach, 6-block creative ray, hitbox border, baby and slime sizes, item frames, marker stands, spectators ignored (ADR-0029). Right click sends interact-at then interact, then the item use unless the client consumes the click; only item frames, boats, minecarts, horses, adult villagers and armour stands are known to consume it. Not compared with a live server. |
+| Combat | sprint reset on hit (vanilla `motion *= 0.6`, sprint off) | Partial | P6 | Unit tests (`combat::sprint`, `game`) | Local only against players: the client world answers false to `attackEntityFrom` for mobs (ADR-0029). |
 | Combat | hurt camera tilt, red hurt tint, death animation | Missing | P6 | — | Hurt tint and death fall on entities in P5. |
 | Combat | crit/sharpness particles, bow charge FOV | Missing | P6 | — | Particles need P8. |
 | Combat | death screen, respawn, combat event message | Partial | P2 | Unit tests (`game`, `umicraft-ui`) | Death screen and `Client Status` respawn (ADR-0021). Combat-event message in P6; the Title Screen button in P10. |

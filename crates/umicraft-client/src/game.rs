@@ -63,6 +63,7 @@ use umicraft_protocol::packets::play::clientbound::player_list_item::PlayerListI
 use umicraft_protocol::packets::play::clientbound::{
     BlockBreakAnim, ChunkData, Explosion, MapChunkBulk, UseBed,
 };
+use umicraft_protocol::packets::play::serverbound::UseEntityAction;
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{
@@ -80,6 +81,8 @@ use crate::inventory_input::InventoryAction;
 use crate::network::{self, ClientCommand, NetworkConfig};
 use crate::profiles::profile_from_properties;
 
+#[path = "combat.rs"]
+mod combat;
 #[path = "creative_events.rs"]
 mod creative_events;
 use creative_events::apply_creative_event;
@@ -594,11 +597,17 @@ impl Game {
             .map(|state| state.player().eye_position())
     }
 
-    /// The block the player looks at.
-    fn target(&self) -> Option<RayHit> {
+    /// The block the crosshair points at, entities aside.
+    fn block_target(&self) -> Option<RayHit> {
         let eye = self.eye()?;
         let direction = look_direction(self.yaw, self.pitch);
         raycast(eye, direction, self.reach(), self.world.as_ref()?)
+    }
+
+    /// The block the crosshair points at: none when an entity is nearer
+    /// (MCP `objectMouseOver`, see [`combat::pointed`]).
+    fn target(&self) -> Option<RayHit> {
+        combat::pointed(self).block()
     }
 
     /// The boxes of the selection outline of the targeted block.
@@ -2060,7 +2069,9 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     if game.spectating() || game.dead() || game.item_use.is_using() {
         return;
     }
-    let target = game.target();
+    let pointed = combat::pointed(game);
+    let target = pointed.block();
+    let entity = pointed.entity().map(|hit| hit.id);
     let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
         return;
     };
@@ -2090,13 +2101,16 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
         pressed,
         held: game.input.attack,
         target,
+        entity,
         world,
         digger,
     });
     let effects = swing_effects(game);
     for outgoing in output.packets {
-        if outgoing == Outgoing::Swing {
-            game.hand.swing(effects);
+        match outgoing {
+            Outgoing::Swing => game.hand.swing(effects),
+            Outgoing::Attack { entity } => combat::after_attack(game, EntityId(entity)),
+            _ => {}
         }
         queue.push(command_of(outgoing));
     }
@@ -2125,7 +2139,11 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
     if game.dead() {
         return;
     }
-    let target = game.target();
+    let pointed = combat::pointed(game);
+    let target = pointed.block();
+    let entity = pointed
+        .entity()
+        .and_then(|hit| Some((game.entities.entities().get(&hit.id)?, hit)));
     let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
         return;
     };
@@ -2144,6 +2162,7 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
             pressed,
             held: game.input.use_item,
             target,
+            entity,
             world,
             player: Some(player.bounding_box()),
             sneaking: player.sneaking,
@@ -2252,6 +2271,12 @@ fn command_of(outgoing: Outgoing) -> ClientCommand {
         },
         Outgoing::UseItem { item } => ClientCommand::UseItem { item },
         Outgoing::Swing => ClientCommand::Swing,
+        Outgoing::Attack { entity } => use_entity(entity, UseEntityAction::Attack),
+        Outgoing::Interact { entity } => use_entity(entity, UseEntityAction::Interact),
+        Outgoing::InteractAt {
+            entity,
+            offset: [x, y, z],
+        } => use_entity(entity, UseEntityAction::InteractAt { x, y, z }),
         Outgoing::AckPosition(ack) => ClientCommand::AckPosition {
             x: ack.x,
             y: ack.y,
@@ -2261,6 +2286,11 @@ fn command_of(outgoing: Outgoing) -> ClientCommand {
             on_ground: ack.on_ground,
         },
     }
+}
+
+/// The `Use Entity` command of an entity click.
+fn use_entity(target: i32, action: UseEntityAction) -> ClientCommand {
+    ClientCommand::UseEntity { target, action }
 }
 
 /// Runs one simulation tick.
@@ -3631,6 +3661,124 @@ mod tests {
 
     fn commands(queue: &CommandQueue) -> Vec<&ClientCommand> {
         queue.ordered.iter().collect()
+    }
+
+    /// Puts a zombie or a player two blocks ahead of the player (yaw 0 looks
+    /// along +z) and returns its id.
+    fn spawn_ahead(game: &mut Game, player: bool) -> EntityId {
+        let id = EntityId(7);
+        let position = DVec3::new(0.5, 64.0, 2.5);
+        if player {
+            game.entities.spawn_player(
+                id,
+                [1; 16],
+                position,
+                0.0,
+                0.0,
+                None,
+                EntityFlags::default(),
+            );
+        } else {
+            game.entities.spawn_mob(
+                id,
+                54,
+                position,
+                0.0,
+                0.0,
+                0.0,
+                Vec3::ZERO,
+                EntityFlags::default(),
+            );
+        }
+        id
+    }
+
+    fn click_attack(game: &mut Game, queue: &mut CommandQueue) {
+        game.input.attack = true;
+        game.attack_pressed = true;
+        run_attack(game, queue);
+    }
+
+    #[test]
+    fn a_left_click_on_an_entity_swings_then_attacks_it() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        spawn_ahead(&mut game, false);
+        click_attack(&mut game, &mut queue);
+        let sent = commands(&queue);
+        assert!(matches!(sent[0], ClientCommand::Swing));
+        assert!(matches!(
+            sent[1],
+            ClientCommand::UseEntity {
+                target: 7,
+                action: UseEntityAction::Attack
+            }
+        ));
+        assert_eq!(sent.len(), 2, "no dig packet while an entity is targeted");
+    }
+
+    #[test]
+    fn an_entity_behind_a_block_is_not_attacked() {
+        let mut game = game_on_floor_with(BlockState::new(1, 0));
+        let mut queue = CommandQueue::default();
+        spawn_ahead(&mut game, false);
+        game.pitch = 0.0;
+        // A wall one block ahead of the eyes.
+        if let Some(world) = game.world.as_mut() {
+            world.set_block(BlockPos::new(0, 65, 1), BlockState::new(1, 0));
+        }
+        click_attack(&mut game, &mut queue);
+        assert!(!commands(&queue)
+            .iter()
+            .any(|command| matches!(command, ClientCommand::UseEntity { .. })));
+    }
+
+    #[test]
+    fn a_knockback_hit_on_a_player_slows_the_attacker_but_a_mob_does_not() {
+        for (player, factor) in [(true, 0.6), (false, 1.0)] {
+            let mut game = game_on_floor_with(BlockState::AIR);
+            let mut queue = CommandQueue::default();
+            spawn_ahead(&mut game, player);
+            game.windows.apply_set_slot(
+                0,
+                36,
+                WireItemStack {
+                    nbt: Some(enchanted_nbt(19, 1)),
+                    ..wire_item(267, 0)
+                },
+            );
+            if let Some(state) = game.state.as_mut() {
+                state.set_velocity(DVec3::new(1.0, 0.0, 1.0));
+            }
+            click_attack(&mut game, &mut queue);
+            let velocity = game.state.as_ref().unwrap().player().velocity;
+            assert!((velocity.x - factor).abs() < 1e-9, "player: {player}");
+        }
+    }
+
+    #[test]
+    fn a_right_click_on_a_mob_interacts_before_using_the_item() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        spawn_ahead(&mut game, false);
+        game.windows.apply_set_slot(0, 36, wire_item(267, 0));
+        click_use(&mut game, &mut queue);
+        let sent = commands(&queue);
+        assert!(matches!(
+            sent[0],
+            ClientCommand::UseEntity {
+                action: UseEntityAction::InteractAt { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            sent[1],
+            ClientCommand::UseEntity {
+                action: UseEntityAction::Interact,
+                ..
+            }
+        ));
+        assert!(matches!(sent[2], ClientCommand::UseItem { .. }));
     }
 
     /// A hungry player who holds bread starts eating on the click, walks at

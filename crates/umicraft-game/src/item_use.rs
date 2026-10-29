@@ -19,6 +19,8 @@ use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_world::BlockPos;
 
+use crate::combat::{interact_packets, EntityHit, InteractTick};
+use crate::entity::EntityRecord;
 use crate::gamemode::GameMode;
 use crate::interaction::{Interaction, Outgoing};
 use crate::items::{self, ItemKind, ToolKind};
@@ -202,6 +204,8 @@ pub struct UseTick<'a, W: BlockSource + ?Sized> {
     pub held: bool,
     /// The block under the crosshair.
     pub target: Option<RayHit>,
+    /// The entity under the crosshair and where the ray entered it.
+    pub entity: Option<(&'a EntityRecord, EntityHit)>,
     /// The loaded world.
     pub world: &'a W,
     /// The bounding box of the player, to refuse a placement inside it.
@@ -313,6 +317,18 @@ impl ItemUse {
         }
         self.delay = RIGHT_CLICK_DELAY;
         let held = tick.item.filter(|item| item.item_id >= 0);
+        if let Some((entity, hit)) = tick.entity {
+            let click = interact_packets(&InteractTick {
+                mode: tick.mode,
+                entity,
+                hit,
+                held,
+            });
+            output.packets.extend(click.packets);
+            if click.consumed {
+                return;
+            }
+        }
         if let Some(hit) = tick.target.filter(|hit| is_solid(tick.world, hit)) {
             let activated = tick.mode != GameMode::Spectator
                 && (!tick.sneaking || held.is_none())
@@ -386,6 +402,7 @@ fn is_solid<W: BlockSource + ?Sized>(world: &W, hit: &RayHit) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entity::{EntityId, EntityKind};
     use crate::raycast::Face;
     use glam::DVec3;
     use umicraft_world::BlockState;
@@ -424,6 +441,7 @@ mod tests {
     fn tick<'a>(item: Option<&'a ItemStack>, pressed: bool, held: bool) -> UseTick<'a, Stone> {
         UseTick {
             mode: GameMode::Survival,
+            entity: None,
             pressed,
             held,
             target: None,
@@ -682,6 +700,7 @@ mod tests {
             let (mut state, mut interaction) = (ItemUse::new(), Interaction::new());
             let click = UseTick {
                 mode: GameMode::Survival,
+                entity: None,
                 pressed: true,
                 held: true,
                 target: Some(hit()),
@@ -702,6 +721,41 @@ mod tests {
         assert!(!output.swing && using);
         let (output, _) = attempt(true, None);
         assert!(output.swing);
+    }
+
+    fn entity_click(kind: EntityKind, held: Option<&ItemStack>) -> UseOutput {
+        let record = EntityRecord::new(EntityId(4), kind, DVec3::ZERO, 0.0, 0.0);
+        let entity_hit = EntityHit {
+            id: record.id,
+            point: DVec3::new(0.0, 1.0, 0.0),
+            origin: record.position,
+        };
+        let (mut state, mut interaction) = (ItemUse::new(), Interaction::new());
+        let click = UseTick {
+            entity: Some((&record, entity_hit)),
+            target: None,
+            ..tick(held, true, true)
+        };
+        state.tick(&mut interaction, &click)
+    }
+
+    #[test]
+    fn a_click_on_a_mob_sends_the_interaction_before_the_use_of_the_item() {
+        let sword = item(267, 0);
+        let output = entity_click(EntityKind::Zombie, Some(&sword));
+        assert!(matches!(
+            output.packets[0],
+            Outgoing::InteractAt { entity: 4, .. }
+        ));
+        assert_eq!(output.packets[1], Outgoing::Interact { entity: 4 });
+        assert!(matches!(output.packets[2], Outgoing::UseItem { .. }));
+    }
+
+    #[test]
+    fn a_click_the_client_consumes_does_not_use_the_item() {
+        let sword = item(267, 0);
+        let output = entity_click(EntityKind::ItemFrame, Some(&sword));
+        assert_eq!(output.packets.len(), 2);
     }
 
     #[test]

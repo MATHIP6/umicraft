@@ -104,15 +104,39 @@ impl EntityKind {
             Self::Cow | Self::Mooshroom => 1.4,
             Self::Pig | Self::Spider => 0.9,
             Self::Sheep => 1.3,
-            Self::Chicken | Self::Ocelot => 0.7,
-            Self::CaveSpider | Self::Rabbit => 0.5,
+            Self::Chicken | Self::Ocelot | Self::Rabbit | Self::Silverfish => 0.7,
+            Self::CaveSpider => 0.5,
             Self::Enderman | Self::IronGolem => 2.9,
             Self::Wolf => 0.8,
             Self::Horse => 1.6,
             Self::Snowman => 1.9,
             Self::Giant => 10.8,
-            Self::Witch | Self::Villager | Self::ZombieVillager | Self::Player => 1.8,
+            Self::Ghast => 4.0,
+            Self::Guardian => 0.85,
+            Self::Endermite => 0.3,
+            Self::Wither => 3.5,
+            Self::Arrow => 0.5,
+            Self::Item => 0.25,
             _ => 1.8,
+        }
+    }
+
+    /// The width of the hitbox in blocks (MCP `Entity.width`): the side of
+    /// its square footprint. Unlisted kinds count as player-wide.
+    #[must_use]
+    pub const fn width(self) -> f32 {
+        match self {
+            Self::Spider | Self::Horse | Self::IronGolem => 1.4,
+            Self::CaveSpider | Self::Snowman => 0.7,
+            Self::Cow | Self::Pig | Self::Sheep | Self::Mooshroom | Self::Wither => 0.9,
+            Self::Chicken | Self::Endermite => 0.4,
+            Self::Silverfish => 0.3,
+            Self::Guardian => 0.85,
+            Self::Giant => 3.6,
+            Self::Ghast => 4.0,
+            Self::Arrow => 0.5,
+            Self::Item => 0.25,
+            _ => 0.6,
         }
     }
 
@@ -189,6 +213,19 @@ mod tests {
         assert_eq!(EntityKind::Player.height(), 1.8);
         assert_eq!(EntityKind::Enderman.height(), 2.9);
         assert!(EntityKind::Pig.height() < EntityKind::Cow.height());
+    }
+
+    #[test]
+    fn widths_match_the_vanilla_footprints() {
+        assert_eq!(EntityKind::Player.width(), 0.6);
+        assert_eq!(EntityKind::Spider.width(), 1.4);
+        assert_eq!(EntityKind::Chicken.width(), 0.4);
+    }
+
+    #[test]
+    fn a_rabbit_is_as_tall_as_an_ocelot_not_a_cave_spider() {
+        assert_eq!(EntityKind::Rabbit.height(), 0.7);
+        assert_eq!(EntityKind::CaveSpider.height(), 0.5);
     }
 
     #[test]
