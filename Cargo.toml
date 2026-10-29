@@ -23,7 +23,7 @@ authors = ["Umicraft contributors"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-aes = "0.8"
+aes = "0.9"
 bytemuck = { version = "1", features = ["derive"] }
 flate2 = "1.0"
 num-bigint = "0.5"
