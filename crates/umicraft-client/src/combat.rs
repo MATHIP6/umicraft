@@ -68,3 +68,23 @@ pub(super) fn after_attack(game: &mut Game, target: EntityId) {
         state.reset_sprint(reset);
     }
 }
+
+/// Logs what a click saw: the target and the entity nearest to the eye.
+///
+/// Tells apart "no entity known", "entity out of reach" and "ray misses the
+/// box" when an attack does not land.
+pub(super) fn log_click(game: &Game, pointed: &Pointed) {
+    let nearest = game.eye().and_then(|eye| {
+        game.entities
+            .entities()
+            .values()
+            .map(|entity| (eye.distance(entity.position), entity))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    });
+    tracing::info!(
+        ?pointed,
+        known_entities = game.entities.len(),
+        nearest = ?nearest.map(|(distance, entity)| (entity.id, entity.kind, entity.position, distance)),
+        "attack click"
+    );
+}

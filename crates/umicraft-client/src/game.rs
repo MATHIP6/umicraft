@@ -2070,6 +2070,9 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
         return;
     }
     let pointed = combat::pointed(game);
+    if pressed {
+        combat::log_click(game, &pointed);
+    }
     let target = pointed.block();
     let entity = pointed.entity().map(|hit| hit.id);
     let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
