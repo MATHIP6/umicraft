@@ -23,7 +23,7 @@ use umicraft_model::item::pose::{context_pose, ground_pose, held_pose};
 use umicraft_model::item::{ItemGeometry, ItemModel};
 use umicraft_model::ModelQuad;
 
-use crate::entity_textures::posed_player;
+use crate::entity_render::posed_player;
 use crate::item_icons::ItemResources;
 
 /// Hover height offset per unit of the ground scale (`RenderEntityItem`).
@@ -549,7 +549,7 @@ mod render_tests {
 #[cfg(test)]
 mod player_render_tests {
     use super::*;
-    use crate::entity_textures::EntityTextures;
+    use crate::entity_render::EntityTextures;
     use crate::model_resources::ModelResources;
     use umicraft_game::entity::{EntityFlags, EntityId};
     use umicraft_render::{Camera, Overlay, Renderer};

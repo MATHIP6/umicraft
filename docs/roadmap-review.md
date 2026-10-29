@@ -245,7 +245,7 @@ stored velocity of other entities is never used.
 ### 3.3 M8 entities: defects (why the animations look broken)
 
 Confirmed in code (file references in `crates/umicraft-game/src/entity/store.rs`
-and `crates/umicraft-client/src/entity_textures.rs`):
+and `crates/umicraft-client/src/entity_textures.rs` (since P5a: `entity_render/`)):
 
 1. **Limb-swing formula wrong.** The store does
    `limb_swing += speed * 4.0` with the raw, unclamped speed, *before*

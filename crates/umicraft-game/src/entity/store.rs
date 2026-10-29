@@ -11,7 +11,7 @@ use crate::physics::EYE_HEIGHT;
 use crate::view::ViewEffects;
 use crate::RenderState;
 
-use super::types::{
+use super::{
     EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityRenderSnapshot,
 };

@@ -17,7 +17,7 @@ use umicraft_model::entity::{emit_block_item_cube, HumanoidModel, ModelVertex, Q
 use umicraft_render::{Camera, EntityVertex, HudLayout, Overlay, RenderEnvironment, Renderer};
 
 use crate::args::{Args, DemoView};
-use crate::entity_textures::{
+use crate::entity_render::{
     load_or_fallback, mesh_entities, procedural_dirt_texture, EntityTextures,
 };
 use crate::error::ClientError;

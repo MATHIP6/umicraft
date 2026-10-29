@@ -39,7 +39,7 @@ use crate::creative_input::CreativeInput;
 use crate::creative_layout::CreativeLayout;
 use crate::creative_screen::{draw_creative_overlay, CreativeScene};
 use crate::dials::{DialAnimator, DialInputs};
-use crate::entity_textures::EntityTextures;
+use crate::entity_render::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
