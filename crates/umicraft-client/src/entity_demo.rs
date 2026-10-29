@@ -400,6 +400,7 @@ fn make_snapshot(
         kind,
         position: pos,
         yaw: FACE_NORTH,
+        body_yaw: FACE_NORTH,
         pitch: 0.0,
         head_yaw: FACE_NORTH,
         limb_swing: 0.0,

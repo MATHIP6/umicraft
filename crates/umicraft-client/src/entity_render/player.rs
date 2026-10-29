@@ -17,7 +17,7 @@ pub(crate) fn posed_player(ent: &EntityRenderSnapshot) -> (HumanoidModel, bool) 
     model.set_angles(
         ent.limb_swing,
         ent.limb_swing_amount,
-        ent.head_yaw - ent.yaw,
+        ent.head_yaw - ent.body_yaw,
         ent.pitch,
         false,
     );

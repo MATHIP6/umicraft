@@ -88,6 +88,13 @@ pub enum EntityKind {
 }
 
 impl EntityKind {
+    /// True for living entities, which have a body yaw and swing their limbs;
+    /// false for the objects (dropped items, arrows, item frames).
+    #[must_use]
+    pub const fn is_living(self) -> bool {
+        !matches!(self, Self::Item | Self::Arrow | Self::ItemFrame)
+    }
+
     /// Maps a 1.8 mob type id to an [`EntityKind`].
     #[must_use]
     pub const fn from_mob_type(id: u8) -> Self {

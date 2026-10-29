@@ -37,7 +37,7 @@ pub fn mesh_entities(
 
     for ent in snapshots {
         let world_pos = ent.position;
-        let yaw_rad = ent.yaw.to_radians();
+        let yaw_rad = ent.body_yaw.to_radians();
         // `RendererLivingEntity.rotateCorpse`: rotate(180 - yaw). The model faces -Z,
         // and a Minecraft yaw of zero looks towards +Z.
         let rot = Mat4::from_rotation_y(std::f32::consts::PI - yaw_rad);
@@ -120,6 +120,7 @@ mod tests {
                 kind: EntityKind::Player,
                 position: Vec3::new(10.0, 64.0, 10.0),
                 yaw: 0.0,
+                body_yaw: 0.0,
                 pitch: 0.0,
                 head_yaw: 0.0,
                 limb_swing: 0.5,
@@ -137,6 +138,7 @@ mod tests {
                 kind: EntityKind::Zombie,
                 position: Vec3::new(12.0, 64.0, 10.0),
                 yaw: 90.0,
+                body_yaw: 90.0,
                 pitch: 0.0,
                 head_yaw: 90.0,
                 limb_swing: 0.0,
@@ -154,6 +156,7 @@ mod tests {
                 kind: EntityKind::Cow,
                 position: Vec3::new(14.0, 64.0, 10.0),
                 yaw: 180.0,
+                body_yaw: 180.0,
                 pitch: 0.0,
                 head_yaw: 180.0,
                 limb_swing: 1.0,
@@ -172,6 +175,7 @@ mod tests {
                 kind: EntityKind::Item,
                 position: Vec3::new(16.0, 64.25, 10.0),
                 yaw: 45.0,
+                body_yaw: 45.0,
                 pitch: 0.0,
                 head_yaw: 45.0,
                 limb_swing: 0.0,

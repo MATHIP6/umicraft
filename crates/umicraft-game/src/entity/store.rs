@@ -12,7 +12,7 @@ use crate::view::ViewEffects;
 use crate::RenderState;
 
 use super::{
-    EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
+    BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityRenderSnapshot,
 };
 
@@ -90,7 +90,8 @@ impl EntityStore {
         let mut record = EntityRecord::new(id, kind, position, yaw, pitch);
         record.head_yaw = head_yaw;
         record.previous_head_yaw = head_yaw;
-        record.target_head_yaw = head_yaw;
+        // MCP `handleSpawnMob`: `renderYawOffset = rotationYawHead = head`.
+        record.body_yaw = BodyYaw::new(head_yaw);
         record.velocity = velocity;
         record.flags = flags;
         self.entities.insert(id, record);
@@ -150,37 +151,36 @@ impl EntityStore {
         })
     }
 
-    /// Applies a relative movement delta to an entity.
+    /// Applies a relative movement delta to an entity (`Entity Relative Move`).
+    ///
+    /// The rotation is retargeted to the current one, which stops a turn in
+    /// progress (MCP `handleEntityMovement`).
     pub fn move_relative(&mut self, id: EntityId, delta: DVec3, on_ground: bool) {
         if let Some(entity) = self.entities.get_mut(&id) {
-            entity.target_position += delta;
-            entity.on_ground = on_ground;
-            entity.interpolation_steps = 3;
+            entity.server_position += delta;
+            entity.retarget(entity.server_position, entity.yaw, entity.pitch, on_ground);
         }
     }
 
-    /// Updates entity orientation.
+    /// Updates entity orientation (`Entity Look`).
     pub fn look(&mut self, id: EntityId, yaw: f32, pitch: f32, on_ground: bool) {
         if let Some(entity) = self.entities.get_mut(&id) {
-            entity.target_yaw = yaw;
-            entity.target_pitch = pitch;
-            entity.on_ground = on_ground;
-            entity.interpolation_steps = 3;
+            entity.retarget(entity.server_position, yaw, pitch, on_ground);
         }
     }
 
-    /// Updates entity position delta and orientation.
+    /// Updates entity position delta and orientation (`Entity Look And
+    /// Relative Move`).
     pub fn look_move(&mut self, id: EntityId, delta: DVec3, yaw: f32, pitch: f32, on_ground: bool) {
         if let Some(entity) = self.entities.get_mut(&id) {
-            entity.target_position += delta;
-            entity.target_yaw = yaw;
-            entity.target_pitch = pitch;
-            entity.on_ground = on_ground;
-            entity.interpolation_steps = 3;
+            entity.server_position += delta;
+            entity.retarget(entity.server_position, yaw, pitch, on_ground);
         }
     }
 
-    /// Teleports an entity to an absolute location.
+    /// Teleports an entity to an absolute location (`Entity Teleport`).
+    ///
+    /// Interpolated over 3 ticks like a relative move, as in vanilla.
     pub fn teleport(
         &mut self,
         id: EntityId,
@@ -190,23 +190,15 @@ impl EntityStore {
         on_ground: bool,
     ) {
         if let Some(entity) = self.entities.get_mut(&id) {
-            entity.position = position;
-            entity.previous_position = position;
-            entity.target_position = position;
-            entity.yaw = yaw;
-            entity.previous_yaw = yaw;
-            entity.target_yaw = yaw;
-            entity.pitch = pitch;
-            entity.previous_pitch = pitch;
-            entity.target_pitch = pitch;
-            entity.on_ground = on_ground;
+            entity.teleport_to(position, yaw, pitch, on_ground);
         }
     }
 
-    /// Sets an entity's head yaw.
+    /// Sets an entity's head yaw (`Entity Head Look`); applied at once, not
+    /// glided (MCP `handleEntityHeadLook`).
     pub fn set_head_yaw(&mut self, id: EntityId, head_yaw: f32) {
         if let Some(entity) = self.entities.get_mut(&id) {
-            entity.target_head_yaw = head_yaw;
+            entity.head_yaw = head_yaw;
         }
     }
 
@@ -258,33 +250,13 @@ impl EntityStore {
         &self.entities
     }
 
-    /// Advances the simulation by one tick (20 Hz).
-    ///
-    /// Position and rotation glide toward the server target over 3 ticks,
-    /// matching vanilla `EntityLivingBase.onLivingUpdate`.
+    /// Advances the simulation by one tick (20 Hz): glide to the server
+    /// position, then animate limbs and body (MCP `EntityLivingBase.onUpdate`).
     pub fn tick(&mut self) {
         for entity in self.entities.values_mut() {
-            entity.previous_position = entity.position;
-            entity.previous_yaw = entity.yaw;
-            entity.previous_pitch = entity.pitch;
-            entity.previous_head_yaw = entity.head_yaw;
-
-            if entity.interpolation_steps > 0 {
-                let steps = f64::from(entity.interpolation_steps);
-                entity.position += (entity.target_position - entity.position) / steps;
-
-                let yaw_diff = wrap_degrees(entity.target_yaw - entity.yaw);
-                entity.yaw += yaw_diff / steps as f32;
-
-                entity.pitch += (entity.target_pitch - entity.pitch) / steps as f32;
-
-                let head_diff = wrap_degrees(entity.target_head_yaw - entity.head_yaw);
-                entity.head_yaw += head_diff / steps as f32;
-
-                entity.interpolation_steps -= 1;
-            }
-
-            entity.update_limbs();
+            entity.begin_tick();
+            entity.glide_to_target();
+            entity.animate();
             entity.age_ticks = entity.age_ticks.saturating_add(1);
         }
     }
@@ -294,49 +266,9 @@ impl EntityStore {
     /// `alpha` is the partial tick fraction in `0.0..=1.0`.
     #[must_use]
     pub fn snapshots(&self, alpha: f32) -> Vec<EntityRenderSnapshot> {
-        let alpha_d = f64::from(alpha.clamp(0.0, 1.0));
-        let alpha_f = alpha.clamp(0.0, 1.0);
-
         self.entities
             .values()
-            .map(|entity| {
-                let interpolated_pos = entity.previous_position.lerp(entity.position, alpha_d);
-                let position = Vec3::new(
-                    interpolated_pos.x as f32,
-                    interpolated_pos.y as f32,
-                    interpolated_pos.z as f32,
-                );
-
-                let yaw = interpolate_angle(entity.previous_yaw, entity.yaw, alpha_f);
-                let pitch =
-                    entity.previous_pitch + (entity.pitch - entity.previous_pitch) * alpha_f;
-                let head_yaw =
-                    interpolate_angle(entity.previous_head_yaw, entity.head_yaw, alpha_f);
-
-                let limb_swing_amount = entity.previous_limb_swing_amount
-                    + (entity.limb_swing_amount - entity.previous_limb_swing_amount) * alpha_f;
-
-                // Vanilla: limbSwing - limbSwingAmount * (1.0 - partialTicks)
-                let limb_swing = entity.limb_swing - entity.limb_swing_amount * (1.0 - alpha_f);
-
-                EntityRenderSnapshot {
-                    id: entity.id,
-                    kind: entity.kind,
-                    position,
-                    yaw,
-                    pitch,
-                    head_yaw,
-                    limb_swing,
-                    limb_swing_amount,
-                    uuid: entity.uuid,
-                    held: entity.held.clone(),
-                    item: entity.item.clone(),
-                    age: entity.age_ticks as f32 + alpha_f,
-                    frame_direction: entity.frame_direction,
-                    frame_rotation: entity.frame_rotation,
-                    flags: entity.flags,
-                }
-            })
+            .map(|entity| entity.frame_data().interpolate(alpha))
             .collect()
     }
 
@@ -352,22 +284,6 @@ impl EntityStore {
             .map(EntityRecord::frame_data)
             .collect()
     }
-}
-
-/// Wraps a degree difference into `(-180, 180]`.
-fn wrap_degrees(d: f32) -> f32 {
-    let mut r = d % 360.0;
-    if r < -180.0 {
-        r += 360.0;
-    } else if r >= 180.0 {
-        r -= 360.0;
-    }
-    r
-}
-
-/// Interpolates between two angles in degrees taking the shortest arc.
-fn interpolate_angle(prev: f32, current: f32, alpha: f32) -> f32 {
-    prev + wrap_degrees(current - prev) * alpha
 }
 
 #[cfg(test)]
@@ -561,6 +477,63 @@ mod tests {
         assert!((view.position.y - 65.62).abs() < 1e-4);
         assert!((view.position.x - 1.0).abs() < 1e-4);
         assert!((view.pitch - 45f32.to_radians()).abs() < 1e-4);
+    }
+
+    fn zombie(store: &mut EntityStore) -> EntityId {
+        let id = EntityId(30);
+        store.spawn_mob(
+            id,
+            54,
+            DVec3::new(0.0, 64.0, 0.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        id
+    }
+
+    #[test]
+    fn a_teleport_is_interpolated_instead_of_snapping() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.teleport(id, DVec3::new(6.0, 64.0, 0.0), 0.0, 0.0, true);
+        assert_eq!(store.snapshots(1.0)[0].position.x, 0.0);
+        store.tick();
+        assert!((store.snapshots(1.0)[0].position.x - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_head_look_applies_at_once() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.set_head_yaw(id, 50.0);
+        assert_eq!(store.snapshots(1.0)[0].head_yaw, 50.0);
+    }
+
+    #[test]
+    fn a_relative_move_stops_a_turn_in_progress() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.look(id, 90.0, 0.0, true);
+        store.tick();
+        let turned = store.snapshots(1.0)[0].yaw;
+        store.move_relative(id, DVec3::ZERO, true);
+        store.tick();
+        store.tick();
+        assert!((store.snapshots(1.0)[0].yaw - turned).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_walking_mob_swings_its_limbs_in_the_snapshot() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.move_relative(id, DVec3::new(0.6, 0.0, 0.0), true);
+        store.tick();
+        let snapshot = &store.snapshots(1.0)[0];
+        assert!(snapshot.limb_swing_amount > 0.0);
+        assert!(snapshot.limb_swing > 0.0);
     }
 
     #[test]

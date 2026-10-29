@@ -2846,18 +2846,14 @@ mod tests {
             tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
         }
         let walking = game.body.frame_data();
-        assert!(
-            walking.limb_swing_amount > 0.1,
-            "{}",
-            walking.limb_swing_amount
-        );
-        assert!(walking.limb_swing > 0.0);
+        assert!(walking.limbs.amount > 0.1, "{}", walking.limbs.amount);
+        assert!(walking.limbs.swing > 0.0);
 
         game.input.forward = 0.0;
         for _ in 0..60 {
             tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
         }
-        assert!(game.body.frame_data().limb_swing_amount < 0.05);
+        assert!(game.body.frame_data().limbs.amount < 0.05);
     }
 
     #[test]

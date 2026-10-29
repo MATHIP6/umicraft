@@ -4,9 +4,11 @@
 
 use glam::Vec3;
 
+use super::angle::lerp_degrees;
 use super::flags::EntityFlags;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
+use super::limbs::LimbSwing;
 
 /// Per-entity interpolation data sent to the render thread each tick.
 ///
@@ -22,9 +24,9 @@ pub struct EntityFrameData {
     pub prev_position: Vec3,
     /// Position at the current simulation tick.
     pub position: Vec3,
-    /// Previous body yaw in degrees.
+    /// Previous facing direction in degrees.
     pub prev_yaw: f32,
-    /// Current body yaw in degrees.
+    /// Current facing direction in degrees.
     pub yaw: f32,
     /// Previous pitch in degrees.
     pub prev_pitch: f32,
@@ -34,12 +36,12 @@ pub struct EntityFrameData {
     pub prev_head_yaw: f32,
     /// Current head yaw in degrees.
     pub head_yaw: f32,
-    /// Accumulated limb swing phase.
-    pub limb_swing: f32,
-    /// Previous limb swing amplitude.
-    pub prev_limb_swing_amount: f32,
-    /// Current limb swing amplitude.
-    pub limb_swing_amount: f32,
+    /// Previous torso yaw in degrees.
+    pub prev_body_yaw: f32,
+    /// Current torso yaw in degrees.
+    pub body_yaw: f32,
+    /// The walking animation.
+    pub limbs: LimbSwing,
     /// Player UUID for skin lookup.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -64,22 +66,21 @@ impl EntityFrameData {
     pub fn interpolate(&self, alpha: f32) -> EntityRenderSnapshot {
         let a = alpha.clamp(0.0, 1.0);
         let position = self.prev_position.lerp(self.position, a);
-        let yaw = interpolate_angle_deg(self.prev_yaw, self.yaw, a);
+        let yaw = lerp_degrees(self.prev_yaw, self.yaw, a);
+        let body_yaw = lerp_degrees(self.prev_body_yaw, self.body_yaw, a);
         let pitch = self.prev_pitch + (self.pitch - self.prev_pitch) * a;
-        let head_yaw = interpolate_angle_deg(self.prev_head_yaw, self.head_yaw, a);
-        let limb_swing_amount = self.prev_limb_swing_amount
-            + (self.limb_swing_amount - self.prev_limb_swing_amount) * a;
-        let limb_swing = self.limb_swing - self.limb_swing_amount * (1.0 - a);
+        let head_yaw = lerp_degrees(self.prev_head_yaw, self.head_yaw, a);
 
         EntityRenderSnapshot {
             id: self.id,
             kind: self.kind,
             position,
             yaw,
+            body_yaw,
             pitch,
             head_yaw,
-            limb_swing,
-            limb_swing_amount,
+            limb_swing: self.limbs.swing_at(a),
+            limb_swing_amount: self.limbs.amount_at(a),
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
@@ -91,17 +92,6 @@ impl EntityFrameData {
     }
 }
 
-/// Interpolates between two degree angles taking the shortest arc.
-fn interpolate_angle_deg(prev: f32, current: f32, alpha: f32) -> f32 {
-    let mut diff = (current - prev) % 360.0;
-    if diff < -180.0 {
-        diff += 360.0;
-    } else if diff >= 180.0 {
-        diff -= 360.0;
-    }
-    prev + diff * alpha
-}
-
 /// Immutable snapshot of one entity prepared for the render thread.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityRenderSnapshot {
@@ -111,8 +101,11 @@ pub struct EntityRenderSnapshot {
     pub kind: EntityKind,
     /// Interpolated world space position.
     pub position: Vec3,
-    /// Interpolated body yaw in degrees.
+    /// Interpolated facing direction in degrees.
     pub yaw: f32,
+    /// Interpolated torso yaw in degrees (MCP `renderYawOffset`); the model
+    /// is drawn rotated by it, and the head turns by `head_yaw - body_yaw`.
+    pub body_yaw: f32,
     /// Interpolated pitch in degrees.
     pub pitch: f32,
     /// Interpolated head yaw in degrees.

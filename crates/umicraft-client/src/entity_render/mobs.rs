@@ -31,7 +31,7 @@ impl Pose {
         Self {
             swing: ent.limb_swing,
             amount: ent.limb_swing_amount,
-            head_yaw: ent.head_yaw - ent.yaw,
+            head_yaw: ent.head_yaw - ent.body_yaw,
             head_pitch: ent.pitch,
         }
     }

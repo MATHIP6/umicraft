@@ -4,9 +4,11 @@
 
 use glam::{DVec3, Vec3};
 
+use super::body_yaw::BodyYaw;
 use super::flags::EntityFlags;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
+use super::limbs::LimbSwing;
 use super::snapshot::EntityFrameData;
 
 /// Full mutable record of an entity owned by the game thread.
@@ -20,15 +22,18 @@ pub struct EntityRecord {
     pub position: DVec3,
     /// Position at the previous simulation tick.
     pub previous_position: DVec3,
-    /// Server-authoritative target position when interpolating movement packets.
+    /// The position the server last reported (MCP `serverPosX / 32`);
+    /// relative moves accumulate on it.
+    pub server_position: DVec3,
+    /// The position the entity glides to over the interpolation steps.
     pub target_position: DVec3,
     /// Velocity in blocks per tick.
     pub velocity: Vec3,
-    /// Body horizontal yaw in degrees.
+    /// Facing direction (MCP `rotationYaw`) in degrees.
     pub yaw: f32,
-    /// Previous body yaw for interpolation.
+    /// Previous facing direction for interpolation.
     pub previous_yaw: f32,
-    /// Target body yaw.
+    /// Target facing direction.
     pub target_yaw: f32,
     /// Vertical pitch in degrees.
     pub pitch: f32,
@@ -36,20 +41,16 @@ pub struct EntityRecord {
     pub previous_pitch: f32,
     /// Target vertical pitch.
     pub target_pitch: f32,
-    /// Head yaw in degrees.
+    /// Head yaw in degrees; set directly by `Entity Head Look`, not glided.
     pub head_yaw: f32,
     /// Previous head yaw.
     pub previous_head_yaw: f32,
-    /// Target head yaw.
-    pub target_head_yaw: f32,
     /// Whether the entity rests on the ground.
     pub on_ground: bool,
-    /// Accumulated limb swing animation progress in radians.
-    pub limb_swing: f32,
-    /// Current limb swing amplitude (0.0 = still, 1.0 = full walk speed).
-    pub limb_swing_amount: f32,
-    /// Previous limb swing amplitude.
-    pub previous_limb_swing_amount: f32,
+    /// The walking animation.
+    pub limbs: LimbSwing,
+    /// Where the torso points, which lags behind `yaw` and the head.
+    pub body_yaw: BodyYaw,
     /// Player UUID if this is a player entity.
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
@@ -71,33 +72,17 @@ pub struct EntityRecord {
 }
 
 impl EntityRecord {
-    /// Advances the limb animation by the horizontal distance moved during
-    /// the tick (`previous_position` to `position`).
-    pub fn update_limbs(&mut self) {
-        let dx = self.position.x - self.previous_position.x;
-        let dz = self.position.z - self.previous_position.z;
-        let speed = (dx * dx + dz * dz).sqrt() as f32;
-
-        self.previous_limb_swing_amount = self.limb_swing_amount;
-        self.limb_swing += speed * 4.0;
-        let target_amount = (speed * 4.0).clamp(0.0, 1.0);
-        self.limb_swing_amount += (target_amount - self.limb_swing_amount) * 0.4;
-    }
-
     /// Moves the entity to where the simulation put it this tick, without
-    /// interpolation, and animates its limbs. For the local player, whose
+    /// interpolation, and animates its limbs and body. For the local player, whose
     /// position is already the predicted one.
     pub fn follow(&mut self, position: DVec3, yaw: f32, pitch: f32, flags: EntityFlags) {
-        self.previous_position = self.position;
+        self.begin_tick();
         self.position = position;
-        self.previous_yaw = self.yaw;
-        self.previous_head_yaw = self.head_yaw;
-        self.previous_pitch = self.pitch;
         self.yaw = yaw;
         self.head_yaw = yaw;
         self.pitch = pitch;
         self.flags = flags;
-        self.update_limbs();
+        self.animate();
     }
 
     /// The data the render thread interpolates between two ticks.
@@ -114,9 +99,9 @@ impl EntityRecord {
             pitch: self.pitch,
             prev_head_yaw: self.previous_head_yaw,
             head_yaw: self.head_yaw,
-            limb_swing: self.limb_swing,
-            prev_limb_swing_amount: self.previous_limb_swing_amount,
-            limb_swing_amount: self.limb_swing_amount,
+            prev_body_yaw: self.body_yaw.previous,
+            body_yaw: self.body_yaw.offset,
+            limbs: self.limbs,
             uuid: self.uuid,
             held: self.held.clone(),
             item: self.item.clone(),
@@ -135,6 +120,7 @@ impl EntityRecord {
             kind,
             position,
             previous_position: position,
+            server_position: position,
             target_position: position,
             velocity: Vec3::ZERO,
             yaw,
@@ -145,11 +131,9 @@ impl EntityRecord {
             target_pitch: pitch,
             head_yaw: yaw,
             previous_head_yaw: yaw,
-            target_head_yaw: yaw,
             on_ground: true,
-            limb_swing: 0.0,
-            limb_swing_amount: 0.0,
-            previous_limb_swing_amount: 0.0,
+            limbs: LimbSwing::default(),
+            body_yaw: BodyYaw::new(yaw),
             uuid: None,
             held: None,
             item: None,
