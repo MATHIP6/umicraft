@@ -116,6 +116,31 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (vec![0; 32 * 32 * 4], 32, 32),
         },
         TextureSpec {
+            slot: TextureSlot::Lightning,
+            // Not in the jar: the bolt has no texture, so this is always the
+            // white fallback.
+            jar_path: "umicraft/white.png",
+            fallback: || (vec![255; 4], 1, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::Particles,
+            jar_path: "assets/minecraft/textures/particle/particles.png",
+            fallback: || (vec![0; 128 * 128 * 4], 128, 128),
+        },
+        TextureSpec {
+            slot: TextureSlot::FishLine,
+            // Not in the jar: always the black fallback.
+            jar_path: "umicraft/black.png",
+            fallback: || (vec![0, 0, 0, 255], 1, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::Leash,
+            // Not in the jar: the rope is two browns, `(0.5, 0.4, 0.3)` of
+            // `renderLeash`, the dark one scaled by 0.7.
+            jar_path: "umicraft/leash.png",
+            fallback: || (vec![89, 71, 54, 255, 128, 102, 77, 255], 2, 1),
+        },
+        TextureSpec {
             slot: TextureSlot::Arrow,
             jar_path: "assets/minecraft/textures/entity/arrow.png",
             // No original stand-in: without the jar the arrows are not drawn.

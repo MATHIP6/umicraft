@@ -452,6 +452,8 @@ fn make_snapshot(
         frame_rotation: 0,
         use_ticks: 0,
         fishing: false,
+        riding: false,
+        leash: None,
         flags: EntityFlags::new(0, 0x7F),
     }
 }

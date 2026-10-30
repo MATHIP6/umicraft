@@ -505,6 +505,14 @@ pub enum TextureSlot {
     Painting,
     /// The knot of a leash (`lead_knot.png`).
     LeashKnot,
+    /// A plain white texel, for what is drawn without a texture (lightning).
+    Lightning,
+    /// The particle sheet (`particle/particles.png`), of which the bobber is a cell.
+    Particles,
+    /// A plain black texel: the line of a fishing rod.
+    FishLine,
+    /// The two browns of the rope of a leash.
+    Leash,
     /// The arrow (`arrow.png`), flying or stuck in a body.
     Arrow,
     /// The ghast while it charges a fireball (`ghast_shooting.png`).
@@ -666,6 +674,7 @@ impl TextureSlot {
                 | Self::CreeperCharge
                 | Self::WitherAura
                 | Self::EnchantGlint
+                | Self::Lightning
         )
     }
 

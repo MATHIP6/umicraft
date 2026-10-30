@@ -450,6 +450,8 @@ mod render_tests {
             shadow: Default::default(),
             use_ticks: 0,
             fishing: false,
+            riding: false,
+            leash: None,
             flags: EntityFlags::default(),
         }
     }
@@ -562,6 +564,8 @@ mod player_render_tests {
             frame_rotation: 0,
             use_ticks: 0,
             fishing: false,
+            riding: false,
+            leash: None,
             flags: EntityFlags::new(if sneaking { 0x02 } else { 0 }, 0),
         }
     }
@@ -750,6 +754,8 @@ mod glint_render_tests {
             shadow: Default::default(),
             use_ticks: 0,
             fishing: false,
+            riding: false,
+            leash: None,
             flags: EntityFlags::default(),
         }
     }

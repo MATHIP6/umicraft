@@ -18,8 +18,10 @@
 mod animals;
 mod armor;
 mod arrows;
+mod bolt;
 mod creatures;
 mod fire;
+mod fishing;
 mod glow;
 mod hand;
 mod horse_coat;
@@ -28,6 +30,7 @@ mod mushrooms;
 mod paintings;
 mod player;
 mod pose;
+mod rope;
 mod shadow;
 mod skins;
 mod skull;
@@ -127,6 +130,14 @@ fn mesh_entities_with(
         xp::add_xp_orb(&mut solid, ent, light, view_yaw, view_pitch);
         paintings::add_painting(&mut solid, ent, light);
         small_models::add_small_model(&mut solid, ent, light);
+        bolt::add_lightning(&mut additive, ent);
+        rope::add_leash(&mut solid, ent);
+        let eye = fishing::Eye {
+            position: camera,
+            yaw: view_yaw,
+            pitch: view_pitch,
+        };
+        fishing::add_bobber(&mut solid, ent, snapshots, light, eye);
         shadow::add_shadow(&mut shadows, ent, camera);
     }
 
@@ -309,6 +320,8 @@ mod tests {
                 frame_rotation: 0,
                 use_ticks: 0,
                 fishing: false,
+                riding: false,
+                leash: None,
                 flags: EntityFlags::new(0, 0x7F),
             },
             EntityRenderSnapshot {
@@ -343,6 +356,8 @@ mod tests {
                 frame_rotation: 0,
                 use_ticks: 0,
                 fishing: false,
+                riding: false,
+                leash: None,
                 flags: EntityFlags::default(),
             },
             EntityRenderSnapshot {
@@ -377,6 +392,8 @@ mod tests {
                 frame_rotation: 0,
                 use_ticks: 0,
                 fishing: false,
+                riding: false,
+                leash: None,
                 flags: EntityFlags::default(),
             },
             // A dropped item has no entity mesh: P3 draws it from its item model.
@@ -412,6 +429,8 @@ mod tests {
                 frame_rotation: 0,
                 use_ticks: 0,
                 fishing: false,
+                riding: false,
+                leash: None,
                 flags: EntityFlags::default(),
             },
         ];

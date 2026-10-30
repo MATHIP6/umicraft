@@ -31,6 +31,7 @@ use umicraft_game::chat_component::{self, Translations};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
+use umicraft_game::entity::leash::{leash_entities, LeashFrame};
 use umicraft_game::entity::light::{eye_light, light_entities};
 use umicraft_game::entity::nametag::{mob_tag, player_tag};
 use umicraft_game::entity::shadow::shadow_entities;
@@ -1137,6 +1138,20 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     }
     // Items are lit by the block they are in; before the first chunk the
     // default (full sky) stays.
+    // The local player holds leashes too, and is not among the frames from the
+    // first person.
+    let eye_height = umicraft_game::physics::EYE_HEIGHT as f32;
+    let me = LeashFrame {
+        prev_position: view.position - Vec3::Y * eye_height,
+        position: view.position - Vec3::Y * eye_height,
+        prev_yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
+        yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
+        prev_pitch: (-view.pitch).to_degrees(),
+        pitch: (-view.pitch).to_degrees(),
+        eye_height,
+        hanging: false,
+    };
+    leash_entities(&mut entities, Some((EntityId(game.entity_id), me)));
     let hand_light = game.world.as_ref().map_or(LightLevel::FULL_SKY, |world| {
         light_entities(world, &mut entities);
         shadow_entities(world, &mut entities, game.world_time);
@@ -1583,6 +1598,29 @@ fn apply_net_event(
                 o.data,
             );
         }
+        // MCP `handleCollectItem`: the collected entity flies to the collector
+        // in three ticks and leaves the world. The pop is not played.
+        PlayEvent::CollectItem(c) => {
+            let local = game
+                .state
+                .as_ref()
+                .map_or(DVec3::ZERO, |state| state.position());
+            game.entities.collect(
+                EntityId(c.collected_entity_id),
+                EntityId(c.collector_entity_id),
+                local,
+            );
+        }
+        // MCP `handleSpawnGlobalEntity`: type 1 is a lightning bolt, the only
+        // global entity of 1.8.
+        PlayEvent::SpawnGlobalEntity(g) if g.entity_type == 1 => {
+            let pos = DVec3::new(
+                f64::from(g.x) / 32.0,
+                f64::from(g.y) / 32.0,
+                f64::from(g.z) / 32.0,
+            );
+            game.entities.spawn_lightning(EntityId(g.entity_id), pos);
+        }
         PlayEvent::SpawnXpOrb(o) => {
             let pos = DVec3::new(
                 f64::from(o.x) / 32.0,
@@ -1673,6 +1711,15 @@ fn apply_net_event(
             // the serverbound traffic. Passengers of other entities are P5.
             if packet.leash == 0 && packet.entity_id == game.entity_id {
                 game.vehicle = (packet.vehicle_id != -1).then_some(packet.vehicle_id);
+            }
+            // Leash 1 ties the entity to the holder (-1 frees it).
+            if packet.leash == 1 {
+                let holder = (packet.vehicle_id != -1).then_some(EntityId(packet.vehicle_id));
+                game.entities.set_leash(EntityId(packet.entity_id), holder);
+            }
+            if packet.leash == 0 {
+                let vehicle = (packet.vehicle_id != -1).then_some(EntityId(packet.vehicle_id));
+                game.entities.attach(EntityId(packet.entity_id), vehicle);
             }
         }
         PlayEvent::EntityStatus(status) => {
@@ -3242,6 +3289,27 @@ mod tests {
         let snapshot = &game.entities.snapshots(0.0)[0];
         let item = snapshot.item.as_ref().expect("stack");
         assert_eq!((item.item_id, item.count), (264, 1));
+    }
+
+    #[test]
+    fn a_collected_item_leaves_the_world() {
+        use umicraft_protocol::packets::play::clientbound::CollectItem;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, spawn_object_event(7, 2, 1), &mut queue, &frames);
+        assert_eq!(game.entities.snapshots(0.0).len(), 1);
+        let event = PlayEvent::CollectItem(CollectItem {
+            collected_entity_id: 7,
+            collector_entity_id: 1,
+        });
+        handle_net(&mut game, event, &mut queue, &frames);
+        assert_eq!(game.entities.snapshots(0.0).len(), 1, "it flies first");
+        for _ in 0..3 {
+            game.entities.tick();
+        }
+        assert!(game.entities.snapshots(0.0).is_empty());
     }
 
     #[test]

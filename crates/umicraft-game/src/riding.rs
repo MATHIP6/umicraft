@@ -20,10 +20,6 @@ const BOAT_SEAT_HEIGHT: f64 = -0.3;
 const BOAT_SEAT_SHIFT: f64 = 0.4;
 /// MCP `EntityMinecart.getMountedYOffset`.
 const MINECART_SEAT_HEIGHT: f64 = 0.0;
-/// The object type id of a boat (MCP `EntityTrackerEntry`, `Spawn Object`).
-const BOAT_OBJECT_TYPE: u8 = 1;
-/// The object type id of a minecart.
-const MINECART_OBJECT_TYPE: u8 = 10;
 
 /// The position of the rider's feet when it rides `vehicle`.
 ///
@@ -46,14 +42,14 @@ const MINECART_OBJECT_TYPE: u8 = 10;
 #[must_use]
 pub fn rider_feet(vehicle: &EntityRecord) -> DVec3 {
     let (shift, seat) = match vehicle.kind {
-        EntityKind::Other(BOAT_OBJECT_TYPE) => {
+        EntityKind::Boat => {
             let yaw = f64::from(vehicle.yaw).to_radians();
             (
                 DVec3::new(yaw.cos(), 0.0, yaw.sin()) * BOAT_SEAT_SHIFT,
                 BOAT_SEAT_HEIGHT,
             )
         }
-        EntityKind::Other(MINECART_OBJECT_TYPE) => (DVec3::ZERO, MINECART_SEAT_HEIGHT),
+        EntityKind::Minecart => (DVec3::ZERO, MINECART_SEAT_HEIGHT),
         EntityKind::Spider | EntityKind::CaveSpider => {
             (DVec3::ZERO, f64::from(vehicle.kind.height()) * 0.5)
         }
@@ -73,18 +69,18 @@ mod tests {
 
     #[test]
     fn a_boat_seats_the_rider_low_and_shifted_along_its_yaw() {
-        let feet = rider_feet(&record(EntityKind::Other(1), 0.0));
+        let feet = rider_feet(&record(EntityKind::Boat, 0.0));
         assert!((feet.x - 10.4).abs() < 1e-9);
         assert!((feet.y - (64.0 - 0.3 - 0.35)).abs() < 1e-9);
         assert!((feet.z - 20.0).abs() < 1e-9);
-        let turned = rider_feet(&record(EntityKind::Other(1), 90.0));
+        let turned = rider_feet(&record(EntityKind::Boat, 90.0));
         assert!((turned.x - 10.0).abs() < 1e-9);
         assert!((turned.z - 20.4).abs() < 1e-9);
     }
 
     #[test]
     fn a_minecart_seats_the_rider_at_its_floor() {
-        let feet = rider_feet(&record(EntityKind::Other(10), 45.0));
+        let feet = rider_feet(&record(EntityKind::Minecart, 45.0));
         assert_eq!((feet.x, feet.z), (10.0, 20.0));
         assert!((feet.y - (64.0 - 0.35)).abs() < 1e-9);
     }

@@ -13,6 +13,7 @@ use super::cape::{cape_angles, CapeAngles};
 use super::flags::EntityFlags;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
+use super::leash::{LeashAnchor, LeashFrame};
 use super::limbs::LimbSwing;
 use super::meta::EntityMeta;
 use super::profile::PlayerProfile;
@@ -84,6 +85,12 @@ pub struct EntityFrameData {
     pub use_ticks: u32,
     /// Whether the player has a bobber out.
     pub fishing: bool,
+    /// Whether the entity sits on a vehicle.
+    pub riding: bool,
+    /// Who holds the leash of the entity, if it is leashed.
+    pub leash_holder: Option<EntityId>,
+    /// Where the holder is, found by [`super::leash::leash_entities`].
+    pub leash: Option<LeashFrame>,
     /// Ticks lived at the current simulation tick.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -140,6 +147,8 @@ impl EntityFrameData {
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.fishing,
+            riding: self.riding,
+            leash: self.leash.map(|holder| holder.at(a)),
             age: self.age_ticks as f32 + a,
             frame_direction: self.frame_direction,
             frame_rotation: self.frame_rotation,
@@ -209,6 +218,10 @@ pub struct EntityRenderSnapshot {
     pub use_ticks: u32,
     /// Whether the player has a bobber out: the held rod shows its cast model.
     pub fishing: bool,
+    /// Whether the entity sits on a vehicle: a humanoid sits with its legs forward.
+    pub riding: bool,
+    /// The holder of the leash of the entity, if it is leashed.
+    pub leash: Option<LeashAnchor>,
     /// Ticks lived plus the interpolation alpha, for the bob and spin of items.
     pub age: f32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -253,6 +266,8 @@ impl EntityRenderSnapshot {
             shadow: Arc::default(),
             use_ticks: 0,
             fishing: false,
+            riding: false,
+            leash: None,
             age: 0.0,
             frame_direction: 0,
             frame_rotation: 0,

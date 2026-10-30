@@ -349,6 +349,26 @@ mod tests {
             small.position = Vec3::new(x, 64.0, -3.0);
             snapshots.push(small);
         }
+        let mut angler = place(60, EntityKind::Player, -1.0, 0.0, 0.0);
+        angler.position = Vec3::new(-1.0, 64.0, -6.0);
+        let mut hook = place(61, EntityKind::FishHook, -1.0, 0.0, 0.0);
+        hook.position = Vec3::new(-1.0, 64.0, -2.5);
+        hook.object_data = 60;
+        snapshots.extend([angler, hook]);
+        let mut cow = place(70, EntityKind::Cow, 0.0, 0.0, 0.0);
+        cow.position = Vec3::new(4.0, 64.0, -4.0);
+        cow.leash = Some(umicraft_game::entity::leash::LeashAnchor {
+            position: Vec3::new(2.5, 64.0, -6.0),
+            yaw: 30.0,
+            pitch: 10.0,
+            eye_height: 1.62,
+            hanging: false,
+        });
+        snapshots.push(cow);
+        let mut bolt = place(50, EntityKind::Lightning, 6.0, 0.0, 0.0);
+        bolt.position = Vec3::new(-6.0, 62.0, 2.0);
+        bolt.object_data = 12_345;
+        snapshots.push(bolt);
         // Two paintings on the far side, facing the camera (north, yaw 180).
         for (id, title, x) in [(30, "Skeleton", -2.0), (31, "Pigscene", 2.5)] {
             let mut painting = place(id, EntityKind::Painting, x, 180.0, 0.0);

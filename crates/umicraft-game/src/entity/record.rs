@@ -87,6 +87,13 @@ pub struct EntityRecord {
     pub use_ticks: u32,
     /// The bobber this player has out, if any (MCP `EntityPlayer.fishEntity`).
     pub bobber: Option<EntityId>,
+    /// The vehicle this entity sits on (MCP `Entity.ridingEntity`).
+    pub vehicle: Option<EntityId>,
+    /// Who holds the leash of this entity (MCP `EntityLiving.leashedToEntity`).
+    pub leash: Option<EntityId>,
+    /// The flight of this entity to whoever picked it up (MCP
+    /// `EntityPickupFX`), `None` while it lies in the world.
+    pub collecting: Option<Collecting>,
     /// Ticks the entity has lived since it was spawned.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -99,6 +106,23 @@ pub struct EntityRecord {
     pub health: Option<f32>,
     /// Remaining interpolation ticks for position/rotation smoothing (vanilla: 3).
     pub interpolation_steps: u8,
+}
+
+/// An entity flying to the one that picked it up: it covers the distance in
+/// three ticks, slowly at first (`EntityPickupFX`: `((age + partial) / 3)^2`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Collecting {
+    /// Where the entity lay.
+    pub start: DVec3,
+    /// Where it flies to.
+    pub target: DVec3,
+    /// Ticks flown.
+    pub ticks: u8,
+}
+
+impl Collecting {
+    /// Ticks of the flight.
+    pub const TICKS: u8 = 3;
 }
 
 impl EntityRecord {
@@ -159,6 +183,9 @@ impl EntityRecord {
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.bobber.is_some(),
+            riding: self.vehicle.is_some(),
+            leash_holder: self.leash,
+            leash: None,
             age_ticks: self.age_ticks,
             frame_direction: self.frame_direction,
             frame_rotation: self.frame_rotation,
@@ -201,6 +228,9 @@ impl EntityRecord {
             object_data: 0,
             use_ticks: 0,
             bobber: None,
+            vehicle: None,
+            leash: None,
+            collecting: None,
             age_ticks: 0,
             frame_direction: 0,
             frame_rotation: 0,

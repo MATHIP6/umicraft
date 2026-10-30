@@ -126,6 +126,9 @@ pub enum EntityKind {
     /// A painting (`Spawn Painting`); its `object_data` is the index of its
     /// artwork in [`super::painting::ARTS`].
     Painting,
+    /// A lightning bolt (`Spawn Global Entity`); its `object_data` seeds the
+    /// shape of the bolt.
+    Lightning,
     /// Other mob or entity type by raw numeric identifier.
     Other(u8),
 }
@@ -196,6 +199,7 @@ impl EntityKind {
                 | Self::LeashKnot
                 | Self::XpOrb
                 | Self::Painting
+                | Self::Lightning
         )
     }
 

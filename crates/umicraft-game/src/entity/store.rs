@@ -20,6 +20,10 @@ use super::{
 };
 
 /// Data watcher entry of the entity flags (MCP `Entity.entityInit`).
+/// Ticks one flash of a lightning bolt lasts here; the bolt is redrawn with a
+/// new shape at each flash.
+pub const LIGHTNING_FLASH_TICKS: u32 = 3;
+
 const ENTITY_FLAGS: u8 = 0;
 /// Data watcher entry of the player skin parts (MCP `EntityPlayer.entityInit`).
 const PLAYER_SKIN_PARTS: u8 = 10;
@@ -155,6 +159,48 @@ impl EntityStore {
     pub fn spawn_xp_orb(&mut self, id: EntityId, position: DVec3, count: i16) {
         let mut record = EntityRecord::new(id, EntityKind::XpOrb, position, 0.0, 0.0);
         record.object_data = i32::from(count);
+        self.entities.insert(id, record);
+    }
+
+    /// Seats `rider` on `vehicle`, or stands it up when `vehicle` is `None`
+    /// (`Attach Entity` with leash 0). The seat is followed in [`Self::tick`].
+    pub fn attach(&mut self, rider: EntityId, vehicle: Option<EntityId>) {
+        if let Some(record) = self.entities.get_mut(&rider) {
+            record.vehicle = vehicle;
+        }
+    }
+
+    /// Sends the entity `item` flying to `collector` (`Collect Item`), half a
+    /// block over its feet; `local` is where the local player is, who is not
+    /// tracked. An item that is not tracked is ignored.
+    pub fn collect(&mut self, item: EntityId, collector: EntityId, local: DVec3) {
+        let target = self
+            .entities
+            .get(&collector)
+            .map_or(local, |record| record.position)
+            + DVec3::Y * 0.5;
+        if let Some(record) = self.entities.get_mut(&item) {
+            record.collecting = Some(super::record::Collecting {
+                start: record.position,
+                target,
+                ticks: 0,
+            });
+        }
+    }
+
+    /// Ties `entity` to `holder`, or frees it when `holder` is `None`
+    /// (`Attach Entity` with leash 1).
+    pub fn set_leash(&mut self, entity: EntityId, holder: Option<EntityId>) {
+        if let Some(record) = self.entities.get_mut(&entity) {
+            record.leash = holder;
+        }
+    }
+
+    /// Spawns a lightning bolt (`Spawn Global Entity`, type 1). The reference
+    /// draws its shape from a random seed the client picks; the id stands in.
+    pub fn spawn_lightning(&mut self, id: EntityId, position: DVec3) {
+        let mut record = EntityRecord::new(id, EntityKind::Lightning, position, 0.0, 0.0);
+        record.object_data = id.0.wrapping_mul(0x9E37_79B1_u32 as i32);
         self.entities.insert(id, record);
     }
 
@@ -457,6 +503,33 @@ impl EntityStore {
             entity.tick_use();
             entity.age_ticks = entity.age_ticks.saturating_add(1);
         }
+        // MCP `Entity.updateRidden`: a rider is put at the seat of its vehicle.
+        let seats: Vec<(EntityId, DVec3)> = self
+            .entities
+            .iter()
+            .filter_map(|(id, rider)| {
+                let vehicle = self.entities.get(&rider.vehicle?)?;
+                Some((*id, crate::riding::rider_feet(vehicle)))
+            })
+            .collect();
+        for (id, feet) in seats {
+            if let Some(rider) = self.entities.get_mut(&id) {
+                rider.position = feet;
+            }
+        }
+        for entity in self.entities.values_mut() {
+            if let Some(flight) = entity.collecting.as_mut() {
+                flight.ticks += 1;
+                let fraction =
+                    (f64::from(flight.ticks) / f64::from(super::record::Collecting::TICKS)).powi(2);
+                entity.position = flight.start.lerp(flight.target, fraction);
+            }
+        }
+        self.entities.retain(|_, entity| {
+            entity
+                .collecting
+                .is_none_or(|flight| flight.ticks < super::record::Collecting::TICKS)
+        });
         self.entities
             .retain(|_, entity| !entity.animation.is_finished());
     }
@@ -466,8 +539,17 @@ impl EntityStore {
     /// Call it right after [`Self::tick`].
     pub fn tick_objects<S: crate::shapes::BlockSource + ?Sized>(&mut self, world: &S) {
         for entity in self.entities.values_mut() {
-            super::objects::step(entity, world);
+            if entity.collecting.is_none() {
+                super::objects::step(entity, world);
+            }
         }
+        // `EntityLightningBolt.onUpdate`: the bolt flashes one to three times
+        // and dies; the number of ticks it takes is random, so it is spread
+        // over the id here.
+        self.entities.retain(|id, entity| {
+            entity.kind != EntityKind::Lightning
+                || entity.age_ticks <= LIGHTNING_FLASH_TICKS * (3 + id.0.rem_euclid(3) as u32)
+        });
     }
 
     /// Produces interpolated render snapshots for all tracked entities.
@@ -506,6 +588,72 @@ mod tests {
             count: 1,
             nbt: None,
         }
+    }
+
+    #[test]
+    fn a_collected_item_flies_to_the_collector_and_goes() {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 2, 0);
+        store.collect(EntityId(1), EntityId(99), DVec3::new(0.0, 0.0, 9.0));
+        // After one tick it has covered (1/3)^2 of the way to half a block over
+        // the collector; after the third it is gone.
+        store.tick();
+        let at = store.snapshots(1.0)[0].position;
+        assert!(
+            (at - glam::Vec3::new(0.0, 0.5 / 9.0, 1.0)).length() < 1e-4,
+            "{at}"
+        );
+        store.tick();
+        store.tick();
+        assert!(store.snapshots(1.0).is_empty());
+    }
+
+    #[test]
+    fn a_rider_follows_the_seat_of_its_vehicle() {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 1, 0);
+        store.spawn_mob(
+            EntityId(2),
+            90,
+            DVec3::new(5.0, 70.0, 5.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            crate::entity::EntityFlags::default(),
+        );
+        store.attach(EntityId(2), Some(EntityId(1)));
+        store.tick();
+        let snaps = store.snapshots(1.0);
+        let rider = snaps.iter().find(|s| s.id == EntityId(2)).unwrap();
+        assert!(rider.riding);
+        // A boat at the origin seats the rider 0.4 along its yaw and 0.65 down.
+        assert!((rider.position - glam::Vec3::new(0.4, -0.65, 0.0)).length() < 1e-4);
+        store.attach(EntityId(2), None);
+        store.tick();
+        assert!(!store.snapshots(1.0).iter().any(|s| s.riding));
+    }
+
+    #[test]
+    fn a_lightning_bolt_flashes_for_a_while_and_goes() {
+        struct Air;
+        impl crate::shapes::BlockSource for Air {
+            fn block(&self, _x: i32, _y: i32, _z: i32) -> umicraft_world::BlockState {
+                umicraft_world::BlockState::AIR
+            }
+        }
+        let mut store = EntityStore::new();
+        store.spawn_lightning(EntityId(4), DVec3::new(1.0, 64.0, 1.0));
+        for _ in 0..LIGHTNING_FLASH_TICKS * 3 {
+            store.tick();
+            store.tick_objects(&Air);
+        }
+        assert_eq!(store.snapshots(0.0).len(), 1, "still flashing");
+        for _ in 0..LIGHTNING_FLASH_TICKS * 3 {
+            store.tick();
+            store.tick_objects(&Air);
+        }
+        assert!(store.snapshots(0.0).is_empty(), "gone");
     }
 
     fn spawn_object_at_origin(store: &mut EntityStore, id: i32, object_type: u8, data: i32) {

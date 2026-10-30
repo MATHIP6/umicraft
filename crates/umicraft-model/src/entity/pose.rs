@@ -50,6 +50,8 @@ pub struct HumanoidPose {
     /// Arms stretched forward, as zombies and skeletons hold them
     /// (MCP `ModelZombie`).
     pub arms_forward: bool,
+    /// Sitting on a vehicle (MCP `ModelBiped.isRiding`).
+    pub riding: bool,
 }
 
 /// Vanilla rotations of the six parts, `[x, y, z]` in radians.
@@ -106,8 +108,15 @@ fn vanilla_angles(pose: &HumanoidPose) -> Angles {
 
     let mut right_arm = [(swing * 0.6662 + PI).cos() * 2.0 * amount * 0.5, 0.0, 0.0];
     let mut left_arm = [(swing * 0.6662).cos() * 2.0 * amount * 0.5, 0.0, 0.0];
-    let right_leg = [(swing * 0.6662).cos() * 1.4 * amount, 0.0, 0.0];
-    let left_leg = [(swing * 0.6662 + PI).cos() * 1.4 * amount, 0.0, 0.0];
+    let mut right_leg = [(swing * 0.6662).cos() * 1.4 * amount, 0.0, 0.0];
+    let mut left_leg = [(swing * 0.6662 + PI).cos() * 1.4 * amount, 0.0, 0.0];
+
+    if pose.riding {
+        right_arm[0] -= PI / 5.0;
+        left_arm[0] -= PI / 5.0;
+        right_leg = [-PI * 2.0 / 5.0, PI / 10.0, 0.0];
+        left_leg = [-PI * 2.0 / 5.0, -PI / 10.0, 0.0];
+    }
 
     match pose.arms {
         ArmPose::Holding => right_arm[0] = right_arm[0] * 0.5 - PI / 10.0,
@@ -208,6 +217,21 @@ mod tests {
         // Only the breathing roll moves the arms.
         assert!((model.right_arm.rotation[2] + 0.1).abs() < 1e-5);
         assert!((model.left_arm.rotation[2] - 0.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_rider_sits_with_the_legs_forward() {
+        let model = posed(HumanoidPose {
+            riding: true,
+            ..HumanoidPose::default()
+        });
+        // Under `isRiding` both legs point forward (-z) and the knees turn out.
+        let foot = tip(&model.right_leg, Vec3::new(0.0, -12.0, 0.0));
+        assert!(foot.z < -5.0, "{foot}");
+        let other = tip(&model.left_leg, Vec3::new(0.0, -12.0, 0.0));
+        assert!(foot.x * other.x < 0.0, "{foot} {other}");
+        // The arms go forward by a fifth of a half turn.
+        assert!((model.right_arm.rotation[0] - PI / 5.0).abs() < 0.1);
     }
 
     #[test]

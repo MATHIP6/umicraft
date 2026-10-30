@@ -14,6 +14,7 @@ pub mod cape;
 pub mod flags;
 pub mod item;
 pub mod kind;
+pub mod leash;
 pub mod light;
 pub mod limbs;
 pub mod meta;
