@@ -16,6 +16,7 @@ use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
 use super::meta::EntityMeta;
 use super::profile::PlayerProfile;
+use super::shadow::ShadowBlock;
 
 /// Per-entity interpolation data sent to the render thread each tick.
 ///
@@ -72,6 +73,9 @@ pub struct EntityFrameData {
     pub armor: [Option<EntityItem>; 4],
     /// Whether the player is in spectator mode: only the head is drawn.
     pub spectator: bool,
+    /// The blocks the shadow of the entity falls on (the game thread finds
+    /// them from the world).
+    pub shadow: Arc<[ShadowBlock]>,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use.
@@ -129,6 +133,7 @@ impl EntityFrameData {
             held: self.held.clone(),
             armor: self.armor.clone(),
             spectator: self.spectator,
+            shadow: self.shadow.clone(),
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.fishing,
@@ -190,6 +195,9 @@ pub struct EntityRenderSnapshot {
     pub armor: [Option<EntityItem>; 4],
     /// Whether the player is in spectator mode: only the head is drawn.
     pub spectator: bool,
+    /// The blocks the shadow of the entity falls on (the game thread finds
+    /// them from the world).
+    pub shadow: Arc<[ShadowBlock]>,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use: picks the bow drawing model.
@@ -236,6 +244,7 @@ impl EntityRenderSnapshot {
             item: None,
             armor: [None, None, None, None],
             spectator: false,
+            shadow: Arc::default(),
             use_ticks: 0,
             fishing: false,
             age: 0.0,

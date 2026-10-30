@@ -253,6 +253,8 @@ pub struct Renderer {
     glint_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
     /// Invisible entities a spectator sees, drawn translucent.
     ghost_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    /// The shadows under the entities.
+    shadow_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
 }
 
 impl Renderer {
@@ -709,6 +711,7 @@ impl Renderer {
             additive_batches: Vec::new(),
             glint_batches: Vec::new(),
             ghost_batches: Vec::new(),
+            shadow_batches: Vec::new(),
         })
     }
 
@@ -1309,6 +1312,26 @@ impl Renderer {
         }
     }
 
+    /// Uploads the shadows under the entities: squares whose `light` is the
+    /// opacity in its low byte.
+    pub fn upload_shadow_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.shadow_batches.clear();
+        for (vertices, bind_group) in batches {
+            if vertices.is_empty() {
+                continue;
+            }
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("entity shadow batch vertices"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            self.shadow_batches
+                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
+        }
+    }
+
     /// Uploads the invisible entities a spectator sees (their model, drawn at
     /// 15 % opacity without writing depth).
     pub fn upload_ghost_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
@@ -1379,6 +1402,7 @@ impl Renderer {
         self.additive_batches.clear();
         self.glint_batches.clear();
         self.ghost_batches.clear();
+        self.shadow_batches.clear();
     }
 
     /// Creates an entity texture (such as a mob skin or player skin) for entity batches.
@@ -1660,6 +1684,16 @@ impl Renderer {
             if let Some(opaque) = mesh.opaque.as_ref() {
                 draw_gpu_pass(&mut pass, opaque);
             }
+        }
+
+        // The shadows lie on the ground, drawn before the entities.
+        if !self.shadow_batches.is_empty() {
+            let batches = self
+                .shadow_batches
+                .iter()
+                .map(|(buf, count, bg)| (buf, *count, bg));
+            self.entity_renderer
+                .render_shadows(&mut pass, &self.camera_bind_group, batches);
         }
 
         // Entities: depth write on, cutout discard, rendered between opaque and transparent passes.

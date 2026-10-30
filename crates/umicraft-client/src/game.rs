@@ -33,6 +33,7 @@ use umicraft_game::digging::{
 };
 use umicraft_game::entity::light::{eye_light, light_entities};
 use umicraft_game::entity::nametag::{mob_tag, player_tag};
+use umicraft_game::entity::shadow::shadow_entities;
 use umicraft_game::entity::{
     BossTracker, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityStore,
@@ -1138,6 +1139,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     // default (full sky) stays.
     let hand_light = game.world.as_ref().map_or(LightLevel::FULL_SKY, |world| {
         light_entities(world, &mut entities);
+        shadow_entities(world, &mut entities, game.world_time);
         eye_light(world, view.position)
     });
     let _ = frames.try_send(RenderEvent::Frame(Frame {

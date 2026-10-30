@@ -138,6 +138,8 @@ MCP to read: `LayerBipedArmor`, `ModelBiped` armour models, `LayerArmorBase`,
 
 ### P5g — Lighting and shadows
 
+**Status (2026-10-30): done, not verified against vanilla.** Entities are lit by the block they stand in (`entity_render::world_light_bits`; the wither, the blaze and the magma cube keep the full light), and cast the blob shadow of `Render.renderShadow` (`umicraft_game::entity::shadow` finds the blocks, `entity_render::shadow` draws the squares). Approximations: rain and thunder do not reduce the sky light, the blocks are the normal cubes (glass, leaves, ice and glowstone cast no shadow on them), and the set of blocks is found at the tick position while the squares follow the interpolated one.
+
 MCP to read: `Render.doRenderShadowAndFire`, `Render.renderShadow`,
 `Entity.getBrightnessForRender`, `RendererLivingEntity.doRender`.
 

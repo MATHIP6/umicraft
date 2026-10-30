@@ -151,6 +151,7 @@ impl EntityRecord {
             held: self.held.clone(),
             armor: self.armor.clone(),
             spectator: self.spectator,
+            shadow: Arc::default(),
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.bobber.is_some(),

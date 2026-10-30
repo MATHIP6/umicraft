@@ -27,6 +27,7 @@ mod mobs;
 mod mushrooms;
 mod player;
 mod pose;
+mod shadow;
 mod skins;
 mod skull;
 mod specs;
@@ -37,7 +38,7 @@ mod variants;
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
-use umicraft_game::entity::EntityRenderSnapshot;
+use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::{ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
@@ -53,7 +54,7 @@ pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(snapshots, &skins::NoSkins, 0.0, false).solid
+    mesh_entities_with(snapshots, &skins::NoSkins, 0.0, false, Vec3::ZERO).solid
 }
 
 /// The meshes of a frame: the lit entities, and the glowing layers that are
@@ -65,6 +66,8 @@ struct MeshedEntities {
     glint: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The invisible entities a spectator sees, drawn translucent.
     ghost: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The shadows under the entities.
+    shadows: HashMap<TextureSlot, Vec<EntityVertex>>,
 }
 
 /// [`mesh_entities`] with the downloaded skins and capes of players.
@@ -73,11 +76,13 @@ fn mesh_entities_with(
     skins: &dyn skins::SkinLookup,
     view_yaw: f32,
     viewer_is_spectator: bool,
+    camera: Vec3,
 ) -> MeshedEntities {
     let mut solid: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut additive: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut glint: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut ghost: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut shadows: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
         let matrix = transform::model_matrix(ent);
@@ -113,6 +118,7 @@ fn mesh_entities_with(
             );
         }
         fire::add_fire(&mut solid, ent, view_yaw);
+        shadow::add_shadow(&mut shadows, ent, camera);
     }
 
     MeshedEntities {
@@ -120,6 +126,7 @@ fn mesh_entities_with(
         additive,
         glint,
         ghost,
+        shadows,
     }
 }
 
@@ -132,14 +139,32 @@ const FLASH_SHIFT: u32 = 9;
 const DYE_BIT: u32 = 1 << 13;
 const DYE_SHIFT: u32 = 14;
 
-/// Full block and sky light: entities are not lit by the world yet.
+/// Full block and sky light (`15728880` in the reference).
 const FULL_LIGHT: u32 = 0x0000_00FF;
+
+/// Whether the entity ignores the world light: the wither, the blaze and the
+/// magma cube return the full light from `getBrightnessForRender`.
+fn lights_itself(kind: EntityKind) -> bool {
+    matches!(
+        kind,
+        EntityKind::Wither | EntityKind::Blaze | EntityKind::MagmaCube
+    )
+}
+
+/// The block and sky light nibbles of an entity's vertices: the light of the
+/// block it stands in (MCP `Entity.getBrightnessForRender`).
+fn world_light_bits(entity: &EntityRenderSnapshot) -> u32 {
+    if lights_itself(entity.kind) {
+        return FULL_LIGHT;
+    }
+    u32::from(entity.light.block.min(15)) | (u32::from(entity.light.sky.min(15)) << 4)
+}
 
 /// The packed light of an entity's vertices: light, hurt tint and creeper
 /// flash.
 fn entity_light(entity: &EntityRenderSnapshot) -> u32 {
     let hurt = if entity.hurt { HURT_BIT } else { 0 };
-    FULL_LIGHT | hurt | (flash_level(entity.fuse_flash) << FLASH_SHIFT)
+    world_light_bits(entity) | hurt | (flash_level(entity.fuse_flash) << FLASH_SHIFT)
 }
 
 /// The white flash of a creeper as a level `0..=15`: it blinks, white every
@@ -196,6 +221,40 @@ mod light_tests {
 }
 
 #[cfg(test)]
+mod world_light_tests {
+    use super::*;
+    use umicraft_game::entity::EntityId;
+    use umicraft_world::LightLevel;
+
+    fn entity(kind: EntityKind, light: LightLevel) -> EntityRenderSnapshot {
+        let mut entity = EntityRenderSnapshot::new(EntityId(1), kind, Vec3::ZERO);
+        entity.light = light;
+        entity
+    }
+
+    #[test]
+    fn a_mob_is_lit_by_the_block_it_stands_in() {
+        let dark = entity(EntityKind::Zombie, LightLevel::DARK);
+        assert_eq!(entity_light(&dark) & 0xFF, 0);
+        let lamp = entity(EntityKind::Zombie, LightLevel { block: 7, sky: 3 });
+        assert_eq!(entity_light(&lamp) & 0xFF, 7 | (3 << 4));
+        let day = entity(EntityKind::Zombie, LightLevel::FULL_SKY);
+        assert_eq!(entity_light(&day) & 0xFF, 15 << 4);
+    }
+
+    #[test]
+    fn the_wither_the_blaze_and_the_magma_cube_ignore_the_world_light() {
+        for kind in [EntityKind::Wither, EntityKind::Blaze, EntityKind::MagmaCube] {
+            assert_eq!(entity_light(&entity(kind, LightLevel::DARK)) & 0xFF, 0xFF);
+        }
+        assert_eq!(
+            entity_light(&entity(EntityKind::Creeper, LightLevel::DARK)) & 0xFF,
+            0
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use umicraft_game::entity::{EntityFlags, EntityId, EntityKind};
@@ -233,6 +292,7 @@ mod tests {
                 held: None,
                 armor: [None, None, None, None],
                 spectator: false,
+                shadow: Default::default(),
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -265,6 +325,7 @@ mod tests {
                 held: None,
                 armor: [None, None, None, None],
                 spectator: false,
+                shadow: Default::default(),
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -297,6 +358,7 @@ mod tests {
                 held: None,
                 armor: [None, None, None, None],
                 spectator: false,
+                shadow: Default::default(),
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
@@ -330,6 +392,7 @@ mod tests {
                 held: None,
                 armor: [None, None, None, None],
                 spectator: false,
+                shadow: Default::default(),
                 item: None,
                 age: 0.0,
                 frame_direction: 0,

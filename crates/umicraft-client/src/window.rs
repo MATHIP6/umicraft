@@ -1230,6 +1230,7 @@ impl App {
             let entities = world.entities(now);
             let hand = world.hand_pose(now);
             entity_textures.set_view_yaw(self.camera.yaw);
+            entity_textures.set_camera_position(self.camera.position);
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
                     == umicraft_game::gamemode::GameMode::Spectator,

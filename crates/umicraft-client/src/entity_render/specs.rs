@@ -21,6 +21,21 @@ use umicraft_assets::skin::{
 };
 use umicraft_model::entity::TextureSlot;
 
+/// An original stand-in for the shadow texture: a black disc whose opacity
+/// falls smoothly from the centre to the rim.
+fn procedural_shadow() -> Vec<u8> {
+    let mut rgba = vec![0u8; 32 * 32 * 4];
+    for y in 0..32 {
+        for x in 0..32 {
+            let dx = x as f32 + 0.5 - 16.0;
+            let dy = y as f32 + 0.5 - 16.0;
+            let falloff = (1.0 - (dx * dx + dy * dy).sqrt() / 16.0).clamp(0.0, 1.0);
+            rgba[(y * 32 + x) * 4 + 3] = (falloff * falloff * 255.0) as u8;
+        }
+    }
+    rgba
+}
+
 /// Specification for one entity texture: jar path + procedural fallback.
 pub(super) struct TextureSpec {
     pub(super) slot: TextureSlot,
@@ -63,6 +78,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
         },
         // The glowing layers have no original stand-in: without the jar they
         // add nothing.
+        TextureSpec {
+            slot: TextureSlot::Shadow,
+            jar_path: "assets/minecraft/textures/misc/shadow.png",
+            fallback: || (procedural_shadow(), 32, 32),
+        },
         TextureSpec {
             slot: TextureSlot::Arrow,
             jar_path: "assets/minecraft/textures/entity/arrow.png",

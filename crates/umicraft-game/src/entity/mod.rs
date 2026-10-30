@@ -21,6 +21,7 @@ pub mod motion;
 pub mod nametag;
 pub mod profile;
 pub mod record;
+pub mod shadow;
 pub mod snapshot;
 pub mod store;
 

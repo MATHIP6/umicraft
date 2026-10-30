@@ -191,3 +191,32 @@ fn fs_additive(in: AdditiveOut) -> @location(0) vec4<f32> {
     return vec4<f32>(rgb * (1.0 - fog), 1.0);
 }
 
+// The shadow under an entity (MCP `Render.renderShadow`): a texture of black
+// fading to nothing, whose opacity is computed per vertex by the client and
+// packed in the low byte of `light`.
+struct ShadowOut {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) world_position: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) @interpolate(flat) alpha: f32,
+};
+
+@vertex
+fn vs_shadow(in: VertexIn) -> ShadowOut {
+    var out: ShadowOut;
+    out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
+    out.world_position = in.position;
+    out.uv = in.uv;
+    out.alpha = f32(in.light & 0xFFu) / 255.0;
+    return out;
+}
+
+@fragment
+fn fs_shadow(in: ShadowOut) -> @location(0) vec4<f32> {
+    let tex = textureSample(entity_texture, entity_sampler, in.uv);
+    // A shadow fades into the fog like everything else.
+    let dist = distance(in.world_position, camera.camera_pos);
+    let fog = clamp((dist - camera.fog_start) / (camera.fog_end - camera.fog_start), 0.0, 1.0);
+    return vec4<f32>(tex.rgb, tex.a * in.alpha * (1.0 - fog));
+}
+

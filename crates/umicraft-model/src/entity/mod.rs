@@ -489,6 +489,8 @@ pub enum TextureSlot {
     PigSaddle,
     /// The red mushroom block texture (`mushroom_red.png`), drawn on a mooshroom.
     MushroomRed,
+    /// The soft black blob drawn under entities (`shadow.png`).
+    Shadow,
     /// The wither while it is being spawned (`wither_invulnerable.png`).
     WitherInvulnerable,
     /// The arrow (`arrow.png`), flying or stuck in a body.

@@ -140,6 +140,8 @@ pub struct EntityRenderer {
     glint_pipeline: wgpu::RenderPipeline,
     /// The translucent pipeline of invisible entities seen by a spectator.
     ghost_pipeline: wgpu::RenderPipeline,
+    /// The pipeline of the shadows under the entities.
+    shadow_pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// The same filtering with the texture repeating, for scrolling layers.
@@ -228,6 +230,20 @@ impl EntityRenderer {
                 depth_compare: wgpu::CompareFunction::LessEqual,
             },
         );
+        let shadow_pipeline = build_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            format,
+            PipelineKind {
+                label: "entity shadow pipeline",
+                vertex: "vs_shadow",
+                fragment: "fs_shadow",
+                blend: wgpu::BlendState::ALPHA_BLENDING,
+                depth_write: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+            },
+        );
         let glint_pipeline = build_pipeline(
             device,
             &pipeline_layout,
@@ -270,6 +286,7 @@ impl EntityRenderer {
             additive_pipeline,
             glint_pipeline,
             ghost_pipeline,
+            shadow_pipeline,
             texture_layout,
             sampler,
             repeat_sampler,
@@ -315,6 +332,16 @@ impl EntityRenderer {
             width,
             height,
         )
+    }
+
+    /// Renders the shadows under the entities.
+    pub fn render_shadows<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        camera_bind_group: &'a wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
+    ) {
+        self.draw_batches(pass, &self.shadow_pipeline, camera_bind_group, batches);
     }
 
     /// Renders the invisible entities a spectator sees: translucent, drawn

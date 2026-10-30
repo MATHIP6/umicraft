@@ -444,6 +444,7 @@ fn make_snapshot(
         held: None,
         armor: [None, None, None, None],
         spectator: false,
+        shadow: Default::default(),
         item: None,
         age: 0.0,
         frame_direction: 0,
@@ -1043,6 +1044,8 @@ enum Look {
     Ghost,
     Spectator,
     Spawning,
+    Cave,
+    Shadow,
 }
 
 /// A different set of armour per mob, to see every material in the dump:
@@ -1142,6 +1145,14 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
             let arrowed = mob.kind == EntityKind::Player;
             let ghost = matches!(mob.kind, EntityKind::Player | EntityKind::Cow);
             let spawning = mob.kind == EntityKind::Wither;
+            let shadowed = matches!(
+                mob.kind,
+                EntityKind::Player | EntityKind::Cow | EntityKind::Pig | EntityKind::Spider
+            );
+            let cave = matches!(
+                mob.kind,
+                EntityKind::Zombie | EntityKind::Cow | EntityKind::Blaze | EntityKind::Player
+            );
             [(index, mob, Look::Plain)]
                 .into_iter()
                 .chain(armored.then_some((index, mob, Look::Armored)))
@@ -1153,6 +1164,8 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
                 .chain(arrowed.then_some((index, mob, Look::Arrows)))
                 .chain(ghost.then_some((index, mob, Look::Ghost)))
                 .chain(spawning.then_some((index, mob, Look::Spawning)))
+                .chain(shadowed.then_some((index, mob, Look::Shadow)))
+                .chain(cave.then_some((index, mob, Look::Cave)))
                 .chain(arrowed.then_some((index, mob, Look::Spectator)))
         })
         .collect::<Vec<_>>();
@@ -1168,6 +1181,25 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
         // An invisible entity is seen by a spectator, who sees it translucent.
         if matches!(look, Look::Ghost | Look::Spectator) {
             snapshot.flags = EntityFlags::new(0x20, 0x7F);
+        }
+        if look == Look::Shadow {
+            // A floor of full blocks under the mob, in daylight.
+            let size =
+                umicraft_game::entity::shadow::shadow_size(mob.kind, false, &snapshot.meta.variant);
+            let floor = (64.0 + mob.world_y_offset).floor() as i32;
+            snapshot.shadow = umicraft_game::entity::shadow::shadow_blocks_with(
+                snapshot.position,
+                size,
+                0,
+                |pos| pos.y < floor,
+                |_| umicraft_world::LightLevel::FULL_SKY,
+            )
+            .into();
+        }
+        entity_textures.set_camera_position(Vec3::new(0.0, 64.0 + mob.camera_y, -mob.camera_dist));
+        if look == Look::Cave {
+            // A dim cave: a little block light and no sky light.
+            snapshot.light = umicraft_world::LightLevel { block: 3, sky: 0 };
         }
         if look == Look::Spawning {
             snapshot.meta.variant =
@@ -1275,6 +1307,8 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
             Look::Arrows => "_arrows",
             Look::Ghost => "_ghost",
             Look::Spawning => "_spawning",
+            Look::Cave => "_cave",
+            Look::Shadow => "_shadow",
             Look::Spectator => "_spectator",
         };
         let out_path = output_dir.join(format!("{}{suffix}.png", mob.id));

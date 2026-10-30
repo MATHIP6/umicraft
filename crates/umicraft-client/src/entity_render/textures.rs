@@ -78,6 +78,8 @@ pub struct EntityTextures {
     view_yaw: Cell<f32>,
     /// Whether the local player is a spectator, who sees invisible entities.
     viewer_is_spectator: Cell<bool>,
+    /// Where the camera is, for the distance at which a shadow fades.
+    camera: Cell<glam::Vec3>,
 }
 
 impl EntityTextures {
@@ -102,6 +104,7 @@ impl EntityTextures {
             skins: RefCell::new(SkinSet::new()),
             view_yaw: Cell::new(0.0),
             viewer_is_spectator: Cell::new(false),
+            camera: Cell::new(glam::Vec3::ZERO),
         }
     }
 
@@ -109,6 +112,12 @@ impl EntityTextures {
     /// that the flames of burning entities face.
     pub fn set_view_yaw(&self, yaw: f32) {
         self.view_yaw.set(yaw);
+    }
+
+    /// Sets the position of the camera, which decides how far a shadow is
+    /// still drawn.
+    pub fn set_camera_position(&self, position: glam::Vec3) {
+        self.camera.set(position);
     }
 
     /// Tells whether the local player is a spectator, who sees the invisible
@@ -140,6 +149,7 @@ impl EntityTextures {
             self,
             self.view_yaw.get(),
             self.viewer_is_spectator.get(),
+            self.camera.get(),
         );
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
@@ -187,6 +197,17 @@ impl EntityTextures {
             })
             .collect();
         renderer.upload_ghost_entities(&ghost);
+        let shadows: Vec<_> = meshed
+            .shadows
+            .iter()
+            .filter(|(_, verts)| !verts.is_empty())
+            .filter_map(|(slot, verts)| {
+                textures
+                    .get(slot)
+                    .map(|tex| (verts.as_slice(), tex.bind_group()))
+            })
+            .collect();
+        renderer.upload_shadow_entities(&shadows);
     }
 
     /// Creates the texture of every horse coat in `slots` that is not there yet.
