@@ -493,6 +493,18 @@ pub enum TextureSlot {
     Shadow,
     /// The wither while it is being spawned (`wither_invulnerable.png`).
     WitherInvulnerable,
+    /// The boat (`boat.png`).
+    Boat,
+    /// The minecart (`minecart.png`).
+    Minecart,
+    /// The ender crystal (`endercrystal/endercrystal.png`).
+    EnderCrystal,
+    /// The experience orb (`experience_orb.png`).
+    ExperienceOrb,
+    /// The sheet of paintings (`painting/paintings_kristoffer_zetterstrand.png`).
+    Painting,
+    /// The knot of a leash (`lead_knot.png`).
+    LeashKnot,
     /// The arrow (`arrow.png`), flying or stuck in a body.
     Arrow,
     /// The ghast while it charges a fireball (`ghast_shooting.png`).

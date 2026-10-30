@@ -8,9 +8,12 @@
 //! the direction of that point seen from the centre of the box, and is the
 //! model of a flying arrow (`RenderArrow`).
 
+use std::collections::HashMap;
+
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::{HumanoidModel, ModelPart, ModelVertex, TextureSlot};
+use umicraft_render::EntityVertex;
 
 use super::mobs::EntityLayer;
 use super::player::posed_player;
@@ -176,6 +179,34 @@ pub(super) fn arrow_layers(ent: &EntityRenderSnapshot) -> Vec<EntityLayer> {
     vec![EntityLayer::new(TextureSlot::Arrow, vertices)]
 }
 
+/// Adds an arrow in flight (`RenderArrow.doRender`): the arrow model at the
+/// position of the entity, turned to its yaw and pitch, in the world frame.
+pub(super) fn add_flying_arrow(
+    batches: &mut HashMap<TextureSlot, Vec<EntityVertex>>,
+    ent: &EntityRenderSnapshot,
+    light: u32,
+) {
+    if ent.kind != EntityKind::Arrow {
+        return;
+    }
+    let placed = Mat4::from_translation(ent.position)
+        * Mat4::from_rotation_y((ent.yaw - 90.0).to_radians())
+        * Mat4::from_rotation_z(ent.pitch.to_radians());
+    batches
+        .entry(TextureSlot::Arrow)
+        .or_default()
+        .extend(arrow_model().into_iter().map(|vertex| {
+            EntityVertex {
+                position: placed
+                    .transform_point3(Vec3::from(vertex.position))
+                    .to_array(),
+                normal: vertex.normal,
+                uv: vertex.uv,
+                light,
+            }
+        }));
+}
+
 /// The posed part an anchor stands for.
 fn anchor_part(model: &HumanoidModel, anchor: Anchor) -> ModelPart {
     match anchor {
@@ -292,6 +323,93 @@ mod tests {
             let [x, y, z] = vertex.position;
             assert!(x.abs() < 1.5 && z.abs() < 1.5, "{x} {z}");
             assert!((-0.9..2.6).contains(&y), "{y}");
+        }
+    }
+
+    #[test]
+    fn an_arrow_in_flight_is_the_arrow_model_at_its_position() {
+        let mut flying = EntityRenderSnapshot::new(
+            EntityId(2),
+            EntityKind::Arrow,
+            glam::Vec3::new(10.0, 70.0, -4.0),
+        );
+        flying.yaw = 30.0;
+        flying.pitch = 15.0;
+        let mut batches = HashMap::new();
+        add_flying_arrow(&mut batches, &flying, 0xFF);
+        let vertices = &batches[&TextureSlot::Arrow];
+        // The six quads of the arrow, around the entity (it is 0.9 block long).
+        assert_eq!(vertices.len(), 6 * 6);
+        for vertex in vertices {
+            let offset = Vec3::from(vertex.position) - Vec3::new(10.0, 70.0, -4.0);
+            assert!(offset.length() < 1.0, "{offset}");
+            assert_eq!(vertex.light, 0xFF);
+        }
+        // Another kind adds nothing.
+        let mut cow = flying.clone();
+        cow.kind = EntityKind::Cow;
+        let mut none = HashMap::new();
+        add_flying_arrow(&mut none, &cow, 0xFF);
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn the_arrow_points_along_its_heading() {
+        // Yaw 0, pitch 0: it flies towards +Z, so its long axis is z.
+        let flying = EntityRenderSnapshot::new(EntityId(3), EntityKind::Arrow, glam::Vec3::ZERO);
+        let mut batches = HashMap::new();
+        add_flying_arrow(&mut batches, &flying, 0);
+        let vertices = &batches[&TextureSlot::Arrow];
+        let extent = |axis: usize| {
+            let values = vertices.iter().map(|v| v.position[axis]);
+            values.clone().fold(f32::MIN, f32::max) - values.fold(f32::MAX, f32::min)
+        };
+        assert!(extent(2) > 0.8, "{}", extent(2));
+        assert!(extent(0) < 0.4 && extent(1) < 0.4);
+    }
+
+    /// Renders arrows in flight. Set `UMICRAFT_ARROW_DUMP` to a path to keep
+    /// the PNG.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn arrows_in_flight() {
+        use crate::entity_render::EntityTextures;
+        use umicraft_render::{Camera, Overlay, Renderer};
+
+        let mut renderer = Renderer::new_offscreen(640, 240).expect("renderer");
+        let heading = |id: i32, x: f32, yaw: f32, pitch: f32| {
+            let mut arrow = EntityRenderSnapshot::new(
+                EntityId(id),
+                EntityKind::Arrow,
+                glam::Vec3::new(x, 65.0, 0.0),
+            );
+            arrow.yaw = yaw;
+            arrow.pitch = pitch;
+            arrow
+        };
+        // Towards +Z, to the right, up and down.
+        let snapshots = [
+            heading(1, -3.0, 0.0, 0.0),
+            heading(2, -1.0, 90.0, 0.0),
+            heading(3, 1.0, 0.0, 45.0),
+            heading(4, 3.0, 0.0, -45.0),
+        ];
+        EntityTextures::load(&renderer).mesh_and_upload(&snapshots, &mut renderer);
+        let mut camera = Camera::new(Vec3::new(0.0, 65.0, -2.2), std::f32::consts::PI, 0.0);
+        camera.set_aspect(640, 240);
+        renderer
+            .render(&camera, &Overlay::new(640, 240))
+            .expect("render");
+        let image = renderer.read_pixels().expect("readback");
+        if let Ok(path) = std::env::var("UMICRAFT_ARROW_DUMP") {
+            let file = std::fs::File::create(path).expect("dump file");
+            let mut encoder = png::Encoder::new(file, image.width, image.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                .expect("png");
         }
     }
 }

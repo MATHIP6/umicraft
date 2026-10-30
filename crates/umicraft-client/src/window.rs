@@ -1230,6 +1230,7 @@ impl App {
             let entities = world.entities(now);
             let hand = world.hand_pose(now);
             entity_textures.set_view_yaw(self.camera.yaw);
+            entity_textures.set_view_pitch(self.camera.pitch);
             entity_textures.set_camera_position(self.camera.position);
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
@@ -1238,6 +1239,8 @@ impl App {
             entity_textures.mesh_and_upload(&entities, renderer);
             entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer);
             if let Some(items) = self.items.as_deref() {
+                self.world_items
+                    .set_view(self.camera.yaw, self.camera.pitch);
                 let dropped = self.world_items.build(&entities, items);
                 renderer.set_world_items(&dropped.items);
                 renderer.set_world_glint(&dropped.glint);

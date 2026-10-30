@@ -19,6 +19,8 @@ pub mod limbs;
 pub mod meta;
 pub mod motion;
 pub mod nametag;
+pub mod objects;
+pub mod painting;
 pub mod profile;
 pub mod record;
 pub mod shadow;

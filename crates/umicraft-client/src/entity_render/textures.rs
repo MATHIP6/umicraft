@@ -76,6 +76,8 @@ pub struct EntityTextures {
     skins: RefCell<SkinSet>,
     /// The camera yaw the flames of burning entities face.
     view_yaw: Cell<f32>,
+    /// The camera pitch the experience orbs face.
+    view_pitch: Cell<f32>,
     /// Whether the local player is a spectator, who sees invisible entities.
     viewer_is_spectator: Cell<bool>,
     /// Where the camera is, for the distance at which a shadow fades.
@@ -103,6 +105,7 @@ impl EntityTextures {
             jar,
             skins: RefCell::new(SkinSet::new()),
             view_yaw: Cell::new(0.0),
+            view_pitch: Cell::new(0.0),
             viewer_is_spectator: Cell::new(false),
             camera: Cell::new(glam::Vec3::ZERO),
         }
@@ -112,6 +115,12 @@ impl EntityTextures {
     /// that the flames of burning entities face.
     pub fn set_view_yaw(&self, yaw: f32) {
         self.view_yaw.set(yaw);
+    }
+
+    /// Sets the camera pitch (radians, `umicraft_render::Camera` convention)
+    /// that the experience orbs face.
+    pub fn set_view_pitch(&self, pitch: f32) {
+        self.view_pitch.set(pitch);
     }
 
     /// Sets the position of the camera, which decides how far a shadow is
@@ -147,7 +156,7 @@ impl EntityTextures {
         let meshed = mesh_entities_with(
             snapshots,
             self,
-            self.view_yaw.get(),
+            (self.view_yaw.get(), self.view_pitch.get()),
             self.viewer_is_spectator.get(),
             self.camera.get(),
         );

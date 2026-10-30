@@ -77,6 +77,9 @@ pub struct EntityRecord {
     /// Whether the tab list says this player is in spectator mode (shown as
     /// a head only).
     pub spectator: bool,
+    /// The `data` of the spawn packet of an object: the block of a falling
+    /// block, the type of a minecart, the owner of a projectile.
+    pub object_data: i32,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use (MCP `getItemInUseDuration` of
@@ -151,6 +154,7 @@ impl EntityRecord {
             held: self.held.clone(),
             armor: self.armor.clone(),
             spectator: self.spectator,
+            object_data: self.object_data,
             shadow: Arc::default(),
             item: self.item.clone(),
             use_ticks: self.use_ticks,
@@ -194,6 +198,7 @@ impl EntityRecord {
             item: None,
             armor: [None, None, None, None],
             spectator: false,
+            object_data: 0,
             use_ticks: 0,
             bobber: None,
             age_ticks: 0,

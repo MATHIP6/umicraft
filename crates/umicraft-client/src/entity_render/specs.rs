@@ -83,6 +83,38 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             jar_path: "assets/minecraft/textures/misc/shadow.png",
             fallback: || (procedural_shadow(), 32, 32),
         },
+        // No original stand-in for the vehicles: without the jar they are
+        // not drawn.
+        TextureSpec {
+            slot: TextureSlot::Boat,
+            jar_path: "assets/minecraft/textures/entity/boat.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Minecart,
+            jar_path: "assets/minecraft/textures/entity/minecart.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::EnderCrystal,
+            jar_path: "assets/minecraft/textures/entity/endercrystal/endercrystal.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::ExperienceOrb,
+            jar_path: "assets/minecraft/textures/entity/experience_orb.png",
+            fallback: || (vec![0; 64 * 64 * 4], 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::Painting,
+            jar_path: "assets/minecraft/textures/painting/paintings_kristoffer_zetterstrand.png",
+            fallback: || (vec![0; 256 * 256 * 4], 256, 256),
+        },
+        TextureSpec {
+            slot: TextureSlot::LeashKnot,
+            jar_path: "assets/minecraft/textures/entity/lead_knot.png",
+            fallback: || (vec![0; 32 * 32 * 4], 32, 32),
+        },
         TextureSpec {
             slot: TextureSlot::Arrow,
             jar_path: "assets/minecraft/textures/entity/arrow.png",

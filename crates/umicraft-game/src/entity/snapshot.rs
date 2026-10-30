@@ -73,6 +73,8 @@ pub struct EntityFrameData {
     pub armor: [Option<EntityItem>; 4],
     /// Whether the player is in spectator mode: only the head is drawn.
     pub spectator: bool,
+    /// The `data` of the spawn packet of an object.
+    pub object_data: i32,
     /// The blocks the shadow of the entity falls on (the game thread finds
     /// them from the world).
     pub shadow: Arc<[ShadowBlock]>,
@@ -133,6 +135,7 @@ impl EntityFrameData {
             held: self.held.clone(),
             armor: self.armor.clone(),
             spectator: self.spectator,
+            object_data: self.object_data,
             shadow: self.shadow.clone(),
             item: self.item.clone(),
             use_ticks: self.use_ticks,
@@ -195,6 +198,8 @@ pub struct EntityRenderSnapshot {
     pub armor: [Option<EntityItem>; 4],
     /// Whether the player is in spectator mode: only the head is drawn.
     pub spectator: bool,
+    /// The `data` of the spawn packet of an object.
+    pub object_data: i32,
     /// The blocks the shadow of the entity falls on (the game thread finds
     /// them from the world).
     pub shadow: Arc<[ShadowBlock]>,
@@ -244,6 +249,7 @@ impl EntityRenderSnapshot {
             item: None,
             armor: [None, None, None, None],
             spectator: false,
+            object_data: 0,
             shadow: Arc::default(),
             use_ticks: 0,
             fishing: false,

@@ -444,6 +444,7 @@ fn make_snapshot(
         held: None,
         armor: [None, None, None, None],
         spectator: false,
+        object_data: 0,
         shadow: Default::default(),
         item: None,
         age: 0.0,

@@ -31,6 +31,7 @@ use crate::java_random::JavaRandom;
 mod carried;
 mod head;
 mod held;
+mod objects;
 
 /// Hover height offset per unit of the ground scale (`RenderEntityItem`).
 const HOVER_BASE: f32 = 0.25;
@@ -45,9 +46,17 @@ const SCATTER_SEED: u64 = 187;
 #[derive(Debug, Default)]
 pub struct WorldItems {
     layers: ItemLayers,
+    /// Where the camera looks, for the sprites that face it.
+    view: objects::View,
 }
 
 impl WorldItems {
+    /// Sets the camera angles (`yaw` and `pitch` in radians, as in
+    /// `umicraft_render::Camera`) that thrown items and fireballs face.
+    pub fn set_view(&mut self, yaw: f32, pitch: f32) {
+        self.view = objects::View::of_camera(yaw, pitch);
+    }
+
     /// Rebuilds the meshes from the entity snapshots and returns them.
     ///
     /// The buffers of the previous frame are reused. Entities that are not
@@ -72,6 +81,7 @@ impl WorldItems {
             }
             head::push(&mut self.layers, entity, items);
             carried::push(&mut self.layers, entity, items);
+            objects::push(&mut self.layers, entity, items, self.view);
         }
         &self.layers
     }
@@ -436,6 +446,7 @@ mod render_tests {
             frame_rotation: 0,
             armor: [None, None, None, None],
             spectator: false,
+            object_data: 0,
             shadow: Default::default(),
             use_ticks: 0,
             fishing: false,
@@ -543,6 +554,7 @@ mod player_render_tests {
             }),
             armor: [None, None, None, None],
             spectator: false,
+            object_data: 0,
             shadow: Default::default(),
             item: None,
             age: 0.0,
@@ -734,6 +746,7 @@ mod glint_render_tests {
             frame_rotation: 0,
             armor: [None, None, None, None],
             spectator: false,
+            object_data: 0,
             shadow: Default::default(),
             use_ticks: 0,
             fishing: false,

@@ -83,7 +83,8 @@ pub fn shadow_size(kind: EntityKind, baby: bool, variant: &Variant) -> f32 {
         | EntityKind::Blaze
         | EntityKind::Ghast
         | EntityKind::Guardian
-        | EntityKind::Dragon => 0.5,
+        | EntityKind::Dragon
+        | EntityKind::EnderCrystal => 0.5,
         EntityKind::Cow | EntityKind::Mooshroom | EntityKind::Pig | EntityKind::Sheep => 0.7,
         EntityKind::Squid => 0.7,
         EntityKind::Horse => 0.75,
@@ -96,7 +97,7 @@ pub fn shadow_size(kind: EntityKind, baby: bool, variant: &Variant) -> f32 {
         EntityKind::Spider | EntityKind::Wither => 1.0,
         EntityKind::CaveSpider => 0.7,
         EntityKind::Giant => 3.0,
-        EntityKind::Item => 0.15,
+        EntityKind::Item | EntityKind::XpOrb => 0.15,
         EntityKind::Slime | EntityKind::MagmaCube => {
             let size = match variant {
                 Variant::Slime(size) => f32::from(*size),
@@ -118,7 +119,7 @@ pub fn shadow_size(kind: EntityKind, baby: bool, variant: &Variant) -> f32 {
 /// lighter than the rest.
 #[must_use]
 pub fn shadow_opacity(kind: EntityKind) -> f32 {
-    if kind == EntityKind::Item {
+    if matches!(kind, EntityKind::Item | EntityKind::XpOrb) {
         0.75
     } else {
         1.0

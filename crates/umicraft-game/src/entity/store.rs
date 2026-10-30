@@ -128,8 +128,16 @@ impl EntityStore {
         data: i32,
     ) {
         let kind = EntityKind::from_object_type(object_type);
+        // `EntityLeashKnot.updateBoundingBox`: the knot sits on the middle of
+        // its fence block.
+        let position = if kind == EntityKind::LeashKnot {
+            position.floor() + DVec3::splat(0.5)
+        } else {
+            position
+        };
         let mut record = EntityRecord::new(id, kind, position, yaw, pitch);
         record.velocity = velocity;
+        record.object_data = data;
         if kind == EntityKind::ItemFrame {
             record.frame_direction = data.clamp(0, 3) as u8;
         }
@@ -140,6 +148,32 @@ impl EntityStore {
                 angler.bobber = Some(id);
             }
         }
+        self.entities.insert(id, record);
+    }
+
+    /// Spawns an experience orb worth `count` (`Spawn Experience Orb`).
+    pub fn spawn_xp_orb(&mut self, id: EntityId, position: DVec3, count: i16) {
+        let mut record = EntityRecord::new(id, EntityKind::XpOrb, position, 0.0, 0.0);
+        record.object_data = i32::from(count);
+        self.entities.insert(id, record);
+    }
+
+    /// Spawns a painting on `block` facing `facing` (`Spawn Painting`). An
+    /// unknown title is ignored: the reference would have no artwork to draw.
+    pub fn spawn_painting(&mut self, id: EntityId, title: &str, block: [i32; 3], facing: u8) {
+        let Some(index) = super::painting::art_index(title) else {
+            return;
+        };
+        let centre = super::painting::centre(block, facing, &super::painting::ARTS[index]);
+        // `EntityHanging.updateFacingWithBoundingBox`: the yaw is 90 per index.
+        let mut record = EntityRecord::new(
+            id,
+            EntityKind::Painting,
+            centre,
+            f32::from(facing & 3) * 90.0,
+            0.0,
+        );
+        record.object_data = index as i32;
         self.entities.insert(id, record);
     }
 
@@ -425,6 +459,15 @@ impl EntityStore {
         }
         self.entities
             .retain(|_, entity| !entity.animation.is_finished());
+    }
+
+    /// Advances the objects the client simulates (dropped items, falling
+    /// blocks, arrows, projectiles) by one tick, with the collisions of `world`.
+    /// Call it right after [`Self::tick`].
+    pub fn tick_objects<S: crate::shapes::BlockSource + ?Sized>(&mut self, world: &S) {
+        for entity in self.entities.values_mut() {
+            super::objects::step(entity, world);
+        }
     }
 
     /// Produces interpolated render snapshots for all tracked entities.

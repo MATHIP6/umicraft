@@ -25,15 +25,19 @@ mod hand;
 mod horse_coat;
 mod mobs;
 mod mushrooms;
+mod paintings;
 mod player;
 mod pose;
 mod shadow;
 mod skins;
 mod skull;
+mod small_models;
 mod specs;
 mod textures;
 mod transform;
 mod variants;
+mod vehicles;
+mod xp;
 
 use std::collections::HashMap;
 
@@ -54,7 +58,7 @@ pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(snapshots, &skins::NoSkins, 0.0, false, Vec3::ZERO).solid
+    mesh_entities_with(snapshots, &skins::NoSkins, (0.0, 0.0), false, Vec3::ZERO).solid
 }
 
 /// The meshes of a frame: the lit entities, and the glowing layers that are
@@ -74,7 +78,7 @@ struct MeshedEntities {
 fn mesh_entities_with(
     snapshots: &[EntityRenderSnapshot],
     skins: &dyn skins::SkinLookup,
-    view_yaw: f32,
+    (view_yaw, view_pitch): (f32, f32),
     viewer_is_spectator: bool,
     camera: Vec3,
 ) -> MeshedEntities {
@@ -118,6 +122,11 @@ fn mesh_entities_with(
             );
         }
         fire::add_fire(&mut solid, ent, view_yaw);
+        arrows::add_flying_arrow(&mut solid, ent, light);
+        vehicles::add_vehicle(&mut solid, ent, light);
+        xp::add_xp_orb(&mut solid, ent, light, view_yaw, view_pitch);
+        paintings::add_painting(&mut solid, ent, light);
+        small_models::add_small_model(&mut solid, ent, light);
         shadow::add_shadow(&mut shadows, ent, camera);
     }
 
@@ -292,6 +301,7 @@ mod tests {
                 held: None,
                 armor: [None, None, None, None],
                 spectator: false,
+                object_data: 0,
                 shadow: Default::default(),
                 item: None,
                 age: 0.0,
@@ -325,6 +335,7 @@ mod tests {
                 held: None,
                 armor: [None, None, None, None],
                 spectator: false,
+                object_data: 0,
                 shadow: Default::default(),
                 item: None,
                 age: 0.0,
@@ -358,6 +369,7 @@ mod tests {
                 held: None,
                 armor: [None, None, None, None],
                 spectator: false,
+                object_data: 0,
                 shadow: Default::default(),
                 item: None,
                 age: 0.0,
@@ -392,6 +404,7 @@ mod tests {
                 held: None,
                 armor: [None, None, None, None],
                 spectator: false,
+                object_data: 0,
                 shadow: Default::default(),
                 item: None,
                 age: 0.0,

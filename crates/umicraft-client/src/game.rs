@@ -1583,6 +1583,23 @@ fn apply_net_event(
                 o.data,
             );
         }
+        PlayEvent::SpawnXpOrb(o) => {
+            let pos = DVec3::new(
+                f64::from(o.x) / 32.0,
+                f64::from(o.y) / 32.0,
+                f64::from(o.z) / 32.0,
+            );
+            game.entities
+                .spawn_xp_orb(EntityId(o.entity_id), pos, o.count);
+        }
+        PlayEvent::SpawnPainting(p) => {
+            game.entities.spawn_painting(
+                EntityId(p.entity_id),
+                &p.title,
+                [p.x, p.y, p.z],
+                p.facing,
+            );
+        }
         PlayEvent::DestroyEntities(d) => {
             game.entities.destroy(&d.entity_ids);
         }
@@ -2349,6 +2366,9 @@ fn tick(
     report_flight(game, was_flying, queue);
     follow_body(game);
     game.entities.tick();
+    if let Some(world) = game.world.as_ref() {
+        game.entities.tick_objects(world);
+    }
     game.server.tick();
     // A player inside a block is pushed out sideways by the simulation
     // itself, like the vanilla client (`umicraft_game::physics`); it is

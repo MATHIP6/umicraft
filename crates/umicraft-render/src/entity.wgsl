@@ -100,6 +100,17 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.flash = f32((in.light >> 9u) & 15u) / 15.0;
     let dyed = (in.light >> 13u) & 1u;
     out.dye = select(vec3<f32>(1.0), DYES[(in.light >> 14u) & 15u], dyed == 1u);
+    // Bit 18: experience orb, whose colour cycles with the phase of bits
+    // 19..=26, in 256 steps of a turn (MCP `RenderXPOrb`: red
+    // `(sin p + 1) / 2`, green 1, blue `(sin (p + 4.1887903) + 1) / 10`).
+    if (((in.light >> 18u) & 1u) == 1u) {
+        let phase = f32((in.light >> 19u) & 255u) * 0.02454369;
+        out.dye = vec3<f32>(
+            (sin(phase) + 1.0) * 0.5,
+            1.0,
+            (sin(phase + 4.1887903) + 1.0) * 0.1,
+        );
+    }
 
     return out;
 }
