@@ -15,6 +15,7 @@ use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_game::hand::HandPose;
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, EntityVertex, Renderer};
+use umicraft_ui::FontAtlas;
 
 use super::armor::armor_texture;
 use super::hand::hand_vertices;
@@ -114,6 +115,33 @@ impl EntityTextures {
             camera: Cell::new(glam::Vec3::ZERO),
             block_entities: RefCell::default(),
         }
+    }
+
+    /// [`Self::load`] plus the sign text texture of `font`, if there is one.
+    #[must_use]
+    pub fn load_with_font(renderer: &Renderer, font: Option<&FontAtlas>) -> Self {
+        let textures = Self::load(renderer);
+        if let Some(font) = font {
+            textures.set_sign_font(renderer, font);
+        }
+        textures
+    }
+
+    /// Makes the texture of the sign text from the coverage of `font`: black
+    /// with the coverage as alpha, so the entity pass's alpha test cuts the
+    /// glyphs out (the reference draws the text in black, colour `0`). The
+    /// glyph UVs of the sign renderer address this atlas, so it must be called
+    /// again with the new atlas whenever the UI font changes.
+    pub fn set_sign_font(&self, renderer: &Renderer, font: &FontAtlas) {
+        let rgba: Vec<u8> = font
+            .pixels
+            .iter()
+            .flat_map(|&coverage| [0, 0, 0, coverage])
+            .collect();
+        let texture = renderer.create_entity_texture(&rgba, font.width, font.height);
+        self.textures
+            .borrow_mut()
+            .insert(TextureSlot::SignText, texture);
     }
 
     /// Sets the camera yaw (radians, `umicraft_render::Camera` convention)

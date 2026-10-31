@@ -436,7 +436,10 @@ impl App {
             self.items = installed.items();
             self.dials = DialAnimator::new(installed.dials());
             self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
-            self.entity_textures = Some(EntityTextures::load(renderer));
+            self.entity_textures = Some(EntityTextures::load_with_font(
+                renderer,
+                self.ui_atlas.as_ref(),
+            ));
             self.map_textures = Some(MapTextures::load(renderer));
             if let Some(world) = self.world.as_mut() {
                 world.reload_terrain(&installed, default_worker_count(), renderer);
@@ -1252,6 +1255,8 @@ impl App {
                 world.block_entities(),
                 &BlockEntityScene {
                     lids: world.chest_lids(),
+                    signs: world.signs(),
+                    font: self.ui_atlas.as_ref(),
                     partial_tick: environment.partial_tick,
                     camera: self.camera.position,
                 },
@@ -1494,7 +1499,10 @@ impl ApplicationHandler for App {
                 return;
             }
         }
-        self.entity_textures = Some(EntityTextures::load(&renderer));
+        self.entity_textures = Some(EntityTextures::load_with_font(
+            &renderer,
+            self.ui_atlas.as_ref(),
+        ));
         self.map_textures = Some(MapTextures::load(&renderer));
         self.renderer = Some(renderer);
         self.window = Some(window.clone());

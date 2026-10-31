@@ -54,6 +54,7 @@ fn texture(kind: Option<BlockEntityKind>, large: bool) -> TextureSlot {
 
 #[cfg(test)]
 mod tests {
+    use umicraft_game::server::block_entities::SignTable;
     use umicraft_mesh::SameNeighbours;
     use umicraft_world::{BlockState, LightLevel};
 
@@ -72,6 +73,8 @@ mod tests {
         let lids = umicraft_game::server::chest_lids::ChestLids::default();
         let scene = BlockEntityScene {
             lids: &lids,
+            signs: &SignTable::new(),
+            font: None,
             partial_tick: 0.0,
             camera: glam::Vec3::ZERO,
         };

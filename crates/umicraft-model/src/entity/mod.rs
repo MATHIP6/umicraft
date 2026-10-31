@@ -513,6 +513,9 @@ pub enum TextureSlot {
     ChestTrappedDouble,
     /// The sign (`sign.png`).
     Sign,
+    /// The glyphs of the font atlas as black on transparent, for the text of
+    /// signs. Made from the UI font at run time, not read from the jar.
+    SignText,
     /// The ender crystal (`endercrystal/endercrystal.png`).
     EnderCrystal,
     /// The experience orb (`experience_orb.png`).

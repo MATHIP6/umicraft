@@ -10,6 +10,7 @@
 //! the renderer consumes it.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use umicraft_protocol::packets::play::clientbound::block_break_anim::BlockBreakAnim;
 use umicraft_protocol::packets::play::clientbound::update_block_entity::UpdateBlockEntity;
@@ -21,6 +22,9 @@ pub type Pos = (i32, i32, i32);
 /// Most positions kept per table. The positions are server-chosen, so the
 /// tables are capped; an update for a known position always applies.
 pub const MAX_ENTRIES: usize = 65_536;
+
+/// The four lines of every known sign, by position.
+pub type SignTable = BTreeMap<Pos, [String; 4]>;
 
 /// The last NBT update of a block entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,7 +48,9 @@ pub struct BreakProgress {
 /// Signs, other block entities and break animations.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlockEntities {
-    signs: BTreeMap<Pos, [String; 4]>,
+    /// Shared so the render thread gets a snapshot for the price of a
+    /// pointer; a change copies the table only while a snapshot is held.
+    signs: Arc<SignTable>,
     entities: BTreeMap<Pos, BlockEntityData>,
     breaking: BTreeMap<i32, BreakProgress>,
 }
@@ -58,11 +64,10 @@ fn insert_capped<V>(map: &mut BTreeMap<Pos, V>, pos: Pos, value: V) {
 impl BlockEntities {
     /// Stores the four lines of a sign (0x33).
     pub fn apply_sign(&mut self, packet: &UpdateSign) {
-        insert_capped(
-            &mut self.signs,
-            (packet.x, packet.y, packet.z),
-            packet.lines.clone(),
-        );
+        let pos = (packet.x, packet.y, packet.z);
+        if self.signs.len() < MAX_ENTRIES || self.signs.contains_key(&pos) {
+            Arc::make_mut(&mut self.signs).insert(pos, packet.lines.clone());
+        }
     }
 
     /// Stores a block entity update (0x35).
@@ -92,13 +97,17 @@ impl BlockEntities {
 
     /// Forgets the data of a position (the block was replaced).
     pub fn remove(&mut self, pos: Pos) {
-        self.signs.remove(&pos);
+        if self.signs.contains_key(&pos) {
+            Arc::make_mut(&mut self.signs).remove(&pos);
+        }
         self.entities.remove(&pos);
     }
 
     /// Forgets everything (the dimension changed).
     pub fn clear(&mut self) {
-        self.signs.clear();
+        if !self.signs.is_empty() {
+            self.signs = Arc::default();
+        }
         self.entities.clear();
         self.breaking.clear();
     }
@@ -106,6 +115,12 @@ impl BlockEntities {
     /// The four lines of the sign at a position.
     pub fn sign(&self, pos: Pos) -> Option<&[String; 4]> {
         self.signs.get(&pos)
+    }
+
+    /// A shared snapshot of all signs, for the render thread.
+    #[must_use]
+    pub fn sign_table(&self) -> Arc<SignTable> {
+        Arc::clone(&self.signs)
     }
 
     /// All signs.
@@ -160,6 +175,17 @@ mod tests {
         assert_eq!(blocks.sign((1, 64, 0)).unwrap()[0], "b");
         assert_eq!(blocks.signs().count(), 1);
         assert!(blocks.sign((2, 64, 0)).is_none());
+    }
+
+    #[test]
+    fn a_snapshot_is_shared_until_a_sign_changes_and_never_sees_the_change() {
+        let mut blocks = BlockEntities::default();
+        blocks.apply_sign(&sign(1, "a"));
+        let before = blocks.sign_table();
+        assert!(Arc::ptr_eq(&before, &blocks.sign_table()));
+        blocks.apply_sign(&sign(1, "b"));
+        assert_eq!(before[&(1, 64, 0)][0], "a");
+        assert_eq!(blocks.sign_table()[&(1, 64, 0)][0], "b");
     }
 
     #[test]

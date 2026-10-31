@@ -10,16 +10,20 @@
 //!
 //! - `chest`: chests, trapped chests, ender chests, single and double, with the
 //!   lid angle of the `Block Action` state.
+//! - `sign`: standing and wall signs with their four lines of text.
 
 mod chest;
+mod sign;
 
 use std::collections::HashMap;
 
 use glam::Vec3;
+use umicraft_game::server::block_entities::SignTable;
 use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_mesh::{BlockEntityKind, BlockEntityRef};
 use umicraft_model::entity::{ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
+use umicraft_ui::FontAtlas;
 
 /// Squared distance beyond which a tile entity is not drawn
 /// (`TileEntity.getMaxRenderDistanceSquared`, 64 blocks).
@@ -29,6 +33,12 @@ const MAX_RENDER_DISTANCE_SQUARED: f32 = 4096.0;
 pub(crate) struct BlockEntityScene<'a> {
     /// The lid angles of the chests.
     pub lids: &'a ChestLids,
+    /// The text of the signs.
+    pub signs: &'a SignTable,
+    /// The font the sign text is laid out with, `None` before it is loaded.
+    /// It must be the atlas `EntityTextures::set_sign_font` was given, since
+    /// the glyph UVs address that texture.
+    pub font: Option<&'a FontAtlas>,
     /// Interpolation between two ticks.
     pub partial_tick: f32,
     /// The camera, for the distance cut.
@@ -49,8 +59,10 @@ pub(crate) fn mesh_block_entities<'a>(
                 | BlockEntityKind::TrappedChest
                 | BlockEntityKind::EnderChest,
             ) => chest::add_chest(&mut batches, entry, scene),
-            // Signs are drawn once their text can be (P7c, next step).
-            Some(BlockEntityKind::StandingSign | BlockEntityKind::WallSign) | None => {}
+            Some(BlockEntityKind::StandingSign | BlockEntityKind::WallSign) => {
+                sign::add_sign(&mut batches, entry, scene);
+            }
+            None => {}
         }
     }
     batches
