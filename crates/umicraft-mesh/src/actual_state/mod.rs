@@ -23,8 +23,12 @@
 
 mod connect;
 mod fence;
+mod gate;
+mod pane;
+mod stairs;
 #[cfg(test)]
 mod test_support;
+mod wall;
 
 use std::collections::BTreeMap;
 
@@ -72,39 +76,71 @@ impl Overrides {
 /// `None` when the block does not depend on its neighbours, or when the
 /// computed key names no variant: the caller then falls back to the wire-state
 /// model, which is the default look of the block.
-pub(crate) fn model_for<'a, S: BlockSource + ?Sized>(
+pub(crate) fn model_for<'a>(
     models: &'a BlockModelSet,
-    source: &S,
+    source: &dyn BlockSource,
     position: [i32; 3],
     state: BlockState,
 ) -> Option<&'a BlockModel> {
-    if !depends_on_neighbours(state) {
-        return None;
-    }
+    let family = family_of(state)?;
     let rule = definition(state.id())?.state(state.metadata())?;
     let base = parse_key(rule.variant);
-    let overrides = compute(source, position, state, &base)?;
+    let context = Context {
+        source,
+        position,
+        state,
+        base: &base,
+    };
+    let overrides = (family.overrides)(&context)?;
     let key = merge_key(&base, overrides.as_slice());
     models.model_by_key(rule.blockstate, &key)
 }
 
-/// Whether [`compute`] knows `state`; keeps the hot path to a table lookup.
-fn depends_on_neighbours(state: BlockState) -> bool {
-    fence::handles(state.id())
+/// What a family needs to compute the properties of one block.
+pub(crate) struct Context<'a> {
+    /// The surroundings.
+    pub(crate) source: &'a dyn BlockSource,
+    /// World position of the block.
+    pub(crate) position: [i32; 3],
+    /// The wire state of the block.
+    pub(crate) state: BlockState,
+    /// Properties of the metadata-derived registry key.
+    pub(crate) base: &'a Props<'a>,
 }
 
-/// Dispatches to the block family of `state`.
-fn compute<S: BlockSource + ?Sized>(
-    source: &S,
-    position: [i32; 3],
-    state: BlockState,
-    _base: &Props<'_>,
-) -> Option<Overrides> {
-    let id = state.id();
-    if fence::handles(id) {
-        return Some(fence::overrides(source, position, id));
-    }
-    None
+/// One block family: which ids it owns and how it reads the neighbours.
+struct Family {
+    handles: fn(u16) -> bool,
+    overrides: fn(&Context<'_>) -> Option<Overrides>,
+}
+
+/// Every family. Adding a block family is one module and one line here.
+const FAMILIES: &[Family] = &[
+    Family {
+        handles: fence::handles,
+        overrides: |c| Some(fence::overrides(c.source, c.position, c.state.id())),
+    },
+    Family {
+        handles: pane::handles,
+        overrides: |c| Some(pane::overrides(c.source, c.position)),
+    },
+    Family {
+        handles: wall::handles,
+        overrides: |c| Some(wall::overrides(c.source, c.position)),
+    },
+    Family {
+        handles: gate::handles,
+        overrides: |c| gate::overrides(c.source, c.position, c.base.get("facing")?),
+    },
+    Family {
+        handles: stairs::handles,
+        overrides: |c| Some(stairs::overrides(c.source, c.position, c.state)),
+    },
+];
+
+/// The family owning `state`, if its look depends on the neighbours.
+fn family_of(state: BlockState) -> Option<&'static Family> {
+    FAMILIES.iter().find(|family| (family.handles)(state.id()))
 }
 
 /// Splits a registry key (`facing=north,half=top`) into its properties.

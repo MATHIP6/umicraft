@@ -108,7 +108,7 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     fluid::emit_fluid(&mut mesh, source, position, liquid, layers, tint);
                     continue;
                 }
-                let model = actual_state::model_for(&context.models, source, position, state)
+                let model = actual_state::model_for(&context.models, &source, position, state)
                     .or_else(|| context.models.model(state));
                 let variant = model.and_then(|model| select_variant(model, position));
                 if let Some(variant) = variant {

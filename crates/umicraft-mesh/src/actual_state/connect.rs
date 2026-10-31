@@ -63,6 +63,11 @@ impl Side {
         }
     }
 
+    /// The side facing this one (`EnumFacing.getOpposite`).
+    pub(super) const fn opposite(self) -> Self {
+        self.rotate_y().rotate_y()
+    }
+
     /// Parses a `facing` property value.
     pub(super) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|side| side.name() == name)
@@ -102,6 +107,15 @@ mod tests {
         }
         assert_eq!(Side::North.rotate_y(), Side::East);
         assert_eq!(Side::North.rotate_y_ccw(), Side::West);
+    }
+
+    #[test]
+    fn opposite_sides_face_each_other() {
+        assert_eq!(Side::North.opposite(), Side::South);
+        assert_eq!(Side::East.opposite(), Side::West);
+        for side in Side::ALL {
+            assert_eq!(side.opposite().opposite(), side);
+        }
     }
 
     #[test]
