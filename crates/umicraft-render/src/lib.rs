@@ -15,6 +15,7 @@
 mod block_atlas;
 mod camera;
 mod chat_hud;
+mod clouds;
 mod dynamic_blocks;
 pub mod entity_pass;
 mod environment;
@@ -33,6 +34,7 @@ mod ui_pass;
 
 pub use block_atlas::BlockAtlasError;
 pub use camera::Camera;
+pub use clouds::CloudMode;
 pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;
 pub use error::RenderError;

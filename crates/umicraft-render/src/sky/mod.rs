@@ -20,10 +20,12 @@
 //! exactly as the reference's linear sky fog does (`setupFog(-1)`: start 0,
 //! end at the view distance).
 //!
-//! Clouds are not drawn here; they are a later step and get their own module
-//! beside `end` that appends layers to the same plan.
+//! Clouds are not drawn here: the reference draws them after the terrain with
+//! the depth test, so they have their own pass in [`crate::clouds`]. Only their
+//! tint ([`SkyState::cloud_color`]) is computed with the sky.
 
 mod celestial;
+mod cloud_color;
 mod dome;
 mod end;
 mod gpu;
@@ -39,10 +41,13 @@ use glam::Mat4;
 
 use crate::{Camera, RenderEnvironment};
 use plan::{Blend, Layer, Mesh, PlanInput, MAX_LAYERS};
-use vertex::SkyVertex;
 
+pub(crate) use gpu::{sampler, upload};
+pub(crate) use state::SkyKind;
 pub use state::SkyState;
+pub(crate) use textures::hash;
 pub use textures::{SkyImage, SkyTextures};
+pub(crate) use vertex::{quad, SkyVertex};
 
 /// Where each mesh lives in the shared vertex buffer.
 struct MeshTable {

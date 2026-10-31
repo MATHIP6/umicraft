@@ -31,6 +31,7 @@ use winit::window::Window;
 
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::camera::Camera;
+use crate::clouds::{CloudMode, CloudRenderer};
 use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
@@ -38,7 +39,7 @@ use crate::error::RenderError;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
-use crate::sky::{SkyRenderer, SkyState, SkyTextures};
+use crate::sky::{SkyImage, SkyRenderer, SkyState, SkyTextures};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
 use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
 
@@ -186,8 +187,12 @@ pub struct Renderer {
     /// capacity is bounded by the number of uploaded meshes and is retained
     /// across frames, so sorting allocates nothing in steady state.
     transparent_order: Vec<TransparentDraw>,
-    /// Sky dome, sun, moon, stars and the End cube (no clouds yet).
+    /// Sky dome, sun, moon, stars and the End cube.
     sky: SkyRenderer,
+    /// The clouds, drawn with the depth test after the opaque passes.
+    clouds: CloudRenderer,
+    /// Client ticks (with the fraction) that drive the cloud drift.
+    cloud_ticks: f64,
     /// World clock and dimension of the next frame.
     environment: RenderEnvironment,
     /// Nearest-neighbour sampler shared by the fallback and installed arrays.
@@ -570,6 +575,7 @@ impl Renderer {
             wgpu::BlendState::ALPHA_BLENDING,
         );
         let sky = SkyRenderer::new(&device, &queue, format);
+        let clouds = CloudRenderer::new(&device, &queue, format);
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("camera bind group layout"),
@@ -680,6 +686,8 @@ impl Renderer {
             terrain_layout,
             transparent_order: Vec::with_capacity(64),
             sky,
+            clouds,
+            cloud_ticks: 0.0,
             environment: RenderEnvironment::default(),
             block_sampler,
             procedural_blocks: block_view,
@@ -735,6 +743,28 @@ impl Renderer {
     /// missing jar never breaks the sky. Calling it again replaces the set.
     pub fn set_sky_textures(&mut self, textures: &SkyTextures) {
         self.sky.set_textures(&self.device, &self.queue, textures);
+        self.clouds
+            .set_texture(&self.device, &self.queue, textures.clouds.as_ref());
+    }
+
+    /// Chooses the cloud version (`GameSettings.clouds` and `fancyGraphics`).
+    ///
+    /// Call once per frame; it only stores the choice.
+    pub fn set_cloud_mode(&mut self, mode: CloudMode) {
+        self.clouds.set_mode(mode);
+    }
+
+    /// Replaces the cloud picture (`textures/environment/clouds.png`). A
+    /// malformed image restores the original generated mask.
+    pub fn set_cloud_texture(&mut self, image: &SkyImage) {
+        self.clouds
+            .set_texture(&self.device, &self.queue, Some(image));
+    }
+
+    /// Sets the cloud drift clock in client ticks, fraction included
+    /// (`cloudTickCounter + partialTicks`).
+    pub fn set_cloud_ticks(&mut self, ticks: f64) {
+        self.cloud_ticks = ticks;
     }
 
     /// Replaces the break cracks drawn over the terrain.
@@ -858,6 +888,13 @@ impl Renderer {
         self.write_camera(camera, &sky_state);
         self.sky
             .update(&self.queue, camera, self.environment, &sky_state);
+        self.clouds.update(
+            &self.queue,
+            camera,
+            self.environment,
+            &sky_state,
+            self.cloud_ticks,
+        );
         self.upload_overlay(overlay);
         self.prepare_transparent_order(camera.position);
         if self.surface.is_some() {
@@ -1778,6 +1815,10 @@ impl Renderer {
         self.world_glint
             .draw_world(&mut pass, &self.terrain_bind_group);
 
+        // The clouds hide behind terrain and hide the water behind them, as in
+        // `renderWorldPass`: before the translucent layer from below.
+        self.clouds.draw_below(&mut pass);
+
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
@@ -1794,6 +1835,9 @@ impl Renderer {
         // Drawn after the chunks' blended faces: a handful of quads, so no
         // sorting against them.
         self.moving_blocks.draw_transparent(&mut pass);
+
+        // From above 128 the clouds come after the translucent layer.
+        self.clouds.draw_above(&mut pass);
 
         if let Some(cracks) = self.crack_mesh.as_ref() {
             pass.set_pipeline(&self.crack_pipeline);

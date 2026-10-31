@@ -38,7 +38,7 @@ documents are baked).
 | P7c | block-entity references from the mesher, chests with the lid, signs with text | done in code, not checked in game |
 | P7d | skulls, banners, beacon, end portal, enchanting book, spawner, flower pots | done in code, not checked in game |
 | P7d-pistons | moving pistons: structure rules, animation, push of the player, drawing | done in code, not checked in game |
-| P7e | vanilla sky: sun, moon, stars, Nether and End (geometry pass, `umicraft-render/src/sky/`); clouds still to do | sky done in code, not checked in game; clouds not started |
+| P7e | vanilla sky: sun, moon, stars, Nether and End (geometry pass, `umicraft-render/src/sky/`) and clouds (`umicraft-render/src/clouds/`) | done in code, not checked in game |
 | P7f | weather | not started |
 | P7g | world border, fog parity | not started |
 | P7h | animated texture check, frame-time benchmark, parity rows | not started |
@@ -54,6 +54,18 @@ now the fog colour, as in the reference. The client still has to load
 `sun.png`, `moon_phases.png` and `end_sky.png` and call
 `Renderer::set_sky_textures`, fill `sky_temperature` from the biome at the
 camera and drive `rain_strength` / `thunder_strength` / `lightning_ticks`.
+
+## Clouds (P7e)
+
+`umicraft-render/src/clouds/` is its own pass, not part of the sky plan: the
+reference draws clouds in `renderWorldPass` with the depth test, before the
+translucent terrain when the eye is below y = 128 and after it above. Meshes
+are static (the cloud picture's alpha selects texels, as in the reference); a
+frame writes one uniform (shift, texture scroll, tint, fog). `CloudMode`
+(`Off`/`Fast`/`Fancy`) comes from `VideoOptions::cloud_mode`
+(`clouds`, `fancy_graphics`); the picture from `SkyTextures::clouds`. Drift is
+driven by `Renderer::set_cloud_ticks` (wall clock x 20 in the client, not the
+reference `cloudTickCounter`). Overworld only. No options UI yet.
 
 ## Known gaps
 

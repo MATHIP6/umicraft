@@ -48,7 +48,7 @@ pub(super) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout 
 }
 
 /// A nearest-neighbour sampler, as the reference's default texture filter.
-pub(super) fn sampler(device: &wgpu::Device, mode: wgpu::AddressMode) -> wgpu::Sampler {
+pub(crate) fn sampler(device: &wgpu::Device, mode: wgpu::AddressMode) -> wgpu::Sampler {
     device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("sky sampler"),
         address_mode_u: mode,
@@ -61,7 +61,7 @@ pub(super) fn sampler(device: &wgpu::Device, mode: wgpu::AddressMode) -> wgpu::S
 }
 
 /// Uploads `image` as an sRGB texture and returns its view.
-pub(super) fn upload(
+pub(crate) fn upload(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     image: &SkyImage,

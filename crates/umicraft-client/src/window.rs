@@ -57,6 +57,7 @@ use crate::network::NetworkConfig;
 use crate::options::{self, Action, Options};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
 use crate::screen::Screen;
+use crate::sky_textures::load_sky_textures;
 use crate::terrain_textures::TerrainTextures;
 use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
@@ -432,6 +433,7 @@ impl App {
             let installed = terrain.install(renderer);
             upload_gui_atlas(renderer, installed.gui_atlas());
             upload_glint_texture(renderer, installed.glint_texture());
+            upload_sky_textures(renderer);
             self.gui_atlas = installed.gui_atlas().cloned();
             self.items = installed.items();
             self.dials = DialAnimator::new(installed.dials());
@@ -1222,6 +1224,9 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+        renderer.set_cloud_mode(self.options.video.cloud_mode());
+        // 20 client ticks per second drive the cloud drift.
+        renderer.set_cloud_ticks((now - self.started).as_secs_f64() * 20.0);
         renderer.set_glint_time((now - self.started).as_secs_f32());
         self.texture_animator
             .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
@@ -1362,6 +1367,12 @@ fn upload_gui_atlas(renderer: &mut Renderer, gui_atlas: Option<&umicraft_assets:
     }
 }
 
+/// Uploads the sun, moon and End sky pictures of the verified jar.
+fn upload_sky_textures(renderer: &mut Renderer) {
+    let jar = crate::official::find_verified_jar().ok();
+    renderer.set_sky_textures(&load_sky_textures(jar.as_ref()));
+}
+
 /// Uploads the enchantment glint texture to the renderer, if available.
 fn upload_glint_texture(renderer: &mut Renderer, glint: Option<&umicraft_assets::GlintTexture>) {
     if let Some(glint) = glint {
@@ -1494,6 +1505,7 @@ impl ApplicationHandler for App {
             .install(&mut renderer);
         upload_gui_atlas(&mut renderer, terrain.gui_atlas());
         upload_glint_texture(&mut renderer, terrain.glint_texture());
+        upload_sky_textures(&mut renderer);
         self.gui_atlas = terrain.gui_atlas().cloned();
         self.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());

@@ -37,6 +37,8 @@ pub struct SkyTextures {
     pub moon_phases: Option<SkyImage>,
     /// `textures/environment/end_sky.png`.
     pub end_sky: Option<SkyImage>,
+    /// `textures/environment/clouds.png`, 256 x 256 cloud cells.
+    pub clouds: Option<SkyImage>,
 }
 
 /// Edge of the fallback sun in texels.
@@ -145,7 +147,7 @@ fn smoothstep(low: f32, high: f32, value: f32) -> f32 {
 }
 
 /// A byte of deterministic noise for a texel.
-fn hash(x: u32, y: u32) -> u8 {
+pub(crate) fn hash(x: u32, y: u32) -> u8 {
     let mut h = x.wrapping_mul(0x9E37_79B1) ^ y.wrapping_mul(0x85EB_CA6B);
     h ^= h >> 15;
     h = h.wrapping_mul(0x2C1B_3C6D);

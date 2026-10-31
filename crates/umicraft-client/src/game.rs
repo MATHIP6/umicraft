@@ -250,6 +250,8 @@ pub struct Frame {
     pub block_entity_data: Arc<EntityTable>,
     /// The text of the signs, shared with the server state until one changes.
     pub signs: Arc<SignTable>,
+    /// Base temperature of the biome at the player, which tints the sky.
+    pub sky_temperature: f32,
 }
 
 /// The statistics the debug overlay shows.
@@ -1223,7 +1225,22 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         moving_blocks: Arc::new(game.server.moving_blocks().clone()),
         block_entity_data: game.server.block_entities().entity_table(),
         signs: game.server.block_entities().sign_table(),
+        sky_temperature: sky_temperature(game, view.position),
     }));
+}
+
+/// The base temperature of the biome at `position`, which the sky takes its
+/// colour from (`World.getSkyColor` reads the biome at the camera). The
+/// default plains value applies without a loaded column.
+fn sky_temperature(game: &Game, position: Vec3) -> f32 {
+    let block = BlockPos::new(position.x.floor() as i32, 0, position.z.floor() as i32);
+    game.world
+        .as_ref()
+        .and_then(|world| world.biome(block))
+        .map_or(
+            umicraft_render::RenderEnvironment::PLAINS_TEMPERATURE,
+            umicraft_mesh::tint::biome_temperature,
+        )
 }
 
 /// Moves the first-person view of the player to the camera of the chosen

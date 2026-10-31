@@ -18,6 +18,7 @@
 //! `0.15` at sunrise / sunset. The sun sits at `(-sin(2π·angle), cos(2π·angle),
 //! 0)` times the distance, so it rises in the east (`+X`).
 
+use super::cloud_color::cloud_color;
 use crate::RenderEnvironment;
 
 /// Length of one day/night cycle in ticks (`WorldProvider`).
@@ -59,6 +60,8 @@ pub struct SkyState {
     pub sky_color: [f32; 3],
     /// Fog colour, which is also the clear colour (`updateFogColor`).
     pub fog_color: [f32; 3],
+    /// Linear cloud tint (`World.getCloudColour`).
+    pub cloud_color: [f32; 3],
     /// Sun-light factor in `0.2..=1.0` applied to sky light in the terrain
     /// shader; `0` in the Nether and End, which have no sky light.
     pub sun_brightness: f32,
@@ -93,6 +96,11 @@ impl SkyState {
             celestial_angle,
             sky_color,
             fog_color: final_fog_color(kind, celestial_angle, sky_color, &environment),
+            cloud_color: cloud_color(
+                cos_cycle(celestial_angle),
+                environment.rain_strength.clamp(0.0, 1.0),
+                environment.thunder_strength.clamp(0.0, 1.0),
+            ),
             sun_brightness: match kind {
                 SkyKind::Overworld => sun_brightness(celestial_angle, &environment),
                 SkyKind::Nether | SkyKind::End => 0.0,

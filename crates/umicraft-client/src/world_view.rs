@@ -470,6 +470,8 @@ struct View {
     dimension: i8,
     /// The newest announced world spawn point.
     spawn: Option<(i32, i32, i32)>,
+    /// The biome temperature at the player, for the sky colour.
+    sky_temperature: f32,
 }
 
 impl View {
@@ -481,6 +483,7 @@ impl View {
         self.world_time = frame.world_time;
         self.dimension = frame.dimension;
         self.spawn = frame.spawn;
+        self.sky_temperature = frame.sky_temperature;
     }
 
     /// The interpolation fraction of the two newest ticks for `now`.
@@ -504,12 +507,15 @@ impl View {
     /// published; the render thread never advances the clock by itself
     /// (ADR-0008 §4).
     fn environment(&self, now: Instant, view_distance: u8) -> RenderEnvironment {
-        RenderEnvironment::new(
-            self.dimension,
-            self.world_time,
-            self.partial_tick(now),
-            view_distance,
-        )
+        RenderEnvironment {
+            sky_temperature: self.sky_temperature,
+            ..RenderEnvironment::new(
+                self.dimension,
+                self.world_time,
+                self.partial_tick(now),
+                view_distance,
+            )
+        }
     }
 
     /// The interpolated state for `now`.
@@ -729,6 +735,7 @@ mod tests {
             chest_lids: Arc::default(),
             moving_blocks: Arc::default(),
             block_entity_data: Arc::default(),
+            sky_temperature: umicraft_render::RenderEnvironment::PLAINS_TEMPERATURE,
             signs: Arc::default(),
         }
     }

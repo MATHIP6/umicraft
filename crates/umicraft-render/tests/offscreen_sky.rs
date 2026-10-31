@@ -8,7 +8,7 @@
 //! on a machine with a wgpu adapter.
 
 use glam::Vec3;
-use umicraft_render::{Camera, Image, Overlay, RenderEnvironment, Renderer, SkyState};
+use umicraft_render::{Camera, CloudMode, Image, Overlay, RenderEnvironment, Renderer, SkyState};
 
 const WIDTH: u32 = 128;
 const HEIGHT: u32 = 96;
@@ -89,4 +89,42 @@ fn the_nether_is_the_plain_fog_colour_and_the_end_draws_its_cube() {
         pixel(&image, 2, 2),
         "the cube covers the fog"
     );
+}
+
+/// Renders a frame from `x`, below the cloud layer, looking straight up.
+fn cloud_frame(mode: CloudMode, x: f32) -> Image {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    renderer.set_cloud_mode(mode);
+    let mut camera = Camera::new(Vec3::new(x, 100.0, 0.0), 0.0, 1.2);
+    camera.set_aspect(WIDTH, HEIGHT);
+    renderer
+        .render(&camera, &Overlay::new(WIDTH, HEIGHT))
+        .expect("render");
+    renderer.read_pixels().expect("read pixels")
+}
+
+/// Pixels that differ from the cloudless frame, summed over a few places
+/// (the generated mask is patchy, one spot may be clear sky).
+fn cloud_pixels(mode: CloudMode) -> usize {
+    [0.0, 400.0, 800.0, 1200.0, 1600.0]
+        .into_iter()
+        .map(|x| {
+            let off = cloud_frame(CloudMode::Off, x);
+            let on = cloud_frame(mode, x);
+            on.rgba
+                .chunks_exact(4)
+                .zip(off.rgba.chunks_exact(4))
+                .filter(|(a, b)| a != b)
+                .count()
+        })
+        .sum()
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn clouds_paint_the_sky_in_both_modes() {
+    for mode in [CloudMode::Fast, CloudMode::Fancy] {
+        let changed = cloud_pixels(mode);
+        assert!(changed > 100, "{mode:?} changed {changed} pixels");
+    }
 }

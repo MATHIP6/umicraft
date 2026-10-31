@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The sky pictures of the user's client jar (P7e).
+//!
+//! `sun.png`, `moon_phases.png`, `end_sky.png` and `clouds.png` are read at runtime from the
+//! verified jar and never stored in the repository (spec §3). A picture the jar
+//! lacks, or that does not decode, stays `None` and the renderer draws its
+//! original stand-in.
+
+use umicraft_assets::client_jar::ClientJar;
+use umicraft_assets::skin::decode_png_bytes;
+use umicraft_render::{SkyImage, SkyTextures};
+
+/// Jar path of the sun.
+const SUN: &str = "assets/minecraft/textures/environment/sun.png";
+/// Jar path of the eight phases of the moon.
+const MOON_PHASES: &str = "assets/minecraft/textures/environment/moon_phases.png";
+/// Jar path of the End sky.
+const END_SKY: &str = "assets/minecraft/textures/environment/end_sky.png";
+
+/// Jar path of the clouds.
+const CLOUDS: &str = "assets/minecraft/textures/environment/clouds.png";
+
+/// Reads the sky pictures of `jar`; every missing or undecodable one is `None`.
+#[must_use]
+pub fn load_sky_textures(jar: Option<&ClientJar>) -> SkyTextures {
+    let read = |path: &str| -> Option<SkyImage> {
+        let bytes = jar?.read_entry(path).ok()?;
+        let (rgba, width, height) = decode_png_bytes(&bytes).ok()?;
+        Some(SkyImage {
+            width,
+            height,
+            rgba,
+        })
+    };
+    SkyTextures {
+        sun: read(SUN),
+        moon_phases: read(MOON_PHASES),
+        end_sky: read(END_SKY),
+        clouds: read(CLOUDS),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_a_jar_every_picture_is_left_to_the_fallback() {
+        let textures = load_sky_textures(None);
+        assert!(textures.sun.is_none());
+        assert!(textures.moon_phases.is_none());
+        assert!(textures.end_sky.is_none());
+        assert!(textures.clouds.is_none());
+    }
+}

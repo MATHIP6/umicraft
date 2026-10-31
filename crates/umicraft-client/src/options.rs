@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use umicraft_core::{ConfigStore, CoreError};
-use umicraft_render::HudState;
+use umicraft_render::{CloudMode, HudState};
 use winit::keyboard::KeyCode;
 
 /// The name of the options file.
@@ -47,6 +47,23 @@ pub struct VideoOptions {
     pub fov: f32,
     /// The frame-rate cap; [`UNLIMITED_FPS`] means no cap.
     pub max_fps: u32,
+    /// Fancy graphics: boxed clouds instead of a flat layer
+    /// (`GameSettings.fancyGraphics`).
+    pub fancy_graphics: bool,
+    /// Whether clouds are drawn at all (`GameSettings.clouds`).
+    pub clouds: bool,
+}
+
+impl VideoOptions {
+    /// The cloud version these options select.
+    #[must_use]
+    pub fn cloud_mode(&self) -> CloudMode {
+        match (self.clouds, self.fancy_graphics) {
+            (false, _) => CloudMode::Off,
+            (true, false) => CloudMode::Fast,
+            (true, true) => CloudMode::Fancy,
+        }
+    }
 }
 
 impl Default for VideoOptions {
@@ -55,6 +72,8 @@ impl Default for VideoOptions {
             render_distance: 8,
             fov: 70.0,
             max_fps: 120,
+            fancy_graphics: true,
+            clouds: true,
         }
     }
 }
@@ -927,6 +946,41 @@ mod tests {
         assert_eq!(loaded.video.fov, 110.0);
         assert_eq!(loaded.video.max_fps, 10);
         assert_eq!(loaded.controls.mouse_sensitivity, 1.0);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_cloud_options_default_to_fancy_clouds() {
+        let video = VideoOptions::default();
+        assert!(video.fancy_graphics && video.clouds);
+        assert_eq!(video.cloud_mode(), CloudMode::Fancy);
+    }
+
+    #[test]
+    fn the_cloud_mode_follows_the_two_switches() {
+        let mode = |clouds, fancy_graphics| {
+            VideoOptions {
+                clouds,
+                fancy_graphics,
+                ..VideoOptions::default()
+            }
+            .cloud_mode()
+        };
+        assert_eq!(mode(false, true), CloudMode::Off);
+        assert_eq!(mode(true, false), CloudMode::Fast);
+        assert_eq!(mode(true, true), CloudMode::Fancy);
+    }
+
+    #[test]
+    fn an_old_file_without_the_cloud_keys_keeps_the_defaults() {
+        let folder = temp_folder("clouds");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join(FILE_NAME);
+        std::fs::write(&path, "[video]\nclouds = false\nrender_distance = 4\n").unwrap();
+        let loaded = Options::load(&path);
+        assert!(!loaded.video.clouds);
+        assert!(loaded.video.fancy_graphics);
+        assert_eq!(loaded.video.render_distance, 4);
         let _ = std::fs::remove_dir_all(&folder);
     }
 

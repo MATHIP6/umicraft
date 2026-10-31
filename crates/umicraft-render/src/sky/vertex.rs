@@ -11,7 +11,7 @@ use bytemuck::{Pod, Zeroable};
 /// the End cube bakes its `0x282828` (`color(40, 40, 40, 255)`) here.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
-pub(super) struct SkyVertex {
+pub(crate) struct SkyVertex {
     pub position: [f32; 3],
     pub uv: [f32; 2],
     pub color: [f32; 4],
@@ -19,21 +19,21 @@ pub(super) struct SkyVertex {
 
 impl SkyVertex {
     /// Vertex attributes for the vertex buffer layout (locations 0..3).
-    pub(super) const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+    pub(crate) const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
         wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
 
     /// A white vertex without texture coordinates.
-    pub(super) const fn plain(position: [f32; 3]) -> Self {
+    pub(crate) const fn plain(position: [f32; 3]) -> Self {
         Self::textured(position, [0.0; 2])
     }
 
     /// A white vertex with texture coordinates.
-    pub(super) const fn textured(position: [f32; 3], uv: [f32; 2]) -> Self {
+    pub(crate) const fn textured(position: [f32; 3], uv: [f32; 2]) -> Self {
         Self::coloured(position, uv, [1.0; 4])
     }
 
     /// A vertex with every attribute.
-    pub(super) const fn coloured(position: [f32; 3], uv: [f32; 2], color: [f32; 4]) -> Self {
+    pub(crate) const fn coloured(position: [f32; 3], uv: [f32; 2], color: [f32; 4]) -> Self {
         Self {
             position,
             uv,
@@ -43,7 +43,7 @@ impl SkyVertex {
 }
 
 /// The two triangles `0 1 2` and `0 2 3` of one `GL_QUADS` quad.
-pub(super) fn quad(corners: [SkyVertex; 4]) -> [SkyVertex; 6] {
+pub(crate) fn quad(corners: [SkyVertex; 4]) -> [SkyVertex; 6] {
     [
         corners[0], corners[1], corners[2], corners[0], corners[2], corners[3],
     ]
