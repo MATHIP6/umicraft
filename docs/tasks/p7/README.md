@@ -36,7 +36,8 @@ documents are baked).
 | P7a | fences, panes, iron bars, walls, fence gates in walls, stair shapes | done |
 | P7b | doors, double plants, vines, redstone wire, tripwire, snowy grass | done |
 | P7c | block-entity references from the mesher, chests with the lid, signs with text | done in code, not checked in game |
-| P7d | skulls, banners, beacon, end portal, enchanting book, spawner, pistons, flower pots | not started |
+| P7d | skulls, banners, beacon, end portal, enchanting book, spawner, flower pots | not started |
+| P7d-pistons | moving pistons: structure rules, animation, push of the player, drawing | done in code, not checked in game |
 | P7e | vanilla sky: sun, moon, clouds, stars, Nether and End | not started |
 | P7f | weather | not started |
 | P7g | world border, fog parity | not started |
@@ -59,3 +60,16 @@ meshes the ones within 64 blocks into entity vertices (`chest.rs`, `sign.rs`)
 that the entity pass draws. Lid angles come from
 `umicraft_game::server::chest_lids` (`Block Action`), sign lines from
 `BlockEntities::sign_table()`.
+
+## Pistons
+
+`Block Action` for a piston (33, 29) reaches the client before the block
+changes of the tick. `umicraft_game::piston::motion::start` plans the move on
+that pre-move world (`structure::plan_move`, the port of
+`BlockPistonStructureHelper`), clears the source cells, puts block 36 in the
+destination cells and records a `MovingBlock` per moved block. `tick` advances
+them by 0.5 per tick and `push::launch` shoves the local player (the physics
+step runs first, then the pistons, as `World.updateEntities` does). The render
+thread draws each moving block interpolated (`moving_blocks_draw`,
+`umicraft_render::dynamic_blocks`). Collision boxes of the base and head are in
+`piston_shape.rs`; before this the sticky piston and the head had none.

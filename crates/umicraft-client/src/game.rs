@@ -52,7 +52,7 @@ use umicraft_game::item_use::{drop_item, ItemUse, UseTick};
 use umicraft_game::movement::movement_stats;
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
-use umicraft_game::piston::MovingBlocks;
+use umicraft_game::piston::{motion, MovingBlocks};
 use umicraft_game::player_list::PlayerList;
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::scoreboard::Scoreboard;
@@ -1918,6 +1918,13 @@ fn apply_net_event(
                 set_gamemode(game, GameMode::from_state_value(packet.value));
             }
         }
+        PlayEvent::BlockAction(packet) => {
+            if let Some(world) = game.world.as_mut() {
+                let dirty = motion::start(world, game.server.moving_blocks_mut(), &packet);
+                game.dirty.extend(dirty);
+            }
+            game.server.apply_block_action(&packet);
+        }
         other => apply_server_state(&mut game.server, &other),
     }
 }
@@ -2567,6 +2574,7 @@ fn tick(
         game.entities.tick_objects(world);
     }
     game.server.tick();
+    tick_pistons(game);
     // A player inside a block is pushed out sideways by the simulation
     // itself, like the vanilla client (`umicraft_game::physics`); it is
     // never lifted.
@@ -2588,6 +2596,30 @@ fn tick(
     if game.status_data.ticks.is_multiple_of(STATUS_PERIOD) {
         publish_status(game, frames);
     }
+}
+
+/// Advances the moving piston blocks and lets them push the local player.
+///
+/// The reference updates the entities (the player) first and the tile
+/// entities after them (`World.updateEntities`), so the push lands on the
+/// position the player just moved to. A spectator passes through blocks and
+/// is not pushed; other entities are placed by the server.
+fn tick_pistons(game: &mut Game) {
+    let pushable = !game.spectating();
+    let Some(world) = game.world.as_mut() else {
+        return;
+    };
+    let mut player = game.state.as_mut().filter(|_| pushable);
+    let dirty = motion::tick(
+        world,
+        game.server.moving_blocks_mut(),
+        |world, block, progress, distance| {
+            if let Some(state) = player.as_mut() {
+                state.launch_by_piston(world, block, progress, distance);
+            }
+        },
+    );
+    game.dirty.extend(dirty);
 }
 
 /// Sends the movement packets of the tick (`umicraft_game::traffic`).

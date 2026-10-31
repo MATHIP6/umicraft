@@ -59,6 +59,7 @@ pub mod nbt;
 pub mod physics;
 pub mod pick;
 pub mod piston;
+mod piston_shape;
 pub mod player_list;
 pub mod prediction;
 pub mod raycast;
@@ -332,6 +333,26 @@ impl GameState {
     /// Adds to the motion of the player (the push of an `Explosion`).
     pub fn add_velocity(&mut self, velocity: DVec3) {
         self.player.velocity += velocity;
+    }
+
+    /// Lets one moving piston block push the player, if the player is in its
+    /// box (`TileEntityPiston.launchWithSlimeBlock`). `progress` and
+    /// `distance` are the arguments the piston tick hands out, see
+    /// [`piston::motion::tick`].
+    ///
+    /// The previous position is left alone, so the renderer interpolates the
+    /// push over the tick.
+    pub fn launch_by_piston<S: BlockSource + ?Sized>(
+        &mut self,
+        world: &S,
+        block: &piston::MovingBlock,
+        progress: f32,
+        distance: f32,
+    ) {
+        let bounds = self.player.bounding_box();
+        if let Some(push) = piston::push::launch(world, block, progress, distance, &bounds) {
+            piston::push::apply(&mut self.player, push, world);
+        }
     }
 
     /// Slows the player and stops its sprint after a hit (MCP

@@ -31,6 +31,7 @@ use winit::window::Window;
 
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::camera::Camera;
+use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
@@ -169,6 +170,7 @@ pub struct Renderer {
     crack_pipeline: wgpu::RenderPipeline,
     /// The crack quads of every block being dug, rebuilt by the client.
     crack_mesh: Option<GpuMeshPass>,
+    moving_blocks: MovingBlocksPass,
     /// The camera of the first-person hand: eye-space vertices, a squeezed
     /// depth range, no fog.
     hand_camera_buffer: wgpu::Buffer,
@@ -637,6 +639,7 @@ impl Renderer {
             &block_view,
         );
         let world_items = DynamicMesh::new(&device, "world items");
+        let moving_blocks = MovingBlocksPass::new(&device);
         let hand_items = DynamicMesh::new(&device, "hand items");
         let hand_item_bind_group = create_terrain_bind_group(
             &device,
@@ -669,6 +672,7 @@ impl Renderer {
             terrain_transparent_pipeline,
             crack_pipeline,
             crack_mesh: None,
+            moving_blocks,
             hand_camera_buffer,
             hand_camera_bind_group,
             hand: Vec::new(),
@@ -731,6 +735,15 @@ impl Renderer {
     /// cracks.
     pub fn set_block_cracks(&mut self, vertices: &[Vertex], indices: &[u32]) {
         self.crack_mesh = create_gpu_mesh_pass(&self.device, "block cracks", vertices, indices);
+    }
+
+    /// Replaces the blocks a piston is moving.
+    ///
+    /// `mesh` is rebuilt by the caller every frame in world coordinates; an
+    /// empty mesh hides them. Its opaque faces are drawn with the chunks'
+    /// terrain pipeline, its transparent faces with the blended one.
+    pub fn set_moving_blocks(&mut self, mesh: &Mesh) {
+        self.moving_blocks.update(&self.device, &self.queue, mesh);
     }
 
     /// Sets the block selection outline for the following frames.
@@ -1696,6 +1709,7 @@ impl Renderer {
                 draw_gpu_pass(&mut pass, opaque);
             }
         }
+        self.moving_blocks.draw_opaque(&mut pass);
 
         // The shadows lie on the ground, drawn before the entities.
         if !self.shadow_batches.is_empty() {
@@ -1756,18 +1770,19 @@ impl Renderer {
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
-        if !self.transparent_order.is_empty() {
-            pass.set_pipeline(&self.terrain_transparent_pipeline);
-            pass.set_bind_group(0, &self.terrain_bind_group, &[]);
-            for draw in &self.transparent_order {
-                let Some(mesh) = self.chunks.get(&draw.pos) else {
-                    continue;
-                };
-                if let Some(transparent) = mesh.transparent.as_ref() {
-                    draw_gpu_pass(&mut pass, transparent);
-                }
+        pass.set_pipeline(&self.terrain_transparent_pipeline);
+        pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+        for draw in &self.transparent_order {
+            let Some(mesh) = self.chunks.get(&draw.pos) else {
+                continue;
+            };
+            if let Some(transparent) = mesh.transparent.as_ref() {
+                draw_gpu_pass(&mut pass, transparent);
             }
         }
+        // Drawn after the chunks' blended faces: a handful of quads, so no
+        // sorting against them.
+        self.moving_blocks.draw_transparent(&mut pass);
 
         if let Some(cracks) = self.crack_mesh.as_ref() {
             pass.set_pipeline(&self.crack_pipeline);

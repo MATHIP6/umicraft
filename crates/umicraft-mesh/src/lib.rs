@@ -69,6 +69,7 @@ mod legacy;
 mod lighting;
 mod mesh;
 pub mod models;
+mod moving;
 mod source;
 pub mod tint;
 mod vertex;
@@ -78,6 +79,7 @@ pub use face::Face;
 pub use legacy::{mesh_chunk, texture_layer};
 pub use mesh::Mesh;
 pub use models::{mesh_chunk_with_models, ModelMeshContext};
+pub use moving::{push_moving_block, push_piston_head, PistonHead};
 pub use source::{BlockSource, ChunkSnapshot};
 pub use vertex::{Vertex, VertexLight};
 

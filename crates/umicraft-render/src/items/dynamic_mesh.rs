@@ -8,6 +8,7 @@
 //! `Queue::write_buffer`.
 
 use umicraft_mesh::item::ItemMesh;
+use umicraft_mesh::Vertex;
 
 use crate::renderer::{draw_gpu_pass_buffers, MIN_DYNAMIC_BYTES};
 
@@ -32,16 +33,28 @@ impl DynamicMesh {
 
     /// Replaces the geometry; an empty mesh hides it.
     pub(crate) fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, mesh: &ItemMesh) {
-        self.index_count = if mesh.vertices.is_empty() {
+        self.update_geometry(device, queue, &mesh.vertices, &mesh.indices);
+    }
+
+    /// Replaces the geometry from raw vertex and index slices; an empty one
+    /// hides it.
+    pub(crate) fn update_geometry(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        vertices: &[Vertex],
+        indices: &[u32],
+    ) {
+        self.index_count = if vertices.is_empty() {
             0
         } else {
-            mesh.indices.len() as u32
+            indices.len() as u32
         };
         if self.index_count == 0 {
             return;
         }
-        let vertex_bytes: &[u8] = bytemuck::cast_slice(&mesh.vertices);
-        let index_bytes: &[u8] = bytemuck::cast_slice(&mesh.indices);
+        let vertex_bytes: &[u8] = bytemuck::cast_slice(vertices);
+        let index_bytes: &[u8] = bytemuck::cast_slice(indices);
         grow(
             device,
             &mut self.vertices,

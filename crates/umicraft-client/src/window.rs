@@ -1233,6 +1233,10 @@ impl App {
             renderer.set_block_cracks(&vertices, &indices);
         }
 
+        if let Some(world) = self.world.as_ref() {
+            renderer.set_moving_blocks(&world.moving_blocks_mesh(environment.partial_tick));
+        }
+
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())
         {

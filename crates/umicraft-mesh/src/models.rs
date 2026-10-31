@@ -117,7 +117,8 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     .or_else(|| context.models.model(state));
                 let variant = model.and_then(|model| select_variant(model, position));
                 if let Some(variant) = variant {
-                    emit_model_quads(&mut mesh, source, context, state, variant, position);
+                    let placement = Placement::in_world(position);
+                    emit_model_quads(&mut mesh, source, context, state, variant, placement);
                 } else if state.is_renderable() {
                     let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
                         tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
@@ -158,7 +159,7 @@ fn fluid_layers(liquid: Liquid, atlas: &AtlasLayout) -> FluidLayers {
 /// that walk; document order is used here, which changes only which variant a
 /// given position sees, not the distribution. `None` when the model has no
 /// variants (the builder never bakes such a model).
-fn select_variant(model: &BlockModel, position: [i32; 3]) -> Option<&ModelVariant> {
+pub(crate) fn select_variant(model: &BlockModel, position: [i32; 3]) -> Option<&ModelVariant> {
     // Almost every blockstate has a single variant; do not hash for it.
     if let [only] = model.variants.as_slice() {
         return Some(only);
@@ -236,26 +237,55 @@ fn block_offset(position: [i32; 3], kind: OffsetType) -> [f32; 3] {
     [ox, oy, oz]
 }
 
-/// Emits every quad of `variant` at `position`, offset by the block position.
+/// Where and how [`emit_model_quads`] places a model.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Placement {
+    /// The cell the light, tint and vegetation offset are sampled at.
+    pub(crate) position: [i32; 3],
+    /// Extra translation of the whole model (a block moved by a piston).
+    pub(crate) shift: [f32; 3],
+    /// Whether `cullface` quads are dropped against an occluding neighbour.
+    pub(crate) cull: bool,
+}
+
+impl Placement {
+    /// A block standing in the world: no shift, hidden faces culled.
+    fn in_world(position: [i32; 3]) -> Self {
+        Self {
+            position,
+            shift: [0.0; 3],
+            cull: true,
+        }
+    }
+}
+
+/// Emits every quad of `variant` at the placement's cell, offset by the block
+/// position.
 ///
 /// `state` is the block rendered by the quad; it is only needed for the
 /// same-state half of the cull rule.
-fn emit_model_quads<S: BlockSource + ?Sized>(
+pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
     mesh: &mut Mesh,
     source: &S,
     context: &ModelMeshContext,
     state: BlockState,
     variant: &ModelVariant,
-    position: [i32; 3],
+    placement: Placement,
 ) {
+    let position = placement.position;
     let [x, y, z] = position;
     let [ox, oy, oz] = block_offset(position, offset_type(state));
+    let [ox, oy, oz] = [
+        ox + placement.shift[0],
+        oy + placement.shift[1],
+        oz + placement.shift[2],
+    ];
     // Tint is constant per block, so compute the 3×3 biome average at most
     // once and reuse it for every tinted quad (grass top + side overlay,
     // six leaf faces, ...). Untinted quads never sample the colormaps.
     let mut block_tint = None;
     for quad in &variant.model.quads {
-        if let Some(cullface) = quad.cullface {
+        if let Some(cullface) = quad.cullface.filter(|_| placement.cull) {
             let offset = cullface.offset();
             let neighbour = source.block(x + offset[0], y + offset[1], z + offset[2]);
             if occludes(neighbour, state) {

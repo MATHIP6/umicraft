@@ -24,6 +24,8 @@
 use glam::DVec3;
 use umicraft_world::{BlockPos, BlockState, World};
 
+use crate::piston_shape;
+
 /// Read access to block states by world coordinate.
 ///
 /// The trait exists so the game logic can be driven by any block provider in
@@ -324,6 +326,10 @@ enum Kind {
     Anvil,
     /// A snow layer, whose height depends on the metadata.
     SnowLayer,
+    /// A piston base, shorter when extended.
+    PistonBase,
+    /// A piston head: plate and rod.
+    PistonHead,
 }
 
 /// Classifies a 1.8 block id (and its metadata) into a collision kind.
@@ -356,16 +362,16 @@ fn classify(id: u16, metadata: u8) -> Kind {
         26 => Kind::Column(0.5625),
         116..=118 => Kind::Column(0.75),
         154 => Kind::Column(0.625),
+        29 | 33 => Kind::PistonBase,
+        34 => Kind::PistonHead,
         81 => Kind::Cactus,
         145 => Kind::Anvil,
         78 => Kind::SnowLayer,
         // Decorations and other blocks without a collision box.
         6
-        | 29
         | 30
         | 31
         | 32
-        | 34
         | 35
         | 36
         | 37
@@ -445,6 +451,8 @@ pub fn shape_of<S: BlockSource + ?Sized>(
             Aabb::new(DVec3::new(0.0, 0.0, 0.4375), DVec3::new(1.0, 1.0, 0.5625)),
             Aabb::new(DVec3::new(0.4375, 0.0, 0.0), DVec3::new(0.5625, 1.0, 1.0)),
         ),
+        Kind::PistonBase => piston_shape::base_shape(state.metadata()),
+        Kind::PistonHead => piston_shape::head_shape(state.metadata()),
         Kind::Stairs => stair_shape(state),
         Kind::Fence => fence_shape(world, pos),
     }

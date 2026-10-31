@@ -31,7 +31,8 @@ use crate::creative_view::CreativeView;
 use crate::error::ClientError;
 use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, TICK};
 use crate::mesher::{MeshPool, MeshResult};
-use crate::terrain_textures::InstalledTerrain;
+use crate::moving_blocks_draw::mesh_moving_blocks;
+use crate::terrain_textures::{InstalledTerrain, TerrainMesher};
 
 /// Where finished chunk meshes go: the renderer, or a test double.
 pub trait MeshTarget {
@@ -92,6 +93,8 @@ pub struct WorldView {
     signs: Arc<SignTable>,
     /// The texture layer of each destroy stage, when the terrain has them.
     destroy_layers: Option<[u32; STAGES]>,
+    /// The mesher of the bound terrain, for the blocks pistons move.
+    mesher: TerrainMesher,
     /// A crack mesh the renderer has not received yet.
     crack_mesh: Option<(Vec<Vertex>, Vec<u32>)>,
 }
@@ -130,6 +133,7 @@ impl WorldView {
             moving_blocks: Arc::default(),
             signs: Arc::default(),
             destroy_layers: terrain.mesher().destroy_layers(),
+            mesher: terrain.mesher(),
             crack_mesh: None,
         })
     }
@@ -344,7 +348,21 @@ impl WorldView {
         // The new array has other layers: rebuild the cracks with the next
         // frame.
         self.destroy_layers = terrain.mesher().destroy_layers();
+        self.mesher = terrain.mesher();
         self.cracks = Arc::from([]);
+    }
+
+    /// The geometry of the blocks pistons move at `partial_tick`, in world
+    /// coordinates. Empty when nothing moves or the terrain has no models
+    /// (the procedural set draws moving blocks nowhere).
+    #[must_use]
+    pub fn moving_blocks_mesh(&self, partial_tick: f32) -> Mesh {
+        match self.mesher.model_context() {
+            Some(context) if !self.moving_blocks.is_empty() => {
+                mesh_moving_blocks(&self.moving_blocks, partial_tick, context)
+            }
+            _ => Mesh::default(),
+        }
     }
 
     /// Forgets the replaced world, including the jobs still in flight.

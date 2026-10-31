@@ -42,6 +42,7 @@ mod java_random;
 pub mod map_render;
 pub mod mesher;
 pub mod model_resources;
+pub mod moving_blocks_draw;
 pub mod nametag_draw;
 pub mod network;
 mod official;

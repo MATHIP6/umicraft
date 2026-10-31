@@ -15,6 +15,7 @@
 mod block_atlas;
 mod camera;
 mod chat_hud;
+mod dynamic_blocks;
 pub mod entity_pass;
 mod environment;
 mod error;

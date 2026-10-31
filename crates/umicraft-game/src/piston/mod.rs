@@ -16,6 +16,14 @@
 //! - `motion`: starting the motion from a `Block Action`, and the tick.
 //! - `push`: moving the player that the pushed blocks run into.
 
+pub mod motion;
+pub mod push;
+
+pub mod mobility;
+mod structure;
+
+pub use structure::{plan_move, BlockLookup, PistonMove};
+
 /// A block in flight, one `TileEntityPiston`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MovingBlock {
@@ -84,6 +92,23 @@ impl MovingBlocks {
     /// Adds a block in flight.
     pub fn push(&mut self, block: MovingBlock) {
         self.blocks.push(block);
+    }
+
+    /// The block moving into `pos`, if any.
+    #[must_use]
+    pub fn at(&self, pos: [i32; 3]) -> Option<&MovingBlock> {
+        self.blocks.iter().find(|block| block.pos == pos)
+    }
+
+    /// Stops and returns the block moving into `pos`, if any.
+    pub fn remove_at(&mut self, pos: [i32; 3]) -> Option<MovingBlock> {
+        let index = self.blocks.iter().position(|block| block.pos == pos)?;
+        Some(self.blocks.remove(index))
+    }
+
+    /// The blocks in flight, for the tick to advance.
+    pub(super) fn blocks_mut(&mut self) -> &mut Vec<MovingBlock> {
+        &mut self.blocks
     }
 
     /// Forgets every block (a new world, a dimension change).

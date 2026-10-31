@@ -296,6 +296,15 @@ impl TerrainMesher {
         Some(layers)
     }
 
+    /// The baked models and atlas, or `None` for the procedural set.
+    #[must_use]
+    pub fn model_context(&self) -> Option<&ModelMeshContext> {
+        match &self.0 {
+            MesherKind::Procedural => None,
+            MesherKind::Models(context) => Some(context),
+        }
+    }
+
     /// Meshes one chunk column from its immutable snapshot.
     #[must_use]
     pub fn mesh(&self, pos: ChunkPos, snapshot: &ChunkSnapshot) -> Mesh {
