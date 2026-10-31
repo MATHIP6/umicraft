@@ -22,6 +22,7 @@ pub(super) fn humanoid_pose(entity: &EntityRenderSnapshot, arms_forward: bool) -
         sneaking: entity.kind == EntityKind::Player && entity.flags.is_sneaking(),
         arms: arm_pose(entity),
         arms_forward,
+        riding: entity.riding,
     }
 }
 

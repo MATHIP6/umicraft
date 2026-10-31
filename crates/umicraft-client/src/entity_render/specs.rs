@@ -21,6 +21,21 @@ use umicraft_assets::skin::{
 };
 use umicraft_model::entity::TextureSlot;
 
+/// An original stand-in for the shadow texture: a black disc whose opacity
+/// falls smoothly from the centre to the rim.
+fn procedural_shadow() -> Vec<u8> {
+    let mut rgba = vec![0u8; 32 * 32 * 4];
+    for y in 0..32 {
+        for x in 0..32 {
+            let dx = x as f32 + 0.5 - 16.0;
+            let dy = y as f32 + 0.5 - 16.0;
+            let falloff = (1.0 - (dx * dx + dy * dy).sqrt() / 16.0).clamp(0.0, 1.0);
+            rgba[(y * 32 + x) * 4 + 3] = (falloff * falloff * 255.0) as u8;
+        }
+    }
+    rgba
+}
+
 /// Specification for one entity texture: jar path + procedural fallback.
 pub(super) struct TextureSpec {
     pub(super) slot: TextureSlot,
@@ -60,6 +75,151 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             slot: TextureSlot::Cow,
             jar_path: "assets/minecraft/textures/entity/cow/cow.png",
             fallback: || (procedural_cow_texture(), 64, 32),
+        },
+        // The glowing layers have no original stand-in: without the jar they
+        // add nothing.
+        TextureSpec {
+            slot: TextureSlot::Shadow,
+            jar_path: "assets/minecraft/textures/misc/shadow.png",
+            fallback: || (procedural_shadow(), 32, 32),
+        },
+        // No original stand-in for the vehicles: without the jar they are
+        // not drawn.
+        TextureSpec {
+            slot: TextureSlot::Boat,
+            jar_path: "assets/minecraft/textures/entity/boat.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Minecart,
+            jar_path: "assets/minecraft/textures/entity/minecart.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Chest,
+            jar_path: "assets/minecraft/textures/entity/chest/normal.png",
+            fallback: || (vec![0; 64 * 64 * 4], 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::EnderCrystal,
+            jar_path: "assets/minecraft/textures/entity/endercrystal/endercrystal.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::ExperienceOrb,
+            jar_path: "assets/minecraft/textures/entity/experience_orb.png",
+            fallback: || (vec![0; 64 * 64 * 4], 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::Painting,
+            jar_path: "assets/minecraft/textures/painting/paintings_kristoffer_zetterstrand.png",
+            fallback: || (vec![0; 256 * 256 * 4], 256, 256),
+        },
+        TextureSpec {
+            slot: TextureSlot::LeashKnot,
+            jar_path: "assets/minecraft/textures/entity/lead_knot.png",
+            fallback: || (vec![0; 32 * 32 * 4], 32, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::Lightning,
+            // Not in the jar: the bolt has no texture, so this is always the
+            // white fallback.
+            jar_path: "umicraft/white.png",
+            fallback: || (vec![255; 4], 1, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::Particles,
+            jar_path: "assets/minecraft/textures/particle/particles.png",
+            fallback: || (vec![0; 128 * 128 * 4], 128, 128),
+        },
+        TextureSpec {
+            slot: TextureSlot::FishLine,
+            // Not in the jar: always the black fallback.
+            jar_path: "umicraft/black.png",
+            fallback: || (vec![0, 0, 0, 255], 1, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::DragonRay,
+            // Not in the jar: the rays are coloured per vertex in the reference.
+            jar_path: "umicraft/dragon_ray.png",
+            fallback: super::dragon_death::ray_texture,
+        },
+        TextureSpec {
+            slot: TextureSlot::DragonExploding,
+            jar_path: "assets/minecraft/textures/entity/enderdragon/dragon_exploding.png",
+            // Without the jar the stand-in does not dissolve.
+            fallback: || (procedural_dragon_texture(), 256, 256),
+        },
+        TextureSpec {
+            slot: TextureSlot::DragonBeam,
+            jar_path: "assets/minecraft/textures/entity/endercrystal/endercrystal_beam.png",
+            fallback: || (vec![0; 4], 1, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::Leash,
+            // Not in the jar: the rope is two browns, `(0.5, 0.4, 0.3)` of
+            // `renderLeash`, the dark one scaled by 0.7.
+            jar_path: "umicraft/leash.png",
+            fallback: || (vec![89, 71, 54, 255, 128, 102, 77, 255], 2, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::Arrow,
+            jar_path: "assets/minecraft/textures/entity/arrow.png",
+            // No original stand-in: without the jar the arrows are not drawn.
+            fallback: || (vec![0; 32 * 32 * 4], 32, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::SpiderEyes,
+            jar_path: "assets/minecraft/textures/entity/spider_eyes.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::EndermanEyes,
+            jar_path: "assets/minecraft/textures/entity/enderman/enderman_eyes.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::DragonEyes,
+            jar_path: "assets/minecraft/textures/entity/enderdragon/dragon_eyes.png",
+            fallback: || (vec![0; 256 * 256 * 4], 256, 256),
+        },
+        TextureSpec {
+            slot: TextureSlot::CreeperCharge,
+            jar_path: "assets/minecraft/textures/entity/creeper/creeper_armor.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::WitherAura,
+            jar_path: "assets/minecraft/textures/entity/wither/wither_armor.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::EnchantGlint,
+            jar_path: "assets/minecraft/textures/misc/enchanted_item_glint.png",
+            fallback: || (vec![0; 64 * 64 * 4], 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::MushroomRed,
+            jar_path: "assets/minecraft/textures/blocks/mushroom_red.png",
+            // No original stand-in: without the jar the mushrooms are not drawn.
+            fallback: || (vec![0; 16 * 16 * 4], 16, 16),
+        },
+        TextureSpec {
+            slot: TextureSlot::Fire(0),
+            jar_path: "assets/minecraft/textures/blocks/fire_layer_0.png",
+            // No original stand-in for the flames: without the jar they are not drawn.
+            fallback: || (vec![0; 16 * 512 * 4], 16, 512),
+        },
+        TextureSpec {
+            slot: TextureSlot::Fire(1),
+            jar_path: "assets/minecraft/textures/blocks/fire_layer_1.png",
+            fallback: || (vec![0; 16 * 512 * 4], 16, 512),
+        },
+        TextureSpec {
+            slot: TextureSlot::PigSaddle,
+            jar_path: "assets/minecraft/textures/entity/pig/pig_saddle.png",
+            // No original stand-in for the saddle: without the jar it is not drawn.
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
         },
         TextureSpec {
             slot: TextureSlot::Pig,
@@ -177,6 +337,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (procedural_ghast_texture(), 64, 32),
         },
         TextureSpec {
+            slot: TextureSlot::GhastShooting,
+            jar_path: "assets/minecraft/textures/entity/ghast/ghast_shooting.png",
+            fallback: || (procedural_ghast_texture(), 64, 32),
+        },
+        TextureSpec {
             slot: TextureSlot::Guardian,
             jar_path: "assets/minecraft/textures/entity/guardian.png",
             fallback: || (procedural_guardian_texture(), 64, 64),
@@ -200,6 +365,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             slot: TextureSlot::Silverfish,
             jar_path: "assets/minecraft/textures/entity/silverfish.png",
             fallback: || (procedural_silverfish_texture(), 64, 32),
+        },
+        TextureSpec {
+            slot: TextureSlot::WitherInvulnerable,
+            jar_path: "assets/minecraft/textures/entity/wither/wither_invulnerable.png",
+            fallback: || (procedural_wither_texture(), 64, 64),
         },
         TextureSpec {
             slot: TextureSlot::Wither,

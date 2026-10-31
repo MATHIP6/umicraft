@@ -26,8 +26,12 @@ use umicraft_model::ModelQuad;
 use umicraft_world::LightLevel;
 
 use crate::item_icons::ItemResources;
+use crate::java_random::JavaRandom;
 
+mod carried;
+mod head;
 mod held;
+pub(crate) mod objects;
 
 /// Hover height offset per unit of the ground scale (`RenderEntityItem`).
 const HOVER_BASE: f32 = 0.25;
@@ -42,9 +46,17 @@ const SCATTER_SEED: u64 = 187;
 #[derive(Debug, Default)]
 pub struct WorldItems {
     layers: ItemLayers,
+    /// Where the camera looks, for the sprites that face it.
+    view: objects::View,
 }
 
 impl WorldItems {
+    /// Sets the camera angles (`yaw` and `pitch` in radians, as in
+    /// `umicraft_render::Camera`) that thrown items and fireballs face.
+    pub fn set_view(&mut self, yaw: f32, pitch: f32) {
+        self.view = objects::View::of_camera(yaw, pitch);
+    }
+
     /// Rebuilds the meshes from the entity snapshots and returns them.
     ///
     /// The buffers of the previous frame are reused. Entities that are not
@@ -67,6 +79,9 @@ impl WorldItems {
                 (_, _, Some(held)) => held::push(&mut self.layers, entity, held, items),
                 _ => {}
             }
+            head::push(&mut self.layers, entity, items);
+            carried::push(&mut self.layers, entity, items);
+            objects::push(&mut self.layers, entity, items, self.view);
         }
         &self.layers
     }
@@ -312,30 +327,6 @@ fn hover_phase(entity_id: i32) -> f32 {
     (hash >> 8) as f32 / (1u32 << 24) as f32 * std::f32::consts::TAU
 }
 
-/// The 48-bit linear congruential generator of `java.util.Random`, enough
-/// for the seeded scatter of stacked blocks.
-struct JavaRandom(u64);
-
-impl JavaRandom {
-    const MULTIPLIER: u64 = 0x5_DEEC_E66D;
-    const MASK: u64 = (1 << 48) - 1;
-
-    fn new(seed: u64) -> Self {
-        Self((seed ^ Self::MULTIPLIER) & Self::MASK)
-    }
-
-    /// `Random.nextFloat`: 24 random bits as a fraction.
-    fn next_float(&mut self) -> f32 {
-        self.0 = (self.0.wrapping_mul(Self::MULTIPLIER).wrapping_add(0xB)) & Self::MASK;
-        (self.0 >> 24) as f32 / (1u32 << 24) as f32
-    }
-
-    /// `nextFloat() * 2 - 1`, the `-1..1` draw of the scatter.
-    fn next_signed_float(&mut self) -> f32 {
-        self.next_float() * 2.0 - 1.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,8 +449,22 @@ mod render_tests {
             age: 3.0,
             frame_direction: 0,
             frame_rotation: 0,
+            armor: [None, None, None, None],
+            spectator: false,
+            object_data: 0,
+            shadow: Default::default(),
             use_ticks: 0,
             fishing: false,
+            riding: false,
+            leash: None,
+            flight: None,
+            squish: 0.0,
+            horse: None,
+            ridden: false,
+            block_lights: std::sync::Arc::default(),
+            rod_tip: None,
+            local: false,
+            ghost_visible: false,
             flags: EntityFlags::default(),
         }
     }
@@ -562,12 +567,26 @@ mod player_render_tests {
                 count: 1,
                 nbt: None,
             }),
+            armor: [None, None, None, None],
+            spectator: false,
+            object_data: 0,
+            shadow: Default::default(),
             item: None,
             age: 0.0,
             frame_direction: 0,
             frame_rotation: 0,
             use_ticks: 0,
             fishing: false,
+            riding: false,
+            leash: None,
+            flight: None,
+            squish: 0.0,
+            horse: None,
+            ridden: false,
+            block_lights: std::sync::Arc::default(),
+            rod_tip: None,
+            local: false,
+            ghost_visible: false,
             flags: EntityFlags::new(if sneaking { 0x02 } else { 0 }, 0),
         }
     }
@@ -750,8 +769,22 @@ mod glint_render_tests {
             age: 3.0,
             frame_direction: 0,
             frame_rotation: 0,
+            armor: [None, None, None, None],
+            spectator: false,
+            object_data: 0,
+            shadow: Default::default(),
             use_ticks: 0,
             fishing: false,
+            riding: false,
+            leash: None,
+            flight: None,
+            squish: 0.0,
+            horse: None,
+            ridden: false,
+            block_lights: std::sync::Arc::default(),
+            rod_tip: None,
+            local: false,
+            ghost_visible: false,
             flags: EntityFlags::default(),
         }
     }

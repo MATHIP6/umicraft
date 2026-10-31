@@ -7,6 +7,7 @@ use glam::DVec3;
 
 use super::angle::wrap_degrees;
 use super::kind::EntityKind;
+use super::meta::Variant;
 use super::record::EntityRecord;
 
 /// Ticks over which a movement or teleport packet is applied
@@ -73,6 +74,22 @@ impl EntityRecord {
         );
         self.limbs.update(moved.0.hypot(moved.1) as f32);
         self.cape.update(self.position);
+        if matches!(self.kind, EntityKind::Slime | EntityKind::MagmaCube) {
+            self.squish.tick(self.on_ground);
+        }
+        if let (EntityKind::Horse, Variant::Horse(horse)) = (self.kind, &self.meta.variant) {
+            self.horse
+                .tick(horse.eating(), horse.rearing(), horse.mouth_open());
+        }
+        if self.kind == EntityKind::Dragon {
+            let alive = self.health.is_none_or(|health| health > 0.0);
+            self.flight.get_or_insert_with(Default::default).tick(
+                self.yaw,
+                self.position.y,
+                self.velocity,
+                alive,
+            );
+        }
         match self.kind {
             EntityKind::Player => self.body_yaw.update_player(moved, self.yaw, false),
             kind if kind.is_living() => {
@@ -84,6 +101,32 @@ impl EntityRecord {
     }
 }
 
+/// The squash and stretch of a slime as it jumps and lands (MCP
+/// `EntitySlime.onUpdate`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Squish {
+    /// Where the factor is heading: `1` on leaving the ground, `-0.5` on
+    /// landing, then decaying by `0.6` each tick.
+    amount: f32,
+    /// What is drawn.
+    pub factor: f32,
+    was_on_ground: bool,
+}
+
+impl Squish {
+    /// One tick, after the entity has moved.
+    pub fn tick(&mut self, on_ground: bool) {
+        self.factor += (self.amount - self.factor) * 0.5;
+        if on_ground && !self.was_on_ground {
+            self.amount = -0.5;
+        } else if !on_ground && self.was_on_ground {
+            self.amount = 1.0;
+        }
+        self.was_on_ground = on_ground;
+        self.amount *= 0.6;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +134,21 @@ mod tests {
 
     fn record(kind: EntityKind) -> EntityRecord {
         EntityRecord::new(EntityId(1), kind, DVec3::new(0.0, 64.0, 0.0), 0.0, 0.0)
+    }
+
+    #[test]
+    fn a_slime_stretches_leaving_the_ground_and_squashes_landing() {
+        let mut squish = Squish::default();
+        squish.tick(true);
+        squish.tick(false);
+        squish.tick(false);
+        assert!(squish.factor > 0.2, "{}", squish.factor);
+        for _ in 0..6 {
+            squish.tick(false);
+        }
+        squish.tick(true);
+        squish.tick(true);
+        assert!(squish.factor < -0.05, "{}", squish.factor);
     }
 
     #[test]

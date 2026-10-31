@@ -18,6 +18,8 @@ const TAMEABLE_FLAGS: u8 = 16;
 const WOLF_COLLAR: u8 = 20;
 /// Wolf entry: begging (head tilt).
 const WOLF_BEGGING: u8 = 19;
+/// Entry of the wolf health (MCP `EntityWolf`, index 18).
+const WOLF_HEALTH: u8 = 18;
 /// Ocelot entry: coat (`0` wild, `1` tuxedo, `2` tabby, `3` siamese).
 const OCELOT_SKIN: u8 = 18;
 /// Rabbit entry: coat (MCP `EntityRabbit.getRabbitType`).
@@ -45,6 +47,8 @@ pub struct WolfMeta {
     pub collar: u8,
     /// Head tilted as when begging for food.
     pub begging: bool,
+    /// Health in whole points (entry 18), which sets the tail of a tamed wolf.
+    pub health: u8,
 }
 
 impl Default for WolfMeta {
@@ -55,6 +59,7 @@ impl Default for WolfMeta {
             tamed: false,
             collar: 14,
             begging: false,
+            health: 20,
         }
     }
 }
@@ -111,6 +116,9 @@ pub(super) fn apply_wolf(variant: &mut Variant, metadata: &Metadata) {
     }
     if let Some(begging) = metadata.get_byte(WOLF_BEGGING) {
         wolf.begging = begging != 0;
+    }
+    if let Some(health) = metadata.get_float(WOLF_HEALTH) {
+        wolf.health = health.clamp(0.0, 40.0).round() as u8;
     }
     *variant = Variant::Wolf(wolf);
 }

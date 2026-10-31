@@ -158,8 +158,19 @@ pub struct EntityBatch {
 /// The entity rendering pipeline.
 pub struct EntityRenderer {
     pipeline: wgpu::RenderPipeline,
+    /// The additive pipeline of glowing layers (eyes, charge, enchantment).
+    additive_pipeline: wgpu::RenderPipeline,
+    /// The additive pipeline of the enchantment glint, which only draws where
+    /// the armour wrote its depth (`depthFunc(GL_EQUAL)`).
+    glint_pipeline: wgpu::RenderPipeline,
+    /// The translucent pipeline of invisible entities seen by a spectator.
+    ghost_pipeline: wgpu::RenderPipeline,
+    /// The pipeline of the shadows under the entities.
+    shadow_pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// The same filtering with the texture repeating, for scrolling layers.
+    repeat_sampler: wgpu::Sampler,
 }
 
 impl EntityRenderer {
@@ -202,49 +213,76 @@ impl EntityRenderer {
             immediate_size: 0,
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("entity pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<EntityVertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &ENTITY_ATTRIBUTES,
-                })],
-                compilation_options: Default::default(),
+        let pipeline = build_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            format,
+            PipelineKind {
+                label: "entity pipeline",
+                vertex: "vs_main",
+                fragment: "fs_main",
+                blend: wgpu::BlendState::ALPHA_BLENDING,
+                depth_write: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
+        );
+        let additive_pipeline = build_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            format,
+            PipelineKind {
+                label: "entity additive pipeline",
+                vertex: "vs_additive",
+                fragment: "fs_additive",
+                blend: ADDITIVE,
+                depth_write: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: crate::renderer::DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        );
+        let ghost_pipeline = build_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            format,
+            PipelineKind {
+                label: "entity ghost pipeline",
+                vertex: "vs_main",
+                fragment: "fs_ghost",
+                blend: wgpu::BlendState::ALPHA_BLENDING,
+                depth_write: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+            },
+        );
+        let shadow_pipeline = build_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            format,
+            PipelineKind {
+                label: "entity shadow pipeline",
+                vertex: "vs_shadow",
+                fragment: "fs_shadow",
+                blend: wgpu::BlendState::ALPHA_BLENDING,
+                depth_write: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+            },
+        );
+        let glint_pipeline = build_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            format,
+            PipelineKind {
+                label: "entity glint pipeline",
+                vertex: "vs_additive",
+                fragment: "fs_additive",
+                blend: ADDITIVE,
+                depth_write: false,
+                depth_compare: wgpu::CompareFunction::Equal,
+            },
+        );
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("entity sampler"),
@@ -257,10 +295,26 @@ impl EntityRenderer {
             ..Default::default()
         });
 
+        let repeat_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("entity repeating sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
         Self {
             pipeline,
+            additive_pipeline,
+            glint_pipeline,
+            ghost_pipeline,
+            shadow_pipeline,
             texture_layout,
             sampler,
+            repeat_sampler,
         }
     }
 
@@ -284,6 +338,90 @@ impl EntityRenderer {
         )
     }
 
+    /// Creates a texture that repeats, for the layers whose coordinates scroll
+    /// past the edge (the creeper charge, the wither aura, the glint).
+    pub fn create_repeating_texture(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> EntityTexture {
+        EntityTexture::new(
+            device,
+            queue,
+            &self.texture_layout,
+            &self.repeat_sampler,
+            rgba,
+            width,
+            height,
+        )
+    }
+
+    /// Renders the shadows under the entities.
+    pub fn render_shadows<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        camera_bind_group: &'a wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
+    ) {
+        self.draw_batches(pass, &self.shadow_pipeline, camera_bind_group, batches);
+    }
+
+    /// Renders the invisible entities a spectator sees: translucent, drawn
+    /// over the opaque ones without writing depth.
+    pub fn render_ghosts<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        camera_bind_group: &'a wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
+    ) {
+        self.draw_batches(pass, &self.ghost_pipeline, camera_bind_group, batches);
+    }
+
+    /// Renders the enchantment glint: added like the other glowing layers, but
+    /// only where the armour it covers wrote the same depth.
+    pub fn render_glint<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        camera_bind_group: &'a wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
+    ) {
+        self.draw_batches(pass, &self.glint_pipeline, camera_bind_group, batches);
+    }
+
+    /// Renders the glowing layers: their colour is added to the frame without
+    /// lighting and without writing depth, so they glow over the body.
+    pub fn render_additive<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        camera_bind_group: &'a wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
+    ) {
+        self.draw_batches(pass, &self.additive_pipeline, camera_bind_group, batches);
+    }
+
+    fn draw_batches<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        pipeline: &'a wgpu::RenderPipeline,
+        camera_bind_group: &'a wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
+    ) {
+        let mut set_pipeline = false;
+        for (buffer, vertex_count, texture_bind_group) in batches {
+            if !set_pipeline {
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, camera_bind_group, &[]);
+                set_pipeline = true;
+            }
+            pass.set_bind_group(1, texture_bind_group, &[]);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..vertex_count, 0..1);
+        }
+    }
+
     /// Renders entity batches.
     pub fn render<'a>(
         &'a self,
@@ -303,4 +441,80 @@ impl EntityRenderer {
             pass.draw(0..vertex_count, 0..1);
         }
     }
+}
+
+/// Adds the source colour to the frame (`blendFunc(1, 1)`), keeping its alpha.
+const ADDITIVE: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::Zero,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+};
+
+/// What differs between the entity pipelines.
+struct PipelineKind {
+    label: &'static str,
+    vertex: &'static str,
+    fragment: &'static str,
+    blend: wgpu::BlendState,
+    depth_write: bool,
+    depth_compare: wgpu::CompareFunction,
+}
+
+fn build_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    kind: PipelineKind,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(kind.label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some(kind.vertex),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<EntityVertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &ENTITY_ATTRIBUTES,
+            })],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(kind.fragment),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(kind.blend),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            unclipped_depth: false,
+            conservative: false,
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: crate::renderer::DEPTH_FORMAT,
+            depth_write_enabled: Some(kind.depth_write),
+            depth_compare: Some(kind.depth_compare),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
 }

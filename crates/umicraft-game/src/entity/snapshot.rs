@@ -11,11 +11,15 @@ use super::angle::lerp_degrees;
 use super::anim::{Animation, BedPose};
 use super::cape::{cape_angles, CapeAngles};
 use super::flags::EntityFlags;
+use super::flight::{DragonFlight, DragonPose};
+use super::horse_state::{HorsePose, HorseState};
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
+use super::leash::{LeashAnchor, LeashFrame};
 use super::limbs::LimbSwing;
 use super::meta::EntityMeta;
 use super::profile::PlayerProfile;
+use super::shadow::ShadowBlock;
 
 /// Per-entity interpolation data sent to the render thread each tick.
 ///
@@ -68,12 +72,47 @@ pub struct EntityFrameData {
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
     pub held: Option<EntityItem>,
+    /// The worn armour, boots first.
+    pub armor: [Option<EntityItem>; 4],
+    /// Whether the player is in spectator mode: only the head is drawn.
+    pub spectator: bool,
+    /// The `data` of the spawn packet of an object.
+    pub object_data: i32,
+    /// The blocks the shadow of the entity falls on (the game thread finds
+    /// them from the world).
+    pub shadow: Arc<[ShadowBlock]>,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use.
     pub use_ticks: u32,
     /// Whether the player has a bobber out.
     pub fishing: bool,
+    /// Whether the entity sits on a vehicle.
+    pub riding: bool,
+    /// The flight history of an ender dragon.
+    pub flight: Option<DragonFlight>,
+    /// The squish factor of a slime or magma cube.
+    pub squish: f32,
+    /// The grazing, rearing and mouth of a horse.
+    pub horse: Option<HorseState>,
+    /// Whether another entity sits on this one.
+    pub ridden: bool,
+    /// The light in front of each block of a painting, column by column (the
+    /// game thread samples it; empty for anything else).
+    pub block_lights: Arc<[LightLevel]>,
+    /// Where the line of this bobber ties to the rod when the angler is the
+    /// local player in first person; set by the game thread.
+    pub rod_tip: Option<Vec3>,
+    /// Whether this is the body of the local player.
+    pub local: bool,
+    /// Whether the viewer sees the invisible body as a ghost by team.
+    pub ghost_visible: bool,
+    /// Whether the dragon is alive: a dead one shows its history frozen.
+    pub flight_alive: bool,
+    /// Who holds the leash of the entity, if it is leashed.
+    pub leash_holder: Option<EntityId>,
+    /// Where the holder is, found by [`super::leash::leash_entities`].
+    pub leash: Option<LeashFrame>,
     /// Ticks lived at the current simulation tick.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -123,9 +162,26 @@ impl EntityFrameData {
             profile: self.profile.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
+            armor: self.armor.clone(),
+            spectator: self.spectator,
+            object_data: self.object_data,
+            shadow: self.shadow.clone(),
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.fishing,
+            riding: self.riding,
+            leash: self.leash.map(|holder| holder.at(a)),
+            local: self.local,
+            ghost_visible: self.ghost_visible,
+            squish: self.squish,
+            horse: self.horse.map(|horse| horse.pose(a)),
+            ridden: self.ridden,
+            block_lights: self.block_lights.clone(),
+            rod_tip: self.rod_tip,
+            flight: self
+                .flight
+                .as_ref()
+                .map(|flight| flight.pose(a, self.flight_alive)),
             age: self.age_ticks as f32 + a,
             frame_direction: self.frame_direction,
             frame_rotation: self.frame_rotation,
@@ -180,12 +236,46 @@ pub struct EntityRenderSnapshot {
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
     pub held: Option<EntityItem>,
+    /// The worn armour, boots first.
+    pub armor: [Option<EntityItem>; 4],
+    /// Whether the player is in spectator mode: only the head is drawn.
+    pub spectator: bool,
+    /// The `data` of the spawn packet of an object.
+    pub object_data: i32,
+    /// The blocks the shadow of the entity falls on (the game thread finds
+    /// them from the world).
+    pub shadow: Arc<[ShadowBlock]>,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use: picks the bow drawing model.
     pub use_ticks: u32,
     /// Whether the player has a bobber out: the held rod shows its cast model.
     pub fishing: bool,
+    /// Whether the entity sits on a vehicle: a humanoid sits with its legs forward.
+    pub riding: bool,
+    /// The holder of the leash of the entity, if it is leashed.
+    pub leash: Option<LeashAnchor>,
+    /// The flight pose of an ender dragon: its wing phase and the path it flew.
+    pub flight: Option<DragonPose>,
+    /// How much a slime or magma cube is squashed (`0` at rest, positive when
+    /// stretched, negative when it lands).
+    pub squish: f32,
+    /// How far a horse grazes, rears and opens its mouth.
+    pub horse: Option<HorsePose>,
+    /// Whether another entity sits on this one: a ridden horse shows its reins.
+    pub ridden: bool,
+    /// The light in front of each block of a painting, column by column; empty
+    /// when the whole entity takes `light`.
+    pub block_lights: Arc<[LightLevel]>,
+    /// Where the line of this bobber ties to the rod (first person only).
+    pub rod_tip: Option<Vec3>,
+    /// Whether this is the body of the local player: it is not lowered further
+    /// when crouching (`RenderPlayer.doRender`).
+    pub local: bool,
+    /// Whether the viewer sees this invisible body as a ghost: a team mate of
+    /// the local player in a team that sees invisible team mates (a
+    /// spectator sees every one, see `EntityTextures::set_viewer_spectator`).
+    pub ghost_visible: bool,
     /// Ticks lived plus the interpolation alpha, for the bob and spin of items.
     pub age: f32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -224,8 +314,22 @@ impl EntityRenderSnapshot {
             uuid: None,
             held: None,
             item: None,
+            armor: [None, None, None, None],
+            spectator: false,
+            object_data: 0,
+            shadow: Arc::default(),
             use_ticks: 0,
             fishing: false,
+            riding: false,
+            leash: None,
+            flight: None,
+            squish: 0.0,
+            horse: None,
+            ridden: false,
+            block_lights: Arc::default(),
+            rod_tip: None,
+            local: false,
+            ghost_visible: false,
             age: 0.0,
             frame_direction: 0,
             frame_rotation: 0,

@@ -366,6 +366,20 @@ impl HumanoidModel {
         }
     }
 
+    /// Keeps only the head and its hat, as `RenderPlayer.setModelVisibilities`
+    /// does for a player in spectator mode.
+    pub fn keep_head_only(&mut self) {
+        for part in [
+            &mut self.body,
+            &mut self.right_arm,
+            &mut self.left_arm,
+            &mut self.right_leg,
+            &mut self.left_leg,
+        ] {
+            part.boxes.clear();
+        }
+    }
+
     /// Emits a baby: the head at three quarters, the rest halved
     /// (MCP `ModelBiped.render` with `isChild`).
     #[must_use]

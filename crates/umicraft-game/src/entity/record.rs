@@ -11,6 +11,8 @@ use super::anim::Animation;
 use super::body_yaw::BodyYaw;
 use super::cape::CapeChase;
 use super::flags::EntityFlags;
+use super::flight::DragonFlight;
+use super::horse_state::HorseState;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
@@ -72,6 +74,14 @@ pub struct EntityRecord {
     pub uuid: Option<[u8; 16]>,
     /// The stack in the hand (players).
     pub held: Option<EntityItem>,
+    /// The worn armour, boots first (`Entity Equipment` slots 1 to 4).
+    pub armor: [Option<EntityItem>; 4],
+    /// Whether the tab list says this player is in spectator mode (shown as
+    /// a head only).
+    pub spectator: bool,
+    /// The `data` of the spawn packet of an object: the block of a falling
+    /// block, the type of a minecart, the owner of a projectile.
+    pub object_data: i32,
     /// The dropped stack (items) or the stack inside the frame (item frames).
     pub item: Option<EntityItem>,
     /// Ticks the held item has been in use (MCP `getItemInUseDuration` of
@@ -79,6 +89,24 @@ pub struct EntityRecord {
     pub use_ticks: u32,
     /// The bobber this player has out, if any (MCP `EntityPlayer.fishEntity`).
     pub bobber: Option<EntityId>,
+    /// The vehicle this entity sits on (MCP `Entity.ridingEntity`).
+    pub vehicle: Option<EntityId>,
+    /// Who holds the leash of this entity (MCP `EntityLiving.leashedToEntity`).
+    pub leash: Option<EntityId>,
+    /// The flight of this entity to whoever picked it up (MCP
+    /// `EntityPickupFX`), `None` while it lies in the world.
+    pub collecting: Option<Collecting>,
+    /// The flight history of an ender dragon (created on its first tick).
+    pub flight: Option<DragonFlight>,
+    /// How far a horse grazes, rears and opens its mouth.
+    pub horse: HorseState,
+    /// The squish of a slime or magma cube (MCP `EntitySlime.squishFactor`).
+    pub squish: super::motion::Squish,
+    /// Whether this is the body of the local player (MCP `EntityPlayerSP`).
+    pub local: bool,
+    /// Whether the local player sees this entity's invisible body as a ghost
+    /// because they share a team that allows it (MCP `isInvisibleToPlayer`).
+    pub ghost_visible: bool,
     /// Ticks the entity has lived since it was spawned.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -91,6 +119,23 @@ pub struct EntityRecord {
     pub health: Option<f32>,
     /// Remaining interpolation ticks for position/rotation smoothing (vanilla: 3).
     pub interpolation_steps: u8,
+}
+
+/// An entity flying to the one that picked it up: it covers the distance in
+/// three ticks, slowly at first (`EntityPickupFX`: `((age + partial) / 3)^2`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Collecting {
+    /// Where the entity lay.
+    pub start: DVec3,
+    /// Where it flies to.
+    pub target: DVec3,
+    /// Ticks flown.
+    pub ticks: u8,
+}
+
+impl Collecting {
+    /// Ticks of the flight.
+    pub const TICKS: u8 = 3;
 }
 
 impl EntityRecord {
@@ -144,9 +189,25 @@ impl EntityRecord {
             profile: self.profile.clone(),
             uuid: self.uuid,
             held: self.held.clone(),
+            armor: self.armor.clone(),
+            spectator: self.spectator,
+            object_data: self.object_data,
+            shadow: Arc::default(),
             item: self.item.clone(),
             use_ticks: self.use_ticks,
             fishing: self.bobber.is_some(),
+            riding: self.vehicle.is_some(),
+            flight: self.flight.clone(),
+            squish: self.squish.factor,
+            horse: (self.kind == EntityKind::Horse).then_some(self.horse),
+            ridden: false,
+            block_lights: Arc::default(),
+            rod_tip: None,
+            local: self.local,
+            ghost_visible: self.ghost_visible,
+            flight_alive: self.health.is_none_or(|health| health > 0.0),
+            leash_holder: self.leash,
+            leash: None,
             age_ticks: self.age_ticks,
             frame_direction: self.frame_direction,
             frame_rotation: self.frame_rotation,
@@ -184,8 +245,19 @@ impl EntityRecord {
             uuid: None,
             held: None,
             item: None,
+            armor: [None, None, None, None],
+            spectator: false,
+            object_data: 0,
             use_ticks: 0,
             bobber: None,
+            vehicle: None,
+            leash: None,
+            collecting: None,
+            flight: None,
+            squish: Default::default(),
+            horse: HorseState::new(u64::from(id.0.unsigned_abs())),
+            local: false,
+            ghost_visible: false,
             age_ticks: 0,
             frame_direction: 0,
             frame_rotation: 0,

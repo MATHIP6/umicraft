@@ -33,6 +33,9 @@ pub struct ItemDisplay {
     pub leather_color: Option<u32>,
     /// `SkullOwner` (a name, or the `Name` of the owner compound).
     pub skull_owner: Option<String>,
+    /// The `textures` property of the `SkullOwner` profile (base64 JSON of the
+    /// skin), when the server sent the owner with its properties.
+    pub skull_textures: Option<String>,
 }
 
 impl ItemDisplay {
@@ -74,6 +77,7 @@ impl ItemDisplay {
                 // A colour is 24 bits; the sign bit of a malformed int is dropped.
                 .map(|color| color as u32 & 0x00FF_FFFF),
             skull_owner: root.get("SkullOwner").and_then(skull_owner),
+            skull_textures: root.get("SkullOwner").and_then(skull_textures),
         }
     }
 
@@ -90,6 +94,18 @@ fn enchantment(entry: &Nbt) -> Enchantment {
         id: short("id") as i16,
         level: short("lvl").clamp(0, i32::from(u16::MAX)) as u16,
     }
+}
+
+/// `SkullOwner.Properties.textures[0].Value` (`NBTUtil.readGameProfileFromNBT`).
+fn skull_textures(tag: &Nbt) -> Option<String> {
+    let value = tag
+        .get("Properties")?
+        .get("textures")?
+        .as_list()?
+        .first()?
+        .get("Value")?
+        .as_str()?;
+    Some(value.to_owned())
 }
 
 fn skull_owner(tag: &Nbt) -> Option<String> {
@@ -147,6 +163,37 @@ mod tests {
         assert_eq!(display.leather_color, Some(0x12_3456));
         assert_eq!(display.skull_owner.as_deref(), Some("Notch"));
         assert!(display.has_glint());
+    }
+
+    /// A compound entry `name: { ..body.. }`.
+    fn compound(name: &str, body: &[u8]) -> Vec<u8> {
+        let mut out = vec![10];
+        out.extend((name.len() as u16).to_be_bytes());
+        out.extend(name.as_bytes());
+        out.extend(body);
+        out.push(0);
+        out
+    }
+
+    #[test]
+    fn a_skull_owner_with_properties_gives_its_skin_textures() {
+        // `{SkullOwner: {Name: "Bob", Properties: {textures: [{Value: "abc"}]}}}`
+        let mut texture = string_tag("Value", "abc");
+        texture.push(0);
+        let mut textures = vec![9, 0, 8];
+        textures.extend(b"textures");
+        textures.extend([10, 0, 0, 0, 1]);
+        textures.extend(&texture);
+        let mut owner = string_tag("Name", "Bob");
+        owner.extend(compound("Properties", &textures));
+        let mut root = vec![10, 0, 0];
+        root.extend(compound("SkullOwner", &owner));
+        root.push(0);
+        let display = ItemDisplay::from_nbt(&root);
+        assert_eq!(display.skull_owner.as_deref(), Some("Bob"));
+        assert_eq!(display.skull_textures.as_deref(), Some("abc"));
+        // A name only: no textures.
+        assert_eq!(ItemDisplay::from_nbt(&full_stack()).skull_textures, None);
     }
 
     #[test]

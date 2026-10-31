@@ -6,9 +6,11 @@
 //! ([`ModelVertex`], [`ModelBox`], [`ModelPart`]) and the texture-slot
 //! registry ([`TextureSlot`], [`MeshLayer`]) are defined here.
 
+mod armor;
 mod bat;
 mod blaze;
 mod cape;
+mod chest;
 mod chicken;
 pub mod child;
 mod creeper;
@@ -34,20 +36,22 @@ mod villager;
 mod wither;
 mod wolf;
 
+pub use armor::ArmorMaterial;
 pub use bat::BatModel;
 pub use blaze::BlazeModel;
 pub use cape::CapeModel;
+pub use chest::ChestModel;
 pub use chicken::ChickenModel;
 pub use creeper::CreeperModel;
-pub use dragon::DragonModel;
+pub use dragon::{DragonModel, FlightFrame};
 pub use enderman::EndermanModel;
 pub use endermite::EndermiteModel;
-pub use ghast::GhastModel;
+pub use ghast::{GhastModel, RENDER_SCALE as GHAST_SCALE};
 pub use guardian::GuardianModel;
-pub use horse::HorseModel;
+pub use horse::{HorseLook, HorseModel};
 pub use humanoid::HumanoidModel;
 pub use iron_golem::IronGolemModel;
-pub use ocelot::OcelotModel;
+pub use ocelot::{OcelotModel, OcelotPose};
 pub use pose::{ArmPose, HumanoidPose};
 pub use quadruped::QuadrupedModel;
 pub use rabbit::RabbitModel;
@@ -424,6 +428,14 @@ impl ModelPart {
         }
     }
 
+    /// Inflates every box of this part by `amount` pixels (the `modelSize`
+    /// argument of the vanilla model constructors).
+    pub fn grow(&mut self, amount: f32) {
+        for shape in &mut self.boxes {
+            shape.dilation += amount;
+        }
+    }
+
     /// Adds a box to this part.
     pub fn with_box(mut self, b: ModelBox) -> Self {
         self.boxes.push(b);
@@ -475,6 +487,62 @@ pub enum TextureSlot {
     Cow,
     /// Pig mob texture.
     Pig,
+    /// The saddle drawn over a pig (`pig_saddle.png`).
+    PigSaddle,
+    /// The red mushroom block texture (`mushroom_red.png`), drawn on a mooshroom.
+    MushroomRed,
+    /// The soft black blob drawn under entities (`shadow.png`).
+    Shadow,
+    /// The wither while it is being spawned (`wither_invulnerable.png`).
+    WitherInvulnerable,
+    /// The boat (`boat.png`).
+    Boat,
+    /// The minecart (`minecart.png`).
+    Minecart,
+    /// The chest (`chest/normal.png`), carried by a chest minecart.
+    Chest,
+    /// The ender crystal (`endercrystal/endercrystal.png`).
+    EnderCrystal,
+    /// The experience orb (`experience_orb.png`).
+    ExperienceOrb,
+    /// The sheet of paintings (`painting/paintings_kristoffer_zetterstrand.png`).
+    Painting,
+    /// The knot of a leash (`lead_knot.png`).
+    LeashKnot,
+    /// A plain white texel, for what is drawn without a texture (lightning).
+    Lightning,
+    /// The particle sheet (`particle/particles.png`), of which the bobber is a cell.
+    Particles,
+    /// A plain black texel: the line of a fishing rod.
+    FishLine,
+    /// The two browns of the rope of a leash.
+    Leash,
+    /// The rays of a dying dragon: white to magenta along a 64 x 1 strip.
+    DragonRay,
+    /// The ray between an ender crystal and the dragon it heals
+    /// (`endercrystal/endercrystal_beam.png`), which scrolls along the ray.
+    DragonBeam,
+    /// The dragon while it dies (`enderdragon/dragon_exploding.png`): the
+    /// dragon texture whose alpha says in which order the body dissolves.
+    DragonExploding,
+    /// The arrow (`arrow.png`), flying or stuck in a body.
+    Arrow,
+    /// The ghast while it charges a fireball (`ghast_shooting.png`).
+    GhastShooting,
+    /// The glowing eyes of a spider (`spider_eyes.png`), added over its body.
+    SpiderEyes,
+    /// The glowing eyes of an enderman (`enderman_eyes.png`).
+    EndermanEyes,
+    /// The glowing eyes of the dragon (`dragon_eyes.png`).
+    DragonEyes,
+    /// The swirl of a charged creeper (`creeper_armor.png`).
+    CreeperCharge,
+    /// The swirl of a wounded wither (`wither_armor.png`).
+    WitherAura,
+    /// The enchantment glint (`enchanted_item_glint.png`).
+    EnchantGlint,
+    /// A strip of flames, `0` for `fire_layer_0` and `1` for `fire_layer_1`.
+    Fire(u8),
     /// Sheep base body texture (`sheep.png`).
     Sheep,
     /// Sheep wool overlay texture (`sheep_fur.png`).
@@ -584,6 +652,55 @@ pub enum TextureSlot {
     /// A horse coat composed from a base colour and a marking, keyed by the
     /// metadata variant (`base | marking << 8`).
     HorseCoat(u16),
+    /// The armour texture of a material; `leggings` picks `layer_2`.
+    Armor {
+        /// The material.
+        material: ArmorMaterial,
+        /// Whether it is the leggings texture (`layer_2`).
+        leggings: bool,
+    },
+    /// The `leather` texture multiplied by a dye colour (`0xRRGGBB`).
+    LeatherArmor {
+        /// Whether it is the leggings texture (`layer_2`).
+        leggings: bool,
+        /// The dye colour.
+        color: u32,
+    },
+    /// The undyed leather overlay texture.
+    LeatherOverlay {
+        /// Whether it is the leggings texture (`layer_2`).
+        leggings: bool,
+    },
+}
+
+impl TextureSlot {
+    /// Whether the texture is added over the frame (the glowing layers) and
+    /// repeats, instead of replacing it.
+    #[must_use]
+    pub const fn is_additive(self) -> bool {
+        matches!(
+            self,
+            Self::SpiderEyes
+                | Self::EndermanEyes
+                | Self::DragonEyes
+                | Self::CreeperCharge
+                | Self::WitherAura
+                | Self::EnchantGlint
+                | Self::Lightning
+                | Self::DragonRay
+                | Self::DragonBeam
+        )
+    }
+
+    /// Whether this is an armour texture, which stays visible on an invisible
+    /// entity.
+    #[must_use]
+    pub const fn is_armor(self) -> bool {
+        matches!(
+            self,
+            Self::Armor { .. } | Self::LeatherArmor { .. } | Self::LeatherOverlay { .. }
+        )
+    }
 }
 
 /// A mesh layer tagged with its texture slot.

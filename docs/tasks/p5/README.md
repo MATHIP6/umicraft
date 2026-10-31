@@ -115,7 +115,7 @@ MCP to read: `LayerBipedArmor`, `ModelBiped` armour models, `LayerArmorBase`,
 `LayerHorseArmor`, `LayerEnderman*`, `LayerArrow`, `RenderEntity.renderEntityOnFire`,
 `Entity.isInvisible`.
 
-- **Armour:** helmet, chestplate, leggings and boots of players and armoured
+- **Armour (done, unverified against vanilla):** `Entity Equipment` slots 1 to 4 are stored on the record (`armor`), drawn as the two biped shells (0.5 leggings, 1.0 others) with the material textures, leather dyed plus overlay, for players, zombies, skeletons, pigmen and giants. Invisible entities draw no body and keep only their armour. The pig saddle layer (`pig_saddle.png`, model inflated by 0.5) is done. The fire overlay is done (`entity_render::fire`, billboarded quads of `fire_layer_0/1`, the camera yaw reaches it through `EntityTextures::set_view_yaw`, widths from `EntityKind::width`; the dropped item and the arrow still use the default width). The horse is a full port of `ModelHorse` (`umicraft_model::entity::HorseModel`, one part per box with its own pivot: shins and hooves bend while walking, the body rises and the front legs fold when rearing, the head goes down grazing, the mouth opens, the tail hangs with the speed and wags, the saddle ropes swing and the reins show when ridden, and a foal is shrunk part by part). The state that makes it move (`umicraft_game::entity::horse_state`, `EntityHorse.onLivingUpdate`) runs on the game thread from the flags of the metadata. The armour is the third layer of the composed coat, and the saddle, bridle and chests are boxes of the model. The foal size is always the newborn one (the age of the metadata is not tracked). The mooshroom mushrooms (`entity_render::mushrooms`) and the long ears of donkeys and mules (`HorseModel::mule`) are done. Blocks on the head (`item_world::head`: the snowman pumpkin and any block item in the helmet slot of a player, zombie, skeleton or pigman), the enderman carried block and scream (`item_world::carried`), the sitting wolf and ocelot (ports of `ModelWolf` and `ModelOcelot`, with the sneak and sprint poses of the cat and the health-driven tail of a tamed wolf) and the ghast (4.5 scale, reference tentacle lengths, shooting texture) are done. The additive pass is done (`EntityRenderer::render_additive` and `render_glint`, `entity_render::glow`): the eyes of spiders, endermen and the dragon, the charged creeper, the wounded wither (now at its scale of 2) and the enchantment glint of armour, drawn only where the armour is. Skulls on heads are done (`entity_render::skull`: the five types on players, zombies, skeletons and pigmen, the owner skin of a player skull comes from the `textures` property of its `SkullOwner` when the server sends it; a bare owner name is not looked up on the session server). Arrows stuck in a player are done (`entity_render::arrows`, drawn with the exact `new Random(entityId)` sequence of `LayerArrow` over the 16 or 17 boxes of `ModelPlayer`). The spectator ghost is done (`EntityRenderer::render_ghosts`, `fs_ghost`): a spectator sees the model of an invisible entity at 15 % opacity, and a player in spectator mode is only a head and a hat. The team rule is done too (`sees_team_ghost`: an invisible teammate is a ghost to the local player when their team sees invisible mates; players only, as mobs are in teams by UUID). The wither spawn countdown is done (entry 20: the `wither_invulnerable.png` texture that blinks and the size that grows from 1.5 to 2). The dragon flight, death, dissolving and recharge ray are done (see "Ender dragon flight" below). Still to do: the glint of the held item in third person is the item pass (P3), arrows in the body, the creeper charge, world light, and the spectator ghost (alpha 0.15). Original plan: helmet, chestplate, leggings and boots of players and armoured
   mobs (zombie, skeleton, pigman): the two armour models (inner 0.5 and outer
   1.0 dilation), the leather tint from `display.color`, the enchantment glint,
   the equipment of `Entity Equipment` slots 1 to 4 (store them on the record
@@ -138,6 +138,8 @@ MCP to read: `LayerBipedArmor`, `ModelBiped` armour models, `LayerArmorBase`,
 
 ### P5g — Lighting and shadows
 
+**Status (2026-10-30): done, not verified against vanilla.** Entities are lit by the block they stand in (`entity_render::world_light_bits`; the wither, the blaze and the magma cube keep the full light), and cast the blob shadow of `Render.renderShadow` (`umicraft_game::entity::shadow` finds the blocks, `entity_render::shadow` draws the squares). Approximations: rain and thunder do not reduce the sky light, the blocks are the normal cubes (glass, leaves, ice and glowstone cast no shadow on them), and the set of blocks is found at the tick position while the squares follow the interpolated one.
+
 MCP to read: `Render.doRenderShadowAndFire`, `Render.renderShadow`,
 `Entity.getBrightnessForRender`, `RendererLivingEntity.doRender`.
 
@@ -155,6 +157,8 @@ MCP to read: `Render.doRenderShadowAndFire`, `Render.renderShadow`,
   light word.
 
 ### P5h — Objects
+
+**Status (2026-10-30): started.** Done: the table of every `Spawn Object` type of 1.8 (`EntityKind::from_object_type`, with the `data` of the packet kept as `object_data`), the client-side motion of dropped items, falling blocks, primed TNT, arrows, thrown objects and fireballs with the collisions of the world (`umicraft_game::entity::objects`, the physics of `EntityItem`, `EntityFallingBlock`, `EntityTNTPrimed`, `EntityArrow`, `EntityThrowable`, `EntityFireball`), and the arrow in flight (`entity_render::arrows::add_flying_arrow`). Also done: the falling block, primed TNT, thrown items (snowball, egg, pearl, eye of ender, potion, bottle, firework) and fireballs drawn from item and block models facing the camera (`item_world::objects`), the boat and the minecart (`entity_render::vehicles`), the ender crystal (`vehicles::add_crystal`, with `ModelEnderCrystal` and its bobbing) and the experience orbs (`Spawn Experience Orb`, `entity_render::xp`, drawn as a camera facing square coloured in the vertex shader) and the paintings (`Spawn Painting`, `umicraft_game::entity::painting` for the 26 artworks and where each hangs, `entity_render::paintings` for the slabs), the flying wither skull and the leash knot (`entity_render::small_models`; the knot is snapped to the middle of its block) and lightning (`Spawn Global Entity`, `entity_render::bolt`: the zigzag and forks of `RenderLightningBolt` added to the frame, re-seeded at each flash; it lasts 9 to 15 ticks instead of a random time, and the sky flash, the thunder and the fire are not done) and the fishing bobber with its line (`entity_render::fishing`: the line is a thin ribbon instead of a GL line, and the line of the local player's own bobber in first person is tied to the rod tip of `RenderFish`, found on the game thread by `entity_render::fishing::first_person_tip` and shipped as `rod_tip`). The block inside a cart of its type is drawn (`item_world::objects::cart_block`: furnace, TNT, spawner, hopper and command block; the chest cart is drawn by the entity pass with `ChestModel` (`vehicles::add_vehicle`, the shut chest of `TileEntityChestRenderer` on the 90 degree turned frame), and the display tile edited by commands is not read; the block now rolls with the cart). A boat or a minecart that was hit shakes (`Variant::Vehicle` from the entries 17 to 19, running down one per tick, rolled about x as `RenderBoat` and `RenderMinecart` do). The white flash of a primed TNT is drawn (`entity_render::tnt_flash`: a white cube added over the block every other 5 ticks of the fuse, `(1 - fuse / 100) * 0.8` strong; the reference blends `SRC_ALPHA, DST_ALPHA` with a polygon offset, here it is added in linear space and grown by 0.1 %). The minecart is pulled onto the rail under it (`umicraft_game::entity::rail`, `func_70489_a` / `func_70495_a` of `EntityMinecart`: position, yaw and pitch along the two points 0.3 either side, at both ends of the interpolation). Each block of a painting is lit by the cell in front of it (`painting::light_paintings`, `RenderPainting.setLightmap`). Still to do: the `Collect Item` pop sound (the item flies to the collector in three ticks and goes). The rider on a rearing horse is lifted and pushed back (`riding::rider_feet`, `EntityHorse.updateRiderPosition`). Leashes (`Attach Entity` with leash 1) are drawn (`entity_render::rope`, the holder found on the game thread by `entity::leash`); the ribbon is not culled and lit like the reference, the holder is the local player, another entity or a knot. Riders of other entities now sit at the seat of their vehicle with the legs forward (`ModelBiped.isRiding`); `riding::rider_feet` follows the boat and minecart kinds again. Approximations: arrows and thrown objects do not collide with entities, water and lava drag are not applied, and an arrow in the ground does not shake.
 
 MCP to read: `NetHandlerPlayClient.handleSpawnObject` / `handleSpawnPainting` /
 `handleSpawnExperienceOrb` / `handleSpawnGlobalEntity` / `handleCollectItem` /
@@ -189,7 +193,13 @@ MCP to read: `NetHandlerPlayClient.handleSpawnObject` / `handleSpawnPainting` /
 - **Storage:** `EntityRecord` gets an object payload (block id, owner, stuck
   flag); keep it out of the living fields.
 
+### Ender dragon flight
+
+**Status (2026-10-31):** the dragon now keeps the flight history of `EntityDragon` (`umicraft_game::entity::flight`: the 64 entry ring of yaw and height, the wing phase from the velocity) and `DragonModel::set_flight` bends the neck, the body and the tail along it as `ModelDragon.render` does, with `RenderDragon.rotateCorpse` for the orientation. The death of the dragon is drawn too: it stays 200 ticks (the base death fall is skipped for it) and throws the rays of `LayerEnderDragonDeath` (`entity_render::dragon_death`, coloured by a 64 x 1 strip texture instead of per vertex). The recharge ray to the nearest crystal within 32 blocks is drawn as well (`entity_render::dragon_beam`; the client picks the nearest crystal every tick instead of drawing it at random, and the black to white fade is the light of the vertices). The body dissolves with `dragon_exploding.png` (the layer carries an alpha cutoff of `deathTicks / 200` in bits 27 to 31 of the vertex light word; the second depth-equal pass of the reference is not needed since both textures share their colours). Still to do: the wing sound.
+
 ### P5i — Local player body
+
+**Status (2026-10-31): mostly done.** The local body wears the skin and cape of its own tab list entry (found by name), swings its arm with the first-person hand, shows the use pose (sword block, bow) from the item use state and ticks its animation each tick; the held stack and the sneak pose were already in. Not done: checking the body yaw lag against recordings of F5. The flying pose does not exist in 1.8 (it came with the elytra).
 
 MCP to read: `EntityPlayerSP.onUpdate`, `EntityLivingBase.onUpdate` (body-yaw
 block), `RenderPlayer`, `Minecraft.clickMouse`, `PlayerControllerMP`.
@@ -211,12 +221,12 @@ block), `RenderPlayer`, `Minecraft.clickMouse`, `PlayerControllerMP`.
 
 ### Not part of any P5 step, but found on the way
 
-- **Remote crouch sink:** `RenderPlayer.doRender` lowers remote crouching
-  players by a further 0.125 (needs an "is local" flag on the snapshot).
-  Listed in `docs/backlog.md`.
+- **Remote crouch sink:** done: the snapshot has a `local` flag, and remote
+  crouching players are lowered by a further 0.125.
 - **Crit particles:** `Animation` 4 and 5 belong to P8.
-- **Scoreboard below the name:** the objective in display slot 2 under the
-  tag (`RenderPlayer.renderOffsetLivingLabel`).
+- **Scoreboard below the name:** done: the objective in display slot 2 adds a
+  `score objective` line under the tag of a player (`name_tag` holds the two
+  lines, split by `place_tags`; a missing score shows 0, as in vanilla).
 - **Mob tag under the crosshair:** a custom-named mob shows its tag when
   looked at (needs the entity ray cast of P6).
 - **Tag occlusion:** tags are drawn without a depth test; vanilla fades them
@@ -252,9 +262,8 @@ Verification still owed to the owner:
   are not handled; the cape's walking bob is left out (it is zero for remote
   players); the local player still wears the default skin until P5i.
 
-- P5d approximations: a foal is the whole horse at half size (the vanilla model
-  shrinks it part by part); slimes ignore the squish; wolves and ocelots do not
-  sit or beg yet; the white flash is a constant mix of the texture.
+- P5d approximations: the white flash of a hurt entity is a constant mix of the
+  texture; a foal horse keeps its newborn size.
 
 - `docs/backlog.md` (Entities): the extra 0.125 sink of remote crouching
   players (needs an "is local" flag on the snapshot); crit particles

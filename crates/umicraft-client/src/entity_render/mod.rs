@@ -16,22 +16,39 @@
 //! 3. Add the kind to the matching family builder in [`mobs`].
 
 mod animals;
+mod armor;
+mod arrows;
+mod bolt;
 mod creatures;
+mod dragon_beam;
+mod dragon_death;
+mod fire;
+pub(crate) mod fishing;
+mod glow;
 mod hand;
 mod horse_coat;
 mod mobs;
+mod mushrooms;
+mod paintings;
 mod player;
 mod pose;
+mod rope;
+mod shadow;
 mod skins;
+mod skull;
+mod small_models;
 mod specs;
 mod textures;
+mod tnt_flash;
 mod transform;
 mod variants;
+pub(crate) mod vehicles;
+mod xp;
 
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
-use umicraft_game::entity::EntityRenderSnapshot;
+use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::{ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
@@ -40,39 +57,102 @@ pub use hand::hand_vertices;
 pub(crate) use mobs::posed_humanoid_mob;
 pub(crate) use player::posed_player;
 pub use textures::{load_or_fallback, procedural_dirt_texture, EntityTextures};
-pub(crate) use transform::{body_matrix, x_mirror};
+pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 
 /// Meshes entity snapshots into batched vertex lists grouped by [`TextureSlot`].
 #[must_use]
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(snapshots, &skins::NoSkins)
+    mesh_entities_with(snapshots, &skins::NoSkins, (0.0, 0.0), false, Vec3::ZERO).solid
+}
+
+/// The meshes of a frame: the lit entities, and the glowing layers that are
+/// added over them.
+struct MeshedEntities {
+    solid: HashMap<TextureSlot, Vec<EntityVertex>>,
+    additive: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The glint of armour, drawn only where the armour is.
+    glint: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The invisible entities a spectator sees, drawn translucent.
+    ghost: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The shadows under the entities.
+    shadows: HashMap<TextureSlot, Vec<EntityVertex>>,
 }
 
 /// [`mesh_entities`] with the downloaded skins and capes of players.
 fn mesh_entities_with(
     snapshots: &[EntityRenderSnapshot],
     skins: &dyn skins::SkinLookup,
-) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    let mut batches: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    (view_yaw, view_pitch): (f32, f32),
+    viewer_is_spectator: bool,
+    camera: Vec3,
+) -> MeshedEntities {
+    let mut solid: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut additive: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut glint: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut ghost: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut shadows: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
         let matrix = transform::model_matrix(ent);
         let light = entity_light(ent);
-        for layer in mobs::build_entity_layers(ent, skins) {
-            let light = light | dye_bits(layer.dye);
-            let batch = batches.entry(layer.slot).or_default();
-            batch.extend(
+        for layer in mobs::build_entity_layers_for(ent, skins, viewer_is_spectator) {
+            if let Some(glow) = layer.glow {
+                let word = glow.light_word();
+                let target = if glow.equal_depth {
+                    &mut glint
+                } else {
+                    &mut additive
+                };
+                target
+                    .entry(layer.slot)
+                    .or_default()
+                    .extend(layer.vertices.into_iter().map(|mut vertex| {
+                        vertex.uv = glow.uv.apply(vertex.uv);
+                        transform_vertex(vertex, &matrix, word)
+                    }));
+                continue;
+            }
+            let light = light | dye_bits(layer.dye) | (u32::from(layer.cutoff) << CUTOFF_SHIFT);
+            let target = if layer.translucent {
+                &mut ghost
+            } else {
+                &mut solid
+            };
+            target.entry(layer.slot).or_default().extend(
                 layer
                     .vertices
                     .into_iter()
                     .map(|vertex| transform_vertex(vertex, &matrix, light)),
             );
         }
+        fire::add_fire(&mut solid, ent, view_yaw);
+        arrows::add_flying_arrow(&mut solid, ent, light);
+        vehicles::add_vehicle(&mut solid, ent, light);
+        xp::add_xp_orb(&mut solid, ent, light, view_yaw, view_pitch);
+        paintings::add_painting(&mut solid, ent, light);
+        small_models::add_small_model(&mut solid, ent, light);
+        bolt::add_lightning(&mut additive, ent);
+        tnt_flash::add_flash(&mut additive, ent);
+        rope::add_leash(&mut solid, ent);
+        dragon_beam::add_beam(&mut solid, ent, snapshots);
+        let eye = fishing::Eye {
+            position: camera,
+            yaw: view_yaw,
+            pitch: view_pitch,
+        };
+        fishing::add_bobber(&mut solid, ent, snapshots, light, eye);
+        shadow::add_shadow(&mut shadows, ent, camera);
     }
 
-    batches
+    MeshedEntities {
+        solid,
+        additive,
+        glint,
+        ghost,
+        shadows,
+    }
 }
 
 /// Bit of [`EntityVertex::light`] that tints the vertex red, as the hurt and
@@ -83,15 +163,35 @@ const FLASH_SHIFT: u32 = 9;
 /// Bit that enables the dye tint, and the shift of its 4-bit colour.
 const DYE_BIT: u32 = 1 << 13;
 const DYE_SHIFT: u32 = 14;
+/// Shift of the 5-bit alpha cutoff of a dissolving layer.
+const CUTOFF_SHIFT: u32 = 27;
 
-/// Full block and sky light: entities are not lit by the world yet.
+/// Full block and sky light (`15728880` in the reference).
 const FULL_LIGHT: u32 = 0x0000_00FF;
+
+/// Whether the entity ignores the world light: the wither, the blaze and the
+/// magma cube return the full light from `getBrightnessForRender`.
+fn lights_itself(kind: EntityKind) -> bool {
+    matches!(
+        kind,
+        EntityKind::Wither | EntityKind::Blaze | EntityKind::MagmaCube
+    )
+}
+
+/// The block and sky light nibbles of an entity's vertices: the light of the
+/// block it stands in (MCP `Entity.getBrightnessForRender`).
+fn world_light_bits(entity: &EntityRenderSnapshot) -> u32 {
+    if lights_itself(entity.kind) {
+        return FULL_LIGHT;
+    }
+    u32::from(entity.light.block.min(15)) | (u32::from(entity.light.sky.min(15)) << 4)
+}
 
 /// The packed light of an entity's vertices: light, hurt tint and creeper
 /// flash.
 fn entity_light(entity: &EntityRenderSnapshot) -> u32 {
     let hurt = if entity.hurt { HURT_BIT } else { 0 };
-    FULL_LIGHT | hurt | (flash_level(entity.fuse_flash) << FLASH_SHIFT)
+    world_light_bits(entity) | hurt | (flash_level(entity.fuse_flash) << FLASH_SHIFT)
 }
 
 /// The white flash of a creeper as a level `0..=15`: it blinks, white every
@@ -148,6 +248,40 @@ mod light_tests {
 }
 
 #[cfg(test)]
+mod world_light_tests {
+    use super::*;
+    use umicraft_game::entity::EntityId;
+    use umicraft_world::LightLevel;
+
+    fn entity(kind: EntityKind, light: LightLevel) -> EntityRenderSnapshot {
+        let mut entity = EntityRenderSnapshot::new(EntityId(1), kind, Vec3::ZERO);
+        entity.light = light;
+        entity
+    }
+
+    #[test]
+    fn a_mob_is_lit_by_the_block_it_stands_in() {
+        let dark = entity(EntityKind::Zombie, LightLevel::DARK);
+        assert_eq!(entity_light(&dark) & 0xFF, 0);
+        let lamp = entity(EntityKind::Zombie, LightLevel { block: 7, sky: 3 });
+        assert_eq!(entity_light(&lamp) & 0xFF, 7 | (3 << 4));
+        let day = entity(EntityKind::Zombie, LightLevel::FULL_SKY);
+        assert_eq!(entity_light(&day) & 0xFF, 15 << 4);
+    }
+
+    #[test]
+    fn the_wither_the_blaze_and_the_magma_cube_ignore_the_world_light() {
+        for kind in [EntityKind::Wither, EntityKind::Blaze, EntityKind::MagmaCube] {
+            assert_eq!(entity_light(&entity(kind, LightLevel::DARK)) & 0xFF, 0xFF);
+        }
+        assert_eq!(
+            entity_light(&entity(EntityKind::Creeper, LightLevel::DARK)) & 0xFF,
+            0
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use umicraft_game::entity::{EntityFlags, EntityId, EntityKind};
@@ -183,12 +317,26 @@ mod tests {
                 profile: None,
                 uuid: Some([0; 16]),
                 held: None,
+                armor: [None, None, None, None],
+                spectator: false,
+                object_data: 0,
+                shadow: Default::default(),
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
                 use_ticks: 0,
                 fishing: false,
+                riding: false,
+                leash: None,
+                flight: None,
+                squish: 0.0,
+                horse: None,
+                ridden: false,
+                block_lights: std::sync::Arc::default(),
+                rod_tip: None,
+                local: false,
+                ghost_visible: false,
                 flags: EntityFlags::new(0, 0x7F),
             },
             EntityRenderSnapshot {
@@ -213,12 +361,26 @@ mod tests {
                 profile: None,
                 uuid: None,
                 held: None,
+                armor: [None, None, None, None],
+                spectator: false,
+                object_data: 0,
+                shadow: Default::default(),
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
                 use_ticks: 0,
                 fishing: false,
+                riding: false,
+                leash: None,
+                flight: None,
+                squish: 0.0,
+                horse: None,
+                ridden: false,
+                block_lights: std::sync::Arc::default(),
+                rod_tip: None,
+                local: false,
+                ghost_visible: false,
                 flags: EntityFlags::default(),
             },
             EntityRenderSnapshot {
@@ -243,12 +405,26 @@ mod tests {
                 profile: None,
                 uuid: None,
                 held: None,
+                armor: [None, None, None, None],
+                spectator: false,
+                object_data: 0,
+                shadow: Default::default(),
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
                 use_ticks: 0,
                 fishing: false,
+                riding: false,
+                leash: None,
+                flight: None,
+                squish: 0.0,
+                horse: None,
+                ridden: false,
+                block_lights: std::sync::Arc::default(),
+                rod_tip: None,
+                local: false,
+                ghost_visible: false,
                 flags: EntityFlags::default(),
             },
             // A dropped item has no entity mesh: P3 draws it from its item model.
@@ -274,12 +450,26 @@ mod tests {
                 profile: None,
                 uuid: None,
                 held: None,
+                armor: [None, None, None, None],
+                spectator: false,
+                object_data: 0,
+                shadow: Default::default(),
                 item: None,
                 age: 0.0,
                 frame_direction: 0,
                 frame_rotation: 0,
                 use_ticks: 0,
                 fishing: false,
+                riding: false,
+                leash: None,
+                flight: None,
+                squish: 0.0,
+                horse: None,
+                ridden: false,
+                block_lights: std::sync::Arc::default(),
+                rod_tip: None,
+                local: false,
+                ghost_visible: false,
                 flags: EntityFlags::default(),
             },
         ];

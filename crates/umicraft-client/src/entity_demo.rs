@@ -12,7 +12,7 @@ use glam::{Mat4, Vec3};
 use umicraft_assets::skin::{
     procedural_cow_texture, procedural_fallback_skin, procedural_zombie_skin, SkinModel,
 };
-use umicraft_game::entity::{EntityFlags, EntityId, EntityKind, EntityRenderSnapshot};
+use umicraft_game::entity::{EntityFlags, EntityId, EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::{
     emit_block_item_cube, HumanoidModel, HumanoidPose, ModelVertex, QuadrupedModel,
 };
@@ -442,12 +442,26 @@ fn make_snapshot(
         profile: None,
         uuid,
         held: None,
+        armor: [None, None, None, None],
+        spectator: false,
+        object_data: 0,
+        shadow: Default::default(),
         item: None,
         age: 0.0,
         frame_direction: 0,
         frame_rotation: 0,
         use_ticks: 0,
         fishing: false,
+        riding: false,
+        leash: None,
+        flight: None,
+        squish: 0.0,
+        horse: None,
+        ridden: false,
+        block_lights: std::sync::Arc::default(),
+        rod_tip: None,
+        local: false,
+        ghost_visible: false,
         flags: EntityFlags::new(0, 0x7F),
     }
 }
@@ -954,10 +968,10 @@ pub static MOB_CATALOG: &[MobCatalogEntry] = &[
         display_name: "Ghast",
         kind: EntityKind::Ghast,
         uuid: None,
-        world_y_offset: 2.0,
-        camera_dist: 9.0,
-        camera_y: 3.50,
-        camera_pitch: -0.08,
+        world_y_offset: 0.0,
+        camera_dist: 17.0,
+        camera_y: 2.0,
+        camera_pitch: -0.02,
         yaw_deg: 25.0,
     },
     MobCatalogEntry {
@@ -965,10 +979,10 @@ pub static MOB_CATALOG: &[MobCatalogEntry] = &[
         display_name: "Wither",
         kind: EntityKind::Wither,
         uuid: None,
-        world_y_offset: 1.0,
-        camera_dist: 4.5,
-        camera_y: 1.80,
-        camera_pitch: -0.06,
+        world_y_offset: 0.0,
+        camera_dist: 9.0,
+        camera_y: 2.4,
+        camera_pitch: -0.02,
         yaw_deg: 25.0,
     },
     MobCatalogEntry {
@@ -1014,6 +1028,73 @@ pub fn find_mob(query: &str) -> Option<&'static MobCatalogEntry> {
     })
 }
 
+/// The skull type a biped wears in the dump, a different one for each:
+/// skeleton, wither skeleton, zombie, player and creeper.
+fn skull_type(mob: &MobCatalogEntry) -> Option<i16> {
+    match mob.display_name {
+        "Steve" => Some(0),
+        "Alex" => Some(4),
+        "Zombie" => Some(1),
+        "Skeleton" => Some(3),
+        "Zombie Pigman" => Some(2),
+        _ => None,
+    }
+}
+
+/// What a mob wears in the dump: nothing, armour, or flames.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Look {
+    Plain,
+    Armored,
+    Burning,
+    Chested,
+    Sitting,
+    Glowing,
+    Skull,
+    Arrows,
+    Ghost,
+    Spectator,
+    Spawning,
+    Cave,
+    Shadow,
+}
+
+/// A different set of armour per mob, to see every material in the dump:
+/// diamond, iron, gold, chainmail, then red-dyed leather.
+fn demo_armor(index: usize) -> [Option<EntityItem>; 4] {
+    const FIRST_ITEM: [i16; 5] = [310, 306, 314, 302, 298];
+    let first = FIRST_ITEM[index % FIRST_ITEM.len()];
+    // Item ids run helmet, chestplate, leggings, boots; the slots run boots first.
+    let piece = |offset: i16| {
+        let leather = first == 298;
+        Some(EntityItem {
+            item_id: first + offset,
+            damage: 0,
+            count: 1,
+            nbt: if leather {
+                Some(std::sync::Arc::from(RED_LEATHER))
+            } else if first == 310 {
+                Some(std::sync::Arc::from(ENCHANTED))
+            } else {
+                None
+            },
+        })
+    };
+    [piece(3), piece(2), piece(1), piece(0)]
+}
+
+/// NBT of `{ench: [{id: 16, lvl: 1}]}`: an enchanted piece with a glint.
+const ENCHANTED: &[u8] = &[
+    10, 0, 0, 9, 0, 4, b'e', b'n', b'c', b'h', 10, 0, 0, 0, 1, 2, 0, 2, b'i', b'd', 0, 16, 2, 0, 3,
+    b'l', b'v', b'l', 0, 1, 0, 0,
+];
+
+/// NBT of `{display: {color: 0xCC2222}}`.
+const RED_LEATHER: &[u8] = &[
+    10, 0, 0, 10, 0, 7, b'd', b'i', b's', b'p', b'l', b'a', b'y', 3, 0, 5, b'c', b'o', b'l', b'o',
+    b'r', 0, 0xCC, 0x22, 0x22, 0, 0,
+];
+
 /// Renders every single entity in [`MOB_CATALOG`] one by one into the given directory.
 ///
 /// # Errors
@@ -1048,10 +1129,161 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
         "CLEAN-ROOM PROCEDURAL TEXTURES"
     };
 
-    for (index, mob) in MOB_CATALOG.iter().enumerate() {
+    // The dump camera looks towards +Z, so the flames face -Z.
+    entity_textures.set_view_yaw(std::f32::consts::PI);
+    let variants = MOB_CATALOG
+        .iter()
+        .enumerate()
+        .flat_map(|(index, mob)| {
+            let armored = matches!(
+                mob.kind,
+                EntityKind::Player
+                    | EntityKind::Zombie
+                    | EntityKind::Skeleton
+                    | EntityKind::ZombiePigman
+                    | EntityKind::Giant
+                    | EntityKind::Pig
+                    | EntityKind::Horse
+            );
+            let burning = matches!(
+                mob.kind,
+                EntityKind::Zombie | EntityKind::Cow | EntityKind::Creeper | EntityKind::Giant
+            );
+            let chested = mob.kind == EntityKind::Horse;
+            let sitting = matches!(mob.kind, EntityKind::Wolf | EntityKind::Ocelot);
+            let glowing = matches!(mob.kind, EntityKind::Creeper | EntityKind::Wither);
+            let skull = skull_type(mob).is_some();
+            let arrowed = mob.kind == EntityKind::Player;
+            let ghost = matches!(mob.kind, EntityKind::Player | EntityKind::Cow);
+            let spawning = mob.kind == EntityKind::Wither;
+            let shadowed = matches!(
+                mob.kind,
+                EntityKind::Player | EntityKind::Cow | EntityKind::Pig | EntityKind::Spider
+            );
+            let cave = matches!(
+                mob.kind,
+                EntityKind::Zombie | EntityKind::Cow | EntityKind::Blaze | EntityKind::Player
+            );
+            [(index, mob, Look::Plain)]
+                .into_iter()
+                .chain(armored.then_some((index, mob, Look::Armored)))
+                .chain(burning.then_some((index, mob, Look::Burning)))
+                .chain(chested.then_some((index, mob, Look::Chested)))
+                .chain(sitting.then_some((index, mob, Look::Sitting)))
+                .chain(glowing.then_some((index, mob, Look::Glowing)))
+                .chain(skull.then_some((index, mob, Look::Skull)))
+                .chain(arrowed.then_some((index, mob, Look::Arrows)))
+                .chain(ghost.then_some((index, mob, Look::Ghost)))
+                .chain(spawning.then_some((index, mob, Look::Spawning)))
+                .chain(shadowed.then_some((index, mob, Look::Shadow)))
+                .chain(cave.then_some((index, mob, Look::Cave)))
+                .chain(arrowed.then_some((index, mob, Look::Spectator)))
+        })
+        .collect::<Vec<_>>();
+    for (index, mob, look) in variants {
         let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
         let mut snapshot = make_snapshot((index + 1) as i32, mob.kind, pos, mob.uuid);
         face_the_camera(&mut snapshot, mob.yaw_deg);
+        if look == Look::Burning {
+            snapshot.flags = EntityFlags::new(0x01, 0x7F);
+        }
+        // The glow layers move with the age: pick a tick away from zero.
+        snapshot.age = 37.0;
+        // An invisible entity is seen by a spectator, who sees it translucent.
+        if matches!(look, Look::Ghost | Look::Spectator) {
+            snapshot.flags = EntityFlags::new(0x20, 0x7F);
+        }
+        if look == Look::Shadow {
+            // A floor of full blocks under the mob, in daylight.
+            let size =
+                umicraft_game::entity::shadow::shadow_size(mob.kind, false, &snapshot.meta.variant);
+            let floor = (64.0 + mob.world_y_offset).floor() as i32;
+            snapshot.shadow = umicraft_game::entity::shadow::shadow_blocks_with(
+                snapshot.position,
+                size,
+                0,
+                |pos| pos.y < floor,
+                |_| umicraft_world::LightLevel::FULL_SKY,
+            )
+            .into();
+        }
+        entity_textures.set_camera_position(Vec3::new(0.0, 64.0 + mob.camera_y, -mob.camera_dist));
+        if look == Look::Cave {
+            // A dim cave: a little block light and no sky light.
+            snapshot.light = umicraft_world::LightLevel { block: 3, sky: 0 };
+        }
+        if look == Look::Spawning {
+            snapshot.meta.variant =
+                umicraft_game::entity::meta::Variant::Wither { invulnerable: 150 };
+        }
+        if look == Look::Spectator {
+            snapshot.spectator = true;
+        }
+        entity_textures.set_viewer_spectator(matches!(look, Look::Ghost | Look::Spectator));
+        if look == Look::Arrows {
+            snapshot.meta.living.arrows = 12;
+        }
+        if look == Look::Skull {
+            snapshot.armor[3] = skull_type(mob).map(|damage| EntityItem {
+                item_id: 397,
+                damage,
+                count: 1,
+                nbt: None,
+            });
+        }
+        if look == Look::Glowing {
+            use umicraft_game::entity::meta::{CreeperMeta, Variant};
+            match mob.kind {
+                EntityKind::Creeper => {
+                    snapshot.meta.variant = Variant::Creeper(CreeperMeta {
+                        powered: true,
+                        ..CreeperMeta::default()
+                    });
+                }
+                _ => snapshot.meta.living.health = 100.0,
+            }
+        }
+        if look == Look::Sitting {
+            use umicraft_game::entity::meta::{OcelotMeta, Variant, WolfMeta};
+            snapshot.meta.variant = match mob.kind {
+                EntityKind::Wolf => Variant::Wolf(WolfMeta {
+                    sitting: true,
+                    tamed: true,
+                    ..WolfMeta::default()
+                }),
+                _ => Variant::Ocelot(OcelotMeta {
+                    sitting: true,
+                    tamed: true,
+                    ..OcelotMeta::default()
+                }),
+            };
+        }
+        if look == Look::Chested {
+            snapshot.meta.variant = umicraft_game::entity::meta::Variant::Horse(
+                umicraft_game::entity::meta::HorseMeta {
+                    kind: 1,
+                    variant: 0,
+                    armor: 0,
+                    flags: 4 | 8,
+                },
+            );
+        }
+        if look == Look::Armored {
+            snapshot.armor = demo_armor(index);
+            if mob.kind == EntityKind::Horse {
+                snapshot.meta.variant = umicraft_game::entity::meta::Variant::Horse(
+                    umicraft_game::entity::meta::HorseMeta {
+                        kind: 0,
+                        variant: 0x0102,
+                        armor: 3,
+                        flags: 4,
+                    },
+                );
+            }
+            if mob.kind == EntityKind::Pig {
+                snapshot.meta.variant = umicraft_game::entity::meta::Variant::Pig { saddled: true };
+            }
+        }
 
         let batches = mesh_entities(&[snapshot.clone()]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();
@@ -1075,7 +1307,22 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
 
         renderer.render(&camera, &overlay)?;
         let image = renderer.read_pixels()?;
-        let out_path = output_dir.join(format!("{}.png", mob.id));
+        let suffix = match look {
+            Look::Plain => "",
+            Look::Armored => "_armored",
+            Look::Burning => "_burning",
+            Look::Chested => "_chested",
+            Look::Sitting => "_sitting",
+            Look::Glowing => "_glowing",
+            Look::Skull => "_skull",
+            Look::Arrows => "_arrows",
+            Look::Ghost => "_ghost",
+            Look::Spawning => "_spawning",
+            Look::Cave => "_cave",
+            Look::Shadow => "_shadow",
+            Look::Spectator => "_spectator",
+        };
+        let out_path = output_dir.join(format!("{}{suffix}.png", mob.id));
         write_png(&out_path, &image.rgba, image.width, image.height)?;
 
         println!(

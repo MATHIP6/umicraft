@@ -11,6 +11,9 @@ const PLAYER_SCALE: f32 = 0.9375;
 /// How far a crouching player sinks, in blocks
 /// (MCP `ModelBiped.render`: `translate(0, 0.2, 0)` in the flipped frame).
 const SNEAK_SINK: f32 = 0.2;
+/// The further drop of a crouching player that is not the local one
+/// (`RenderPlayer.doRender`: `y - 0.125`).
+const REMOTE_SNEAK_SINK: f32 = 0.125;
 /// Death fall in degrees at the end of the fall (MCP `getDeathMaxRotation`).
 const DEATH_FALL_DEGREES: f32 = 90.0;
 /// Ticks of the death fall that the angle is spread over, and the speed-up
@@ -23,6 +26,17 @@ const DEATH_FALL_SPEED: f32 = 1.6;
 #[must_use]
 pub(crate) fn model_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
     body_matrix(entity) * x_mirror()
+}
+
+/// `ModelRenderer.postRender(0.0625)` of a part: its pivot and angles, taking a
+/// point of the vanilla frame (y down) of the part to the model space of this
+/// crate (y up). The models of this crate are the vanilla ones with the y axis
+/// flipped, so the chain is conjugated by a y flip.
+#[must_use]
+pub(crate) fn part_frame(part: &umicraft_model::entity::ModelPart) -> Mat4 {
+    part.transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)))
+        * Mat4::from_scale(Vec3::splat(16.0))
+        * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0))
 }
 
 /// The vanilla model space is drawn through `scale(-1, -1, 1)`; the models of
@@ -45,6 +59,12 @@ pub(crate) fn body_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
         matrix *= Mat4::from_scale(Vec3::splat(PLAYER_SCALE));
         if entity.flags.is_sneaking() {
             matrix *= Mat4::from_translation(Vec3::new(0.0, -SNEAK_SINK, 0.0));
+            if !entity.local {
+                // `RenderPlayer.doRender`: every crouching player but the local
+                // one is lowered by a further 0.125 (before the scale, as the
+                // reference moves the position it draws at).
+                matrix = Mat4::from_translation(Vec3::new(0.0, -REMOTE_SNEAK_SINK, 0.0)) * matrix;
+            }
         }
     }
     matrix
@@ -62,6 +82,14 @@ fn orientation(entity: &EntityRenderSnapshot) -> Mat4 {
             * Mat4::from_rotation_y(bed.orientation.to_radians())
             * Mat4::from_rotation_z(90.0_f32.to_radians())
             * Mat4::from_rotation_y(270.0_f32.to_radians());
+    }
+    if let Some(flight) = entity.flight.filter(|_| entity.kind == EntityKind::Dragon) {
+        // MCP `RenderDragon.rotateCorpse`: the dragon turns by the yaw it had 7
+        // ticks ago and tips by the climb between 10 and 5 ticks ago.
+        let climb = (flight.offsets[5][1] - flight.offsets[10][1]) as f32;
+        return Mat4::from_rotation_y(-(flight.offsets[7][0] as f32).to_radians())
+            * Mat4::from_rotation_x((climb * 10.0).to_radians())
+            * Mat4::from_translation(Vec3::Z);
     }
     Mat4::from_rotation_y((180.0 - entity.body_yaw).to_radians()) * death_fall(entity.death_time)
 }
@@ -123,8 +151,21 @@ mod tests {
     fn a_crouching_player_sinks_by_a_fifth_of_a_block() {
         let mut entity = snapshot(EntityKind::Player);
         entity.flags = EntityFlags::new(0x02, 0);
+        entity.local = true;
         let feet = model_matrix(&entity).transform_point3(Vec3::ZERO);
         assert!((feet.y - (64.0 - 0.2 * 0.9375)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_remote_crouching_player_sinks_an_eighth_of_a_block_further() {
+        let mut entity = snapshot(EntityKind::Player);
+        entity.flags = EntityFlags::new(0x02, 0);
+        let feet = model_matrix(&entity).transform_point3(Vec3::ZERO);
+        assert!((feet.y - (64.0 - 0.2 * 0.9375 - 0.125)).abs() < 1e-5);
+        // Standing, it is not lowered at all.
+        entity.flags = EntityFlags::new(0, 0);
+        let standing = model_matrix(&entity).transform_point3(Vec3::ZERO);
+        assert!((standing.y - 64.0).abs() < 1e-5);
     }
 
     #[test]

@@ -86,8 +86,49 @@ pub enum EntityKind {
     /// Armour stand (object type 78).
     ArmorStand,
     /// The bobber of a fishing rod (object type 90); its `data` is the
-    /// angler's entity id.
+    /// angler entity id.
     FishHook,
+    /// A boat (object type 1).
+    Boat,
+    /// A minecart (object type 10); its `data` is the cart type.
+    Minecart,
+    /// Primed TNT (object type 50).
+    PrimedTnt,
+    /// An ender crystal (object type 51).
+    EnderCrystal,
+    /// A snowball (object type 61).
+    Snowball,
+    /// A thrown egg (object type 62).
+    Egg,
+    /// A large fireball of a ghast (object type 63).
+    LargeFireball,
+    /// A small fireball of a blaze (object type 64).
+    SmallFireball,
+    /// An ender pearl (object type 65).
+    EnderPearl,
+    /// A wither skull (object type 66).
+    WitherSkull,
+    /// A falling block (object type 70); its `data` is the block state.
+    FallingBlock,
+    /// An eye of ender (object type 72).
+    EyeOfEnder,
+    /// A thrown potion (object type 73); its `data` is the potion damage.
+    Potion,
+    /// A bottle o enchanting (object type 75).
+    ExpBottle,
+    /// A firework rocket (object type 76).
+    FireworkRocket,
+    /// The knot of a leash on a fence (object type 77).
+    LeashKnot,
+    /// An experience orb (`Spawn Experience Orb`); its `object_data` is the
+    /// experience it is worth.
+    XpOrb,
+    /// A painting (`Spawn Painting`); its `object_data` is the index of its
+    /// artwork in [`super::painting::ARTS`].
+    Painting,
+    /// A lightning bolt (`Spawn Global Entity`); its `object_data` seeds the
+    /// shape of the bolt.
+    Lightning,
     /// Other mob or entity type by raw numeric identifier.
     Other(u8),
 }
@@ -146,7 +187,29 @@ impl EntityKind {
     pub const fn is_living(self) -> bool {
         !matches!(
             self,
-            Self::Item | Self::Arrow | Self::ItemFrame | Self::FishHook
+            Self::Item
+                | Self::Arrow
+                | Self::ItemFrame
+                | Self::FishHook
+                | Self::Boat
+                | Self::Minecart
+                | Self::PrimedTnt
+                | Self::EnderCrystal
+                | Self::Snowball
+                | Self::Egg
+                | Self::LargeFireball
+                | Self::SmallFireball
+                | Self::EnderPearl
+                | Self::WitherSkull
+                | Self::FallingBlock
+                | Self::EyeOfEnder
+                | Self::Potion
+                | Self::ExpBottle
+                | Self::FireworkRocket
+                | Self::LeashKnot
+                | Self::XpOrb
+                | Self::Painting
+                | Self::Lightning
         )
     }
 
@@ -194,9 +257,25 @@ impl EntityKind {
     #[must_use]
     pub const fn from_object_type(id: u8) -> Self {
         match id {
+            1 => Self::Boat,
             2 => Self::Item,
+            10 => Self::Minecart,
+            50 => Self::PrimedTnt,
+            51 => Self::EnderCrystal,
             60 => Self::Arrow,
+            61 => Self::Snowball,
+            62 => Self::Egg,
+            63 => Self::LargeFireball,
+            64 => Self::SmallFireball,
+            65 => Self::EnderPearl,
+            66 => Self::WitherSkull,
+            70 => Self::FallingBlock,
             71 => Self::ItemFrame,
+            72 => Self::EyeOfEnder,
+            73 => Self::Potion,
+            75 => Self::ExpBottle,
+            76 => Self::FireworkRocket,
+            77 => Self::LeashKnot,
             78 => Self::ArmorStand,
             90 => Self::FishHook,
             other => Self::Other(other),
@@ -243,5 +322,31 @@ mod tests {
     fn item_frames_are_object_type_71() {
         assert_eq!(EntityKind::from_object_type(71), EntityKind::ItemFrame);
         assert_eq!(EntityKind::from_object_type(2), EntityKind::Item);
+    }
+
+    #[test]
+    fn every_spawn_object_type_of_1_8_has_a_kind() {
+        let table = [
+            (1, EntityKind::Boat),
+            (10, EntityKind::Minecart),
+            (50, EntityKind::PrimedTnt),
+            (51, EntityKind::EnderCrystal),
+            (61, EntityKind::Snowball),
+            (62, EntityKind::Egg),
+            (63, EntityKind::LargeFireball),
+            (64, EntityKind::SmallFireball),
+            (65, EntityKind::EnderPearl),
+            (66, EntityKind::WitherSkull),
+            (70, EntityKind::FallingBlock),
+            (72, EntityKind::EyeOfEnder),
+            (73, EntityKind::Potion),
+            (75, EntityKind::ExpBottle),
+            (76, EntityKind::FireworkRocket),
+            (77, EntityKind::LeashKnot),
+        ];
+        for (id, kind) in table {
+            assert_eq!(EntityKind::from_object_type(id), kind);
+            assert!(!kind.is_living());
+        }
     }
 }

@@ -5,7 +5,7 @@
 //!
 //! The table lives in `specs`; horse coats are composed on first use.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use glam::Mat4;
@@ -16,6 +16,7 @@ use umicraft_game::hand::HandPose;
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, Renderer};
 
+use super::armor::armor_texture;
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
@@ -74,6 +75,14 @@ pub struct EntityTextures {
     jar: Option<ClientJar>,
     /// The skins and capes of players.
     skins: RefCell<SkinSet>,
+    /// The camera yaw the flames of burning entities face.
+    view_yaw: Cell<f32>,
+    /// The camera pitch the experience orbs face.
+    view_pitch: Cell<f32>,
+    /// Whether the local player is a spectator, who sees invisible entities.
+    viewer_is_spectator: Cell<bool>,
+    /// Where the camera is, for the distance at which a shadow fades.
+    camera: Cell<glam::Vec3>,
 }
 
 impl EntityTextures {
@@ -84,13 +93,47 @@ impl EntityTextures {
         let mut textures = HashMap::new();
         for spec in texture_specs() {
             let (rgba, w, h) = load_or_fallback(jar.as_ref(), spec.jar_path, spec.fallback);
-            textures.insert(spec.slot, renderer.create_entity_texture(&rgba, w, h));
+            // The glowing layers scroll their coordinates past the edge.
+            let texture = if spec.slot.is_additive() {
+                renderer.create_repeating_entity_texture(&rgba, w, h)
+            } else {
+                renderer.create_entity_texture(&rgba, w, h)
+            };
+            textures.insert(spec.slot, texture);
         }
         Self {
             textures: RefCell::new(textures),
             jar,
             skins: RefCell::new(SkinSet::new()),
+            view_yaw: Cell::new(0.0),
+            view_pitch: Cell::new(0.0),
+            viewer_is_spectator: Cell::new(false),
+            camera: Cell::new(glam::Vec3::ZERO),
         }
+    }
+
+    /// Sets the camera yaw (radians, `umicraft_render::Camera` convention)
+    /// that the flames of burning entities face.
+    pub fn set_view_yaw(&self, yaw: f32) {
+        self.view_yaw.set(yaw);
+    }
+
+    /// Sets the camera pitch (radians, `umicraft_render::Camera` convention)
+    /// that the experience orbs face.
+    pub fn set_view_pitch(&self, pitch: f32) {
+        self.view_pitch.set(pitch);
+    }
+
+    /// Sets the position of the camera, which decides how far a shadow is
+    /// still drawn.
+    pub fn set_camera_position(&self, position: glam::Vec3) {
+        self.camera.set(position);
+    }
+
+    /// Tells whether the local player is a spectator, who sees the invisible
+    /// entities as ghosts (MCP `isInvisibleToPlayer`).
+    pub fn set_viewer_spectator(&self, spectator: bool) {
+        self.viewer_is_spectator.set(spectator);
     }
 
     /// Uploads the first-person hand, or hides it when `pose` shows no arm.
@@ -139,22 +182,71 @@ impl EntityTextures {
         self.skins
             .borrow_mut()
             .collect(renderer, &mut self.textures.borrow_mut());
-        let batches = mesh_entities_with(snapshots, self);
-        self.compose_missing_coats(batches.keys(), renderer);
+        let meshed = mesh_entities_with(
+            snapshots,
+            self,
+            (self.view_yaw.get(), self.view_pitch.get()),
+            self.viewer_is_spectator.get(),
+            self.camera.get(),
+        );
+        self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
-        let mut pairs: Vec<_> = batches
+        let mut solid: Vec<_> = meshed
+            .solid
             .iter()
+            .filter(|(_, verts)| !verts.is_empty())
             .filter_map(|(slot, verts)| {
-                if verts.is_empty() {
-                    return None;
-                }
                 textures
                     .get(slot)
                     .map(|tex| (verts.as_slice(), tex.bind_group()))
             })
             .collect();
-        pairs.extend(extra.iter().map(|b| (b.vertices.as_slice(), &b.bind_group)));
-        renderer.upload_entities(&pairs);
+        solid.extend(extra.iter().map(|b| (b.vertices.as_slice(), &b.bind_group)));
+        renderer.upload_entities(&solid);
+        let additive: Vec<_> = meshed
+            .additive
+            .iter()
+            .filter(|(_, verts)| !verts.is_empty())
+            .filter_map(|(slot, verts)| {
+                textures
+                    .get(slot)
+                    .map(|tex| (verts.as_slice(), tex.bind_group()))
+            })
+            .collect();
+        renderer.upload_additive_entities(&additive);
+        let glint: Vec<_> = meshed
+            .glint
+            .iter()
+            .filter(|(_, verts)| !verts.is_empty())
+            .filter_map(|(slot, verts)| {
+                textures
+                    .get(slot)
+                    .map(|tex| (verts.as_slice(), tex.bind_group()))
+            })
+            .collect();
+        renderer.upload_glint_entities(&glint);
+        let ghost: Vec<_> = meshed
+            .ghost
+            .iter()
+            .filter(|(_, verts)| !verts.is_empty())
+            .filter_map(|(slot, verts)| {
+                textures
+                    .get(slot)
+                    .map(|tex| (verts.as_slice(), tex.bind_group()))
+            })
+            .collect();
+        renderer.upload_ghost_entities(&ghost);
+        let shadows: Vec<_> = meshed
+            .shadows
+            .iter()
+            .filter(|(_, verts)| !verts.is_empty())
+            .filter_map(|(slot, verts)| {
+                textures
+                    .get(slot)
+                    .map(|tex| (verts.as_slice(), tex.bind_group()))
+            })
+            .collect();
+        renderer.upload_shadow_entities(&shadows);
     }
 
     /// Creates the texture of every horse coat in `slots` that is not there yet.
@@ -164,13 +256,18 @@ impl EntityTextures {
         renderer: &Renderer,
     ) {
         for slot in slots {
-            let TextureSlot::HorseCoat(variant) = *slot else {
-                continue;
-            };
             if self.textures.borrow().contains_key(slot) {
                 continue;
             }
-            let (rgba, w, h) = horse_coat(self.jar.as_ref(), variant);
+            let (rgba, w, h) = match *slot {
+                TextureSlot::HorseCoat(variant) => horse_coat(self.jar.as_ref(), variant),
+                // A missing armour texture leaves the piece undrawn.
+                TextureSlot::Armor { .. }
+                | TextureSlot::LeatherArmor { .. }
+                | TextureSlot::LeatherOverlay { .. } => armor_texture(self.jar.as_ref(), *slot)
+                    .unwrap_or((vec![0; 64 * 32 * 4], 64, 32)),
+                _ => continue,
+            };
             let texture = renderer.create_entity_texture(&rgba, w, h);
             self.textures.borrow_mut().insert(*slot, texture);
         }

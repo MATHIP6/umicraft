@@ -247,6 +247,14 @@ pub struct Renderer {
     entity_renderer: EntityRenderer,
     outline: OutlineRenderer,
     entity_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    /// The glowing layers of the entities, drawn after them.
+    additive_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    /// The enchantment glint of worn armour, drawn over it at equal depth.
+    glint_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    /// Invisible entities a spectator sees, drawn translucent.
+    ghost_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    /// The shadows under the entities.
+    shadow_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
 }
 
 impl Renderer {
@@ -700,6 +708,10 @@ impl Renderer {
             entity_renderer,
             outline,
             entity_batches: Vec::new(),
+            additive_batches: Vec::new(),
+            glint_batches: Vec::new(),
+            ghost_batches: Vec::new(),
+            shadow_batches: Vec::new(),
         })
     }
 
@@ -1279,6 +1291,87 @@ impl Renderer {
         }
     }
 
+    /// Uploads the glowing entity layers (eyes, charge, aura, glint) to be
+    /// drawn after the entities. The `light` of their vertices is the tint
+    /// (bits 0..=23, `0xBBGGRR`) and bit 24 squares the colour.
+    pub fn upload_additive_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.additive_batches.clear();
+        for (vertices, bind_group) in batches {
+            if vertices.is_empty() {
+                continue;
+            }
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("entity additive batch vertices"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            self.additive_batches
+                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
+        }
+    }
+
+    /// Uploads the shadows under the entities: squares whose `light` is the
+    /// opacity in its low byte.
+    pub fn upload_shadow_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.shadow_batches.clear();
+        for (vertices, bind_group) in batches {
+            if vertices.is_empty() {
+                continue;
+            }
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("entity shadow batch vertices"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            self.shadow_batches
+                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
+        }
+    }
+
+    /// Uploads the invisible entities a spectator sees (their model, drawn at
+    /// 15 % opacity without writing depth).
+    pub fn upload_ghost_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.ghost_batches.clear();
+        for (vertices, bind_group) in batches {
+            if vertices.is_empty() {
+                continue;
+            }
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("entity ghost batch vertices"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            self.ghost_batches
+                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
+        }
+    }
+
+    /// Uploads the enchantment glint of worn armour: the same vertices as the
+    /// armour, drawn only where the armour wrote its depth.
+    pub fn upload_glint_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.glint_batches.clear();
+        for (vertices, bind_group) in batches {
+            if vertices.is_empty() {
+                continue;
+            }
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("entity glint batch vertices"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            self.glint_batches
+                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
+        }
+    }
+
     /// Sets the first-person hand for the following frames.
     ///
     /// `vertices` are in camera space (the camera at the origin looking down
@@ -1317,6 +1410,10 @@ impl Renderer {
     /// Clears any queued entity batches.
     pub fn clear_entities(&mut self) {
         self.entity_batches.clear();
+        self.additive_batches.clear();
+        self.glint_batches.clear();
+        self.ghost_batches.clear();
+        self.shadow_batches.clear();
     }
 
     /// Creates an entity texture (such as a mob skin or player skin) for entity batches.
@@ -1329,6 +1426,24 @@ impl Renderer {
     ) -> crate::entity_pass::EntityTexture {
         self.entity_renderer
             .create_texture(&self.device, &self.queue, rgba, width, height)
+    }
+
+    /// Creates a repeating entity texture for the glowing layers, whose
+    /// coordinates scroll past the edge.
+    #[must_use]
+    pub fn create_repeating_entity_texture(
+        &self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> crate::entity_pass::EntityTexture {
+        self.entity_renderer.create_repeating_texture(
+            &self.device,
+            &self.queue,
+            rgba,
+            width,
+            height,
+        )
     }
 
     /// Reads the offscreen colour target as tightly packed RGBA8.
@@ -1582,6 +1697,16 @@ impl Renderer {
             }
         }
 
+        // The shadows lie on the ground, drawn before the entities.
+        if !self.shadow_batches.is_empty() {
+            let batches = self
+                .shadow_batches
+                .iter()
+                .map(|(buf, count, bg)| (buf, *count, bg));
+            self.entity_renderer
+                .render_shadows(&mut pass, &self.camera_bind_group, batches);
+        }
+
         // Entities: depth write on, cutout discard, rendered between opaque and transparent passes.
         if !self.entity_batches.is_empty() {
             let batches = self
@@ -1590,6 +1715,35 @@ impl Renderer {
                 .map(|(buf, count, bg)| (buf, *count, bg));
             self.entity_renderer
                 .render(&mut pass, &self.camera_bind_group, batches);
+        }
+
+        // The invisible entities a spectator sees, over the opaque ones.
+        if !self.ghost_batches.is_empty() {
+            let batches = self
+                .ghost_batches
+                .iter()
+                .map(|(buf, count, bg)| (buf, *count, bg));
+            self.entity_renderer
+                .render_ghosts(&mut pass, &self.camera_bind_group, batches);
+        }
+
+        // The glow of the entities is added over them, without writing depth.
+        if !self.additive_batches.is_empty() {
+            let batches = self
+                .additive_batches
+                .iter()
+                .map(|(buf, count, bg)| (buf, *count, bg));
+            self.entity_renderer
+                .render_additive(&mut pass, &self.camera_bind_group, batches);
+        }
+
+        if !self.glint_batches.is_empty() {
+            let batches = self
+                .glint_batches
+                .iter()
+                .map(|(buf, count, bg)| (buf, *count, bg));
+            self.entity_renderer
+                .render_glint(&mut pass, &self.camera_bind_group, batches);
         }
 
         // Dropped items share the terrain pipeline and its texture array.

@@ -123,11 +123,5 @@ picked up, and delete it when it is done.
 
 ## Entities
 
-### Crouch offset of remote players
-- **Problem:** `RenderPlayer.doRender` lowers every non-local crouching player
-  by a further 0.125; the local body (F5) must not get it. The snapshot does
-  not say whether an entity is the local one.
-- **Reference:** `RenderPlayer.doRender` (`d0 = y - 0.125D`).
-
 ### Critical-hit particles
 - **Problem:** `Animation` 4 and 5 (crits) need the particle system (P8).

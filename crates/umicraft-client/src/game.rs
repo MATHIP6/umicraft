@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::entity_render::fishing::first_person_tip;
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
@@ -31,8 +32,12 @@ use umicraft_game::chat_component::{self, Translations};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
+use umicraft_game::entity::leash::{leash_entities, LeashFrame};
 use umicraft_game::entity::light::{eye_light, light_entities};
 use umicraft_game::entity::nametag::{mob_tag, player_tag};
+use umicraft_game::entity::painting::light_paintings;
+use umicraft_game::entity::rail::rail_entities;
+use umicraft_game::entity::shadow::shadow_entities;
 use umicraft_game::entity::{
     BossTracker, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityStore,
@@ -1143,13 +1148,52 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         ..game.hand.pose()
     };
     let mut entities = game.entities.frame_data();
+    if let Some(vehicle) = game.vehicle {
+        for frame in &mut entities {
+            frame.ridden |= frame.id.0 == vehicle;
+        }
+    }
     if followed.is_none() && game.perspective.shows_player() {
         entities.push(game.body.frame_data());
     }
+    // The line of the bobber of the local player ties to their rod, which is
+    // not among the frames from the first person.
+    if followed.is_none() && !game.perspective.shows_player() {
+        let body = game.body.frame_data();
+        let tip = first_person_tip(
+            view.position - Vec3::Y * umicraft_game::physics::EYE_HEIGHT as f32,
+            game.yaw.to_degrees(),
+            game.pitch.to_degrees(),
+            game.body.animation.swing_progress_at(1.0),
+            body.flags.is_sneaking(),
+        );
+        for bobber in &mut entities {
+            if bobber.kind == EntityKind::FishHook && bobber.object_data == game.entity_id {
+                bobber.rod_tip = Some(tip);
+            }
+        }
+    }
     // Items are lit by the block they are in; before the first chunk the
     // default (full sky) stays.
+    // The local player holds leashes too, and is not among the frames from the
+    // first person.
+    let eye_height = umicraft_game::physics::EYE_HEIGHT as f32;
+    let me = LeashFrame {
+        prev_position: view.position - Vec3::Y * eye_height,
+        position: view.position - Vec3::Y * eye_height,
+        prev_yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
+        yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
+        prev_pitch: (-view.pitch).to_degrees(),
+        pitch: (-view.pitch).to_degrees(),
+        eye_height,
+        hanging: false,
+    };
+    leash_entities(&mut entities, Some((EntityId(game.entity_id), me)));
     let hand_light = game.world.as_ref().map_or(LightLevel::FULL_SKY, |world| {
+        rail_entities(world, &mut entities);
         light_entities(world, &mut entities);
+        light_paintings(world, &mut entities);
+        shadow_entities(world, &mut entities, game.world_time);
         eye_light(world, view.position)
     });
     let _ = frames.try_send(RenderEvent::Frame(Frame {
@@ -1190,8 +1234,29 @@ fn follow_body(game: &mut Game) {
     let Some(state) = game.state.as_ref() else {
         return;
     };
-    let sneaking = if state.player().sneaking { 0x02 } else { 0 };
+    // The same bits the server sends for a remote player: sneaking 0x02 and
+    // using the held item 0x10 (the sword blocks, the bow is aimed).
+    let sneaking = if state.player().sneaking { 0x02 } else { 0 }
+        | if game.item_use.is_using() { 0x10 } else { 0 };
     game.body.id = EntityId(game.entity_id);
+    game.body.local = true;
+    // The skin and the cape of the local player come from its own tab list
+    // entry, which is found by name; until it arrives the body wears the
+    // default skin.
+    if game.body.profile.is_none() {
+        let own = game
+            .server
+            .player_list()
+            .iter()
+            .find(|info| info.name == game.own_name);
+        if let Some(info) = own {
+            game.body.uuid = Some(info.uuid.to_be_bytes());
+            game.body.profile = Some(std::sync::Arc::new(profile_from_properties(
+                &info.name,
+                &info.properties,
+            )));
+        }
+    }
     // The local stack comes from the windows (ADR-0025), not from `Entity
     // Equipment`, so the body shows the item in the second and third person.
     game.body.held = game
@@ -1204,18 +1269,53 @@ fn follow_body(game: &mut Game) {
         game.pitch.to_degrees(),
         EntityFlags::new(sneaking, 0x7F),
     );
+    // The swing of the third person arm advances with the tick, as the
+    // animation of every tracked entity does in `EntityStore::tick`.
+    game.body.animation.tick();
 }
+
+/// The display slot of the score shown below the name.
+const SLOT_BELOW_NAME: i8 = 2;
 
 /// The name tag text of an entity under the team rules, if it has one.
 fn entity_tag(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> Option<String> {
     if entity.kind == EntityKind::Player {
         let name = &entity.profile.as_ref()?.name;
-        return player_tag(scoreboard, local, name, entity.flags.is_invisible());
+        let tag = player_tag(scoreboard, local, name, entity.flags.is_invisible())?;
+        // The objective in the display slot below the name adds a line of
+        // `score objective` under the tag (`RenderPlayer.renderOffsetLivingLabel`);
+        // the two lines are one tag, split by `place_tags`.
+        return Some(match scoreboard.display_slot(SLOT_BELOW_NAME) {
+            Some(objective) => format!(
+                "{tag}\n{} {}",
+                scoreboard.score(&objective.name, name),
+                objective.display_name
+            ),
+            None => tag,
+        });
     }
     mob_tag(
         entity.meta.custom_name.as_deref(),
         entity.meta.custom_name_visible,
     )
+}
+
+/// Whether the local player sees an invisible player as a ghost because they
+/// are in the same team, and that team sees invisible team mates
+/// (MCP `Entity.isInvisibleToPlayer`).
+fn sees_team_ghost(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> bool {
+    let Some(profile) = entity
+        .profile
+        .as_ref()
+        .filter(|_| entity.kind == EntityKind::Player)
+    else {
+        return false;
+    };
+    let (Some(team), Some(own)) = (scoreboard.team_of(&profile.name), scoreboard.team_of(local))
+    else {
+        return false;
+    };
+    team.name == own.name && team.friendly_flags & 0x02 != 0
 }
 
 /// Block id of the bed (MCP `Blocks.bed`).
@@ -1238,6 +1338,9 @@ fn put_to_bed(game: &mut Game, packet: &UseBed) {
     game.entities.sleep(EntityId(packet.entity_id), bed, facing);
 }
 
+/// The game mode a tab list entry has for a player in spectator mode.
+const SPECTATOR_WIRE: i32 = 3;
+
 /// Handles one decoded clientbound packet.
 fn handle_net(
     game: &mut Game,
@@ -1250,6 +1353,9 @@ fn handle_net(
     let changes_name_tags = matches!(
         event,
         PlayEvent::Teams(_)
+            | PlayEvent::ScoreboardObjective(_)
+            | PlayEvent::UpdateScore(_)
+            | PlayEvent::DisplayScoreboard(_)
             | PlayEvent::PlayerListItem(_)
             | PlayEvent::SpawnPlayer(_)
             | PlayEvent::SpawnMob(_)
@@ -1257,9 +1363,17 @@ fn handle_net(
     );
     apply_net_event(game, event, queue, frames);
     if changes_name_tags {
+        let players = &game.player_list;
+        game.entities.refresh_spectators(|uuid| {
+            players
+                .get(&u128::from_be_bytes(*uuid))
+                .is_some_and(|entry| entry.game_mode == SPECTATOR_WIRE)
+        });
         let (scoreboard, own_name) = (&game.scoreboard, game.own_name.as_str());
         game.entities
             .refresh_name_tags(|entity| entity_tag(scoreboard, own_name, entity));
+        game.entities
+            .refresh_ghosts(|entity| sees_team_ghost(scoreboard, own_name, entity));
     }
 }
 
@@ -1496,6 +1610,12 @@ fn apply_net_event(
                     EntityId(packet.entity_id),
                     EntityItem::from_stack(&packet.item),
                 );
+            } else {
+                game.entities.set_armor(
+                    EntityId(packet.entity_id),
+                    packet.slot,
+                    EntityItem::from_stack(&packet.item),
+                );
             }
         }
         PlayEvent::SpawnPlayer(p) => {
@@ -1579,6 +1699,46 @@ fn apply_net_event(
                 o.data,
             );
         }
+        // MCP `handleCollectItem`: the collected entity flies to the collector
+        // in three ticks and leaves the world. The pop is not played.
+        PlayEvent::CollectItem(c) => {
+            let local = game
+                .state
+                .as_ref()
+                .map_or(DVec3::ZERO, |state| state.position());
+            game.entities.collect(
+                EntityId(c.collected_entity_id),
+                EntityId(c.collector_entity_id),
+                local,
+            );
+        }
+        // MCP `handleSpawnGlobalEntity`: type 1 is a lightning bolt, the only
+        // global entity of 1.8.
+        PlayEvent::SpawnGlobalEntity(g) if g.entity_type == 1 => {
+            let pos = DVec3::new(
+                f64::from(g.x) / 32.0,
+                f64::from(g.y) / 32.0,
+                f64::from(g.z) / 32.0,
+            );
+            game.entities.spawn_lightning(EntityId(g.entity_id), pos);
+        }
+        PlayEvent::SpawnXpOrb(o) => {
+            let pos = DVec3::new(
+                f64::from(o.x) / 32.0,
+                f64::from(o.y) / 32.0,
+                f64::from(o.z) / 32.0,
+            );
+            game.entities
+                .spawn_xp_orb(EntityId(o.entity_id), pos, o.count);
+        }
+        PlayEvent::SpawnPainting(p) => {
+            game.entities.spawn_painting(
+                EntityId(p.entity_id),
+                &p.title,
+                [p.x, p.y, p.z],
+                p.facing,
+            );
+        }
         PlayEvent::DestroyEntities(d) => {
             game.entities.destroy(&d.entity_ids);
         }
@@ -1652,6 +1812,15 @@ fn apply_net_event(
             // the serverbound traffic. Passengers of other entities are P5.
             if packet.leash == 0 && packet.entity_id == game.entity_id {
                 game.vehicle = (packet.vehicle_id != -1).then_some(packet.vehicle_id);
+            }
+            // Leash 1 ties the entity to the holder (-1 frees it).
+            if packet.leash == 1 {
+                let holder = (packet.vehicle_id != -1).then_some(EntityId(packet.vehicle_id));
+                game.entities.set_leash(EntityId(packet.entity_id), holder);
+            }
+            if packet.leash == 0 {
+                let vehicle = (packet.vehicle_id != -1).then_some(EntityId(packet.vehicle_id));
+                game.entities.attach(EntityId(packet.entity_id), vehicle);
             }
         }
         PlayEvent::EntityStatus(status) => {
@@ -2119,7 +2288,10 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     let effects = swing_effects(game);
     for outgoing in output.packets {
         match outgoing {
-            Outgoing::Swing => game.hand.swing(effects),
+            Outgoing::Swing => {
+                game.hand.swing(effects);
+                game.body.animation.swing_item();
+            }
             Outgoing::Attack { entity } => combat::after_attack(game, EntityId(entity)),
             _ => {}
         }
@@ -2191,6 +2363,7 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         queue.push(ClientCommand::Swing);
         let effects = swing_effects(game);
         game.hand.swing(effects);
+        game.body.animation.swing_item();
     }
 }
 
@@ -2377,6 +2550,9 @@ fn tick(
     report_flight(game, was_flying, queue);
     follow_body(game);
     game.entities.tick();
+    if let Some(world) = game.world.as_ref() {
+        game.entities.tick_objects(world);
+    }
     game.server.tick();
     // A player inside a block is pushed out sideways by the simulation
     // itself, like the vanilla client (`umicraft_game::physics`); it is
@@ -3253,6 +3429,27 @@ mod tests {
     }
 
     #[test]
+    fn a_collected_item_leaves_the_world() {
+        use umicraft_protocol::packets::play::clientbound::CollectItem;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, spawn_object_event(7, 2, 1), &mut queue, &frames);
+        assert_eq!(game.entities.snapshots(0.0).len(), 1);
+        let event = PlayEvent::CollectItem(CollectItem {
+            collected_entity_id: 7,
+            collector_entity_id: 1,
+        });
+        handle_net(&mut game, event, &mut queue, &frames);
+        assert_eq!(game.entities.snapshots(0.0).len(), 1, "it flies first");
+        for _ in 0..3 {
+            game.entities.tick();
+        }
+        assert!(game.entities.snapshots(0.0).is_empty());
+    }
+
+    #[test]
     fn an_item_frame_takes_its_stack_rotation_and_direction() {
         use umicraft_protocol::packets::play::metadata::WatchedObject;
 
@@ -3354,6 +3551,168 @@ mod tests {
             1,
             "the tab list still updates"
         );
+    }
+
+    #[test]
+    fn the_local_body_swings_its_arm_when_the_player_does() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        follow_body(&mut game);
+        assert_eq!(game.body.animation.swing_progress_at(1.0), 0.0);
+        game.body.animation.swing_item();
+        for _ in 0..3 {
+            follow_body(&mut game);
+        }
+        assert!(game.body.animation.swing_progress_at(1.0) > 0.0);
+    }
+
+    #[test]
+    fn the_local_body_wears_the_profile_of_its_own_tab_list_entry() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.own_name = "Me".to_owned();
+        follow_body(&mut game);
+        assert!(game.body.profile.is_none(), "not listed yet");
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let entry = |uuid: u8, name: &str| AddPlayerEntry {
+            uuid: u128::from_be_bytes([uuid; 16]),
+            name: name.to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping: 0,
+            display_name: None,
+        };
+        let event = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![
+            entry(1, "Other"),
+            entry(2, "Me"),
+        ]));
+        handle_net(&mut game, event, &mut queue, &frames);
+        follow_body(&mut game);
+        assert_eq!(game.body.uuid, Some([2; 16]));
+        assert_eq!(
+            game.body.profile.as_ref().map(|p| p.name.to_string()),
+            Some("Me".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_team_mate_is_a_ghost_only_when_the_team_sees_invisible_mates() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+        use umicraft_protocol::packets::play::clientbound::teams::{TeamInfo, Teams};
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.own_name = "me".to_owned();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let uuid = [9u8; 16];
+        game.entities.spawn_player(
+            EntityId(4),
+            uuid,
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        let entry = AddPlayerEntry {
+            uuid: u128::from_be_bytes(uuid),
+            name: "Bob".to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping: 0,
+            display_name: None,
+        };
+        let listed = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![entry]));
+        handle_net(&mut game, listed, &mut queue, &frames);
+        let ghost = |game: &Game| game.entities.snapshots(0.0)[0].ghost_visible;
+        assert!(!ghost(&game), "no team");
+
+        let team = |flags: i8, players: &[&str]| {
+            PlayEvent::Teams(Box::new(Teams::Create {
+                name: "red".to_owned(),
+                info: TeamInfo {
+                    display_name: "Red".to_owned(),
+                    prefix: String::new(),
+                    suffix: String::new(),
+                    friendly_flags: flags,
+                    name_tag_visibility: "always".to_owned(),
+                    color: 12,
+                },
+                players: players.iter().map(|name| (*name).to_owned()).collect(),
+            }))
+        };
+        // Bob alone in the team: the local player is not a mate.
+        handle_net(&mut game, team(2, &["Bob"]), &mut queue, &frames);
+        assert!(!ghost(&game));
+        let remove = || {
+            PlayEvent::Teams(Box::new(Teams::Remove {
+                name: "red".to_owned(),
+            }))
+        };
+        handle_net(&mut game, remove(), &mut queue, &frames);
+        // Both in the team, but it does not see invisible mates.
+        handle_net(&mut game, team(0, &["Bob", "me"]), &mut queue, &frames);
+        assert!(!ghost(&game));
+        handle_net(&mut game, remove(), &mut queue, &frames);
+        handle_net(&mut game, team(2, &["Bob", "me"]), &mut queue, &frames);
+        assert!(ghost(&game));
+    }
+
+    #[test]
+    fn the_objective_below_the_name_adds_a_score_line_to_the_tag() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+        use umicraft_protocol::packets::play::clientbound::{
+            DisplayScoreboard, ObjectiveRenderType, ScoreboardObjective, UpdateScore,
+        };
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.own_name = "me".to_owned();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let uuid = [9u8; 16];
+        game.entities.spawn_player(
+            EntityId(4),
+            uuid,
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        let entry = AddPlayerEntry {
+            uuid: u128::from_be_bytes(uuid),
+            name: "Bob".to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping: 0,
+            display_name: None,
+        };
+        let listed = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![entry]));
+        handle_net(&mut game, listed, &mut queue, &frames);
+        let tag = |game: &Game| game.entities.snapshots(0.0)[0].name_tag.clone();
+        assert_eq!(tag(&game).as_deref(), Some("Bob"));
+
+        let objective = PlayEvent::ScoreboardObjective(ScoreboardObjective::Create {
+            name: "kills".to_owned(),
+            value: "Kills".to_owned(),
+            render_type: ObjectiveRenderType::Integer,
+        });
+        handle_net(&mut game, objective, &mut queue, &frames);
+        let display = PlayEvent::DisplayScoreboard(DisplayScoreboard {
+            position: 2,
+            score_name: "kills".to_owned(),
+        });
+        handle_net(&mut game, display, &mut queue, &frames);
+        // No score yet: vanilla shows 0.
+        assert_eq!(tag(&game).as_deref(), Some("Bob\n0 Kills"));
+        let score = PlayEvent::UpdateScore(UpdateScore::Change {
+            name: "Bob".to_owned(),
+            objective: "kills".to_owned(),
+            value: 12,
+        });
+        handle_net(&mut game, score, &mut queue, &frames);
+        assert_eq!(tag(&game).as_deref(), Some("Bob\n12 Kills"));
     }
 
     #[test]

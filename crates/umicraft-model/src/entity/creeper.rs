@@ -30,6 +30,24 @@ impl Default for CreeperModel {
 }
 
 impl CreeperModel {
+    /// The shell of a charged creeper: the model inflated by 2 pixels (MCP
+    /// `LayerCreeperCharge`, `new ModelCreeper(2.0F)`).
+    #[must_use]
+    pub fn charged() -> Self {
+        let mut model = Self::new();
+        for part in [
+            &mut model.head,
+            &mut model.body,
+            &mut model.leg1,
+            &mut model.leg2,
+            &mut model.leg3,
+            &mut model.leg4,
+        ] {
+            part.grow(2.0);
+        }
+        model
+    }
+
     /// Creates a creeper model (64×32 texture) following MCP `ModelCreeper.java`.
     #[must_use]
     pub fn new() -> Self {

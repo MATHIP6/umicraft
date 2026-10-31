@@ -8,10 +8,20 @@ use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{
     BatModel, BlazeModel, CreeperModel, DragonModel, EndermiteModel, GhastModel, GuardianModel,
-    SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot, WitherModel,
+    ModelVertex, SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot, WitherModel,
+    GHAST_SCALE,
 };
 
+use super::animals::with_eyes;
+use super::dragon_death;
+use super::glow::{glowing, Glow, UvMap};
 use super::mobs::{one, EntityLayer, Pose};
+
+/// Scale of a wither (MCP `RenderWither.preRenderCallback`, without the
+/// shrink of the spawn animation).
+const WITHER_SCALE: f32 = 2.0;
+/// Health at or below which a wither is armoured (half of its 300).
+const WITHER_ARMORED_HEALTH: f32 = 150.0;
 
 /// Slimes, creepers, flyers, swimmers and the other models driven by fewer
 /// inputs.
@@ -28,12 +38,12 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             let model = SlimeModel::slime(1.0);
             let mut vertices = model.emit_inner_mesh();
             vertices.extend(model.emit_outer_mesh());
-            scale_mesh(&mut vertices, slime_size(ent));
+            squash(&mut vertices, ent);
             one(TextureSlot::Slime, vertices)
         }
         EntityKind::MagmaCube => {
             let mut vertices = SlimeModel::magma_cube(1.0).emit_inner_mesh();
-            scale_mesh(&mut vertices, slime_size(ent));
+            squash(&mut vertices, ent);
             one(TextureSlot::MagmaCube, vertices)
         }
         EntityKind::Snowman => {
@@ -58,8 +68,34 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         }
         EntityKind::Dragon => {
             let mut model = DragonModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Dragon, model.emit_mesh())
+            // A dragon that has flown bends along its path; before its first
+            // tick it holds the plain pose.
+            let mesh = match ent.flight {
+                Some(flight) => {
+                    let frame = model.set_flight(flight.anim_time, &flight.offsets);
+                    model.emit_mesh_in_flight(&frame)
+                }
+                None => {
+                    model.set_angles(swing);
+                    model.emit_mesh()
+                }
+            };
+            let mut layers = with_eyes(TextureSlot::Dragon, TextureSlot::DragonEyes, mesh);
+            // The rays of a dying dragon (`LayerEnderDragonDeath`), and its body
+            // dissolving: the texture that carries the order of the dissolving
+            // replaces the usual one, and texels under `deathTicks / 200` go.
+            if let Some(flight) = ent.flight.filter(|flight| flight.death_ticks > 0.0) {
+                layers[0].slot = TextureSlot::DragonExploding;
+                layers[0].cutoff =
+                    (flight.death_ticks / 200.0 * 31.0).round().clamp(0.0, 31.0) as u8;
+                let (rays, root) = dragon_death::death_rays(flight.death_ticks);
+                let glow = Glow {
+                    tint: [root; 3],
+                    ..Glow::EYES
+                };
+                layers.push(glowing(TextureSlot::DragonRay, rays, glow));
+            }
+            layers
         }
         EntityKind::Endermite => {
             let mut model = EndermiteModel::new();
@@ -68,8 +104,18 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         }
         EntityKind::Ghast => {
             let mut model = GhastModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Ghast, model.emit_mesh())
+            model.set_angles(ent.age);
+            let mut mesh = model.emit_mesh();
+            scale_mesh(&mut mesh, GHAST_SCALE);
+            let attacking = matches!(ent.meta.variant, Variant::Ghast { attacking: true });
+            one(
+                if attacking {
+                    TextureSlot::GhastShooting
+                } else {
+                    TextureSlot::Ghast
+                },
+                mesh,
+            )
         }
         EntityKind::Guardian => {
             let mut model = GuardianModel::new();
@@ -84,18 +130,71 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         EntityKind::Wither => {
             let mut model = WitherModel::new();
             model.set_angles(swing, head_yaw, head_pitch);
-            one(TextureSlot::Wither, model.emit_mesh())
+            let invulnerable = match ent.meta.variant {
+                Variant::Wither { invulnerable } => invulnerable,
+                _ => 0,
+            };
+            let scale = wither_scale(invulnerable);
+            let mut mesh = model.emit_mesh();
+            scale_mesh(&mut mesh, scale);
+            let mut layers = one(wither_texture(invulnerable), mesh);
+            // A wounded wither (half its health or less) shows its swirling
+            // armour (MCP `LayerWitherAura`, `EntityWither.isArmored`).
+            if ent.meta.living.health <= WITHER_ARMORED_HEALTH {
+                let mut aura = WitherModel::aura();
+                aura.set_angles(swing, head_yaw, head_pitch);
+                let mut aura_mesh = aura.emit_mesh();
+                scale_mesh(&mut aura_mesh, scale);
+                layers.push(glowing(
+                    TextureSlot::WitherAura,
+                    aura_mesh,
+                    Glow {
+                        tint: [0.5; 3],
+                        squared: false,
+                        uv: UvMap::scroll((ent.age * 0.02).cos() * 3.0, ent.age * 0.01),
+                        equal_depth: false,
+                    },
+                ));
+            }
+            layers
         }
         _ => return None,
     })
 }
 
-/// The size of a slime or magma cube; vanilla draws the one model scaled by it
-/// (MCP `RenderSlime.preRenderCallback`, without the squish).
-fn slime_size(ent: &EntityRenderSnapshot) -> f32 {
-    match ent.meta.variant {
+/// The scale of a wither with `invulnerable` ticks of spawn countdown left: it
+/// starts small and grows to 2 (MCP `RenderWither.preRenderCallback`).
+fn wither_scale(invulnerable: i32) -> f32 {
+    if invulnerable > 0 {
+        WITHER_SCALE - invulnerable as f32 / 220.0 * 0.5
+    } else {
+        WITHER_SCALE
+    }
+}
+
+/// The texture of a wither: the white-flashing one while it is spawning, in
+/// the first 80 ticks and then every other 5 ticks (MCP
+/// `RenderWither.getEntityTexture`).
+fn wither_texture(invulnerable: i32) -> TextureSlot {
+    if invulnerable > 0 && (invulnerable > 80 || invulnerable / 5 % 2 != 1) {
+        TextureSlot::WitherInvulnerable
+    } else {
+        TextureSlot::Wither
+    }
+}
+
+/// Scales a slime or magma cube by its size, stretched or flattened by its
+/// squish (MCP `RenderSlime.preRenderCallback`).
+fn squash(vertices: &mut [ModelVertex], ent: &EntityRenderSnapshot) {
+    let size = match ent.meta.variant {
         Variant::Slime(size) => f32::from(size),
         _ => 1.0,
+    };
+    let stretch = 1.0 / (ent.squish / (size * 0.5 + 1.0) + 1.0);
+    for vertex in vertices {
+        vertex.position[0] *= stretch * size;
+        vertex.position[1] *= size / stretch;
+        vertex.position[2] *= stretch * size;
     }
 }
 
@@ -110,7 +209,30 @@ pub(super) fn creeper_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Vec<Enti
         vertex.position[1] *= tall;
         vertex.position[2] *= wide;
     }
-    one(TextureSlot::Creeper, vertices)
+    let mut layers = one(TextureSlot::Creeper, vertices);
+    // A creeper struck by lightning is wrapped in a swirling shell inflated by
+    // 2 pixels (MCP `LayerCreeperCharge`).
+    if matches!(&ent.meta.variant, Variant::Creeper(creeper) if creeper.powered) {
+        let mut shell = CreeperModel::charged();
+        shell.set_angles(pose.swing, pose.amount, pose.head_yaw, pose.head_pitch);
+        let mut mesh = shell.emit_mesh();
+        for vertex in &mut mesh {
+            vertex.position[0] *= wide;
+            vertex.position[1] *= tall;
+            vertex.position[2] *= wide;
+        }
+        layers.push(glowing(
+            TextureSlot::CreeperCharge,
+            mesh,
+            Glow {
+                tint: [0.5; 3],
+                squared: false,
+                uv: UvMap::scroll(ent.age * 0.01, ent.age * 0.01),
+                equal_depth: false,
+            },
+        ));
+    }
+    layers
 }
 
 /// The horizontal and vertical scale of a creeper at fuse flash `flash`.
@@ -125,6 +247,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_stretched_slime_is_taller_and_thinner() {
+        let mut ent = EntityRenderSnapshot::new(
+            umicraft_game::entity::EntityId(1),
+            EntityKind::Slime,
+            glam::Vec3::ZERO,
+        );
+        ent.meta.variant = Variant::Slime(1);
+        let corner = |ent: &EntityRenderSnapshot| {
+            let mut v = [ModelVertex {
+                position: [1.0; 3],
+                normal: [0.0; 3],
+                uv: [0.0; 2],
+            }];
+            squash(&mut v, ent);
+            v[0].position
+        };
+        assert_eq!(corner(&ent), [1.0; 3]);
+        ent.squish = 1.0;
+        let [x, y, _] = corner(&ent);
+        assert!(y > 1.0 && x < 1.0, "{x} {y}");
+        ent.squish = -0.5;
+        let [x, y, _] = corner(&ent);
+        assert!(y < 1.0 && x > 1.0, "{x} {y}");
+    }
+
+    #[test]
     fn a_calm_creeper_keeps_its_size() {
         assert_eq!(creeper_swell(0.0), (1.0, 1.0));
     }
@@ -134,5 +282,37 @@ mod tests {
         let (wide, tall) = creeper_swell(1.0);
         assert!((wide - 1.4).abs() < 0.02, "{wide}");
         assert!((tall - 1.1).abs() < 0.02, "{tall}");
+    }
+
+    #[test]
+    fn a_spawning_wither_grows_and_flashes_like_the_reference() {
+        assert_eq!(wither_scale(0), 2.0);
+        assert!(
+            (wither_scale(220) - 1.5).abs() < 1e-6,
+            "the smallest, at the start"
+        );
+        assert!(wither_scale(100) > wither_scale(200));
+        assert_eq!(wither_texture(0), TextureSlot::Wither);
+        assert_eq!(wither_texture(200), TextureSlot::WitherInvulnerable);
+        assert_eq!(wither_texture(81), TextureSlot::WitherInvulnerable);
+        // Under 80 ticks it blinks: the odd groups of 5 ticks show the normal skin.
+        assert_eq!(
+            wither_texture(80),
+            TextureSlot::WitherInvulnerable,
+            "group 16"
+        );
+        assert_eq!(wither_texture(79), TextureSlot::Wither, "group 15");
+        assert_eq!(wither_texture(75), TextureSlot::Wither, "group 15");
+        assert_eq!(
+            wither_texture(74),
+            TextureSlot::WitherInvulnerable,
+            "group 14"
+        );
+        assert_eq!(wither_texture(69), TextureSlot::Wither, "group 13");
+        assert_eq!(
+            wither_texture(1),
+            TextureSlot::WitherInvulnerable,
+            "group 0"
+        );
     }
 }

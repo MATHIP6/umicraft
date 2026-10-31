@@ -7,6 +7,9 @@ use glam::{Mat4, Vec3};
 use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
+/// The angle each ear leans away from the head (MCP `0.2617994F`, 15 degrees).
+const EAR_SPREAD: f32 = 0.261_799_4;
+
 /// Rabbit model (64×32 texture sheet) with long ears, crouching thighs and hind feet.
 #[derive(Debug, Clone)]
 pub struct RabbitModel {
@@ -166,24 +169,32 @@ impl RabbitModel {
         }
     }
 
-    /// Sets hopping walk and look animation angles.
+    /// Sets the look angles (degrees) and the resting pose of the limbs
+    /// (MCP `ModelRabbit.setRotationAngles` with the hop progress at 0).
+    ///
+    /// The vanilla hop animation follows the jump progress of the rabbit,
+    /// which the client does not track yet, so the limbs do not swing.
     pub fn set_angles(
         &mut self,
-        limb_angle: f32,
-        limb_distance: f32,
+        _limb_angle: f32,
+        _limb_distance: f32,
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        self.head.rotation[1] = head_yaw;
-        self.head.rotation[0] = head_pitch;
-        self.right_ear.rotation[1] = -0.261 + head_yaw;
-        self.left_ear.rotation[1] = 0.261 + head_yaw;
+        // The vanilla y axis points down, so a pitch rotates the other way.
+        let yaw = head_yaw.to_radians();
+        let pitch = -head_pitch.to_radians();
+        self.head.rotation = [pitch, yaw, 0.0];
+        self.right_ear.rotation = [pitch, yaw - EAR_SPREAD, 0.0];
+        self.left_ear.rotation = [pitch, yaw + EAR_SPREAD, 0.0];
 
-        let hop = (limb_angle * 0.8).cos() * 0.6 * limb_distance;
-        self.left_arm.rotation[0] = -0.174 + hop;
-        self.right_arm.rotation[0] = -0.174 - hop;
-        self.left_thigh.rotation[0] = -0.349 - hop;
-        self.right_thigh.rotation[0] = -0.349 + hop;
+        // Thighs -21 degrees and arms -11 degrees in the vanilla frame.
+        let thigh = 21.0_f32.to_radians();
+        let arm = 11.0_f32.to_radians();
+        self.left_thigh.rotation[0] = thigh;
+        self.right_thigh.rotation[0] = thigh;
+        self.left_arm.rotation[0] = arm;
+        self.right_arm.rotation[0] = arm;
     }
 
     /// Emits a kit: the head and ears at full size, the rest halved.
@@ -231,5 +242,35 @@ impl RabbitModel {
 impl Default for RabbitModel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_head_turns_by_the_yaw_in_degrees_and_the_ears_follow_it() {
+        let mut model = RabbitModel::new();
+        model.set_angles(0.0, 0.0, 90.0, 30.0);
+        assert!((model.head.rotation[1] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        assert!((model.head.rotation[0] + 30.0_f32.to_radians()).abs() < 1e-5);
+        for ear in [&model.left_ear, &model.right_ear] {
+            assert_eq!(
+                ear.rotation[0], model.head.rotation[0],
+                "ears pitch with the head"
+            );
+        }
+        let spread = model.left_ear.rotation[1] - model.right_ear.rotation[1];
+        assert!((spread - 2.0 * EAR_SPREAD).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_looking_straight_rabbit_has_the_vanilla_rest_pose() {
+        let mut model = RabbitModel::new();
+        model.set_angles(3.0, 1.0, 0.0, 0.0);
+        assert_eq!(model.head.rotation, [0.0, 0.0, 0.0]);
+        assert!((model.left_thigh.rotation[0] - 21.0_f32.to_radians()).abs() < 1e-5);
+        assert!((model.left_arm.rotation[0] - 11.0_f32.to_radians()).abs() < 1e-5);
     }
 }

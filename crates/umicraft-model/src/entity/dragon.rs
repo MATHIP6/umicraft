@@ -2,7 +2,7 @@
 
 //! Ender Dragon box model matching MCP 1.8 `ModelDragon.java`.
 
-use std::f32::consts::PI;
+use std::f32::consts::{PI, TAU};
 
 use glam::{Mat4, Vec3};
 
@@ -37,6 +37,32 @@ pub struct DragonModel {
     pub rear_foot: ModelPart,
     /// 12 tail segments trailing behind body.
     pub tail: Vec<ModelPart>,
+}
+
+/// The two transforms `ModelDragon.render` applies besides the angles of the
+/// parts, in blocks and in the space of this crate's models.
+#[derive(Debug, Clone, Copy)]
+pub struct FlightFrame {
+    /// Moves and tips the whole dragon (`translate(0, f1 - 2, -3)`,
+    /// `rotate(f1 * 2, x)`).
+    pub prelude: Mat4,
+    /// Rolls the body, the wings and the legs about the back
+    /// (`translate(0, 1, 0)`, `rotate(-f6 * 1.5, z)`, `translate(0, -1, 0)`).
+    pub group: Mat4,
+}
+
+impl Default for FlightFrame {
+    fn default() -> Self {
+        Self {
+            prelude: Mat4::IDENTITY,
+            group: Mat4::IDENTITY,
+        }
+    }
+}
+
+/// `ModelDragon.updateRotations`: an angle brought into `-180..180`.
+fn wrap_180(angle: f64) -> f32 {
+    ((angle + 180.0).rem_euclid(360.0) - 180.0) as f32
 }
 
 impl DragonModel {
@@ -325,12 +351,96 @@ impl DragonModel {
         }
     }
 
+    /// Poses the model for a dragon that flew along `offsets` (MCP
+    /// `ModelDragon.render`): `offsets[i]` is the `[yaw, height]` it had `i`
+    /// ticks ago, `anim_time` the phase of its wings in turns. The neck, the
+    /// body and the tail bend along the path; the returned frame goes to
+    /// [`Self::emit_mesh_in_flight`].
+    ///
+    /// # Panics
+    /// When `offsets` has fewer than 24 entries.
+    pub fn set_flight(&mut self, anim_time: f32, offsets: &[[f64; 2]]) -> FlightFrame {
+        const SPREAD: f32 = 1.5;
+        let f8 = anim_time * TAU;
+        let mut f1 = (f8 - 1.0).sin() + 1.0;
+        f1 = (f1 * f1 + f1 * 2.0) * 0.05;
+        self.jaw.rotation[0] = -((f8.sin() + 1.0) * 0.2);
+
+        let reference = offsets[6];
+        let f6 = wrap_180(offsets[5][0] - offsets[10][0]);
+        let f7 = wrap_180(offsets[5][0] + f64::from(f6) / 2.0);
+        let (mut f2, mut f3, mut f4) = (20.0_f32, -12.0_f32, 0.0_f32);
+        for (i, seg) in self.neck.iter_mut().enumerate() {
+            let at = offsets[5 - i];
+            let rx = (i as f32 * 0.45 + f8).cos() * 0.15
+                + (at[1] - reference[1]).to_radians() as f32 * SPREAD * 5.0;
+            let ry = wrap_180(at[0] - reference[0]).to_radians() * SPREAD;
+            let rz = -wrap_180(at[0] - f64::from(f7)).to_radians() * SPREAD;
+            seg.pivot = [f4, 24.0 - f2, f3];
+            seg.rotation = [-rx, ry, -rz];
+            f2 += rx.sin() * 10.0;
+            f3 -= ry.cos() * rx.cos() * 10.0;
+            f4 -= ry.sin() * rx.cos() * 10.0;
+        }
+        self.head.pivot = [f4, 24.0 - f2, f3];
+        let ry = wrap_180(offsets[0][0] - reference[0]).to_radians();
+        let rz = -wrap_180(offsets[0][0] - f64::from(f7)).to_radians();
+        self.head.rotation = [0.0, ry, -rz];
+
+        self.wing.rotation[0] = -(0.125 - f8.cos() * 0.2);
+        self.wing.rotation[1] = 0.25;
+        self.wing.rotation[2] = -((f8.sin() + 0.125) * 0.8);
+        self.wing_tip.rotation[2] = ((f8 + 2.0).sin() + 0.5) * 0.75;
+        self.rear_leg.rotation[0] = -(1.0 + f1 * 0.1);
+        self.rear_leg_tip.rotation[0] = -(0.5 + f1 * 0.1);
+        self.rear_foot.rotation[0] = -(0.75 + f1 * 0.1);
+        self.front_leg.rotation[0] = -(1.3 + f1 * 0.1);
+        self.front_leg_tip.rotation[0] = 0.5 + f1 * 0.1;
+        self.front_foot.rotation[0] = -(0.75 + f1 * 0.1);
+
+        let tail_reference = offsets[11];
+        let (mut f10, mut f2, mut f3, mut f4) = (0.0_f32, 10.0_f32, 60.0_f32, 0.0_f32);
+        for (k, seg) in self.tail.iter_mut().enumerate() {
+            let at = offsets[12 + k];
+            f10 += (k as f32 * 0.45 + f8).sin() * 0.05;
+            let ry = (wrap_180(at[0] - tail_reference[0]) * SPREAD + 180.0).to_radians();
+            let rx = f10 + (at[1] - tail_reference[1]).to_radians() as f32 * SPREAD * 5.0;
+            let rz = wrap_180(at[0] - f64::from(f7)).to_radians() * SPREAD;
+            seg.pivot = [f4, 24.0 - f2, f3];
+            seg.rotation = [-rx, ry, -rz];
+            f2 += rx.sin() * 10.0;
+            f3 -= ry.cos() * rx.cos() * 10.0;
+            f4 -= ry.sin() * rx.cos() * 10.0;
+        }
+
+        // The reference translates in blocks inside its `scale(-1, -1, 1)`, so
+        // the y of a translation and the angle of a turn about x change sign in
+        // this crate's frame; the roll about z only conjugates the mirror.
+        FlightFrame {
+            prelude: Mat4::from_translation(Vec3::new(0.0, 2.0 - f1, -3.0))
+                * Mat4::from_rotation_x(-(f1 * 2.0).to_radians()),
+            group: Mat4::from_translation(Vec3::new(0.0, -1.0, 0.0))
+                * Mat4::from_rotation_z((f6 * SPREAD).to_radians())
+                * Mat4::from_translation(Vec3::new(0.0, 1.0, 0.0)),
+        }
+    }
+
     /// Emits the dragon mesh vertices transformed into world units.
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
+        self.emit_mesh_in_flight(&FlightFrame::default())
+    }
+
+    /// Emits the mesh with the extra transforms of [`Self::set_flight`].
+    #[must_use]
+    pub fn emit_mesh_in_flight(&self, frame: &FlightFrame) -> Vec<ModelVertex> {
         let mut out = Vec::new();
         let scale = 1.0 / 16.0;
-        let root = Mat4::from_scale(Vec3::splat(scale));
+        let pixels = Mat4::from_scale(Vec3::splat(scale));
+        // The neck, the head and the tail are drawn outside the group that
+        // rolls with the body.
+        let root = frame.prelude * pixels;
+        let grouped = frame.prelude * frame.group * pixels;
 
         for seg in &self.neck {
             seg.emit(root, &mut out);
@@ -340,11 +450,11 @@ impl DragonModel {
         self.head.emit(root, &mut out);
         self.jaw.emit(head_t, &mut out);
 
-        self.body.emit(root, &mut out);
+        self.body.emit(grouped, &mut out);
 
         // Emit right side (j = 0) and X-mirrored left side (j = 1), matching ModelDragon.java:189-212
         for side in [1.0_f32, -1.0_f32] {
-            let side_root = root * Mat4::from_scale(Vec3::new(side, 1.0, 1.0));
+            let side_root = grouped * Mat4::from_scale(Vec3::new(side, 1.0, 1.0));
 
             let wing_t = self.wing.transform(side_root);
             self.wing.emit(side_root, &mut out);
