@@ -38,7 +38,7 @@ use crate::error::RenderError;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
-use crate::sky::{SkyRenderer, SkyState};
+use crate::sky::{SkyRenderer, SkyState, SkyTextures};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
 use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
 
@@ -186,7 +186,7 @@ pub struct Renderer {
     /// capacity is bounded by the number of uploaded meshes and is retained
     /// across frames, so sorting allocates nothing in steady state.
     transparent_order: Vec<TransparentDraw>,
-    /// Sky, sun/moon and procedural clouds.
+    /// Sky dome, sun, moon, stars and the End cube (no clouds yet).
     sky: SkyRenderer,
     /// World clock and dimension of the next frame.
     environment: RenderEnvironment,
@@ -569,7 +569,7 @@ impl Renderer {
             format,
             wgpu::BlendState::ALPHA_BLENDING,
         );
-        let sky = SkyRenderer::new(&device, format);
+        let sky = SkyRenderer::new(&device, &queue, format);
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("camera bind group layout"),
@@ -728,6 +728,15 @@ impl Renderer {
         self.environment = environment;
     }
 
+    /// Replaces the sun, moon and End sky images (`textures/environment/`).
+    ///
+    /// Images are decoded by the caller from the user's installation. An
+    /// absent or malformed image keeps the original generated fallback, so a
+    /// missing jar never breaks the sky. Calling it again replaces the set.
+    pub fn set_sky_textures(&mut self, textures: &SkyTextures) {
+        self.sky.set_textures(&self.device, &self.queue, textures);
+    }
+
     /// Replaces the break cracks drawn over the terrain.
     ///
     /// `vertices` and `indices` are the faces of the blocks being dug, with
@@ -847,7 +856,8 @@ impl Renderer {
         // sky pass must agree even if W3's model changes between calls.
         let sky_state = SkyState::at(self.environment);
         self.write_camera(camera, &sky_state);
-        self.sky.update(&self.queue, camera, self.environment);
+        self.sky
+            .update(&self.queue, camera, self.environment, &sky_state);
         self.upload_overlay(overlay);
         self.prepare_transparent_order(camera.position);
         if self.surface.is_some() {
@@ -1669,16 +1679,17 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         sky_state: &SkyState,
     ) {
-        let sky_color = sky_state.sky_color;
+        // The reference clears to the fog colour; the dome fades into it.
+        let clear = sky_state.fog_color;
         let color_attachment = Some(wgpu::RenderPassColorAttachment {
             view,
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: f64::from(sky_color[0]),
-                    g: f64::from(sky_color[1]),
-                    b: f64::from(sky_color[2]),
+                    r: f64::from(clear[0]),
+                    g: f64::from(clear[1]),
+                    b: f64::from(clear[2]),
                     a: 1.0,
                 }),
                 store: wgpu::StoreOp::Store,
@@ -2180,7 +2191,7 @@ fn sort_transparent_farthest_first(chunks: &mut [TransparentDraw]) {
 /// full distance capped at 500 blocks (inside the 512-block camera far plane).
 /// The start is capped below the end so a degenerate `view_distance` cannot
 /// invert the smoothstep edges.
-fn fog_range(view_distance: u8) -> (f32, f32) {
+pub(crate) fn fog_range(view_distance: u8) -> (f32, f32) {
     let nominal = f32::from(view_distance) * 16.0;
     let end = nominal.clamp(1.0, 500.0);
     let start = (nominal * 0.75).min(end - 0.001);

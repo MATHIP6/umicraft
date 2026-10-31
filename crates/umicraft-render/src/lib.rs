@@ -46,7 +46,7 @@ pub use items::{IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE};
 pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
 pub use renderer::{Image, Renderer};
-pub use sky::SkyState;
+pub use sky::{SkyImage, SkyState, SkyTextures};
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};
 pub use ui_pass::{fallback_atlas, FontAtlasError, UiBatch, UiBatchKind, UiPass};
 pub use umicraft_ui::SpriteSheet;

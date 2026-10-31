@@ -26,7 +26,7 @@ use umicraft_model::ModelQuad;
 use umicraft_world::LightLevel;
 
 use crate::item_icons::ItemResources;
-use crate::java_random::JavaRandom;
+use umicraft_core::java_random::JavaRandom;
 
 mod carried;
 mod head;

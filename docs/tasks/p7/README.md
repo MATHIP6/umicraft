@@ -38,10 +38,22 @@ documents are baked).
 | P7c | block-entity references from the mesher, chests with the lid, signs with text | done in code, not checked in game |
 | P7d | skulls, banners, beacon, end portal, enchanting book, spawner, flower pots | done in code, not checked in game |
 | P7d-pistons | moving pistons: structure rules, animation, push of the player, drawing | done in code, not checked in game |
-| P7e | vanilla sky: sun, moon, clouds, stars, Nether and End | not started |
+| P7e | vanilla sky: sun, moon, stars, Nether and End (geometry pass, `umicraft-render/src/sky/`); clouds still to do | sky done in code, not checked in game; clouds not started |
 | P7f | weather | not started |
 | P7g | world border, fog parity | not started |
 | P7h | animated texture check, frame-time benchmark, parity rows | not started |
+
+## Sky (P7e)
+
+`umicraft-render/src/sky/` mirrors `RenderGlobal.renderSky` / `renderSkyEnd`:
+`state` (pure `SkyState`: biome temperature, rain, thunder and lightning inputs
+come from `RenderEnvironment`), `dome`, `stars`, `celestial`, `end`,
+`textures` (`SkyTextures` from the user's jar, original fallbacks otherwise),
+`plan` (the ordered layers of a frame as data) and `gpu`. The clear colour is
+now the fog colour, as in the reference. The client still has to load
+`sun.png`, `moon_phases.png` and `end_sky.png` and call
+`Renderer::set_sky_textures`, fill `sky_temperature` from the biome at the
+camera and drive `rain_strength` / `thunder_strength` / `lightning_ticks`.
 
 ## Known gaps
 

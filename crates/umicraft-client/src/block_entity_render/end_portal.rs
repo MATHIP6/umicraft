@@ -35,6 +35,7 @@
 
 use std::collections::HashMap;
 
+use umicraft_core::java_random::JavaRandom;
 use umicraft_mesh::BlockEntityRef;
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::EntityVertex;
@@ -165,24 +166,6 @@ fn layer_uv(layer: u32, corner: [f64; 2], camera: [f64; 2], height: f64, scroll:
     ]
 }
 
-/// `java.util.Random`, for the colour ramp of the reference.
-struct JavaRandom(u64);
-
-impl JavaRandom {
-    const MULTIPLIER: u64 = 0x5_DEEC_E66D;
-    const MASK: u64 = (1 << 48) - 1;
-
-    fn new(seed: u64) -> Self {
-        Self((seed ^ Self::MULTIPLIER) & Self::MASK)
-    }
-
-    /// `nextFloat`: 24 random bits over 2^24.
-    fn next_float(&mut self) -> f32 {
-        self.0 = (self.0.wrapping_mul(Self::MULTIPLIER).wrapping_add(0xB)) & Self::MASK;
-        (self.0 >> 24) as f32 / (1u32 << 24) as f32
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use umicraft_game::server::block_entities::EntityTable;
@@ -273,13 +256,6 @@ mod tests {
         let b = layer_uv(3, [1.0, 2.0], [0.0, 0.0], 2.0, 0.25);
         assert_eq!(a[0], b[0]);
         assert!((b[1] - a[1] - 0.25).abs() < 1e-6);
-    }
-
-    #[test]
-    fn the_java_random_matches_the_known_first_float() {
-        // new Random(0).nextFloat() == 0.73096776
-        let first = JavaRandom::new(0).next_float();
-        assert!((first - 0.730_967_76).abs() < 1e-7, "{first}");
     }
 
     #[test]

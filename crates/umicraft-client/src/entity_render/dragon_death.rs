@@ -14,7 +14,7 @@
 use glam::{Mat4, Vec3};
 use umicraft_model::entity::ModelVertex;
 
-use crate::java_random::JavaRandom;
+use umicraft_core::java_random::JavaRandom;
 
 /// Ticks of the death of a dragon.
 const DEATH_TICKS: f32 = 200.0;

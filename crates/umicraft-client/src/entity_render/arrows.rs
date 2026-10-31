@@ -18,7 +18,7 @@ use umicraft_render::EntityVertex;
 use super::mobs::EntityLayer;
 use super::player::posed_player;
 use super::transform::part_frame;
-use crate::java_random::JavaRandom;
+use umicraft_core::java_random::JavaRandom;
 
 /// The part of the posed model a [`Shape`] hangs on.
 #[derive(Clone, Copy)]

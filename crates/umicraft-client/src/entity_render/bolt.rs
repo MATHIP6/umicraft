@@ -14,7 +14,7 @@ use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::EntityVertex;
 
-use crate::java_random::JavaRandom;
+use umicraft_core::java_random::JavaRandom;
 
 /// The tint of the strips as an additive light word. The reference adds
 /// `(0.45, 0.45, 0.5) * 0.3` in display space; the target blends in linear

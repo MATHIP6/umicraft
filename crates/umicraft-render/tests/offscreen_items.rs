@@ -97,6 +97,13 @@ fn an_item_command_draws_the_provided_icon_once() {
     list.item(99, Rect::new(56.0, 56.0, 32.0, 32.0), false);
     let mut provider = FlatSprite { requests: 0 };
 
+    // The sky is a dome fading into the fog, so the "empty" colour is read
+    // from a frame without items instead of assumed uniform.
+    renderer
+        .render_with_ui(&camera, &overlay, &DrawList::new(), &mut provider)
+        .expect("render empty");
+    let empty_there = pixel(&mut renderer, 72, 72);
+
     renderer
         .render_with_ui(&camera, &overlay, &list, &mut provider)
         .expect("render");
@@ -105,7 +112,7 @@ fn an_item_command_draws_the_provided_icon_once() {
     assert!(inside[1] > 200 && inside[0] < 60, "icon pixel {inside:?}");
     assert_ne!(inside, outside);
     // The unknown key draws nothing: its area keeps the sky colour.
-    assert_eq!(pixel(&mut renderer, 72, 72), outside);
+    assert_eq!(pixel(&mut renderer, 72, 72), empty_there);
 
     // A second frame reuses the atlas cell instead of rebuilding the mesh.
     renderer

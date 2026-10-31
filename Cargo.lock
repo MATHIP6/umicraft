@@ -3523,6 +3523,7 @@ dependencies = [
  "naga",
  "pollster",
  "thiserror 2.0.21",
+ "umicraft-core",
  "umicraft-mesh",
  "umicraft-ui",
  "umicraft-world",

@@ -29,6 +29,7 @@
 pub mod config;
 pub mod error;
 pub mod events;
+pub mod java_random;
 pub mod module;
 pub mod scheduler;
 pub mod service;

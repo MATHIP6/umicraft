@@ -19,45 +19,13 @@
 use std::f32::consts::PI;
 
 use glam::Vec3;
+use umicraft_core::java_random::JavaRandom;
 
 /// Eye height above the feet of the viewer: the camera is the eye, while
 /// `getClosestPlayer` measures from the player's position (the feet).
 const EYE_HEIGHT: f32 = 1.62;
 /// Squared range in which a player opens the book (`getClosestPlayer(..., 3.0)`).
 const RANGE_SQUARED: f32 = 9.0;
-
-/// `java.util.Random`, as much of it as the book draws from.
-#[derive(Debug, Clone)]
-pub(super) struct JavaRandom(u64);
-
-impl JavaRandom {
-    const MULTIPLIER: u64 = 0x5_DEEC_E66D;
-    const MASK: u64 = (1 << 48) - 1;
-
-    /// A generator whose sequence is fixed by `seed`.
-    pub(super) fn new(seed: u64) -> Self {
-        Self((seed ^ Self::MULTIPLIER) & Self::MASK)
-    }
-
-    fn next(&mut self, bits: u32) -> i32 {
-        self.0 = self.0.wrapping_mul(Self::MULTIPLIER).wrapping_add(0xB) & Self::MASK;
-        (self.0 >> (48 - bits)) as i32
-    }
-
-    /// `nextInt(bound)` for a positive `bound`.
-    pub(super) fn next_int(&mut self, bound: i32) -> i32 {
-        if bound & (bound - 1) == 0 {
-            return ((i64::from(bound) * i64::from(self.next(31))) >> 31) as i32;
-        }
-        loop {
-            let bits = self.next(31);
-            let value = bits % bound;
-            if bits.wrapping_sub(value).wrapping_add(bound - 1) >= 0 {
-                return value;
-            }
-        }
-    }
-}
 
 /// The animated fields of one table.
 #[derive(Debug, Clone)]
@@ -123,7 +91,7 @@ impl BookState {
     /// Moves the flip target by a random non-zero step.
     fn draw_flip_target(&mut self) {
         loop {
-            let step = self.random.next_int(4) - self.random.next_int(4);
+            let step = self.random.next_int(4) as i32 - self.random.next_int(4) as i32;
             if step != 0 {
                 self.flip_target += step as f32;
                 return;
@@ -153,16 +121,6 @@ mod tests {
     fn near() -> Vec3 {
         // Two blocks east of the table, eyes at head height.
         Vec3::new(2.5, 64.0 + EYE_HEIGHT, 0.5)
-    }
-
-    #[test]
-    fn java_random_matches_the_reference_sequence() {
-        // `new Random(0).nextInt(10)` is 0, then 8, 9, 7, 5.
-        let mut random = JavaRandom::new(0);
-        let drawn: Vec<i32> = (0..5).map(|_| random.next_int(10)).collect();
-        assert_eq!(drawn, [0, 8, 9, 7, 5]);
-        // A power of two takes the high bits: `new Random(0).nextInt(4)`.
-        assert_eq!(JavaRandom::new(0).next_int(4), 2);
     }
 
     #[test]

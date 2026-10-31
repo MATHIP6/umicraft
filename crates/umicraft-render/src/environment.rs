@@ -22,6 +22,18 @@ pub struct RenderEnvironment {
     /// Applied to the lightmap as `1-(1-x)^4`, matching
     /// `EntityRenderer.updateLightmap`.
     pub gamma: f32,
+    /// Biome temperature at the camera (`BiomeGenBase.getFloatTemperature`),
+    /// which tints the sky blue (cold) or teal (hot). `0.8` is the plains
+    /// value, the default until the client reads the biome.
+    pub sky_temperature: f32,
+    /// Interpolated rain strength in `0.0..=1.0` (`World.getRainStrength`).
+    pub rain_strength: f32,
+    /// Interpolated thunder strength in `0.0..=1.0`
+    /// (`World.getThunderStrength`, which already includes the rain factor).
+    pub thunder_strength: f32,
+    /// Ticks left of the lightning flash (`World.getLastLightningBolt`);
+    /// `0` when there is none.
+    pub lightning_ticks: u8,
 }
 
 impl RenderEnvironment {
@@ -32,7 +44,14 @@ impl RenderEnvironment {
         partial_tick: 0.0,
         view_distance: 8,
         gamma: 0.5,
+        sky_temperature: Self::PLAINS_TEMPERATURE,
+        rain_strength: 0.0,
+        thunder_strength: 0.0,
+        lightning_ticks: 0,
     };
+
+    /// `BiomeGenBase.plains` temperature, the default sky tint.
+    pub const PLAINS_TEMPERATURE: f32 = 0.8;
 
     /// Builds an environment, clamping `partial_tick` to `0.0..1.0`.
     #[must_use]
@@ -42,7 +61,7 @@ impl RenderEnvironment {
             world_time,
             partial_tick: partial_tick.clamp(0.0, 1.0),
             view_distance,
-            gamma: 0.5,
+            ..Self::DEFAULT
         }
     }
 }
