@@ -43,23 +43,33 @@ pub(super) fn add_painting(
     let (width, height) = (f32::from(art.width), f32::from(art.height));
     let (u, v) = (f32::from(art.u), f32::from(art.v));
 
-    let mut quad = |corners: [([f32; 3], [f32; 2]); 4], normal: [f32; 3]| {
-        let normal = placed
-            .transform_vector3(Vec3::from(normal))
-            .normalize_or_zero()
-            .to_array();
-        let vertex = |(position, uv): ([f32; 3], [f32; 2])| EntityVertex {
-            position: placed.transform_point3(Vec3::from(position)).to_array(),
-            normal,
-            uv,
-            light,
-        };
-        let [a, b, c, d] = corners.map(vertex);
-        out.extend([a, b, c, a, c, d]);
-    };
-
+    let rows = u32::from(art.height / 16);
     for i in 0..u32::from(art.width / 16) {
-        for j in 0..u32::from(art.height / 16) {
+        for j in 0..rows {
+            // The light in front of this block of the artwork; the whole
+            // entity's light when the game thread has not sampled the cells.
+            let light = ent
+                .block_lights
+                .get((i * rows + j) as usize)
+                .map_or(light, |cell| {
+                    (light & !0xFF)
+                        | u32::from(cell.block.min(15))
+                        | (u32::from(cell.sky.min(15)) << 4)
+                });
+            let mut quad = |corners: [([f32; 3], [f32; 2]); 4], normal: [f32; 3]| {
+                let normal = placed
+                    .transform_vector3(Vec3::from(normal))
+                    .normalize_or_zero()
+                    .to_array();
+                let vertex = |(position, uv): ([f32; 3], [f32; 2])| EntityVertex {
+                    position: placed.transform_point3(Vec3::from(position)).to_array(),
+                    normal,
+                    uv,
+                    light,
+                };
+                let [a, b, c, d] = corners.map(vertex);
+                out.extend([a, b, c, a, c, d]);
+            };
             let (i, j) = (i as f32, j as f32);
             let x15 = -width / 2.0 + (i + 1.0) * 16.0;
             let x16 = -width / 2.0 + i * 16.0;
@@ -195,5 +205,21 @@ mod tests {
         // The back is the strip of the sheet that is the same for every one.
         let back: Vec<_> = vertices.iter().filter(|v| v.normal[2] < -0.5).collect();
         assert_eq!(range(&back, |v| v.uv[0]), (0.75, 0.8125));
+    }
+
+    #[test]
+    fn every_block_takes_the_light_of_its_own_cell() {
+        let mut ent = EntityRenderSnapshot::new(EntityId(1), EntityKind::Painting, Vec3::ZERO);
+        ent.object_data = art_index("Pool").unwrap() as i32;
+        // Two blocks wide, one high: a torch on the left, daylight on the right.
+        ent.block_lights = std::sync::Arc::from([
+            umicraft_world::LightLevel { block: 14, sky: 0 },
+            umicraft_world::LightLevel { block: 0, sky: 15 },
+        ]);
+        let mut batches = HashMap::new();
+        add_painting(&mut batches, &ent, 0x100);
+        let vertices = &batches[&TextureSlot::Painting];
+        let words: std::collections::BTreeSet<u32> = vertices.iter().map(|v| v.light).collect();
+        assert_eq!(words, [0x100 | 14, 0x100 | (15 << 4)].into());
     }
 }

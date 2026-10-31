@@ -14,11 +14,13 @@ use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::{Mat4, Vec3};
+use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
-use umicraft_model::entity::{ModelBox, ModelPart, ModelVertex, TextureSlot};
+use umicraft_model::entity::{ChestModel, ModelBox, ModelPart, ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
 use super::transform::x_mirror;
+use crate::item_world::objects::{cart_block, Pose, CHEST};
 
 /// How high above the position of the entity the model is drawn.
 const BOAT_LIFT: f32 = 0.25;
@@ -95,6 +97,30 @@ fn mesh(parts: &[ModelPart]) -> Vec<ModelVertex> {
     vertices
 }
 
+/// The roll in degrees of a boat or a minecart that was hit
+/// (`RenderBoat.doRender`, `RenderMinecart.doRender`): `sin(f) * f * d / 10`
+/// times the direction, with `f` the ticks of shaking left less the partial
+/// tick and `d` the damage less the partial tick (at least 0).
+pub(crate) fn wobble(ent: &EntityRenderSnapshot) -> f32 {
+    let Variant::Vehicle {
+        amplitude,
+        direction,
+        damage,
+    } = ent.meta.variant
+    else {
+        return 0.0;
+    };
+    // `age` is the ticks lived plus the partial tick.
+    let partial = ent.age.fract();
+    let shake = amplitude as f32 - partial;
+    let damage = (damage - partial).max(0.0);
+    if shake > 0.0 {
+        shake.sin() * shake * damage / 10.0 * direction as f32
+    } else {
+        0.0
+    }
+}
+
 /// Adds the boat or the minecart `ent` to `batches` when it is one.
 pub(super) fn add_vehicle(
     batches: &mut HashMap<TextureSlot, Vec<EntityVertex>>,
@@ -116,6 +142,7 @@ pub(super) fn add_vehicle(
     let placed = Mat4::from_translation(ent.position + Vec3::new(0.0, lift, 0.0))
         * Mat4::from_rotation_y((180.0 - ent.yaw).to_radians())
         * Mat4::from_rotation_z(tilt)
+        * Mat4::from_rotation_x(wobble(ent).to_radians())
         * x_mirror();
     push(
         batches.entry(slot).or_default(),
@@ -123,6 +150,18 @@ pub(super) fn add_vehicle(
         placed,
         light,
     );
+    // A chest minecart carries a chest, which the item pass cannot draw: it
+    // is a block entity with its own model.
+    if let Some((item, Pose::Block(frame))) = cart_block(ent) {
+        if item.item_id == CHEST {
+            push(
+                batches.entry(TextureSlot::Chest).or_default(),
+                ChestModel::emit_mesh(),
+                frame,
+                light,
+            );
+        }
+    }
 }
 
 /// Carries `vertices` through `placed` into `out`.
@@ -272,6 +311,41 @@ mod tests {
     }
 
     #[test]
+    fn a_hit_boat_rolls_and_a_calm_one_does_not() {
+        let hit = |amplitude: i32, damage: f32| {
+            let mut ent = at(EntityKind::Boat, 0.0, 0.0);
+            ent.meta.variant = Variant::Vehicle {
+                amplitude,
+                direction: 1,
+                damage,
+            };
+            ent
+        };
+        assert_eq!(wobble(&at(EntityKind::Boat, 0.0, 0.0)), 0.0);
+        assert_eq!(wobble(&hit(0, 20.0)), 0.0, "the shake is over");
+        assert_eq!(wobble(&hit(10, 0.0)), 0.0, "no damage");
+        // `sin(10) * 10 * 20 / 10`.
+        let rolled = wobble(&hit(10, 20.0));
+        assert!((rolled - 10.0_f32.sin() * 20.0).abs() < 1e-4, "{rolled}");
+        // It rolls the other way when the direction flips.
+        let mut other = hit(10, 20.0);
+        other.meta.variant = Variant::Vehicle {
+            amplitude: 10,
+            direction: -1,
+            damage: 20.0,
+        };
+        assert!((wobble(&other) + rolled).abs() < 1e-4);
+        // The boat is turned by it.
+        assert_ne!(
+            extent(&vertices(&hit(10, 20.0), TextureSlot::Boat), 1),
+            extent(
+                &vertices(&at(EntityKind::Boat, 0.0, 0.0), TextureSlot::Boat),
+                1
+            )
+        );
+    }
+
+    #[test]
     fn a_cart_tips_with_the_slope_of_its_track() {
         let flat = vertices(&at(EntityKind::Minecart, 0.0, 0.0), TextureSlot::Minecart);
         let sloped = vertices(&at(EntityKind::Minecart, 0.0, 30.0), TextureSlot::Minecart);
@@ -320,7 +394,12 @@ mod tests {
         let mut snapshots = vec![
             place(1, EntityKind::Boat, -3.0, 0.0, 0.0),
             place(2, EntityKind::Boat, -0.8, 90.0, 0.0),
-            place(3, EntityKind::Minecart, 1.3, 0.0, 0.0),
+            // A chest minecart (the type is the `data` of its spawn packet).
+            {
+                let mut cart = place(3, EntityKind::Minecart, 1.3, 0.0, 0.0);
+                cart.object_data = 1;
+                cart
+            },
             place(4, EntityKind::Minecart, 3.2, 90.0, 30.0),
             place(5, EntityKind::EnderCrystal, 5.2, 0.0, 0.0),
         ];
@@ -442,6 +521,41 @@ mod tests {
             .expect("render");
         let image = renderer.read_pixels().expect("readback");
         if let Ok(path) = std::env::var("UMICRAFT_DRAGON_DUMP") {
+            let file = std::fs::File::create(path).expect("dump file");
+            let mut encoder = png::Encoder::new(file, image.width, image.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                .expect("png");
+        }
+    }
+
+    /// A chest minecart up close, two ways. Set `UMICRAFT_CHEST_DUMP`.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn a_chest_cart_in_close_up() {
+        use crate::entity_render::EntityTextures;
+        use umicraft_render::{Camera, Overlay, Renderer};
+
+        let mut renderer = Renderer::new_offscreen(600, 300).expect("renderer");
+        let cart = |id: i32, x: f32, yaw: f32| {
+            let mut ent = at(EntityKind::Minecart, yaw, 0.0);
+            ent.id = EntityId(id);
+            ent.position = Vec3::new(x, 64.0, 0.0);
+            ent.object_data = 1;
+            ent
+        };
+        EntityTextures::load(&renderer)
+            .mesh_and_upload(&[cart(1, -1.2, 0.0), cart(2, 1.2, 90.0)], &mut renderer);
+        let mut camera = Camera::new(Vec3::new(0.0, 65.4, -4.0), std::f32::consts::PI, -0.2);
+        camera.set_aspect(600, 300);
+        renderer
+            .render(&camera, &Overlay::new(600, 300))
+            .expect("render");
+        let image = renderer.read_pixels().expect("readback");
+        if let Ok(path) = std::env::var("UMICRAFT_CHEST_DUMP") {
             let file = std::fs::File::create(path).expect("dump file");
             let mut encoder = png::Encoder::new(file, image.width, image.height);
             encoder.set_color(png::ColorType::Rgba);

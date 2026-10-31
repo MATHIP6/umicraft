@@ -12,6 +12,7 @@ use umicraft_model::display::DisplayContext;
 use umicraft_model::item::pose::context_pose;
 
 use super::{sprite_model, world_light, ItemLayers};
+use crate::entity_render::vehicles::wobble;
 use crate::item_icons::ItemResources;
 
 /// Where the camera looks, in the angles of the reference (`playerViewY` is
@@ -40,11 +41,17 @@ impl View {
 const TNT_FUSE: f32 = 80.0;
 /// The block id of TNT.
 const TNT: i16 = 46;
+/// The blocks of the minecarts that carry one.
+pub(crate) const CHEST: i16 = 54;
+const FURNACE: i16 = 61;
+const MOB_SPAWNER: i16 = 52;
+const HOPPER: i16 = 154;
+const COMMAND_BLOCK: i16 = 137;
 /// The fire charge item, the sprite of fireballs.
 const FIRE_CHARGE: i16 = 385;
 
 /// How an object is placed.
-enum Pose {
+pub(crate) enum Pose {
     /// A sprite facing the camera: the frame, then the pose of the item for
     /// its ground context.
     Sprite(Mat4),
@@ -99,8 +106,42 @@ fn placed(entity: &EntityRenderSnapshot, view: View) -> Option<(EntityItem, Pose
         EntityKind::SmallFireball => Some((item(FIRE_CHARGE, 0), fireball(at, 0.5, view))),
         EntityKind::FallingBlock => Some(falling_block(entity)),
         EntityKind::PrimedTnt => Some((item(TNT, 0), tnt(entity))),
+        EntityKind::Minecart => cart_block(entity),
         _ => None,
     }
+}
+
+/// The block a minecart carries by its type, the `data` of its spawn packet
+/// (`getDefaultDisplayTile` of each cart class), and how many pixels it sits
+/// over the floor (`getDefaultDisplayTileOffset`). An empty cart and the
+/// display tile of a cart edited with commands are not drawn.
+pub(crate) fn cart_block(entity: &EntityRenderSnapshot) -> Option<(EntityItem, Pose)> {
+    let (item_id, offset) = match entity.object_data {
+        1 => (CHEST, 8),
+        2 => (FURNACE, 6),
+        3 => (TNT, 6),
+        4 => (MOB_SPAWNER, 6),
+        5 => (HOPPER, 1),
+        6 => (COMMAND_BLOCK, 6),
+        _ => return None,
+    };
+    // `RenderMinecart.doRender`: the cart's own frame (the model is drawn
+    // 0.375 up, turned to its yaw and tipped by its pitch), then the block at
+    // three quarters of its size, centred in the cart.
+    let matrix = Mat4::from_translation(entity.position + Vec3::new(0.0, 0.375, 0.0))
+        * Mat4::from_rotation_y((180.0 - entity.yaw).to_radians())
+        * Mat4::from_rotation_z((-entity.pitch).to_radians())
+        * Mat4::from_rotation_x(wobble(entity).to_radians())
+        * Mat4::from_scale(Vec3::splat(0.75))
+        * Mat4::from_translation(Vec3::new(-0.5, (offset - 8) as f32 / 16.0, 0.5))
+        * Mat4::from_rotation_y(90.0_f32.to_radians());
+    let item = EntityItem {
+        item_id,
+        damage: 0,
+        count: 1,
+        nbt: None,
+    };
+    Some((item, Pose::Block(matrix)))
 }
 
 /// `RenderSnowball.doRender`: half size, turned to face the camera.
@@ -156,6 +197,13 @@ fn tnt(entity: &EntityRenderSnapshot) -> Pose {
             * Mat4::from_translation(Vec3::new(-0.5, -0.5, 0.5))
             * Mat4::from_rotation_y(90.0_f32.to_radians()),
     )
+}
+
+/// Where the block of a primed TNT is, for the white flash drawn over it.
+pub(crate) fn tnt_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
+    match tnt(entity) {
+        Pose::Block(matrix) | Pose::Sprite(matrix) => matrix,
+    }
 }
 
 /// `fuse - partialTicks + 1` for an entity of `age` ticks: the fuse starts at
@@ -236,6 +284,34 @@ mod tests {
     }
 
     #[test]
+    fn a_cart_carries_the_block_of_its_type_inside_itself() {
+        let mut cart = entity(EntityKind::Minecart);
+        // An empty cart (0) and an unknown type carry nothing.
+        assert!(cart_block(&cart).is_none());
+        cart.object_data = 9;
+        assert!(cart_block(&cart).is_none());
+        // A TNT cart: the block at three quarters of its size, 0.375 over the
+        // position plus (6 - 8) / 16 of the scaled block.
+        cart.object_data = 3;
+        let (item, pose) = cart_block(&cart).expect("a block");
+        assert_eq!(item.item_id, TNT);
+        let centre = matrix(&pose).transform_point3(Vec3::splat(0.5));
+        let expected_y = 70.0 + 0.375 + 0.75 * (-2.0 / 16.0 + 0.5);
+        assert!(
+            (centre.y - expected_y).abs() < 1e-4,
+            "{} {expected_y}",
+            centre.y
+        );
+        assert!((matrix(&pose).transform_vector3(Vec3::X).length() - 0.75).abs() < 1e-5);
+        // The chest sits two pixels higher than the furnace.
+        cart.object_data = 1;
+        let chest = matrix(&cart_block(&cart).unwrap().1).transform_point3(Vec3::ZERO);
+        cart.object_data = 2;
+        let furnace = matrix(&cart_block(&cart).unwrap().1).transform_point3(Vec3::ZERO);
+        assert!((chest.y - furnace.y - 0.75 * 2.0 / 16.0).abs() < 1e-4);
+    }
+
+    #[test]
     fn the_fuse_counts_down_from_eighty() {
         assert_eq!(fuse_remaining(0.0), 81.0);
         assert_eq!(fuse_remaining(80.0), 1.0);
@@ -292,6 +368,9 @@ mod tests {
             at(7, EntityKind::FallingBlock, 2.2, 12, 0.0),
             at(8, EntityKind::PrimedTnt, 3.6, 0, 20.0),
             at(9, EntityKind::PrimedTnt, 4.8, 0, 76.0),
+            at(10, EntityKind::Minecart, -1.8, 3, 0.0),
+            at(11, EntityKind::Minecart, -3.0, 2, 0.0),
+            at(12, EntityKind::Minecart, -4.2, 5, 0.0),
         ];
         let mut world = WorldItems::default();
         world.set_view(std::f32::consts::PI, 0.0);

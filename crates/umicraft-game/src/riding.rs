@@ -25,8 +25,8 @@ const MINECART_SEAT_HEIGHT: f64 = 0.0;
 ///
 /// A boat shifts the seat 0.4 along its yaw, a spider rides at half its
 /// height, a minecart at its floor and every other mount (pig, horse) at
-/// three quarters of its height (MCP `Entity.getMountedYOffset`). The horse's
-/// rearing shift is not modelled.
+/// three quarters of its height (MCP `Entity.getMountedYOffset`). A rearing
+/// horse pushes the seat back and up (`EntityHorse.updateRiderPosition`).
 ///
 /// # Example
 ///
@@ -53,6 +53,18 @@ pub fn rider_feet(vehicle: &EntityRecord) -> DVec3 {
         EntityKind::Spider | EntityKind::CaveSpider => {
             (DVec3::ZERO, f64::from(vehicle.kind.height()) * 0.5)
         }
+        EntityKind::Horse => {
+            let rearing = f64::from(vehicle.horse.previous_rearing());
+            let yaw = f64::from(vehicle.body_yaw.offset).to_radians();
+            (
+                DVec3::new(
+                    0.7 * rearing * yaw.sin(),
+                    0.15 * rearing,
+                    -0.7 * rearing * yaw.cos(),
+                ),
+                f64::from(vehicle.kind.height()) * 0.75,
+            )
+        }
         kind => (DVec3::ZERO, f64::from(kind.height()) * 0.75),
     };
     vehicle.position + shift + DVec3::Y * (seat + PLAYER_Y_OFFSET)
@@ -76,6 +88,20 @@ mod tests {
         let turned = rider_feet(&record(EntityKind::Boat, 90.0));
         assert!((turned.x - 10.0).abs() < 1e-9);
         assert!((turned.z - 20.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_rearing_horse_throws_its_rider_back_and_up() {
+        let mut horse = record(EntityKind::Horse, 0.0);
+        let calm = rider_feet(&horse);
+        for _ in 0..8 {
+            horse.horse.tick(false, true, false);
+        }
+        let rearing = rider_feet(&horse);
+        assert!((rearing.y - calm.y - 0.15).abs() < 1e-6);
+        // Facing south (yaw 0), the back is north: z decreases by 0.7.
+        assert!((rearing.z - calm.z + 0.7).abs() < 1e-6, "{rearing} {calm}");
+        assert!((rearing.x - calm.x).abs() < 1e-6);
     }
 
     #[test]

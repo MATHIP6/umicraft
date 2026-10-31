@@ -5,7 +5,13 @@
 //! `Spawn Painting` names the artwork and the block the painting hangs on;
 //! where its centre is depends on the size of the artwork.
 
+use std::sync::Arc;
+
 use glam::DVec3;
+use umicraft_world::{BlockPos, World};
+
+use super::kind::EntityKind;
+use super::snapshot::EntityFrameData;
 
 /// One artwork of `EntityPainting.EnumArt`: its title, its size in pixels and
 /// where it is on the 256 x 256 sheet.
@@ -90,9 +96,81 @@ pub fn centre(block: [i32; 3], facing: u8, art: &Art) -> DVec3 {
     )
 }
 
+/// The light each block of a painting is drawn with, column by column from
+/// the left (`RenderPainting.setLightmap`): the cell of that block in front of
+/// the wall, at the height of its middle.
+#[must_use]
+pub fn block_lights(
+    world: &World,
+    art: &Art,
+    centre: DVec3,
+    facing: u8,
+) -> Vec<umicraft_world::LightLevel> {
+    let (columns, rows) = (art.width / 16, art.height / 16);
+    let mut lights = Vec::with_capacity(usize::from(columns * rows));
+    for column in 0..columns {
+        // The middle of the column from the left edge, in blocks.
+        let across = f64::from(column) + 0.5 - f64::from(columns) / 2.0;
+        for row in 0..rows {
+            let up = f64::from(row) + 0.5 - f64::from(rows) / 2.0;
+            let (mut x, y, mut z) = (centre.x, centre.y + up, centre.z);
+            match facing & 3 {
+                // North.
+                2 => x += across,
+                // West.
+                1 => z -= across,
+                // South.
+                0 => x -= across,
+                // East.
+                _ => z += across,
+            }
+            lights.push(world.light(BlockPos::new(
+                x.floor() as i32,
+                y.floor() as i32,
+                z.floor() as i32,
+            )));
+        }
+    }
+    lights
+}
+
+/// Samples the light of every block of the paintings of `entities`.
+pub fn light_paintings(world: &World, entities: &mut [EntityFrameData]) {
+    for entity in entities
+        .iter_mut()
+        .filter(|entity| entity.kind == EntityKind::Painting)
+    {
+        let Some(art) = ARTS.get(usize::try_from(entity.object_data).unwrap_or(usize::MAX)) else {
+            continue;
+        };
+        // The yaw of a painting is its facing times 90 degrees.
+        let facing = (entity.yaw / 90.0).round().rem_euclid(4.0) as u8;
+        entity.block_lights = Arc::from(block_lights(
+            world,
+            art,
+            DVec3::new(
+                f64::from(entity.position.x),
+                f64::from(entity.position.y),
+                f64::from(entity.position.z),
+            ),
+            facing,
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_painting_in_an_unloaded_world_is_dark_in_every_block() {
+        let skeleton = ARTS[art_index("Skeleton").unwrap()];
+        let lights = block_lights(&World::default(), &skeleton, DVec3::new(0.0, 65.5, 0.0), 0);
+        assert_eq!(lights.len(), 4 * 3);
+        assert!(lights
+            .iter()
+            .all(|light| *light == umicraft_world::LightLevel::DARK));
+    }
 
     #[test]
     fn every_title_of_the_reference_is_known() {

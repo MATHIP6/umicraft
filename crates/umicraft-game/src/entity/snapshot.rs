@@ -12,6 +12,7 @@ use super::anim::{Animation, BedPose};
 use super::cape::{cape_angles, CapeAngles};
 use super::flags::EntityFlags;
 use super::flight::{DragonFlight, DragonPose};
+use super::horse_state::{HorsePose, HorseState};
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::leash::{LeashAnchor, LeashFrame};
@@ -90,6 +91,18 @@ pub struct EntityFrameData {
     pub riding: bool,
     /// The flight history of an ender dragon.
     pub flight: Option<DragonFlight>,
+    /// The squish factor of a slime or magma cube.
+    pub squish: f32,
+    /// The grazing, rearing and mouth of a horse.
+    pub horse: Option<HorseState>,
+    /// Whether another entity sits on this one.
+    pub ridden: bool,
+    /// The light in front of each block of a painting, column by column (the
+    /// game thread samples it; empty for anything else).
+    pub block_lights: Arc<[LightLevel]>,
+    /// Where the line of this bobber ties to the rod when the angler is the
+    /// local player in first person; set by the game thread.
+    pub rod_tip: Option<Vec3>,
     /// Whether this is the body of the local player.
     pub local: bool,
     /// Whether the viewer sees the invisible body as a ghost by team.
@@ -160,6 +173,11 @@ impl EntityFrameData {
             leash: self.leash.map(|holder| holder.at(a)),
             local: self.local,
             ghost_visible: self.ghost_visible,
+            squish: self.squish,
+            horse: self.horse.map(|horse| horse.pose(a)),
+            ridden: self.ridden,
+            block_lights: self.block_lights.clone(),
+            rod_tip: self.rod_tip,
             flight: self
                 .flight
                 .as_ref()
@@ -239,6 +257,18 @@ pub struct EntityRenderSnapshot {
     pub leash: Option<LeashAnchor>,
     /// The flight pose of an ender dragon: its wing phase and the path it flew.
     pub flight: Option<DragonPose>,
+    /// How much a slime or magma cube is squashed (`0` at rest, positive when
+    /// stretched, negative when it lands).
+    pub squish: f32,
+    /// How far a horse grazes, rears and opens its mouth.
+    pub horse: Option<HorsePose>,
+    /// Whether another entity sits on this one: a ridden horse shows its reins.
+    pub ridden: bool,
+    /// The light in front of each block of a painting, column by column; empty
+    /// when the whole entity takes `light`.
+    pub block_lights: Arc<[LightLevel]>,
+    /// Where the line of this bobber ties to the rod (first person only).
+    pub rod_tip: Option<Vec3>,
     /// Whether this is the body of the local player: it is not lowered further
     /// when crouching (`RenderPlayer.doRender`).
     pub local: bool,
@@ -293,6 +323,11 @@ impl EntityRenderSnapshot {
             riding: false,
             leash: None,
             flight: None,
+            squish: 0.0,
+            horse: None,
+            ridden: false,
+            block_lights: Arc::default(),
+            rod_tip: None,
             local: false,
             ghost_visible: false,
             age: 0.0,

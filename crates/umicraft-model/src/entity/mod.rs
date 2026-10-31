@@ -10,6 +10,7 @@ mod armor;
 mod bat;
 mod blaze;
 mod cape;
+mod chest;
 mod chicken;
 pub mod child;
 mod creeper;
@@ -39,6 +40,7 @@ pub use armor::ArmorMaterial;
 pub use bat::BatModel;
 pub use blaze::BlazeModel;
 pub use cape::CapeModel;
+pub use chest::ChestModel;
 pub use chicken::ChickenModel;
 pub use creeper::CreeperModel;
 pub use dragon::{DragonModel, FlightFrame};
@@ -46,7 +48,7 @@ pub use enderman::EndermanModel;
 pub use endermite::EndermiteModel;
 pub use ghast::{GhastModel, RENDER_SCALE as GHAST_SCALE};
 pub use guardian::GuardianModel;
-pub use horse::HorseModel;
+pub use horse::{HorseLook, HorseModel};
 pub use humanoid::HumanoidModel;
 pub use iron_golem::IronGolemModel;
 pub use ocelot::{OcelotModel, OcelotPose};
@@ -497,6 +499,8 @@ pub enum TextureSlot {
     Boat,
     /// The minecart (`minecart.png`).
     Minecart,
+    /// The chest (`chest/normal.png`), carried by a chest minecart.
+    Chest,
     /// The ender crystal (`endercrystal/endercrystal.png`).
     EnderCrystal,
     /// The experience orb (`experience_orb.png`).

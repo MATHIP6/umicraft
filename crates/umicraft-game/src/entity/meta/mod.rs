@@ -89,11 +89,32 @@ pub enum Variant {
         /// True while the ghast attacks: its face shows the shooting texture.
         attacking: bool,
     },
+    /// A thrown wither skull (entry 10): the blue one, shot by a wither that
+    /// is at less than half its health.
+    WitherSkull {
+        /// True for the blue skull (`EntityWitherSkull.isInvulnerable`).
+        invulnerable: bool,
+    },
+    /// The shake of a boat or a minecart that was hit (entries 17 to 19).
+    Vehicle {
+        /// Ticks of shaking left (`getRollingAmplitude`, `getTimeSinceHit`).
+        amplitude: i32,
+        /// Which way it rolls, `1` or `-1`.
+        direction: i32,
+        /// The damage it took, which scales the shake.
+        damage: f32,
+    },
     /// Armour stand flags and pose.
     ArmorStand(ArmorStandMeta),
 }
 
 impl EntityMeta {
+    /// Advances the state that runs down by itself, one tick (the shake of a
+    /// boat or a minecart that was hit).
+    pub fn tick(&mut self) {
+        monsters::tick_vehicle(&mut self.variant);
+    }
+
     /// Merges the entries of `metadata` into this state; `kind` selects which
     /// class-specific entries exist.
     pub fn apply(&mut self, kind: EntityKind, metadata: &Metadata) {
@@ -117,6 +138,10 @@ impl EntityMeta {
             EntityKind::Enderman => monsters::apply_enderman(&mut variant, metadata),
             EntityKind::Ghast => monsters::apply_ghast(&mut variant, metadata),
             EntityKind::Wither => monsters::apply_wither(&mut variant, metadata),
+            EntityKind::WitherSkull => monsters::apply_wither_skull(&mut variant, metadata),
+            EntityKind::Boat | EntityKind::Minecart => {
+                monsters::apply_vehicle(&mut variant, metadata)
+            }
             EntityKind::Villager => monsters::apply_villager(&mut variant, metadata),
             EntityKind::ArmorStand => armor_stand::apply(&mut variant, metadata),
             _ => {}

@@ -514,6 +514,7 @@ impl EntityStore {
                 entity.animation.tick_fuse(state);
             }
             entity.tick_use();
+            entity.meta.tick();
             entity.age_ticks = entity.age_ticks.saturating_add(1);
         }
         // MCP `Entity.updateRidden`: a rider is put at the seat of its vehicle.
@@ -583,10 +584,20 @@ impl EntityStore {
     /// fraction without pre-baking the alpha on the game thread.
     #[must_use]
     pub fn frame_data(&self) -> Vec<EntityFrameData> {
-        self.entities
+        let mut frames: Vec<EntityFrameData> = self
+            .entities
             .values()
             .map(EntityRecord::frame_data)
-            .collect()
+            .collect();
+        let rided: Vec<EntityId> = self
+            .entities
+            .values()
+            .filter_map(|entity| entity.vehicle)
+            .collect();
+        for frame in &mut frames {
+            frame.ridden = rided.contains(&frame.id);
+        }
+        frames
     }
 }
 

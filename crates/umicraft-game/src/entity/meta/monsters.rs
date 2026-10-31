@@ -73,6 +73,64 @@ pub(super) fn apply_wither(variant: &mut Variant, metadata: &Metadata) {
     }
 }
 
+/// Entries of the shake of a boat or a minecart (`EntityBoat.entityInit`,
+/// `EntityMinecart.entityInit`): ticks left, direction and damage.
+const VEHICLE_AMPLITUDE: u8 = 17;
+const VEHICLE_DIRECTION: u8 = 18;
+const VEHICLE_DAMAGE: u8 = 19;
+
+pub(super) fn apply_vehicle(variant: &mut Variant, metadata: &Metadata) {
+    let (mut amplitude, mut direction, mut damage) = match *variant {
+        Variant::Vehicle {
+            amplitude,
+            direction,
+            damage,
+        } => (amplitude, direction, damage),
+        _ => (0, 1, 0.0),
+    };
+    if let Some(value) = metadata.get_int(VEHICLE_AMPLITUDE) {
+        amplitude = value;
+    }
+    if let Some(value) = metadata.get_int(VEHICLE_DIRECTION) {
+        direction = value;
+    }
+    if let Some(value) = metadata.get_float(VEHICLE_DAMAGE) {
+        damage = value;
+    }
+    *variant = Variant::Vehicle {
+        amplitude,
+        direction,
+        damage,
+    };
+}
+
+/// One tick of the shake dying down (`EntityMinecart.onUpdate`,
+/// `EntityBoat.onUpdate`).
+pub(super) fn tick_vehicle(variant: &mut Variant) {
+    if let Variant::Vehicle {
+        amplitude, damage, ..
+    } = variant
+    {
+        if *amplitude > 0 {
+            *amplitude -= 1;
+        }
+        if *damage > 0.0 {
+            *damage -= 1.0;
+        }
+    }
+}
+
+/// Data watcher entry of `EntityWitherSkull.invulnerable`.
+const WITHER_SKULL_INVULNERABLE: u8 = 10;
+
+pub(super) fn apply_wither_skull(variant: &mut Variant, metadata: &Metadata) {
+    if let Some(invulnerable) = metadata.get_byte(WITHER_SKULL_INVULNERABLE) {
+        *variant = Variant::WitherSkull {
+            invulnerable: invulnerable != 0,
+        };
+    }
+}
+
 pub(super) fn apply_ghast(variant: &mut Variant, metadata: &Metadata) {
     if let Some(attacking) = metadata.get_byte(GHAST_ATTACKING) {
         *variant = Variant::Ghast {

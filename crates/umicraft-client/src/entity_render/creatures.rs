@@ -8,7 +8,8 @@ use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{
     BatModel, BlazeModel, CreeperModel, DragonModel, EndermiteModel, GhastModel, GuardianModel,
-    SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot, WitherModel, GHAST_SCALE,
+    ModelVertex, SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot, WitherModel,
+    GHAST_SCALE,
 };
 
 use super::animals::with_eyes;
@@ -37,12 +38,12 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             let model = SlimeModel::slime(1.0);
             let mut vertices = model.emit_inner_mesh();
             vertices.extend(model.emit_outer_mesh());
-            scale_mesh(&mut vertices, slime_size(ent));
+            squash(&mut vertices, ent);
             one(TextureSlot::Slime, vertices)
         }
         EntityKind::MagmaCube => {
             let mut vertices = SlimeModel::magma_cube(1.0).emit_inner_mesh();
-            scale_mesh(&mut vertices, slime_size(ent));
+            squash(&mut vertices, ent);
             one(TextureSlot::MagmaCube, vertices)
         }
         EntityKind::Snowman => {
@@ -182,12 +183,18 @@ fn wither_texture(invulnerable: i32) -> TextureSlot {
     }
 }
 
-/// The size of a slime or magma cube; vanilla draws the one model scaled by it
-/// (MCP `RenderSlime.preRenderCallback`, without the squish).
-fn slime_size(ent: &EntityRenderSnapshot) -> f32 {
-    match ent.meta.variant {
+/// Scales a slime or magma cube by its size, stretched or flattened by its
+/// squish (MCP `RenderSlime.preRenderCallback`).
+fn squash(vertices: &mut [ModelVertex], ent: &EntityRenderSnapshot) {
+    let size = match ent.meta.variant {
         Variant::Slime(size) => f32::from(size),
         _ => 1.0,
+    };
+    let stretch = 1.0 / (ent.squish / (size * 0.5 + 1.0) + 1.0);
+    for vertex in vertices {
+        vertex.position[0] *= stretch * size;
+        vertex.position[1] *= size / stretch;
+        vertex.position[2] *= stretch * size;
     }
 }
 
@@ -238,6 +245,32 @@ fn creeper_swell(flash: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stretched_slime_is_taller_and_thinner() {
+        let mut ent = EntityRenderSnapshot::new(
+            umicraft_game::entity::EntityId(1),
+            EntityKind::Slime,
+            glam::Vec3::ZERO,
+        );
+        ent.meta.variant = Variant::Slime(1);
+        let corner = |ent: &EntityRenderSnapshot| {
+            let mut v = [ModelVertex {
+                position: [1.0; 3],
+                normal: [0.0; 3],
+                uv: [0.0; 2],
+            }];
+            squash(&mut v, ent);
+            v[0].position
+        };
+        assert_eq!(corner(&ent), [1.0; 3]);
+        ent.squish = 1.0;
+        let [x, y, _] = corner(&ent);
+        assert!(y > 1.0 && x < 1.0, "{x} {y}");
+        ent.squish = -0.5;
+        let [x, y, _] = corner(&ent);
+        assert!(y < 1.0 && x > 1.0, "{x} {y}");
+    }
 
     #[test]
     fn a_calm_creeper_keeps_its_size() {

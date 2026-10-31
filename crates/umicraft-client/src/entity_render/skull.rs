@@ -15,18 +15,25 @@ use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{ModelBox, ModelPart, ModelVertex, TextureSlot};
 
+use umicraft_assets::profile_textures::parse_textures_property;
+use umicraft_game::item_nbt::ItemDisplay;
+
+use super::skins::SkinLookup;
+
 use super::mobs::{posed_humanoid_mob, EntityLayer};
 use super::player::posed_player;
 
 /// The skull item id.
 const SKULL: i16 = 397;
+/// The damage of a player skull.
+const PLAYER_SKULL: i16 = 3;
 /// The factor `LayerCustomHead` scales a skull by.
 const SKULL_SCALE: f32 = 1.1875;
 /// Extra lift of a skull on a villager (`translate(0, 0.0625, 0)` in the scaled frame).
 const VILLAGER_LIFT: f32 = 0.0625;
 
 /// The skull layers of `ent`, empty when it wears none or has no head layer.
-pub(super) fn skull_layers(ent: &EntityRenderSnapshot) -> Vec<EntityLayer> {
+pub(super) fn skull_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -> Vec<EntityLayer> {
     let Some(skull) = ent.armor[3].as_ref().filter(|item| item.item_id == SKULL) else {
         return Vec::new();
     };
@@ -40,7 +47,22 @@ pub(super) fn skull_layers(ent: &EntityRenderSnapshot) -> Vec<EntityLayer> {
         }
         _ => return Vec::new(),
     };
-    let (slot, humanoid) = skull_texture(skull.damage);
+    let (mut slot, humanoid) = skull_texture(skull.damage);
+    if skull.damage == PLAYER_SKULL {
+        // The skin of the owner, when the server sent the owner with its
+        // textures and the download is ready (`TileEntitySkullRenderer`
+        // would ask the session server for a bare name; this does not).
+        let owner_skin = skull
+            .nbt
+            .as_deref()
+            .and_then(|nbt| ItemDisplay::from_nbt(nbt).skull_textures)
+            .and_then(|value| parse_textures_property(&value).ok())
+            .and_then(|textures| textures.skin)
+            .and_then(|url| skins.skin(&url));
+        if let Some(index) = owner_skin {
+            slot = TextureSlot::Skin(index);
+        }
+    }
     let lift = if ent.meta.is_zombie_villager() {
         VILLAGER_LIFT * SKULL_SCALE
     } else {
@@ -100,6 +122,7 @@ fn skull_mesh(head: &ModelPart, humanoid: bool, lift: f32) -> Vec<ModelVertex> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entity_render::skins::NoSkins;
     use umicraft_game::entity::{EntityId, EntityItem};
 
     fn wearing(kind: EntityKind, skull_type: i16) -> EntityRenderSnapshot {
@@ -114,7 +137,50 @@ mod tests {
     }
 
     fn slot_of(ent: &EntityRenderSnapshot) -> Option<TextureSlot> {
-        skull_layers(ent).first().map(|layer| layer.slot)
+        skull_layers(ent, &NoSkins).first().map(|layer| layer.slot)
+    }
+
+    /// The NBT of a player skull whose owner carries the textures property
+    /// `{"textures":{"SKIN":{"url":"http://t/skin"}}}`.
+    fn owner_nbt() -> std::sync::Arc<[u8]> {
+        let value = "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90L3NraW4ifX19";
+        let mut nbt = vec![10, 0, 0, 10, 0, 10];
+        nbt.extend(b"SkullOwner");
+        nbt.extend([10, 0, 10]);
+        nbt.extend(b"Properties");
+        nbt.extend([9, 0, 8]);
+        nbt.extend(b"textures");
+        nbt.extend([10, 0, 0, 0, 1, 8, 0, 5]);
+        nbt.extend(b"Value");
+        nbt.extend((value.len() as u16).to_be_bytes());
+        nbt.extend(value.as_bytes());
+        // The texture, Properties, SkullOwner and the root.
+        nbt.extend([0, 0, 0, 0]);
+        nbt.into()
+    }
+
+    #[test]
+    fn a_player_skull_wears_the_skin_of_its_owner_once_downloaded() {
+        struct Ready;
+        impl SkinLookup for Ready {
+            fn skin(&self, url: &str) -> Option<u32> {
+                (url == "http://t/skin").then_some(7)
+            }
+            fn cape(&self, _url: &str) -> Option<u32> {
+                None
+            }
+        }
+        let mut ent = wearing(EntityKind::Player, 3);
+        ent.armor[3].as_mut().unwrap().nbt = Some(owner_nbt());
+        assert_eq!(
+            skull_layers(&ent, &Ready)[0].slot,
+            TextureSlot::Skin(7),
+            "the owner skin"
+        );
+        // Not downloaded yet, or no textures: the default skin.
+        assert_eq!(skull_layers(&ent, &NoSkins)[0].slot, TextureSlot::Steve);
+        let bare = wearing(EntityKind::Player, 3);
+        assert_eq!(skull_layers(&bare, &Ready)[0].slot, TextureSlot::Steve);
     }
 
     #[test]
@@ -138,17 +204,17 @@ mod tests {
     fn only_a_skull_in_the_helmet_slot_of_a_biped_is_drawn() {
         let mut player = wearing(EntityKind::Player, 0);
         player.armor[3].as_mut().expect("skull").item_id = 306;
-        assert!(skull_layers(&player).is_empty(), "an iron helmet");
-        assert!(skull_layers(&wearing(EntityKind::Cow, 0)).is_empty());
-        assert!(skull_layers(&wearing(EntityKind::Giant, 0)).is_empty());
-        assert!(!skull_layers(&wearing(EntityKind::Skeleton, 0)).is_empty());
-        assert!(!skull_layers(&wearing(EntityKind::Zombie, 2)).is_empty());
+        assert!(skull_layers(&player, &NoSkins).is_empty(), "an iron helmet");
+        assert!(skull_layers(&wearing(EntityKind::Cow, 0), &NoSkins).is_empty());
+        assert!(skull_layers(&wearing(EntityKind::Giant, 0), &NoSkins).is_empty());
+        assert!(!skull_layers(&wearing(EntityKind::Skeleton, 0), &NoSkins).is_empty());
+        assert!(!skull_layers(&wearing(EntityKind::Zombie, 2), &NoSkins).is_empty());
     }
 
     #[test]
     fn a_humanoid_skull_has_the_hat_layer_and_the_others_do_not() {
         let boxes = |skull_type| {
-            skull_layers(&wearing(EntityKind::Player, skull_type))[0]
+            skull_layers(&wearing(EntityKind::Player, skull_type), &NoSkins)[0]
                 .vertices
                 .len()
                 / 36
@@ -161,7 +227,7 @@ mod tests {
     fn the_skull_is_a_little_larger_than_the_head_and_sits_on_its_pivot() {
         let player = wearing(EntityKind::Player, 0);
         let head = posed_player(&player).0.head;
-        let vertices = &skull_layers(&player)[0].vertices;
+        let vertices = &skull_layers(&player, &NoSkins)[0].vertices;
         let width = |axis: usize| {
             let values = vertices.iter().map(|v| v.position[axis]);
             values.clone().fold(f32::MIN, f32::max) - values.fold(f32::MAX, f32::min)

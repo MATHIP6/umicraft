@@ -31,7 +31,7 @@ use crate::java_random::JavaRandom;
 mod carried;
 mod head;
 mod held;
-mod objects;
+pub(crate) mod objects;
 
 /// Hover height offset per unit of the ground scale (`RenderEntityItem`).
 const HOVER_BASE: f32 = 0.25;
@@ -453,6 +453,11 @@ mod render_tests {
             riding: false,
             leash: None,
             flight: None,
+            squish: 0.0,
+            horse: None,
+            ridden: false,
+            block_lights: std::sync::Arc::default(),
+            rod_tip: None,
             local: false,
             ghost_visible: false,
             flags: EntityFlags::default(),
@@ -570,6 +575,11 @@ mod player_render_tests {
             riding: false,
             leash: None,
             flight: None,
+            squish: 0.0,
+            horse: None,
+            ridden: false,
+            block_lights: std::sync::Arc::default(),
+            rod_tip: None,
             local: false,
             ghost_visible: false,
             flags: EntityFlags::new(if sneaking { 0x02 } else { 0 }, 0),
@@ -763,6 +773,11 @@ mod glint_render_tests {
             riding: false,
             leash: None,
             flight: None,
+            squish: 0.0,
+            horse: None,
+            ridden: false,
+            block_lights: std::sync::Arc::default(),
+            rod_tip: None,
             local: false,
             ghost_visible: false,
             flags: EntityFlags::default(),

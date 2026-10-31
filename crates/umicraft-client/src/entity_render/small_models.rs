@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
+use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::{ModelBox, ModelPart, TextureSlot};
 use umicraft_render::EntityVertex;
@@ -34,7 +35,17 @@ pub(super) fn add_small_model(
                 0.0,
             ));
             part.rotation = [-ent.pitch.to_radians(), ent.yaw.to_radians(), 0.0];
-            (TextureSlot::Wither, part)
+            // The blue skull has the texture of the wither being spawned.
+            let blue = matches!(
+                ent.meta.variant,
+                Variant::WitherSkull { invulnerable: true }
+            );
+            let slot = if blue {
+                TextureSlot::WitherInvulnerable
+            } else {
+                TextureSlot::Wither
+            };
+            (slot, part)
         }
         EntityKind::LeashKnot => (
             TextureSlot::LeashKnot,
@@ -118,6 +129,20 @@ mod tests {
         assert!((high - (70.0 + 6.0 / 16.0)).abs() < 1e-4, "{high}");
         let (z0, z1) = range(&knot, 2);
         assert!((z1 - z0 - 6.0 / 16.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_blue_wither_skull_has_the_texture_of_the_spawning_wither() {
+        let slot_of = |blue: bool| {
+            let mut ent =
+                EntityRenderSnapshot::new(EntityId(1), EntityKind::WitherSkull, Vec3::ZERO);
+            ent.meta.variant = Variant::WitherSkull { invulnerable: blue };
+            let mut batches = HashMap::new();
+            add_small_model(&mut batches, &ent, 0xFF);
+            batches.into_keys().next().unwrap()
+        };
+        assert_eq!(slot_of(false), TextureSlot::Wither);
+        assert_eq!(slot_of(true), TextureSlot::WitherInvulnerable);
     }
 
     #[test]

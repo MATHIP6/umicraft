@@ -23,7 +23,7 @@ mod creatures;
 mod dragon_beam;
 mod dragon_death;
 mod fire;
-mod fishing;
+pub(crate) mod fishing;
 mod glow;
 mod hand;
 mod horse_coat;
@@ -39,9 +39,10 @@ mod skull;
 mod small_models;
 mod specs;
 mod textures;
+mod tnt_flash;
 mod transform;
 mod variants;
-mod vehicles;
+pub(crate) mod vehicles;
 mod xp;
 
 use std::collections::HashMap;
@@ -133,6 +134,7 @@ fn mesh_entities_with(
         paintings::add_painting(&mut solid, ent, light);
         small_models::add_small_model(&mut solid, ent, light);
         bolt::add_lightning(&mut additive, ent);
+        tnt_flash::add_flash(&mut additive, ent);
         rope::add_leash(&mut solid, ent);
         dragon_beam::add_beam(&mut solid, ent, snapshots);
         let eye = fishing::Eye {
@@ -328,6 +330,11 @@ mod tests {
                 riding: false,
                 leash: None,
                 flight: None,
+                squish: 0.0,
+                horse: None,
+                ridden: false,
+                block_lights: std::sync::Arc::default(),
+                rod_tip: None,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::new(0, 0x7F),
@@ -367,6 +374,11 @@ mod tests {
                 riding: false,
                 leash: None,
                 flight: None,
+                squish: 0.0,
+                horse: None,
+                ridden: false,
+                block_lights: std::sync::Arc::default(),
+                rod_tip: None,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),
@@ -406,6 +418,11 @@ mod tests {
                 riding: false,
                 leash: None,
                 flight: None,
+                squish: 0.0,
+                horse: None,
+                ridden: false,
+                block_lights: std::sync::Arc::default(),
+                rod_tip: None,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),
@@ -446,6 +463,11 @@ mod tests {
                 riding: false,
                 leash: None,
                 flight: None,
+                squish: 0.0,
+                horse: None,
+                ridden: false,
+                block_lights: std::sync::Arc::default(),
+                rod_tip: None,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),

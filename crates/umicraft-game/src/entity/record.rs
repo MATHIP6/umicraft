@@ -12,6 +12,7 @@ use super::body_yaw::BodyYaw;
 use super::cape::CapeChase;
 use super::flags::EntityFlags;
 use super::flight::DragonFlight;
+use super::horse_state::HorseState;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
@@ -97,6 +98,10 @@ pub struct EntityRecord {
     pub collecting: Option<Collecting>,
     /// The flight history of an ender dragon (created on its first tick).
     pub flight: Option<DragonFlight>,
+    /// How far a horse grazes, rears and opens its mouth.
+    pub horse: HorseState,
+    /// The squish of a slime or magma cube (MCP `EntitySlime.squishFactor`).
+    pub squish: super::motion::Squish,
     /// Whether this is the body of the local player (MCP `EntityPlayerSP`).
     pub local: bool,
     /// Whether the local player sees this entity's invisible body as a ghost
@@ -193,6 +198,11 @@ impl EntityRecord {
             fishing: self.bobber.is_some(),
             riding: self.vehicle.is_some(),
             flight: self.flight.clone(),
+            squish: self.squish.factor,
+            horse: (self.kind == EntityKind::Horse).then_some(self.horse),
+            ridden: false,
+            block_lights: Arc::default(),
+            rod_tip: None,
             local: self.local,
             ghost_visible: self.ghost_visible,
             flight_alive: self.health.is_none_or(|health| health > 0.0),
@@ -244,6 +254,8 @@ impl EntityRecord {
             leash: None,
             collecting: None,
             flight: None,
+            squish: Default::default(),
+            horse: HorseState::new(u64::from(id.0.unsigned_abs())),
             local: false,
             ghost_visible: false,
             age_ticks: 0,

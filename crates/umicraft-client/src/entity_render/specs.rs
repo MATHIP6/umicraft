@@ -96,6 +96,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (vec![0; 64 * 32 * 4], 64, 32),
         },
         TextureSpec {
+            slot: TextureSlot::Chest,
+            jar_path: "assets/minecraft/textures/entity/chest/normal.png",
+            fallback: || (vec![0; 64 * 64 * 4], 64, 64),
+        },
+        TextureSpec {
             slot: TextureSlot::EnderCrystal,
             jar_path: "assets/minecraft/textures/entity/endercrystal/endercrystal.png",
             fallback: || (vec![0; 64 * 32 * 4], 64, 32),

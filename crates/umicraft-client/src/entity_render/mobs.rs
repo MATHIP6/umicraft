@@ -128,7 +128,7 @@ pub(super) fn build_entity_layers_for(
         }
     }
     // A skull on the head is drawn even when its wearer is invisible.
-    layers.extend(skull_layers(ent));
+    layers.extend(skull_layers(ent, skins));
     // Arrows in the body are drawn on an invisible player too.
     layers.extend(arrow_layers(ent));
     layers

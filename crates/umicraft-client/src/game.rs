@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::entity_render::fishing::first_person_tip;
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
@@ -34,6 +35,8 @@ use umicraft_game::digging::{
 use umicraft_game::entity::leash::{leash_entities, LeashFrame};
 use umicraft_game::entity::light::{eye_light, light_entities};
 use umicraft_game::entity::nametag::{mob_tag, player_tag};
+use umicraft_game::entity::painting::light_paintings;
+use umicraft_game::entity::rail::rail_entities;
 use umicraft_game::entity::shadow::shadow_entities;
 use umicraft_game::entity::{
     BossTracker, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
@@ -1133,8 +1136,30 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         ..game.hand.pose()
     };
     let mut entities = game.entities.frame_data();
+    if let Some(vehicle) = game.vehicle {
+        for frame in &mut entities {
+            frame.ridden |= frame.id.0 == vehicle;
+        }
+    }
     if followed.is_none() && game.perspective.shows_player() {
         entities.push(game.body.frame_data());
+    }
+    // The line of the bobber of the local player ties to their rod, which is
+    // not among the frames from the first person.
+    if followed.is_none() && !game.perspective.shows_player() {
+        let body = game.body.frame_data();
+        let tip = first_person_tip(
+            view.position - Vec3::Y * umicraft_game::physics::EYE_HEIGHT as f32,
+            game.yaw.to_degrees(),
+            game.pitch.to_degrees(),
+            game.body.animation.swing_progress_at(1.0),
+            body.flags.is_sneaking(),
+        );
+        for bobber in &mut entities {
+            if bobber.kind == EntityKind::FishHook && bobber.object_data == game.entity_id {
+                bobber.rod_tip = Some(tip);
+            }
+        }
     }
     // Items are lit by the block they are in; before the first chunk the
     // default (full sky) stays.
@@ -1153,7 +1178,9 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     };
     leash_entities(&mut entities, Some((EntityId(game.entity_id), me)));
     let hand_light = game.world.as_ref().map_or(LightLevel::FULL_SKY, |world| {
+        rail_entities(world, &mut entities);
         light_entities(world, &mut entities);
+        light_paintings(world, &mut entities);
         shadow_entities(world, &mut entities, game.world_time);
         eye_light(world, view.position)
     });
