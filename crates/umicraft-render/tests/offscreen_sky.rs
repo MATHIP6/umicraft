@@ -71,8 +71,8 @@ fn the_night_sky_shows_stars_that_the_day_does_not() {
 fn the_nether_is_the_plain_fog_colour_and_the_end_draws_its_cube() {
     let nether = RenderEnvironment::new(-1, 0, 0.0, 8);
     let image = frame(nether, 0.5);
-    // The target is sRGB, so the linear clear colour reads back encoded.
-    let encode = |c: f32| (c.powf(1.0 / 2.2) * 255.0).round() as i32;
+    // The target is not sRGB: the clear colour reads back as stored.
+    let encode = |c: f32| (c * 255.0).round() as i32;
     let fog = SkyState::at(nether).fog.color.map(encode);
     for (x, y) in [(2, 2), (WIDTH / 2, HEIGHT / 2), (WIDTH - 3, HEIGHT - 3)] {
         let got = pixel(&image, x, y).map(i32::from);

@@ -52,9 +52,10 @@ fn pixel(image: &Image, x: u32, y: u32) -> [i32; 3] {
     [0, 1, 2].map(|i| i32::from(image.rgba[at + i]))
 }
 
-/// The linear clear colour as the sRGB target reads it back.
+/// The clear colour as the target reads it back: the target is not sRGB, so
+/// the stored bytes are the colour times 255, as in the reference.
 fn encoded(color: [f32; 3]) -> [i32; 3] {
-    color.map(|c| (c.powf(1.0 / 2.2) * 255.0).round() as i32)
+    color.map(|c| (c * 255.0).round() as i32)
 }
 
 fn close(a: [i32; 3], b: [i32; 3], tolerance: i32) -> bool {

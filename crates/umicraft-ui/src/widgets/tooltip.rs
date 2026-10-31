@@ -55,35 +55,10 @@ fn tooltip_origin(pointer: [f32; 2], size: [f32; 2], viewport: Rect, scale: f32)
     [x, y]
 }
 
-/// The sRGB to linear transfer function, the inverse of what the sRGB render
-/// target applies on write.
-///
-/// The UI pass hands vertex colours to an sRGB target as they are, so a
-/// vanilla colour (written for a plain 8-bit framebuffer) has to be linearised
-/// first or it comes out too light: the tooltip background 0x100010 showed as
-/// a bright purple.
-fn linear(channel: f32) -> f32 {
-    if channel <= 0.04045 {
-        channel / 12.92
-    } else {
-        ((channel + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-/// A vanilla colour (straight sRGB channels and alpha) as the UI pass wants it.
-fn vanilla(color: Color) -> Color {
-    [
-        linear(color[0]),
-        linear(color[1]),
-        linear(color[2]),
-        color[3],
-    ]
-}
-
 /// The text colour as straight RGBA.
 fn rgba(rgb: u32, factor: f32) -> Color {
     let channel = |shift: u32| ((rgb >> shift) & 0xFF) as f32 / 255.0 * factor;
-    vanilla([channel(16), channel(8), channel(0), 1.0])
+    [channel(16), channel(8), channel(0), 1.0]
 }
 
 /// A vanilla text colour (`0xRRGGBB`) as the UI pass wants it.
@@ -142,8 +117,7 @@ fn tooltip_height(rows: usize) -> f32 {
 
 /// Draws a vertical gradient as one strip per GUI pixel row.
 ///
-/// The colours are interpolated as vanilla does, on the sRGB channels, and
-/// each strip is then linearised for the render target.
+/// The colours are interpolated as vanilla does, on the stored channels.
 fn gradient_column(
     draw: &mut DrawList,
     origin: [f32; 2],
@@ -158,7 +132,7 @@ fn gradient_column(
         let color = std::array::from_fn(|i| top[i] + (bottom[i] - top[i]) * t);
         draw.rect(
             Rect::new(origin[0], origin[1] + strip * row as f32, size[0], strip),
-            vanilla(color),
+            color,
         );
     }
 }
@@ -167,11 +141,7 @@ fn gradient_column(
 fn draw_box(ui: &mut Ui, origin: [f32; 2], size: [f32; 2], scale: f32) {
     let pad = PADDING * scale;
     let (x, y, w, h) = (origin[0], origin[1], size[0], size[1]);
-    let (background, border_top, border_bottom) = (
-        vanilla(BACKGROUND),
-        vanilla(BORDER_TOP),
-        vanilla(BORDER_BOTTOM),
-    );
+    let (background, border_top, border_bottom) = (BACKGROUND, BORDER_TOP, BORDER_BOTTOM);
     let draw = ui.draw();
     // Background: the body plus a one-pixel rim on every side.
     draw.rect(
@@ -227,13 +197,13 @@ mod tests {
     use crate::DrawCommand;
 
     #[test]
-    fn vanilla_colours_are_linearised_for_the_srgb_target() {
-        let background = vanilla(BACKGROUND);
-        // 0x10 / 255 in sRGB is about 0.005 linear, not 0.0625.
-        assert!((background[0] - 0.0052).abs() < 0.001);
-        assert_eq!(background[3], 0.94);
+    fn vanilla_colours_reach_the_target_as_stored() {
+        // The target is not sRGB, so the 8-bit values of the reference are the
+        // channels as they are: 0x10 / 255 is 0.0625.
+        assert!((BACKGROUND[0] - 0.0625).abs() < 0.001);
+        assert_eq!(BACKGROUND[3], 0.94);
         assert_eq!(rgba(0xFF_FF_FF, 1.0), [1.0, 1.0, 1.0, 1.0]);
-        assert!(rgba(0x55_55_FF, 1.0)[0] < 0.1);
+        assert!((rgba(0x55_55_FF, 1.0)[0] - 0.333).abs() < 0.001);
     }
 
     #[test]
@@ -257,7 +227,7 @@ mod tests {
             })
             .collect();
         assert!(colors[0][2] > colors[9][2], "blue fades towards the bottom");
-        assert!((colors[0][2] - vanilla(BORDER_TOP)[2]).abs() < 0.1);
+        assert!((colors[0][2] - BORDER_TOP[2]).abs() < 0.1);
     }
 
     #[test]

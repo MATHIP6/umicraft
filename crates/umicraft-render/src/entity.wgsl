@@ -193,18 +193,11 @@ fn vs_additive(in: VertexIn) -> AdditiveOut {
 @fragment
 fn fs_additive(in: AdditiveOut) -> @location(0) vec4<f32> {
     let tex = textureSample(entity_texture, entity_sampler, in.uv);
-    // The reference multiplies and squares the colour as stored (sRGB) and adds
-    // it to the frame in that space; the target here blends in linear space.
-    var rgb = pow(tex.rgb, vec3<f32>(1.0 / 2.2)) * in.tint;
+    // The reference multiplies the colour as stored and adds it to the frame
+    // in the same space; the glint also squares it.
+    var rgb = tex.rgb * in.tint;
     if (in.squared > 0.5) {
-        // The glint is added over mid-tone armour, where adding the value as
-        // stored shows up as the reference does and adding its linear
-        // equivalent would almost vanish.
         rgb = rgb * rgb;
-    } else {
-        // Eyes and swirls are added over dark bodies, where the exact
-        // conversion matches the reference.
-        rgb = pow(rgb, vec3<f32>(2.2));
     }
     // A glow fades into the fog like everything else.
     return vec4<f32>(rgb * (1.0 - fog_at(in.world_position)), 1.0);

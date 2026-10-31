@@ -296,9 +296,15 @@ impl Renderer {
             .map_err(|error| RenderError::Surface(format!("{error:?}")))?;
         let adapter = request_adapter(&instance, Some(&surface))?;
         let (device, queue) = request_device(&adapter)?;
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, width, height)
             .ok_or(RenderError::NoSurfaceConfig)?;
+        // The 1.8 client does all its colour arithmetic on the stored 8-bit
+        // values (texel x biome tint x light, fog mixes, blending) and never
+        // asks for an sRGB framebuffer. An sRGB surface would encode those
+        // products a second time and wash every colour out, so the surface
+        // keeps the plain format and the textures are sampled as stored.
+        config.format = config.format.remove_srgb_suffix();
         let format = config.format;
         surface.configure(&device, &config);
         Self::create(
@@ -316,7 +322,7 @@ impl Renderer {
 
     /// Creates an offscreen renderer of `width`×`height`.
     ///
-    /// The colour target is `Rgba8UnormSrgb`, matching the PNG written by the
+    /// The colour target is `Rgba8Unorm`, matching the PNG written by the
     /// client. [`Renderer::read_pixels`] is only available in this mode.
     pub fn new_offscreen(width: u32, height: u32) -> Result<Self, RenderError> {
         let width = width.max(1);
@@ -333,7 +339,7 @@ impl Renderer {
             queue,
             width,
             height,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Unorm,
         )
     }
 
@@ -366,7 +372,7 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -1059,7 +1065,7 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -1126,7 +1132,7 @@ impl Renderer {
     ///
     /// `pixels` is layer-major tightly packed RGBA8, exactly
     /// `width × height × 4 × layers` bytes long (the payload of
-    /// `umicraft_assets::BlockAtlas`). One `Rgba8UnormSrgb` 2D array texture is
+    /// `umicraft_assets::BlockAtlas`). One `Rgba8Unorm` 2D array texture is
     /// created at the declared layer count and written with a single upload;
     /// the shared nearest-neighbour sampler keeps the texels crisp.
     ///
@@ -1168,7 +1174,7 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -2061,7 +2067,7 @@ fn create_offscreen(device: &wgpu::Device, width: u32, height: u32) -> Offscreen
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });

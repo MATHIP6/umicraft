@@ -44,9 +44,9 @@ pub(super) fn add_flash(
     let Some(strength) = strength(ent.age) else {
         return;
     };
-    // The light word of an additive vertex is the tint, which the shader raises
-    // to 2.2: this adds `strength` in linear space.
-    let channel = (strength.powf(1.0 / 2.2) * 255.0).round() as u32;
+    // The light word of an additive vertex is the tint: this adds `strength`
+    // to the frame as stored, like the reference's white at that alpha.
+    let channel = (strength * 255.0).round() as u32;
     let light = channel | (channel << 8) | (channel << 16);
     let cube = tnt_matrix(ent)
         * Mat4::from_translation(Vec3::splat(0.5))
