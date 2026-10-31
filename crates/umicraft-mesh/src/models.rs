@@ -38,6 +38,7 @@ use umicraft_world::{BlockState, ChunkPos};
 
 use crate::fluid::{self, FluidLayers};
 
+use crate::actual_state;
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, occludes};
 use crate::lighting::quad_light;
 use crate::{tint, BlockSource, Mesh, Vertex};
@@ -107,10 +108,9 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     fluid::emit_fluid(&mut mesh, source, position, liquid, layers, tint);
                     continue;
                 }
-                let variant = context
-                    .models
-                    .model(state)
-                    .and_then(|model| select_variant(model, position));
+                let model = actual_state::model_for(&context.models, source, position, state)
+                    .or_else(|| context.models.model(state));
+                let variant = model.and_then(|model| select_variant(model, position));
                 if let Some(variant) = variant {
                     emit_model_quads(&mut mesh, source, context, state, variant, position);
                 } else if state.is_renderable() {

@@ -1005,3 +1005,40 @@ fn blockstate_parser_is_public_for_tooling() {
     assert_eq!(variants[0].model, "oak_stairs");
     assert_eq!(variants[0].weight, 1);
 }
+
+#[test]
+fn every_variant_of_a_referenced_document_is_reachable_by_key() {
+    static STATES: &[StateDef] = &[StateDef {
+        mask: 0,
+        value: 0,
+        blockstate: "fence",
+        variant: "east=false,north=false",
+    }];
+    static DEFS: &[BlockDefinition] = &[BlockDefinition {
+        id: 85,
+        name: "fence",
+        states: STATES,
+    }];
+
+    let source = Memory::new()
+        .model("post", cube("blocks/planks_oak"))
+        .model("arm", slab(0, 8, "blocks/planks_oak"))
+        .blockstate(
+            "fence",
+            json!({ "variants": {
+                "east=false,north=false": { "model": "post" },
+                "east=true,north=false": { "model": "arm" },
+            } }),
+        );
+
+    let set = build(source, DEFS).expect("synthetic fence");
+    // The wire-state table only knows the variant the metadata maps to...
+    assert_eq!(quads(&set, 85, 0).len(), 6);
+    // ...but the other variant is reachable by key, in any property order.
+    let arm = set
+        .model_by_key("fence", "north=false,east=true")
+        .expect("keyed variant");
+    assert_eq!(arm.variants[0].model.quads.len(), 6);
+    assert!(set.model_by_key("fence", "east=true,north=true").is_none());
+    assert!(set.model_by_key("missing", "east=true,north=false").is_none());
+}

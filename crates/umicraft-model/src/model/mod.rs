@@ -83,6 +83,8 @@ pub struct BlockModel {
 pub struct BlockModelSet {
     /// Baked models keyed by wire state.
     models: HashMap<BlockState, Arc<BlockModel>>,
+    /// Baked models keyed by blockstate document and canonical variant key.
+    keyed: HashMap<(String, String), Arc<BlockModel>>,
     texture_keys: BTreeSet<String>,
     blockstate_count: usize,
     source_model_count: usize,
@@ -115,9 +117,7 @@ impl BlockModelSet {
         builder.loader.validate_parent_chains()?;
 
         let mut models: HashMap<BlockState, Arc<BlockModel>> = HashMap::new();
-        let mut block_models: HashMap<(String, String), Arc<BlockModel>> = HashMap::new();
-        let mut resolved_models: HashMap<ResolvedKey, Arc<ResolvedModel>> = HashMap::new();
-        let mut texture_keys = BTreeSet::new();
+        let mut cache = BakeCache::default();
         let mut fallback_count = 0;
 
         for definition in definitions {
@@ -157,40 +157,29 @@ impl BlockModelSet {
                     }
                 };
 
-                let cache_key = (blockstate_name.clone(), variant_key);
-                let block_model = if let Some(cached) = block_models.get(&cache_key) {
-                    Arc::clone(cached)
-                } else {
-                    let mut baked_variants = Vec::with_capacity(variants.len());
-                    for variant in &variants {
-                        let resolved = resolve_variant(
-                            &mut builder,
-                            variant,
-                            &mut resolved_models,
-                            &mut texture_keys,
-                        )?;
-                        baked_variants.push(ModelVariant {
-                            model: resolved,
-                            weight: variant.weight,
-                        });
-                    }
-                    let block_model = Arc::new(BlockModel {
-                        variants: baked_variants,
-                    });
-                    block_models.insert(cache_key, Arc::clone(&block_model));
-                    block_model
-                };
+                let block_model = bake_block_model(
+                    &mut builder,
+                    &mut cache,
+                    (blockstate_name, variant_key),
+                    &variants,
+                )?;
                 models.insert(BlockState::new(definition.id, metadata), block_model);
             }
         }
 
+        // Neighbour-dependent states (P7) pick a variant key at mesh time, so
+        // every variant of every referenced document is baked, not only the
+        // ones a metadata value maps to.
+        bake_all_variants(&mut builder, &mut cache, definitions)?;
+
         Ok(Self {
             models,
-            texture_keys,
+            keyed: cache.block_models,
+            texture_keys: cache.texture_keys,
             blockstate_count: builder.blockstates.len(),
             source_model_count: builder.loader.raw_models.len(),
             fallback_count,
-            model_count: resolved_models.len(),
+            model_count: cache.resolved_models.len(),
         })
     }
 
@@ -198,6 +187,21 @@ impl BlockModelSet {
     #[must_use]
     pub fn model(&self, state: BlockState) -> Option<&BlockModel> {
         self.models.get(&state).map(Arc::as_ref)
+    }
+
+    /// Baked variants for a blockstate document and a variant key such as
+    /// `east=true,north=false,south=false,west=true`.
+    ///
+    /// The key is canonicalized first, so property order does not matter.
+    /// This is how neighbour-dependent states (`getActualState`) reach their
+    /// model: the mesher computes the key from the surroundings, the wire
+    /// state alone cannot carry it.
+    #[must_use]
+    pub fn model_by_key(&self, blockstate: &str, variant_key: &str) -> Option<&BlockModel> {
+        let key = canonicalize_variant_key(variant_key).ok()?;
+        self.keyed
+            .get(&(blockstate.to_string(), key))
+            .map(Arc::as_ref)
     }
 
     /// Number of distinct baked block states.
@@ -240,6 +244,71 @@ impl BlockModelSet {
     pub fn fallback_count(&self) -> usize {
         self.fallback_count
     }
+}
+
+/// Models baked so far, shared between blockstates.
+#[derive(Default)]
+struct BakeCache {
+    block_models: HashMap<(String, String), Arc<BlockModel>>,
+    resolved_models: HashMap<ResolvedKey, Arc<ResolvedModel>>,
+    texture_keys: BTreeSet<String>,
+}
+
+/// Bakes the variants of one `(document, key)` pair, or returns the cached
+/// model of an earlier call.
+fn bake_block_model(
+    builder: &mut Builder<'_>,
+    cache: &mut BakeCache,
+    cache_key: (String, String),
+    variants: &[Variant],
+) -> ModelResult<Arc<BlockModel>> {
+    if let Some(cached) = cache.block_models.get(&cache_key) {
+        return Ok(Arc::clone(cached));
+    }
+    let mut baked_variants = Vec::with_capacity(variants.len());
+    for variant in variants {
+        let resolved = resolve_variant(
+            builder,
+            variant,
+            &mut cache.resolved_models,
+            &mut cache.texture_keys,
+        )?;
+        baked_variants.push(ModelVariant {
+            model: resolved,
+            weight: variant.weight,
+        });
+    }
+    let block_model = Arc::new(BlockModel {
+        variants: baked_variants,
+    });
+    cache
+        .block_models
+        .insert(cache_key, Arc::clone(&block_model));
+    Ok(block_model)
+}
+
+/// Bakes every variant of every document a definition references.
+fn bake_all_variants(
+    builder: &mut Builder<'_>,
+    cache: &mut BakeCache,
+    definitions: &[BlockDefinition],
+) -> ModelResult<()> {
+    let names: BTreeSet<String> = definitions
+        .iter()
+        .flat_map(|definition| definition.states)
+        .map(|state| normalize_blockstate_name(state.blockstate))
+        .collect();
+    for name in names {
+        let variants: Vec<(String, Vec<Variant>)> = builder
+            .blockstates
+            .get(&name)
+            .map(|document| document.variants.clone().into_iter().collect())
+            .unwrap_or_default();
+        for (key, list) in variants {
+            bake_block_model(builder, cache, (name.clone(), key), &list)?;
+        }
+    }
+    Ok(())
 }
 
 /// Cache key for a model after blockstate rotation.
