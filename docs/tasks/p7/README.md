@@ -1,7 +1,7 @@
 # P7 — World rendering: plan and architecture
 
-Status: **P7-0 to P7d are done** (unit tests; not yet checked in game). P7e onwards
-remain. The decision record is `docs/decisions/0030-p7-actual-state.md`;
+Status: **P7-0 to P7g are done** (unit tests and ignored GPU tests; not yet checked in
+game). P7h remains. The decision record is `docs/decisions/0030-p7-actual-state.md`;
 MCP sources are in `docs/sources.md` (rows dated 2026-10-31). The roadmap entry
 is `ROADMAP.md` §P7.
 
@@ -39,8 +39,8 @@ documents are baked).
 | P7d | skulls, banners, beacon, end portal, enchanting book, spawner, flower pots | done in code, not checked in game |
 | P7d-pistons | moving pistons: structure rules, animation, push of the player, drawing | done in code, not checked in game |
 | P7e | vanilla sky: sun, moon, stars, Nether and End (geometry pass, `umicraft-render/src/sky/`) and clouds (`umicraft-render/src/clouds/`) | done in code, not checked in game |
-| P7f | weather | not started |
-| P7g | world border, fog parity | not started |
+| P7f | weather: rain, snow, darkening, lightning flash (`umicraft-render/src/weather/`) | done in code, not checked in game |
+| P7g | world border (`umicraft-render/src/border/`; done in code, checked offscreen, not in game), fog parity (`umicraft-render/src/fog.rs`, `fog.wgsl`; done in code, checked offscreen, not in game) | done |
 | P7h | animated texture check, frame-time benchmark, parity rows | not started |
 
 ## Sky (P7e)
@@ -66,6 +66,36 @@ frame writes one uniform (shift, texture scroll, tint, fog). `CloudMode`
 (`clouds`, `fancy_graphics`); the picture from `SkyTextures::clouds`. Drift is
 driven by `Renderer::set_cloud_ticks` (wall clock x 20 in the client, not the
 reference `cloudTickCounter`). Overworld only. No options UI yet.
+
+## Weather (P7f)
+
+The 1.8 client has no weather ramp: `World.updateWeather` only runs on the
+server, and `WorldClient.updateWeather` is empty. The strengths are the values of
+`Change Game State` 7 and 8 (reasons 1 and 2 reset the rain to 0 / 1);
+`thunder = thunder * rain` (`umicraft_game::server::weather`). A lightning
+flash (`lastLightningBolt`) is set to 2 on each tick a bolt entity lives and
+decremented before it (`Weather::tick`).
+
+The game thread publishes in `Frame::weather` (`umicraft-client/src/weather_view.rs`):
+the strengths, the flash and, only while it rains, a 25 x 25
+`PrecipitationField` (precipitation height from
+`ChunkColumn::precipitation_height`, biome temperature and wet flag from
+`umicraft_mesh::climate`, light at the precipitation height). The render thread
+builds at most 441 quads from it each frame (`weather/geometry.rs`, same
+formulas and per-column `Random` seeds as `renderRainSnow`), drawn before the
+translucent terrain with the camera bind group of the terrain
+(depth test, no depth write, alpha blend, fog). `rain.png` and `snow.png` come
+from the jar through `SkyTextures`, with generated fallbacks. The terrain
+darkening is already part of `SkyState::sun_brightness`; the sky colours, stars
+and fog take the strengths from `RenderEnvironment`.
+
+Approximations: no temperature noise term in `getFloatTemperature` (at most
+0.007); the rain light is read at the precipitation height even when the camera
+is above it; the camera stands for the render view entity; the lightning flash
+brightens the sky colour only, not the terrain lightmap
+(`EntityRenderer.updateLightmap`); the bolt is considered alive for its whole
+client lifetime (`EntityLightningBolt.lightningState` is not modelled). Splash
+particles belong to P8, sounds to P11.
 
 ## Known gaps
 
@@ -107,3 +137,16 @@ the model (table, spawner, beacon base, pot). Their NBT comes from
 `BlockEntities::entity_table()` (an `Arc` snapshot like the signs). A renderer
 can write to the `solid` or `additive` batches of `BlockEntityMeshes`; the
 pot plants go through the dynamic terrain mesh like the moving blocks.
+
+## Fog (P7g)
+
+`umicraft-render/src/fog.rs` ports `EntityRenderer.updateFogColor` and
+`setupFog`: `FogParams { color, world, sky }` with a linear or exponential
+`FogMode`. The game thread publishes a `FogContext` (medium at the eye,
+Blindness, Night Vision, Water Breathing, eye height, eye light) in `Frame`
+(`umicraft-client/src/fog_context.rs`); the render thread eases the eye light
+per tick and puts the context in `RenderEnvironment::fog`. `SkyState::fog` holds
+the result (`SkyState::at_looking` adds the sunrise tint toward the sun), and
+every pass reads it: the camera uniform (terrain, entities), the cloud uniform
+and the sky slots. `fog.wgsl` (`fog_amount`) is prepended to those shaders.
+Terrain fog is now linear as in the reference instead of a smoothstep.

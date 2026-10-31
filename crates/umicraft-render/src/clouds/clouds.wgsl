@@ -19,7 +19,7 @@ struct Clouds {
     tint: vec4<f32>,
     // rgb fog colour.
     fog_color: vec4<f32>,
-    // x fog start, y fog end, in blocks.
+    // x fog start, y fog end in blocks, z exponential density (`fog_amount`).
     fog: vec4<f32>,
 };
 
@@ -66,8 +66,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
     let lit = texel.rgb * clouds.tint.rgb * in.shade;
-    // The same smoothstep fog as the terrain.
-    let span = max(clouds.fog.y - clouds.fog.x, 0.001);
-    let amount = smoothstep(clouds.fog.x, clouds.fog.x + span, in.eye_distance);
+    // The same fog as the terrain.
+    let amount = fog_amount(in.eye_distance, clouds.fog.x, clouds.fog.y, clouds.fog.z);
     return vec4<f32>(mix(lit, clouds.fog_color.rgb, amount), texel.a * clouds.tint.a);
 }

@@ -62,6 +62,7 @@
 
 mod actual_state;
 mod block_entity;
+pub mod climate;
 mod face;
 mod flower_pot;
 pub mod fluid;

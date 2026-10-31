@@ -57,7 +57,7 @@ use crate::network::NetworkConfig;
 use crate::options::{self, Action, Options};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
 use crate::screen::Screen;
-use crate::sky_textures::load_sky_textures;
+use crate::sky_textures::{load_border_texture, load_sky_textures};
 use crate::terrain_textures::TerrainTextures;
 use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
@@ -1227,6 +1227,13 @@ impl App {
         renderer.set_cloud_mode(self.options.video.cloud_mode());
         // 20 client ticks per second drive the cloud drift.
         renderer.set_cloud_ticks((now - self.started).as_secs_f64() * 20.0);
+        if let Some(world) = self.world.as_ref() {
+            renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
+        }
+        renderer.set_world_border(
+            self.world.as_ref().and_then(WorldView::border),
+            (now - self.started).as_secs_f64(),
+        );
         renderer.set_glint_time((now - self.started).as_secs_f32());
         self.texture_animator
             .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
@@ -1371,6 +1378,9 @@ fn upload_gui_atlas(renderer: &mut Renderer, gui_atlas: Option<&umicraft_assets:
 fn upload_sky_textures(renderer: &mut Renderer) {
     let jar = crate::official::find_verified_jar().ok();
     renderer.set_sky_textures(&load_sky_textures(jar.as_ref()));
+    if let Some(forcefield) = load_border_texture(jar.as_ref()) {
+        renderer.set_border_texture(&forcefield);
+    }
 }
 
 /// Uploads the enchantment glint texture to the renderer, if available.

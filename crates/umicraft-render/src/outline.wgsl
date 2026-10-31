@@ -12,7 +12,7 @@ struct Camera {
     fog_start: f32,
     fog_end: f32,
     gamma: f32,
-    _pad0: f32,
+    fog_density: f32,
     _pad1: f32,
 };
 

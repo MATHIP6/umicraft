@@ -13,6 +13,7 @@
 //! vertices and font atlas.
 
 mod block_atlas;
+mod border;
 mod camera;
 mod chat_hud;
 mod clouds;
@@ -20,6 +21,7 @@ mod dynamic_blocks;
 pub mod entity_pass;
 mod environment;
 mod error;
+mod fog;
 mod font;
 mod hud;
 pub mod hud_gui;
@@ -31,13 +33,16 @@ mod sky;
 mod social_hud;
 mod texture;
 mod ui_pass;
+mod weather;
 
 pub use block_atlas::BlockAtlasError;
+pub use border::{BorderStatus, BorderView};
 pub use camera::Camera;
 pub use clouds::CloudMode;
 pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;
 pub use error::RenderError;
+pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
 pub use hud::{
     draw as draw_hud, draw_debug_only, selected_index, status_fills, BossView, ChatInputView,
     ChatLineView, ChatRunView, ChatStyle, Fill, HudLayout, HudState, Rect, SidebarView, StatusRow,
@@ -52,3 +57,4 @@ pub use sky::{SkyImage, SkyState, SkyTextures};
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};
 pub use ui_pass::{fallback_atlas, FontAtlasError, UiBatch, UiBatchKind, UiPass};
 pub use umicraft_ui::SpriteSheet;
+pub use weather::{PrecipitationCell, PrecipitationField, FIELD_RADIUS};

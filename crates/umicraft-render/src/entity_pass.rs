@@ -4,6 +4,9 @@
 
 use bytemuck::{Pod, Zeroable};
 
+/// The entity shader with the shared fog falloff in front.
+const ENTITY_WGSL: &str = concat!(include_str!("fog.wgsl"), include_str!("entity.wgsl"));
+
 /// Entity vertex format consumed by `entity.wgsl`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -182,7 +185,7 @@ impl EntityRenderer {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("entity shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("entity.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(ENTITY_WGSL.into()),
         });
 
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -517,4 +520,21 @@ fn build_pipeline(
         multiview_mask: None,
         cache: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ENTITY_WGSL;
+
+    /// The shader is only compiled on a GPU device; this validates it without one.
+    #[test]
+    fn the_entity_shader_is_valid_wgsl() {
+        let module = naga::front::wgsl::parse_str(ENTITY_WGSL).expect("the shader parses");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("the shader validates");
+    }
 }

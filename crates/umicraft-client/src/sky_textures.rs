@@ -2,7 +2,7 @@
 
 //! The sky pictures of the user's client jar (P7e).
 //!
-//! `sun.png`, `moon_phases.png`, `end_sky.png` and `clouds.png` are read at runtime from the
+//! `sun.png`, `moon_phases.png`, `end_sky.png`, `clouds.png`, `rain.png` and `snow.png` are read at runtime from the
 //! verified jar and never stored in the repository (spec §3). A picture the jar
 //! lacks, or that does not decode, stays `None` and the renderer draws its
 //! original stand-in.
@@ -21,23 +21,43 @@ const END_SKY: &str = "assets/minecraft/textures/environment/end_sky.png";
 /// Jar path of the clouds.
 const CLOUDS: &str = "assets/minecraft/textures/environment/clouds.png";
 
+/// Jar path of the world border's force field.
+const FORCEFIELD: &str = "assets/minecraft/textures/misc/forcefield.png";
+
+/// Reads and decodes one picture of `jar`; `None` when absent or malformed.
+fn read_image(jar: Option<&ClientJar>, path: &str) -> Option<SkyImage> {
+    let bytes = jar?.read_entry(path).ok()?;
+    let (rgba, width, height) = decode_png_bytes(&bytes).ok()?;
+    Some(SkyImage {
+        width,
+        height,
+        rgba,
+    })
+}
+
+/// Reads the world border picture of `jar`; `None` keeps the renderer's
+/// original fallback.
+#[must_use]
+pub fn load_border_texture(jar: Option<&ClientJar>) -> Option<SkyImage> {
+    read_image(jar, FORCEFIELD)
+}
+
+/// Jar path of the rain streaks.
+const RAIN: &str = "assets/minecraft/textures/environment/rain.png";
+/// Jar path of the snowflakes.
+const SNOW: &str = "assets/minecraft/textures/environment/snow.png";
+
 /// Reads the sky pictures of `jar`; every missing or undecodable one is `None`.
 #[must_use]
 pub fn load_sky_textures(jar: Option<&ClientJar>) -> SkyTextures {
-    let read = |path: &str| -> Option<SkyImage> {
-        let bytes = jar?.read_entry(path).ok()?;
-        let (rgba, width, height) = decode_png_bytes(&bytes).ok()?;
-        Some(SkyImage {
-            width,
-            height,
-            rgba,
-        })
-    };
+    let read = |path: &str| read_image(jar, path);
     SkyTextures {
         sun: read(SUN),
         moon_phases: read(MOON_PHASES),
         end_sky: read(END_SKY),
         clouds: read(CLOUDS),
+        rain: read(RAIN),
+        snow: read(SNOW),
     }
 }
 
@@ -52,5 +72,8 @@ mod tests {
         assert!(textures.moon_phases.is_none());
         assert!(textures.end_sky.is_none());
         assert!(textures.clouds.is_none());
+        assert!(textures.rain.is_none());
+        assert!(textures.snow.is_none());
+        assert!(load_border_texture(None).is_none());
     }
 }

@@ -76,8 +76,8 @@ use umicraft_protocol::packets::play::serverbound::UseEntityAction;
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{
-    BossView, ChatLineView, ChatRunView, HudState, OutlineBox, SidebarView, TabEntryView,
-    TabListView, TitleView,
+    BorderView, BossView, ChatLineView, ChatRunView, FogContext, HudState, OutlineBox, SidebarView,
+    TabEntryView, TabListView, TitleView,
 };
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, LightLevel, World};
 
@@ -85,6 +85,7 @@ use crate::cracks::Crack;
 use crate::creative_input::CreativeEvent;
 use crate::creative_view::CreativeView;
 use crate::error::ClientError;
+use crate::fog_context::fog_context;
 use crate::input::InputUpdate;
 use crate::inventory_input::InventoryAction;
 use crate::network::{self, ClientCommand, NetworkConfig};
@@ -252,6 +253,12 @@ pub struct Frame {
     pub signs: Arc<SignTable>,
     /// Base temperature of the biome at the player, which tints the sky.
     pub sky_temperature: f32,
+    /// The medium at the eye and the effects that shape the fog (P7g).
+    pub fog: FogContext,
+    /// The world border of the dimension (P7g).
+    pub border: BorderView,
+    /// Rain, thunder, the lightning flash and the columns rain falls on (P7f).
+    pub weather: crate::weather_view::WeatherView,
 }
 
 /// The statistics the debug overlay shows.
@@ -286,7 +293,7 @@ pub struct GameStatus {
 #[derive(Debug)]
 pub enum RenderEvent {
     /// A simulation frame.
-    Frame(Frame),
+    Frame(Box<Frame>),
     /// The HUD state changed.
     Hud(Box<HudState>),
     /// The inventory/container state changed.
@@ -1210,7 +1217,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         shadow_entities(world, &mut entities, game.world_time);
         eye_light(world, view.position)
     });
-    let _ = frames.try_send(RenderEvent::Frame(Frame {
+    let _ = frames.try_send(RenderEvent::Frame(Box::new(Frame {
         state: view,
         tick_time,
         world_time: game.world_time,
@@ -1226,7 +1233,21 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         block_entity_data: game.server.block_entities().entity_table(),
         signs: game.server.block_entities().sign_table(),
         sky_temperature: sky_temperature(game, view.position),
-    }));
+        fog: fog_context(
+            game.world.as_ref(),
+            game.server.effects(),
+            view.position,
+            game.dimension,
+            game.world_time,
+        ),
+        border: crate::border_view::border_view(game.server.border()),
+        weather: crate::weather_view::WeatherView::new(
+            game.server.weather(),
+            game.world.as_ref(),
+            view.position.x.floor() as i32,
+            view.position.z.floor() as i32,
+        ),
+    })));
 }
 
 /// The base temperature of the biome at `position`, which the sky takes its
@@ -2595,6 +2616,8 @@ fn tick(
         game.entities.tick_objects(world);
     }
     game.server.tick();
+    game.server
+        .tick_lightning(game.entities.lightning_flashing());
     tick_pistons(game);
     // A player inside a block is pushed out sideways by the simulation
     // itself, like the vanilla client (`umicraft_game::physics`); it is

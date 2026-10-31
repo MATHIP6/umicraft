@@ -19,7 +19,7 @@
 //! 0)` times the distance, so it rises in the east (`+X`).
 
 use super::cloud_color::cloud_color;
-use crate::RenderEnvironment;
+use crate::{FogParams, RenderEnvironment};
 
 /// Length of one day/night cycle in ticks (`WorldProvider`).
 const DAY_TICKS: i64 = 24_000;
@@ -58,8 +58,9 @@ pub struct SkyState {
     pub celestial_angle: f32,
     /// Linear sky colour overhead (`World.getSkyColor`), rain-darkened.
     pub sky_color: [f32; 3],
-    /// Fog colour, which is also the clear colour (`updateFogColor`).
-    pub fog_color: [f32; 3],
+    /// The fog of the frame: its colour is also the clear colour
+    /// (`updateFogColor`), its falloffs are `setupFog`'s (P7g).
+    pub fog: FogParams,
     /// Linear cloud tint (`World.getCloudColour`).
     pub cloud_color: [f32; 3],
     /// Sun-light factor in `0.2..=1.0` applied to sky light in the terrain
@@ -80,11 +81,18 @@ pub struct SkyState {
 impl SkyState {
     /// Computes the sky state for `environment`.
     ///
-    /// Not modelled here (they need the camera or the block at the eye): the
-    /// sunrise tint of the fog toward the sun, the void darkening below
-    /// `y = 32` and the water / lava fog colours (P7g).
+    /// The fog takes no sunrise tint because there is no view direction;
+    /// [`SkyState::at_looking`] adds it.
     #[must_use]
     pub fn at(environment: RenderEnvironment) -> Self {
+        Self::at_looking(environment, [0.0; 3])
+    }
+
+    /// Computes the sky state for `environment` seen along the unit vector
+    /// `look`, which tints the fog toward the sun at sunrise and sunset
+    /// (`EntityRenderer.updateFogColor`).
+    #[must_use]
+    pub fn at_looking(environment: RenderEnvironment, look: [f32; 3]) -> Self {
         let kind = SkyKind::of(environment.dimension);
         let celestial_angle = match kind {
             SkyKind::Overworld => celestial_angle(environment.world_time, environment.partial_tick),
@@ -92,10 +100,24 @@ impl SkyState {
             SkyKind::End => 0.0,
         };
         let sky_color = sky_color(celestial_angle, &environment);
+        let sunrise = match kind {
+            SkyKind::Overworld => sunrise_colors(celestial_angle),
+            SkyKind::Nether | SkyKind::End => None,
+        };
+        let fog_color = final_fog_color(
+            FogInput {
+                kind,
+                angle: celestial_angle,
+                sky: sky_color,
+                sunrise,
+                look,
+            },
+            &environment,
+        );
         Self {
             celestial_angle,
             sky_color,
-            fog_color: final_fog_color(kind, celestial_angle, sky_color, &environment),
+            fog: FogParams::new(fog_color, &environment),
             cloud_color: cloud_color(
                 cos_cycle(celestial_angle),
                 environment.rain_strength.clamp(0.0, 1.0),
@@ -108,10 +130,7 @@ impl SkyState {
             star_brightness: star_brightness(celestial_angle),
             rain_dim: 1.0 - environment.rain_strength.clamp(0.0, 1.0),
             moon_phase: moon_phase(environment.world_time),
-            sunrise: match kind {
-                SkyKind::Overworld => sunrise_colors(celestial_angle),
-                SkyKind::Nether | SkyKind::End => None,
-            },
+            sunrise,
         }
     }
 }
@@ -241,16 +260,42 @@ fn provider_fog_color(kind: SkyKind, angle: f32) -> [f32; 3] {
     }
 }
 
-/// `EntityRenderer.updateFogColor` without the camera-dependent parts: the
-/// provider fog drawn toward the sky colour by the view distance, then dimmed
-/// by rain and thunder.
-fn final_fog_color(
+/// The sky-side inputs of the fog colour.
+struct FogInput {
     kind: SkyKind,
     angle: f32,
     sky: [f32; 3],
-    environment: &RenderEnvironment,
-) -> [f32; 3] {
-    let fog = provider_fog_color(kind, angle);
+    sunrise: Option<[f32; 4]>,
+    look: [f32; 3],
+}
+
+/// The sunrise glow pulled into the fog when looking toward the sun
+/// (`updateFogColor`, view distance 4 and up).
+fn sunrise_tint(fog: [f32; 3], input: &FogInput, view_distance: u8) -> [f32; 3] {
+    let Some(glow) = input.sunrise.filter(|_| view_distance >= 4) else {
+        return fog;
+    };
+    // The horizon the sun is over: -X while it climbs toward the afternoon.
+    let toward = if (input.angle * std::f32::consts::TAU).sin() > 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let amount = (input.look[0] * toward).max(0.0) * glow[3];
+    [0, 1, 2].map(|i| fog[i] * (1.0 - amount) + glow[i] * amount)
+}
+
+/// `EntityRenderer.updateFogColor` up to the weather dimming: the provider
+/// fog with the sunrise tint, drawn toward the sky colour by the view
+/// distance, then dimmed by rain and thunder. The medium, light, void and
+/// effects follow in [`FogParams`].
+fn final_fog_color(input: FogInput, environment: &RenderEnvironment) -> [f32; 3] {
+    let sky = input.sky;
+    let fog = sunrise_tint(
+        provider_fog_color(input.kind, input.angle),
+        &input,
+        environment.view_distance,
+    );
     // Far views see more of the sky colour at the horizon.
     let view = 0.25 + 0.75 * f32::from(environment.view_distance) / 32.0;
     let sky_mix = 1.0 - view.powf(0.25);
@@ -267,6 +312,14 @@ fn final_fog_color(
         color = color.map(|channel| channel * (1.0 - thunder * 0.5));
     }
     color
+}
+
+/// `World.calculateSkylightSubtracted` without weather: how many levels the
+/// time of day takes off the stored sky light.
+pub(crate) fn skylight_subtracted(world_time: i64) -> u8 {
+    let darkness = 1.0 - (cos_cycle(celestial_angle(world_time, 0.0)) * 2.0 + 0.5).clamp(0.0, 1.0);
+    // `(int)(darkness * 11)`; `darkness` is in 0..=1.
+    (darkness * 11.0) as u8
 }
 
 /// `WorldProvider.calcSunriseSunsetColors`: the glow `[r, g, b, alpha]` while
@@ -424,19 +477,52 @@ mod tests {
         // Nether sky is black (cosine clamp), so the fog is only the base.
         assert_eq!(nether.sky_color, [0.0; 3]);
         let mixed = 1.0 - (0.25f32 + 0.75 * 8.0 / 32.0).powf(0.25);
-        assert!(near(nether.fog_color[0], 0.2 * (1.0 - mixed)));
-        assert!(end.fog_color[0] > 0.0 && end.fog_color[0] < 0.3);
+        assert!(near(nether.fog.color[0], 0.2 * (1.0 - mixed)));
+        assert!(end.fog.color[0] > 0.0 && end.fog.color[0] < 0.3);
     }
 
     #[test]
     fn the_fog_is_dimmed_by_rain_and_thunder() {
-        let clear = state(6_000).fog_color;
+        let clear = state(6_000).fog.color;
         let rain = SkyState::at(RenderEnvironment {
             rain_strength: 1.0,
             ..RenderEnvironment::DEFAULT
         });
-        assert!(rain.fog_color[0] < clear[0] * 0.55 + 0.1);
-        assert!(rain.fog_color[2] < clear[2]);
+        assert!(rain.fog.color[0] < clear[0] * 0.55 + 0.1);
+        assert!(rain.fog.color[2] < clear[2]);
+    }
+
+    #[test]
+    fn the_fog_takes_the_sunrise_glow_only_toward_the_sun() {
+        let environment = RenderEnvironment::new(0, 23_000, 0.0, 8);
+        let plain = SkyState::at(environment).fog.color;
+        // At dawn the sun rises in the east (+X).
+        let toward = SkyState::at_looking(environment, [1.0, 0.0, 0.0]).fog.color;
+        let away = SkyState::at_looking(environment, [-1.0, 0.0, 0.0])
+            .fog
+            .color;
+        assert_eq!(away, plain);
+        assert!(toward[0] > plain[0], "the glow is orange");
+        assert!(toward[2] < plain[2]);
+        // Below four chunks the reference skips the tint.
+        let near_view = RenderEnvironment::new(0, 23_000, 0.0, 3);
+        assert_eq!(
+            SkyState::at_looking(near_view, [1.0, 0.0, 0.0]).fog.color,
+            SkyState::at(near_view).fog.color
+        );
+        // No glow at noon.
+        let noon = RenderEnvironment::new(0, 6_000, 0.0, 8);
+        assert_eq!(
+            SkyState::at_looking(noon, [1.0, 0.0, 0.0]).fog.color,
+            SkyState::at(noon).fog.color
+        );
+    }
+
+    #[test]
+    fn the_time_of_day_takes_up_to_eleven_levels_off_the_sky_light() {
+        assert_eq!(skylight_subtracted(6_000), 0);
+        assert_eq!(skylight_subtracted(18_000), 11);
+        assert!((1..11).contains(&skylight_subtracted(14_500)));
     }
 
     #[test]

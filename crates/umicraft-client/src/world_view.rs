@@ -24,17 +24,22 @@ use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::RenderState;
 use umicraft_mesh::{BlockEntityRef, ChunkSnapshot, Mesh, Vertex};
-use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer};
+use umicraft_render::{
+    BorderView, Camera, FogContext, HudState, OutlineBox, PrecipitationField, RenderEnvironment,
+    Renderer,
+};
 use umicraft_world::{ChunkPos, LightLevel};
 
 use crate::block_entity_render::push_pot_plants;
 use crate::cracks::{crack_mesh, Crack, STAGES};
 use crate::creative_view::CreativeView;
 use crate::error::ClientError;
+use crate::fog_context::FogLight;
 use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, TICK};
 use crate::mesher::{MeshPool, MeshResult};
 use crate::moving_blocks_draw::mesh_moving_blocks;
 use crate::terrain_textures::{InstalledTerrain, TerrainMesher};
+use crate::weather_view::WeatherView;
 
 /// Where finished chunk meshes go: the renderer, or a test double.
 pub trait MeshTarget {
@@ -191,6 +196,19 @@ impl WorldView {
         self.view.environment(now, view_distance)
     }
 
+    /// The columns rain and snow fall on in the newest frame (empty while it
+    /// does not rain), for `Renderer::set_precipitation`.
+    #[must_use]
+    pub fn precipitation(&self) -> Arc<PrecipitationField> {
+        Arc::clone(&self.view.weather.precipitation)
+    }
+
+    /// The world border of the newest frame; `None` before the first one.
+    #[must_use]
+    pub fn border(&self) -> Option<BorderView> {
+        self.view.border
+    }
+
     /// The dimension and the spawn point of the newest frame, for the compass.
     #[must_use]
     pub fn compass_world(&self) -> (i8, Option<(i32, i32, i32)>) {
@@ -334,7 +352,7 @@ impl WorldView {
                         .as_ref()
                         .map(|layers| crack_mesh(&self.cracks, layers));
                 }
-                self.view.push(frame);
+                self.view.push(*frame);
             }
             RenderEvent::Hud(hud) => self.hud = *hud,
             RenderEvent::Inventory(view) => self.window_view = *view,
@@ -472,6 +490,14 @@ struct View {
     spawn: Option<(i32, i32, i32)>,
     /// The biome temperature at the player, for the sky colour.
     sky_temperature: f32,
+    /// The fog inputs of the newest frame (P7g).
+    fog: FogContext,
+    /// The eye light of the fog, eased over ticks.
+    fog_light: FogLight,
+    /// The world border of the newest frame.
+    border: Option<BorderView>,
+    /// Rain, thunder, lightning and the precipitation columns of the newest frame.
+    weather: WeatherView,
 }
 
 impl View {
@@ -484,6 +510,10 @@ impl View {
         self.dimension = frame.dimension;
         self.spawn = frame.spawn;
         self.sky_temperature = frame.sky_temperature;
+        self.fog = frame.fog;
+        self.fog_light.tick(frame.fog.light_brightness);
+        self.border = Some(frame.border);
+        self.weather = frame.weather;
     }
 
     /// The interpolation fraction of the two newest ticks for `now`.
@@ -509,6 +539,13 @@ impl View {
     fn environment(&self, now: Instant, view_distance: u8) -> RenderEnvironment {
         RenderEnvironment {
             sky_temperature: self.sky_temperature,
+            fog: FogContext {
+                light_brightness: self.fog_light.at(self.partial_tick(now)),
+                ..self.fog
+            },
+            rain_strength: self.weather.rain_strength,
+            thunder_strength: self.weather.thunder_strength,
+            lightning_ticks: self.weather.lightning_ticks,
             ..RenderEnvironment::new(
                 self.dimension,
                 self.world_time,
@@ -549,6 +586,7 @@ mod tests {
     use super::*;
     use crate::terrain_textures::TerrainTextures;
     use crate::test_support::TextureTarget;
+    use umicraft_game::server::world_border::Border;
 
     /// A renderer without a GPU: the face count of every uploaded chunk.
     #[derive(Default)]
@@ -714,8 +752,8 @@ mod tests {
         assert_eq!(harness.world_view.ended(), Some("kicked"));
     }
 
-    fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Frame {
-        Frame {
+    fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Box<Frame> {
+        Box::new(Frame {
             state: RenderState {
                 position,
                 yaw: 0.0,
@@ -736,8 +774,11 @@ mod tests {
             moving_blocks: Arc::default(),
             block_entity_data: Arc::default(),
             sky_temperature: umicraft_render::RenderEnvironment::PLAINS_TEMPERATURE,
+            fog: FogContext::DEFAULT,
+            border: crate::border_view::border_view(&Border::default()),
+            weather: crate::weather_view::WeatherView::default(),
             signs: Arc::default(),
-        }
+        })
     }
 
     #[test]

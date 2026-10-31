@@ -36,6 +36,7 @@ pub mod error;
 pub mod fluid;
 pub mod light;
 pub mod pos;
+mod precipitation;
 pub mod section;
 pub mod world;
 

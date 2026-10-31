@@ -204,6 +204,15 @@ impl EntityStore {
         self.entities.insert(id, record);
     }
 
+    /// Whether a lightning bolt is alive, which flashes the sky
+    /// (`EntityLightningBolt.onUpdate` on a client world).
+    #[must_use]
+    pub fn lightning_flashing(&self) -> bool {
+        self.entities
+            .values()
+            .any(|entity| entity.kind == EntityKind::Lightning)
+    }
+
     /// Spawns a painting on `block` facing `facing` (`Spawn Painting`). An
     /// unknown title is ignored: the reference would have no artwork to draw.
     pub fn spawn_painting(&mut self, id: EntityId, title: &str, block: [i32; 3], facing: u8) {
@@ -667,7 +676,9 @@ mod tests {
             }
         }
         let mut store = EntityStore::new();
+        assert!(!store.lightning_flashing());
         store.spawn_lightning(EntityId(4), DVec3::new(1.0, 64.0, 1.0));
+        assert!(store.lightning_flashing());
         for _ in 0..LIGHTNING_FLASH_TICKS * 3 {
             store.tick();
             store.tick_objects(&Air);
@@ -678,6 +689,7 @@ mod tests {
             store.tick_objects(&Air);
         }
         assert!(store.snapshots(0.0).is_empty(), "gone");
+        assert!(!store.lightning_flashing());
     }
 
     fn spawn_object_at_origin(store: &mut EntityStore, id: i32, object_type: u8, data: i32) {

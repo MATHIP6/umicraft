@@ -166,6 +166,12 @@ impl ServerState {
         self.chest_lids.tick();
     }
 
+    /// Advances the lightning flash of the sky; `bolt_flashing` is true while
+    /// a lightning bolt entity is alive (see [`Weather::tick`]).
+    pub fn tick_lightning(&mut self, bolt_flashing: bool) {
+        self.weather.tick(bolt_flashing);
+    }
+
     fn is_local(&self, entity_id: i32) -> bool {
         self.local_entity_id == Some(entity_id)
     }

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 // Entity shader: textured articulated models, face shading, block/sky lighting,
-// alpha-tested cutout discard, and distance fog matching SkyState.
+// alpha-tested cutout discard, and the fog of `FogParams` (fog.wgsl is
+// prepended).
 
 struct Camera {
     view_proj: mat4x4<f32>,
@@ -11,7 +12,8 @@ struct Camera {
     fog_start: f32,
     fog_end: f32,
     gamma: f32,
-    _pad0: f32,
+    // Exponential fog density; above zero it replaces the linear range.
+    fog_density: f32,
     _pad1: f32,
 };
 
@@ -119,6 +121,12 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
+// The share of the fog colour at a world position (`fog_amount` in fog.wgsl).
+fn fog_at(world_position: vec3<f32>) -> f32 {
+    let dist = distance(world_position, camera.camera_pos);
+    return fog_amount(dist, camera.fog_start, camera.fog_end, camera.fog_density);
+}
+
 // The colour of a lit texel: hurt tint, flash, light, shade and fog.
 fn lit_colour(in: VertexOut, tex: vec4<f32>) -> vec3<f32> {
     // A hurt or dying entity is blended 30 % towards red before the light is
@@ -128,9 +136,7 @@ fn lit_colour(in: VertexOut, tex: vec4<f32>) -> vec3<f32> {
     // (MCP `RenderCreeper.getColorMultiplier`).
     base = mix(base, vec3<f32>(1.0), 0.2 * in.flash);
     let lit = base * in.light * in.shade;
-    let dist = distance(in.world_position, camera.camera_pos);
-    let fog = clamp((dist - camera.fog_start) / (camera.fog_end - camera.fog_start), 0.0, 1.0);
-    return mix(lit, camera.fog_color, fog);
+    return mix(lit, camera.fog_color, fog_at(in.world_position));
 }
 
 @fragment
@@ -201,9 +207,7 @@ fn fs_additive(in: AdditiveOut) -> @location(0) vec4<f32> {
         rgb = pow(rgb, vec3<f32>(2.2));
     }
     // A glow fades into the fog like everything else.
-    let dist = distance(in.world_position, camera.camera_pos);
-    let fog = clamp((dist - camera.fog_start) / (camera.fog_end - camera.fog_start), 0.0, 1.0);
-    return vec4<f32>(rgb * (1.0 - fog), 1.0);
+    return vec4<f32>(rgb * (1.0 - fog_at(in.world_position)), 1.0);
 }
 
 // The shadow under an entity (MCP `Render.renderShadow`): a texture of black
@@ -230,8 +234,6 @@ fn vs_shadow(in: VertexIn) -> ShadowOut {
 fn fs_shadow(in: ShadowOut) -> @location(0) vec4<f32> {
     let tex = textureSample(entity_texture, entity_sampler, in.uv);
     // A shadow fades into the fog like everything else.
-    let dist = distance(in.world_position, camera.camera_pos);
-    let fog = clamp((dist - camera.fog_start) / (camera.fog_end - camera.fog_start), 0.0, 1.0);
-    return vec4<f32>(tex.rgb, tex.a * in.alpha * (1.0 - fog));
+    return vec4<f32>(tex.rgb, tex.a * in.alpha * (1.0 - fog_at(in.world_position)));
 }
 

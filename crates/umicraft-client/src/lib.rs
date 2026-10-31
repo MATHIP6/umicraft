@@ -18,6 +18,7 @@
 pub mod args;
 pub mod block_demo;
 mod block_entity_render;
+mod border_view;
 pub mod chat;
 pub mod cracks;
 pub mod creative_input;
@@ -28,6 +29,7 @@ pub mod dials;
 pub mod entity_demo;
 pub mod entity_render;
 pub mod error;
+mod fog_context;
 pub mod game;
 pub mod headless;
 pub mod hud_demo;
@@ -60,6 +62,7 @@ mod tooltip_draw;
 pub mod ui_demo;
 pub mod ui_font;
 pub mod ui_input;
+pub mod weather_view;
 pub mod window;
 pub mod world_view;
 

@@ -28,7 +28,7 @@ impl SkyImage {
     }
 }
 
-/// The three images of the sky; `None` keeps the fallback.
+/// The images of the sky and the weather; `None` keeps the fallback.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SkyTextures {
     /// `textures/environment/sun.png`.
@@ -39,6 +39,10 @@ pub struct SkyTextures {
     pub end_sky: Option<SkyImage>,
     /// `textures/environment/clouds.png`, 256 x 256 cloud cells.
     pub clouds: Option<SkyImage>,
+    /// `textures/environment/rain.png`, drawn by the weather pass.
+    pub rain: Option<SkyImage>,
+    /// `textures/environment/snow.png`, drawn by the weather pass.
+    pub snow: Option<SkyImage>,
 }
 
 /// Edge of the fallback sun in texels.

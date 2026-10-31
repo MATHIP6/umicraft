@@ -55,6 +55,9 @@ pub enum CloudMode {
 /// Opacity of a cloud texel (`color(r, g, b, 0.8F)`).
 const OPACITY: f32 = 0.8;
 
+/// The cloud shader with the shared fog falloff in front.
+const CLOUDS_WGSL: &str = concat!(include_str!("../fog.wgsl"), include_str!("clouds.wgsl"));
+
 /// What the current frame draws.
 struct FramePlan {
     prepass: bool,
@@ -86,7 +89,7 @@ impl CloudRenderer {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cloud shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("clouds.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(CLOUDS_WGSL.into()),
         });
         let layout = gpu::bind_group_layout(device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -211,7 +214,7 @@ impl CloudRenderer {
         let Some(placement) = drift::placement(self.mode, eye, ticks) else {
             return;
         };
-        let (fog_start, fog_end) = crate::renderer::fog_range(environment.view_distance);
+        let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
         let uniform = CloudUniform {
             view_proj: (camera.view_projection() * Mat4::from_translation(camera.position))
                 .to_cols_array_2d(),
@@ -229,8 +232,8 @@ impl CloudRenderer {
                 sky.cloud_color[2],
                 OPACITY,
             ],
-            fog_color: [sky.fog_color[0], sky.fog_color[1], sky.fog_color[2], 1.0],
-            fog: [fog_start, fog_end, 0.0, 0.0],
+            fog_color: [sky.fog.color[0], sky.fog.color[1], sky.fog.color[2], 1.0],
+            fog: [fog_start, fog_end, fog_density, 0.0],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
         let fancy = self.mode == CloudMode::Fancy;
@@ -282,8 +285,7 @@ mod tests {
     /// The shader is only compiled on a GPU device; this validates it without one.
     #[test]
     fn the_cloud_shader_is_valid_wgsl() {
-        let module =
-            naga::front::wgsl::parse_str(include_str!("clouds.wgsl")).expect("the shader parses");
+        let module = naga::front::wgsl::parse_str(CLOUDS_WGSL).expect("the shader parses");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),

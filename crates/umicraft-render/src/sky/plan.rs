@@ -71,9 +71,11 @@ pub(super) struct SlotUniform {
     pub model: [[f32; 4]; 4],
     pub tint: [f32; 4],
     pub fog_color: [f32; 4],
-    /// `x` fog end, `y` fog on, `z` textured.
+    /// `x` textured, `y` fog on.
     pub params: [f32; 4],
-    pub _pad: [f32; 20],
+    /// `x` fog start, `y` fog end, `z` exponential density (see `fog.wgsl`).
+    pub fog: [f32; 4],
+    pub _pad: [f32; 16],
 }
 
 /// One draw of the pass.
@@ -95,8 +97,6 @@ pub(super) struct PlanInput<'a> {
     pub view_proj: Mat4,
     /// Eye height in world blocks.
     pub eye_y: f32,
-    /// Distance at which the sky fog is complete, in blocks.
-    pub fog_end: f32,
 }
 
 /// Appends the layers of the frame to `layers` (cleared first), in draw order.
@@ -230,7 +230,8 @@ fn layer(
     tint: [f32; 4],
     fogged: bool,
 ) -> Layer {
-    let [fog_r, fog_g, fog_b] = input.state.fog_color;
+    let [fog_r, fog_g, fog_b] = input.state.fog.color;
+    let [fog_start, fog_end, fog_density] = input.state.fog.sky.uniform();
     let textured = image != Image::White;
     Layer {
         blend,
@@ -242,12 +243,13 @@ fn layer(
             tint,
             fog_color: Vec4::new(fog_r, fog_g, fog_b, 1.0).to_array(),
             params: [
-                input.fog_end,
-                f32::from(u8::from(fogged)),
                 f32::from(u8::from(textured)),
+                f32::from(u8::from(fogged)),
+                0.0,
                 0.0,
             ],
-            _pad: [0.0; 20],
+            fog: [fog_start, fog_end, fog_density, 0.0],
+            _pad: [0.0; 16],
         },
     }
 }
@@ -264,7 +266,6 @@ mod tests {
             state: &state,
             view_proj: Mat4::IDENTITY,
             eye_y,
-            fog_end: 128.0,
         };
         let mut layers = Vec::new();
         build(&mut layers, &input);
@@ -280,6 +281,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(SlotUniform, model), 64);
         assert_eq!(std::mem::offset_of!(SlotUniform, tint), 128);
         assert_eq!(std::mem::offset_of!(SlotUniform, params), 160);
+        assert_eq!(std::mem::offset_of!(SlotUniform, fog), 176);
         assert_eq!(std::mem::size_of::<SlotUniform>(), SLOT_STRIDE);
     }
 
@@ -346,7 +348,8 @@ mod tests {
     #[test]
     fn only_dome_layers_are_fogged_and_only_textured_images_sample() {
         let layers = plan(RenderEnvironment::DEFAULT, 80.0);
-        assert_eq!(layers[0].uniform.params[..3], [128.0, 1.0, 0.0]);
-        assert_eq!(layers[1].uniform.params[..3], [128.0, 0.0, 1.0]);
+        assert_eq!(layers[0].uniform.params[..2], [0.0, 1.0]);
+        assert_eq!(layers[1].uniform.params[..2], [1.0, 0.0]);
+        assert_eq!(layers[0].uniform.fog[..3], [0.0, 128.0, 0.0]);
     }
 }

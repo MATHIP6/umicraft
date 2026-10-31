@@ -43,7 +43,10 @@ use crate::{Camera, RenderEnvironment};
 use plan::{Blend, Layer, Mesh, PlanInput, MAX_LAYERS};
 
 pub(crate) use gpu::{sampler, upload};
-pub(crate) use state::SkyKind;
+pub(crate) use state::{skylight_subtracted, SkyKind};
+
+/// The sky shader with the shared fog falloff in front.
+const SKY_WGSL: &str = concat!(include_str!("../fog.wgsl"), include_str!("sky.wgsl"));
 pub use state::SkyState;
 pub(crate) use textures::hash;
 pub use textures::{SkyImage, SkyTextures};
@@ -125,7 +128,7 @@ impl SkyRenderer {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sky shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("sky.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(SKY_WGSL.into()),
         });
         let layout = gpu::bind_group_layout(device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -260,7 +263,6 @@ impl SkyRenderer {
         environment: RenderEnvironment,
         state: &SkyState,
     ) {
-        let (_, fog_end) = crate::renderer::fog_range(environment.view_distance);
         let input = PlanInput {
             kind: state::SkyKind::of(environment.dimension),
             state,
@@ -268,7 +270,6 @@ impl SkyRenderer {
             // drawn around the eye, so it never parallaxes.
             view_proj: camera.view_projection() * Mat4::from_translation(camera.position),
             eye_y: camera.position.y,
-            fog_end,
         };
         plan::build(&mut self.layers, &input);
 
@@ -314,8 +315,7 @@ mod tests {
     /// it without one.
     #[test]
     fn the_sky_shader_is_valid_wgsl() {
-        let module =
-            naga::front::wgsl::parse_str(include_str!("sky.wgsl")).expect("the shader parses");
+        let module = naga::front::wgsl::parse_str(SKY_WGSL).expect("the shader parses");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),

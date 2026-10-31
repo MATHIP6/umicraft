@@ -15,8 +15,10 @@ struct Slot {
     tint: vec4<f32>,
     // rgb fog colour.
     fog_color: vec4<f32>,
-    // x fog end in blocks, y fog on (1/0), z textured (1/0).
+    // x textured (1/0), y fog on (1/0).
     params: vec4<f32>,
+    // x fog start, y fog end in blocks, z exponential density (`fog_amount`).
+    fog: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> slot: Slot;
@@ -54,12 +56,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // flow; the switch picks the result.
     let texel = textureSample(sky_texture, sky_sampler, in.uv);
     var color = in.color;
-    if (slot.params.z > 0.5) {
+    if (slot.params.x > 0.5) {
         color = color * texel;
     }
     if (slot.params.y > 0.5) {
-        // Linear fog from 0 to the fog end, as `setupFog(-1)` sets it up.
-        let amount = clamp(in.eye_distance / slot.params.x, 0.0, 1.0);
+        // `setupFog(-1)`: the dome's own range, or the medium's exponential fog.
+        let amount = fog_amount(in.eye_distance, slot.fog.x, slot.fog.y, slot.fog.z);
         color = vec4<f32>(mix(color.rgb, slot.fog_color.rgb, amount), color.a);
     }
     return color;

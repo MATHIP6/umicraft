@@ -12,7 +12,7 @@
 //! writes disabled, straight-alpha blending and a farthest-first chunk order.
 //! Both passes consume the packed per-vertex block/sky light, baked AO and face
 //! shade from the M6 mesh payload, and fog toward the current
-//! [`SkyState::fog_color`]. Chunk meshes are uploaded whole and replaced
+//! [`SkyState::fog`]. Chunk meshes are uploaded whole and replaced
 //! copy-on-write when remeshed. The HUD and the UI share the overlay pipeline;
 //! [`Renderer::render_with_ui`] appends [`UiPass`] geometry after the HUD.
 
@@ -30,6 +30,7 @@ use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::block_atlas::{self, BlockAtlasError};
+use crate::border::{BorderRenderer, BorderView};
 use crate::camera::Camera;
 use crate::clouds::{CloudMode, CloudRenderer};
 use crate::dynamic_blocks::MovingBlocksPass;
@@ -42,6 +43,7 @@ use crate::overlay::{Overlay, OverlayVertex};
 use crate::sky::{SkyImage, SkyRenderer, SkyState, SkyTextures};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
 use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
+use crate::weather::{PrecipitationField, WeatherRenderer};
 
 /// Depth attachment format. The sky pipeline in [`crate::sky`] uses the same
 /// format so it can draw in the main pass.
@@ -67,6 +69,9 @@ const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
 /// Half the depth range of the icon camera, in GUI pixels; a lit block's
 /// rotated corners stay within about 17.
 const ICON_DEPTH: f32 = 32.0;
+/// The terrain shader with the shared fog falloff in front.
+const TERRAIN_WGSL: &str = concat!(include_str!("fog.wgsl"), include_str!("terrain.wgsl"));
+
 /// A fog distance the hand never reaches.
 const HAND_FOG_FREE: f32 = 1.0e6;
 
@@ -77,16 +82,19 @@ pub(crate) struct CameraUniform {
     camera_pos: [f32; 3],
     /// Sun-light factor from [`SkyState::sun_brightness`].
     sun_brightness: f32,
-    /// Linear fog target from [`SkyState::fog_color`].
+    /// Linear fog target from [`SkyState::fog`].
     fog_color: [f32; 3],
-    /// Start of the fog band in blocks.
+    /// Start of the linear fog band in blocks.
     fog_start: f32,
-    /// End of the fog band in blocks.
+    /// End of the linear fog band in blocks.
     fog_end: f32,
     /// 1.8 brightness gamma in `0..=1` (Moody → Bright).
     gamma: f32,
     /// Explicit tail padding: the WGSL `Camera` struct is 112 bytes.
-    _pad: [f32; 2],
+    /// Exponential fog density (water, lava); above zero it replaces the
+    /// linear band (`fog_amount` in `fog.wgsl`).
+    fog_density: f32,
+    _pad: f32,
 }
 
 impl CameraUniform {
@@ -106,7 +114,8 @@ impl CameraUniform {
             fog_start: HAND_FOG_FREE,
             fog_end: HAND_FOG_FREE * 2.0,
             gamma: 0.0,
-            _pad: [0.0; 2],
+            fog_density: 0.0,
+            _pad: 0.0,
         }
     }
 }
@@ -191,8 +200,13 @@ pub struct Renderer {
     sky: SkyRenderer,
     /// The clouds, drawn with the depth test after the opaque passes.
     clouds: CloudRenderer,
-    /// Client ticks (with the fraction) that drive the cloud drift.
+    /// Client ticks (with the fraction) that drive the cloud drift and the
+    /// animation of the rain and snow.
     cloud_ticks: f64,
+    /// Rain and snow, drawn before the translucent terrain.
+    weather: WeatherRenderer,
+    /// The world border walls, drawn after the translucent terrain.
+    border: BorderRenderer,
     /// World clock and dimension of the next frame.
     environment: RenderEnvironment,
     /// Nearest-neighbour sampler shared by the fallback and installed arrays.
@@ -441,7 +455,7 @@ impl Renderer {
 
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("terrain.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(TERRAIN_WGSL.into()),
         });
         let overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("overlay shader"),
@@ -576,6 +590,7 @@ impl Renderer {
         );
         let sky = SkyRenderer::new(&device, &queue, format);
         let clouds = CloudRenderer::new(&device, &queue, format);
+        let border = BorderRenderer::new(&device, &queue, format);
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("camera bind group layout"),
@@ -614,6 +629,7 @@ impl Renderer {
         });
         let entity_renderer = EntityRenderer::new(&device, &camera_layout, format);
         let outline = OutlineRenderer::new(&device, &camera_layout, format);
+        let weather = WeatherRenderer::new(&device, &queue, &camera_layout, format);
 
         let overlay_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("overlay vertices"),
@@ -688,6 +704,8 @@ impl Renderer {
             sky,
             clouds,
             cloud_ticks: 0.0,
+            weather,
+            border,
             environment: RenderEnvironment::default(),
             block_sampler,
             procedural_blocks: block_view,
@@ -745,6 +763,26 @@ impl Renderer {
         self.sky.set_textures(&self.device, &self.queue, textures);
         self.clouds
             .set_texture(&self.device, &self.queue, textures.clouds.as_ref());
+        self.set_weather_textures(textures);
+    }
+
+    /// Replaces the rain and snow pictures (`textures/environment/rain.png`,
+    /// `snow.png`) from the `rain` and `snow` fields of `textures`; an absent
+    /// or malformed one keeps the original generated fallback.
+    pub fn set_weather_textures(&mut self, textures: &SkyTextures) {
+        self.weather.set_textures(
+            &self.device,
+            &self.queue,
+            textures.rain.as_ref(),
+            textures.snow.as_ref(),
+        );
+    }
+
+    /// Sets the columns the rain and snow fall on, sampled by the game
+    /// thread, and whether graphics are fancy (precipitation reaches 10
+    /// blocks instead of 5). Call once per frame; it only stores the handle.
+    pub fn set_precipitation(&mut self, field: Arc<PrecipitationField>, fancy: bool) {
+        self.weather.set_field(field, fancy);
     }
 
     /// Chooses the cloud version (`GameSettings.clouds` and `fancyGraphics`).
@@ -765,6 +803,20 @@ impl Renderer {
     /// (`cloudTickCounter + partialTicks`).
     pub fn set_cloud_ticks(&mut self, ticks: f64) {
         self.cloud_ticks = ticks;
+    }
+
+    /// Sets the world border of the next frame (`None` hides it) and the
+    /// clock in seconds that scrolls its texture every 3 s
+    /// (`getSystemTime() % 3000L`). Call once per frame.
+    pub fn set_world_border(&mut self, border: Option<BorderView>, clock_seconds: f64) {
+        self.border.set_view(border, clock_seconds);
+    }
+
+    /// Replaces the border picture (`textures/misc/forcefield.png`). A
+    /// malformed image restores the original generated pattern.
+    pub fn set_border_texture(&mut self, image: &SkyImage) {
+        self.border
+            .set_texture(&self.device, &self.queue, Some(image));
     }
 
     /// Replaces the break cracks drawn over the terrain.
@@ -884,7 +936,7 @@ impl Renderer {
     fn render_frame(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
         // One SkyState per frame: the clear colour, the fog uniform and the
         // sky pass must agree even if W3's model changes between calls.
-        let sky_state = SkyState::at(self.environment);
+        let sky_state = SkyState::at_looking(self.environment, camera.forward().to_array());
         self.write_camera(camera, &sky_state);
         self.sky
             .update(&self.queue, camera, self.environment, &sky_state);
@@ -894,6 +946,14 @@ impl Renderer {
             self.environment,
             &sky_state,
             self.cloud_ticks,
+        );
+        self.weather
+            .update(&self.queue, camera, self.environment, self.cloud_ticks);
+        // The reference's reach is `renderDistanceChunks * 16`.
+        self.border.update(
+            &self.queue,
+            camera,
+            f64::from(self.environment.view_distance) * 16.0,
         );
         self.upload_overlay(overlay);
         self.prepare_transparent_order(camera.position);
@@ -1594,16 +1654,17 @@ impl Renderer {
     }
 
     fn write_camera(&self, camera: &Camera, sky: &SkyState) {
-        let (fog_start, fog_end) = fog_range(self.environment.view_distance);
+        let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
         let uniform = CameraUniform {
             view_proj: camera.view_projection().to_cols_array_2d(),
             camera_pos: camera.position.to_array(),
             sun_brightness: sky.sun_brightness,
-            fog_color: sky.fog_color,
+            fog_color: sky.fog.color,
             fog_start,
             fog_end,
             gamma: self.environment.gamma,
-            _pad: [0.0; 2],
+            fog_density,
+            _pad: 0.0,
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -1614,6 +1675,7 @@ impl Renderer {
             camera_pos: [0.0; 3],
             fog_start: HAND_FOG_FREE,
             fog_end: HAND_FOG_FREE * 2.0,
+            fog_density: 0.0,
             ..uniform
         };
         self.queue.write_buffer(
@@ -1717,7 +1779,7 @@ impl Renderer {
         sky_state: &SkyState,
     ) {
         // The reference clears to the fog colour; the dome fades into it.
-        let clear = sky_state.fog_color;
+        let clear = sky_state.fog.color;
         let color_attachment = Some(wgpu::RenderPassColorAttachment {
             view,
             depth_slice: None,
@@ -1819,6 +1881,10 @@ impl Renderer {
         // `renderWorldPass`: before the translucent layer from below.
         self.clouds.draw_below(&mut pass);
 
+        // `renderRainSnow` comes after the entities and particles and before
+        // the translucent terrain.
+        self.weather.draw(&mut pass, &self.camera_bind_group);
+
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
@@ -1835,6 +1901,9 @@ impl Renderer {
         // Drawn after the chunks' blended faces: a handful of quads, so no
         // sorting against them.
         self.moving_blocks.draw_transparent(&mut pass);
+
+        // The world border follows the weather and precedes the high clouds.
+        self.border.draw(&mut pass);
 
         // From above 128 the clouds come after the translucent layer.
         self.clouds.draw_above(&mut pass);
@@ -2229,19 +2298,6 @@ fn sort_transparent_farthest_first(chunks: &mut [TransparentDraw]) {
     });
 }
 
-/// Fog band `(start, end)` in blocks for a view distance in chunks.
-///
-/// Uses the ADR-0008 range: start at 75 % of the view distance and end at the
-/// full distance capped at 500 blocks (inside the 512-block camera far plane).
-/// The start is capped below the end so a degenerate `view_distance` cannot
-/// invert the smoothstep edges.
-pub(crate) fn fog_range(view_distance: u8) -> (f32, f32) {
-    let nominal = f32::from(view_distance) * 16.0;
-    let end = nominal.clamp(1.0, 500.0);
-    let start = (nominal * 0.75).min(end - 0.001);
-    (start, end)
-}
-
 /// Binds the camera uniform, one block texture-array view and the block
 /// sampler.
 ///
@@ -2362,7 +2418,8 @@ mod tests {
             fog_start: 96.0,
             fog_end: 128.0,
             gamma: 0.5,
-            _pad: [0.0; 2],
+            fog_density: 0.1,
+            _pad: 0.0,
         };
         let bytes = bytemuck::bytes_of(&uniform);
         assert_eq!(bytes.len(), 112);
@@ -2373,18 +2430,8 @@ mod tests {
         assert_eq!(std::mem::offset_of!(CameraUniform, fog_color), 80);
         assert_eq!(std::mem::offset_of!(CameraUniform, fog_start), 92);
         assert_eq!(std::mem::offset_of!(CameraUniform, fog_end), 96);
-    }
-
-    #[test]
-    fn fog_range_uses_three_quarters_and_caps_at_500() {
-        assert_eq!(fog_range(8), (96.0, 128.0));
-        assert_eq!(fog_range(32), (384.0, 500.0));
-        // Degenerate and oversized view distances stay a valid band.
-        let (start, end) = fog_range(0);
-        assert!(start < end);
-        let (start, end) = fog_range(255);
-        assert!(start < end);
-        assert!(end <= 500.0);
+        assert_eq!(std::mem::offset_of!(CameraUniform, gamma), 100);
+        assert_eq!(std::mem::offset_of!(CameraUniform, fog_density), 104);
     }
 
     #[test]
@@ -2489,8 +2536,7 @@ mod tests {
     /// validates it (all three fragment entry points) without one.
     #[test]
     fn the_terrain_shader_is_valid_wgsl() {
-        let module =
-            naga::front::wgsl::parse_str(include_str!("terrain.wgsl")).expect("the shader parses");
+        let module = naga::front::wgsl::parse_str(TERRAIN_WGSL).expect("the shader parses");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),

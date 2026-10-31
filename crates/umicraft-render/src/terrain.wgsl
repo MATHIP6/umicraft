@@ -31,9 +31,11 @@ struct Camera {
     fog_end: f32,
     // 1.8 brightness gamma (Moody=0, Bright=1).
     gamma: f32,
+    // Exponential fog density (water, lava); above zero it replaces the
+    // linear range.
+    fog_density: f32,
     // Explicit tail padding keeps the Rust `CameraUniform` and this struct at
     // the same 112-byte, 16-byte-aligned layout.
-    _pad0: f32,
     _pad1: f32,
 };
 
@@ -129,9 +131,8 @@ fn vs_main(in: VertexIn) -> VertexOut {
 fn shade_fragment(in: VertexOut, texel: vec4<f32>) -> vec3<f32> {
     let lit = texel.rgb * in.tint * in.light * in.ao * in.shade;
     let fog_target = camera.fog_color * (0.15 + 0.85 * in.light);
-    let fog_span = max(camera.fog_end - camera.fog_start, 0.001);
     let distance = distance(in.world_position, camera.camera_pos);
-    let fog = smoothstep(camera.fog_start, camera.fog_start + fog_span, distance);
+    let fog = fog_amount(distance, camera.fog_start, camera.fog_end, camera.fog_density);
     return mix(lit, fog_target, fog);
 }
 

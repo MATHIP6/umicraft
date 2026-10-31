@@ -6,6 +6,8 @@
 //! render thread adds the sub-tick interpolation before handing it to the
 //! renderer. Keeping it `Copy` avoids a lock or allocation on the frame path.
 
+use crate::fog::FogContext;
+
 /// World clock, dimension and view distance for one rendered frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderEnvironment {
@@ -34,6 +36,9 @@ pub struct RenderEnvironment {
     /// Ticks left of the lightning flash (`World.getLastLightningBolt`);
     /// `0` when there is none.
     pub lightning_ticks: u8,
+    /// The medium at the eye, the potion effects and the eye light that
+    /// shape the fog (P7g).
+    pub fog: FogContext,
 }
 
 impl RenderEnvironment {
@@ -48,6 +53,7 @@ impl RenderEnvironment {
         rain_strength: 0.0,
         thunder_strength: 0.0,
         lightning_ticks: 0,
+        fog: FogContext::DEFAULT,
     };
 
     /// `BiomeGenBase.plains` temperature, the default sky tint.
