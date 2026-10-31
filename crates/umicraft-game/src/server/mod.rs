@@ -66,6 +66,7 @@ use umicraft_protocol::packets::play::clientbound::update_sign::UpdateSign;
 use umicraft_protocol::packets::play::clientbound::world_border::WorldBorder;
 use umicraft_protocol::types::read_string;
 
+use crate::piston::MovingBlocks;
 use attributes::Attributes;
 use block_entities::{BlockEntities, Pos};
 use chest_lids::ChestLids;
@@ -110,6 +111,7 @@ pub struct ServerState {
     maps: MapStore,
     blocks: BlockEntities,
     chest_lids: ChestLids,
+    moving_blocks: MovingBlocks,
     statistics: BTreeMap<String, i32>,
     camera: Option<i32>,
     brand: Option<String>,
@@ -148,6 +150,7 @@ impl ServerState {
         if dimension_changed {
             self.blocks.clear();
             self.chest_lids.forget_all();
+            self.moving_blocks.clear();
             self.maps.clear();
             self.border = Border::default();
             self.weather.reset_world();
@@ -390,6 +393,17 @@ impl ServerState {
     /// The chest lid animations.
     pub fn chest_lids(&self) -> &ChestLids {
         &self.chest_lids
+    }
+
+    /// The blocks pistons are moving.
+    #[must_use]
+    pub fn moving_blocks(&self) -> &MovingBlocks {
+        &self.moving_blocks
+    }
+
+    /// The blocks pistons are moving, to start or advance them.
+    pub fn moving_blocks_mut(&mut self) -> &mut MovingBlocks {
+        &mut self.moving_blocks
     }
 
     /// Mutable access, so the world code can drop the data of a block that

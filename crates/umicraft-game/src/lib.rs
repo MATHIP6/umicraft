@@ -58,6 +58,7 @@ pub mod movement;
 pub mod nbt;
 pub mod physics;
 pub mod pick;
+pub mod piston;
 pub mod player_list;
 pub mod prediction;
 pub mod raycast;

@@ -52,6 +52,7 @@ use umicraft_game::item_use::{drop_item, ItemUse, UseTick};
 use umicraft_game::movement::movement_stats;
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
+use umicraft_game::piston::MovingBlocks;
 use umicraft_game::player_list::PlayerList;
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::scoreboard::Scoreboard;
@@ -242,6 +243,8 @@ pub struct Frame {
     pub maps: Arc<MapStore>,
     /// The lid angles of the chests (P7c).
     pub chest_lids: Arc<ChestLids>,
+    /// The blocks pistons are moving (P7d).
+    pub moving_blocks: Arc<MovingBlocks>,
     /// The text of the signs, shared with the server state until one changes.
     pub signs: Arc<SignTable>,
 }
@@ -1214,6 +1217,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         cracks: game.cracks().into(),
         maps: Arc::new(game.server.maps().clone()),
         chest_lids: Arc::new(game.server.chest_lids().clone()),
+        moving_blocks: Arc::new(game.server.moving_blocks().clone()),
         signs: game.server.block_entities().sign_table(),
     }));
 }
