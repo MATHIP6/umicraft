@@ -14,7 +14,7 @@ use umicraft_assets::skin::decode_png_bytes;
 use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_game::hand::HandPose;
 use umicraft_model::entity::TextureSlot;
-use umicraft_render::{EntityTexture, Renderer};
+use umicraft_render::{EntityTexture, EntityVertex, Renderer};
 
 use super::armor::armor_texture;
 use super::hand::hand_vertices;
@@ -83,6 +83,9 @@ pub struct EntityTextures {
     viewer_is_spectator: Cell<bool>,
     /// Where the camera is, for the distance at which a shadow fades.
     camera: Cell<glam::Vec3>,
+    /// The chests of the frame, meshed by the block-entity renderer and drawn
+    /// with the entities (P7c). Taken by the next upload.
+    block_entities: RefCell<HashMap<TextureSlot, Vec<EntityVertex>>>,
 }
 
 impl EntityTextures {
@@ -109,6 +112,7 @@ impl EntityTextures {
             view_pitch: Cell::new(0.0),
             viewer_is_spectator: Cell::new(false),
             camera: Cell::new(glam::Vec3::ZERO),
+            block_entities: RefCell::default(),
         }
     }
 
@@ -128,6 +132,12 @@ impl EntityTextures {
     /// still drawn.
     pub fn set_camera_position(&self, position: glam::Vec3) {
         self.camera.set(position);
+    }
+
+    /// Hands over the tile-entity vertices of this frame, which the next
+    /// upload draws with the entities.
+    pub fn set_block_entities(&self, batches: HashMap<TextureSlot, Vec<EntityVertex>>) {
+        *self.block_entities.borrow_mut() = batches;
     }
 
     /// Tells whether the local player is a spectator, who sees the invisible
@@ -182,13 +192,16 @@ impl EntityTextures {
         self.skins
             .borrow_mut()
             .collect(renderer, &mut self.textures.borrow_mut());
-        let meshed = mesh_entities_with(
+        let mut meshed = mesh_entities_with(
             snapshots,
             self,
             (self.view_yaw.get(), self.view_pitch.get()),
             self.viewer_is_spectator.get(),
             self.camera.get(),
         );
+        for (slot, vertices) in self.block_entities.take() {
+            meshed.solid.entry(slot).or_default().extend(vertices);
+        }
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
         let mut solid: Vec<_> = meshed

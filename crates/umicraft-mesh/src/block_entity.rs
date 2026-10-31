@@ -12,7 +12,7 @@
 //! a block that has one on demand. A scan of the blocks is therefore the
 //! faithful source for them.
 
-use umicraft_world::BlockState;
+use umicraft_world::{BlockState, LightLevel};
 
 use crate::BlockSource;
 
@@ -68,6 +68,9 @@ pub struct BlockEntityRef {
     /// block: `TileEntityChest.checkForAdjacentChests` merges two such chests
     /// into a double chest.
     pub same_neighbour: SameNeighbours,
+    /// Block and sky light of the block's own cell: the renderer lights the
+    /// tile entity with `getCombinedLight` of its position.
+    pub light: LightLevel,
 }
 
 /// The horizontal neighbours holding the same block as a [`BlockEntityRef`].
@@ -95,6 +98,7 @@ impl BlockEntityRef {
         Self {
             position,
             state,
+            light: source.light(x, y, z),
             same_neighbour: SameNeighbours {
                 west: same(-1, 0),
                 east: same(1, 0),

@@ -55,6 +55,7 @@ use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::player_list::PlayerList;
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::scoreboard::Scoreboard;
+use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
@@ -238,6 +239,8 @@ pub struct Frame {
     pub cracks: Arc<[Crack]>,
     /// The maps the server sent (copy-on-write pixels, so cloning is cheap).
     pub maps: Arc<MapStore>,
+    /// The lid angles of the chests (P7c).
+    pub chest_lids: Arc<ChestLids>,
 }
 
 /// The statistics the debug overlay shows.
@@ -1207,6 +1210,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         selection: game.selection_outline().into(),
         cracks: game.cracks().into(),
         maps: Arc::new(game.server.maps().clone()),
+        chest_lids: Arc::new(game.server.chest_lids().clone()),
     }));
 }
 

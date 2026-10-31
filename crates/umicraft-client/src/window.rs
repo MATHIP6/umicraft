@@ -47,6 +47,7 @@ use crate::inventory_input::{Context, InventoryAction, InventoryInput};
 use crate::map_render::{map_id_of, MapTextures};
 use crate::nametag_draw::{draw_tags, place_tags};
 
+use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
 use crate::inventory_screen::{draw_inventory_overlay, screen_input};
 use crate::inventory_winit;
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
@@ -1247,6 +1248,14 @@ impl App {
             let framed = self.map_textures.as_mut().map_or_else(Vec::new, |maps| {
                 maps.frame_batches(&entities, world.maps(), renderer)
             });
+            entity_textures.set_block_entities(mesh_block_entities(
+                world.block_entities(),
+                &BlockEntityScene {
+                    lids: world.chest_lids(),
+                    partial_tick: environment.partial_tick,
+                    camera: self.camera.position,
+                },
+            ));
             entity_textures.mesh_and_upload_with(&entities, &framed, renderer);
             match (held_map, self.map_textures.as_mut()) {
                 (Some(map_id), Some(maps)) => {

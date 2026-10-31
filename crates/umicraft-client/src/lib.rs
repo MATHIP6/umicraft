@@ -17,6 +17,7 @@
 
 pub mod args;
 pub mod block_demo;
+mod block_entity_render;
 pub mod chat;
 pub mod cracks;
 pub mod creative_input;

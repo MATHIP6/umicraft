@@ -17,6 +17,7 @@ use std::time::Instant;
 use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
 use umicraft_game::hand::HandPose;
 use umicraft_game::inventory::WindowView;
+use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::RenderState;
 use umicraft_mesh::{BlockEntityRef, ChunkSnapshot, Mesh, Vertex};
@@ -82,6 +83,8 @@ pub struct WorldView {
     cracks: Arc<[Crack]>,
     /// The maps of the newest frame.
     maps: Arc<MapStore>,
+    /// The chest lids of the newest frame.
+    chest_lids: Arc<ChestLids>,
     /// The texture layer of each destroy stage, when the terrain has them.
     destroy_layers: Option<[u32; STAGES]>,
     /// A crack mesh the renderer has not received yet.
@@ -118,6 +121,7 @@ impl WorldView {
             selection: Arc::from([]),
             cracks: Arc::from([]),
             maps: Arc::default(),
+            chest_lids: Arc::default(),
             destroy_layers: terrain.mesher().destroy_layers(),
             crack_mesh: None,
         })
@@ -219,6 +223,12 @@ impl WorldView {
         self.faces.values().sum()
     }
 
+    /// The lid angles of the chests in the newest frame.
+    #[must_use]
+    pub fn chest_lids(&self) -> &ChestLids {
+        &self.chest_lids
+    }
+
     /// The chests and signs of every current chunk mesh.
     pub fn block_entities(&self) -> impl Iterator<Item = &BlockEntityRef> {
         self.block_entities.values().flatten()
@@ -279,6 +289,7 @@ impl WorldView {
                 self.hand_light = frame.hand_light;
                 self.selection = Arc::clone(&frame.selection);
                 self.maps = Arc::clone(&frame.maps);
+                self.chest_lids = Arc::clone(&frame.chest_lids);
                 if *self.cracks != *frame.cracks {
                     self.cracks = Arc::clone(&frame.cracks);
                     self.crack_mesh = self
@@ -656,6 +667,7 @@ mod tests {
             selection: Arc::from([]),
             cracks: Arc::from([]),
             maps: Arc::default(),
+            chest_lids: Arc::default(),
         }
     }
 
