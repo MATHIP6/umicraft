@@ -100,10 +100,12 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     continue;
                 }
                 let position = [wx, y, wz];
-                if BlockEntityKind::of(state).is_some() {
+                if let Some(kind) = BlockEntityKind::of(state) {
                     mesh.block_entities
                         .push(BlockEntityRef::scan(source, position, state));
-                    continue;
+                    if kind.replaces_model() {
+                        continue;
+                    }
                 }
                 if let Some(liquid) = Liquid::of(state) {
                     let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {

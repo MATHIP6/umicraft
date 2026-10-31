@@ -56,6 +56,7 @@ use umicraft_game::piston::{motion, MovingBlocks};
 use umicraft_game::player_list::PlayerList;
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::scoreboard::Scoreboard;
+use umicraft_game::server::block_entities::EntityTable;
 use umicraft_game::server::block_entities::SignTable;
 use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
@@ -245,6 +246,8 @@ pub struct Frame {
     pub chest_lids: Arc<ChestLids>,
     /// The blocks pistons are moving (P7d).
     pub moving_blocks: Arc<MovingBlocks>,
+    /// The updates of skulls, banners, beacons, spawners and flower pots.
+    pub block_entity_data: Arc<EntityTable>,
     /// The text of the signs, shared with the server state until one changes.
     pub signs: Arc<SignTable>,
 }
@@ -1218,6 +1221,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         maps: Arc::new(game.server.maps().clone()),
         chest_lids: Arc::new(game.server.chest_lids().clone()),
         moving_blocks: Arc::new(game.server.moving_blocks().clone()),
+        block_entity_data: game.server.block_entities().entity_table(),
         signs: game.server.block_entities().sign_table(),
     }));
 }

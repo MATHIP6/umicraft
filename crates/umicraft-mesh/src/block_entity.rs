@@ -26,6 +26,22 @@ const TRAPPED_CHEST: u16 = 146;
 const STANDING_SIGN: u16 = 63;
 /// Wall sign block id.
 const WALL_SIGN: u16 = 68;
+/// Mob spawner block id.
+const SPAWNER: u16 = 52;
+/// Enchanting table block id.
+const ENCHANTING_TABLE: u16 = 116;
+/// End portal block id.
+const END_PORTAL: u16 = 119;
+/// Beacon block id.
+const BEACON: u16 = 138;
+/// Flower pot block id.
+const FLOWER_POT: u16 = 140;
+/// Skull block id.
+const SKULL: u16 = 144;
+/// Standing banner block id.
+const STANDING_BANNER: u16 = 176;
+/// Wall banner block id.
+const WALL_BANNER: u16 = 177;
 
 /// The tile-entity renderer family of a block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +56,22 @@ pub enum BlockEntityKind {
     StandingSign,
     /// `BlockWallSign`.
     WallSign,
+    /// `BlockMobSpawner`: the cage has a model, the mob spins inside.
+    Spawner,
+    /// `BlockEnchantmentTable`: the table has a model, the book floats above.
+    EnchantingTable,
+    /// `BlockEndPortal`: no model, the portal surface is the renderer's.
+    EndPortal,
+    /// `BlockBeacon`: the base has a model, the beam is the renderer's.
+    Beacon,
+    /// `BlockFlowerPot`: the pot has a model, the plant is the renderer's.
+    FlowerPot,
+    /// `BlockSkull`.
+    Skull,
+    /// `BlockBanner.BlockBannerStanding`.
+    StandingBanner,
+    /// `BlockBanner.BlockBannerHanging`.
+    WallBanner,
 }
 
 impl BlockEntityKind {
@@ -52,8 +84,28 @@ impl BlockEntityKind {
             ENDER_CHEST => Some(Self::EnderChest),
             STANDING_SIGN => Some(Self::StandingSign),
             WALL_SIGN => Some(Self::WallSign),
+            SPAWNER => Some(Self::Spawner),
+            ENCHANTING_TABLE => Some(Self::EnchantingTable),
+            END_PORTAL => Some(Self::EndPortal),
+            BEACON => Some(Self::Beacon),
+            FLOWER_POT => Some(Self::FlowerPot),
+            SKULL => Some(Self::Skull),
+            STANDING_BANNER => Some(Self::StandingBanner),
+            WALL_BANNER => Some(Self::WallBanner),
             _ => None,
         }
+    }
+
+    /// Whether the renderer draws the whole block, so the chunk mesh must
+    /// not: these have no blockstate model (`builtin/entity`). The others
+    /// (spawner cage, table, beacon base, pot) keep their model and the
+    /// renderer adds to it.
+    #[must_use]
+    pub const fn replaces_model(self) -> bool {
+        !matches!(
+            self,
+            Self::Spawner | Self::EnchantingTable | Self::Beacon | Self::FlowerPot
+        )
     }
 }
 
@@ -136,6 +188,17 @@ mod tests {
         );
         assert_eq!(BlockEntityKind::of(BlockState::new(1, 0)), None);
         assert_eq!(BlockEntityKind::of(BlockState::AIR), None);
+    }
+
+    #[test]
+    fn blocks_with_a_model_keep_it_and_the_rest_are_drawn_by_their_renderer() {
+        let kind = |id| BlockEntityKind::of(BlockState::new(id, 0)).expect("a tile entity");
+        for id in [52, 116, 138, 140] {
+            assert!(!kind(id).replaces_model(), "block {id}");
+        }
+        for id in [54, 63, 119, 144, 176, 177] {
+            assert!(kind(id).replaces_model(), "block {id}");
+        }
     }
 
     #[test]

@@ -18,7 +18,7 @@ mod sign;
 use std::collections::HashMap;
 
 use glam::Vec3;
-use umicraft_game::server::block_entities::SignTable;
+use umicraft_game::server::block_entities::{EntityTable, SignTable};
 use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_mesh::{BlockEntityKind, BlockEntityRef};
 use umicraft_model::entity::{ModelVertex, TextureSlot};
@@ -35,6 +35,12 @@ pub(crate) struct BlockEntityScene<'a> {
     pub lids: &'a ChestLids,
     /// The text of the signs.
     pub signs: &'a SignTable,
+    /// The last update of the other block entities (skull type, banner
+    /// patterns, beacon levels, spawner mob, flower pot contents).
+    pub data: &'a EntityTable,
+    /// Seconds since the client started, for the animations that do not
+    /// follow the world clock (the beam, the book).
+    pub seconds: f32,
     /// The font the sign text is laid out with, `None` before it is loaded.
     /// It must be the atlas `EntityTextures::set_sign_font` was given, since
     /// the glyph UVs address that texture.
@@ -45,27 +51,51 @@ pub(crate) struct BlockEntityScene<'a> {
     pub camera: Vec3,
 }
 
+/// Vertices grouped by the texture they sample.
+pub(crate) type Batches = HashMap<TextureSlot, Vec<EntityVertex>>;
+
+/// What the tile entities of a frame draw.
+#[derive(Debug, Default)]
+pub(crate) struct BlockEntityMeshes {
+    /// Lit and opaque: chests, signs, skulls, banners.
+    pub solid: Batches,
+    /// Blended over the world: the beacon beam, the end portal.
+    pub additive: Batches,
+}
+
 /// The vertices of every tile entity of `entries` in range, by texture.
 #[must_use]
 pub(crate) fn mesh_block_entities<'a>(
     entries: impl Iterator<Item = &'a BlockEntityRef>,
     scene: &BlockEntityScene<'_>,
-) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    let mut batches: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+) -> BlockEntityMeshes {
+    let mut meshes = BlockEntityMeshes::default();
+    let batches = &mut meshes.solid;
     for entry in entries.filter(|entry| in_range(entry, scene.camera)) {
         match BlockEntityKind::of(entry.state) {
             Some(
                 BlockEntityKind::Chest
                 | BlockEntityKind::TrappedChest
                 | BlockEntityKind::EnderChest,
-            ) => chest::add_chest(&mut batches, entry, scene),
+            ) => chest::add_chest(batches, entry, scene),
             Some(BlockEntityKind::StandingSign | BlockEntityKind::WallSign) => {
-                sign::add_sign(&mut batches, entry, scene);
+                sign::add_sign(batches, entry, scene);
             }
-            None => {}
+            // Drawn by the renderers P7d adds, one per kind.
+            Some(
+                BlockEntityKind::Spawner
+                | BlockEntityKind::EnchantingTable
+                | BlockEntityKind::EndPortal
+                | BlockEntityKind::Beacon
+                | BlockEntityKind::FlowerPot
+                | BlockEntityKind::Skull
+                | BlockEntityKind::StandingBanner
+                | BlockEntityKind::WallBanner,
+            )
+            | None => {}
         }
     }
-    batches
+    meshes
 }
 
 /// Whether the block is near enough to draw.

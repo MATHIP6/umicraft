@@ -36,6 +36,9 @@ pub struct BlockEntityData {
     pub nbt: Option<Vec<u8>>,
 }
 
+/// The last update of every block entity that sent one.
+pub type EntityTable = BTreeMap<Pos, BlockEntityData>;
+
 /// A running block-break animation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BreakProgress {
@@ -51,14 +54,8 @@ pub struct BlockEntities {
     /// Shared so the render thread gets a snapshot for the price of a
     /// pointer; a change copies the table only while a snapshot is held.
     signs: Arc<SignTable>,
-    entities: BTreeMap<Pos, BlockEntityData>,
+    entities: Arc<EntityTable>,
     breaking: BTreeMap<i32, BreakProgress>,
-}
-
-fn insert_capped<V>(map: &mut BTreeMap<Pos, V>, pos: Pos, value: V) {
-    if map.len() < MAX_ENTRIES || map.contains_key(&pos) {
-        map.insert(pos, value);
-    }
 }
 
 impl BlockEntities {
@@ -76,7 +73,10 @@ impl BlockEntities {
             action: packet.action,
             nbt: packet.nbt.clone(),
         };
-        insert_capped(&mut self.entities, (packet.x, packet.y, packet.z), data);
+        let pos = (packet.x, packet.y, packet.z);
+        if self.entities.len() < MAX_ENTRIES || self.entities.contains_key(&pos) {
+            Arc::make_mut(&mut self.entities).insert(pos, data);
+        }
     }
 
     /// Applies a break animation (0x25): per breaker, stages `0..=9` set the
@@ -100,7 +100,9 @@ impl BlockEntities {
         if self.signs.contains_key(&pos) {
             Arc::make_mut(&mut self.signs).remove(&pos);
         }
-        self.entities.remove(&pos);
+        if self.entities.contains_key(&pos) {
+            Arc::make_mut(&mut self.entities).remove(&pos);
+        }
     }
 
     /// Forgets everything (the dimension changed).
@@ -108,8 +110,17 @@ impl BlockEntities {
         if !self.signs.is_empty() {
             self.signs = Arc::default();
         }
-        self.entities.clear();
+        if !self.entities.is_empty() {
+            self.entities = Arc::default();
+        }
         self.breaking.clear();
+    }
+
+    /// A shared snapshot of the updates of the other block entities (skulls,
+    /// banners, beacons, spawners, flower pots), for the render thread.
+    #[must_use]
+    pub fn entity_table(&self) -> Arc<EntityTable> {
+        Arc::clone(&self.entities)
     }
 
     /// The four lines of the sign at a position.

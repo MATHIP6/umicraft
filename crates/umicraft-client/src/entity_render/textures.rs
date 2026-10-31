@@ -8,6 +8,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
+use crate::block_entity_render::BlockEntityMeshes;
 use glam::Mat4;
 use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::skin::decode_png_bytes;
@@ -86,7 +87,7 @@ pub struct EntityTextures {
     camera: Cell<glam::Vec3>,
     /// The chests of the frame, meshed by the block-entity renderer and drawn
     /// with the entities (P7c). Taken by the next upload.
-    block_entities: RefCell<HashMap<TextureSlot, Vec<EntityVertex>>>,
+    block_entities: RefCell<BlockEntityMeshes>,
 }
 
 impl EntityTextures {
@@ -164,8 +165,8 @@ impl EntityTextures {
 
     /// Hands over the tile-entity vertices of this frame, which the next
     /// upload draws with the entities.
-    pub fn set_block_entities(&self, batches: HashMap<TextureSlot, Vec<EntityVertex>>) {
-        *self.block_entities.borrow_mut() = batches;
+    pub(crate) fn set_block_entities(&self, meshes: BlockEntityMeshes) {
+        *self.block_entities.borrow_mut() = meshes;
     }
 
     /// Tells whether the local player is a spectator, who sees the invisible
@@ -227,8 +228,12 @@ impl EntityTextures {
             self.viewer_is_spectator.get(),
             self.camera.get(),
         );
-        for (slot, vertices) in self.block_entities.take() {
+        let block_entities = self.block_entities.take();
+        for (slot, vertices) in block_entities.solid {
             meshed.solid.entry(slot).or_default().extend(vertices);
+        }
+        for (slot, vertices) in block_entities.additive {
+            meshed.additive.entry(slot).or_default().extend(vertices);
         }
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();

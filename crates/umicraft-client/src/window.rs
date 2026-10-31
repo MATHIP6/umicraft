@@ -1260,6 +1260,8 @@ impl App {
                 &BlockEntityScene {
                     lids: world.chest_lids(),
                     signs: world.signs(),
+                    data: world.block_entity_data(),
+                    seconds: (now - self.started).as_secs_f32(),
                     font: self.ui_atlas.as_ref(),
                     partial_tick: environment.partial_tick,
                     camera: self.camera.position,

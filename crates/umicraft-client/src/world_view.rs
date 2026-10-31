@@ -18,6 +18,7 @@ use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
 use umicraft_game::hand::HandPose;
 use umicraft_game::inventory::WindowView;
 use umicraft_game::piston::MovingBlocks;
+use umicraft_game::server::block_entities::EntityTable;
 use umicraft_game::server::block_entities::SignTable;
 use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
@@ -90,6 +91,8 @@ pub struct WorldView {
     chest_lids: Arc<ChestLids>,
     /// The blocks pistons move, of the newest frame.
     moving_blocks: Arc<MovingBlocks>,
+    /// The block entity updates of the newest frame.
+    block_entity_data: Arc<EntityTable>,
     signs: Arc<SignTable>,
     /// The texture layer of each destroy stage, when the terrain has them.
     destroy_layers: Option<[u32; STAGES]>,
@@ -131,6 +134,7 @@ impl WorldView {
             maps: Arc::default(),
             chest_lids: Arc::default(),
             moving_blocks: Arc::default(),
+            block_entity_data: Arc::default(),
             signs: Arc::default(),
             destroy_layers: terrain.mesher().destroy_layers(),
             mesher: terrain.mesher(),
@@ -246,6 +250,12 @@ impl WorldView {
         &self.signs
     }
 
+    /// The updates of the skulls, banners, beacons, spawners and flower pots.
+    #[must_use]
+    pub fn block_entity_data(&self) -> &EntityTable {
+        &self.block_entity_data
+    }
+
     /// The blocks pistons are moving in the newest frame.
     #[must_use]
     pub fn moving_blocks(&self) -> &MovingBlocks {
@@ -314,6 +324,7 @@ impl WorldView {
                 self.maps = Arc::clone(&frame.maps);
                 self.chest_lids = Arc::clone(&frame.chest_lids);
                 self.moving_blocks = Arc::clone(&frame.moving_blocks);
+                self.block_entity_data = Arc::clone(&frame.block_entity_data);
                 self.signs = Arc::clone(&frame.signs);
                 if *self.cracks != *frame.cracks {
                     self.cracks = Arc::clone(&frame.cracks);
@@ -708,6 +719,7 @@ mod tests {
             maps: Arc::default(),
             chest_lids: Arc::default(),
             moving_blocks: Arc::default(),
+            block_entity_data: Arc::default(),
             signs: Arc::default(),
         }
     }

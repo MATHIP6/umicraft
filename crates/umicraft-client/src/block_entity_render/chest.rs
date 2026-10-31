@@ -72,6 +72,8 @@ mod tests {
     fn draw(entry: &BlockEntityRef) -> HashMap<TextureSlot, Vec<EntityVertex>> {
         let lids = umicraft_game::server::chest_lids::ChestLids::default();
         let scene = BlockEntityScene {
+            data: &umicraft_game::server::block_entities::EntityTable::new(),
+            seconds: 0.0,
             lids: &lids,
             signs: &SignTable::new(),
             font: None,
