@@ -27,6 +27,7 @@ mod pose;
 mod quadruped;
 mod rabbit;
 mod sheep;
+mod sign;
 mod silverfish;
 mod slime;
 mod snowman;
@@ -40,7 +41,7 @@ pub use armor::ArmorMaterial;
 pub use bat::BatModel;
 pub use blaze::BlazeModel;
 pub use cape::CapeModel;
-pub use chest::ChestModel;
+pub use chest::{chest_facing_degrees, ChestModel};
 pub use chicken::ChickenModel;
 pub use creeper::CreeperModel;
 pub use dragon::{DragonModel, FlightFrame};
@@ -56,6 +57,7 @@ pub use pose::{ArmPose, HumanoidPose};
 pub use quadruped::QuadrupedModel;
 pub use rabbit::RabbitModel;
 pub use sheep::SheepModel;
+pub use sign::{sign_text_transform, standing_sign_degrees, wall_sign_degrees, SignModel};
 pub use silverfish::SilverfishModel;
 pub use slime::SlimeModel;
 pub use snowman::SnowmanModel;
@@ -501,6 +503,16 @@ pub enum TextureSlot {
     Minecart,
     /// The chest (`chest/normal.png`), carried by a chest minecart.
     Chest,
+    /// The trapped chest (`chest/trapped.png`).
+    ChestTrapped,
+    /// The ender chest (`chest/ender.png`).
+    ChestEnder,
+    /// The large chest (`chest/normal_double.png`, 128x64).
+    ChestDouble,
+    /// The large trapped chest (`chest/trapped_double.png`, 128x64).
+    ChestTrappedDouble,
+    /// The sign (`sign.png`).
+    Sign,
     /// The ender crystal (`endercrystal/endercrystal.png`).
     EnderCrystal,
     /// The experience orb (`experience_orb.png`).

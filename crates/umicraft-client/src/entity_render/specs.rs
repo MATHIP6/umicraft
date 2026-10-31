@@ -101,6 +101,31 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (vec![0; 64 * 64 * 4], 64, 64),
         },
         TextureSpec {
+            slot: TextureSlot::ChestTrapped,
+            jar_path: "assets/minecraft/textures/entity/chest/trapped.png",
+            fallback: || (vec![0; 64 * 64 * 4], 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::ChestEnder,
+            jar_path: "assets/minecraft/textures/entity/chest/ender.png",
+            fallback: || (vec![0; 64 * 64 * 4], 64, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::ChestDouble,
+            jar_path: "assets/minecraft/textures/entity/chest/normal_double.png",
+            fallback: || (vec![0; 128 * 64 * 4], 128, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::ChestTrappedDouble,
+            jar_path: "assets/minecraft/textures/entity/chest/trapped_double.png",
+            fallback: || (vec![0; 128 * 64 * 4], 128, 64),
+        },
+        TextureSpec {
+            slot: TextureSlot::Sign,
+            jar_path: "assets/minecraft/textures/entity/sign.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
             slot: TextureSlot::EnderCrystal,
             jar_path: "assets/minecraft/textures/entity/endercrystal/endercrystal.png",
             fallback: || (vec![0; 64 * 32 * 4], 64, 32),

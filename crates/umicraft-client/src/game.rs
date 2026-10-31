@@ -2045,6 +2045,7 @@ fn apply_server_state(server: &mut ServerState, event: &PlayEvent) {
         PlayEvent::Teams(packet) => server.apply_team(packet),
         PlayEvent::Title(packet) => server.apply_title(packet),
         PlayEvent::UpdateSign(packet) => server.apply_sign(packet),
+        PlayEvent::BlockAction(packet) => server.apply_block_action(packet),
         PlayEvent::UpdateBlockEntity(packet) => server.apply_block_entity(packet),
         PlayEvent::BlockBreakAnim(packet) => server.apply_block_break_anim(packet),
         PlayEvent::Maps(packet) => server.apply_map(packet),

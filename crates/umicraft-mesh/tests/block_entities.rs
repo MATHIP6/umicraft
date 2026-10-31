@@ -33,7 +33,11 @@ fn a_double_chest_is_two_references_and_no_geometry() {
     let chest = BlockState::new(54, 3);
     let scene = Scene(vec![([2, 5, 2], chest), ([3, 5, 2], chest)]);
     let mesh = mesh_chunk_with_models(ChunkPos::new(0, 0), &scene, &context());
-    assert_eq!(mesh.face_count(), 0, "a chest is not a missing-texture cube");
+    assert_eq!(
+        mesh.face_count(),
+        0,
+        "a chest is not a missing-texture cube"
+    );
     assert_eq!(mesh.block_entities.len(), 2);
     assert!(!mesh.is_empty(), "the chunk still has something to show");
     let west = mesh

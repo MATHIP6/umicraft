@@ -27,6 +27,7 @@
 
 pub mod attributes;
 pub mod block_entities;
+pub mod chest_lids;
 pub mod effects;
 pub mod map_colors;
 pub mod maps;
@@ -38,6 +39,7 @@ pub mod world_border;
 
 use std::collections::BTreeMap;
 
+use umicraft_protocol::packets::play::clientbound::block_action::BlockAction;
 use umicraft_protocol::packets::play::clientbound::block_break_anim::BlockBreakAnim;
 use umicraft_protocol::packets::play::clientbound::camera::Camera;
 use umicraft_protocol::packets::play::clientbound::change_game_state::ChangeGameState;
@@ -66,6 +68,7 @@ use umicraft_protocol::types::read_string;
 
 use attributes::Attributes;
 use block_entities::{BlockEntities, Pos};
+use chest_lids::ChestLids;
 use effects::Effects;
 use maps::MapStore;
 use player_list::PlayerList;
@@ -106,6 +109,7 @@ pub struct ServerState {
     title: TitleState,
     maps: MapStore,
     blocks: BlockEntities,
+    chest_lids: ChestLids,
     statistics: BTreeMap<String, i32>,
     camera: Option<i32>,
     brand: Option<String>,
@@ -143,6 +147,7 @@ impl ServerState {
         self.sign_editor = None;
         if dimension_changed {
             self.blocks.clear();
+            self.chest_lids.forget_all();
             self.maps.clear();
             self.border = Border::default();
             self.weather.reset_world();
@@ -155,6 +160,7 @@ impl ServerState {
         self.effects.tick();
         self.title.tick();
         self.border.tick();
+        self.chest_lids.tick();
     }
 
     fn is_local(&self, entity_id: i32) -> bool {
@@ -256,6 +262,11 @@ impl ServerState {
     /// Applies a block-break animation (0x25).
     pub fn apply_block_break_anim(&mut self, packet: &BlockBreakAnim) {
         self.blocks.apply_break_anim(packet);
+    }
+
+    /// Applies a block action (0x24); only chest viewer counts are kept.
+    pub fn apply_block_action(&mut self, packet: &BlockAction) {
+        self.chest_lids.apply_action(packet);
     }
 
     /// Applies a map packet (0x34).
@@ -374,6 +385,11 @@ impl ServerState {
     /// Signs, block entities and break animations.
     pub fn block_entities(&self) -> &BlockEntities {
         &self.blocks
+    }
+
+    /// The chest lid animations.
+    pub fn chest_lids(&self) -> &ChestLids {
+        &self.chest_lids
     }
 
     /// Mutable access, so the world code can drop the data of a block that
