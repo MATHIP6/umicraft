@@ -15,10 +15,11 @@ use umicraft_assets::skin::decode_png_bytes;
 use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_game::hand::HandPose;
 use umicraft_model::entity::TextureSlot;
-use umicraft_render::{EntityTexture, EntityVertex, Renderer};
+use umicraft_render::{EntityTexture, Renderer};
 use umicraft_ui::FontAtlas;
 
 use super::armor::armor_texture;
+use super::banner_cache::BannerCache;
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
@@ -77,6 +78,8 @@ pub struct EntityTextures {
     jar: Option<ClientJar>,
     /// The skins and capes of players.
     skins: RefCell<SkinSet>,
+    /// The composed banner designs among `textures`.
+    banners: RefCell<BannerCache>,
     /// The camera yaw the flames of burning entities face.
     view_yaw: Cell<f32>,
     /// The camera pitch the experience orbs face.
@@ -110,6 +113,7 @@ impl EntityTextures {
             textures: RefCell::new(textures),
             jar,
             skins: RefCell::new(SkinSet::new()),
+            banners: RefCell::default(),
             view_yaw: Cell::new(0.0),
             view_pitch: Cell::new(0.0),
             viewer_is_spectator: Cell::new(false),
@@ -235,6 +239,12 @@ impl EntityTextures {
         for (slot, vertices) in block_entities.additive {
             meshed.additive.entry(slot).or_default().extend(vertices);
         }
+        self.banners.borrow_mut().ensure(
+            &block_entities.banners,
+            &mut self.textures.borrow_mut(),
+            self.jar.as_ref(),
+            renderer,
+        );
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
         let mut solid: Vec<_> = meshed

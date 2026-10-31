@@ -49,18 +49,12 @@ pub(super) fn skull_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -
     };
     let (mut slot, humanoid) = skull_texture(skull.damage);
     if skull.damage == PLAYER_SKULL {
-        // The skin of the owner, when the server sent the owner with its
-        // textures and the download is ready (`TileEntitySkullRenderer`
-        // would ask the session server for a bare name; this does not).
-        let owner_skin = skull
+        let textures = skull
             .nbt
             .as_deref()
-            .and_then(|nbt| ItemDisplay::from_nbt(nbt).skull_textures)
-            .and_then(|value| parse_textures_property(&value).ok())
-            .and_then(|textures| textures.skin)
-            .and_then(|url| skins.skin(&url));
-        if let Some(index) = owner_skin {
-            slot = TextureSlot::Skin(index);
+            .and_then(|nbt| ItemDisplay::from_nbt(nbt).skull_textures);
+        if let Some(owner) = textures.and_then(|value| owner_skin_slot(&value, skins)) {
+            slot = owner;
         }
     }
     let lift = if ent.meta.is_zombie_villager() {
@@ -73,26 +67,37 @@ pub(super) fn skull_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -
     vec![EntityLayer::new(slot, vertices)]
 }
 
+/// The skin slot of a skull owner whose `textures` property is `value`
+/// (base64 JSON), once the download is ready.
+///
+/// `TileEntitySkullRenderer` would ask the session server for a bare name;
+/// this only uses the textures the server sent with the owner. Shared by the
+/// worn skull and the placed one.
+pub(crate) fn owner_skin_slot(value: &str, skins: &dyn SkinLookup) -> Option<TextureSlot> {
+    let url = parse_textures_property(value).ok()?.skin?;
+    skins.skin(&url).map(TextureSlot::Skin)
+}
+
 /// The texture of a skull type and whether its model is the humanoid head
 /// (64 x 64 with a hat layer) rather than the plain skull (64 x 32).
-fn skull_texture(skull_type: i16) -> (TextureSlot, bool) {
+pub(crate) fn skull_texture(skull_type: i16) -> (TextureSlot, bool) {
     match skull_type {
         1 => (TextureSlot::SkeletonWither, false),
         2 => (TextureSlot::Zombie, true),
-        // A player skull wears the default skin: the owner's skin needs a
-        // profile lookup the client does not make.
+        // A player skull wears the default skin unless the owner's skin is
+        // known (see [`owner_skin_slot`]).
         3 => (TextureSlot::Steve, true),
         4 => (TextureSlot::Creeper, false),
         _ => (TextureSlot::Skeleton, false),
     }
 }
 
-/// The skull model placed on `head` (MCP `ModelSkeletonHead`,
-/// `ModelHumanoidHead`): inflated by [`SKULL_SCALE`] about the pivot of the
-/// head and lifted by `lift` blocks.
-fn skull_mesh(head: &ModelPart, humanoid: bool, lift: f32) -> Vec<ModelVertex> {
+/// The head of a skull model (MCP `ModelSkeletonHead`, `ModelHumanoidHead`)
+/// pivoting at `pivot`: the 8 pixel cube, and for the humanoid head the hat
+/// layer 0.25 larger. The boxes are y-up, as the rest of the crate's models.
+pub(crate) fn skull_part(pivot: [f32; 3], humanoid: bool) -> ModelPart {
     let texture = if humanoid { [64.0, 64.0] } else { [64.0, 32.0] };
-    let mut part = ModelPart::new(head.pivot).with_box(ModelBox::new(
+    let mut part = ModelPart::new(pivot).with_box(ModelBox::new(
         [-4.0, 0.0, -4.0],
         [8.0, 8.0, 8.0],
         [0.0, 0.0],
@@ -108,6 +113,14 @@ fn skull_mesh(head: &ModelPart, humanoid: bool, lift: f32) -> Vec<ModelVertex> {
             0.25,
         ));
     }
+    part
+}
+
+/// The skull model placed on `head` (MCP `ModelSkeletonHead`,
+/// `ModelHumanoidHead`): inflated by [`SKULL_SCALE`] about the pivot of the
+/// head and lifted by `lift` blocks.
+fn skull_mesh(head: &ModelPart, humanoid: bool, lift: f32) -> Vec<ModelVertex> {
+    let mut part = skull_part(head.pivot, humanoid);
     part.rotation = head.rotation;
     let mut vertices = Vec::new();
     part.emit(Mat4::from_scale(Vec3::splat(1.0 / 16.0)), &mut vertices);

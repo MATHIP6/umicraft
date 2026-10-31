@@ -63,6 +63,7 @@
 mod actual_state;
 mod block_entity;
 mod face;
+mod flower_pot;
 pub mod fluid;
 pub mod item;
 mod legacy;
@@ -76,6 +77,7 @@ mod vertex;
 
 pub use block_entity::{BlockEntityKind, BlockEntityRef, SameNeighbours};
 pub use face::Face;
+pub use flower_pot::push_flower_pot_plant;
 pub use legacy::{mesh_chunk, texture_layer};
 pub use mesh::Mesh;
 pub use models::{mesh_chunk_with_models, ModelMeshContext};

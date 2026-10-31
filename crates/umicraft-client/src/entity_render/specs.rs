@@ -126,6 +126,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (vec![0; 64 * 32 * 4], 64, 32),
         },
         TextureSpec {
+            slot: TextureSlot::EnchantingBook,
+            jar_path: "assets/minecraft/textures/entity/enchanting_table_book.png",
+            fallback: || (vec![0; 64 * 32 * 4], 64, 32),
+        },
+        TextureSpec {
             slot: TextureSlot::EnderCrystal,
             jar_path: "assets/minecraft/textures/entity/endercrystal/endercrystal.png",
             fallback: || (vec![0; 64 * 32 * 4], 64, 32),
@@ -178,6 +183,22 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
         TextureSpec {
             slot: TextureSlot::DragonBeam,
             jar_path: "assets/minecraft/textures/entity/endercrystal/endercrystal_beam.png",
+            fallback: || (vec![0; 4], 1, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::BeaconBeam,
+            jar_path: "assets/minecraft/textures/entity/beacon_beam.png",
+            // No original stand-in: without the jar the beam is not drawn.
+            fallback: || (vec![0; 4], 1, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::EndSky,
+            jar_path: "assets/minecraft/textures/environment/end_sky.png",
+            fallback: || (vec![0; 4], 1, 1),
+        },
+        TextureSpec {
+            slot: TextureSlot::EndPortal,
+            jar_path: "assets/minecraft/textures/entity/end_portal.png",
             fallback: || (vec![0; 4], 1, 1),
         },
         TextureSpec {

@@ -11,9 +11,22 @@
 //! - `chest`: chests, trapped chests, ender chests, single and double, with the
 //!   lid angle of the `Block Action` state.
 //! - `sign`: standing and wall signs with their four lines of text.
+//! - `banner`: standing and wall banners, textured by `banner_texture`.
+//! - `skull`: placed skulls, with the owner's skin for a player skull.
 
+mod additive;
+mod banner;
+mod banner_patterns;
+mod banner_texture;
+mod beacon;
+mod book;
+mod book_state;
 mod chest;
+mod end_portal;
+mod flower_pot;
 mod sign;
+mod skull;
+mod spawner;
 
 use std::collections::HashMap;
 
@@ -25,9 +38,17 @@ use umicraft_model::entity::{ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 use umicraft_ui::FontAtlas;
 
+pub(crate) use flower_pot::push_pot_plants;
+
+use crate::entity_render::SkinLookup;
+pub(crate) use banner_texture::{compose as compose_banner, BannerDesign, Image};
+
 /// Squared distance beyond which a tile entity is not drawn
 /// (`TileEntity.getMaxRenderDistanceSquared`, 64 blocks).
 const MAX_RENDER_DISTANCE_SQUARED: f32 = 4096.0;
+/// The same for a beacon, whose beam is seen from afar
+/// (`TileEntityBeacon.getMaxRenderDistanceSquared`, 256 blocks).
+const BEACON_RENDER_DISTANCE_SQUARED: f32 = 65_536.0;
 
 /// What the renderers need besides the block itself.
 pub(crate) struct BlockEntityScene<'a> {
@@ -38,6 +59,8 @@ pub(crate) struct BlockEntityScene<'a> {
     /// The last update of the other block entities (skull type, banner
     /// patterns, beacon levels, spawner mob, flower pot contents).
     pub data: &'a EntityTable,
+    /// The downloaded skins, for the player skulls.
+    pub skins: &'a dyn SkinLookup,
     /// Seconds since the client started, for the animations that do not
     /// follow the world clock (the beam, the book).
     pub seconds: f32,
@@ -54,6 +77,10 @@ pub(crate) struct BlockEntityScene<'a> {
 /// Vertices grouped by the texture they sample.
 pub(crate) type Batches = HashMap<TextureSlot, Vec<EntityVertex>>;
 
+/// The banner designs of a frame by the slot their vertices use; the texture
+/// cache composes the ones it has not got.
+pub(crate) type BannerDesigns = HashMap<TextureSlot, BannerDesign>;
+
 /// What the tile entities of a frame draw.
 #[derive(Debug, Default)]
 pub(crate) struct BlockEntityMeshes {
@@ -61,6 +88,8 @@ pub(crate) struct BlockEntityMeshes {
     pub solid: Batches,
     /// Blended over the world: the beacon beam, the end portal.
     pub additive: Batches,
+    /// The textures the banners of `solid` need.
+    pub banners: BannerDesigns,
 }
 
 /// The vertices of every tile entity of `entries` in range, by texture.
@@ -71,8 +100,12 @@ pub(crate) fn mesh_block_entities<'a>(
 ) -> BlockEntityMeshes {
     let mut meshes = BlockEntityMeshes::default();
     let batches = &mut meshes.solid;
+    let banners = &mut meshes.banners;
+    let additive = &mut meshes.additive;
     for entry in entries.filter(|entry| in_range(entry, scene.camera)) {
         match BlockEntityKind::of(entry.state) {
+            Some(BlockEntityKind::Beacon) => beacon::add_beam(additive, entry, scene),
+            Some(BlockEntityKind::EndPortal) => end_portal::add_end_portal(additive, entry, scene),
             Some(
                 BlockEntityKind::Chest
                 | BlockEntityKind::TrappedChest
@@ -81,18 +114,14 @@ pub(crate) fn mesh_block_entities<'a>(
             Some(BlockEntityKind::StandingSign | BlockEntityKind::WallSign) => {
                 sign::add_sign(batches, entry, scene);
             }
-            // Drawn by the renderers P7d adds, one per kind.
-            Some(
-                BlockEntityKind::Spawner
-                | BlockEntityKind::EnchantingTable
-                | BlockEntityKind::EndPortal
-                | BlockEntityKind::Beacon
-                | BlockEntityKind::FlowerPot
-                | BlockEntityKind::Skull
-                | BlockEntityKind::StandingBanner
-                | BlockEntityKind::WallBanner,
-            )
-            | None => {}
+            Some(BlockEntityKind::StandingBanner | BlockEntityKind::WallBanner) => {
+                banner::add_banner(batches, banners, entry, scene);
+            }
+            Some(BlockEntityKind::Skull) => skull::add_skull(batches, entry, scene),
+            Some(BlockEntityKind::Spawner) => spawner::add_spawner(batches, entry, scene),
+            Some(BlockEntityKind::EnchantingTable) => book::add_book(batches, entry, scene),
+            // The plant is added to the terrain mesh, see `push_pot_plants`.
+            Some(BlockEntityKind::FlowerPot) | None => {}
         }
     }
     meshes
@@ -102,7 +131,12 @@ pub(crate) fn mesh_block_entities<'a>(
 fn in_range(entry: &BlockEntityRef, camera: Vec3) -> bool {
     let [x, y, z] = entry.position;
     let centre = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
-    centre.distance_squared(camera) <= MAX_RENDER_DISTANCE_SQUARED
+    let limit = if BlockEntityKind::of(entry.state) == Some(BlockEntityKind::Beacon) {
+        BEACON_RENDER_DISTANCE_SQUARED
+    } else {
+        MAX_RENDER_DISTANCE_SQUARED
+    };
+    centre.distance_squared(camera) <= limit
 }
 
 /// The packed light word of a tile entity's vertices (`block | sky << 4`).

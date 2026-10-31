@@ -15,7 +15,7 @@ use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, Renderer};
 
 /// What a mesher may ask about downloaded textures.
-pub(super) trait SkinLookup {
+pub(crate) trait SkinLookup {
     /// The index of the skin at `url`, once it is ready.
     fn skin(&self, url: &str) -> Option<u32>;
     /// The index of the cape at `url`, once it is ready.
@@ -23,7 +23,7 @@ pub(super) trait SkinLookup {
 }
 
 /// No skin is ever ready: everybody wears the default skin.
-pub(super) struct NoSkins;
+pub(crate) struct NoSkins;
 
 impl SkinLookup for NoSkins {
     fn skin(&self, _url: &str) -> Option<u32> {

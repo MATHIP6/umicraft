@@ -1261,6 +1261,7 @@ impl App {
                     lids: world.chest_lids(),
                     signs: world.signs(),
                     data: world.block_entity_data(),
+                    skins: entity_textures,
                     seconds: (now - self.started).as_secs_f32(),
                     font: self.ui_atlas.as_ref(),
                     partial_tick: environment.partial_tick,

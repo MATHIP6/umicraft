@@ -18,6 +18,7 @@
 mod animals;
 mod armor;
 mod arrows;
+mod banner_cache;
 mod bolt;
 mod creatures;
 mod dragon_beam;
@@ -56,6 +57,10 @@ pub(crate) use animals::WITCH_SCALE;
 pub use hand::hand_vertices;
 pub(crate) use mobs::posed_humanoid_mob;
 pub(crate) use player::posed_player;
+#[cfg(test)]
+pub(crate) use skins::NoSkins;
+pub(crate) use skins::SkinLookup;
+pub(crate) use skull::{owner_skin_slot, skull_part, skull_texture};
 pub use textures::{load_or_fallback, procedural_dirt_texture, EntityTextures};
 pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 

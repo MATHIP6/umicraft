@@ -7,8 +7,10 @@
 //! registry ([`TextureSlot`], [`MeshLayer`]) are defined here.
 
 mod armor;
+mod banner;
 mod bat;
 mod blaze;
+mod book;
 mod cape;
 mod chest;
 mod chicken;
@@ -38,8 +40,10 @@ mod wither;
 mod wolf;
 
 pub use armor::ArmorMaterial;
+pub use banner::{banner_sway, BannerModel};
 pub use bat::BatModel;
 pub use blaze::BlazeModel;
+pub use book::{BookModel, BookPose};
 pub use cape::CapeModel;
 pub use chest::{chest_facing_degrees, ChestModel};
 pub use chicken::ChickenModel;
@@ -513,9 +517,16 @@ pub enum TextureSlot {
     ChestTrappedDouble,
     /// The sign (`sign.png`).
     Sign,
+    /// A banner design, composed at run time from `banner_base.png` and the
+    /// pattern masks. The number is the hash of the design
+    /// (`BannerDesign::slot` in the client); the texture is not in the
+    /// static table.
+    Banner(u64),
     /// The glyphs of the font atlas as black on transparent, for the text of
     /// signs. Made from the UI font at run time, not read from the jar.
     SignText,
+    /// The book above an enchanting table (`enchanting_table_book.png`).
+    EnchantingBook,
     /// The ender crystal (`endercrystal/endercrystal.png`).
     EnderCrystal,
     /// The experience orb (`experience_orb.png`).
@@ -537,6 +548,12 @@ pub enum TextureSlot {
     /// The ray between an ender crystal and the dragon it heals
     /// (`endercrystal/endercrystal_beam.png`), which scrolls along the ray.
     DragonBeam,
+    /// The beam of a beacon (`entity/beacon_beam.png`), which scrolls up.
+    BeaconBeam,
+    /// The sky layer of an end portal (`environment/end_sky.png`).
+    EndSky,
+    /// The swirl layers of an end portal (`entity/end_portal.png`).
+    EndPortal,
     /// The dragon while it dies (`enderdragon/dragon_exploding.png`): the
     /// dragon texture whose alpha says in which order the body dissolves.
     DragonExploding,
@@ -704,6 +721,9 @@ impl TextureSlot {
                 | Self::Lightning
                 | Self::DragonRay
                 | Self::DragonBeam
+                | Self::BeaconBeam
+                | Self::EndSky
+                | Self::EndPortal
         )
     }
 

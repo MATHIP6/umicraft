@@ -27,6 +27,7 @@ use umicraft_mesh::{BlockEntityRef, ChunkSnapshot, Mesh, Vertex};
 use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer};
 use umicraft_world::{ChunkPos, LightLevel};
 
+use crate::block_entity_render::push_pot_plants;
 use crate::cracks::{crack_mesh, Crack, STAGES};
 use crate::creative_view::CreativeView;
 use crate::error::ClientError;
@@ -363,17 +364,25 @@ impl WorldView {
         self.cracks = Arc::from([]);
     }
 
-    /// The geometry of the blocks pistons move at `partial_tick`, in world
-    /// coordinates. Empty when nothing moves or the terrain has no models
+    /// The geometry of the blocks pistons move at `partial_tick`, and the
+    /// plants of flower pots, in world coordinates. Empty when nothing
+    /// moves or the terrain has no models
     /// (the procedural set draws moving blocks nowhere).
     #[must_use]
     pub fn moving_blocks_mesh(&self, partial_tick: f32) -> Mesh {
-        match self.mesher.model_context() {
-            Some(context) if !self.moving_blocks.is_empty() => {
-                mesh_moving_blocks(&self.moving_blocks, partial_tick, context)
-            }
-            _ => Mesh::default(),
-        }
+        let Some(context) = self.mesher.model_context() else {
+            return Mesh::default();
+        };
+        let mut mesh = mesh_moving_blocks(&self.moving_blocks, partial_tick, context);
+        // The plants of the flower pots ride the same dynamic mesh: their
+        // contents come from tile entity data the chunk mesher cannot see.
+        push_pot_plants(
+            &mut mesh,
+            self.block_entities(),
+            self.block_entity_data(),
+            context,
+        );
+        mesh
     }
 
     /// Forgets the replaced world, including the jobs still in flight.

@@ -96,8 +96,10 @@ fn enchantment(entry: &Nbt) -> Enchantment {
     }
 }
 
-/// `SkullOwner.Properties.textures[0].Value` (`NBTUtil.readGameProfileFromNBT`).
-fn skull_textures(tag: &Nbt) -> Option<String> {
+/// `Properties.textures[0].Value` of a skull owner profile
+/// (`NBTUtil.readGameProfileFromNBT`); the owner of a placed skull has the
+/// same shape as the `SkullOwner` of the item.
+pub fn skull_textures(tag: &Nbt) -> Option<String> {
     let value = tag
         .get("Properties")?
         .get("textures")?

@@ -20,7 +20,7 @@
 //! References (ADR-0001): `TileEntityPistonRenderer.renderTileEntityAt`,
 //! `BlockPistonExtension` (blockstate `facing`/`short`/`type`).
 
-use umicraft_model::BlockModel;
+use umicraft_model::{BlockModel, ModelVariant};
 use umicraft_world::{BlockState, LightLevel};
 
 use crate::models::{emit_model_quads, select_variant, Placement};
@@ -129,9 +129,22 @@ fn push_model(
     light: LightLevel,
     context: &ModelMeshContext,
 ) {
-    let Some(variant) = select_variant(model, position) else {
-        return;
-    };
+    if let Some(variant) = select_variant(model, position) {
+        push_variant(mesh, variant, state, position, offset, light, context);
+    }
+}
+
+/// Appends one chosen `variant`; the shared tail of the moving blocks and of
+/// the flower pot plants, which both draw a model with no neighbour.
+pub(crate) fn push_variant(
+    mesh: &mut Mesh,
+    variant: &ModelVariant,
+    state: BlockState,
+    position: [i32; 3],
+    offset: [f32; 3],
+    light: LightLevel,
+    context: &ModelMeshContext,
+) {
     let source = LoneBlock { state, light };
     let placement = Placement {
         position: [0, 0, 0],

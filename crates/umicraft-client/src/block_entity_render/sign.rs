@@ -190,6 +190,7 @@ mod tests {
         let scene = BlockEntityScene {
             data: &umicraft_game::server::block_entities::EntityTable::new(),
             seconds: 0.0,
+            skins: &crate::entity_render::NoSkins,
             lids: &lids,
             signs,
             font,
