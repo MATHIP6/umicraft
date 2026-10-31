@@ -38,10 +38,9 @@ use umicraft_world::{BlockState, ChunkPos};
 
 use crate::fluid::{self, FluidLayers};
 
-use crate::{
-    emit_legacy_faces_with, is_transparent_pass, occludes, quad_light, tint, BlockSource, Mesh,
-    Vertex,
-};
+use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, occludes};
+use crate::lighting::quad_light;
+use crate::{tint, BlockSource, Mesh, Vertex};
 
 /// The baked models and the texture layers the model mesher reads.
 ///
