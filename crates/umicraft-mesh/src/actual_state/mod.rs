@@ -22,12 +22,18 @@
 //! `docs/sources.md`.
 
 mod connect;
+mod door;
+mod double_plant;
 mod fence;
 mod gate;
 mod pane;
+mod redstone;
+mod snowy;
 mod stairs;
 #[cfg(test)]
 mod test_support;
+mod tripwire;
+mod vine;
 mod wall;
 
 use std::collections::BTreeMap;
@@ -49,6 +55,7 @@ const MAX_OVERRIDES: usize = 5;
 pub(crate) struct Overrides {
     items: [(&'static str, &'static str); MAX_OVERRIDES],
     len: usize,
+    document: Option<&'static str>,
 }
 
 impl Overrides {
@@ -62,6 +69,14 @@ impl Overrides {
     /// Sets a boolean property.
     pub(crate) fn set_flag(&mut self, name: &'static str, value: bool) {
         self.set(name, if value { "true" } else { "false" });
+    }
+
+    /// Takes the model from another blockstate document than the registry's.
+    ///
+    /// Needed when the document itself encodes the neighbour-dependent part,
+    /// like the double plants (one document per species).
+    pub(crate) fn set_document(&mut self, document: &'static str) {
+        self.document = Some(document);
     }
 
     /// The overridden `(name, value)` pairs.
@@ -93,7 +108,8 @@ pub(crate) fn model_for<'a>(
     };
     let overrides = (family.overrides)(&context)?;
     let key = merge_key(&base, overrides.as_slice());
-    models.model_by_key(rule.blockstate, &key)
+    let document = overrides.document.unwrap_or(rule.blockstate);
+    models.model_by_key(document, &key)
 }
 
 /// What a family needs to compute the properties of one block.
@@ -133,8 +149,32 @@ const FAMILIES: &[Family] = &[
         overrides: |c| gate::overrides(c.source, c.position, c.base.get("facing")?),
     },
     Family {
+        handles: door::handles,
+        overrides: |c| door::overrides(c.source, c.position, c.state),
+    },
+    Family {
+        handles: double_plant::handles,
+        overrides: |c| double_plant::overrides(c.source, c.position, c.state),
+    },
+    Family {
+        handles: snowy::handles,
+        overrides: |c| snowy::overrides(c.source, c.position, c.state),
+    },
+    Family {
         handles: stairs::handles,
         overrides: |c| Some(stairs::overrides(c.source, c.position, c.state)),
+    },
+    Family {
+        handles: vine::handles,
+        overrides: |c| Some(vine::overrides(c.source, c.position)),
+    },
+    Family {
+        handles: redstone::handles,
+        overrides: |c| Some(redstone::overrides(c.source, c.position)),
+    },
+    Family {
+        handles: tripwire::handles,
+        overrides: |c| Some(tripwire::overrides(c.source, c.position, c.state)),
     },
 ];
 

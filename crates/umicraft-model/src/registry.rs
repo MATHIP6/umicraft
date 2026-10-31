@@ -39,7 +39,10 @@
 //! `grass` and `mycelium` are a deliberate task-level deviation from 1.8: the
 //! game computes `snowy` from the block above, but the M5 acceptance table
 //! requires metadata bit 0 to select `snowy=false` / `snowy=true`, so both
-//! definitions do that.
+//! definitions do that. Real 1.8 metadata is always 0 there: the mesher
+//! (`umicraft-mesh` `actual_state::snowy`) overrides `snowy` from the block
+//! above and ignores the metadata bit. Upper double plants likewise use the
+//! sunflower document here and the mesher takes the species from the lower half.
 
 /// One metadata range that selects a blockstate document and variant key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

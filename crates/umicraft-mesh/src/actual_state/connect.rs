@@ -68,6 +68,18 @@ impl Side {
         self.rotate_y().rotate_y()
     }
 
+    /// Decodes the two low metadata bits of a `BlockDirectional` block
+    /// (repeaters, comparators, tripwire hooks): 0 south, 1 west, 2 north,
+    /// 3 east (`EnumFacing.getHorizontal`).
+    pub(super) const fn from_horizontal_index(bits: u8) -> Self {
+        match bits & 3 {
+            0 => Self::South,
+            1 => Self::West,
+            2 => Self::North,
+            _ => Self::East,
+        }
+    }
+
     /// Parses a `facing` property value.
     pub(super) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|side| side.name() == name)
@@ -116,6 +128,14 @@ mod tests {
         for side in Side::ALL {
             assert_eq!(side.opposite().opposite(), side);
         }
+    }
+
+    #[test]
+    fn horizontal_index_follows_enum_facing() {
+        assert_eq!(Side::from_horizontal_index(0), Side::South);
+        assert_eq!(Side::from_horizontal_index(1), Side::West);
+        assert_eq!(Side::from_horizontal_index(2), Side::North);
+        assert_eq!(Side::from_horizontal_index(7), Side::East);
     }
 
     #[test]

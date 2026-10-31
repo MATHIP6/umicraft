@@ -124,7 +124,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
 | World render | block models and textures | Partial — not verified against vanilla | P7 | — |  |
-| World render | neighbour-dependent shapes (fences, panes, walls, stairs, doors…) | Missing | P7 | — |  |
+| World render | neighbour-dependent shapes (fences, panes, walls, stairs, doors…) | Partial — not verified against vanilla | P7 | Unit tests (`umicraft_mesh::actual_state::*`), `tests/actual_state.rs` (wiring); `umicraft_model` `model_by_key` | Fences, panes, bars, walls, gates in walls, stair shapes, doors, double plants, vines, redstone wire, tripwire and snowy grass (ADR-0030). Approximations: `is_opaque()` stands for `isFullCube`; redstone power providers are an id table. Not compared with the owner's screenshots. |
 | World render | block entities | Missing | P7 | — |  |
 | World render | animated textures (water, lava, fire, portal, prismarine, sea lantern) | Partial | P7 | Unit tests (`animation`, `texture_animator`, `client_resources`) | Stepped once per 20 Hz tick from the `.mcmeta` timeline, with interpolation; not compared with vanilla frame by frame. Clock and compass wait for P3. |
 | World render | smooth lighting, AO, transparency, biome tint, fluids (sloped surface, flow direction, biome tint; restored 2026-10-28) | Partial — not verified against vanilla | P7 | — | Frame time never measured (M6 criterion). |
