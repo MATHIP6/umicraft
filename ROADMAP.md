@@ -48,8 +48,8 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M2 World data & first pixels | Done | — |
 | M3 Movement & interaction | Partial — non-vanilla traffic, fixed-time breaking, no respawn, knockback, effects, flying | P1, P2 |
 | M4 Interface foundation | Done | — |
-| M5 Model system & atlas | Partial — no neighbour-dependent states, no block entities, no item models, no animated textures | P3, P7 |
-| M6 Lighting, sky, fog, transparency | Partial — procedural sky, no weather, frame time not measured | P7 |
+| M5 Model system & atlas | Partial — neighbour-dependent states and block entities done in P7 (not all checked in game); animated textures to verify (P7h) | P7 |
+| M6 Lighting, sky, fog, transparency | Partial — vanilla sky, clouds, weather, fog and border done in P7 (not all checked in game); frame time not measured (P7h) | P7 |
 | M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files unused, animated textures missing | P7, P9 |
 | M8 Entities | Partial / defective — animations, metadata, skins, armour, held items, objects, lighting | P5 |
 | M9 Inventory & containers | Partial — `Click Window` never sent, no item icons | P3, P4 |
