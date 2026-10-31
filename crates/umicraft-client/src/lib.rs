@@ -38,6 +38,7 @@ pub mod item_icons;
 pub mod item_tints;
 pub mod item_world;
 mod java_random;
+pub mod map_render;
 pub mod mesher;
 pub mod model_resources;
 pub mod nametag_draw;

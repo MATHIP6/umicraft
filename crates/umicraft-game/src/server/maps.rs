@@ -9,8 +9,11 @@
 //! colour patch (the icons and scale still apply) and never panics.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use umicraft_protocol::packets::play::clientbound::maps::{MapColumns, MapIcon, Maps};
+
+use super::map_colors::map_pixel;
 
 /// Side length of a map in pixels.
 pub const MAP_SIZE: usize = 128;
@@ -27,7 +30,9 @@ pub struct MapData {
     pub scale: i8,
     /// The decorations (player markers, frames).
     pub icons: Vec<MapIcon>,
-    colors: Vec<u8>,
+    /// Shared copy-on-write so a frame snapshot of the store is cheap.
+    colors: Arc<Vec<u8>>,
+    revision: u64,
 }
 
 impl Default for MapData {
@@ -35,7 +40,8 @@ impl Default for MapData {
         Self {
             scale: 0,
             icons: Vec::new(),
-            colors: vec![0; PIXELS],
+            colors: Arc::new(vec![0; PIXELS]),
+            revision: 0,
         }
     }
 }
@@ -44,6 +50,22 @@ impl MapData {
     /// The colour indices, row-major, `MAP_SIZE * MAP_SIZE` bytes.
     pub fn colors(&self) -> &[u8] {
         &self.colors
+    }
+
+    /// A number that changes with every packet that touches this map, so a
+    /// texture cache knows when to upload again. Unique across the store.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The map as `MAP_SIZE * MAP_SIZE` RGBA pixels (MCP
+    /// `MapItemRenderer.Instance.updateMapTexture`).
+    pub fn rgba(&self) -> Vec<u8> {
+        self.colors
+            .iter()
+            .enumerate()
+            .flat_map(|(pixel, &color)| map_pixel(color, pixel))
+            .collect()
     }
 
     /// The colour index at `(x, z)`, `None` outside the map.
@@ -61,10 +83,11 @@ impl MapData {
         if x0 + columns > MAP_SIZE || z0 + rows > MAP_SIZE || patch.data.len() < columns * rows {
             return;
         }
+        let colors = Arc::make_mut(&mut self.colors);
         for row in 0..rows {
             let source = &patch.data[row * columns..(row + 1) * columns];
             let start = x0 + (z0 + row) * MAP_SIZE;
-            self.colors[start..start + columns].copy_from_slice(source);
+            colors[start..start + columns].copy_from_slice(source);
         }
     }
 }
@@ -73,6 +96,7 @@ impl MapData {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MapStore {
     maps: BTreeMap<i32, MapData>,
+    revisions: u64,
 }
 
 impl MapStore {
@@ -81,7 +105,9 @@ impl MapStore {
         if !self.maps.contains_key(&packet.map_id) && self.maps.len() >= MAX_MAPS {
             return;
         }
+        self.revisions += 1;
         let map = self.maps.entry(packet.map_id).or_default();
+        map.revision = self.revisions;
         map.scale = packet.scale;
         map.icons.clone_from(&packet.icons);
         if let Some(patch) = &packet.columns {
@@ -92,6 +118,11 @@ impl MapStore {
     /// The map with this id.
     pub fn get(&self, map_id: i32) -> Option<&MapData> {
         self.maps.get(&map_id)
+    }
+
+    /// Every map by id.
+    pub fn iter(&self) -> impl Iterator<Item = (i32, &MapData)> {
+        self.maps.iter().map(|(&id, map)| (id, map))
     }
 
     /// The number of known maps.
@@ -208,5 +239,37 @@ mod tests {
         assert_eq!(maps.len(), MAX_MAPS);
         maps.clear();
         assert!(maps.is_empty());
+    }
+
+    #[test]
+    fn every_packet_gives_its_map_a_new_revision() {
+        let mut maps = MapStore::default();
+        maps.apply(&packet(1, None));
+        let first = maps.get(1).unwrap().revision();
+        maps.apply(&packet(2, None));
+        maps.apply(&packet(1, None));
+        let second = maps.get(1).unwrap().revision();
+        assert_ne!(first, second);
+        assert_ne!(maps.get(2).unwrap().revision(), second);
+    }
+
+    #[test]
+    fn the_rgba_image_follows_the_colour_table() {
+        let mut maps = MapStore::default();
+        maps.apply(&packet(1, Some(patch(1, 1, 1, 0, vec![6]))));
+        let image = maps.get(1).unwrap().rgba();
+        assert_eq!(image.len(), PIXELS * 4);
+        assert_eq!(&image[4..8], &[127, 178, 56, 255]);
+        assert_eq!(&image[0..4], &[0, 0, 0, 16]);
+    }
+
+    #[test]
+    fn a_snapshot_keeps_the_old_pixels_after_a_later_patch() {
+        let mut maps = MapStore::default();
+        maps.apply(&packet(1, Some(patch(1, 1, 0, 0, vec![9]))));
+        let snapshot = maps.clone();
+        maps.apply(&packet(1, Some(patch(1, 1, 0, 0, vec![8]))));
+        assert_eq!(snapshot.get(1).unwrap().color_at(0, 0), Some(9));
+        assert_eq!(maps.get(1).unwrap().color_at(0, 0), Some(8));
     }
 }

@@ -147,6 +147,13 @@ const BOW: i16 = 261;
 /// The item id of a filled map, which has its own frame model.
 const FILLED_MAP: i16 = 358;
 
+/// The frame of an item frame entity: its block centre, turned by `180 - yaw`.
+pub(crate) fn frame_base(entity: &EntityRenderSnapshot) -> Mat4 {
+    let yaw = f32::from(entity.frame_direction) * 90.0;
+    Mat4::from_translation(entity.position.floor() + Vec3::splat(0.5))
+        * Mat4::from_rotation_y((180.0 - yaw).to_radians())
+}
+
 /// Appends an item frame and the item inside it (MCP `RenderItemFrame`).
 ///
 /// The entity position of a frame is its block; the frame is drawn around the
@@ -161,9 +168,7 @@ fn push_item_frame(
     resources: &ItemResources,
 ) {
     let holds_map = framed.is_some_and(|item| item.item_id == FILLED_MAP);
-    let yaw = f32::from(entity.frame_direction) * 90.0;
-    let base = Mat4::from_translation(entity.position.floor() + Vec3::splat(0.5))
-        * Mat4::from_rotation_y((180.0 - yaw).to_radians());
+    let base = frame_base(entity);
     let wood = ItemStyle {
         atlas: resources.atlas(),
         light: world_light(entity.light, true),

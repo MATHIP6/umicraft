@@ -197,6 +197,13 @@ pub enum ClientCommand {
     },
     /// `Animation` (0x0A): the arm swings.
     Swing,
+    /// `Use Entity` (0x02): an attack, an interaction or a click at a point.
+    UseEntity {
+        /// The network id of the target.
+        target: i32,
+        /// What the player did.
+        action: serverbound::UseEntityAction,
+    },
     /// `Client Status` (0x16): the respawn request of the death screen.
     Respawn,
     /// `Held Item Change` (0x09): the selected hotbar slot.
@@ -377,6 +384,9 @@ impl ClientCommand {
                 .with_flying(flying),
             ),
             Self::Swing => PlayServerbound::Animation(serverbound::Animation),
+            Self::UseEntity { target, action } => {
+                PlayServerbound::UseEntity(serverbound::UseEntity { target, action })
+            }
             Self::Respawn => PlayServerbound::ClientStatus(serverbound::ClientStatus {
                 action: serverbound::ClientStatusAction::PerformRespawn,
             }),
@@ -599,6 +609,13 @@ mod tests {
                     item: ItemStack::EMPTY,
                 },
                 0x08,
+            ),
+            (
+                ClientCommand::UseEntity {
+                    target: 7,
+                    action: serverbound::UseEntityAction::Attack,
+                },
+                0x02,
             ),
             (ClientCommand::HeldItemChange { slot: 3 }, 0x09),
             (

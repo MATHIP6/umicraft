@@ -174,7 +174,7 @@ pub struct Renderer {
     hand_camera_buffer: wgpu::Buffer,
     hand_camera_bind_group: wgpu::BindGroup,
     /// The vertices of the hand and its skin texture, if one is drawn.
-    hand: Option<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    hand: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
     terrain_bind_group: wgpu::BindGroup,
     /// Layout of the terrain camera + texture binding, kept so
     /// [`Renderer::set_block_atlas`] can bind a replacement array without
@@ -671,7 +671,7 @@ impl Renderer {
             crack_mesh: None,
             hand_camera_buffer,
             hand_camera_bind_group,
-            hand: None,
+            hand: Vec::new(),
             terrain_bind_group,
             terrain_layout,
             transparent_order: Vec::with_capacity(64),
@@ -1379,21 +1379,32 @@ impl Renderer {
     /// `bind_group`; an empty slice hides the hand. It is drawn on top of the
     /// world and under the HUD.
     pub fn set_hand(&mut self, vertices: &[EntityVertex], bind_group: &wgpu::BindGroup) {
-        self.hand = (!vertices.is_empty()).then(|| {
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("hand vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            (buffer, vertices.len() as u32, bind_group.clone())
-        });
+        self.set_hand_batches(&[(vertices, bind_group)]);
+    }
+
+    /// Sets the first-person hand as several batches, drawn in order (the
+    /// arms, then a held map with its background, pixels and markers).
+    /// Empty batches are skipped.
+    pub fn set_hand_batches(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.hand = batches
+            .iter()
+            .filter(|(vertices, _)| !vertices.is_empty())
+            .map(|(vertices, bind_group)| {
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("hand vertices"),
+                        contents: bytemuck::cast_slice(vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                (buffer, vertices.len() as u32, (*bind_group).clone())
+            })
+            .collect();
     }
 
     /// Hides the first-person hand.
     pub fn clear_hand(&mut self) {
-        self.hand = None;
+        self.hand.clear();
     }
 
     /// Clears any queued entity batches.
@@ -1767,11 +1778,13 @@ impl Renderer {
         self.outline.draw(&mut pass, &self.camera_bind_group);
 
         // The hand: camera-space vertices under a squeezed depth range.
-        if let Some((buffer, count, texture)) = self.hand.as_ref() {
+        if !self.hand.is_empty() {
             self.entity_renderer.render(
                 &mut pass,
                 &self.hand_camera_bind_group,
-                [(buffer, *count, texture)],
+                self.hand
+                    .iter()
+                    .map(|(buffer, count, texture)| (buffer, *count, texture)),
             );
         }
 
