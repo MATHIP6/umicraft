@@ -41,7 +41,7 @@ use crate::fluid::{self, FluidLayers};
 use crate::actual_state;
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, occludes};
 use crate::lighting::quad_light;
-use crate::{tint, BlockSource, Mesh, Vertex};
+use crate::{tint, BlockEntityKind, BlockEntityRef, BlockSource, Mesh, Vertex};
 
 /// The baked models and the texture layers the model mesher reads.
 ///
@@ -100,6 +100,11 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     continue;
                 }
                 let position = [wx, y, wz];
+                if BlockEntityKind::of(state).is_some() {
+                    mesh.block_entities
+                        .push(BlockEntityRef::scan(source, position, state));
+                    continue;
+                }
                 if let Some(liquid) = Liquid::of(state) {
                     let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
                         tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)

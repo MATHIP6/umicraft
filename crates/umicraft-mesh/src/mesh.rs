@@ -2,7 +2,7 @@
 
 //! The CPU mesh of one chunk column, split into an opaque and a blended pass.
 
-use crate::Vertex;
+use crate::{BlockEntityRef, Vertex};
 
 /// CPU mesh for one chunk column.
 ///
@@ -19,13 +19,18 @@ pub struct Mesh {
     pub transparent_vertices: Vec<Vertex>,
     /// Transparent triangle indices, six per face.
     pub transparent_indices: Vec<u32>,
+    /// Blocks a tile-entity renderer draws (chests, signs), which have no
+    /// quad here.
+    pub block_entities: Vec<BlockEntityRef>,
 }
 
 impl Mesh {
     /// True when neither pass has faces.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.indices.is_empty() && self.transparent_indices.is_empty()
+        self.indices.is_empty()
+            && self.transparent_indices.is_empty()
+            && self.block_entities.is_empty()
     }
 
     /// Number of triangles across both passes.

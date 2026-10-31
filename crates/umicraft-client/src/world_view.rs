@@ -19,7 +19,7 @@ use umicraft_game::hand::HandPose;
 use umicraft_game::inventory::WindowView;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::RenderState;
-use umicraft_mesh::{ChunkSnapshot, Mesh, Vertex};
+use umicraft_mesh::{BlockEntityRef, ChunkSnapshot, Mesh, Vertex};
 use umicraft_render::{Camera, HudState, OutlineBox, RenderEnvironment, Renderer};
 use umicraft_world::{ChunkPos, LightLevel};
 
@@ -62,6 +62,9 @@ pub struct WorldView {
     pending: HashSet<ChunkPos>,
     /// Faces of every chunk whose current mesh is not empty.
     faces: HashMap<ChunkPos, usize>,
+    /// The chests and signs of every chunk, which a tile-entity renderer
+    /// draws (P7c).
+    block_entities: HashMap<ChunkPos, Vec<BlockEntityRef>>,
     hud: HudState,
     window_view: WindowView,
     /// The newest creative screen snapshot, once one was published.
@@ -98,6 +101,7 @@ impl WorldView {
             waiting: Vec::new(),
             pending: HashSet::new(),
             faces: HashMap::new(),
+            block_entities: HashMap::new(),
             hud: HudState::default(),
             window_view: WindowView {
                 player_slots: std::array::from_fn(|_| None),
@@ -215,6 +219,11 @@ impl WorldView {
         self.faces.values().sum()
     }
 
+    /// The chests and signs of every current chunk mesh.
+    pub fn block_entities(&self) -> impl Iterator<Item = &BlockEntityRef> {
+        self.block_entities.values().flatten()
+    }
+
     /// The simulation frames received so far.
     #[must_use]
     pub fn frame_count(&self) -> usize {
@@ -312,6 +321,7 @@ impl WorldView {
         self.waiting.clear();
         self.pending.clear();
         self.faces.clear();
+        self.block_entities.clear();
         self.entities = Arc::from([]);
         target.clear_meshes();
     }
@@ -340,6 +350,11 @@ impl WorldView {
                 self.faces.remove(&pos);
             } else {
                 self.faces.insert(pos, mesh.face_count());
+            }
+            if mesh.block_entities.is_empty() {
+                self.block_entities.remove(&pos);
+            } else {
+                self.block_entities.insert(pos, mesh.block_entities.clone());
             }
             target.upload_mesh(pos, &mesh);
         }

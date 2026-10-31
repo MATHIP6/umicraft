@@ -61,6 +61,7 @@
 //! [`docs/sources.md`]: ../../../docs/sources.md
 
 mod actual_state;
+mod block_entity;
 mod face;
 pub mod fluid;
 pub mod item;
@@ -72,6 +73,7 @@ mod source;
 pub mod tint;
 mod vertex;
 
+pub use block_entity::{BlockEntityKind, BlockEntityRef, SameNeighbours};
 pub use face::Face;
 pub use legacy::{mesh_chunk, texture_layer};
 pub use mesh::Mesh;
