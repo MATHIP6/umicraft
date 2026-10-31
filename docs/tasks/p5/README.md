@@ -195,6 +195,8 @@ MCP to read: `NetHandlerPlayClient.handleSpawnObject` / `handleSpawnPainting` /
 
 ### P5i — Local player body
 
+**Status (2026-10-31): mostly done.** The local body wears the skin and cape of its own tab list entry (found by name), swings its arm with the first-person hand, shows the use pose (sword block, bow) from the item use state and ticks its animation each tick; the held stack and the sneak pose were already in. Not done: checking the body yaw lag against recordings of F5, and the flying pose.
+
 MCP to read: `EntityPlayerSP.onUpdate`, `EntityLivingBase.onUpdate` (body-yaw
 block), `RenderPlayer`, `Minecraft.clickMouse`, `PlayerControllerMP`.
 

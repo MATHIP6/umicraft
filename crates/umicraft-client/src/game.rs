@@ -1194,8 +1194,28 @@ fn follow_body(game: &mut Game) {
     let Some(state) = game.state.as_ref() else {
         return;
     };
-    let sneaking = if state.player().sneaking { 0x02 } else { 0 };
+    // The same bits the server sends for a remote player: sneaking 0x02 and
+    // using the held item 0x10 (the sword blocks, the bow is aimed).
+    let sneaking = if state.player().sneaking { 0x02 } else { 0 }
+        | if game.item_use.is_using() { 0x10 } else { 0 };
     game.body.id = EntityId(game.entity_id);
+    // The skin and the cape of the local player come from its own tab list
+    // entry, which is found by name; until it arrives the body wears the
+    // default skin.
+    if game.body.profile.is_none() {
+        let own = game
+            .server
+            .player_list()
+            .iter()
+            .find(|info| info.name == game.own_name);
+        if let Some(info) = own {
+            game.body.uuid = Some(info.uuid.to_be_bytes());
+            game.body.profile = Some(std::sync::Arc::new(profile_from_properties(
+                &info.name,
+                &info.properties,
+            )));
+        }
+    }
     // The local stack comes from the windows (ADR-0025), not from `Entity
     // Equipment`, so the body shows the item in the second and third person.
     game.body.held = game
@@ -1208,6 +1228,9 @@ fn follow_body(game: &mut Game) {
         game.pitch.to_degrees(),
         EntityFlags::new(sneaking, 0x7F),
     );
+    // The swing of the third person arm advances with the tick, as the
+    // animation of every tracked entity does in `EntityStore::tick`.
+    game.body.animation.tick();
 }
 
 /// The name tag text of an entity under the team rules, if it has one.
@@ -2174,6 +2197,7 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     for outgoing in output.packets {
         if outgoing == Outgoing::Swing {
             game.hand.swing(effects);
+            game.body.animation.swing_item();
         }
         queue.push(command_of(outgoing));
     }
@@ -2238,6 +2262,7 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         queue.push(ClientCommand::Swing);
         let effects = swing_effects(game);
         game.hand.swing(effects);
+        game.body.animation.swing_item();
     }
 }
 
@@ -3413,6 +3438,49 @@ mod tests {
             game.server.player_list().len(),
             1,
             "the tab list still updates"
+        );
+    }
+
+    #[test]
+    fn the_local_body_swings_its_arm_when_the_player_does() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        follow_body(&mut game);
+        assert_eq!(game.body.animation.swing_progress_at(1.0), 0.0);
+        game.body.animation.swing_item();
+        for _ in 0..3 {
+            follow_body(&mut game);
+        }
+        assert!(game.body.animation.swing_progress_at(1.0) > 0.0);
+    }
+
+    #[test]
+    fn the_local_body_wears_the_profile_of_its_own_tab_list_entry() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.own_name = "Me".to_owned();
+        follow_body(&mut game);
+        assert!(game.body.profile.is_none(), "not listed yet");
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let entry = |uuid: u8, name: &str| AddPlayerEntry {
+            uuid: u128::from_be_bytes([uuid; 16]),
+            name: name.to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping: 0,
+            display_name: None,
+        };
+        let event = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![
+            entry(1, "Other"),
+            entry(2, "Me"),
+        ]));
+        handle_net(&mut game, event, &mut queue, &frames);
+        follow_body(&mut game);
+        assert_eq!(game.body.uuid, Some([2; 16]));
+        assert_eq!(
+            game.body.profile.as_ref().map(|p| p.name.to_string()),
+            Some("Me".to_owned())
         );
     }
 
