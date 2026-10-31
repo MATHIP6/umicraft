@@ -11,6 +11,7 @@ use super::anim::Animation;
 use super::body_yaw::BodyYaw;
 use super::cape::CapeChase;
 use super::flags::EntityFlags;
+use super::flight::DragonFlight;
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
@@ -94,6 +95,13 @@ pub struct EntityRecord {
     /// The flight of this entity to whoever picked it up (MCP
     /// `EntityPickupFX`), `None` while it lies in the world.
     pub collecting: Option<Collecting>,
+    /// The flight history of an ender dragon (created on its first tick).
+    pub flight: Option<DragonFlight>,
+    /// Whether this is the body of the local player (MCP `EntityPlayerSP`).
+    pub local: bool,
+    /// Whether the local player sees this entity's invisible body as a ghost
+    /// because they share a team that allows it (MCP `isInvisibleToPlayer`).
+    pub ghost_visible: bool,
     /// Ticks the entity has lived since it was spawned.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -184,6 +192,10 @@ impl EntityRecord {
             use_ticks: self.use_ticks,
             fishing: self.bobber.is_some(),
             riding: self.vehicle.is_some(),
+            flight: self.flight.clone(),
+            local: self.local,
+            ghost_visible: self.ghost_visible,
+            flight_alive: self.health.is_none_or(|health| health > 0.0),
             leash_holder: self.leash,
             leash: None,
             age_ticks: self.age_ticks,
@@ -231,6 +243,9 @@ impl EntityRecord {
             vehicle: None,
             leash: None,
             collecting: None,
+            flight: None,
+            local: false,
+            ghost_visible: false,
             age_ticks: 0,
             frame_direction: 0,
             frame_rotation: 0,

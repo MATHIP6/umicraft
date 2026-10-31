@@ -345,7 +345,12 @@ impl EntityStore {
             }
         }
         entity.meta.apply(entity.kind, metadata);
-        if entity.kind.is_living() && metadata.get_float(LIVING_HEALTH).is_some_and(|h| h <= 0.0) {
+        // The dragon does not fall: it stays for 200 ticks while it dies
+        // (`EntityDragon.onDeathUpdate` replaces the death of the base class).
+        if entity.kind.is_living()
+            && entity.kind != EntityKind::Dragon
+            && metadata.get_float(LIVING_HEALTH).is_some_and(|h| h <= 0.0)
+        {
             entity.animation.die();
         }
     }
@@ -381,6 +386,14 @@ impl EntityStore {
     pub fn refresh_spectators(&mut self, is_spectator: impl Fn(&[u8; 16]) -> bool) {
         for entity in self.entities.values_mut() {
             entity.spectator = entity.uuid.as_ref().is_some_and(&is_spectator);
+        }
+    }
+
+    /// Marks which entities the local player sees as ghosts when they are
+    /// invisible, as their team says (`sees` gets the entity).
+    pub fn refresh_ghosts(&mut self, sees: impl Fn(&EntityRecord) -> bool) {
+        for entity in self.entities.values_mut() {
+            entity.ghost_visible = sees(entity);
         }
     }
 
@@ -451,7 +464,7 @@ impl EntityStore {
                 entity.limbs.amount = HURT_LIMB_AMOUNT;
                 entity.animation.hurt();
             }
-            3 => entity.animation.die(),
+            3 if entity.kind != EntityKind::Dragon => entity.animation.die(),
             // MCP `EntityPlayer.handleStatusUpdate`: the item use finished.
             9 => entity.use_ticks = 0,
             _ => {}

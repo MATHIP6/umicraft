@@ -398,4 +398,58 @@ mod tests {
                 .expect("png");
         }
     }
+
+    /// Renders a dragon that has been turning and climbing. Set
+    /// `UMICRAFT_DRAGON_DUMP` to a path to keep the PNG.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn a_dragon_bends_along_its_flight() {
+        use crate::entity_render::EntityTextures;
+        use umicraft_game::entity::flight::DragonFlight;
+        use umicraft_render::{Camera, Overlay, Renderer};
+
+        let mut renderer = Renderer::new_offscreen(800, 400).expect("renderer");
+        let mut flight = DragonFlight::default();
+        for tick in 0..30 {
+            flight.tick(
+                tick as f32 * 2.0,
+                70.0 + f64::from(tick) * 0.15,
+                Vec3::ZERO,
+                true,
+            );
+        }
+        let mut dragon =
+            EntityRenderSnapshot::new(EntityId(80), EntityKind::Dragon, Vec3::new(0.0, 66.0, 14.0));
+        let mut pose = flight.pose(1.0, true);
+        // Alive unless UMICRAFT_DRAGON_DEATH is set, and tied to a crystal.
+        pose.death_ticks = if std::env::var("UMICRAFT_DRAGON_DEATH").is_ok() {
+            150.0
+        } else {
+            0.0
+        };
+        dragon.flight = Some(pose);
+        let mut crystal = EntityRenderSnapshot::new(
+            EntityId(81),
+            EntityKind::EnderCrystal,
+            Vec3::new(-9.0, 58.0, 14.0),
+        );
+        crystal.age = 5.0;
+        EntityTextures::load(&renderer).mesh_and_upload(&[dragon, crystal], &mut renderer);
+        let mut camera = Camera::new(Vec3::new(0.0, 74.0, -8.0), std::f32::consts::PI, -0.35);
+        camera.set_aspect(800, 400);
+        renderer
+            .render(&camera, &Overlay::new(800, 400))
+            .expect("render");
+        let image = renderer.read_pixels().expect("readback");
+        if let Ok(path) = std::env::var("UMICRAFT_DRAGON_DUMP") {
+            let file = std::fs::File::create(path).expect("dump file");
+            let mut encoder = png::Encoder::new(file, image.width, image.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                .expect("png");
+        }
+    }
 }

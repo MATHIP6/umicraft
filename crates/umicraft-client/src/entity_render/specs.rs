@@ -134,6 +134,23 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (vec![0, 0, 0, 255], 1, 1),
         },
         TextureSpec {
+            slot: TextureSlot::DragonRay,
+            // Not in the jar: the rays are coloured per vertex in the reference.
+            jar_path: "umicraft/dragon_ray.png",
+            fallback: super::dragon_death::ray_texture,
+        },
+        TextureSpec {
+            slot: TextureSlot::DragonExploding,
+            jar_path: "assets/minecraft/textures/entity/enderdragon/dragon_exploding.png",
+            // Without the jar the stand-in does not dissolve.
+            fallback: || (procedural_dragon_texture(), 256, 256),
+        },
+        TextureSpec {
+            slot: TextureSlot::DragonBeam,
+            jar_path: "assets/minecraft/textures/entity/endercrystal/endercrystal_beam.png",
+            fallback: || (vec![0; 4], 1, 1),
+        },
+        TextureSpec {
             slot: TextureSlot::Leash,
             // Not in the jar: the rope is two browns, `(0.5, 0.4, 0.3)` of
             // `renderLeash`, the dark one scaled by 0.7.

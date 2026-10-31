@@ -41,7 +41,7 @@ pub use blaze::BlazeModel;
 pub use cape::CapeModel;
 pub use chicken::ChickenModel;
 pub use creeper::CreeperModel;
-pub use dragon::DragonModel;
+pub use dragon::{DragonModel, FlightFrame};
 pub use enderman::EndermanModel;
 pub use endermite::EndermiteModel;
 pub use ghast::{GhastModel, RENDER_SCALE as GHAST_SCALE};
@@ -513,6 +513,14 @@ pub enum TextureSlot {
     FishLine,
     /// The two browns of the rope of a leash.
     Leash,
+    /// The rays of a dying dragon: white to magenta along a 64 x 1 strip.
+    DragonRay,
+    /// The ray between an ender crystal and the dragon it heals
+    /// (`endercrystal/endercrystal_beam.png`), which scrolls along the ray.
+    DragonBeam,
+    /// The dragon while it dies (`enderdragon/dragon_exploding.png`): the
+    /// dragon texture whose alpha says in which order the body dissolves.
+    DragonExploding,
     /// The arrow (`arrow.png`), flying or stuck in a body.
     Arrow,
     /// The ghast while it charges a fireball (`ghast_shooting.png`).
@@ -675,6 +683,8 @@ impl TextureSlot {
                 | Self::WitherAura
                 | Self::EnchantGlint
                 | Self::Lightning
+                | Self::DragonRay
+                | Self::DragonBeam
         )
     }
 

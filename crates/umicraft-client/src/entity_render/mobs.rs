@@ -58,6 +58,9 @@ pub(super) struct EntityLayer {
     /// Drawn at 15 % opacity: the model of an invisible entity a spectator
     /// sees.
     pub(super) translucent: bool,
+    /// Texels whose alpha is under `cutoff / 31` are not drawn: the dissolving
+    /// of a dying dragon (`0` keeps the usual alpha test).
+    pub(super) cutoff: u8,
 }
 
 impl EntityLayer {
@@ -69,6 +72,7 @@ impl EntityLayer {
             dye: None,
             glow: None,
             translucent: false,
+            cutoff: 0,
         }
     }
 
@@ -115,7 +119,8 @@ pub(super) fn build_entity_layers_for(
     // A spectator sees the main model, the first layer, as a ghost
     // (`isInvisibleToPlayer`).
     if ent.flags.is_invisible() {
-        let ghost = (viewer_is_spectator && !layers.is_empty()).then(|| layers.remove(0));
+        let sees_ghost = viewer_is_spectator || ent.ghost_visible;
+        let ghost = (sees_ghost && !layers.is_empty()).then(|| layers.remove(0));
         layers.retain(|layer| layer.slot.is_armor() || layer.slot == TextureSlot::EnchantGlint);
         if let Some(mut body) = ghost {
             body.translucent = true;

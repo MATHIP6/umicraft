@@ -454,6 +454,9 @@ fn make_snapshot(
         fishing: false,
         riding: false,
         leash: None,
+        flight: None,
+        local: false,
+        ghost_visible: false,
         flags: EntityFlags::new(0, 0x7F),
     }
 }

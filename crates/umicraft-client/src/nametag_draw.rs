@@ -76,12 +76,30 @@ pub fn place_tags(
             )?;
             // A font pixel is as many screen pixels as `up` moves it.
             let scale = (top[1] - above[1]).abs();
-            (scale > 0.0).then(|| PlacedTag {
-                text: Arc::clone(text),
-                anchor: top,
-                scale,
+            (scale > 0.0).then(|| match text.split_once('\n') {
+                // `RenderPlayer.renderOffsetLivingLabel`: the score line sits
+                // where the tag would, and the name is lifted over it by
+                // 1.15 line heights.
+                Some((name, score)) => vec![
+                    PlacedTag {
+                        text: Arc::from(score),
+                        anchor: top,
+                        scale,
+                    },
+                    PlacedTag {
+                        text: Arc::from(name),
+                        anchor: [top[0], top[1] - FONT_HEIGHT * 1.15 * scale],
+                        scale,
+                    },
+                ],
+                None => vec![PlacedTag {
+                    text: Arc::clone(text),
+                    anchor: top,
+                    scale,
+                }],
             })
         })
+        .flatten()
         .collect()
 }
 
@@ -243,6 +261,26 @@ mod tests {
         let standing = tagged(EntityKind::Player, Vec3::new(0.0, 0.0, 40.0), "Bob");
         assert!(place_tags(&[crouching], &camera(), 1280.0, 720.0).is_empty());
         assert_eq!(place_tags(&[standing], &camera(), 1280.0, 720.0).len(), 1);
+    }
+
+    #[test]
+    fn a_score_line_goes_under_the_name() {
+        let tags = place_tags(
+            &[tagged(
+                EntityKind::Player,
+                Vec3::new(0.0, 0.0, 5.0),
+                "Bob\n12 Kills",
+            )],
+            &camera(),
+            1280.0,
+            720.0,
+        );
+        assert_eq!(tags.len(), 2);
+        assert_eq!(&*tags[0].text, "12 Kills");
+        assert_eq!(&*tags[1].text, "Bob");
+        // The name is a line and 15 % higher up the screen than the score.
+        let lift = tags[0].anchor[1] - tags[1].anchor[1];
+        assert!((lift - FONT_HEIGHT * 1.15 * tags[0].scale).abs() < 1e-3);
     }
 
     #[test]

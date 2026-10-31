@@ -12,6 +12,7 @@ pub mod body_yaw;
 pub mod boss;
 pub mod cape;
 pub mod flags;
+pub mod flight;
 pub mod item;
 pub mod kind;
 pub mod leash;

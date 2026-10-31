@@ -1199,6 +1199,7 @@ fn follow_body(game: &mut Game) {
     let sneaking = if state.player().sneaking { 0x02 } else { 0 }
         | if game.item_use.is_using() { 0x10 } else { 0 };
     game.body.id = EntityId(game.entity_id);
+    game.body.local = true;
     // The skin and the cape of the local player come from its own tab list
     // entry, which is found by name; until it arrives the body wears the
     // default skin.
@@ -1233,16 +1234,48 @@ fn follow_body(game: &mut Game) {
     game.body.animation.tick();
 }
 
+/// The display slot of the score shown below the name.
+const SLOT_BELOW_NAME: i8 = 2;
+
 /// The name tag text of an entity under the team rules, if it has one.
 fn entity_tag(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> Option<String> {
     if entity.kind == EntityKind::Player {
         let name = &entity.profile.as_ref()?.name;
-        return player_tag(scoreboard, local, name, entity.flags.is_invisible());
+        let tag = player_tag(scoreboard, local, name, entity.flags.is_invisible())?;
+        // The objective in the display slot below the name adds a line of
+        // `score objective` under the tag (`RenderPlayer.renderOffsetLivingLabel`);
+        // the two lines are one tag, split by `place_tags`.
+        return Some(match scoreboard.display_slot(SLOT_BELOW_NAME) {
+            Some(objective) => format!(
+                "{tag}\n{} {}",
+                scoreboard.score(&objective.name, name),
+                objective.display_name
+            ),
+            None => tag,
+        });
     }
     mob_tag(
         entity.meta.custom_name.as_deref(),
         entity.meta.custom_name_visible,
     )
+}
+
+/// Whether the local player sees an invisible player as a ghost because they
+/// are in the same team, and that team sees invisible team mates
+/// (MCP `Entity.isInvisibleToPlayer`).
+fn sees_team_ghost(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> bool {
+    let Some(profile) = entity
+        .profile
+        .as_ref()
+        .filter(|_| entity.kind == EntityKind::Player)
+    else {
+        return false;
+    };
+    let (Some(team), Some(own)) = (scoreboard.team_of(&profile.name), scoreboard.team_of(local))
+    else {
+        return false;
+    };
+    team.name == own.name && team.friendly_flags & 0x02 != 0
 }
 
 /// Block id of the bed (MCP `Blocks.bed`).
@@ -1280,6 +1313,9 @@ fn handle_net(
     let changes_name_tags = matches!(
         event,
         PlayEvent::Teams(_)
+            | PlayEvent::ScoreboardObjective(_)
+            | PlayEvent::UpdateScore(_)
+            | PlayEvent::DisplayScoreboard(_)
             | PlayEvent::PlayerListItem(_)
             | PlayEvent::SpawnPlayer(_)
             | PlayEvent::SpawnMob(_)
@@ -1296,6 +1332,8 @@ fn handle_net(
         let (scoreboard, own_name) = (&game.scoreboard, game.own_name.as_str());
         game.entities
             .refresh_name_tags(|entity| entity_tag(scoreboard, own_name, entity));
+        game.entities
+            .refresh_ghosts(|entity| sees_team_ghost(scoreboard, own_name, entity));
     }
 }
 
@@ -3482,6 +3520,125 @@ mod tests {
             game.body.profile.as_ref().map(|p| p.name.to_string()),
             Some("Me".to_owned())
         );
+    }
+
+    #[test]
+    fn a_team_mate_is_a_ghost_only_when_the_team_sees_invisible_mates() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+        use umicraft_protocol::packets::play::clientbound::teams::{TeamInfo, Teams};
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.own_name = "me".to_owned();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let uuid = [9u8; 16];
+        game.entities.spawn_player(
+            EntityId(4),
+            uuid,
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        let entry = AddPlayerEntry {
+            uuid: u128::from_be_bytes(uuid),
+            name: "Bob".to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping: 0,
+            display_name: None,
+        };
+        let listed = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![entry]));
+        handle_net(&mut game, listed, &mut queue, &frames);
+        let ghost = |game: &Game| game.entities.snapshots(0.0)[0].ghost_visible;
+        assert!(!ghost(&game), "no team");
+
+        let team = |flags: i8, players: &[&str]| {
+            PlayEvent::Teams(Box::new(Teams::Create {
+                name: "red".to_owned(),
+                info: TeamInfo {
+                    display_name: "Red".to_owned(),
+                    prefix: String::new(),
+                    suffix: String::new(),
+                    friendly_flags: flags,
+                    name_tag_visibility: "always".to_owned(),
+                    color: 12,
+                },
+                players: players.iter().map(|name| (*name).to_owned()).collect(),
+            }))
+        };
+        // Bob alone in the team: the local player is not a mate.
+        handle_net(&mut game, team(2, &["Bob"]), &mut queue, &frames);
+        assert!(!ghost(&game));
+        let remove = || {
+            PlayEvent::Teams(Box::new(Teams::Remove {
+                name: "red".to_owned(),
+            }))
+        };
+        handle_net(&mut game, remove(), &mut queue, &frames);
+        // Both in the team, but it does not see invisible mates.
+        handle_net(&mut game, team(0, &["Bob", "me"]), &mut queue, &frames);
+        assert!(!ghost(&game));
+        handle_net(&mut game, remove(), &mut queue, &frames);
+        handle_net(&mut game, team(2, &["Bob", "me"]), &mut queue, &frames);
+        assert!(ghost(&game));
+    }
+
+    #[test]
+    fn the_objective_below_the_name_adds_a_score_line_to_the_tag() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+        use umicraft_protocol::packets::play::clientbound::{
+            DisplayScoreboard, ObjectiveRenderType, ScoreboardObjective, UpdateScore,
+        };
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.own_name = "me".to_owned();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let uuid = [9u8; 16];
+        game.entities.spawn_player(
+            EntityId(4),
+            uuid,
+            DVec3::ZERO,
+            0.0,
+            0.0,
+            None,
+            EntityFlags::default(),
+        );
+        let entry = AddPlayerEntry {
+            uuid: u128::from_be_bytes(uuid),
+            name: "Bob".to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping: 0,
+            display_name: None,
+        };
+        let listed = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![entry]));
+        handle_net(&mut game, listed, &mut queue, &frames);
+        let tag = |game: &Game| game.entities.snapshots(0.0)[0].name_tag.clone();
+        assert_eq!(tag(&game).as_deref(), Some("Bob"));
+
+        let objective = PlayEvent::ScoreboardObjective(ScoreboardObjective::Create {
+            name: "kills".to_owned(),
+            value: "Kills".to_owned(),
+            render_type: ObjectiveRenderType::Integer,
+        });
+        handle_net(&mut game, objective, &mut queue, &frames);
+        let display = PlayEvent::DisplayScoreboard(DisplayScoreboard {
+            position: 2,
+            score_name: "kills".to_owned(),
+        });
+        handle_net(&mut game, display, &mut queue, &frames);
+        // No score yet: vanilla shows 0.
+        assert_eq!(tag(&game).as_deref(), Some("Bob\n0 Kills"));
+        let score = PlayEvent::UpdateScore(UpdateScore::Change {
+            name: "Bob".to_owned(),
+            objective: "kills".to_owned(),
+            value: 12,
+        });
+        handle_net(&mut game, score, &mut queue, &frames);
+        assert_eq!(tag(&game).as_deref(), Some("Bob\n12 Kills"));
     }
 
     #[test]

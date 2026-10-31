@@ -20,6 +20,8 @@ mod armor;
 mod arrows;
 mod bolt;
 mod creatures;
+mod dragon_beam;
+mod dragon_death;
 mod fire;
 mod fishing;
 mod glow;
@@ -111,7 +113,7 @@ fn mesh_entities_with(
                     }));
                 continue;
             }
-            let light = light | dye_bits(layer.dye);
+            let light = light | dye_bits(layer.dye) | (u32::from(layer.cutoff) << CUTOFF_SHIFT);
             let target = if layer.translucent {
                 &mut ghost
             } else {
@@ -132,6 +134,7 @@ fn mesh_entities_with(
         small_models::add_small_model(&mut solid, ent, light);
         bolt::add_lightning(&mut additive, ent);
         rope::add_leash(&mut solid, ent);
+        dragon_beam::add_beam(&mut solid, ent, snapshots);
         let eye = fishing::Eye {
             position: camera,
             yaw: view_yaw,
@@ -158,6 +161,8 @@ const FLASH_SHIFT: u32 = 9;
 /// Bit that enables the dye tint, and the shift of its 4-bit colour.
 const DYE_BIT: u32 = 1 << 13;
 const DYE_SHIFT: u32 = 14;
+/// Shift of the 5-bit alpha cutoff of a dissolving layer.
+const CUTOFF_SHIFT: u32 = 27;
 
 /// Full block and sky light (`15728880` in the reference).
 const FULL_LIGHT: u32 = 0x0000_00FF;
@@ -322,6 +327,9 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                flight: None,
+                local: false,
+                ghost_visible: false,
                 flags: EntityFlags::new(0, 0x7F),
             },
             EntityRenderSnapshot {
@@ -358,6 +366,9 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                flight: None,
+                local: false,
+                ghost_visible: false,
                 flags: EntityFlags::default(),
             },
             EntityRenderSnapshot {
@@ -394,6 +405,9 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                flight: None,
+                local: false,
+                ghost_visible: false,
                 flags: EntityFlags::default(),
             },
             // A dropped item has no entity mesh: P3 draws it from its item model.
@@ -431,6 +445,9 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                flight: None,
+                local: false,
+                ghost_visible: false,
                 flags: EntityFlags::default(),
             },
         ];

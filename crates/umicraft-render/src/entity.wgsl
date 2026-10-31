@@ -35,6 +35,7 @@ struct VertexOut {
     @location(4) @interpolate(flat) hurt: f32,
     @location(5) @interpolate(flat) flash: f32,
     @location(6) @interpolate(flat) dye: vec3<f32>,
+    @location(7) @interpolate(flat) cutoff: f32,
 };
 
 // Dye colours of the sheep wool and the wolf collar, by metadata value
@@ -100,6 +101,9 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.flash = f32((in.light >> 9u) & 15u) / 15.0;
     let dyed = (in.light >> 13u) & 1u;
     out.dye = select(vec3<f32>(1.0), DYES[(in.light >> 14u) & 15u], dyed == 1u);
+    // Bits 27..=31: texels with an alpha under `n / 31` are dropped (the
+    // dragon dissolving, MCP `RenderDragon.renderModel` `alphaFunc`).
+    out.cutoff = f32(in.light >> 27u) / 31.0;
     // Bit 18: experience orb, whose colour cycles with the phase of bits
     // 19..=26, in 256 steps of a turn (MCP `RenderXPOrb`: red
     // `(sin p + 1) / 2`, green 1, blue `(sin (p + 4.1887903) + 1) / 10`).
@@ -132,7 +136,7 @@ fn lit_colour(in: VertexOut, tex: vec4<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let tex = textureSample(entity_texture, entity_sampler, in.uv);
-    if (tex.a < 0.1) {
+    if (tex.a < max(0.1, in.cutoff)) {
         discard;
     }
     return vec4<f32>(lit_colour(in, tex), tex.a);

@@ -452,6 +452,9 @@ mod render_tests {
             fishing: false,
             riding: false,
             leash: None,
+            flight: None,
+            local: false,
+            ghost_visible: false,
             flags: EntityFlags::default(),
         }
     }
@@ -566,6 +569,9 @@ mod player_render_tests {
             fishing: false,
             riding: false,
             leash: None,
+            flight: None,
+            local: false,
+            ghost_visible: false,
             flags: EntityFlags::new(if sneaking { 0x02 } else { 0 }, 0),
         }
     }
@@ -756,6 +762,9 @@ mod glint_render_tests {
             fishing: false,
             riding: false,
             leash: None,
+            flight: None,
+            local: false,
+            ghost_visible: false,
             flags: EntityFlags::default(),
         }
     }

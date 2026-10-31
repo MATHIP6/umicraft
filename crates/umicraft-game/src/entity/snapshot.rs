@@ -11,6 +11,7 @@ use super::angle::lerp_degrees;
 use super::anim::{Animation, BedPose};
 use super::cape::{cape_angles, CapeAngles};
 use super::flags::EntityFlags;
+use super::flight::{DragonFlight, DragonPose};
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::leash::{LeashAnchor, LeashFrame};
@@ -87,6 +88,14 @@ pub struct EntityFrameData {
     pub fishing: bool,
     /// Whether the entity sits on a vehicle.
     pub riding: bool,
+    /// The flight history of an ender dragon.
+    pub flight: Option<DragonFlight>,
+    /// Whether this is the body of the local player.
+    pub local: bool,
+    /// Whether the viewer sees the invisible body as a ghost by team.
+    pub ghost_visible: bool,
+    /// Whether the dragon is alive: a dead one shows its history frozen.
+    pub flight_alive: bool,
     /// Who holds the leash of the entity, if it is leashed.
     pub leash_holder: Option<EntityId>,
     /// Where the holder is, found by [`super::leash::leash_entities`].
@@ -149,6 +158,12 @@ impl EntityFrameData {
             fishing: self.fishing,
             riding: self.riding,
             leash: self.leash.map(|holder| holder.at(a)),
+            local: self.local,
+            ghost_visible: self.ghost_visible,
+            flight: self
+                .flight
+                .as_ref()
+                .map(|flight| flight.pose(a, self.flight_alive)),
             age: self.age_ticks as f32 + a,
             frame_direction: self.frame_direction,
             frame_rotation: self.frame_rotation,
@@ -222,6 +237,15 @@ pub struct EntityRenderSnapshot {
     pub riding: bool,
     /// The holder of the leash of the entity, if it is leashed.
     pub leash: Option<LeashAnchor>,
+    /// The flight pose of an ender dragon: its wing phase and the path it flew.
+    pub flight: Option<DragonPose>,
+    /// Whether this is the body of the local player: it is not lowered further
+    /// when crouching (`RenderPlayer.doRender`).
+    pub local: bool,
+    /// Whether the viewer sees this invisible body as a ghost: a team mate of
+    /// the local player in a team that sees invisible team mates (a
+    /// spectator sees every one, see `EntityTextures::set_viewer_spectator`).
+    pub ghost_visible: bool,
     /// Ticks lived plus the interpolation alpha, for the bob and spin of items.
     pub age: f32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -268,6 +292,9 @@ impl EntityRenderSnapshot {
             fishing: false,
             riding: false,
             leash: None,
+            flight: None,
+            local: false,
+            ghost_visible: false,
             age: 0.0,
             frame_direction: 0,
             frame_rotation: 0,

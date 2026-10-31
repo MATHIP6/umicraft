@@ -12,6 +12,7 @@ use umicraft_model::entity::{
 };
 
 use super::animals::with_eyes;
+use super::dragon_death;
 use super::glow::{glowing, Glow, UvMap};
 use super::mobs::{one, EntityLayer, Pose};
 
@@ -66,12 +67,34 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         }
         EntityKind::Dragon => {
             let mut model = DragonModel::new();
-            model.set_angles(swing);
-            with_eyes(
-                TextureSlot::Dragon,
-                TextureSlot::DragonEyes,
-                model.emit_mesh(),
-            )
+            // A dragon that has flown bends along its path; before its first
+            // tick it holds the plain pose.
+            let mesh = match ent.flight {
+                Some(flight) => {
+                    let frame = model.set_flight(flight.anim_time, &flight.offsets);
+                    model.emit_mesh_in_flight(&frame)
+                }
+                None => {
+                    model.set_angles(swing);
+                    model.emit_mesh()
+                }
+            };
+            let mut layers = with_eyes(TextureSlot::Dragon, TextureSlot::DragonEyes, mesh);
+            // The rays of a dying dragon (`LayerEnderDragonDeath`), and its body
+            // dissolving: the texture that carries the order of the dissolving
+            // replaces the usual one, and texels under `deathTicks / 200` go.
+            if let Some(flight) = ent.flight.filter(|flight| flight.death_ticks > 0.0) {
+                layers[0].slot = TextureSlot::DragonExploding;
+                layers[0].cutoff =
+                    (flight.death_ticks / 200.0 * 31.0).round().clamp(0.0, 31.0) as u8;
+                let (rays, root) = dragon_death::death_rays(flight.death_ticks);
+                let glow = Glow {
+                    tint: [root; 3],
+                    ..Glow::EYES
+                };
+                layers.push(glowing(TextureSlot::DragonRay, rays, glow));
+            }
+            layers
         }
         EntityKind::Endermite => {
             let mut model = EndermiteModel::new();

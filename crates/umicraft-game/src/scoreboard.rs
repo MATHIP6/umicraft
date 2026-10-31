@@ -284,6 +284,17 @@ impl Scoreboard {
         }
     }
 
+    /// The score of `holder` in `objective`, `0` when it has none
+    /// (`Scoreboard.getValueFromObjective` creates the score).
+    #[must_use]
+    pub fn score(&self, objective: &str, holder: &str) -> i32 {
+        self.scores
+            .get(holder)
+            .and_then(|by_objective| by_objective.get(objective))
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// The scores of an objective in the order of MCP `Score.scoreComparator`:
     /// ascending value, equal values by descending name (ignoring case).
     #[must_use]
@@ -392,6 +403,16 @@ mod tests {
             info,
             players: players.iter().map(|p| (*p).to_string()).collect(),
         });
+    }
+
+    #[test]
+    fn a_holder_without_a_score_has_zero() {
+        let mut board = Scoreboard::new();
+        create_objective(&mut board, "kills", "Kills");
+        set_score(&mut board, "Alex", "kills", Some(3));
+        assert_eq!(board.score("kills", "Alex"), 3);
+        assert_eq!(board.score("kills", "Bob"), 0);
+        assert_eq!(board.score("deaths", "Alex"), 0);
     }
 
     #[test]

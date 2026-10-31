@@ -73,6 +73,15 @@ impl EntityRecord {
         );
         self.limbs.update(moved.0.hypot(moved.1) as f32);
         self.cape.update(self.position);
+        if self.kind == EntityKind::Dragon {
+            let alive = self.health.is_none_or(|health| health > 0.0);
+            self.flight.get_or_insert_with(Default::default).tick(
+                self.yaw,
+                self.position.y,
+                self.velocity,
+                alive,
+            );
+        }
         match self.kind {
             EntityKind::Player => self.body_yaw.update_player(moved, self.yaw, false),
             kind if kind.is_living() => {
