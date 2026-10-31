@@ -114,25 +114,16 @@ impl ItemMesh {
 /// 0.6 and ambient 0.4) and the GUI pose of a block (rotate X 210, Y -135, then
 /// the model `gui` rotation 30 / 225): the top face is fully lit, the two
 /// visible sides get 0.592 (west and east) and 0.4 (north and south). These
-/// are the 8-bit values the fixed pipeline multiplies in, so they are
-/// converted to the linear space the sRGB target blends in.
+/// are the values the fixed pipeline multiplies the stored texel by, and the
+/// target does the same (ADR-0033).
 #[must_use]
 pub fn gui_face_factor(normal: [f32; 3]) -> f32 {
-    let srgb: f32 = if normal[1] > 0.5 {
+    if normal[1] > 0.5 {
         1.0
     } else if normal[1] < -0.5 || normal[2].abs() > 0.5 {
         0.4
     } else {
         0.592
-    };
-    srgb_to_linear(srgb)
-}
-
-fn srgb_to_linear(value: f32) -> f32 {
-    if value <= 0.04045 {
-        value / 12.92
-    } else {
-        ((value + 0.055) / 1.055).powf(2.4)
     }
 }
 
@@ -199,8 +190,8 @@ mod tests {
         assert_eq!(gui_face_factor([0.0, 1.0, 0.0]), 1.0);
         let west = gui_face_factor([-1.0, 0.0, 0.0]);
         let north = gui_face_factor([0.0, 0.0, -1.0]);
-        assert!((west - 0.30).abs() < 0.01, "0.592 in sRGB is 0.30 linear");
-        assert!((north - 0.133).abs() < 0.01, "0.4 in sRGB is 0.133 linear");
+        assert_eq!(west, 0.592);
+        assert_eq!(north, 0.4);
         assert_eq!(gui_face_factor([1.0, 0.0, 0.0]), west);
     }
 

@@ -17,9 +17,8 @@ use umicraft_render::EntityVertex;
 use umicraft_core::java_random::JavaRandom;
 
 /// The tint of the strips as an additive light word. The reference adds
-/// `(0.45, 0.45, 0.5) * 0.3` in display space; the target blends in linear
-/// space, where that amount is the tint raised to 2.2 (see `fs_additive`).
-const TINT: u32 = 103 | (103 << 8) | (108 << 16);
+/// `(0.45, 0.45, 0.5) * 0.3`, which the target adds as stored.
+const TINT: u32 = 34 | (34 << 8) | (38 << 16);
 
 /// `random.nextInt(bound) - offset` of the reference.
 fn step(random: &mut JavaRandom, bound: u32, offset: i32) -> f64 {
