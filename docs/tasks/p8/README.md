@@ -39,3 +39,5 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 - Opaque particles do not write depth (see `umicraft_render::particles`).
 - Item sprites (`iconcrack`), `footprint.png` and the large explosion sheet are
   not drawn; their particles are simulated but skipped by `particle_view`.
+- `Effect` 2002 (potion splash) passes no potion colour yet (the item tables of
+  `ItemPotion.getColorFromDamage` are not ported), so its spell sparks are black.

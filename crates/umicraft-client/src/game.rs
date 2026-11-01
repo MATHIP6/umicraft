@@ -50,7 +50,7 @@ use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::item_use::{drop_item, ItemUse, UseTick};
 use umicraft_game::movement::movement_stats;
-use umicraft_game::particles::SpawnFilter;
+use umicraft_game::particles::{EffectContext, SpawnFilter};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::piston::{motion, MovingBlocks};
@@ -2095,20 +2095,24 @@ fn spawn_particles(
     game: &mut Game,
     packet: &umicraft_protocol::packets::play::clientbound::Particle,
 ) {
-    let Some(state) = game.state.as_ref() else {
-        return;
-    };
-    let filter = SpawnFilter {
-        viewer: state.position(),
+    if let Some(filter) = particle_filter(game) {
+        game.particles.spawn_from_packet(packet, &filter);
+    }
+}
+
+/// The spawn filter for the local viewer; `None` before the player is placed.
+fn particle_filter(game: &Game) -> Option<SpawnFilter> {
+    Some(SpawnFilter {
+        viewer: game.state.as_ref()?.position(),
         setting: game.particle_setting,
-    };
-    game.particles.spawn_from_packet(packet, &filter);
+    })
 }
 
 /// `Effect` 2001 (`RenderGlobal.playAuxSFX`): a block broke somewhere, so its
 /// fragments fly. The data is the broken state, `id | metadata << 12`.
 fn apply_effect(game: &mut Game, packet: &umicraft_protocol::packets::play::clientbound::Effect) {
     if packet.effect_id != BLOCK_BREAK_EFFECT {
+        spawn_effect_particles(game, packet);
         return;
     }
     let (Ok(id), Ok(metadata)) = (
@@ -2122,6 +2126,34 @@ fn apply_effect(game: &mut Game, packet: &umicraft_protocol::packets::play::clie
         BlockState::new(id, metadata),
         [1.0; 3],
     );
+}
+
+/// The particles of the other `Effect` ids (smoke, potion splash, ender eye,
+/// spawner, bone meal); the rest are sounds.
+fn spawn_effect_particles(
+    game: &mut Game,
+    packet: &umicraft_protocol::packets::play::clientbound::Effect,
+) {
+    let Some(filter) = particle_filter(game) else {
+        return;
+    };
+    let pos = BlockPos::new(packet.x, packet.y, packet.z);
+    let block_max_y = game.world.as_ref().and_then(|world| {
+        let state = world.block(pos);
+        (state.id() != 0).then(|| {
+            umicraft_game::shapes::selection_shape(state, world, pos)
+                .boxes()
+                .iter()
+                .map(|bounds| bounds.max.y)
+                .fold(0.0, f64::max)
+        })
+    });
+    let context = EffectContext {
+        block_max_y,
+        ..EffectContext::default()
+    };
+    game.particles
+        .spawn_effect(packet.effect_id, pos, packet.data, &context, &filter);
 }
 
 /// Chips the face being dug while the dig goes on (MCP
@@ -2161,9 +2193,18 @@ fn apply_explosion(game: &mut Game, packet: &Explosion) {
     let Some(world) = game.world.as_mut() else {
         return;
     };
-    for (x, y, z) in packet.affected_blocks() {
+    let affected: Vec<(i32, i32, i32)> = packet.affected_blocks().collect();
+    for &(x, y, z) in &affected {
         game.dirty
             .extend(world.apply_block_change(BlockPos::new(x, y, z), BlockState::AIR));
+    }
+    if let Some(filter) = particle_filter(game) {
+        game.particles.explode(
+            DVec3::new(packet.x.into(), packet.y.into(), packet.z.into()),
+            packet.strength,
+            &affected,
+            &filter,
+        );
     }
 }
 
