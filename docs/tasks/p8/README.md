@@ -53,3 +53,6 @@ checks beyond what `Weather` answers.
   not drawn; their particles are simulated but skipped by `particle_view`.
 - `Effect` 2002 (potion splash) passes no potion colour yet (the item tables of
   `ItemPotion.getColorFromDamage` are not ported), so its spell sparks are black.
+- The ambient rain splashes assume fancy graphics (the video options live on
+  the render thread). `Weather` approximates the biome with the climate table
+  (precipitation and a temperature of at least 0.15).

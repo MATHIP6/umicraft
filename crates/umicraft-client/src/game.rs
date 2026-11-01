@@ -112,6 +112,9 @@ pub const TICK: Duration = Duration::from_millis(50);
 /// blocks and the TCP backpressure slows the server down.
 const INBOX_CAPACITY: usize = 256;
 
+/// The barrier item (id 166), whose holder in creative sees barrier blocks.
+const BARRIER_ITEM: i16 = 166;
+
 /// The `Effect` id of a block breaking (`RenderGlobal.playAuxSFX`, case 2001).
 const BLOCK_BREAK_EFFECT: i32 = 2001;
 
@@ -453,6 +456,8 @@ struct Game {
     world: Option<World>,
     /// The client-side particles (P8).
     particles: umicraft_game::particles::ParticleEngine,
+    /// The ambient sources of the particles (blocks, rain, sprint dust).
+    ambient: crate::particle_ambient::AmbientSpawner,
     /// How many particles are created (`GameSettings.particleSetting`).
     particle_setting: umicraft_game::particles::ParticleSetting,
     /// The chunks whose geometry changed and still need a snapshot.
@@ -560,6 +565,7 @@ impl Game {
         Self {
             world: None,
             particles: umicraft_game::particles::ParticleEngine::new(PARTICLE_SEED),
+            ambient: crate::particle_ambient::AmbientSpawner::default(),
             particle_setting: umicraft_game::particles::ParticleSetting::default(),
             dirty: BTreeSet::new(),
             status: "CONNECTING".to_string(),
@@ -2088,6 +2094,32 @@ fn report_flight(game: &Game, was_flying: bool, queue: &mut CommandQueue) {
 
 /// Removes the blocks of an explosion from the world.
 ///
+/// The particles the world makes around the player this tick.
+fn spawn_ambient_particles(game: &mut Game) {
+    let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
+        return;
+    };
+    let player = state.player();
+    let viewer = crate::particle_ambient::Viewer {
+        position: player.position,
+        motion: player.velocity,
+        running: player.sprinting && !player.in_water && player.on_ground,
+        sees_barriers: game.gamemode == GameMode::Creative
+            && game
+                .windows
+                .selected_item()
+                .is_some_and(|stack| stack.item_id == BARRIER_ITEM),
+    };
+    game.ambient.tick(
+        &mut game.particles,
+        world,
+        &viewer,
+        game.server.weather().rain_strength(),
+        i32::try_from(game.status_data.ticks).unwrap_or(0),
+        game.particle_setting,
+    );
+}
+
 /// Creates the particles a `Particle` packet asks for, seen from the player
 /// (MCP `NetHandlerPlayClient.handleParticles`). Before the player is placed
 /// there is no viewer, so the packet is dropped.
@@ -2740,6 +2772,7 @@ fn tick(
         game.entities.tick_objects(world);
         game.particles.tick(world);
     }
+    spawn_ambient_particles(game);
     game.server.tick();
     game.server
         .tick_lightning(game.entities.lightning_flashing());
