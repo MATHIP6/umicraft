@@ -170,6 +170,8 @@ pub struct EntityRenderer {
     ghost_pipeline: wgpu::RenderPipeline,
     /// The pipeline of the shadows under the entities.
     shadow_pipeline: wgpu::RenderPipeline,
+    /// The pipeline of item icons, lit by the fixed GUI lights.
+    icon_pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// The same filtering with the texture repeating, for scrolling layers.
@@ -272,6 +274,20 @@ impl EntityRenderer {
                 depth_compare: wgpu::CompareFunction::LessEqual,
             },
         );
+        let icon_pipeline = build_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            format,
+            PipelineKind {
+                label: "entity icon pipeline",
+                vertex: "vs_gui",
+                fragment: "fs_main",
+                blend: wgpu::BlendState::ALPHA_BLENDING,
+                depth_write: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+            },
+        );
         let glint_pipeline = build_pipeline(
             device,
             &pipeline_layout,
@@ -315,6 +331,7 @@ impl EntityRenderer {
             glint_pipeline,
             ghost_pipeline,
             shadow_pipeline,
+            icon_pipeline,
             texture_layout,
             sampler,
             repeat_sampler,
@@ -432,17 +449,38 @@ impl EntityRenderer {
         camera_bind_group: &wgpu::BindGroup,
         batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
     ) {
-        let mut set_pipeline = false;
-        for (buffer, vertex_count, texture_bind_group) in batches {
-            if !set_pipeline {
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, camera_bind_group, &[]);
-                set_pipeline = true;
-            }
-            pass.set_bind_group(1, texture_bind_group, &[]);
-            pass.set_vertex_buffer(0, buffer.slice(..));
-            pass.draw(0..vertex_count, 0..1);
+        draw_batches(pass, &self.pipeline, camera_bind_group, batches);
+    }
+
+    /// Renders entity batches posed into the GUI box as an item icon, lit by
+    /// the two fixed GUI lights at full light.
+    pub fn render_icon<'a>(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        camera_bind_group: &wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
+    ) {
+        draw_batches(pass, &self.icon_pipeline, camera_bind_group, batches);
+    }
+}
+
+/// Draws `batches` with `pipeline`: one vertex buffer and one texture each.
+fn draw_batches<'a>(
+    pass: &mut wgpu::RenderPass<'_>,
+    pipeline: &wgpu::RenderPipeline,
+    camera_bind_group: &wgpu::BindGroup,
+    batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
+) {
+    let mut set_pipeline = false;
+    for (buffer, vertex_count, texture_bind_group) in batches {
+        if !set_pipeline {
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, camera_bind_group, &[]);
+            set_pipeline = true;
         }
+        pass.set_bind_group(1, texture_bind_group, &[]);
+        pass.set_vertex_buffer(0, buffer.slice(..));
+        pass.draw(0..vertex_count, 0..1);
     }
 }
 
@@ -524,6 +562,8 @@ fn build_pipeline(
 
 #[cfg(test)]
 mod tests {
+    use glam::{Mat3, Vec3};
+
     use super::ENTITY_WGSL;
 
     /// The shader is only compiled on a GPU device; this validates it without one.
@@ -536,5 +576,34 @@ mod tests {
         )
         .validate(&module)
         .expect("the shader validates");
+    }
+
+    /// The GUI lights of the shader are the reference's two vectors turned by
+    /// `rotate(-30, y)` then `rotate(165, x)` (`enableGUIStandardItemLighting`).
+    #[test]
+    fn gui_light_constants_follow_the_reference() {
+        let turn = Mat3::from_rotation_y((-30.0_f32).to_radians())
+            * Mat3::from_rotation_x(165.0_f32.to_radians());
+        for (name, vector) in [
+            ("GUI_LIGHT_0", Vec3::new(0.2, 1.0, -0.7)),
+            ("GUI_LIGHT_1", Vec3::new(-0.2, 1.0, 0.7)),
+        ] {
+            let light = turn * vector.normalize();
+            let line = ENTITY_WGSL
+                .lines()
+                .find(|line| line.starts_with(&format!("const {name} ")))
+                .expect("light constant");
+            let numbers: Vec<f32> = line
+                .split(['(', ')', ','])
+                .filter_map(|part| part.trim().parse().ok())
+                .collect();
+            assert_eq!(numbers.len(), 3, "{line}");
+            for (shader, expected) in numbers.iter().zip(light.to_array()) {
+                assert!(
+                    (shader - expected).abs() < 1e-6,
+                    "{name}: {shader} {expected}"
+                );
+            }
+        }
     }
 }

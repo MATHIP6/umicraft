@@ -918,8 +918,8 @@ impl Renderer {
     /// `vertices` are posed into the 16x16 GUI box like an [`ItemMesh`]
     /// (`umicraft_model::item::pose::gui_pose`) and sample `texture`, an entity
     /// texture bind group. Nothing is drawn for an empty list. The icon uses
-    /// the entity pipeline, so it is lit by the face shade of the entity
-    /// shader at full daylight.
+    /// the icon variant of the entity pipeline, lit at full light by the two
+    /// fixed GUI lights (`gui_shade` in the entity shader).
     pub fn render_entity_icon(
         &mut self,
         key: u64,
@@ -940,7 +940,7 @@ impl Renderer {
         let (entities, camera) = (&self.entity_renderer, &self.icon_entity_bind_group);
         self.icon_atlas
             .render_with(&self.device, &self.queue, key, |pass| {
-                entities.render(pass, camera, batch);
+                entities.render_icon(pass, camera, batch);
             });
     }
 

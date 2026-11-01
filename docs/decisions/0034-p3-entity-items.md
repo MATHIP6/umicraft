@@ -44,8 +44,11 @@ damage).
   fixes the items.
 - A player skull whose owner's skin is downloading is drawn with the default
   skin and redrawn (the old cell is forgotten) once the skin is ready.
-- Deviations: the GUI icons are lit with the entity shader's face shade at
-  full light, not `RenderHelper.enableGUIStandardItemLighting`; the glint of
+- The GUI icons use the `vs_gui` entry of the entity shader: full light and the
+  two fixed lights of `RenderHelper.enableGUIStandardItemLighting` (ambient
+  0.4, two lights of 0.6) on the posed normal, as block icons do. With the
+  face shade of the world they came out too dark.
+- Deviations: the glint of
   enchanted skulls and banners is not drawn; a skull owner given only as a
   name is not looked up (the same as the placed skull); two stacks that differ
   only in unrelated NBT (a custom name) get separate icon cells.

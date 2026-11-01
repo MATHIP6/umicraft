@@ -82,8 +82,8 @@ fn face_shade(normal: vec3<f32>) -> f32 {
     return 0.6;
 }
 
-@vertex
-fn vs_main(in: VertexIn) -> VertexOut {
+// The vertex of a lit entity; the entry points differ in the shade they use.
+fn entity_vertex(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
     out.world_position = in.position;
@@ -118,6 +118,37 @@ fn vs_main(in: VertexIn) -> VertexOut {
         );
     }
 
+    return out;
+}
+
+@vertex
+fn vs_main(in: VertexIn) -> VertexOut {
+    return entity_vertex(in);
+}
+
+// The two fixed lights of `RenderHelper.enableGUIStandardItemLighting` in the
+// GUI's eye space: the vectors (0.2, 1, -0.7) and (-0.2, 1, 0.7), normalised
+// and turned by `rotate(-30, y)` then `rotate(165, x)`. Pinned by the test
+// `gui_light_constants_follow_the_reference` in entity_pass.rs.
+const GUI_LIGHT_0 = vec3<f32>(-0.23791005, -0.63443479, 0.73545313);
+const GUI_LIGHT_1 = vec3<f32>(0.02866725, -0.92737470, -0.37303398);
+
+// The brightness of a face in an item icon: ambient 0.4 plus the two lights at
+// 0.6 each (`GL_LIGHT_MODEL_AMBIENT`, `GL_DIFFUSE`), capped at 1. `normal` is
+// already in the GUI's eye space.
+fn gui_shade(normal: vec3<f32>) -> f32 {
+    let n = normalize(normal);
+    let lit = 0.4 + 0.6 * max(dot(n, GUI_LIGHT_0), 0.0) + 0.6 * max(dot(n, GUI_LIGHT_1), 0.0);
+    return min(lit, 1.0);
+}
+
+// An item icon: full light and the two fixed GUI lights instead of the face
+// shade of the world.
+@vertex
+fn vs_gui(in: VertexIn) -> VertexOut {
+    var out = entity_vertex(in);
+    out.light = 1.0;
+    out.shade = gui_shade(in.normal);
     return out;
 }
 
