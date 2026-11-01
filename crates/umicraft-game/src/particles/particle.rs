@@ -38,13 +38,16 @@ pub enum Layer {
     Terrain,
     /// A sprite of the item atlas (layer 2).
     Items,
+    /// Particles that bring their own picture and are drawn lit by
+    /// `renderLitParticles` (layer 3: the large explosion).
+    Lit,
 }
 
 impl Layer {
-    /// The three layers in draw order.
-    pub const ALL: [Self; 3] = [Self::Misc, Self::Terrain, Self::Items];
+    /// The four layers in draw order.
+    pub const ALL: [Self; 4] = [Self::Misc, Self::Terrain, Self::Items, Self::Lit];
 
-    /// The index of the layer in the reference (0, 1 or 2).
+    /// The index of the layer in the reference (0 to 3).
     #[must_use]
     pub fn index(self) -> usize {
         self as usize
@@ -56,6 +59,10 @@ impl Layer {
 pub enum Lighting {
     /// The world light at the particle (`Entity.getBrightnessForRender`).
     World,
+    /// Always at the brightest light level: `getBrightnessForRender` returns
+    /// a constant above the lightmap range (257 for a lava drip, 61680 for
+    /// the large explosion).
+    FullBright,
 }
 
 /// What a particle shows.
@@ -219,7 +226,7 @@ impl Particle {
 
     /// `Entity.moveEntity` for a box without step: moves, zeroes the motion on
     /// the axes that were blocked and sets `on_ground`.
-    fn move_with_collision<S: BlockSource + ?Sized>(&mut self, world: &S) {
+    pub(super) fn move_with_collision<S: BlockSource + ?Sized>(&mut self, world: &S) {
         let result = move_entity(
             self.bounding_box(),
             self.motion,
