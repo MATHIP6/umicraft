@@ -23,9 +23,19 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | P8-0 | `ParticleKind`, `Particle`, `ParticleEngine`, `Behaviour`, `create` | done |
 | P8-a | `ParticleRenderer`: billboards, flat footprints, `particles.png` sheet or block atlas layer, tint x light x fog | done: packet to screen for sheet particles |
 | P8-b | water, drips, explosion and large explosion (simulation) | simulation done |
-| P8-b2 | digging, block break, `blockcrack`/`blockdust`/`iconcrack`, sprint, rain splash (need client sprites) | |
+| P8-b2 | block break and hit fragments, `blockcrack`/`blockdust`, `Effect` 2001 | done (blocks); `iconcrack`, sprint and rain splash remain |
 | P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | |
 | P8-c | flame, smoke, lava, portal, redstone, footstep (drips: with P8-b water) | simulation done |
 | P8-d | spells and potions, crit, hearts, notes, enchantment | simulation done |
 | P8-f | screen overlays | |
 | P8-g | `particles` setting, criterion benchmark, parity sheet | |
+
+## Approximations
+
+- Block fragments are tinted with the plains colours (leaves, plants), not the
+  biome at the block: the game thread has no biome tint table. Packet-made
+  fragments (`blockcrack`, `blockdust`) use white like `getRenderColor` would for
+  untinted blocks.
+- Opaque particles do not write depth (see `umicraft_render::particles`).
+- Item sprites (`iconcrack`), `footprint.png` and the large explosion sheet are
+  not drawn; their particles are simulated but skipped by `particle_view`.

@@ -8,14 +8,48 @@
 //! and never reads the world (as for the weather, ADR-0031).
 
 use umicraft_game::particles::{Behaviour, Layer, Particle, ParticleEngine, Texture};
+use umicraft_mesh::tint::tint_class;
+use umicraft_mesh::ModelMeshContext;
 use umicraft_render::ParticleSprite;
-use umicraft_world::{BlockPos, World};
+use umicraft_world::{BlockPos, BlockState, World};
 
 /// Cells per side of `particles.png`.
 const SHEET_GRID: f32 = 16.0;
 /// The share of a cell a picture covers (`0.0624375` in `renderParticle`,
 /// just under 1/16 so neighbours do not bleed in).
 const CELL_SPAN: f32 = 0.062_437_5;
+
+/// The plains biome, whose colours tint the fragments of leaves and plants:
+/// the game thread has no biome at hand for a fragment (see
+/// `docs/tasks/p8/README.md`).
+const TINT_BIOME: u8 = 1;
+/// The grass block's id: its fragments are never tinted (`EntityDiggingFX`).
+const GRASS_BLOCK: u16 = 2;
+
+/// The picture of a block for its fragments.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockSprite {
+    /// The layer of the block atlas.
+    pub layer: u32,
+    /// The colour multiplier of the block.
+    pub tint: [f32; 3],
+}
+
+/// The particle picture of `state`: the `particle` texture of its first model
+/// variant (`BlockModelShapes.getTexture`) and its tint.
+#[must_use]
+pub fn block_sprite(context: &ModelMeshContext, state: BlockState) -> Option<BlockSprite> {
+    let model = context.models.model(state)?;
+    let key = model.variants.first()?.model.particle.as_deref()?;
+    let layer = context.atlas.layer(key)?;
+    let tint = match (&context.tints, state.id()) {
+        (Some(tints), id) if id != GRASS_BLOCK => tints
+            .color(tint_class(state), TINT_BIOME)
+            .map(|channel| f32::from(channel) / 255.0),
+        _ => [1.0; 3],
+    };
+    Some(BlockSprite { layer, tint })
+}
 
 /// A particle of the newest tick with the light at its position.
 #[derive(Debug, Clone)]
@@ -61,16 +95,37 @@ fn light_position(particle: &Particle) -> BlockPos {
 }
 
 /// The quad to draw for `draw` at `partial_ticks` into the tick; `None` when
-/// its picture is not available yet (the sprites of the block and item
-/// atlases and the pictures beside `particles.png`).
+/// its picture is not available (an item sprite, or a picture beside
+/// `particles.png` that is not drawn yet). `blocks` finds the picture of a
+/// block.
 #[must_use]
-pub fn sprite(draw: &ParticleDraw, partial_ticks: f32) -> Option<ParticleSprite> {
+pub fn sprite(
+    draw: &ParticleDraw,
+    partial_ticks: f32,
+    blocks: &impl Fn(BlockState) -> Option<BlockSprite>,
+) -> Option<ParticleSprite> {
     let particle = &draw.particle;
-    let Texture::Cell { index } = particle.texture else {
-        return None;
+    let (uv_min, uv_max, atlas_layer, tint) = match particle.texture {
+        Texture::Cell { index } => {
+            let u0 = f32::from(index % 16) / SHEET_GRID;
+            let v0 = f32::from(index / 16) / SHEET_GRID;
+            ([u0, v0], [u0 + CELL_SPAN, v0 + CELL_SPAN], None, [1.0; 3])
+        }
+        Texture::Block { state } => {
+            let block = blocks(state)?;
+            // A fragment shows a quarter of the sprite, picked by its jitter
+            // (`EntityDiggingFX.renderParticle`).
+            let u0 = particle.jitter_u / 4.0;
+            let v0 = particle.jitter_v / 4.0;
+            (
+                [u0, v0],
+                [u0 + 0.25, v0 + 0.25],
+                Some(block.layer),
+                block.tint,
+            )
+        }
+        Texture::Sprite { .. } => return None,
     };
-    let u0 = f32::from(index % 16) / SHEET_GRID;
-    let v0 = f32::from(index / 16) / SHEET_GRID;
     let (block, sky) = particle.light(
         draw.block_light.saturating_mul(16),
         draw.sky_light.saturating_mul(16),
@@ -81,13 +136,13 @@ pub fn sprite(draw: &ParticleDraw, partial_ticks: f32) -> Option<ParticleSprite>
     Some(ParticleSprite {
         center: particle.interpolated_position(partial_ticks).as_vec3(),
         half_size: 0.1 * behaviour.render_scale(particle, partial_ticks),
-        uv_min: [u0, v0],
-        uv_max: [u0 + CELL_SPAN, v0 + CELL_SPAN],
-        atlas_layer: None,
+        uv_min,
+        uv_max,
+        atlas_layer,
         color: [
-            red,
-            green,
-            blue,
+            red * tint[0],
+            green * tint[1],
+            blue * tint[2],
             behaviour.render_alpha(particle, partial_ticks),
         ],
         light: [f32::from(block) / 16.0, f32::from(sky) / 16.0],
@@ -97,10 +152,14 @@ pub fn sprite(draw: &ParticleDraw, partial_ticks: f32) -> Option<ParticleSprite>
 
 /// The quads of every particle that can be drawn, for `Renderer::set_particles`.
 #[must_use]
-pub fn sprites(draws: &[ParticleDraw], partial_ticks: f32) -> Vec<ParticleSprite> {
+pub fn sprites(
+    draws: &[ParticleDraw],
+    partial_ticks: f32,
+    blocks: &impl Fn(BlockState) -> Option<BlockSprite>,
+) -> Vec<ParticleSprite> {
     draws
         .iter()
-        .filter_map(|draw| sprite(draw, partial_ticks))
+        .filter_map(|draw| sprite(draw, partial_ticks, blocks))
         .collect()
 }
 
@@ -109,6 +168,10 @@ mod tests {
     use super::*;
     use glam::DVec3;
     use umicraft_game::particles::{create, ParticleKind};
+
+    fn no_blocks(_: BlockState) -> Option<BlockSprite> {
+        None
+    }
 
     fn flame() -> Particle {
         let mut engine = ParticleEngine::new(1);
@@ -130,7 +193,7 @@ mod tests {
             block_light: 3,
             sky_light: 15,
         };
-        let sprite = sprite(&draw, 0.5).expect("a sheet cell");
+        let sprite = sprite(&draw, 0.5, &no_blocks).expect("a sheet cell");
         assert_eq!(sprite.uv_min, [3.0 / 16.0, 2.0 / 16.0]);
         assert!(sprite.atlas_layer.is_none() && !sprite.flat);
         assert!(sprite.half_size > 0.0);
@@ -147,7 +210,33 @@ mod tests {
             block_light: 0,
             sky_light: 15,
         };
-        assert!(sprite(&draw, 0.0).is_none());
+        assert!(sprite(&draw, 0.0, &no_blocks).is_none());
+    }
+
+    #[test]
+    fn a_block_fragment_samples_a_quarter_of_its_layer_tinted() {
+        let mut particle = flame();
+        let state = BlockState::new(18, 0);
+        particle.texture = Texture::Block { state };
+        particle.jitter_u = 2.0;
+        particle.jitter_v = 1.0;
+        particle.color = [0.6; 3];
+        let draw = ParticleDraw {
+            particle,
+            block_light: 0,
+            sky_light: 15,
+        };
+        let blocks = |_: BlockState| {
+            Some(BlockSprite {
+                layer: 9,
+                tint: [0.5, 1.0, 0.0],
+            })
+        };
+        let sprite = sprite(&draw, 0.0, &blocks).expect("a block sprite");
+        assert_eq!(sprite.atlas_layer, Some(9));
+        assert_eq!(sprite.uv_min, [0.5, 0.25]);
+        assert_eq!(sprite.uv_max, [0.75, 0.5]);
+        assert_eq!(sprite.color[..3], [0.3, 0.6, 0.0]);
     }
 
     #[test]

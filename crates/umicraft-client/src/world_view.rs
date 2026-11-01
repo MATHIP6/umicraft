@@ -203,11 +203,16 @@ impl WorldView {
         Arc::clone(&self.view.weather.precipitation)
     }
 
-    /// The particles of the newest frame, for `Renderer::set_particles` once
-    /// `particle_view::sprites` has resolved them at the frame's partial tick.
+    /// The quads of the newest frame's particles at `partial_ticks` into the
+    /// tick, for `Renderer::set_particles`. Block fragments find their sprite
+    /// in the bound terrain; the procedural terrain has none, so they are
+    /// left out.
     #[must_use]
-    pub fn particles(&self) -> &[crate::particle_view::ParticleDraw] {
-        &self.view.particles
+    pub fn particle_sprites(&self, partial_ticks: f32) -> Vec<umicraft_render::ParticleSprite> {
+        let context = self.mesher.model_context();
+        crate::particle_view::sprites(&self.view.particles, partial_ticks, &|state| {
+            crate::particle_view::block_sprite(context?, state)
+        })
     }
 
     /// The world border of the newest frame; `None` before the first one.

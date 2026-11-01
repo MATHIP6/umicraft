@@ -94,7 +94,15 @@ pub enum Texture {
         /// The cell number, 0 to 255.
         index: u8,
     },
-    /// A sprite of the block or item atlas, named by its path.
+    /// The picture of a block in the block atlas (digging and dust); the
+    /// client picks the sprite from the block's model. The sprite is sampled
+    /// through the jitter window of [`Particle::jitter_u`] and
+    /// [`Particle::jitter_v`].
+    Block {
+        /// The block the particle was torn from.
+        state: umicraft_world::BlockState,
+    },
+    /// A sprite named by its path (a picture beside `particles.png`).
     Sprite {
         /// The atlas path, e.g. `blocks/stone`.
         name: &'static str,

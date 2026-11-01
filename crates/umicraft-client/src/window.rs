@@ -1233,10 +1233,7 @@ impl App {
         renderer.set_cloud_ticks((now - self.started).as_secs_f64() * 20.0);
         if let Some(world) = self.world.as_ref() {
             renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
-            renderer.set_particles(&crate::particle_view::sprites(
-                world.particles(),
-                environment.partial_tick,
-            ));
+            renderer.set_particles(&world.particle_sprites(environment.partial_tick));
         }
         renderer.set_world_border(
             self.world.as_ref().and_then(WorldView::border),

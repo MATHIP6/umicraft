@@ -31,6 +31,7 @@ use crate::shapes::BlockSource;
 use glam::DVec3;
 use umicraft_world::fluid::Liquid;
 
+pub(super) mod digging;
 mod drip;
 mod explode;
 mod rain;

@@ -50,6 +50,7 @@ use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::item_use::{drop_item, ItemUse, UseTick};
 use umicraft_game::movement::movement_stats;
+use umicraft_game::particles::SpawnFilter;
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::piston::{motion, MovingBlocks};
@@ -62,6 +63,7 @@ use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
+use umicraft_game::shapes::Aabb;
 use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::view::{camera_pose, Perspective};
@@ -109,6 +111,9 @@ pub const TICK: Duration = Duration::from_millis(50);
 /// sized like the M2 network queue: when it is full the network thread
 /// blocks and the TCP backpressure slows the server down.
 const INBOX_CAPACITY: usize = 256;
+
+/// The `Effect` id of a block breaking (`RenderGlobal.playAuxSFX`, case 2001).
+const BLOCK_BREAK_EFFECT: i32 = 2001;
 
 /// The seed of the particle random source; particles are cosmetic, so a fixed
 /// seed only makes a session repeatable.
@@ -1965,6 +1970,7 @@ fn apply_net_event(
         }
         PlayEvent::Explosion(packet) => apply_explosion(game, &packet),
         PlayEvent::Particle(packet) => spawn_particles(game, &packet),
+        PlayEvent::Effect(packet) => apply_effect(game, &packet),
         PlayEvent::PlayerAbilities(packet) => {
             game.server.apply_abilities(&packet);
             apply_mode_rules(game);
@@ -2092,9 +2098,52 @@ fn spawn_particles(
     let Some(state) = game.state.as_ref() else {
         return;
     };
-    let viewer = state.position();
+    let filter = SpawnFilter {
+        viewer: state.position(),
+        setting: game.particle_setting,
+    };
+    game.particles.spawn_from_packet(packet, &filter);
+}
+
+/// `Effect` 2001 (`RenderGlobal.playAuxSFX`): a block broke somewhere, so its
+/// fragments fly. The data is the broken state, `id | metadata << 12`.
+fn apply_effect(game: &mut Game, packet: &umicraft_protocol::packets::play::clientbound::Effect) {
+    if packet.effect_id != BLOCK_BREAK_EFFECT {
+        return;
+    }
+    let (Ok(id), Ok(metadata)) = (
+        u16::try_from(packet.data & 0xFFF),
+        u8::try_from((packet.data >> 12) & 0xFF),
+    ) else {
+        return;
+    };
+    game.particles.add_block_destroy_effects(
+        BlockPos::new(packet.x, packet.y, packet.z),
+        BlockState::new(id, metadata),
+        [1.0; 3],
+    );
+}
+
+/// Chips the face being dug while the dig goes on (MCP
+/// `PlayerControllerMP.onPlayerDamageBlock` calls `addBlockHitEffects` on every
+/// tick of a dig).
+fn chip_dug_block(game: &mut Game, hit: Option<&RayHit>) {
+    let (Some(hit), Some(world)) = (hit, game.world.as_ref()) else {
+        return;
+    };
+    if game.interaction.digging_block() != Some(hit.block) {
+        return;
+    }
+    let state = world.block(hit.block);
+    let shape = umicraft_game::shapes::selection_shape(state, world, hit.block);
+    let bounds = shape
+        .boxes()
+        .iter()
+        .copied()
+        .reduce(|a, b| Aabb::new(a.min.min(b.min), a.max.max(b.max)))
+        .unwrap_or_else(|| Aabb::new(DVec3::ZERO, DVec3::ONE));
     game.particles
-        .spawn_from_packet(packet, viewer, game.particle_setting);
+        .add_block_hit_effects(hit.block, state, bounds, hit.face, [1.0; 3]);
 }
 
 /// MCP `NetHandlerPlayClient.handleExplosion` runs `Explosion.doExplosionB`
@@ -2392,10 +2441,14 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     if let Some(world) = game.world.as_mut() {
         for position in output.broken {
             tracing::info!(block = ?position, "breaking a block");
+            let broken = world.block(position);
             game.dirty
                 .extend(world.apply_block_change(position, BlockState::AIR));
+            game.particles
+                .add_block_destroy_effects(position, broken, [1.0; 3]);
         }
     }
+    chip_dug_block(game, target.as_ref());
     if let Some(progress) = output.progress {
         game.server.apply_block_break_anim(&BlockBreakAnim {
             entity_id: game.entity_id,

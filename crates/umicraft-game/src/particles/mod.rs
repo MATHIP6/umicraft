@@ -8,6 +8,7 @@
 //! | `kind` | [`ParticleKind`], the 42 wire ids |
 //! | `particle` | [`Particle`], the shared `EntityFX` state and tick |
 //! | `behaviours` | [`Behaviour`], one module per family of particle classes |
+//! | `block_effects` | the fragments of a broken or hit block |
 //! | `spawn` | [`ParticleSetting`], the range filter and the `Particle` packet |
 //! | `engine` | [`ParticleEngine`], the buckets, the 4000 cap and the tick |
 //!
@@ -16,6 +17,7 @@
 //! for the weather, ADR-0031). The plan is in `docs/tasks/p8/README.md`.
 
 pub mod behaviours;
+mod block_effects;
 mod engine;
 mod kind;
 mod particle;
@@ -25,4 +27,4 @@ pub use behaviours::{create, Behaviour, TickContext};
 pub use engine::{ParticleEngine, MAX_PER_BUCKET};
 pub use kind::ParticleKind;
 pub use particle::{Layer, Lighting, Particle, Texture};
-pub use spawn::ParticleSetting;
+pub use spawn::{ParticleSetting, SpawnFilter, SpawnRequest};

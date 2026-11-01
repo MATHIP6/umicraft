@@ -209,7 +209,7 @@ impl BiomeTints {
 /// their texture colours. `BlockTallGrass` metadata 0 is the dead bush and
 /// `BlockDoublePlant` tints only the grass/fern variants.
 #[must_use]
-pub(crate) fn tint_class(state: BlockState) -> TintClass {
+pub fn tint_class(state: BlockState) -> TintClass {
     match state.id() {
         2 => TintClass::Grass,
         31 if state.metadata() != 0 => TintClass::Grass,
