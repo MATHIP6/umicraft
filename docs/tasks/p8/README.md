@@ -26,9 +26,21 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | P8-b2 | block break and hit fragments, `blockcrack`/`blockdust`, `Effect` 2001 | done (blocks); `iconcrack`, sprint and rain splash remain |
 | P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | |
 | P8-c | flame, smoke, lava, portal, redstone, footstep (drips: with P8-b water) | simulation done |
+| P8-c2 | ambient block particles (`randomDisplayTick`), 1000-block sampling, rain splashes, sprint dust (`particles::ambient`) | simulation done, not wired |
 | P8-d | spells and potions, crit, hearts, notes, enchantment | simulation done |
 | P8-f | screen overlays | |
 | P8-g | `particles` setting, criterion benchmark, parity sheet | |
+
+## Ambient particles (P8-c2)
+
+`particles::ambient` queues `SpawnRequest`s (it never touches the engine): the
+display tick of 17 block families, `sample_around` (1000 blocks within 16 of the
+player, barrier markers in creative), `rain_splashes` and `running_dust`. The
+caller owns the `JavaRandom`, feeds the requests to `ParticleEngine::spawn` and
+supplies a `Weather` (rain at a block, rain-bearing biome). Sounds are not played
+and the draws that only pick them are not made. Not done: the sound-bearing
+branches, stairs (their model blocks never emit), biome-dependent leaf and rain
+checks beyond what `Weather` answers.
 
 ## Approximations
 
