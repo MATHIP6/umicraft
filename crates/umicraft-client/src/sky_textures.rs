@@ -2,7 +2,7 @@
 
 //! The sky pictures of the user's client jar (P7e).
 //!
-//! `sun.png`, `moon_phases.png`, `end_sky.png`, `clouds.png`, `rain.png` and `snow.png` are read at runtime from the
+//! `sun.png`, `moon_phases.png`, `end_sky.png`, `clouds.png`, `rain.png`, `snow.png` and the particle sheet are read at runtime from the
 //! verified jar and never stored in the repository (spec §3). A picture the jar
 //! lacks, or that does not decode, stays `None` and the renderer draws its
 //! original stand-in.
@@ -47,6 +47,9 @@ const RAIN: &str = "assets/minecraft/textures/environment/rain.png";
 /// Jar path of the snowflakes.
 const SNOW: &str = "assets/minecraft/textures/environment/snow.png";
 
+/// Jar path of the particle sheet.
+const PARTICLES: &str = "assets/minecraft/textures/particle/particles.png";
+
 /// Reads the sky pictures of `jar`; every missing or undecodable one is `None`.
 #[must_use]
 pub fn load_sky_textures(jar: Option<&ClientJar>) -> SkyTextures {
@@ -58,6 +61,7 @@ pub fn load_sky_textures(jar: Option<&ClientJar>) -> SkyTextures {
         clouds: read(CLOUDS),
         rain: read(RAIN),
         snow: read(SNOW),
+        particles: read(PARTICLES),
     }
 }
 
@@ -74,6 +78,7 @@ mod tests {
         assert!(textures.clouds.is_none());
         assert!(textures.rain.is_none());
         assert!(textures.snow.is_none());
+        assert!(textures.particles.is_none());
         assert!(load_border_texture(None).is_none());
     }
 }

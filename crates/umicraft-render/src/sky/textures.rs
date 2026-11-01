@@ -43,6 +43,8 @@ pub struct SkyTextures {
     pub rain: Option<SkyImage>,
     /// `textures/environment/snow.png`, drawn by the weather pass.
     pub snow: Option<SkyImage>,
+    /// `textures/particle/particles.png`, the 16 x 16 sheet of the particles.
+    pub particles: Option<SkyImage>,
 }
 
 /// Edge of the fallback sun in texels.

@@ -21,7 +21,7 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | Step | Content | State |
 |---|---|---|
 | P8-0 | `ParticleKind`, `Particle`, `ParticleEngine`, `Behaviour`, `create` | done |
-| P8-a | `ParticleRenderer`: billboards, 3 layers, `particles.png`, tint x light x fog | |
+| P8-a | `ParticleRenderer`: billboards, flat footprints, `particles.png` sheet or block atlas layer, tint x light x fog (render side done; client wiring next) | render done |
 | P8-b | water, drips, explosion and large explosion (simulation) | simulation done |
 | P8-b2 | digging, block break, `blockcrack`/`blockdust`/`iconcrack`, sprint, rain splash (need client sprites) | |
 | P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | |

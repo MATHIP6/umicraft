@@ -40,6 +40,7 @@ use crate::error::RenderError;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
+use crate::particles::{ParticleRenderer, ParticleSprite};
 use crate::sky::{SkyImage, SkyRenderer, SkyState, SkyTextures};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
 use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
@@ -205,6 +206,8 @@ pub struct Renderer {
     cloud_ticks: f64,
     /// Rain and snow, drawn before the translucent terrain.
     weather: WeatherRenderer,
+    particles: ParticleRenderer,
+    particle_sprites: Vec<ParticleSprite>,
     /// The world border walls, drawn after the translucent terrain.
     border: BorderRenderer,
     /// World clock and dimension of the next frame.
@@ -638,6 +641,7 @@ impl Renderer {
         let entity_renderer = EntityRenderer::new(&device, &camera_layout, format);
         let outline = OutlineRenderer::new(&device, &camera_layout, format);
         let weather = WeatherRenderer::new(&device, &queue, &camera_layout, format);
+        let particles = ParticleRenderer::new(&device, &queue, &terrain_layout, format);
 
         let overlay_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("overlay vertices"),
@@ -721,6 +725,8 @@ impl Renderer {
             clouds,
             cloud_ticks: 0.0,
             weather,
+            particles,
+            particle_sprites: Vec::new(),
             border,
             environment: RenderEnvironment::default(),
             block_sampler,
@@ -781,6 +787,8 @@ impl Renderer {
         self.clouds
             .set_texture(&self.device, &self.queue, textures.clouds.as_ref());
         self.set_weather_textures(textures);
+        self.particles
+            .set_sheet(&self.device, &self.queue, textures.particles.as_ref());
     }
 
     /// Replaces the rain and snow pictures (`textures/environment/rain.png`,
@@ -793,6 +801,14 @@ impl Renderer {
             textures.rain.as_ref(),
             textures.snow.as_ref(),
         );
+    }
+
+    /// Sets the particles to draw this frame, already resolved by the client
+    /// (position, picture, tint, light). Call once per frame; the list is
+    /// copied into a reused buffer.
+    pub fn set_particles(&mut self, sprites: &[ParticleSprite]) {
+        self.particle_sprites.clear();
+        self.particle_sprites.extend_from_slice(sprites);
     }
 
     /// Sets the columns the rain and snow fall on, sampled by the game
@@ -1009,6 +1025,8 @@ impl Renderer {
         );
         self.weather
             .update(&self.queue, camera, self.environment, self.cloud_ticks);
+        self.particles
+            .update(&self.queue, camera, &self.particle_sprites);
         // The reference's reach is `renderDistanceChunks * 16`.
         self.border.update(
             &self.queue,
@@ -1941,8 +1959,9 @@ impl Renderer {
         // `renderWorldPass`: before the translucent layer from below.
         self.clouds.draw_below(&mut pass);
 
-        // `renderRainSnow` comes after the entities and particles and before
-        // the translucent terrain.
+        // `renderParticles` follows the entities; `renderRainSnow` comes after
+        // both and before the translucent terrain.
+        self.particles.draw(&mut pass, &self.terrain_bind_group);
         self.weather.draw(&mut pass, &self.camera_bind_group);
 
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
