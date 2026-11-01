@@ -10,6 +10,7 @@ use super::behaviours::{create, digging};
 use super::engine::ParticleEngine;
 use super::kind::ParticleKind;
 use super::particle::Particle;
+use umicraft_core::java_random::JavaRandom;
 use umicraft_world::BlockState;
 
 /// How far from the viewer a particle is still created, squared (MCP
@@ -62,6 +63,19 @@ impl ParticleEngine {
     /// whether a particle was created: kinds the engine cannot build yet (item
     /// cracks, and the families still to port) return `false`.
     pub fn spawn(&mut self, request: &SpawnRequest<'_>, filter: &SpawnFilter) -> bool {
+        self.spawn_with(request, filter, |particle, _| particle)
+    }
+
+    /// [`spawn`](Self::spawn) for the callers that adjust the new particle
+    /// (colour, velocity) before it is added, as the ones of `playAuxSFX` do
+    /// with the `EntityFX` that `spawnEntityFX` returns. `adjust` also gets
+    /// the engine's random source to keep the draw order of the reference.
+    pub(super) fn spawn_with(
+        &mut self,
+        request: &SpawnRequest<'_>,
+        filter: &SpawnFilter,
+        adjust: impl FnOnce(Particle, &mut JavaRandom) -> Particle,
+    ) -> bool {
         if !request.ignore_range {
             let setting = match filter.setting {
                 ParticleSetting::Decreased if self.rng().next_int(3) == 0 => {
@@ -77,6 +91,7 @@ impl ParticleEngine {
         }
         match self.build(request) {
             Some(particle) => {
+                let particle = adjust(particle, self.rng());
                 self.add(particle);
                 true
             }

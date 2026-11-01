@@ -24,7 +24,7 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | P8-a | `ParticleRenderer`: billboards, flat footprints, `particles.png` sheet or block atlas layer, tint x light x fog | done: packet to screen for sheet particles |
 | P8-b | water, drips, explosion and large explosion (simulation) | simulation done |
 | P8-b2 | block break and hit fragments, `blockcrack`/`blockdust`, `Effect` 2001 | done (blocks); `iconcrack`, sprint and rain splash remain |
-| P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | |
+| P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | simulation done for `HugeExplosion`, `explode`, `Effect` 2000/2002-2005 and `FireworksSpark`; `FireworksSpark` `StarterFX`/overlay, `ItemTake`, `MobAppearance`, breaking (item sprites) and `iconcrack` remain; wiring in the client pending |
 | P8-c | flame, smoke, lava, portal, redstone, footstep (drips: with P8-b water) | simulation done |
 | P8-d | spells and potions, crit, hearts, notes, enchantment | simulation done |
 | P8-f | screen overlays | |

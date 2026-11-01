@@ -11,7 +11,9 @@ mod cloud;
 mod common;
 mod crit;
 mod enchantment;
+mod firework;
 mod heart;
+mod huge_explode;
 mod note;
 mod snow_shovel;
 mod spell;
@@ -41,6 +43,7 @@ mod underwater;
 pub use explode::{
     large_explode_quad, LargeExplodeQuad, LARGE_EXPLODE_FRAME_SPAN, LARGE_EXPLODE_TEXTURE,
 };
+pub use firework::{spark as firework_spark, SparkStyle};
 
 /// What a behaviour may read and do during a tick.
 pub struct TickContext<'a, S: BlockSource + ?Sized> {
@@ -137,6 +140,13 @@ pub enum Behaviour {
         /// The factor of the quad size (`field_70582_as`).
         size: f32,
     },
+    /// `EntityHugeExplodeFX`: an invisible emitter of large explosions.
+    HugeExplosion {
+        /// The ticks it has emitted (`timeSinceStart`).
+        ticks: u32,
+    },
+    /// `EntityFirework.SparkFX`: a firework spark.
+    Spark(SparkStyle),
 }
 
 impl Behaviour {
@@ -170,6 +180,8 @@ impl Behaviour {
             Self::Drip { liquid, bob_timer } => drip::update(liquid, bob_timer, particle, context),
             Self::Explode => explode::update_puff(particle, context),
             Self::LargeExplode { .. } => explode::update_flash(particle),
+            Self::HugeExplosion { ticks } => huge_explode::update(particle, ticks, context),
+            Self::Spark(style) => firework::update(particle, style, context),
         }
     }
 
@@ -195,6 +207,8 @@ impl Behaviour {
             Self::Crit | Self::Heart | Self::Note | Self::Cloud | Self::SnowShovel => {
                 particle.scale * common::growth(particle, partial_ticks)
             }
+            Self::HugeExplosion { .. } => 0.0,
+            Self::Spark(style) => firework::render_scale(style, particle),
             _ => particle.scale,
         }
     }
@@ -205,6 +219,7 @@ impl Behaviour {
     pub fn render_alpha(self, particle: &Particle, partial_ticks: f32) -> f32 {
         match self {
             Self::Footstep => footstep::alpha(particle, partial_ticks),
+            Self::HugeExplosion { .. } => 0.0,
             _ => particle.alpha,
         }
     }
@@ -266,6 +281,8 @@ pub fn create(
         K::DripLava => Some(drip::drop(position, Liquid::Lava, rng)),
         K::Explode => Some(explode::puff(position, speed, rng)),
         K::LargeExplode => Some(explode::large_flash(position, speed, rng)),
+        K::HugeExplosion => Some(huge_explode::create(position, rng)),
+        K::FireworksSpark => Some(firework::spark(position, speed, SparkStyle::default(), rng)),
         _ => None,
     }
 }
