@@ -24,7 +24,7 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | P8-a | `ParticleRenderer`: billboards, 3 layers, `particles.png`, tint x light x fog | |
 | P8-b | digging, block break, `blockcrack`/`blockdust`/`iconcrack`, sprint, rain splash | |
 | P8-c | flame, smoke, lava, portal, redstone, drips | |
-| P8-d | spells and potions, crit, hearts, notes, enchantment | |
+| P8-d | spells and potions, crit, hearts, notes, enchantment | done |
 | P8-e | explosions, fireworks, full `Effect` packet | |
 | P8-f | screen overlays | |
 | P8-g | `particles` setting, criterion benchmark, parity sheet | |

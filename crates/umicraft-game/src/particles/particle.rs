@@ -56,6 +56,10 @@ impl Layer {
 pub enum Lighting {
     /// The world light at the particle (`Entity.getBrightnessForRender`).
     World,
+    /// The world light, with the sky component raised as the particle ages
+    /// (`EntityEnchantmentTableParticleFX.getBrightnessForRender`, so the
+    /// glyphs flare up near the table). See [`Particle::light_coords`].
+    AgeGlow,
 }
 
 /// What a particle shows.
@@ -219,7 +223,7 @@ impl Particle {
 
     /// `Entity.moveEntity` for a box without step: moves, zeroes the motion on
     /// the axes that were blocked and sets `on_ground`.
-    fn move_with_collision<S: BlockSource + ?Sized>(&mut self, world: &S) {
+    pub(super) fn move_with_collision<S: BlockSource + ?Sized>(&mut self, world: &S) {
         let result = move_entity(
             self.bounding_box(),
             self.motion,
@@ -237,6 +241,27 @@ impl Particle {
             self.motion.y = 0.0;
         }
         self.on_ground = result.on_ground;
+    }
+
+    /// The lightmap coordinates to draw with, given the world light at the
+    /// particle in the 0 to 240 scale of `getBrightnessForRender` (the light
+    /// level times 16).
+    ///
+    /// [`Lighting::AgeGlow`] adds `(age / life)^4 * 240` to the sky component,
+    /// capped at 240 (MCP `EntityEnchantmentTableParticleFX.java:36-52`). The
+    /// reference also overrides the float `getBrightness`, which particles
+    /// never read.
+    #[must_use]
+    pub fn light_coords(&self, block: u32, sky: u32) -> (u32, u32) {
+        match self.lighting {
+            Lighting::World => (block, sky),
+            Lighting::AgeGlow => {
+                let mut fraction = self.age as f32 / self.max_age as f32;
+                fraction *= fraction;
+                fraction *= fraction;
+                (block, (sky + (fraction * 15.0 * 16.0) as u32).min(240))
+            }
+        }
     }
 
     /// The position to draw at, `previous + (current - previous) * partial`.
@@ -318,6 +343,21 @@ mod tests {
         // motionY = (0 - 0.04) * 0.98 after the first tick.
         assert!((particle.motion.y - (-0.04 * AIR_DRAG)).abs() < 1e-12);
         assert!(particle.position.y < 100.0);
+    }
+
+    #[test]
+    fn world_lighting_keeps_the_light_and_age_glow_raises_the_sky() {
+        let mut particle = Particle::new(DVec3::ZERO, &mut rng());
+        assert_eq!(particle.light_coords(32, 64), (32, 64));
+        particle.lighting = Lighting::AgeGlow;
+        particle.max_age = 10;
+        particle.age = 0;
+        assert_eq!(particle.light_coords(32, 64), (32, 64));
+        // (5 / 10)^4 * 240 = 15.
+        particle.age = 5;
+        assert_eq!(particle.light_coords(32, 64), (32, 79));
+        particle.age = 10;
+        assert_eq!(particle.light_coords(32, 64), (32, 240));
     }
 
     #[test]
