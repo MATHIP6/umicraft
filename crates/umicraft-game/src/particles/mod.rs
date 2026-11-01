@@ -8,6 +8,7 @@
 //! | `kind` | [`ParticleKind`], the 42 wire ids |
 //! | `particle` | [`Particle`], the shared `EntityFX` state and tick |
 //! | `behaviours` | [`Behaviour`], one module per family of particle classes |
+//! | `spawn` | [`ParticleSetting`], the range filter and the `Particle` packet |
 //! | `engine` | [`ParticleEngine`], the buckets, the 4000 cap and the tick |
 //!
 //! The game thread ticks the engine at 20 Hz; the renderer only reads the
@@ -18,8 +19,10 @@ pub mod behaviours;
 mod engine;
 mod kind;
 mod particle;
+mod spawn;
 
 pub use behaviours::{create, Behaviour, TickContext};
 pub use engine::{ParticleEngine, MAX_PER_BUCKET};
 pub use kind::ParticleKind;
 pub use particle::{Layer, Lighting, Particle, Texture};
+pub use spawn::ParticleSetting;

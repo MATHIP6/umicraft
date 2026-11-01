@@ -110,6 +110,10 @@ pub const TICK: Duration = Duration::from_millis(50);
 /// blocks and the TCP backpressure slows the server down.
 const INBOX_CAPACITY: usize = 256;
 
+/// The seed of the particle random source; particles are cosmetic, so a fixed
+/// seed only makes a session repeatable.
+const PARTICLE_SEED: u64 = 0x5041_5254;
+
 /// Bounded queue of the frames the render thread polls.
 const FRAME_CAPACITY: usize = 32;
 
@@ -259,6 +263,8 @@ pub struct Frame {
     pub border: BorderView,
     /// Rain, thunder, the lightning flash and the columns rain falls on (P7f).
     pub weather: crate::weather_view::WeatherView,
+    /// The live particles with the light where they stand (P8).
+    pub particles: Arc<[crate::particle_view::ParticleDraw]>,
 }
 
 /// The statistics the debug overlay shows.
@@ -440,6 +446,10 @@ fn spawn_game_thread(
 struct Game {
     /// The loaded world; `None` before `Join Game`.
     world: Option<World>,
+    /// The client-side particles (P8).
+    particles: umicraft_game::particles::ParticleEngine,
+    /// How many particles are created (`GameSettings.particleSetting`).
+    particle_setting: umicraft_game::particles::ParticleSetting,
     /// The chunks whose geometry changed and still need a snapshot.
     dirty: BTreeSet<ChunkPos>,
     /// The human-readable status.
@@ -544,6 +554,8 @@ impl Game {
         }
         Self {
             world: None,
+            particles: umicraft_game::particles::ParticleEngine::new(PARTICLE_SEED),
+            particle_setting: umicraft_game::particles::ParticleSetting::default(),
             dirty: BTreeSet::new(),
             status: "CONNECTING".to_string(),
             entity_id: 0,
@@ -1247,6 +1259,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
             view.position.x.floor() as i32,
             view.position.z.floor() as i32,
         ),
+        particles: crate::particle_view::collect(&game.particles, game.world.as_ref()).into(),
     })));
 }
 
@@ -1606,6 +1619,7 @@ fn apply_net_event(
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
                 game.entities.clear();
+                game.particles.clear();
                 // A new world has its own scoreboard; the tab list belongs to
                 // the connection and stays.
                 game.scoreboard = Scoreboard::new();
@@ -1950,6 +1964,7 @@ fn apply_net_event(
             publish_inventory(game, frames);
         }
         PlayEvent::Explosion(packet) => apply_explosion(game, &packet),
+        PlayEvent::Particle(packet) => spawn_particles(game, &packet),
         PlayEvent::PlayerAbilities(packet) => {
             game.server.apply_abilities(&packet);
             apply_mode_rules(game);
@@ -2067,6 +2082,21 @@ fn report_flight(game: &Game, was_flying: bool, queue: &mut CommandQueue) {
 
 /// Removes the blocks of an explosion from the world.
 ///
+/// Creates the particles a `Particle` packet asks for, seen from the player
+/// (MCP `NetHandlerPlayClient.handleParticles`). Before the player is placed
+/// there is no viewer, so the packet is dropped.
+fn spawn_particles(
+    game: &mut Game,
+    packet: &umicraft_protocol::packets::play::clientbound::Particle,
+) {
+    let Some(state) = game.state.as_ref() else {
+        return;
+    };
+    let viewer = state.position();
+    game.particles
+        .spawn_from_packet(packet, viewer, game.particle_setting);
+}
+
 /// MCP `NetHandlerPlayClient.handleExplosion` runs `Explosion.doExplosionB`
 /// on the client, which sets every affected block to air before the server's
 /// block changes arrive. The player's knockback from the packet is P2.
@@ -2614,6 +2644,7 @@ fn tick(
     game.entities.tick();
     if let Some(world) = game.world.as_ref() {
         game.entities.tick_objects(world);
+        game.particles.tick(world);
     }
     game.server.tick();
     game.server

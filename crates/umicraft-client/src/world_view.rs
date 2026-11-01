@@ -203,6 +203,13 @@ impl WorldView {
         Arc::clone(&self.view.weather.precipitation)
     }
 
+    /// The particles of the newest frame, for `Renderer::set_particles` once
+    /// `particle_view::sprites` has resolved them at the frame's partial tick.
+    #[must_use]
+    pub fn particles(&self) -> &[crate::particle_view::ParticleDraw] {
+        &self.view.particles
+    }
+
     /// The world border of the newest frame; `None` before the first one.
     #[must_use]
     pub fn border(&self) -> Option<BorderView> {
@@ -498,6 +505,8 @@ struct View {
     border: Option<BorderView>,
     /// Rain, thunder, lightning and the precipitation columns of the newest frame.
     weather: WeatherView,
+    /// The particles of the newest frame (P8).
+    particles: Arc<[crate::particle_view::ParticleDraw]>,
 }
 
 impl View {
@@ -514,6 +523,7 @@ impl View {
         self.fog_light.tick(frame.fog.light_brightness);
         self.border = Some(frame.border);
         self.weather = frame.weather;
+        self.particles = frame.particles;
     }
 
     /// The interpolation fraction of the two newest ticks for `now`.
@@ -777,6 +787,7 @@ mod tests {
             fog: FogContext::DEFAULT,
             border: crate::border_view::border_view(&Border::default()),
             weather: crate::weather_view::WeatherView::default(),
+            particles: Arc::from([]),
             signs: Arc::default(),
         })
     }

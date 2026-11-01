@@ -1,6 +1,6 @@
 # P8 — Particles & visual effects: plan and architecture
 
-Status: **P8-0 done** (core in `umicraft-game/src/particles`). Decision:
+Status: **P8-0, P8-a and the `Particle` packet path are done**: a `Particle` packet now shows its particle for every kind drawn from `particles.png`. Block and item sprites, `footprint.png` and the explosion sheet are not drawn yet (`particle_view::sprite` returns `None` for them). Decision:
 `docs/decisions/0035-p8-particles.md`. Roadmap entry: `ROADMAP.md` §P8.
 
 Rule (as in P5 to P7): a step adds a module, existing big files only get
@@ -21,7 +21,7 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | Step | Content | State |
 |---|---|---|
 | P8-0 | `ParticleKind`, `Particle`, `ParticleEngine`, `Behaviour`, `create` | done |
-| P8-a | `ParticleRenderer`: billboards, flat footprints, `particles.png` sheet or block atlas layer, tint x light x fog (render side done; client wiring next) | render done |
+| P8-a | `ParticleRenderer`: billboards, flat footprints, `particles.png` sheet or block atlas layer, tint x light x fog | done: packet to screen for sheet particles |
 | P8-b | water, drips, explosion and large explosion (simulation) | simulation done |
 | P8-b2 | digging, block break, `blockcrack`/`blockdust`/`iconcrack`, sprint, rain splash (need client sprites) | |
 | P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | |
