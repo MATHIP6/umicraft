@@ -51,7 +51,7 @@ pub fn create(
     _speed: DVec3,
     _rng: &mut JavaRandom,
 ) -> Option<Particle> {
-    match kind {
-        _ => None,
-    }
+    // Each family adds its kinds here as it is ported.
+    let _ = kind;
+    None
 }
