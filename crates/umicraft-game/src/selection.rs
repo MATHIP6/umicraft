@@ -623,7 +623,10 @@ fn is_fence_gate(id: u16) -> bool {
 
 /// The neighbours north, south, west and east of `pos`, in the order of the
 /// `flag..flag3` variables of the reference.
-fn horizontal_neighbours<S: BlockSource + ?Sized>(world: &S, pos: BlockPos) -> [BlockState; 4] {
+pub(crate) fn horizontal_neighbours<S: BlockSource + ?Sized>(
+    world: &S,
+    pos: BlockPos,
+) -> [BlockState; 4] {
     [
         world.block(pos.x, pos.y, pos.z - 1),
         world.block(pos.x, pos.y, pos.z + 1),
@@ -683,7 +686,7 @@ fn post_bounds(north: bool, south: bool, west: bool, east: bool, lo: f32, height
 }
 
 /// MCP `BlockPane.canPaneConnectToBlock`: a full block, a pane or glass.
-fn pane_connects(this_id: u16, other: BlockState) -> bool {
+pub(crate) fn pane_connects(this_id: u16, other: BlockState) -> bool {
     let id = other.id();
     id == this_id
         || matches!(id, 20 | 95 | 101 | 102 | 160)

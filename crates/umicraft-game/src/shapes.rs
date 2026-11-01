@@ -25,6 +25,7 @@ use glam::DVec3;
 use umicraft_world::{BlockPos, BlockState, World};
 
 use crate::piston_shape;
+use crate::selection::{horizontal_neighbours, pane_connects};
 
 /// Read access to block states by world coordinate.
 ///
@@ -316,7 +317,7 @@ enum Kind {
     Stairs,
     /// A fence, wall or fence gate.
     Fence,
-    /// A thin plate (glass pane, iron bars).
+    /// A thin plate (glass pane, iron bars) that reaches its connected neighbours.
     Pane,
     /// A box that covers the full footprint and is `f64` blocks tall.
     Column(f64),
@@ -330,6 +331,8 @@ enum Kind {
     PistonBase,
     /// A piston head: plate and rod.
     PistonHead,
+    /// A skull, whose box follows its facing (the same as its selection box).
+    Skull,
 }
 
 /// Classifies a 1.8 block id (and its metadata) into a collision kind.
@@ -364,6 +367,7 @@ fn classify(id: u16, metadata: u8) -> Kind {
         154 => Kind::Column(0.625),
         29 | 33 => Kind::PistonBase,
         34 => Kind::PistonHead,
+        144 => Kind::Skull,
         81 => Kind::Cactus,
         145 => Kind::Anvil,
         78 => Kind::SnowLayer,
@@ -403,7 +407,6 @@ fn classify(id: u16, metadata: u8) -> Kind {
         | 141
         | 142
         | 143
-        | 144
         | 175
         | 176
         | 177
@@ -447,12 +450,13 @@ pub fn shape_of<S: BlockSource + ?Sized>(
             }
         }
         Kind::SnowLayer => BlockShape::column(f64::from(state.metadata() + 1) / 8.0),
-        Kind::Pane => BlockShape::pair(
-            Aabb::new(DVec3::new(0.0, 0.0, 0.4375), DVec3::new(1.0, 1.0, 0.5625)),
-            Aabb::new(DVec3::new(0.4375, 0.0, 0.0), DVec3::new(0.5625, 1.0, 1.0)),
-        ),
+        Kind::Pane => pane_shape(state, world, pos),
         Kind::PistonBase => piston_shape::base_shape(state.metadata()),
         Kind::PistonHead => piston_shape::head_shape(state.metadata()),
+        // `BlockSkull.getCollisionBoundingBox` applies
+        // `setBlockBoundsBasedOnState` and returns the block bounds, which
+        // are exactly the selection bounds.
+        Kind::Skull => selection_shape(state, world, pos),
         Kind::Stairs => stair_shape(state),
         Kind::Fence => fence_shape(world, pos),
     }
@@ -529,6 +533,46 @@ pub fn selection_shape<S: BlockSource + ?Sized>(
     pos: BlockPos,
 ) -> BlockShape {
     crate::selection::selection_shape(state, world, pos)
+}
+
+/// The collision boxes of a glass pane or iron bars.
+///
+/// MCP `BlockPane.addCollisionBoxesToList` (line 75): one thin box per axis.
+/// An axis that is connected on both sides, or on neither side while the
+/// pane is alone, spans the whole block; one connected side reaches the
+/// middle towards that side; and an axis with no connection while the other
+/// has one gets no box at all. The selection box (`setBlockBoundsBasedOnState`)
+/// merges both axes instead, which is why it differs.
+fn pane_shape<S: BlockSource + ?Sized>(state: BlockState, world: &S, pos: BlockPos) -> BlockShape {
+    const LO: f64 = 0.4375;
+    const HI: f64 = 0.5625;
+    let [north, south, west, east] =
+        horizontal_neighbours(world, pos).map(|other| pane_connects(state.id(), other));
+    let any = north || south || west || east;
+    let x_span = pane_span(west, east, any);
+    let z_span = pane_span(north, south, any);
+    let along_x =
+        x_span.map(|(min, max)| Aabb::new(DVec3::new(min, 0.0, LO), DVec3::new(max, 1.0, HI)));
+    let along_z =
+        z_span.map(|(min, max)| Aabb::new(DVec3::new(LO, 0.0, min), DVec3::new(HI, 1.0, max)));
+    match (along_x, along_z) {
+        (Some(x), Some(z)) => BlockShape::pair(x, z),
+        (Some(only), None) | (None, Some(only)) => BlockShape::single(only),
+        (None, None) => BlockShape::EMPTY,
+    }
+}
+
+/// The extent of a pane box along one axis, or `None` when it has no box.
+fn pane_span(negative: bool, positive: bool, any_connection: bool) -> Option<(f64, f64)> {
+    if (negative && positive) || !any_connection {
+        Some((0.0, 1.0))
+    } else if negative {
+        Some((0.0, 0.5))
+    } else if positive {
+        Some((0.5, 1.0))
+    } else {
+        None
+    }
 }
 
 /// The two collision boxes of a stair block.
@@ -764,6 +808,46 @@ mod tests {
         let selection = selection_shape(torch, &world, BlockPos::new(0, 0, 0));
         assert_eq!(selection.boxes().len(), 1);
         assert!(selection_shape(BlockState::AIR, &world, BlockPos::new(0, 0, 0)).is_empty());
+    }
+
+    #[test]
+    fn skulls_collide_with_their_facing_dependent_box() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        let floor = shape_of(BlockState::new(144, 1), &world, pos);
+        assert_eq!(floor.boxes().len(), 1);
+        assert_eq!(floor.boxes()[0].max.y, 0.5);
+        let wall = shape_of(BlockState::new(144, 2), &world, pos);
+        assert_eq!(wall.boxes()[0].min.z, 0.5);
+        // The no-drop bit (8) does not change the facing.
+        assert_eq!(shape_of(BlockState::new(144, 9), &world, pos), floor);
+    }
+
+    #[test]
+    fn panes_follow_their_connections() {
+        let pos = BlockPos::new(0, 0, 0);
+        let pane = BlockState::new(102, 0);
+        let alone = shape_of(pane, &TestBlocks::default(), pos);
+        assert_eq!(alone.boxes().len(), 2);
+        // A neighbour to the west only: a half box towards it, nothing on Z.
+        let west = TestBlocks::with(&[(-1, 0, 0, BlockState::new(1, 0))]);
+        let shape = shape_of(pane, &west, pos);
+        assert_eq!(shape.boxes().len(), 1);
+        assert_eq!((shape.boxes()[0].min.x, shape.boxes()[0].max.x), (0.0, 0.5));
+        // Both west and east: one full-length box.
+        let both = TestBlocks::with(&[
+            (-1, 0, 0, BlockState::new(1, 0)),
+            (1, 0, 0, BlockState::new(1, 0)),
+        ]);
+        let shape = shape_of(pane, &both, pos);
+        assert_eq!(shape.boxes().len(), 1);
+        assert_eq!((shape.boxes()[0].min.x, shape.boxes()[0].max.x), (0.0, 1.0));
+        // A corner (west and south) gives two half boxes.
+        let corner = TestBlocks::with(&[
+            (-1, 0, 0, BlockState::new(1, 0)),
+            (0, 0, 1, BlockState::new(1, 0)),
+        ]);
+        assert_eq!(shape_of(pane, &corner, pos).boxes().len(), 2);
     }
 
     #[test]
