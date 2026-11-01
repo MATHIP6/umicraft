@@ -115,6 +115,8 @@ pub fn run(args: Args) -> Result<(), ClientError> {
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::new(args, session, options, options_path)?;
+    // The game thread starts with every particle; the saved option follows.
+    app.send_particle_setting();
     event_loop
         .run_app(&mut app)
         .map_err(|error| ClientError::Window(error.to_string()))?;
@@ -539,6 +541,14 @@ impl App {
         self.saved_options = self.options.clone();
     }
 
+    /// Tells the game thread how many particles to create.
+    fn send_particle_setting(&self) {
+        let _ = self
+            .session
+            .events()
+            .try_send(GameEvent::ParticleSetting(self.options.video.particles));
+    }
+
     /// Closes the options screen: saves the options, tells the server about
     /// a changed render distance or chat setting, and goes back to the menu.
     fn close_options(&mut self) {
@@ -552,7 +562,11 @@ impl App {
             )
         };
         let changed = server_settings(&self.options) != server_settings(&self.saved_options);
+        let particles_changed = self.options.video.particles != self.saved_options.video.particles;
         self.save_options();
+        if particles_changed {
+            self.send_particle_setting();
+        }
         if changed {
             let (view_distance, chat_mode, chat_colors) = server_settings(&self.options);
             let _ = self.session.events().try_send(GameEvent::ClientSettings {

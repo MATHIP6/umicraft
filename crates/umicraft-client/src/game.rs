@@ -210,6 +210,8 @@ pub enum GameEvent {
         /// Whether the chat shows colours.
         chat_colors: bool,
     },
+    /// The player changed the particle option (`0`, `1` or `2`).
+    ParticleSetting(u8),
     /// A line the client shows in its own chat (the completion list).
     LocalChat(String),
     /// Request to re-mesh every loaded chunk column (e.g. after a resource pack reload).
@@ -1127,6 +1129,10 @@ fn handle_event(
                 chat_mode,
                 chat_colors,
             });
+            false
+        }
+        GameEvent::ParticleSetting(index) => {
+            game.particle_setting = umicraft_game::particles::ParticleSetting::from_index(index);
             false
         }
         GameEvent::LocalChat(text) => {

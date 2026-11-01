@@ -53,6 +53,30 @@ pub struct SpawnFilter {
     pub setting: ParticleSetting,
 }
 
+impl ParticleSetting {
+    /// The setting of the saved value `0`, `1` or `2` (`GameSettings.particleSetting`);
+    /// anything else is the default, as a corrupt options file must not break
+    /// the game.
+    #[must_use]
+    pub fn from_index(index: u8) -> Self {
+        match index {
+            1 => Self::Decreased,
+            2 => Self::Minimal,
+            _ => Self::All,
+        }
+    }
+
+    /// The label of `GameSettings.getTranslation(PARTICLES, setting)`.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Decreased => "Decreased",
+            Self::Minimal => "Minimal",
+        }
+    }
+}
+
 impl ParticleEngine {
     /// Creates the particle of `kind` unless the viewer is too far or the
     /// setting filters it out (MCP `RenderGlobal.spawnEntityFX`, line 2063).
@@ -207,6 +231,13 @@ mod tests {
 
     fn live(engine: &ParticleEngine) -> usize {
         engine.len()
+    }
+
+    #[test]
+    fn the_saved_index_selects_the_setting_and_defaults_when_corrupt() {
+        assert_eq!(ParticleSetting::from_index(1), ParticleSetting::Decreased);
+        assert_eq!(ParticleSetting::from_index(2).label(), "Minimal");
+        assert_eq!(ParticleSetting::from_index(200), ParticleSetting::All);
     }
 
     #[test]

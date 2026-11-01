@@ -23,7 +23,8 @@ use umicraft_ui::{Color, FontAtlas, InputEvent, Rect, TextStyle, Ui};
 use winit::keyboard::KeyCode;
 
 use crate::options::{
-    key_label, Action, ChatVisibility, Options, FOV, MAX_FPS, RENDER_DISTANCE, UNLIMITED_FPS,
+    key_label, Action, ChatVisibility, Options, FOV, MAX_FPS, MAX_PARTICLE_SETTING,
+    RENDER_DISTANCE, UNLIMITED_FPS,
 };
 
 /// Height of a vanilla button, in GUI units.
@@ -529,6 +530,15 @@ impl OptionsScreen {
                     }
                 } else {
                     self.rects.insert("fps".to_string(), rect);
+                }
+            }
+            9 => {
+                // `GameSettings.setOptionValue(PARTICLES)`: cycles 0, 1, 2.
+                let label = format!("Particles: {}", options.video.particle_setting().label());
+                if self.button(ui, atlas, "video:9", rect, &label, true, None) && inside {
+                    options.video.particles =
+                        (options.video.particles + 1) % (MAX_PARTICLE_SETTING + 1);
+                    outcome.changed = true;
                 }
             }
             _ => {

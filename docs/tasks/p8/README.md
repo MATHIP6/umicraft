@@ -1,6 +1,6 @@
 # P8 — Particles & visual effects: plan and architecture
 
-Status: **P8-0, P8-a and the `Particle` packet path are done**: a `Particle` packet now shows its particle for every kind drawn from `particles.png`. Block and item sprites, `footprint.png` and the explosion sheet are not drawn yet (`particle_view::sprite` returns `None` for them). Decision:
+Status: **P8 is implemented except the pieces listed under "Not done"**, and nothing has been compared with vanilla on a screen yet (unit tests, ignored GPU tests and a headless build only). Decision:
 `docs/decisions/0035-p8-particles.md`. Roadmap entry: `ROADMAP.md` §P8.
 
 Rule (as in P5 to P7): a step adds a module, existing big files only get
@@ -21,15 +21,15 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | Step | Content | State |
 |---|---|---|
 | P8-0 | `ParticleKind`, `Particle`, `ParticleEngine`, `Behaviour`, `create` | done |
-| P8-a | `ParticleRenderer`: billboards, flat footprints, `particles.png` sheet or block atlas layer, tint x light x fog | done: packet to screen for sheet particles |
+| P8-a | `ParticleRenderer`: billboards, flat footprints, `particles.png` sheet or block atlas layer, tint x light x fog | done |
 | P8-b | water, drips, explosion and large explosion (simulation) | simulation done |
-| P8-b2 | block break and hit fragments, `blockcrack`/`blockdust`, `Effect` 2001 | done (blocks); `iconcrack`, sprint and rain splash remain |
-| P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | simulation done for `HugeExplosion`, `explode`, `Effect` 2000/2002-2005 and `FireworksSpark`; `FireworksSpark` `StarterFX`/overlay, `ItemTake`, `MobAppearance`, breaking (item sprites) and `iconcrack` remain; wiring in the client pending |
+| P8-b2 | block break and hit fragments, `blockcrack`/`blockdust`, `Effect` 2001 | done (blocks); `iconcrack`, sprint and rain splash remain (iconcrack) |
+| P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | simulation done for `HugeExplosion`, `explode`, `Effect` 2000/2002-2005 and `FireworksSpark`; `FireworksSpark` `StarterFX`/overlay, `ItemTake`, `MobAppearance`, breaking (item sprites) and `iconcrack` remain; wired: `Effect` and `Explosion` packets |
 | P8-c | flame, smoke, lava, portal, redstone, footstep (drips: with P8-b water) | simulation done |
-| P8-c2 | ambient block particles (`randomDisplayTick`), 1000-block sampling, rain splashes, sprint dust (`particles::ambient`) | simulation done, not wired |
+| P8-c2 | ambient block particles (`randomDisplayTick`), 1000-block sampling, rain splashes, sprint dust (`particles::ambient`) | done, wired in `particle_ambient` |
 | P8-d | spells and potions, crit, hearts, notes, enchantment | simulation done |
 | P8-f | screen overlays: underwater, in a wall, fire, pumpkin, portal, vignette | done (see below) |
-| P8-g | `particles` setting, criterion benchmark, parity sheet | |
+| P8-g | `particles` setting, criterion benchmark, parity sheet | done: option in the video screen, benchmark in `docs/perf-log.md`, rows in `docs/parity.md` |
 
 ## Ambient particles (P8-c2)
 
@@ -74,3 +74,15 @@ checks beyond what `Weather` answers.
   Fire and the portal veil need the sprite in the block atlas; the procedural
   terrain has none, so they are skipped there. Sleeping and `hideGUI` (F1, not
   implemented) do not hide the overlays.
+
+## Not done
+
+- Item sprites: `iconcrack`, `Snowball`, `Slime` and the 8 flakes of `Effect`
+  2002/2003 (needs an item variant of `Texture` and the item layers).
+- `footprint.png` and the large-explosion sheet (their particles are
+  simulated but not drawn).
+- `ItemTake`, `MobAppearance`, the firework shell and flash.
+- Potion swirls from entity metadata and critical-hit stars from `Animation`
+  packets (the particles exist; no code reads the metadata or animation to
+  spawn them yet).
+- Comparison with vanilla on a screen (checklist in `docs/parity.md`).

@@ -52,9 +52,20 @@ pub struct VideoOptions {
     pub fancy_graphics: bool,
     /// Whether clouds are drawn at all (`GameSettings.clouds`).
     pub clouds: bool,
+    /// `GameSettings.particleSetting`: 0 all, 1 decreased, 2 minimal.
+    pub particles: u8,
 }
 
+/// The highest `particles` value (minimal).
+pub const MAX_PARTICLE_SETTING: u8 = 2;
+
 impl VideoOptions {
+    /// The particle setting these options select.
+    #[must_use]
+    pub fn particle_setting(&self) -> umicraft_game::particles::ParticleSetting {
+        umicraft_game::particles::ParticleSetting::from_index(self.particles)
+    }
+
     /// The cloud version these options select.
     #[must_use]
     pub fn cloud_mode(&self) -> CloudMode {
@@ -74,6 +85,7 @@ impl Default for VideoOptions {
             max_fps: 120,
             fancy_graphics: true,
             clouds: true,
+            particles: 0,
         }
     }
 }
@@ -674,6 +686,7 @@ impl Options {
             .render_distance
             .clamp(*RENDER_DISTANCE.start(), *RENDER_DISTANCE.end());
         self.video.max_fps = self.video.max_fps.clamp(*MAX_FPS.start(), *MAX_FPS.end());
+        self.video.particles = self.video.particles.min(MAX_PARTICLE_SETTING);
         self.video.fov = if self.video.fov.is_finite() {
             self.video.fov.clamp(*FOV.start(), *FOV.end())
         } else {
@@ -947,6 +960,16 @@ mod tests {
         assert_eq!(loaded.video.max_fps, 10);
         assert_eq!(loaded.controls.mouse_sensitivity, 1.0);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_particle_setting_defaults_to_all_and_is_clamped() {
+        let mut options = Options::default();
+        assert_eq!(options.video.particle_setting().label(), "All");
+        options.video.particles = 9;
+        options.clamp();
+        assert_eq!(options.video.particles, MAX_PARTICLE_SETTING);
+        assert_eq!(options.video.particle_setting().label(), "Minimal");
     }
 
     #[test]

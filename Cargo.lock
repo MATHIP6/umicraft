@@ -3458,6 +3458,7 @@ dependencies = [
 name = "umicraft-game"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "glam",
  "serde_json",
  "thiserror 2.0.21",

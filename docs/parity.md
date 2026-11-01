@@ -67,7 +67,7 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Interaction | hold-to-break with vanilla progress, cracks, particles | Partial | P2 | Unit tests (`digging`, `interaction`, `game`) | Vanilla progress (hardness, tool, Efficiency, Haste, fatigue, water, air), own and 0x25 cracks, abort. Particles in P8. Not compared with vanilla on a live server. |
+| Interaction | hold-to-break with vanilla progress, cracks, particles | Partial | P2 | Unit tests (`digging`, `interaction`, `game`) | Vanilla progress (hardness, tool, Efficiency, Haste, fatigue, water, air), own and 0x25 cracks, abort. Block fragments from P8. Not compared with vanilla on a live server. |
 | Interaction | place blocks | Partial — not verified against vanilla | P2 | — |  |
 | Interaction | use items (food, potions, bow, sword block, rod, throwables, buckets) | Partial | P2 | Unit tests (`item_use`, `game`) | Right button held and released, repeat every 4 ticks, 0.2 slowdown, `Entity Status` 9. Eat / drink / bow / sword start a local use; throwables, buckets and rods only send the use packet. Hoes, seeds, signs and doors also send it after their block use (harmless). Bow draw animation and FOV zoom, and the item models, wait for P3 / P6. |
 | Interaction | pick block, drop item, swap hotbar | Partial | P2 | Unit tests (`pick`, `game`) | Middle button picks a block (creative fills a free slot and sends 0x10); Q / Ctrl+Q send the drop packets. The block-to-item table is hand-written until the P3 registry; picking an entity (creative) waits for P5 / P6. |
@@ -138,7 +138,9 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Effects | particles (packet + client-side) | Missing | P8 | — |  |
+| Effects | particles (packet + client-side) | Partial | P8 | Unit tests, ignored GPU tests (`offscreen_particles`), criterion `particles` | 33 of the 42 types are simulated and drawn; block fragments, `Particle`/`Effect`/`Explosion` packets, ambient block particles, rain splashes and sprint dust are wired. Not done: item-sprite particles, footprints, the large explosion sheet, potion swirls from metadata, crit stars from `Animation`, `ItemTake`, `MobAppearance`, firework shells. Not compared with vanilla on a screen. |
+| Effects | particles option (All / Decreased / Minimal) | Partial | P8 | Unit tests (`spawn`, `options`) | Saved with the options and applied by the spawn filter; the video screen cycles it. |
+| Effects | screen overlays (underwater, in-wall, fire, pumpkin, portal, vignette) | Partial | P8 | Unit tests, ignored GPU tests (`offscreen_overlays`) | Overlays need the model terrain; `is_opaque` approximates the in-wall test. Not compared with vanilla on a screen. |
 
 ## HUD
 
