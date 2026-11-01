@@ -40,6 +40,9 @@ pub(crate) struct EntityItemMesh {
     pub vertices: Vec<ModelVertex>,
     /// The design the texture of a banner is composed from.
     pub banner: Option<BannerDesign>,
+    /// Whether a player skull waits for the skin of its owner and wears the
+    /// default one until it is downloaded.
+    pub pending_skin: bool,
 }
 
 impl EntityItemMesh {
@@ -84,6 +87,12 @@ impl EntityItemMesh {
     }
 }
 
+/// Whether `item_id` is drawn by a tile-entity model (skull, banner).
+#[must_use]
+pub(crate) fn is_entity_item(item_id: i16) -> bool {
+    matches!(item_id, SKULL | BANNER)
+}
+
 /// The mesh of a skull or banner stack, `None` for any other item.
 ///
 /// `nbt` is the stack's raw tag, `skins` resolves the owner's skin of a
@@ -107,20 +116,19 @@ fn skull_item(damage: i16, nbt: Option<&[u8]>, skins: &dyn SkinLookup) -> Entity
     let owner = nbt
         .map(ItemDisplay::from_nbt)
         .and_then(|d| d.skull_textures);
+    let owner_skin = owner
+        .as_deref()
+        .filter(|_| slot == TextureSlot::Steve)
+        .and_then(|value| owner_skin_slot(value, skins));
     // The renderer is called at the origin with `translate(-0.5, 0, -0.5)` and
     // `scale(2)` around it.
     let place = Mat4::from_translation(Vec3::new(-0.5, 0.0, -0.5))
         * Mat4::from_scale(Vec3::splat(SKULL_SCALE));
     EntityItemMesh {
-        slot: match slot {
-            TextureSlot::Steve => owner
-                .as_deref()
-                .and_then(|value| owner_skin_slot(value, skins))
-                .unwrap_or(slot),
-            other => other,
-        },
+        slot: owner_skin.unwrap_or(slot),
         vertices: into_item_space(skull_vertices(1, 0.0, humanoid), place),
         banner: None,
+        pending_skin: slot == TextureSlot::Steve && owner.is_some() && owner_skin.is_none(),
     }
 }
 
@@ -133,6 +141,7 @@ fn banner_item(damage: i16, nbt: Option<&[u8]>) -> EntityItemMesh {
             Mat4::IDENTITY,
         ),
         banner: Some(design),
+        pending_skin: false,
     }
 }
 

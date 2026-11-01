@@ -13,9 +13,13 @@
 //! spawn-egg colours are untinted, and the sprites of the compass and the
 //! clock are static.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use umicraft_assets::ClientResources;
 use umicraft_game::item_nbt::ItemDisplay;
 
+use crate::block_entity_render::is_entity_item;
 use crate::dials::{is_dial, DialFrames};
 use crate::item_tints::{item_grass_color, layer_tints, nbt_color};
 use umicraft_game::items;
@@ -34,6 +38,10 @@ const ID_SHIFT: u32 = 0;
 const DAMAGE_SHIFT: u32 = 16;
 const COLOR_SHIFT: u32 = 32;
 
+/// Skull and banner stacks remembered at most; the keys are built again on
+/// the next frame that shows them.
+const MAX_ENTITY_STACKS: usize = 1024;
+
 const GOLDEN_APPLE: i16 = 322;
 const ENCHANTED_BOOK: i16 = 403;
 const EXPERIENCE_BOTTLE: i16 = 384;
@@ -46,6 +54,9 @@ pub struct ItemResources {
     atlas: AtlasLayout,
     /// The grass colour of block items, `None` without the colormap.
     grass_color: Option<u32>,
+    /// The NBT of the skull and banner stacks behind the icon keys handed
+    /// out, which the key only identifies by a hash.
+    entity_stacks: Mutex<HashMap<u64, Option<Vec<u8>>>>,
 }
 
 impl ItemResources {
@@ -70,6 +81,7 @@ impl ItemResources {
             models: ItemModelSet::build(resources, &masks)?,
             atlas: atlas.layout().clone(),
             grass_color,
+            entity_stacks: Mutex::default(),
         })
     }
 
@@ -80,6 +92,7 @@ impl ItemResources {
             models: ItemModelSet::default(),
             atlas: AtlasLayout::default(),
             grass_color: None,
+            entity_stacks: Mutex::default(),
         }
     }
 
@@ -97,6 +110,34 @@ impl ItemResources {
     #[must_use]
     pub fn tints(&self, item_id: i16, damage: i16, nbt: Option<&[u8]>) -> [u32; 2] {
         layer_tints(item_id, damage, nbt_color(item_id, nbt), self.grass_color)
+    }
+
+    /// For a skull or banner, the hash that tells its icons apart (it takes
+    /// the place of the dye colour in the icon key); the stack is remembered
+    /// for [`Self::entity_stack`].
+    fn entity_stack_hash(&self, stack: &ItemStack) -> Option<u32> {
+        if !is_entity_item(stack.item_id) {
+            return None;
+        }
+        let hash = fnv_24(stack.nbt.as_deref().unwrap_or_default());
+        let key = icon_key(stack, None, Some(hash), DialFrames::default());
+        let Ok(mut stacks) = self.entity_stacks.lock() else {
+            return Some(hash);
+        };
+        if stacks.len() >= MAX_ENTITY_STACKS {
+            stacks.clear();
+        }
+        stacks.entry(key).or_insert_with(|| stack.nbt.clone());
+        Some(hash)
+    }
+
+    /// The item id, damage and NBT of the skull or banner behind an icon
+    /// key, as [`Self::slot_item`] saw it.
+    #[must_use]
+    pub(crate) fn entity_stack(&self, key: u64) -> Option<(i16, i16, Option<Vec<u8>>)> {
+        let (item_id, damage, _) = unpack_key(key);
+        let nbt = self.entity_stacks.lock().ok()?.get(&key)?.clone();
+        Some((item_id, damage, nbt))
     }
 
     /// The texture layers the item models index.
@@ -121,13 +162,10 @@ impl ItemResources {
             .as_deref()
             .map(ItemDisplay::from_nbt)
             .unwrap_or_default();
+        let color = nbt_color(stack.item_id, stack.nbt.as_deref())
+            .or_else(|| self.entity_stack_hash(stack));
         SlotItem {
-            key: icon_key(
-                stack,
-                definition,
-                nbt_color(stack.item_id, stack.nbt.as_deref()),
-                dials,
-            ),
+            key: icon_key(stack, definition, color, dials),
             count: u8::try_from(stack.stack_size).unwrap_or(0),
             damage: stack.damage,
             max_durability: definition
@@ -211,6 +249,14 @@ impl ItemResources {
         }
         !mesh.is_empty()
     }
+}
+
+/// A 24-bit FNV-1a hash, for the part of an icon key that identifies NBT.
+fn fnv_24(bytes: &[u8]) -> u32 {
+    let hash = bytes.iter().fold(0x811c_9dc5_u32, |hash, byte| {
+        (hash ^ u32::from(*byte)).wrapping_mul(0x0100_0193)
+    });
+    (hash ^ (hash >> 24)) & 0x00FF_FFFF
 }
 
 /// Packs what decides the picture of a stack into an icon key.

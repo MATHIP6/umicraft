@@ -246,6 +246,8 @@ pub struct Renderer {
     icon_pipeline: wgpu::RenderPipeline,
     /// The icon camera over the current block texture array.
     icon_bind_group: wgpu::BindGroup,
+    /// The icon camera for the entity pipeline (skull and banner icons).
+    icon_entity_bind_group: wgpu::BindGroup,
     /// Binding that samples the icon atlas from the GUI overlay pipeline.
     icon_gui_bind_group: wgpu::BindGroup,
     /// The enchantment glint drawn over glinting icons.
@@ -666,6 +668,14 @@ impl Renderer {
             &block_sampler,
             &block_view,
         );
+        let icon_entity_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("icon entity camera bind group"),
+            layout: &camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: icon_atlas.camera_buffer().as_entire_binding(),
+            }],
+        });
         let world_items = DynamicMesh::new(&device, "world items");
         let moving_blocks = MovingBlocksPass::new(&device);
         let hand_items = DynamicMesh::new(&device, "hand items");
@@ -729,6 +739,7 @@ impl Renderer {
             icon_atlas,
             icon_pipeline,
             icon_bind_group,
+            icon_entity_bind_group,
             icon_gui_bind_group,
             glint,
             world_glint,
@@ -888,6 +899,49 @@ impl Renderer {
         self.ui_pass
             .rebuild_with_icons(draw_list, &self.ui_atlas, &|key| atlas.uv(key));
         self.render_frame(camera, overlay)
+    }
+
+    /// Whether the icon atlas holds the icon `key`.
+    #[must_use]
+    pub fn has_icon(&self, key: u64) -> bool {
+        self.icon_atlas.contains(key)
+    }
+
+    /// Forgets the icon `key`, so that it is built again when asked for.
+    pub fn forget_icon(&mut self, key: u64) {
+        self.icon_atlas.forget(key);
+    }
+
+    /// Renders an icon drawn by a tile-entity model (a skull or a banner) into
+    /// the icon atlas under `key`.
+    ///
+    /// `vertices` are posed into the 16x16 GUI box like an [`ItemMesh`]
+    /// (`umicraft_model::item::pose::gui_pose`) and sample `texture`, an entity
+    /// texture bind group. Nothing is drawn for an empty list. The icon uses
+    /// the entity pipeline, so it is lit by the face shade of the entity
+    /// shader at full daylight.
+    pub fn render_entity_icon(
+        &mut self,
+        key: u64,
+        vertices: &[EntityVertex],
+        texture: &wgpu::BindGroup,
+    ) {
+        if vertices.is_empty() {
+            return;
+        }
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("entity icon vertices"),
+                contents: bytemuck::cast_slice(vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let batch = [(&buffer, vertices.len() as u32, texture)];
+        let (entities, camera) = (&self.entity_renderer, &self.icon_entity_bind_group);
+        self.icon_atlas
+            .render_with(&self.device, &self.queue, key, |pass| {
+                entities.render(pass, camera, batch);
+            });
     }
 
     /// Replaces the world-space item geometry drawn after the entities

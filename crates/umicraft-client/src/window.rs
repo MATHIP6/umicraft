@@ -48,6 +48,7 @@ use crate::map_render::{map_id_of, MapTextures};
 use crate::nametag_draw::{draw_tags, place_tags};
 
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
+use crate::entity_icons::EntityIcons;
 use crate::inventory_screen::{draw_inventory_overlay, screen_input};
 use crate::inventory_winit;
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
@@ -213,6 +214,8 @@ struct App {
     dials: DialAnimator,
     /// The dropped-item geometry of the frame, kept for its buffers.
     world_items: WorldItems,
+    /// The skull and banner icons drawn into the icon atlas.
+    entity_icons: EntityIcons,
     /// The first-person held item geometry of the frame.
     hand_layers: ItemLayers,
     /// Steps the water, lava and fire textures once per game tick.
@@ -292,6 +295,7 @@ impl App {
             items: None,
             dials: DialAnimator::default(),
             world_items: WorldItems::default(),
+            entity_icons: EntityIcons::default(),
             hand_layers: ItemLayers::default(),
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
@@ -1343,6 +1347,14 @@ impl App {
             }
         }
 
+        if let (Some(frame), Some(items), Some(textures)) = (
+            ui_frame.as_ref(),
+            self.items.as_deref(),
+            self.entity_textures.as_ref(),
+        ) {
+            self.entity_icons
+                .prepare(&frame.draw_list, items, textures, renderer);
+        }
         let rendered = match (ui_frame.as_ref(), self.items.as_deref()) {
             (Some(frame), Some(items)) => renderer.render_with_ui(
                 &self.camera,

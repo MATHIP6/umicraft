@@ -8,7 +8,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
-use crate::block_entity_render::BlockEntityMeshes;
+use crate::block_entity_render::BannerDesign;
+use crate::block_entity_render::{BannerDesigns, BlockEntityMeshes};
 use glam::Mat4;
 use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::skin::decode_png_bytes;
@@ -190,6 +191,26 @@ impl EntityTextures {
             (false, Some(skin)) => renderer.set_hand(&vertices, skin.bind_group()),
             _ => renderer.clear_hand(),
         }
+    }
+
+    /// Composes the texture of `design` if it is missing (a banner icon in
+    /// the GUI, which the tile-entity meshes of the frame do not cover).
+    pub(crate) fn ensure_banner(&self, design: &BannerDesign, renderer: &Renderer) {
+        let designs = BannerDesigns::from([(design.slot(), design.clone())]);
+        self.banners.borrow_mut().ensure(
+            &designs,
+            &mut self.textures.borrow_mut(),
+            self.jar.as_ref(),
+            renderer,
+        );
+    }
+
+    /// The bind group of the texture in `slot`, once it exists.
+    pub(crate) fn bind_group_of(&self, slot: TextureSlot) -> Option<wgpu::BindGroup> {
+        self.textures
+            .borrow()
+            .get(&slot)
+            .map(|texture| texture.bind_group().clone())
     }
 
     /// Uploads the hand with an item drawn by a tile-entity model (a skull or

@@ -27,6 +27,7 @@ mod creative_screen;
 pub mod creative_view;
 pub mod dials;
 pub mod entity_demo;
+mod entity_icons;
 pub mod entity_render;
 pub mod error;
 mod fog_context;

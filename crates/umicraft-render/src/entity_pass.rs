@@ -427,9 +427,9 @@ impl EntityRenderer {
 
     /// Renders entity batches.
     pub fn render<'a>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        camera_bind_group: &'a wgpu::BindGroup,
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        camera_bind_group: &wgpu::BindGroup,
         batches: impl IntoIterator<Item = (&'a wgpu::Buffer, u32, &'a wgpu::BindGroup)>,
     ) {
         let mut set_pipeline = false;

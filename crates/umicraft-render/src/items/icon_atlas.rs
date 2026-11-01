@@ -135,6 +135,26 @@ impl IconAtlas {
         else {
             return false;
         };
+        self.render_with(device, queue, key, |pass| {
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bind_group, &[]);
+            draw_gpu_pass(pass, &gpu_mesh);
+        });
+        true
+    }
+
+    /// Draws into a free cell under `key` with `draw`, which receives the
+    /// pass of the cell (cleared colour and depth, the icon camera's box).
+    ///
+    /// When every cell is taken the atlas is emptied first, so icons of the
+    /// current frame that were already placed are redrawn on the next frame.
+    pub(crate) fn render_with(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        key: u64,
+        draw: impl FnOnce(&mut wgpu::RenderPass<'_>),
+    ) {
         if self.next_cell >= CELL_COUNT {
             self.invalidate();
         }
@@ -168,9 +188,7 @@ impl IconAtlas {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, bind_group, &[]);
-            draw_gpu_pass(&mut pass, &gpu_mesh);
+            draw(&mut pass);
         }
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
@@ -189,7 +207,12 @@ impl IconAtlas {
         );
         queue.submit(Some(encoder.finish()));
         self.cells.insert(key, cell);
-        true
+    }
+
+    /// Forgets the icon under `key`; its cell stays unused until the atlas
+    /// wraps.
+    pub(crate) fn forget(&mut self, key: u64) {
+        self.cells.remove(&key);
     }
 
     /// Clears the atlas to transparent so unused cells sample nothing.
