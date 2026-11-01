@@ -38,11 +38,14 @@ pub enum Layer {
     Terrain,
     /// A sprite of the item atlas (layer 2).
     Items,
+    /// The lit, flat layer 3 of the reference (`renderLitParticles`): the
+    /// particles that draw their own quad, today only the footstep.
+    Footprint,
 }
 
 impl Layer {
-    /// The three layers in draw order.
-    pub const ALL: [Self; 3] = [Self::Misc, Self::Terrain, Self::Items];
+    /// The layers in draw order.
+    pub const ALL: [Self; 4] = [Self::Misc, Self::Terrain, Self::Items, Self::Footprint];
 
     /// The index of the layer in the reference (0, 1 or 2).
     #[must_use]
@@ -56,7 +59,22 @@ impl Layer {
 pub enum Lighting {
     /// The world light at the particle (`Entity.getBrightnessForRender`).
     World,
+    /// Flame: the block light rises to the maximum as the particle ages
+    /// (`EntityFlameFX.getBrightnessForRender`).
+    FlameGlow,
+    /// Lava spark: the block light is always the maximum
+    /// (`EntityLavaFX.getBrightnessForRender`).
+    LavaFull,
+    /// Portal: the sky light rises to the maximum, with the fourth power of
+    /// the age (`EntityPortalFX.getBrightnessForRender`).
+    PortalGlow,
+    /// No light map: the quad is tinted with the brightness of its block
+    /// (`EntityFootStepFX` draws with `getLightBrightness`).
+    BlockBrightness,
 }
+
+/// The top of the light map scale: a 4 bit light level times 16.
+const MAX_LIGHT: i32 = 240;
 
 /// What a particle shows.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -109,6 +127,8 @@ pub struct Particle {
     pub on_ground: bool,
     /// Whether the particle has died and can be dropped.
     pub dead: bool,
+    /// Whether the particle ignores the blocks (`Entity.noClip`).
+    pub no_clip: bool,
     /// How the particle is lit.
     pub lighting: Lighting,
     /// What the particle does each tick.
@@ -142,6 +162,7 @@ impl Particle {
             size: BOX_SIZE,
             on_ground: false,
             dead: false,
+            no_clip: false,
             lighting: Lighting::World,
             behaviour: Behaviour::Plain,
         }
@@ -203,14 +224,30 @@ impl Particle {
     /// `Entity.moveEntity`; they only change particles that sit in a web, so
     /// they are left out.
     pub fn tick<S: BlockSource + ?Sized>(&mut self, world: &S) {
+        self.remember_position();
+        self.grow_older();
+        self.motion.y -= GRAVITY_STEP * f64::from(self.gravity);
+        self.move_with_collision(world);
+        self.drag_and_friction(AIR_DRAG);
+    }
+
+    /// `prevPos = pos`, the first line of every `onUpdate`.
+    pub(super) fn remember_position(&mut self) {
         self.previous_position = self.position;
+    }
+
+    /// `if (particleAge++ >= particleMaxAge) setDead()`, in every `onUpdate`.
+    pub(super) fn grow_older(&mut self) {
         self.age += 1;
         if self.age > self.max_age {
             self.dead = true;
         }
-        self.motion.y -= GRAVITY_STEP * f64::from(self.gravity);
-        self.move_with_collision(world);
-        self.motion *= AIR_DRAG;
+    }
+
+    /// The end of most `onUpdate`s: the motion times `drag`, then the ground
+    /// friction on X and Z.
+    pub(super) fn drag_and_friction(&mut self, drag: f64) {
+        self.motion *= drag;
         if self.on_ground {
             self.motion.x *= GROUND_FRICTION;
             self.motion.z *= GROUND_FRICTION;
@@ -218,8 +255,13 @@ impl Particle {
     }
 
     /// `Entity.moveEntity` for a box without step: moves, zeroes the motion on
-    /// the axes that were blocked and sets `on_ground`.
-    fn move_with_collision<S: BlockSource + ?Sized>(&mut self, world: &S) {
+    /// the axes that were blocked and sets `on_ground`. A `no_clip` particle
+    /// only translates (the reference's `noClip` branch).
+    pub(super) fn move_with_collision<S: BlockSource + ?Sized>(&mut self, world: &S) {
+        if self.no_clip {
+            self.position += self.motion;
+            return;
+        }
         let result = move_entity(
             self.bounding_box(),
             self.motion,
@@ -237,6 +279,34 @@ impl Particle {
             self.motion.y = 0.0;
         }
         self.on_ground = result.on_ground;
+    }
+
+    /// The light map coordinates to draw with, from the world light at the
+    /// particle (`block` and `sky`, each 0 to 240) and the particle's own rule
+    /// (MCP `getBrightnessForRender`); `partial_ticks` is the draw fraction of
+    /// the tick. [`Lighting::BlockBrightness`] has no light map and returns the
+    /// world light unchanged.
+    #[must_use]
+    pub fn light(&self, block: u8, sky: u8, partial_ticks: f32) -> (u8, u8) {
+        let (block, sky) = (i32::from(block), i32::from(sky));
+        let boost =
+            |light: i32, progress: f32| (light + (progress * 15.0 * 16.0) as i32).min(MAX_LIGHT);
+        let (block, sky) = match self.lighting {
+            Lighting::World | Lighting::BlockBrightness => (block, sky),
+            Lighting::FlameGlow => {
+                let progress =
+                    ((self.age as f32 + partial_ticks) / self.max_age as f32).clamp(0.0, 1.0);
+                (boost(block, progress), sky)
+            }
+            Lighting::LavaFull => (MAX_LIGHT, sky),
+            // The portal ignores the partial tick, MCP `EntityPortalFX.java:46-61`.
+            Lighting::PortalGlow => {
+                let squared = (self.age as f32 / self.max_age as f32).powi(2);
+                let progress = squared * squared;
+                (block, boost(sky, progress))
+            }
+        };
+        (block as u8, sky as u8)
     }
 
     /// The position to draw at, `previous + (current - previous) * partial`.
