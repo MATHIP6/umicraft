@@ -7,7 +7,7 @@
 //! (`position.y` is the bottom of the quad, corners at `+-0.125` on X and Z),
 //! with the `textures/particle/footprint.png` picture, alpha blending, no
 //! light map, and a grey tint equal to the block brightness at the particle
-//! ([`Lighting::BlockBrightness`]). It is in [`Layer::Footprint`], the
+//! ([`Lighting::BlockBrightness`]). It is in [`Layer::Lit`], the
 //! reference's layer 3, so it is drawn apart from the billboards. Its alpha
 //! comes from [`alpha`]; `Particle::alpha` stays 1.
 //!
@@ -33,7 +33,7 @@ pub(super) fn create(position: DVec3, rng: &mut JavaRandom) -> Particle {
     let mut particle = Particle::with_velocity(position, DVec3::ZERO, rng);
     particle.motion = DVec3::ZERO;
     particle.max_age = LIFE;
-    particle.layer = Layer::Footprint;
+    particle.layer = Layer::Lit;
     particle.lighting = Lighting::BlockBrightness;
     particle.behaviour = Behaviour::Footstep;
     particle
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn footprint_is_flat_and_lasts_200_ticks() {
         let particle = make();
-        assert_eq!(particle.layer, Layer::Footprint);
+        assert_eq!(particle.layer, Layer::Lit);
         assert_eq!(particle.max_age, 200);
         assert_eq!(particle.motion, DVec3::ZERO);
         assert_eq!(particle.lighting, Lighting::BlockBrightness);

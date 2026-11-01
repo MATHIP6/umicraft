@@ -38,16 +38,17 @@ pub enum Layer {
     Terrain,
     /// A sprite of the item atlas (layer 2).
     Items,
-    /// The lit, flat layer 3 of the reference (`renderLitParticles`): the
-    /// particles that draw their own quad, today only the footstep.
-    Footprint,
+    /// The layer 3 of the reference (`renderLitParticles`): the particles
+    /// that bring their own picture and quad, the large explosion and the
+    /// flat footstep.
+    Lit,
 }
 
 impl Layer {
-    /// The layers in draw order.
-    pub const ALL: [Self; 4] = [Self::Misc, Self::Terrain, Self::Items, Self::Footprint];
+    /// The four layers in draw order.
+    pub const ALL: [Self; 4] = [Self::Misc, Self::Terrain, Self::Items, Self::Lit];
 
-    /// The index of the layer in the reference (0, 1 or 2).
+    /// The index of the layer in the reference (0 to 3).
     #[must_use]
     pub fn index(self) -> usize {
         self as usize
@@ -75,6 +76,10 @@ pub enum Lighting {
     /// (`EntityEnchantmentTableParticleFX.getBrightnessForRender`, so the
     /// glyphs flare up near the table). See [`Particle::light`].
     AgeGlow,
+    /// Always at the brightest light level: `getBrightnessForRender` returns
+    /// a constant above the lightmap range (257 for a lava drip, 61680 for
+    /// the large explosion).
+    FullBright,
 }
 
 /// The top of the light map scale: a 4 bit light level times 16.
@@ -309,6 +314,7 @@ impl Particle {
                 (block, boost(sky, squared * squared))
             }
             Lighting::LavaFull => (MAX_LIGHT, sky),
+            Lighting::FullBright => (MAX_LIGHT, MAX_LIGHT),
             // The portal ignores the partial tick, MCP `EntityPortalFX.java:46-61`.
             Lighting::PortalGlow => {
                 let squared = (self.age as f32 / self.max_age as f32).powi(2);

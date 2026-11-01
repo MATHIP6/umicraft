@@ -29,6 +29,17 @@ use super::kind::ParticleKind;
 use super::particle::Particle;
 use crate::shapes::BlockSource;
 use glam::DVec3;
+use umicraft_world::fluid::Liquid;
+
+mod drip;
+mod explode;
+mod rain;
+mod shared;
+mod underwater;
+
+pub use explode::{
+    large_explode_quad, LargeExplodeQuad, LARGE_EXPLODE_FRAME_SPAN, LARGE_EXPLODE_TEXTURE,
+};
 
 /// What a behaviour may read and do during a tick.
 pub struct TickContext<'a, S: BlockSource + ?Sized> {
@@ -100,6 +111,31 @@ pub enum Behaviour {
     Cloud,
     /// `EntitySnowShovelFX`: the thrown snow.
     SnowShovel,
+    /// `EntityBubbleFX`: rises in water, dies out of it.
+    Bubble,
+    /// `EntitySuspendFX`: a still speck that dies out of water.
+    Suspended,
+    /// `EntityFishWakeFX`: a ripple that grows and cycles its picture.
+    Wake,
+    /// `EntityRainFX` and `EntitySplashFX`: a droplet that dies on the
+    /// ground or under a surface.
+    Rain,
+    /// `EntityDropParticleFX`: a drop of `liquid` that hangs for `bob_timer`
+    /// more ticks, then falls.
+    Drip {
+        /// The liquid that drips.
+        liquid: Liquid,
+        /// The ticks left before the drop falls; negative once it falls.
+        bob_timer: i32,
+    },
+    /// `EntityExplodeFX`: a smoke puff that fades through eight pictures.
+    Explode,
+    /// `EntityLargeExplodeFX`: the animated flash; `size` is the packet's
+    /// `1 - speed.x / 2`.
+    LargeExplode {
+        /// The factor of the quad size (`field_70582_as`).
+        size: f32,
+    },
 }
 
 impl Behaviour {
@@ -126,6 +162,13 @@ impl Behaviour {
             Self::Enchantment { table } => enchantment::update(particle, table, context),
             Self::Cloud => cloud::update(particle, context),
             Self::SnowShovel => snow_shovel::update(particle, context),
+            Self::Bubble => underwater::update_bubble(particle, context),
+            Self::Suspended => underwater::update_suspended(particle, context),
+            Self::Wake => underwater::update_wake(particle, context),
+            Self::Rain => rain::update(particle, context),
+            Self::Drip { liquid, bob_timer } => drip::update(liquid, bob_timer, particle, context),
+            Self::Explode => explode::update_puff(particle, context),
+            Self::LargeExplode { .. } => explode::update_flash(particle),
         }
     }
 
@@ -213,6 +256,15 @@ pub fn create(
         K::EnchantmentTable => Some(enchantment::create(position, speed, rng)),
         K::Cloud => Some(cloud::create(position, speed, rng)),
         K::SnowShovel => Some(snow_shovel::create(position, speed, rng)),
+        K::Bubble => Some(underwater::bubble(position, speed, rng)),
+        K::Suspended => Some(underwater::suspended(position, speed, rng)),
+        K::Wake => Some(underwater::wake(position, speed, rng)),
+        K::Droplet => Some(rain::droplet(position, rng)),
+        K::Splash => Some(rain::splash(position, speed, rng)),
+        K::DripWater => Some(drip::drop(position, Liquid::Water, rng)),
+        K::DripLava => Some(drip::drop(position, Liquid::Lava, rng)),
+        K::Explode => Some(explode::puff(position, speed, rng)),
+        K::LargeExplode => Some(explode::large_flash(position, speed, rng)),
         _ => None,
     }
 }
