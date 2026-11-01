@@ -43,35 +43,44 @@ pub(crate) struct EntityItemMesh {
 }
 
 impl EntityItemMesh {
-    /// Appends the mesh to `meshes`, moved by `pose` (cube space to world
-    /// space, the chain of the display context) and lit by `light`.
-    ///
-    /// The banner design is recorded so that the texture cache composes it.
-    pub(crate) fn push_into(&self, meshes: &mut BlockEntityMeshes, pose: &Mat4, light: LightLevel) {
+    /// The vertices moved by `pose` (cube space to the frame the caller
+    /// draws in) and lit by `light`.
+    pub(crate) fn placed(&self, pose: &Mat4, light: LightLevel) -> Vec<EntityVertex> {
+        let light = packed_light(light);
+        self.vertices
+            .iter()
+            .map(|vertex| EntityVertex {
+                position: pose
+                    .transform_point3(Vec3::from(vertex.position))
+                    .to_array(),
+                normal: pose
+                    .transform_vector3(Vec3::from(vertex.normal))
+                    .normalize_or_zero()
+                    .to_array(),
+                uv: vertex.uv,
+                light,
+            })
+            .collect()
+    }
+
+    /// Records the banner design so that the texture cache composes it.
+    pub(crate) fn record_design(&self, meshes: &mut BlockEntityMeshes) {
         if let Some(design) = &self.banner {
             meshes
                 .banners
                 .entry(self.slot)
                 .or_insert_with(|| design.clone());
         }
-        let light = packed_light(light);
+    }
+
+    /// Appends the mesh to `meshes` as [`Self::placed`] and records its design.
+    pub(crate) fn push_into(&self, meshes: &mut BlockEntityMeshes, pose: &Mat4, light: LightLevel) {
+        self.record_design(meshes);
         meshes
             .solid
             .entry(self.slot)
             .or_default()
-            .extend(self.vertices.iter().map(|vertex| {
-                EntityVertex {
-                    position: pose
-                        .transform_point3(Vec3::from(vertex.position))
-                        .to_array(),
-                    normal: pose
-                        .transform_vector3(Vec3::from(vertex.normal))
-                        .normalize_or_zero()
-                        .to_array(),
-                    uv: vertex.uv,
-                    light,
-                }
-            }));
+            .extend(self.placed(pose, light));
     }
 }
 

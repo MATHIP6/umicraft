@@ -15,7 +15,7 @@ use umicraft_assets::skin::decode_png_bytes;
 use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_game::hand::HandPose;
 use umicraft_model::entity::TextureSlot;
-use umicraft_render::{EntityTexture, Renderer};
+use umicraft_render::{EntityTexture, EntityVertex, Renderer};
 use umicraft_ui::FontAtlas;
 
 use super::armor::armor_texture;
@@ -190,6 +190,29 @@ impl EntityTextures {
             (false, Some(skin)) => renderer.set_hand(&vertices, skin.bind_group()),
             _ => renderer.clear_hand(),
         }
+    }
+
+    /// Uploads the hand with an item drawn by a tile-entity model (a skull or
+    /// a banner): the arm, if the pose shows it, then the item with its own
+    /// texture. The hand is cleared when that texture is not ready.
+    pub fn upload_hand_item(
+        &self,
+        pose: &HandPose,
+        bob: Mat4,
+        item: (TextureSlot, &[EntityVertex]),
+        renderer: &mut Renderer,
+    ) {
+        let arm = hand_vertices(pose, bob, false);
+        let textures = self.textures.borrow();
+        let (Some(skin), Some(texture)) =
+            (textures.get(&TextureSlot::Steve), textures.get(&item.0))
+        else {
+            return renderer.clear_hand();
+        };
+        renderer.set_hand_batches(&[
+            (arm.as_slice(), skin.bind_group()),
+            (item.1, texture.bind_group()),
+        ]);
     }
 
     /// Uploads the hands that hold a map: both arms, then the `map` batches.

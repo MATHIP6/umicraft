@@ -514,6 +514,32 @@ mod render_tests {
         assert!(vertices
             .iter()
             .all(|vertex| (vertex.position[1] - 79.6).abs() < 1.0));
+        // A player holding a skull, and the first-person hand with a banner.
+        let mut holder = dropped(9, 0.0, 1, 1);
+        holder.kind = EntityKind::Player;
+        holder.item = None;
+        holder.held = Some(EntityItem {
+            item_id: 397,
+            damage: 1,
+            count: 1,
+            nbt: None,
+        });
+        let mut held = BlockEntityMeshes::default();
+        entity_items::push(&mut held, &[holder], items, &NoSkins);
+        assert!(held
+            .solid
+            .contains_key(&umicraft_model::entity::TextureSlot::SkeletonWither));
+        let mut hand = BlockEntityMeshes::default();
+        let shown = entity_items::hand_item(
+            &mut hand,
+            (425, 4, None),
+            &HandPose::default(),
+            (Mat4::IDENTITY, LightLevel::FULL_SKY),
+            items,
+            &NoSkins,
+        );
+        let (slot, vertices) = shown.expect("a banner in hand");
+        assert!(!vertices.is_empty() && hand.banners.contains_key(&slot));
         // A stack of 40 draws more than one copy.
         skull.item.as_mut().expect("item").count = 40;
         let mut stacked = BlockEntityMeshes::default();

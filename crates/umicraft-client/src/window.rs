@@ -1280,8 +1280,21 @@ impl App {
                     camera: self.camera.position,
                 },
             );
+            let mut hand_item = None;
             if let Some(items) = self.items.as_deref() {
                 entity_items::push(&mut block_entities, &entities, items, entity_textures);
+                hand_item = held_stack(world)
+                    .filter(|_| hand.visible)
+                    .and_then(|stack| {
+                        entity_items::hand_item(
+                            &mut block_entities,
+                            (stack.item_id, stack.damage, stack.nbt.as_deref()),
+                            &hand,
+                            (self.camera.view_bob(), world.hand_light()),
+                            items,
+                            entity_textures,
+                        )
+                    });
             }
             entity_textures.set_block_entities(block_entities);
             entity_textures.mesh_and_upload_with(&entities, &framed, renderer);
@@ -1296,7 +1309,15 @@ impl App {
                     );
                     entity_textures.upload_hand_map(&hand, bob, &held, renderer);
                 }
-                _ => entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer),
+                _ => match &hand_item {
+                    Some((slot, vertices)) => entity_textures.upload_hand_item(
+                        &hand,
+                        self.camera.view_bob(),
+                        (*slot, vertices),
+                        renderer,
+                    ),
+                    None => entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer),
+                },
             }
             if let Some(items) = self.items.as_deref() {
                 self.world_items
