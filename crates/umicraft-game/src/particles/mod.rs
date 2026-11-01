@@ -19,7 +19,7 @@ mod engine;
 mod kind;
 mod particle;
 
-pub use behaviours::{create, Behaviour};
+pub use behaviours::{create, Behaviour, TickContext};
 pub use engine::{ParticleEngine, MAX_PER_BUCKET};
 pub use kind::ParticleKind;
-pub use particle::{Layer, Particle, Texture};
+pub use particle::{Layer, Lighting, Particle, Texture};

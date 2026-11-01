@@ -51,6 +51,13 @@ impl Layer {
     }
 }
 
+/// How the light of a particle is chosen (MCP `getBrightnessForRender`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Lighting {
+    /// The world light at the particle (`Entity.getBrightnessForRender`).
+    World,
+}
+
 /// What a particle shows.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Texture {
@@ -102,6 +109,8 @@ pub struct Particle {
     pub on_ground: bool,
     /// Whether the particle has died and can be dropped.
     pub dead: bool,
+    /// How the particle is lit.
+    pub lighting: Lighting,
     /// What the particle does each tick.
     pub behaviour: Behaviour,
 }
@@ -133,6 +142,7 @@ impl Particle {
             size: BOX_SIZE,
             on_ground: false,
             dead: false,
+            lighting: Lighting::World,
             behaviour: Behaviour::Plain,
         }
     }

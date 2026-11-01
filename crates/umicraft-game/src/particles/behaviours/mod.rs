@@ -13,6 +13,17 @@ use super::particle::Particle;
 use crate::shapes::BlockSource;
 use glam::DVec3;
 
+/// What a behaviour may read and do during a tick.
+pub struct TickContext<'a, S: BlockSource + ?Sized> {
+    /// The blocks, for collision and for the particles that look at them.
+    pub world: &'a S,
+    /// The random source of the engine.
+    pub rng: &'a mut JavaRandom,
+    /// Particles created by this tick (a drop that splashes, an explosion
+    /// that scatters smoke); the engine adds them after the tick.
+    pub spawned: &'a mut Vec<Particle>,
+}
+
 /// What a particle does each tick beyond being an `EntityFX`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Behaviour {
@@ -27,11 +38,10 @@ impl Behaviour {
     pub(super) fn update<S: BlockSource + ?Sized>(
         self,
         particle: &mut Particle,
-        world: &S,
-        _rng: &mut JavaRandom,
+        context: &mut TickContext<'_, S>,
     ) {
         match self {
-            Self::Plain => particle.tick(world),
+            Self::Plain => particle.tick(context.world),
         }
     }
 }

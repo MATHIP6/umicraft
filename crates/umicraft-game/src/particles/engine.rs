@@ -4,6 +4,7 @@
 
 use umicraft_core::java_random::JavaRandom;
 
+use super::behaviours::TickContext;
 use super::particle::{Layer, Particle};
 use crate::shapes::BlockSource;
 
@@ -21,6 +22,7 @@ pub struct ParticleEngine {
     /// Particles whose opacity changed during a tick and now belong to the
     /// other pass; kept to reuse its allocation.
     migrating: Vec<Particle>,
+    spawned: Vec<Particle>,
     rng: JavaRandom,
 }
 
@@ -36,6 +38,7 @@ impl ParticleEngine {
         Self {
             buckets: Default::default(),
             migrating: Vec::new(),
+            spawned: Vec::new(),
             rng: JavaRandom::new(seed),
         }
     }
@@ -59,9 +62,14 @@ impl ParticleEngine {
     pub fn tick<S: BlockSource + ?Sized>(&mut self, world: &S) {
         for index in 0..BUCKETS {
             let bucket = &mut self.buckets[index];
+            let mut context = TickContext {
+                world,
+                rng: &mut self.rng,
+                spawned: &mut self.spawned,
+            };
             for particle in bucket.iter_mut() {
                 let behaviour = particle.behaviour;
-                behaviour.update(particle, world, &mut self.rng);
+                behaviour.update(particle, &mut context);
             }
             bucket.retain(|particle| !particle.dead);
             let mut kept = 0;
@@ -74,6 +82,9 @@ impl ParticleEngine {
             self.migrating.extend(bucket.drain(kept..));
         }
         while let Some(particle) = self.migrating.pop() {
+            self.add(particle);
+        }
+        while let Some(particle) = self.spawned.pop() {
             self.add(particle);
         }
     }
