@@ -2,7 +2,8 @@
 
 //! The sky pictures of the user's client jar (P7e).
 //!
-//! `sun.png`, `moon_phases.png`, `end_sky.png`, `clouds.png`, `rain.png`, `snow.png` and the particle sheet are read at runtime from the
+//! `sun.png`, `moon_phases.png`, `end_sky.png`, `clouds.png`, `rain.png`, `snow.png`, the particle sheet
+//! and the overlay pictures (`underwater.png`, `pumpkinblur.png`, `vignette.png`) are read at runtime from the
 //! verified jar and never stored in the repository (spec §3). A picture the jar
 //! lacks, or that does not decode, stays `None` and the renderer draws its
 //! original stand-in.
@@ -50,6 +51,13 @@ const SNOW: &str = "assets/minecraft/textures/environment/snow.png";
 /// Jar path of the particle sheet.
 const PARTICLES: &str = "assets/minecraft/textures/particle/particles.png";
 
+/// Jar path of the veil seen under water.
+const UNDERWATER: &str = "assets/minecraft/textures/misc/underwater.png";
+/// Jar path of the pumpkin worn on the head.
+const PUMPKIN_BLUR: &str = "assets/minecraft/textures/misc/pumpkinblur.png";
+/// Jar path of the shade of the screen edges.
+const VIGNETTE: &str = "assets/minecraft/textures/misc/vignette.png";
+
 /// Reads the sky pictures of `jar`; every missing or undecodable one is `None`.
 #[must_use]
 pub fn load_sky_textures(jar: Option<&ClientJar>) -> SkyTextures {
@@ -62,6 +70,9 @@ pub fn load_sky_textures(jar: Option<&ClientJar>) -> SkyTextures {
         rain: read(RAIN),
         snow: read(SNOW),
         particles: read(PARTICLES),
+        underwater: read(UNDERWATER),
+        pumpkin_blur: read(PUMPKIN_BLUR),
+        vignette: read(VIGNETTE),
     }
 }
 
@@ -79,6 +90,9 @@ mod tests {
         assert!(textures.rain.is_none());
         assert!(textures.snow.is_none());
         assert!(textures.particles.is_none());
+        assert!(textures.underwater.is_none());
+        assert!(textures.pumpkin_blur.is_none());
+        assert!(textures.vignette.is_none());
         assert!(load_border_texture(None).is_none());
     }
 }

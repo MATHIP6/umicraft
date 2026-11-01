@@ -270,6 +270,8 @@ pub struct Frame {
     pub weather: crate::weather_view::WeatherView,
     /// The live particles with the light where they stand (P8).
     pub particles: Arc<[crate::particle_view::ParticleDraw]>,
+    /// What the screen overlays need to decide what shows (P8-f).
+    pub overlays: crate::overlay_state::OverlayInputs,
 }
 
 /// The statistics the debug overlay shows.
@@ -455,6 +457,8 @@ struct Game {
     particles: umicraft_game::particles::ParticleEngine,
     /// How many particles are created (`GameSettings.particleSetting`).
     particle_setting: umicraft_game::particles::ParticleSetting,
+    /// What the screen overlays need to know of the player (P8-f).
+    overlays: crate::overlay_state::OverlayTracker,
     /// The chunks whose geometry changed and still need a snapshot.
     dirty: BTreeSet<ChunkPos>,
     /// The human-readable status.
@@ -561,6 +565,7 @@ impl Game {
             world: None,
             particles: umicraft_game::particles::ParticleEngine::new(PARTICLE_SEED),
             particle_setting: umicraft_game::particles::ParticleSetting::default(),
+            overlays: crate::overlay_state::OverlayTracker::default(),
             dirty: BTreeSet::new(),
             status: "CONNECTING".to_string(),
             entity_id: 0,
@@ -1265,6 +1270,9 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
             view.position.z.floor() as i32,
         ),
         particles: crate::particle_view::collect(&game.particles, game.world.as_ref()).into(),
+        overlays: game
+            .overlays
+            .inputs(game.perspective == Perspective::FirstPerson),
     })));
 }
 
@@ -1344,6 +1352,31 @@ fn follow_body(game: &mut Game) {
     // The swing of the third person arm advances with the tick, as the
     // animation of every tracked entity does in `EntityStore::tick`.
     game.body.animation.tick();
+}
+
+/// Potion id of Nausea.
+const NAUSEA: u8 = 9;
+
+/// Advances the overlay state of the local player by one tick.
+fn tick_overlays(game: &mut Game) {
+    let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
+        return;
+    };
+    let facts = crate::overlay_state::PlayerFacts {
+        world,
+        feet: state.position(),
+        eye: state.player().eye_position(),
+        spectator: game.gamemode == GameMode::Spectator,
+        riding: game.vehicle.is_some(),
+        nausea_ticks: game
+            .server
+            .effects()
+            .get(NAUSEA)
+            .map(|effect| u32::try_from(effect.duration).unwrap_or(0)),
+        helmet: game.windows.helmet().map(|stack| stack.item_id),
+        border: game.server.border(),
+    };
+    game.overlays.tick(&facts);
 }
 
 /// The display slot of the score shown below the name.
@@ -1611,6 +1644,7 @@ fn apply_net_event(
             // nothing yet (MCP `handleRespawn` creates a new player entity,
             // whose sprint and sneak states start off).
             game.vehicle = None;
+            game.overlays.reset();
             game.server_view = ServerView::default();
             // The server keeps the chunks of the dimension, so only a change
             // of the dimension replaces the world.
@@ -1871,6 +1905,7 @@ fn apply_net_event(
                     game.score = score;
                     game.hud_dirty = true;
                 }
+                game.overlays.apply_metadata(&m.metadata);
             }
             let id = EntityId(m.entity_id);
             game.entities.apply_metadata(id, &m.metadata);
@@ -2694,6 +2729,7 @@ fn tick(
     }
     report_flight(game, was_flying, queue);
     follow_body(game);
+    tick_overlays(game);
     game.entities.tick();
     if let Some(world) = game.world.as_ref() {
         game.entities.tick_objects(world);

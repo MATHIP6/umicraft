@@ -143,6 +143,33 @@ impl Border {
         (self.center_x, self.center_z)
     }
 
+    /// How fast the border resizes, in blocks per millisecond; zero while it
+    /// holds still (`WorldBorder.getResizeSpeed`).
+    pub fn resize_speed(&self) -> f64 {
+        if self.is_resizing() {
+            (self.start_diameter - self.end_diameter).abs() / self.duration_ms as f64
+        } else {
+            0.0
+        }
+    }
+
+    /// The distance from `(x, z)` to the nearest wall; negative outside
+    /// (`WorldBorder.getClosestDistance`). The walls never pass the portal
+    /// boundary (`minX`, `maxX`, `minZ` and `maxZ` clamp to it).
+    pub fn closest_distance(&self, x: f64, z: f64) -> f64 {
+        let reach = f64::from(self.portal_boundary);
+        let half = self.diameter() / 2.0;
+        let (min_x, max_x) = (
+            (self.center_x - half).max(-reach),
+            (self.center_x + half).min(reach),
+        );
+        let (min_z, max_z) = (
+            (self.center_z - half).max(-reach),
+            (self.center_z + half).min(reach),
+        );
+        (x - min_x).min(max_x - x).min(z - min_z).min(max_z - z)
+    }
+
     /// The portal boundary (MCP `WorldBorder.getSize`).
     pub fn portal_boundary(&self) -> i32 {
         self.portal_boundary
@@ -180,6 +207,35 @@ mod tests {
         border.apply(&BorderPacket::SetCenter { x: 3.0, z: -4.0 });
         assert_eq!(border.diameter(), 100.0);
         assert_eq!(border.center(), (3.0, -4.0));
+    }
+
+    #[test]
+    fn the_closest_wall_gives_the_distance_and_outside_is_negative() {
+        let mut border = Border::default();
+        border.apply(&BorderPacket::SetSize { diameter: 100.0 });
+        border.apply(&BorderPacket::SetCenter { x: 10.0, z: 0.0 });
+        // Walls at x = -40 and 60, z = -50 and 50.
+        assert_eq!(border.closest_distance(10.0, 0.0), 50.0);
+        assert_eq!(border.closest_distance(55.0, 0.0), 5.0);
+        assert_eq!(border.closest_distance(10.0, 53.0), -3.0);
+    }
+
+    #[test]
+    fn a_huge_border_stops_at_the_portal_boundary() {
+        let border = Border::default();
+        assert_eq!(border.closest_distance(0.0, 0.0), 29_999_984.0);
+    }
+
+    #[test]
+    fn the_resize_speed_is_blocks_per_millisecond() {
+        let mut border = Border::default();
+        assert_eq!(border.resize_speed(), 0.0);
+        border.apply(&BorderPacket::LerpSize {
+            old_diameter: 100.0,
+            new_diameter: 50.0,
+            speed: 10_000,
+        });
+        assert_eq!(border.resize_speed(), 0.005);
     }
 
     #[test]

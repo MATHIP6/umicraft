@@ -25,8 +25,8 @@ use umicraft_game::server::maps::MapStore;
 use umicraft_game::RenderState;
 use umicraft_mesh::{BlockEntityRef, ChunkSnapshot, Mesh, Vertex};
 use umicraft_render::{
-    BorderView, Camera, FogContext, HudState, OutlineBox, PrecipitationField, RenderEnvironment,
-    Renderer,
+    BorderView, Camera, FogContext, FogMedium, HudState, OutlineBox, PrecipitationField,
+    RenderEnvironment, Renderer, ScreenOverlays,
 };
 use umicraft_world::{ChunkPos, LightLevel};
 
@@ -38,6 +38,8 @@ use crate::fog_context::FogLight;
 use crate::game::{camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, TICK};
 use crate::mesher::{MeshPool, MeshResult};
 use crate::moving_blocks_draw::mesh_moving_blocks;
+use crate::overlay_state::OverlayInputs;
+use crate::overlay_view::{compose, SpriteLayers, ViewFacts, VignetteShade};
 use crate::terrain_textures::{InstalledTerrain, TerrainMesher};
 use crate::weather_view::WeatherView;
 
@@ -213,6 +215,30 @@ impl WorldView {
         crate::particle_view::sprites(&self.view.particles, partial_ticks, &|state| {
             crate::particle_view::block_sprite(context?, state)
         })
+    }
+
+    /// The full-screen overlays of the frame at `now`, for
+    /// `Renderer::set_screen_overlays`. `fancy` is the graphics setting, which
+    /// the vignette needs.
+    pub fn screen_overlays(&mut self, now: Instant, fancy: bool) -> ScreenOverlays {
+        let Some(state) = self.view.sample(now) else {
+            return ScreenOverlays::default();
+        };
+        let (inputs, fog) = (self.view.overlays, self.view.fog);
+        let facts = ViewFacts {
+            underwater: fog.medium == FogMedium::Water,
+            brightness: fog.light_brightness,
+            yaw_degrees: state.yaw.to_degrees(),
+            pitch_degrees: state.pitch.to_degrees(),
+            partial_tick: self.view.partial_tick(now),
+        };
+        let vignette = fancy.then(|| {
+            self.view
+                .vignette
+                .step(fog.light_brightness, inputs.border_danger)
+        });
+        let layers = SpriteLayers::find(self.mesher.model_context(), inputs.in_wall);
+        compose(&inputs, &facts, layers, vignette)
     }
 
     /// The world border of the newest frame; `None` before the first one.
@@ -512,6 +538,10 @@ struct View {
     weather: WeatherView,
     /// The particles of the newest frame (P8).
     particles: Arc<[crate::particle_view::ParticleDraw]>,
+    /// What decides the screen overlays, of the newest frame (P8-f).
+    overlays: OverlayInputs,
+    /// The vignette brightness, eased frame by frame.
+    vignette: VignetteShade,
 }
 
 impl View {
@@ -529,6 +559,7 @@ impl View {
         self.border = Some(frame.border);
         self.weather = frame.weather;
         self.particles = frame.particles;
+        self.overlays = frame.overlays;
     }
 
     /// The interpolation fraction of the two newest ticks for `now`.
@@ -793,6 +824,7 @@ mod tests {
             border: crate::border_view::border_view(&Border::default()),
             weather: crate::weather_view::WeatherView::default(),
             particles: Arc::from([]),
+            overlays: crate::overlay_state::OverlayInputs::default(),
             signs: Arc::default(),
         })
     }

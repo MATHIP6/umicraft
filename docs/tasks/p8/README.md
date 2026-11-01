@@ -27,7 +27,7 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | |
 | P8-c | flame, smoke, lava, portal, redstone, footstep (drips: with P8-b water) | simulation done |
 | P8-d | spells and potions, crit, hearts, notes, enchantment | simulation done |
-| P8-f | screen overlays | |
+| P8-f | screen overlays: underwater, in a wall, fire, pumpkin, portal, vignette | done (see below) |
 | P8-g | `particles` setting, criterion benchmark, parity sheet | |
 
 ## Approximations
@@ -39,3 +39,21 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 - Opaque particles do not write depth (see `umicraft_render::particles`).
 - Item sprites (`iconcrack`), `footprint.png` and the large explosion sheet are
   not drawn; their particles are simulated but skipped by `particle_view`.
+
+## Screen overlays (P8-f)
+
+- `umicraft_render::overlays` draws a `ScreenOverlays` (plain data) in one pass
+  after the hand and before the HUD: no depth, alpha blending, and the vignette
+  multiplies the screen. Sprites of walls, fire and portal are layers of the
+  block atlas; `underwater.png`, `pumpkinblur.png` and `vignette.png` come from
+  the user's jar through `SkyTextures`, with generated fallbacks.
+- The decisions are pure functions: `umicraft-client/src/overlay_state.rs` (game
+  thread: block in the way, portal timer, burning flag, pumpkin, border warning)
+  and `overlay_view.rs` (render thread: gating by perspective and gamemode,
+  interpolation, vignette easing, sprite layers).
+- Approximations: the burning flag comes from the metadata of the local entity
+  (flag 0), the portal and in-wall tests read the client world, and blocks count
+  as visually opaque by `BlockState::is_opaque` (leaves, glass and ice do not).
+  Fire and the portal veil need the sprite in the block atlas; the procedural
+  terrain has none, so they are skipped there. Sleeping and `hideGUI` (F1, not
+  implemented) do not hide the overlays.

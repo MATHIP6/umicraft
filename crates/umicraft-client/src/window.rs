@@ -18,7 +18,7 @@ use umicraft_game::inventory::{drag_preview, DragPreview, WindowView, HOTBAR_STA
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
     draw_debug_only, draw_hud, draw_hud_gui, gui_scale, Camera, ChatInputView, HudLayout, HudState,
-    NoIcons, Overlay, RenderEnvironment, Renderer, SkyState,
+    NoIcons, Overlay, RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
@@ -1235,6 +1235,13 @@ impl App {
             renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
             renderer.set_particles(&world.particle_sprites(environment.partial_tick));
         }
+        renderer.set_screen_overlays(
+            self.world
+                .as_mut()
+                .map_or_else(ScreenOverlays::default, |world| {
+                    world.screen_overlays(now, self.options.video.fancy_graphics)
+                }),
+        );
         renderer.set_world_border(
             self.world.as_ref().and_then(WorldView::border),
             (now - self.started).as_secs_f64(),
