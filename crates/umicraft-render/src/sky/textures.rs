@@ -45,6 +45,12 @@ pub struct SkyTextures {
     pub snow: Option<SkyImage>,
     /// `textures/particle/particles.png`, the 16 x 16 sheet of the particles.
     pub particles: Option<SkyImage>,
+    /// `textures/misc/underwater.png`, the veil seen from below the water.
+    pub underwater: Option<SkyImage>,
+    /// `textures/misc/pumpkinblur.png`, the pumpkin on the head.
+    pub pumpkin_blur: Option<SkyImage>,
+    /// `textures/misc/vignette.png`, the shade of the screen edges.
+    pub vignette: Option<SkyImage>,
 }
 
 /// Edge of the fallback sun in texels.

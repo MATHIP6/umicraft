@@ -40,6 +40,7 @@ use crate::error::RenderError;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
+use crate::overlays::{Pictures, ScreenOverlays, ScreenRenderer};
 use crate::particles::{ParticleRenderer, ParticleSprite};
 use crate::sky::{SkyImage, SkyRenderer, SkyState, SkyTextures};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
@@ -208,6 +209,9 @@ pub struct Renderer {
     weather: WeatherRenderer,
     particles: ParticleRenderer,
     particle_sprites: Vec<ParticleSprite>,
+    /// Underwater, in-wall, fire, pumpkin, portal and vignette (P8-f).
+    screen: ScreenRenderer,
+    screen_overlays: ScreenOverlays,
     /// The world border walls, drawn after the translucent terrain.
     border: BorderRenderer,
     /// World clock and dimension of the next frame.
@@ -642,6 +646,7 @@ impl Renderer {
         let outline = OutlineRenderer::new(&device, &camera_layout, format);
         let weather = WeatherRenderer::new(&device, &queue, &camera_layout, format);
         let particles = ParticleRenderer::new(&device, &queue, &terrain_layout, format);
+        let screen = ScreenRenderer::new(&device, &queue, &terrain_layout, format);
 
         let overlay_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("overlay vertices"),
@@ -727,6 +732,8 @@ impl Renderer {
             weather,
             particles,
             particle_sprites: Vec::new(),
+            screen,
+            screen_overlays: ScreenOverlays::default(),
             border,
             environment: RenderEnvironment::default(),
             block_sampler,
@@ -789,6 +796,15 @@ impl Renderer {
         self.set_weather_textures(textures);
         self.particles
             .set_sheet(&self.device, &self.queue, textures.particles.as_ref());
+        self.screen.set_pictures(
+            &self.device,
+            &self.queue,
+            Pictures {
+                underwater: textures.underwater.as_ref(),
+                pumpkin_blur: textures.pumpkin_blur.as_ref(),
+                vignette: textures.vignette.as_ref(),
+            },
+        );
     }
 
     /// Replaces the rain and snow pictures (`textures/environment/rain.png`,
@@ -809,6 +825,12 @@ impl Renderer {
     pub fn set_particles(&mut self, sprites: &[ParticleSprite]) {
         self.particle_sprites.clear();
         self.particle_sprites.extend_from_slice(sprites);
+    }
+
+    /// Sets the full-screen overlays to draw this frame (underwater, in a
+    /// wall, fire, pumpkin, portal, vignette). Call once per frame.
+    pub fn set_screen_overlays(&mut self, overlays: ScreenOverlays) {
+        self.screen_overlays = overlays;
     }
 
     /// Sets the columns the rain and snow fall on, sampled by the game
@@ -1027,6 +1049,8 @@ impl Renderer {
             .update(&self.queue, camera, self.environment, self.cloud_ticks);
         self.particles
             .update(&self.queue, camera, &self.particle_sprites);
+        self.screen
+            .update(&self.queue, &self.screen_overlays, camera);
         // The reference's reach is `renderDistanceChunks * 16`.
         self.border.update(
             &self.queue,
@@ -2011,6 +2035,10 @@ impl Renderer {
         self.hand_items.draw(&mut pass);
         self.world_glint
             .draw_hand(&mut pass, &self.hand_item_bind_group);
+
+        // `renderOverlays` follows the hand; the GUI's vignette, pumpkin and
+        // portal come before the hotbar.
+        self.screen.draw(&mut pass, &self.terrain_bind_group);
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
