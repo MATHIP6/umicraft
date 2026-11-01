@@ -8,6 +8,7 @@
 //! | `kind` | [`ParticleKind`], the 42 wire ids |
 //! | `particle` | [`Particle`], the shared `EntityFX` state and tick |
 //! | `behaviours` | [`Behaviour`], one module per family of particle classes |
+//! | `ambient` | the particles blocks, rain and sprinting make by themselves |
 //! | `block_effects` | the fragments of a broken or hit block |
 //! | `effect` | the particles of `playAuxSFX` (`Effect` packet) |
 //! | `explosion` | the particles of an `Explosion` packet |
@@ -18,6 +19,7 @@
 //! particles it hands out, so the render thread never touches the world (as
 //! for the weather, ADR-0031). The plan is in `docs/tasks/p8/README.md`.
 
+pub mod ambient;
 pub mod behaviours;
 mod block_effects;
 mod effect;
