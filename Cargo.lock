@@ -3461,6 +3461,7 @@ dependencies = [
  "glam",
  "serde_json",
  "thiserror 2.0.21",
+ "umicraft-core",
  "umicraft-protocol",
  "umicraft-world",
 ]

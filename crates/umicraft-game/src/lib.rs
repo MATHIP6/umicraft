@@ -56,6 +56,7 @@ pub mod items;
 pub mod media;
 pub mod movement;
 pub mod nbt;
+pub mod particles;
 pub mod physics;
 pub mod pick;
 pub mod piston;
