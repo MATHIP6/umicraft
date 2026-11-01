@@ -79,8 +79,30 @@ impl BannerDesign {
         let Some(root) = bytes.and_then(|bytes| Nbt::parse(bytes).ok()) else {
             return Self::plain(WHITE);
         };
-        let mut design = Self::plain(dye(root.get("Base")));
-        let entries = root.get("Patterns").and_then(Nbt::as_list).unwrap_or(&[]);
+        Self::from_tree(&root, dye(root.get("Base")))
+    }
+
+    /// The design of a banner item (`TileEntityBanner.setItemValues`).
+    ///
+    /// The patterns and the base dye live in `BlockEntityTag`; without a
+    /// `Base` there, the base dye is the item damage (`metadata & 15`).
+    /// Unreadable NBT is a banner without a tag.
+    #[must_use]
+    pub(crate) fn from_item(nbt: Option<&[u8]>, damage: i16) -> Self {
+        let from_damage = (damage & 15) as u8;
+        let root = nbt.and_then(|bytes| Nbt::parse(bytes).ok());
+        match root.as_ref().and_then(|root| root.get("BlockEntityTag")) {
+            Some(tag) => {
+                Self::from_tree(tag, tag.get("Base").map_or(from_damage, |b| dye(Some(b))))
+            }
+            None => Self::plain(from_damage),
+        }
+    }
+
+    /// The patterns of `tag` over the dye `base`.
+    fn from_tree(tag: &Nbt, base: u8) -> Self {
+        let mut design = Self::plain(base);
+        let entries = tag.get("Patterns").and_then(Nbt::as_list).unwrap_or(&[]);
         for entry in entries.iter().take(MAX_LAYERS - 1) {
             let index = entry
                 .get("Pattern")

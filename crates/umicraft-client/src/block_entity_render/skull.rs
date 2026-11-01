@@ -101,7 +101,7 @@ fn skin_slot(data: &SkullData, slot: TextureSlot, skins: &dyn SkinLookup) -> Tex
 /// wall it hangs on (offsets 0.26 and 0.74) at a quarter block high, turned
 /// to its facing. The renderer applies `scale(-1, -1, 1)`; the crate's boxes
 /// are already y-up, so only the mirror in x is left.
-fn skull_vertices(metadata: u8, floor_degrees: f32, humanoid: bool) -> Vec<ModelVertex> {
+pub(super) fn skull_vertices(metadata: u8, floor_degrees: f32, humanoid: bool) -> Vec<ModelVertex> {
     // `EnumFacing.getFront`: 0 down, 1 up, 2 north, 3 south, 4 west, 5 east,
     // and the index wraps at 6.
     let (offset, degrees) = match (metadata & 7) % 6 {

@@ -29,6 +29,7 @@ use crate::item_icons::ItemResources;
 use umicraft_core::java_random::JavaRandom;
 
 mod carried;
+pub(crate) mod entity_items;
 mod head;
 mod held;
 pub(crate) mod objects;
@@ -185,17 +186,7 @@ fn push_item_frame(
     let Some((model, quads)) = sprite_model(resources, item.item_id, item.damage) else {
         return;
     };
-    let turn = if model.gui_3d {
-        Mat4::IDENTITY
-    } else {
-        Mat4::from_rotation_y(std::f32::consts::PI)
-    };
-    let pose = base
-        * Mat4::from_translation(Vec3::new(0.0, 0.0, 0.4375))
-        * Mat4::from_rotation_z(f32::from(entity.frame_rotation) * std::f32::consts::FRAC_PI_4)
-        * Mat4::from_scale(Vec3::splat(0.5))
-        * turn
-        * context_pose(model, DisplayContext::Fixed);
+    let pose = framed_pose(entity, model);
     let tints = resources.tints(item.item_id, item.damage, item.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
@@ -204,6 +195,24 @@ fn push_item_frame(
     };
     let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
     layers.push(quads, &pose, &style, glint);
+}
+
+/// The world matrix of the item in a frame (`RenderItemFrame.func_82402_b`).
+///
+/// Pushed out 7/16 of a block, rolled by 45 degrees per rotation step, halved
+/// and posed for the `fixed` context; flat sprites are turned to face outwards.
+fn framed_pose(entity: &EntityRenderSnapshot, model: &ItemModel) -> Mat4 {
+    let turn = if model.gui_3d {
+        Mat4::IDENTITY
+    } else {
+        Mat4::from_rotation_y(std::f32::consts::PI)
+    };
+    frame_base(entity)
+        * Mat4::from_translation(Vec3::new(0.0, 0.0, 0.4375))
+        * Mat4::from_rotation_z(f32::from(entity.frame_rotation) * std::f32::consts::FRAC_PI_4)
+        * Mat4::from_scale(Vec3::splat(0.5))
+        * turn
+        * context_pose(model, DisplayContext::Fixed)
 }
 
 /// Appends the first-person held item to `layers`, in camera space.
@@ -262,6 +271,15 @@ fn sprite_model(
         .models()
         .model(item_id as u16, damage as u16, damageable)?;
     quads_of(model)
+}
+
+/// The model of an item that a tile-entity renderer draws (`builtin/entity`).
+fn entity_model(resources: &ItemResources, item_id: i16, damage: i16) -> Option<&ItemModel> {
+    let damageable = items::lookup(i32::from(item_id)).is_some_and(items::ItemDef::is_damageable);
+    resources
+        .models()
+        .model(item_id as u16, damage as u16, damageable)
+        .filter(|model| model.geometry == ItemGeometry::Entity)
 }
 
 fn quads_of(model: &ItemModel) -> Option<(&ItemModel, &[ModelQuad])> {
@@ -467,6 +485,42 @@ mod render_tests {
             ghost_visible: false,
             flags: EntityFlags::default(),
         }
+    }
+
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar"]
+    fn real_skulls_and_banners_are_placed_as_entity_meshes() {
+        use crate::block_entity_render::BlockEntityMeshes;
+        use crate::entity_render::NoSkins;
+
+        let resources = ModelResources::load().expect("official resources");
+        let items = &*resources.items();
+        let mut skull = dropped(1, 0.0, 397, 1);
+        let mut banner = dropped(2, 2.0, 425, 1);
+        banner.kind = EntityKind::ItemFrame;
+        let plain = dropped(3, 4.0, 1, 1);
+        let mut meshes = BlockEntityMeshes::default();
+        entity_items::push(
+            &mut meshes,
+            &[skull.clone(), banner, plain],
+            items,
+            &NoSkins,
+        );
+        // The skeleton skull and the banner; nothing for stone.
+        assert_eq!(meshes.solid.len(), 2);
+        assert_eq!(meshes.banners.len(), 1);
+        // The dropped skull hovers around its entity position.
+        let vertices = &meshes.solid[&umicraft_model::entity::TextureSlot::Skeleton];
+        assert!(vertices
+            .iter()
+            .all(|vertex| (vertex.position[1] - 79.6).abs() < 1.0));
+        // A stack of 40 draws more than one copy.
+        skull.item.as_mut().expect("item").count = 40;
+        let mut stacked = BlockEntityMeshes::default();
+        entity_items::push(&mut stacked, &[skull], items, &NoSkins);
+        assert!(
+            stacked.solid[&umicraft_model::entity::TextureSlot::Skeleton].len() > vertices.len()
+        );
     }
 
     /// Renders dropped items and a held one; set `UMICRAFT_ITEM_DUMP` to a

@@ -13,6 +13,7 @@
 //! - `sign`: standing and wall signs with their four lines of text.
 //! - `banner`: standing and wall banners, textured by `banner_texture`.
 //! - `skull`: placed skulls, with the owner's skin for a player skull.
+//! - `item`: skull and banner items, drawn with the same models (`builtin/entity`).
 
 mod additive;
 mod banner;
@@ -24,6 +25,7 @@ mod book_state;
 mod chest;
 mod end_portal;
 mod flower_pot;
+mod item;
 mod sign;
 mod skull;
 mod spawner;
@@ -37,8 +39,10 @@ use umicraft_mesh::{BlockEntityKind, BlockEntityRef};
 use umicraft_model::entity::{ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 use umicraft_ui::FontAtlas;
+use umicraft_world::LightLevel;
 
 pub(crate) use flower_pot::push_pot_plants;
+pub(crate) use item::entity_item_mesh;
 
 use crate::entity_render::SkinLookup;
 pub(crate) use banner_texture::{compose as compose_banner, BannerDesign, Image};
@@ -141,7 +145,12 @@ fn in_range(entry: &BlockEntityRef, camera: Vec3) -> bool {
 
 /// The packed light word of a tile entity's vertices (`block | sky << 4`).
 fn light_word(entry: &BlockEntityRef) -> u32 {
-    u32::from(entry.light.block.min(15)) | (u32::from(entry.light.sky.min(15)) << 4)
+    packed_light(entry.light)
+}
+
+/// The packed light word of `light` (`block | sky << 4`).
+fn packed_light(light: LightLevel) -> u32 {
+    u32::from(light.block.min(15)) | (u32::from(light.sky.min(15)) << 4)
 }
 
 /// Moves model-space vertices to the block at `entry` and appends them.

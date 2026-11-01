@@ -51,7 +51,7 @@ use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
 use crate::inventory_screen::{draw_inventory_overlay, screen_input};
 use crate::inventory_winit;
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
-use crate::item_world::{push_held_item, ItemLayers, WorldItems};
+use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::options::{self, Action, Options};
@@ -1267,7 +1267,7 @@ impl App {
             let framed = self.map_textures.as_mut().map_or_else(Vec::new, |maps| {
                 maps.frame_batches(&entities, world.maps(), renderer)
             });
-            entity_textures.set_block_entities(mesh_block_entities(
+            let mut block_entities = mesh_block_entities(
                 world.block_entities(),
                 &BlockEntityScene {
                     lids: world.chest_lids(),
@@ -1279,7 +1279,11 @@ impl App {
                     partial_tick: environment.partial_tick,
                     camera: self.camera.position,
                 },
-            ));
+            );
+            if let Some(items) = self.items.as_deref() {
+                entity_items::push(&mut block_entities, &entities, items, entity_textures);
+            }
+            entity_textures.set_block_entities(block_entities);
             entity_textures.mesh_and_upload_with(&entities, &framed, renderer);
             match (held_map, self.map_textures.as_mut()) {
                 (Some(map_id), Some(maps)) => {
