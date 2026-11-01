@@ -71,6 +71,10 @@ pub enum Lighting {
     /// No light map: the quad is tinted with the brightness of its block
     /// (`EntityFootStepFX` draws with `getLightBrightness`).
     BlockBrightness,
+    /// The world light, with the sky component raised as the particle ages
+    /// (`EntityEnchantmentTableParticleFX.getBrightnessForRender`, so the
+    /// glyphs flare up near the table). See [`Particle::light`].
+    AgeGlow,
 }
 
 /// The top of the light map scale: a 4 bit light level times 16.
@@ -298,6 +302,12 @@ impl Particle {
                     ((self.age as f32 + partial_ticks) / self.max_age as f32).clamp(0.0, 1.0);
                 (boost(block, progress), sky)
             }
+            // The glyphs of the enchantment table flare up near the table with
+            // the fourth power of the age (`EntityEnchantmentTableParticleFX`).
+            Lighting::AgeGlow => {
+                let squared = (self.age as f32 / self.max_age as f32).powi(2);
+                (block, boost(sky, squared * squared))
+            }
             Lighting::LavaFull => (MAX_LIGHT, sky),
             // The portal ignores the partial tick, MCP `EntityPortalFX.java:46-61`.
             Lighting::PortalGlow => {
@@ -388,6 +398,21 @@ mod tests {
         // motionY = (0 - 0.04) * 0.98 after the first tick.
         assert!((particle.motion.y - (-0.04 * AIR_DRAG)).abs() < 1e-12);
         assert!(particle.position.y < 100.0);
+    }
+
+    #[test]
+    fn world_lighting_keeps_the_light_and_age_glow_raises_the_sky() {
+        let mut particle = Particle::new(DVec3::ZERO, &mut rng());
+        assert_eq!(particle.light(32, 64, 0.0), (32, 64));
+        particle.lighting = Lighting::AgeGlow;
+        particle.max_age = 10;
+        particle.age = 0;
+        assert_eq!(particle.light(32, 64, 0.0), (32, 64));
+        // (5 / 10)^4 * 240 = 15.
+        particle.age = 5;
+        assert_eq!(particle.light(32, 64, 0.0), (32, 79));
+        particle.age = 10;
+        assert_eq!(particle.light(32, 64, 0.0), (32, 240));
     }
 
     #[test]
