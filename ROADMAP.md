@@ -257,9 +257,10 @@ and clock, and world light on dropped, framed and held items.
 - Screenshot diff of a reference hotbar and inventory against the vanilla
   client within the agreed threshold (needs the owner's reference set,
   kept outside the repository; harness: `umicraft-testkit/screenshot.rs`).
-- `builtin/entity` items have no icon and are not drawn in hand: chests,
-  ender chests, trapped chests, skulls (with `SkullOwner` skins) and banners
-  (needs the block-entity renderers of P7).
+- `builtin/entity` chest items (chest, ender chest, trapped chest) have no
+  icon and are not drawn in hand. Skulls (with `SkullOwner` skins) and banners
+  are done (ADR-0034, not checked in game, no glint); the chests can use the
+  same path.
 - In-game check of the new rendering (no GPU test covers it): held items of
   mobs, the witch's item, the cast rod, filled maps (hand, frames).
 - Maps: a map not yet received shows the paper only (vanilla: checkerboard);
