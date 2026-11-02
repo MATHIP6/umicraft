@@ -53,7 +53,7 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files unused, animated textures missing | P7, P9 |
 | M8 Entities | Partial / defective — animations, metadata, skins, armour, held items, objects, lighting | P5 |
 | M9 Inventory & containers | Partial — `Click Window` never sent, no item icons | P3, P4 |
-| M10 Chat, scoreboard, settings, keybinds | Not started (basic chat only) | P9, P10 |
+| M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings and keybinds (P10) not started | P9, P10 |
 | M11 Audio | Not started | P11 |
 | M12 Accounts & main menu | Not started | P10 (menus), F1 (accounts) |
 | M13 Premium authentication | Not started | P12 |
