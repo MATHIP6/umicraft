@@ -29,6 +29,7 @@ use umicraft_world::ChunkPos;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
+use crate::adapter::AdapterSummary;
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::border::{BorderRenderer, BorderView};
 use crate::camera::Camera;
@@ -165,6 +166,7 @@ struct OffscreenTarget {
 
 /// Windowed or offscreen wgpu renderer.
 pub struct Renderer {
+    adapter: AdapterSummary,
     instance: wgpu::Instance,
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
@@ -328,6 +330,7 @@ impl Renderer {
             width,
             height,
             format,
+            AdapterSummary::of(&adapter),
         )
     }
 
@@ -351,6 +354,7 @@ impl Renderer {
             width,
             height,
             wgpu::TextureFormat::Rgba8Unorm,
+            AdapterSummary::of(&adapter),
         )
     }
 
@@ -365,6 +369,7 @@ impl Renderer {
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
+        adapter: AdapterSummary,
     ) -> Result<Self, RenderError> {
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera uniform"),
@@ -727,6 +732,7 @@ impl Renderer {
         let world_glint = WorldGlint::new(&device, &terrain_layout, format);
 
         Ok(Self {
+            adapter,
             instance,
             window,
             surface,
@@ -1461,6 +1467,12 @@ impl Renderer {
     /// Removes every uploaded chunk mesh (e.g. after a dimension change).
     pub fn clear_meshes(&mut self) {
         self.chunks.clear();
+    }
+
+    /// The GPU adapter the renderer runs on, for the F3 screen.
+    #[must_use]
+    pub fn adapter(&self) -> &AdapterSummary {
+        &self.adapter
     }
 
     /// Number of chunk meshes currently resident on the GPU.

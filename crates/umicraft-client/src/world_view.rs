@@ -253,6 +253,18 @@ impl WorldView {
         (self.view.dimension, self.view.spawn)
     }
 
+    /// The world facts of the F3 screen from the newest frame.
+    #[must_use]
+    pub fn debug_world(&self) -> &crate::debug_world::DebugWorld {
+        &self.view.debug
+    }
+
+    /// The entities and particles drawn in the newest frame, for F3.
+    #[must_use]
+    pub fn drawn_counts(&self) -> (usize, usize) {
+        (self.entities.len(), self.view.particles.len())
+    }
+
     /// The newest HUD the game thread published.
     #[must_use]
     pub fn hud(&self) -> &HudState {
@@ -540,6 +552,8 @@ struct View {
     particles: Arc<[crate::particle_view::ParticleDraw]>,
     /// What decides the screen overlays, of the newest frame (P8-f).
     overlays: OverlayInputs,
+    /// The facts the F3 screen prints, of the newest frame (P9-h).
+    debug: Arc<crate::debug_world::DebugWorld>,
     /// The vignette brightness, eased frame by frame.
     vignette: VignetteShade,
 }
@@ -560,6 +574,7 @@ impl View {
         self.weather = frame.weather;
         self.particles = frame.particles;
         self.overlays = frame.overlays;
+        self.debug = frame.debug;
     }
 
     /// The interpolation fraction of the two newest ticks for `now`.
@@ -825,6 +840,7 @@ mod tests {
             weather: crate::weather_view::WeatherView::default(),
             particles: Arc::from([]),
             overlays: crate::overlay_state::OverlayInputs::default(),
+            debug: Arc::default(),
             signs: Arc::default(),
         })
     }

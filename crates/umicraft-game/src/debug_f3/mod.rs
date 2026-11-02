@@ -26,6 +26,9 @@
 
 use std::fmt::Write as _;
 
+pub mod biomes;
+pub mod difficulty;
+
 /// The first left line (`"Minecraft 1.8.8 (" + version + "/" + brand + ")"`).
 pub const VERSION_LINE: &str = "Minecraft 1.8.8 (Umicraft)";
 

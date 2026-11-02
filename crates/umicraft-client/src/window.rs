@@ -1045,13 +1045,16 @@ impl App {
             self.options.chat.apply(&mut game_hud);
             let chatting = self.screen == Screen::Chat;
             let debug_f3 = self.show_f3.then(|| {
-                crate::debug_f3_view::build(&crate::debug_f3_view::F3Frame {
-                    fps: self.fps,
-                    chunk_meshes: self.renderer.as_ref().map_or(0, Renderer::mesh_count),
-                    video: &self.options.video,
-                    display: (width, height),
-                    camera: &self.camera,
-                })
+                crate::debug_f3_view::build_live(
+                    self.renderer.as_ref(),
+                    self.world.as_ref(),
+                    &crate::debug_f3_view::Live {
+                        fps: self.fps,
+                        video: &self.options.video,
+                        display: (width, height),
+                        camera: &self.camera,
+                    },
+                )
             });
             let items = ItemView::new(self.items.as_deref(), self.dials.frames());
             let hud = HudState {

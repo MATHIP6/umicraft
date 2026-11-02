@@ -275,6 +275,8 @@ pub struct Frame {
     pub particles: Arc<[crate::particle_view::ParticleDraw]>,
     /// What the screen overlays need to decide what shows (P8-f).
     pub overlays: crate::overlay_state::OverlayInputs,
+    /// The world facts the F3 screen prints (P9-h).
+    pub debug: Arc<crate::debug_world::DebugWorld>,
 }
 
 /// The statistics the debug overlay shows.
@@ -1219,7 +1221,28 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         overlays: game
             .overlays
             .inputs(game.perspective == Perspective::FirstPerson),
+        debug: Arc::new(debug_world(game)),
     })));
+}
+
+/// The world facts of the F3 screen, empty before the first chunk.
+fn debug_world(game: &Game) -> crate::debug_world::DebugWorld {
+    let (Some(world), Some(state)) = (game.world.as_ref(), game.state.as_ref()) else {
+        return crate::debug_world::DebugWorld::default();
+    };
+    let feet = state.position();
+    crate::debug_world::collect(
+        world,
+        &crate::debug_world::DebugInputs {
+            loaded_entities: game.entities.len(),
+            particles: game.particles.len(),
+            feet: [feet.x, feet.y, feet.z],
+            target: game.target().map(|hit| hit.block),
+            // A client that has not seen the packet assumes normal.
+            difficulty: game.server.difficulty().unwrap_or(2),
+            world_time: game.world_time,
+        },
+    )
 }
 
 /// The base temperature of the biome at `position`, which the sky takes its
@@ -3026,6 +3049,21 @@ mod tests {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.playing = true;
         game
+    }
+
+    #[test]
+    fn the_f3_facts_hold_the_feet_the_biome_and_the_chunk_cache() {
+        let game = placed_game();
+        let facts = debug_world(&game);
+        let feet = game.state.as_ref().expect("state").position();
+        assert_eq!(facts.feet, [feet.x, feet.y, feet.z]);
+        assert_eq!(
+            facts.chunk_cache.0,
+            game.world.as_ref().expect("world").chunk_count()
+        );
+        let place = facts.location.expect("the player column is loaded");
+        assert_eq!(place.day, 0);
+        assert!(place.sky_light <= 15);
     }
 
     #[test]

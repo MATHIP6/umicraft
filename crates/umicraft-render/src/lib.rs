@@ -12,6 +12,7 @@
 //! pure `umicraft-ui` crate; this crate only uploads its [`ui_pass::UiPass`]
 //! vertices and font atlas.
 
+mod adapter;
 mod block_atlas;
 mod border;
 mod camera;
@@ -35,6 +36,7 @@ mod texture;
 mod ui_pass;
 mod weather;
 
+pub use adapter::AdapterSummary;
 pub use block_atlas::BlockAtlasError;
 pub use border::{BorderStatus, BorderView};
 pub use camera::Camera;
