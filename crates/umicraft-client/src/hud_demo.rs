@@ -13,6 +13,7 @@
 //! texts are original Umicraft or generic player names.
 
 use umicraft_game::chat_input::ChatInput;
+use umicraft_game::hud::{vitals_view, BottomBar, VitalsInput};
 use umicraft_net::play::PlayEvent;
 use umicraft_protocol::packets::play::clientbound::{
     AddPlayerEntry, DisplayScoreboard, ObjectiveRenderType, PlayerListHeaderFooter, PlayerListItem,
@@ -207,6 +208,16 @@ fn scene_hud() -> HudState {
     hud.armor = 8.0;
     hud.experience = 0.4;
     hud.level = 7;
+    hud.vitals = Some(vitals_view(&VitalsInput {
+        health: 14.0,
+        food: 17,
+        armor: 8,
+        ..VitalsInput::default()
+    }));
+    hud.bar = BottomBar::Experience {
+        fill: 73,
+        level: Some(7),
+    };
     hud.selected_slot = 2;
     hud
 }

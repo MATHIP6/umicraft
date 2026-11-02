@@ -61,7 +61,7 @@ pub(crate) fn fog_context(
 
 /// The liquid the eye is in. A liquid block whose surface lies below the eye
 /// counts as the block above it (a pool surface does not tint the air).
-fn medium_at(world: &World, eye: Vec3) -> FogMedium {
+pub(crate) fn medium_at(world: &World, eye: Vec3) -> FogMedium {
     let pos = BlockPos::new(
         eye.x.floor() as i32,
         eye.y.floor() as i32,

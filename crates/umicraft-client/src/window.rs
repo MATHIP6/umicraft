@@ -17,13 +17,13 @@ use umicraft_game::chat_input::{push_sent, ChatInput, TabOutcome};
 use umicraft_game::inventory::{drag_preview, DragPreview, WindowView, HOTBAR_START};
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
-    draw_debug_only, draw_hud, draw_hud_gui, gui_scale, Camera, ChatInputView, HudLayout, HudState,
-    NoIcons, Overlay, RenderEnvironment, Renderer, ScreenOverlays, SkyState,
+    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudLayout, HudState, NoIcons,
+    Overlay, RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{
-    debug_screen::DebugScreen, draw_item, FontAtlas, Rect, ScreenLayout, Ui, UiOutput,
+    debug_screen::DebugScreen, draw_item, FontAtlas, Rect, ScreenLayout, SlotItem, Ui, UiOutput,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -1069,7 +1069,11 @@ impl App {
                     camera: &self.camera,
                 })
             });
+            let items = ItemView::new(self.items.as_deref(), self.dials.frames());
             let hud = HudState {
+                hotbar_items: self.world.as_ref().map_or_else(Default::default, |world| {
+                    hotbar_slot_items(&world.window_view().player_slots, items)
+                }),
                 debug_lines: Vec::new(),
                 debug_f3,
                 chat_open: chatting,
@@ -1087,14 +1091,16 @@ impl App {
             draw_hud_gui(self.ui.draw(), &hud, (width, height), atlas, &sheets);
         }
         if let Some(world) = self.world.as_ref() {
-            draw_hotbar_items(
-                &mut self.ui,
-                atlas,
-                &world.window_view().player_slots,
-                ItemView::new(self.items.as_deref(), self.dials.frames()),
-                (width, height),
-                textured_hud,
-            );
+            // The textured HUD draws its own hotbar items (`hotbar_items`).
+            if !textured_hud {
+                draw_hotbar_items(
+                    &mut self.ui,
+                    atlas,
+                    &world.window_view().player_slots,
+                    ItemView::new(self.items.as_deref(), self.dials.frames()),
+                    (width, height),
+                );
+            }
             if !matches!(screen, Screen::Inventory | Screen::Creative) {
                 let entities = world.entities(Instant::now());
                 let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
@@ -1469,43 +1475,37 @@ fn held_stack(world: &WorldView) -> Option<&umicraft_protocol::packets::play::It
     world.window_view().player_slots[HOTBAR_START + selected].as_ref()
 }
 
-/// Draws the item icons, counts and durability bars of the hotbar over the
-/// HUD frame. `textured` selects the vanilla layout of the `widgets.png` HUD;
-/// otherwise the items follow the placeholder HUD.
+/// The widget data of the nine hotbar slots, for the textured HUD.
+fn hotbar_slot_items(
+    player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
+    items: ItemView<'_>,
+) -> [Option<SlotItem>; 9] {
+    std::array::from_fn(|index| {
+        player_slots[HOTBAR_START + index]
+            .as_ref()
+            .map(|stack| slot_item(items, stack))
+    })
+}
+
+/// Draws the item icons, counts and durability bars of the hotbar of the
+/// placeholder HUD, whose slots the textured HUD does not share.
 fn draw_hotbar_items(
     ui: &mut Ui,
     atlas: &FontAtlas,
     player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
     items: ItemView<'_>,
     (width, height): (u32, u32),
-    textured: bool,
 ) {
-    for (index, stack) in player_slots[HOTBAR_START..HOTBAR_START + 9]
-        .iter()
-        .enumerate()
-    {
-        let Some(stack) = stack else { continue };
-        let cell = if textured {
-            vanilla_hotbar_cell(index, (width, height))
-        } else {
-            placeholder_hotbar_cell(index, (width, height))
-        };
-        draw_item(ui.draw(), atlas, cell, &slot_item(items, stack));
+    for (index, item) in hotbar_slot_items(player_slots, items).iter().enumerate() {
+        if let Some(item) = item {
+            draw_item(
+                ui.draw(),
+                atlas,
+                placeholder_hotbar_cell(index, (width, height)),
+                item,
+            );
+        }
     }
-}
-
-/// The 16×16 item cell of hotbar slot `index` in the vanilla HUD: the hotbar
-/// starts at `W/2 - 91` and its items 3 GUI pixels in, 20 apart, 19 above the
-/// bottom (MCP `GuiIngame.renderHotbarItem`).
-fn vanilla_hotbar_cell(index: usize, (width, height): (u32, u32)) -> Rect {
-    let scale = gui_scale(width, height) as f32;
-    let (gui_width, gui_height) = (width as f32 / scale, height as f32 / scale);
-    Rect::new(
-        (gui_width * 0.5 - 88.0 + index as f32 * 20.0) * scale,
-        (gui_height - 19.0) * scale,
-        16.0 * scale,
-        16.0 * scale,
-    )
 }
 
 /// The item cell of hotbar slot `index`, centred in the placeholder HUD slot.
@@ -1763,15 +1763,5 @@ mod tests {
         assert!(!is_debug_toggle(KeyCode::F3, ElementState::Pressed, false));
         assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, false));
         assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
-    }
-
-    #[test]
-    fn hotbar_items_sit_inside_the_vanilla_hotbar_slots() {
-        // 1920x1080 is GUI scale 4 (the placeholder HUD caps at 3), where the
-        // items used to drift away from their slots.
-        let first = vanilla_hotbar_cell(0, (1920, 1080));
-        let last = vanilla_hotbar_cell(8, (1920, 1080));
-        assert_eq!((first.x, first.y, first.width), (608.0, 1004.0, 64.0));
-        assert_eq!(last.x - first.x, 8.0 * 20.0 * 4.0);
     }
 }

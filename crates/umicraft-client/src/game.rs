@@ -552,6 +552,8 @@ struct Game {
     absorption: f32,
     /// Whether the world is hardcore (`Join Game`).
     hardcore: bool,
+    /// The status rows, bars and held-item name of the HUD.
+    hud_view: crate::hud_view::HudTracker,
     /// Entities in the world (mobs, players, objects).
     entities: EntityStore,
     /// The inventory and container window model.
@@ -628,6 +630,7 @@ impl Game {
             hearts: HeartsView::default(),
             absorption: 0.0,
             hardcore: false,
+            hud_view: crate::hud_view::HudTracker::default(),
             entities: EntityStore::new(),
             windows: WindowManager::new(),
             own_name: String::new(),
@@ -794,6 +797,9 @@ impl Game {
             completions: self.completions.clone(),
             completions_serial: self.completions_serial,
             boss: social_view::boss_view(&self.boss_bar),
+            vitals: self.hud_view.views().vitals.clone(),
+            bar: self.hud_view.views().bar,
+            held_name: self.hud_view.views().held_name.clone(),
             ..HudState::default()
         }
     }
@@ -1464,6 +1470,7 @@ fn apply_net_event(
     queue: &mut CommandQueue,
     frames: &SyncSender<RenderEvent>,
 ) {
+    game.hud_view.observe(&event, game.entity_id);
     match event {
         PlayEvent::JoinGame(info) => {
             game.world = Some(World::new(info.dimension));
@@ -2827,6 +2834,7 @@ fn tick(
     publish_chunks(game, chunks);
 
     publish_frame(game, frames, tick_time);
+    tick_hud_view(game);
     if game.hud_dirty {
         // The HUD is only published again when the last one was accepted, so
         // a full queue does not lose a change.
@@ -2839,6 +2847,36 @@ fn tick(
     }
     if game.status_data.ticks.is_multiple_of(STATUS_PERIOD) {
         publish_status(game, frames);
+    }
+}
+
+/// Advances the status rows and bars of the HUD by one tick and asks for a new
+/// HUD when they changed (they shake, blink and fade with the tick).
+fn tick_hud_view(game: &mut Game) {
+    let head_in_water = match (game.state.as_ref(), game.world.as_ref()) {
+        (Some(state), Some(world)) => {
+            crate::fog_context::medium_at(world, state.player().eye_position().as_vec3())
+                == umicraft_render::FogMedium::Water
+        }
+        _ => false,
+    };
+    let facts = crate::hud_view::HudFacts {
+        mode: game.gamemode,
+        health: game.health,
+        food: game.food,
+        armor: game.armor,
+        experience: game.experience,
+        level: game.level,
+        effects: game.server.effects(),
+        attributes: game.server.attributes(),
+        vehicle: game.vehicle,
+        entities: &game.entities,
+        head_in_water,
+        held: game.windows.selected_item(),
+        jump: game.input.jump,
+    };
+    if game.hud_view.tick(&facts) {
+        game.hud_dirty = true;
     }
 }
 
@@ -3551,6 +3589,32 @@ mod tests {
                 saturation: 5.0,
             },
         )
+    }
+
+    #[test]
+    fn the_hud_carries_the_rows_and_bars_of_the_tick() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.experience = 0.5;
+        game.level = 4;
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(
+            &mut game,
+            health_update(7.0),
+            &mut CommandQueue::default(),
+            &frames,
+        );
+        game.health = 7.0;
+        tick_hud_view(&mut game);
+        let hud = game.hud();
+        let hearts = hud.vitals.expect("survival shows the rows").hearts;
+        assert_eq!(hearts.len(), 10);
+        assert!(matches!(
+            hud.bar,
+            umicraft_game::hud::BottomBar::Experience {
+                fill: 91,
+                level: Some(4)
+            }
+        ));
     }
 
     #[test]

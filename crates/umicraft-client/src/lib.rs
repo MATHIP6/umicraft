@@ -35,6 +35,7 @@ mod fog_context;
 pub mod game;
 pub mod headless;
 pub mod hud_demo;
+mod hud_view;
 pub mod input;
 pub mod inventory_input;
 mod inventory_screen;
