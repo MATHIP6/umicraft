@@ -14,6 +14,9 @@ const PIG_SADDLE: u8 = 16;
 /// Tameable entry: bit 0 sitting, bit 1 angry (wolf), bit 2 tamed
 /// (MCP `EntityTameable`, `EntityWolf`).
 const TAMEABLE_FLAGS: u8 = 16;
+/// Entry of the owner of a tamed pet (MCP `EntityTameable.entityInit`: the
+/// UUID as a string).
+const TAMEABLE_OWNER: u8 = 17;
 /// Wolf entry: collar dye colour.
 const WOLF_COLLAR: u8 = 20;
 /// Wolf entry: begging (head tilt).
@@ -49,6 +52,8 @@ pub struct WolfMeta {
     pub begging: bool,
     /// Health in whole points (entry 18), which sets the tail of a tamed wolf.
     pub health: u8,
+    /// The owner's UUID, `None` for a wild wolf (entry 17).
+    pub owner: Option<u128>,
 }
 
 impl Default for WolfMeta {
@@ -60,6 +65,7 @@ impl Default for WolfMeta {
             collar: 14,
             begging: false,
             health: 20,
+            owner: None,
         }
     }
 }
@@ -73,6 +79,8 @@ pub struct OcelotMeta {
     pub tamed: bool,
     /// Coat `0..=3`.
     pub skin: u8,
+    /// The owner's UUID, `None` for a wild ocelot (entry 17).
+    pub owner: Option<u128>,
 }
 
 /// Rabbit coat.
@@ -120,6 +128,9 @@ pub(super) fn apply_wolf(variant: &mut Variant, metadata: &Metadata) {
     if let Some(health) = metadata.get_float(WOLF_HEALTH) {
         wolf.health = health.clamp(0.0, 40.0).round() as u8;
     }
+    if let Some(owner) = metadata.get_string(TAMEABLE_OWNER) {
+        wolf.owner = parse_uuid(&owner);
+    }
     *variant = Variant::Wolf(wolf);
 }
 
@@ -135,7 +146,20 @@ pub(super) fn apply_ocelot(variant: &mut Variant, metadata: &Metadata) {
     if let Some(skin) = metadata.get_byte(OCELOT_SKIN) {
         ocelot.skin = skin;
     }
+    if let Some(owner) = metadata.get_string(TAMEABLE_OWNER) {
+        ocelot.owner = parse_uuid(&owner);
+    }
     *variant = Variant::Ocelot(ocelot);
+}
+
+/// A UUID written with dashes (`UUID.toString`), `None` when it is empty or
+/// malformed.
+fn parse_uuid(text: &str) -> Option<u128> {
+    let digits: String = text.chars().filter(|c| *c != '-').collect();
+    if digits.len() != 32 {
+        return None;
+    }
+    u128::from_str_radix(&digits, 16).ok()
 }
 
 pub(super) fn apply_rabbit(variant: &mut Variant, metadata: &Metadata) {
@@ -205,7 +229,8 @@ mod tests {
             Variant::Ocelot(OcelotMeta {
                 sitting: false,
                 tamed: true,
-                skin: 2
+                skin: 2,
+                owner: None,
             })
         );
     }

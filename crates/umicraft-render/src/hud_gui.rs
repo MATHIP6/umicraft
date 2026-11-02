@@ -14,6 +14,7 @@ use crate::chat_hud::{self, line_alpha};
 use crate::hud::{
     ChatLineView, ChatRunView, HudState, SidebarView, TabListView, TitleView, HOTBAR_SLOTS,
 };
+use crate::hud_hearts;
 use crate::social_hud::tab_geometry;
 
 /// The sprite sheets extracted from the GUI atlas for HUD rendering.
@@ -116,19 +117,15 @@ fn draw_icons_layer(
     }
 
     // Health: y = gh - 39
-    let health_y = gh - 39.0;
-    let ceil_health = state.health.ceil() as i32;
-    for i in 0..10 {
-        let x = gw * 0.5 - 91.0 + i as f32 * 8.0;
-        let dst = Rect::new(x * sf, health_y * sf, 9.0 * sf, 9.0 * sf);
-        // Container
-        list.image(icons.sub(16, 0, 9, 9), dst, [1.0; 4]);
-        let val = i * 2 + 1;
-        if val < ceil_health {
-            list.image(icons.sub(52, 0, 9, 9), dst, [1.0; 4]);
-        } else if val == ceil_health {
-            list.image(icons.sub(61, 0, 9, 9), dst, [1.0; 4]);
-        }
+    let hearts = hud_hearts::layout(&state.hearts, state.health, gw, gh);
+    for sprite in &hearts.sprites {
+        let dst = Rect::new(
+            sprite.x as f32 * sf,
+            sprite.y as f32 * sf,
+            9.0 * sf,
+            9.0 * sf,
+        );
+        list.image(icons.sub(sprite.u, sprite.v, 9, 9), dst, [1.0; 4]);
     }
 
     // Food: y = gh - 39, x = gw / 2 + 91 - i * 8 - 9
@@ -149,7 +146,7 @@ fn draw_icons_layer(
 
     // Armor: y = gh - 49 if armor > 0
     if state.armor > 0.0 {
-        let armor_y = gh - 49.0;
+        let armor_y = hearts.armor_y as f32;
         let ceil_armor = state.armor.ceil() as i32;
         for i in 0..10 {
             let x = gw * 0.5 - 91.0 + i as f32 * 8.0;

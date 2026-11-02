@@ -411,8 +411,9 @@ formulas.
 
 ### P6 — Combat & PvP
 
-**Status:** P6a (entity ray cast) and P6b (attack, interact, sprint reset) are done;
-P6c onwards remain (`docs/tasks/p6/README.md`).
+**Status:** P6a to P6e are done (entity ray cast, attack, interact, sprint reset,
+hurt camera, hearts, bow zoom, critical stars); P6f (the scripted 1v1 against a
+local server) remains (`docs/tasks/p6/README.md`).
 
 **Features**
 - Entity ray-cast with the vanilla reach and hitbox expansion, and the
@@ -425,7 +426,8 @@ P6c onwards remain (`docs/tasks/p6/README.md`).
 - Sword blocking, bow charge with FOV zoom, fishing rod, snowballs, eggs,
   pearls, splash potions, golden apples and absorption, regeneration,
   poison and wither heart styles.
-- Death message from `Combat Event`.
+- No death message from `Combat Event`: the vanilla client does not show one
+  (`handleCombatEvent` feeds the Twitch metadata only).
 
 **MCP to read:** `EntityRenderer.getMouseOver`, `PlayerControllerMP`
 (`attackEntity`, `interactWithEntitySendPacket`, `onPlayerRightClick`),

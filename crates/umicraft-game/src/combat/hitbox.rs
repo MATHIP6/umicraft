@@ -12,6 +12,7 @@
 use glam::DVec3;
 
 use crate::entity::meta::Variant;
+use crate::entity::painting::ARTS;
 use crate::entity::{EntityKind, EntityRecord};
 use crate::shapes::Aabb;
 
@@ -45,8 +46,11 @@ const FRAME_WALL_OFFSET: f64 = 0.46875;
 /// The box already carries the collision border.
 #[must_use]
 pub fn hitbox(entity: &EntityRecord) -> Option<Aabb> {
-    if entity.kind == EntityKind::ItemFrame {
-        return Some(frame_box(entity));
+    match entity.kind {
+        EntityKind::ItemFrame => return Some(frame_box(entity)),
+        EntityKind::Painting => return painting_box(entity),
+        EntityKind::LeashKnot => return Some(knot_box(entity)),
+        _ => {}
     }
     let (width, height) = size(entity)?;
     let half = width / 2.0 + COLLISION_BORDER;
@@ -59,6 +63,13 @@ pub fn hitbox(entity: &EntityRecord) -> Option<Aabb> {
             feet.z + half,
         ),
     ))
+}
+
+/// The width and height of an entity that can be targeted, without the
+/// collision border (MCP `Entity.width`, `Entity.height`).
+#[must_use]
+pub fn body_size(entity: &EntityRecord) -> Option<(f64, f64)> {
+    size(entity)
 }
 
 /// The width and height of an entity that can be targeted.
@@ -77,6 +88,27 @@ fn size(entity: &EntityRecord) -> Option<(f64, f64)> {
             Some((side, side))
         }
         EntityKind::Other(id) => object_size(id),
+        // The objects with a body (MCP `canBeCollidedWith`, sizes of their
+        // constructors).
+        EntityKind::Boat => Some((1.5, 0.6)),
+        EntityKind::Minecart => Some((0.98, 0.7)),
+        EntityKind::EnderCrystal => Some((2.0, 2.0)),
+        EntityKind::LargeFireball => Some((1.0, 1.0)),
+        EntityKind::PrimedTnt | EntityKind::FallingBlock => Some((0.98, 0.98)),
+        // Everything else the ray passes through: small fireballs and wither
+        // skulls answer false, thrown objects, rockets, orbs and bolts never
+        // collide.
+        EntityKind::SmallFireball
+        | EntityKind::WitherSkull
+        | EntityKind::Snowball
+        | EntityKind::Egg
+        | EntityKind::EnderPearl
+        | EntityKind::EyeOfEnder
+        | EntityKind::Potion
+        | EntityKind::ExpBottle
+        | EntityKind::FireworkRocket
+        | EntityKind::XpOrb
+        | EntityKind::Lightning => None,
         kind => {
             let scale = if entity.meta.baby { CHILD_SCALE } else { 1.0 };
             Some((
@@ -127,6 +159,43 @@ fn frame_box(entity: &EntityRecord) -> Aabb {
     };
     let half = DVec3::new(half_x, FRAME_HALF_FACE, half_z) + DVec3::splat(COLLISION_BORDER);
     Aabb::new(centre - half, centre + half)
+}
+
+/// The box of a painting (MCP `EntityHanging.updateBoundingBox`): centred on
+/// the record, `width / 32` either side along the wall, `1 / 32` deep and
+/// `height / 32` either side up. `None` for an artwork the table does not know.
+fn painting_box(entity: &EntityRecord) -> Option<Aabb> {
+    let art = ARTS.get(usize::try_from(entity.object_data).ok()?)?;
+    let facing = ((entity.yaw / 90.0).round() as i32).rem_euclid(4);
+    let along = f64::from(art.width) / 32.0;
+    // South and north (0 and 2) run along x, west and east along z.
+    let (half_x, half_z) = if facing % 2 == 0 {
+        (along, 1.0 / 32.0)
+    } else {
+        (1.0 / 32.0, along)
+    };
+    let half =
+        DVec3::new(half_x, f64::from(art.height) / 32.0, half_z) + DVec3::splat(COLLISION_BORDER);
+    Some(Aabb::new(entity.position - half, entity.position + half))
+}
+
+/// The box of a leash knot (MCP `EntityLeashKnot.updateBoundingBox`): 0.375
+/// wide, from an eighth of a block under its centre to three eighths over.
+fn knot_box(entity: &EntityRecord) -> Aabb {
+    let centre = entity.position;
+    let half = DVec3::new(0.1875, 0.0, 0.1875) + DVec3::splat(COLLISION_BORDER);
+    Aabb::new(
+        DVec3::new(
+            centre.x - half.x,
+            centre.y - 0.125 - COLLISION_BORDER,
+            centre.z - half.z,
+        ),
+        DVec3::new(
+            centre.x + half.x,
+            centre.y + 0.375 + COLLISION_BORDER,
+            centre.z + half.z,
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -203,5 +272,60 @@ mod tests {
         assert!(hitbox(&record(EntityKind::Other(1), DVec3::ZERO)).is_some());
         assert!(hitbox(&record(EntityKind::Other(10), DVec3::ZERO)).is_some());
         assert!(hitbox(&record(EntityKind::Other(61), DVec3::ZERO)).is_none());
+    }
+
+    #[test]
+    fn a_boat_a_cart_a_crystal_and_tnt_have_their_vanilla_boxes() {
+        let width = |kind| {
+            let bounds = hitbox(&record(kind, DVec3::ZERO)).unwrap();
+            (
+                bounds.max.x - bounds.min.x - 0.2,
+                bounds.max.y - bounds.min.y - 0.2,
+            )
+        };
+        let close =
+            |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+        assert!(close(width(EntityKind::Boat), (1.5, 0.6)));
+        assert!(close(width(EntityKind::Minecart), (0.98, 0.7)));
+        assert!(close(width(EntityKind::EnderCrystal), (2.0, 2.0)));
+        assert!(close(width(EntityKind::PrimedTnt), (0.98, 0.98)));
+    }
+
+    #[test]
+    fn thrown_objects_and_small_fireballs_are_not_targeted() {
+        for kind in [
+            EntityKind::Snowball,
+            EntityKind::EnderPearl,
+            EntityKind::SmallFireball,
+            EntityKind::WitherSkull,
+            EntityKind::XpOrb,
+            EntityKind::Lightning,
+        ] {
+            assert!(hitbox(&record(kind, DVec3::ZERO)).is_none(), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn a_painting_is_a_thin_slab_as_wide_as_its_artwork() {
+        let mut painting = record(EntityKind::Painting, DVec3::new(0.0, 65.0, 0.5));
+        // The first artwork is 16 by 16 pixels, hung facing south.
+        painting.object_data = 0;
+        let south = hitbox(&painting).unwrap();
+        assert!((south.max.x - south.min.x - (1.0 + 0.2)).abs() < 1e-9);
+        assert!((south.max.z - south.min.z - (1.0 / 16.0 + 0.2)).abs() < 1e-9);
+        painting.yaw = 90.0;
+        let west = hitbox(&painting).unwrap();
+        assert!(west.max.x - west.min.x < west.max.z - west.min.z);
+        painting.object_data = 9999;
+        assert!(hitbox(&painting).is_none());
+    }
+
+    #[test]
+    fn a_leash_knot_is_a_small_box_above_the_middle_of_its_fence() {
+        let knot = record(EntityKind::LeashKnot, DVec3::new(3.5, 64.5, 3.5));
+        let bounds = hitbox(&knot).unwrap();
+        assert!((bounds.max.x - bounds.min.x - (0.375 + 0.2)).abs() < 1e-9);
+        assert!((bounds.min.y - (64.5 - 0.125 - 0.1)).abs() < 1e-9);
+        assert!((bounds.max.y - (64.5 + 0.375 + 0.1)).abs() < 1e-9);
     }
 }

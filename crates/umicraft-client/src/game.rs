@@ -29,6 +29,7 @@ use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
 use umicraft_game::chat_component::{self, Translations};
+use umicraft_game::combat::{hurt_roll, ClickViewer, HeartsFlash, HitStar};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
@@ -48,7 +49,7 @@ use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
-use umicraft_game::item_use::{drop_item, ItemUse, UseTick};
+use umicraft_game::item_use::{drop_item, ItemUse, UseAction, UseTick};
 use umicraft_game::movement::movement_stats;
 use umicraft_game::particles::{EffectContext, SpawnFilter};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
@@ -78,8 +79,8 @@ use umicraft_protocol::packets::play::serverbound::UseEntityAction;
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{
-    BorderView, BossView, ChatLineView, ChatRunView, FogContext, HudState, OutlineBox, SidebarView,
-    TabEntryView, TabListView, TitleView,
+    BorderView, BossView, ChatLineView, ChatRunView, FogContext, HeartsTint, HeartsView, HudState,
+    OutlineBox, SidebarView, TabEntryView, TabListView, TitleView,
 };
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, LightLevel, World};
 
@@ -155,6 +156,7 @@ const DEATH_TICKS: u32 = 20;
 
 /// The data watcher index of the player score (MCP `EntityPlayer` line 160).
 const SCORE_WATCHER: u8 = 18;
+const ABSORPTION_WATCHER: u8 = 17;
 
 /// Data watcher of the stack of a dropped item (MCP `EntityItem`, watcher 10).
 const DROPPED_ITEM_WATCHER: u8 = 10;
@@ -539,6 +541,16 @@ struct Game {
     status_data: GameStatus,
     /// Whether the HUD has to be published again.
     hud_dirty: bool,
+    /// The bursts of critical stars still going (`EntityParticleEmitter`).
+    hit_emitters: Vec<umicraft_game::combat::HitEmitter>,
+    /// The flash of the hearts after a loss of health.
+    hearts_flash: HeartsFlash,
+    /// What the hearts show beyond the health (published with the HUD).
+    hearts: HeartsView,
+    /// The absorption hearts of the local player (entry 17).
+    absorption: f32,
+    /// Whether the world is hardcore (`Join Game`).
+    hardcore: bool,
     /// Entities in the world (mobs, players, objects).
     entities: EntityStore,
     /// The inventory and container window model.
@@ -608,6 +620,11 @@ impl Game {
             body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
             status_data: GameStatus::default(),
             hud_dirty: true,
+            hit_emitters: Vec::new(),
+            hearts_flash: HeartsFlash::new(),
+            hearts: HeartsView::default(),
+            absorption: 0.0,
+            hardcore: false,
             entities: EntityStore::new(),
             windows: WindowManager::new(),
             own_name: String::new(),
@@ -755,6 +772,7 @@ impl Game {
     fn hud(&self) -> HudState {
         HudState {
             health: self.health,
+            hearts: self.hearts,
             food: self.food,
             armor: self.armor,
             experience: self.experience,
@@ -1191,6 +1209,11 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     if followed.is_none() && game.dead() {
         view.effects = view.effects.with_death(game.death_time as f32);
     }
+    if followed.is_none() {
+        view.effects = view
+            .effects
+            .with_hurt(hurt_roll(game.body.animation.hurt_time(), 1.0));
+    }
     // MCP `EntityRenderer.renderHand`: only the first-person view of a
     // player who plays shows the hand.
     let hand_visible = followed.is_none()
@@ -1364,6 +1387,50 @@ fn follow_body(game: &mut Game) {
     // The swing of the third person arm advances with the tick, as the
     // animation of every tracked entity does in `EntityStore::tick`.
     game.body.animation.tick();
+    tick_hearts(game);
+}
+
+/// Potion ids that change the hearts.
+const REGENERATION: u8 = 10;
+const POISON: u8 = 19;
+const WITHER: u8 = 20;
+
+/// Looks at the health once per tick, as `GuiIngame.renderPlayerStats` does
+/// each frame; the flash counts ticks, so one look per tick shows the same.
+fn tick_hearts(game: &mut Game) {
+    game.hearts_flash.tick();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis() as u64);
+    let look = game
+        .hearts_flash
+        .look(game.health, game.body.animation.is_hurt_resistant(), now_ms);
+    let effects = game.server.effects();
+    let tint = if effects.get(POISON).is_some() {
+        HeartsTint::Poison
+    } else if effects.get(WITHER).is_some() {
+        HeartsTint::Wither
+    } else {
+        HeartsTint::Normal
+    };
+    let hearts = HeartsView {
+        max_health: game
+            .server
+            .attributes()
+            .value("generic.maxHealth")
+            .map_or(20.0, |value| value as f32),
+        absorption: game.absorption,
+        previous: look.previous,
+        flash: look.flash,
+        tint,
+        regeneration: effects.get(REGENERATION).is_some(),
+        hardcore: game.hardcore,
+        tick: look.tick,
+    };
+    if hearts != game.hearts {
+        game.hearts = hearts;
+        game.hud_dirty = true;
+    }
 }
 
 /// Potion id of Nausea.
@@ -1506,6 +1573,8 @@ fn apply_net_event(
             game.dirty.clear();
             game.entities.clear();
             game.entity_id = info.entity_id;
+            game.hardcore = info.gamemode & 8 != 0;
+            game.absorption = 0.0;
             game.server.on_join(info.entity_id);
             game.server_view = ServerView::default();
             game.vehicle = None;
@@ -1917,6 +1986,11 @@ fn apply_net_event(
                     game.score = score;
                     game.hud_dirty = true;
                 }
+                // MCP `EntityPlayer.entityInit`: the absorption hearts.
+                if let Some(absorption) = m.metadata.get_float(ABSORPTION_WATCHER) {
+                    game.absorption = absorption;
+                    game.hud_dirty = true;
+                }
                 game.overlays.apply_metadata(&m.metadata);
             }
             let id = EntityId(m.entity_id);
@@ -1949,10 +2023,24 @@ fn apply_net_event(
             if status.status == ITEM_USE_FINISHED && status.entity_id == game.entity_id {
                 game.item_use.finish();
             }
+            // `handleStatusUpdate(2)` of the local player: the hurt shake of the
+            // camera and the resistance that flashes the hearts.
+            if status.entity_id == game.entity_id && status.status == 2 {
+                game.body.animation.hurt_by_status();
+            }
             game.entities
                 .status(EntityId(status.entity_id), status.status);
         }
         PlayEvent::Animation(packet) => {
+            // `performHurtAnimation` of the local player.
+            if packet.entity_id == game.entity_id && packet.animation == 1 {
+                game.body.animation.hurt();
+            }
+            // `handleAnimation` 4 and 5: the stars of a critical hit on that
+            // entity.
+            if let Some(star) = HitStar::from_animation(packet.animation) {
+                combat::emit_stars(game, EntityId(packet.entity_id), star);
+            }
             game.entities
                 .play_animation(EntityId(packet.entity_id), packet.animation);
         }
@@ -2112,6 +2200,12 @@ fn apply_movement_stats(game: &mut Game) {
         .and_then(|boots| boots.nbt.as_deref())
         .map_or(0, |nbt| enchantment_level(nbt, DEPTH_STRIDER));
     state.set_depth_strider(u8::try_from(strider).unwrap_or(u8::MAX));
+    state.set_bow_draw(
+        game.item_use
+            .view()
+            .filter(|using| using.action == UseAction::Bow)
+            .map(|using| using.ticks_used),
+    );
 }
 
 /// Tells the server about a change of the flying state.
@@ -2492,7 +2586,7 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     // nothing while an item is in use.
     if game.spectating() || game.dead() || game.item_use.is_using() {
         if pressed {
-            tracing::info!(
+            tracing::debug!(
                 spectating = game.spectating(),
                 dead = game.dead(),
                 using_item = game.item_use.is_using(),
@@ -2612,6 +2706,10 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
             item: item.as_ref(),
             food: game.food as i32,
             has_arrow,
+            viewer: ClickViewer {
+                id: EntityId(game.entity_id),
+                uuid: game.body.uuid.map(u128::from_be_bytes),
+            },
         },
     );
     for outgoing in output.packets {
@@ -2814,6 +2912,7 @@ fn tick(
         game.entities.tick_objects(world);
         game.particles.tick(world);
     }
+    combat::tick_emitters(game);
     spawn_ambient_particles(game);
     game.server.tick();
     game.server
@@ -4512,6 +4611,88 @@ mod tests {
         );
         handle_net(&mut game, status, &mut queue, &frames);
         assert!(!game.item_use.is_using());
+    }
+
+    fn hurt_status(entity_id: i32, status: i8) -> PlayEvent {
+        PlayEvent::EntityStatus(
+            umicraft_protocol::packets::play::clientbound::EntityStatus { entity_id, status },
+        )
+    }
+
+    #[test]
+    fn a_hurt_status_of_the_local_player_rolls_the_camera_and_flashes_the_hearts() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 7;
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        follow_body(&mut game);
+        handle_net(&mut game, health_update(10.0), &mut queue, &frames);
+        follow_body(&mut game);
+        handle_net(&mut game, hurt_status(7, 2), &mut queue, &frames);
+        assert_eq!(game.body.animation.hurt_time(), 10);
+        assert!(game.body.animation.is_hurt_resistant());
+        // Someone else's hurt does not shake this camera.
+        let mut other = game_on_floor_with(BlockState::AIR);
+        other.entity_id = 7;
+        handle_net(&mut other, hurt_status(8, 2), &mut queue, &frames);
+        assert_eq!(other.body.animation.hurt_time(), 0);
+        // The hearts flash on the ticks that follow the loss.
+        handle_net(&mut game, health_update(6.0), &mut queue, &frames);
+        let mut flashed = false;
+        for _ in 0..20 {
+            follow_body(&mut game);
+            flashed |= game.hearts.flash;
+        }
+        assert!(flashed);
+    }
+
+    #[test]
+    fn a_critical_animation_throws_stars_for_three_ticks() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        game.entities.spawn_mob(
+            EntityId(30),
+            54,
+            DVec3::new(2.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        let animation = |code| {
+            PlayEvent::Animation(umicraft_protocol::packets::play::clientbound::Animation {
+                entity_id: 30,
+                animation: code,
+            })
+        };
+        // A swing throws nothing.
+        handle_net(&mut game, animation(0), &mut queue, &frames);
+        assert!(game.particles.is_empty());
+        handle_net(&mut game, animation(4), &mut queue, &frames);
+        let first = game.particles.len();
+        assert!(first > 0, "the first burst comes at once");
+        assert_eq!(game.hit_emitters.len(), 1);
+        combat::tick_emitters(&mut game);
+        combat::tick_emitters(&mut game);
+        assert!(game.particles.len() > first);
+        assert_eq!(game.hit_emitters.len(), 1);
+        combat::tick_emitters(&mut game);
+        assert!(game.hit_emitters.is_empty(), "three bursts, then done");
+    }
+
+    #[test]
+    fn absorption_effects_and_hardcore_reach_the_hearts() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 7;
+        game.hardcore = true;
+        game.absorption = 4.0;
+        follow_body(&mut game);
+        assert!(game.hearts.hardcore);
+        assert_eq!(game.hearts.absorption, 4.0);
+        assert_eq!(game.hud().hearts.absorption, 4.0);
+        assert_eq!(game.hearts.max_health, 20.0);
     }
 
     #[test]

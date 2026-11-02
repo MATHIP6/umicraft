@@ -25,6 +25,7 @@ mod fog;
 mod font;
 mod hud;
 pub mod hud_gui;
+pub mod hud_hearts;
 mod items;
 mod outline;
 mod overlay;
@@ -51,6 +52,7 @@ pub use hud::{
     TabEntryView, TabListView, TitleView,
 };
 pub use hud_gui::{draw_hud_gui, gui_scale, HudSheets};
+pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE};
 pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
