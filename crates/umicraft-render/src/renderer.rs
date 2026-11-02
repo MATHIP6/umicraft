@@ -98,6 +98,10 @@ pub(crate) struct CameraUniform {
     /// linear band (`fog_amount` in `fog.wgsl`).
     fog_density: f32,
     _pad: f32,
+    /// Integer world offset the matrix is relative to: shaders subtract it
+    /// from every position, which keeps f32 exact far from the origin.
+    origin: [f32; 3],
+    _pad_origin: f32,
 }
 
 impl CameraUniform {
@@ -119,6 +123,8 @@ impl CameraUniform {
             gamma: 0.0,
             fog_density: 0.0,
             _pad: 0.0,
+            origin: [0.0; 3],
+            _pad_origin: 0.0,
         }
     }
 }
@@ -1792,8 +1798,9 @@ impl Renderer {
 
     fn write_camera(&self, camera: &Camera, sky: &SkyState) {
         let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
+        let origin = camera.position.floor();
         let uniform = CameraUniform {
-            view_proj: camera.view_projection().to_cols_array_2d(),
+            view_proj: camera.view_projection_from(origin).to_cols_array_2d(),
             camera_pos: camera.position.to_array(),
             sun_brightness: sky.sun_brightness,
             fog_color: sky.fog.color,
@@ -1802,6 +1809,8 @@ impl Renderer {
             gamma: self.environment.gamma,
             fog_density,
             _pad: 0.0,
+            origin: origin.to_array(),
+            _pad_origin: 0.0,
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -1813,6 +1822,7 @@ impl Renderer {
             fog_start: HAND_FOG_FREE,
             fog_end: HAND_FOG_FREE * 2.0,
             fog_density: 0.0,
+            origin: [0.0; 3],
             ..uniform
         };
         self.queue.write_buffer(
@@ -2566,9 +2576,11 @@ mod tests {
             gamma: 0.5,
             fog_density: 0.1,
             _pad: 0.0,
+            origin: [0.0; 3],
+            _pad_origin: 0.0,
         };
         let bytes = bytemuck::bytes_of(&uniform);
-        assert_eq!(bytes.len(), 112);
+        assert_eq!(bytes.len(), 128);
         assert_eq!(bytes.len() % 16, 0);
         // These offsets must match the WGSL `Camera` struct in terrain.wgsl.
         assert_eq!(std::mem::offset_of!(CameraUniform, camera_pos), 64);
@@ -2578,6 +2590,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(CameraUniform, fog_end), 96);
         assert_eq!(std::mem::offset_of!(CameraUniform, gamma), 100);
         assert_eq!(std::mem::offset_of!(CameraUniform, fog_density), 104);
+        assert_eq!(std::mem::offset_of!(CameraUniform, origin), 112);
     }
 
     #[test]

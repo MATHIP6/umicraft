@@ -15,6 +15,10 @@ struct Camera {
     // Exponential fog density; above zero it replaces the linear range.
     fog_density: f32,
     _pad1: f32,
+    // Integer world offset of the render origin: positions are sent to the
+    // GPU relative to it (`view_proj` is built for that origin), so f32
+    // keeps its precision far from the world origin.
+    origin: vec3<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -85,7 +89,7 @@ fn face_shade(normal: vec3<f32>) -> f32 {
 // The vertex of a lit entity; the entry points differ in the shade they use.
 fn entity_vertex(in: VertexIn) -> VertexOut {
     var out: VertexOut;
-    out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
+    out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
     out.world_position = in.position;
     out.uv = in.uv;
 
@@ -209,7 +213,7 @@ struct AdditiveOut {
 @vertex
 fn vs_additive(in: VertexIn) -> AdditiveOut {
     var out: AdditiveOut;
-    out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
+    out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
     out.world_position = in.position;
     out.uv = in.uv;
     out.tint = vec3<f32>(
@@ -247,7 +251,7 @@ struct ShadowOut {
 @vertex
 fn vs_shadow(in: VertexIn) -> ShadowOut {
     var out: ShadowOut;
-    out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
+    out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
     out.world_position = in.position;
     out.uv = in.uv;
     out.alpha = f32(in.light & 0xFFu) / 255.0;

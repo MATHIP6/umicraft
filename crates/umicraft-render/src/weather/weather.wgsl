@@ -15,6 +15,10 @@ struct Camera {
     gamma: f32,
     _pad0: f32,
     _pad1: f32,
+    // Integer world offset of the render origin: positions are sent to the
+    // GPU relative to it (`view_proj` is built for that origin), so f32
+    // keeps its precision far from the world origin.
+    origin: vec3<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -51,7 +55,7 @@ fn gamma_correct(value: f32) -> f32 {
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
-    out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
+    out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
     out.world_position = in.position;
     out.uv = in.uv;
     out.alpha = in.alpha;

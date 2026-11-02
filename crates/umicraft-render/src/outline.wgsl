@@ -14,6 +14,10 @@ struct Camera {
     gamma: f32,
     fog_density: f32,
     _pad1: f32,
+    // Integer world offset of the render origin: positions are sent to the
+    // GPU relative to it (`view_proj` is built for that origin), so f32
+    // keeps its precision far from the world origin.
+    origin: vec3<f32>,
 };
 
 struct Screen {
@@ -35,8 +39,8 @@ fn vs_main(
     @location(0) start: vec3<f32>,
     @location(1) end: vec3<f32>,
 ) -> @builtin(position) vec4<f32> {
-    var a = camera.view_proj * vec4<f32>(start, 1.0);
-    var b = camera.view_proj * vec4<f32>(end, 1.0);
+    var a = camera.view_proj * vec4<f32>(start - camera.origin, 1.0);
+    var b = camera.view_proj * vec4<f32>(end - camera.origin, 1.0);
     // An edge behind the camera is not drawn; a crossing one is cut at the
     // near distance so the projection stays finite.
     if (a.w < NEAR_W && b.w < NEAR_W) {

@@ -176,9 +176,21 @@ impl Camera {
     /// View-projection matrix for wgpu's 0..1 depth range.
     #[must_use]
     pub fn view_projection(&self) -> Mat4 {
+        self.view_projection_from(Vec3::ZERO)
+    }
+
+    /// The view-projection for points given relative to `origin`.
+    ///
+    /// Far from the world origin an f32 translation in the matrix is too
+    /// coarse (about 0.002 blocks at x = 30000) and every vertex rounds
+    /// differently, so the blocks shimmer. Shaders subtract the integer
+    /// `origin` from each position instead (exact in f32) and the matrix only
+    /// carries the small remainder `position - origin`.
+    #[must_use]
+    pub fn view_projection_from(&self, origin: Vec3) -> Mat4 {
         // WebGPU NDC is Y-up with Z in 0..1, i.e. the DirectX convention.
         let view = self.view_bob
-            * glam::camera::rh::view::look_to_mat4(self.position, self.forward(), Vec3::Y);
+            * glam::camera::rh::view::look_to_mat4(self.position - origin, self.forward(), Vec3::Y);
         let projection = glam::camera::rh::proj::directx::perspective(
             self.fov_y * self.fov_modifier,
             self.aspect,
@@ -204,6 +216,21 @@ mod tests {
 
         let west = Camera::from_minecraft(0.0, 64.0, 0.0, 90.0, 0.0);
         assert!((west.forward() - Vec3::new(-1.0, 0.0, 0.0)).length() < 1e-5);
+    }
+
+    #[test]
+    fn a_relative_projection_matches_the_absolute_one_and_stays_exact_far_away() {
+        let camera = Camera::new(Vec3::new(29_993.4, 65.6, -8.3), 0.7, -0.2);
+        let origin = camera.position.floor();
+        let point = Vec3::new(29_996.0, 64.0, -12.0);
+        let relative = camera
+            .view_projection_from(origin)
+            .project_point3(point - origin);
+        // The same point with exact f64 maths: the absolute f32 matrix is off
+        // by whole pixels here, the relative one is not.
+        let near = Camera::new(camera.position - origin, 0.7, -0.2);
+        let expected = near.view_projection().project_point3(point - origin);
+        assert!((relative - expected).abs().max_element() < 1e-6);
     }
 
     #[test]
