@@ -98,7 +98,8 @@ options:
   --headless          run a scripted session without a window and print a report
   --play-secs N       duration of the headless session (default: 60)
   --script NAME       headless script: default (walk, break, place), idle, or
-                      movement (the 60 s parity-harness script)
+                      movement (the 60 s parity-harness script), or combat (the
+                      60 s combat script: strikes, a use, a jump strike)
   --chat MESSAGE      chat line the headless session sends when it is placed
   --ui-demo           drive the scripted M4 debug screen without a server or GPU;
                       combine with --screenshot to render the same screen offscreen
@@ -135,7 +136,7 @@ pub const HUD_VIEWS: [&str; 8] = [
 ];
 
 /// The scripted sessions the headless mode knows.
-pub const SCRIPTS: [&str; 3] = ["default", "idle", "movement"];
+pub const SCRIPTS: [&str; 4] = ["default", "idle", "movement", "combat"];
 
 /// The top-level mode selected by the parsed arguments.
 ///

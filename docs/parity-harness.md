@@ -49,6 +49,36 @@ One play session per file.
 | 47 s | 55 s | walk forward |
 | 55 s | 60 s | stand still |
 
+## 2b. Combat script (owner, for P6)
+
+The 1v1 timeline of `umicraft-client --headless --script combat`
+(`combat_script` in `crates/umicraft-client/src/input.rs`; keep both in
+sync). Set up on the same offline server: a second player or a mob that
+stands still 8 blocks ahead, on flat ground, `difficulty=0`, a hotbar with a
+sword in slot 1 and a bow (with arrows) or a rod in slot 2, selected before
+the script starts; the same spot and the same opponent for both sides.
+
+| From | To | Action |
+|---|---|---|
+| 0 s | 5 s | stand still |
+| 5 s | 9 s | sprint forward (W + Ctrl) to the opponent |
+| 9 s | 19 s | sprint and click the attack button five times a second |
+| 19 s | 22 s | stand still |
+| 22 s | 27 s | hold the use button (draw the bow, cast the rod) |
+| 27 s | 30 s | stand still |
+| 30 s | 40 s | sprint and click the attack button five times a second |
+| 40 s | 50 s | walk forward and jump twice a second, clicking the attack button five times a second |
+| 50 s | 60 s | stand still |
+
+Record the vanilla side as in step 2 into `vanilla-combat.umcapt`, the
+Umicraft side as in step 3 with `--script combat` into
+`umicraft-combat.umcapt`, and compare with `umicraft-trace-diff`. The
+acceptance signal is the same tick shapes (an attack is `0x0A` then `0x02`,
+a use of the item `0x08`, a sprint reset `0x0B`). A hand-played side only
+approximates the clicks: the script presses the attack button every 200 ms,
+because the vanilla client attacks an entity on each press and a held button
+only keeps digging a block.
+
 ## 3. Record the Umicraft session
 
 ```sh

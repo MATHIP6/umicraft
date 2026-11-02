@@ -197,6 +197,9 @@ pub struct Player {
     pub pitch: f32,
     /// Whether the player rests on the ground.
     pub on_ground: bool,
+    /// How far the player has fallen since it left the ground (MCP
+    /// `Entity.fallDistance`); it makes a hit a critical one.
+    pub fall_distance: f32,
     /// Whether the player is sprinting.
     pub sprinting: bool,
     /// Whether the player is sneaking.
@@ -230,6 +233,9 @@ pub struct Player {
     /// movement (MCP `EntityPlayer.java:627-634`), so the sprint state of the
     /// previous tick decides the speed of the current one.
     pub speed_multiplier: f64,
+    /// How many ticks the bow in use has been drawn, `None` when no bow is
+    /// drawn; it narrows the field of view.
+    pub bow_draw_ticks: Option<u32>,
     /// The forward input of the previous tick, used by the double-tap sprint.
     pub previous_forward: f32,
     /// Whether the last move was blocked horizontally.
@@ -289,6 +295,7 @@ impl Default for Player {
             yaw: 0.0,
             pitch: 0.0,
             on_ground: false,
+            fall_distance: 0.0,
             sprinting: false,
             sneaking: false,
             sprinting_ticks_left: 0,
@@ -300,6 +307,7 @@ impl Default for Player {
             well_fed: true,
             blinded: false,
             speed_multiplier: 1.0,
+            bow_draw_ticks: None,
             previous_forward: 0.0,
             collided_horizontally: false,
             in_web: false,
@@ -393,6 +401,9 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     // The water check and the current, MCP `Entity.onEntityUpdate`, which
     // runs before the living update. A spectator is no part of the world.
     player.in_water = !player.no_clip && media::handle_water_movement(player, world);
+    if player.in_water {
+        player.fall_distance = 0.0;
+    }
 
     update_sprint(player, intent);
 
@@ -483,6 +494,7 @@ fn update_view_effects(player: &mut Player) {
     let target = view::target_fov_modifier(
         player.flying,
         player.movement_speed * player.speed_multiplier / f64::from(player.walk_speed),
+        player.bow_draw_ticks,
     );
     player.fov_modifier = view::smooth_fov_modifier(player.fov_modifier, target);
 }
@@ -799,6 +811,7 @@ fn travel_on_land<S: BlockSource + ?Sized>(
 
     // A ladder caps the motion, MCP `EntityLivingBase.java:1625-1643`.
     if !flying && media::is_on_ladder(player, world) {
+        player.fall_distance = 0.0;
         player.velocity.x = player.velocity.x.clamp(-LADDER_SPEED, LADDER_SPEED);
         player.velocity.z = player.velocity.z.clamp(-LADDER_SPEED, LADDER_SPEED);
         player.velocity.y = player.velocity.y.max(-LADDER_SPEED);
@@ -880,6 +893,12 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
     }
     player.collided_horizontally = result.blocked_horizontally;
     player.on_ground = result.on_ground;
+    // MCP `Entity.updateFallState`.
+    if result.on_ground {
+        player.fall_distance = 0.0;
+    } else if result.delta.y < 0.0 {
+        player.fall_distance -= result.delta.y as f32;
+    }
     if result.blocked_x {
         player.velocity.x = 0.0;
     }

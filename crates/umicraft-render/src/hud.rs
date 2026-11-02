@@ -32,6 +32,7 @@ use std::borrow::Cow;
 use std::time::Instant;
 
 use crate::font;
+use crate::hud_hearts::HeartsView;
 use crate::overlay::Overlay;
 
 /// Number of hotbar slots drawn by the HUD.
@@ -123,6 +124,8 @@ pub struct HudState {
     pub food: f32,
     /// Armour points, `0..=20`; zero hides the armour row.
     pub armor: f32,
+    /// What the hearts show besides the health: absorption, effects, flash.
+    pub hearts: HeartsView,
     /// Progress towards the next level, `0..=1`.
     pub experience: f32,
     /// The current experience level, shown on the experience bar.
@@ -319,6 +322,7 @@ impl Default for HudState {
             health: 20.0,
             food: 20.0,
             armor: 0.0,
+            hearts: HeartsView::default(),
             experience: 0.0,
             level: 0,
             selected_slot: 0,

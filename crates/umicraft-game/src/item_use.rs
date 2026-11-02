@@ -19,7 +19,7 @@ use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_world::BlockPos;
 
-use crate::combat::{interact_packets, EntityHit, InteractTick};
+use crate::combat::{interact_packets, ClickViewer, EntityHit, InteractTick};
 use crate::entity::EntityRecord;
 use crate::gamemode::GameMode;
 use crate::interaction::{Interaction, Outgoing};
@@ -220,6 +220,8 @@ pub struct UseTick<'a, W: BlockSource + ?Sized> {
     pub food: i32,
     /// Whether the inventory holds an arrow.
     pub has_arrow: bool,
+    /// The player, for the clicks on entities that depend on who clicks.
+    pub viewer: ClickViewer,
 }
 
 /// The result of one tick of the use button.
@@ -323,6 +325,7 @@ impl ItemUse {
                 entity,
                 hit,
                 held,
+                viewer: tick.viewer,
             });
             output.packets.extend(click.packets);
             if click.consumed {
@@ -452,6 +455,7 @@ mod tests {
             item,
             food: 10,
             has_arrow: true,
+            viewer: ClickViewer::default(),
         }
     }
 
@@ -711,6 +715,7 @@ mod tests {
                 item: held,
                 food: 10,
                 has_arrow: false,
+                viewer: ClickViewer::default(),
             };
             (state.tick(&mut interaction, &click), state.is_using())
         };

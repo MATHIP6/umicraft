@@ -471,7 +471,7 @@ impl EntityStore {
         match status {
             2 => {
                 entity.limbs.amount = HURT_LIMB_AMOUNT;
-                entity.animation.hurt();
+                entity.animation.hurt_by_status();
             }
             3 if entity.kind != EntityKind::Dragon => entity.animation.die(),
             // MCP `EntityPlayer.handleStatusUpdate`: the item use finished.

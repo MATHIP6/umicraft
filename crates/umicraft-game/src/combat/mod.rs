@@ -12,13 +12,19 @@
 //! | [`target`] | the entity ray cast and its priority over blocks |
 //! | [`interact`] | the packets of an entity click and what the client consumes |
 //! | [`sprint`] | the sprint reset after a hit |
+//! | [`effects`] | the stars of a critical hit and of a sharp weapon |
+//! | [`damage_view`] | the roll of the camera when hurt and the flash of the hearts |
 
+pub mod damage_view;
+pub mod effects;
 pub mod hitbox;
 pub mod interact;
 pub mod sprint;
 pub mod target;
 
-pub use hitbox::hitbox;
-pub use interact::{attack_packets, interact_packets, EntityClick, InteractTick};
+pub use damage_view::{hurt_roll, HeartsFlash, HeartsLook};
+pub use effects::{burst, local_stars, CriticalState, HitEmitter, HitStar, HitStars, SHARPNESS};
+pub use hitbox::{body_size, hitbox};
+pub use interact::{attack_packets, interact_packets, ClickViewer, EntityClick, InteractTick};
 pub use sprint::{sprint_reset, SprintReset};
 pub use target::{pick_target, EntityHit, Pointed, TargetQuery};

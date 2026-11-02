@@ -320,6 +320,11 @@ impl GameState {
         self.player.well_fed = well_fed;
     }
 
+    /// Tells how long the bow in use has been drawn (`None` when there is none).
+    pub fn set_bow_draw(&mut self, ticks: Option<u32>) {
+        self.player.bow_draw_ticks = ticks;
+    }
+
     /// Sets the Depth Strider level of the worn boots.
     pub fn set_depth_strider(&mut self, level: u8) {
         self.player.depth_strider = level;

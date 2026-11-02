@@ -45,6 +45,10 @@ pub const FOV_MODIFIER_RANGE: (f32, f32) = (0.1, 1.5);
 
 /// The extra FOV factor of a flying player (MCP `AbstractClientPlayer.java:115`).
 const FLYING_FOV_FACTOR: f32 = 1.1;
+/// Ticks after which a bow is as narrowing as it gets.
+const BOW_FULL_DRAW_TICKS: f32 = 20.0;
+/// How much of the FOV a fully drawn bow takes off.
+const BOW_ZOOM: f32 = 0.15;
 
 /// Where the camera sits (`F5`, MCP `GameSettings.thirdPersonView`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -244,6 +248,14 @@ impl ViewEffects {
         self
     }
 
+    /// The effects of a player hurt `roll_degrees` out of level
+    /// (`combat::hurt_roll`, MCP `EntityRenderer.hurtCameraEffect`).
+    #[must_use]
+    pub fn with_hurt(mut self, roll_degrees: f32) -> Self {
+        self.bob.roll_degrees += roll_degrees;
+        self
+    }
+
     /// The blend of two frames of effects.
     #[must_use]
     pub fn lerp(self, other: Self, alpha: f32) -> Self {
@@ -259,11 +271,22 @@ impl ViewEffects {
 ///
 /// MCP `AbstractClientPlayer.getFovModifier`: 1.1 while flying, times the
 /// mean of 1 and the ratio of the movement speed to the walking speed (a
-/// sprint adds 30 % to the speed).
+/// sprint adds 30 % to the speed). A drawn bow narrows it further
+/// ([`bow_zoom`]); `bow_ticks` is how long the bow has been drawn.
 #[must_use]
-pub fn target_fov_modifier(flying: bool, speed_ratio: f64) -> f32 {
+pub fn target_fov_modifier(flying: bool, speed_ratio: f64, bow_ticks: Option<u32>) -> f32 {
     let flight = if flying { FLYING_FOV_FACTOR } else { 1.0 };
-    flight * ((speed_ratio as f32 + 1.0) / 2.0)
+    flight * ((speed_ratio as f32 + 1.0) / 2.0) * bow_ticks.map_or(1.0, bow_zoom)
+}
+
+/// The factor a bow drawn for `ticks` ticks puts on the FOV (MCP
+/// `AbstractClientPlayer.getFovModifier`): the square of the draw over a
+/// second, up to a full second, takes off 15 %.
+#[must_use]
+pub fn bow_zoom(ticks: u32) -> f32 {
+    let draw = ticks as f32 / BOW_FULL_DRAW_TICKS;
+    let draw = if draw > 1.0 { 1.0 } else { draw * draw };
+    1.0 - draw * BOW_ZOOM
 }
 
 /// Moves a FOV modifier towards its target for one tick.
@@ -394,11 +417,11 @@ mod tests {
 
     #[test]
     fn sprinting_widens_the_field_of_view() {
-        let walking = target_fov_modifier(false, 1.0);
-        let sprinting = target_fov_modifier(false, 1.3);
+        let walking = target_fov_modifier(false, 1.0, None);
+        let sprinting = target_fov_modifier(false, 1.3, None);
         assert_eq!(walking, 1.0);
         assert!((sprinting - 1.15).abs() < 1e-6);
-        assert!(target_fov_modifier(true, 1.0) > walking);
+        assert!(target_fov_modifier(true, 1.0, None) > walking);
     }
 
     #[test]
@@ -431,5 +454,17 @@ mod tests {
         };
         assert!((a.lerp(b, 0.5).fov_modifier - 1.1).abs() < 1e-6);
         assert_eq!(a.lerp(b, 1.0), b);
+    }
+
+    #[test]
+    fn a_drawn_bow_narrows_the_field_of_view_by_up_to_fifteen_percent() {
+        assert_eq!(bow_zoom(0), 1.0);
+        // The draw is squared: half a second takes off a quarter of 15 %.
+        assert!((bow_zoom(10) - (1.0 - 0.25 * 0.15)).abs() < 1e-6);
+        assert!((bow_zoom(20) - 0.85).abs() < 1e-6);
+        // A longer draw changes nothing more.
+        assert_eq!(bow_zoom(200), bow_zoom(20));
+        let walking = target_fov_modifier(false, 1.0, None);
+        assert!((target_fov_modifier(false, 1.0, Some(20)) - walking * 0.85).abs() < 1e-6);
     }
 }

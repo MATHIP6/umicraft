@@ -8,6 +8,10 @@ use glam::Vec3;
 /// Ticks the hurt flash lasts (MCP `EntityLivingBase.handleStatusUpdate`,
 /// `hurtTime = maxHurtTime = 10`).
 pub const HURT_TICKS: u8 = 10;
+/// Ticks an entity stays hurt-resistant after `Entity Status` 2 (MCP
+/// `EntityLivingBase.handleStatusUpdate`, `hurtResistantTime =
+/// maxHurtResistantTime = 20`).
+pub const HURT_RESISTANT_TICKS: u8 = 20;
 /// Ticks of the death fall before the entity disappears
 /// (MCP `EntityLivingBase.onDeathUpdate`).
 pub const DEATH_TICKS: u8 = 20;
@@ -18,6 +22,7 @@ const SWING_TICKS: i8 = 6;
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Animation {
     hurt_time: u8,
+    hurt_resistant_time: u8,
     dying: bool,
     death_time: u8,
     swing: ArmSwing,
@@ -83,6 +88,25 @@ impl Animation {
         self.hurt_time = HURT_TICKS;
     }
 
+    /// Starts the hurt flash and the hurt resistance of `Entity Status` 2;
+    /// `Animation` 1 (`performHurtAnimation`) starts only the flash.
+    pub fn hurt_by_status(&mut self) {
+        self.hurt();
+        self.hurt_resistant_time = HURT_RESISTANT_TICKS;
+    }
+
+    /// Ticks left of the hurt flash (MCP `hurtTime`).
+    #[must_use]
+    pub const fn hurt_time(&self) -> u8 {
+        self.hurt_time
+    }
+
+    /// Whether the entity is still hurt-resistant (MCP `hurtResistantTime > 0`).
+    #[must_use]
+    pub const fn is_hurt_resistant(&self) -> bool {
+        self.hurt_resistant_time > 0
+    }
+
     /// Starts the death fall (`Entity Status` 3).
     pub fn die(&mut self) {
         self.dying = true;
@@ -102,6 +126,7 @@ impl Animation {
     /// Advances one tick.
     pub fn tick(&mut self) {
         self.hurt_time = self.hurt_time.saturating_sub(1);
+        self.hurt_resistant_time = self.hurt_resistant_time.saturating_sub(1);
         if self.dying {
             self.death_time = self.death_time.saturating_add(1);
         }
@@ -179,6 +204,18 @@ mod tests {
         for _ in 0..ticks {
             animation.tick();
         }
+    }
+
+    #[test]
+    fn a_hurt_status_keeps_the_entity_resistant_for_twenty_ticks() {
+        let mut animation = Animation::default();
+        animation.hurt();
+        assert!(!animation.is_hurt_resistant());
+        animation.hurt_by_status();
+        run(&mut animation, 19);
+        assert!(animation.is_hurt_resistant());
+        run(&mut animation, 1);
+        assert!(!animation.is_hurt_resistant());
     }
 
     #[test]

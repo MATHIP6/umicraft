@@ -115,6 +115,15 @@ pub enum ScriptStep {
     Break,
     /// Place a block against the targeted face.
     Place,
+    /// Sprint forward and click the attack button five times a second: a
+    /// sprinting fight. The vanilla client attacks an entity on each press,
+    /// not while the button is held.
+    Strike,
+    /// Walk forward, jump twice a second and click the attack button five
+    /// times a second: the hits that land on the way down are critical.
+    JumpStrike,
+    /// Hold the use button (a bow drawn, a rod cast, a meal eaten).
+    UseItem,
 }
 
 /// One phase of a scripted session.
@@ -142,9 +151,22 @@ pub struct Script {
     pitch: f32,
     fired: bool,
     last_jump: Instant,
+    last_click: Instant,
 }
 
+/// The time between two clicks of a fight (five clicks a second).
+const CLICK_PERIOD: Duration = Duration::from_millis(200);
+
 impl Script {
+    /// Whether a click of the attack button is due; if so, it is taken.
+    fn click_due(&mut self, now: Instant) -> bool {
+        let due = now.duration_since(self.last_click) >= CLICK_PERIOD;
+        if due {
+            self.last_click = now;
+        }
+        due
+    }
+
     /// Creates a script from its phases.
     ///
     /// An empty list is replaced by [`default_script`], so the script always
@@ -163,6 +185,8 @@ impl Script {
             pitch: 0.0,
             fired: false,
             last_jump: Instant::now(),
+            // Far enough in the past for the first click to come at once.
+            last_click: Instant::now() - CLICK_PERIOD,
         }
     }
 
@@ -245,6 +269,20 @@ impl Script {
                     place_block = true;
                 }
             }
+            ScriptStep::Strike => {
+                update.state.forward = 1.0;
+                update.state.sprint = true;
+                break_block = self.click_due(now);
+            }
+            ScriptStep::JumpStrike => {
+                update.state.forward = 1.0;
+                break_block = self.click_due(now);
+                if now.duration_since(self.last_jump) >= Duration::from_millis(500) {
+                    self.last_jump = now;
+                    update.state.jump = true;
+                }
+            }
+            ScriptStep::UseItem => update.state.use_item = true,
         }
         update.break_block = break_block;
         update.place_block = place_block;
@@ -362,6 +400,32 @@ pub fn movement_script() -> Vec<ScriptPhase> {
     ]
 }
 
+/// The scripted 1v1: the player walks up to an opponent and fights, with a
+/// pause to draw a bow, cast a rod or eat.
+///
+/// The owner plays the same timeline by hand with the vanilla client against
+/// the same opponent (`docs/parity-harness.md`, "Combat script"). Changing a
+/// phase here means changing that document too.
+#[must_use]
+pub fn combat_script() -> Vec<ScriptPhase> {
+    let phase = |step, seconds| ScriptPhase {
+        step,
+        duration: Duration::from_secs(seconds),
+        pitch: 0.0,
+    };
+    vec![
+        phase(ScriptStep::Idle, 5),
+        phase(ScriptStep::Sprint, 4),
+        phase(ScriptStep::Strike, 10),
+        phase(ScriptStep::Idle, 3),
+        phase(ScriptStep::UseItem, 5),
+        phase(ScriptStep::Idle, 3),
+        phase(ScriptStep::Strike, 10),
+        phase(ScriptStep::JumpStrike, 10),
+        phase(ScriptStep::Idle, 10),
+    ]
+}
+
 /// The scripted session that only stands still.
 ///
 /// It is used to measure the idle traffic of a session (the keepalives and
@@ -414,6 +478,39 @@ mod tests {
         }
         assert!(saw_break, "the break phase must request a dig");
         assert!(saw_place, "the place phase must request a placement");
+    }
+
+    #[test]
+    fn the_combat_script_lasts_sixty_seconds_and_fights() {
+        let total: Duration = combat_script().iter().map(|phase| phase.duration).sum();
+        assert_eq!(total, Duration::from_secs(60));
+        let state_in = |step| {
+            let mut script = Script::new(vec![ScriptPhase {
+                step,
+                duration: Duration::from_secs(10),
+                pitch: 0.0,
+            }]);
+            script.update(Instant::now()).state
+        };
+        let strike = state_in(ScriptStep::Strike);
+        assert!(strike.sprint && strike.forward == 1.0);
+        assert!(state_in(ScriptStep::UseItem).use_item);
+        assert!(!state_in(ScriptStep::UseItem).attack);
+        // A fight clicks five times a second, one press at a time.
+        let mut script = Script::new(vec![ScriptPhase {
+            step: ScriptStep::Strike,
+            duration: Duration::from_secs(10),
+            pitch: 0.0,
+        }]);
+        let start = Instant::now();
+        let clicks = (0..100u64)
+            .filter(|tick| {
+                script
+                    .update(start + Duration::from_millis(tick * 50))
+                    .break_block
+            })
+            .count();
+        assert!((24..=26).contains(&clicks), "{clicks}");
     }
 
     #[test]
