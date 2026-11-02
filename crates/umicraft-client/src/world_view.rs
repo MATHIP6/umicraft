@@ -404,6 +404,7 @@ impl WorldView {
                 }
                 self.view.push(*frame);
             }
+            RenderEvent::Look(state) => self.view.retarget(state),
             RenderEvent::Hud(hud) => self.hud = *hud,
             RenderEvent::Inventory(view) => self.window_view = *view,
             RenderEvent::Creative(view) => self.creative = Some(*view),
@@ -575,6 +576,16 @@ impl View {
         self.particles = frame.particles;
         self.overlays = frame.overlays;
         self.debug = frame.debug;
+    }
+
+    /// Replaces the view of the newest tick, keeping the tick it belongs to.
+    ///
+    /// The interpolation clock (`tick_time`) and the previous tick stay, so a
+    /// look between two ticks turns the camera without moving anything else.
+    fn retarget(&mut self, state: RenderState) {
+        if self.current.is_some() {
+            self.current = Some(state);
+        }
     }
 
     /// The interpolation fraction of the two newest ticks for `now`.
@@ -843,6 +854,38 @@ mod tests {
             debug: Arc::default(),
             signs: Arc::default(),
         })
+    }
+
+    #[test]
+    fn a_look_between_ticks_turns_the_camera_without_restarting_the_interpolation() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let later = tick + TICK;
+        for event in [
+            RenderEvent::Frame(frame(glam::Vec3::ZERO, tick, 0)),
+            RenderEvent::Frame(frame(glam::Vec3::new(2.0, 0.0, 0.0), later, 0)),
+        ] {
+            harness.frames.0.send(event).expect("frame queue");
+        }
+        let mut turned = frame(glam::Vec3::new(2.0, 0.0, 0.0), later, 0).state;
+        turned.yaw = 1.0;
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Look(turned))
+            .expect("frame queue");
+        harness.sync();
+
+        let halfway = later + TICK / 2;
+        let mut camera = Camera::default();
+        harness.world_view.update_camera(&mut camera, halfway);
+        assert!(
+            (camera.position.x - 1.0).abs() < 1e-4,
+            "{}",
+            camera.position.x
+        );
+        assert!((camera.yaw - (1.0 + std::f32::consts::PI)).abs() < 1e-4);
+        assert!((harness.world_view.view.partial_tick(halfway) - 0.5).abs() < 1e-4);
     }
 
     #[test]

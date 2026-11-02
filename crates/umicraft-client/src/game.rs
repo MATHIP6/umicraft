@@ -312,6 +312,9 @@ pub struct GameStatus {
 pub enum RenderEvent {
     /// A simulation frame.
     Frame(Box<Frame>),
+    /// The view of the player changed between two ticks (mouse look); it
+    /// replaces the newest frame's view without restarting the interpolation.
+    Look(RenderState),
     /// The HUD state changed.
     Hud(Box<HudState>),
     /// The inventory/container state changed.
@@ -1030,9 +1033,9 @@ fn handle_event(
             let before = (game.yaw, game.pitch);
             handle_input(game, update, queue);
             if (game.yaw, game.pitch) != before {
-                // The view changed between two ticks: publish the frame right
-                // away, so the mouse look does not wait for the next tick.
-                publish_frame(game, frames, Instant::now());
+                // The view changed between two ticks: publish it right away,
+                // so the mouse look does not wait for the next tick.
+                publish_look(game, frames);
             }
             false
         }
@@ -1106,15 +1109,12 @@ fn handle_event(
     }
 }
 
-/// Publishes the current player state as a frame.
+/// The view of the player at the end of the current tick, and whether it is
+/// the player's own (`false` while the camera follows another entity).
 ///
-/// The frame queue is polled by the render thread, so the game thread never
-/// blocks on it: a full queue drops the frame and the render thread keeps the
-/// one it has.
-fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Instant) {
-    let Some(state) = game.state.as_ref() else {
-        return;
-    };
+/// `None` until the first state exists.
+fn player_view(game: &Game) -> Option<(RenderState, bool)> {
+    let state = game.state.as_ref()?;
     let followed = game
         .camera_entity()
         .and_then(|id| game.entities.camera_view(id, 1.0));
@@ -1138,18 +1138,42 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         item_use: game.item_use.view(),
         ..game.hand.pose()
     };
+    Some((view, followed.is_none()))
+}
+
+/// Publishes only the view of the player, for a look that changed between two
+/// ticks.
+///
+/// A full [`Frame`] would restart the render thread's interpolation (its
+/// `tick_time` is the arrival) and, at mouse rate, fill the frame queue until
+/// tick frames are dropped: entities and the camera then stutter while moving.
+fn publish_look(game: &Game, frames: &SyncSender<RenderEvent>) {
+    if let Some((view, _)) = player_view(game) {
+        let _ = frames.try_send(RenderEvent::Look(view));
+    }
+}
+
+/// Publishes the current player state as a frame.
+///
+/// The frame queue is polled by the render thread, so the game thread never
+/// blocks on it: a full queue drops the frame and the render thread keeps the
+/// one it has.
+fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Instant) {
+    let Some((view, first_person)) = player_view(game) else {
+        return;
+    };
     let mut entities = game.entities.frame_data();
     if let Some(vehicle) = game.vehicle {
         for frame in &mut entities {
             frame.ridden |= frame.id.0 == vehicle;
         }
     }
-    if followed.is_none() && game.perspective.shows_player() {
+    if first_person && game.perspective.shows_player() {
         entities.push(game.body.frame_data());
     }
     // The line of the bobber of the local player ties to their rod, which is
     // not among the frames from the first person.
-    if followed.is_none() && !game.perspective.shows_player() {
+    if first_person && !game.perspective.shows_player() {
         let body = game.body.frame_data();
         let tip = first_person_tip(
             view.position - Vec3::Y * umicraft_game::physics::EYE_HEIGHT as f32,
