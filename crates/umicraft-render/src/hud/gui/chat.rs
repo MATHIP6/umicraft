@@ -4,13 +4,11 @@
 //!
 //! Rules follow MCP `GuiNewChat.drawChat` and `GuiChat`.
 
+use umicraft_ui::styled_text::{draw_styled, StyledRun};
 use umicraft_ui::{Color, DrawList, FontAtlas, Rect, TextStyle};
 
 use crate::hud::chat_hud::{self, line_alpha};
 use crate::hud::{ChatLineView, ChatRunView, HudState};
-
-/// The glyphs an obfuscated character cycles through.
-const SCRAMBLE: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
 
 /// A wrapped row of chat text with its computed opacity.
 struct ChatRow {
@@ -70,6 +68,25 @@ fn wrap_proportional(
     rows
 }
 
+/// The run `run` of a chat row as a styled run with the row's opacity.
+fn styled(run: &ChatRunView, alpha: f32) -> StyledRun {
+    let channel = |value: u8| f32::from(value) / 255.0;
+    StyledRun {
+        text: run.text.clone(),
+        color: [
+            channel(run.color[0]),
+            channel(run.color[1]),
+            channel(run.color[2]),
+            alpha,
+        ],
+        bold: run.bold,
+        italic: run.italic,
+        underlined: run.underlined,
+        strikethrough: run.strikethrough,
+        obfuscated: run.obfuscated,
+    }
+}
+
 /// The log of `GuiNewChat.drawChat`: everything is in the units of a frame
 /// scaled by `chatScale`, from the origin (2, h - 28).
 fn draw_chat_log(list: &mut DrawList, state: &HudState, gh: f32, sf: f32, font: &FontAtlas) {
@@ -109,9 +126,10 @@ fn draw_chat_log(list: &mut DrawList, state: &HudState, gh: f32, sf: f32, font: 
     let first = end.saturating_sub(limit);
     let visible = &rows[first..end];
 
-    let seed = state
+    // Obfuscated glyphs change every 50 ms.
+    let tick = state
         .now
-        .map_or(0, |now| now.elapsed().as_millis() as usize / 50);
+        .map_or(0, |now| (now.elapsed().as_millis() / 50) as u32);
 
     let (ox, oy) = (2.0 * sf, (gh - 28.0) * sf);
     for (i, row) in visible.iter().rev().enumerate() {
@@ -122,71 +140,13 @@ fn draw_chat_log(list: &mut DrawList, state: &HudState, gh: f32, sf: f32, font: 
         let band_rect = Rect::new(ox, oy + local_y * k, chat_width * k, 9.0 * k);
         list.rect(band_rect, [0.0, 0.0, 0.0, row.alpha * 0.5]);
 
-        let mut cur_x = 0.0;
         let text_y = oy + (local_y + 1.0) * k;
-        for (run_idx, run) in row.pieces.iter().enumerate() {
-            let run_text: String = if run.obfuscated {
-                run.text
-                    .chars()
-                    .enumerate()
-                    .map(|(char_idx, c)| {
-                        if c == ' ' {
-                            ' '
-                        } else {
-                            let idx = (seed + run_idx * 17 + char_idx * 31) % SCRAMBLE.len();
-                            SCRAMBLE[idx] as char
-                        }
-                    })
-                    .collect()
-            } else {
-                run.text.clone()
-            };
-
-            let text_color: Color = [
-                run.color[0] as f32 / 255.0,
-                run.color[1] as f32 / 255.0,
-                run.color[2] as f32 / 255.0,
-                row.alpha,
-            ];
-            let shadow_color: Color = [
-                run.color[0] as f32 / 1020.0,
-                run.color[1] as f32 / 1020.0,
-                run.color[2] as f32 / 1020.0,
-                row.alpha,
-            ];
-
-            let run_w = font.measure(&run_text, 1.0);
-            let x = ox + cur_x * k;
-
-            // Shadow
-            list.text(
-                [x + k, text_y + k],
-                &run_text,
-                TextStyle::new(k, shadow_color),
-            );
-            if run.bold {
-                list.text(
-                    [x + 2.0 * k, text_y + k],
-                    &run_text,
-                    TextStyle::new(k, shadow_color),
-                );
-            }
-
-            // Main text
-            list.text([x, text_y], &run_text, TextStyle::new(k, text_color));
-            if run.bold {
-                list.text([x + k, text_y], &run_text, TextStyle::new(k, text_color));
-            }
-
-            if run.underlined {
-                list.rect(Rect::new(x, text_y + 8.0 * k, run_w * k, k), text_color);
-            }
-            if run.strikethrough {
-                list.rect(Rect::new(x, text_y + 4.0 * k, run_w * k, k), text_color);
-            }
-
-            cur_x += run_w + if run.bold { 1.0 } else { 0.0 };
-        }
+        let runs: Vec<StyledRun> = row
+            .pieces
+            .iter()
+            .map(|run| styled(run, row.alpha))
+            .collect();
+        draw_styled(list, font, [ox, text_y], &runs, k, true, tick);
     }
 
     if open {

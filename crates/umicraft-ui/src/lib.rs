@@ -42,6 +42,7 @@ pub mod geom;
 pub mod id;
 pub mod input;
 pub mod screens;
+pub mod styled_text;
 pub mod text;
 pub mod widgets;
 
