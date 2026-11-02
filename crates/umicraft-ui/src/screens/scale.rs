@@ -7,23 +7,68 @@ const MIN_SCALED_WIDTH: u32 = 320;
 /// Minimum scaled-height the vanilla algorithm enforces.
 const MIN_SCALED_HEIGHT: u32 = 240;
 
-/// Computes the vanilla auto GUI scale factor for a physical viewport.
+/// The result of vanilla's `ScaledResolution` constructor: the integer GUI
+/// scale factor and the viewport size in GUI units.
 ///
-/// Replicates the `ScaledResolution` constructor with `guiScale == 0` (auto):
-/// the scale starts at 1 and increments while the scaled dimensions stay
-/// above 320×240.
-#[must_use]
-pub fn gui_scale(width: u32, height: u32) -> u32 {
-    let mut scale: u32 = 1;
-    loop {
-        let next = scale + 1;
-        if width / next >= MIN_SCALED_WIDTH && height / next >= MIN_SCALED_HEIGHT {
-            scale = next;
+/// Source: `net.minecraft.client.gui.ScaledResolution` of MCP 1.8 (ADR-0001).
+/// The unicode-font parity rule of the original (odd scales are lowered while
+/// the unicode font is on) is not reproduced: Umicraft has no unicode flag.
+///
+/// # Example
+///
+/// ```
+/// use umicraft_ui::screens::ScaledResolution;
+///
+/// let auto = ScaledResolution::new(1280, 720, 0);
+/// assert_eq!(auto.scale_factor, 3);
+/// assert_eq!((auto.scaled_width, auto.scaled_height), (427, 240));
+/// assert_eq!(ScaledResolution::new(1280, 720, 2).scale_factor, 2);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScaledResolution {
+    /// Physical pixels per GUI unit, at least 1.
+    pub scale_factor: u32,
+    /// Viewport width in GUI units, rounded up like vanilla's `ceil`.
+    pub scaled_width: u32,
+    /// Viewport height in GUI units, rounded up like vanilla's `ceil`.
+    pub scaled_height: u32,
+}
+
+impl ScaledResolution {
+    /// Computes the scale for a physical viewport.
+    ///
+    /// `gui_scale_option` is the "GUI Scale" video setting: `0` is auto (the
+    /// largest scale that keeps at least 320x240 GUI units), any other value
+    /// caps that scale. A zero-sized viewport yields scale 1.
+    #[must_use]
+    pub fn new(width: u32, height: u32, gui_scale_option: u32) -> Self {
+        let cap = if gui_scale_option == 0 {
+            u32::MAX
         } else {
-            break;
+            gui_scale_option
+        };
+        let mut scale_factor = 1;
+        while scale_factor < cap
+            && width / (scale_factor + 1) >= MIN_SCALED_WIDTH
+            && height / (scale_factor + 1) >= MIN_SCALED_HEIGHT
+        {
+            scale_factor += 1;
+        }
+        Self {
+            scale_factor,
+            scaled_width: width.div_ceil(scale_factor),
+            scaled_height: height.div_ceil(scale_factor),
         }
     }
-    scale
+}
+
+/// Computes the vanilla auto GUI scale factor for a physical viewport.
+///
+/// Equivalent to [`ScaledResolution::new`] with option `0` (auto): the scale
+/// grows while the scaled dimensions stay at least 320x240.
+#[must_use]
+pub fn gui_scale(width: u32, height: u32) -> u32 {
+    ScaledResolution::new(width, height, 0).scale_factor
 }
 
 #[cfg(test)]
@@ -37,5 +82,39 @@ mod tests {
         assert_eq!(gui_scale(1280, 720), 3);
         assert_eq!(gui_scale(1920, 1080), 4);
         assert_eq!(gui_scale(400, 300), 1);
+    }
+
+    #[test]
+    fn auto_scale_covers_one_to_four() {
+        for (w, h, scale) in [
+            (320, 240, 1),
+            (640, 480, 2),
+            (1280, 720, 3),
+            (1920, 1080, 4),
+        ] {
+            assert_eq!(ScaledResolution::new(w, h, 0).scale_factor, scale);
+        }
+    }
+
+    #[test]
+    fn large_viewport_is_limited_by_the_height() {
+        // 2160 / 9 = 240 while 2160 / 10 < 240, so 4K auto is 9, not 12.
+        assert_eq!(ScaledResolution::new(3840, 2160, 0).scale_factor, 9);
+    }
+
+    #[test]
+    fn option_caps_the_scale() {
+        assert_eq!(ScaledResolution::new(1920, 1080, 2).scale_factor, 2);
+        assert_eq!(ScaledResolution::new(1920, 1080, 1).scale_factor, 1);
+        // A cap above the auto scale changes nothing.
+        assert_eq!(ScaledResolution::new(640, 480, 4).scale_factor, 2);
+    }
+
+    #[test]
+    fn scaled_size_uses_ceiling_division() {
+        let r = ScaledResolution::new(1280, 720, 0);
+        assert_eq!((r.scaled_width, r.scaled_height), (427, 240));
+        let r = ScaledResolution::new(0, 0, 0);
+        assert_eq!((r.scale_factor, r.scaled_width), (1, 0));
     }
 }

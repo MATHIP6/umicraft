@@ -34,7 +34,7 @@ mod scale;
 mod screen_layout;
 
 pub use decoration::{Decoration, Fill, SpriteRect};
-pub use scale::gui_scale;
+pub use scale::{gui_scale, ScaledResolution};
 pub use screen_layout::ScreenLayout;
 
 /// Which screen to show. More kinds are added as their windows are supported.
