@@ -8,10 +8,9 @@
 //! (`writeText`, `func_146197_a` word movement, `deleteFromCursor`). The type
 //! is I/O-free: the window feeds it keys and sends the requests it returns.
 
-/// The longest message the input accepts (`setMaxStringLength(100)`).
-pub const MAX_LEN: usize = 100;
-/// The sent messages kept for the up and down keys.
-pub const MAX_HISTORY: usize = 100;
+use super::commands::MAX_LEN;
+use super::complete::{common_prefix, Completion};
+use super::history::SentHistory;
 
 /// What pressing Tab asks the caller to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,52 +27,22 @@ pub enum TabOutcome {
     },
 }
 
-/// The completion state between two Tab presses.
-#[derive(Debug, Clone, Default)]
-struct Completion {
-    /// A request is in flight; only then is a response accepted.
-    waiting: bool,
-    /// The matches Tab cycles through.
-    matches: Vec<String>,
-    /// The next match to write.
-    index: usize,
-    /// Tab is cycling through `matches` instead of asking the server.
-    cycling: bool,
-}
-
 /// The chat input line.
 #[derive(Debug, Clone)]
 pub struct ChatInput {
     text: Vec<char>,
     caret: usize,
-    /// Where the up and down keys are in the sent history.
-    history_cursor: usize,
-    /// The line being typed, kept while the history is browsed.
-    history_buffer: String,
     completion: Completion,
-}
-
-/// Adds a sent message to the history: consecutive duplicates collapse and
-/// the oldest message goes first (`GuiNewChat.addToSentMessages`).
-pub fn push_sent(sent: &mut Vec<String>, message: &str) {
-    if sent.last().map(String::as_str) != Some(message) {
-        sent.push(message.to_string());
-    }
-    if sent.len() > MAX_HISTORY {
-        sent.remove(0);
-    }
 }
 
 impl ChatInput {
     /// A line holding `initial` (a leading `/` when the command key opened
-    /// the chat), with the history cursor after the `sent_len` messages.
+    /// the chat).
     #[must_use]
-    pub fn new(initial: &str, sent_len: usize) -> Self {
+    pub fn new(initial: &str) -> Self {
         let mut input = Self {
             text: Vec::new(),
             caret: 0,
-            history_cursor: sent_len,
-            history_buffer: String::new(),
             completion: Completion::default(),
         };
         input.write(initial);
@@ -106,8 +75,7 @@ impl ChatInput {
 
     /// Any edit other than Tab ends the completion (`keyTyped` resets it).
     fn interrupt(&mut self) {
-        self.completion.waiting = false;
-        self.completion.cycling = false;
+        self.completion.interrupt();
     }
 
     /// Writes at the caret, dropping the characters the chat does not accept
@@ -223,32 +191,19 @@ impl ChatInput {
     }
 
     /// Shows the previous sent message (the up key).
-    pub fn history_previous(&mut self, sent: &[String]) {
-        self.browse_history(-1, sent);
+    pub fn history_previous(&mut self, history: &mut SentHistory) {
+        self.browse_history(-1, history);
     }
 
     /// Shows the next sent message, then the line being typed (the down key).
-    pub fn history_next(&mut self, sent: &[String]) {
-        self.browse_history(1, sent);
+    pub fn history_next(&mut self, history: &mut SentHistory) {
+        self.browse_history(1, history);
     }
 
-    fn browse_history(&mut self, delta: isize, sent: &[String]) {
+    fn browse_history(&mut self, delta: isize, history: &mut SentHistory) {
         self.interrupt();
-        let len = sent.len();
-        let target = (self.history_cursor as isize + delta).clamp(0, len as isize) as usize;
-        if target == self.history_cursor {
-            return;
-        }
-        if target == len {
-            self.history_cursor = len;
-            let buffer = std::mem::take(&mut self.history_buffer);
-            self.set_text(&buffer);
-        } else {
-            if self.history_cursor == len {
-                self.history_buffer = self.text();
-            }
-            self.history_cursor = target;
-            self.set_text(&sent[target]);
+        if let Some(text) = history.browse(delta, &self.text()) {
+            self.set_text(&text);
         }
     }
 
@@ -266,8 +221,7 @@ impl ChatInput {
                 listing: self.write_next_match(),
             };
         }
-        self.completion.matches.clear();
-        self.completion.index = 0;
+        self.completion.clear_matches();
         if self.caret == 0 {
             return TabOutcome::Nothing;
         }
@@ -281,15 +235,10 @@ impl ChatInput {
         let start = self.word_start();
         self.text.drain(start..self.caret);
         self.caret = start;
-        if self.completion.index >= self.completion.matches.len() {
-            self.completion.index = 0;
-        }
-        let listing =
-            (self.completion.matches.len() > 1).then(|| self.completion.matches.join(", "));
-        if let Some(name) = self.completion.matches.get(self.completion.index).cloned() {
+        let (name, listing) = self.completion.next_match();
+        if let Some(name) = name {
             self.write(&name);
         }
-        self.completion.index += 1;
         listing
     }
 
@@ -324,23 +273,6 @@ impl ChatInput {
     }
 }
 
-/// The longest prefix shared by every string (`StringUtils.getCommonPrefix`).
-fn common_prefix(strings: &[String]) -> String {
-    let Some(first) = strings.first() else {
-        return String::new();
-    };
-    let mut prefix: Vec<char> = first.chars().collect();
-    for other in &strings[1..] {
-        let shared = prefix
-            .iter()
-            .zip(other.chars())
-            .take_while(|(a, b)| **a == *b)
-            .count();
-        prefix.truncate(shared);
-    }
-    prefix.into_iter().collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,7 +282,7 @@ mod tests {
     }
 
     fn typed(text: &str) -> ChatInput {
-        let mut input = ChatInput::new("", 0);
+        let mut input = ChatInput::new("");
         input.insert(text);
         input
     }
@@ -421,42 +353,25 @@ mod tests {
     }
 
     #[test]
-    fn the_history_walks_back_and_returns_to_the_unsent_line() {
-        let sent = names(&["first", "second"]);
-        let mut input = ChatInput::new("", sent.len());
+    fn the_history_keys_swap_the_line_and_return_to_the_unsent_draft() {
+        let mut sent = SentHistory::new();
+        sent.push("first");
+        sent.push("second");
+        let mut input = ChatInput::new("");
         input.insert("draft");
-        input.history_previous(&sent);
+        input.history_previous(&mut sent);
         assert_eq!(input.text(), "second");
-        input.history_previous(&sent);
+        assert_eq!(input.caret(), 6, "the caret goes to the end");
+        input.history_previous(&mut sent);
         assert_eq!(input.text(), "first");
-        input.history_previous(&sent);
-        assert_eq!(input.text(), "first", "the oldest message is the limit");
-        input.history_next(&sent);
-        assert_eq!(input.text(), "second");
-        input.history_next(&sent);
-        assert_eq!(input.text(), "draft", "down returns to the typed line");
-        input.history_next(&sent);
+        input.history_next(&mut sent);
+        input.history_next(&mut sent);
         assert_eq!(input.text(), "draft");
     }
 
     #[test]
-    fn sent_messages_collapse_duplicates_and_keep_one_hundred() {
-        let mut sent = Vec::new();
-        push_sent(&mut sent, "a");
-        push_sent(&mut sent, "a");
-        push_sent(&mut sent, "b");
-        push_sent(&mut sent, "a");
-        assert_eq!(sent, ["a", "b", "a"]);
-        for number in 0..150 {
-            push_sent(&mut sent, &number.to_string());
-        }
-        assert_eq!(sent.len(), MAX_HISTORY);
-        assert_eq!(sent.last().unwrap(), "149");
-    }
-
-    #[test]
     fn tab_on_an_empty_line_asks_for_nothing() {
-        let mut input = ChatInput::new("", 0);
+        let mut input = ChatInput::new("");
         assert_eq!(input.tab(), TabOutcome::Nothing);
     }
 
@@ -544,15 +459,6 @@ mod tests {
         // An empty string in the answer makes the common prefix empty.
         input.on_completions(&names(&["", "abc", "abd"]));
         assert_eq!(input.text(), "abc");
-    }
-
-    #[test]
-    fn the_common_prefix_is_character_based() {
-        assert_eq!(common_prefix(&names(&["abc", "abd"])), "ab");
-        assert_eq!(common_prefix(&names(&["abc"])), "abc");
-        assert_eq!(common_prefix(&names(&["abc", "xyz"])), "");
-        assert_eq!(common_prefix(&[]), "");
-        assert_eq!(common_prefix(&names(&["\u{e9}a", "\u{e9}b"])), "\u{e9}");
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! `handleChat` type 2 and `GuiIngame.setRecordPlaying(IChatComponent)` (the
 //! action bar drops the JSON styles: `getUnformattedText`).
 
-use crate::chat_component::{parse, parse_legacy, unformatted_text, Run, Translations};
+use crate::chat::{local, parse, unformatted_text, LangTable, Run};
 use crate::title::{ActionBar, TitleState};
 
 /// The title and subtitle to draw.
@@ -36,7 +36,7 @@ pub struct ActionBarFrame {
 #[must_use]
 pub fn title_frame(
     state: &TitleState,
-    translations: &Translations,
+    translations: &LangTable,
     partial_tick: f32,
 ) -> Option<TitleFrame> {
     let alpha = state.alpha(partial_tick);
@@ -58,13 +58,13 @@ pub fn title_frame(
 #[must_use]
 pub fn action_bar_frame(
     bar: &ActionBar,
-    translations: &Translations,
+    translations: &LangTable,
     partial_tick: f32,
 ) -> Option<ActionBarFrame> {
     let json = bar.message()?;
     let alpha = bar.alpha(partial_tick);
     (alpha > 0.0).then(|| ActionBarFrame {
-        text: parse_legacy(&unformatted_text(json, translations)),
+        text: local(&unformatted_text(json, translations)),
         alpha,
     })
 }
@@ -72,11 +72,11 @@ pub fn action_bar_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat_component::plain;
+    use crate::chat::plain;
     use umicraft_protocol::packets::play::clientbound::Title;
 
-    fn tr() -> Translations {
-        Translations::builtin()
+    fn tr() -> LangTable {
+        LangTable::builtin()
     }
 
     #[test]

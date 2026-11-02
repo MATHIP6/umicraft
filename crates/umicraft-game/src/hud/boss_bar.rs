@@ -13,7 +13,7 @@
 //! depends on the frame rate (1.7 s at 60 fps). Here it counts game ticks, 5 s
 //! at 20 Hz, so it does not.
 
-use crate::chat_component::{parse_legacy, Run, Translations};
+use crate::chat::{local, LangTable, Run};
 use crate::entity::{BossInfo, DRAGON_NAME_KEY, WITHER_NAME_KEY};
 
 /// The countdown set by `BossStatus.setBossStatus`.
@@ -47,7 +47,7 @@ impl BossBar {
     /// Records the boss that is in the world this tick, if any
     /// (`BossStatus.setBossStatus`). The name is translated here so that a
     /// language change shows at the next refresh.
-    pub fn observe(&mut self, boss: Option<&BossInfo>, translations: &Translations) {
+    pub fn observe(&mut self, boss: Option<&BossInfo>, translations: &LangTable) {
         let Some(boss) = boss else { return };
         self.name = Some(boss_name(boss, translations));
         self.health_scale = boss.health_fraction;
@@ -72,7 +72,7 @@ impl BossBar {
     pub fn frame(&self) -> Option<BossBarFrame> {
         let name = self.name.as_deref().filter(|_| self.is_visible())?;
         Some(BossBarFrame {
-            name: parse_legacy(name),
+            name: local(name),
             health_scale: self.health_scale,
         })
     }
@@ -89,7 +89,7 @@ fn fallback_name(key: &str) -> &str {
 
 /// The name of a boss: its custom name, else the translated type name
 /// (`Entity.getName`).
-fn boss_name(boss: &BossInfo, translations: &Translations) -> String {
+fn boss_name(boss: &BossInfo, translations: &LangTable) -> String {
     boss.custom_name.clone().unwrap_or_else(|| {
         translations
             .get(boss.name_key)
@@ -101,7 +101,7 @@ fn boss_name(boss: &BossInfo, translations: &Translations) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat_component::plain;
+    use crate::chat::plain;
 
     fn wither(fraction: f32) -> BossInfo {
         BossInfo {
@@ -125,10 +125,8 @@ mod tests {
     #[test]
     fn the_bar_shows_the_translated_name_and_the_health_fraction() {
         let mut bar = BossBar::new();
-        let mut table = Translations::default();
-        table.extend(Translations::from_lang(
-            "entity.WitherBoss.name=Wither (lang)",
-        ));
+        let mut table = LangTable::default();
+        table.extend(LangTable::from_lang("entity.WitherBoss.name=Wither (lang)"));
         bar.observe(Some(&wither(0.5)), &table);
         let frame = bar.frame().expect("visible");
         assert_eq!(plain(&frame.name), "Wither (lang)");
@@ -143,7 +141,7 @@ mod tests {
             custom_name: None,
             health_fraction: 1.0,
         };
-        bar.observe(Some(&dragon), &Translations::default());
+        bar.observe(Some(&dragon), &LangTable::default());
         assert_eq!(shown_name(&bar).as_deref(), Some("Ender Dragon"));
     }
 
@@ -154,7 +152,7 @@ mod tests {
             custom_name: Some("§cBig Bad".to_owned()),
             ..wither(1.0)
         };
-        bar.observe(Some(&named), &Translations::default());
+        bar.observe(Some(&named), &LangTable::default());
         let frame = bar.frame().expect("visible");
         assert_eq!(plain(&frame.name), "Big Bad");
         assert_eq!(frame.name[0].style.color.map(|c| c.index()), Some(12));
@@ -163,7 +161,7 @@ mod tests {
     #[test]
     fn the_bar_lasts_one_hundred_ticks_after_the_boss_was_last_seen() {
         let mut bar = BossBar::new();
-        bar.observe(Some(&wither(1.0)), &Translations::default());
+        bar.observe(Some(&wither(1.0)), &LangTable::default());
         for _ in 0..99 {
             bar.tick();
         }
@@ -176,11 +174,11 @@ mod tests {
     #[test]
     fn seeing_the_boss_again_restarts_the_countdown() {
         let mut bar = BossBar::new();
-        bar.observe(Some(&wither(1.0)), &Translations::default());
+        bar.observe(Some(&wither(1.0)), &LangTable::default());
         for _ in 0..90 {
             bar.tick();
         }
-        bar.observe(Some(&wither(0.25)), &Translations::default());
+        bar.observe(Some(&wither(0.25)), &LangTable::default());
         for _ in 0..90 {
             bar.tick();
         }
@@ -190,8 +188,8 @@ mod tests {
     #[test]
     fn observing_no_boss_keeps_the_countdown_running() {
         let mut bar = BossBar::new();
-        bar.observe(Some(&wither(1.0)), &Translations::default());
-        bar.observe(None, &Translations::default());
+        bar.observe(Some(&wither(1.0)), &LangTable::default());
+        bar.observe(None, &LangTable::default());
         bar.tick();
         assert!(bar.is_visible());
     }

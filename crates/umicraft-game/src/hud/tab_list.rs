@@ -8,7 +8,7 @@
 //! geometry (columns, widths, ping bars, hearts) needs the font and the
 //! screen width and is computed by the renderer.
 
-use crate::chat_component::{parse, parse_legacy, plain, Run, Translations};
+use crate::chat::{local, parse, plain, LangTable, Run};
 use crate::player_list::{PlayerEntry, PlayerList, Uuid, SPECTATOR};
 use crate::scoreboard::{Scoreboard, SLOT_LIST};
 
@@ -60,7 +60,7 @@ pub struct TabListFrame {
 pub fn tab_list_frame(
     list: &PlayerList,
     scoreboard: &Scoreboard,
-    translations: &Translations,
+    translations: &LangTable,
 ) -> Option<TabListFrame> {
     if list.is_empty() {
         return None;
@@ -95,18 +95,14 @@ pub fn tab_list_frame(
 
 /// `GuiPlayerTabOverlay.getPlayerName`: the display name the server set, else
 /// the name with its team decoration.
-fn player_name(
-    entry: &PlayerEntry,
-    scoreboard: &Scoreboard,
-    translations: &Translations,
-) -> Vec<Run> {
+fn player_name(entry: &PlayerEntry, scoreboard: &Scoreboard, translations: &LangTable) -> Vec<Run> {
     match &entry.display_name {
         Some(json) => parse(json, translations),
-        None => parse_legacy(&scoreboard.format_name(&entry.name)),
+        None => local(&scoreboard.format_name(&entry.name)),
     }
 }
 
-fn non_empty(json: Option<&str>, translations: &Translations) -> Option<Vec<Run>> {
+fn non_empty(json: Option<&str>, translations: &LangTable) -> Option<Vec<Run>> {
     let runs = parse(json?, translations);
     (!plain(&runs).is_empty()).then_some(runs)
 }
@@ -137,7 +133,7 @@ mod tests {
     }
 
     fn frame(list: &PlayerList, board: &Scoreboard) -> TabListFrame {
-        tab_list_frame(list, board, &Translations::builtin()).expect("listed")
+        tab_list_frame(list, board, &LangTable::builtin()).expect("listed")
     }
 
     fn names(frame: &TabListFrame) -> Vec<String> {
@@ -149,7 +145,7 @@ mod tests {
         let none = tab_list_frame(
             &PlayerList::new(),
             &Scoreboard::new(),
-            &Translations::default(),
+            &LangTable::default(),
         );
         assert_eq!(none, None);
     }

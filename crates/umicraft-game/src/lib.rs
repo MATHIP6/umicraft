@@ -38,8 +38,7 @@
 //! [`server`].
 
 mod block_data;
-pub mod chat_component;
-pub mod chat_input;
+pub mod chat;
 pub mod collision;
 pub mod combat;
 pub mod debug_f3;

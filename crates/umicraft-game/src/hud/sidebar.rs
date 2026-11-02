@@ -7,7 +7,7 @@
 //! `GuiIngame.renderScoreboard`; this module gives the title and the holder
 //! names (`ScorePlayerTeam.formatPlayerName`) their `§` styles.
 
-use crate::chat_component::{parse_legacy, Run};
+use crate::chat::{local, Run};
 use crate::scoreboard::Scoreboard;
 
 /// One sidebar row.
@@ -37,12 +37,12 @@ pub struct SidebarFrame {
 pub fn sidebar_frame(scoreboard: &Scoreboard, own_name: &str) -> Option<SidebarFrame> {
     let sidebar = scoreboard.sidebar(own_name)?;
     Some(SidebarFrame {
-        title: parse_legacy(&sidebar.title),
+        title: local(&sidebar.title),
         lines: sidebar
             .lines
             .iter()
             .map(|line| SidebarLineFrame {
-                name: parse_legacy(&line.name),
+                name: local(&line.name),
                 score: line.value,
             })
             .collect(),
@@ -52,7 +52,7 @@ pub fn sidebar_frame(scoreboard: &Scoreboard, own_name: &str) -> Option<SidebarF
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat_component::plain;
+    use crate::chat::plain;
     use umicraft_protocol::packets::play::clientbound::{
         DisplayScoreboard, ObjectiveRenderType, ScoreboardObjective, TeamInfo, Teams, UpdateScore,
     };

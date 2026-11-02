@@ -4,17 +4,20 @@
 //! list and the sidebar, flattened into styled runs of text (M10, GAM-6).
 //!
 //! The format follows MCP `IChatComponent`, `ChatStyle` and its JSON
-//! serializer (`ChatComponentText`, `ChatComponentTranslation`, the `extra`
-//! list, the style fields and their inheritance from the parent) and the
-//! legacy `§` colour codes of `FontRenderer.renderStringAtPos`.
+//! serializer (`ChatComponentText`, `ChatComponentTranslation`,
+//! `ChatComponentScore`, the `extra` list, the style fields and their
+//! inheritance from the parent) and the legacy `§` codes of
+//! `FontRenderer.renderStringAtPos`.
 //!
 //! The parser never fails on server data. A malformed component becomes one
 //! run of raw text, the recursion depth and the total text are capped, and a
-//! `translate` key the client does not know is shown as the key.
-
-use std::collections::HashMap;
+//! `translate` key the language table does not know is shown as the key.
 
 use serde_json::Value;
+
+use super::events::{ClickAction, ClickEvent, HoverEvent};
+use super::lang::{expand_format, LangTable, Piece};
+use super::style::{Color, Style, SECTION};
 
 /// The deepest `extra` / `with` nesting the parser follows. A hostile server
 /// could otherwise nest a component until the stack overflows.
@@ -23,111 +26,6 @@ pub const MAX_DEPTH: usize = 16;
 pub const MAX_CHARS: usize = 32_767;
 /// The most runs one parsed component may hold.
 pub const MAX_RUNS: usize = 4096;
-/// The section sign that starts a legacy formatting code.
-const SECTION: char = '\u{a7}';
-
-/// One of the sixteen chat colours, by its formatting index (`0` black to
-/// `f` white).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Color(u8);
-
-impl Color {
-    /// White, the default colour of chat text.
-    pub const WHITE: Self = Self(15);
-
-    /// The colour of a legacy code character such as `'c'`.
-    #[must_use]
-    pub fn from_code(code: char) -> Option<Self> {
-        code.to_digit(16)
-            .and_then(|digit| u8::try_from(digit).ok())
-            .map(Self)
-    }
-
-    /// The colour with this JSON name, such as `"dark_red"`.
-    #[must_use]
-    pub fn from_name(name: &str) -> Option<Self> {
-        const NAMES: [&str; 16] = [
-            "black",
-            "dark_blue",
-            "dark_green",
-            "dark_aqua",
-            "dark_red",
-            "dark_purple",
-            "gold",
-            "gray",
-            "dark_gray",
-            "blue",
-            "green",
-            "aqua",
-            "red",
-            "light_purple",
-            "yellow",
-            "white",
-        ];
-        NAMES
-            .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(name))
-            .map(|index| Self(index as u8))
-    }
-
-    /// The formatting index, `0..=15`.
-    #[must_use]
-    pub const fn index(self) -> u8 {
-        self.0
-    }
-
-    /// The RGB value of the colour (`FontRenderer.colorCode`, without the
-    /// darker shadow variants).
-    #[must_use]
-    pub const fn rgb(self) -> [u8; 3] {
-        const TABLE: [[u8; 3]; 16] = [
-            [0x00, 0x00, 0x00],
-            [0x00, 0x00, 0xAA],
-            [0x00, 0xAA, 0x00],
-            [0x00, 0xAA, 0xAA],
-            [0xAA, 0x00, 0x00],
-            [0xAA, 0x00, 0xAA],
-            [0xFF, 0xAA, 0x00],
-            [0xAA, 0xAA, 0xAA],
-            [0x55, 0x55, 0x55],
-            [0x55, 0x55, 0xFF],
-            [0x55, 0xFF, 0x55],
-            [0x55, 0xFF, 0xFF],
-            [0xFF, 0x55, 0x55],
-            [0xFF, 0x55, 0xFF],
-            [0xFF, 0xFF, 0x55],
-            [0xFF, 0xFF, 0xFF],
-        ];
-        TABLE[(self.0 & 15) as usize]
-    }
-}
-
-/// The resolved style of a run of text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Style {
-    /// The text colour, white when `None`.
-    pub color: Option<Color>,
-    /// Bold text.
-    pub bold: bool,
-    /// Italic text.
-    pub italic: bool,
-    /// Underlined text.
-    pub underlined: bool,
-    /// Struck-through text.
-    pub strikethrough: bool,
-    /// Text drawn as random glyphs of the same width.
-    pub obfuscated: bool,
-}
-
-/// What clicking a run does, as the server described it. The client decides
-/// which actions it follows (ADR-0017: never `open_url`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClickEvent {
-    /// `open_url`, `run_command`, `suggest_command`, ….
-    pub action: String,
-    /// The URL or the command.
-    pub value: String,
-}
 
 /// A piece of text with one style.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,66 +34,34 @@ pub struct Run {
     pub text: String,
     /// The style.
     pub style: Style,
-    /// The click action of the component the run came from.
+    /// The click event of the component the run came from.
     pub click: Option<ClickEvent>,
-    /// The `show_text` hover of the component the run came from.
-    pub hover: Option<String>,
+    /// The hover event of the component the run came from.
+    pub hover: Option<HoverEvent>,
+    /// The text a Shift-click appends to the input line.
+    pub insertion: Option<String>,
 }
 
-/// The translation table for `translate` components.
-#[derive(Debug, Clone, Default)]
-pub struct Translations {
-    entries: HashMap<String, String>,
-}
-
-impl Translations {
-    /// A table with the system messages the vanilla server sends most, so the
-    /// chat is readable before the language file is installed.
+impl Run {
+    /// An unstyled run without events.
     #[must_use]
-    pub fn builtin() -> Self {
-        const ENTRIES: [(&str, &str); 8] = [
-            ("multiplayer.player.joined", "%s joined the game"),
-            ("multiplayer.player.left", "%s left the game"),
-            ("chat.type.text", "<%s> %s"),
-            ("chat.type.announcement", "[%s] %s"),
-            ("multiplayer.disconnect.generic", "Disconnected"),
-            ("multiplayer.disconnect.kicked", "Kicked by an operator: %s"),
-            (
-                "commands.generic.notFound",
-                "Unknown command. Type /help for help.",
-            ),
-            ("death.attack.player", "%s was slain by %s"),
-        ];
+    pub fn plain(text: impl Into<String>) -> Self {
         Self {
-            entries: ENTRIES
-                .iter()
-                .map(|(key, text)| ((*key).to_string(), (*text).to_string()))
-                .collect(),
+            text: text.into(),
+            style: Style::default(),
+            click: None,
+            hover: None,
+            insertion: None,
         }
     }
 
-    /// Parses the text of a `.lang` file: `key=value` lines, `#` comments.
+    /// The same run with other text, as wrapping splits a run.
     #[must_use]
-    pub fn from_lang(text: &str) -> Self {
-        let entries = text
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .filter_map(|line| line.split_once('='))
-            .map(|(key, value)| (key.trim().to_string(), value.to_string()))
-            .collect();
-        Self { entries }
-    }
-
-    /// Adds the entries of `other`, replacing the ones with the same key.
-    pub fn extend(&mut self, other: Self) {
-        self.entries.extend(other.entries);
-    }
-
-    /// The text for a key.
-    #[must_use]
-    pub fn get(&self, key: &str) -> Option<&str> {
-        self.entries.get(key).map(String::as_str)
+    pub fn with_text(&self, text: String) -> Self {
+        Self {
+            text,
+            ..self.clone()
+        }
     }
 }
 
@@ -209,12 +75,13 @@ struct Inherited {
     strikethrough: Option<bool>,
     obfuscated: Option<bool>,
     click: Option<ClickEvent>,
-    hover: Option<String>,
+    hover: Option<HoverEvent>,
+    insertion: Option<String>,
 }
 
 impl Inherited {
     /// This style with the fields `value` sets on top.
-    fn with(&self, value: &Value) -> Self {
+    fn with(&self, value: &Value, lang: &LangTable) -> Self {
         let flag =
             |name: &str, parent: Option<bool>| value.get(name).and_then(Value::as_bool).or(parent);
         Self {
@@ -234,8 +101,13 @@ impl Inherited {
                 .or_else(|| self.click.clone()),
             hover: value
                 .get("hoverEvent")
-                .and_then(hover_text)
+                .and_then(|event| hover_event(event, lang))
                 .or_else(|| self.hover.clone()),
+            insertion: value
+                .get("insertion")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| self.insertion.clone()),
         }
     }
 
@@ -253,19 +125,26 @@ impl Inherited {
 
 fn click_event(value: &Value) -> Option<ClickEvent> {
     Some(ClickEvent {
-        action: value.get("action")?.as_str()?.to_string(),
+        action: ClickAction::from_name(value.get("action")?.as_str()?)?,
         value: value.get("value")?.as_str()?.to_string(),
     })
 }
 
-/// The text of a `show_text` hover event. Item and entity hovers are not
-/// followed (ADR-0017).
-fn hover_text(value: &Value) -> Option<String> {
-    if value.get("action")?.as_str()? != "show_text" {
-        return None;
+/// A `hoverEvent` object. Its `value` is itself a component: shown as text
+/// for `show_text`, and read as NBT text for the other actions.
+fn hover_event(value: &Value, lang: &LangTable) -> Option<HoverEvent> {
+    let action = value.get("action")?.as_str()?.to_ascii_lowercase();
+    let content = value.get("value")?;
+    if action == "show_text" {
+        return Some(HoverEvent::ShowText(parse_value(content, lang)));
     }
-    let runs = parse_json_value(value.get("value")?, &Translations::default());
-    Some(plain(&runs))
+    let text = plain(&parse_value(content, lang));
+    match action.as_str() {
+        "show_item" => Some(HoverEvent::ShowItem(text)),
+        "show_entity" => Some(HoverEvent::ShowEntity(text)),
+        "show_achievement" => Some(HoverEvent::ShowAchievement(text)),
+        _ => None,
+    }
 }
 
 /// What the parser has produced so far, with its budgets.
@@ -287,6 +166,7 @@ impl Output {
             style: style.style(),
             click: style.click.clone(),
             hover: style.hover.clone(),
+            insertion: style.insertion.clone(),
         });
     }
 }
@@ -296,23 +176,23 @@ impl Output {
 /// Malformed JSON becomes a single run holding the raw text, so no message
 /// is lost. A component with no text yields no runs.
 #[must_use]
-pub fn parse(json: &str, translations: &Translations) -> Vec<Run> {
+pub fn parse(json: &str, lang: &LangTable) -> Vec<Run> {
     match serde_json::from_str::<Value>(json) {
-        Ok(value) => parse_json_value(&value, translations),
-        Err(_) => parse_legacy(json),
+        Ok(value) => parse_value(&value, lang),
+        Err(_) => expand_legacy(vec![Run::plain(
+            json.chars().take(MAX_CHARS).collect::<String>(),
+        )]),
     }
 }
 
-/// The runs of a string that carries legacy `§` codes and no JSON, such as a
-/// team prefix or an objective display name.
+/// The runs of a component the client writes itself. The text is never
+/// mistaken for JSON (a player named `null` or `123`), but its `§` codes
+/// still apply.
 #[must_use]
-pub fn parse_legacy(text: &str) -> Vec<Run> {
-    expand_legacy(vec![Run {
-        text: text.chars().take(MAX_CHARS).collect(),
-        style: Style::default(),
-        click: None,
-        hover: None,
-    }])
+pub fn local(text: &str) -> Vec<Run> {
+    expand_legacy(vec![Run::plain(
+        text.chars().take(MAX_CHARS).collect::<String>(),
+    )])
 }
 
 /// The text of a component with the JSON styles dropped but the legacy `§`
@@ -321,23 +201,23 @@ pub fn parse_legacy(text: &str) -> Vec<Run> {
 /// The action bar is drawn from this text: 1.8 loses the colour of the
 /// component but the font renderer still obeys a code written in the text.
 #[must_use]
-pub fn unformatted_text(json: &str, translations: &Translations) -> String {
+pub fn unformatted_text(json: &str, lang: &LangTable) -> String {
     match serde_json::from_str::<Value>(json) {
-        Ok(value) => plain(&collect(&value, translations)),
+        Ok(value) => plain(&collect(&value, lang)),
         Err(_) => json.chars().take(MAX_CHARS).collect(),
     }
 }
 
-fn parse_json_value(value: &Value, translations: &Translations) -> Vec<Run> {
-    expand_legacy(collect(value, translations))
+fn parse_value(value: &Value, lang: &LangTable) -> Vec<Run> {
+    expand_legacy(collect(value, lang))
 }
 
-fn collect(value: &Value, translations: &Translations) -> Vec<Run> {
+fn collect(value: &Value, lang: &LangTable) -> Vec<Run> {
     let mut output = Output {
         runs: Vec::new(),
         chars: 0,
     };
-    walk(value, &Inherited::default(), translations, 0, &mut output);
+    walk(value, &Inherited::default(), lang, 0, &mut output);
     output.runs
 }
 
@@ -347,13 +227,7 @@ pub fn plain(runs: &[Run]) -> String {
     runs.iter().map(|run| run.text.as_str()).collect()
 }
 
-fn walk(
-    value: &Value,
-    parent: &Inherited,
-    translations: &Translations,
-    depth: usize,
-    output: &mut Output,
-) {
+fn walk(value: &Value, parent: &Inherited, lang: &LangTable, depth: usize, output: &mut Output) {
     if depth > MAX_DEPTH {
         return;
     }
@@ -368,30 +242,34 @@ fn walk(
             let Some(first) = items.next() else {
                 return;
             };
-            walk(first, parent, translations, depth + 1, output);
+            walk(first, parent, lang, depth + 1, output);
             let sibling_parent = match first {
-                Value::Object(_) => parent.with(first),
+                Value::Object(_) => parent.with(first, lang),
                 _ => parent.clone(),
             };
             for sibling in items {
-                walk(sibling, &sibling_parent, translations, depth + 1, output);
+                walk(sibling, &sibling_parent, lang, depth + 1, output);
             }
         }
         Value::Object(_) => {
-            let style = parent.with(value);
+            let style = parent.with(value, lang);
             if let Some(Value::String(text)) = value.get("text") {
                 output.push(text, &style);
+            }
+            if let Some(score) = value.get("score") {
+                let shown = score.get("value").and_then(Value::as_str).unwrap_or("");
+                output.push(shown, &style);
             }
             if let Some(Value::String(key)) = value.get("translate") {
                 let arguments = match value.get("with") {
                     Some(Value::Array(items)) => items.as_slice(),
                     _ => &[],
                 };
-                translate(key, arguments, &style, translations, depth, output);
+                translate(key, arguments, &style, lang, depth, output);
             }
             if let Some(Value::Array(extra)) = value.get("extra") {
                 for child in extra {
-                    walk(child, &style, translations, depth + 1, output);
+                    walk(child, &style, lang, depth + 1, output);
                 }
             }
         }
@@ -400,70 +278,38 @@ fn walk(
 }
 
 /// Expands a `translate` component: `%s`, `%1$s` and `%%` in the format.
+///
+/// A format the chat cannot expand shows its key, as a missing entry does.
 fn translate(
     key: &str,
     arguments: &[Value],
     style: &Inherited,
-    translations: &Translations,
+    lang: &LangTable,
     depth: usize,
     output: &mut Output,
 ) {
-    let format = translations.get(key).unwrap_or(key);
-    let mut literal = String::new();
-    let mut next_argument = 0;
-    let mut chars = format.chars().peekable();
-    while let Some(character) = chars.next() {
-        if character != '%' {
-            literal.push(character);
-            continue;
-        }
-        match chars.peek().copied() {
-            Some('%') => {
-                chars.next();
-                literal.push('%');
-            }
-            Some('s') => {
-                chars.next();
-                output.push(&std::mem::take(&mut literal), style);
-                if let Some(argument) = arguments.get(next_argument) {
-                    walk(argument, style, translations, depth + 1, output);
-                }
-                next_argument += 1;
-            }
-            Some(digit) if digit.is_ascii_digit() => {
-                // `%n$s`: a numbered argument.
-                let mut lookahead = chars.clone();
-                let mut number = String::new();
-                while let Some(&next) = lookahead.peek() {
-                    if next.is_ascii_digit() {
-                        number.push(next);
-                        lookahead.next();
-                    } else {
-                        break;
-                    }
-                }
-                if lookahead.next() == Some('$') && lookahead.next() == Some('s') {
-                    chars = lookahead;
-                    output.push(&std::mem::take(&mut literal), style);
-                    let index = number.parse::<usize>().ok().and_then(|n| n.checked_sub(1));
-                    if let Some(argument) = index.and_then(|index| arguments.get(index)) {
-                        walk(argument, style, translations, depth + 1, output);
-                    }
-                } else {
-                    literal.push('%');
+    let format = lang.get(key).unwrap_or(key);
+    let Ok(pieces) = expand_format(format) else {
+        output.push(key, style);
+        return;
+    };
+    for piece in pieces {
+        match piece {
+            Piece::Text(text) => output.push(&text, style),
+            Piece::Argument(index) => {
+                if let Some(argument) = arguments.get(index) {
+                    walk(argument, style, lang, depth + 1, output);
                 }
             }
-            _ => literal.push('%'),
         }
     }
-    output.push(&literal, style);
 }
 
 /// Splits runs at the legacy `§` codes and applies them.
 ///
 /// A colour code resets the other styles; `k l m n o` switch one on; `r`
 /// resets everything; an unknown code is treated as white, like the
-/// reference font renderer.
+/// reference font renderer (see [`Style::apply_code`]).
 fn expand_legacy(runs: Vec<Run>) -> Vec<Run> {
     if runs.iter().all(|run| !run.text.contains(SECTION)) {
         return runs;
@@ -473,16 +319,6 @@ fn expand_legacy(runs: Vec<Run>) -> Vec<Run> {
         let mut style = run.style;
         let mut buffer = String::new();
         let mut chars = run.text.chars();
-        let flush = |buffer: &mut String, style: Style, expanded: &mut Vec<Run>| {
-            if !buffer.is_empty() {
-                expanded.push(Run {
-                    text: std::mem::take(buffer),
-                    style,
-                    click: run.click.clone(),
-                    hover: run.hover.clone(),
-                });
-            }
-        };
         while let Some(character) = chars.next() {
             if character != SECTION {
                 buffer.push(character);
@@ -492,23 +328,20 @@ fn expand_legacy(runs: Vec<Run>) -> Vec<Run> {
                 buffer.push(character);
                 break;
             };
-            flush(&mut buffer, style, &mut expanded);
-            match code.to_ascii_lowercase() {
-                'k' => style.obfuscated = true,
-                'l' => style.bold = true,
-                'm' => style.strikethrough = true,
-                'n' => style.underlined = true,
-                'o' => style.italic = true,
-                'r' => style = Style::default(),
-                other => {
-                    style = Style {
-                        color: Some(Color::from_code(other).unwrap_or(Color::WHITE)),
-                        ..Style::default()
-                    };
-                }
+            if !buffer.is_empty() {
+                expanded.push(Run {
+                    style,
+                    ..run.with_text(std::mem::take(&mut buffer))
+                });
             }
+            style.apply_code(code);
         }
-        flush(&mut buffer, style, &mut expanded);
+        if !buffer.is_empty() {
+            expanded.push(Run {
+                style,
+                ..run.with_text(buffer)
+            });
+        }
     }
     expanded
 }
@@ -518,7 +351,7 @@ mod tests {
     use super::*;
 
     fn runs(json: &str) -> Vec<Run> {
-        parse(json, &Translations::builtin())
+        parse(json, &LangTable::builtin())
     }
 
     fn red() -> Option<Color> {
@@ -550,6 +383,12 @@ mod tests {
         );
         assert_eq!(parsed[1].style.color, Color::from_name("blue"));
         assert!(!parsed[1].style.bold);
+    }
+
+    #[test]
+    fn italic_is_a_style_flag_that_is_inherited() {
+        let parsed = runs(r#"{"text":"A","italic":true,"extra":[{"text":"B"}]}"#);
+        assert!(parsed[0].style.italic && parsed[1].style.italic);
     }
 
     #[test]
@@ -586,10 +425,17 @@ mod tests {
 
     #[test]
     fn numbered_arguments_and_escaped_percent_signs_work() {
-        let mut table = Translations::default();
-        table.extend(Translations::from_lang("k=%2$s then %1$s, 100%% sure\n"));
+        let mut table = LangTable::default();
+        table.extend(LangTable::from_lang("k=%2$s then %1$s, 100%% sure\n"));
         let parsed = parse(r#"{"translate":"k","with":["a","b"]}"#, &table);
         assert_eq!(plain(&parsed), "b then a, 100% sure");
+    }
+
+    #[test]
+    fn a_lang_file_entry_with_a_number_conversion_takes_a_string_argument() {
+        let table = LangTable::from_lang("k=%s has %d points\n");
+        let parsed = parse(r#"{"translate":"k","with":["Alex",12]}"#, &table);
+        assert_eq!(plain(&parsed), "Alex has 12 points");
     }
 
     #[test]
@@ -601,11 +447,15 @@ mod tests {
     }
 
     #[test]
-    fn a_lang_file_is_parsed_into_entries() {
-        let table = Translations::from_lang("# comment\n\na.b=Hello %s\nc=d=e\n");
-        assert_eq!(table.get("a.b"), Some("Hello %s"));
-        assert_eq!(table.get("c"), Some("d=e"));
-        assert_eq!(table.get("# comment"), None);
+    fn a_format_the_chat_cannot_expand_shows_the_key() {
+        let table = LangTable::from_lang("bad=value %x\n");
+        assert_eq!(plain(&parse(r#"{"translate":"bad"}"#, &table)), "bad");
+    }
+
+    #[test]
+    fn a_score_component_shows_its_value() {
+        let parsed = runs(r#"{"score":{"name":"Steve","objective":"kills","value":"7"}}"#);
+        assert_eq!(plain(&parsed), "7");
     }
 
     #[test]
@@ -619,6 +469,13 @@ mod tests {
         assert!(parsed[2].style.bold);
         assert_eq!(parsed[2].style.color, red(), "bold keeps the colour");
         assert_eq!(parsed[3].style, Style::default(), "r resets everything");
+    }
+
+    #[test]
+    fn a_legacy_code_extends_the_json_style_it_follows() {
+        let parsed = runs("{\"text\":\"\u{a7}ox\",\"color\":\"red\",\"bold\":true}");
+        assert!(parsed[0].style.italic && parsed[0].style.bold);
+        assert_eq!(parsed[0].style.color, red());
     }
 
     #[test]
@@ -645,8 +502,14 @@ mod tests {
 
     #[test]
     fn raw_text_still_honours_legacy_codes() {
-        let parsed = parse("\u{a7}chello", &Translations::default());
+        let parsed = parse("\u{a7}chello", &LangTable::default());
         assert_eq!(parsed[0].style.color, red());
+    }
+
+    #[test]
+    fn local_text_is_never_json_but_keeps_its_codes() {
+        assert_eq!(plain(&local("null")), "null");
+        assert_eq!(local("\u{a7}ahi")[0].style.color, Color::from_code('a'));
     }
 
     #[test]
@@ -688,31 +551,52 @@ mod tests {
     }
 
     #[test]
-    fn click_and_hover_events_are_kept_and_inherited() {
+    fn click_hover_and_insertion_are_kept_and_inherited() {
         let parsed = runs(
             r#"{"text":"a","clickEvent":{"action":"suggest_command","value":"/home"},
                 "hoverEvent":{"action":"show_text","value":{"text":"tip"}},
+                "insertion":"Steve",
                 "extra":[{"text":"b"}]}"#,
         );
         for run in &parsed {
-            assert_eq!(run.click.as_ref().unwrap().action, "suggest_command");
-            assert_eq!(run.click.as_ref().unwrap().value, "/home");
-            assert_eq!(run.hover.as_deref(), Some("tip"));
+            let click = run.click.as_ref().expect("click");
+            assert_eq!(click.action, ClickAction::SuggestCommand);
+            assert_eq!(click.value, "/home");
+            assert_eq!(
+                run.hover,
+                Some(HoverEvent::ShowText(vec![Run::plain("tip")]))
+            );
+            assert_eq!(run.insertion.as_deref(), Some("Steve"));
         }
     }
 
     #[test]
-    fn a_hover_that_is_not_show_text_is_dropped() {
-        let parsed = runs(r#"{"text":"a","hoverEvent":{"action":"show_item","value":"{id:1}"}}"#);
-        assert_eq!(parsed[0].hover, None);
+    fn a_hover_text_may_be_styled() {
+        let parsed = runs(
+            r#"{"text":"a","hoverEvent":{"action":"show_text","value":{"text":"t","color":"red"}}}"#,
+        );
+        let Some(HoverEvent::ShowText(lines)) = &parsed[0].hover else {
+            panic!("show_text expected");
+        };
+        assert_eq!(lines[0].style.color, red());
     }
 
     #[test]
-    fn colours_map_to_the_font_table() {
-        assert_eq!(Color::from_name("red").unwrap().rgb(), [0xFF, 0x55, 0x55]);
-        assert_eq!(Color::from_code('0').unwrap().rgb(), [0, 0, 0]);
-        assert_eq!(Color::from_name("RED"), Color::from_name("red"));
-        assert_eq!(Color::from_name("purple"), None);
-        assert_eq!(Color::from_code('g'), None);
+    fn item_and_entity_hovers_keep_their_nbt_text() {
+        let item = runs(r#"{"text":"a","hoverEvent":{"action":"show_item","value":"{id:1}"}}"#);
+        assert_eq!(item[0].hover, Some(HoverEvent::ShowItem("{id:1}".into())));
+        let entity =
+            runs(r#"{"text":"a","hoverEvent":{"action":"show_entity","value":"{id:\"x\"}"}}"#);
+        assert!(matches!(entity[0].hover, Some(HoverEvent::ShowEntity(_))));
+    }
+
+    #[test]
+    fn an_unknown_hover_or_click_action_is_dropped() {
+        let parsed = runs(
+            r#"{"text":"a","hoverEvent":{"action":"show_cat","value":"x"},
+                "clickEvent":{"action":"explode","value":"x"}}"#,
+        );
+        assert_eq!(parsed[0].hover, None);
+        assert_eq!(parsed[0].click, None);
     }
 }
