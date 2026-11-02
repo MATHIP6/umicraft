@@ -43,13 +43,13 @@ pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
+pub use hud::{chat_run_at, draw_hud_gui, HudSheets};
 pub use hud::{
     draw as draw_hud, draw_debug_only, plain_text, selected_index, status_fills, ActionBarView,
     BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle, DebugF3View, Fill, HudLayout,
     HudState, Rect, SidebarLineView, SidebarView, StatusRow, TabEntryView, TabListView,
     TabValueStyle, TitleView,
 };
-pub use hud::{draw_hud_gui, HudSheets};
 pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE};
 pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};

@@ -2,13 +2,38 @@
 
 //! The chat: the wrapped, fading log, its scrollbar and the input line.
 //!
-//! Rules follow MCP `GuiNewChat.drawChat` and `GuiChat`.
+//! Rules follow MCP `GuiNewChat.drawChat`, `GuiNewChat.getChatComponent` and
+//! `GuiChat`. The rows are wrapped with the proportional font by
+//! [`umicraft_game::chat::wrap`], the text is drawn with
+//! [`umicraft_ui::styled_text::draw_styled`].
 
+use umicraft_game::chat::wrap::{self, ChatGeometry, Piece};
+use umicraft_ui::screens::gui_scale;
 use umicraft_ui::styled_text::{draw_styled, StyledRun};
 use umicraft_ui::{Color, DrawList, FontAtlas, Rect, TextStyle};
 
-use crate::hud::chat_hud::{self, line_alpha};
-use crate::hud::{ChatLineView, ChatRunView, HudState};
+use crate::hud::chat_hud::{age_ticks, line_alpha};
+use crate::hud::{ChatRunView, HudState};
+
+/// The wrapped rows `GuiNewChat` keeps (`field_146253_i` is cut at 100).
+const MAX_ROWS: usize = 100;
+
+impl Piece for ChatRunView {
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    fn bold(&self) -> bool {
+        self.bold
+    }
+
+    fn with_text(&self, text: String) -> Self {
+        Self {
+            text,
+            ..self.clone()
+        }
+    }
+}
 
 /// A wrapped row of chat text with its computed opacity.
 struct ChatRow {
@@ -16,56 +41,77 @@ struct ChatRow {
     alpha: f32,
 }
 
-/// Wraps a chat line using proportional font glyph metrics (`font.advance`).
-fn wrap_proportional(
-    line: &ChatLineView,
-    max_width: f32,
-    font: &FontAtlas,
-) -> Vec<Vec<ChatRunView>> {
-    let chars: Vec<(char, usize, f32)> = line
-        .runs
-        .iter()
-        .enumerate()
-        .flat_map(|(index, run)| {
-            run.text.chars().map(move |character| {
-                let adv = font.advance(character, 1.0) + if run.bold { 1.0 } else { 0.0 };
-                (character, index, adv)
-            })
-        })
-        .collect();
-
-    let mut rows = Vec::new();
-    let mut start = 0;
-    while start < chars.len() {
-        let mut width = 0.0;
-        let mut end = start;
-        while end < chars.len() && width + chars[end].2 <= max_width {
-            width += chars[end].2;
-            end += 1;
-        }
-
-        let (chosen_end, next) = if end >= chars.len() {
-            (chars.len(), chars.len())
-        } else {
-            // Find last space
-            match (start + 1..=end).rev().find(|&i| chars[i - 1].0 == ' ') {
-                Some(space) => (space - 1, space),
-                None => (end.max(start + 1), end.max(start + 1)),
-            }
-        };
-
-        let raw_chars: Vec<(char, usize)> = chars[start..chosen_end]
-            .iter()
-            .map(|&(c, idx, _)| (c, idx))
-            .collect();
-        rows.push(chat_hud::regroup(&line.runs, &raw_chars));
-        start = next;
+/// The wrapped rows of the whole log, oldest first, at most [`MAX_ROWS`].
+///
+/// `GuiNewChat.setChatLine` wraps every message to `floor(chatWidth /
+/// chatScale)` with the proportional font and drops the oldest rows beyond
+/// 100.
+fn chat_rows(state: &HudState, font: &FontAtlas) -> Vec<ChatRow> {
+    let opacity = state.chat_style.opacity * 0.9 + 0.1;
+    let max_width = (state.chat_style.width_px() as f32 / state.chat_style.scale).floor();
+    let advance = |character: char| font.advance(character, 1.0);
+    let mut rows: Vec<ChatRow> = Vec::new();
+    for line in &state.chat {
+        let age = age_ticks(line.received, state.now);
+        let alpha = line_alpha(age, state.chat_open) * opacity;
+        rows.extend(
+            wrap::wrap(&line.runs, max_width, &advance)
+                .into_iter()
+                .map(|pieces| ChatRow { pieces, alpha }),
+        );
     }
-
-    if rows.is_empty() {
-        rows.push(Vec::new());
-    }
+    rows.drain(..rows.len().saturating_sub(MAX_ROWS));
     rows
+}
+
+/// The slice of rows the chat shows (`first..end`) and how far it is
+/// scrolled back, for `total` wrapped rows.
+fn visible_window(state: &HudState, total: usize) -> (usize, usize, usize) {
+    let style = state.chat_style;
+    let height = if state.chat_open {
+        style.height_focused_px()
+    } else {
+        style.height_unfocused_px()
+    };
+    let limit = (height / 9).max(0) as usize;
+    let scroll = if state.chat_open {
+        state.chat_scroll.min(total.saturating_sub(limit))
+    } else {
+        0
+    };
+    let end = total - scroll;
+    (end.saturating_sub(limit), end, scroll)
+}
+
+/// The run of the open chat under `pointer` (`GuiNewChat.getChatComponent`).
+///
+/// `pointer` is in physical pixels from the top-left of a `viewport` window.
+/// `None` when the chat is closed or the pointer is over no text.
+#[must_use]
+pub fn chat_run_at(
+    state: &HudState,
+    viewport: (u32, u32),
+    font: &FontAtlas,
+    pointer: (f32, f32),
+) -> Option<ChatRunView> {
+    if !state.chat_open {
+        return None;
+    }
+    let rows = chat_rows(state, font);
+    let (_, _, scroll) = visible_window(state, rows.len());
+    let style = state.chat_style;
+    let geometry = ChatGeometry {
+        scale_factor: i32::try_from(gui_scale(viewport.0, viewport.1)).unwrap_or(1),
+        chat_scale: style.scale,
+        width: style.width_px(),
+        line_count: (style.height_focused_px() / 9).max(0) as usize,
+    };
+    // LWJGL reports the pointer from the bottom-left.
+    let from_bottom = (pointer.0 as i32, viewport.1 as i32 - pointer.1 as i32);
+    let hit = wrap::hit_row(from_bottom, &geometry, rows.len(), scroll)?;
+    let row = rows.get(rows.len() - 1 - hit.row)?;
+    let index = wrap::piece_at(&row.pieces, hit.x, &|c| font.advance(c, 1.0))?;
+    row.pieces.get(index).cloned()
 }
 
 /// The run `run` of a chat row as a styled run with the row's opacity.
@@ -95,35 +141,13 @@ fn draw_chat_log(list: &mut DrawList, state: &HudState, gh: f32, sf: f32, font: 
     if style.scale <= 0.0 {
         return;
     }
-    let opacity = style.opacity * 0.9 + 0.1;
     let k = sf * style.scale;
     let band = style.width_px() as f32 / style.scale;
-    // The text wraps at the floor of the width and the band is `l + 4` wide.
-    let text_max_w = band.floor();
+    // The band is `l + 4` wide (the text itself wraps at the floor of `l`).
     let chat_width = band.ceil() + 4.0;
 
-    let mut rows: Vec<ChatRow> = Vec::new();
-    for line in &state.chat {
-        let age = chat_hud::age_ticks(line.received, state.now);
-        let alpha = line_alpha(age, open) * opacity;
-        for pieces in wrap_proportional(line, text_max_w, font) {
-            rows.push(ChatRow { pieces, alpha });
-        }
-    }
-
-    let height = if open {
-        style.height_focused_px()
-    } else {
-        style.height_unfocused_px()
-    };
-    let limit = (height / 9).max(0) as usize;
-    let scroll = if open {
-        state.chat_scroll.min(rows.len().saturating_sub(limit))
-    } else {
-        0
-    };
-    let end = rows.len().saturating_sub(scroll);
-    let first = end.saturating_sub(limit);
+    let rows = chat_rows(state, font);
+    let (first, end, scroll) = visible_window(state, rows.len());
     let visible = &rows[first..end];
 
     // Obfuscated glyphs change every 50 ms.
@@ -181,9 +205,10 @@ pub(super) fn draw_chat(
         list.text([4.0 * sf, (gh - 12.0) * sf], text, TextStyle::new(sf, ink));
 
         if input.caret_visible {
-            let caret_idx = input.caret.min(text.len());
-            let caret_x = 4.0 + font.measure(&text[..caret_idx], 1.0);
-            if caret_idx == text.len() {
+            // The caret is a character index, not a byte offset.
+            let before: String = text.chars().take(input.caret).collect();
+            let caret_x = 4.0 + font.measure(&before, 1.0);
+            if input.caret >= text.chars().count() {
                 // At the end vanilla draws an underscore, not a bar.
                 list.text(
                     [(caret_x + 1.0) * sf, (gh - 12.0 + 1.0) * sf],
@@ -239,28 +264,90 @@ fn draw_chat_scrollbar(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use super::*;
+    use crate::hud::{ChatInputView, ChatLineView};
+
+    fn run(text: &str) -> ChatRunView {
+        ChatRunView {
+            text: text.to_string(),
+            color: [255; 3],
+            ..ChatRunView::default()
+        }
+    }
+
+    fn state_with(lines: Vec<ChatLineView>) -> HudState {
+        HudState {
+            chat: lines,
+            chat_open: true,
+            now: Some(Instant::now()),
+            ..HudState::default()
+        }
+    }
+
+    fn line(text: &str) -> ChatLineView {
+        ChatLineView {
+            runs: vec![run(text)],
+            received: Instant::now(),
+        }
+    }
 
     #[test]
-    fn wrapping_splits_long_lines_and_never_returns_nothing() {
+    fn long_lines_wrap_into_several_rows_and_an_empty_one_is_blank() {
         let font = FontAtlas::fallback();
-        let line = ChatLineView {
-            runs: vec![ChatRunView {
-                text: "aaaa bbbb cccc".to_string(),
-                color: [255; 3],
-                bold: false,
-                italic: false,
-                underlined: false,
-                strikethrough: false,
-                obfuscated: false,
-            }],
-            received: std::time::Instant::now(),
+        let long = "word ".repeat(80);
+        let state = state_with(vec![line(&long), line("")]);
+        let rows = chat_rows(&state, &font);
+        assert!(rows.len() > 2);
+        assert!(rows.last().is_some_and(|row| row.pieces.is_empty()));
+    }
+
+    #[test]
+    fn the_log_keeps_only_the_newest_hundred_wrapped_rows() {
+        let font = FontAtlas::fallback();
+        let lines = (0..150).map(|n| line(&format!("message {n}"))).collect();
+        let rows = chat_rows(&state_with(lines), &font);
+        assert_eq!(rows.len(), MAX_ROWS);
+        assert_eq!(rows[MAX_ROWS - 1].pieces[0].text, "message 149");
+    }
+
+    #[test]
+    fn the_pointer_finds_the_run_under_it_with_its_events() {
+        let font = FontAtlas::fallback();
+        let mut linked = run("click");
+        linked.insertion = Some("Steve".to_string());
+        let mut state = state_with(vec![ChatLineView {
+            runs: vec![run("ab "), linked],
+            received: Instant::now(),
+        }]);
+        state.chat_style.scale = 1.0;
+        let viewport = (640, 360);
+        // The gui scale is 1 at this size; the newest row is hit from 27 to 36
+        // units above the window bottom, so y = 330 from the top.
+        let hit = chat_run_at(&state, viewport, &font, (23.0, 330.0));
+        assert_eq!(hit.and_then(|run| run.insertion), Some("Steve".to_string()));
+        let on_first = chat_run_at(&state, viewport, &font, (6.0, 330.0));
+        assert_eq!(on_first.map(|run| run.text), Some("ab ".to_string()));
+        assert!(chat_run_at(&state, viewport, &font, (600.0, 330.0)).is_none());
+        state.chat_open = false;
+        assert!(chat_run_at(&state, viewport, &font, (6.0, 330.0)).is_none());
+    }
+
+    #[test]
+    fn a_non_ascii_caret_position_does_not_split_a_character() {
+        let font = FontAtlas::fallback();
+        let mut list = DrawList::new();
+        let state = HudState {
+            chat_input: Some(ChatInputView {
+                text: "\u{e9}\u{e9}x".to_string(),
+                caret: 1,
+                caret_visible: true,
+            }),
+            ..HudState::default()
         };
-        assert!(wrap_proportional(&line, 20.0, &font).len() > 1);
-        let empty = ChatLineView {
-            runs: Vec::new(),
-            ..line
-        };
-        assert_eq!(wrap_proportional(&empty, 20.0, &font).len(), 1);
+        // A byte slice at the character index 1 would panic inside "\u{e9}".
+        draw_chat(&mut list, &state, 320.0, 180.0, 2.0, &font);
+        assert!(!list.is_empty());
     }
 }

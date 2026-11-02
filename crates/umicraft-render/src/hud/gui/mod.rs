@@ -30,6 +30,7 @@ use umicraft_ui::{DrawList, FontAtlas, SpriteSheet};
 
 use action_bar::draw_action_bar;
 use boss_bar::draw_boss_bar;
+pub use chat::chat_run_at;
 use chat::draw_chat;
 use debug_f3::draw_debug_f3;
 use held_name::draw_held_name;

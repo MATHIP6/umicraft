@@ -39,7 +39,7 @@ mod overlay_views;
 mod social_hud;
 mod state;
 
-pub use gui::{draw_hud_gui, HudSheets};
+pub use gui::{chat_run_at, draw_hud_gui, HudSheets};
 pub use layout::{selected_index, status_fills, Fill, HudLayout, Rect, StatusRow};
 pub use legacy::{draw, draw_debug_only};
 pub use overlay_views::{

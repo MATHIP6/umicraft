@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use super::overlay_views::{ActionBarView, BossView, SidebarView, TabListView, TitleView};
 use crate::hud_hearts::HeartsView;
+use umicraft_game::chat::{ClickEvent, HoverEvent};
 use umicraft_game::hud::{vitals_view, BottomBar, HeldNameView, VitalsInput, VitalsView};
 use umicraft_ui::SlotItem;
 
@@ -150,7 +151,7 @@ impl ChatStyle {
 }
 
 /// One styled piece of a chat line.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ChatRunView {
     /// The text.
     pub text: String,
@@ -158,7 +159,7 @@ pub struct ChatRunView {
     pub color: [u8; 3],
     /// Drawn twice, one pixel apart.
     pub bold: bool,
-    /// Not drawn differently: the built-in font cannot be sheared.
+    /// Drawn as a sheared glyph (`ChatStyle.italic`).
     pub italic: bool,
     /// Underlined with a rectangle.
     pub underlined: bool,
@@ -166,6 +167,12 @@ pub struct ChatRunView {
     pub strikethrough: bool,
     /// Replaced by glyphs that change every few ticks.
     pub obfuscated: bool,
+    /// What a click on the run asks for, as the server described it.
+    pub click: Option<ClickEvent>,
+    /// What hovering the run shows, as the server described it.
+    pub hover: Option<HoverEvent>,
+    /// The text a Shift-click appends to the input line.
+    pub insertion: Option<String>,
 }
 
 /// A chat message as it arrived, before it is wrapped to the screen width.
