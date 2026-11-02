@@ -53,31 +53,89 @@ One play session per file.
 
 The 1v1 timeline of `umicraft-client --headless --script combat`
 (`combat_script` in `crates/umicraft-client/src/input.rs`; keep both in
-sync). Set up on the same offline server: a second player or a mob that
-stands still 8 blocks ahead, on flat ground, `difficulty=0`, a hotbar with a
-sword in slot 1 and a bow (with arrows) or a rod in slot 2, selected before
-the script starts; the same spot and the same opponent for both sides.
+sync). Set up on the same offline server, on flat ground, `difficulty=0`,
+the same spot and the same opponent for both sides. A player walks through a
+mob (the collision is soft in 1.8), so the opponent needs a barrier in front:
+a row of `cobblestone_wall` (collision 1.5, so a jump does not clear it, but
+the cursor ray passes above it) two blocks short of an invulnerable iron
+golem that does not move. Console commands, as run on 2026-11-02 (player at
+`-1080.5 4 868.5`, facing south, `+z`):
+
+```
+tp NAME -1080.5 4 868.5 0 0
+fill -1086 4 874 -1075 4 874 cobblestone_wall
+summon VillagerGolem -1080.5 4 876.2 {NoAI:1,PersistenceRequired:1,Invulnerable:1}
+replaceitem entity NAME slot.hotbar.0 iron_sword 1
+replaceitem entity NAME slot.hotbar.1 bow 1
+replaceitem entity NAME slot.hotbar.2 ender_pearl 16
+replaceitem entity NAME slot.hotbar.3 potion 3 16421
+replaceitem entity NAME slot.inventory.0 arrow 64
+```
+
+Refill the items before each run (a run throws a pearl and a splash potion).
+An invulnerable golem takes no damage and no knockback: this run compares the
+serverbound sequence, not the knockback trajectories (those need a second
+player). Hotbar: sword in slot 1, bow (with arrows) in slot 2, ender pearls in
+slot 3, a splash potion in slot 4.
+The script selects the slots itself; the vanilla side presses 1 to 4 at the
+same times, a moment after letting go of the use button.
 
 | From | To | Action |
 |---|---|---|
-| 0 s | 5 s | stand still |
+| 0 s | 5 s | select slot 1 (sword), stand still |
 | 5 s | 9 s | sprint forward (W + Ctrl) to the opponent |
 | 9 s | 19 s | sprint and click the attack button five times a second |
-| 19 s | 22 s | stand still |
-| 22 s | 27 s | hold the use button (draw the bow, cast the rod) |
-| 27 s | 30 s | stand still |
+| 19 s | 22 s | select slot 2 (bow), stand still |
+| 22 s | 27 s | hold the use button (draw the bow) |
+| 27 s | 30 s | select slot 1 (sword), stand still |
 | 30 s | 40 s | sprint and click the attack button five times a second |
 | 40 s | 50 s | walk forward and jump twice a second, clicking the attack button five times a second |
-| 50 s | 60 s | stand still |
+| 50 s | 53 s | hold the use button (sword block) |
+| 53 s | 54 s | select slot 3 (pearl), stand still |
+| 54 s | 55 s | press the use button once (throw the pearl) |
+| 55 s | 56 s | select slot 4 (splash potion), stand still |
+| 56 s | 57 s | press the use button once (throw the potion) |
+| 57 s | 60 s | stand still |
 
 Record the vanilla side as in step 2 into `vanilla-combat.umcapt`, the
 Umicraft side as in step 3 with `--script combat` into
 `umicraft-combat.umcapt`, and compare with `umicraft-trace-diff`. The
 acceptance signal is the same tick shapes (an attack is `0x0A` then `0x02`,
-a use of the item `0x08`, a sprint reset `0x0B`). A hand-played side only
+a use of the item `0x08`, a held-slot change `0x09`, a sword block `0x08` then `0x07` (release), a sprint reset `0x0B`). A hand-played side only
 approximates the clicks: the script presses the attack button every 200 ms,
 because the vanilla client attacks an entity on each press and a held button
-only keeps digging a block.
+only keeps digging a block. A right click on the golem sends interact-at and
+interact (`0x02` twice) before the item use (`0x08`): that is the vanilla order
+and it is expected in both captures.
+
+Umicraft side recorded on 2026-11-02 (`runtime/umicraft-combat.umcapt`, not in
+git): slot 2, `0x02 0x02 0x08` (bow drawn), `0x07` (release), slot 1, about 150
+attacks (`0x0A` then `0x02`), `0x02 0x02 0x08` and `0x07` (sword), slot 3 and
+`0x02 0x02 0x08` (pearl), slot 4 and `0x02 0x02 0x08` (potion). The vanilla
+side was played by hand on 2026-11-02 (`vanilla-movement.umcapt`, a free
+session: sword blocks, then hits and a block while swinging, not the
+timeline). Its tick shapes match: interact-at, interact, item use and release
+are `0x02` (16 bytes), `0x02` (4), `0x08` (19), `0x07` (11); an attack is
+`0x0A` then `0x02` (4) in the same tick. The comparison found one difference:
+the attack followed the swing by 40 ms in Umicraft because the socket had
+Nagle enabled; `Connection::connect` and the packet logger now set
+`TCP_NODELAY` like the vanilla client (146 of 147 pairs at 0 ms after the fix).
+A scripted vanilla run of the timeline above is still to record.
+
+### Recording a public server
+
+The logger forwards to `HOST:PORT` (the port is required) and the client
+connects to the logger, so the handshake would carry `127.0.0.1`, which many
+public servers and their proxies refuse. `--handshake-host` writes the real
+name instead:
+
+```sh
+umicraft-packet-logger 127.0.0.1:25600 play.example.net:25565 --out session.umcapt &
+umicraft-client 127.0.0.1 25600 --handshake-host play.example.net
+# play, disconnect, then Ctrl+C in the logger
+```
+
+A server that encrypts the session (online mode) cannot be recorded.
 
 ## 3. Record the Umicraft session
 
