@@ -146,6 +146,7 @@ pub(super) fn run(text: &str) -> ChatRunView {
         underlined: false,
         strikethrough: false,
         obfuscated: false,
+        ..ChatRunView::default()
     }
 }
 

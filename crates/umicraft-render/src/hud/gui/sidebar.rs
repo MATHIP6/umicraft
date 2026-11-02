@@ -34,6 +34,7 @@ fn score_runs(score: i32) -> Vec<ChatRunView> {
         underlined: false,
         strikethrough: false,
         obfuscated: false,
+        ..ChatRunView::default()
     }]
 }
 

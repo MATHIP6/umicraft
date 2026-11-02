@@ -1,134 +1,155 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The chat: the plain text of a 1.8 chat JSON component.
+//! The client side of the chat: the language table loaded from the
+//! downloaded `.lang` file, the conversion of parsed components to HUD views
+//! and the text of a hover tooltip.
 //!
-//! The server sends the chat as a JSON component (MCP
-//! `ChatComponentText`), not as plain text. The HUD draws plain strings, so
-//! the client flattens the component into the line a player would read.
-//!
-//! Only the parts of the format the vanilla server uses for its system
-//! messages are handled: the `text` and `translate` fields, the `with`
-//! arguments and the `extra` list. A component that cannot be parsed falls
-//! back to the raw JSON, so no message is ever lost.
+//! The server sends the chat as a JSON component (MCP `IChatComponent`); the
+//! parsing, styles, wrapping and click rules live in
+//! [`umicraft_game::chat`]. The language option stays `en_US` until P10.
 
 use std::sync::OnceLock;
+use std::time::Instant;
 
-use serde_json::Value;
-use umicraft_game::chat_component::{self, Translations};
+use umicraft_game::chat::events::{hover_entity_lines, parse_hover_item};
+use umicraft_game::chat::{self, Color, HoverEvent, LangTable, Run};
+use umicraft_game::inventory::tooltip::tooltip_advanced;
+use umicraft_protocol::packets::play::ItemStack;
+use umicraft_render::{ChatLineView, ChatRunView};
+use umicraft_ui::widgets::tooltip::TooltipRow;
 
-/// The system messages of the vanilla server that the client can flatten.
-///
-/// The keys are the `translate` values of the 1.8 language file; the values
-/// are the English texts of MCP `net/minecraft/util/ChatComponentTranslation`
-/// and the 1.8 `en_US.lang`.
-const TRANSLATIONS: [(&str, &str); 8] = [
-    ("multiplayer.player.joined", "%s joined the game"),
-    ("multiplayer.player.left", "%s left the game"),
-    ("chat.type.text", "%s: %s"),
-    ("chat.type.announcement", "[%s] %s"),
-    ("multiplayer.disconnect.generic", "Disconnected"),
-    ("multiplayer.disconnect.kicked", "Kicked by an operator: %s"),
-    (
-        "commands.generic.notFound",
-        "Unknown command. Type /help for help.",
-    ),
-    ("death.attack.player", "%s was slain by %s"),
-];
+use crate::tooltip_draw;
 
-/// The plain text of a chat JSON component.
-///
-/// The function never fails: a malformed component is returned unchanged, so
-/// the player still sees something.
-#[must_use]
-pub fn plain_text(json: &str) -> String {
-    let Ok(value) = serde_json::from_str::<Value>(json) else {
-        return json.to_string();
-    };
-    let text = component_text(&value);
-    if text.is_empty() {
-        json.to_string()
-    } else {
-        text
-    }
+/// The colour of the "Invalid Item!" line (`EnumChatFormatting.RED`).
+const RED: u32 = 0x00FF_5555;
+/// The colour of plain tooltip text.
+const WHITE: u32 = 0x00FF_FFFF;
+
+/// The language table: the built-in fallback, overridden by the `en_US.lang`
+/// of the first-run download (asset index entry `minecraft/lang/en_US.lang`)
+/// when it is installed.
+pub(crate) fn lang() -> &'static LangTable {
+    static TABLE: OnceLock<LangTable> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = LangTable::builtin();
+        if let Some(text) = crate::official::load_en_us_lang() {
+            table.extend(LangTable::from_lang(&text));
+        }
+        table
+    })
 }
 
 /// The plain text of a chat JSON component, empty when the component is.
 ///
-/// [`plain_text`] falls back to the raw JSON for an empty result so that no
-/// chat message is lost. The tab-list header, the title and the action bar
-/// are legitimately empty (`{"text":""}` clears them), so they use this
-/// variant. A malformed component is still returned unchanged.
+/// The tab-list header, the title and the action bar are legitimately empty
+/// (`{"text":""}` clears them). A malformed component is returned unchanged.
 #[must_use]
 pub fn flatten(json: &str) -> String {
-    static TRANSLATIONS: OnceLock<Translations> = OnceLock::new();
-    let translations = TRANSLATIONS.get_or_init(Translations::builtin);
-    chat_component::plain(&chat_component::parse(json, translations))
+    chat::plain(&chat::parse(json, lang()))
 }
 
-/// The text of one component and of its children.
-fn component_text(value: &Value) -> String {
-    // An argument of a translation may be a plain string.
-    if let Value::String(direct) = value {
-        return direct.clone();
+/// The HUD view of parsed runs, stamped with the arrival time.
+pub(crate) fn line_from_runs(runs: &[Run], received: Instant) -> ChatLineView {
+    ChatLineView {
+        runs: run_views(runs),
+        received,
     }
-    let mut text = String::new();
-    if let Some(Value::String(direct)) = value.get("text") {
-        text.push_str(direct);
+}
+
+/// The HUD runs of parsed chat runs; text without a colour is white.
+pub(crate) fn run_views(runs: &[Run]) -> Vec<ChatRunView> {
+    runs.iter().map(run_view).collect()
+}
+
+fn run_view(run: &Run) -> ChatRunView {
+    ChatRunView {
+        text: run.text.clone(),
+        color: run.style.color.map_or(Color::WHITE.rgb(), Color::rgb),
+        bold: run.style.bold,
+        italic: run.style.italic,
+        underlined: run.style.underlined,
+        strikethrough: run.style.strikethrough,
+        obfuscated: run.style.obfuscated,
+        click: run.click.clone(),
+        hover: run.hover.clone(),
+        insertion: run.insertion.clone(),
     }
-    if let Some(Value::String(key)) = value.get("translate") {
-        let arguments = arguments(value);
-        text.push_str(&translate(key, &arguments));
+}
+
+/// The rows of the tooltip a hover event shows
+/// (`GuiScreen.handleComponentHover`).
+///
+/// `show_text` is one row per line of the text; `show_item` is the item
+/// tooltip, or a red "Invalid Item!"; `show_entity` shows only with advanced
+/// tooltips on. `show_achievement` needs the statistics list, which the
+/// client does not have, so it shows nothing.
+pub(crate) fn hover_rows(hover: &HoverEvent, advanced: bool) -> Vec<TooltipRow> {
+    match hover {
+        HoverEvent::ShowText(runs) => text_rows(runs),
+        HoverEvent::ShowItem(snbt) => item_rows(snbt, advanced),
+        HoverEvent::ShowEntity(snbt) if advanced => hover_entity_lines(snbt).map_or_else(
+            || vec![row("Invalid Entity!", RED)],
+            |lines| lines.into_iter().map(|line| row(&line, WHITE)).collect(),
+        ),
+        HoverEvent::ShowEntity(_) | HoverEvent::ShowAchievement(_) => Vec::new(),
     }
-    if let Some(Value::Array(extra)) = value.get("extra") {
-        for child in extra {
-            text.push_str(&component_text(child));
+}
+
+fn row(text: &str, rgb: u32) -> TooltipRow {
+    TooltipRow {
+        text: text.to_string(),
+        rgb,
+    }
+}
+
+/// One row per line of the text; a row takes the colour of its first run.
+fn text_rows(runs: &[Run]) -> Vec<TooltipRow> {
+    let mut rows = vec![TooltipRow {
+        text: String::new(),
+        rgb: WHITE,
+    }];
+    for run in runs {
+        for (index, piece) in run.text.split('\n').enumerate() {
+            if index > 0 {
+                rows.push(row("", WHITE));
+            }
+            let Some(current) = rows.last_mut() else {
+                continue;
+            };
+            if current.text.is_empty() && !piece.is_empty() {
+                let [r, g, b] = run.style.color.map_or(Color::WHITE.rgb(), Color::rgb);
+                current.rgb = u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b);
+            }
+            current.text.push_str(piece);
         }
     }
-    text
+    rows
 }
 
-/// The `with` arguments of a component, as plain strings.
-fn arguments(value: &Value) -> Vec<String> {
-    match value.get("with") {
-        Some(Value::Array(items)) => items.iter().map(component_text).collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// The text of a translated key.
-///
-/// An unknown key keeps its own name, which is what the vanilla client shows
-/// when the language file misses an entry.
-fn translate(key: &str, arguments: &[String]) -> String {
-    let template = TRANSLATIONS
+fn item_rows(snbt: &str, advanced: bool) -> Vec<TooltipRow> {
+    let Some(item) = parse_hover_item(snbt).and_then(|item| {
+        Some(ItemStack {
+            item_id: i16::try_from(item.id).ok()?,
+            stack_size: 1,
+            damage: item.damage,
+            nbt: None,
+        })
+    }) else {
+        return vec![row("Invalid Item!", RED)];
+    };
+    tooltip_advanced(&item, advanced)
         .iter()
-        .find(|(name, _)| *name == key)
-        .map_or("", |(_, text)| *text);
-    if template.is_empty() {
-        return key.to_string();
-    }
-    let mut out = String::new();
-    let mut rest = template;
-    let mut index = 0;
-    while let Some(position) = rest.find("%s") {
-        out.push_str(&rest[..position]);
-        out.push_str(arguments.get(index).map_or("", String::as_str));
-        rest = &rest[position + 2..];
-        index += 1;
-    }
-    out.push_str(rest);
-    out
+        .map(|line| row(&tooltip_draw::resolve(&line.text), line.color.rgb()))
+        .collect()
 }
 
 #[cfg(test)]
-mod flatten_tests {
-    use super::{flatten, plain_text};
+mod tests {
+    use super::*;
 
     #[test]
     fn an_empty_component_stays_empty_for_the_overlays() {
         assert_eq!(flatten(r#"{"text":""}"#), "");
-        // The chat keeps the raw JSON so no message is lost.
-        assert_eq!(plain_text(r#"{"text":""}"#), r#"{"text":""}"#);
     }
 
     #[test]
@@ -156,44 +177,41 @@ mod flatten_tests {
             "Alex joined the game"
         );
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
-    fn a_plain_text_component_is_used_as_it_is() {
-        assert_eq!(plain_text("{\"text\":\"hello\"}"), "hello");
+    fn the_view_keeps_the_style_flags_and_the_events() {
+        let runs = chat::parse(
+            r#"{"text":"x","italic":true,"insertion":"i",
+                "clickEvent":{"action":"run_command","value":"/a"}}"#,
+            &LangTable::builtin(),
+        );
+        let line = line_from_runs(&runs, Instant::now());
+        let view = &line.runs[0];
+        assert!(view.italic);
+        assert_eq!(view.insertion.as_deref(), Some("i"));
+        assert!(view.click.is_some());
     }
 
     #[test]
-    fn the_join_message_is_flattened() {
-        let json = "{\"color\":\"yellow\",\"translate\":\"multiplayer.player.joined\",\"with\":[\"Steve\"]}";
-        assert_eq!(plain_text(json), "Steve joined the game");
+    fn show_text_is_one_row_per_line_in_the_colour_of_the_line() {
+        let runs = chat::parse(r#"{"text":"a\nb","color":"red"}"#, &LangTable::builtin());
+        let rows = text_rows(&runs);
+        let texts: Vec<_> = rows.iter().map(|row| row.text.as_str()).collect();
+        assert_eq!(texts, ["a", "b"]);
+        assert_eq!(rows[0].rgb, 0xFF5555);
     }
 
     #[test]
-    fn a_chat_line_keeps_the_player_and_the_message() {
-        let json =
-            "{\"translate\":\"chat.type.text\",\"with\":[{\"text\":\"Steve\"},{\"text\":\"hi\"}]}";
-        assert_eq!(plain_text(json), "Steve: hi");
+    fn show_item_is_the_item_tooltip_and_a_broken_item_is_invalid() {
+        let rows = item_rows(r#"{id:"minecraft:diamond_sword",Damage:0s}"#, false);
+        assert_eq!(rows[0].text, "Diamond Sword");
+        assert_eq!(item_rows("garbage", false), vec![row("Invalid Item!", RED)]);
     }
 
     #[test]
-    fn the_extra_children_are_appended() {
-        let json = "{\"text\":\"a\",\"extra\":[{\"text\":\"b\"}]}";
-        assert_eq!(plain_text(json), "ab");
-    }
-
-    #[test]
-    fn a_malformed_component_falls_back_to_the_raw_json() {
-        assert_eq!(plain_text("not json"), "not json");
-        assert_eq!(plain_text("{\"unknown\":1}"), "{\"unknown\":1}");
-    }
-
-    #[test]
-    fn an_unknown_translation_keeps_its_key() {
-        assert_eq!(plain_text("{\"translate\":\"some.key\"}"), "some.key");
+    fn show_entity_needs_advanced_tooltips() {
+        let hover = HoverEvent::ShowEntity(r#"{id:"x",name:"Pig"}"#.to_string());
+        assert!(hover_rows(&hover, false).is_empty());
+        assert_eq!(hover_rows(&hover, true)[0].text, "Pig");
     }
 }

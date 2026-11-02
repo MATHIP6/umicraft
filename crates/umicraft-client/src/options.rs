@@ -1054,6 +1054,7 @@ mod tests {
                     underlined: true,
                     strikethrough: true,
                     obfuscated: true,
+                    ..ChatRunView::default()
                 }],
                 received: Instant::now(),
             }],

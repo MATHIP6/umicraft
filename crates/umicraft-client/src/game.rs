@@ -29,7 +29,7 @@ use crate::social_view;
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
-use umicraft_game::chat_component::{self, Translations};
+use umicraft_game::chat::{self as chat_rules, commands, Position};
 use umicraft_game::combat::{hurt_roll, ClickViewer, HeartsFlash, HitStar};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
@@ -133,9 +133,6 @@ const CHUNK_CAPACITY: usize = 64;
 /// The number of chat messages kept (MCP GuiNewChat keeps 100). The HUD
 /// wraps them and shows the newest rows that fit.
 const CHAT_HISTORY: usize = 100;
-
-/// The longest message the server accepts, in characters (C01PacketChatMessage).
-const MAX_CHAT_CHARS: usize = 100;
 
 /// The arrow item id (MCP `Items.arrow`): a bow needs one to be drawn.
 const ARROW: i16 = 262;
@@ -515,8 +512,8 @@ struct Game {
     selected_slot: u8,
     /// The chat messages, oldest first.
     chat: VecDeque<ChatLineView>,
-    /// The translations of the `translate` chat components.
-    translations: Translations,
+    /// The chat visibility the server was told (`ClientSettings` byte).
+    chat_mode: u8,
     /// Counts the tab-completion answers.
     completions_serial: u64,
     /// What the server was last told about the player's movement.
@@ -581,10 +578,6 @@ struct Game {
 
 impl Game {
     fn new() -> Self {
-        let mut translations = Translations::builtin();
-        if let Some(lang) = crate::official::load_en_us_lang() {
-            translations.extend(Translations::from_lang(&lang));
-        }
         Self {
             world: None,
             particles: umicraft_game::particles::ParticleEngine::new(PARTICLE_SEED),
@@ -612,7 +605,7 @@ impl Game {
             death_time: 0,
             selected_slot: 0,
             chat: VecDeque::new(),
-            translations,
+            chat_mode: 0,
             completions_serial: 0,
             server_view: ServerView::default(),
             vehicle: None,
@@ -828,23 +821,29 @@ pub(crate) fn hud_after(events: Vec<PlayEvent>, own_name: &str, ticks: u32) -> H
     game.hud()
 }
 
-/// A chat message from the chat JSON of the server.
-fn chat_line(json: &str, translations: &Translations) -> ChatLineView {
-    line_from_runs(&chat_component::parse(json, translations))
+/// A chat message from the chat JSON of the server, in the language of the
+/// downloaded `.lang` file.
+fn chat_line(json: &str) -> ChatLineView {
+    crate::chat::line_from_runs(
+        &chat_rules::parse(json, crate::chat::lang()),
+        Instant::now(),
+    )
 }
 
-/// A line the client writes itself. The text is wrapped in a component so it
-/// is never mistaken for JSON (a player named `null` or `123`).
-fn local_chat_line(text: &str, translations: &Translations) -> ChatLineView {
-    let json = serde_json::json!({ "text": text }).to_string();
-    chat_line(&json, translations)
+/// A line the client writes itself. It is never mistaken for JSON (a player
+/// named `null` or `123`).
+fn local_chat_line(text: &str) -> ChatLineView {
+    crate::chat::line_from_runs(&chat_rules::local(text), Instant::now())
 }
 
-/// The HUD view of parsed runs, stamped with the arrival time.
-fn line_from_runs(runs: &[chat_component::Run]) -> ChatLineView {
-    ChatLineView {
-        runs: social_view::run_views(runs),
-        received: Instant::now(),
+/// Shows a chat packet unless the chat visibility the player chose filters it
+/// out (`GuiNewChat.drawChat` draws nothing when hidden; "commands only"
+/// keeps the system messages).
+fn show_chat(game: &mut Game, json: &str, position: Position) {
+    game.status_data.chat_messages += 1;
+    if chat_rules::shows(game.chat_mode, position) {
+        let line = chat_line(json);
+        push_chat(game, line);
     }
 }
 
@@ -1048,13 +1047,13 @@ fn handle_event(
         }
         GameEvent::Chat(message) => {
             // The server limit counts characters, not bytes.
-            if !message.is_empty() && message.chars().count() <= MAX_CHAT_CHARS {
+            if !message.is_empty() && message.chars().count() <= commands::MAX_LEN {
                 queue.push(ClientCommand::Chat { message });
             }
             false
         }
         GameEvent::TabComplete(message) => {
-            if message.chars().count() <= MAX_CHAT_CHARS {
+            if message.chars().count() <= commands::MAX_LEN {
                 queue.push(ClientCommand::TabComplete { message });
             }
             false
@@ -1064,6 +1063,7 @@ fn handle_event(
             chat_mode,
             chat_colors,
         } => {
+            game.chat_mode = chat_mode;
             queue.push(ClientCommand::ClientSettings {
                 view_distance,
                 chat_mode,
@@ -1076,7 +1076,7 @@ fn handle_event(
             false
         }
         GameEvent::LocalChat(text) => {
-            let line = local_chat_line(&text, &game.translations);
+            let line = local_chat_line(&text);
             push_chat(game, line);
             false
         }
@@ -1503,11 +1503,8 @@ fn apply_net_event(
         PlayEvent::Placement(placement) => {
             apply_placement(game, &placement, queue);
         }
-        PlayEvent::Chat(json) => {
-            game.status_data.chat_messages += 1;
-            let line = chat_line(&json, &game.translations);
-            push_chat(game, line);
-        }
+        PlayEvent::Chat(json) => show_chat(game, &json, Position::Chat),
+        PlayEvent::SystemChat(json) => show_chat(game, &json, Position::System),
         PlayEvent::ActionBar(json) => {
             game.action_bar.show(&json);
             game.hud_dirty = true;
@@ -5091,6 +5088,51 @@ mod tests {
         let hud = game.hud();
         assert_eq!(hud.completions, ["/help"]);
         assert_eq!(hud.completions_serial, 1);
+    }
+
+    #[test]
+    fn the_chat_visibility_filters_incoming_chat_and_system_messages() {
+        let mut game = Game::new();
+        let say = |game: &mut Game, event: PlayEvent| {
+            let (frames, _received) = mpsc::sync_channel(16);
+            handle_net(game, event, &mut CommandQueue::default(), &frames);
+        };
+        // Commands only: the system message stays, the player message goes.
+        game.chat_mode = 1;
+        say(
+            &mut game,
+            PlayEvent::Chat(r#"{"text":"player"}"#.to_string()),
+        );
+        say(
+            &mut game,
+            PlayEvent::SystemChat(r#"{"text":"system"}"#.to_string()),
+        );
+        // Hidden: nothing is kept.
+        game.chat_mode = 2;
+        say(
+            &mut game,
+            PlayEvent::SystemChat(r#"{"text":"late"}"#.to_string()),
+        );
+        let plain: Vec<_> = game.hud().chat.iter().map(ChatLineView::plain).collect();
+        assert_eq!(plain, ["system"]);
+    }
+
+    #[test]
+    fn a_client_settings_event_updates_the_chat_visibility_filter() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_event(
+            &mut game,
+            GameEvent::ClientSettings {
+                view_distance: 8,
+                chat_mode: 2,
+                chat_colors: true,
+            },
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.chat_mode, 2);
     }
 
     #[test]

@@ -12,7 +12,7 @@
 //! Nothing here is read from the player's machine except the UI font, and the
 //! texts are original Umicraft or generic player names.
 
-use umicraft_game::chat_input::ChatInput;
+use umicraft_game::chat::ChatInput;
 use umicraft_game::hud::{vitals_view, BottomBar, VitalsInput};
 use umicraft_net::play::PlayEvent;
 use umicraft_protocol::packets::play::clientbound::{
@@ -408,7 +408,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                 hud.show_tab_list = true;
             }
             if view == "chat" {
-                let input = ChatInput::new("/gamemode cr", 0);
+                let input = ChatInput::new("/gamemode cr");
                 hud.chat_open = true;
                 hud.chat_input = Some(ChatInputView {
                     text: input.text(),

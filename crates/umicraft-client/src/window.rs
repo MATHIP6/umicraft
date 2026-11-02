@@ -13,12 +13,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use umicraft_game::chat_input::{push_sent, ChatInput, TabOutcome};
+use umicraft_game::chat::{commands, on_click, ChatInput, ClickOutcome, SentHistory, TabOutcome};
 use umicraft_game::inventory::{drag_preview, DragPreview, WindowView, HOTBAR_START};
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
-    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudLayout, HudState, NoIcons,
-    Overlay, RenderEnvironment, Renderer, ScreenOverlays, SkyState,
+    chat_run_at, draw_debug_only, draw_hud, draw_hud_gui, gui_scale, Camera, ChatInputView,
+    HudLayout, HudState, NoIcons, Overlay, RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
@@ -169,7 +169,7 @@ struct App {
     /// The line the player is typing while [`Screen::Chat`] is current.
     chat_input: ChatInput,
     /// The messages the player sent, for the up and down keys.
-    sent_messages: Vec<String>,
+    sent_messages: SentHistory,
     /// How many rows the open chat is scrolled up.
     chat_scroll: usize,
     /// When the chat opened; the caret blinks from here.
@@ -178,6 +178,12 @@ struct App {
     seen_completions: u64,
     /// Whether a Control key is held (word movement in the chat).
     ctrl_held: bool,
+    /// Whether Shift is held: a chat click then inserts instead of acting.
+    shift_held: bool,
+    /// The pointer in physical pixels, for the chat hover and click.
+    pointer: (f32, f32),
+    /// The chat run under the pointer in the last frame (click and hover).
+    chat_hover: Option<umicraft_render::ChatRunView>,
     /// The use (right) button is down.
     use_held: bool,
     /// The pick block (middle) button went down since the last input update.
@@ -274,12 +280,15 @@ impl App {
             respawn_requested: false,
             place_block: false,
             screen: Screen::None,
-            chat_input: ChatInput::new("", 0),
-            sent_messages: Vec::new(),
+            chat_input: ChatInput::new(""),
+            sent_messages: SentHistory::new(),
             chat_scroll: 0,
             chat_opened: Instant::now(),
             seen_completions: 0,
             ctrl_held: false,
+            shift_held: false,
+            pointer: (0.0, 0.0),
+            chat_hover: None,
             use_held: false,
             pick_block: false,
             drop_item: None,
@@ -769,8 +778,8 @@ impl App {
             KeyCode::Escape => self.set_screen(Screen::Chat.after_escape()),
             KeyCode::Enter | KeyCode::NumpadEnter => self.submit_chat(),
             KeyCode::Tab => self.complete_chat(),
-            KeyCode::ArrowUp => self.chat_input.history_previous(&self.sent_messages),
-            KeyCode::ArrowDown => self.chat_input.history_next(&self.sent_messages),
+            KeyCode::ArrowUp => self.chat_input.history_previous(&mut self.sent_messages),
+            KeyCode::ArrowDown => self.chat_input.history_next(&mut self.sent_messages),
             KeyCode::PageUp => self.scroll_chat(CHAT_PAGE),
             KeyCode::PageDown => self.scroll_chat(-CHAT_PAGE),
             KeyCode::Backspace => self.chat_input.backspace(word),
@@ -793,17 +802,18 @@ impl App {
     /// Opens the chat with `initial` already typed (`/` for the command key).
     fn open_chat(&mut self, initial: &str) {
         self.set_screen(Screen::Chat);
-        self.chat_input = ChatInput::new(initial, self.sent_messages.len());
+        self.chat_input = ChatInput::new(initial);
+        self.sent_messages.reset();
         self.chat_scroll = 0;
         self.chat_opened = Instant::now();
     }
 
     /// Sends the typed line, remembers it for the history and closes the chat.
     fn submit_chat(&mut self) {
-        let message = self.chat_input.text().trim().to_string();
+        let message = commands::outgoing(&self.chat_input.text());
         self.set_screen(Screen::None);
-        if !message.is_empty() {
-            push_sent(&mut self.sent_messages, &message);
+        if let Some(message) = message {
+            self.sent_messages.push(&message);
             let _ = self.session.events().try_send(GameEvent::Chat(message));
         }
     }
@@ -823,6 +833,27 @@ impl App {
                         .try_send(GameEvent::LocalChat(listing));
                 }
             }
+        }
+    }
+
+    /// Acts on a left click in the open chat: `run_command` sends,
+    /// `suggest_command` fills the input line, Shift inserts the run's
+    /// insertion text (`GuiChat.mouseClicked`). Links are never followed.
+    fn chat_click(&mut self) {
+        let Some(run) = self.chat_hover.as_ref() else {
+            return;
+        };
+        match on_click(
+            run.click.as_ref(),
+            run.insertion.as_deref(),
+            self.shift_held,
+        ) {
+            ClickOutcome::Send(text) => {
+                let _ = self.session.events().try_send(GameEvent::Chat(text));
+            }
+            ClickOutcome::Suggest(text) => self.chat_input.set_text(&text),
+            ClickOutcome::Insert(text) => self.chat_input.insert(&text),
+            ClickOutcome::Nothing => {}
         }
     }
 
@@ -1089,6 +1120,25 @@ impl App {
                 ..game_hud
             };
             draw_hud_gui(self.ui.draw(), &hud, (width, height), atlas, &sheets);
+            self.chat_hover = chatting
+                .then(|| chat_run_at(&hud, (width, height), atlas, self.pointer))
+                .flatten();
+            let rows = self
+                .chat_hover
+                .as_ref()
+                .and_then(|run| run.hover.as_ref())
+                .map(|hover| crate::chat::hover_rows(hover, false))
+                .unwrap_or_default();
+            let pointer = [self.pointer.0, self.pointer.1];
+            let scale = gui_scale(width, height) as f32;
+            umicraft_ui::widgets::tooltip::tooltip(
+                &mut self.ui,
+                atlas,
+                viewport,
+                scale,
+                pointer,
+                &rows,
+            );
         }
         if let Some(world) = self.world.as_ref() {
             // The textured HUD draws its own hotbar items (`hotbar_items`).
@@ -1627,6 +1677,7 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, event),
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.ctrl_held = modifiers.state().control_key();
+                self.shift_held = modifiers.state().shift_key();
                 self.ui_input.modifiers(modifiers.state());
                 let state = modifiers.state();
                 self.inventory_input
@@ -1638,6 +1689,7 @@ impl ApplicationHandler for App {
                 // Keep the pointer current even while the UI is closed: F4 can
                 // open the screen before the next mouse movement, and the first
                 // click must use the physical cursor, not the initial origin.
+                self.pointer = (position.x as f32, position.y as f32);
                 self.ui_input.pointer_moved(position);
                 self.inventory_pointer(position);
                 self.creative_pointer(position);
@@ -1652,7 +1704,12 @@ impl ApplicationHandler for App {
                     self.inventory_button(state, button);
                     self.creative_button(state, button);
                 } else if screen.blocks_game_input() {
-                    // The chat has no pointer interaction yet.
+                    if screen == Screen::Chat
+                        && button == MouseButton::Left
+                        && state == ElementState::Pressed
+                    {
+                        self.chat_click();
+                    }
                 } else {
                     match button {
                         MouseButton::Left => {

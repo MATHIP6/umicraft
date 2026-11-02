@@ -72,6 +72,7 @@ fn plain_run(text: &str, color: [u8; 3]) -> ChatRunView {
         underlined: false,
         strikethrough: false,
         obfuscated: false,
+        ..ChatRunView::default()
     }
 }
 

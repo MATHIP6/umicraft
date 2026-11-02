@@ -9,7 +9,8 @@
 
 use std::sync::OnceLock;
 
-use umicraft_game::chat_component::{Color, Run, Translations};
+use crate::chat::run_views;
+use umicraft_game::chat::LangTable;
 use umicraft_game::entity::{BossTracker, EntityStore};
 use umicraft_game::hud::boss_bar::BossBar;
 use umicraft_game::hud::sidebar::sidebar_frame;
@@ -19,30 +20,15 @@ use umicraft_game::player_list::PlayerList;
 use umicraft_game::scoreboard::Scoreboard;
 use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_render::{
-    ActionBarView, BossView, ChatRunView, SidebarLineView, SidebarView, TabEntryView, TabListView,
+    ActionBarView, BossView, SidebarLineView, SidebarView, TabEntryView, TabListView,
     TabValueStyle, TitleView,
 };
 
 /// The translations of the overlays: the built-in table until the language
 /// files are installed.
-fn translations() -> &'static Translations {
-    static TABLE: OnceLock<Translations> = OnceLock::new();
-    TABLE.get_or_init(Translations::builtin)
-}
-
-/// The HUD runs of parsed chat runs; text without a colour is white.
-pub(crate) fn run_views(runs: &[Run]) -> Vec<ChatRunView> {
-    runs.iter()
-        .map(|run| ChatRunView {
-            text: run.text.clone(),
-            color: run.style.color.map_or(Color::WHITE.rgb(), Color::rgb),
-            bold: run.style.bold,
-            italic: run.style.italic,
-            underlined: run.style.underlined,
-            strikethrough: run.style.strikethrough,
-            obfuscated: run.style.obfuscated,
-        })
-        .collect()
+fn translations() -> &'static LangTable {
+    static TABLE: OnceLock<LangTable> = OnceLock::new();
+    TABLE.get_or_init(LangTable::builtin)
 }
 
 /// The sidebar `own_name` sees.
@@ -136,13 +122,13 @@ pub(crate) fn tick_boss_bar(bar: &mut BossBar, entities: &EntityStore) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use umicraft_game::chat_component::parse;
+    use umicraft_game::chat::parse;
 
     #[test]
     fn unstyled_runs_are_white_and_styled_runs_keep_their_flags() {
         let runs = parse(
             r#"[{"text":"a"},{"text":"b","color":"red","bold":true}]"#,
-            &Translations::default(),
+            &LangTable::default(),
         );
         let views = run_views(&runs);
         assert_eq!(views[0].color, [255, 255, 255]);
