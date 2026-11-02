@@ -274,6 +274,31 @@ impl GameState {
         }
     }
 
+    /// Teleports the player to a position of `Player Position and Look`.
+    ///
+    /// Vanilla sets the position and the rotation and nothing else: the
+    /// motion is zeroed on the axes that were absolute and kept on the ones
+    /// that were relative (MCP `NetHandlerPlayClient.handlePlayerPosLook`).
+    /// The pending inputs are dropped, unlike [`Self::apply_correction`], which
+    /// replays them: replaying after a setback put the player ahead of the
+    /// server again at once, and an anti-cheat such as GrimAC set the player
+    /// back in a loop (observed 2026-11-02).
+    pub fn teleport(&mut self, target: &ServerCorrection, relative: [bool; 3]) {
+        let position = target.position();
+        let keep = |kept: bool, value: f64| if kept { value } else { 0.0 };
+        self.player.velocity = DVec3::new(
+            keep(relative[0], self.player.velocity.x),
+            keep(relative[1], self.player.velocity.y),
+            keep(relative[2], self.player.velocity.z),
+        );
+        self.player.position = position;
+        self.player.on_ground = target.on_ground;
+        self.player.yaw = target.yaw;
+        self.player.pitch = target.pitch;
+        self.previous_position = position;
+        self.history.clear();
+    }
+
     /// The interpolated view of the player for the renderer.
     ///
     /// `alpha` is the fraction of a tick that elapsed since the last tick:
@@ -533,6 +558,42 @@ mod tests {
             "expected {expected}, got {}",
             state.position().z
         );
+    }
+
+    /// Regression test (GrimAC setbacks, 2026-11-02): a teleport to a position
+    /// the player has been at is taken as it is, nothing is replayed on top.
+    #[test]
+    fn a_teleport_does_not_replay_the_pending_inputs() {
+        let world = TestBlocks::flat();
+        let mut state = GameState::new(DVec3::new(0.0, 1.0, 0.0));
+        let intent = InputIntent::walking(0.0);
+        let mut visited = Vec::new();
+        for _ in 0..10 {
+            state.tick(&intent, &world);
+            visited.push(state.position());
+        }
+        let back = visited[4];
+        let target = ServerCorrection::new(back.x, back.y, back.z, 0.0, 0.0, true);
+        state.teleport(&target, [false; 3]);
+        assert_eq!(state.position(), back);
+        assert_eq!(state.player().velocity, DVec3::ZERO);
+        state.tick(&InputIntent::still(0.0), &world);
+        assert!((state.position() - back).length() < 0.1);
+    }
+
+    #[test]
+    fn a_teleport_keeps_the_motion_of_the_relative_axes() {
+        let world = TestBlocks::flat();
+        let mut state = GameState::new(DVec3::new(0.0, 1.0, 0.0));
+        for _ in 0..5 {
+            state.tick(&InputIntent::walking(0.0), &world);
+        }
+        let moving = state.player().velocity;
+        assert!(moving.z != 0.0);
+        let target = ServerCorrection::new(0.0, 1.0, 0.0, 0.0, 0.0, true);
+        state.teleport(&target, [false, false, true]);
+        assert_eq!(state.player().velocity.z, moving.z);
+        assert_eq!(state.player().velocity.x, 0.0);
     }
 
     #[test]

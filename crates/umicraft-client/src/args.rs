@@ -100,6 +100,8 @@ options:
   --script NAME       headless script: default (walk, break, place), idle, or
                       movement (the 60 s parity-harness script), or combat (the
                       60 s combat script: strikes, a use, a jump strike)
+  --handshake-host H  address sent in the handshake instead of <host> (to record a
+                      session with umicraft-packet-logger on a public server)
   --chat MESSAGE      chat line the headless session sends when it is placed
   --ui-demo           drive the scripted M4 debug screen without a server or GPU;
                       combine with --screenshot to render the same screen offscreen
@@ -186,6 +188,9 @@ pub struct Args {
     pub script: String,
     /// A chat line the headless session sends once the player is placed.
     pub chat: Option<String>,
+    /// The address written in the `Handshake`, when it differs from `host`
+    /// (a packet logger on `127.0.0.1` in front of a server that checks it).
+    pub handshake_host: Option<String>,
     /// Whether the server-less scripted UI acceptance run is requested.
     pub ui_demo: bool,
     /// Whether the server-less M10 HUD acceptance run is requested.
@@ -270,6 +275,7 @@ impl Args {
         let mut play_secs = 60.0_f64;
         let mut script = "default".to_string();
         let mut chat = None;
+        let mut handshake_host = None;
         let mut ui_demo = false;
         let mut hud_demo = false;
         let mut hud_view = HUD_VIEWS[0].to_string();
@@ -324,6 +330,10 @@ impl Args {
                         ));
                     }
                     script = value.clone();
+                    index += 2;
+                }
+                "--handshake-host" => {
+                    handshake_host = Some(words.get(index + 1).ok_or_else(help)?.clone());
                     index += 2;
                 }
                 "--chat" => {
@@ -469,6 +479,7 @@ impl Args {
             play: Duration::from_secs_f64(play_secs),
             script,
             chat,
+            handshake_host,
             ui_demo,
             hud_demo,
             hud_view,
@@ -502,6 +513,20 @@ mod tests {
 
     fn words(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn the_handshake_host_is_kept_for_the_packet_logger() {
+        let args = Args::parse(&words(&[
+            "127.0.0.1",
+            "25600",
+            "--handshake-host",
+            "play.example.net",
+        ]))
+        .expect("valid");
+        assert_eq!(args.handshake_host.as_deref(), Some("play.example.net"));
+        let plain = Args::parse(&words(&["127.0.0.1", "25600"])).expect("valid");
+        assert_eq!(plain.handshake_host, None);
     }
 
     #[test]
@@ -718,6 +743,7 @@ mod tests {
         assert!(Args::parse(&words(&["host", "25565", "--width", "0"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--unknown"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--name"])).is_err());
+        assert!(Args::parse(&words(&["host", "25565", "--handshake-host"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--play-secs", "0"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--script", "dance"])).is_err());
         assert!(Args::parse(&words(&["--ui-demo", "--width", "0"])).is_err());

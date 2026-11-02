@@ -1963,8 +1963,8 @@ fn apply_net_event(
             publish_inventory(game, frames);
         }
         PlayEvent::ConfirmTransaction(packet) => {
-            // The session layer already echoed a rejection; here the
-            // prediction is confirmed or rolled back.
+            answer_transaction(game, &packet, queue);
+            // The prediction is confirmed or rolled back.
             game.windows.confirm_transaction(
                 packet.window_id,
                 packet.action_number,
@@ -2342,12 +2342,44 @@ fn acknowledge_block(game: &mut Game, position: BlockPos, block_state: u16) {
     }
 }
 
+/// Answers a `Confirm Transaction` the server did not accept.
+///
+/// Vanilla answers on the game thread, in the order of the packets
+/// (`NetHandlerPlayClient.handleConfirmTransaction`). GrimAC sends a
+/// transaction before and after a teleport and needs the replies in that
+/// order: the position reply must leave between the two. The session thread
+/// used to answer at once, so the second transaction overtook the position
+/// reply and Grim flagged `BadPacketsN` (observed 2026-11-02).
+fn answer_transaction(
+    game: &Game,
+    packet: &umicraft_protocol::packets::play::clientbound::ConfirmTransaction,
+    queue: &mut CommandQueue,
+) {
+    if !packet.accepted && game.windows.answers_transaction(packet.window_id) {
+        queue.push(ClientCommand::ConfirmTransaction {
+            window_id: packet.window_id as i8,
+            action_number: packet.action_number,
+        });
+    }
+}
+
 /// Applies a server placement.
 fn apply_placement(
     game: &mut Game,
     placement: &umicraft_net::play::PlayerPlacement,
     queue: &mut CommandQueue,
 ) {
+    // Relative flags apply to where the player is now, not to the last
+    // placement the session saw.
+    let resolved = game.state.as_ref().map(|state| {
+        let position = state.position();
+        placement.resolved_against(
+            [position.x, position.y, position.z],
+            state.player().yaw.to_degrees(),
+            state.player().pitch.to_degrees(),
+        )
+    });
+    let placement = resolved.as_ref().unwrap_or(placement);
     let yaw = placement.yaw.to_radians();
     let pitch = placement.pitch.to_radians();
     let position = DVec3::new(placement.x, placement.y, placement.z);
@@ -2369,9 +2401,10 @@ fn apply_placement(
                 state.player().on_ground,
             );
             let predicted = state.position();
-            if let Some(world) = game.world.as_ref() {
-                state.apply_correction(&correction, world);
-            }
+            // A `Player Position and Look` is a teleport, not a correction to
+            // reconcile: nothing is replayed (see `GameState::teleport`).
+            let flags = placement.raw.as_deref().map_or(0, |raw| raw.flags);
+            state.teleport(&correction, [0x01, 0x02, 0x04].map(|bit| flags & bit != 0));
             game.yaw = state.player().yaw;
             game.pitch = state.player().pitch;
             game.status_data.resyncs += 1;
@@ -2391,11 +2424,13 @@ fn apply_placement(
         z: placement.z,
         yaw: placement.yaw,
         pitch: placement.pitch,
-        on_ground: true,
+        on_ground: false,
     };
-    if let Some(outgoing) = game.interaction.acknowledge_position(ack) {
-        queue.push(command_of(outgoing));
-    }
+    // Vanilla answers every `Player Position and Look`
+    // (`NetHandlerPlayClient.handlePlayerPosLook`). Anti-cheats such as
+    // GrimAC require it: a teleport that is not answered is flagged
+    // (`BadPacketsN`), so a repeated position is acknowledged again.
+    queue.push(command_of(Outgoing::AckPosition(ack)));
     game.server_view.forget_position();
 }
 
@@ -4367,6 +4402,64 @@ mod tests {
             damage,
             nbt: None,
         }
+    }
+
+    fn confirmation(window_id: u8, action_number: i16) -> PlayEvent {
+        PlayEvent::ConfirmTransaction(
+            umicraft_protocol::packets::play::clientbound::ConfirmTransaction {
+                window_id,
+                action_number,
+                accepted: false,
+            },
+        )
+    }
+
+    /// Regression test (GrimAC `BadPacketsN`, 2026-11-02): the replies leave in
+    /// the order of the packets, the position reply between the two
+    /// transactions that surround a teleport.
+    #[test]
+    fn the_replies_to_a_teleport_keep_the_order_of_the_packets() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(64);
+        let placement = umicraft_net::play::PlayerPlacement {
+            x: 0.5,
+            y: 64.0,
+            z: 0.5,
+            ..Default::default()
+        };
+        handle_net(&mut game, confirmation(0, -1), &mut queue, &frames);
+        handle_net(
+            &mut game,
+            PlayEvent::Placement(placement),
+            &mut queue,
+            &frames,
+        );
+        handle_net(&mut game, confirmation(0, -2), &mut queue, &frames);
+        let sent = commands(&queue);
+        assert!(matches!(
+            sent[..],
+            [
+                ClientCommand::ConfirmTransaction {
+                    action_number: -1,
+                    ..
+                },
+                ClientCommand::AckPosition { .. },
+                ClientCommand::ConfirmTransaction {
+                    action_number: -2,
+                    ..
+                },
+            ]
+        ));
+    }
+
+    #[test]
+    fn a_transaction_of_a_window_that_is_not_open_gets_no_reply() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(64);
+        handle_net(&mut game, confirmation(7, 1), &mut queue, &frames);
+        assert!(commands(&queue).is_empty());
     }
 
     fn commands(queue: &CommandQueue) -> Vec<&ClientCommand> {

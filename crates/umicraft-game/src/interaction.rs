@@ -33,9 +33,6 @@ const BLOCK_HIT_DELAY: u8 = 5;
 /// (MCP `Minecraft.leftClickCounter`, line 1513).
 const MISS_DELAY: u8 = 10;
 
-/// The position the acknowledgement of a server placement repeats.
-const SAME_POSITION_TOLERANCE: f64 = 1e-6;
-
 /// A packet the interaction rules ask the client to send.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outgoing {
@@ -177,8 +174,6 @@ pub struct Interaction {
     expected_break: Option<BlockPos>,
     /// The block whose placement the server is expected to confirm.
     expected_placement: Option<BlockPos>,
-    /// The last position that was acknowledged to the server.
-    last_acknowledged: Option<PositionAck>,
 }
 
 impl Interaction {
@@ -283,27 +278,6 @@ impl Interaction {
             return Some(BlockAck::Placement);
         }
         None
-    }
-
-    /// The acknowledgement to send for a position the server imposed.
-    ///
-    /// The acknowledgement is a position packet itself, and the server
-    /// answers every position packet it does not accept with a resync. A
-    /// server that keeps resyncing the same position (for example because the
-    /// player stands inside a block) would therefore get an acknowledgement
-    /// per resync, and the two would feed each other until the packet limiter
-    /// of the server kicks the client. A position is acknowledged only once.
-    pub fn acknowledge_position(&mut self, ack: PositionAck) -> Option<Outgoing> {
-        let repeated = self.last_acknowledged.is_some_and(|last| {
-            (last.x - ack.x).abs() < SAME_POSITION_TOLERANCE
-                && (last.y - ack.y).abs() < SAME_POSITION_TOLERANCE
-                && (last.z - ack.z).abs() < SAME_POSITION_TOLERANCE
-        });
-        if repeated {
-            return None;
-        }
-        self.last_acknowledged = Some(ack);
-        Some(Outgoing::AckPosition(ack))
     }
 }
 
@@ -546,17 +520,6 @@ mod tests {
 
     fn stone() -> RayHit {
         hit(BlockPos::new(3, 4, 5), Face::Up)
-    }
-
-    fn ack(x: f64) -> PositionAck {
-        PositionAck {
-            x,
-            y: 64.0,
-            z: 0.5,
-            yaw: 90.0,
-            pitch: 10.0,
-            on_ground: true,
-        }
     }
 
     #[test]
@@ -987,16 +950,5 @@ mod tests {
         let placed = interaction.place_block(GameMode::Spectator, &stone(), None, ItemStack::EMPTY);
         assert!(placed.is_some());
         assert_eq!(interaction.acknowledge_block(BlockPos::new(3, 5, 5)), None);
-    }
-
-    #[test]
-    fn a_position_is_acknowledged_only_once() {
-        let mut interaction = Interaction::new();
-        assert_eq!(
-            interaction.acknowledge_position(ack(1.0)),
-            Some(Outgoing::AckPosition(ack(1.0)))
-        );
-        assert_eq!(interaction.acknowledge_position(ack(1.0)), None);
-        assert!(interaction.acknowledge_position(ack(2.0)).is_some());
     }
 }

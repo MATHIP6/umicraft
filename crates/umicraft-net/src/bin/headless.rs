@@ -195,6 +195,17 @@ async fn hold_play(conn: &mut Connection, stay: Duration) -> Result<Held, Sessio
                 let _ = acks.try_send(placement.acknowledgement(true));
                 held.placement = Some(placement);
             }
+            // The session does not answer transactions: the reply shares the
+            // queue of the position reply, so they leave in packet order.
+            PlayEvent::ConfirmTransaction(packet) if !packet.accepted && packet.window_id == 0 => {
+                let _ = acks.try_send(umicraft_protocol::PlayServerbound::ConfirmTransaction(
+                    umicraft_protocol::packets::play::serverbound::ConfirmTransaction {
+                        window_id: 0,
+                        action_number: packet.action_number,
+                        accepted: true,
+                    },
+                ));
+            }
             PlayEvent::Chat(_) | PlayEvent::SystemChat(_) => held.chat_messages += 1,
             _ => {}
         }

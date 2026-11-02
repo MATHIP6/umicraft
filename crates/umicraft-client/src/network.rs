@@ -50,6 +50,8 @@ pub struct NetworkConfig {
     pub chat_mode: u8,
     /// Client Settings chat colours.
     pub chat_colors: bool,
+    /// The address of the `Handshake` when it is not `host`.
+    pub handshake_host: Option<String>,
 }
 
 /// A serverbound packet the game thread wants the socket to send.
@@ -146,6 +148,14 @@ pub enum ClientCommand {
         pitch: f32,
         /// Whether the player rests on the ground.
         on_ground: bool,
+    },
+    /// `Confirm Transaction` (0x0F): the answer to a transaction the server
+    /// did not accept (MCP `NetHandlerPlayClient.handleConfirmTransaction`).
+    ConfirmTransaction {
+        /// The window id of the transaction.
+        window_id: i8,
+        /// The action number of the transaction.
+        action_number: i16,
     },
     /// `Player Digging` (0x07): the start or the stop of a block break.
     PlayerDigging {
@@ -345,6 +355,14 @@ impl ClientCommand {
                 pitch,
                 on_ground,
             }),
+            Self::ConfirmTransaction {
+                window_id,
+                action_number,
+            } => PlayServerbound::ConfirmTransaction(serverbound::ConfirmTransaction {
+                window_id,
+                action_number,
+                accepted: true,
+            }),
             Self::PlayerDigging {
                 status,
                 x,
@@ -515,7 +533,13 @@ async fn run_session(
         Ok(connection) => connection,
         Err(error) => return Some(error.to_string()),
     };
-    let profile = match login_offline(&mut connection, &config.name, None).await {
+    let profile = match login_offline(
+        &mut connection,
+        &config.name,
+        config.handshake_host.as_deref(),
+    )
+    .await
+    {
         Ok(profile) => profile,
         Err(error) => return Some(error.to_string()),
     };

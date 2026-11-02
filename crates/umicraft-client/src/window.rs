@@ -111,6 +111,7 @@ pub fn run(args: Args) -> Result<(), ClientError> {
         view_distance: options.video.render_distance,
         chat_mode: options.chat.visibility.wire(),
         chat_colors: options.chat.colors,
+        handshake_host: args.handshake_host.clone(),
     })?;
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Poll);
