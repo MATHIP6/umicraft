@@ -122,8 +122,15 @@ pub enum ScriptStep {
     /// Walk forward, jump twice a second and click the attack button five
     /// times a second: the hits that land on the way down are critical.
     JumpStrike,
-    /// Hold the use button (a bow drawn, a rod cast, a meal eaten).
+    /// Hold the use button (a bow drawn, a rod cast, a meal eaten, a sword
+    /// raised).
     UseItem,
+    /// Press the use button once, for one tick (a pearl or a splash potion
+    /// thrown; holding it would throw again every four ticks).
+    Tap,
+    /// Stand still and select the hotbar slot (0 to 8) a moment after the phase
+    /// starts.
+    Select(u8),
 }
 
 /// One phase of a scripted session.
@@ -153,6 +160,9 @@ pub struct Script {
     last_jump: Instant,
     last_click: Instant,
 }
+
+/// How long into a [`ScriptStep::Select`] phase the slot is selected.
+const SELECT_DELAY: Duration = Duration::from_millis(100);
 
 /// The time between two clicks of a fight (five clicks a second).
 const CLICK_PERIOD: Duration = Duration::from_millis(200);
@@ -283,6 +293,20 @@ impl Script {
                 }
             }
             ScriptStep::UseItem => update.state.use_item = true,
+            ScriptStep::Tap => {
+                update.state.use_item = !self.fired;
+                self.fired = true;
+            }
+            ScriptStep::Select(slot) => {
+                // Later than the phase start, so that a use released
+                // by the same phase sends its release first, as a player who
+                // lets go of the button and then presses a number key.
+                let started = now.duration_since(self.phase_started);
+                if !self.fired && started >= SELECT_DELAY {
+                    self.fired = true;
+                    update.select_slot = Some(slot);
+                }
+            }
         }
         update.break_block = break_block;
         update.place_block = place_block;
@@ -413,16 +437,23 @@ pub fn combat_script() -> Vec<ScriptPhase> {
         duration: Duration::from_secs(seconds),
         pitch: 0.0,
     };
+    use ScriptStep::{Idle, JumpStrike, Select, Sprint, Strike, Tap, UseItem};
+    // Hotbar: 0 sword, 1 bow, 2 ender pearl, 3 splash potion.
     vec![
-        phase(ScriptStep::Idle, 5),
-        phase(ScriptStep::Sprint, 4),
-        phase(ScriptStep::Strike, 10),
-        phase(ScriptStep::Idle, 3),
-        phase(ScriptStep::UseItem, 5),
-        phase(ScriptStep::Idle, 3),
-        phase(ScriptStep::Strike, 10),
-        phase(ScriptStep::JumpStrike, 10),
-        phase(ScriptStep::Idle, 10),
+        phase(Select(0), 5),
+        phase(Sprint, 4),
+        phase(Strike, 10),
+        phase(Select(1), 3),
+        phase(UseItem, 5),
+        phase(Select(0), 3),
+        phase(Strike, 10),
+        phase(JumpStrike, 10),
+        phase(UseItem, 3),
+        phase(Select(2), 1),
+        phase(Tap, 1),
+        phase(Select(3), 1),
+        phase(Tap, 1),
+        phase(Idle, 3),
     ]
 }
 
@@ -511,6 +542,37 @@ mod tests {
             })
             .count();
         assert!((24..=26).contains(&clicks), "{clicks}");
+    }
+
+    #[test]
+    fn a_tap_presses_use_once_and_a_select_picks_the_slot_once() {
+        let phase = |step| ScriptPhase {
+            step,
+            duration: Duration::from_secs(10),
+            pitch: 0.0,
+        };
+        let start = Instant::now();
+        let mut tap = Script::new(vec![phase(ScriptStep::Tap)]);
+        assert!(tap.update(start).state.use_item);
+        assert!(!tap.update(start + Duration::from_millis(50)).state.use_item);
+        let mut select = Script::new(vec![phase(ScriptStep::Select(3))]);
+        assert_eq!(select.update(start).select_slot, None);
+        let picked = select.update(start + Duration::from_millis(150));
+        assert_eq!(picked.select_slot, Some(3));
+        let again = select.update(start + Duration::from_millis(200));
+        assert_eq!(again.select_slot, None);
+    }
+
+    #[test]
+    fn the_combat_script_selects_every_weapon_it_uses() {
+        let slots: Vec<u8> = combat_script()
+            .iter()
+            .filter_map(|phase| match phase.step {
+                ScriptStep::Select(slot) => Some(slot),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(slots, [0, 1, 0, 2, 3]);
     }
 
     #[test]
