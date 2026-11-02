@@ -192,6 +192,8 @@ struct App {
     container_was_open: bool,
     /// The immediate-mode context, owned by the render thread.
     ui: Ui,
+    /// Whether the vanilla F3 text screen is shown (toggled by F3).
+    show_f3: bool,
     /// The acceptance screen shown while [`Screen::Debug`] is current.
     debug_screen: DebugScreen,
     /// The menu shown while [`Screen::GameMenu`] is current.
@@ -285,6 +287,7 @@ impl App {
             creative_input: CreativeInput::new(),
             container_was_open: false,
             ui: Ui::new(ui_viewport),
+            show_f3: false,
             debug_screen: DebugScreen::new(),
             game_menu: GameMenu::new(),
             menu_action: None,
@@ -325,11 +328,12 @@ impl App {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
-        // F2 is the debug-screen toggle. It is handled before the UI
-        // translation so it can never be typed into the screen, and it is
+        // F4 is the Umicraft debug-screen toggle (F3 is the vanilla text
+        // screen, F2 stays free for the screenshot). It is handled before the
+        // UI translation so it can never be typed into the screen, and it is
         // ignored while the key repeats so one press toggles exactly once.
-        // Releases are swallowed as well, so no F2 event ever reaches the UI.
-        if code == KeyCode::F2 {
+        // Releases are swallowed as well, so no F4 event ever reaches the UI.
+        if code == KeyCode::F4 {
             if is_debug_toggle(code, event.state, event.repeat) {
                 self.set_screen(self.screen().after_debug_toggle());
             }
@@ -372,7 +376,7 @@ impl App {
                     match code {
                         KeyCode::Escape => self.set_screen(Screen::None.after_escape()),
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
-                        KeyCode::F4 => self.reload_resources(),
+                        KeyCode::F3 => self.show_f3 = !self.show_f3,
                         KeyCode::F5 => self.toggle_perspective = true,
                         // F3 + T reloads the resource packs, whatever the
                         // chat key is bound to.
@@ -1056,8 +1060,18 @@ impl App {
                 .unwrap_or_default();
             self.options.chat.apply(&mut game_hud);
             let chatting = self.screen == Screen::Chat;
+            let debug_f3 = self.show_f3.then(|| {
+                crate::debug_f3_view::build(&crate::debug_f3_view::F3Frame {
+                    fps: self.fps,
+                    chunk_meshes: self.renderer.as_ref().map_or(0, Renderer::mesh_count),
+                    video: &self.options.video,
+                    display: (width, height),
+                    camera: &self.camera,
+                })
+            });
             let hud = HudState {
                 debug_lines: Vec::new(),
+                debug_f3,
                 chat_open: chatting,
                 chat_scroll: self.chat_scroll,
                 chat_input: chatting.then(|| ChatInputView {
@@ -1412,10 +1426,10 @@ impl App {
 
 /// True when this key event must toggle the debug screen.
 ///
-/// Only a fresh F2 press toggles: releases and auto-repeats are ignored so a
+/// Only a fresh F4 press toggles: releases and auto-repeats are ignored so a
 /// held key cannot flicker the screen.
 fn is_debug_toggle(code: KeyCode, state: ElementState, repeat: bool) -> bool {
-    code == KeyCode::F2 && state == ElementState::Pressed && !repeat
+    code == KeyCode::F4 && state == ElementState::Pressed && !repeat
 }
 
 /// Uploads the GUI atlas to the renderer, if available.
@@ -1621,7 +1635,7 @@ impl ApplicationHandler for App {
                     .set_modifiers(state.shift_key(), state.control_key());
             }
             WindowEvent::CursorMoved { position, .. } => {
-                // Keep the pointer current even while the UI is closed: F2 can
+                // Keep the pointer current even while the UI is closed: F4 can
                 // open the screen before the next mouse movement, and the first
                 // click must use the physical cursor, not the initial origin.
                 self.ui_input.pointer_moved(position);
@@ -1743,9 +1757,11 @@ mod tests {
 
     #[test]
     fn a_fresh_f2_press_is_the_only_toggle() {
-        assert!(is_debug_toggle(KeyCode::F2, ElementState::Pressed, false));
-        assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, true));
-        assert!(!is_debug_toggle(KeyCode::F2, ElementState::Released, false));
+        assert!(is_debug_toggle(KeyCode::F4, ElementState::Pressed, false));
+        assert!(!is_debug_toggle(KeyCode::F4, ElementState::Pressed, true));
+        assert!(!is_debug_toggle(KeyCode::F4, ElementState::Released, false));
+        assert!(!is_debug_toggle(KeyCode::F3, ElementState::Pressed, false));
+        assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, false));
         assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
     }
 

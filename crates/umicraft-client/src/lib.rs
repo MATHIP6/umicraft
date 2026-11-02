@@ -25,6 +25,7 @@ pub mod creative_input;
 mod creative_layout;
 mod creative_screen;
 pub mod creative_view;
+mod debug_f3_view;
 pub mod dials;
 pub mod entity_demo;
 mod entity_icons;

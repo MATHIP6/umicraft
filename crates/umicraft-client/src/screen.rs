@@ -26,7 +26,7 @@ pub enum Screen {
     GameMenu,
     /// The options, opened from the game menu.
     Options,
-    /// The M4 debug screen (F2).
+    /// The Umicraft debug screen (F4; ADR-0036, F3 is the vanilla text screen).
     Debug,
 }
 
@@ -50,7 +50,7 @@ impl Screen {
     ///
     /// With no screen, Escape opens the game menu. The chat, the inventory and
     /// the menu close; the options go back to the menu they were opened from.
-    /// The debug screen is closed by F2 only, because Escape is a key its
+    /// The debug screen is closed by F4 only, because Escape is a key its
     /// widgets may consume.
     #[must_use]
     pub const fn after_escape(self) -> Self {
@@ -62,7 +62,7 @@ impl Screen {
         }
     }
 
-    /// The screen after a fresh F2 press: the debug screen opens over any
+    /// The screen after a fresh F4 press: the debug screen opens over any
     /// other screen and a second press closes it.
     #[must_use]
     pub const fn after_debug_toggle(self) -> Self {
@@ -113,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn f2_toggles_the_debug_screen_over_any_screen() {
+    fn f4_toggles_the_debug_screen_over_any_screen() {
         assert_eq!(Screen::None.after_debug_toggle(), Screen::Debug);
         assert_eq!(Screen::Chat.after_debug_toggle(), Screen::Debug);
         assert_eq!(Screen::Debug.after_debug_toggle(), Screen::None);

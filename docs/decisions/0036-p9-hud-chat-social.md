@@ -39,3 +39,11 @@ whenever `hud_dirty` is set. Several files exceed 1000 lines.
 Steps P9-b to P9-g touch disjoint files and can be developed in parallel in
 worktrees. The `HudState` type is replaced zone by zone; `hud_dirty` becomes a
 per-zone flag.
+
+## Addendum (P9-g): F3 and F4
+
+F3 toggles the vanilla text debug screen (`umicraft_game::debug_f3`, drawn by
+`umicraft_render::hud::gui::debug_f3`). The Umicraft debug screen
+(`Screen::Debug`) moves from F2 to **F4**: *proposed, awaiting owner approval*.
+F2 stays free for the vanilla screenshot (not implemented). The former F4
+resource reload is dropped; F3+T still reloads the resources.

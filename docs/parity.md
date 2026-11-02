@@ -150,7 +150,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | HUD | air, absorption, effect hearts, mount bar | Partial | P9 | Unit tests (`hud_hearts`) | Absorption, regeneration, poison, wither, hardcore and the low health shake are done with the hearts (P6); the air bubbles and the mount bar are not. |
 | HUD | chat with colours/styles/events | Partial | P9 | — |  |
 | HUD | tab list, scoreboard, teams, titles, action bar, boss health | Missing | P9 | — |  |
-| HUD | vanilla F3 debug screen | Missing | P9 | — | See approved-deviation candidate for F2. |
+| HUD | vanilla F3 debug screen | Partial — lines and drawing done (P9-g), not all data wired | P9 | `umicraft_game::debug_f3` tests | F3 toggles it; the Umicraft debug screen moved to F4 (proposed, awaiting owner approval). GPU adapter/backend and memory replace the GL/Java lines. Entities, particles, light, biome and looking-at data are not fed yet (P9-h). |
 
 ## Screens
 
@@ -177,3 +177,4 @@ session is [`parity-harness.md`](parity-harness.md).
 | Deviation | Status |
 |---|---|
 | F2 opens the Umicraft debug screen instead of taking a screenshot (ROADMAP.md §8.2). Vanilla F3 is reproduced in P9; the Umicraft debug data moves to another key. | Proposed, awaiting owner approval |
+| P9-g: the Umicraft debug screen moves from F2 to F4 (F3 is the vanilla text screen, F2 stays free for the vanilla screenshot, not implemented); the old F4 resource reload is dropped, F3+T remains. | F4 proposed, awaiting owner approval |

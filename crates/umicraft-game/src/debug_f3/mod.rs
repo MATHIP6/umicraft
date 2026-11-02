@@ -349,7 +349,7 @@ fn left_lines(input: &DebugF3Input) -> Vec<String> {
 
 /// `Mem: % 2d%% %03d/%03dMB`; the space flag prints a leading space.
 fn memory_line(used: u64, max: u64) -> String {
-    let percent = if max == 0 { 0 } else { used * 100 / max };
+    let percent = (used * 100).checked_div(max).unwrap_or(0);
     let megabytes = |bytes: u64| bytes / 1024 / 1024;
     format!(
         "Mem:  {percent}% {:03}/{:03}MB",

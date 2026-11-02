@@ -29,7 +29,7 @@ umicraft-client/src/hud_view.rs
 | P9-d | Chat: `game/chat/`, `.lang` files, full styles, history, Tab, commands, click/hover | todo |
 | P9-e | Tab list (header/footer, ping, heads), sidebar, teams, below-name and list objectives | todo |
 | P9-f | Titles, subtitles, action bar, boss bar | todo |
-| P9-g | Vanilla F3, Umicraft debug on another key | todo |
+| P9-g | Vanilla F3, Umicraft debug on another key | done (lines, drawing, keys; data feed partial) |
 | P9-h | Delete legacy HUD, switch `game.rs` to zone views, scale 1–4 captures, parity rows, sources | todo |
 
 ## Audit (starting point, P9-0)
