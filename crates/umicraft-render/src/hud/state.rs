@@ -1,0 +1,256 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The plain-data description of the HUD: [`HudState`] and the view structs
+//! the client fills every frame (chat, title, sidebar, tab list, boss bar).
+//!
+//! These types carry no behaviour beyond small conversions, so both the
+//! layout maths and the renderers depend on them without depending on each
+//! other.
+
+use std::time::Instant;
+
+use crate::hud_hearts::HeartsView;
+
+/// Number of hotbar slots drawn by the HUD.
+pub const HOTBAR_SLOTS: usize = 9;
+
+/// Number of icons in each status row (hearts, food, armour).
+pub const STATUS_ICONS: usize = 10;
+
+/// Maximum number of chat lines the HUD keeps on screen.
+pub const CHAT_LINES: usize = 10;
+
+/// Everything the HUD draws, as plain data.
+///
+/// The client fills this from the game state every frame and hands it to
+/// [`draw`]; the HUD itself keeps no state and owns no resources.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HudState {
+    /// Health points, `0..=20`; twenty points fill ten hearts.
+    pub health: f32,
+    /// Food points, `0..=20`; twenty points fill ten drumsticks.
+    pub food: f32,
+    /// Armour points, `0..=20`; zero hides the armour row.
+    pub armor: f32,
+    /// What the hearts show besides the health: absorption, effects, flash.
+    pub hearts: HeartsView,
+    /// Progress towards the next level, `0..=1`.
+    pub experience: f32,
+    /// The current experience level, shown on the experience bar.
+    pub level: i32,
+    /// The selected hotbar slot; values above eight are clamped.
+    pub selected_slot: u8,
+    /// Whether the crosshair is drawn.
+    pub crosshair: bool,
+    /// The chat lines, oldest first, with their styles and arrival times.
+    pub chat: Vec<ChatLineView>,
+    /// Whether the chat input is open: every line is shown at full opacity.
+    pub chat_open: bool,
+    /// How many rows the open chat is scrolled up from the newest.
+    pub chat_scroll: usize,
+    /// The chat input line, while the chat is open.
+    pub chat_input: Option<ChatInputView>,
+    /// The chat options that shape the log.
+    pub chat_style: ChatStyle,
+    /// The time of this frame; ages the chat lines. `None` freezes the fade.
+    pub now: Option<Instant>,
+    /// Debug lines, top to bottom.
+    pub debug_lines: Vec<String>,
+    /// The action bar text and its opacity, when a message is displayed.
+    pub action_bar: Option<(String, f32)>,
+    /// The title and subtitle, when displayed.
+    pub title: Option<TitleView>,
+    /// The scoreboard sidebar, when an objective is assigned to it.
+    pub sidebar: Option<SidebarView>,
+    /// The tab list, filled whether or not the player holds the key.
+    pub tab_list: Option<TabListView>,
+    /// Whether the player holds the tab-list key.
+    pub show_tab_list: bool,
+    /// The tab completions the server offered for the open chat line.
+    pub completions: Vec<String>,
+    /// Counts the completion answers, so a new answer is told from the last.
+    pub completions_serial: u64,
+    /// The boss bar of a Wither or an Ender Dragon in the world.
+    pub boss: Option<BossView>,
+    /// The score shown on the death screen (MCP `EntityPlayer.getScore`).
+    pub score: i32,
+}
+
+/// The boss bar at the top of the screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BossView {
+    /// The name drawn above the bar.
+    pub name: String,
+    /// The health as a fraction of the maximum, `0.0..=1.0`.
+    pub health: f32,
+}
+
+/// The chat options that shape the log (`GameSettings.chat*`), as the
+/// fractions the options screen stores: `0.0..=1.0` each.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatStyle {
+    /// `chatOpacity`: the text and band alpha is `opacity * 0.9 + 0.1`.
+    pub opacity: f32,
+    /// `chatScale`: scales the whole log, `0.0` hides it.
+    pub scale: f32,
+    /// `chatWidth`: from 40 to 320 pixels.
+    pub width: f32,
+    /// `chatHeightFocused`: from 20 to 180 pixels while the chat is open.
+    pub height_focused: f32,
+    /// `chatHeightUnfocused`: from 20 to 180 pixels while it is closed.
+    pub height_unfocused: f32,
+}
+
+impl Default for ChatStyle {
+    /// The vanilla defaults.
+    fn default() -> Self {
+        Self {
+            opacity: 1.0,
+            scale: 1.0,
+            width: 1.0,
+            height_focused: 1.0,
+            height_unfocused: 0.444_444_45,
+        }
+    }
+}
+
+impl ChatStyle {
+    /// `GuiNewChat.calculateChatboxWidth`, in pixels.
+    #[must_use]
+    pub fn width_px(&self) -> i32 {
+        (self.width * 280.0 + 40.0) as i32
+    }
+
+    /// `GuiNewChat.calculateChatboxHeight` for the open chat, in pixels.
+    #[must_use]
+    pub fn height_focused_px(&self) -> i32 {
+        (self.height_focused * 160.0 + 20.0) as i32
+    }
+
+    /// `GuiNewChat.calculateChatboxHeight` for the closed chat, in pixels.
+    #[must_use]
+    pub fn height_unfocused_px(&self) -> i32 {
+        (self.height_unfocused * 160.0 + 20.0) as i32
+    }
+}
+
+/// One styled piece of a chat line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRunView {
+    /// The text.
+    pub text: String,
+    /// The colour as RGB.
+    pub color: [u8; 3],
+    /// Drawn twice, one pixel apart.
+    pub bold: bool,
+    /// Not drawn differently: the built-in font cannot be sheared.
+    pub italic: bool,
+    /// Underlined with a rectangle.
+    pub underlined: bool,
+    /// Struck through with a rectangle.
+    pub strikethrough: bool,
+    /// Replaced by glyphs that change every few ticks.
+    pub obfuscated: bool,
+}
+
+/// A chat message as it arrived, before it is wrapped to the screen width.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatLineView {
+    /// The styled pieces.
+    pub runs: Vec<ChatRunView>,
+    /// When the message arrived; the fade counts from here.
+    pub received: Instant,
+}
+
+impl ChatLineView {
+    /// The text of the message without its styles.
+    #[must_use]
+    pub fn plain(&self) -> String {
+        self.runs.iter().map(|run| run.text.as_str()).collect()
+    }
+}
+
+/// The chat input line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatInputView {
+    /// The typed text.
+    pub text: String,
+    /// The caret as a character index.
+    pub caret: usize,
+    /// Whether the caret is in the visible half of its blink.
+    pub caret_visible: bool,
+}
+
+/// The title and subtitle drawn in the middle of the screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TitleView {
+    /// The title text.
+    pub title: String,
+    /// The subtitle text; empty when there is none.
+    pub subtitle: String,
+    /// The opacity in `0.0..=1.0`.
+    pub alpha: f32,
+}
+
+/// The scoreboard sidebar: a title and lines, top line first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SidebarView {
+    /// The objective display name.
+    pub title: String,
+    /// The lines as `(name, score)`.
+    pub lines: Vec<(String, i32)>,
+}
+
+/// One player of the tab list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabEntryView {
+    /// The name drawn for the player, with its team decoration.
+    pub name: String,
+    /// The latency in milliseconds.
+    pub ping: i32,
+    /// The game mode id; 3 is spectator.
+    pub game_mode: i32,
+}
+
+/// The tab list in display order, with its header and footer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabListView {
+    /// The header text; empty when there is none.
+    pub header: String,
+    /// The footer text; empty when there is none.
+    pub footer: String,
+    /// The players, already sorted and capped.
+    pub entries: Vec<TabEntryView>,
+}
+
+impl Default for HudState {
+    /// A player at full health and food,
+    fn default() -> Self {
+        Self {
+            health: 20.0,
+            food: 20.0,
+            armor: 0.0,
+            hearts: HeartsView::default(),
+            experience: 0.0,
+            level: 0,
+            selected_slot: 0,
+            crosshair: true,
+            chat: Vec::new(),
+            chat_open: false,
+            chat_scroll: 0,
+            chat_input: None,
+            chat_style: ChatStyle::default(),
+            now: None,
+            debug_lines: Vec::new(),
+            action_bar: None,
+            title: None,
+            sidebar: None,
+            tab_list: None,
+            show_tab_list: false,
+            completions: Vec::new(),
+            completions_serial: 0,
+            boss: None,
+            score: 0,
+        }
+    }
+}

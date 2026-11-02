@@ -15,7 +15,6 @@
 mod block_atlas;
 mod border;
 mod camera;
-mod chat_hud;
 mod clouds;
 mod dynamic_blocks;
 pub mod entity_pass;
@@ -23,8 +22,7 @@ mod environment;
 mod error;
 mod fog;
 mod font;
-mod hud;
-pub mod hud_gui;
+pub mod hud;
 pub mod hud_hearts;
 mod items;
 mod outline;
@@ -33,7 +31,6 @@ mod overlays;
 mod particles;
 mod renderer;
 mod sky;
-mod social_hud;
 mod texture;
 mod ui_pass;
 mod weather;
@@ -51,7 +48,7 @@ pub use hud::{
     ChatLineView, ChatRunView, ChatStyle, Fill, HudLayout, HudState, Rect, SidebarView, StatusRow,
     TabEntryView, TabListView, TitleView,
 };
-pub use hud_gui::{draw_hud_gui, gui_scale, HudSheets};
+pub use hud::{draw_hud_gui, HudSheets};
 pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE};
 pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
@@ -62,5 +59,6 @@ pub use renderer::{Image, Renderer};
 pub use sky::{SkyImage, SkyState, SkyTextures};
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};
 pub use ui_pass::{fallback_atlas, FontAtlasError, UiBatch, UiBatchKind, UiPass};
+pub use umicraft_ui::screens::gui_scale;
 pub use umicraft_ui::SpriteSheet;
 pub use weather::{PrecipitationCell, PrecipitationField, FIELD_RADIUS};
