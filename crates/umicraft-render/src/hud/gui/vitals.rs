@@ -187,26 +187,7 @@ mod tests {
     use super::*;
 
     fn input() -> VitalsInput {
-        VitalsInput {
-            health: 20.0,
-            max_health: 20.0,
-            absorption: 0.0,
-            armor: 0,
-            food: 20,
-            saturation: 5.0,
-            hardcore: false,
-            poison: false,
-            wither: false,
-            regeneration: false,
-            hunger: false,
-            update_counter: 0,
-            flash: FlashFrame {
-                blink: false,
-                last_health: 20,
-            },
-            riding: Riding::OnFoot,
-            air: None,
-        }
+        VitalsInput::default()
     }
 
     /// The sources drawn, as `(u, v)` texture pixels of a 256-pixel sheet.

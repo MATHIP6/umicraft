@@ -17,6 +17,13 @@ pub const GAMEMODE_REASON: u8 = 3;
 /// lookup (MCP `S01PacketJoinGame.readPacketData`: `i & -9`).
 const HARDCORE_FLAG: u8 = 8;
 
+/// Whether the gamemode byte of `Join Game` carries the hardcore bit (MCP
+/// `S01PacketJoinGame.isHardcoreMode`: `(i & 8) == 8`).
+#[must_use]
+pub fn is_hardcore(wire: u8) -> bool {
+    wire & HARDCORE_FLAG != 0
+}
+
 /// A gamemode (MCP `WorldSettings.GameType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GameMode {
@@ -134,6 +141,13 @@ impl GameMode {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_hardcore_bit_is_bit_three_of_the_join_byte() {
+        assert!(is_hardcore(8));
+        assert!(is_hardcore(9));
+        assert!(!is_hardcore(1));
+    }
+
     use super::*;
 
     #[test]

@@ -138,6 +138,32 @@ pub struct VitalsInput {
     pub air: Option<i32>,
 }
 
+impl Default for VitalsInput {
+    /// A healthy, fed player on foot at tick zero.
+    fn default() -> Self {
+        Self {
+            health: 20.0,
+            max_health: 20.0,
+            absorption: 0.0,
+            armor: 0,
+            food: 20,
+            saturation: 5.0,
+            hardcore: false,
+            poison: false,
+            wither: false,
+            regeneration: false,
+            hunger: false,
+            update_counter: 0,
+            flash: FlashFrame {
+                blink: false,
+                last_health: 20,
+            },
+            riding: Riding::OnFoot,
+            air: None,
+        }
+    }
+}
+
 /// The status rows of one frame.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VitalsView {
@@ -158,15 +184,8 @@ pub struct VitalsView {
 /// Builds the rows for one frame.
 ///
 /// ```
-/// use umicraft_game::hud::{vitals_view, FlashFrame, Riding, VitalsInput};
-/// let input = VitalsInput {
-///     health: 20.0, max_health: 20.0, absorption: 0.0, armor: 0, food: 20,
-///     saturation: 5.0, hardcore: false, poison: false, wither: false,
-///     regeneration: false, hunger: false, update_counter: 0,
-///     flash: FlashFrame { blink: false, last_health: 20 },
-///     riding: Riding::OnFoot, air: None,
-/// };
-/// assert_eq!(vitals_view(&input).hearts.len(), 10);
+/// use umicraft_game::hud::{vitals_view, VitalsInput};
+/// assert_eq!(vitals_view(&VitalsInput::default()).hearts.len(), 10);
 /// ```
 #[must_use]
 pub fn vitals_view(input: &VitalsInput) -> VitalsView {
@@ -270,8 +289,10 @@ fn armor_row(armor: i32) -> ArmorView {
 fn food_icons(input: &VitalsInput, rng: &mut JavaRandom) -> Vec<FoodIconView> {
     // `updateCounter % (food * 3 + 1) == 0` with no saturation shakes the
     // icons by one pixel either way.
-    let shaking =
-        input.saturation <= 0.0 && input.update_counter % (input.food.max(0) as u32 * 3 + 1) == 0;
+    let shaking = input.saturation <= 0.0
+        && input
+            .update_counter
+            .is_multiple_of(input.food.max(0) as u32 * 3 + 1);
     (0..ROW)
         .map(|index| FoodIconView {
             col: index as u8,
@@ -302,24 +323,8 @@ mod tests {
 
     fn input() -> VitalsInput {
         VitalsInput {
-            health: 20.0,
-            max_health: 20.0,
-            absorption: 0.0,
-            armor: 0,
-            food: 20,
-            saturation: 5.0,
-            hardcore: false,
-            poison: false,
-            wither: false,
-            regeneration: false,
-            hunger: false,
             update_counter: 7,
-            flash: FlashFrame {
-                blink: false,
-                last_health: 20,
-            },
-            riding: Riding::OnFoot,
-            air: None,
+            ..VitalsInput::default()
         }
     }
 

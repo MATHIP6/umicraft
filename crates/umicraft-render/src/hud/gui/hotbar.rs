@@ -115,4 +115,23 @@ mod tests {
             .any(|c| matches!(c, DrawCommand::Text { text, .. } if text == "5"));
         assert!(count);
     }
+
+    #[test]
+    fn items_stay_in_their_slots_at_gui_scale_four() {
+        // 1920x1080 is GUI scale 4, where the items once drifted away.
+        let item_x = |slot: usize| {
+            let mut list = DrawList::new();
+            let sheet = SpriteSheet::new(0.0, 0.0, 1.0, 1.0, 256, 256);
+            let mut state = HudState::default();
+            state.hotbar_items[slot] = Some(stone());
+            let mut canvas = Canvas::new(&mut list, (1920, 1080));
+            draw_hotbar(&mut canvas, &state, &FontAtlas::fallback(), &sheet);
+            list.commands().iter().find_map(|c| match c {
+                DrawCommand::Item { dst, .. } => Some((dst.x, dst.y, dst.width)),
+                _ => None,
+            })
+        };
+        assert_eq!(item_x(0), Some((608.0, 1004.0, 64.0)));
+        assert_eq!(item_x(8).map(|i| i.0), Some(608.0 + 8.0 * 20.0 * 4.0));
+    }
 }

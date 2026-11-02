@@ -11,9 +11,7 @@ use std::time::Instant;
 
 use super::overlay_views::{ActionBarView, BossView, SidebarView, TabListView, TitleView};
 use crate::hud_hearts::HeartsView;
-use umicraft_game::hud::{
-    vitals_view, BottomBar, FlashFrame, HeldNameView, Riding, VitalsInput, VitalsView,
-};
+use umicraft_game::hud::{vitals_view, BottomBar, HeldNameView, VitalsInput, VitalsView};
 use umicraft_ui::SlotItem;
 
 /// Number of hotbar slots drawn by the HUD.
@@ -211,26 +209,7 @@ impl Default for HudState {
             selected_slot: 0,
             crosshair: true,
             hotbar_items: Default::default(),
-            vitals: Some(vitals_view(&VitalsInput {
-                health: 20.0,
-                max_health: 20.0,
-                absorption: 0.0,
-                armor: 0,
-                food: 20,
-                saturation: 5.0,
-                hardcore: false,
-                poison: false,
-                wither: false,
-                regeneration: false,
-                hunger: false,
-                update_counter: 0,
-                flash: FlashFrame {
-                    blink: false,
-                    last_health: 20,
-                },
-                riding: Riding::OnFoot,
-                air: None,
-            })),
+            vitals: Some(vitals_view(&VitalsInput::default())),
             bar: BottomBar::Experience {
                 fill: 0,
                 level: None,
