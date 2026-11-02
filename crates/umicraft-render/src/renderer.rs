@@ -324,6 +324,9 @@ impl Renderer {
         // products a second time and wash every colour out, so the surface
         // keeps the plain format and the textures are sampled as stored.
         config.format = config.format.remove_srgb_suffix();
+        // No vsync: the "Max Framerate" option paces the frames (the default
+        // present mode is Fifo, which locks them to the display refresh).
+        config.present_mode = wgpu::PresentMode::AutoNoVsync;
         let format = config.format;
         surface.configure(&device, &config);
         Self::create(
