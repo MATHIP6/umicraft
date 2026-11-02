@@ -19,6 +19,8 @@ mod held_name;
 mod hotbar;
 mod icons;
 mod runs;
+#[cfg(test)]
+mod scale_tests;
 mod sidebar;
 mod tab_layout;
 mod tab_list;
