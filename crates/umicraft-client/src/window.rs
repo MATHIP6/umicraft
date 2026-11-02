@@ -236,6 +236,8 @@ struct App {
     /// The textures of filled maps, created with the entity textures.
     map_textures: Option<MapTextures>,
     last_frame: Instant,
+    /// When the frame-rate cap wants the next frame to start.
+    next_frame: Instant,
     /// Origin of the clock that scrolls the enchantment glint.
     started: Instant,
     frame_times: Vec<f32>,
@@ -316,6 +318,7 @@ impl App {
             entity_textures: None,
             map_textures: None,
             last_frame: Instant::now(),
+            next_frame: Instant::now(),
             started: Instant::now(),
             frame_times: Vec::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
@@ -1413,12 +1416,27 @@ impl App {
             event_loop.exit();
             return;
         }
-        // The frame-rate cap: wait out what is left of the frame budget.
+        // The frame-rate cap. The target moves on by one exact budget per frame,
+        // so the wake-up delay of a sleep is not lost on every frame; the last
+        // millisecond is spun because a sleep overshoots by about that much.
         if self.options.video.max_fps < options::UNLIMITED_FPS {
             let budget = Duration::from_secs_f32(1.0 / self.options.video.max_fps as f32);
-            if let Some(rest) = budget.checked_sub(now.elapsed()) {
-                std::thread::sleep(rest);
+            self.next_frame += budget;
+            let arrived = Instant::now();
+            if self.next_frame < arrived {
+                // Behind schedule (a slow frame, a changed cap): do not catch up.
+                self.next_frame = arrived;
+            } else {
+                let spin = Duration::from_millis(1);
+                if let Some(rest) = (self.next_frame - arrived).checked_sub(spin) {
+                    std::thread::sleep(rest);
+                }
+                while Instant::now() < self.next_frame {
+                    std::hint::spin_loop();
+                }
             }
+        } else {
+            self.next_frame = Instant::now();
         }
         if let Some(window) = &self.window {
             window.request_redraw();
