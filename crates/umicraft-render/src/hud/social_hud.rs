@@ -11,7 +11,7 @@
 //! only draws on encrypted connections, are left out.
 
 use crate::font;
-use crate::hud::{HudLayout, HudState, SidebarView, TabListView, TitleView};
+use crate::hud::{plain_text, HudLayout, HudState, SidebarView, TabListView, TitleView};
 use crate::overlay::Overlay;
 
 /// A tab-list column holds at most this many rows before a column is added.
@@ -48,8 +48,6 @@ const SPECTATOR_TEXT: [f32; 4] = [1.0, 1.0, 1.0, 0.57];
 const SCORE_RED: [f32; 4] = [1.0, 0.33, 0.33, 1.0];
 /// An unlit ping bar.
 const PING_OFF: [f32; 4] = [0.25, 0.25, 0.25, 1.0];
-/// The game mode id of spectators.
-const SPECTATOR: i32 = 3;
 /// Heights of the five ping bars, in unscaled pixels.
 const PING_BAR_HEIGHTS: [f32; 5] = [2.0, 3.0, 5.0, 6.0, 8.0];
 
@@ -146,8 +144,9 @@ pub(crate) fn draw(overlay: &mut Overlay, state: &HudState, layout: &HudLayout) 
     if let Some(title) = &state.title {
         draw_title(overlay, title, layout);
     }
-    if let Some((text, alpha)) = &state.action_bar {
-        draw_action_bar(overlay, text, *alpha, state.armor > 0.0, layout);
+    if let Some(bar) = &state.action_bar {
+        let text = plain_text(&bar.text);
+        draw_action_bar(overlay, &text, bar.alpha, state.armor > 0.0, layout);
     }
     if state.show_tab_list {
         if let Some(tab_list) = &state.tab_list {
@@ -172,16 +171,22 @@ fn draw_sidebar(overlay: &mut Overlay, sidebar: &SidebarView, layout: &HudLayout
     let margin = SIDEBAR_MARGIN * scale;
     let right = layout.width() - margin + 2.0 * scale;
 
-    let mut inner = Overlay::text_width(&sidebar.title, scale);
-    for (name, value) in &sidebar.lines {
+    let title = plain_text(&sidebar.title);
+    let lines: Vec<(String, i32)> = sidebar
+        .lines
+        .iter()
+        .map(|line| (plain_text(&line.name), line.score))
+        .collect();
+    let mut inner = Overlay::text_width(&title, scale);
+    for (name, value) in &lines {
         let label = Overlay::text_width(name, scale) + Overlay::text_width(": ", scale);
         inner = inner.max(label + Overlay::text_width(&value.to_string(), scale));
     }
     let left = layout.width() - inner - margin;
-    let count = sidebar.lines.len();
+    let count = lines.len();
     let base = layout.height() * 0.5 + count as f32 * row / 3.0;
 
-    for (index, (name, value)) in sidebar.lines.iter().enumerate() {
+    for (index, (name, value)) in lines.iter().enumerate() {
         let y = base - (count - index) as f32 * row;
         overlay.rect(
             left - 2.0 * scale,
@@ -197,7 +202,7 @@ fn draw_sidebar(overlay: &mut Overlay, sidebar: &SidebarView, layout: &HudLayout
     }
 
     let top = base - count as f32 * row;
-    let title_width = Overlay::text_width(&sidebar.title, scale);
+    let title_width = Overlay::text_width(&title, scale);
     overlay.rect(
         left - 2.0 * scale,
         top - row - scale,
@@ -218,7 +223,7 @@ fn draw_sidebar(overlay: &mut Overlay, sidebar: &SidebarView, layout: &HudLayout
         top - row,
         scale,
         WHITE,
-        &sidebar.title,
+        &title,
     );
 }
 
@@ -234,8 +239,16 @@ fn draw_title(overlay: &mut Overlay, title: &TitleView, layout: &HudLayout) {
     };
     // The reference draws the title at 4x from -10 and the subtitle at 2x
     // from +5, in units of its own scaled space.
-    draw_centered(&title.title, 4.0 * scale, centre_y - 40.0 * scale);
-    draw_centered(&title.subtitle, 2.0 * scale, centre_y + 10.0 * scale);
+    draw_centered(
+        &plain_text(&title.title),
+        4.0 * scale,
+        centre_y - 40.0 * scale,
+    );
+    draw_centered(
+        &plain_text(&title.subtitle),
+        2.0 * scale,
+        centre_y + 10.0 * scale,
+    );
 }
 
 fn draw_action_bar(
@@ -268,18 +281,18 @@ fn draw_tab_list(overlay: &mut Overlay, tab: &TabListView, layout: &HudLayout) {
     let entries = &tab.entries[..count];
     let name_width = entries
         .iter()
-        .map(|entry| Overlay::text_width(&entry.name, scale))
+        .map(|entry| Overlay::text_width(&plain_text(&entry.name), scale))
         .fold(0.0_f32, f32::max);
     let geometry = tab_geometry(count, name_width, layout.width(), scale);
     let text_limit = layout.width() - TAB_SIDE_MARGIN * scale;
 
-    let header: Vec<String> = tab
-        .header
+    let header_text = tab.header.as_deref().map(plain_text).unwrap_or_default();
+    let footer_text = tab.footer.as_deref().map(plain_text).unwrap_or_default();
+    let header: Vec<String> = header_text
         .lines()
         .map(|line| clip(line, text_limit, scale))
         .collect();
-    let footer: Vec<String> = tab
-        .footer
+    let footer: Vec<String> = footer_text
         .lines()
         .map(|line| clip(line, text_limit, scale))
         .collect();
@@ -328,7 +341,7 @@ fn draw_tab_list(overlay: &mut Overlay, tab: &TabListView, layout: &HudLayout) {
         let x = geometry.left + column as f32 * (geometry.column_width + TAB_COLUMN_GAP * scale);
         let cell_y = y + line as f32 * row;
         overlay.rect(x, cell_y, geometry.column_width, row - scale, CELL);
-        let color = if entry.game_mode == SPECTATOR {
+        let color = if entry.spectator {
             SPECTATOR_TEXT
         } else {
             WHITE
@@ -340,7 +353,7 @@ fn draw_tab_list(overlay: &mut Overlay, tab: &TabListView, layout: &HudLayout) {
             cell_y,
             scale,
             color,
-            &clip(&entry.name, name_room, scale),
+            &clip(&plain_text(&entry.name), name_room, scale),
         );
         draw_ping(
             overlay,
@@ -381,7 +394,19 @@ fn draw_ping(overlay: &mut Overlay, right: f32, row_y: f32, ping: i32, scale: f3
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hud::TabEntryView;
+    use crate::hud::{ActionBarView, ChatRunView, SidebarLineView, TabEntryView};
+
+    fn run(text: &str) -> ChatRunView {
+        ChatRunView {
+            text: text.to_string(),
+            color: [255; 3],
+            bold: false,
+            italic: false,
+            underlined: false,
+            strikethrough: false,
+            obfuscated: false,
+        }
+    }
 
     fn layout() -> HudLayout {
         HudLayout::new(1280, 720)
@@ -389,9 +414,12 @@ mod tests {
 
     fn entry(name: &str, ping: i32) -> TabEntryView {
         TabEntryView {
-            name: name.to_string(),
+            name: vec![run(name)],
             ping,
-            game_mode: 0,
+            spectator: false,
+            score: None,
+            uuid: 0,
+            has_skin: false,
         }
     }
 
@@ -448,9 +476,11 @@ mod tests {
     fn the_tab_list_is_hidden_until_the_key_is_held() {
         let mut state = HudState {
             tab_list: Some(TabListView {
-                header: "WELCOME".to_string(),
-                footer: String::new(),
+                header: Some(vec![run("WELCOME")]),
+                footer: None,
                 entries: vec![entry("STEVE", 20), entry("ALEX", 400)],
+                value_style: None,
+                show_heads: false,
             }),
             ..HudState::default()
         };
@@ -463,21 +493,33 @@ mod tests {
     fn the_sidebar_title_and_action_bar_each_draw_something() {
         let sidebar = HudState {
             sidebar: Some(SidebarView {
-                title: "KILLS".to_string(),
-                lines: vec![("ALEX".to_string(), 4), ("BOB".to_string(), 1)],
+                title: vec![run("KILLS")],
+                lines: vec![
+                    SidebarLineView {
+                        name: vec![run("ALEX")],
+                        score: 4,
+                    },
+                    SidebarLineView {
+                        name: vec![run("BOB")],
+                        score: 1,
+                    },
+                ],
             }),
             ..HudState::default()
         };
         let title = HudState {
             title: Some(TitleView {
-                title: "ROUND 1".to_string(),
-                subtitle: "FIGHT".to_string(),
+                title: vec![run("ROUND 1")],
+                subtitle: vec![run("FIGHT")],
                 alpha: 1.0,
             }),
             ..HudState::default()
         };
         let action_bar = HudState {
-            action_bar: Some(("GO".to_string(), 0.5)),
+            action_bar: Some(ActionBarView {
+                text: vec![run("GO")],
+                alpha: 0.5,
+            }),
             ..HudState::default()
         };
         assert!(drawn(&sidebar) > 0);
@@ -489,7 +531,7 @@ mod tests {
     fn an_empty_sidebar_draws_nothing() {
         let state = HudState {
             sidebar: Some(SidebarView {
-                title: "T".to_string(),
+                title: vec![run("T")],
                 lines: vec![],
             }),
             ..HudState::default()
@@ -510,9 +552,11 @@ mod tests {
         let state = HudState {
             show_tab_list: true,
             tab_list: Some(TabListView {
-                header: String::new(),
-                footer: String::new(),
+                header: None,
+                footer: None,
                 entries,
+                value_style: None,
+                show_heads: false,
             }),
             ..HudState::default()
         };

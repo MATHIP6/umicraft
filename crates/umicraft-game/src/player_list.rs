@@ -20,7 +20,7 @@ pub type Uuid = u128;
 /// The tab list shows at most this many players.
 pub const MAX_VISIBLE: usize = 80;
 /// The game mode id of spectators, who are listed last.
-const SPECTATOR: i32 = 3;
+pub const SPECTATOR: i32 = 3;
 /// The profile property that carries the skin textures.
 const TEXTURES_PROPERTY: &str = "textures";
 
@@ -156,10 +156,13 @@ impl PlayerList {
         self.entries.iter_mut().find(|entry| entry.uuid == *uuid)
     }
 
-    /// The players in display order: spectators last, then by team name, then
-    /// by player name, capped at [`MAX_VISIBLE`].
+    /// Every player in display order: spectators last, then by team name, then
+    /// by player name (`GuiPlayerTabOverlay.PlayerComparator`).
+    ///
+    /// The column widths of the tab list are measured over all of them, before
+    /// the [`MAX_VISIBLE`] cap, as the reference does.
     #[must_use]
-    pub fn sorted(&self, scoreboard: &Scoreboard) -> Vec<&PlayerEntry> {
+    pub fn sorted_all(&self, scoreboard: &Scoreboard) -> Vec<&PlayerEntry> {
         let team = |entry: &PlayerEntry| {
             scoreboard
                 .team_of(&entry.name)
@@ -172,6 +175,13 @@ impl PlayerList {
                 .then_with(|| team(a).cmp(team(b)))
                 .then_with(|| a.name.cmp(&b.name))
         });
+        sorted
+    }
+
+    /// The players in display order, capped at [`MAX_VISIBLE`].
+    #[must_use]
+    pub fn sorted(&self, scoreboard: &Scoreboard) -> Vec<&PlayerEntry> {
+        let mut sorted = self.sorted_all(scoreboard);
         sorted.truncate(MAX_VISIBLE);
         sorted
     }

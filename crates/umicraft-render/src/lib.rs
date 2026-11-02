@@ -44,9 +44,10 @@ pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
 pub use hud::{
-    draw as draw_hud, draw_debug_only, selected_index, status_fills, BossView, ChatInputView,
-    ChatLineView, ChatRunView, ChatStyle, DebugF3View, Fill, HudLayout, HudState, Rect,
-    SidebarView, StatusRow, TabEntryView, TabListView, TitleView,
+    draw as draw_hud, draw_debug_only, plain_text, selected_index, status_fills, ActionBarView,
+    BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle, DebugF3View, Fill, HudLayout,
+    HudState, Rect, SidebarLineView, SidebarView, StatusRow, TabEntryView, TabListView,
+    TabValueStyle, TitleView,
 };
 pub use hud::{draw_hud_gui, HudSheets};
 pub use hud_hearts::{HeartsTint, HeartsView};

@@ -20,8 +20,8 @@ use umicraft_protocol::packets::play::clientbound::{
 };
 use umicraft_protocol::packets::play::metadata::{Metadata, WatchedObject};
 use umicraft_render::{
-    draw_debug_only, draw_hud, draw_hud_gui, Camera, ChatInputView, HudSheets, HudState, Overlay,
-    Renderer, SpriteSheet,
+    draw_debug_only, draw_hud, draw_hud_gui, plain_text, Camera, ChatInputView, HudSheets,
+    HudState, Overlay, Renderer, SpriteSheet,
 };
 use umicraft_ui::game_menu::GameMenu;
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
@@ -354,14 +354,14 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                     "boss",
                     hud.boss.as_ref().map_or_else(
                         || "none".to_string(),
-                        |b| format!("{} (health {:.2})", b.name, b.health),
+                        |b| format!("{} (health {:.2})", plain_text(&b.name), b.health),
                     ),
                 ),
                 (
                     "sidebar",
                     hud.sidebar.as_ref().map_or_else(
                         || "none".to_string(),
-                        |s| format!("{} ({} lines)", s.title, s.lines.len()),
+                        |s| format!("{} ({} lines)", plain_text(&s.title), s.lines.len()),
                     ),
                 ),
                 (
@@ -375,14 +375,21 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                     "title",
                     hud.title.as_ref().map_or_else(
                         || "none".to_string(),
-                        |t| format!("{} / {} (alpha {:.2})", t.title, t.subtitle, t.alpha),
+                        |t| {
+                            format!(
+                                "{} / {} (alpha {:.2})",
+                                plain_text(&t.title),
+                                plain_text(&t.subtitle),
+                                t.alpha
+                            )
+                        },
                     ),
                 ),
                 (
                     "action bar",
                     hud.action_bar.as_ref().map_or_else(
                         || "none".to_string(),
-                        |(text, alpha)| format!("{text} (alpha {alpha:.2})"),
+                        |bar| format!("{} (alpha {:.2})", plain_text(&bar.text), bar.alpha),
                     ),
                 ),
             ];
@@ -549,20 +556,29 @@ mod tests {
         assert!(sidebar
             .lines
             .iter()
-            .all(|(name, _)| !name.contains("hidden")));
+            .all(|line| !plain_text(&line.name).contains("hidden")));
         // The team prefix decorates the members.
-        assert!(sidebar.lines.iter().any(|(name, _)| name == "[R] Steve"));
+        assert!(sidebar
+            .lines
+            .iter()
+            .any(|line| plain_text(&line.name) == "[R] Steve"));
         // The highest score is on top.
-        assert_eq!(sidebar.lines[0].1, 9);
+        assert_eq!(sidebar.lines[0].score, 9);
     }
 
     #[test]
     fn the_tab_list_is_sorted_with_spectators_last_and_uses_display_names() {
         let hud = scene_hud();
         let tab = hud.tab_list.expect("a tab list");
-        assert_eq!(tab.entries.last().map(|e| e.game_mode), Some(3));
-        assert!(tab.entries.iter().any(|e| e.name == "Bob the Builder"));
-        assert_eq!(tab.header, "UMICRAFT DEMO SERVER");
+        assert_eq!(tab.entries.last().map(|e| e.spectator), Some(true));
+        assert!(tab
+            .entries
+            .iter()
+            .any(|e| plain_text(&e.name) == "Bob the Builder"));
+        assert_eq!(
+            tab.header.as_deref().map(plain_text).as_deref(),
+            Some("UMICRAFT DEMO SERVER")
+        );
     }
 
     #[test]

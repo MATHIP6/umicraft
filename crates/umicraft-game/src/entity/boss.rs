@@ -20,11 +20,21 @@ pub const DRAGON_MAX_HEALTH: f32 = 200.0;
 /// Maximum health of a Wither in Minecraft 1.8.
 pub const WITHER_MAX_HEALTH: f32 = 300.0;
 
+/// Language key of the Ender Dragon's name (`EntityList` string `EnderDragon`,
+/// `Entity.getName`: `"entity." + string + ".name"`).
+pub const DRAGON_NAME_KEY: &str = "entity.EnderDragon.name";
+
+/// Language key of the Wither's name (`EntityList` string `WitherBoss`).
+pub const WITHER_NAME_KEY: &str = "entity.WitherBoss.name";
+
 /// Active boss information suitable for rendering on the HUD.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BossInfo {
-    /// The boss display name.
-    pub name: String,
+    /// The language key of the boss type; the HUD translates it.
+    pub name_key: &'static str,
+    /// The custom name of the boss, which replaces the translated one
+    /// (`Entity.getName`).
+    pub custom_name: Option<String>,
     /// Health fraction in `0.0..=1.0`.
     pub health_fraction: f32,
 }
@@ -48,7 +58,8 @@ impl BossTracker {
                 EntityKind::Dragon => {
                     let health = record.health.unwrap_or(DRAGON_MAX_HEALTH);
                     dragon = Some(BossInfo {
-                        name: "Ender Dragon".to_string(),
+                        name_key: DRAGON_NAME_KEY,
+                        custom_name: record.meta.custom_name.as_deref().map(str::to_owned),
                         health_fraction: (health / DRAGON_MAX_HEALTH).clamp(0.0, 1.0),
                     });
                     break;
@@ -56,7 +67,8 @@ impl BossTracker {
                 EntityKind::Wither if wither.is_none() => {
                     let health = record.health.unwrap_or(WITHER_MAX_HEALTH);
                     wither = Some(BossInfo {
-                        name: "Wither".to_string(),
+                        name_key: WITHER_NAME_KEY,
+                        custom_name: record.meta.custom_name.as_deref().map(str::to_owned),
                         health_fraction: (health / WITHER_MAX_HEALTH).clamp(0.0, 1.0),
                     });
                 }
@@ -95,7 +107,7 @@ mod tests {
             EntityFlags::default(),
         );
         let boss = BossTracker::find_boss(&store).expect("wither boss");
-        assert_eq!(boss.name, "Wither");
+        assert_eq!(boss.name_key, WITHER_NAME_KEY);
         assert_eq!(boss.health_fraction, 1.0);
 
         store.set_health(EntityId(10), 150.0);
@@ -115,12 +127,12 @@ mod tests {
         );
         store.set_health(EntityId(20), 50.0);
         let boss = BossTracker::find_boss(&store).expect("dragon prioritized");
-        assert_eq!(boss.name, "Ender Dragon");
+        assert_eq!(boss.name_key, DRAGON_NAME_KEY);
         assert_eq!(boss.health_fraction, 0.25);
 
         store.destroy(&[20]);
         let boss = BossTracker::find_boss(&store).expect("wither after dragon destroyed");
-        assert_eq!(boss.name, "Wither");
+        assert_eq!(boss.name_key, WITHER_NAME_KEY);
         assert_eq!(boss.health_fraction, 0.5);
     }
 }

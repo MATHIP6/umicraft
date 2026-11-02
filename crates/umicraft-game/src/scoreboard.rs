@@ -23,6 +23,8 @@ use umicraft_protocol::packets::play::clientbound::{
 pub const DISPLAY_SLOTS: usize = 19;
 /// The display slot of the tab list.
 pub const SLOT_LIST: i8 = 0;
+/// The display slot of the score shown below player names.
+pub const SLOT_BELOW_NAME: i8 = 2;
 /// The display slot of the sidebar.
 pub const SLOT_SIDEBAR: i8 = 1;
 /// The first display slot of the per-team-colour sidebars (`3 + colour`).
@@ -58,6 +60,21 @@ pub struct Team {
     pub name_tag_visibility: String,
     /// The team colour as a chat formatting index, `-1` for none.
     pub color: i8,
+}
+
+impl Team {
+    /// Whether team mates may hurt each other (friendly flag bit 0).
+    #[must_use]
+    pub fn allows_friendly_fire(&self) -> bool {
+        self.friendly_flags & 0x01 != 0
+    }
+
+    /// Whether team mates see each other when invisible (friendly flag bit 1,
+    /// `ScorePlayerTeam.func_98297_h`).
+    #[must_use]
+    pub fn sees_friendly_invisibles(&self) -> bool {
+        self.friendly_flags & 0x02 != 0
+    }
 }
 
 /// One line of the sidebar, already formatted with the team of its holder.

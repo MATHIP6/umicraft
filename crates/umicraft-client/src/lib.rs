@@ -60,6 +60,7 @@ pub mod screen;
 pub mod screenshot;
 pub mod setup_cli;
 mod sky_textures;
+mod social_view;
 pub mod terrain_textures;
 #[cfg(test)]
 mod test_support;

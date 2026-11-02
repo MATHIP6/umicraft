@@ -9,6 +9,7 @@
 
 use std::time::Instant;
 
+use super::overlay_views::{ActionBarView, BossView, SidebarView, TabListView, TitleView};
 use crate::hud_hearts::HeartsView;
 
 /// Number of hotbar slots drawn by the HUD.
@@ -59,7 +60,7 @@ pub struct HudState {
     /// The vanilla F3 screen (P9-g), `None` while F3 is off.
     pub debug_f3: Option<DebugF3View>,
     /// The action bar text and its opacity, when a message is displayed.
-    pub action_bar: Option<(String, f32)>,
+    pub action_bar: Option<ActionBarView>,
     /// The title and subtitle, when displayed.
     pub title: Option<TitleView>,
     /// The scoreboard sidebar, when an objective is assigned to it.
@@ -86,15 +87,6 @@ pub struct DebugF3View {
     pub left: Vec<String>,
     /// The right column; may carry the `\u{a7}a` / `\u{a7}c` colour prefixes.
     pub right: Vec<String>,
-}
-
-/// The boss bar at the top of the screen.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BossView {
-    /// The name drawn above the bar.
-    pub name: String,
-    /// The health as a fraction of the maximum, `0.0..=1.0`.
-    pub health: f32,
 }
 
 /// The chat options that shape the log (`GameSettings.chat*`), as the
@@ -191,48 +183,6 @@ pub struct ChatInputView {
     pub caret: usize,
     /// Whether the caret is in the visible half of its blink.
     pub caret_visible: bool,
-}
-
-/// The title and subtitle drawn in the middle of the screen.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TitleView {
-    /// The title text.
-    pub title: String,
-    /// The subtitle text; empty when there is none.
-    pub subtitle: String,
-    /// The opacity in `0.0..=1.0`.
-    pub alpha: f32,
-}
-
-/// The scoreboard sidebar: a title and lines, top line first.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SidebarView {
-    /// The objective display name.
-    pub title: String,
-    /// The lines as `(name, score)`.
-    pub lines: Vec<(String, i32)>,
-}
-
-/// One player of the tab list.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TabEntryView {
-    /// The name drawn for the player, with its team decoration.
-    pub name: String,
-    /// The latency in milliseconds.
-    pub ping: i32,
-    /// The game mode id; 3 is spectator.
-    pub game_mode: i32,
-}
-
-/// The tab list in display order, with its header and footer.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TabListView {
-    /// The header text; empty when there is none.
-    pub header: String,
-    /// The footer text; empty when there is none.
-    pub footer: String,
-    /// The players, already sorted and capped.
-    pub entries: Vec<TabEntryView>,
 }
 
 impl Default for HudState {

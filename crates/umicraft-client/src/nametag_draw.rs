@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use glam::{Vec3, Vec4};
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
+use umicraft_game::hud::team_names::SCORE_LABEL_RANGE_SQ;
 use umicraft_render::Camera;
 use umicraft_ui::{Color, FontAtlas, Rect, TextStyle, Ui};
 
@@ -76,10 +77,19 @@ pub fn place_tags(
             )?;
             // A font pixel is as many screen pixels as `up` moves it.
             let scale = (top[1] - above[1]).abs();
+            let near =
+                f64::from(entity.position.distance_squared(camera.position)) < SCORE_LABEL_RANGE_SQ;
             (scale > 0.0).then(|| match text.split_once('\n') {
                 // `RenderPlayer.renderOffsetLivingLabel`: the score line sits
                 // where the tag would, and the name is lifted over it by
-                // 1.15 line heights.
+                // 1.15 line heights. A crouching player's tag goes through
+                // `renderName`'s own branch, which has no score line, and the
+                // score needs the player within 10 blocks.
+                Some((name, _)) if sneaking || !near => vec![PlacedTag {
+                    text: Arc::from(name),
+                    anchor: top,
+                    scale,
+                }],
                 Some((name, score)) => vec![
                     PlacedTag {
                         text: Arc::from(score),
@@ -245,6 +255,23 @@ mod tests {
             (near[0].scale / far[0].scale - 4.0).abs() < 0.3,
             "1/d scale"
         );
+    }
+
+    #[test]
+    fn the_score_line_needs_a_standing_player_within_ten_blocks() {
+        let label = "Bob\n7 hp";
+        let tags = |z: f32, flags: EntityFlags| {
+            let mut entity = tagged(EntityKind::Player, Vec3::new(0.0, 0.0, z), label);
+            entity.flags = flags;
+            place_tags(&[entity], &camera(), 1280.0, 720.0)
+        };
+        let standing = EntityFlags::default();
+        assert_eq!(tags(9.0, standing).len(), 2, "name and score");
+        let far = tags(11.0, standing);
+        assert_eq!(far.len(), 1, "too far for the score");
+        assert_eq!(&*far[0].text, "Bob");
+        let crouching = tags(5.0, EntityFlags::new(0x02, 0x7F));
+        assert_eq!(crouching.len(), 1, "no score line while crouching");
     }
 
     #[test]

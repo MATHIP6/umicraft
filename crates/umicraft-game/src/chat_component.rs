@@ -264,7 +264,7 @@ fn hover_text(value: &Value) -> Option<String> {
     if value.get("action")?.as_str()? != "show_text" {
         return None;
     }
-    let runs = parse_value(value.get("value")?, &Translations::default());
+    let runs = parse_json_value(value.get("value")?, &Translations::default());
     Some(plain(&runs))
 }
 
@@ -298,23 +298,47 @@ impl Output {
 #[must_use]
 pub fn parse(json: &str, translations: &Translations) -> Vec<Run> {
     match serde_json::from_str::<Value>(json) {
-        Ok(value) => parse_value(&value, translations),
-        Err(_) => expand_legacy(vec![Run {
-            text: json.chars().take(MAX_CHARS).collect(),
-            style: Style::default(),
-            click: None,
-            hover: None,
-        }]),
+        Ok(value) => parse_json_value(&value, translations),
+        Err(_) => parse_legacy(json),
     }
 }
 
-fn parse_value(value: &Value, translations: &Translations) -> Vec<Run> {
+/// The runs of a string that carries legacy `§` codes and no JSON, such as a
+/// team prefix or an objective display name.
+#[must_use]
+pub fn parse_legacy(text: &str) -> Vec<Run> {
+    expand_legacy(vec![Run {
+        text: text.chars().take(MAX_CHARS).collect(),
+        style: Style::default(),
+        click: None,
+        hover: None,
+    }])
+}
+
+/// The text of a component with the JSON styles dropped but the legacy `§`
+/// codes inside the text kept (`IChatComponent.getUnformattedText`).
+///
+/// The action bar is drawn from this text: 1.8 loses the colour of the
+/// component but the font renderer still obeys a code written in the text.
+#[must_use]
+pub fn unformatted_text(json: &str, translations: &Translations) -> String {
+    match serde_json::from_str::<Value>(json) {
+        Ok(value) => plain(&collect(&value, translations)),
+        Err(_) => json.chars().take(MAX_CHARS).collect(),
+    }
+}
+
+fn parse_json_value(value: &Value, translations: &Translations) -> Vec<Run> {
+    expand_legacy(collect(value, translations))
+}
+
+fn collect(value: &Value, translations: &Translations) -> Vec<Run> {
     let mut output = Output {
         runs: Vec::new(),
         chars: 0,
     };
     walk(value, &Inherited::default(), translations, 0, &mut output);
-    expand_legacy(output.runs)
+    output.runs
 }
 
 /// The text of the runs, without any style.

@@ -35,13 +35,18 @@ mod chat_hud;
 pub mod gui;
 mod layout;
 mod legacy;
+mod overlay_views;
 mod social_hud;
 mod state;
 
 pub use gui::{draw_hud_gui, HudSheets};
 pub use layout::{selected_index, status_fills, Fill, HudLayout, Rect, StatusRow};
 pub use legacy::{draw, draw_debug_only};
+pub use overlay_views::{
+    plain_text, ActionBarView, BossView, SidebarLineView, SidebarView, TabEntryView, TabListView,
+    TabValueStyle, TitleView,
+};
 pub use state::{
-    BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle, DebugF3View, HudState,
-    SidebarView, TabEntryView, TabListView, TitleView, CHAT_LINES, HOTBAR_SLOTS, STATUS_ICONS,
+    ChatInputView, ChatLineView, ChatRunView, ChatStyle, DebugF3View, HudState, CHAT_LINES,
+    HOTBAR_SLOTS, STATUS_ICONS,
 };

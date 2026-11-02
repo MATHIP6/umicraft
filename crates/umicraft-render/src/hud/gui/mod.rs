@@ -9,20 +9,30 @@
 //! `icons.png`. [`draw_hud_gui`] is the entry point; each element family
 //! lives in its own submodule.
 
+mod action_bar;
+mod boss_bar;
 mod chat;
 mod debug_f3;
 mod hotbar;
 mod icons;
-mod overlays;
+mod runs;
+mod sidebar;
+mod tab_layout;
+mod tab_list;
+mod titles;
 
 use umicraft_ui::screens::gui_scale;
 use umicraft_ui::{DrawList, FontAtlas, SpriteSheet};
 
+use action_bar::draw_action_bar;
+use boss_bar::draw_boss_bar;
 use chat::draw_chat;
 use debug_f3::draw_debug_f3;
 use hotbar::draw_hotbar;
 use icons::draw_icons_layer;
-use overlays::draw_overlays;
+use sidebar::draw_sidebar;
+use tab_list::draw_tab_list;
+use titles::draw_title;
 
 use super::HudState;
 
@@ -62,13 +72,38 @@ pub fn draw_hud_gui(
 
     if let Some(icons) = &sheets.icons {
         draw_icons_layer(list, state, gw, gh, sf, font, icons);
+        if let Some(boss) = &state.boss {
+            draw_boss_bar(list, state, boss, (gw, gh), sf, (font, icons));
+        }
     }
 
     draw_chat(list, state, gw, gh, sf, font);
-    draw_overlays(list, state, gw, gh, sf, font, sheets.icons.as_ref());
+    draw_social_overlays(list, state, (gw, gh), sf, (font, sheets.icons.as_ref()));
+}
 
+/// Draws the sidebar, title, action bar and, while the key is held, the tab
+/// list, in the order of `GuiIngame.renderGameOverlay`.
+fn draw_social_overlays(
+    list: &mut DrawList,
+    state: &HudState,
+    size: (f32, f32),
+    sf: f32,
+    (font, icons): (&FontAtlas, Option<&SpriteSheet>),
+) {
+    if let Some(sidebar) = &state.sidebar {
+        draw_sidebar(list, state, sidebar, size, sf, font);
+    }
+    if let Some(bar) = &state.action_bar {
+        draw_action_bar(list, state, bar, size, sf, font);
+    }
+    if let Some(title) = &state.title {
+        draw_title(list, state, title, size, sf, font);
+    }
+    if let (true, Some(tab)) = (state.show_tab_list, &state.tab_list) {
+        draw_tab_list(list, state, tab, size.0, sf, (font, icons));
+    }
     if let Some(view) = &state.debug_f3 {
-        draw_debug_f3(list, view, gw, sf, font);
+        draw_debug_f3(list, view, size.0, sf, font);
     }
 }
 
@@ -108,7 +143,7 @@ mod tests {
         let mut list = DrawList::new();
         let state = HudState {
             boss: Some(BossView {
-                name: "Ender Dragon".to_string(),
+                name: vec![runs::run("Ender Dragon")],
                 health: 0.8,
             }),
             ..Default::default()

@@ -25,6 +25,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::entity_render::fishing::first_person_tip;
+use crate::social_view;
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
@@ -35,16 +36,17 @@ use umicraft_game::digging::{
 };
 use umicraft_game::entity::leash::{leash_entities, LeashFrame};
 use umicraft_game::entity::light::{eye_light, light_entities};
-use umicraft_game::entity::nametag::{mob_tag, player_tag};
+use umicraft_game::entity::nametag::mob_tag;
 use umicraft_game::entity::painting::light_paintings;
 use umicraft_game::entity::rail::rail_entities;
 use umicraft_game::entity::shadow::shadow_entities;
 use umicraft_game::entity::{
-    BossTracker, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
-    EntityStore,
+    EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord, EntityStore,
 };
 use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::hand::{HandPose, HandState, SwingEffects};
+use umicraft_game::hud::boss_bar::BossBar;
+use umicraft_game::hud::team_names::{player_label, sees_team_ghost};
 use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::creative::CreativeScreen;
@@ -79,8 +81,7 @@ use umicraft_protocol::packets::play::serverbound::UseEntityAction;
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
 use umicraft_render::{
-    BorderView, BossView, ChatLineView, ChatRunView, FogContext, HeartsTint, HeartsView, HudState,
-    OutlineBox, SidebarView, TabEntryView, TabListView, TitleView,
+    BorderView, ChatLineView, FogContext, HeartsTint, HeartsView, HudState, OutlineBox,
 };
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, LightLevel, World};
 
@@ -566,6 +567,8 @@ struct Game {
     title: TitleState,
     /// The message above the hotbar.
     action_bar: ActionBar,
+    /// The boss bar (`BossStatus`).
+    boss_bar: BossBar,
     /// The completions the server offered for the open chat line.
     completions: Vec<String>,
     /// The state of the creative inventory screen.
@@ -632,6 +635,7 @@ impl Game {
             scoreboard: Scoreboard::new(),
             title: TitleState::new(),
             action_bar: ActionBar::new(),
+            boss_bar: BossBar::new(),
             completions: Vec::new(),
             creative: CreativeScreen::new(),
             server: ServerState::new(),
@@ -782,92 +786,16 @@ impl Game {
             crosshair: true,
             chat: self.chat.iter().cloned().collect(),
             debug_lines: Vec::new(),
-            action_bar: self.action_bar_view(),
-            title: self.title_view(),
-            sidebar: self.sidebar_view(),
-            tab_list: self.tab_list_view(),
+            action_bar: social_view::action_bar_view(&self.action_bar),
+            title: social_view::title_view(&self.title),
+            sidebar: social_view::sidebar_view(&self.scoreboard, &self.own_name),
+            tab_list: social_view::tab_list_view(&self.player_list, &self.scoreboard, true),
             show_tab_list: false,
             completions: self.completions.clone(),
             completions_serial: self.completions_serial,
-            boss: self.boss_view(),
+            boss: social_view::boss_view(&self.boss_bar),
             ..HudState::default()
         }
-    }
-
-    /// The active boss bar, if any boss is in the world.
-    fn boss_view(&self) -> Option<BossView> {
-        BossTracker::find_boss(&self.entities).map(|b| BossView {
-            name: b.name,
-            health: b.health_fraction,
-        })
-    }
-
-    /// The action bar message with its opacity, while one is displayed.
-    fn action_bar_view(&self) -> Option<(String, f32)> {
-        let json = self.action_bar.message()?;
-        let alpha = self.action_bar.alpha(0.0);
-        (alpha > 0.0).then(|| (crate::chat::flatten(json), alpha))
-    }
-
-    /// The title and subtitle with their opacity, while they are displayed.
-    fn title_view(&self) -> Option<TitleView> {
-        let title = self.title.title();
-        let subtitle = self.title.subtitle();
-        let alpha = self.title.alpha(0.0);
-        if alpha <= 0.0 || (title.is_none() && subtitle.is_none()) {
-            return None;
-        }
-        Some(TitleView {
-            title: title.map(crate::chat::flatten).unwrap_or_default(),
-            subtitle: subtitle.map(crate::chat::flatten).unwrap_or_default(),
-            alpha,
-        })
-    }
-
-    /// The sidebar of the scoreboard, as the player sees it.
-    fn sidebar_view(&self) -> Option<SidebarView> {
-        let sidebar = self.scoreboard.sidebar(&self.own_name)?;
-        Some(SidebarView {
-            title: sidebar.title,
-            lines: sidebar
-                .lines
-                .into_iter()
-                .map(|line| (line.name, line.value))
-                .collect(),
-        })
-    }
-
-    /// The tab list in display order, once the server listed a player.
-    fn tab_list_view(&self) -> Option<TabListView> {
-        if self.player_list.is_empty() {
-            return None;
-        }
-        let entries = self
-            .player_list
-            .sorted(&self.scoreboard)
-            .into_iter()
-            .map(|entry| TabEntryView {
-                name: entry.display_name.as_deref().map_or_else(
-                    || self.scoreboard.format_name(&entry.name),
-                    crate::chat::flatten,
-                ),
-                ping: entry.ping,
-                game_mode: entry.game_mode,
-            })
-            .collect();
-        Some(TabListView {
-            header: self
-                .player_list
-                .header()
-                .map(crate::chat::flatten)
-                .unwrap_or_default(),
-            footer: self
-                .player_list
-                .footer()
-                .map(crate::chat::flatten)
-                .unwrap_or_default(),
-            entries,
-        })
     }
 }
 
@@ -885,9 +813,11 @@ pub(crate) fn hud_after(events: Vec<PlayEvent>, own_name: &str, ticks: u32) -> H
     for event in events {
         handle_net(&mut game, event, &mut queue, &frames);
     }
+    social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
     for _ in 0..ticks {
         game.title.tick();
         game.action_bar.tick();
+        social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
     }
     game.hud()
 }
@@ -907,21 +837,7 @@ fn local_chat_line(text: &str, translations: &Translations) -> ChatLineView {
 /// The HUD view of parsed runs, stamped with the arrival time.
 fn line_from_runs(runs: &[chat_component::Run]) -> ChatLineView {
     ChatLineView {
-        runs: runs
-            .iter()
-            .map(|run| ChatRunView {
-                text: run.text.clone(),
-                color: run.style.color.map_or(
-                    chat_component::Color::WHITE.rgb(),
-                    chat_component::Color::rgb,
-                ),
-                bold: run.style.bold,
-                italic: run.style.italic,
-                underlined: run.style.underlined,
-                strikethrough: run.style.strikethrough,
-                obfuscated: run.style.obfuscated,
-            })
-            .collect(),
+        runs: social_view::run_views(runs),
         received: Instant::now(),
     }
 }
@@ -1458,25 +1374,14 @@ fn tick_overlays(game: &mut Game) {
     game.overlays.tick(&facts);
 }
 
-/// The display slot of the score shown below the name.
-const SLOT_BELOW_NAME: i8 = 2;
-
 /// The name tag text of an entity under the team rules, if it has one.
+///
+/// A player's label may hold a second line, the below-name score; the two
+/// lines are one tag, split by `place_tags`.
 fn entity_tag(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> Option<String> {
     if entity.kind == EntityKind::Player {
         let name = &entity.profile.as_ref()?.name;
-        let tag = player_tag(scoreboard, local, name, entity.flags.is_invisible())?;
-        // The objective in the display slot below the name adds a line of
-        // `score objective` under the tag (`RenderPlayer.renderOffsetLivingLabel`);
-        // the two lines are one tag, split by `place_tags`.
-        return Some(match scoreboard.display_slot(SLOT_BELOW_NAME) {
-            Some(objective) => format!(
-                "{tag}\n{} {}",
-                scoreboard.score(&objective.name, name),
-                objective.display_name
-            ),
-            None => tag,
-        });
+        return player_label(scoreboard, local, name, entity.flags.is_invisible());
     }
     mob_tag(
         entity.meta.custom_name.as_deref(),
@@ -1484,22 +1389,14 @@ fn entity_tag(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> Op
     )
 }
 
-/// Whether the local player sees an invisible player as a ghost because they
-/// are in the same team, and that team sees invisible team mates
-/// (MCP `Entity.isInvisibleToPlayer`).
-fn sees_team_ghost(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> bool {
-    let Some(profile) = entity
+/// Whether the local player sees an invisible player as a ghost (MCP
+/// `Entity.isInvisibleToPlayer`).
+fn is_team_ghost(scoreboard: &Scoreboard, local: &str, entity: &EntityRecord) -> bool {
+    entity
         .profile
         .as_ref()
         .filter(|_| entity.kind == EntityKind::Player)
-    else {
-        return false;
-    };
-    let (Some(team), Some(own)) = (scoreboard.team_of(&profile.name), scoreboard.team_of(local))
-    else {
-        return false;
-    };
-    team.name == own.name && team.friendly_flags & 0x02 != 0
+        .is_some_and(|profile| sees_team_ghost(scoreboard, local, &profile.name))
 }
 
 /// Block id of the bed (MCP `Blocks.bed`).
@@ -1557,7 +1454,7 @@ fn handle_net(
         game.entities
             .refresh_name_tags(|entity| entity_tag(scoreboard, own_name, entity));
         game.entities
-            .refresh_ghosts(|entity| sees_team_ghost(scoreboard, own_name, entity));
+            .refresh_ghosts(|entity| is_team_ghost(scoreboard, own_name, entity));
     }
 }
 
@@ -1590,6 +1487,7 @@ fn apply_net_event(
             game.scoreboard = Scoreboard::new();
             game.title = TitleState::new();
             game.action_bar = ActionBar::new();
+            game.boss_bar = BossBar::new();
             game.completions.clear();
             game.hud_dirty = true;
             let _ = frames.try_send(RenderEvent::Reset);
@@ -2857,6 +2755,9 @@ fn tick(
         game.action_bar.tick();
         game.hud_dirty = true;
     }
+    if social_view::tick_boss_bar(&mut game.boss_bar, &game.entities) {
+        game.hud_dirty = true;
+    }
 
     // The intent of the tick: the raw key state with the yaw and the pitch
     // the player is looking at.
@@ -3113,6 +3014,7 @@ mod tests {
     use umicraft_game::item_use::{DropKind, UseAction};
     use umicraft_protocol::packets::play::serverbound::DiggingStatus;
     use umicraft_protocol::packets::play::ItemStack as WireItemStack;
+    use umicraft_render::plain_text;
 
     /// An `ench` list with one enchantment, as a server would send it.
     fn enchanted_nbt(id: i16, level: i16) -> Vec<u8> {
@@ -5215,22 +5117,27 @@ mod tests {
         }
         let hud = game.hud();
         let sidebar = hud.sidebar.expect("the sidebar objective is displayed");
-        assert_eq!(sidebar.title, "Kills");
-        assert_eq!(sidebar.lines, [("Alex".to_string(), 4)]);
+        assert_eq!(plain_text(&sidebar.title), "Kills");
+        assert_eq!(sidebar.lines.len(), 1);
+        assert_eq!(plain_text(&sidebar.lines[0].name), "Alex");
+        assert_eq!(sidebar.lines[0].score, 4);
 
         let tab_list = hud.tab_list.expect("a player is listed");
-        assert_eq!(tab_list.header, "Welcome");
-        assert_eq!(tab_list.footer, "", "an empty footer stays empty");
+        assert_eq!(
+            tab_list.header.as_deref().map(plain_text).as_deref(),
+            Some("Welcome")
+        );
+        assert_eq!(tab_list.footer, None, "an empty footer is absent");
         assert_eq!(tab_list.entries.len(), 1);
-        assert_eq!(tab_list.entries[0].name, "Steve");
+        assert_eq!(plain_text(&tab_list.entries[0].name), "Steve");
         assert_eq!(tab_list.entries[0].ping, 37);
 
         let title = hud.title.expect("a title is displayed");
-        assert_eq!(title.title, "Round 1");
+        assert_eq!(plain_text(&title.title), "Round 1");
         assert!(title.alpha > 0.0);
-        let (action_bar, alpha) = hud.action_bar.expect("an action bar is displayed");
-        assert_eq!(action_bar, "Go!");
-        assert!(alpha > 0.0);
+        let action_bar = hud.action_bar.expect("an action bar is displayed");
+        assert_eq!(plain_text(&action_bar.text), "Go!");
+        assert!(action_bar.alpha > 0.0);
     }
 
     #[test]
@@ -5334,9 +5241,10 @@ mod tests {
             &frames,
         );
 
+        social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
         let hud = game.hud();
         let boss = hud.boss.expect("boss bar present after dragon spawn");
-        assert_eq!(boss.name, "Ender Dragon");
+        assert_eq!(plain_text(&boss.name), "Ender Dragon");
         assert_eq!(boss.health, 1.0);
 
         // Update health via EntityMetadata to 100.0 (half health)
@@ -5356,6 +5264,7 @@ mod tests {
             &frames,
         );
 
+        social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
         let hud = game.hud();
         let boss = hud.boss.expect("boss bar present after damage");
         assert_eq!(boss.health, 0.5);
@@ -5369,9 +5278,15 @@ mod tests {
             &mut queue,
             &frames,
         );
+        // `BossStatus.statusBarTime` keeps the bar for 100 ticks.
+        for _ in 0..99 {
+            social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
+        }
+        assert!(game.hud().boss.is_some(), "the bar outlives the dragon");
+        social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
         assert!(
             game.hud().boss.is_none(),
-            "boss bar disappears when dragon is destroyed"
+            "boss bar disappears 100 ticks after the dragon"
         );
     }
 }

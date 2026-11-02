@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The `icons.png` layer: crosshair, health, food and armour rows, the
-//! experience bar and level, and the boss bar.
+//! experience bar and level.
 
 use umicraft_ui::{DrawList, FontAtlas, Rect, SpriteSheet, TextStyle};
 
@@ -104,37 +104,5 @@ pub(super) fn draw_icons_layer(
         list.text([lx * sf, (ly + 1.0) * sf], &s, TextStyle::new(sf, outline));
         list.text([lx * sf, (ly - 1.0) * sf], &s, TextStyle::new(sf, outline));
         list.text([lx * sf, ly * sf], &s, TextStyle::new(sf, green));
-    }
-
-    // Boss bar: icons (0, 74, 182, 5) at (W/2 - 91, 12), fill (0, 79, l, 5), name at y=2
-    if let Some(boss) = &state.boss {
-        let bx = gw * 0.5 - 91.0;
-        let by = 12.0;
-        list.image(
-            icons.sub(0, 74, 182, 5),
-            Rect::new(bx * sf, by * sf, 182.0 * sf, 5.0 * sf),
-            [1.0; 4],
-        );
-        let l = ((boss.health.clamp(0.0, 1.0) * 183.0).floor() as u32).min(182);
-        if l > 0 {
-            list.image(
-                icons.sub(0, 79, l, 5),
-                Rect::new(bx * sf, by * sf, l as f32 * sf, 5.0 * sf),
-                [1.0; 4],
-            );
-        }
-        let name_w = font.measure(&boss.name, 1.0);
-        let nx = gw * 0.5 - name_w * 0.5;
-        let ny = 2.0;
-        list.text(
-            [(nx + 1.0) * sf, (ny + 1.0) * sf],
-            &boss.name,
-            TextStyle::new(sf, [0.25, 0.25, 0.25, 1.0]),
-        );
-        list.text(
-            [nx * sf, ny * sf],
-            &boss.name,
-            TextStyle::new(sf, [1.0, 1.0, 1.0, 1.0]),
-        );
     }
 }
