@@ -288,6 +288,18 @@ impl WindowManager {
         }
     }
 
+    /// Whether a `Confirm Transaction` of this window gets an answer: the
+    /// inventory (id 0) and the open container do, any other id does not
+    /// (MCP `NetHandlerPlayClient.handleConfirmTransaction`).
+    #[must_use]
+    pub fn answers_transaction(&self, window_id: u8) -> bool {
+        window_id == 0
+            || self
+                .container
+                .as_ref()
+                .is_some_and(|container| container.window_id == window_id)
+    }
+
     /// Applies a `Confirm Transaction`: an accepted click is forgotten, a
     /// rejected one is rolled back to the state before it.
     pub fn confirm_transaction(
@@ -436,6 +448,17 @@ mod tests {
         assert_eq!(wm.cursor(), Some(&stack(1, 2)));
         wm.apply_set_slot(-1, -1, ItemStack::EMPTY);
         assert_eq!(wm.cursor(), None);
+    }
+
+    #[test]
+    fn a_transaction_is_answered_for_the_inventory_and_the_open_window_only() {
+        let mut wm = WindowManager::new();
+        assert!(wm.answers_transaction(0));
+        assert!(!wm.answers_transaction(2));
+        wm.open_window(2, WindowKind::Chest, "Chest".to_string(), 27);
+        assert!(wm.answers_transaction(2));
+        wm.close_window(2);
+        assert!(!wm.answers_transaction(2));
     }
 
     #[test]

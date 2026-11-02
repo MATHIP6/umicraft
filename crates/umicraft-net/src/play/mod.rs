@@ -12,4 +12,6 @@ mod session;
 
 pub use drive::{drive, SessionCounters, SessionEnd};
 
-pub use session::{JoinGameInfo, PlayEvent, PlayOptions, PlaySession, PlayerPlacement, Reaction};
+pub use session::{
+    JoinGameInfo, PlayEvent, PlayOptions, PlaySession, PlayerPlacement, RawPlacement, Reaction,
+};

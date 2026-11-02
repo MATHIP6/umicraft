@@ -55,7 +55,7 @@ side of the stars is `combat::{emit_stars, tick_emitters}`.
 | P6c | hurt camera tilt, heart flash, absorption / regeneration / poison / wither hearts | done |
 | P6d | bow FOV zoom; fishing line; projectiles (snowball, egg, pearl, splash potion: only the use packet is sent, which is vanilla) | done; nothing else to draw |
 | P6e | critical and sharpness stars | done through `Animation` 4 / 5 and the local prediction against players; the death message is dropped (not vanilla) |
-| P6f | scripted 1v1 in `umicraft-testkit` (melee with sprint resets, bow, rod, pearls, splash) compared with vanilla within the P0 tolerance | Needs the local PandaSpigot server (`runtime/panda-1.8.8`, `docs/parity-harness.md`) and a vanilla session to compare with: not done. The anti-cheat check on a public network waits for P12. |
+| P6f | Umicraft side recorded 2026-11-02 against a still golem (`runtime/umicraft-combat.umcapt`); a first hand-played vanilla capture matches the packet shapes (and showed the missing `TCP_NODELAY`, fixed); the scripted vanilla run and the knockback comparison remain. Scripted 1v1 in `umicraft-testkit` (melee with sprint resets, bow, rod, pearls, splash) compared with vanilla within the P0 tolerance | Needs the local PandaSpigot server (`runtime/panda-1.8.8`, `docs/parity-harness.md`) and a vanilla session to compare with: not done. The anti-cheat check on a public network waits for P12. |
 
 ## Known gaps of P6a / P6b
 

@@ -69,9 +69,59 @@ pub struct PlayerPlacement {
     pub yaw: f32,
     /// Pitch.
     pub pitch: f32,
+    /// The packet as the server sent it, only when it has relative flags
+    /// (boxed to keep [`PlayEvent`] small).
+    pub raw: Option<Box<RawPlacement>>,
+}
+
+/// A `Player Position and Look` (0x08) before its relative flags are applied.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RawPlacement {
+    /// X, an offset when bit 0x01 of `flags` is set.
+    pub x: f64,
+    /// Y, an offset when bit 0x02 is set.
+    pub y: f64,
+    /// Z, an offset when bit 0x04 is set.
+    pub z: f64,
+    /// Yaw, an offset when bit 0x08 is set.
+    pub yaw: f32,
+    /// Pitch, an offset when bit 0x10 is set.
+    pub pitch: f32,
+    /// The relative flags.
+    pub flags: u8,
 }
 
 impl PlayerPlacement {
+    /// The placement with the relative flags applied to where the player is
+    /// now (MCP `NetHandlerPlayClient.handlePlayerPosLook`).
+    ///
+    /// The session only knows the previous placement, which is stale as soon
+    /// as the player moved or turned. A relative teleport (GrimAC sends its
+    /// setbacks with relative rotation, so the view does not jump) resolved
+    /// against the stale one lands on the wrong yaw and is ignored by the
+    /// anti-cheat (`BadPacketsN`, observed 2026-11-02).
+    #[must_use]
+    pub fn resolved_against(&self, position: [f64; 3], yaw: f32, pitch: f32) -> Self {
+        let Some(raw) = self.raw.as_deref().copied() else {
+            return self.clone();
+        };
+        let offset = |bit: u8, now: f64, value: f64| {
+            if raw.flags & bit != 0 {
+                now + value
+            } else {
+                value
+            }
+        };
+        Self {
+            x: offset(0x01, position[0], raw.x),
+            y: offset(0x02, position[1], raw.y),
+            z: offset(0x04, position[2], raw.z),
+            yaw: offset(0x08, f64::from(yaw), f64::from(raw.yaw)) as f32,
+            pitch: offset(0x10, f64::from(pitch), f64::from(raw.pitch)) as f32,
+            raw: self.raw.clone(),
+        }
+    }
+
     /// The `Player Position and Look` (0x06) packet that acknowledges this
     /// placement.
     ///
@@ -495,27 +545,12 @@ impl PlaySession {
             clientbound::WindowProperty::ID => {
                 Reaction::event(PlayEvent::WindowProperty(WindowProperty::decode(body)?))
             }
-            clientbound::ConfirmTransaction::ID => {
-                let packet = clientbound::ConfirmTransaction::decode(body)?;
-                if packet.accepted {
-                    Reaction::event(PlayEvent::ConfirmTransaction(packet))
-                } else {
-                    Reaction {
-                        event: Some(PlayEvent::ConfirmTransaction(packet)),
-                        replies: [
-                            Some(PlayServerbound::ConfirmTransaction(
-                                umicraft_protocol::packets::play::serverbound::ConfirmTransaction {
-                                    window_id: packet.window_id as i8,
-                                    action_number: packet.action_number,
-                                    accepted: false,
-                                },
-                            )),
-                            None,
-                        ],
-                        ..Reaction::default()
-                    }
-                }
-            }
+            // The reply is not sent here: it must leave after the replies to
+            // the packets that came before it, so the game thread sends it
+            // (see `Game::answer_transaction`).
+            clientbound::ConfirmTransaction::ID => Reaction::event(PlayEvent::ConfirmTransaction(
+                clientbound::ConfirmTransaction::decode(body)?,
+            )),
             clientbound::UseBed::ID => {
                 Reaction::event(PlayEvent::UseBed(clientbound::UseBed::decode(body)?))
             }
@@ -736,6 +771,16 @@ impl PlaySession {
             z: pick(0x04, previous.z, packet.z),
             yaw: pick_angle(0x08, previous.yaw, packet.yaw),
             pitch: pick_angle(0x10, previous.pitch, packet.pitch),
+            raw: (packet.flags & 0x1F != 0).then(|| {
+                Box::new(RawPlacement {
+                    x: packet.x,
+                    y: packet.y,
+                    z: packet.z,
+                    yaw: packet.yaw,
+                    pitch: packet.pitch,
+                    flags: packet.flags,
+                })
+            }),
         }
     }
 }
@@ -805,6 +850,23 @@ mod tests {
             pitch: -20.0,
             flags,
         })
+    }
+
+    #[test]
+    fn a_relative_placement_resolves_against_where_the_player_is() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let PlayEvent::Placement(placement) = event(&mut session, position_look(0x1F)) else {
+            panic!("placement expected");
+        };
+        let now = placement.resolved_against([10.0, 64.0, -4.0], 90.0, 30.0);
+        assert_eq!((now.x, now.y, now.z), (11.5, 134.0, -6.5));
+        assert_eq!((now.yaw, now.pitch), (105.0, 10.0));
+        let absolute = event(&mut session, position_look(0));
+        let PlayEvent::Placement(absolute) = absolute else {
+            panic!("placement expected");
+        };
+        let same = absolute.resolved_against([9.0, 9.0, 9.0], 9.0, 9.0);
+        assert_eq!((same.x, same.yaw), (1.5, 15.0));
     }
 
     #[test]
@@ -879,6 +941,7 @@ mod tests {
                 z: -2.5,
                 yaw: 15.0,
                 pitch: -20.0,
+                raw: None,
             })
         );
     }
@@ -892,6 +955,7 @@ mod tests {
             z: -5.0,
             yaw: 90.0,
             pitch: 10.0,
+            ..PlayerPlacement::default()
         });
         // X, Z and yaw are deltas; Y and pitch stay absolute.
         let PlayEvent::Placement(placement) =
@@ -1125,30 +1189,15 @@ mod tests {
     }
 
     #[test]
-    fn a_rejected_transaction_is_echoed_back_and_forwarded() {
+    fn a_rejected_transaction_is_forwarded_and_left_to_the_game_thread() {
         let mut session = PlaySession::new(PlayOptions::default());
         let packet = clientbound::ConfirmTransaction {
-            window_id: 2,
+            window_id: 0,
             action_number: 5,
             accepted: false,
         };
-        let reaction = react(&mut session, PlayClientbound::ConfirmTransaction(packet));
-        let replies: Vec<_> = reaction.replies().cloned().collect();
-        assert_eq!(replies.len(), 1);
-        assert_eq!(
-            replies[0],
-            PlayServerbound::ConfirmTransaction(
-                umicraft_protocol::packets::play::serverbound::ConfirmTransaction {
-                    window_id: 2,
-                    action_number: 5,
-                    accepted: false,
-                }
-            )
-        );
-        assert_eq!(
-            reaction.into_event(),
-            Some(PlayEvent::ConfirmTransaction(packet))
-        );
+        let ev = event(&mut session, PlayClientbound::ConfirmTransaction(packet));
+        assert_eq!(ev, PlayEvent::ConfirmTransaction(packet));
     }
 
     #[test]
@@ -1247,6 +1296,7 @@ mod tests {
             z: -0.5,
             yaw: 90.0,
             pitch: 0.0,
+            ..PlayerPlacement::default()
         };
         let PlayServerbound::PositionLook(answer) = placement.acknowledgement(true) else {
             panic!("the acknowledgement is a position-and-look packet");

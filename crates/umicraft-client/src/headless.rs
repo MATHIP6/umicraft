@@ -69,6 +69,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         view_distance: args.view_distance,
         chat_mode: 0,
         chat_colors: true,
+        handshake_host: args.handshake_host.clone(),
     })?;
 
     let mut script = Script::new(phases(&args.script));
