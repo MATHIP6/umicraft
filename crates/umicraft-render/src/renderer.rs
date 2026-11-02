@@ -228,6 +228,8 @@ pub struct Renderer {
     overlay_pipeline: wgpu::RenderPipeline,
     /// Pipeline for GUI texture quads (RGBA, no coverage threshold).
     gui_overlay_pipeline: wgpu::RenderPipeline,
+    /// `gui_overlay_pipeline` with the inverting blend of the crosshair.
+    gui_inverted_pipeline: wgpu::RenderPipeline,
     /// Layout and sampler shared by every font texture, so
     /// [`Renderer::set_font_atlas`] can bind a replacement texture without
     /// recreating the overlay pipeline.
@@ -603,6 +605,26 @@ impl Renderer {
             format,
             wgpu::BlendState::ALPHA_BLENDING,
         );
+        // MCP `GuiIngame.renderGameOverlay`: `tryBlendFuncSeparate(775, 769,
+        // 1, 0)` for the crosshair, i.e. `src * (1 - dst) + dst * (1 - src)`.
+        let gui_inverted_pipeline = create_overlay_pipeline(
+            &device,
+            &gui_overlay_shader,
+            &gui_overlay_layout,
+            format,
+            wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::OneMinusDst,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            },
+        );
         let sky = SkyRenderer::new(&device, &queue, format);
         let clouds = CloudRenderer::new(&device, &queue, format);
         let border = BorderRenderer::new(&device, &queue, format);
@@ -741,6 +763,7 @@ impl Renderer {
             official_blocks: None,
             overlay_pipeline,
             gui_overlay_pipeline,
+            gui_inverted_pipeline,
             overlay_layout,
             gui_overlay_layout,
             font_sampler,
@@ -2067,9 +2090,13 @@ impl Renderer {
                             continue;
                         }
                     }
-                    UiBatchKind::Gui => {
+                    UiBatchKind::Gui | UiBatchKind::GuiInverted => {
                         if let Some(gui_bg) = &self.gui_bind_group {
-                            pass.set_pipeline(&self.gui_overlay_pipeline);
+                            pass.set_pipeline(if batch.kind == UiBatchKind::Gui {
+                                &self.gui_overlay_pipeline
+                            } else {
+                                &self.gui_inverted_pipeline
+                            });
                             pass.set_bind_group(0, gui_bg, &[]);
                         } else {
                             // No GUI atlas uploaded — skip this batch.

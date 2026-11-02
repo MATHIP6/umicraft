@@ -3526,6 +3526,7 @@ dependencies = [
  "pollster",
  "thiserror 2.0.21",
  "umicraft-core",
+ "umicraft-game",
  "umicraft-mesh",
  "umicraft-ui",
  "umicraft-world",

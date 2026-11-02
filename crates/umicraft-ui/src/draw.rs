@@ -132,6 +132,15 @@ pub enum DrawCommand {
         /// Tint colour multiplied with the texel (white = unmodified).
         color: Color,
     },
+    /// Draw a sub-region of the GUI atlas with the inverting blend of the
+    /// crosshair (`glBlendFunc(ONE_MINUS_DST_COLOR, ONE_MINUS_SRC_COLOR)`), so
+    /// it stays visible on any background.
+    InvertedImage {
+        /// Source UV rectangle in the GUI atlas.
+        src: [f32; 4],
+        /// Destination rectangle in physical pixels.
+        dst: Rect,
+    },
     /// Draw the item icon registered under `key` into `dst`.
     ///
     /// `key` is an opaque, client-chosen identifier that the renderer maps to
@@ -239,6 +248,12 @@ impl DrawList {
     /// coordinates. `color` tints the texel (`[1.0; 4]` = unmodified).
     pub fn image(&mut self, src: [f32; 4], dst: Rect, color: Color) {
         self.commands.push(DrawCommand::Image { src, dst, color });
+    }
+
+    /// Appends a textured rectangle drawn with the inverting blend of the
+    /// crosshair (MCP `GuiIngame.renderGameOverlay`, blend 775/769).
+    pub fn image_inverted(&mut self, src: [f32; 4], dst: Rect) {
+        self.commands.push(DrawCommand::InvertedImage { src, dst });
     }
 
     /// Appends an item icon registered under `key`, drawn into `dst`.

@@ -175,6 +175,8 @@ pub enum UiBatchKind {
     Font,
     /// GUI atlas pipeline (RGBA, direct sampling).
     Gui,
+    /// The GUI atlas drawn with the inverting blend of the crosshair.
+    GuiInverted,
     /// The same pipeline as [`UiBatchKind::Gui`], bound to the item icon
     /// atlas instead of the GUI texture.
     Icon,
@@ -343,6 +345,14 @@ impl UiPass {
                         &mut batch_start,
                     );
                     self.push_image(*src, *dst, *color);
+                }
+                DrawCommand::InvertedImage { src, dst } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::GuiInverted,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_image(*src, *dst, [1.0; 4]);
                 }
                 DrawCommand::Item { key, dst, glint } => {
                     if let Some(uv) = icon_uv(*key) {
@@ -559,6 +569,22 @@ mod tests {
     use umicraft_ui::{Glyph, TextStyle};
 
     const COLOR: [f32; 4] = [0.2, 0.4, 0.6, 0.8];
+
+    #[test]
+    fn an_inverted_image_gets_its_own_batch() {
+        let mut list = DrawList::new();
+        let dst = umicraft_ui::Rect::new(0.0, 0.0, 16.0, 16.0);
+        list.image([0.0, 0.0, 0.5, 0.5], dst, [1.0; 4]);
+        list.image_inverted([0.0, 0.0, 0.5, 0.5], dst);
+        list.image_inverted([0.0, 0.0, 0.5, 0.5], dst);
+        let mut pass = UiPass::new(64, 64);
+        pass.rebuild(&list, &atlas());
+        let kinds: Vec<_> = pass.batches().iter().map(|b| (b.kind, b.count)).collect();
+        assert_eq!(
+            kinds,
+            [(UiBatchKind::Gui, 6), (UiBatchKind::GuiInverted, 12)]
+        );
+    }
 
     fn atlas() -> FontAtlas {
         FontAtlas::new(
