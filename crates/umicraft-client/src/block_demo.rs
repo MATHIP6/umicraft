@@ -1298,7 +1298,9 @@ scene blocks      : stone, dirt, oak stairs
         let args = Args::parse(&words).expect("valid block demo arguments");
         run(&args).expect("the block demo renders");
 
-        let decoder = png::Decoder::new(std::fs::File::open(&path).expect("screenshot exists"));
+        let decoder = png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(&path).expect("screenshot exists"),
+        ));
         let reader = decoder.read_info().expect("png header");
         assert_eq!(
             (reader.info().width, reader.info().height),

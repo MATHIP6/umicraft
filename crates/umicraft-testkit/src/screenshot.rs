@@ -110,7 +110,7 @@ impl Image {
         let mut decoder = png::Decoder::new(BufReader::new(File::open(path)?));
         decoder.set_transformations(Transformations::EXPAND | Transformations::STRIP_16);
         let mut reader = decoder.read_info()?;
-        let mut buffer = vec![0; reader.output_buffer_size()];
+        let mut buffer = vec![0; reader.output_buffer_size().unwrap_or(0)];
         let frame = reader.next_frame(&mut buffer)?;
         let data = &buffer[..frame.buffer_size()];
         let rgba = match frame.color_type {

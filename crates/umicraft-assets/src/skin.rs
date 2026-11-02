@@ -870,13 +870,13 @@ pub(crate) fn base64_decode(input: &str) -> Result<Vec<u8>, AssetsError> {
 /// # Errors
 /// [`AssetsError::Image`] on corrupt PNG or unsupported color format.
 pub fn decode_png_bytes(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), AssetsError> {
-    let mut decoder = png::Decoder::new(bytes);
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().map_err(|err| AssetsError::Image {
         path: "skin.png".to_string(),
         reason: err.to_string(),
     })?;
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let mut buf = vec![0u8; reader.output_buffer_size().unwrap_or(0)];
     let info = reader
         .next_frame(&mut buf)
         .map_err(|err| AssetsError::Image {

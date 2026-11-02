@@ -164,7 +164,9 @@ mod tests {
         let path = dir.join("pixels.png");
         let pixels = vec![255_u8; 4 * 4 * 4];
         write_png(&path, &pixels, 4, 4).expect("write png");
-        let decoder = png::Decoder::new(File::open(&path).expect("open png"));
+        let decoder = png::Decoder::new(std::io::BufReader::new(
+            File::open(&path).expect("open png"),
+        ));
         let reader = decoder.read_info().expect("png info");
         assert_eq!((reader.info().width, reader.info().height), (4, 4));
         std::fs::remove_file(&path).ok();

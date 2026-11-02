@@ -365,7 +365,7 @@ impl FontAtlas {
             return Err(FontError::InvalidSignature);
         }
 
-        let mut decoder = png::Decoder::new(bytes);
+        let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
         decoder.set_transformations(png::Transformations::normalize_to_color8());
         {
             let header = decoder.read_header_info()?;
@@ -373,7 +373,7 @@ impl FontAtlas {
         }
 
         let mut reader = decoder.read_info()?;
-        let mut buffer = vec![0u8; reader.output_buffer_size()];
+        let mut buffer = vec![0u8; reader.output_buffer_size().unwrap_or(0)];
         let info = reader.next_frame(&mut buffer)?;
         validate_atlas_dimensions(info.width, info.height)?;
 

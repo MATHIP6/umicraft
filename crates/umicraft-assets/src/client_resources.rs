@@ -76,7 +76,7 @@ impl DecodedPng {
         let mut reader = decoder
             .read_info()
             .map_err(|error| image_error(path, format!("invalid PNG header: {error}")))?;
-        let mut buffer = vec![0_u8; reader.output_buffer_size()];
+        let mut buffer = vec![0_u8; reader.output_buffer_size().unwrap_or(0)];
         let info = reader
             .next_frame(&mut buffer)
             .map_err(|error| image_error(path, format!("invalid PNG data: {error}")))?;
