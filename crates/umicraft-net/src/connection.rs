@@ -42,6 +42,11 @@ impl Connection {
     /// [`NetError::Io`] on connect failure.
     pub async fn connect(host: &str, port: u16) -> Result<Self, NetError> {
         let stream = TcpStream::connect((host, port)).await?;
+        // The vanilla client sets TCP_NODELAY (netty `TCP_NODELAY`). Without
+        // it Nagle's algorithm holds a small packet until the previous one is
+        // acknowledged, so a swing and its attack sent in one tick reached the
+        // server about 40 ms apart (observed in a P6 capture).
+        stream.set_nodelay(true)?;
         Ok(Self::adopt(stream, host, port))
     }
 
@@ -202,6 +207,14 @@ mod tests {
 
     fn push_var(pending: &mut Vec<u8>, value: u32) {
         umicraft_protocol::varint::write_var_u32(pending, value).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_connection_sends_small_packets_at_once() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let connection = Connection::connect("127.0.0.1", port).await.unwrap();
+        assert!(connection.write_half.as_ref().nodelay().unwrap());
     }
 
     #[test]

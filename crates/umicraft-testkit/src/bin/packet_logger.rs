@@ -107,6 +107,17 @@ fn ms_now() -> u64 {
         .map_or(0, |span| span.as_millis() as u64)
 }
 
+/// Writes the capture to `path` and returns how many frames it holds.
+///
+/// The lock is taken once: the logger used to lock the mutex again while the
+/// guard of the first lock was still alive (a temporary of the `match`
+/// scrutinee), so it saved the file and then hung on `Ctrl+C`.
+fn save_capture(capture: &Mutex<Capture>, path: &std::path::Path) -> std::io::Result<usize> {
+    let capture = capture.lock().expect("capture mutex is not poisoned");
+    capture.save(path)?;
+    Ok(capture.entries.len())
+}
+
 /// Binds, forwards, and records; ends on socket close or `Ctrl+C`.
 async fn run(args: &Args, capture: Arc<Mutex<Capture>>) -> std::io::Result<()> {
     let listener = TcpListener::bind(&args.listen).await?;
@@ -121,6 +132,11 @@ async fn run(args: &Args, capture: Arc<Mutex<Capture>>) -> std::io::Result<()> {
             println!("upstream {} unreachable, closing", args.upstream);
             continue;
         };
+        // Both legs without Nagle, so the proxy does not move packets in time.
+        if client_stream.set_nodelay(true).is_err() || server_stream.set_nodelay(true).is_err() {
+            println!("could not set TCP_NODELAY, closing");
+            continue;
+        }
         let (client_read, client_write) = client_stream.into_split();
         let (server_read, server_write) = server_stream.into_split();
         tokio::spawn(pump(
@@ -162,20 +178,8 @@ fn main() {
         }
     });
 
-    match &capture
-        .lock()
-        .expect("capture mutex is not poisoned")
-        .save(&args.out)
-    {
-        Ok(()) => println!(
-            "recorded {} frames -> {}",
-            capture
-                .lock()
-                .expect("capture mutex is not poisoned")
-                .entries
-                .len(),
-            args.out.display()
-        ),
+    match save_capture(&capture, &args.out) {
+        Ok(frames) => println!("recorded {frames} frames -> {}", args.out.display()),
         Err(err) => {
             eprintln!("failed to save capture: {err}");
             std::process::exit(1);
@@ -185,5 +189,27 @@ fn main() {
     if let Err(err) = result {
         eprintln!("proxy stopped: {err}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: saving twice the lock of the capture must be free
+    /// again, and the count is the number of frames.
+    #[test]
+    fn saving_a_capture_returns_its_frame_count_and_releases_the_lock() {
+        let capture = Mutex::new(Capture::default());
+        capture
+            .lock()
+            .expect("not poisoned")
+            .add(Direction::ClientToServer, 1, vec![1, 0]);
+        let dir = std::env::temp_dir().join(format!("umicraft-logger-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("test.umcapt");
+        assert_eq!(save_capture(&capture, &path).expect("saved"), 1);
+        assert_eq!(save_capture(&capture, &path).expect("saved again"), 1);
+        std::fs::remove_dir_all(dir).expect("cleanup");
     }
 }
