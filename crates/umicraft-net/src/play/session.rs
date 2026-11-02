@@ -29,6 +29,9 @@ const MAX_REPLIES: usize = 2;
 
 /// The `Chat Message` position byte that routes the text to the action bar.
 const ACTION_BAR_POSITION: u8 = 2;
+/// The `Chat Message` position byte of a system message (command feedback,
+/// join and leave notices): shown in the chat even with "commands only".
+const SYSTEM_POSITION: u8 = 1;
 
 /// Every skin layer shown, as a vanilla client announces by default.
 const ALL_SKIN_PARTS: u8 = 0b0111_1111;
@@ -130,8 +133,11 @@ pub enum PlayEvent {
     JoinGame(JoinGameInfo),
     /// Absolute player placement after resolving the 1.8 relative flags.
     Placement(PlayerPlacement),
-    /// Chat/system JSON.
+    /// Chat JSON of a player message (chat position 0).
     Chat(String),
+    /// Chat JSON of a system message (chat position 1), which the chat
+    /// visibility "commands only" still shows.
+    SystemChat(String),
     /// A message for the action bar above the hotbar (chat position 2).
     ActionBar(String),
     /// The world clock changed (`Time Update`, 0x03).
@@ -386,10 +392,10 @@ impl PlaySession {
             clientbound::JoinGame::ID => self.join_game(clientbound::JoinGame::decode(body)?)?,
             clientbound::Chat::ID => {
                 let packet = clientbound::Chat::decode(body)?;
-                Reaction::event(if packet.position == ACTION_BAR_POSITION {
-                    PlayEvent::ActionBar(packet.json)
-                } else {
-                    PlayEvent::Chat(packet.json)
+                Reaction::event(match packet.position {
+                    ACTION_BAR_POSITION => PlayEvent::ActionBar(packet.json),
+                    SYSTEM_POSITION => PlayEvent::SystemChat(packet.json),
+                    _ => PlayEvent::Chat(packet.json),
                 })
             }
             clientbound::TimeUpdate::ID => {
@@ -764,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn only_chat_position_two_becomes_an_action_bar_event() {
+    fn the_chat_position_selects_chat_system_or_action_bar_event() {
         let mut session = PlaySession::new(PlayOptions::default());
         let chat = |position| {
             PlayClientbound::Chat(clientbound::Chat {
@@ -774,7 +780,7 @@ mod tests {
         };
         let text = || "{}".to_string();
         assert_eq!(event(&mut session, chat(0)), PlayEvent::Chat(text()));
-        assert_eq!(event(&mut session, chat(1)), PlayEvent::Chat(text()));
+        assert_eq!(event(&mut session, chat(1)), PlayEvent::SystemChat(text()));
         assert_eq!(event(&mut session, chat(2)), PlayEvent::ActionBar(text()));
     }
 

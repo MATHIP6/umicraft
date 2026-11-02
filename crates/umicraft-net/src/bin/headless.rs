@@ -195,7 +195,7 @@ async fn hold_play(conn: &mut Connection, stay: Duration) -> Result<Held, Sessio
                 let _ = acks.try_send(placement.acknowledgement(true));
                 held.placement = Some(placement);
             }
-            PlayEvent::Chat(_) => held.chat_messages += 1,
+            PlayEvent::Chat(_) | PlayEvent::SystemChat(_) => held.chat_messages += 1,
             _ => {}
         }
     });
