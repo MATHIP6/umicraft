@@ -11,6 +11,10 @@ use std::time::Instant;
 
 use super::overlay_views::{ActionBarView, BossView, SidebarView, TabListView, TitleView};
 use crate::hud_hearts::HeartsView;
+use umicraft_game::hud::{
+    vitals_view, BottomBar, FlashFrame, HeldNameView, Riding, VitalsInput, VitalsView,
+};
+use umicraft_ui::SlotItem;
 
 /// Number of hotbar slots drawn by the HUD.
 pub const HOTBAR_SLOTS: usize = 9;
@@ -43,6 +47,15 @@ pub struct HudState {
     pub selected_slot: u8,
     /// Whether the crosshair is drawn.
     pub crosshair: bool,
+    /// The items of the nine hotbar slots, with their counts and durability.
+    pub hotbar_items: [Option<SlotItem>; HOTBAR_SLOTS],
+    /// The hearts, armour, food, mount hearts and air; `None` hides them
+    /// (creative and spectator).
+    pub vitals: Option<VitalsView>,
+    /// The experience bar, or the jump bar of a horse.
+    pub bar: BottomBar,
+    /// The name of the held item while it is highlighted.
+    pub held_name: Option<HeldNameView>,
     /// The chat lines, oldest first, with their styles and arrival times.
     pub chat: Vec<ChatLineView>,
     /// Whether the chat input is open: every line is shown at full opacity.
@@ -197,6 +210,32 @@ impl Default for HudState {
             level: 0,
             selected_slot: 0,
             crosshair: true,
+            hotbar_items: Default::default(),
+            vitals: Some(vitals_view(&VitalsInput {
+                health: 20.0,
+                max_health: 20.0,
+                absorption: 0.0,
+                armor: 0,
+                food: 20,
+                saturation: 5.0,
+                hardcore: false,
+                poison: false,
+                wither: false,
+                regeneration: false,
+                hunger: false,
+                update_counter: 0,
+                flash: FlashFrame {
+                    blink: false,
+                    last_health: 20,
+                },
+                riding: Riding::OnFoot,
+                air: None,
+            })),
+            bar: BottomBar::Experience {
+                fill: 0,
+                level: None,
+            },
+            held_name: None,
             chat: Vec::new(),
             chat_open: false,
             chat_scroll: 0,

@@ -12,7 +12,9 @@
 mod action_bar;
 mod boss_bar;
 mod chat;
+mod crosshair;
 mod debug_f3;
+mod held_name;
 mod hotbar;
 mod icons;
 mod runs;
@@ -20,6 +22,8 @@ mod sidebar;
 mod tab_layout;
 mod tab_list;
 mod titles;
+mod vitals;
+mod xp;
 
 use umicraft_ui::screens::gui_scale;
 use umicraft_ui::{DrawList, FontAtlas, SpriteSheet};
@@ -28,8 +32,9 @@ use action_bar::draw_action_bar;
 use boss_bar::draw_boss_bar;
 use chat::draw_chat;
 use debug_f3::draw_debug_f3;
+use held_name::draw_held_name;
 use hotbar::draw_hotbar;
-use icons::draw_icons_layer;
+use icons::{draw_icons_layer, Canvas};
 use sidebar::draw_sidebar;
 use tab_list::draw_tab_list;
 use titles::draw_title;
@@ -67,14 +72,18 @@ pub fn draw_hud_gui(
     let gh = viewport.1 as f32 / sf;
 
     if let Some(widgets) = &sheets.widgets {
-        draw_hotbar(list, state, gw, gh, sf, widgets);
+        draw_hotbar(&mut Canvas::new(list, viewport), state, font, widgets);
     }
 
     if let Some(icons) = &sheets.icons {
-        draw_icons_layer(list, state, gw, gh, sf, font, icons);
+        draw_icons_layer(list, state, viewport, font, icons);
         if let Some(boss) = &state.boss {
             draw_boss_bar(list, state, boss, (gw, gh), sf, (font, icons));
         }
+    }
+
+    if let Some(name) = &state.held_name {
+        draw_held_name(&mut Canvas::new(list, viewport), name, font);
     }
 
     draw_chat(list, state, gw, gh, sf, font);
