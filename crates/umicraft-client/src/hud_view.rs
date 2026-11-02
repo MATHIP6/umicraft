@@ -116,6 +116,8 @@ pub(crate) struct HudTracker {
     held: HeldNameTracker,
     horse_jump: HorseJump,
     was_jumping: bool,
+    /// The horse jump released this tick and not sent yet.
+    pending_jump: Option<u8>,
     /// `generic.maxHealth` of the entities the server described.
     max_health: BTreeMap<i32, f32>,
     views: HudViews,
@@ -135,6 +137,7 @@ impl Default for HudTracker {
             held: HeldNameTracker::new(),
             horse_jump: HorseJump::new(),
             was_jumping: false,
+            pending_jump: None,
             max_health: BTreeMap::new(),
             views: HudViews::default(),
         }
@@ -211,17 +214,26 @@ impl HudTracker {
         let held = facts.held.map(identity_of);
         self.held.tick(held);
         let riding = riding_of(facts, &self.max_health);
-        // The jump power of a horse that is ridden; the `Riding Jump` packet
-        // it would send is not sent yet (see docs/parity.md).
-        let _ = self
-            .horse_jump
-            .tick(riding_horse(facts), self.was_jumping, facts.jump);
+        // `EntityPlayerSP.onLivingUpdate`: the strength of the jump, on the
+        // tick the key is released; the game thread sends it as `Riding Jump`.
+        if let Some(strength) =
+            self.horse_jump
+                .tick(riding_horse(facts), self.was_jumping, facts.jump)
+        {
+            self.pending_jump = Some(strength);
+        }
         self.was_jumping = facts.jump;
 
         let views = self.build(facts, riding);
         let changed = views != self.views;
         self.views = views;
         changed
+    }
+
+    /// The strength (`0..=80`) of the horse jump the player released since the
+    /// last call (`EntityPlayerSP.sendHorseJump`: `(int)(power * 100)`).
+    pub(crate) fn take_jump(&mut self) -> Option<u8> {
+        self.pending_jump.take()
     }
 
     fn build(&mut self, facts: &HudFacts<'_>, riding: Riding) -> HudViews {
@@ -486,5 +498,64 @@ mod tests {
             tracker.tick(&facts);
         }
         assert!(tracker.views().held_name.is_none());
+    }
+
+    /// A world with a saddled horse (entity 9) that the player rides.
+    fn saddled_horse_world() -> World {
+        let mut world = World::new();
+        world.entities.spawn_mob(
+            umicraft_game::entity::EntityId(9),
+            100,
+            glam::DVec3::ZERO,
+            0.0,
+            0.0,
+            0.0,
+            glam::Vec3::ZERO,
+            Default::default(),
+        );
+        let mut metadata = Metadata::default();
+        metadata
+            .objects
+            .push(umicraft_protocol::packets::play::metadata::WatchedObject {
+                type_id: 2,
+                index: 16,
+                value: 4_i32.to_be_bytes().to_vec(),
+            });
+        world
+            .entities
+            .apply_metadata(umicraft_game::entity::EntityId(9), &metadata);
+        world
+    }
+
+    #[test]
+    fn releasing_the_jump_key_on_a_saddled_horse_queues_the_strength() {
+        let world = saddled_horse_world();
+        let mut tracker = HudTracker::default();
+        let mut tick = |jump| {
+            let mut facts = world.facts(GameMode::Survival, 20.0);
+            facts.vehicle = Some(9);
+            facts.jump = jump;
+            tracker.tick(&facts);
+            tracker.take_jump()
+        };
+        assert_eq!(tick(true), None);
+        for _ in 0..5 {
+            assert_eq!(tick(true), None);
+        }
+        // Five ticks of charge are 0.5 of the bar: `(int)(0.5 * 100)`.
+        assert_eq!(tick(false), Some(50));
+        assert_eq!(tick(false), None, "the strength is sent once");
+    }
+
+    #[test]
+    fn jumping_on_foot_sends_nothing() {
+        let world = World::new();
+        let mut tracker = HudTracker::default();
+        for jump in [true, true, false] {
+            let mut facts = world.facts(GameMode::Survival, 20.0);
+            facts.jump = jump;
+            tracker.tick(&facts);
+            assert_eq!(tracker.take_jump(), None);
+        }
     }
 }

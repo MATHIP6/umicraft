@@ -2800,6 +2800,12 @@ fn tick(
 
     publish_frame(game, frames, tick_time);
     tick_hud_view(game);
+    if let Some(strength) = game.hud_view.take_jump() {
+        queue.ordered.push_back(ClientCommand::RidingJump {
+            entity_id: game.entity_id,
+            strength,
+        });
+    }
     if game.hud_dirty {
         // The HUD is only published again when the last one was accepted, so
         // a full queue does not lose a change.

@@ -84,6 +84,14 @@ pub enum ClientCommand {
         /// The transition.
         action: EntityActionKind,
     },
+    /// `Entity Action` (0x0B) `Riding Jump`: the player released the jump key
+    /// while riding a horse (`EntityPlayerSP.sendHorseJump`).
+    RidingJump {
+        /// The entity id of the player.
+        entity_id: i32,
+        /// The charge in percent, `(int)(power * 100)`.
+        strength: u8,
+    },
     /// `Player Position` (0x04): the feet position and the ground flag.
     PlayerPosition {
         /// The feet X.
@@ -287,6 +295,14 @@ impl ClientCommand {
                     aux_data: 0,
                 })
             }
+            Self::RidingJump {
+                entity_id,
+                strength,
+            } => PlayServerbound::EntityAction(serverbound::EntityAction {
+                entity_id,
+                action: EntityActionKind::RidingJump,
+                aux_data: i32::from(strength),
+            }),
             Self::PlayerPosition { x, y, z, on_ground } => {
                 PlayServerbound::PlayerPosition(PlayerPosition { x, y, z, on_ground })
             }
@@ -616,6 +632,13 @@ mod tests {
                     action: serverbound::UseEntityAction::Attack,
                 },
                 0x02,
+            ),
+            (
+                ClientCommand::RidingJump {
+                    entity_id: 9,
+                    strength: 40,
+                },
+                0x0B,
             ),
             (ClientCommand::HeldItemChange { slot: 3 }, 0x09),
             (
