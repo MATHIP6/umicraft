@@ -376,7 +376,6 @@ fn classify(id: u16, metadata: u8) -> Kind {
         | 30
         | 31
         | 32
-        | 35
         | 36
         | 37
         | 38
@@ -733,6 +732,19 @@ mod tests {
         assert_eq!(shape.boxes().len(), 1);
         assert_eq!(shape.boxes()[0].min, DVec3::ZERO);
         assert_eq!(shape.boxes()[0].max, DVec3::ONE);
+    }
+
+    /// Regression test: wool was listed among the blocks without a collision
+    /// box, so the player fell through every wool floor (a public server's
+    /// lobby, 2026-11-02) and the anti-cheat set the player back.
+    #[test]
+    fn wool_is_a_full_cube_of_every_colour() {
+        let world = TestBlocks::default();
+        for colour in 0..16 {
+            let shape = shape_of(BlockState::new(35, colour), &world, BlockPos::new(0, 0, 0));
+            assert_eq!(shape.boxes().len(), 1, "colour {colour}");
+            assert_eq!(shape.boxes()[0].max, DVec3::ONE);
+        }
     }
 
     #[test]
