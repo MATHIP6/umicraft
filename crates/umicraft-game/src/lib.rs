@@ -42,6 +42,7 @@ pub mod chat_component;
 pub mod chat_input;
 pub mod collision;
 pub mod combat;
+pub mod debug_f3;
 pub mod digging;
 pub mod entity;
 pub mod gamemode;

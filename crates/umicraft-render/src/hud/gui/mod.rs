@@ -10,6 +10,7 @@
 //! lives in its own submodule.
 
 mod chat;
+mod debug_f3;
 mod hotbar;
 mod icons;
 mod overlays;
@@ -18,6 +19,7 @@ use umicraft_ui::screens::gui_scale;
 use umicraft_ui::{DrawList, FontAtlas, SpriteSheet};
 
 use chat::draw_chat;
+use debug_f3::draw_debug_f3;
 use hotbar::draw_hotbar;
 use icons::draw_icons_layer;
 use overlays::draw_overlays;
@@ -64,6 +66,10 @@ pub fn draw_hud_gui(
 
     draw_chat(list, state, gw, gh, sf, font);
     draw_overlays(list, state, gw, gh, sf, font, sheets.icons.as_ref());
+
+    if let Some(view) = &state.debug_f3 {
+        draw_debug_f3(list, view, gw, sf, font);
+    }
 }
 
 #[cfg(test)]

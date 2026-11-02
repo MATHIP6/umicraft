@@ -56,6 +56,8 @@ pub struct HudState {
     pub now: Option<Instant>,
     /// Debug lines, top to bottom.
     pub debug_lines: Vec<String>,
+    /// The vanilla F3 screen (P9-g), `None` while F3 is off.
+    pub debug_f3: Option<DebugF3View>,
     /// The action bar text and its opacity, when a message is displayed.
     pub action_bar: Option<(String, f32)>,
     /// The title and subtitle, when displayed.
@@ -74,6 +76,16 @@ pub struct HudState {
     pub boss: Option<BossView>,
     /// The score shown on the death screen (MCP `EntityPlayer.getScore`).
     pub score: i32,
+}
+
+/// The two columns of the vanilla F3 screen, as built by
+/// `umicraft_game::debug_f3::DebugF3Lines`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DebugF3View {
+    /// The left column; empty strings are blank rows.
+    pub left: Vec<String>,
+    /// The right column; may carry the `\u{a7}a` / `\u{a7}c` colour prefixes.
+    pub right: Vec<String>,
 }
 
 /// The boss bar at the top of the screen.
@@ -242,6 +254,7 @@ impl Default for HudState {
             chat_style: ChatStyle::default(),
             now: None,
             debug_lines: Vec::new(),
+            debug_f3: None,
             action_bar: None,
             title: None,
             sidebar: None,
