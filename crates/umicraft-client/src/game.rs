@@ -30,7 +30,7 @@ use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender as CommandSender;
 use umicraft_game::chat::{self as chat_rules, commands, Position};
-use umicraft_game::combat::{hurt_roll, ClickViewer, HeartsFlash, HitStar};
+use umicraft_game::combat::{hurt_roll, ClickViewer, HitStar};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
@@ -80,9 +80,7 @@ use umicraft_protocol::packets::play::clientbound::{
 use umicraft_protocol::packets::play::serverbound::UseEntityAction;
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
-use umicraft_render::{
-    BorderView, ChatLineView, FogContext, HeartsTint, HeartsView, HudState, OutlineBox,
-};
+use umicraft_render::{BorderView, ChatLineView, FogContext, HudState, OutlineBox};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, LightLevel, World};
 
 use crate::cracks::Crack;
@@ -541,10 +539,6 @@ struct Game {
     hud_dirty: bool,
     /// The bursts of critical stars still going (`EntityParticleEmitter`).
     hit_emitters: Vec<umicraft_game::combat::HitEmitter>,
-    /// The flash of the hearts after a loss of health.
-    hearts_flash: HeartsFlash,
-    /// What the hearts show beyond the health (published with the HUD).
-    hearts: HeartsView,
     /// The absorption hearts of the local player (entry 17).
     absorption: f32,
     /// Whether the world is hardcore (`Join Game`).
@@ -619,8 +613,6 @@ impl Game {
             status_data: GameStatus::default(),
             hud_dirty: true,
             hit_emitters: Vec::new(),
-            hearts_flash: HeartsFlash::new(),
-            hearts: HeartsView::default(),
             absorption: 0.0,
             hardcore: false,
             hud_view: crate::hud_view::HudTracker::default(),
@@ -772,16 +764,13 @@ impl Game {
     fn hud(&self) -> HudState {
         HudState {
             health: self.health,
-            hearts: self.hearts,
             food: self.food,
             armor: self.armor,
-            experience: self.experience,
             level: self.level,
             score: self.score,
             selected_slot: self.selected_slot,
             crosshair: true,
             chat: self.chat.iter().cloned().collect(),
-            debug_lines: Vec::new(),
             action_bar: social_view::action_bar_view(&self.action_bar),
             title: social_view::title_view(&self.title),
             sidebar: social_view::sidebar_view(&self.scoreboard, &self.own_name),
@@ -1309,50 +1298,6 @@ fn follow_body(game: &mut Game) {
     // The swing of the third person arm advances with the tick, as the
     // animation of every tracked entity does in `EntityStore::tick`.
     game.body.animation.tick();
-    tick_hearts(game);
-}
-
-/// Potion ids that change the hearts.
-const REGENERATION: u8 = 10;
-const POISON: u8 = 19;
-const WITHER: u8 = 20;
-
-/// Looks at the health once per tick, as `GuiIngame.renderPlayerStats` does
-/// each frame; the flash counts ticks, so one look per tick shows the same.
-fn tick_hearts(game: &mut Game) {
-    game.hearts_flash.tick();
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| since.as_millis() as u64);
-    let look = game
-        .hearts_flash
-        .look(game.health, game.body.animation.is_hurt_resistant(), now_ms);
-    let effects = game.server.effects();
-    let tint = if effects.get(POISON).is_some() {
-        HeartsTint::Poison
-    } else if effects.get(WITHER).is_some() {
-        HeartsTint::Wither
-    } else {
-        HeartsTint::Normal
-    };
-    let hearts = HeartsView {
-        max_health: game
-            .server
-            .attributes()
-            .value("generic.maxHealth")
-            .map_or(20.0, |value| value as f32),
-        absorption: game.absorption,
-        previous: look.previous,
-        flash: look.flash,
-        tint,
-        regeneration: effects.get(REGENERATION).is_some(),
-        hardcore: game.hardcore,
-        tick: look.tick,
-    };
-    if hearts != game.hearts {
-        game.hearts = hearts;
-        game.hud_dirty = true;
-    }
 }
 
 /// Potion id of Nausea.
@@ -4583,7 +4528,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hurt_status_of_the_local_player_rolls_the_camera_and_flashes_the_hearts() {
+    fn a_hurt_status_of_the_local_player_rolls_the_camera() {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.entity_id = 7;
         let mut queue = CommandQueue::default();
@@ -4599,14 +4544,6 @@ mod tests {
         other.entity_id = 7;
         handle_net(&mut other, hurt_status(8, 2), &mut queue, &frames);
         assert_eq!(other.body.animation.hurt_time(), 0);
-        // The hearts flash on the ticks that follow the loss.
-        handle_net(&mut game, health_update(6.0), &mut queue, &frames);
-        let mut flashed = false;
-        for _ in 0..20 {
-            follow_body(&mut game);
-            flashed |= game.hearts.flash;
-        }
-        assert!(flashed);
     }
 
     #[test]
@@ -4643,19 +4580,6 @@ mod tests {
         assert_eq!(game.hit_emitters.len(), 1);
         combat::tick_emitters(&mut game);
         assert!(game.hit_emitters.is_empty(), "three bursts, then done");
-    }
-
-    #[test]
-    fn absorption_effects_and_hardcore_reach_the_hearts() {
-        let mut game = game_on_floor_with(BlockState::AIR);
-        game.entity_id = 7;
-        game.hardcore = true;
-        game.absorption = 4.0;
-        follow_body(&mut game);
-        assert!(game.hearts.hardcore);
-        assert_eq!(game.hearts.absorption, 4.0);
-        assert_eq!(game.hud().hearts.absorption, 4.0);
-        assert_eq!(game.hearts.max_health, 20.0);
     }
 
     #[test]

@@ -14,6 +14,7 @@ mod boss_bar;
 mod chat;
 mod crosshair;
 mod debug_f3;
+mod fade;
 mod held_name;
 mod hotbar;
 mod icons;

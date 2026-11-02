@@ -16,7 +16,7 @@ use umicraft_game::entity::{EntityFlags, EntityId, EntityItem, EntityKind, Entit
 use umicraft_model::entity::{
     emit_block_item_cube, HumanoidModel, HumanoidPose, ModelVertex, QuadrupedModel,
 };
-use umicraft_render::{Camera, EntityVertex, HudLayout, Overlay, RenderEnvironment, Renderer};
+use umicraft_render::{Camera, EntityVertex, RenderEnvironment, Renderer};
 
 use crate::args::{Args, DemoView};
 use crate::entity_render::{
@@ -1294,7 +1294,6 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
         let mut camera = Camera::new(eye, std::f32::consts::PI, mob.camera_pitch);
         camera.set_aspect(args.width, args.height);
 
-        let mut overlay = Overlay::new(args.width, args.height);
         let lines = [
             format!(
                 "UMICRAFT M8 // ENTITY SHOWCASE // {}",
@@ -1303,9 +1302,12 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
             format!("1 ENTITY // {} VERTICES", total_vertices),
             texture_info.to_string(),
         ];
-        draw_caption(&mut overlay, &lines, args.width, args.height);
-
-        renderer.render(&camera, &overlay)?;
+        crate::caption::render_captioned(
+            &mut renderer,
+            &camera,
+            &lines,
+            (args.width, args.height),
+        )?;
         let image = renderer.read_pixels()?;
         let suffix = match look {
             Look::Plain => "",
@@ -1452,7 +1454,6 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
             "CLEAN-ROOM PROCEDURAL TEXTURES"
         };
 
-        let mut overlay = Overlay::new(args.width, args.height);
         let lines = [
             format!(
                 "UMICRAFT M8 // ENTITY SHOWCASE // {}",
@@ -1461,9 +1462,12 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
             format!("1 ENTITY // {} VERTICES", total_vertices),
             texture_info.to_string(),
         ];
-        draw_caption(&mut overlay, &lines, args.width, args.height);
-
-        renderer.render(&camera, &overlay)?;
+        crate::caption::render_captioned(
+            &mut renderer,
+            &camera,
+            &lines,
+            (args.width, args.height),
+        )?;
         let image = renderer.read_pixels()?;
         write_png(path, &image.rgba, image.width, image.height)?;
 
@@ -1592,7 +1596,6 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         "CLEAN-ROOM PROCEDURAL TEXTURES"
     };
 
-    let mut overlay = Overlay::new(args.width, args.height);
     let lines = [
         format!(
             "UMICRAFT M8 ENTITY DEMO // VIEW: {}",
@@ -1604,9 +1607,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         ),
         format!("ALL 29 MINECRAFT 1.8 MOBS // {}", texture_info),
     ];
-    draw_caption(&mut overlay, &lines, args.width, args.height);
-
-    renderer.render(&camera, &overlay)?;
+    crate::caption::render_captioned(&mut renderer, &camera, &lines, (args.width, args.height))?;
     let image = renderer.read_pixels()?;
     write_png(path, &image.rgba, image.width, image.height)?;
 
@@ -1619,24 +1620,6 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     );
 
     Ok(())
-}
-
-fn draw_caption(overlay: &mut Overlay, lines: &[String], width: u32, height: u32) {
-    const BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
-    const TEXT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-
-    let layout = HudLayout::new(width, height);
-    let scale = layout.scale();
-    let text_width = lines
-        .iter()
-        .map(|line| Overlay::text_width(line, scale))
-        .fold(0.0_f32, f32::max);
-    let panel = layout.debug_panel_rect(text_width, lines.len());
-    overlay.rect(panel.x, panel.y, panel.width, panel.height, BACKGROUND);
-    for (index, line) in lines.iter().enumerate() {
-        let (x, y) = layout.debug_text_origin(index);
-        overlay.text(x, y, scale, TEXT, line);
-    }
 }
 
 #[cfg(test)]

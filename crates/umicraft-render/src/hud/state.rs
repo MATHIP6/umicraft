@@ -10,7 +10,6 @@
 use std::time::Instant;
 
 use super::overlay_views::{ActionBarView, BossView, SidebarView, TabListView, TitleView};
-use crate::hud_hearts::HeartsView;
 use umicraft_game::chat::{ClickEvent, HoverEvent};
 use umicraft_game::hud::{vitals_view, BottomBar, HeldNameView, VitalsInput, VitalsView};
 use umicraft_ui::SlotItem;
@@ -18,29 +17,20 @@ use umicraft_ui::SlotItem;
 /// Number of hotbar slots drawn by the HUD.
 pub const HOTBAR_SLOTS: usize = 9;
 
-/// Number of icons in each status row (hearts, food, armour).
-pub const STATUS_ICONS: usize = 10;
-
-/// Maximum number of chat lines the HUD keeps on screen.
-pub const CHAT_LINES: usize = 10;
-
 /// Everything the HUD draws, as plain data.
 ///
 /// The client fills this from the game state every frame and hands it to
-/// [`draw`]; the HUD itself keeps no state and owns no resources.
+/// [`draw_hud_gui`](super::draw_hud_gui); the HUD itself keeps no state and owns no resources.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HudState {
-    /// Health points, `0..=20`; twenty points fill ten hearts.
+    /// Health points, `0..=20`; the death screen and the headless report read
+    /// it (the hearts are drawn from [`HudState::vitals`]).
     pub health: f32,
-    /// Food points, `0..=20`; twenty points fill ten drumsticks.
+    /// Food points, `0..=20`, for the headless report.
     pub food: f32,
-    /// Armour points, `0..=20`; zero hides the armour row.
+    /// Armour points, `0..=20`, for the headless report.
     pub armor: f32,
-    /// What the hearts show besides the health: absorption, effects, flash.
-    pub hearts: HeartsView,
-    /// Progress towards the next level, `0..=1`.
-    pub experience: f32,
-    /// The current experience level, shown on the experience bar.
+    /// The current experience level, for the headless report.
     pub level: i32,
     /// The selected hotbar slot; values above eight are clamped.
     pub selected_slot: u8,
@@ -67,8 +57,6 @@ pub struct HudState {
     pub chat_style: ChatStyle,
     /// The time of this frame; ages the chat lines. `None` freezes the fade.
     pub now: Option<Instant>,
-    /// Debug lines, top to bottom.
-    pub debug_lines: Vec<String>,
     /// The vanilla F3 screen (P9-g), `None` while F3 is off.
     pub debug_f3: Option<DebugF3View>,
     /// The action bar text and its opacity, when a message is displayed.
@@ -204,14 +192,12 @@ pub struct ChatInputView {
 }
 
 impl Default for HudState {
-    /// A player at full health and food,
+    /// A player at full health and food with an empty hotbar.
     fn default() -> Self {
         Self {
             health: 20.0,
             food: 20.0,
             armor: 0.0,
-            hearts: HeartsView::default(),
-            experience: 0.0,
             level: 0,
             selected_slot: 0,
             crosshair: true,
@@ -228,7 +214,6 @@ impl Default for HudState {
             chat_input: None,
             chat_style: ChatStyle::default(),
             now: None,
-            debug_lines: Vec::new(),
             debug_f3: None,
             action_bar: None,
             title: None,

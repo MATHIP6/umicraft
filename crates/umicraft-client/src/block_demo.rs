@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use glam::Vec3;
 use umicraft_mesh::{mesh_chunk_with_models, ChunkSnapshot, Mesh, ModelMeshContext, VertexLight};
-use umicraft_render::{Camera, HudLayout, Overlay, RenderEnvironment, Renderer};
+use umicraft_render::{Camera, RenderEnvironment, Renderer};
 use umicraft_world::{BlockState, ChunkColumn, ChunkPos};
 
 use crate::args::{Args, DemoView};
@@ -581,7 +581,6 @@ fn draw_view(
     let camera_spec = camera_for_view(args.demo_view);
     let mut camera = Camera::new(camera_spec.position, camera_spec.yaw, camera_spec.pitch);
     camera.set_aspect(args.width, args.height);
-    let mut overlay = Overlay::new(args.width, args.height);
     let lines = [
         "UMICRAFT M6 BLOCK DEMO".to_string(),
         format!(
@@ -606,9 +605,7 @@ fn draw_view(
             report.scene.len()
         ),
     ];
-    draw_caption(&mut overlay, &lines, args.width, args.height);
-
-    renderer.render(&camera, &overlay)?;
+    crate::caption::render_captioned(renderer, &camera, &lines, (args.width, args.height))?;
     Ok(renderer.read_pixels()?)
 }
 
@@ -625,29 +622,6 @@ fn camera_for_view(view: DemoView) -> DemoCamera {
         DemoView::Day | DemoView::Night => GROUND_CAMERA,
         DemoView::Cave => CAVE_CAMERA,
         DemoView::Transparency => TRANSPARENCY_CAMERA,
-    }
-}
-
-/// Draws a stats panel in the corner, without the gameplay HUD.
-///
-/// The acceptance shot should show blocks, not a hotbar or status bars, but
-/// the caption still uses [`HudLayout`] so it follows the same scale and
-/// padding conventions as the in-game debug overlay.
-fn draw_caption(overlay: &mut Overlay, lines: &[String], width: u32, height: u32) {
-    const BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
-    const TEXT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-
-    let layout = HudLayout::new(width, height);
-    let scale = layout.scale();
-    let text_width = lines
-        .iter()
-        .map(|line| Overlay::text_width(line, scale))
-        .fold(0.0_f32, f32::max);
-    let panel = layout.debug_panel_rect(text_width, lines.len());
-    overlay.rect(panel.x, panel.y, panel.width, panel.height, BACKGROUND);
-    for (index, line) in lines.iter().enumerate() {
-        let (x, y) = layout.debug_text_origin(index);
-        overlay.text(x, y, scale, TEXT, line);
     }
 }
 

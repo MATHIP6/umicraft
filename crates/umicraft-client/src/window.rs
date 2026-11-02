@@ -17,13 +17,13 @@ use umicraft_game::chat::{commands, on_click, ChatInput, ClickOutcome, SentHisto
 use umicraft_game::inventory::{drag_preview, DragPreview, WindowView, HOTBAR_START};
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
-    chat_run_at, draw_debug_only, draw_hud, draw_hud_gui, gui_scale, Camera, ChatInputView,
-    HudLayout, HudState, NoIcons, Overlay, RenderEnvironment, Renderer, ScreenOverlays, SkyState,
+    chat_run_at, draw_hud_gui, gui_scale, Camera, ChatInputView, HudState, NoIcons, Overlay,
+    RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{
-    debug_screen::DebugScreen, draw_item, FontAtlas, Rect, ScreenLayout, SlotItem, Ui, UiOutput,
+    debug_screen::DebugScreen, FontAtlas, Rect, ScreenLayout, SlotItem, Ui, UiOutput,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -988,7 +988,8 @@ impl App {
         }
     }
 
-    /// Builds the HUD and the debug block.
+    /// Builds the frame-time graph; the rest of the HUD is drawn by the UI
+    /// pass (`build_ui_frame`).
     fn build_overlay(&mut self) {
         let (width, height) = self
             .renderer
@@ -998,56 +999,6 @@ impl App {
         if !self.show_overlay {
             return;
         }
-        let meshes = self.renderer.as_ref().map_or(0, Renderer::mesh_count);
-        let faces = self.world.as_ref().map_or(0, WorldView::face_count);
-        let mut game_hud = self
-            .world
-            .as_ref()
-            .map(|world| world.hud().clone())
-            .unwrap_or_default();
-        self.options.chat.apply(&mut game_hud);
-        let position = self.camera.position;
-        let yaw = self.camera.yaw.to_degrees();
-        let pitch = self.camera.pitch.to_degrees();
-        let lines = [
-            "UMICRAFT M3 // PROTOCOL 47".to_string(),
-            format!(
-                "FPS {:.1}  FRAME {:.1} MS  MESHES {}  FACES {}",
-                self.fps, self.frame_ms, meshes, faces
-            ),
-            format!(
-                "XYZ {:.1} {:.1} {:.1}  YAW {:.0} PITCH {:.0}",
-                position.x, position.y, position.z, yaw, pitch
-            ),
-            "WASD MOVE  SPACE JUMP  SHIFT SNEAK  CTRL SPRINT".to_string(),
-            "LEFT BREAK  RIGHT PLACE  1-9 HOTBAR  ESC MENU".to_string(),
-        ];
-        // The HUD owns the debug block, the crosshair and the bottom stack;
-        // the client only feeds it the lines it already tracks.
-        let chatting = self.screen == Screen::Chat;
-        let hud = HudState {
-            debug_lines: lines.to_vec(),
-            chat_open: chatting,
-            chat_scroll: self.chat_scroll,
-            chat_input: chatting.then(|| ChatInputView {
-                text: self.chat_input.text(),
-                caret: self.chat_input.caret(),
-                caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
-                    .is_multiple_of(2),
-            }),
-            now: Some(Instant::now()),
-            // The tab list shows while the key is held and no screen is open.
-            show_tab_list: self.screen() == Screen::None && self.held(Action::PlayerList),
-            ..game_hud
-        };
-
-        let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
-        if self.ui_atlas.is_some() && sheets.is_complete() {
-            draw_debug_only(&mut self.overlay, &hud, width, height);
-        } else {
-            draw_hud(&mut self.overlay, &hud, width, height);
-        }
-
         let graph_width = 240.0_f32.min(width as f32 - 20.0);
         let graph_height = 40.0_f32.min(height as f32 - 70.0);
         if graph_width > 0.0 && graph_height > 0.0 {
@@ -1073,8 +1024,10 @@ impl App {
         let atlas = self.ui_atlas.as_ref()?;
         let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
         let screen = self.screen();
-        let textured_hud = sheets.is_complete();
-        if self.world.is_none() && !textured_hud && !screen.uses_ui() {
+        // Without the GUI atlas the hotbar and the status rows are not drawn
+        // (no sprite sheets); chat, titles, the sidebar and F3 still are.
+        let in_game = self.world.is_some();
+        if !in_game && !screen.uses_ui() {
             return None;
         }
 
@@ -1083,7 +1036,7 @@ impl App {
         self.ui.begin_frame(viewport, input);
         self.ui.set_widgets_sheet(sheets.widgets);
 
-        if textured_hud {
+        if in_game {
             let mut game_hud = self
                 .world
                 .as_ref()
@@ -1105,7 +1058,6 @@ impl App {
                 hotbar_items: self.world.as_ref().map_or_else(Default::default, |world| {
                     hotbar_slot_items(&world.window_view().player_slots, items)
                 }),
-                debug_lines: Vec::new(),
                 debug_f3,
                 chat_open: chatting,
                 chat_scroll: self.chat_scroll,
@@ -1141,16 +1093,6 @@ impl App {
             );
         }
         if let Some(world) = self.world.as_ref() {
-            // The textured HUD draws its own hotbar items (`hotbar_items`).
-            if !textured_hud {
-                draw_hotbar_items(
-                    &mut self.ui,
-                    atlas,
-                    &world.window_view().player_slots,
-                    ItemView::new(self.items.as_deref(), self.dials.frames()),
-                    (width, height),
-                );
-            }
             if !matches!(screen, Screen::Inventory | Screen::Creative) {
                 let entities = world.entities(Instant::now());
                 let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
@@ -1535,40 +1477,6 @@ fn hotbar_slot_items(
             .as_ref()
             .map(|stack| slot_item(items, stack))
     })
-}
-
-/// Draws the item icons, counts and durability bars of the hotbar of the
-/// placeholder HUD, whose slots the textured HUD does not share.
-fn draw_hotbar_items(
-    ui: &mut Ui,
-    atlas: &FontAtlas,
-    player_slots: &[Option<umicraft_protocol::packets::play::ItemStack>; 45],
-    items: ItemView<'_>,
-    (width, height): (u32, u32),
-) {
-    for (index, item) in hotbar_slot_items(player_slots, items).iter().enumerate() {
-        if let Some(item) = item {
-            draw_item(
-                ui.draw(),
-                atlas,
-                placeholder_hotbar_cell(index, (width, height)),
-                item,
-            );
-        }
-    }
-}
-
-/// The item cell of hotbar slot `index`, centred in the placeholder HUD slot.
-fn placeholder_hotbar_cell(index: usize, (width, height): (u32, u32)) -> Rect {
-    let layout = HudLayout::new(width, height);
-    let icon = 16.0 * layout.scale();
-    let slot = layout.slot_rect(index);
-    Rect::new(
-        slot.x + (slot.width - icon) * 0.5,
-        slot.y + (slot.height - icon) * 0.5,
-        icon,
-        icon,
-    )
 }
 
 /// The key on the other side of the keyboard that counts as the same

@@ -21,8 +21,8 @@ use umicraft_protocol::packets::play::clientbound::{
 };
 use umicraft_protocol::packets::play::metadata::{Metadata, WatchedObject};
 use umicraft_render::{
-    draw_debug_only, draw_hud, draw_hud_gui, plain_text, Camera, ChatInputView, HudSheets,
-    HudState, Overlay, Renderer, SpriteSheet,
+    draw_hud_gui, plain_text, Camera, ChatInputView, HudSheets, HudState, Overlay, Renderer,
+    SpriteSheet,
 };
 use umicraft_ui::game_menu::GameMenu;
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
@@ -41,19 +41,10 @@ const PLAYER: &str = "Steve";
 /// Game ticks the title and the action bar are advanced by: past the fade-in.
 const SCENE_TICKS: u32 = 20;
 
-/// What a scene is made of.
-enum Scene {
-    /// The HUD, drawn by the overlay (fallback mode).
-    Hud(Box<HudState>),
-    /// The textured HUD, drawn by the UI pass with debug block on the overlay.
-    HudGui(Box<HudState>, DrawList),
-    /// A screen, drawn by the UI pass.
-    Screen(DrawList),
-}
-
 /// The scene and the numbers that describe it.
 struct Demo {
-    scene: Scene,
+    /// What the UI pass draws.
+    scene: DrawList,
     lines: Vec<(&'static str, String)>,
 }
 
@@ -203,11 +194,6 @@ fn scripted_packets() -> Vec<PlayEvent> {
 /// The HUD of the demo: the vitals and the hotbar around the server data.
 fn scene_hud() -> HudState {
     let mut hud = hud_after(scripted_packets(), PLAYER, SCENE_TICKS);
-    hud.health = 14.0;
-    hud.food = 17.0;
-    hud.armor = 8.0;
-    hud.experience = 0.4;
-    hud.level = 7;
     hud.vitals = Some(vitals_view(&VitalsInput {
         health: 14.0,
         food: 17,
@@ -288,7 +274,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                     ),
                     ("draw commands", output.draw_list.len().to_string()),
                 ],
-                scene: Scene::Screen(output.draw_list),
+                scene: output.draw_list,
             }
         }
         "options" => {
@@ -305,7 +291,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                     ("max fps", options.video.max_fps.to_string()),
                     ("draw commands", draw_list.len().to_string()),
                 ],
-                scene: Scene::Screen(draw_list),
+                scene: draw_list,
             }
         }
         "video" | "chat-options" => {
@@ -322,7 +308,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                     ("page", format!("{:?}", screen.page())),
                     ("draw commands", draw_list.len().to_string()),
                 ],
-                scene: Scene::Screen(draw_list),
+                scene: draw_list,
             }
         }
         "controls" => {
@@ -354,7 +340,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                     ("actions in conflict", conflicts.to_string()),
                     ("draw commands", draw_list.len().to_string()),
                 ],
-                scene: Scene::Screen(draw_list),
+                scene: draw_list,
             }
         }
         view => {
@@ -418,26 +404,10 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                 lines.push(("chat input", input.text()));
             }
 
-            if sheets.is_complete() {
-                let mut draw_list = DrawList::default();
-                draw_hud_gui(&mut draw_list, &hud, (width, height), atlas, sheets);
-                let mut overlay = Overlay::new(width, height);
-                draw_debug_only(&mut overlay, &hud, width, height);
-                lines.push(("draw commands", draw_list.len().to_string()));
-                lines.push(("overlay vertices", overlay.vertex_count().to_string()));
-                Demo {
-                    lines,
-                    scene: Scene::HudGui(Box::new(hud), draw_list),
-                }
-            } else {
-                let mut overlay = Overlay::new(width, height);
-                draw_hud(&mut overlay, &hud, width, height);
-                lines.push(("overlay vertices", overlay.vertex_count().to_string()));
-                Demo {
-                    lines,
-                    scene: Scene::Hud(Box::new(hud)),
-                }
-            }
+            let mut scene = DrawList::default();
+            draw_hud_gui(&mut scene, &hud, (width, height), atlas, sheets);
+            lines.push(("draw commands", scene.len().to_string()));
+            Demo { lines, scene }
         }
     }
 }
@@ -495,20 +465,13 @@ fn render_scene(
     viewport: (u32, u32),
 ) -> Result<(), ClientError> {
     let camera = Camera::default();
-    let mut overlay = Overlay::new(viewport.0, viewport.1);
-    match &demo.scene {
-        Scene::Hud(hud) => {
-            draw_hud(&mut overlay, hud, viewport.0, viewport.1);
-            renderer.render(&camera, &overlay)?;
-        }
-        Scene::HudGui(hud, draw_list) => {
-            draw_debug_only(&mut overlay, hud, viewport.0, viewport.1);
-            renderer.render_with_ui(&camera, &overlay, draw_list, &mut umicraft_render::NoIcons)?;
-        }
-        Scene::Screen(draw_list) => {
-            renderer.render_with_ui(&camera, &overlay, draw_list, &mut umicraft_render::NoIcons)?;
-        }
-    }
+    let overlay = Overlay::new(viewport.0, viewport.1);
+    renderer.render_with_ui(
+        &camera,
+        &overlay,
+        &demo.scene,
+        &mut umicraft_render::NoIcons,
+    )?;
     Ok(())
 }
 

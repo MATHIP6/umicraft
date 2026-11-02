@@ -12,7 +12,8 @@ use std::io::BufWriter;
 use std::path::Path;
 use std::time::Instant;
 
-use umicraft_render::{draw_hud, Camera, HudState, Overlay, Renderer};
+use umicraft_render::{draw_hud_gui, Camera, NoIcons, Overlay, Renderer};
+use umicraft_ui::DrawList;
 
 use crate::args::Args;
 use crate::error::ClientError;
@@ -20,6 +21,7 @@ use crate::game::Session;
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::terrain_textures::TerrainTextures;
+use crate::ui_font;
 use crate::world_view::WorldView;
 
 /// Runs the screenshot path and writes `args.screenshot`.
@@ -76,26 +78,29 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     world.update_camera(&mut camera, now);
     renderer.set_environment(world.environment(now, args.view_distance));
     camera.set_aspect(args.width, args.height);
-    let mut overlay = Overlay::new(args.width, args.height);
-    let lines = [
-        "UMICRAFT M3 SCREENSHOT".to_string(),
-        format!("CHUNKS {}  MESHES {}  FACES {}", chunks, meshes, faces),
-        format!(
-            "XYZ {:.1} {:.1} {:.1}",
-            camera.position.x, camera.position.y, camera.position.z
-        ),
-        format!("SERVER {host}:{port}  VIEW {}", args.view_distance),
-        format!("COLLECTED {:.1}S", args.collect.as_secs_f32()),
-    ];
-    // The offscreen path draws the same HUD as the window, so the acceptance
-    // screenshot shows the in-game layout.
-    let hud = HudState {
-        debug_lines: lines.to_vec(),
-        ..world.hud().clone()
-    };
-    draw_hud(&mut overlay, &hud, args.width, args.height);
-
-    renderer.render(&camera, &overlay)?;
+    // The offscreen path draws the same textured HUD as the window, so the
+    // acceptance screenshot shows the in-game layout. Without the GUI atlas
+    // only the sprite-free parts (chat, titles, sidebar) appear.
+    let installed = ui_font::install(&mut renderer, &ui_font::load().atlas)?;
+    let gui_atlas = crate::official::load_gui_atlas();
+    if let Some(atlas) = gui_atlas.as_ref().filter(|atlas| !atlas.is_empty()) {
+        renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels());
+    }
+    let sheets = crate::official::hud_sheets(gui_atlas.as_ref());
+    let mut list = DrawList::new();
+    draw_hud_gui(
+        &mut list,
+        world.hud(),
+        (args.width, args.height),
+        &installed.atlas,
+        &sheets,
+    );
+    renderer.render_with_ui(
+        &camera,
+        &Overlay::new(args.width, args.height),
+        &list,
+        &mut NoIcons,
+    )?;
     let image = renderer.read_pixels()?;
     write_png(path, &image.rgba, image.width, image.height)?;
 

@@ -19,6 +19,7 @@ pub mod args;
 pub mod block_demo;
 mod block_entity_render;
 mod border_view;
+mod caption;
 pub mod chat;
 pub mod cracks;
 pub mod creative_input;

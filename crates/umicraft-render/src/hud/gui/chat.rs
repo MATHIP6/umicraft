@@ -12,7 +12,7 @@ use umicraft_ui::screens::gui_scale;
 use umicraft_ui::styled_text::{draw_styled, StyledRun};
 use umicraft_ui::{Color, DrawList, FontAtlas, Rect, TextStyle};
 
-use crate::hud::chat_hud::{age_ticks, line_alpha};
+use super::fade::{age_ticks, line_alpha};
 use crate::hud::{ChatRunView, HudState};
 
 /// The wrapped rows `GuiNewChat` keeps (`field_146253_i` is cut at 100).
