@@ -26,7 +26,7 @@ umicraft-client/src/hud_view.rs
 | P9-a | `render/hud/` split, `ScaledResolution`, `styled_text` | in progress |
 | P9-b | Hotbar with item icons, crosshair, XP, held-item name | done |
 | P9-c | Vitals: hearts (styles, absorption, flash, effects), food, armour, air, mount health, jump bar | done |
-| P9-d | Chat: `game/chat/`, `.lang` files, full styles, history, Tab, commands, click/hover | todo |
+| P9-d | Chat: `game/chat/`, `.lang` files, full styles, history, Tab, commands, click/hover | done |
 | P9-e | Tab list (header/footer, ping, heads), sidebar, teams, below-name and list objectives | done (head skins and heart flash pending) |
 | P9-f | Titles, subtitles, action bar, boss bar | done |
 | P9-g | Vanilla F3, Umicraft debug on another key | done (lines, drawing, keys; data feed partial) |
