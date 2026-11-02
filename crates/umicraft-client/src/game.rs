@@ -5278,8 +5278,9 @@ mod tests {
             &mut queue,
             &frames,
         );
-        // `BossStatus.statusBarTime` keeps the bar for 100 ticks.
-        for _ in 0..99 {
+        // `BossStatus.statusBarTime` is 100 when the dragon was last seen and
+        // the tick of that same frame already took one off: 99 remain.
+        for _ in 0..98 {
             social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
         }
         assert!(game.hud().boss.is_some(), "the bar outlives the dragon");
