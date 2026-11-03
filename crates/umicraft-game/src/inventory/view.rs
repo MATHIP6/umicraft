@@ -5,6 +5,7 @@
 use umicraft_protocol::packets::play::ItemStack;
 
 use super::kind::{WindowKind, PLAYER_SLOT_COUNT};
+use super::payload::Trade;
 
 /// An immutable snapshot of one container.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +20,10 @@ pub struct ContainerView {
     pub slots: Vec<Option<ItemStack>>,
     /// The properties (furnace progress, enchantment levels, …).
     pub properties: Vec<i16>,
+    /// The offers of a villager window.
+    pub trades: Vec<Trade>,
+    /// The offer a villager window shows.
+    pub selected_trade: usize,
 }
 
 /// An immutable snapshot of the full window state.

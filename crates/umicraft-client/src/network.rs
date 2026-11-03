@@ -254,6 +254,28 @@ pub enum ClientCommand {
         /// The window id (0 for the player inventory).
         window_id: i8,
     },
+    /// `Enchant Item` (0x11): the player picked an enchantment of the table.
+    EnchantItem {
+        /// The window id of the enchanting table.
+        window_id: i8,
+        /// The row, 0 to 2.
+        enchantment: i8,
+    },
+    /// `Plugin Message` (0x17): a payload on an `MC|...` channel (anvil
+    /// rename, beacon effects, villager offer, books).
+    PluginMessage {
+        /// The channel name.
+        channel: &'static str,
+        /// The raw payload.
+        data: Vec<u8>,
+    },
+    /// `Update Sign` (0x12): the player finished editing a sign.
+    UpdateSign {
+        /// Block position of the sign.
+        position: (i32, i32, i32),
+        /// The four lines as chat-component JSON.
+        lines: [String; 4],
+    },
     /// `Click Window` (0x0E): a slot interaction.
     ClickWindow {
         /// The window id.
@@ -449,6 +471,21 @@ impl ClientCommand {
             Self::CloseWindow { window_id } => {
                 PlayServerbound::CloseWindow(ServerCloseWindow { window_id })
             }
+            Self::EnchantItem {
+                window_id,
+                enchantment,
+            } => PlayServerbound::EnchantItem(serverbound::EnchantItem {
+                window_id,
+                enchantment,
+            }),
+            Self::PluginMessage { channel, data } => PlayServerbound::Brand(serverbound::Brand {
+                channel: channel.to_owned(),
+                data,
+            }),
+            Self::UpdateSign {
+                position: (x, y, z),
+                lines,
+            } => PlayServerbound::UpdateSign(serverbound::UpdateSign { x, y, z, lines }),
             Self::ClickWindow {
                 window_id,
                 slot,

@@ -22,8 +22,9 @@ pub const ICON_ATLAS_SIZE: u32 = 2048;
 pub const ICON_CELL_SIZE: u32 = 64;
 
 /// Key under which the portrait (the player model of the inventory screen)
-/// is drawn. Icon keys are hashes of item stacks; this value is reserved.
-pub const PORTRAIT_KEY: u64 = u64::MAX;
+/// is drawn. Icon keys are hashes of item stacks, and `u64::MAX` is the
+/// placeholder of a slot without item resources; this value is reserved.
+pub const PORTRAIT_KEY: u64 = u64::MAX - 1;
 /// Side of the portrait in cells.
 const PORTRAIT_CELLS: u32 = 4;
 /// Side of the portrait in pixels: it covers 64x64 GUI pixels at the same

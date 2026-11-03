@@ -5,6 +5,9 @@
 use crate::geom::Rect;
 
 use super::decoration::{Decoration, SpriteRect};
+use super::interaction::Hotspot;
+#[cfg(test)]
+use super::interaction::ScreenState;
 use super::scale::gui_scale;
 use super::{ScreenKind, ScreenSpec};
 
@@ -22,6 +25,8 @@ pub struct ScreenLayout {
     pub background: Rect,
     /// `(window slot index, 16x16 item area scaled)` per slot, in window order.
     pub slots: Vec<(usize, Rect)>,
+    /// `(hotspot, scaled rectangle)` of the buttons and option rows.
+    pub hotspots: Vec<(Hotspot, Rect)>,
 }
 
 impl ScreenLayout {
@@ -54,11 +59,25 @@ impl ScreenLayout {
                 (slot.index, rect)
             })
             .collect();
+        let hotspots = kind
+            .hotspots()
+            .into_iter()
+            .map(|h| {
+                let rect = Rect::new(
+                    background.x + h.x as f32 * s,
+                    background.y + h.y as f32 * s,
+                    h.width as f32 * s,
+                    h.height as f32 * s,
+                );
+                (h.hotspot, rect)
+            })
+            .collect();
         Self {
             spec,
             scale,
             background,
             slots,
+            hotspots,
         }
     }
 
@@ -78,6 +97,20 @@ impl ScreenLayout {
                     && point.1 < rect.y + rect.height + border
             })
             .map(|(index, _)| *index)
+    }
+
+    /// The button or option row under `point`, if any (half-open rectangles).
+    #[must_use]
+    pub fn hotspot_at(&self, point: (f32, f32)) -> Option<Hotspot> {
+        self.hotspots
+            .iter()
+            .find(|(_, rect)| {
+                point.0 >= rect.x
+                    && point.0 < rect.x + rect.width
+                    && point.1 >= rect.y
+                    && point.1 < rect.y + rect.height
+            })
+            .map(|(hotspot, _)| *hotspot)
     }
 
     /// Whether `point` is inside the background. A click outside sends slot
@@ -185,9 +218,27 @@ mod tests {
     #[test]
     fn furnace_decorations_are_placed_relative_to_the_gui() {
         let layout = ScreenLayout::new(viewport(), ScreenKind::Furnace);
-        let deco = ScreenKind::Furnace.decorations(&[100, 100, 0, 200]);
+        let state = ScreenState {
+            properties: &[100, 100, 0, 200],
+            ..ScreenState::default()
+        };
+        let deco = ScreenKind::Furnace.dynamic(&state).decorations;
         let sprites = layout.sprites(&deco);
         assert_eq!(sprites.len(), 2);
         assert_eq!(sprites[0].dst.x, layout.background.x + 56.0 * 3.0);
+    }
+
+    #[test]
+    fn hotspots_are_scaled_and_hit_tested() {
+        let layout = ScreenLayout::new(viewport(), ScreenKind::EnchantingTable);
+        let (hotspot, rect) = layout.hotspots[1];
+        assert_eq!(hotspot, Hotspot::Enchant(1));
+        assert_eq!(rect.x, layout.background.x + 60.0 * 3.0);
+        assert_eq!(layout.hotspot_at((rect.x, rect.y)), Some(hotspot));
+        assert_eq!(layout.hotspot_at((rect.x - 1.0, rect.y)), None);
+        assert_eq!(
+            layout.hotspot_at((rect.x, rect.y + rect.height)),
+            Some(Hotspot::Enchant(2))
+        );
     }
 }

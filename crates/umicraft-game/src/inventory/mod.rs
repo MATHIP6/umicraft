@@ -19,6 +19,7 @@ pub mod click;
 pub mod creative;
 pub mod kind;
 mod manager;
+pub mod payload;
 pub mod player;
 pub mod preview;
 pub mod slot;

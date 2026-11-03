@@ -88,6 +88,15 @@ pub enum InventoryAction {
     },
 }
 
+/// What the player did on a container screen besides moving items.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContainerAction {
+    /// A click on a button or option row.
+    Press(umicraft_ui::screens::Hotspot),
+    /// The anvil name field changed to this text.
+    Rename(String),
+}
+
 /// The button press in progress (`GuiContainer` fields `dragSplitting`,
 /// `ignoreMouseUp` and `doubleClick`).
 #[derive(Debug)]

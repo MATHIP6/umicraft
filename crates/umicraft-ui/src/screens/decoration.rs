@@ -15,6 +15,16 @@ pub enum Fill {
     Right(f32),
 }
 
+/// The texture a [`Decoration`] is cut from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sheet {
+    /// The texture of the screen itself.
+    #[default]
+    Screen,
+    /// The player inventory texture, which holds the potion status icons.
+    Inventory,
+}
+
 /// A sprite taken from a screen's texture and drawn at a fixed offset.
 ///
 /// All coordinates are unscaled texture pixels; `dst` is relative to the GUI
@@ -29,6 +39,8 @@ pub struct Decoration {
     pub dst: (u32, u32),
     /// Which part of the sprite is drawn.
     pub fill: Fill,
+    /// The texture the sprite is cut from.
+    pub sheet: Sheet,
 }
 
 /// A texture sub-rectangle and the screen rectangle it is drawn into.
@@ -37,6 +49,8 @@ pub struct SpriteRect {
     /// `(x, y, width, height)` in texture pixels, ready for
     /// `GuiRegion::sub_region`.
     pub src: (u32, u32, u32, u32),
+    /// The texture `src` refers to.
+    pub sheet: Sheet,
     /// The scaled destination in physical pixels.
     pub dst: Rect,
 }
@@ -50,7 +64,15 @@ impl Decoration {
             size,
             dst,
             fill: Fill::Full,
+            sheet: Sheet::Screen,
         }
+    }
+
+    /// The same sprite cut from the player inventory texture.
+    #[must_use]
+    pub const fn on_inventory_sheet(mut self) -> Self {
+        self.sheet = Sheet::Inventory;
+        self
     }
 
     /// The source and destination rectangles to draw, or `None` when the fill
@@ -78,6 +100,7 @@ impl Decoration {
         let s = scale as f32;
         Some(SpriteRect {
             src: (sx + cut_x, sy + cut_y, width, height),
+            sheet: self.sheet,
             dst: Rect::new(
                 origin.0 + (dx + cut_x) as f32 * s,
                 origin.1 + (dy + cut_y) as f32 * s,
@@ -104,6 +127,7 @@ mod tests {
             size: (14, 13),
             dst: (56, 36),
             fill,
+            sheet: Sheet::Screen,
         }
     }
 
@@ -131,6 +155,7 @@ mod tests {
             size: (25, 16),
             dst: (79, 34),
             fill: Fill::Right(0.4),
+            sheet: Sheet::Screen,
         };
         let rect = arrow.sprite_rect((0.0, 0.0), 1).unwrap();
         assert_eq!(rect.src, (176, 14, 10, 16));

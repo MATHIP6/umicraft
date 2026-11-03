@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use umicraft_game::chat::{commands, on_click, ChatInput, ClickOutcome, SentHistory, TabOutcome};
-use umicraft_game::inventory::{drag_preview, DragPreview, WindowView, HOTBAR_START};
+use umicraft_game::inventory::{drag_preview, DragPreview, WindowKind, WindowView, HOTBAR_START};
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
     chat_run_at, draw_hud_gui, gui_scale, Camera, ChatInputView, HudState, NoIcons, Overlay,
@@ -34,6 +34,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
 
+use crate::anvil_field::{AnvilField, Edit};
 use crate::args::Args;
 use crate::creative_input::CreativeInput;
 use crate::creative_layout::CreativeLayout;
@@ -43,13 +44,13 @@ use crate::entity_render::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
-use crate::inventory_input::{Context, InventoryAction, InventoryInput};
+use crate::inventory_input::{Button, ContainerAction, Context, InventoryAction, InventoryInput};
 use crate::map_render::{map_id_of, MapTextures};
 use crate::nametag_draw::{draw_tags, place_tags};
 
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
 use crate::entity_icons::EntityIcons;
-use crate::inventory_screen::{draw_inventory_overlay, screen_input};
+use crate::inventory_screen::{draw_inventory_overlay, screen_input, ScreenFacts};
 use crate::inventory_winit;
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
@@ -230,6 +231,8 @@ struct App {
     entity_icons: EntityIcons,
     /// Where the inventory screen put the player model in the last frame.
     portrait: Option<Spot>,
+    /// The name field of the anvil screen.
+    anvil_field: AnvilField,
     /// The first-person held item geometry of the frame.
     hand_layers: ItemLayers,
     /// Steps the water, lava and fire textures once per game tick.
@@ -317,6 +320,7 @@ impl App {
             world_items: WorldItems::default(),
             entity_icons: EntityIcons::default(),
             portrait: None,
+            anvil_field: AnvilField::default(),
             hand_layers: ItemLayers::default(),
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
@@ -661,7 +665,13 @@ impl App {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
-        let closes = code == KeyCode::Escape || code == self.options.keys.get(Action::Inventory);
+        let anvil = self.anvil_open();
+        // The anvil name field takes the inventory key and the digits as text.
+        let closes =
+            code == KeyCode::Escape || (!anvil && code == self.options.keys.get(Action::Inventory));
+        if event.state == ElementState::Pressed && anvil && !closes && self.anvil_key(&event) {
+            return;
+        }
         if event.state == ElementState::Pressed && !event.repeat && closes {
             self.close_inventory();
         }
@@ -690,9 +700,92 @@ impl App {
             self.container_was_open = open;
             self.ui_input.clear();
             self.inventory_input.reset();
+            self.anvil_field = AnvilField::default();
             let free = open || self.screen().blocks_game_input() || self.death_screen_visible();
             self.capture_mouse(!free);
         }
+    }
+
+    /// What the container screens need beyond the window: the player's level
+    /// and game mode and, for an anvil, the name field (kept in step with the
+    /// first slot, which sends the rename when its stack changed).
+    fn screen_facts(&mut self, view: &WindowView) -> ScreenFacts {
+        let anvil = view
+            .container
+            .as_ref()
+            .filter(|container| container.kind == WindowKind::Anvil);
+        let name = anvil.map(|container| {
+            let first = container.slots.first().and_then(Option::as_ref);
+            let rename = self.anvil_field.sync(first);
+            (rename, self.anvil_field.view())
+        });
+        if let Some((Some(rename), _)) = &name {
+            self.send_container(ContainerAction::Rename(rename.clone()));
+        }
+        ScreenFacts {
+            drag: None,
+            xp_level: self.world.as_ref().map_or(0, |world| world.hud().level),
+            creative: self
+                .world
+                .as_ref()
+                .is_some_and(|world| world.status().gamemode == 1),
+            anvil: name.map(|(_, view)| view),
+            caret_visible: (self.started.elapsed().as_millis() / CARET_BLINK_MS).is_multiple_of(2),
+        }
+    }
+
+    /// The facts of the open inventory screen; the default when none is open.
+    fn inventory_facts(&mut self) -> ScreenFacts {
+        if self.screen() != Screen::Inventory {
+            return ScreenFacts::default();
+        }
+        let view = self.world.as_ref().map(|world| world.window_view().clone());
+        view.map(|view| self.screen_facts(&view))
+            .unwrap_or_default()
+    }
+
+    /// Sends a container screen action to the game thread.
+    fn send_container(&self, action: ContainerAction) {
+        let _ = self.session.events().try_send(GameEvent::Container(action));
+    }
+
+    /// Whether an anvil screen is open, whose name field takes the keys.
+    fn anvil_open(&self) -> bool {
+        self.screen() == Screen::Inventory
+            && self.world.as_ref().is_some_and(|world| {
+                world
+                    .window_view()
+                    .container
+                    .as_ref()
+                    .is_some_and(|container| container.kind == WindowKind::Anvil)
+            })
+    }
+
+    /// Feeds a key press to the anvil name field; returns whether it took it.
+    fn anvil_key(&mut self, event: &KeyEvent) -> bool {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return false;
+        };
+        let edit = match code {
+            KeyCode::Backspace => Some(Edit::Backspace),
+            KeyCode::Delete => Some(Edit::Delete),
+            KeyCode::ArrowLeft => Some(Edit::Left),
+            KeyCode::ArrowRight => Some(Edit::Right),
+            KeyCode::Home => Some(Edit::Home),
+            KeyCode::End => Some(Edit::End),
+            _ => event
+                .text
+                .as_deref()
+                .filter(|text| !self.ctrl_held && !text.chars().any(char::is_control))
+                .map(Edit::Insert),
+        };
+        let Some(edit) = edit else {
+            return false;
+        };
+        if let Some(rename) = self.anvil_field.edit(edit) {
+            self.send_container(ContainerAction::Rename(rename));
+        }
+        true
     }
 
     /// Closes the inventory or container screen.
@@ -750,6 +843,12 @@ impl App {
         else {
             return;
         };
+        if state == ElementState::Pressed && button == Button::Left {
+            if let Some(hotspot) = layout.hotspot_at(self.pointer) {
+                self.send_container(ContainerAction::Press(hotspot));
+                return;
+            }
+        }
         let action = match state {
             ElementState::Pressed => {
                 self.inventory_input
@@ -1030,6 +1129,7 @@ impl App {
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
         self.portrait = None;
+        let inventory_facts = self.inventory_facts();
         let atlas = self.ui_atlas.as_ref()?;
         let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
         let screen = self.screen();
@@ -1149,7 +1249,10 @@ impl App {
                 Screen::Inventory => {
                     let wv = self.world.as_ref().map(|w| w.window_view().clone());
                     if let Some(wv) = wv {
-                        let drag = self.inventory_drag_preview(&wv);
+                        let facts = ScreenFacts {
+                            drag: self.inventory_drag_preview(&wv),
+                            ..inventory_facts
+                        };
                         self.portrait = draw_inventory_overlay(
                             &mut self.ui,
                             atlas,
@@ -1157,7 +1260,7 @@ impl App {
                             &wv,
                             self.gui_atlas.as_ref(),
                             ItemView::new(self.items.as_deref(), self.dials.frames()),
-                            drag.as_ref(),
+                            &facts,
                         );
                     }
                 }

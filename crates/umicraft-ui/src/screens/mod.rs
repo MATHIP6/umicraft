@@ -33,15 +33,20 @@ mod enchanting;
 mod furnace;
 mod hopper;
 mod horse;
+mod interaction;
 mod layout;
 mod player;
 mod scale;
 mod screen_layout;
 mod villager;
 
-pub use decoration::{Decoration, Fill, SpriteRect};
+pub use beacon::effect_of as beacon_effect;
+pub use decoration::{Decoration, Fill, Sheet, SpriteRect};
+pub use enchanting::row_available as enchant_row_available;
+pub use interaction::{Dynamic, Hotspot, HotspotSpec, Label, ScreenState};
 pub use scale::{gui_scale, ScaledResolution};
 pub use screen_layout::ScreenLayout;
+pub use villager::OFFER_ITEMS as TRADE_OFFER_ITEMS;
 
 /// Which screen to show. More kinds are added as their windows are supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,31 +142,30 @@ impl ScreenKind {
         }
     }
 
-    /// The dynamic sprites (flames, progress arrows) for the window
-    /// `properties` the server sent. Screens without any return an empty list.
-    ///
-    /// The anvil's sprites depend on its slot contents rather than on
-    /// properties: use [`ScreenKind::anvil_decorations`].
+    /// The clickable parts of this screen, in unscaled texture pixels.
     #[must_use]
-    pub fn decorations(self, properties: &[i16]) -> Vec<Decoration> {
+    pub fn hotspots(self) -> Vec<HotspotSpec> {
         match self {
-            Self::Furnace => furnace::decorations(properties),
-            Self::BrewingStand => brewing::decorations(properties),
+            Self::EnchantingTable => enchanting::hotspots(),
+            Self::Beacon => beacon::hotspots(),
+            Self::Villager => villager::hotspots(),
             _ => Vec::new(),
         }
     }
-}
 
-impl ScreenKind {
-    /// The anvil's name field and "no result" cross, which depend on which of
-    /// its three slots hold a stack.
+    /// The dynamic sprites (flames, progress arrows, buttons) and labels for
+    /// the state of the window. Screens without any return nothing.
     #[must_use]
-    pub fn anvil_decorations(
-        has_input: bool,
-        has_second: bool,
-        has_result: bool,
-    ) -> Vec<Decoration> {
-        anvil::decorations(has_input, has_second, has_result)
+    pub fn dynamic(self, state: &ScreenState<'_>) -> Dynamic {
+        match self {
+            Self::Furnace => Dynamic::sprites(furnace::decorations(state.properties)),
+            Self::BrewingStand => Dynamic::sprites(brewing::decorations(state.properties)),
+            Self::Anvil => anvil::dynamic(state),
+            Self::EnchantingTable => enchanting::dynamic(state),
+            Self::Beacon => beacon::dynamic(state),
+            Self::Villager => villager::dynamic(state),
+            _ => Dynamic::default(),
+        }
     }
 }
 
@@ -213,9 +217,22 @@ mod tests {
     }
 
     #[test]
-    fn only_the_furnace_and_brewing_stand_have_property_decorations() {
-        assert!(ScreenKind::Hopper.decorations(&[1, 2, 3, 4]).is_empty());
-        assert!(!ScreenKind::Furnace.decorations(&[]).is_empty());
-        assert!(!ScreenKind::BrewingStand.decorations(&[200]).is_empty());
+    fn plain_screens_have_nothing_dynamic() {
+        let state = ScreenState {
+            properties: &[1, 2, 3, 4],
+            ..ScreenState::default()
+        };
+        assert_eq!(ScreenKind::Hopper.dynamic(&state), Dynamic::default());
+        assert!(ScreenKind::Hopper.hotspots().is_empty());
+        assert!(!ScreenKind::Furnace
+            .dynamic(&ScreenState::default())
+            .decorations
+            .is_empty());
+        assert!(!ScreenKind::BrewingStand
+            .dynamic(&state)
+            .decorations
+            .is_empty());
+        assert_eq!(ScreenKind::EnchantingTable.hotspots().len(), 3);
+        assert_eq!(ScreenKind::Villager.hotspots().len(), 2);
     }
 }

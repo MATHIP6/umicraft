@@ -89,15 +89,19 @@ use crate::creative_view::CreativeView;
 use crate::error::ClientError;
 use crate::fog_context::fog_context;
 use crate::input::InputUpdate;
-use crate::inventory_input::InventoryAction;
+use crate::inventory_input::{ContainerAction, InventoryAction};
 use crate::network::{self, ClientCommand, NetworkConfig};
 use crate::profiles::profile_from_properties;
+use umicraft_game::inventory::payload;
 
 #[path = "combat.rs"]
 mod combat;
 #[path = "creative_events.rs"]
 mod creative_events;
 use creative_events::apply_creative_event;
+#[path = "container_events.rs"]
+mod container_events;
+use container_events::{apply_container_action, apply_trade_list};
 #[path = "inventory_events.rs"]
 mod inventory_events;
 use inventory_events::apply_inventory_action;
@@ -218,6 +222,8 @@ pub enum GameEvent {
     CloseInventory,
     /// A slot interaction of the open inventory or container screen.
     Inventory(InventoryAction),
+    /// A click on a button or text change of a container screen.
+    Container(ContainerAction),
     /// An interaction with the creative inventory screen.
     Creative(CreativeEvent),
     /// The player pressed "Respawn" on the death screen.
@@ -1094,6 +1100,10 @@ fn handle_event(
         }
         GameEvent::Inventory(action) => {
             apply_inventory_action(game, action, queue, frames);
+            false
+        }
+        GameEvent::Container(action) => {
+            apply_container_action(game, action, queue, frames);
             false
         }
         GameEvent::Creative(event) => {
@@ -2024,6 +2034,9 @@ fn apply_net_event(
                 game.dirty.extend(dirty);
             }
             game.server.apply_block_action(&packet);
+        }
+        PlayEvent::PluginMessage(packet) if packet.channel == payload::TRADE_LIST => {
+            apply_trade_list(game, &packet.data, frames);
         }
         other => apply_server_state(&mut game.server, &other),
     }

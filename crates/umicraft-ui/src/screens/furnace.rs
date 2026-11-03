@@ -2,7 +2,7 @@
 
 //! The furnace, after `ContainerFurnace` / `GuiFurnace`.
 
-use super::decoration::{Decoration, Fill};
+use super::decoration::{Decoration, Fill, Sheet};
 use super::layout::player_inventory_slots;
 use super::{ScreenSpec, SlotSpec};
 
@@ -58,6 +58,7 @@ pub(super) fn decorations(properties: &[i16]) -> Vec<Decoration> {
             size: (14, FLAME_HEIGHT),
             dst: (56, 36),
             fill: Fill::Up((k + 1) as f32 / FLAME_HEIGHT as f32),
+            sheet: Sheet::Screen,
         });
     }
     let l = if cook_total != 0 && cook != 0 {
@@ -70,6 +71,7 @@ pub(super) fn decorations(properties: &[i16]) -> Vec<Decoration> {
         size: (ARROW_WIDTH, 16),
         dst: (79, 34),
         fill: Fill::Right((l + 1) as f32 / ARROW_WIDTH as f32),
+        sheet: Sheet::Screen,
     });
     decorations
 }

@@ -6,6 +6,7 @@
 //! field, the cost line and `MC|ItemName` come with the anvil input handling.
 
 use super::decoration::Decoration;
+use super::interaction::{Dynamic, ScreenState};
 use super::layout::player_inventory_slots;
 use super::{ScreenSpec, SlotSpec};
 
@@ -24,7 +25,12 @@ pub(super) fn spec() -> ScreenSpec {
 }
 
 /// The name field and the "no result" cross for the current slot contents.
-pub(super) fn decorations(has_input: bool, has_second: bool, has_result: bool) -> Vec<Decoration> {
+pub(super) fn dynamic(state: &ScreenState<'_>) -> Dynamic {
+    let [has_input, has_second, has_result] = state.filled;
+    Dynamic::sprites(decorations(has_input, has_second, has_result))
+}
+
+fn decorations(has_input: bool, has_second: bool, has_result: bool) -> Vec<Decoration> {
     let field_v = if has_input { 166 } else { 182 };
     let mut decorations = vec![Decoration::full((0, field_v), (110, 16), (59, 20))];
     if (has_input || has_second) && !has_result {

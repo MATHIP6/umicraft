@@ -316,10 +316,12 @@ inventory, chests, crafting table, furnace, dispenser, dropper and hopper, and
 the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 
 **Remaining before P4 is done**
-- **P4d, container screens and protocol (layouts done 2026-11-03):** the
-  screens of the brewing stand (complete), horse, enchanting table, anvil,
-  beacon and villager (layout only) exist in `umicraft-ui/src/screens/`.
-  Remaining: enchanting table (`Enchant Item`, `Window Property` 0-9), anvil
+- **P4d, container screens and protocol (2026-11-03):** brewing stand, horse,
+  enchanting table, anvil, beacon and villager have their screens and their
+  packets (`Enchant Item`, `MC|ItemName`, `MC|Beacon`, `MC|TrList`,
+  `MC|TrSel`). Book and quill (`MC|BEdit`, `MC|BSign`) and sign editing
+  (`Update Sign` is encodable, nothing sends it) are not started. The text
+  below lists the original scope: enchanting table (`Enchant Item`, `Window Property` 0-9), anvil
   (`MC|ItemName`), beacon (`MC|Beacon`), villager (`MC|TrList`, `MC|TrSel`),
   horse inventory, book and quill (`MC|BEdit`, `MC|BSign`), sign editing.
   They open today with a chest layout (`ScreenKind` fallback) and the slot

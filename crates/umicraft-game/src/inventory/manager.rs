@@ -10,6 +10,7 @@ use super::kind::{
     resolve_container_slot, SlotTarget, WindowKind, HOTBAR_LEN, HOTBAR_START, MAIN_INV_LEN,
     PLAYER_SLOT_COUNT,
 };
+use super::payload::{Trade, TradeList};
 use super::player::{main_index_to_slot, PlayerInventory};
 use super::slot::{container_window_kinds, player_window_kinds, SlotKind};
 use super::space::ClickSpace;
@@ -35,6 +36,10 @@ pub struct ContainerWindow {
     pub container_slots: Vec<Option<ItemStack>>,
     /// Properties indexed by property id (e.g. furnace progress).
     pub properties: Vec<i16>,
+    /// The offers of a villager window, once `MC|TrList` arrived.
+    pub trades: Vec<Trade>,
+    /// The offer shown in a villager window.
+    pub selected_trade: usize,
     kinds: Vec<SlotKind>,
 }
 
@@ -146,6 +151,8 @@ impl WindowManager {
             title,
             container_slots: vec![None; own],
             properties: Vec::new(),
+            trades: Vec::new(),
+            selected_trade: 0,
             kinds: container_window_kinds(kind, own),
         });
         self.reset_transactions();
@@ -182,6 +189,37 @@ impl WindowManager {
             container.properties.resize(idx + 1, 0);
         }
         container.properties[idx] = value;
+    }
+
+    /// Stores the offers of the villager window `list` belongs to; offers for
+    /// another window are dropped, like the reference does.
+    pub fn set_trades(&mut self, list: TradeList) {
+        let Some(container) = self
+            .container
+            .as_mut()
+            .filter(|c| i32::from(c.window_id) == list.window_id && c.kind == WindowKind::Villager)
+        else {
+            return;
+        };
+        container.selected_trade = container
+            .selected_trade
+            .min(list.trades.len().saturating_sub(1));
+        container.trades = list.trades;
+    }
+
+    /// Moves the selected villager offer by `step` (`GuiMerchant`'s arrows)
+    /// and returns the new index when it changed.
+    pub fn step_trade(&mut self, step: i32) -> Option<usize> {
+        let container = self.container.as_mut()?;
+        let last = container.trades.len().checked_sub(1)?;
+        let next = container
+            .selected_trade
+            .saturating_add_signed(step as isize)
+            .min(last);
+        (next != container.selected_trade).then(|| {
+            container.selected_trade = next;
+            next
+        })
     }
 
     /// Returns the next action number for a `Click Window` packet
@@ -418,6 +456,8 @@ impl WindowManager {
                 title: c.title.clone(),
                 slots: c.container_slots.clone(),
                 properties: c.properties.clone(),
+                trades: c.trades.clone(),
+                selected_trade: c.selected_trade,
             }),
             cursor: self.cursor.clone(),
             selected_slot: self.selected_slot,
@@ -635,5 +675,61 @@ mod tests {
             view.container.map(|c| (c.window_id, c.slots.len())),
             Some((1, 27))
         );
+    }
+
+    fn offer(n: i8) -> Trade {
+        Trade {
+            buy: stack(1, n),
+            buy_second: None,
+            sell: stack(2, 1),
+            disabled: false,
+            uses: 0,
+            max_uses: 7,
+        }
+    }
+
+    #[test]
+    fn trades_belong_to_the_villager_window_that_asked() {
+        let mut wm = WindowManager::default();
+        wm.open_window(3, WindowKind::Villager, String::new(), 3);
+        wm.set_trades(TradeList {
+            window_id: 4,
+            trades: vec![offer(1)],
+        });
+        assert!(wm.container().unwrap().trades.is_empty());
+        wm.set_trades(TradeList {
+            window_id: 3,
+            trades: vec![offer(1), offer(2)],
+        });
+        assert_eq!(wm.container().unwrap().trades.len(), 2);
+        assert_eq!(wm.view().container.unwrap().trades.len(), 2);
+    }
+
+    #[test]
+    fn stepping_offers_stops_at_both_ends() {
+        let mut wm = WindowManager::default();
+        assert_eq!(wm.step_trade(1), None, "no window");
+        wm.open_window(3, WindowKind::Villager, String::new(), 3);
+        assert_eq!(wm.step_trade(1), None, "no offers yet");
+        wm.set_trades(TradeList {
+            window_id: 3,
+            trades: vec![offer(1), offer(2), offer(3)],
+        });
+        assert_eq!(wm.step_trade(-1), None);
+        assert_eq!(wm.step_trade(1), Some(1));
+        assert_eq!(wm.step_trade(5), Some(2));
+        assert_eq!(wm.step_trade(1), None);
+        assert_eq!(wm.step_trade(-1), Some(1));
+    }
+
+    #[test]
+    fn worn_armor_lists_boots_first() {
+        let mut wm = WindowManager::default();
+        wm.apply_set_slot(0, 5, stack(298, 1));
+        wm.apply_set_slot(0, 8, stack(301, 1));
+        let worn = wm.worn_armor();
+        assert_eq!(worn[3].map(|s| s.item_id), Some(298), "helmet last");
+        assert_eq!(worn[0].map(|s| s.item_id), Some(301), "boots first");
+        assert!(worn[1].is_none() && worn[2].is_none());
     }
 }
