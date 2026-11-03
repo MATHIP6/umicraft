@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Skull and banner items (MCP `TileEntityItemStackRenderer.renderByItem`).
+//! Skull, banner and chest items (MCP `TileEntityItemStackRenderer.renderByItem`).
 //!
 //! An item whose model is `builtin/entity` has no quads: vanilla draws the
 //! same tile-entity model as for a placed block, at the origin, after the
@@ -12,10 +12,12 @@
 //!   bottom centre, wearing the skin of `SkullOwner` when it is known.
 //! - A banner is drawn standing, with its pole, unturned and with the sway
 //!   of a banner at the origin at time 0 (no world, so no phase).
+//! - A chest, trapped chest or ender chest is drawn shut and unturned, like
+//!   the chest of a minecart (`TileEntityChestRenderer` with no world).
 
 use glam::{Mat4, Vec3};
 use umicraft_game::item_nbt::ItemDisplay;
-use umicraft_model::entity::{banner_sway, BannerModel, ModelVertex, TextureSlot};
+use umicraft_model::entity::{banner_sway, BannerModel, ChestModel, ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 use umicraft_world::LightLevel;
 
@@ -28,6 +30,12 @@ use crate::entity_render::{owner_skin_slot, skull_texture, SkinLookup};
 const SKULL: i16 = 397;
 /// `Items.banner`.
 const BANNER: i16 = 425;
+/// `Blocks.chest` as an item.
+const CHEST: i16 = 54;
+/// `Blocks.ender_chest` as an item.
+const ENDER_CHEST: i16 = 130;
+/// `Blocks.trapped_chest` as an item.
+const TRAPPED_CHEST: i16 = 146;
 /// `renderByItem` scales a skull by 2 about the origin of its renderer.
 const SKULL_SCALE: f32 = 2.0;
 
@@ -87,13 +95,16 @@ impl EntityItemMesh {
     }
 }
 
-/// Whether `item_id` is drawn by a tile-entity model (skull, banner).
+/// Whether `item_id` is drawn by a tile-entity model (skull, banner, chests).
 #[must_use]
 pub(crate) fn is_entity_item(item_id: i16) -> bool {
-    matches!(item_id, SKULL | BANNER)
+    matches!(
+        item_id,
+        SKULL | BANNER | CHEST | ENDER_CHEST | TRAPPED_CHEST
+    )
 }
 
-/// The mesh of a skull or banner stack, `None` for any other item.
+/// The mesh of a skull, banner or chest stack, `None` for any other item.
 ///
 /// `nbt` is the stack's raw tag, `skins` resolves the owner's skin of a
 /// player skull.
@@ -107,6 +118,7 @@ pub(crate) fn entity_item_mesh(
     match item_id {
         SKULL => Some(skull_item(damage, nbt, skins)),
         BANNER => Some(banner_item(damage, nbt)),
+        CHEST | ENDER_CHEST | TRAPPED_CHEST => Some(chest_item(item_id)),
         _ => None,
     }
 }
@@ -141,6 +153,22 @@ fn banner_item(damage: i16, nbt: Option<&[u8]>) -> EntityItemMesh {
             Mat4::IDENTITY,
         ),
         banner: Some(design),
+        pending_skin: false,
+    }
+}
+
+/// A shut chest facing south: `renderByItem` draws the tile entity at the
+/// origin, where it has no world to read a facing or a lid angle from.
+fn chest_item(item_id: i16) -> EntityItemMesh {
+    let slot = match item_id {
+        ENDER_CHEST => TextureSlot::ChestEnder,
+        TRAPPED_CHEST => TextureSlot::ChestTrapped,
+        _ => TextureSlot::Chest,
+    };
+    EntityItemMesh {
+        slot,
+        vertices: into_item_space(ChestModel::emit_mesh(), Mat4::IDENTITY),
+        banner: None,
         pending_skin: false,
     }
 }
@@ -206,8 +234,25 @@ mod tests {
     #[test]
     fn other_items_have_no_entity_mesh() {
         assert_eq!(entity_item_mesh(1, 0, None, &NoSkins), None);
-        // The chests are `builtin/entity` too but are not handled here.
-        assert_eq!(entity_item_mesh(54, 0, None, &NoSkins), None);
+        assert_eq!(entity_item_mesh(58, 0, None, &NoSkins), None);
+    }
+
+    #[test]
+    fn each_chest_item_has_its_sheet_and_stays_inside_the_cube() {
+        for (id, slot) in [
+            (CHEST, TextureSlot::Chest),
+            (TRAPPED_CHEST, TextureSlot::ChestTrapped),
+            (ENDER_CHEST, TextureSlot::ChestEnder),
+        ] {
+            let chest = mesh(id, 0, None);
+            assert!(is_entity_item(id));
+            assert_eq!(chest.slot, slot);
+            assert_eq!(chest.banner, None);
+            for axis in 0..3 {
+                let (low, high) = extent(&chest, axis);
+                assert!(low >= -1e-5 && high <= 1.0 + 1e-5, "{id} {axis}");
+            }
+        }
     }
 
     #[test]

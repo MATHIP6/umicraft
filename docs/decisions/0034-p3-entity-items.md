@@ -52,5 +52,8 @@ damage).
   enchanted skulls and banners is not drawn; a skull owner given only as a
   name is not looked up (the same as the placed skull); two stacks that differ
   only in unrelated NBT (a custom name) get separate icon cells.
-- Chests, ender chests and trapped chests are `builtin/entity` too and can use
-  the same path later.
+- Chests, ender chests and trapped chests use the same path (2026-11-03):
+  `ChestModel::emit_mesh()` (shut, facing south, like the chest minecart),
+  folded into item space with the half turn, with the sheet of the chest, the
+  trapped chest or the ender chest. `TileEntityItemStackRenderer.renderByItem`
+  draws them at the origin with no world, so there is no facing or lid angle.
