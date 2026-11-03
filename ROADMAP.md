@@ -316,8 +316,10 @@ inventory, chests, crafting table, furnace, dispenser, dropper and hopper, and
 the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 
 **Remaining before P4 is done**
-- **P4d, container screens and protocol (not started):** brewing stand,
-  enchanting table (`Enchant Item`, `Window Property` 0-9), anvil
+- **P4d, container screens and protocol (layouts done 2026-11-03):** the
+  screens of the brewing stand (complete), horse, enchanting table, anvil,
+  beacon and villager (layout only) exist in `umicraft-ui/src/screens/`.
+  Remaining: enchanting table (`Enchant Item`, `Window Property` 0-9), anvil
   (`MC|ItemName`), beacon (`MC|Beacon`), villager (`MC|TrList`, `MC|TrSel`),
   horse inventory, book and quill (`MC|BEdit`, `MC|BSign`), sign editing.
   They open today with a chest layout (`ScreenKind` fallback) and the slot
@@ -325,10 +327,9 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
   `umicraft-ui/src/screens/`), its decorations and its packets. The window
   kinds whose `Open Window` announces 0 slots are handled in
   `WindowKind::implicit_slot_count`; check the horse (entity id in the packet).
-- **Player model** (`GuiInventory.drawEntityOnScreen`) in the inventory (51, 75,
-  scale 30) and in the creative Inventory tab (43, 45, scale 20): not done. It
-  needs a per-frame offscreen render of the player through the entity pipeline
-  and a UI draw command, like the icon atlas.
+- **Player model**: done in the survival inventory (offscreen portrait block
+  of the icon atlas, ADR-0025 addendum); the creative Inventory tab (43, 45,
+  scale 20) still lacks it.
 - **Active effects list** in the inventory (needs the `Entity Effect` state of
   P1/P2 drawn left of the window, `GuiInventory.drawActivePotionEffects`).
 - **Creative inventory gaps:** tab-name line in the Search tooltip, Shift +

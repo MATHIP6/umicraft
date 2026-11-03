@@ -52,7 +52,9 @@ pub use hud::{
     TitleView,
 };
 pub use hud_hearts::{HeartsTint, HeartsView};
-pub use items::{IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE};
+pub use items::{
+    IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE, PORTRAIT_KEY, PORTRAIT_SIZE,
+};
 pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
 pub use overlays::{Portal, ScreenOverlays, Underwater};

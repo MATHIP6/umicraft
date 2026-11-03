@@ -245,6 +245,9 @@ pub struct Frame {
     pub spawn: Option<(i32, i32, i32)>,
     /// Per-entity interpolation data for the render thread.
     pub entities: Arc<[EntityFrameData]>,
+    /// The body of the local player, always present: the inventory screen
+    /// draws it (`GuiInventory.drawEntityOnScreen`).
+    pub local_body: Arc<EntityFrameData>,
     /// The light at the eye of the local player, which lights the
     /// first-person item (MCP `ItemRenderer.func_178109_a`).
     pub hand_light: LightLevel,
@@ -1218,6 +1221,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         dimension: game.dimension,
         spawn: game.spawn,
         entities: entities.into(),
+        local_body: Arc::new(game.body.frame_data()),
         hand_light,
         selection: game.selection_outline().into(),
         cracks: game.cracks().into(),
@@ -1336,6 +1340,10 @@ fn follow_body(game: &mut Game) {
         .windows
         .selected_item()
         .and_then(EntityItem::from_stack);
+    game.body.armor = game
+        .windows
+        .worn_armor()
+        .map(|piece| piece.and_then(EntityItem::from_stack));
     game.body.follow(
         state.position(),
         game.yaw.to_degrees(),

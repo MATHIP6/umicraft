@@ -12,12 +12,14 @@ use umicraft_game::inventory::{
     resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
 };
 use umicraft_protocol::packets::play::ItemStack;
-use umicraft_ui::screens::{ScreenKind, ScreenLayout, SpriteRect};
+use umicraft_render::PORTRAIT_KEY;
+use umicraft_ui::screens::{Decoration, ScreenKind, ScreenLayout, SpriteRect};
 use umicraft_ui::widgets::slot;
 use umicraft_ui::{draw_item, FontAtlas, Rect, Ui};
 
 use crate::inventory_input::Context;
 use crate::item_icons::{slot_item, ItemView};
+use crate::portrait::{self, Spot};
 use crate::tooltip_draw::draw_tooltip;
 
 /// Number of backpack and hotbar slots after a container's own slots.
@@ -34,9 +36,8 @@ const DRAG_HIGHLIGHT: [f32; 4] = [1.0, 1.0, 1.0, 0.5];
 
 /// Chooses the screen of an open window.
 ///
-/// Windows that have no dedicated screen yet (brewing, enchanting, anvil,
-/// beacon, villager, horse) fall back to a chest layout with enough rows for
-/// their own slots, so they stay usable.
+/// A window kind whose screen is not drawn yet falls back to a chest layout
+/// with enough rows for its own slots, so it stays usable.
 pub fn screen_kind(container: Option<&ContainerView>) -> ScreenKind {
     let Some(container) = container else {
         return ScreenKind::Player;
@@ -47,7 +48,15 @@ pub fn screen_kind(container: Option<&ContainerView>) -> ScreenKind {
         WindowKind::Furnace => ScreenKind::Furnace,
         WindowKind::Dispenser | WindowKind::Dropper => ScreenKind::Dispenser,
         WindowKind::Hopper => ScreenKind::Hopper,
-        _ => ScreenKind::Chest {
+        WindowKind::BrewingStand => ScreenKind::BrewingStand,
+        WindowKind::EnchantingTable => ScreenKind::EnchantingTable,
+        WindowKind::Anvil => ScreenKind::Anvil,
+        WindowKind::Beacon => ScreenKind::Beacon,
+        WindowKind::Villager => ScreenKind::Villager,
+        WindowKind::Horse => ScreenKind::Horse {
+            own_slots: u8::try_from(container.slots.len()).unwrap_or(u8::MAX),
+        },
+        WindowKind::Chest => ScreenKind::Chest {
             rows: rows(container.slots.len()),
         },
     }
@@ -65,6 +74,17 @@ pub fn screen_input(viewport: Rect, view: &WindowView, gamemode: u8) -> (ScreenL
         creative: gamemode == CREATIVE_GAMEMODE,
     };
     (layout, context)
+}
+
+/// The dynamic sprites of `kind` for the open window.
+fn screen_decorations(view: &WindowView, kind: ScreenKind, properties: &[i16]) -> Vec<Decoration> {
+    match (kind, &view.container) {
+        (ScreenKind::Anvil, Some(container)) => {
+            let filled = |i: usize| container.slots.get(i).is_some_and(Option::is_some);
+            ScreenKind::anvil_decorations(filled(0), filled(1), filled(2))
+        }
+        _ => kind.decorations(properties),
+    }
 }
 
 /// The number of slots the container adds in front of the player part.
@@ -89,8 +109,10 @@ fn stack_at(view: &WindowView, own_len: usize, index: usize) -> Option<&ItemStac
 }
 
 /// Draws the inventory or container screen as a modal overlay, including the
-/// stack on the cursor.
-pub fn draw_inventory_overlay(
+/// stack on the cursor. Returns where the player model of the survival
+/// inventory goes: the caller draws it into the portrait block of the icon
+/// atlas before rendering the frame.
+pub(crate) fn draw_inventory_overlay(
     ui: &mut Ui,
     atlas: &FontAtlas,
     viewport: Rect,
@@ -98,7 +120,7 @@ pub fn draw_inventory_overlay(
     gui_atlas: Option<&GuiAtlas>,
     items: ItemView<'_>,
     drag: Option<&DragPreview>,
-) {
+) -> Option<Spot> {
     ui.draw().rect(viewport, DIMMING);
     let kind = screen_kind(view.container.as_ref());
     let layout = ScreenLayout::new(viewport, kind);
@@ -107,7 +129,7 @@ pub fn draw_inventory_overlay(
     match region {
         Some(region) => {
             let properties = view.container.as_ref().map_or(&[][..], |c| &c.properties);
-            let decorations = kind.decorations(properties);
+            let decorations = screen_decorations(view, kind, properties);
             for sprite in layout
                 .background_sprites()
                 .iter()
@@ -117,6 +139,14 @@ pub fn draw_inventory_overlay(
             }
         }
         None => ui.draw().rect(layout.background, FALLBACK_BACKGROUND),
+    }
+    let spot = (kind == ScreenKind::Player).then_some(Spot {
+        origin: (layout.background.x, layout.background.y),
+        gui_scale: layout.scale,
+        placement: portrait::INVENTORY,
+    });
+    if let Some(spot) = &spot {
+        ui.draw().item(PORTRAIT_KEY, spot.rect(), false);
     }
 
     let own_len = own_slot_count(&layout, kind);
@@ -147,6 +177,7 @@ pub fn draw_inventory_overlay(
             hovered_stack(ui, &layout, view, own_len),
         );
     }
+    spot
 }
 
 /// The stack under the pointer, if any.
@@ -233,14 +264,20 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_windows_fall_back_to_a_chest_layout() {
+    fn every_window_kind_has_its_own_screen() {
         let kind = |k, n| screen_kind(Some(&container(k, n)));
+        assert_eq!(kind(WindowKind::BrewingStand, 4), ScreenKind::BrewingStand);
         assert_eq!(
-            kind(WindowKind::BrewingStand, 4),
-            ScreenKind::Chest { rows: 1 }
+            kind(WindowKind::EnchantingTable, 2),
+            ScreenKind::EnchantingTable
         );
-        assert_eq!(kind(WindowKind::Horse, 17), ScreenKind::Chest { rows: 2 });
-        assert_eq!(kind(WindowKind::Horse, 0), ScreenKind::Chest { rows: 1 });
+        assert_eq!(kind(WindowKind::Anvil, 3), ScreenKind::Anvil);
+        assert_eq!(kind(WindowKind::Beacon, 1), ScreenKind::Beacon);
+        assert_eq!(kind(WindowKind::Villager, 3), ScreenKind::Villager);
+        assert_eq!(
+            kind(WindowKind::Horse, 17),
+            ScreenKind::Horse { own_slots: 17 }
+        );
     }
 
     fn stack(id: i16) -> ItemStack {

@@ -22,16 +22,22 @@
 //! assert_eq!(layout.slots.len(), 39);
 //! ```
 
+mod anvil;
+mod beacon;
+mod brewing;
 mod chest;
 mod crafting;
 mod decoration;
 mod dispenser;
+mod enchanting;
 mod furnace;
 mod hopper;
+mod horse;
 mod layout;
 mod player;
 mod scale;
 mod screen_layout;
+mod villager;
 
 pub use decoration::{Decoration, Fill, SpriteRect};
 pub use scale::{gui_scale, ScaledResolution};
@@ -56,6 +62,22 @@ pub enum ScreenKind {
     Dispenser,
     /// The five-slot hopper.
     Hopper,
+    /// The brewing stand.
+    BrewingStand,
+    /// The enchanting table (static layout).
+    EnchantingTable,
+    /// The anvil (static layout).
+    Anvil,
+    /// The beacon (static layout).
+    Beacon,
+    /// The villager trading screen (static layout).
+    Villager,
+    /// A horse inventory with `own_slots` slots of its own (2, or 17 with a
+    /// chest).
+    Horse {
+        /// Number of window slots before the player part.
+        own_slots: u8,
+    },
 }
 
 /// One slot of a screen.
@@ -106,17 +128,40 @@ impl ScreenKind {
             Self::Furnace => furnace::spec(),
             Self::Dispenser => dispenser::spec(),
             Self::Hopper => hopper::spec(),
+            Self::BrewingStand => brewing::spec(),
+            Self::EnchantingTable => enchanting::spec(),
+            Self::Anvil => anvil::spec(),
+            Self::Beacon => beacon::spec(),
+            Self::Villager => villager::spec(),
+            Self::Horse { own_slots } => horse::spec(usize::from(own_slots)),
         }
     }
 
     /// The dynamic sprites (flames, progress arrows) for the window
     /// `properties` the server sent. Screens without any return an empty list.
+    ///
+    /// The anvil's sprites depend on its slot contents rather than on
+    /// properties: use [`ScreenKind::anvil_decorations`].
     #[must_use]
     pub fn decorations(self, properties: &[i16]) -> Vec<Decoration> {
         match self {
             Self::Furnace => furnace::decorations(properties),
+            Self::BrewingStand => brewing::decorations(properties),
             _ => Vec::new(),
         }
+    }
+}
+
+impl ScreenKind {
+    /// The anvil's name field and "no result" cross, which depend on which of
+    /// its three slots hold a stack.
+    #[must_use]
+    pub fn anvil_decorations(
+        has_input: bool,
+        has_second: bool,
+        has_result: bool,
+    ) -> Vec<Decoration> {
+        anvil::decorations(has_input, has_second, has_result)
     }
 }
 
@@ -124,7 +169,7 @@ impl ScreenKind {
 mod tests {
     use super::*;
 
-    const KINDS: [ScreenKind; 8] = [
+    const KINDS: [ScreenKind; 14] = [
         ScreenKind::Player,
         ScreenKind::Chest { rows: 3 },
         ScreenKind::Chest { rows: 6 },
@@ -133,6 +178,12 @@ mod tests {
         ScreenKind::Dispenser,
         ScreenKind::Hopper,
         ScreenKind::Chest { rows: 1 },
+        ScreenKind::BrewingStand,
+        ScreenKind::EnchantingTable,
+        ScreenKind::Anvil,
+        ScreenKind::Beacon,
+        ScreenKind::Villager,
+        ScreenKind::Horse { own_slots: 17 },
     ];
 
     #[test]
@@ -149,7 +200,11 @@ mod tests {
 
     #[test]
     fn container_screens_end_with_27_backpack_and_9_hotbar_slots() {
-        for kind in KINDS.into_iter().filter(|k| *k != ScreenKind::Player) {
+        // The beacon window is wider and its backpack starts at x = 36.
+        for kind in KINDS
+            .into_iter()
+            .filter(|k| !matches!(k, ScreenKind::Player | ScreenKind::Beacon))
+        {
             let spec = kind.spec();
             let own = spec.slots.len() - 36;
             assert_eq!(spec.slots[own].x, 8, "{kind:?}");
@@ -158,8 +213,9 @@ mod tests {
     }
 
     #[test]
-    fn only_the_furnace_has_decorations() {
+    fn only_the_furnace_and_brewing_stand_have_property_decorations() {
         assert!(ScreenKind::Hopper.decorations(&[1, 2, 3, 4]).is_empty());
         assert!(!ScreenKind::Furnace.decorations(&[]).is_empty());
+        assert!(!ScreenKind::BrewingStand.decorations(&[200]).is_empty());
     }
 }

@@ -347,6 +347,13 @@ impl WindowManager {
         self.inventory.slot(BOOTS_SLOT)
     }
 
+    /// The four worn pieces, boots first and helmet last (the order of
+    /// `Entity Equipment` slots 1 to 4), for drawing the player model.
+    #[must_use]
+    pub fn worn_armor(&self) -> [Option<&ItemStack>; 4] {
+        std::array::from_fn(|index| self.inventory.slot(BOOTS_SLOT - index))
+    }
+
     /// The armour bar value, read from the four armour slots.
     #[must_use]
     pub fn armor_value(&self) -> u8 {

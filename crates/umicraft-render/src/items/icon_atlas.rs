@@ -21,8 +21,21 @@ pub const ICON_ATLAS_SIZE: u32 = 2048;
 /// Side of one icon cell in pixels (four times the 16 px GUI icon).
 pub const ICON_CELL_SIZE: u32 = 64;
 
+/// Key under which the portrait (the player model of the inventory screen)
+/// is drawn. Icon keys are hashes of item stacks; this value is reserved.
+pub const PORTRAIT_KEY: u64 = u64::MAX;
+/// Side of the portrait in cells.
+const PORTRAIT_CELLS: u32 = 4;
+/// Side of the portrait in pixels: it covers 64x64 GUI pixels at the same
+/// density as an icon.
+pub const PORTRAIT_SIZE: u32 = PORTRAIT_CELLS * ICON_CELL_SIZE;
+
 const CELLS_PER_ROW: u32 = ICON_ATLAS_SIZE / ICON_CELL_SIZE;
-const CELL_COUNT: u32 = CELLS_PER_ROW * CELLS_PER_ROW;
+/// The last rows of the atlas are reserved for the portrait, which is
+/// redrawn in place so that a moving mouse never uses up item icon cells.
+const CELL_COUNT: u32 = CELLS_PER_ROW * (CELLS_PER_ROW - PORTRAIT_CELLS);
+/// Top-left cell of the portrait.
+const PORTRAIT_CELL: (u32, u32) = (0, CELLS_PER_ROW - PORTRAIT_CELLS);
 
 /// The atlas texture, its cell bookkeeping and the scratch targets.
 pub(crate) struct IconAtlas {
@@ -56,13 +69,13 @@ impl IconAtlas {
         let scratch = create_color_texture(
             device,
             "icon scratch",
-            ICON_CELL_SIZE,
+            PORTRAIT_SIZE,
             format,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         );
         let depth = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("icon depth"),
-            size: cell_extent(),
+            size: extent(PORTRAIT_SIZE),
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -107,12 +120,16 @@ impl IconAtlas {
 
     /// The normalised `[u_min, v_min, u_max, v_max]` of a rendered icon.
     pub(crate) fn uv(&self, key: u64) -> Option<[f32; 4]> {
+        if key == PORTRAIT_KEY {
+            return Some(portrait_uv());
+        }
         self.cells.get(&key).map(|&cell| cell_uv(cell))
     }
 
-    /// Whether `key` already has a cell.
+    /// Whether `key` already has a cell. The portrait always does: it is
+    /// redrawn by [`IconAtlas::render_portrait`], never built on demand.
     pub(crate) fn contains(&self, key: u64) -> bool {
-        self.cells.contains_key(&key)
+        key == PORTRAIT_KEY || self.cells.contains_key(&key)
     }
 
     /// Renders `mesh` into a free cell under `key`.
@@ -160,7 +177,33 @@ impl IconAtlas {
         }
         let cell = self.next_cell;
         self.next_cell += 1;
+        let origin = cell_origin(cell);
+        self.draw_into(device, queue, ICON_CELL_SIZE, origin, draw);
+        self.cells.insert(key, cell);
+    }
 
+    /// Redraws the portrait block with `draw`, which receives a pass whose
+    /// camera maps the 16x16 GUI box to the whole block.
+    pub(crate) fn render_portrait(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        draw: impl FnOnce(&mut wgpu::RenderPass<'_>),
+    ) {
+        let origin = cell_origin_of(PORTRAIT_CELL.0, PORTRAIT_CELL.1);
+        self.draw_into(device, queue, PORTRAIT_SIZE, origin, draw);
+    }
+
+    /// Draws a `size` x `size` square with `draw` into the scratch target and
+    /// copies it to `origin` of the atlas.
+    fn draw_into(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: u32,
+        origin: wgpu::Origin3d,
+        draw: impl FnOnce(&mut wgpu::RenderPass<'_>),
+    ) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("icon encoder"),
         });
@@ -188,6 +231,9 @@ impl IconAtlas {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            // The scratch target is sized for the portrait; a smaller icon
+            // uses its corner and the camera maps the box to that corner.
+            pass.set_viewport(0.0, 0.0, size as f32, size as f32, 0.0, 1.0);
             draw(&mut pass);
         }
         encoder.copy_texture_to_texture(
@@ -200,13 +246,12 @@ impl IconAtlas {
             wgpu::TexelCopyTextureInfo {
                 texture: &self.atlas,
                 mip_level: 0,
-                origin: cell_origin(cell),
+                origin,
                 aspect: wgpu::TextureAspect::All,
             },
-            cell_extent(),
+            extent(size),
         );
         queue.submit(Some(encoder.finish()));
-        self.cells.insert(key, cell);
     }
 
     /// Forgets the icon under `key`; its cell stays unused until the atlas
@@ -263,20 +308,33 @@ fn create_color_texture(
     })
 }
 
-fn cell_extent() -> wgpu::Extent3d {
+fn extent(side: u32) -> wgpu::Extent3d {
     wgpu::Extent3d {
-        width: ICON_CELL_SIZE,
-        height: ICON_CELL_SIZE,
+        width: side,
+        height: side,
         depth_or_array_layers: 1,
     }
 }
 
 fn cell_origin(cell: u32) -> wgpu::Origin3d {
+    cell_origin_of(cell % CELLS_PER_ROW, cell / CELLS_PER_ROW)
+}
+
+fn cell_origin_of(column: u32, row: u32) -> wgpu::Origin3d {
     wgpu::Origin3d {
-        x: (cell % CELLS_PER_ROW) * ICON_CELL_SIZE,
-        y: (cell / CELLS_PER_ROW) * ICON_CELL_SIZE,
+        x: column * ICON_CELL_SIZE,
+        y: row * ICON_CELL_SIZE,
         z: 0,
     }
+}
+
+/// The normalised rectangle of the portrait block.
+fn portrait_uv() -> [f32; 4] {
+    let origin = cell_origin_of(PORTRAIT_CELL.0, PORTRAIT_CELL.1);
+    let size = ICON_ATLAS_SIZE as f32;
+    let (u, v) = (origin.x as f32 / size, origin.y as f32 / size);
+    let side = PORTRAIT_SIZE as f32 / size;
+    [u, v, u + side, v + side]
 }
 
 /// The normalised rectangle of `cell` in the atlas.
@@ -298,8 +356,23 @@ mod tests {
         let second_row = cell_uv(CELLS_PER_ROW);
         assert_eq!(second_row[0], 0.0);
         assert_eq!(second_row[1], 1.0 / 32.0);
+    }
+
+    #[test]
+    fn icon_cells_end_where_the_portrait_begins() {
         let last = cell_uv(CELL_COUNT - 1);
-        assert_eq!(last[2], 1.0);
-        assert_eq!(last[3], 1.0);
+        let portrait = portrait_uv();
+        assert_eq!(last[2], 1.0, "the last row of icons spans the atlas");
+        assert_eq!(last[3], portrait[1], "and the portrait starts right below");
+    }
+
+    #[test]
+    fn the_portrait_fills_the_bottom_left_corner() {
+        let uv = portrait_uv();
+        assert_eq!(uv, [0.0, 28.0 / 32.0, 4.0 / 32.0, 1.0]);
+        assert_eq!(
+            (uv[2] - uv[0]) * ICON_ATLAS_SIZE as f32,
+            PORTRAIT_SIZE as f32
+        );
     }
 }

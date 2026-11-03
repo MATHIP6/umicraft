@@ -1020,6 +1020,36 @@ impl Renderer {
             });
     }
 
+    /// Redraws the portrait, the large icon of the inventory screen that
+    /// shows the player, under [`crate::PORTRAIT_KEY`].
+    ///
+    /// Each batch is a vertex list and the entity texture it samples. The
+    /// vertices are posed in the 16x16 GUI box like a
+    /// [`Renderer::render_entity_icon`] icon, but the box fills the whole
+    /// [`crate::PORTRAIT_SIZE`] square, so the caller scales the model to fit.
+    /// The pipeline is the icon one: the two GUI lights at full light.
+    pub fn render_portrait(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        let buffers: Vec<(wgpu::Buffer, u32, &wgpu::BindGroup)> = batches
+            .iter()
+            .filter(|(vertices, _)| !vertices.is_empty())
+            .map(|&(vertices, texture)| {
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("portrait vertices"),
+                        contents: bytemuck::cast_slice(vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                (buffer, vertices.len() as u32, texture)
+            })
+            .collect();
+        let (entities, camera) = (&self.entity_renderer, &self.icon_entity_bind_group);
+        self.icon_atlas
+            .render_portrait(&self.device, &self.queue, |pass| {
+                entities.render_icon(pass, camera, buffers.iter().map(|(b, n, t)| (b, *n, *t)));
+            });
+    }
+
     /// Replaces the world-space item geometry drawn after the entities
     /// (dropped items, frames), already positioned in world coordinates.
     pub fn set_world_items(&mut self, mesh: &ItemMesh) {

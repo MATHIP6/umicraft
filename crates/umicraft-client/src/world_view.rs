@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
+#[cfg(test)]
+use umicraft_game::entity::{EntityId, EntityKind, EntityRecord};
 use umicraft_game::hand::HandPose;
 use umicraft_game::inventory::WindowView;
 use umicraft_game::piston::MovingBlocks;
@@ -87,6 +89,8 @@ pub struct WorldView {
     frames: usize,
     /// Active living entities interpolation data from the latest frame.
     entities: Arc<[EntityFrameData]>,
+    /// The body of the local player in the newest frame.
+    local_body: Option<Arc<EntityFrameData>>,
     /// The light at the eye of the local player in the latest frame.
     hand_light: LightLevel,
     /// Selection outline boxes from the latest frame.
@@ -136,6 +140,7 @@ impl WorldView {
             ended: None,
             frames: 0,
             entities: Arc::from([]),
+            local_body: None,
             hand_light: LightLevel::FULL_SKY,
             selection: Arc::from([]),
             cracks: Arc::from([]),
@@ -352,6 +357,12 @@ impl WorldView {
         self.entities.iter().map(|e| e.interpolate(alpha)).collect()
     }
 
+    /// The body of the local player at the newest tick, once a frame arrived.
+    #[must_use]
+    pub fn local_body(&self) -> Option<EntityRenderSnapshot> {
+        self.local_body.as_ref().map(|body| body.interpolate(1.0))
+    }
+
     /// The light that lights the first-person item in the newest frame.
     #[must_use]
     pub fn hand_light(&self) -> LightLevel {
@@ -388,6 +399,7 @@ impl WorldView {
             RenderEvent::Frame(frame) => {
                 self.frames += 1;
                 self.entities = Arc::clone(&frame.entities);
+                self.local_body = Some(Arc::clone(&frame.local_body));
                 self.hand_light = frame.hand_light;
                 self.selection = Arc::clone(&frame.selection);
                 self.maps = Arc::clone(&frame.maps);
@@ -838,6 +850,10 @@ mod tests {
             dimension: -1,
             spawn: None,
             entities: Arc::from([]),
+            local_body: Arc::new(
+                EntityRecord::new(EntityId(0), EntityKind::Player, glam::DVec3::ZERO, 0.0, 0.0)
+                    .frame_data(),
+            ),
             hand_light: LightLevel::FULL_SKY,
             selection: Arc::from([]),
             cracks: Arc::from([]),

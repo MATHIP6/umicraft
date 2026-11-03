@@ -18,7 +18,7 @@ mod world_glint;
 pub(crate) use dynamic_mesh::DynamicMesh;
 pub(crate) use glint::GlintPass;
 pub(crate) use icon_atlas::IconAtlas;
-pub use icon_atlas::{ICON_ATLAS_SIZE, ICON_CELL_SIZE};
+pub use icon_atlas::{ICON_ATLAS_SIZE, ICON_CELL_SIZE, PORTRAIT_KEY, PORTRAIT_SIZE};
 pub(crate) use world_glint::WorldGlint;
 
 use umicraft_mesh::item::ItemMesh;

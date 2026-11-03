@@ -99,3 +99,13 @@ is replaced by `screens/player.rs` and `screens/layout.rs`.
   is possible.
 - `WindowManager` gained `click_local` (a click without packet or transaction)
   and `set_cursor`.
+
+## Addendum (2026-11-03, player model)
+
+The player model of the inventory is drawn into a reserved 256x256 block (the
+last four rows) of the icon atlas, under `PORTRAIT_KEY`, and shown with an
+ordinary `DrawCommand::Item` of 64x64 GUI pixels. Redrawing it in place each
+frame avoids using up icon cells while the pointer moves. The matrix chain of
+`drawEntityOnScreen` is in `umicraft-client/src/portrait.rs`. The local body
+snapshot reaches the render thread through `Frame::local_body`, and its armour
+now comes from the armour slots of the window.

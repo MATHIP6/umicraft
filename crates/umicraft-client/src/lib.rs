@@ -58,6 +58,7 @@ pub mod overlay_state;
 pub mod overlay_view;
 pub mod particle_ambient;
 pub mod particle_view;
+pub(crate) mod portrait;
 mod process_memory;
 pub mod profiles;
 pub mod screen;

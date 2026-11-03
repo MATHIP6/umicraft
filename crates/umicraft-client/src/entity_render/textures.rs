@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use crate::block_entity_render::BannerDesign;
 use crate::block_entity_render::{BannerDesigns, BlockEntityMeshes};
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::skin::decode_png_bytes;
 use umicraft_game::entity::EntityRenderSnapshot;
@@ -347,6 +347,52 @@ impl EntityTextures {
             })
             .collect();
         renderer.upload_shadow_entities(&shadows);
+    }
+
+    /// Draws `body` into the portrait of the icon atlas, `placement` carrying
+    /// the model at the world origin into the icon box (`GuiInventory`'s
+    /// player model). Only the lit layers are drawn: no shadow, no glint.
+    pub(crate) fn render_portrait(
+        &self,
+        body: &EntityRenderSnapshot,
+        placement: Mat4,
+        renderer: &mut Renderer,
+    ) {
+        self.skins
+            .borrow_mut()
+            .collect(renderer, &mut self.textures.borrow_mut());
+        let meshed = mesh_entities_with(
+            std::slice::from_ref(body),
+            self,
+            (0.0, 0.0),
+            false,
+            Vec3::ZERO,
+        );
+        self.compose_missing_coats(meshed.solid.keys(), renderer);
+        let textures = self.textures.borrow();
+        let mut posed: Vec<(TextureSlot, Vec<EntityVertex>)> = meshed
+            .solid
+            .into_iter()
+            .filter(|(_, vertices)| !vertices.is_empty())
+            .collect();
+        for vertex in posed.iter_mut().flat_map(|(_, vertices)| vertices) {
+            vertex.position = placement
+                .transform_point3(Vec3::from(vertex.position))
+                .to_array();
+            vertex.normal = placement
+                .transform_vector3(Vec3::from(vertex.normal))
+                .normalize_or_zero()
+                .to_array();
+        }
+        let batches: Vec<_> = posed
+            .iter()
+            .filter_map(|(slot, vertices)| {
+                textures
+                    .get(slot)
+                    .map(|texture| (vertices.as_slice(), texture.bind_group()))
+            })
+            .collect();
+        renderer.render_portrait(&batches);
     }
 
     /// Creates the texture of every horse coat in `slots` that is not there yet.

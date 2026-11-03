@@ -57,6 +57,7 @@ use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::options::{self, Action, Options};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
+use crate::portrait::{turned_towards, Spot};
 use crate::screen::Screen;
 use crate::sky_textures::{load_border_texture, load_sky_textures};
 use crate::terrain_textures::TerrainTextures;
@@ -227,6 +228,8 @@ struct App {
     world_items: WorldItems,
     /// The skull and banner icons drawn into the icon atlas.
     entity_icons: EntityIcons,
+    /// Where the inventory screen put the player model in the last frame.
+    portrait: Option<Spot>,
     /// The first-person held item geometry of the frame.
     hand_layers: ItemLayers,
     /// Steps the water, lava and fire textures once per game tick.
@@ -313,6 +316,7 @@ impl App {
             dials: DialAnimator::default(),
             world_items: WorldItems::default(),
             entity_icons: EntityIcons::default(),
+            portrait: None,
             hand_layers: ItemLayers::default(),
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
@@ -1025,6 +1029,7 @@ impl App {
     /// caller recycles the returned output after the renderer consumed the
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
+        self.portrait = None;
         let atlas = self.ui_atlas.as_ref()?;
         let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
         let screen = self.screen();
@@ -1145,7 +1150,7 @@ impl App {
                     let wv = self.world.as_ref().map(|w| w.window_view().clone());
                     if let Some(wv) = wv {
                         let drag = self.inventory_drag_preview(&wv);
-                        draw_inventory_overlay(
+                        self.portrait = draw_inventory_overlay(
                             &mut self.ui,
                             atlas,
                             viewport,
@@ -1388,6 +1393,18 @@ impl App {
             }
         }
 
+        if let (Some(spot), Some(textures), Some(body)) = (
+            self.portrait,
+            self.entity_textures.as_ref(),
+            self.world.as_ref().and_then(|world| world.local_body()),
+        ) {
+            let mouse = spot.mouse_offset(self.pointer);
+            textures.render_portrait(
+                &turned_towards(body, mouse),
+                spot.placement.matrix(mouse),
+                renderer,
+            );
+        }
         if let (Some(frame), Some(items), Some(textures)) = (
             ui_frame.as_ref(),
             self.items.as_deref(),
