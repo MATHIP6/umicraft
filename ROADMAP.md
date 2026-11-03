@@ -329,9 +329,8 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
   `umicraft-ui/src/screens/`), its decorations and its packets. The window
   kinds whose `Open Window` announces 0 slots are handled in
   `WindowKind::implicit_slot_count`; check the horse (entity id in the packet).
-- **Player model**: done in the survival inventory (offscreen portrait block
-  of the icon atlas, ADR-0025 addendum); the creative Inventory tab (43, 45,
-  scale 20) still lacks it.
+- **Player model**: done in the survival inventory and the creative Inventory
+  tab (offscreen portrait block of the icon atlas, ADR-0025 addendum).
 - **Active effects list** in the inventory (needs the `Entity Effect` state of
   P1/P2 drawn left of the window, `GuiInventory.drawActivePotionEffects`).
 - **Creative inventory gaps:** tab-name line in the Search tooltip, Shift +

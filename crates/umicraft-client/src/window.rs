@@ -1243,7 +1243,8 @@ impl App {
                                 .is_multiple_of(2),
                         };
                         let layout = CreativeLayout::new(width, height);
-                        draw_creative_overlay(&mut self.ui, atlas, viewport, &layout, &scene);
+                        self.portrait =
+                            draw_creative_overlay(&mut self.ui, atlas, viewport, &layout, &scene);
                     }
                 }
                 Screen::Inventory => {

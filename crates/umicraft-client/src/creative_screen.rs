@@ -29,6 +29,7 @@ use umicraft_game::inventory::creative::{visible_slots, CreativeSlot, CreativeTa
 use umicraft_game::inventory::tooltip::{tooltip, TooltipColor, TooltipLine, TooltipText};
 use umicraft_game::inventory::{WindowView, HOTBAR_START};
 use umicraft_protocol::packets::play::ItemStack;
+use umicraft_render::PORTRAIT_KEY;
 use umicraft_ui::widgets::slot;
 use umicraft_ui::{draw_item, FontAtlas, Rect, TextStyle, Ui};
 
@@ -36,6 +37,7 @@ use crate::creative_layout::CreativeLayout;
 use crate::creative_view::CreativeView;
 use crate::inventory_screen::{draw_cursor_item, DIMMING, FALLBACK_BACKGROUND, WHITE};
 use crate::item_icons::{slot_item, ItemView};
+use crate::portrait::{self, Spot};
 use crate::tooltip_draw::{draw_tooltip, resolve, text_color};
 
 /// Atlas name of the tab buttons and scroll handles.
@@ -317,14 +319,15 @@ fn hover_lines(scene: &CreativeScene<'_>, point: (i32, i32)) -> Vec<TooltipLine>
 }
 
 /// Draws the creative inventory as a modal overlay: the window, its slots,
-/// the stack on the cursor and the tooltip under the pointer.
+/// the stack on the cursor and the tooltip under the pointer. Returns where
+/// the player model of the Inventory tab goes, like the survival screen.
 pub fn draw_creative_overlay(
     ui: &mut Ui,
     atlas: &FontAtlas,
     viewport: Rect,
     layout: &CreativeLayout,
     scene: &CreativeScene<'_>,
-) {
+) -> Option<Spot> {
     ui.draw().rect(viewport, DIMMING);
     let tabs = scene.gui_atlas.and_then(|atlas| atlas.region(TABS_TEXTURE));
     let selected = scene.creative.tab;
@@ -332,6 +335,17 @@ pub fn draw_creative_overlay(
         draw_tab(ui, atlas, layout, scene, tabs, tab);
     }
     let textured = draw_background(ui, layout, scene);
+    let spot = (selected == CreativeTab::Inventory).then(|| {
+        let window = layout.rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+        Spot {
+            origin: (window.x, window.y),
+            gui_scale: layout.scale(),
+            placement: portrait::CREATIVE,
+        }
+    });
+    if let Some(spot) = &spot {
+        ui.draw().item(PORTRAIT_KEY, spot.rect(), false);
+    }
     draw_handle(ui, layout, scene, tabs);
     draw_tab(ui, atlas, layout, scene, tabs, selected);
     if scene.creative.tab.shows_search_box() {
@@ -362,6 +376,7 @@ pub fn draw_creative_overlay(
         let lines = hover_lines(scene, layout.local((pointer[0], pointer[1])));
         draw_tooltip(ui, atlas, viewport, layout.scale() as f32, pointer, &lines);
     }
+    spot
 }
 
 #[cfg(test)]

@@ -20,8 +20,6 @@ const BLOCK: f32 = 64.0;
 /// head tilted by the mouse) stays inside the block: 1.8 blocks at scale 30
 /// is 54 pixels, leaving 4 above the head.
 const FEET_Y: f32 = 58.0;
-/// Height above the feet the pointer is compared with (`posY - 50`).
-const HEAD_HEIGHT: f32 = 50.0;
 /// Pixels of the mouse offset that count as one unit in the `atan` of the
 /// turn (`mouseX / 40`).
 const MOUSE_SPAN: f32 = 40.0;
@@ -36,6 +34,10 @@ pub(crate) struct Placement {
     pub y: f32,
     /// Pixels per block.
     pub scale: f32,
+    /// How far above the feet the pointer offset is measured: the reference
+    /// compares the pointer with a point `posY - head` (50 in the survival
+    /// inventory, 30 in the creative one).
+    pub head: f32,
 }
 
 /// The survival inventory (`GuiInventory.drawScreen`: 51, 75, 30).
@@ -43,6 +45,15 @@ pub(crate) const INVENTORY: Placement = Placement {
     x: 51.0,
     y: 75.0,
     scale: 30.0,
+    head: 50.0,
+};
+
+/// The Inventory tab of the creative screen (`GuiContainerCreative`: 43, 45, 20).
+pub(crate) const CREATIVE: Placement = Placement {
+    x: 43.0,
+    y: 45.0,
+    scale: 20.0,
+    head: 30.0,
 };
 
 /// Where a screen put the portrait in the last frame, for the render step that
@@ -63,13 +74,13 @@ impl Spot {
         self.placement.rect(self.origin, self.gui_scale)
     }
 
-    /// `(model - pointer)` in GUI pixels, with the 50 pixel head height of
-    /// the vertical term (`j + 75 - 50 - mouseY`).
+    /// `(model - pointer)` in GUI pixels, the vertical term measured from the
+    /// head height of the placement (`j + 75 - 50 - mouseY`).
     pub(crate) fn mouse_offset(&self, pointer: (f32, f32)) -> (f32, f32) {
         let s = self.gui_scale as f32;
         (
             (self.origin.0 + self.placement.x * s - pointer.0) / s,
-            (self.origin.1 + (self.placement.y - HEAD_HEIGHT) * s - pointer.1) / s,
+            (self.origin.1 + (self.placement.y - self.placement.head) * s - pointer.1) / s,
         )
     }
 }
@@ -195,5 +206,15 @@ mod tests {
     fn a_pointer_below_looks_down() {
         // dy = (placement - 50) - pointer is negative below the head.
         assert!(turned_towards(body(), (0.0, -40.0)).pitch > 0.0);
+    }
+
+    #[test]
+    fn the_creative_head_height_is_thirty() {
+        let spot = Spot {
+            origin: (0.0, 0.0),
+            gui_scale: 1,
+            placement: CREATIVE,
+        };
+        assert_eq!(spot.mouse_offset((43.0, 15.0)), (0.0, 0.0));
     }
 }
