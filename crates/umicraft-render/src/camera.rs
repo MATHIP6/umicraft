@@ -2,7 +2,7 @@
 
 //! Free-flying camera and projection.
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec4};
 
 /// Vertical field of view in radians (70°).
 const DEFAULT_FOV: f32 = 70.0_f32 * std::f32::consts::PI / 180.0;
@@ -201,9 +201,61 @@ impl Camera {
     }
 }
 
+/// The six clipping planes of a view-projection, for culling boxes the
+/// camera cannot see.
+///
+/// Extracted with the Gribb–Hartmann method for wgpu's `0..1` depth range
+/// (near plane is row 2 alone). The vanilla client culls render chunks against
+/// its frustum too (`ViewFrustum`/`ICamera`), so drawing only what intersects
+/// it changes no pixel.
+#[derive(Debug, Clone, Copy)]
+pub struct Frustum {
+    /// `(a, b, c, d)` with `ax + by + cz + d >= 0` inside, normals pointing in.
+    planes: [Vec4; 6],
+}
+
+impl Frustum {
+    /// Builds the frustum of `view_projection` (world space in, clip out).
+    #[must_use]
+    pub fn from_view_projection(view_projection: Mat4) -> Self {
+        let [r0, r1, r2, r3] = [0, 1, 2, 3].map(|row| view_projection.row(row));
+        Self {
+            planes: [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r2, r3 - r2],
+        }
+    }
+
+    /// False only when the axis-aligned box lies entirely outside a plane.
+    ///
+    /// Conservative: a box near a frustum corner may be reported as visible.
+    #[must_use]
+    pub fn intersects_aabb(&self, min: Vec3, max: Vec3) -> bool {
+        self.planes.iter().all(|plane| {
+            // The corner farthest along the plane normal decides.
+            let corner = Vec3::new(
+                if plane.x >= 0.0 { max.x } else { min.x },
+                if plane.y >= 0.0 { max.y } else { min.y },
+                if plane.z >= 0.0 { max.z } else { min.z },
+            );
+            plane.truncate().dot(corner) + plane.w >= 0.0
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frustum_keeps_boxes_ahead_and_drops_boxes_behind() {
+        let camera = Camera::new(Vec3::ZERO, 0.0, 0.0);
+        let frustum = Frustum::from_view_projection(camera.view_projection());
+        // Yaw 0 looks toward -Z.
+        assert!(frustum.intersects_aabb(Vec3::new(-1.0, -1.0, -20.0), Vec3::new(1.0, 1.0, -18.0)));
+        assert!(!frustum.intersects_aabb(Vec3::new(-1.0, -1.0, 18.0), Vec3::new(1.0, 1.0, 20.0)));
+        assert!(
+            !frustum.intersects_aabb(Vec3::new(500.0, -1.0, -20.0), Vec3::new(502.0, 1.0, -18.0))
+        );
+    }
 
     #[test]
     fn yaw_zero_looks_north_and_minecraft_yaw_zero_south() {

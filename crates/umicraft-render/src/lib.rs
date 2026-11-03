@@ -39,7 +39,7 @@ mod weather;
 pub use adapter::AdapterSummary;
 pub use block_atlas::BlockAtlasError;
 pub use border::{BorderStatus, BorderView};
-pub use camera::Camera;
+pub use camera::{Camera, Frustum};
 pub use clouds::CloudMode;
 pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;

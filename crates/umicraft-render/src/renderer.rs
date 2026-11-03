@@ -32,7 +32,7 @@ use winit::window::Window;
 use crate::adapter::AdapterSummary;
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::border::{BorderRenderer, BorderView};
-use crate::camera::Camera;
+use crate::camera::{Camera, Frustum};
 use crate::clouds::{CloudMode, CloudRenderer};
 use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
@@ -206,6 +206,9 @@ pub struct Renderer {
     /// capacity is bounded by the number of uploaded meshes and is retained
     /// across frames, so sorting allocates nothing in steady state.
     transparent_order: Vec<TransparentDraw>,
+    /// Reused per-frame list of the chunks with opaque geometry that are
+    /// inside the render distance and the view frustum.
+    visible_opaque: Vec<ChunkPos>,
     /// Sky dome, sun, moon, stars and the End cube.
     sky: SkyRenderer,
     /// The clouds, drawn with the depth test after the opaque passes.
@@ -763,6 +766,7 @@ impl Renderer {
             terrain_bind_group,
             terrain_layout,
             transparent_order: Vec::with_capacity(64),
+            visible_opaque: Vec::with_capacity(256),
             sky,
             clouds,
             cloud_ticks: 0.0,
@@ -1126,7 +1130,7 @@ impl Renderer {
             f64::from(self.environment.view_distance) * 16.0,
         );
         self.upload_overlay(overlay);
-        self.prepare_transparent_order(camera.position);
+        self.prepare_visible_chunks(camera);
         if self.surface.is_some() {
             self.render_window(overlay, &sky_state)
         } else {
@@ -1134,20 +1138,36 @@ impl Renderer {
         }
     }
 
-    /// Rebuilds the reused transparent draw queue, farthest chunk first.
+    /// Rebuilds the reused per-frame draw lists from the chunks that are
+    /// inside the render distance and the view frustum.
     ///
-    /// Only chunks with a transparent pass are queued; opaque chunks are drawn
-    /// straight from the map. The queue never grows beyond the number of
-    /// resident meshes, and [`Vec::clear`] keeps its capacity across frames.
-    fn prepare_transparent_order(&mut self, camera_position: Vec3) {
+    /// The server may keep sending or keeping columns beyond the client's
+    /// render distance, and the GPU would still shade every one of them, so
+    /// the cull happens here. The transparent list is sorted farthest first;
+    /// both lists keep their capacity across frames.
+    fn prepare_visible_chunks(&mut self, camera: &Camera) {
+        let frustum = Frustum::from_view_projection(camera.view_projection());
+        let eye_chunk = ChunkPos::new(
+            (camera.position.x / 16.0).floor() as i32,
+            (camera.position.z / 16.0).floor() as i32,
+        );
+        let reach = i32::from(self.environment.view_distance);
+        self.visible_opaque.clear();
         self.transparent_order.clear();
-        self.transparent_order
-            .extend(self.chunks.iter().filter_map(|(pos, mesh)| {
-                mesh.transparent.as_ref().map(|_| TransparentDraw {
+        for (pos, mesh) in &self.chunks {
+            if !chunk_is_visible(*pos, eye_chunk, reach, &frustum) {
+                continue;
+            }
+            if mesh.opaque.is_some() {
+                self.visible_opaque.push(*pos);
+            }
+            if mesh.transparent.is_some() {
+                self.transparent_order.push(TransparentDraw {
                     pos: *pos,
-                    distance_sq: squared_distance_to_chunk(*pos, camera_position),
-                })
-            }));
+                    distance_sq: squared_distance_to_chunk(*pos, camera.position),
+                });
+            }
+        }
         sort_transparent_farthest_first(&mut self.transparent_order);
     }
 
@@ -1994,8 +2014,8 @@ impl Renderer {
         // Opaque terrain: depth write on, alpha cutout, order-independent.
         pass.set_pipeline(&self.terrain_pipeline);
         pass.set_bind_group(0, &self.terrain_bind_group, &[]);
-        for mesh in self.chunks.values() {
-            if let Some(opaque) = mesh.opaque.as_ref() {
+        for pos in &self.visible_opaque {
+            if let Some(opaque) = self.chunks.get(pos).and_then(|mesh| mesh.opaque.as_ref()) {
                 draw_gpu_pass(&mut pass, opaque);
             }
         }
@@ -2470,6 +2490,17 @@ pub(crate) fn draw_gpu_pass_buffers(
 /// column at the cloud/terrain reference height of y = 128.
 fn chunk_centre(pos: ChunkPos) -> Vec3 {
     Vec3::new(pos.x as f32 * 16.0 + 8.0, 128.0, pos.z as f32 * 16.0 + 8.0)
+}
+
+/// True when the column is within `reach` chunks of the eye (a square, like
+/// the reference's `renderDistanceChunks`) and its bounding box touches the
+/// frustum.
+fn chunk_is_visible(pos: ChunkPos, eye: ChunkPos, reach: i32, frustum: &Frustum) -> bool {
+    if (pos.x - eye.x).abs() > reach || (pos.z - eye.z).abs() > reach {
+        return false;
+    }
+    let min = Vec3::new(pos.x as f32 * 16.0, 0.0, pos.z as f32 * 16.0);
+    frustum.intersects_aabb(min, min + Vec3::new(16.0, 256.0, 16.0))
 }
 
 /// Squared camera-to-chunk-centre distance; avoids a square root per chunk.
