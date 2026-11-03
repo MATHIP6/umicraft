@@ -124,6 +124,17 @@ impl World {
         }
     }
 
+    /// Mutable access to a loaded column (copy-on-write).
+    pub(crate) fn chunk_mut(&mut self, pos: ChunkPos) -> Option<&mut ChunkColumn> {
+        self.chunks.get_mut(&pos).map(Arc::make_mut)
+    }
+
+    /// Loads a hand-built column, for the unit tests of this crate.
+    #[cfg(test)]
+    pub(crate) fn insert_column_for_test(&mut self, column: ChunkColumn) {
+        self.chunks.insert(column.pos(), Arc::new(column));
+    }
+
     /// Writes a block, returning `true` when it changed.
     ///
     /// Updates for unloaded chunks, out-of-range Y, or an unchanged state are
@@ -132,10 +143,15 @@ impl World {
         if !(0..WORLD_HEIGHT as i32).contains(&pos.y) {
             return false;
         }
+        let has_sky_light = self.has_sky_light();
         let Some(column) = self.chunks.get_mut(&pos.chunk()) else {
             return false;
         };
-        Arc::make_mut(column).set_block(
+        let column = Arc::make_mut(column);
+        if has_sky_light && !state.is_air() {
+            column.ensure_open_sky_section(pos.y as usize);
+        }
+        column.set_block(
             pos.local_x() as usize,
             pos.y as usize,
             pos.local_z() as usize,
@@ -195,10 +211,16 @@ impl World {
     /// Writes one block (`Block Change`, 0x23) and returns the dirty chunks.
     ///
     /// Border updates also dirty the adjacent chunk so its face culling can be
-    /// rebuilt; ignored updates (see [`Self::set_block`]) dirty nothing.
+    /// rebuilt; ignored updates (see [`Self::set_block`]) dirty nothing. The
+    /// light around the block is recomputed (see [`Self::relight_around`]) and
+    /// the columns it reaches are dirty too.
     pub fn apply_block_change(&mut self, pos: BlockPos, state: BlockState) -> Vec<ChunkPos> {
         if self.set_block(pos, state) {
-            self.dirty_for_block(pos.chunk(), pos.local_x(), pos.local_z())
+            let mut dirty = self.dirty_for_block(pos.chunk(), pos.local_x(), pos.local_z());
+            dirty.extend(self.relight_around(pos));
+            dirty.sort_unstable();
+            dirty.dedup();
+            dirty
         } else {
             Vec::new()
         }
@@ -217,11 +239,21 @@ impl World {
             return Vec::new();
         };
         let column = Arc::make_mut(column);
+        let has_sky_light = self.dimension == 0;
         let mut changed = false;
+        let mut changed_blocks = Vec::new();
         let mut edges = (false, false, false, false);
         for ((x, y, z), state) in changes {
+            if has_sky_light && !state.is_air() {
+                column.ensure_open_sky_section(usize::from(y));
+            }
             if column.set_block(usize::from(x), usize::from(y), usize::from(z), state) {
                 changed = true;
+                changed_blocks.push(BlockPos::new(
+                    (chunk.x << 4) + i32::from(x),
+                    i32::from(y),
+                    (chunk.z << 4) + i32::from(z),
+                ));
                 edges.0 |= x == 0;
                 edges.1 |= x == 15;
                 edges.2 |= z == 0;
@@ -229,7 +261,13 @@ impl World {
             }
         }
         if changed {
-            self.dirty_for_edges(chunk, edges)
+            let mut dirty = self.dirty_for_edges(chunk, edges);
+            for pos in changed_blocks {
+                dirty.extend(self.relight_around(pos));
+            }
+            dirty.sort_unstable();
+            dirty.dedup();
+            dirty
         } else {
             Vec::new()
         }

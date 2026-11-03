@@ -178,6 +178,19 @@ impl ChunkColumn {
             })
     }
 
+    /// Materialises the section holding height `y` as air under open sky when
+    /// the server elided it.
+    ///
+    /// A missing section reads as full sky light, so a light or block write
+    /// into one must first give it real nibbles at that value; otherwise the
+    /// untouched rest of the section would turn black. A no-op for a present
+    /// section or an out-of-range `y`.
+    pub(crate) fn ensure_open_sky_section(&mut self, y: usize) {
+        if let Some(slot) = self.sections.get_mut(y / SECTION_SIZE) {
+            slot.get_or_insert_with(Section::open_sky);
+        }
+    }
+
     /// Writes block light at column-local coordinates.
     ///
     /// Out-of-range coordinates are ignored. Values above 15 are clamped.

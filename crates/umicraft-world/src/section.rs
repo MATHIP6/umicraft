@@ -48,6 +48,19 @@ impl Section {
         }
     }
 
+    /// Creates an all-air section under open sky: every sky nibble is 15.
+    ///
+    /// A column omits air sections and reads them as full sky, so a section
+    /// materialised later (a block placed in it, light spilling into it) must
+    /// start from the same value or the rest of it would turn black.
+    #[must_use]
+    pub(crate) fn open_sky() -> Self {
+        Self {
+            sky_light: Some(Box::new([0xFF; LIGHT_BYTES])),
+            ..Self::empty()
+        }
+    }
+
     /// Decodes the wire block/light arrays. The caller (`ChunkColumn`) has
     /// already validated the total payload length; this constructor is
     /// tolerant of short inputs (missing bytes read as zero) so it can never

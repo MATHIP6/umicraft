@@ -37,6 +37,7 @@ pub mod fluid;
 pub mod light;
 pub mod pos;
 mod precipitation;
+mod relight;
 pub mod section;
 pub mod world;
 
