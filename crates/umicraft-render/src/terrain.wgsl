@@ -12,7 +12,8 @@
 //   sky      = b(sky) * sun_brightness
 //   block    = b(block)
 //   light    = min(1, sky + block)
-//   ao       = 0.2 + 0.8 * (ao_nibble / 15)
+//   ao       = 0.4 + 0.6 * (ao_nibble / 15)   (1.0, 0.8, 0.6, 0.4: the mean
+//              of the four corner cells, solid = 0.2, open = 1.0)
 // The five `VertexLight` fields are packed in the fifth vertex attribute:
 // bits 0..=3 block, 4..=7 sky, 8..=11 AO, bit 12 shade.
 //
@@ -118,7 +119,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     let block = light_brightness(f32(in.light & 0xFu) / 15.0);
     let sky = light_brightness(f32((in.light >> 4u) & 0xFu) / 15.0) * camera.sun_brightness;
     out.light = gamma_correct(min(1.0, sky + block));
-    out.ao = 0.2 + 0.8 * (f32((in.light >> 8u) & 0xFu) / 15.0);
+    out.ao = 0.4 + 0.6 * (f32((in.light >> 8u) & 0xFu) / 15.0);
 
     let shaded = (in.light & (1u << 12u)) != 0u;
     if (shaded) {

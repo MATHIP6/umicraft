@@ -179,11 +179,28 @@ pub(crate) fn quad_light<S: BlockSource + ?Sized>(
         };
 
         let base = samples.light[grid_index(0, 0)];
-        let side_u = samples.light[grid_index(du, 0)];
-        let side_v = samples.light[grid_index(0, dv)];
-        let diagonal = samples.light[grid_index(du, dv)];
-        let block_light = average_nibble([base.block, side_u.block, side_v.block, diagonal.block]);
-        let sky_light = average_nibble([base.sky, side_u.sky, side_v.sky, diagonal.sky]);
+        let edge_u_light = or_base(samples.light[grid_index(du, 0)], base);
+        let edge_v_light = or_base(samples.light[grid_index(0, dv)], base);
+        // `renderModelAmbientOcclusion`: when both edge neighbours are solid
+        // the diagonal is hidden behind them and reuses an edge sample.
+        let diagonal_light =
+            if samples.opaque[grid_index(du, 0)] && samples.opaque[grid_index(0, dv)] {
+                edge_u_light
+            } else {
+                or_base(samples.light[grid_index(du, dv)], base)
+            };
+        let block_light = average_nibble([
+            base.block,
+            edge_u_light.block,
+            edge_v_light.block,
+            diagonal_light.block,
+        ]);
+        let sky_light = average_nibble([
+            base.sky,
+            edge_u_light.sky,
+            edge_v_light.sky,
+            diagonal_light.sky,
+        ]);
 
         let ao = if ao_enabled {
             let edge_u = samples.opaque[grid_index(du, 0)];
@@ -203,6 +220,19 @@ pub(crate) fn quad_light<S: BlockSource + ?Sized>(
     })
 }
 
+/// `getAoBrightness`: a corner sample with no light at all (a solid block's
+/// own cell, which the server stores as dark) takes the light of the face's
+/// outward cell instead of pulling the corner toward black. Without this
+/// every edge next to a solid block was a dark crease, much darker than the
+/// reference.
+fn or_base(sample: LightLevel, base: LightLevel) -> LightLevel {
+    if sample == LightLevel::DARK {
+        base
+    } else {
+        sample
+    }
+}
+
 /// Rounds the average of four nibbles to the nearest integer.
 fn average_nibble(values: [u8; 4]) -> u8 {
     let sum: u16 = values.iter().map(|value| u16::from(*value)).sum();
@@ -212,6 +242,13 @@ fn average_nibble(values: [u8; 4]) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dark_sample_falls_back_to_the_outward_cell() {
+        let base = LightLevel::new(0, 12);
+        assert_eq!(or_base(LightLevel::DARK, base), base);
+        assert_eq!(or_base(LightLevel::new(3, 0), base), LightLevel::new(3, 0));
+    }
 
     #[test]
     fn a_diagonal_normal_snaps_to_its_dominant_axis() {
