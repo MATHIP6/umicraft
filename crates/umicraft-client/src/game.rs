@@ -2209,10 +2209,7 @@ fn spawn_effect_particles(
                 .fold(0.0, f64::max)
         })
     });
-    let context = EffectContext {
-        block_max_y,
-        ..EffectContext::default()
-    };
+    let context = EffectContext::new(packet.data, block_max_y);
     game.particles
         .spawn_effect(packet.effect_id, pos, packet.data, &context, &filter);
 }

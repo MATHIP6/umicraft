@@ -31,8 +31,10 @@
 //!   shears have no attribute modifier in 1.8). A stack-level
 //!   `AttributeModifiers` NBT list that replaces the item's own modifiers is
 //!   ignored.
-//! * `CanDestroy` / `CanPlaceOn`, potion effects, books, maps (apart from the
+//! * `CanDestroy` / `CanPlaceOn`, books, maps (apart from the
 //!   ` #<damage>` name suffix), fireworks and banners add no lines.
+//! * Potion lines come from [`potion`]. The "When Applied" attribute lines
+//!   keep the order of the effects; the reference iterates a hash multimap.
 //! * The stack NBT is parsed twice (once here, once by [`ItemDisplay`]); a
 //!   tooltip is built per hover, not per frame of bulk data.
 
@@ -42,12 +44,17 @@ use crate::item_nbt::{Enchantment, ItemDisplay};
 use crate::items::{self, ItemKind, Tier, ToolKind};
 use crate::nbt::Nbt;
 
+mod potion;
+pub use potion::has_effects as potion_has_effects;
+
 /// Registry name of the golden apple (`ItemAppleGold`).
 const GOLDEN_APPLE: &str = "golden_apple";
 /// Registry name of the filled map, whose name gets a ` #<damage>` suffix.
 const FILLED_MAP: &str = "filled_map";
 /// Registry name of the enchanted book (`ItemEnchantedBook`).
 const ENCHANTED_BOOK: &str = "enchanted_book";
+/// Registry name of the potion (`ItemPotion`).
+const POTION: &str = "potion";
 /// Enchantment id of sharpness (`Enchantment.sharpness`).
 const SHARPNESS_ID: i16 = 16;
 /// Extra attack damage per sharpness level (`EnchantmentDamage`, type 0).
@@ -310,7 +317,7 @@ fn base_tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
         rarity(stack, def, root.as_ref()),
     )];
     if hide & HIDE_ADDITIONAL == 0 {
-        lines.extend(additional_lines(def, root.as_ref()));
+        lines.extend(additional_lines(def, stack.damage, root.as_ref()));
     }
     if hide & HIDE_ENCHANTMENTS == 0 {
         lines.extend(display.enchantments.iter().filter_map(enchantment_line));
@@ -401,10 +408,17 @@ fn name_line(
     TooltipLine::plain(text, colour)
 }
 
-/// The lines `Item.addInformation` adds in 1.8: the record title and the
-/// stored enchantments of an enchanted book.
-fn additional_lines(def: Option<&items::ItemDef>, root: Option<&Nbt>) -> Vec<TooltipLine> {
+/// The lines `Item.addInformation` adds in 1.8: the record title, the
+/// stored enchantments of an enchanted book and the effects of a potion.
+fn additional_lines(
+    def: Option<&items::ItemDef>,
+    damage: i16,
+    root: Option<&Nbt>,
+) -> Vec<TooltipLine> {
     let Some(def) = def else { return Vec::new() };
+    if def.name == POTION {
+        return potion::lines(damage, root);
+    }
     if let Some(record) = def.name.strip_prefix("record_") {
         let key = format!("item.record.{record}.desc");
         return vec![TooltipLine::plain(

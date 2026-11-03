@@ -46,6 +46,20 @@ pub struct EffectContext {
     pub block_max_y: Option<f64>,
 }
 
+impl EffectContext {
+    /// The context of an `Effect` packet whose `data` is `data`: for the potion
+    /// splash (2002) that is the potion's damage value, from which the colour
+    /// and the instant flag follow. Without it the sparkles come out black.
+    #[must_use]
+    pub fn new(data: i32, block_max_y: Option<f64>) -> Self {
+        Self {
+            potion_color: crate::items::potion_liquid_color(data),
+            potion_instant: crate::items::is_instant_potion(data),
+            block_max_y,
+        }
+    }
+}
+
 impl ParticleEngine {
     /// Spawns the particles of the `Effect` packet `effect_id` at `pos` with
     /// its `data` (MCP `RenderGlobal.playAuxSFX`): 2000 smoke jets, 2002
@@ -232,6 +246,18 @@ mod tests {
         let mut engine = ParticleEngine::new(7);
         engine.spawn_effect(id, BlockPos::new(0, 64, 0), data, &context, &near());
         engine
+    }
+
+    #[test]
+    fn the_context_of_a_potion_takes_its_colour_and_kind_from_the_damage() {
+        // 16421: splash Healing; 16386: splash Swiftness.
+        let healing = EffectContext::new(16421, None);
+        assert_eq!(healing.potion_color, 16_262_179);
+        assert!(healing.potion_instant);
+        let swiftness = EffectContext::new(16386, Some(1.0));
+        assert_eq!(swiftness.potion_color, 8_171_462);
+        assert!(!swiftness.potion_instant);
+        assert_eq!(swiftness.block_max_y, Some(1.0));
     }
 
     #[test]

@@ -25,10 +25,13 @@ const INSTANT_IDS: [u8; 2] = [6, 7];
 
 /// One active effect of a potion (`PotionEffect` as far as `equals` looks).
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Effect {
-    id: u8,
-    duration: i32,
-    amplifier: i32,
+pub(crate) struct Effect {
+    /// `Potion.getId()`.
+    pub(crate) id: u8,
+    /// Remaining ticks; 1 for an instant effect.
+    pub(crate) duration: i32,
+    /// `0` for level I.
+    pub(crate) amplifier: i32,
     splash: bool,
 }
 
@@ -47,8 +50,21 @@ fn round(value: f64) -> i32 {
     (value + 0.5).floor() as i32
 }
 
-/// `PotionHelper.getPotionEffects(damage, false)`.
-fn effects(damage: i32) -> Vec<Effect> {
+impl Effect {
+    /// A drinkable effect, as read from a stack's `CustomPotionEffects`.
+    pub(crate) fn new(id: u8, duration: i32, amplifier: i32) -> Self {
+        Self {
+            id,
+            duration,
+            amplifier,
+            splash: false,
+        }
+    }
+}
+
+/// `PotionHelper.getPotionEffects(damage, false)`: the effects a potion item
+/// of this damage value carries (empty for the water bottle).
+pub(crate) fn effects(damage: i32) -> Vec<Effect> {
     let splash = damage & SPLASH_BIT != 0;
     RECIPES
         .iter()
@@ -79,6 +95,22 @@ fn effects(damage: i32) -> Vec<Effect> {
             })
         })
         .collect()
+}
+
+/// `ItemPotion.isEffectInstant`: whether one of the effects of the potion is
+/// instant (instant health or damage), which makes its splash particles
+/// `InstantSpell` rather than `Spell`.
+///
+/// ```
+/// use umicraft_game::items::is_instant_potion;
+/// assert!(is_instant_potion(16421)); // splash Healing
+/// assert!(!is_instant_potion(8194)); // Swiftness
+/// ```
+#[must_use]
+pub fn is_instant_potion(damage: i32) -> bool {
+    effects(damage)
+        .iter()
+        .any(|effect| INSTANT_IDS.contains(&effect.id))
 }
 
 /// The damage values of the potions in the creative inventory, in vanilla
@@ -113,6 +145,14 @@ pub fn potion_creative_damages() -> Vec<i16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_healing_and_harming_are_instant() {
+        assert!(is_instant_potion(8197));
+        assert!(is_instant_potion(16460));
+        assert!(!is_instant_potion(8194));
+        assert!(!is_instant_potion(0));
+    }
 
     #[test]
     fn the_water_bottle_comes_first() {

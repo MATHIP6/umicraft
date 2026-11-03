@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use umicraft_assets::ClientResources;
+use umicraft_game::inventory::tooltip::potion_has_effects;
 use umicraft_game::item_nbt::ItemDisplay;
 
 use crate::block_entity_render::is_entity_item;
@@ -43,6 +44,8 @@ const COLOR_SHIFT: u32 = 32;
 const MAX_ENTITY_STACKS: usize = 1024;
 
 const GOLDEN_APPLE: i16 = 322;
+/// `Items.potionitem`.
+const POTION: i16 = 373;
 const ENCHANTED_BOOK: i16 = 403;
 const EXPERIENCE_BOTTLE: i16 = 384;
 const NETHER_STAR: i16 = 399;
@@ -101,7 +104,7 @@ impl ItemResources {
     #[must_use]
     pub fn glints(&self, item_id: i16, damage: i16, nbt: Option<&[u8]>) -> bool {
         let display = nbt.map(ItemDisplay::from_nbt).unwrap_or_default();
-        has_glint(item_id, damage, &display)
+        has_glint(item_id, damage, nbt, &display)
     }
 
     /// The tint of each of the first two layers of an item's model (dyed
@@ -170,7 +173,7 @@ impl ItemResources {
             damage: stack.damage,
             max_durability: definition
                 .map_or(0, |def| i16::try_from(def.max_damage).unwrap_or(i16::MAX)),
-            glint: has_glint(stack.item_id, stack.damage, &display),
+            glint: has_glint(stack.item_id, stack.damage, stack.nbt.as_deref(), &display),
         }
     }
 }
@@ -294,10 +297,11 @@ fn unpack_key(key: u64) -> (i16, i16, Option<u32>) {
 
 /// Whether the stack shows the enchantment glint (MCP `Item.hasEffect` and
 /// its overrides for the golden apple, enchanted book, experience bottle and
-/// nether star).
-fn has_glint(item_id: i16, damage: i16, display: &ItemDisplay) -> bool {
+/// nether star, and potions with an effect).
+fn has_glint(item_id: i16, damage: i16, nbt: Option<&[u8]>, display: &ItemDisplay) -> bool {
     display.has_glint()
         || match item_id {
+            POTION => potion_has_effects(damage, nbt),
             GOLDEN_APPLE => damage > 0,
             ENCHANTED_BOOK | EXPERIENCE_BOTTLE | NETHER_STAR => true,
             _ => false,
@@ -355,10 +359,16 @@ mod tests {
     #[test]
     fn intrinsic_glints_follow_the_reference() {
         let none = ItemDisplay::default();
-        assert!(!has_glint(322, 0, &none));
-        assert!(has_glint(322, 1, &none));
-        assert!(has_glint(399, 0, &none));
-        assert!(!has_glint(1, 0, &none));
+        assert!(!has_glint(322, 0, None, &none));
+        assert!(has_glint(322, 1, None, &none));
+        assert!(has_glint(399, 0, None, &none));
+        assert!(!has_glint(1, 0, None, &none));
+        // Potions glint when they carry an effect: swiftness, splash healing,
+        // but not the water bottle or an unbrewed one.
+        assert!(has_glint(373, 8194, None, &none));
+        assert!(has_glint(373, 16421, None, &none));
+        assert!(!has_glint(373, 0, None, &none));
+        assert!(!has_glint(373, 16, None, &none));
     }
 }
 

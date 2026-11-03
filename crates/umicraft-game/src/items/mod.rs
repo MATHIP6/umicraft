@@ -26,7 +26,9 @@ mod table;
 pub mod tint;
 
 pub use kind::{ArmorMaterial, ArmorSlot, FoodValues, ItemKind, Tier, ToolKind};
-pub use potion_variants::potion_creative_damages;
+pub use potion_color::liquid_color as potion_liquid_color;
+pub(crate) use potion_variants::{effects as potion_effects, Effect as PotionEffect};
+pub use potion_variants::{is_instant_potion, potion_creative_damages};
 
 /// The static description of one item id.
 #[derive(Debug, Clone, Copy, PartialEq)]

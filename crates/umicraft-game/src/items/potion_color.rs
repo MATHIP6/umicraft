@@ -114,7 +114,7 @@ fn potion_color(id: u8) -> u32 {
 ///
 /// The splash bit (16384) does not change it: the reference uses the same
 /// effect list for the drinkable and the thrown potion.
-pub(super) fn liquid_color(damage: i32) -> u32 {
+pub fn liquid_color(damage: i32) -> u32 {
     let effects = potion_effects(RECIPES, damage);
     if effects.is_empty() {
         WATER_COLOR
