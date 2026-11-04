@@ -339,6 +339,16 @@ const BUILTIN: &[(&str, &str)] = &[
     ("umicraft.hover.invalidItem", "Invalid Item!"),
     ("umicraft.hover.invalidEntity", "Invalid Entity!"),
     ("item.durability", "Durability: %s / %s"),
+    // Menu texts vanilla hard-codes (`ServerListEntryNormal`) or that are
+    // Umicraft's own (title screen credit); the first group has no key in the files.
+    ("umicraft.server.pinging", "Pinging..."),
+    ("umicraft.server.noConnection", "(no connection)"),
+    ("umicraft.server.incompatible", "Incompatible version!"),
+    ("umicraft.server.unreachable", "Can't connect to server."),
+    (
+        "umicraft.title.credit",
+        "Not affiliated with Mojang or Microsoft",
+    ),
     ("attribute.modifier.plus.0", "+%s %s"),
 ];
 

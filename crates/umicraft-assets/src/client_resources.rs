@@ -52,18 +52,18 @@ const DEFAULT_FRAME_SIZE: u32 = 16;
 
 /// One decoded PNG before it is cropped and copied into the atlas.
 #[derive(Debug)]
-struct DecodedPng {
+pub(crate) struct DecodedPng {
     /// Pixel width of the full image.
-    width: u32,
+    pub(crate) width: u32,
     /// Pixel height of the full image (larger than `width` for animation strips).
-    height: u32,
+    pub(crate) height: u32,
     /// Tightly packed RGBA8 pixels of the full image.
-    pixels: Vec<u8>,
+    pub(crate) pixels: Vec<u8>,
 }
 
 impl DecodedPng {
     /// Decodes `bytes` to RGBA8, expanding palette, grayscale and 16-bit PNGs.
-    fn decode(path: &str, bytes: &[u8]) -> AssetsResult<Self> {
+    pub(crate) fn decode(path: &str, bytes: &[u8]) -> AssetsResult<Self> {
         let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
         // EXPAND turns palette and low-bit-depth images into 8-bit samples;
         // STRIP_16 narrows 16-bit samples; ALPHA adds an opaque alpha channel
