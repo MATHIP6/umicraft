@@ -342,6 +342,10 @@ const BUILTIN: &[(&str, &str)] = &[
         "umicraft.resourcePack.defaultDescription",
         "The default look of Minecraft",
     ),
+    (
+        "umicraft.resourcePack.missingMetadata",
+        "Missing pack.mcmeta :(",
+    ),
     ("umicraft.hover.invalidItem", "Invalid Item!"),
     ("umicraft.hover.invalidEntity", "Invalid Entity!"),
     ("item.durability", "Durability: %s / %s"),

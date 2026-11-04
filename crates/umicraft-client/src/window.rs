@@ -60,7 +60,8 @@ use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
 use crate::mesher::default_worker_count;
 use crate::network::NetworkConfig;
 use crate::options::{self, Action, Options};
-use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
+use crate::options_effects::{open_folder, pack_paths, packs_folder, ServerSettings, VideoApplier};
+use crate::options_screen::{Catalog, OptionsScreen, Outcome as OptionsOutcome};
 use crate::portrait::{turned_towards, Spot};
 use crate::screen::Screen;
 use crate::sky_textures::{load_border_texture, load_sky_textures};
@@ -118,6 +119,7 @@ pub fn run(args: Args) -> Result<(), ClientError> {
         view_distance: options.video.render_distance,
         chat_mode: options.chat.visibility.wire(),
         chat_colors: options.chat.colors,
+        skin_parts: options.skin.parts_mask(),
         handshake_host: args.handshake_host.clone(),
     })?;
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
@@ -150,6 +152,8 @@ struct App {
     options_screen: OptionsScreen,
     /// What the options screen did in the last UI frame, applied by `redraw`.
     options_outcome: OptionsOutcome,
+    /// Applies the video options that act on the window and the renderer.
+    video_applier: VideoApplier,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     camera: Camera,
@@ -272,7 +276,11 @@ impl App {
     ) -> Result<Self, ClientError> {
         // Assets are loaded once, before any worker or GPU resource exists.
         // A missing/corrupt installation picks the procedural set.
-        let terrain = Some(TerrainTextures::load_with_packs(&args.resource_packs));
+        let terrain = Some(TerrainTextures::load_with_packs(&pack_paths(
+            &args.resource_packs,
+            &options,
+            packs_folder().as_deref(),
+        )));
         let font = ui_font::load();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
@@ -283,6 +291,7 @@ impl App {
             options_path,
             options_screen: OptionsScreen::new(),
             options_outcome: OptionsOutcome::default(),
+            video_applier: VideoApplier::default(),
             window: None,
             renderer: None,
             camera: Camera::default(),
@@ -476,7 +485,11 @@ impl App {
     /// re-meshing all loaded chunk columns.
     fn reload_resources(&mut self) {
         tracing::info!("reloading resource packs...");
-        let terrain = TerrainTextures::load_with_packs(&self.args.resource_packs);
+        let terrain = TerrainTextures::load_with_packs(&pack_paths(
+            &self.args.resource_packs,
+            &self.options,
+            packs_folder().as_deref(),
+        ));
         if let Some(renderer) = self.renderer.as_mut() {
             let installed = terrain.install(renderer);
             upload_gui_atlas(renderer, installed.gui_atlas());
@@ -591,31 +604,53 @@ impl App {
             .try_send(GameEvent::ParticleSetting(self.options.video.particles));
     }
 
+    /// Opens the options screen, listing the languages and packs as they are
+    /// now.
+    fn open_options(&mut self) {
+        self.options_screen.set_catalog(Catalog::discover());
+        self.set_screen(Screen::Options);
+    }
+
+    /// Rebuilds the language handle after the language page picked another.
+    fn reload_language(&mut self) {
+        let lang = Arc::new(language::load(&self.options.language.code));
+        language::install(Arc::clone(&lang));
+        self.lang = lang;
+    }
+
+    /// Applies what the options screen reported in its last frame.
+    fn apply_options_outcome(&mut self, outcome: OptionsOutcome) {
+        if outcome.language_changed {
+            self.reload_language();
+        }
+        if outcome.packs_changed {
+            self.reload_resources();
+        }
+        if outcome.open_packs_folder {
+            if let Some(folder) = packs_folder() {
+                open_folder(&folder);
+            }
+        }
+        if outcome.done {
+            self.close_options();
+        }
+    }
+
     /// Closes the options screen: saves the options, tells the server about
-    /// a changed render distance or chat setting, and goes back to the menu.
+    /// a changed render distance, chat setting or skin layer, and goes back
+    /// to the menu.
     fn close_options(&mut self) {
         self.options_screen.reset();
         self.options.clamp();
-        let server_settings = |options: &Options| {
-            (
-                options.video.render_distance,
-                options.chat.visibility.wire(),
-                options.chat.colors,
-            )
-        };
-        let changed = server_settings(&self.options) != server_settings(&self.saved_options);
+        let changed = ServerSettings::of(&self.options) != ServerSettings::of(&self.saved_options);
         let particles_changed = self.options.video.particles != self.saved_options.video.particles;
+        let settings = ServerSettings::of(&self.options);
         self.save_options();
         if particles_changed {
             self.send_particle_setting();
         }
         if changed {
-            let (view_distance, chat_mode, chat_colors) = server_settings(&self.options);
-            let _ = self.session.events().try_send(GameEvent::ClientSettings {
-                view_distance,
-                chat_mode,
-                chat_colors,
-            });
+            let _ = self.session.events().try_send(settings.event());
         }
         self.set_screen(Screen::GameMenu);
     }
@@ -1158,7 +1193,7 @@ impl App {
             return;
         };
         world.sync(self.session.frames(), self.session.chunks(), renderer);
-        world.update_camera(&mut self.camera, now);
+        world.update_camera(&mut self.camera, now, self.options.video.view_bobbing);
         if let Some(reason) = world.ended() {
             self.exit_error = Some(reason.to_string());
         }
@@ -1419,11 +1454,12 @@ impl App {
         self.update_death_screen(now);
         self.update_container_cursor();
         self.publish_input();
-        let environment = self
+        let mut environment = self
             .world
             .as_ref()
             .map(|world| world.environment(now, self.options.video.render_distance))
             .unwrap_or_default();
+        environment.gamma = self.options.video.gamma;
         self.build_overlay();
 
         if self.exit_error.is_some() {
@@ -1445,7 +1481,7 @@ impl App {
                 self.set_screen(Screen::None);
                 self.capture_mouse(true);
             }
-            Some(GameMenuAction::Options) => self.set_screen(Screen::Options),
+            Some(GameMenuAction::Options) => self.open_options(),
             Some(GameMenuAction::Achievements) | Some(GameMenuAction::Stats) => {
                 // Not yet implemented: vanilla opens GuiAchievements / GuiStats.
             }
@@ -1456,12 +1492,17 @@ impl App {
             }
             None => {}
         }
-        if std::mem::take(&mut self.options_outcome).done {
-            self.close_options();
-        }
+        let outcome = std::mem::take(&mut self.options_outcome);
+        self.apply_options_outcome(outcome);
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
+        self.video_applier.apply(
+            &self.options.video,
+            self.window.as_deref(),
+            renderer,
+            self.entity_textures.as_ref(),
+        );
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);

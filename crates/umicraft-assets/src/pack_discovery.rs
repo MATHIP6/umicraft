@@ -113,8 +113,14 @@ mod tests {
     fn directories_are_listed_sorted_with_their_metadata() {
         let folder = temp_folder("dirs");
         for (name, mcmeta) in [
-            ("zeta", Some(r#"{"pack":{"pack_format":1,"description":"Last"}}"#)),
-            ("alpha", Some(r#"{"pack":{"pack_format":1,"description":"First"}}"#)),
+            (
+                "zeta",
+                Some(r#"{"pack":{"pack_format":1,"description":"Last"}}"#),
+            ),
+            (
+                "alpha",
+                Some(r#"{"pack":{"pack_format":1,"description":"First"}}"#),
+            ),
             ("broken", None),
         ] {
             let root = folder.join(name);

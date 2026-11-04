@@ -327,9 +327,10 @@ impl Renderer {
         // products a second time and wash every colour out, so the surface
         // keeps the plain format and the textures are sampled as stored.
         config.format = config.format.remove_srgb_suffix();
-        // No vsync: the "Max Framerate" option paces the frames (the default
-        // present mode is Fifo, which locks them to the display refresh).
-        config.present_mode = wgpu::PresentMode::AutoNoVsync;
+        // The "Max Framerate" option paces the frames; the "Use VSync" option
+        // decides whether the display refresh does too (`set_vsync`). Start
+        // without, as the first frame has not read the options yet.
+        config.present_mode = present_mode(false);
         let format = config.format;
         surface.configure(&device, &config);
         Self::create(
@@ -1564,6 +1565,21 @@ impl Renderer {
         }
     }
 
+    /// Turns vertical sync on or off (`GameSettings.enableVsync`). The
+    /// surface is only reconfigured when the mode changes, so the window can
+    /// call this every frame. Offscreen renderers ignore it.
+    pub fn set_vsync(&mut self, vsync: bool) {
+        let mode = present_mode(vsync);
+        let (Some(config), Some(surface)) = (self.surface_config.as_mut(), self.surface.as_ref())
+        else {
+            return;
+        };
+        if config.present_mode != mode {
+            config.present_mode = mode;
+            surface.configure(&self.device, config);
+        }
+    }
+
     /// Current target size in physical pixels.
     #[must_use]
     pub fn size(&self) -> (u32, u32) {
@@ -2216,6 +2232,17 @@ impl Renderer {
     }
 }
 
+/// The present mode of the "Use VSync" option: `Auto*` picks the best mode
+/// the platform supports for the wish (Fifo for vsync, Immediate or Mailbox
+/// without).
+fn present_mode(vsync: bool) -> wgpu::PresentMode {
+    if vsync {
+        wgpu::PresentMode::AutoVsync
+    } else {
+        wgpu::PresentMode::AutoNoVsync
+    }
+}
+
 fn request_adapter(
     instance: &wgpu::Instance,
     surface: Option<&wgpu::Surface<'static>>,
@@ -2627,6 +2654,12 @@ pub(crate) fn create_overlay_pipeline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_vsync_option_selects_the_present_mode() {
+        assert_eq!(present_mode(true), wgpu::PresentMode::AutoVsync);
+        assert_eq!(present_mode(false), wgpu::PresentMode::AutoNoVsync);
+    }
 
     #[test]
     fn camera_uniform_is_pod_and_aligned() {

@@ -2,12 +2,18 @@
 
 //! Tests of the options screens.
 
+use umicraft_assets::languages::LanguageInfo;
+use umicraft_assets::pack_discovery::DiscoveredPack;
+use umicraft_assets::PackMetadata;
 use umicraft_core::lang::Lang;
 use umicraft_ui::{FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 
 use super::controls_page::sensitivity_label;
 use super::main_page::fov_label;
+use super::sounds_page::volume_text;
+use super::video_page::gamma_value;
 use super::*;
+use crate::options::{SkinPart, SoundCategory};
 
 const VIEWPORT: Rect = Rect {
     x: 0.0,
@@ -98,11 +104,14 @@ fn done_on_the_hub_closes_and_done_on_a_page_goes_back() {
 }
 
 #[test]
-fn a_disabled_hub_button_does_nothing() {
+fn a_hub_button_without_a_backend_does_nothing() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
-    click_widget(&mut screen, &mut options, "sounds");
-    assert_eq!(screen.page(), Page::Main);
+    for id in ["shaders", "stream", "snooper"] {
+        let outcome = click_widget(&mut screen, &mut options, id);
+        assert_eq!(screen.page(), Page::Main, "{id}");
+        assert_eq!(outcome, Outcome::default(), "{id}");
+    }
 }
 
 #[test]
@@ -121,7 +130,7 @@ fn the_fov_slider_edits_within_its_range_and_names_the_ends() {
 }
 
 #[test]
-fn the_video_page_lists_the_sixteen_options_in_vanilla_order() {
+fn the_video_page_lists_the_options_in_vanilla_order() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
     click_widget(&mut screen, &mut options, "nav:video");
@@ -250,4 +259,262 @@ fn labels_follow_game_settings() {
     assert_eq!(fov_label(&lang, 70.0), "View: std");
     assert_eq!(fov_label(&lang, 110.0), "View: wide");
     assert_eq!(fov_label(&lang, 90.0), "View: 90");
+}
+
+fn language(code: &str, name: &str, region: &str) -> LanguageInfo {
+    LanguageInfo {
+        code: code.to_string(),
+        name: name.to_string(),
+        region: region.to_string(),
+    }
+}
+
+fn pack(name: &str, pack_format: u32) -> DiscoveredPack {
+    DiscoveredPack {
+        name: name.to_string(),
+        metadata: Some(PackMetadata {
+            pack_format,
+            description: format!("{name} pack"),
+        }),
+        icon: None,
+    }
+}
+
+/// A screen that lists two languages and three packs.
+fn catalog_screen() -> OptionsScreen {
+    let mut screen = OptionsScreen::new();
+    screen.set_catalog(Catalog::new(
+        vec![
+            language("en_US", "English", "US"),
+            language("de_DE", "Deutsch", "Deutschland"),
+        ],
+        vec![pack("a.zip", 1), pack("b.zip", 1), pack("old.zip", 2)],
+    ));
+    screen
+}
+
+/// Presses the left button at the left edge of widget `id`, which sets a
+/// slider to its minimum, or at its right edge for its maximum.
+fn press_slider(screen: &mut OptionsScreen, options: &mut Options, id: &str, at_end: bool) {
+    let rect = screen.rect_of(id).expect("a slider");
+    let x = if at_end {
+        rect.x + rect.width
+    } else {
+        rect.x + 1.0
+    };
+    let events = vec![InputEvent::PointerPressed {
+        position: [x, rect.y + 5.0],
+        button: PointerButton::Left,
+    }];
+    let outcome = frame(screen, options, events);
+    assert!(outcome.changed, "{id}");
+}
+
+#[test]
+fn every_new_hub_button_opens_its_page_and_done_comes_back() {
+    for (id, page) in [
+        ("skin", Page::Skin),
+        ("sounds", Page::Sounds),
+        ("language", Page::Language),
+        ("resourcepacks", Page::ResourcePacks),
+    ] {
+        let mut screen = catalog_screen();
+        let mut options = Options::default();
+        click_widget(&mut screen, &mut options, id);
+        assert_eq!(screen.page(), page, "{id}");
+        let outcome = click_widget(&mut screen, &mut options, "done");
+        assert_eq!(screen.page(), Page::Main, "{id}");
+        assert_eq!(outcome, Outcome::default(), "{id} done only goes back");
+    }
+}
+
+#[test]
+fn the_skin_page_toggles_each_part_and_reports_the_change() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "skin");
+    frame(&mut screen, &mut options, vec![]);
+    // Row 0 is at h/6 = 40, two buttons per row, Done under the last row.
+    assert_eq!(
+        screen.rect_of("part:1"),
+        Some(gui_rect(218.0, 40.0, 150.0, 20.0))
+    );
+    assert_eq!(
+        screen.rect_of("done"),
+        Some(gui_rect(113.0, 136.0, 200.0, 20.0))
+    );
+    for part in SkinPart::ALL {
+        let outcome = click_widget(&mut screen, &mut options, &format!("part:{}", part.id()));
+        assert!(outcome.changed && outcome.skin_changed, "{part:?}");
+        assert!(!options.skin.is_enabled(part), "{part:?}");
+    }
+    assert_eq!(options.skin.parts_mask(), 0);
+    click_widget(&mut screen, &mut options, "part:6");
+    assert_eq!(options.skin.parts_mask(), 0x40);
+}
+
+#[test]
+fn the_sound_page_sets_every_category_and_names_off() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "sounds");
+    frame(&mut screen, &mut options, vec![]);
+    // The master slider spans both columns; music starts the second row.
+    assert_eq!(
+        screen.rect_of("sound:soundCategory.master"),
+        Some(gui_rect(58.0, 28.0, 310.0, 20.0))
+    );
+    assert_eq!(
+        screen.rect_of("sound:soundCategory.music"),
+        Some(gui_rect(58.0, 52.0, 150.0, 20.0))
+    );
+    assert_eq!(
+        screen.rect_of("sound:soundCategory.ambient"),
+        Some(gui_rect(218.0, 124.0, 150.0, 20.0))
+    );
+    for category in SoundCategory::ALL {
+        let id = format!("sound:{}", category.lang_key());
+        press_slider(&mut screen, &mut options, &id, false);
+        assert_eq!(options.sound.volume(category), 0.0, "{category:?}");
+    }
+    assert_eq!(volume_text(&Lang::builtin(), 0.0), "options.off");
+    assert_eq!(volume_text(&Lang::builtin(), 0.5), "50%");
+}
+
+#[test]
+fn picking_a_language_sets_the_code_and_signals_the_reload() {
+    let mut screen = catalog_screen();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "language");
+    let outcome = click_widget(&mut screen, &mut options, "language:de_DE");
+    assert!(outcome.language_changed && outcome.changed);
+    assert_eq!(options.language.code, "de_DE");
+    // Picking the language that is already selected changes nothing.
+    let again = click_widget(&mut screen, &mut options, "language:de_DE");
+    assert!(!again.language_changed);
+    let back = click_widget(&mut screen, &mut options, "language:en_US");
+    assert!(back.language_changed);
+    assert_eq!(options.language.code, "en_US");
+}
+
+#[test]
+fn the_resource_pack_page_moves_packs_between_the_lists() {
+    let mut screen = catalog_screen();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "resourcepacks");
+    assert!(screen.pack_draft().is_empty());
+    click_widget(&mut screen, &mut options, "pack:Available:0");
+    assert_eq!(screen.pack_draft(), ["a.zip"]);
+    // The next pack goes on top: highest priority first.
+    click_widget(&mut screen, &mut options, "pack:Available:0");
+    assert_eq!(screen.pack_draft(), ["b.zip", "a.zip"]);
+    click_widget(&mut screen, &mut options, "pack:down:Selected:0");
+    assert_eq!(screen.pack_draft(), ["a.zip", "b.zip"]);
+    click_widget(&mut screen, &mut options, "pack:up:Selected:1");
+    assert_eq!(screen.pack_draft(), ["b.zip", "a.zip"]);
+    click_widget(&mut screen, &mut options, "pack:Selected:0");
+    assert_eq!(screen.pack_draft(), ["a.zip"]);
+    assert!(
+        options.resource_packs.enabled.is_empty(),
+        "a draft until Done"
+    );
+}
+
+#[test]
+fn done_applies_the_pack_draft_lowest_priority_first_and_signals_the_reload() {
+    let mut screen = catalog_screen();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "resourcepacks");
+    click_widget(&mut screen, &mut options, "pack:Available:0");
+    click_widget(&mut screen, &mut options, "pack:Available:0");
+    let outcome = click_widget(&mut screen, &mut options, "done");
+    assert!(outcome.packs_changed && outcome.changed);
+    assert_eq!(screen.page(), Page::Main);
+    // The top of the list (b.zip) is the highest priority, so it loads last.
+    assert_eq!(options.resource_packs.enabled, ["a.zip", "b.zip"]);
+
+    // Opening and leaving again without a change does not reload.
+    click_widget(&mut screen, &mut options, "resourcepacks");
+    assert_eq!(screen.pack_draft(), ["b.zip", "a.zip"]);
+    let outcome = click_widget(&mut screen, &mut options, "done");
+    assert!(!outcome.packs_changed);
+}
+
+#[test]
+fn a_saved_pack_that_left_the_folder_is_dropped_from_the_draft() {
+    let mut screen = catalog_screen();
+    let mut options = Options::default();
+    options.resource_packs.enabled = vec!["gone.zip".to_string(), "a.zip".to_string()];
+    click_widget(&mut screen, &mut options, "resourcepacks");
+    assert_eq!(screen.pack_draft(), ["a.zip"]);
+}
+
+#[test]
+fn the_open_folder_button_raises_its_flag() {
+    let mut screen = catalog_screen();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "resourcepacks");
+    assert!(click_widget(&mut screen, &mut options, "open_folder").open_packs_folder);
+}
+
+#[test]
+fn the_video_buttons_cycle_and_toggle_their_options() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "nav:video");
+    click_widget(&mut screen, &mut options, "video:0");
+    assert!(!options.video.fancy_graphics);
+    click_widget(&mut screen, &mut options, "video:2");
+    assert_eq!(options.video.smooth_lighting, 0);
+    click_widget(&mut screen, &mut options, "video:4");
+    assert!(!options.video.view_bobbing);
+    click_widget(&mut screen, &mut options, "video:5");
+    assert_eq!(options.video.gui_scale, 1);
+    click_widget(&mut screen, &mut options, "video:7");
+    assert_eq!(options.video.clouds, 0);
+    click_widget(&mut screen, &mut options, "video:8");
+    assert_eq!(options.video.particles, 1);
+    click_widget(&mut screen, &mut options, "video:9");
+    assert!(options.video.fullscreen);
+    click_widget(&mut screen, &mut options, "video:10");
+    assert!(!options.video.vsync);
+}
+
+#[test]
+fn the_gui_scale_button_wraps_after_large() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    options.video.gui_scale = 3;
+    click_widget(&mut screen, &mut options, "nav:video");
+    click_widget(&mut screen, &mut options, "video:5");
+    assert_eq!(options.video.gui_scale, 0);
+}
+
+#[test]
+fn the_brightness_and_mipmap_sliders_edit_within_their_ranges() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "nav:video");
+    options.video.mipmap_levels = 0;
+    frame(&mut screen, &mut options, vec![]);
+    press_slider(&mut screen, &mut options, "gamma", true);
+    assert_eq!(options.video.gamma, 1.0);
+    press_slider(&mut screen, &mut options, "gamma", false);
+    assert_eq!(options.video.gamma, 0.0);
+    press_slider(&mut screen, &mut options, "mipmap", true);
+    assert_eq!(options.video.mipmap_levels, 4);
+    press_slider(&mut screen, &mut options, "mipmap", false);
+    assert_eq!(options.video.mipmap_levels, 0);
+}
+
+#[test]
+fn the_new_labels_follow_game_settings() {
+    let lang = Lang::from_texts(
+        "xx_XX",
+        None,
+        Some("options.gamma.min=Moody\noptions.gamma.max=Bright\n"),
+    );
+    assert_eq!(gamma_value(&lang, 0.0), "Moody");
+    assert_eq!(gamma_value(&lang, 1.0), "Bright");
+    assert_eq!(gamma_value(&lang, 0.5), "+50%");
 }

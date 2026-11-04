@@ -50,6 +50,8 @@ pub struct NetworkConfig {
     pub chat_mode: u8,
     /// Client Settings chat colours.
     pub chat_colors: bool,
+    /// Client Settings skin-parts byte (`SkinOptions::parts_mask`).
+    pub skin_parts: u8,
     /// The address of the `Handshake` when it is not `host`.
     pub handshake_host: Option<String>,
 }
@@ -243,6 +245,8 @@ pub enum ClientCommand {
         chat_mode: u8,
         /// Whether the chat shows colours.
         chat_colors: bool,
+        /// The skin-parts byte: the model layers other players see.
+        skin_parts: u8,
     },
     /// `Tab-Complete` (0x14): ask the server to complete the typed text.
     TabComplete {
@@ -454,13 +458,13 @@ impl ClientCommand {
                 view_distance,
                 chat_mode,
                 chat_colors,
+                skin_parts,
             } => PlayServerbound::ClientSettings(serverbound::ClientSettings {
                 locale: "en_us".to_string(),
                 view_distance,
                 chat_mode,
                 chat_colors,
-                // Every skin layer, as the entry packet sends them.
-                skin_parts: 0b0111_1111,
+                skin_parts,
             }),
             Self::TabComplete { message } => {
                 PlayServerbound::TabComplete(serverbound::TabComplete {
@@ -591,6 +595,7 @@ async fn run_session(
         view_distance: config.view_distance,
         chat_mode: config.chat_mode,
         chat_colors: config.chat_colors,
+        skin_parts: config.skin_parts,
         ..PlayOptions::default()
     });
     // A full inbox blocks this thread in `send`, which slows the server down
@@ -617,6 +622,22 @@ async fn run_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_settings_carry_the_skin_parts_of_the_options() {
+        let packet = ClientCommand::ClientSettings {
+            view_distance: 10,
+            chat_mode: 1,
+            chat_colors: false,
+            skin_parts: 0b0100_0101,
+        }
+        .into_packet();
+        let PlayServerbound::ClientSettings(settings) = packet else {
+            panic!("not a Client Settings packet");
+        };
+        assert_eq!(settings.skin_parts, 0b0100_0101);
+        assert_eq!((settings.view_distance, settings.chat_mode), (10, 1));
+    }
 
     #[test]
     fn the_commands_map_to_the_expected_wire_ids() {

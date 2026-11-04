@@ -44,6 +44,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         view_distance: args.view_distance,
         chat_mode: 0,
         chat_colors: true,
+        skin_parts: crate::options::SkinOptions::default().parts_mask(),
         handshake_host: args.handshake_host.clone(),
     })?;
 
@@ -76,7 +77,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
     let now = Instant::now();
     let mut camera = Camera::default();
-    world.update_camera(&mut camera, now);
+    world.update_camera(&mut camera, now, true);
     renderer.set_environment(world.environment(now, args.view_distance));
     camera.set_aspect(args.width, args.height);
     // The offscreen path draws the same textured HUD as the window, so the

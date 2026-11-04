@@ -44,10 +44,7 @@ impl ResourcePackOptions {
 /// Whether `name` is a plain file or folder name.
 #[must_use]
 pub fn is_pack_name(name: &str) -> bool {
-    !name.is_empty()
-        && name != "."
-        && name != ".."
-        && !name.contains(['/', '\\', '\0'])
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
 }
 
 #[cfg(test)]
@@ -62,9 +59,18 @@ mod tests {
     #[test]
     fn names_that_escape_the_folder_or_repeat_are_dropped_in_order() {
         let mut packs = ResourcePackOptions {
-            enabled: ["b.zip", "../evil.zip", "", "a", "b.zip", "x/y", "..", "c\\d"]
-                .map(String::from)
-                .to_vec(),
+            enabled: [
+                "b.zip",
+                "../evil.zip",
+                "",
+                "a",
+                "b.zip",
+                "x/y",
+                "..",
+                "c\\d",
+            ]
+            .map(String::from)
+            .to_vec(),
         };
         packs.clamp();
         assert_eq!(packs.enabled, ["b.zip", "a"]);

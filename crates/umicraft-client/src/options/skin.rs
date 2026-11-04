@@ -194,10 +194,7 @@ mod tests {
             hat: true,
         };
         assert_eq!(skin.parts_mask(), 0x40);
-        let nothing = SkinOptions {
-            hat: false,
-            ..skin
-        };
+        let nothing = SkinOptions { hat: false, ..skin };
         assert_eq!(nothing.parts_mask(), 0);
     }
 

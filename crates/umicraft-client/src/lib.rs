@@ -55,6 +55,7 @@ pub mod nametag_draw;
 pub mod network;
 mod official;
 pub mod options;
+pub mod options_effects;
 pub mod options_screen;
 pub mod overlay_state;
 pub mod overlay_view;

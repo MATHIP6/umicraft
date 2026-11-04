@@ -156,6 +156,9 @@ pub struct PlayOptions {
     /// The chat visibility byte announced in `Client Settings`: `0` every
     /// message, `1` commands only, `2` hidden.
     pub chat_mode: u8,
+    /// The skin-parts byte announced in `Client Settings` (bit `n` shows
+    /// model part `n` of MCP `EnumPlayerModelParts`).
+    pub skin_parts: u8,
     /// Client brand sent on the `MC|Brand` channel (spec NET-9).
     pub brand: String,
 }
@@ -167,6 +170,7 @@ impl Default for PlayOptions {
             view_distance: 8,
             chat_colors: true,
             chat_mode: 0,
+            skin_parts: ALL_SKIN_PARTS,
             brand: "umicraft".to_string(),
         }
     }
@@ -728,7 +732,7 @@ impl PlaySession {
             view_distance: self.options.view_distance,
             chat_mode: self.options.chat_mode,
             chat_colors: self.options.chat_colors,
-            skin_parts: ALL_SKIN_PARTS,
+            skin_parts: self.options.skin_parts,
         };
         // The brand channel carries a length-prefixed string.
         let brand = self.options.brand.as_bytes();
@@ -891,6 +895,7 @@ mod tests {
             view_distance: 12,
             chat_colors: false,
             chat_mode: 2,
+            skin_parts: 0b0100_0010,
             brand: "test".to_string(),
         };
         let mut session = PlaySession::new(options);
@@ -905,7 +910,7 @@ mod tests {
                     view_distance: 12,
                     chat_mode: 2,
                     chat_colors: false,
-                    skin_parts: ALL_SKIN_PARTS,
+                    skin_parts: 0b0100_0010,
                 }),
                 PlayServerbound::Brand(Brand {
                     channel: "MC|Brand".to_string(),
