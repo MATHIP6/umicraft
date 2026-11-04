@@ -40,6 +40,7 @@ fn options_survive_a_restart() {
     options.controls.mouse_sensitivity = 0.9;
     options.chat.visibility = ChatVisibility::Commands;
     options.chat.colors = false;
+    options.language.code = "de_DE".to_string();
     options.save(&path).unwrap();
 
     let loaded = Options::load(&path);
@@ -149,5 +150,18 @@ fn saving_keeps_the_sections_this_version_does_not_know() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("[future]") && text.contains("answer = 42"));
     assert!(text.contains("[keys]"));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn the_language_defaults_to_english_and_a_bad_code_is_replaced() {
+    assert_eq!(Options::default().language.code, "en_US");
+    let folder = temp_folder("language");
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join(FILE_NAME);
+    std::fs::write(&path, "[language]\ncode = \"../../etc\"\n").unwrap();
+    assert_eq!(Options::load(&path).language.code, "en_US");
+    std::fs::write(&path, "[language]\ncode = \"fr_FR\"\n").unwrap();
+    assert_eq!(Options::load(&path).language.code, "fr_FR");
     let _ = std::fs::remove_dir_all(&folder);
 }

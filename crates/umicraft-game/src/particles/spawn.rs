@@ -66,13 +66,14 @@ impl ParticleSetting {
         }
     }
 
-    /// The label of `GameSettings.getTranslation(PARTICLES, setting)`.
+    /// The language key of the value label of `GameSettings.getTranslation(
+    /// PARTICLES, setting)` (`options.particles.all` ...).
     #[must_use]
-    pub fn label(self) -> &'static str {
+    pub fn lang_key(self) -> &'static str {
         match self {
-            Self::All => "All",
-            Self::Decreased => "Decreased",
-            Self::Minimal => "Minimal",
+            Self::All => "options.particles.all",
+            Self::Decreased => "options.particles.decreased",
+            Self::Minimal => "options.particles.minimal",
         }
     }
 }
@@ -236,7 +237,10 @@ mod tests {
     #[test]
     fn the_saved_index_selects_the_setting_and_defaults_when_corrupt() {
         assert_eq!(ParticleSetting::from_index(1), ParticleSetting::Decreased);
-        assert_eq!(ParticleSetting::from_index(2).label(), "Minimal");
+        assert_eq!(
+            ParticleSetting::from_index(2).lang_key(),
+            "options.particles.minimal"
+        );
         assert_eq!(ParticleSetting::from_index(200), ParticleSetting::All);
     }
 

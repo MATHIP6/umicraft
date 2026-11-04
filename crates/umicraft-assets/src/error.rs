@@ -118,6 +118,11 @@ pub enum AssetsError {
         reason: String,
     },
 
+    /// A language code that is not of the form `en_US`, or a language the
+    /// downloaded assets do not contain.
+    #[error("language `{0}` is not available")]
+    UnknownLanguage(String),
+
     /// The platform data directory could not be determined.
     #[error("the platform data directory could not be determined")]
     NoDataDir,

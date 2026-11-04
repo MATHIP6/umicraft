@@ -2,14 +2,15 @@
 
 //! The chat settings page (`ScreenChatOptions`).
 
+use umicraft_core::lang::Lang;
 use umicraft_ui::{FontAtlas, Rect, Ui};
 
 use super::layout::{Gui, BUTTON_H, HALF_W};
-use super::{OptionsScreen, Outcome};
+use super::{on_off, option_label, OptionsScreen, Outcome};
 use crate::options::{ChatVisibility, Options};
 
 impl OptionsScreen {
-    /// A `GuiOptionButton` of an on/off option: "Name: ON".
+    /// A `GuiOptionButton` of an on/off option: "Name: ON" (`options.on` / `options.off`).
     #[allow(clippy::too_many_arguments)]
     fn toggle(
         &mut self,
@@ -17,11 +18,12 @@ impl OptionsScreen {
         atlas: &FontAtlas,
         id: &str,
         rect: Rect,
-        name: &str,
+        lang: &Lang,
+        name_key: &str,
         value: &mut bool,
         outcome: &mut Outcome,
     ) {
-        let label = format!("{name}: {}", if *value { "ON" } else { "OFF" });
+        let label = option_label(lang, name_key, on_off(lang, *value));
         if self.button(ui, atlas, id, rect, &label, true, None) {
             *value = !*value;
             outcome.changed = true;
@@ -53,9 +55,10 @@ impl OptionsScreen {
         atlas: &FontAtlas,
         options: &mut Options,
         gui: Gui,
+        lang: &Lang,
         outcome: &mut Outcome,
     ) {
-        Self::title(ui, atlas, gui, "Chat Settings", 20.0);
+        Self::title(ui, atlas, gui, lang.tr("options.chat.title"), 20.0);
         let cx = gui.cx();
         let h6 = (gui.height / 6.0).floor();
         for index in 0..10 {
@@ -65,14 +68,12 @@ impl OptionsScreen {
             let chat = &mut options.chat;
             match index {
                 0 => {
-                    let label = format!(
-                        "Chat: {}",
-                        match chat.visibility {
-                            ChatVisibility::Full => "Shown",
-                            ChatVisibility::Commands => "Commands Only",
-                            ChatVisibility::Hidden => "Hidden",
-                        }
-                    );
+                    let value = lang.tr(match chat.visibility {
+                        ChatVisibility::Full => "options.chat.visibility.full",
+                        ChatVisibility::Commands => "options.chat.visibility.system",
+                        ChatVisibility::Hidden => "options.chat.visibility.hidden",
+                    });
+                    let label = option_label(lang, "options.chat.visibility", value);
                     if self.button(ui, atlas, "visibility", rect, &label, true, None) {
                         chat.visibility = chat.visibility.next();
                         outcome.changed = true;
@@ -83,7 +84,8 @@ impl OptionsScreen {
                     atlas,
                     "colors",
                     rect,
-                    "Colors",
+                    lang,
+                    "options.chat.color",
                     &mut chat.colors,
                     outcome,
                 ),
@@ -92,12 +94,17 @@ impl OptionsScreen {
                     atlas,
                     "links",
                     rect,
-                    "Web Links",
+                    lang,
+                    "options.chat.links",
                     &mut chat.links,
                     outcome,
                 ),
                 3 => {
-                    let label = format!("Opacity: {}%", (chat.opacity * 90.0 + 10.0) as i32);
+                    let label = option_label(
+                        lang,
+                        "options.chat.opacity",
+                        &format!("{}%", (chat.opacity * 90.0 + 10.0) as i32),
+                    );
                     self.fraction(
                         ui,
                         atlas,
@@ -113,36 +120,44 @@ impl OptionsScreen {
                     atlas,
                     "links_prompt",
                     rect,
-                    "Prompt on Links",
+                    lang,
+                    "options.chat.links.prompt",
                     &mut chat.links_prompt,
                     outcome,
                 ),
                 5 => {
-                    let label = if chat.scale == 0.0 {
-                        "Scale: OFF".to_string()
+                    let value = if chat.scale == 0.0 {
+                        lang.tr("options.off").to_string()
                     } else {
-                        format!("Scale: {}%", (chat.scale * 100.0) as i32)
+                        format!("{}%", (chat.scale * 100.0) as i32)
                     };
+                    let label = option_label(lang, "options.chat.scale", &value);
                     self.fraction(ui, atlas, "scale", rect, &label, &mut chat.scale, outcome);
                 }
                 6 => {
-                    let label = format!(
-                        "Focused Height: {}px",
-                        (chat.height_focused * 160.0 + 20.0) as i32
+                    let label = option_label(
+                        lang,
+                        "options.chat.height.focused",
+                        &format!("{}px", (chat.height_focused * 160.0 + 20.0) as i32),
                     );
                     let value = &mut chat.height_focused;
                     self.fraction(ui, atlas, "height_focused", rect, &label, value, outcome);
                 }
                 7 => {
-                    let label = format!(
-                        "Unfocused Height: {}px",
-                        (chat.height_unfocused * 160.0 + 20.0) as i32
+                    let label = option_label(
+                        lang,
+                        "options.chat.height.unfocused",
+                        &format!("{}px", (chat.height_unfocused * 160.0 + 20.0) as i32),
                     );
                     let value = &mut chat.height_unfocused;
                     self.fraction(ui, atlas, "height_unfocused", rect, &label, value, outcome);
                 }
                 8 => {
-                    let label = format!("Width: {}px", (chat.width * 280.0 + 40.0) as i32);
+                    let label = option_label(
+                        lang,
+                        "options.chat.width",
+                        &format!("{}px", (chat.width * 280.0 + 40.0) as i32),
+                    );
                     self.fraction(ui, atlas, "width", rect, &label, &mut chat.width, outcome);
                 }
                 _ => self.toggle(
@@ -150,13 +165,14 @@ impl OptionsScreen {
                     atlas,
                     "reduced_debug",
                     rect,
-                    "Reduced Debug Info",
+                    lang,
+                    "options.reducedDebugInfo",
                     &mut chat.reduced_debug,
                     outcome,
                 ),
             }
         }
         let done = gui.rect(cx - 100.0, h6 + 120.0, 200.0, BUTTON_H);
-        self.back(ui, atlas, done);
+        self.back(ui, atlas, done, lang);
     }
 }

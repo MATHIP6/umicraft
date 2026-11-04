@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 
+use umicraft_core::lang::Lang;
 use umicraft_ui::game_menu::draw_default_background;
 use umicraft_ui::widgets::{button_tinted, slider, SliderState};
 use umicraft_ui::{Color, FontAtlas, Rect, Ui};
@@ -136,17 +137,23 @@ impl OptionsScreen {
     /// Draws one frame of the screen and edits `options`.
     ///
     /// `ui` must be between [`Ui::begin_frame`] and [`Ui::end_frame`].
-    pub fn show(&mut self, ui: &mut Ui, atlas: &FontAtlas, options: &mut Options) -> Outcome {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        options: &mut Options,
+        lang: &Lang,
+    ) -> Outcome {
         self.rects.clear();
         let gui = Gui::new(ui.viewport());
         let mut outcome = Outcome::default();
         draw_default_background(ui);
         ui.push_id("options");
         match self.page {
-            Page::Main => self.show_main(ui, atlas, options, gui, &mut outcome),
-            Page::Video => self.show_video(ui, atlas, options, gui, &mut outcome),
-            Page::Controls => self.show_controls(ui, atlas, options, gui, &mut outcome),
-            Page::Chat => self.show_chat(ui, atlas, options, gui, &mut outcome),
+            Page::Main => self.show_main(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Video => self.show_video(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Controls => self.show_controls(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Chat => self.show_chat(ui, atlas, options, gui, lang, &mut outcome),
         }
         ui.pop_id();
         outcome
@@ -187,12 +194,23 @@ impl OptionsScreen {
         changed.then_some(value)
     }
 
-    /// The bottom "Done" of the sub-pages: back to the hub.
-    fn back(&mut self, ui: &mut Ui, atlas: &FontAtlas, rect: Rect) {
-        if self.button(ui, atlas, "done", rect, "Done", true, None) {
+    /// The bottom "Done" (`gui.done`) of the sub-pages: back to the hub.
+    fn back(&mut self, ui: &mut Ui, atlas: &FontAtlas, rect: Rect, lang: &Lang) {
+        if self.button(ui, atlas, "done", rect, lang.tr("gui.done"), true, None) {
             self.page = Page::Main;
             self.capturing = None;
             self.scroll = 0.0;
         }
     }
+}
+
+/// The label of an option button, as `GameSettings.getKeyBinding` builds it:
+/// the translated option name, `": "`, then the value.
+fn option_label(lang: &Lang, key: &str, value: &str) -> String {
+    format!("{}: {value}", lang.tr(key))
+}
+
+/// `options.on` / `options.off` for a boolean option.
+fn on_off(lang: &Lang, value: bool) -> &str {
+    lang.tr(if value { "options.on" } else { "options.off" })
 }

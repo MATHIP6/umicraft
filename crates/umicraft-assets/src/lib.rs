@@ -72,6 +72,7 @@ pub mod gui_atlas;
 pub mod hash;
 pub mod http;
 pub mod install;
+pub mod languages;
 pub mod manifest;
 pub mod objects;
 pub mod profile_textures;

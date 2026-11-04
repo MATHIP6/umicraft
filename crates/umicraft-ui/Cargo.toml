@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 png.workspace = true
 thiserror.workspace = true
+umicraft-core.workspace = true
 
 [lints]
 workspace = true

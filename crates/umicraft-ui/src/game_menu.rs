@@ -6,13 +6,15 @@
 //! at authentic GUI scale (`gui_scale`).
 //!
 //! Coordinates in GUI space (200x20 and 98x20 buttons, `cx = width / 2`, `h4 = height / 4`):
-//! - Title "Game Menu" centered at `(cx, 40)`
-//! - Button 4 (`Back to Game`): `(cx - 100, h4 + 8)`, 200x20
-//! - Button 5 (`Achievements`): `(cx - 100, h4 + 32)`, 98x20
-//! - Button 6 (`Statistics`): `(cx + 2, h4 + 32)`, 98x20
-//! - Button 0 (`Options...`): `(cx - 100, h4 + 80)`, 98x20
-//! - Button 7 (`Open to LAN`): `(cx + 2, h4 + 80)`, 98x20 (disabled in multiplayer)
-//! - Button 1 (`Disconnect` / `Save and Quit to Title`): `(cx - 100, h4 + 104)`, 200x20
+//! - Title (`menu.game`) centered at `(cx, 40)`
+//! - Button 4 (`menu.returnToGame`): `(cx - 100, h4 + 8)`, 200x20
+//! - Button 5 (`gui.achievements`): `(cx - 100, h4 + 32)`, 98x20
+//! - Button 6 (`gui.stats`): `(cx + 2, h4 + 32)`, 98x20
+//! - Button 0 (`menu.options`): `(cx - 100, h4 + 80)`, 98x20
+//! - Button 7 (`menu.shareToLan`): `(cx + 2, h4 + 80)`, 98x20 (disabled in multiplayer)
+//! - Button 1 (`menu.disconnect` / `menu.returnToMenu`): `(cx - 100, h4 + 104)`, 200x20
+
+use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
 use crate::draw::TextStyle;
@@ -20,38 +22,43 @@ use crate::geom::Rect;
 use crate::text::FontAtlas;
 use crate::widgets::{button, button_enabled, gui_scale};
 
-/// The localized labels displayed by the game menu.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GameMenuLabels {
-    /// Screen title (vanilla `menu.game`, default "Game Menu").
-    pub title: String,
-    /// Return to game (vanilla `menu.returnToGame`, default "Back to Game").
-    pub resume: String,
-    /// Achievements (vanilla `gui.achievements`, default "Achievements").
-    pub achievements: String,
-    /// Statistics (vanilla `gui.stats`, default "Statistics").
-    pub stats: String,
-    /// Options (vanilla `menu.options`, default "Options...").
-    pub options: String,
-    /// Open to LAN (vanilla `menu.shareToLan`, default "Open to LAN").
-    pub share_to_lan: String,
-    /// Disconnect (vanilla `menu.disconnect`, default "Disconnect").
-    pub disconnect: String,
-    /// Return to menu in singleplayer (vanilla `menu.returnToMenu`, default "Save and Quit to Title").
-    pub return_to_menu: String,
+/// The localized labels displayed by the game menu, borrowed from a [`Lang`].
+///
+/// Every field is the text of a vanilla translation key (`GuiIngameMenu`),
+/// so the screen carries no English literal (ADR-0039).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameMenuLabels<'a> {
+    /// Screen title (`menu.game`).
+    pub title: &'a str,
+    /// Return to game (`menu.returnToGame`).
+    pub resume: &'a str,
+    /// Achievements (`gui.achievements`).
+    pub achievements: &'a str,
+    /// Statistics (`gui.stats`).
+    pub stats: &'a str,
+    /// Options (`menu.options`).
+    pub options: &'a str,
+    /// Open to LAN (`menu.shareToLan`).
+    pub share_to_lan: &'a str,
+    /// Disconnect (`menu.disconnect`).
+    pub disconnect: &'a str,
+    /// Return to menu in singleplayer (`menu.returnToMenu`).
+    pub return_to_menu: &'a str,
 }
 
-impl Default for GameMenuLabels {
-    fn default() -> Self {
+impl<'a> GameMenuLabels<'a> {
+    /// The labels of the menu in the language of `lang`.
+    #[must_use]
+    pub fn new(lang: &'a Lang) -> Self {
         Self {
-            title: "Game Menu".to_string(),
-            resume: "Back to Game".to_string(),
-            achievements: "Achievements".to_string(),
-            stats: "Statistics".to_string(),
-            options: "Options...".to_string(),
-            share_to_lan: "Open to LAN".to_string(),
-            disconnect: "Disconnect".to_string(),
-            return_to_menu: "Save and Quit to Title".to_string(),
+            title: lang.tr("menu.game"),
+            resume: lang.tr("menu.returnToGame"),
+            achievements: lang.tr("gui.achievements"),
+            stats: lang.tr("gui.stats"),
+            options: lang.tr("menu.options"),
+            share_to_lan: lang.tr("menu.shareToLan"),
+            disconnect: lang.tr("menu.disconnect"),
+            return_to_menu: lang.tr("menu.returnToMenu"),
         }
     }
 }
@@ -93,8 +100,8 @@ impl GameMenu {
 
     /// Sets whether the client is in singleplayer mode.
     ///
-    /// In singleplayer, button 1 is labeled "Save and Quit to Title" instead of
-    /// "Disconnect", and "Open to LAN" is enabled.
+    /// In singleplayer, button 1 is labeled `menu.returnToMenu` instead of
+    /// `menu.disconnect`, and `menu.shareToLan` is enabled.
     pub fn set_singleplayer(&mut self, singleplayer: bool) {
         self.is_singleplayer = singleplayer;
     }
@@ -105,23 +112,12 @@ impl GameMenu {
         self.is_singleplayer
     }
 
-    /// Draws one frame of the menu using default vanilla labels and returns
-    /// the entry the player clicked.
+    /// Draws one frame of the menu with the texts of `lang` and returns the
+    /// entry the player clicked.
     ///
     /// `ui` must be between [`Ui::begin_frame`] and [`Ui::end_frame`].
-    pub fn show(&mut self, ui: &mut Ui, atlas: &FontAtlas) -> Option<GameMenuAction> {
-        let labels = GameMenuLabels::default();
-        self.show_with_labels(ui, atlas, &labels)
-    }
-
-    /// Draws one frame of the menu with customized/localized labels and
-    /// returns the entry the player clicked.
-    pub fn show_with_labels(
-        &mut self,
-        ui: &mut Ui,
-        atlas: &FontAtlas,
-        labels: &GameMenuLabels,
-    ) -> Option<GameMenuAction> {
+    pub fn show(&mut self, ui: &mut Ui, atlas: &FontAtlas, lang: &Lang) -> Option<GameMenuAction> {
+        let labels = GameMenuLabels::new(lang);
         let viewport = ui.viewport();
 
         // 1. Draw default gradient background: -1072689136 (0xC0101010) to -804253680 (0xD0101010)
@@ -136,17 +132,17 @@ impl GameMenu {
         let i = -16.0;
 
         // 3. Draw centered title at y = 40 in GUI units with shadow
-        let title_w = atlas.measure(&labels.title, scale);
+        let title_w = atlas.measure(labels.title, scale);
         let title_x = (cx * scale - title_w * 0.5).round();
         let title_y = (40.0 * scale).round();
         ui.draw().text(
             [title_x + scale, title_y + scale],
-            &labels.title,
+            labels.title,
             TextStyle::new(scale, [0.25, 0.25, 0.25, 1.0]),
         );
         ui.draw().text(
             [title_x, title_y],
-            &labels.title,
+            labels.title,
             TextStyle::new(scale, [1.0, 1.0, 1.0, 1.0]),
         );
 
@@ -204,28 +200,28 @@ impl GameMenu {
         let quit_id = ui.id("quit");
 
         let quit_label = if self.is_singleplayer {
-            &labels.return_to_menu
+            labels.return_to_menu
         } else {
-            &labels.disconnect
+            labels.disconnect
         };
 
-        let resume = button(ui, resume_id, resume_rect, atlas, &labels.resume).clicked;
+        let resume = button(ui, resume_id, resume_rect, atlas, labels.resume).clicked;
         let achievements = button(
             ui,
             achievements_id,
             achievements_rect,
             atlas,
-            &labels.achievements,
+            labels.achievements,
         )
         .clicked;
-        let stats = button(ui, stats_id, stats_rect, atlas, &labels.stats).clicked;
-        let options = button(ui, options_id, options_rect, atlas, &labels.options).clicked;
+        let stats = button(ui, stats_id, stats_rect, atlas, labels.stats).clicked;
+        let options = button(ui, options_id, options_rect, atlas, labels.options).clicked;
         let _lan = button_enabled(
             ui,
             lan_id,
             lan_rect,
             atlas,
-            &labels.share_to_lan,
+            labels.share_to_lan,
             self.is_singleplayer,
         );
         let quit = button(ui, quit_id, quit_rect, atlas, quit_label).clicked;
@@ -246,7 +242,7 @@ impl GameMenu {
         }
     }
 
-    /// The rectangle of the resume button ("Back to Game") in the last frame.
+    /// The rectangle of the resume button in the last frame.
     #[must_use]
     pub fn resume_rect(&self) -> Rect {
         self.resume_rect
@@ -317,7 +313,7 @@ mod tests {
         let viewport = Rect::new(0.0, 0.0, 1280.0, 720.0);
         let mut ui = Ui::new(viewport);
         ui.begin_frame(viewport, input);
-        let action = menu.show(&mut ui, &FontAtlas::fallback());
+        let action = menu.show(&mut ui, &FontAtlas::fallback(), &Lang::builtin());
         ui.end_frame();
         action
     }

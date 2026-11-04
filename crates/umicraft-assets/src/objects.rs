@@ -131,25 +131,27 @@ impl AssetIndex {
         self.objects.get(path)
     }
 
+    /// Loads the asset index document stored in `cache`, if there is one.
+    ///
+    /// The documents are looked up under the names the setup stores them by
+    /// (`1.8.json` and the SHA-1 of the 1.8.8 index); the first that parses
+    /// wins.
+    #[must_use]
+    pub fn load_cached(cache: &crate::cache::AssetCache) -> Option<Self> {
+        const CANDIDATES: [&str; 2] = ["1.8.json", "f6ad102bcaa53b1a58358f16e376d548d44933ec.json"];
+        CANDIDATES.iter().find_map(|name| {
+            let bytes = std::fs::read(cache.indexes_dir().join(name)).ok()?;
+            Self::parse(&bytes).ok()
+        })
+    }
+
     /// Loads the `en_US.lang` contents from `cache` if an asset index document
     /// and the object are present.
     #[must_use]
     pub fn load_en_us_lang(cache: &crate::cache::AssetCache) -> Option<String> {
-        let candidates = ["1.8.json", "f6ad102bcaa53b1a58358f16e376d548d44933ec.json"];
-        for name in candidates {
-            let index_path = cache.indexes_dir().join(name);
-            if let Ok(bytes) = std::fs::read(&index_path) {
-                if let Ok(index) = Self::parse(&bytes) {
-                    if let Some(obj) = index.get("minecraft/lang/en_US.lang") {
-                        let obj_path = cache.object_path(&obj.hash);
-                        if let Ok(text) = std::fs::read_to_string(&obj_path) {
-                            return Some(text);
-                        }
-                    }
-                }
-            }
-        }
-        None
+        let index = Self::load_cached(cache)?;
+        let object = index.get("minecraft/lang/en_US.lang")?;
+        std::fs::read_to_string(cache.object_path(&object.hash)).ok()
     }
 
     /// Every object of the index, ordered by path.

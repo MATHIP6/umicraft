@@ -7,10 +7,10 @@
 //! only turns its frames into the plain views of `umicraft_render`, so
 //! `game.rs` carries no overlay logic (ADR-0036).
 
-use std::sync::OnceLock;
+use std::sync::Arc;
 
 use crate::chat::run_views;
-use umicraft_game::chat::LangTable;
+use umicraft_core::lang::Lang;
 use umicraft_game::entity::{BossTracker, EntityStore};
 use umicraft_game::hud::boss_bar::BossBar;
 use umicraft_game::hud::sidebar::sidebar_frame;
@@ -24,11 +24,9 @@ use umicraft_render::{
     TabValueStyle, TitleView,
 };
 
-/// The translations of the overlays: the built-in table until the language
-/// files are installed.
-fn translations() -> &'static LangTable {
-    static TABLE: OnceLock<LangTable> = OnceLock::new();
-    TABLE.get_or_init(LangTable::builtin)
+/// The language of the overlays: the installed one (ADR-0039).
+fn translations() -> Arc<Lang> {
+    crate::language::current()
 }
 
 /// The sidebar `own_name` sees.
@@ -56,7 +54,7 @@ pub(crate) fn tab_list_view(
     scoreboard: &Scoreboard,
     show_heads: bool,
 ) -> Option<TabListView> {
-    let frame = tab_list_frame(list, scoreboard, translations())?;
+    let frame = tab_list_frame(list, scoreboard, translations().table())?;
     Some(TabListView {
         header: frame.header.as_deref().map(run_views),
         footer: frame.footer.as_deref().map(run_views),
@@ -82,7 +80,7 @@ pub(crate) fn tab_list_view(
 
 /// The title and subtitle with their opacity, while they are displayed.
 pub(crate) fn title_view(state: &TitleState) -> Option<TitleView> {
-    let frame = title_frame(state, translations(), 0.0)?;
+    let frame = title_frame(state, translations().table(), 0.0)?;
     Some(TitleView {
         title: run_views(&frame.title),
         subtitle: run_views(&frame.subtitle),
@@ -92,7 +90,7 @@ pub(crate) fn title_view(state: &TitleState) -> Option<TitleView> {
 
 /// The action bar message with its opacity, while one is displayed.
 pub(crate) fn action_bar_view(bar: &ActionBar) -> Option<ActionBarView> {
-    let frame = action_bar_frame(bar, translations(), 0.0)?;
+    let frame = action_bar_frame(bar, translations().table(), 0.0)?;
     Some(ActionBarView {
         text: run_views(&frame.text),
         alpha: frame.alpha,
@@ -114,7 +112,10 @@ pub(crate) fn boss_view(bar: &BossBar) -> Option<BossView> {
 /// Returns whether the bar was or is shown, i.e. whether the HUD changed.
 pub(crate) fn tick_boss_bar(bar: &mut BossBar, entities: &EntityStore) -> bool {
     let was_visible = bar.is_visible();
-    bar.observe(BossTracker::find_boss(entities).as_ref(), translations());
+    bar.observe(
+        BossTracker::find_boss(entities).as_ref(),
+        translations().table(),
+    );
     bar.tick();
     was_visible || bar.is_visible()
 }
@@ -128,7 +129,7 @@ mod tests {
     fn unstyled_runs_are_white_and_styled_runs_keep_their_flags() {
         let runs = parse(
             r#"[{"text":"a"},{"text":"b","color":"red","bold":true}]"#,
-            &LangTable::default(),
+            &umicraft_core::lang::LangTable::default(),
         );
         let views = run_views(&runs);
         assert_eq!(views[0].color, [255, 255, 255]);

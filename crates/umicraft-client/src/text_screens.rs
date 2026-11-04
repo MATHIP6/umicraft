@@ -8,6 +8,7 @@
 //! hit areas drawn from `book.png`.
 
 use umicraft_assets::GuiAtlas;
+use umicraft_core::lang::Lang;
 use umicraft_game::editors::book::{BookEditor, PAGE_WIDTH};
 use umicraft_game::editors::sign::SignEditor;
 use umicraft_game::editors::wrap::wrap;
@@ -123,6 +124,7 @@ impl TextScreens {
         viewport: Rect,
         gui_atlas: Option<&GuiAtlas>,
         caret_visible: bool,
+        lang: &Lang,
     ) -> Option<Done> {
         let scale = gui_scale(viewport.width as u32, viewport.height as u32) as f32;
         let view = View {
@@ -130,6 +132,7 @@ impl TextScreens {
             atlas,
             viewport,
             scale,
+            lang,
         };
         if let Some(sign) = self.sign.as_mut() {
             return sign.draw(view, caret_visible);
@@ -144,6 +147,7 @@ struct View<'a> {
     atlas: &'a FontAtlas,
     viewport: Rect,
     scale: f32,
+    lang: &'a Lang,
 }
 
 impl View<'_> {
@@ -206,7 +210,7 @@ impl SignScreen {
     fn draw(&mut self, mut view: View<'_>, caret_visible: bool) -> Option<Done> {
         view.ui.draw().rect(view.viewport, [0.0, 0.0, 0.0, 0.55]);
         let centre = view.gui_width() / 2.0;
-        let title = "Edit sign message:";
+        let title = view.lang.tr("sign.edit");
         let title_x = centre - view.width(title) / 2.0;
         view.text(title_x, 40.0, title, WHITE);
 
@@ -226,7 +230,8 @@ impl SignScreen {
         }
 
         let done = view.rect(centre - DONE_WIDE / 2.0, 150.0, DONE_WIDE, BUTTON.1);
-        view.button("sign_done", done, "Done", true)
+        let label = view.lang.tr("gui.done");
+        view.button("sign_done", done, label, true)
             .then(|| self.finish())
     }
 }
@@ -288,10 +293,12 @@ impl BookScreen {
     }
 
     fn draw_page(&self, view: &mut View<'_>, origin: (f32, f32), caret_visible: bool) {
-        let indicator = format!(
-            "Page {} of {}",
-            self.editor.current() + 1,
-            self.editor.page_count()
+        let indicator = view.lang.tr_args(
+            "book.pageIndicator",
+            &[
+                &(self.editor.current() + 1).to_string(),
+                &self.editor.page_count().to_string(),
+            ],
         );
         let indicator_x = origin.0 + BOOK_SIZE - 44.0 - view.width(&indicator);
         view.text(indicator_x, origin.1 + 16.0, &indicator, BLACK);
@@ -311,16 +318,16 @@ impl BookScreen {
     fn draw_signing(&self, view: &mut View<'_>, origin: (f32, f32), caret_visible: bool) {
         let centred =
             |view: &View<'_>, text: &str| origin.0 + (BOOK_SIZE - view.width(text)) / 2.0 + 0.0;
-        let prompt = "Enter Book Title:";
+        let prompt = view.lang.tr("book.editTitle");
         view.text(centred(view, prompt), origin.1 + 34.0, prompt, BLACK);
         let mut title = self.editor.title().to_owned();
         if caret_visible {
             title.push('_');
         }
         view.text(centred(view, &title), origin.1 + 50.0, &title, BLACK);
-        let by = format!("by {}", self.author);
+        let by = view.lang.tr_args("book.byAuthor", &[&self.author]);
         view.text(centred(view, &by), origin.1 + 60.0, &by, GREY);
-        let note = "Note! When you sign the book, it will no longer be editable.";
+        let note = view.lang.tr("book.finalizeWarning");
         let measure = |s: &str| view.atlas.measure(s, 1.0);
         for (index, line) in wrap(note, PAGE_WIDTH, &measure).iter().enumerate() {
             let y = origin.1 + 82.0 + index as f32 * LINE_HEIGHT;
@@ -370,28 +377,32 @@ impl BookScreen {
     fn draw_buttons(&mut self, view: &mut View<'_>) -> Option<Done> {
         let centre = view.gui_width() / 2.0;
         let top = 4.0 + BOOK_SIZE;
+        let lang = view.lang;
+        let (sign_label, finalize_label) =
+            (lang.tr("book.signButton"), lang.tr("book.finalizeButton"));
+        let (cancel_label, done_label) = (lang.tr("gui.cancel"), lang.tr("gui.done"));
         if self.editor.is_signing() {
             let sign = view.rect(centre - 100.0, top, BUTTON.0, BUTTON.1);
             let enabled = !self.editor.title().trim().is_empty();
-            if view.button("book_sign", sign, "Sign", enabled) {
+            if view.button("book_sign", sign, finalize_label, enabled) {
                 return Some(self.finish(true));
             }
             let cancel = view.rect(centre + 2.0, top, BUTTON.0, BUTTON.1);
-            if view.button("book_cancel", cancel, "Cancel", true) {
+            if view.button("book_cancel", cancel, cancel_label, true) {
                 self.editor.cancel_signing();
             }
         } else if self.editor.is_editable() {
             let sign = view.rect(centre - 100.0, top, BUTTON.0, BUTTON.1);
-            if view.button("book_begin_sign", sign, "Sign", true) {
+            if view.button("book_begin_sign", sign, sign_label, true) {
                 self.editor.begin_signing();
             }
             let done = view.rect(centre + 2.0, top, BUTTON.0, BUTTON.1);
-            if view.button("book_done", done, "Done", true) {
+            if view.button("book_done", done, done_label, true) {
                 return Some(self.finish(false));
             }
         } else {
             let done = view.rect(centre - DONE_WIDE / 2.0, top, DONE_WIDE, BUTTON.1);
-            if view.button("book_done", done, "Done", true) {
+            if view.button("book_done", done, done_label, true) {
                 return Some(Done(None));
             }
         }

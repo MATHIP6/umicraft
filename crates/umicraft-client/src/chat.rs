@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The client side of the chat: the language table loaded from the
-//! downloaded `.lang` file, the conversion of parsed components to HUD views
+//! The client side of the chat: the conversion of parsed components to HUD views
 //! and the text of a hover tooltip.
 //!
 //! The server sends the chat as a JSON component (MCP `IChatComponent`); the
 //! parsing, styles, wrapping and click rules live in
-//! [`umicraft_game::chat`]. The language option stays `en_US` until P10.
+//! [`umicraft_game::chat`]. The language comes from [`crate::language`].
 
-use std::sync::OnceLock;
+use std::sync::Arc;
 use std::time::Instant;
 
+use umicraft_core::lang::Lang;
 use umicraft_game::chat::events::{hover_entity_lines, parse_hover_item};
-use umicraft_game::chat::{self, Color, HoverEvent, LangTable, Run};
+use umicraft_game::chat::{self, Color, HoverEvent, Run};
 use umicraft_game::inventory::tooltip::tooltip_advanced;
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::{ChatLineView, ChatRunView};
@@ -25,18 +25,10 @@ const RED: u32 = 0x00FF_5555;
 /// The colour of plain tooltip text.
 const WHITE: u32 = 0x00FF_FFFF;
 
-/// The language table: the built-in fallback, overridden by the `en_US.lang`
-/// of the first-run download (asset index entry `minecraft/lang/en_US.lang`)
-/// when it is installed.
-pub(crate) fn lang() -> &'static LangTable {
-    static TABLE: OnceLock<LangTable> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut table = LangTable::builtin();
-        if let Some(text) = crate::official::load_en_us_lang() {
-            table.extend(LangTable::from_lang(&text));
-        }
-        table
-    })
+/// The language the chat components are translated in: the one the client
+/// installed at startup (ADR-0039).
+pub(crate) fn lang() -> Arc<Lang> {
+    crate::language::current()
 }
 
 /// The plain text of a chat JSON component, empty when the component is.
@@ -45,7 +37,7 @@ pub(crate) fn lang() -> &'static LangTable {
 /// (`{"text":""}` clears them). A malformed component is returned unchanged.
 #[must_use]
 pub fn flatten(json: &str) -> String {
-    chat::plain(&chat::parse(json, lang()))
+    chat::plain(&chat::parse(json, lang().table()))
 }
 
 /// The HUD view of parsed runs, stamped with the arrival time.
@@ -80,7 +72,7 @@ fn run_view(run: &Run) -> ChatRunView {
 /// (`GuiScreen.handleComponentHover`).
 ///
 /// `show_text` is one row per line of the text; `show_item` is the item
-/// tooltip, or a red "Invalid Item!"; `show_entity` shows only with advanced
+/// tooltip, or a red `umicraft.hover.invalidItem`; `show_entity` shows only with advanced
 /// tooltips on. `show_achievement` needs the statistics list, which the
 /// client does not have, so it shows nothing.
 pub(crate) fn hover_rows(hover: &HoverEvent, advanced: bool) -> Vec<TooltipRow> {
@@ -88,7 +80,7 @@ pub(crate) fn hover_rows(hover: &HoverEvent, advanced: bool) -> Vec<TooltipRow> 
         HoverEvent::ShowText(runs) => text_rows(runs),
         HoverEvent::ShowItem(snbt) => item_rows(snbt, advanced),
         HoverEvent::ShowEntity(snbt) if advanced => hover_entity_lines(snbt).map_or_else(
-            || vec![row("Invalid Entity!", RED)],
+            || vec![row(lang().tr("umicraft.hover.invalidEntity"), RED)],
             |lines| lines.into_iter().map(|line| row(&line, WHITE)).collect(),
         ),
         HoverEvent::ShowEntity(_) | HoverEvent::ShowAchievement(_) => Vec::new(),
@@ -135,7 +127,7 @@ fn item_rows(snbt: &str, advanced: bool) -> Vec<TooltipRow> {
             nbt: None,
         })
     }) else {
-        return vec![row("Invalid Item!", RED)];
+        return vec![row(lang().tr("umicraft.hover.invalidItem"), RED)];
     };
     tooltip_advanced(&item, advanced)
         .iter()
@@ -146,6 +138,7 @@ fn item_rows(snbt: &str, advanced: bool) -> Vec<TooltipRow> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use umicraft_game::chat::LangTable;
 
     #[test]
     fn an_empty_component_stays_empty_for_the_overlays() {

@@ -2,6 +2,7 @@
 
 //! Tests of the options screens.
 
+use umicraft_core::lang::Lang;
 use umicraft_ui::{FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 
 use super::controls_page::sensitivity_label;
@@ -18,7 +19,7 @@ const VIEWPORT: Rect = Rect {
 fn frame(screen: &mut OptionsScreen, options: &mut Options, events: Vec<InputEvent>) -> Outcome {
     let mut ui = Ui::new(VIEWPORT);
     ui.begin_frame(VIEWPORT, UiInput::new(events));
-    let outcome = screen.show(&mut ui, &FontAtlas::fallback(), options);
+    let outcome = screen.show(&mut ui, &FontAtlas::fallback(), options, &Lang::builtin());
     ui.end_frame();
     outcome
 }
@@ -117,9 +118,6 @@ fn the_fov_slider_edits_within_its_range_and_names_the_ends() {
     let outcome = frame(&mut screen, &mut options, events);
     assert!(outcome.changed);
     assert_eq!(options.video.fov, 110.0);
-    assert_eq!(fov_label(110.0), "FOV: Quake Pro");
-    assert_eq!(fov_label(70.0), "FOV: Normal");
-    assert_eq!(fov_label(90.0), "FOV: 90");
 }
 
 #[test]
@@ -237,7 +235,19 @@ fn the_chat_sliders_edit_the_options_and_name_their_pixels() {
 
 #[test]
 fn labels_follow_game_settings() {
-    assert_eq!(sensitivity_label(0.0), "Sensitivity: *yawn*");
-    assert_eq!(sensitivity_label(1.0), "Sensitivity: HYPERSPEED!!!");
-    assert_eq!(sensitivity_label(0.5), "Sensitivity: 100%");
+    let lang = Lang::from_texts(
+        "xx_XX",
+        None,
+        Some(
+            "options.sensitivity=Sens\noptions.sensitivity.min=low\n\
+             options.sensitivity.max=high\noptions.fov=View\noptions.fov.min=std\n\
+             options.fov.max=wide\n",
+        ),
+    );
+    assert_eq!(sensitivity_label(&lang, 0.0), "Sens: low");
+    assert_eq!(sensitivity_label(&lang, 1.0), "Sens: high");
+    assert_eq!(sensitivity_label(&lang, 0.5), "Sens: 100%");
+    assert_eq!(fov_label(&lang, 70.0), "View: std");
+    assert_eq!(fov_label(&lang, 110.0), "View: wide");
+    assert_eq!(fov_label(&lang, 90.0), "View: 90");
 }

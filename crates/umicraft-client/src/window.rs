@@ -12,6 +12,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use umicraft_core::lang::Lang;
 
 use umicraft_game::chat::{commands, on_click, ChatInput, ClickOutcome, SentHistory, TabOutcome};
 use umicraft_game::inventory::{drag_preview, DragPreview, WindowKind, WindowView, HOTBAR_START};
@@ -45,6 +46,7 @@ use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
 use crate::inventory_input::{Button, ContainerAction, Context, InventoryAction, InventoryInput};
+use crate::language;
 use crate::map_render::{map_id_of, MapTextures};
 use crate::nametag_draw::{draw_tags, place_tags};
 use crate::text_screens::{Done, Key, TextScreens};
@@ -107,6 +109,8 @@ pub fn run(args: Args) -> Result<(), ClientError> {
         options.video.render_distance = args.view_distance;
         options.clamp();
     }
+    let lang = Arc::new(language::load(&options.language.code));
+    language::install(Arc::clone(&lang));
     let session = Session::start(NetworkConfig {
         host: host.to_string(),
         port,
@@ -118,7 +122,7 @@ pub fn run(args: Args) -> Result<(), ClientError> {
     })?;
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new(args, session, options, options_path)?;
+    let mut app = App::new(args, session, options, options_path, lang)?;
     // The game thread starts with every particle; the saved option follows.
     app.send_particle_setting();
     event_loop
@@ -134,6 +138,9 @@ struct App {
     args: Args,
     /// The user's options: video, mouse, chat and the key bindings.
     options: Options,
+    /// The language every UI text comes from (ADR-0039); also installed as
+    /// the shared current language for the other threads.
+    lang: Arc<Lang>,
     /// Where the options are saved, when the platform has a data folder.
     options_path: Option<std::path::PathBuf>,
     /// The options as they are on disk and known to the server, to tell what
@@ -261,6 +268,7 @@ impl App {
         session: Session,
         options: Options,
         options_path: Option<std::path::PathBuf>,
+        lang: Arc<Lang>,
     ) -> Result<Self, ClientError> {
         // Assets are loaded once, before any worker or GPU resource exists.
         // A missing/corrupt installation picks the procedural set.
@@ -270,6 +278,7 @@ impl App {
         Ok(Self {
             args,
             saved_options: options.clone(),
+            lang,
             options,
             options_path,
             options_screen: OptionsScreen::new(),
@@ -1277,17 +1286,24 @@ impl App {
         if self.death_screen_visible() {
             let score = self.world.as_ref().map_or(0, |world| world.hud().score);
             let enabled = self.death_buttons_enabled(Instant::now());
-            if death_screen(&mut self.ui, atlas, viewport, score, enabled) == DeathAction::Respawn {
+            if death_screen(&mut self.ui, atlas, viewport, score, enabled, &self.lang)
+                == DeathAction::Respawn
+            {
                 self.respawn();
             }
         } else {
             match screen {
                 Screen::Debug => self.debug_screen.show(&mut self.ui, atlas),
-                Screen::GameMenu => self.menu_action = self.game_menu.show(&mut self.ui, atlas),
+                Screen::GameMenu => {
+                    self.menu_action = self.game_menu.show(&mut self.ui, atlas, &self.lang)
+                }
                 Screen::Options => {
-                    self.options_outcome =
-                        self.options_screen
-                            .show(&mut self.ui, atlas, &mut self.options);
+                    self.options_outcome = self.options_screen.show(
+                        &mut self.ui,
+                        atlas,
+                        &mut self.options,
+                        &self.lang,
+                    );
                 }
                 Screen::Creative => {
                     if let Some((world, creative)) = self
@@ -1336,6 +1352,7 @@ impl App {
                         viewport,
                         self.gui_atlas.as_ref(),
                         caret,
+                        &self.lang,
                     );
                     text_done = done;
                 }

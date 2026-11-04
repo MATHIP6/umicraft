@@ -2,13 +2,16 @@
 
 //! The death screen (MCP `GuiGameOver`).
 //!
-//! A dark red gradient covers the game, "You died!" is drawn at twice the
-//! text size, the score follows, and a "Respawn" button leaves the screen.
+//! A dark red gradient covers the game, the title (`deathScreen.title`) is
+//! drawn at twice the text size, the score follows, and the respawn button
+//! (`deathScreen.respawn`) leaves the screen. The texts come from a [`Lang`].
 //! The buttons only react 20 ticks after the death (`enableButtonsTimer`);
 //! the caller passes that state in, so the widget keeps no clock.
 //!
 //! Positions are the vanilla ones in GUI pixels (`width / 2 - 100`,
 //! `height / 4 + 72`, ...) scaled by [`gui_scale`].
+
+use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
 use crate::draw::{Color, TextStyle};
@@ -39,16 +42,16 @@ const BUTTON_SIZE: (f32, f32) = (200.0, 20.0);
 pub enum DeathAction {
     /// Nothing happened.
     None,
-    /// The player pressed "Respawn".
+    /// The player pressed the respawn button.
     Respawn,
 }
 
 /// The rectangles of the death screen.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeathLayout {
-    /// The "Respawn" button.
+    /// The respawn button.
     pub respawn: Rect,
-    /// The "Title Screen" button.
+    /// The title screen button.
     pub title_screen: Rect,
     /// The vertical position of the title text.
     pub title_y: f32,
@@ -85,7 +88,7 @@ pub fn death_layout(viewport: Rect) -> DeathLayout {
 /// Draws the death screen and reports what the player chose.
 ///
 /// `buttons_enabled` is false during the first [`BUTTON_DELAY_TICKS`] ticks.
-/// The "Title Screen" button is drawn but never enabled: the client has no
+/// The title screen button is drawn but never enabled: the client has no
 /// title screen yet (milestone P10).
 pub fn death_screen(
     ui: &mut Ui,
@@ -93,6 +96,7 @@ pub fn death_screen(
     viewport: Rect,
     score: i32,
     buttons_enabled: bool,
+    lang: &Lang,
 ) -> DeathAction {
     let layout = death_layout(viewport);
     draw_gradient(ui, viewport);
@@ -104,8 +108,10 @@ pub fn death_screen(
         viewport,
         layout.title_y,
         title_scale,
-        &[("You died!", style::TEXT)],
+        &[(lang.tr("deathScreen.title"), style::TEXT)],
     );
+    // `GuiGameOver.drawScreen`: the translated label, ": ", then the yellow number.
+    let score_label = format!("{}: ", lang.tr("deathScreen.score"));
     let score_text = score.to_string();
     centered_text(
         ui,
@@ -113,7 +119,7 @@ pub fn death_screen(
         viewport,
         layout.score_y,
         layout.scale,
-        &[("Score: ", style::TEXT), (&score_text, YELLOW)],
+        &[(&score_label, style::TEXT), (&score_text, YELLOW)],
     );
 
     let respawn_id = ui.id("death.respawn");
@@ -122,7 +128,7 @@ pub fn death_screen(
         atlas,
         buttons_enabled.then_some(respawn_id),
         layout.respawn,
-        "Respawn",
+        lang.tr("deathScreen.respawn"),
         layout.scale,
     );
     draw_button(
@@ -130,7 +136,7 @@ pub fn death_screen(
         atlas,
         None,
         layout.title_screen,
-        "Title Screen",
+        lang.tr("deathScreen.titleScreen"),
         layout.scale,
     );
 
@@ -226,6 +232,18 @@ mod tests {
 
     const VIEWPORT: Rect = Rect::new(0.0, 0.0, 1280.0, 720.0);
 
+    /// Texts that differ from the vanilla ones, so the tests prove the keys are used.
+    fn test_lang() -> Lang {
+        Lang::from_texts(
+            "xx_XX",
+            None,
+            Some(
+                "deathScreen.title=Gone\ndeathScreen.score=Points\n\
+                 deathScreen.respawn=Again\ndeathScreen.titleScreen=Menu\n",
+            ),
+        )
+    }
+
     fn click(position: [f32; 2]) -> UiInput {
         UiInput::new(vec![
             InputEvent::PointerMoved { position },
@@ -243,7 +261,14 @@ mod tests {
     fn run(input: UiInput, enabled: bool) -> (DeathAction, Vec<DrawCommand>) {
         let mut ui = Ui::new(VIEWPORT);
         ui.begin_frame(VIEWPORT, input);
-        let action = death_screen(&mut ui, &FontAtlas::fallback(), VIEWPORT, 42, enabled);
+        let action = death_screen(
+            &mut ui,
+            &FontAtlas::fallback(),
+            VIEWPORT,
+            42,
+            enabled,
+            &test_lang(),
+        );
         let output = ui.end_frame();
         (action, output.draw_list.commands().to_vec())
     }
@@ -302,7 +327,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        for expected in ["You died!", "Score: ", "42", "Respawn", "Title Screen"] {
+        for expected in ["Gone", "Points: ", "42", "Again", "Menu"] {
             assert!(texts.contains(&expected), "{expected} missing in {texts:?}");
         }
     }

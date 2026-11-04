@@ -2,10 +2,11 @@
 
 //! The hub page (`GuiOptions`).
 
+use umicraft_core::lang::Lang;
 use umicraft_ui::{FontAtlas, Ui};
 
 use super::layout::{Gui, BUTTON_H, HALF_W};
-use super::{OptionsScreen, Outcome, Page};
+use super::{option_label, OptionsScreen, Outcome, Page};
 use crate::options::{Options, FOV};
 
 impl OptionsScreen {
@@ -16,9 +17,10 @@ impl OptionsScreen {
         atlas: &FontAtlas,
         options: &mut Options,
         gui: Gui,
+        lang: &Lang,
         outcome: &mut Outcome,
     ) {
-        Self::title(ui, atlas, gui, "Options", 15.0);
+        Self::title(ui, atlas, gui, lang.tr("options.title"), 15.0);
         let cx = gui.cx();
         let h6 = (gui.height / 6.0).floor();
         let left = cx - 155.0;
@@ -27,7 +29,7 @@ impl OptionsScreen {
         let fov = options.video.fov;
         let fraction = (fov - FOV.start()) / (FOV.end() - FOV.start());
         let rect = gui.rect(left, h6 - 12.0, HALF_W, BUTTON_H);
-        if let Some(value) = self.slider(ui, atlas, "fov", rect, &fov_label(fov), fraction) {
+        if let Some(value) = self.slider(ui, atlas, "fov", rect, &fov_label(lang, fov), fraction) {
             options.video.fov = (FOV.start() + value * (FOV.end() - FOV.start())).round();
             outcome.changed = true;
         }
@@ -38,28 +40,32 @@ impl OptionsScreen {
             atlas,
             "difficulty",
             difficulty,
-            "Difficulty: Normal",
+            &option_label(
+                lang,
+                "options.difficulty",
+                lang.tr("options.difficulty.normal"),
+            ),
             false,
             None,
         );
 
-        // (id, label, y offset, x, enabled): the disabled ones wait for
-        // a backend of their own.
-        let entries: [(&str, &str, f32, f32, bool); 10] = [
-            ("skin", "Skin Customization...", 48.0, left, true),
-            ("shaders", "Super Secret Settings...", 48.0, right, true),
-            ("sounds", "Music & Sounds...", 72.0, left, true),
-            ("stream", "Broadcast Settings...", 72.0, right, true),
-            ("nav:video", "Video Settings...", 96.0, left, true),
-            ("nav:controls", "Controls...", 96.0, right, true),
-            ("language", "Language...", 120.0, left, true),
-            ("nav:chat", "Chat Settings...", 120.0, right, true),
-            ("resourcepacks", "Resource Packs...", 144.0, left, true),
-            ("snooper", "Snooper Settings...", 144.0, right, true),
+        // (id, label key, y offset, x): the pages the client has no screen for
+        // yet are drawn and inert.
+        let entries: [(&str, &str, f32, f32); 10] = [
+            ("skin", "options.skinCustomisation", 48.0, left),
+            ("shaders", "umicraft.options.shaders", 48.0, right),
+            ("sounds", "options.sounds", 72.0, left),
+            ("stream", "options.stream", 72.0, right),
+            ("nav:video", "options.video", 96.0, left),
+            ("nav:controls", "options.controls", 96.0, right),
+            ("language", "options.language", 120.0, left),
+            ("nav:chat", "options.chat.title", 120.0, right),
+            ("resourcepacks", "options.resourcepack", 144.0, left),
+            ("snooper", "options.snooper.view", 144.0, right),
         ];
-        for (id, label, row, x, enabled) in entries {
+        for (id, key, row, x) in entries {
             let rect = gui.rect(x, h6 + row - 6.0, HALF_W, BUTTON_H);
-            if self.button(ui, atlas, id, rect, label, enabled, None) {
+            if self.button(ui, atlas, id, rect, lang.tr(key), true, None) {
                 let page = match id {
                     "nav:video" => Page::Video,
                     "nav:controls" => Page::Controls,
@@ -73,19 +79,20 @@ impl OptionsScreen {
         }
 
         let done = gui.rect(cx - 100.0, h6 + 168.0, 200.0, BUTTON_H);
-        if self.button(ui, atlas, "done", done, "Done", true, None) {
+        if self.button(ui, atlas, "done", done, lang.tr("gui.done"), true, None) {
             outcome.done = true;
         }
     }
 }
 
 /// `GameSettings.getKeyBinding(FOV)`.
-pub(super) fn fov_label(fov: f32) -> String {
-    if fov == 70.0 {
-        "FOV: Normal".to_string()
+pub(super) fn fov_label(lang: &Lang, fov: f32) -> String {
+    let value = if fov == 70.0 {
+        lang.tr("options.fov.min").to_string()
     } else if fov == 110.0 {
-        "FOV: Quake Pro".to_string()
+        lang.tr("options.fov.max").to_string()
     } else {
-        format!("FOV: {}", fov as i32)
-    }
+        (fov as i32).to_string()
+    };
+    option_label(lang, "options.fov", &value)
 }

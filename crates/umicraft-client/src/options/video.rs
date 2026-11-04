@@ -76,11 +76,17 @@ mod tests {
     #[test]
     fn the_particle_setting_defaults_to_all_and_is_clamped() {
         let mut options = Options::default();
-        assert_eq!(options.video.particle_setting().label(), "All");
+        assert_eq!(
+            options.video.particle_setting().lang_key(),
+            "options.particles.all"
+        );
         options.video.particles = 9;
         options.clamp();
         assert_eq!(options.video.particles, MAX_PARTICLE_SETTING);
-        assert_eq!(options.video.particle_setting().label(), "Minimal");
+        assert_eq!(
+            options.video.particle_setting().lang_key(),
+            "options.particles.minimal"
+        );
     }
 
     #[test]

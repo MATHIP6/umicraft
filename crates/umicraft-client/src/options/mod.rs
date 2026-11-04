@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The user's options: video, mouse, chat and the key bindings (M10, UI-3).
+//! The user's options: video, mouse, chat, language and the key bindings (M10, UI-3).
 //!
 //! The options live in one TOML file, `options.toml`, in the Umicraft data
-//! folder, as the sections `[video]`, `[controls]`, `[chat]` and `[keys]`
+//! folder, as the sections `[video]`, `[controls]`, `[chat]`, `[language]` and `[keys]`
 //! (ADR-0017). Loading never fails: a missing file gives the defaults, a
 //! section that does not parse is replaced by its defaults without touching
 //! the others, and every number is clamped to its range. Saving is atomic
@@ -18,6 +18,7 @@ use umicraft_core::{ConfigStore, CoreError};
 mod chat;
 mod controls;
 mod keys;
+mod language;
 #[cfg(test)]
 mod tests;
 mod video;
@@ -25,6 +26,7 @@ mod video;
 pub use chat::{ChatOptions, ChatVisibility};
 pub use controls::ControlOptions;
 pub use keys::{is_reserved, key_from_name, key_label, key_name, Action, KeyBindings};
+pub use language::LanguageOptions;
 pub use video::{VideoOptions, FOV, MAX_FPS, MAX_PARTICLE_SETTING, RENDER_DISTANCE, UNLIMITED_FPS};
 
 /// The name of the options file.
@@ -46,6 +48,8 @@ pub struct Options {
     pub controls: ControlOptions,
     /// The chat options.
     pub chat: ChatOptions,
+    /// The language of the texts.
+    pub language: LanguageOptions,
     /// The key bindings.
     pub keys: KeyBindings,
 }
@@ -54,6 +58,7 @@ impl Options {
     /// Puts every number back in its range; a value that is not a number
     /// returns to its default.
     pub fn clamp(&mut self) {
+        self.language.clamp();
         let defaults = Self::default();
         self.video.render_distance = self
             .video
@@ -106,6 +111,7 @@ impl Options {
             video: section(store, "video"),
             controls: section(store, "controls"),
             chat: section(store, "chat"),
+            language: section(store, "language"),
             keys: KeyBindings::from_map(&keys),
         };
         options.clamp();
@@ -138,6 +144,7 @@ impl Options {
         store.set_section("video", &self.video)?;
         store.set_section("controls", &self.controls)?;
         store.set_section("chat", &self.chat)?;
+        store.set_section("language", &self.language)?;
         store.set_section("keys", &self.keys.to_map())?;
         store.save(path)
     }

@@ -12,6 +12,7 @@
 //! Nothing here is read from the player's machine except the UI font, and the
 //! texts are original Umicraft or generic player names.
 
+use umicraft_core::lang::Lang;
 use umicraft_game::chat::ChatInput;
 use umicraft_game::hud::{vitals_view, BottomBar, VitalsInput};
 use umicraft_net::play::PlayEvent;
@@ -24,7 +25,7 @@ use umicraft_render::{
     draw_hud_gui, plain_text, Camera, ChatInputView, HudSheets, HudState, Overlay, Renderer,
     SpriteSheet,
 };
-use umicraft_ui::game_menu::GameMenu;
+use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
 
@@ -237,9 +238,10 @@ fn run_options(
     let mut ui = Ui::new(viewport);
     ui.set_widgets_sheet(widgets_sheet);
     let mut screen = OptionsScreen::new();
+    let lang = crate::language::load(Lang::DEFAULT_CODE);
     let mut frame = |screen: &mut OptionsScreen, ui: &mut Ui, input: UiInput| {
         ui.begin_frame(viewport, input);
-        screen.show(ui, atlas, options);
+        screen.show(ui, atlas, options, &lang);
         ui.end_frame()
     };
     frame(&mut screen, &mut ui, UiInput::default());
@@ -263,14 +265,23 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
             ui.set_widgets_sheet(sheets.widgets);
             let mut menu = GameMenu::new();
             ui.begin_frame(viewport, UiInput::default());
-            menu.show(&mut ui, atlas);
+            let lang = crate::language::load(Lang::DEFAULT_CODE);
+            menu.show(&mut ui, atlas, &lang);
             let output = ui.end_frame();
+            let labels = GameMenuLabels::new(&lang);
             Demo {
                 lines: vec![
                     (
                         "buttons",
-                        "Back to Game, Achievements, Statistics, Options..., Open to LAN, Disconnect"
-                            .to_string(),
+                        [
+                            labels.resume,
+                            labels.achievements,
+                            labels.stats,
+                            labels.options,
+                            labels.share_to_lan,
+                            labels.disconnect,
+                        ]
+                        .join(", "),
                     ),
                     ("draw commands", output.draw_list.len().to_string()),
                 ],

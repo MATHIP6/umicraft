@@ -865,7 +865,7 @@ pub(crate) fn hud_after(events: Vec<PlayEvent>, own_name: &str, ticks: u32) -> H
 /// downloaded `.lang` file.
 fn chat_line(json: &str) -> ChatLineView {
     crate::chat::line_from_runs(
-        &chat_rules::parse(json, crate::chat::lang()),
+        &chat_rules::parse(json, crate::chat::lang().table()),
         Instant::now(),
     )
 }
