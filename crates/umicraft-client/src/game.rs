@@ -243,6 +243,8 @@ pub enum GameEvent {
     Creative(CreativeEvent),
     /// The player pressed "Respawn" on the death screen.
     Respawn,
+    /// The statistics screen opened: ask the server for the counters.
+    RequestStats,
 }
 
 /// One simulation frame published to the render thread.
@@ -329,6 +331,9 @@ pub struct GameStatus {
     pub placements_acknowledged: u64,
     /// The gamemode of the local player; `1` is creative.
     pub gamemode: u8,
+    /// The server placed the player (the first `Player Position and Look`
+    /// was applied). The window leaves the connecting screen on this.
+    pub placed: bool,
 }
 
 /// A message the game thread sends to the render thread.
@@ -349,6 +354,9 @@ pub enum RenderEvent {
     TextScreen(Box<TextScreenRequest>),
     /// The statistics changed.
     Status(Box<GameStatus>),
+    /// The server answered a statistics request (`Statistics`, 0x37): every
+    /// `(name, value)` pair it knows, by name.
+    Stats(Vec<(String, i32)>),
     /// The world was replaced; the render thread drops its meshes.
     Reset,
     /// The session ended.
@@ -1162,6 +1170,12 @@ fn handle_event(
             apply_creative_event(game, event, queue, frames);
             false
         }
+        GameEvent::RequestStats => {
+            // MCP `GuiStats` / `GuiIngameMenu` button 6 send `Client Status`
+            // (REQUEST_STATS); the answer is `Statistics` (0x37).
+            queue.push(ClientCommand::RequestStats);
+            false
+        }
         GameEvent::Respawn => {
             // MCP `GuiGameOver.actionPerformed`: `respawnPlayer` sends
             // `Client Status` (PERFORM_RESPAWN); the server answers with
@@ -1510,7 +1524,11 @@ fn handle_net(
             | PlayEvent::SpawnMob(_)
             | PlayEvent::EntityMetadata(_)
     );
+    let answers_stats = matches!(event, PlayEvent::Statistics(_));
     apply_net_event(game, event, queue, frames);
+    if answers_stats {
+        publish_stats(game, frames);
+    }
     if changes_name_tags {
         let players = &game.player_list;
         game.entities.refresh_spectators(|uuid| {
@@ -1563,7 +1581,13 @@ fn apply_net_event(
             publish_status(game, frames);
         }
         PlayEvent::Placement(placement) => {
+            let first = !game.status_data.placed;
             apply_placement(game, &placement, queue);
+            if first {
+                // The window leaves the connecting screen on this flag, so it
+                // must not wait for the periodic status.
+                publish_status(game, frames);
+            }
         }
         PlayEvent::Chat(json) => show_chat(game, &json, Position::Chat),
         PlayEvent::SystemChat(json) => show_chat(game, &json, Position::System),
@@ -2481,6 +2505,7 @@ fn apply_placement(
     match game.state.as_mut() {
         None => {
             game.state = Some(GameState::new(position));
+            game.status_data.placed = true;
             game.yaw = yaw;
             game.pitch = pitch;
             apply_mode_rules(game);
@@ -3171,6 +3196,17 @@ fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
 /// Publishes the inventory state to the render thread.
 fn publish_inventory(game: &Game, frames: &SyncSender<RenderEvent>) {
     let _ = frames.try_send(RenderEvent::Inventory(Box::new(game.windows.view())));
+}
+
+/// Publishes the statistic counters the server sent, by name.
+fn publish_stats(game: &Game, frames: &SyncSender<RenderEvent>) {
+    let stats = game
+        .server
+        .statistics()
+        .iter()
+        .map(|(name, value)| (name.clone(), *value))
+        .collect();
+    let _ = frames.try_send(RenderEvent::Stats(stats));
 }
 
 /// Publishes the statistics of the session.
@@ -5586,5 +5622,87 @@ mod tests {
             game.hud().boss.is_none(),
             "boss bar disappears 100 ticks after the dragon"
         );
+    }
+
+    #[test]
+    fn the_first_placement_publishes_the_placed_flag_at_once() {
+        use umicraft_net::play::PlayerPlacement;
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, received) = mpsc::sync_channel(16);
+        let placement = PlayerPlacement {
+            x: 0.5,
+            y: 64.0,
+            z: 0.5,
+            yaw: 0.0,
+            pitch: 0.0,
+            raw: None,
+        };
+        handle_net(
+            &mut game,
+            PlayEvent::Placement(placement.clone()),
+            &mut queue,
+            &frames,
+        );
+        let statuses: Vec<bool> = received
+            .try_iter()
+            .filter_map(|event| match event {
+                RenderEvent::Status(status) => Some(status.placed),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(statuses, [true]);
+        // A later correction does not publish again.
+        handle_net(
+            &mut game,
+            PlayEvent::Placement(placement),
+            &mut queue,
+            &frames,
+        );
+        assert!(received
+            .try_iter()
+            .all(|event| !matches!(event, RenderEvent::Status(_))));
+    }
+
+    #[test]
+    fn a_statistics_packet_is_forwarded_by_name() {
+        use umicraft_protocol::packets::play::clientbound::Statistics;
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, received) = mpsc::sync_channel(16);
+        let packet = Statistics {
+            entries: vec![("stat.jump".to_string(), 7), ("stat.deaths".to_string(), 1)],
+        };
+        handle_net(
+            &mut game,
+            PlayEvent::Statistics(packet),
+            &mut queue,
+            &frames,
+        );
+        let stats = received.try_iter().find_map(|event| match event {
+            RenderEvent::Stats(stats) => Some(stats),
+            _ => None,
+        });
+        assert_eq!(
+            stats,
+            Some(vec![
+                ("stat.deaths".to_string(), 1),
+                ("stat.jump".to_string(), 7)
+            ])
+        );
+    }
+
+    #[test]
+    fn opening_the_statistics_asks_the_server() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_event(&mut game, GameEvent::RequestStats, &mut queue, &frames);
+        assert!(matches!(
+            queue.ordered.front(),
+            Some(ClientCommand::RequestStats)
+        ));
     }
 }

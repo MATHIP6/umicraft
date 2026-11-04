@@ -87,6 +87,8 @@ pub struct WorldView {
     /// The newest creative screen snapshot, once one was published.
     creative: Option<CreativeView>,
     status: GameStatus,
+    /// The newest statistic counters the server sent, by name.
+    stats: Vec<(String, i32)>,
     ended: Option<String>,
     frames: usize,
     /// Active living entities interpolation data from the latest frame.
@@ -118,6 +120,16 @@ pub struct WorldView {
     crack_mesh: Option<(Vec<Vertex>, Vec<u32>)>,
 }
 
+/// The inventory of a player who has not joined: nothing in any slot.
+fn empty_window_view() -> WindowView {
+    WindowView {
+        player_slots: std::array::from_fn(|_| None),
+        container: None,
+        cursor: None,
+        selected_slot: 0,
+    }
+}
+
 impl WorldView {
     /// Starts the mesh workers for the installed terrain textures.
     ///
@@ -133,14 +145,10 @@ impl WorldView {
             faces: HashMap::new(),
             block_entities: HashMap::new(),
             hud: HudState::default(),
-            window_view: WindowView {
-                player_slots: std::array::from_fn(|_| None),
-                container: None,
-                cursor: None,
-                selected_slot: 0,
-            },
+            window_view: empty_window_view(),
             creative: None,
             status: GameStatus::default(),
+            stats: Vec::new(),
             ended: None,
             frames: 0,
             entities: Arc::from([]),
@@ -306,6 +314,18 @@ impl WorldView {
         &self.status
     }
 
+    /// The statistic counters of the last `Statistics` answer, sorted by name.
+    #[must_use]
+    pub fn stats(&self) -> &[(String, i32)] {
+        &self.stats
+    }
+
+    /// Whether the server placed the player: the world is ready to be shown.
+    #[must_use]
+    pub fn placed(&self) -> bool {
+        self.status.placed
+    }
+
     /// Why the session ended, once it has.
     #[must_use]
     pub fn ended(&self) -> Option<&str> {
@@ -439,6 +459,7 @@ impl WorldView {
             RenderEvent::Creative(view) => self.creative = Some(*view),
             RenderEvent::TextScreen(request) => self.text_request = Some(*request),
             RenderEvent::Status(status) => self.status = *status,
+            RenderEvent::Stats(stats) => self.stats = stats,
             RenderEvent::Ended(reason) => self.ended = Some(reason),
             RenderEvent::Reset => self.reset(target),
         }
@@ -482,6 +503,33 @@ impl WorldView {
             context,
         );
         mesh
+    }
+
+    /// Forgets everything of a finished session: the meshes, the camera
+    /// history, the HUD, the inventory, the statistics and the end reason.
+    /// The mesh workers and the terrain stay, so the next session starts
+    /// from a view that looks like a new one (ADR-0044).
+    pub fn clear_session(&mut self, target: &mut impl MeshTarget) {
+        self.reset(target);
+        self.view = View::default();
+        self.hud = HudState::default();
+        self.window_view = empty_window_view();
+        self.creative = None;
+        self.status = GameStatus::default();
+        self.stats.clear();
+        self.ended = None;
+        self.frames = 0;
+        self.local_body = None;
+        self.text_request = None;
+        self.hand_light = LightLevel::FULL_SKY;
+        self.selection = Arc::from([]);
+        self.cracks = Arc::from([]);
+        self.crack_mesh = None;
+        self.maps = Arc::default();
+        self.chest_lids = Arc::default();
+        self.moving_blocks = Arc::default();
+        self.block_entity_data = Arc::default();
+        self.signs = Arc::default();
     }
 
     /// Forgets the replaced world, including the jobs still in flight.
@@ -839,11 +887,13 @@ mod tests {
         };
         let status = GameStatus {
             chunks: 3,
+            placed: true,
             ..GameStatus::default()
         };
         for event in [
             RenderEvent::Hud(Box::new(hud)),
             RenderEvent::Status(Box::new(status)),
+            RenderEvent::Stats(vec![("stat.jump".to_string(), 4)]),
             RenderEvent::Ended("kicked".to_string()),
         ] {
             harness.frames.0.send(event).expect("frame queue");
@@ -851,7 +901,40 @@ mod tests {
         harness.sync();
         assert_eq!(harness.world_view.hud().health, 7.0);
         assert_eq!(harness.world_view.status().chunks, 3);
+        assert!(harness.world_view.placed());
+        assert_eq!(harness.world_view.stats(), [("stat.jump".to_string(), 4)]);
         assert_eq!(harness.world_view.ended(), Some("kicked"));
+    }
+
+    #[test]
+    fn clearing_a_session_forgets_its_state_but_keeps_the_workers() {
+        let mut harness = Harness::new();
+        let status = GameStatus {
+            placed: true,
+            chunks: 4,
+            ..GameStatus::default()
+        };
+        for event in [
+            RenderEvent::Hud(Box::new(HudState {
+                health: 3.0,
+                ..HudState::default()
+            })),
+            RenderEvent::Status(Box::new(status)),
+            RenderEvent::Stats(vec![("stat.jump".to_string(), 4)]),
+            RenderEvent::Ended("kicked".to_string()),
+        ] {
+            harness.frames.0.send(event).expect("frame queue");
+        }
+        harness.sync();
+        harness.world_view.clear_session(&mut harness.target);
+        assert!(!harness.world_view.placed());
+        assert!(harness.world_view.stats().is_empty());
+        assert_eq!(harness.world_view.ended(), None);
+        assert_eq!(harness.world_view.hud().health, 20.0);
+        assert_eq!(harness.target.clears, 1);
+
+        harness.send_chunk(ORIGIN, &[BlockPos::new(2, 1, 2)]);
+        harness.sync_until(|h| h.target.uploaded.contains_key(&ORIGIN));
     }
 
     fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Box<Frame> {

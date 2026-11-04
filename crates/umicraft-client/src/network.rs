@@ -226,6 +226,8 @@ pub enum ClientCommand {
     },
     /// `Client Status` (0x16): the respawn request of the death screen.
     Respawn,
+    /// `Client Status` (0x16): the statistics request of the statistics screen.
+    RequestStats,
     /// `Held Item Change` (0x09): the selected hotbar slot.
     HeldItemChange {
         /// The slot index.
@@ -449,6 +451,9 @@ impl ClientCommand {
             }
             Self::Respawn => PlayServerbound::ClientStatus(serverbound::ClientStatus {
                 action: serverbound::ClientStatusAction::PerformRespawn,
+            }),
+            Self::RequestStats => PlayServerbound::ClientStatus(serverbound::ClientStatus {
+                action: serverbound::ClientStatusAction::RequestStats,
             }),
             Self::HeldItemChange { slot } => {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })

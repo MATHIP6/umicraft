@@ -127,6 +127,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 | RenderEvent::Creative(_)
                 | RenderEvent::TextScreen(_)
                 | RenderEvent::Look(_)
+                | RenderEvent::Stats(_)
                 | RenderEvent::Reset => {}
             }
             if report.error.is_some() {
