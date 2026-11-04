@@ -27,6 +27,8 @@ pub(super) const SHADOW: Color = [0.247, 0.247, 0.247, 1.0];
 pub(super) const LIST_BACKGROUND: Color = [0.125, 0.125, 0.125, 1.0];
 /// The tint of the bars above and below a list (`0x404040`).
 pub(super) const LIST_BAR: Color = [0.25, 0.25, 0.25, 1.0];
+/// The grey of secondary text (`0x808080`).
+pub(super) const GREY: Color = [0.5, 0.5, 0.5, 1.0];
 
 /// The geometry of a frame: GUI units and their scale.
 #[derive(Debug, Clone, Copy)]
@@ -75,6 +77,32 @@ impl OptionsScreen {
         );
         ui.draw()
             .text([x, y], text, TextStyle::new(gui.scale, [1.0; 4]));
+    }
+
+    /// Draws `text` with its left edge at `x` and its top at `y` (GUI
+    /// units), shadowed like `drawString`.
+    pub(super) fn text_at(ui: &mut Ui, gui: Gui, (x, y): (f32, f32), text: &str, color: Color) {
+        let at = [(x * gui.scale).round(), (y * gui.scale).round()];
+        let shadow = [color[0] * 0.25, color[1] * 0.25, color[2] * 0.25, color[3]];
+        ui.draw().text(
+            [at[0] + gui.scale, at[1] + gui.scale],
+            text,
+            TextStyle::new(gui.scale, shadow),
+        );
+        ui.draw().text(at, text, TextStyle::new(gui.scale, color));
+    }
+
+    /// Draws `text` centred on the GUI x coordinate `x`.
+    pub(super) fn centered_text(
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        gui: Gui,
+        (x, y): (f32, f32),
+        text: &str,
+        color: Color,
+    ) {
+        let left = x - atlas.measure(text, 1.0) * 0.5;
+        Self::text_at(ui, gui, (left, y), text, color);
     }
 
     /// Draws the dirt-less list background: the middle tint, the bars above
@@ -140,4 +168,32 @@ impl OptionsScreen {
         ui.draw()
             .rect(gui.rect(x, y, 5.0, thumb - 1.0), [0.75, 0.75, 0.75, 1.0]);
     }
+}
+
+/// The longest start of `text` that is at most `max_width` GUI units wide,
+/// like `FontRenderer.trimStringToWidth`.
+pub(super) fn fit_text(atlas: &FontAtlas, text: &str, max_width: f32) -> String {
+    let mut fitted = String::new();
+    for character in text.chars() {
+        fitted.push(character);
+        if atlas.measure(&fitted, 1.0) > max_width {
+            fitted.pop();
+            break;
+        }
+    }
+    fitted
+}
+
+/// `text` without its `§x` formatting codes, for a single-colour line.
+pub(super) fn strip_formatting(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut characters = text.chars();
+    while let Some(character) = characters.next() {
+        if character == '\u{a7}' {
+            characters.next();
+        } else {
+            plain.push(character);
+        }
+    }
+    plain
 }

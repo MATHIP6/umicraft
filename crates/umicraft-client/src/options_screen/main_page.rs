@@ -49,8 +49,8 @@ impl OptionsScreen {
             None,
         );
 
-        // (id, label key, y offset, x): the pages the client has no screen for
-        // yet are drawn and inert.
+        // (id, label key, y offset, x): the pages the client has no backend
+        // for (shaders, stream, snooper) are drawn and inert.
         let entries: [(&str, &str, f32, f32); 10] = [
             ("skin", "options.skinCustomisation", 48.0, left),
             ("shaders", "umicraft.options.shaders", 48.0, right),
@@ -70,11 +70,15 @@ impl OptionsScreen {
                     "nav:video" => Page::Video,
                     "nav:controls" => Page::Controls,
                     "nav:chat" => Page::Chat,
-                    // Vanilla opens a screen the client does not have yet.
+                    "skin" => Page::Skin,
+                    "sounds" => Page::Sounds,
+                    "language" => Page::Language,
+                    "resourcepacks" => Page::ResourcePacks,
+                    // Vanilla opens a screen the client has no backend for
+                    // (shaders, Twitch stream, snooper).
                     _ => continue,
                 };
-                self.page = page;
-                self.scroll = 0.0;
+                self.open(page, options);
             }
         }
 

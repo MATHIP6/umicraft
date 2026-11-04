@@ -183,7 +183,9 @@ impl WorldView {
     }
 
     /// Points `camera` at the player, interpolated for `now` (GAM-8).
-    pub fn update_camera(&self, camera: &mut Camera, now: Instant) {
+    /// `view_bobbing` is the "View Bobbing" option: off, the camera and the
+    /// hand keep still while walking (`EntityRenderer.setupCameraTransform`).
+    pub fn update_camera(&self, camera: &mut Camera, now: Instant, view_bobbing: bool) {
         let Some(state) = self.view.sample(now) else {
             return;
         };
@@ -191,7 +193,12 @@ impl WorldView {
         let (yaw, pitch) = camera_angles(&state);
         camera.yaw = yaw;
         camera.pitch = pitch;
-        camera.set_view_effects(state.effects.fov_modifier, state.effects.bob.matrix());
+        let bob = if view_bobbing {
+            state.effects.bob.matrix()
+        } else {
+            glam::Mat4::IDENTITY
+        };
+        camera.set_view_effects(state.effects.fov_modifier, bob);
     }
 
     /// The pose of the first-person hand for `now`.
@@ -905,7 +912,7 @@ mod tests {
 
         let halfway = later + TICK / 2;
         let mut camera = Camera::default();
-        harness.world_view.update_camera(&mut camera, halfway);
+        harness.world_view.update_camera(&mut camera, halfway, true);
         assert!(
             (camera.position.x - 1.0).abs() < 1e-4,
             "{}",
@@ -913,6 +920,26 @@ mod tests {
         );
         assert!((camera.yaw - (1.0 + std::f32::consts::PI)).abs() < 1e-4);
         assert!((harness.world_view.view.partial_tick(halfway) - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_view_bobbing_option_gates_the_camera_sway() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let mut walking = frame(glam::Vec3::ZERO, tick, 0);
+        walking.state.effects.bob = umicraft_game::view::ViewBob::new(0.4, 0.1, 0.0);
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(walking))
+            .expect("frame queue");
+        harness.sync();
+
+        let mut camera = Camera::default();
+        harness.world_view.update_camera(&mut camera, tick, true);
+        assert_ne!(camera.view_bob(), glam::Mat4::IDENTITY, "bobbing on");
+        harness.world_view.update_camera(&mut camera, tick, false);
+        assert_eq!(camera.view_bob(), glam::Mat4::IDENTITY, "bobbing off");
     }
 
     #[test]
@@ -931,7 +958,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, tick + TICK * 2);
+            .update_camera(&mut camera, tick + TICK * 2, true);
         assert_eq!(camera.position, start);
         assert_eq!(
             harness
@@ -952,7 +979,7 @@ mod tests {
         assert_eq!(harness.world_view.frame_count(), 2);
 
         let halfway = later + TICK / 2;
-        harness.world_view.update_camera(&mut camera, halfway);
+        harness.world_view.update_camera(&mut camera, halfway, true);
         assert!((camera.position.x - 1.0).abs() < 1e-3);
         let environment = harness.world_view.environment(halfway, 12);
         assert!((environment.partial_tick - 0.5).abs() < 1e-3);

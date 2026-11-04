@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The vanilla auto GUI scale factor.
+//! The vanilla GUI scale factor: automatic, or capped by the "GUI Scale"
+//! video option.
+
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Minimum scaled-width the vanilla algorithm enforces.
 const MIN_SCALED_WIDTH: u32 = 320;
@@ -62,13 +65,32 @@ impl ScaledResolution {
     }
 }
 
-/// Computes the vanilla auto GUI scale factor for a physical viewport.
+/// The "GUI Scale" option (`GameSettings.guiScale`): `0` auto, `1..=3` caps.
 ///
-/// Equivalent to [`ScaledResolution::new`] with option `0` (auto): the scale
+/// One process-wide value, because every screen and the HUD derive their
+/// scale from the window size alone and none of them is handed the options.
+static GUI_SCALE_OPTION: AtomicU32 = AtomicU32::new(0);
+
+/// Sets the "GUI Scale" option that [`gui_scale`] applies: `0` is auto, any
+/// other value caps the scale (vanilla offers `1`, `2` and `3`).
+pub fn set_gui_scale_option(option: u32) {
+    GUI_SCALE_OPTION.store(option, Ordering::Relaxed);
+}
+
+/// The "GUI Scale" option currently applied by [`gui_scale`].
+#[must_use]
+pub fn gui_scale_option() -> u32 {
+    GUI_SCALE_OPTION.load(Ordering::Relaxed)
+}
+
+/// Computes the GUI scale factor for a physical viewport.
+///
+/// Equivalent to [`ScaledResolution::new`] with the current "GUI Scale"
+/// option (see [`set_gui_scale_option`]): auto by default, where the scale
 /// grows while the scaled dimensions stay at least 320x240.
 #[must_use]
 pub fn gui_scale(width: u32, height: u32) -> u32 {
-    ScaledResolution::new(width, height, 0).scale_factor
+    ScaledResolution::new(width, height, gui_scale_option()).scale_factor
 }
 
 #[cfg(test)]

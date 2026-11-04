@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The user's options: video, mouse, chat, language and the key bindings (M10, UI-3).
+//! The user's options: video, mouse, chat, language, skin, sound, resource
+//! packs and the key bindings (M10, UI-3, ADR-0043).
 //!
 //! The options live in one TOML file, `options.toml`, in the Umicraft data
-//! folder, as the sections `[video]`, `[controls]`, `[chat]`, `[language]` and `[keys]`
-//! (ADR-0017). Loading never fails: a missing file gives the defaults, a
+//! folder, as the sections `[video]`, `[controls]`, `[chat]`, `[language]`,
+//! `[skin]`, `[sound]`, `[resource_packs]` and `[keys]` (ADR-0017). Loading never fails: a missing file gives the defaults, a
 //! section that does not parse is replaced by its defaults without touching
 //! the others, and every number is clamped to its range. Saving is atomic
 //! (see `ConfigStore::save`). The defaults and ranges follow MCP
@@ -19,6 +20,9 @@ mod chat;
 mod controls;
 mod keys;
 mod language;
+mod packs;
+mod skin;
+mod sound;
 #[cfg(test)]
 mod tests;
 mod video;
@@ -27,7 +31,13 @@ pub use chat::{ChatOptions, ChatVisibility};
 pub use controls::ControlOptions;
 pub use keys::{is_reserved, key_from_name, key_label, key_name, Action, KeyBindings};
 pub use language::LanguageOptions;
-pub use video::{VideoOptions, FOV, MAX_FPS, MAX_PARTICLE_SETTING, RENDER_DISTANCE, UNLIMITED_FPS};
+pub use packs::{is_pack_name, ResourcePackOptions, PACKS_FOLDER};
+pub use skin::{SkinOptions, SkinPart};
+pub use sound::{SoundCategory, SoundOptions};
+pub use video::{
+    VideoOptions, FOV, MAX_CLOUD_SETTING, MAX_FPS, MAX_GUI_SCALE, MAX_PARTICLE_SETTING,
+    MAX_SMOOTH_LIGHTING, MIPMAP_LEVELS, RENDER_DISTANCE, UNLIMITED_FPS,
+};
 
 /// The name of the options file.
 pub const FILE_NAME: &str = "options.toml";
@@ -50,6 +60,12 @@ pub struct Options {
     pub chat: ChatOptions,
     /// The language of the texts.
     pub language: LanguageOptions,
+    /// The skin layers sent in `Client Settings`.
+    pub skin: SkinOptions,
+    /// The sound volumes (values only until P11).
+    pub sound: SoundOptions,
+    /// The enabled resource packs.
+    pub resource_packs: ResourcePackOptions,
     /// The key bindings.
     pub keys: KeyBindings,
 }
@@ -59,18 +75,10 @@ impl Options {
     /// returns to its default.
     pub fn clamp(&mut self) {
         self.language.clamp();
+        self.video.clamp();
+        self.sound.clamp();
+        self.resource_packs.clamp();
         let defaults = Self::default();
-        self.video.render_distance = self
-            .video
-            .render_distance
-            .clamp(*RENDER_DISTANCE.start(), *RENDER_DISTANCE.end());
-        self.video.max_fps = self.video.max_fps.clamp(*MAX_FPS.start(), *MAX_FPS.end());
-        self.video.particles = self.video.particles.min(MAX_PARTICLE_SETTING);
-        self.video.fov = if self.video.fov.is_finite() {
-            self.video.fov.clamp(*FOV.start(), *FOV.end())
-        } else {
-            defaults.video.fov
-        };
         let defaults_chat = ChatOptions::default();
         for (value, default) in [
             (&mut self.chat.opacity, defaults_chat.opacity),
@@ -112,6 +120,9 @@ impl Options {
             controls: section(store, "controls"),
             chat: section(store, "chat"),
             language: section(store, "language"),
+            skin: section(store, "skin"),
+            sound: section(store, "sound"),
+            resource_packs: section(store, "resource_packs"),
             keys: KeyBindings::from_map(&keys),
         };
         options.clamp();
@@ -145,6 +156,9 @@ impl Options {
         store.set_section("controls", &self.controls)?;
         store.set_section("chat", &self.chat)?;
         store.set_section("language", &self.language)?;
+        store.set_section("skin", &self.skin)?;
+        store.set_section("sound", &self.sound)?;
+        store.set_section("resource_packs", &self.resource_packs)?;
         store.set_section("keys", &self.keys.to_map())?;
         store.save(path)
     }

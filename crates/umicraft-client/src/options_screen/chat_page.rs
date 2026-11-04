@@ -12,7 +12,7 @@ use crate::options::{ChatVisibility, Options};
 impl OptionsScreen {
     /// A `GuiOptionButton` of an on/off option: "Name: ON" (`options.on` / `options.off`).
     #[allow(clippy::too_many_arguments)]
-    fn toggle(
+    pub(super) fn toggle(
         &mut self,
         ui: &mut Ui,
         atlas: &FontAtlas,
@@ -32,7 +32,7 @@ impl OptionsScreen {
 
     /// A `GuiOptionSlider` of an option stored as a fraction of `0.0..=1.0`.
     #[allow(clippy::too_many_arguments)]
-    fn fraction(
+    pub(super) fn fraction(
         &mut self,
         ui: &mut Ui,
         atlas: &FontAtlas,

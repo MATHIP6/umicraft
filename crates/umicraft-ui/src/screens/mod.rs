@@ -44,7 +44,7 @@ pub use beacon::effect_of as beacon_effect;
 pub use decoration::{Decoration, Fill, Sheet, SpriteRect};
 pub use enchanting::row_available as enchant_row_available;
 pub use interaction::{Dynamic, Hotspot, HotspotSpec, Label, ScreenState};
-pub use scale::{gui_scale, ScaledResolution};
+pub use scale::{gui_scale, gui_scale_option, set_gui_scale_option, ScaledResolution};
 pub use screen_layout::ScreenLayout;
 pub use villager::OFFER_ITEMS as TRADE_OFFER_ITEMS;
 

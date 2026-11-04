@@ -207,7 +207,7 @@ pub enum GameEvent {
     /// The player pressed Tab: ask the server to complete this text.
     TabComplete(String),
     /// The player changed an option the server must know: the render
-    /// distance, the chat visibility or the chat colours.
+    /// distance, the chat visibility, the chat colours or the skin layers.
     ClientSettings {
         /// The render distance in chunks.
         view_distance: u8,
@@ -215,6 +215,8 @@ pub enum GameEvent {
         chat_mode: u8,
         /// Whether the chat shows colours.
         chat_colors: bool,
+        /// The skin-parts byte.
+        skin_parts: u8,
     },
     /// The player changed the particle option (`0`, `1` or `2`).
     ParticleSetting(u8),
@@ -1102,12 +1104,14 @@ fn handle_event(
             view_distance,
             chat_mode,
             chat_colors,
+            skin_parts,
         } => {
             game.chat_mode = chat_mode;
             queue.push(ClientCommand::ClientSettings {
                 view_distance,
                 chat_mode,
                 chat_colors,
+                skin_parts,
             });
             false
         }
@@ -5314,6 +5318,7 @@ mod tests {
                 view_distance: 8,
                 chat_mode: 2,
                 chat_colors: true,
+                skin_parts: 0x7F,
             },
             &mut queue,
             &frames,

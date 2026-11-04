@@ -2,11 +2,13 @@
 
 //! The options screens, laid out like Minecraft 1.8.8 (M10, UI-3).
 //!
-//! The pages replicate `GuiOptions`, `GuiVideoSettings`, `GuiControls` and
-//! `ScreenChatOptions`: every coordinate below is in GUI units (the
-//! `ScaledResolution` of the window) and multiplied by the GUI scale when
-//! drawn. A vanilla option the client has no backend for yet is drawn in its
-//! place, enabled but inert, with the vanilla default value.
+//! The pages replicate `GuiOptions`, `GuiVideoSettings`, `GuiControls`,
+//! `ScreenChatOptions`, `GuiCustomizeSkin`, `GuiScreenOptionsSounds`,
+//! `GuiScreenResourcePacks` and `GuiLanguage`: every coordinate below is in
+//! GUI units (the `ScaledResolution` of the window) and multiplied by the GUI
+//! scale when drawn. The hub buttons of the pages the client does not have
+//! (Super Secret Settings, Broadcast, Snooper) are drawn in their place and
+//! inert.
 //!
 //! [`OptionsScreen`] draws through a [`Ui`] and a [`FontAtlas`], reads no
 //! file, clock or network, and edits the [`Options`] it is given. The window
@@ -25,14 +27,20 @@ use winit::keyboard::KeyCode;
 
 use crate::options::{Action, Options};
 
+mod catalog;
 mod chat_page;
 mod controls_page;
+mod language_page;
 mod layout;
 mod main_page;
+mod packs_page;
+mod skin_page;
+mod sounds_page;
 #[cfg(test)]
 mod tests;
 mod video_page;
 
+pub use catalog::Catalog;
 use layout::Gui;
 
 /// One page of the options screens.
@@ -46,6 +54,14 @@ pub enum Page {
     Controls,
     /// `ScreenChatOptions`.
     Chat,
+    /// `GuiCustomizeSkin`.
+    Skin,
+    /// `GuiScreenOptionsSounds`.
+    Sounds,
+    /// `GuiScreenResourcePacks`.
+    ResourcePacks,
+    /// `GuiLanguage`.
+    Language,
 }
 
 /// What one frame of the screen did.
@@ -55,6 +71,15 @@ pub struct Outcome {
     pub changed: bool,
     /// The player pressed Done on the hub page.
     pub done: bool,
+    /// The player picked another language: the window rebuilds its `Lang`.
+    pub language_changed: bool,
+    /// The player left the resource packs page with another selection: the
+    /// window reloads the resources.
+    pub packs_changed: bool,
+    /// A skin layer was switched: the server is told when the screen closes.
+    pub skin_changed: bool,
+    /// The player asked to open the folder of the resource packs.
+    pub open_packs_folder: bool,
 }
 
 /// The state of the options screens.
@@ -65,6 +90,12 @@ pub struct OptionsScreen {
     /// Scroll offset of the list of the page, in GUI units.
     scroll: f32,
     sliders: HashMap<String, SliderState>,
+    /// The languages and packs the pages choose from.
+    catalog: Catalog,
+    /// The selected packs of the resource packs page, highest priority first.
+    pack_draft: Vec<String>,
+    /// Scroll offsets of the available and selected pack lists.
+    pack_scroll: [f32; 2],
     /// The rectangle of every widget in the last frame, by id.
     rects: HashMap<String, Rect>,
 }
@@ -84,8 +115,27 @@ impl OptionsScreen {
             capturing: None,
             scroll: 0.0,
             sliders: HashMap::new(),
+            catalog: Catalog::default(),
+            pack_draft: Vec::new(),
+            pack_scroll: [0.0; 2],
             rects: HashMap::new(),
         }
+    }
+
+    /// Gives the language and resource pack pages what they list. The window
+    /// does this each time it opens the options, so a pack added meanwhile
+    /// shows up.
+    pub fn set_catalog(&mut self, catalog: Catalog) {
+        self.catalog = catalog;
+    }
+
+    /// Opens `page` from the hub, preparing the state it needs.
+    fn open(&mut self, page: Page, options: &Options) {
+        if page == Page::ResourcePacks {
+            self.begin_pack_draft(options);
+        }
+        self.page = page;
+        self.scroll = 0.0;
     }
 
     /// The page that is shown.
@@ -154,6 +204,10 @@ impl OptionsScreen {
             Page::Video => self.show_video(ui, atlas, options, gui, lang, &mut outcome),
             Page::Controls => self.show_controls(ui, atlas, options, gui, lang, &mut outcome),
             Page::Chat => self.show_chat(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Skin => self.show_skin(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Sounds => self.show_sounds(ui, atlas, options, gui, lang, &mut outcome),
+            Page::ResourcePacks => self.show_packs(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Language => self.show_language(ui, atlas, options, gui, lang, &mut outcome),
         }
         ui.pop_id();
         outcome

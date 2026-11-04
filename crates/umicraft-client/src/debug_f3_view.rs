@@ -94,11 +94,7 @@ pub fn build(frame: &F3Frame<'_>) -> DebugF3View {
         fps: frame.fps.round() as u32,
         fps_limit: (frame.video.max_fps < UNLIMITED_FPS).then_some(frame.video.max_fps),
         fancy_graphics: frame.video.fancy_graphics,
-        clouds: match (frame.video.clouds, frame.video.fancy_graphics) {
-            (false, _) => 0,
-            (true, false) => 1,
-            (true, true) => 2,
-        },
+        clouds: frame.video.clouds,
         chunks_rendered: frame.chunk_meshes,
         chunks_total: frame.chunk_meshes,
         render_distance: u32::from(frame.video.render_distance),

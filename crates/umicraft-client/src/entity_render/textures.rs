@@ -87,6 +87,8 @@ pub struct EntityTextures {
     view_pitch: Cell<f32>,
     /// Whether the local player is a spectator, who sees invisible entities.
     viewer_is_spectator: Cell<bool>,
+    /// Whether the shadows under the entities are drawn ("Entity Shadows").
+    shadows_enabled: Cell<bool>,
     /// Where the camera is, for the distance at which a shadow fades.
     camera: Cell<glam::Vec3>,
     /// The chests of the frame, meshed by the block-entity renderer and drawn
@@ -118,6 +120,7 @@ impl EntityTextures {
             view_yaw: Cell::new(0.0),
             view_pitch: Cell::new(0.0),
             viewer_is_spectator: Cell::new(false),
+            shadows_enabled: Cell::new(true),
             camera: Cell::new(glam::Vec3::ZERO),
             block_entities: RefCell::default(),
         }
@@ -172,6 +175,12 @@ impl EntityTextures {
     /// upload draws with the entities.
     pub(crate) fn set_block_entities(&self, meshes: BlockEntityMeshes) {
         *self.block_entities.borrow_mut() = meshes;
+    }
+
+    /// Switches the shadows under the entities (`GameSettings` "Entity
+    /// Shadows"); on by default.
+    pub fn set_shadows_enabled(&self, enabled: bool) {
+        self.shadows_enabled.set(enabled);
     }
 
     /// Tells whether the local player is a spectator, who sees the invisible
@@ -336,6 +345,9 @@ impl EntityTextures {
             })
             .collect();
         renderer.upload_ghost_entities(&ghost);
+        if !self.shadows_enabled.get() {
+            meshed.shadows.clear();
+        }
         let shadows: Vec<_> = meshed
             .shadows
             .iter()

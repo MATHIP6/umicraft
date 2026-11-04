@@ -31,6 +31,9 @@ umicraft-world.workspace = true
 wgpu = "30.0.1"
 winit = "0.30.8"
 
+[dev-dependencies]
+toml.workspace = true
+
 [[bin]]
 name = "umicraft-client"
 path = "src/main.rs"
