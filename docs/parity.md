@@ -159,6 +159,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
 | Screens | pause, death, disconnect, options, main menu, server list | Missing | P10 | — | Death screen logic lands in P2. |
+| Server list data | saved servers (add, edit, remove, reorder), status ping with MOTD, players, latency, favicon, version mismatch | Partial | P10 | `servers::{book,pinger}` unit tests | Book and pinger exist (ADR-0041); the list screen, SRV lookup and the resource-pack mode per server are not done. |
 | Screens | controls rebinding, persisted options | Missing | P10 | — |  |
 
 ## Audio

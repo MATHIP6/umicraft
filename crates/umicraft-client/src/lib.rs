@@ -65,6 +65,7 @@ mod process_memory;
 pub mod profiles;
 pub mod screen;
 pub mod screenshot;
+pub mod servers;
 pub mod setup_cli;
 mod sky_textures;
 mod social_view;
