@@ -82,12 +82,14 @@ impl DemoView {
 
 /// Usage text shown by `--help` and on argument errors.
 pub const USAGE: &str = "\
-usage: umicraft-client <host> <port> [options]
+usage: umicraft-client [<host> <port>] [options]
        umicraft-client --ui-demo [--screenshot PATH] [options]
        umicraft-client --hud-demo [--hud-view NAME] [--screenshot PATH] [options]
        umicraft-client --block-demo [--screenshot PATH] [options]
        umicraft-client --entity-demo [--screenshot PATH] [options]
-  <host> <port>       Minecraft 1.8 server (protocol 47); not needed with
+  <host> <port>       Minecraft 1.8 server (protocol 47). The window connects to it
+                      at start; without it the window opens on the title screen.
+                      Required with --headless and --screenshot; not needed with
                       --ui-demo, --hud-demo, --block-demo or --entity-demo
 
 options:
@@ -452,21 +454,23 @@ impl Args {
             ));
         }
 
-        // The UI, block demos, entity demo, mob inspection, dump-mobs, and setup-assets mode can run without a
-        // server. Every other mode keeps the M1-M3 contract of an explicit
-        // host and port.
-        let (host, port) = if ui_demo
+        // The demos and the windowed client can run without a server: the
+        // window then opens on the title screen (ADR-0044). Headless and
+        // screenshot sessions keep the M1-M3 contract of an explicit host and
+        // port, and a lone host is never accepted.
+        let serverless_demo = ui_demo
             || hud_demo
             || block_demo
             || entity_demo
             || mob.is_some()
             || dump_mobs.is_some()
-            || setup_assets
-        {
-            (host, port)
-        } else {
-            (Some(host.ok_or_else(help)?), Some(port.ok_or_else(help)?))
-        };
+            || setup_assets;
+        let title_screen = !headless && screenshot.is_none();
+        let complete = host.is_some() && port.is_some();
+        let absent = host.is_none() && port.is_none();
+        if !(serverless_demo || complete || (absent && title_screen)) {
+            return Err(help());
+        }
 
         Ok(Self {
             host,
@@ -527,6 +531,28 @@ mod tests {
         assert_eq!(args.handshake_host.as_deref(), Some("play.example.net"));
         let plain = Args::parse(&words(&["127.0.0.1", "25600"])).expect("valid");
         assert_eq!(plain.handshake_host, None);
+    }
+
+    #[test]
+    fn the_window_opens_on_the_title_screen_without_a_server() {
+        let args = Args::parse(&words(&[])).expect("valid");
+        assert_eq!(args.mode(), Mode::Windowed);
+        assert_eq!(args.server(), None);
+        let named = Args::parse(&words(&["--name", "Pixel"])).expect("valid");
+        assert_eq!(named.server(), None);
+        assert_eq!(named.name, "Pixel");
+    }
+
+    #[test]
+    fn headless_and_screenshot_sessions_still_need_a_server() {
+        assert!(Args::parse(&words(&["--headless"])).is_err());
+        assert!(Args::parse(&words(&["--screenshot", "out.png"])).is_err());
+        assert!(Args::parse(&words(&["--headless", "127.0.0.1", "25565"])).is_ok());
+    }
+
+    #[test]
+    fn a_lone_host_is_rejected() {
+        assert!(Args::parse(&words(&["localhost"])).is_err());
     }
 
     #[test]
@@ -725,7 +751,6 @@ mod tests {
             vec!["--headless"],
             vec!["--screenshot", "/tmp/out.png"],
             vec!["host"],
-            vec![],
         ] {
             assert!(
                 Args::parse(&words(&case)).is_err(),
@@ -736,7 +761,6 @@ mod tests {
 
     #[test]
     fn rejects_bad_values() {
-        assert!(Args::parse(&words(&[])).is_err());
         assert!(Args::parse(&words(&["host", "0"])).is_err());
         assert!(Args::parse(&words(&["host", "70000"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--view-distance", "1"])).is_err());
