@@ -29,6 +29,7 @@ mod items;
 mod outline;
 mod overlay;
 mod overlays;
+mod panorama;
 mod particles;
 mod renderer;
 mod sky;

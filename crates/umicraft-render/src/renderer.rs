@@ -24,6 +24,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use umicraft_mesh::item::ItemMesh;
 use umicraft_mesh::{Mesh, Vertex, TEXTURE_LAYERS};
+use umicraft_ui::menus::{PanoramaTextures, PanoramaView};
 use umicraft_ui::{DrawCommand, DrawList, FontAtlas};
 use umicraft_world::ChunkPos;
 use wgpu::util::DeviceExt;
@@ -42,6 +43,7 @@ use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::overlays::{Pictures, ScreenOverlays, ScreenRenderer};
+use crate::panorama::PanoramaRenderer;
 use crate::particles::{ParticleRenderer, ParticleSprite};
 use crate::sky::{SkyImage, SkyRenderer, SkyState, SkyTextures};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
@@ -225,6 +227,8 @@ pub struct Renderer {
     screen_overlays: ScreenOverlays,
     /// The world border walls, drawn after the translucent terrain.
     border: BorderRenderer,
+    /// The title-screen panorama, drawn first when a view is set.
+    panorama: PanoramaRenderer,
     /// World clock and dimension of the next frame.
     environment: RenderEnvironment,
     /// Nearest-neighbour sampler shared by the fallback and installed arrays.
@@ -646,6 +650,7 @@ impl Renderer {
         let sky = SkyRenderer::new(&device, &queue, format);
         let clouds = CloudRenderer::new(&device, &queue, format);
         let border = BorderRenderer::new(&device, &queue, format);
+        let panorama = PanoramaRenderer::new(&device, format);
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("camera bind group layout"),
@@ -777,6 +782,7 @@ impl Renderer {
             screen,
             screen_overlays: ScreenOverlays::default(),
             border,
+            panorama,
             environment: RenderEnvironment::default(),
             block_sampler,
             procedural_blocks: block_view,
@@ -915,6 +921,21 @@ impl Renderer {
     pub fn set_border_texture(&mut self, image: &SkyImage) {
         self.border
             .set_texture(&self.device, &self.queue, Some(image));
+    }
+
+    /// Uploads the six panorama faces (`panorama_0` to `panorama_5`, square
+    /// RGBA) and returns the ids the title screen hands back in its
+    /// [`PanoramaView`]; `None` when a face is malformed. Call once at start.
+    pub fn upload_panorama(&mut self, faces: &[SkyImage; 6]) -> Option<PanoramaTextures> {
+        self.panorama.upload(&self.device, &self.queue, faces)
+    }
+
+    /// Sets the panorama of the next frame, drawn over the sky and under the
+    /// UI. `None`, or a view of an older upload, shows none; the session must
+    /// set `None` so the world is not covered.
+    pub fn set_panorama(&mut self, view: Option<PanoramaView>) {
+        self.panorama
+            .set_view(&self.queue, view, (self.width, self.height));
     }
 
     /// Replaces the break cracks drawn over the terrain.
@@ -2026,6 +2047,7 @@ impl Renderer {
             multiview_mask: None,
         });
         self.sky.draw(&mut pass);
+        self.panorama.draw(&mut pass);
 
         // Opaque terrain: depth write on, alpha cutout, order-independent.
         pass.set_pipeline(&self.terrain_pipeline);
