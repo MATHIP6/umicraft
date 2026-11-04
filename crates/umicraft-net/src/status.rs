@@ -45,6 +45,18 @@ pub struct PlayersBlock {
     /// Player cap.
     #[serde(default)]
     pub max: Option<i64>,
+    /// A few online player names (the hover list), server-chosen and optional.
+    #[serde(default)]
+    pub sample: Option<Vec<PlayerSample>>,
+}
+
+/// One entry of the `players.sample` list.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlayerSample {
+    /// Player name; servers use this field for arbitrary text (plugins show
+    /// extra hover lines), so it may contain `§` codes.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 impl ServerStatus {
@@ -120,6 +132,17 @@ mod tests {
             serde_json::from_str(r#"{"description":{"text":"base","extra":[{"text":" plus"}]}}"#)
                 .unwrap();
         assert_eq!(nested.motd_text(), "base plus");
+    }
+
+    #[test]
+    fn parses_the_player_sample() {
+        let status: ServerStatus = serde_json::from_str(
+            r#"{"players":{"online":1,"max":2,"sample":[{"name":"Ann","id":"x"},{}]}}"#,
+        )
+        .unwrap();
+        let sample = status.players.unwrap().sample.unwrap();
+        assert_eq!(sample[0].name.as_deref(), Some("Ann"));
+        assert_eq!(sample[1].name, None);
     }
 
     #[test]

@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+base64 = "0.22"
 glam = "0.34"
 png.workspace = true
 pollster = "1"
