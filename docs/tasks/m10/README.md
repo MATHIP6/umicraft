@@ -87,7 +87,7 @@
 - Tests : positions de mise en page unitaires, captures hors écran (`--screenshot`) avec un scénario synthétique.
 
 ### W5 — Réglages et touches (UI-3)
-- **Widgets** : `slider`, `button_tinted` (libellé coloré), boutons ON/OFF et curseurs de fraction dans `options_screen.rs`.
+- **Widgets** : `slider`, `button_tinted` (libellé coloré), boutons ON/OFF et curseurs de fraction dans `options_screen/`.
 - **`Options`** : pages identiques à `GuiOptions`, `GuiVideoSettings`, `GuiControls` et `ScreenChatOptions` (hub, Video Settings, Controls, Chat Settings), en unités GUI à l'échelle vanilla. Distance de rendu, FOV, FPS max, sensibilité, souris inversée, touches et réglages du chat (opacité, échelle, hauteurs, largeur) agissent ; les autres options vanilla sont affichées avec leur valeur par défaut, sans effet. Gestionnaires de comptes (M12) et de mods (M15) : écrans à part, hors des Options vanilla.
 - **Persistance** : lecture au démarrage, écriture à la validation ou à la fermeture de l'écran ; fichier absent ou corrompu → valeurs par défaut sans plantage, sauvegarde atomique (fichier temporaire puis renommage).
 - **Application à chaud** : distance de rendu (renvoie `ClientSettings`, ajuste le monde chargé), FOV (caméra), échelle d'interface, FPS cap.
@@ -153,7 +153,7 @@ Légende : `[x]` fait et vérifié (tests, et captures du `--hud-demo` quand c'e
 | W2 chat | fait avec `en_US.lang` | `chat_component.rs`, `chat_input.rs`, `umicraft-render/chat_hud.rs`, `official.rs` |
 | W3 états de jeu | fait avec `BossTracker` | `player_list.rs`, `scoreboard.rs`, `title.rs`, `entity/boss.rs` |
 | W4 rendu HUD | fait avec HUD texturé et boss bar | `umicraft-render/hud_gui.rs`, `social_hud.rs`, repli `hud.rs` |
-| W5 options et touches | fait avec widgets skinnés (boutons, sliders) | `options.rs`, `options_screen.rs`, `widgets/slider.rs`, `widgets/button.rs` |
+| W5 options et touches | fait avec widgets skinnés (boutons, sliders) | `options/`, `options_screen/`, `widgets/slider.rs`, `widgets/button.rs` |
 | W6 démo et docs | fait, sans essai sur un serveur direct | `hud_demo.rs` (`--hud-demo`) |
 
 Écarts par rapport au plan : la police de secours n'avait pas `< > = ' " * # @ ;`

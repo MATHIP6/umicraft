@@ -96,7 +96,7 @@ page, gamepad input.
 What was decided above and how it landed, and what differs from the plan.
 
 - **Options storage (decision 1).** `ConfigStore` is now used: by
-  `crates/umicraft-client/src/options.rs`, in the sections `[video]`,
+  `crates/umicraft-client/src/options/`, in the sections `[video]`,
   `[controls]`, `[chat]` and `[keys]` of `options.toml` in the Umicraft data
   folder (`umicraft_assets::cache::data_dir`). `ConfigStore::save` became
   atomic (temporary file, then rename). A section that does not parse is
