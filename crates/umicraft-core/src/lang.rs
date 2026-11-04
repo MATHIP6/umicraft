@@ -323,6 +323,35 @@ const BUILTIN: &[(&str, &str)] = &[
     ("menu.shareToLan", "Open to LAN"),
     ("menu.disconnect", "Disconnect"),
     ("menu.returnToMenu", "Save and Quit to Title"),
+    // The title screen is the first screen of the client, so its texts and
+    // those of the server list work before the language files are installed.
+    ("menu.singleplayer", "Singleplayer"),
+    ("menu.multiplayer", "Multiplayer"),
+    ("menu.quit", "Quit Game"),
+    ("multiplayer.title", "Play Multiplayer"),
+    ("selectServer.select", "Join Server"),
+    ("selectServer.direct", "Direct Connect"),
+    ("selectServer.add", "Add server"),
+    ("selectServer.edit", "Edit"),
+    ("selectServer.delete", "Delete"),
+    ("selectServer.refresh", "Refresh"),
+    (
+        "selectServer.deleteQuestion",
+        "Are you sure you want to remove this server?",
+    ),
+    (
+        "selectServer.deleteWarning",
+        "will be lost forever! (A long time!)",
+    ),
+    ("selectServer.deleteButton", "Delete"),
+    ("addServer.title", "Edit Server Info"),
+    ("addServer.enterName", "Server Name"),
+    ("addServer.enterIp", "Server Address"),
+    ("addServer.add", "Done"),
+    ("connect.connecting", "Connecting to the server..."),
+    ("connect.authorizing", "Logging in..."),
+    ("disconnect.lost", "Connection Lost"),
+    ("gui.toMenu", "Back to server list"),
     ("gui.achievements", "Achievements"),
     ("gui.stats", "Statistics"),
     ("gui.done", "Done"),
@@ -365,6 +394,15 @@ const BUILTIN: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_title_and_server_list_texts_work_offline() {
+        let lang = Lang::builtin();
+        assert_eq!(lang.tr("menu.multiplayer"), "Multiplayer");
+        assert_eq!(lang.tr("selectServer.direct"), "Direct Connect");
+        assert_eq!(lang.tr("disconnect.lost"), "Connection Lost");
+        assert_eq!(lang.tr("gui.toMenu"), "Back to server list");
+    }
 
     fn text(value: &str) -> Piece {
         Piece::Text(value.to_string())

@@ -41,10 +41,12 @@ fn options_survive_a_restart() {
     options.chat.visibility = ChatVisibility::Commands;
     options.chat.colors = false;
     options.language.code = "de_DE".to_string();
+    options.multiplayer.last_server = "play.example.net:25570".to_string();
     options.save(&path).unwrap();
 
     let loaded = Options::load(&path);
     assert_eq!(loaded, options);
+    assert_eq!(loaded.multiplayer.last_server, "play.example.net:25570");
     assert_eq!(loaded.keys.get(Action::Forward), KeyCode::ArrowUp);
     let _ = std::fs::remove_dir_all(&folder);
 }

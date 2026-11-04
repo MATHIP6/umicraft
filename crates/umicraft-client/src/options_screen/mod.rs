@@ -138,6 +138,12 @@ impl OptionsScreen {
         self.scroll = 0.0;
     }
 
+    /// Opens `page` directly, as the title screen's language button does
+    /// (the hub is skipped; Done on a sub-page goes to the hub).
+    pub fn open_page(&mut self, page: Page, options: &Options) {
+        self.open(page, options);
+    }
+
     /// The page that is shown.
     #[must_use]
     pub fn page(&self) -> Page {

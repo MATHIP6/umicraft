@@ -5,7 +5,8 @@
 //!
 //! The options live in one TOML file, `options.toml`, in the Umicraft data
 //! folder, as the sections `[video]`, `[controls]`, `[chat]`, `[language]`,
-//! `[skin]`, `[sound]`, `[resource_packs]` and `[keys]` (ADR-0017). Loading never fails: a missing file gives the defaults, a
+//! `[skin]`, `[sound]`, `[resource_packs]`, `[multiplayer]` and `[keys]`
+//! (ADR-0017, ADR-0044). Loading never fails: a missing file gives the defaults, a
 //! section that does not parse is replaced by its defaults without touching
 //! the others, and every number is clamped to its range. Saving is atomic
 //! (see `ConfigStore::save`). The defaults and ranges follow MCP
@@ -20,6 +21,7 @@ mod chat;
 mod controls;
 mod keys;
 mod language;
+mod multiplayer;
 mod packs;
 mod skin;
 mod sound;
@@ -31,6 +33,7 @@ pub use chat::{ChatOptions, ChatVisibility};
 pub use controls::ControlOptions;
 pub use keys::{is_reserved, key_from_name, key_label, key_name, Action, KeyBindings};
 pub use language::LanguageOptions;
+pub use multiplayer::MultiplayerOptions;
 pub use packs::{is_pack_name, ResourcePackOptions, PACKS_FOLDER};
 pub use skin::{SkinOptions, SkinPart};
 pub use sound::{SoundCategory, SoundOptions};
@@ -68,6 +71,8 @@ pub struct Options {
     pub resource_packs: ResourcePackOptions,
     /// The key bindings.
     pub keys: KeyBindings,
+    /// The multiplayer screen's memory.
+    pub multiplayer: MultiplayerOptions,
 }
 
 impl Options {
@@ -78,6 +83,7 @@ impl Options {
         self.video.clamp();
         self.sound.clamp();
         self.resource_packs.clamp();
+        self.multiplayer.clamp();
         let defaults = Self::default();
         let defaults_chat = ChatOptions::default();
         for (value, default) in [
@@ -124,6 +130,7 @@ impl Options {
             sound: section(store, "sound"),
             resource_packs: section(store, "resource_packs"),
             keys: KeyBindings::from_map(&keys),
+            multiplayer: section(store, "multiplayer"),
         };
         options.clamp();
         options
@@ -159,6 +166,7 @@ impl Options {
         store.set_section("skin", &self.skin)?;
         store.set_section("sound", &self.sound)?;
         store.set_section("resource_packs", &self.resource_packs)?;
+        store.set_section("multiplayer", &self.multiplayer)?;
         store.set_section("keys", &self.keys.to_map())?;
         store.save(path)
     }
