@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use umicraft_core::lang::Lang;
 
-use umicraft_game::chat::{commands, on_click, ChatInput, ClickOutcome, SentHistory, TabOutcome};
-use umicraft_game::inventory::{drag_preview, DragPreview, WindowKind, WindowView, HOTBAR_START};
+use umicraft_game::chat::{ChatInput, SentHistory};
+use umicraft_game::inventory::HOTBAR_START;
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
     chat_run_at, draw_hud_gui, gui_scale, Camera, ChatInputView, HudState, NoIcons, Overlay,
@@ -23,11 +23,9 @@ use umicraft_render::{
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
-use umicraft_ui::{
-    debug_screen::DebugScreen, FontAtlas, Rect, ScreenLayout, SlotItem, Ui, UiOutput,
-};
+use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, SlotItem, Ui, UiOutput};
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::dpi::LogicalSize;
 use winit::event::{
     DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
@@ -35,7 +33,10 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
 
-use crate::anvil_field::{AnvilField, Edit};
+use self::chat_control::CHAT_WHEEL_ROWS;
+use self::menu_screens::VERSION_LINE;
+use self::session_control::lifecycle_step;
+use crate::anvil_field::AnvilField;
 use crate::args::Args;
 use crate::creative_input::CreativeInput;
 use crate::creative_layout::CreativeLayout;
@@ -45,25 +46,25 @@ use crate::entity_render::EntityTextures;
 use crate::error::ClientError;
 use crate::game::{GameEvent, Session};
 use crate::input::{InputState, InputUpdate};
-use crate::inventory_input::{Button, ContainerAction, Context, InventoryAction, InventoryInput};
+use crate::inventory_input::InventoryInput;
 use crate::language;
 use crate::map_render::{map_id_of, MapTextures};
+use crate::menu_flow::{MenuCommand, MenuContext, MenuFlow, MenuFrame};
 use crate::nametag_draw::{draw_tags, place_tags};
-use crate::text_screens::{Done, Key, TextScreens};
+use crate::text_screens::TextScreens;
 
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
 use crate::entity_icons::EntityIcons;
-use crate::inventory_screen::{draw_inventory_overlay, screen_input, ScreenFacts};
-use crate::inventory_winit;
+use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
 use crate::mesher::default_worker_count;
-use crate::network::NetworkConfig;
 use crate::options::{self, Action, Options};
-use crate::options_effects::{open_folder, pack_paths, packs_folder, ServerSettings, VideoApplier};
-use crate::options_screen::{Catalog, OptionsScreen, Outcome as OptionsOutcome};
+use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
+use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
 use crate::portrait::{turned_towards, Spot};
 use crate::screen::Screen;
+use crate::servers::{Pinger, ServerBook};
 use crate::sky_textures::{load_border_texture, load_sky_textures};
 use crate::terrain_textures::TerrainTextures;
 use crate::texture_animator::TextureAnimator;
@@ -71,8 +72,12 @@ use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
 
-#[path = "creative_window.rs"]
+mod chat_control;
 mod creative_window;
+mod inventory_control;
+mod menu_screens;
+mod options_control;
+mod session_control;
 
 /// The look speed at the default sensitivity, in radians per pixel; the
 /// sensitivity option scales it.
@@ -82,12 +87,6 @@ const MOUSE_SENSITIVITY: f32 = 0.0022;
 const CLI_DEFAULT_VIEW_DISTANCE: u8 = 8;
 /// How long the chat caret stays on, then off, in milliseconds (6 ticks).
 const CARET_BLINK_MS: u128 = 300;
-/// Rows a Page Up or Page Down scrolls the open chat.
-const CHAT_PAGE: isize = 19;
-/// Rows one mouse-wheel notch scrolls the open chat.
-const CHAT_WHEEL_ROWS: isize = 7;
-/// The furthest the chat can be scrolled: more than the 100 messages kept.
-const CHAT_SCROLL_MAX: isize = 2_000;
 const FRAME_HISTORY: usize = 120;
 
 /// Runs the windowed client until the user closes the window.
@@ -97,9 +96,6 @@ const FRAME_HISTORY: usize = 120;
 /// initialization failure. Runtime draw failures are surfaced the same way
 /// after the event loop returns.
 pub fn run(args: Args) -> Result<(), ClientError> {
-    let (host, port) = args.server().ok_or_else(|| {
-        ClientError::Network("the windowed client needs a host and port".to_string())
-    })?;
     let options_path = options::default_path();
     let mut options = options_path
         .as_deref()
@@ -112,21 +108,9 @@ pub fn run(args: Args) -> Result<(), ClientError> {
     }
     let lang = Arc::new(language::load(&options.language.code));
     language::install(Arc::clone(&lang));
-    let session = Session::start(NetworkConfig {
-        host: host.to_string(),
-        port,
-        name: args.name.clone(),
-        view_distance: options.video.render_distance,
-        chat_mode: options.chat.visibility.wire(),
-        chat_colors: options.chat.colors,
-        skin_parts: options.skin.parts_mask(),
-        handshake_host: args.handshake_host.clone(),
-    })?;
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new(args, session, options, options_path, lang)?;
-    // The game thread starts with every particle; the saved option follows.
-    app.send_particle_setting();
+    let mut app = App::new(args, options, options_path, lang)?;
     event_loop
         .run_app(&mut app)
         .map_err(|error| ClientError::Window(error.to_string()))?;
@@ -164,7 +148,15 @@ struct App {
     /// The camera, clock, chunk meshing and HUD of the game; created with
     /// the renderer, once the terrain textures are bound (ADR-0012, ADR-0013).
     world: Option<WorldView>,
-    session: Session,
+    /// The play session; `None` on the title screen and the server list
+    /// (ADR-0044). Started by `connect`, dropped by `disconnect`.
+    session: Option<Session>,
+    /// The menu screens and their data: the server book, the pings, the
+    /// dialogs (ADR-0044).
+    menu: MenuFlow,
+    /// The screen the options were opened from: the title screen or the game
+    /// menu. Escape and Done go back there.
+    options_origin: Screen,
     last_input: InputState,
     look: (f32, f32),
     select_slot: Option<u8>,
@@ -221,6 +213,9 @@ struct App {
     game_menu: GameMenu,
     /// The entry the player clicked in the last UI frame, applied by `redraw`.
     menu_action: Option<GameMenuAction>,
+    /// What the player did on a menu screen in the last UI frame, applied by
+    /// `redraw`.
+    menu_command: Option<MenuCommand>,
     /// The winit events waiting for the next UI frame.
     ui_input: UiInputTranslator,
     /// Turns the mouse and keys on the inventory screen into slot clicks.
@@ -269,7 +264,6 @@ struct App {
 impl App {
     fn new(
         args: Args,
-        session: Session,
         options: Options,
         options_path: Option<std::path::PathBuf>,
         lang: Arc<Lang>,
@@ -282,6 +276,8 @@ impl App {
             packs_folder().as_deref(),
         )));
         let font = ui_font::load();
+        let args_has_server = args.server().is_some();
+        let last_server = options.multiplayer.last_server.clone();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
             args,
@@ -300,7 +296,14 @@ impl App {
             mouse_captured: false,
             keys: HashSet::new(),
             world: None,
-            session,
+            session: None,
+            menu: MenuFlow::new(
+                ServerBook::open_default(),
+                start_pinger(),
+                last_server,
+                menu_seed(),
+            ),
+            options_origin: Screen::GameMenu,
             last_input: InputState::default(),
             look: (0.0, 0.0),
             select_slot: None,
@@ -309,7 +312,13 @@ impl App {
             death_started: None,
             respawn_requested: false,
             place_block: false,
-            screen: Screen::None,
+            // With a server on the command line the window connects at once
+            // (see `resumed`); otherwise it opens on the title screen.
+            screen: if args_has_server {
+                Screen::Connecting
+            } else {
+                Screen::Title
+            },
             chat_input: ChatInput::new(""),
             sent_messages: SentHistory::new(),
             chat_scroll: 0,
@@ -330,6 +339,7 @@ impl App {
             debug_screen: DebugScreen::new(),
             game_menu: GameMenu::new(),
             menu_action: None,
+            menu_command: None,
             ui_input: UiInputTranslator::new(),
             inventory_input: InventoryInput::new(),
             font,
@@ -377,7 +387,8 @@ impl App {
         // ignored while the key repeats so one press toggles exactly once.
         // Releases are swallowed as well, so no F4 event ever reaches the UI.
         if code == KeyCode::F4 {
-            if is_debug_toggle(code, event.state, event.repeat) {
+            // The debug screen shows a game; menus have none.
+            if self.session.is_some() && is_debug_toggle(code, event.state, event.repeat) {
                 self.set_screen(self.screen().after_debug_toggle());
             }
             return;
@@ -415,13 +426,25 @@ impl App {
                 self.handle_options_key(event);
                 return;
             }
+            Screen::Title
+            | Screen::ServerList
+            | Screen::ServerEdit
+            | Screen::ConfirmDelete
+            | Screen::Connecting
+            | Screen::Disconnected
+            | Screen::Stats => {
+                self.handle_menu_screen_key(&event);
+                return;
+            }
             Screen::None => {}
         }
         match event.state {
             ElementState::Pressed => {
                 if !event.repeat {
                     match code {
-                        KeyCode::Escape => self.set_screen(Screen::None.after_escape()),
+                        KeyCode::Escape => {
+                            self.set_screen(Screen::None.after_escape(self.options_origin))
+                        }
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
                         KeyCode::F3 => self.show_f3 = !self.show_f3,
                         KeyCode::F5 => self.toggle_perspective = true,
@@ -481,40 +504,6 @@ impl App {
         }
     }
 
-    /// Hot-reloads the active resource packs, rebinding the block atlas and
-    /// re-meshing all loaded chunk columns.
-    fn reload_resources(&mut self) {
-        tracing::info!("reloading resource packs...");
-        let terrain = TerrainTextures::load_with_packs(&pack_paths(
-            &self.args.resource_packs,
-            &self.options,
-            packs_folder().as_deref(),
-        ));
-        if let Some(renderer) = self.renderer.as_mut() {
-            let installed = terrain.install(renderer);
-            upload_gui_atlas(renderer, installed.gui_atlas());
-            upload_glint_texture(renderer, installed.glint_texture());
-            upload_sky_textures(renderer);
-            self.gui_atlas = installed.gui_atlas().cloned();
-            self.items = installed.items();
-            self.dials = DialAnimator::new(installed.dials());
-            self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
-            self.entity_textures = Some(EntityTextures::load_with_font(
-                renderer,
-                self.ui_atlas.as_ref(),
-            ));
-            self.map_textures = Some(MapTextures::load(renderer));
-            if let Some(world) = self.world.as_mut() {
-                world.reload_terrain(&installed, default_worker_count(), renderer);
-                let _ = self
-                    .session
-                    .events()
-                    .try_send(crate::game::GameEvent::ReMeshAll);
-            }
-        }
-        tracing::info!("resource packs reloaded");
-    }
-
     /// The screen that owns the input right now.
     ///
     /// A container the server opened is shown by the inventory screen even
@@ -541,6 +530,7 @@ impl App {
         }
         let was_blocking = self.screen.blocks_game_input();
         self.screen = screen;
+        self.menu.enter(screen);
         self.ui_input.clear();
         self.chat_scroll = 0;
         self.keys.clear();
@@ -559,102 +549,6 @@ impl App {
         }
     }
 
-    /// Handles a key while the options screen is open. While a key binding
-    /// waits for its key, the next press is the key (Escape gives up).
-    fn handle_options_key(&mut self, event: KeyEvent) {
-        let PhysicalKey::Code(code) = event.physical_key else {
-            return;
-        };
-        let pressed = event.state == ElementState::Pressed && !event.repeat;
-        if self.options_screen.capturing().is_some() {
-            if pressed {
-                if code == KeyCode::Escape {
-                    self.options_screen.cancel_capture();
-                } else {
-                    self.options_screen.capture_key(&mut self.options, code);
-                }
-            }
-            return;
-        }
-        if pressed && code == KeyCode::Escape {
-            self.close_options();
-            return;
-        }
-        self.ui_input.key(code, event.state, event.text.as_deref());
-    }
-
-    /// Writes the options to disk when they changed since the last write.
-    fn save_options(&mut self) {
-        if self.options == self.saved_options {
-            return;
-        }
-        if let Some(path) = &self.options_path {
-            if let Err(error) = self.options.save(path) {
-                tracing::warn!(path = %path.display(), %error, "could not save the options");
-            }
-        }
-        self.saved_options = self.options.clone();
-    }
-
-    /// Tells the game thread how many particles to create.
-    fn send_particle_setting(&self) {
-        let _ = self
-            .session
-            .events()
-            .try_send(GameEvent::ParticleSetting(self.options.video.particles));
-    }
-
-    /// Opens the options screen, listing the languages and packs as they are
-    /// now.
-    fn open_options(&mut self) {
-        self.options_screen.set_catalog(Catalog::discover());
-        self.set_screen(Screen::Options);
-    }
-
-    /// Rebuilds the language handle after the language page picked another.
-    fn reload_language(&mut self) {
-        let lang = Arc::new(language::load(&self.options.language.code));
-        language::install(Arc::clone(&lang));
-        self.lang = lang;
-    }
-
-    /// Applies what the options screen reported in its last frame.
-    fn apply_options_outcome(&mut self, outcome: OptionsOutcome) {
-        if outcome.language_changed {
-            self.reload_language();
-        }
-        if outcome.packs_changed {
-            self.reload_resources();
-        }
-        if outcome.open_packs_folder {
-            if let Some(folder) = packs_folder() {
-                open_folder(&folder);
-            }
-        }
-        if outcome.done {
-            self.close_options();
-        }
-    }
-
-    /// Closes the options screen: saves the options, tells the server about
-    /// a changed render distance, chat setting or skin layer, and goes back
-    /// to the menu.
-    fn close_options(&mut self) {
-        self.options_screen.reset();
-        self.options.clamp();
-        let changed = ServerSettings::of(&self.options) != ServerSettings::of(&self.saved_options);
-        let particles_changed = self.options.video.particles != self.saved_options.video.particles;
-        let settings = ServerSettings::of(&self.options);
-        self.save_options();
-        if particles_changed {
-            self.send_particle_setting();
-        }
-        if changed {
-            let _ = self.session.events().try_send(settings.event());
-        }
-        self.set_screen(Screen::GameMenu);
-    }
-
     /// Handles a key press while the game menu is open.
     fn handle_menu_key(&mut self, event: KeyEvent) {
         let PhysicalKey::Code(code) = event.physical_key else {
@@ -662,11 +556,17 @@ impl App {
         };
         if code == KeyCode::Escape {
             if event.state == ElementState::Pressed && !event.repeat {
-                self.set_screen(Screen::GameMenu.after_escape());
+                self.set_screen(Screen::GameMenu.after_escape(self.options_origin));
             }
             return;
         }
         self.ui_input.key(code, event.state, event.text.as_deref());
+    }
+
+    /// Whether a game is shown: a session runs and no full-screen menu
+    /// (connecting, disconnected) covers it.
+    fn world_visible(&self) -> bool {
+        self.session.is_some() && !self.screen().is_menu()
     }
 
     /// Whether a server-opened container is currently displayed.
@@ -712,33 +612,11 @@ impl App {
         })
     }
 
-    /// Handles a key press while the inventory or a container screen is open.
-    fn handle_inventory_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
-        let PhysicalKey::Code(code) = event.physical_key else {
-            return;
-        };
-        let anvil = self.anvil_open();
-        // The anvil name field takes the inventory key and the digits as text.
-        let closes =
-            code == KeyCode::Escape || (!anvil && code == self.options.keys.get(Action::Inventory));
-        if event.state == ElementState::Pressed && anvil && !closes && self.anvil_key(&event) {
-            return;
-        }
-        if event.state == ElementState::Pressed && !event.repeat && closes {
-            self.close_inventory();
-        }
-        if event.state == ElementState::Pressed && !event.repeat {
-            self.inventory_key(code);
-        }
-        self.ui_input.key(code, event.state, event.text.as_deref());
-        let _ = event_loop;
-    }
-
     /// Asks the server to respawn and gives the game back to the player.
     fn respawn(&mut self) {
         // MCP `GuiGameOver.actionPerformed` (button 0): `respawnPlayer`, then
         // the screen closes at once.
-        let _ = self.session.events().try_send(GameEvent::Respawn);
+        self.send_event(GameEvent::Respawn);
         self.respawn_requested = true;
         self.ui_input.clear();
         self.capture_mouse(true);
@@ -755,342 +633,6 @@ impl App {
             self.anvil_field = AnvilField::default();
             let free = open || self.screen().blocks_game_input() || self.death_screen_visible();
             self.capture_mouse(!free);
-        }
-    }
-
-    /// What the container screens need beyond the window: the player's level
-    /// and game mode and, for an anvil, the name field (kept in step with the
-    /// first slot, which sends the rename when its stack changed).
-    fn screen_facts(&mut self, view: &WindowView) -> ScreenFacts {
-        let anvil = view
-            .container
-            .as_ref()
-            .filter(|container| container.kind == WindowKind::Anvil);
-        let name = anvil.map(|container| {
-            let first = container.slots.first().and_then(Option::as_ref);
-            let rename = self.anvil_field.sync(first);
-            (rename, self.anvil_field.view())
-        });
-        if let Some((Some(rename), _)) = &name {
-            self.send_container(ContainerAction::Rename(rename.clone()));
-        }
-        ScreenFacts {
-            drag: None,
-            xp_level: self.world.as_ref().map_or(0, |world| world.hud().level),
-            creative: self
-                .world
-                .as_ref()
-                .is_some_and(|world| world.status().gamemode == 1),
-            anvil: name.map(|(_, view)| view),
-            caret_visible: (self.started.elapsed().as_millis() / CARET_BLINK_MS).is_multiple_of(2),
-        }
-    }
-
-    /// The facts of the open inventory screen; the default when none is open.
-    fn inventory_facts(&mut self) -> ScreenFacts {
-        if self.screen() != Screen::Inventory {
-            return ScreenFacts::default();
-        }
-        let view = self.world.as_ref().map(|world| world.window_view().clone());
-        view.map(|view| self.screen_facts(&view))
-            .unwrap_or_default()
-    }
-
-    /// Sends a container screen action to the game thread.
-    fn send_container(&self, action: ContainerAction) {
-        let _ = self.session.events().try_send(GameEvent::Container(action));
-    }
-
-    /// Whether an anvil screen is open, whose name field takes the keys.
-    fn anvil_open(&self) -> bool {
-        self.screen() == Screen::Inventory
-            && self.world.as_ref().is_some_and(|world| {
-                world
-                    .window_view()
-                    .container
-                    .as_ref()
-                    .is_some_and(|container| container.kind == WindowKind::Anvil)
-            })
-    }
-
-    /// Feeds a key press to the anvil name field; returns whether it took it.
-    fn anvil_key(&mut self, event: &KeyEvent) -> bool {
-        let PhysicalKey::Code(code) = event.physical_key else {
-            return false;
-        };
-        let edit = match code {
-            KeyCode::Backspace => Some(Edit::Backspace),
-            KeyCode::Delete => Some(Edit::Delete),
-            KeyCode::ArrowLeft => Some(Edit::Left),
-            KeyCode::ArrowRight => Some(Edit::Right),
-            KeyCode::Home => Some(Edit::Home),
-            KeyCode::End => Some(Edit::End),
-            _ => event
-                .text
-                .as_deref()
-                .filter(|text| !self.ctrl_held && !text.chars().any(char::is_control))
-                .map(Edit::Insert),
-        };
-        let Some(edit) = edit else {
-            return false;
-        };
-        if let Some(rename) = self.anvil_field.edit(edit) {
-            self.send_container(ContainerAction::Rename(rename));
-        }
-        true
-    }
-
-    /// Closes the inventory or container screen.
-    fn close_inventory(&mut self) {
-        if matches!(self.screen(), Screen::Inventory | Screen::Creative) {
-            let _ = self.session.events().try_send(GameEvent::CloseInventory);
-        }
-        self.inventory_input.reset();
-        self.creative_input.reset();
-        self.set_screen(Screen::None);
-        self.ui_input.clear();
-    }
-
-    /// The layout and input context of the open inventory screen, if any.
-    fn inventory_screen(&self) -> Option<(ScreenLayout, Context)> {
-        if self.screen() != Screen::Inventory {
-            return None;
-        }
-        let size = self.window.as_ref()?.inner_size();
-        let viewport = Rect::new(0.0, 0.0, size.width as f32, size.height as f32);
-        let world = self.world.as_ref()?;
-        Some(screen_input(
-            viewport,
-            world.window_view(),
-            world.status().gamemode,
-        ))
-    }
-
-    /// The stacks a drag split in progress will leave in the slots.
-    fn inventory_drag_preview(&self, view: &WindowView) -> Option<DragPreview> {
-        let (slots, button) = self.inventory_input.drag_in_progress()?;
-        let creative = self.world.as_ref()?.status().gamemode == 1;
-        drag_preview(view, slots, button, creative)
-    }
-
-    /// Sends the slot interaction of the inventory input to the game thread.
-    fn send_inventory(&self, action: Option<InventoryAction>) {
-        if let Some(action) = action {
-            let _ = self.session.events().try_send(GameEvent::Inventory(action));
-        }
-    }
-
-    /// Feeds a pointer move to the inventory input.
-    fn inventory_pointer(&mut self, position: PhysicalPosition<f64>) {
-        if let Some((layout, context)) = self.inventory_screen() {
-            let point = (position.x as f32, position.y as f32);
-            self.inventory_input.pointer_moved(&layout, point, context);
-        }
-    }
-
-    /// Feeds a mouse button to the inventory input.
-    fn inventory_button(&mut self, state: ElementState, button: MouseButton) {
-        let (Some((layout, context)), Some(button)) =
-            (self.inventory_screen(), inventory_winit::button(button))
-        else {
-            return;
-        };
-        if state == ElementState::Pressed && button == Button::Left {
-            if let Some(hotspot) = layout.hotspot_at(self.pointer) {
-                self.send_container(ContainerAction::Press(hotspot));
-                return;
-            }
-        }
-        let action = match state {
-            ElementState::Pressed => {
-                self.inventory_input
-                    .button_pressed(&layout, button, context, Instant::now())
-            }
-            ElementState::Released => self
-                .inventory_input
-                .button_released(&layout, button, context),
-        };
-        self.send_inventory(action);
-    }
-
-    /// Feeds a key press (number keys, Q) to the inventory input.
-    fn inventory_key(&mut self, code: KeyCode) {
-        let (Some((layout, context)), Some(key)) =
-            (self.inventory_screen(), inventory_winit::key(code))
-        else {
-            return;
-        };
-        let action = self.inventory_input.key_pressed(&layout, key, context);
-        self.send_inventory(action);
-    }
-
-    /// Opens the book or sign screen the game thread asked for.
-    fn open_text_screen(&mut self) {
-        let Some(request) = self.world.as_mut().and_then(|w| w.take_text_request()) else {
-            return;
-        };
-        if let Some(screen) = self.text_screens.open(request) {
-            self.set_screen(screen);
-        }
-    }
-
-    /// Ends the book or sign screen, sending what it produced.
-    fn finish_text_screen(&mut self, done: Done) {
-        if let Some(event) = done.0 {
-            let _ = self.session.events().try_send(event);
-        }
-        self.text_screens = TextScreens::default();
-        self.set_screen(Screen::None);
-    }
-
-    /// Handles a key press while the book or sign screen is open.
-    fn handle_text_screen_key(&mut self, event: &KeyEvent) {
-        if event.state != ElementState::Pressed {
-            return;
-        }
-        let PhysicalKey::Code(code) = event.physical_key else {
-            return;
-        };
-        let text = event
-            .text
-            .as_deref()
-            .filter(|_| !self.ctrl_held)
-            .filter(|text| !text.chars().any(char::is_control));
-        let key = match code {
-            KeyCode::Escape => Key::Escape,
-            KeyCode::Backspace => Key::Backspace,
-            KeyCode::Enter | KeyCode::NumpadEnter => Key::Enter,
-            KeyCode::ArrowUp => Key::Up,
-            KeyCode::ArrowDown => Key::Down,
-            _ => match text {
-                Some(text) => Key::Text(text),
-                None => return,
-            },
-        };
-        let Some(atlas) = self.ui_atlas.as_ref() else {
-            return;
-        };
-        let measure = |text: &str| atlas.measure(text, 1.0);
-        if let Some(done) = self.text_screens.key(key, &measure) {
-            self.finish_text_screen(done);
-        }
-    }
-
-    /// Handles a key press while the chat input is open.
-    fn handle_chat_key(&mut self, event: KeyEvent) {
-        let PhysicalKey::Code(code) = event.physical_key else {
-            return;
-        };
-        if event.state != ElementState::Pressed {
-            return;
-        }
-        let word = self.ctrl_held;
-        match code {
-            KeyCode::Escape => self.set_screen(Screen::Chat.after_escape()),
-            KeyCode::Enter | KeyCode::NumpadEnter => self.submit_chat(),
-            KeyCode::Tab => self.complete_chat(),
-            KeyCode::ArrowUp => self.chat_input.history_previous(&mut self.sent_messages),
-            KeyCode::ArrowDown => self.chat_input.history_next(&mut self.sent_messages),
-            KeyCode::PageUp => self.scroll_chat(CHAT_PAGE),
-            KeyCode::PageDown => self.scroll_chat(-CHAT_PAGE),
-            KeyCode::Backspace => self.chat_input.backspace(word),
-            KeyCode::Delete => self.chat_input.delete(word),
-            KeyCode::ArrowLeft => self.chat_input.left(word),
-            KeyCode::ArrowRight => self.chat_input.right(word),
-            KeyCode::Home => self.chat_input.home(),
-            KeyCode::End => self.chat_input.end(),
-            _ => {
-                // Control combinations are shortcuts, not text.
-                if !self.ctrl_held {
-                    if let Some(text) = event.text.as_ref() {
-                        self.chat_input.insert(text);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Opens the chat with `initial` already typed (`/` for the command key).
-    fn open_chat(&mut self, initial: &str) {
-        self.set_screen(Screen::Chat);
-        self.chat_input = ChatInput::new(initial);
-        self.sent_messages.reset();
-        self.chat_scroll = 0;
-        self.chat_opened = Instant::now();
-    }
-
-    /// Sends the typed line, remembers it for the history and closes the chat.
-    fn submit_chat(&mut self) {
-        let message = commands::outgoing(&self.chat_input.text());
-        self.set_screen(Screen::None);
-        if let Some(message) = message {
-            self.sent_messages.push(&message);
-            let _ = self.session.events().try_send(GameEvent::Chat(message));
-        }
-    }
-
-    /// Presses Tab in the chat: asks the server or cycles its answer.
-    fn complete_chat(&mut self) {
-        match self.chat_input.tab() {
-            TabOutcome::Nothing => {}
-            TabOutcome::Request(text) => {
-                let _ = self.session.events().try_send(GameEvent::TabComplete(text));
-            }
-            TabOutcome::Cycled { listing } => {
-                if let Some(listing) = listing {
-                    let _ = self
-                        .session
-                        .events()
-                        .try_send(GameEvent::LocalChat(listing));
-                }
-            }
-        }
-    }
-
-    /// Acts on a left click in the open chat: `run_command` sends,
-    /// `suggest_command` fills the input line, Shift inserts the run's
-    /// insertion text (`GuiChat.mouseClicked`). Links are never followed.
-    fn chat_click(&mut self) {
-        let Some(run) = self.chat_hover.as_ref() else {
-            return;
-        };
-        match on_click(
-            run.click.as_ref(),
-            run.insertion.as_deref(),
-            self.shift_held,
-        ) {
-            ClickOutcome::Send(text) => {
-                let _ = self.session.events().try_send(GameEvent::Chat(text));
-            }
-            ClickOutcome::Suggest(text) => self.chat_input.set_text(&text),
-            ClickOutcome::Insert(text) => self.chat_input.insert(&text),
-            ClickOutcome::Nothing => {}
-        }
-    }
-
-    /// Scrolls the open chat by `rows` (positive is towards older messages).
-    fn scroll_chat(&mut self, rows: isize) {
-        self.chat_scroll = (self.chat_scroll as isize + rows).clamp(0, CHAT_SCROLL_MAX) as usize;
-    }
-
-    /// Hands a new tab-completion answer to the chat input.
-    fn process_completions(&mut self) {
-        let Some(world) = self.world.as_ref() else {
-            return;
-        };
-        let serial = world.hud().completions_serial;
-        if serial == self.seen_completions {
-            return;
-        }
-        let matches = world.hud().completions.clone();
-        self.seen_completions = serial;
-        if self.screen == Screen::Chat {
-            if let Some(listing) = self.chat_input.on_completions(&matches) {
-                let _ = self
-                    .session
-                    .events()
-                    .try_send(GameEvent::LocalChat(listing));
-            }
         }
     }
 
@@ -1146,6 +688,9 @@ impl App {
     /// The send never blocks: when the inbox is full the input is repeated
     /// on the next frame.
     fn publish_input(&mut self) {
+        if self.session.is_none() {
+            return;
+        }
         let state = self.key_state();
         let changed = state != self.last_input
             || self.look != (0.0, 0.0)
@@ -1169,12 +714,7 @@ impl App {
             drop_item: self.drop_item,
             toggle_perspective: self.toggle_perspective,
         };
-        if self
-            .session
-            .events()
-            .try_send(GameEvent::Input(update))
-            .is_ok()
-        {
+        if self.send_event(GameEvent::Input(update)) {
             self.last_input = state;
             self.look = (0.0, 0.0);
             self.select_slot = None;
@@ -1187,16 +727,20 @@ impl App {
     }
 
     /// Moves the world view forward, follows the player with the camera and
-    /// leaves when the session ended.
+    /// applies the session lifecycle: leaving the connecting screen, showing
+    /// the disconnected screen (ADR-0044).
     fn sync_world(&mut self, now: Instant) {
-        let (Some(world), Some(renderer)) = (self.world.as_mut(), self.renderer.as_mut()) else {
+        let (Some(session), Some(world), Some(renderer)) = (
+            self.session.as_ref(),
+            self.world.as_mut(),
+            self.renderer.as_mut(),
+        ) else {
             return;
         };
-        world.sync(self.session.frames(), self.session.chunks(), renderer);
+        world.sync(session.frames(), session.chunks(), renderer);
         world.update_camera(&mut self.camera, now, self.options.video.view_bobbing);
-        if let Some(reason) = world.ended() {
-            self.exit_error = Some(reason.to_string());
-        }
+        let step = lifecycle_step(self.screen, world.placed(), world.ended());
+        self.apply_lifecycle(step);
     }
 
     /// Builds the frame-time graph; the rest of the HUD is drawn by the UI
@@ -1207,7 +751,7 @@ impl App {
             .as_ref()
             .map_or((self.args.width, self.args.height), Renderer::size);
         self.overlay.clear();
-        if !self.show_overlay {
+        if !self.show_overlay || !self.world_visible() {
             return;
         }
         let graph_width = 240.0_f32.min(width as f32 - 20.0);
@@ -1241,7 +785,7 @@ impl App {
         let screen = self.screen();
         // Without the GUI atlas the hotbar and the status rows are not drawn
         // (no sprite sheets); chat, titles, the sidebar and F3 still are.
-        let in_game = self.world.is_some();
+        let in_game = self.world_visible();
         if !in_game && !screen.uses_ui() {
             return None;
         }
@@ -1310,7 +854,7 @@ impl App {
                 &rows,
             );
         }
-        if let Some(world) = self.world.as_ref() {
+        if let Some(world) = self.world.as_ref().filter(|_| in_game) {
             if !matches!(screen, Screen::Inventory | Screen::Creative) {
                 let entities = world.entities(Instant::now());
                 let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
@@ -1391,6 +935,30 @@ impl App {
                     );
                     text_done = done;
                 }
+                Screen::Title
+                | Screen::ServerList
+                | Screen::ServerEdit
+                | Screen::ConfirmDelete
+                | Screen::Connecting
+                | Screen::Disconnected
+                | Screen::Stats => {
+                    let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
+                    let context = MenuContext {
+                        version: VERSION_LINE,
+                        stats,
+                    };
+                    let shown = self
+                        .menu
+                        .show(screen, &mut self.ui, atlas, &self.lang, &context);
+                    // The title screen's panorama is for the cube pass of a
+                    // later lot (ADR-0044); until then the dirt background it
+                    // drew stays.
+                    let MenuFrame {
+                        command,
+                        panorama: _panorama,
+                    } = shown;
+                    self.menu_command = command;
+                }
                 Screen::None | Screen::Chat => {}
             }
         }
@@ -1449,6 +1017,7 @@ impl App {
         }
 
         self.camera.set_fov_degrees(self.options.video.fov);
+        self.advance_menus(Duration::from_secs_f32(elapsed));
         self.sync_world(now);
         self.process_completions();
         self.update_death_screen(now);
@@ -1476,21 +1045,11 @@ impl App {
         // block array shows.
         self.advance_dials(Duration::from_secs_f32(elapsed), environment);
         let ui_frame = self.build_ui_frame(width, height);
-        match self.menu_action.take() {
-            Some(GameMenuAction::Resume) => {
-                self.set_screen(Screen::None);
-                self.capture_mouse(true);
-            }
-            Some(GameMenuAction::Options) => self.open_options(),
-            Some(GameMenuAction::Achievements) | Some(GameMenuAction::Stats) => {
-                // Not yet implemented: vanilla opens GuiAchievements / GuiStats.
-            }
-            Some(GameMenuAction::Quit) => {
-                self.save_options();
-                event_loop.exit();
-                return;
-            }
-            None => {}
+        if let Some(action) = self.menu_action.take() {
+            self.apply_game_menu_action(action);
+        }
+        if let Some(command) = self.menu_command.take() {
+            self.apply_menu_command(command, event_loop);
         }
         let outcome = std::mem::take(&mut self.options_outcome);
         self.apply_options_outcome(outcome);
@@ -1701,6 +1260,25 @@ impl App {
     }
 }
 
+/// Starts the thread that pings the saved servers. Without it the list still
+/// works and every row stays "pinging".
+fn start_pinger() -> Option<Pinger> {
+    match Pinger::new() {
+        Ok(pinger) => Some(pinger),
+        Err(error) => {
+            tracing::warn!(%error, "server pings are off");
+            None
+        }
+    }
+}
+
+/// A number that differs from start to start, for the title splash.
+fn menu_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
 /// True when this key event must toggle the debug screen.
 ///
 /// Only a fresh F4 press toggles: releases and auto-repeats are ignored so a
@@ -1845,6 +1423,7 @@ impl ApplicationHandler for App {
         self.map_textures = Some(MapTextures::load(&renderer));
         self.renderer = Some(renderer);
         self.window = Some(window.clone());
+        self.connect_from_arguments();
         event_loop.listen_device_events(DeviceEvents::Always);
         window.request_redraw();
     }

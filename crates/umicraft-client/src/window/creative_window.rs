@@ -67,7 +67,7 @@ impl App {
     }
 
     fn send_creative(&self, event: CreativeEvent) {
-        let _ = self.session.events().try_send(GameEvent::Creative(event));
+        self.send_event(GameEvent::Creative(event));
     }
 
     /// Feeds a pointer move to the creative input.

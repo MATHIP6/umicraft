@@ -9,6 +9,12 @@
 //! [`Screen`] replaces them: exactly one screen is current, and the input
 //! router asks it who owns the keyboard and the mouse. The type is plain data
 //! with no window, GPU or network, so the transitions are unit-tested.
+//!
+//! Since P10 (ADR-0044) the same type also names the menus that surround a
+//! session: the title screen, the server list and its dialogs, the connecting
+//! and disconnected screens and the statistics. They are drawn by
+//! `menu_flow`; this module only decides who owns the input and where Escape
+//! leads.
 
 /// The screen that owns the keyboard and the mouse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -32,6 +38,20 @@ pub enum Screen {
     Book,
     /// The Umicraft debug screen (F4; ADR-0036, F3 is the vanilla text screen).
     Debug,
+    /// The title screen the client starts on when no server is given.
+    Title,
+    /// The multiplayer server list.
+    ServerList,
+    /// The add, edit or direct-connect form of the server list.
+    ServerEdit,
+    /// The "really delete this server" question.
+    ConfirmDelete,
+    /// The session is starting; no world is shown yet.
+    Connecting,
+    /// The session ended; the reason is shown with a way back to the list.
+    Disconnected,
+    /// The statistics, opened from the game menu.
+    Stats,
 }
 
 impl Screen {
@@ -47,6 +67,23 @@ impl Screen {
                 | Self::Sign
                 | Self::Book
                 | Self::Debug
+                | Self::Stats
+        ) || self.is_menu()
+    }
+
+    /// Whether this is a full-screen menu that replaces the world view: the
+    /// title screen, the server list with its dialogs, connecting and
+    /// disconnected. They draw the dirt or panorama background themselves.
+    #[must_use]
+    pub const fn is_menu(self) -> bool {
+        matches!(
+            self,
+            Self::Title
+                | Self::ServerList
+                | Self::ServerEdit
+                | Self::ConfirmDelete
+                | Self::Connecting
+                | Self::Disconnected
         )
     }
 
@@ -59,11 +96,15 @@ impl Screen {
     /// The screen after a fresh Escape press.
     ///
     /// With no screen, Escape opens the game menu. The chat, the inventory and
-    /// the menu close; the options go back to the menu they were opened from.
-    /// The debug screen is closed by F4 only, because Escape is a key its
-    /// widgets may consume.
+    /// the menu close; the options go back to `options_origin`, the screen they
+    /// were opened from ([`Screen::Title`] or [`Screen::GameMenu`]). The
+    /// server list leads to the title screen, its dialogs and the
+    /// disconnected screen to the list, cancelling a connection to the list
+    /// and the statistics to the game menu. The title screen stays. The debug
+    /// screen is closed by F4 only, because Escape is a key its widgets may
+    /// consume.
     #[must_use]
-    pub const fn after_escape(self) -> Self {
+    pub const fn after_escape(self, options_origin: Self) -> Self {
         match self {
             Self::None => Self::GameMenu,
             Self::Chat
@@ -72,8 +113,14 @@ impl Screen {
             | Self::GameMenu
             | Self::Sign
             | Self::Book => Self::None,
-            Self::Options => Self::GameMenu,
+            Self::Options => options_origin,
             Self::Debug => Self::Debug,
+            Self::Title => Self::Title,
+            Self::ServerList => Self::Title,
+            Self::ServerEdit | Self::ConfirmDelete | Self::Connecting | Self::Disconnected => {
+                Self::ServerList
+            }
+            Self::Stats => Self::GameMenu,
         }
     }
 
@@ -104,6 +151,13 @@ mod tests {
             Screen::Sign,
             Screen::Book,
             Screen::Debug,
+            Screen::Title,
+            Screen::ServerList,
+            Screen::ServerEdit,
+            Screen::ConfirmDelete,
+            Screen::Connecting,
+            Screen::Disconnected,
+            Screen::Stats,
         ] {
             assert!(screen.blocks_game_input(), "{screen:?} must own the input");
         }
@@ -121,12 +175,24 @@ mod tests {
 
     #[test]
     fn escape_opens_the_menu_and_closes_every_other_screen_but_debug() {
-        assert_eq!(Screen::None.after_escape(), Screen::GameMenu);
-        assert_eq!(Screen::GameMenu.after_escape(), Screen::None);
-        assert_eq!(Screen::Chat.after_escape(), Screen::None);
-        assert_eq!(Screen::Inventory.after_escape(), Screen::None);
-        assert_eq!(Screen::Options.after_escape(), Screen::GameMenu);
-        assert_eq!(Screen::Debug.after_escape(), Screen::Debug);
+        assert_eq!(
+            Screen::None.after_escape(Screen::GameMenu),
+            Screen::GameMenu
+        );
+        assert_eq!(
+            Screen::GameMenu.after_escape(Screen::GameMenu),
+            Screen::None
+        );
+        assert_eq!(Screen::Chat.after_escape(Screen::GameMenu), Screen::None);
+        assert_eq!(
+            Screen::Inventory.after_escape(Screen::GameMenu),
+            Screen::None
+        );
+        assert_eq!(
+            Screen::Options.after_escape(Screen::GameMenu),
+            Screen::GameMenu
+        );
+        assert_eq!(Screen::Debug.after_escape(Screen::GameMenu), Screen::Debug);
     }
 
     #[test]
@@ -134,5 +200,50 @@ mod tests {
         assert_eq!(Screen::None.after_debug_toggle(), Screen::Debug);
         assert_eq!(Screen::Chat.after_debug_toggle(), Screen::Debug);
         assert_eq!(Screen::Debug.after_debug_toggle(), Screen::None);
+    }
+
+    #[test]
+    fn every_menu_screen_uses_the_ui() {
+        for screen in [
+            Screen::Title,
+            Screen::ServerList,
+            Screen::ServerEdit,
+            Screen::ConfirmDelete,
+            Screen::Connecting,
+            Screen::Disconnected,
+            Screen::Stats,
+        ] {
+            assert!(screen.uses_ui(), "{screen:?} is drawn by the UI");
+        }
+        assert!(Screen::Title.is_menu());
+        assert!(!Screen::Stats.is_menu(), "the statistics open over a game");
+        assert!(!Screen::GameMenu.is_menu());
+    }
+
+    #[test]
+    fn escape_walks_back_through_the_menus() {
+        let origin = Screen::Title;
+        assert_eq!(Screen::ServerList.after_escape(origin), Screen::Title);
+        assert_eq!(Screen::ServerEdit.after_escape(origin), Screen::ServerList);
+        assert_eq!(
+            Screen::ConfirmDelete.after_escape(origin),
+            Screen::ServerList
+        );
+        assert_eq!(Screen::Connecting.after_escape(origin), Screen::ServerList);
+        assert_eq!(
+            Screen::Disconnected.after_escape(origin),
+            Screen::ServerList
+        );
+        assert_eq!(Screen::Stats.after_escape(origin), Screen::GameMenu);
+        assert_eq!(Screen::Title.after_escape(origin), Screen::Title);
+    }
+
+    #[test]
+    fn the_options_return_to_the_screen_that_opened_them() {
+        assert_eq!(Screen::Options.after_escape(Screen::Title), Screen::Title);
+        assert_eq!(
+            Screen::Options.after_escape(Screen::GameMenu),
+            Screen::GameMenu
+        );
     }
 }

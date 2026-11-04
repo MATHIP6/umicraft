@@ -53,8 +53,13 @@ and lighting, and the server-less `--entity-demo` acceptance path (ADR-0015).
 ## Run the graphical client
 
 ```sh
+cargo run --release -p umicraft-client
 cargo run --release -p umicraft-client -- 127.0.0.1 25599 --name Umicraft --view-distance 8
 ```
+
+Without a host and port the window opens on the title screen: Multiplayer
+lists your saved servers, where you add one, connect and disconnect. With a
+host and port it connects at start.
 
 Always play and measure with `--release`. A debug build compiles the whole
 client, including the zlib decompression of the chunks and the mesher,

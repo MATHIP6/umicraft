@@ -32,9 +32,12 @@ use winit::keyboard::KeyCode;
 use crate::args::{Args, HUD_VIEWS};
 use crate::error::ClientError;
 use crate::game::hud_after;
+use crate::menu_flow::{MenuContext, MenuFlow};
 use crate::options::{Action, Options};
 use crate::options_screen::OptionsScreen;
+use crate::screen::Screen;
 use crate::screenshot::write_png;
+use crate::servers::ServerBook;
 use crate::ui_font::{self, FontSource};
 
 /// The name of the scripted player: a member of the red team.
@@ -257,6 +260,45 @@ fn run_options(
     (screen, output.draw_list)
 }
 
+/// The title screen or the server list of the menu flow, with three sample
+/// entries that have not been pinged (the demo opens no socket).
+fn menu_scene(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudSheets) -> Demo {
+    let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
+    let mut ui = Ui::new(viewport);
+    ui.set_widgets_sheet(sheets.widgets);
+    let mut book = ServerBook::open(&std::env::temp_dir().join("umicraft-menu-demo-missing.toml"));
+    for (name, address) in [
+        ("Survival", "play.example.net"),
+        ("Creative", "build.example.net:25570"),
+        ("Minigames", "10.0.0.7"),
+    ] {
+        if book.add(name, address).is_err() {
+            break;
+        }
+    }
+    let mut flow = MenuFlow::new(book, None, String::new(), 3);
+    let screen = if view == "title" {
+        Screen::Title
+    } else {
+        Screen::ServerList
+    };
+    let lang = crate::language::load(Lang::DEFAULT_CODE);
+    let context = MenuContext {
+        version: "Umicraft",
+        stats: &[],
+    };
+    ui.begin_frame(viewport, UiInput::default());
+    flow.show(screen, &mut ui, atlas, &lang, &context);
+    let output = ui.end_frame();
+    Demo {
+        lines: vec![
+            ("screen", format!("{screen:?}")),
+            ("draw commands", output.draw_list.len().to_string()),
+        ],
+        scene: output.draw_list,
+    }
+}
+
 fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudSheets) -> Demo {
     match view {
         "menu" => {
@@ -305,6 +347,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                 scene: draw_list,
             }
         }
+        "title" | "servers" => menu_scene(view, width, height, atlas, sheets),
         "video" | "chat-options" => {
             let mut options = Options::default();
             let click = if view == "video" {

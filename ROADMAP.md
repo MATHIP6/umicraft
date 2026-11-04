@@ -53,9 +53,9 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files unused, animated textures missing | P7, P9 |
 | M8 Entities | Partial / defective — animations, metadata, skins, armour, held items, objects, lighting | P5 |
 | M9 Inventory & containers | Partial — `Click Window` never sent, no item icons | P3, P4 |
-| M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings and keybinds (P10) not started | P9, P10 |
+| M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and the options pages done in P10 (code complete, owner validation open) | P9, P10 |
 | M11 Audio | Not started | P11 |
-| M12 Accounts & main menu | Not started | P10 (menus), F1 (accounts) |
+| M12 Accounts & main menu | Main menu, server list, connecting and disconnected screens done in P10 (code complete, panorama pass and owner validation open); accounts not started | P10 (rest of menus), F1 (accounts) |
 | M13 Premium authentication | Not started | P12 |
 | M14 Performance pass | Not started | F2 |
 | M15 Modding API v1 | Not started | F3 |
@@ -534,6 +534,27 @@ server's scoreboard and tab list display correctly.
 **Done when:** a user can start the client, add a server, connect, change
 every vanilla option, rebind a key, disconnect and quit without the command
 line; the options survive a restart.
+
+**Status (2026-11-04): code complete except the panorama pass, owner
+validation open.** Implemented (ADR-0039, ADR-0041, ADR-0042, ADR-0043,
+ADR-0044, `docs/parity.md`): the client starts on the title screen without
+`<host> <port>` (with them it still connects at start), the multiplayer list
+with ping, add, edit, delete, reorder and direct connect on a saved book, the
+connecting and disconnected screens (a kick shows the reason and returns to
+the list instead of closing the client), the pause menu (Disconnect, Options,
+Statistics), the statistics screen fed by `Client Status` request-stats, every
+options page and the options file, and the language system.
+
+**Remaining before P10 is done**
+- The panorama behind the title screen: a GPU cube pass that consumes
+  `MenuFrame::panorama` (the dirt background is drawn until then).
+- Owner validation in a real window: title to server list to a live server,
+  kick, Disconnect, Escape while connecting, options from the title and from
+  the pause menu, statistics against a real server; screenshot comparison
+  with vanilla. `--hud-demo --hud-view title|servers` shows the two screens
+  offscreen.
+- Out of P10 and inert: Singleplayer, Achievements, Open to LAN, the
+  statistics block, item and mob tabs, LAN entries, server icons, SRV lookup.
 
 ### P11 — Audio
 

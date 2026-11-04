@@ -111,7 +111,7 @@ options:
                       action bar) and the options screens from scripted server
                       packets; no server or GPU unless --screenshot is given
   --hud-view NAME     scene of --hud-demo: overview, tab, chat, menu, options,
-                      controls (default: overview)
+                      controls, chat-options, title, servers (default: overview)
   --block-demo        mesh and report the M5/M6 acceptance blocks from the official
                       1.8.8 jar; no server or GPU unless --screenshot is given
   --entity-demo       mesh and report the M8 acceptance entities (Steve, Alex,
@@ -128,7 +128,7 @@ options:
   --help, -h          print this help";
 
 /// The scenes of `--hud-demo`.
-pub const HUD_VIEWS: [&str; 8] = [
+pub const HUD_VIEWS: [&str; 10] = [
     "overview",
     "tab",
     "chat",
@@ -137,6 +137,8 @@ pub const HUD_VIEWS: [&str; 8] = [
     "video",
     "controls",
     "chat-options",
+    "title",
+    "servers",
 ];
 
 /// The scripted sessions the headless mode knows.
