@@ -26,6 +26,10 @@ pub enum Screen {
     GameMenu,
     /// The options, opened from the game menu.
     Options,
+    /// The sign editor.
+    Sign,
+    /// A book and quill or a written book.
+    Book,
     /// The Umicraft debug screen (F4; ADR-0036, F3 is the vanilla text screen).
     Debug,
 }
@@ -36,7 +40,13 @@ impl Screen {
     pub const fn uses_ui(self) -> bool {
         matches!(
             self,
-            Self::Inventory | Self::Creative | Self::GameMenu | Self::Options | Self::Debug
+            Self::Inventory
+                | Self::Creative
+                | Self::GameMenu
+                | Self::Options
+                | Self::Sign
+                | Self::Book
+                | Self::Debug
         )
     }
 
@@ -56,7 +66,12 @@ impl Screen {
     pub const fn after_escape(self) -> Self {
         match self {
             Self::None => Self::GameMenu,
-            Self::Chat | Self::Inventory | Self::Creative | Self::GameMenu => Self::None,
+            Self::Chat
+            | Self::Inventory
+            | Self::Creative
+            | Self::GameMenu
+            | Self::Sign
+            | Self::Book => Self::None,
             Self::Options => Self::GameMenu,
             Self::Debug => Self::Debug,
         }
@@ -86,6 +101,8 @@ mod tests {
             Screen::Creative,
             Screen::GameMenu,
             Screen::Options,
+            Screen::Sign,
+            Screen::Book,
             Screen::Debug,
         ] {
             assert!(screen.blocks_game_input(), "{screen:?} must own the input");

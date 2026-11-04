@@ -92,7 +92,11 @@ use crate::input::InputUpdate;
 use crate::inventory_input::{ContainerAction, InventoryAction};
 use crate::network::{self, ClientCommand, NetworkConfig};
 use crate::profiles::profile_from_properties;
+use umicraft_game::chat::lang::LangTable;
+use umicraft_game::chat::unformatted_text;
+use umicraft_game::editors::book::{BookPacket, WRITABLE_BOOK, WRITTEN_BOOK};
 use umicraft_game::inventory::payload;
+use umicraft_protocol::packets::play::ItemStack;
 
 #[path = "combat.rs"]
 mod combat;
@@ -224,6 +228,15 @@ pub enum GameEvent {
     Inventory(InventoryAction),
     /// A click on a button or text change of a container screen.
     Container(ContainerAction),
+    /// The player finished editing a sign.
+    SignEdited {
+        /// Block position of the sign.
+        position: (i32, i32, i32),
+        /// The four lines as chat-component JSON.
+        lines: [String; 4],
+    },
+    /// The player finished with a book: the packet to send, if any.
+    BookEdited(BookPacket),
     /// An interaction with the creative inventory screen.
     Creative(CreativeEvent),
     /// The player pressed "Respawn" on the death screen.
@@ -330,12 +343,33 @@ pub enum RenderEvent {
     Inventory(Box<WindowView>),
     /// The creative inventory screen changed.
     Creative(Box<CreativeView>),
+    /// The server or the held item asks for a book or sign screen.
+    TextScreen(Box<TextScreenRequest>),
     /// The statistics changed.
     Status(Box<GameStatus>),
     /// The world was replaced; the render thread drops its meshes.
     Reset,
     /// The session ended.
     Ended(String),
+}
+
+/// A screen for editing text that the game thread asks the window to open.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TextScreenRequest {
+    /// The sign editor (`Sign Editor Open`).
+    Sign {
+        /// Block position of the sign.
+        position: (i32, i32, i32),
+        /// What the four lines read now.
+        lines: [String; 4],
+    },
+    /// The book screen of a book and quill or a written book.
+    Book {
+        /// The held stack.
+        stack: ItemStack,
+        /// The name of the local player, the author of a signed book.
+        author: String,
+    },
 }
 
 /// A chunk whose geometry changed.
@@ -563,6 +597,8 @@ struct Game {
     entities: EntityStore,
     /// The inventory and container window model.
     windows: WindowManager,
+    /// A book the player used this tick, whose screen the window opens.
+    pending_book: Option<ItemStack>,
     /// The player's own name; it picks the team sidebar of the scoreboard and
     /// the team rules of name tags.
     own_name: String,
@@ -619,6 +655,7 @@ impl Game {
             vehicle: None,
             interaction: Interaction::new(),
             item_use: ItemUse::new(),
+            pending_book: None,
             use_pressed: false,
             perspective: Perspective::default(),
             attack_pressed: false,
@@ -1100,6 +1137,17 @@ fn handle_event(
         }
         GameEvent::Inventory(action) => {
             apply_inventory_action(game, action, queue, frames);
+            false
+        }
+        GameEvent::SignEdited { position, lines } => {
+            queue.push(ClientCommand::UpdateSign { position, lines });
+            false
+        }
+        GameEvent::BookEdited(packet) => {
+            queue.push(ClientCommand::PluginMessage {
+                channel: packet.channel,
+                data: packet.data,
+            });
             false
         }
         GameEvent::Container(action) => {
@@ -2660,6 +2708,13 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         },
     );
     for outgoing in output.packets {
+        if let Outgoing::UseItem { item } = &outgoing {
+            // MCP `ItemWritableBook` / `ItemEditableBook.onItemRightClick`
+            // open the book screen when the item is used.
+            if matches!(item.item_id, WRITABLE_BOOK | WRITTEN_BOOK) {
+                game.pending_book = Some(item.clone());
+            }
+        }
         queue.push(command_of(outgoing));
     }
     if output.swing {
@@ -2781,6 +2836,33 @@ fn use_entity(target: i32, action: UseEntityAction) -> ClientCommand {
     ClientCommand::UseEntity { target, action }
 }
 
+/// Asks the window to open the sign editor the server requested and the book
+/// the player used.
+fn publish_text_screens(game: &mut Game, frames: &SyncSender<RenderEvent>) {
+    let mut requests = Vec::new();
+    if let Some(position) = game.server.take_sign_editor() {
+        let lang = LangTable::default();
+        let lines = game
+            .server
+            .block_entities()
+            .signs()
+            .find(|(at, _)| *at == position)
+            .map_or_else(Default::default, |(_, lines)| {
+                lines.clone().map(|line| unformatted_text(&line, &lang))
+            });
+        requests.push(TextScreenRequest::Sign { position, lines });
+    }
+    if let Some(stack) = game.pending_book.take() {
+        requests.push(TextScreenRequest::Book {
+            stack,
+            author: game.own_name.clone(),
+        });
+    }
+    for request in requests {
+        let _ = frames.try_send(RenderEvent::TextScreen(Box::new(request)));
+    }
+}
+
 /// Runs one simulation tick.
 fn tick(
     game: &mut Game,
@@ -2792,6 +2874,7 @@ fn tick(
     game.status_data.ticks += 1;
     run_attack(game, queue);
     run_use(game, queue);
+    publish_text_screens(game, frames);
     tick_hand(game);
 
     // The title and the action bar fade with the tick, so the HUD is

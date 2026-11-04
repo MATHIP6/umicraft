@@ -47,6 +47,7 @@ use crate::input::{InputState, InputUpdate};
 use crate::inventory_input::{Button, ContainerAction, Context, InventoryAction, InventoryInput};
 use crate::map_render::{map_id_of, MapTextures};
 use crate::nametag_draw::{draw_tags, place_tags};
+use crate::text_screens::{Done, Key, TextScreens};
 
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
 use crate::entity_icons::EntityIcons;
@@ -233,6 +234,8 @@ struct App {
     portrait: Option<Spot>,
     /// The name field of the anvil screen.
     anvil_field: AnvilField,
+    /// The open book or sign screen.
+    text_screens: TextScreens,
     /// The first-person held item geometry of the frame.
     hand_layers: ItemLayers,
     /// Steps the water, lava and fire textures once per game tick.
@@ -321,6 +324,7 @@ impl App {
             entity_icons: EntityIcons::default(),
             portrait: None,
             anvil_field: AnvilField::default(),
+            text_screens: TextScreens::default(),
             hand_layers: ItemLayers::default(),
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
@@ -379,6 +383,10 @@ impl App {
             }
             Screen::Inventory => {
                 self.handle_inventory_key(event_loop, event);
+                return;
+            }
+            Screen::Sign | Screen::Book => {
+                self.handle_text_screen_key(&event);
                 return;
             }
             Screen::GameMenu => {
@@ -872,6 +880,58 @@ impl App {
         self.send_inventory(action);
     }
 
+    /// Opens the book or sign screen the game thread asked for.
+    fn open_text_screen(&mut self) {
+        let Some(request) = self.world.as_mut().and_then(|w| w.take_text_request()) else {
+            return;
+        };
+        if let Some(screen) = self.text_screens.open(request) {
+            self.set_screen(screen);
+        }
+    }
+
+    /// Ends the book or sign screen, sending what it produced.
+    fn finish_text_screen(&mut self, done: Done) {
+        if let Some(event) = done.0 {
+            let _ = self.session.events().try_send(event);
+        }
+        self.text_screens = TextScreens::default();
+        self.set_screen(Screen::None);
+    }
+
+    /// Handles a key press while the book or sign screen is open.
+    fn handle_text_screen_key(&mut self, event: &KeyEvent) {
+        if event.state != ElementState::Pressed {
+            return;
+        }
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return;
+        };
+        let text = event
+            .text
+            .as_deref()
+            .filter(|_| !self.ctrl_held)
+            .filter(|text| !text.chars().any(char::is_control));
+        let key = match code {
+            KeyCode::Escape => Key::Escape,
+            KeyCode::Backspace => Key::Backspace,
+            KeyCode::Enter | KeyCode::NumpadEnter => Key::Enter,
+            KeyCode::ArrowUp => Key::Up,
+            KeyCode::ArrowDown => Key::Down,
+            _ => match text {
+                Some(text) => Key::Text(text),
+                None => return,
+            },
+        };
+        let Some(atlas) = self.ui_atlas.as_ref() else {
+            return;
+        };
+        let measure = |text: &str| atlas.measure(text, 1.0);
+        if let Some(done) = self.text_screens.key(key, &measure) {
+            self.finish_text_screen(done);
+        }
+    }
+
     /// Handles a key press while the chat input is open.
     fn handle_chat_key(&mut self, event: KeyEvent) {
         let PhysicalKey::Code(code) = event.physical_key else {
@@ -1129,6 +1189,8 @@ impl App {
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
         self.portrait = None;
+        self.open_text_screen();
+        let mut text_done = None;
         let inventory_facts = self.inventory_facts();
         let atlas = self.ui_atlas.as_ref()?;
         let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
@@ -1265,10 +1327,26 @@ impl App {
                         );
                     }
                 }
+                Screen::Sign | Screen::Book => {
+                    let caret =
+                        (self.started.elapsed().as_millis() / CARET_BLINK_MS).is_multiple_of(2);
+                    let done = self.text_screens.draw(
+                        &mut self.ui,
+                        atlas,
+                        viewport,
+                        self.gui_atlas.as_ref(),
+                        caret,
+                    );
+                    text_done = done;
+                }
                 Screen::None | Screen::Chat => {}
             }
         }
-        Some(self.ui.end_frame())
+        let output = self.ui.end_frame();
+        if let Some(done) = text_done {
+            self.finish_text_screen(done);
+        }
+        Some(output)
     }
 
     /// Steps the compass and the clock and writes their new frames into the

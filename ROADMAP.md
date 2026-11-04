@@ -319,9 +319,9 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 - **P4d, container screens and protocol (2026-11-03):** brewing stand, horse,
   enchanting table, anvil, beacon and villager have their screens and their
   packets (`Enchant Item`, `MC|ItemName`, `MC|Beacon`, `MC|TrList`,
-  `MC|TrSel`). Book and quill (`MC|BEdit`, `MC|BSign`) and sign editing
-  (`Update Sign` is encodable, nothing sends it) are not started. The text
-  below lists the original scope: enchanting table (`Enchant Item`, `Window Property` 0-9), anvil
+  `MC|TrSel`), and so do the book and quill (`MC|BEdit`, `MC|BSign`) and sign
+  editing (`Update Sign`). P4d is done apart from the gaps in `docs/parity.md`.
+  The text below lists the original scope: enchanting table (`Enchant Item`, `Window Property` 0-9), anvil
   (`MC|ItemName`), beacon (`MC|Beacon`), villager (`MC|TrList`, `MC|TrSel`),
   horse inventory, book and quill (`MC|BEdit`, `MC|BSign`), sign editing.
   They open today with a chest layout (`ScreenKind` fallback) and the slot

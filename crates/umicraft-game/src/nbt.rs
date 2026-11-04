@@ -121,6 +121,83 @@ impl Nbt {
 const TAG_END: u8 = 0;
 const TAG_COMPOUND: u8 = 10;
 
+impl Nbt {
+    /// Encodes a compound as the root of an item stack's tag: the compound
+    /// type, an empty name and the payload (the inverse of [`Nbt::parse`]).
+    /// Returns `None` for any other tag, which cannot be a root.
+    ///
+    /// ```
+    /// use umicraft_game::nbt::Nbt;
+    /// let tag = Nbt::Compound(vec![("n".into(), Nbt::Byte(1))]);
+    /// assert_eq!(Nbt::parse(&tag.to_root_bytes().unwrap()).unwrap(), tag);
+    /// ```
+    #[must_use]
+    pub fn to_root_bytes(&self) -> Option<Vec<u8>> {
+        if !matches!(self, Self::Compound(_)) {
+            return None;
+        }
+        let mut out = vec![TAG_COMPOUND, 0, 0];
+        self.write_payload(&mut out);
+        Some(out)
+    }
+
+    fn type_id(&self) -> u8 {
+        match self {
+            Self::Byte(_) => 1,
+            Self::Short(_) => 2,
+            Self::Int(_) => 3,
+            Self::Long(_) => 4,
+            Self::Float(_) => 5,
+            Self::Double(_) => 6,
+            Self::ByteArray(_) => 7,
+            Self::String(_) => 8,
+            Self::List(_) => 9,
+            Self::Compound(_) => TAG_COMPOUND,
+            Self::IntArray(_) => 11,
+        }
+    }
+
+    fn write_payload(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Byte(v) => out.push(*v as u8),
+            Self::Short(v) => out.extend(v.to_be_bytes()),
+            Self::Int(v) => out.extend(v.to_be_bytes()),
+            Self::Long(v) => out.extend(v.to_be_bytes()),
+            Self::Float(v) => out.extend(v.to_be_bytes()),
+            Self::Double(v) => out.extend(v.to_be_bytes()),
+            Self::ByteArray(bytes) => {
+                out.extend((bytes.len() as i32).to_be_bytes());
+                out.extend(bytes);
+            }
+            Self::String(text) => write_string(out, text),
+            Self::List(items) => {
+                out.push(items.first().map_or(TAG_END, Self::type_id));
+                out.extend((items.len() as i32).to_be_bytes());
+                items.iter().for_each(|item| item.write_payload(out));
+            }
+            Self::Compound(entries) => {
+                for (name, value) in entries {
+                    out.push(value.type_id());
+                    write_string(out, name);
+                    value.write_payload(out);
+                }
+                out.push(TAG_END);
+            }
+            Self::IntArray(values) => {
+                out.extend((values.len() as i32).to_be_bytes());
+                values.iter().for_each(|v| out.extend(v.to_be_bytes()));
+            }
+        }
+    }
+}
+
+/// Writes a modified-UTF-8 length-prefixed string (plain UTF-8 for the text a
+/// book holds; the surrogate and NUL cases of Java's encoding do not arise).
+fn write_string(out: &mut Vec<u8>, text: &str) {
+    out.extend((text.len() as u16).to_be_bytes());
+    out.extend(text.as_bytes());
+}
+
 /// A bounds-checked cursor over NBT bytes.
 struct Cursor<'a> {
     data: &'a [u8],
@@ -277,5 +354,33 @@ mod tests {
     fn a_huge_declared_list_fails_without_allocating_it() {
         let huge = [10, 0, 0, 9, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF];
         assert_eq!(Nbt::parse(&huge), Err(NbtError::Truncated));
+    }
+
+    #[test]
+    fn every_tag_type_round_trips_through_the_root_encoding() {
+        let tag = Nbt::Compound(vec![
+            ("b".into(), Nbt::Byte(-3)),
+            ("s".into(), Nbt::Short(300)),
+            ("i".into(), Nbt::Int(-70000)),
+            ("l".into(), Nbt::Long(1 << 40)),
+            ("f".into(), Nbt::Float(1.5)),
+            ("d".into(), Nbt::Double(-2.25)),
+            ("ba".into(), Nbt::ByteArray(vec![1, 2, 3])),
+            ("str".into(), Nbt::String("héllo".into())),
+            (
+                "list".into(),
+                Nbt::List(vec![Nbt::String("a".into()), Nbt::String("b".into())]),
+            ),
+            ("empty".into(), Nbt::List(Vec::new())),
+            ("c".into(), Nbt::Compound(vec![("x".into(), Nbt::Int(1))])),
+            ("ia".into(), Nbt::IntArray(vec![5, -6])),
+        ]);
+        let bytes = tag.to_root_bytes().unwrap();
+        assert_eq!(Nbt::parse(&bytes).unwrap(), tag);
+    }
+
+    #[test]
+    fn only_a_compound_can_be_a_root() {
+        assert_eq!(Nbt::Int(1).to_root_bytes(), None);
     }
 }

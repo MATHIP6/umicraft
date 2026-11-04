@@ -70,6 +70,7 @@ mod social_view;
 pub mod terrain_textures;
 #[cfg(test)]
 mod test_support;
+mod text_screens;
 pub mod texture_animator;
 mod tooltip_draw;
 pub mod ui_demo;
