@@ -112,6 +112,8 @@ options:
                       packets; no server or GPU unless --screenshot is given
   --hud-view NAME     scene of --hud-demo: overview, tab, chat, menu, options,
                       controls, chat-options, title, servers (default: overview)
+  --synthetic-panorama  with --hud-demo --hud-view title: draw generated gradient
+                      faces instead of the panorama of the user's jar
   --block-demo        mesh and report the M5/M6 acceptance blocks from the official
                       1.8.8 jar; no server or GPU unless --screenshot is given
   --entity-demo       mesh and report the M8 acceptance entities (Steve, Alex,
@@ -201,6 +203,8 @@ pub struct Args {
     pub hud_demo: bool,
     /// The scene of `--hud-demo`; one of [`HUD_VIEWS`].
     pub hud_view: String,
+    /// Use generated gradient faces for the title panorama of `--hud-demo`.
+    pub synthetic_panorama: bool,
     /// Whether the server-less M5/M6 block acceptance run is requested.
     pub block_demo: bool,
     /// Whether the server-less M8 entity acceptance run is requested.
@@ -282,6 +286,7 @@ impl Args {
         let mut handshake_host = None;
         let mut ui_demo = false;
         let mut hud_demo = false;
+        let mut synthetic_panorama = false;
         let mut hud_view = HUD_VIEWS[0].to_string();
         let mut block_demo = false;
         let mut entity_demo = false;
@@ -351,6 +356,10 @@ impl Args {
                 }
                 "--hud-demo" => {
                     hud_demo = true;
+                    index += 1;
+                }
+                "--synthetic-panorama" => {
+                    synthetic_panorama = true;
                     index += 1;
                 }
                 "--hud-view" => {
@@ -489,6 +498,7 @@ impl Args {
             ui_demo,
             hud_demo,
             hud_view,
+            synthetic_panorama,
             block_demo,
             entity_demo,
             mob,
@@ -653,6 +663,14 @@ mod tests {
         assert_eq!(args.hud_view, "controls");
         assert_eq!(args.mode(), Mode::HudDemo);
         assert!(args.screenshot.is_some());
+    }
+
+    #[test]
+    fn the_synthetic_panorama_flag_is_off_by_default() {
+        let on = Args::parse(&words(&["--hud-demo", "--synthetic-panorama"])).expect("flag");
+        assert!(on.synthetic_panorama);
+        let off = Args::parse(&words(&["--hud-demo"])).expect("no flag");
+        assert!(!off.synthetic_panorama);
     }
 
     #[test]

@@ -22,6 +22,7 @@ use umicraft_render::{
     RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
+use umicraft_ui::menus::PanoramaTextures;
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, SlotItem, Ui, UiOutput};
 use winit::application::ApplicationHandler;
@@ -62,6 +63,7 @@ use crate::mesher::default_worker_count;
 use crate::options::{self, Action, Options};
 use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
+use crate::panorama_faces::load_panorama_faces;
 use crate::portrait::{turned_towards, Spot};
 use crate::screen::Screen;
 use crate::servers::{Pinger, ServerBook};
@@ -140,6 +142,8 @@ struct App {
     video_applier: VideoApplier,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
+    /// The uploaded title panorama, when the user's assets provide it.
+    panorama: Option<PanoramaTextures>,
     camera: Camera,
     overlay: Overlay,
     show_overlay: bool,
@@ -290,6 +294,7 @@ impl App {
             video_applier: VideoApplier::default(),
             window: None,
             renderer: None,
+            panorama: None,
             camera: Camera::default(),
             overlay: Overlay::new(1280, 720),
             show_overlay: true,
@@ -777,6 +782,11 @@ impl App {
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
         self.portrait = None;
+        // Only the title screen sets it again below; every other frame,
+        // in particular a session's, draws the world.
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_panorama(None);
+        }
         self.open_text_screen();
         let mut text_done = None;
         let inventory_facts = self.inventory_facts();
@@ -946,17 +956,15 @@ impl App {
                     let context = MenuContext {
                         version: VERSION_LINE,
                         stats,
+                        panorama: self.panorama,
                     };
                     let shown = self
                         .menu
                         .show(screen, &mut self.ui, atlas, &self.lang, &context);
-                    // The title screen's panorama is for the cube pass of a
-                    // later lot (ADR-0044); until then the dirt background it
-                    // drew stays.
-                    let MenuFrame {
-                        command,
-                        panorama: _panorama,
-                    } = shown;
+                    let MenuFrame { command, panorama } = shown;
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.set_panorama(panorama);
+                    }
                     self.menu_command = command;
                 }
                 Screen::None | Screen::Chat => {}
@@ -1311,6 +1319,13 @@ fn upload_sky_textures(renderer: &mut Renderer) {
     }
 }
 
+/// Uploads the six title panorama faces of the verified jar; `None` keeps the
+/// dirt background (no jar, or a face that does not decode).
+fn upload_panorama(renderer: &mut Renderer) -> Option<PanoramaTextures> {
+    let jar = crate::official::find_verified_jar().ok();
+    renderer.upload_panorama(&load_panorama_faces(jar.as_ref())?)
+}
+
 /// Uploads the enchantment glint texture to the renderer, if available.
 fn upload_glint_texture(renderer: &mut Renderer, glint: Option<&umicraft_assets::GlintTexture>) {
     if let Some(glint) = glint {
@@ -1404,6 +1419,7 @@ impl ApplicationHandler for App {
         upload_gui_atlas(&mut renderer, terrain.gui_atlas());
         upload_glint_texture(&mut renderer, terrain.glint_texture());
         upload_sky_textures(&mut renderer);
+        self.panorama = upload_panorama(&mut renderer);
         self.gui_atlas = terrain.gui_atlas().cloned();
         self.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());

@@ -26,7 +26,10 @@ struct VertexOut {
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
-    out.position = panorama.clip_from_cube * vec4<f32>(in.position, 1.0);
+    let clip = panorama.clip_from_cube * vec4<f32>(in.position, 1.0);
+    // Depth 0 everywhere: the world passes drawn after the panorama (clouds,
+    // particles, ...) fail their depth test and cannot show through it.
+    out.position = vec4<f32>(clip.xy, 0.0, clip.w);
     out.uv = in.uv;
     return out;
 }

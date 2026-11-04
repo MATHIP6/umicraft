@@ -68,16 +68,16 @@ without the command line.
 - **Offline texts.** The title and server list keys are in the built-in
   language table, so a first run without downloaded assets shows words.
 - **Panorama seam.** `MenuFlow::show` returns the optional `PanoramaView` the
-  title screen computes, and the window ignores it: `PanoramaTextures` stays
+  title screen computes; until ADR-0045 the window ignored it and `PanoramaTextures` stayed
   `None`, so the default dirt background is drawn. The GPU cube pass (six
   textures from `umicraft_assets::panorama`, a perspective pass, no blur) is
-  the next lot and only has to consume `MenuFrame::panorama`.
+  the next lot and only has to consume `MenuFrame::panorama` (done, ADR-0045).
 - **Demo.** `--hud-demo --hud-view title` and `--hud-view servers` render the
   two screens offscreen without a window (three sample entries, not pinged).
 
 ## Not done
 
-- Panorama cube pass; Singleplayer (drawn disabled); LAN entries, server
+- Singleplayer (drawn disabled); LAN entries, server
   icons, SRV lookup; the connecting screen always shows "Connecting to the
   server..." (no separate "Logging in" stage, no status line); achievements;
   statistics tabs for blocks, items and mobs; no refresh of the statistics

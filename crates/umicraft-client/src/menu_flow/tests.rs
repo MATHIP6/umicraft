@@ -65,6 +65,7 @@ fn frame_with(
     let context = MenuContext {
         version: "test",
         stats,
+        panorama: None,
     };
     let result = flow.show(
         screen,

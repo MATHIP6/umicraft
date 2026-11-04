@@ -8,8 +8,9 @@
 //! | `panorama.wgsl` | the textured-quad shader |
 //!
 //! The six faces are six textured quads of a unit cube seen from inside, so
-//! no cubemap is needed. The pass has no depth test and covers the target,
-//! so the renderer draws it right after the sky and the menu draws on top.
+//! no cubemap is needed. The pass covers the target and writes depth 0, so the
+//! renderer draws it right after the sky, the world passes behind it fail
+//! their depth test and the menu draws on top.
 //!
 //! # Deviation
 //!
@@ -210,8 +211,8 @@ fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
-/// Opaque quads without culling or depth: the cube is seen from inside and
-/// everything drawn later (the menu) goes over it.
+/// Opaque quads without culling that write depth 0, so the world passes drawn
+/// after them are hidden; the UI draws without a depth test and goes over it.
 fn pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -234,7 +235,7 @@ fn pipeline(
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: Some(wgpu::DepthStencilState {
             format: crate::renderer::DEPTH_FORMAT,
-            depth_write_enabled: Some(false),
+            depth_write_enabled: Some(true),
             depth_compare: Some(wgpu::CompareFunction::Always),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),

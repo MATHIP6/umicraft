@@ -55,7 +55,7 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M9 Inventory & containers | Partial — `Click Window` never sent, no item icons | P3, P4 |
 | M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and the options pages done in P10 (code complete, owner validation open) | P9, P10 |
 | M11 Audio | Not started | P11 |
-| M12 Accounts & main menu | Main menu, server list, connecting and disconnected screens done in P10 (code complete, panorama pass and owner validation open); accounts not started | P10 (rest of menus), F1 (accounts) |
+| M12 Accounts & main menu | Main menu, server list, connecting and disconnected screens done in P10 (code complete, owner validation open); accounts not started | P10 (rest of menus), F1 (accounts) |
 | M13 Premium authentication | Not started | P12 |
 | M14 Performance pass | Not started | F2 |
 | M15 Modding API v1 | Not started | F3 |
@@ -535,19 +535,17 @@ server's scoreboard and tab list display correctly.
 every vanilla option, rebind a key, disconnect and quit without the command
 line; the options survive a restart.
 
-**Status (2026-11-04): code complete except the panorama pass, owner
-validation open.** Implemented (ADR-0039, ADR-0041, ADR-0042, ADR-0043,
+**Status (2026-11-04): code complete, owner validation open.** Implemented (ADR-0039, ADR-0041, ADR-0042, ADR-0043,
 ADR-0044, `docs/parity.md`): the client starts on the title screen without
 `<host> <port>` (with them it still connects at start), the multiplayer list
 with ping, add, edit, delete, reorder and direct connect on a saved book, the
 connecting and disconnected screens (a kick shows the reason and returns to
 the list instead of closing the client), the pause menu (Disconnect, Options,
 Statistics), the statistics screen fed by `Client Status` request-stats, every
-options page and the options file, and the language system.
+options page and the options file, the language system and the rotating
+title panorama (ADR-0045; the vanilla blur is skipped).
 
 **Remaining before P10 is done**
-- The panorama behind the title screen: a GPU cube pass that consumes
-  `MenuFrame::panorama` (the dirt background is drawn until then).
 - Owner validation in a real window: title to server list to a live server,
   kick, Disconnect, Escape while connecting, options from the title and from
   the pause menu, statistics against a real server; screenshot comparison

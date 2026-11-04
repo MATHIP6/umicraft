@@ -6,7 +6,7 @@
 //! Run with `cargo test -p umicraft-render --test offscreen_panorama -- --ignored`
 //! on a machine with a wgpu adapter.
 
-use umicraft_render::{Camera, Image, Overlay, Renderer, SkyImage};
+use umicraft_render::{Camera, CloudMode, Image, Overlay, Renderer, SkyImage};
 use umicraft_ui::menus::{PanoramaRotation, PanoramaView};
 
 const WIDTH: u32 = 160;
@@ -87,4 +87,32 @@ fn without_a_view_nothing_is_drawn() {
     for colour in COLOURS {
         assert_ne!(pixel(&image, WIDTH / 2, HEIGHT / 2), colour);
     }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn the_world_passes_do_not_show_through_the_panorama() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    renderer.set_cloud_mode(CloudMode::Fancy);
+    let textures = renderer.upload_panorama(&faces()).expect("valid faces");
+    renderer.set_panorama(Some(PanoramaView {
+        textures,
+        rotation: PanoramaRotation {
+            yaw_degrees: -20.0,
+            pitch_degrees: 20.0,
+        },
+    }));
+    // Looking up from below the clouds: without the panorama they fill the view.
+    let mut camera = Camera::new(glam::Vec3::new(0.0, 100.0, 0.0), 0.0, 0.8);
+    camera.set_aspect(WIDTH, HEIGHT);
+    renderer
+        .render(&camera, &Overlay::new(WIDTH, HEIGHT))
+        .expect("render");
+    let image = renderer.read_pixels().expect("read pixels");
+    let foreign = (0..HEIGHT)
+        .flat_map(|y| (0..WIDTH).map(move |x| (x, y)))
+        .filter(|&(x, y)| !COLOURS.contains(&pixel(&image, x, y)))
+        .count();
+    // Only the seams between faces, where bilinear filtering blends, differ.
+    assert!(foreign < 200, "{foreign} pixels are not a face colour");
 }

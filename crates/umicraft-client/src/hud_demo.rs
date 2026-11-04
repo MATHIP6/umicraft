@@ -26,12 +26,14 @@ use umicraft_render::{
     SpriteSheet,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
+use umicraft_ui::menus::{PanoramaTextures, PanoramaView};
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
 
 use crate::args::{Args, HUD_VIEWS};
 use crate::error::ClientError;
 use crate::game::hud_after;
+use crate::hud_demo_panorama;
 use crate::menu_flow::{MenuContext, MenuFlow};
 use crate::options::{Action, Options};
 use crate::options_screen::OptionsScreen;
@@ -262,7 +264,13 @@ fn run_options(
 
 /// The title screen or the server list of the menu flow, with three sample
 /// entries that have not been pinged (the demo opens no socket).
-fn menu_scene(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudSheets) -> Demo {
+fn menu_scene(
+    view: &str,
+    (width, height): (u32, u32),
+    atlas: &FontAtlas,
+    sheets: &HudSheets,
+    panorama: Option<PanoramaTextures>,
+) -> (Demo, Option<PanoramaView>) {
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     let mut ui = Ui::new(viewport);
     ui.set_widgets_sheet(sheets.widgets);
@@ -286,17 +294,20 @@ fn menu_scene(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &H
     let context = MenuContext {
         version: "Umicraft",
         stats: &[],
+        panorama,
     };
     ui.begin_frame(viewport, UiInput::default());
-    flow.show(screen, &mut ui, atlas, &lang, &context);
+    let frame = flow.show(screen, &mut ui, atlas, &lang, &context);
     let output = ui.end_frame();
-    Demo {
+    let demo = Demo {
         lines: vec![
             ("screen", format!("{screen:?}")),
             ("draw commands", output.draw_list.len().to_string()),
+            ("panorama", frame.panorama.is_some().to_string()),
         ],
         scene: output.draw_list,
-    }
+    };
+    (demo, frame.panorama)
 }
 
 fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudSheets) -> Demo {
@@ -347,7 +358,7 @@ fn build(view: &str, width: u32, height: u32, atlas: &FontAtlas, sheets: &HudShe
                 scene: draw_list,
             }
         }
-        "title" | "servers" => menu_scene(view, width, height, atlas, sheets),
+        "title" | "servers" => menu_scene(view, (width, height), atlas, sheets, None).0,
         "video" | "chat-options" => {
             let mut options = Options::default();
             let click = if view == "video" {
@@ -498,8 +509,17 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     } else {
         font.source
     };
-    let demo = build(view, viewport.0, viewport.1, &installed.atlas, &sheets);
+    let (demo, panorama) = if view == "title" {
+        let textures = hud_demo_panorama::upload(args, &mut renderer);
+        menu_scene(view, viewport, &installed.atlas, &sheets, textures)
+    } else {
+        (
+            build(view, viewport.0, viewport.1, &installed.atlas, &sheets),
+            None,
+        )
+    };
     print!("{}", demo.render(view, viewport, source));
+    renderer.set_panorama(panorama);
     render_scene(&mut renderer, &demo, viewport)?;
     let image = renderer.read_pixels()?;
     write_png(path, &image.rgba, image.width, image.height)?;

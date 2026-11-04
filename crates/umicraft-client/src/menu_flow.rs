@@ -17,9 +17,9 @@ use std::time::Duration;
 use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
     ConfirmOutcome, ConfirmScreen, ConnectStage, ConnectingOutcome, ConnectingScreen,
-    DisconnectedOutcome, DisconnectedScreen, PanoramaView, ServerEditOutcome, ServerEditScreen,
-    ServerListOutcome, ServerListScreen, ServerRow, StatsOutcome, StatsScreen, TitleInfo,
-    TitleOutcome, TitleScreen,
+    DisconnectedOutcome, DisconnectedScreen, PanoramaTextures, PanoramaView, ServerEditOutcome,
+    ServerEditScreen, ServerListOutcome, ServerListScreen, ServerRow, StatsOutcome, StatsScreen,
+    TitleInfo, TitleOutcome, TitleScreen,
 };
 use umicraft_ui::{FontAtlas, Ui};
 
@@ -52,6 +52,8 @@ pub struct MenuContext<'a> {
     pub version: &'a str,
     /// The statistics of the last server answer, for [`Screen::Stats`].
     pub stats: &'a [(String, i32)],
+    /// The uploaded panorama faces, when the user's assets provide them.
+    pub panorama: Option<PanoramaTextures>,
 }
 
 /// The result of one menu frame.
@@ -59,9 +61,8 @@ pub struct MenuContext<'a> {
 pub struct MenuFrame {
     /// The command the player's click or key produced.
     pub command: Option<MenuCommand>,
-    /// The panorama the title screen wants behind it. The window has no cube
-    /// pass yet and ignores it (ADR-0044); the dirt background is drawn
-    /// meanwhile.
+    /// The panorama the title screen wants behind it; the window hands it to
+    /// the renderer (ADR-0045).
     pub panorama: Option<PanoramaView>,
 }
 
@@ -195,8 +196,7 @@ impl MenuFlow {
     ) -> Option<MenuCommand> {
         let info = TitleInfo {
             version: context.version,
-            // The GPU cube pass is a follow-up (ADR-0044): no textures yet.
-            panorama: None,
+            panorama: context.panorama,
             partial_tick: self.partial_tick(),
         };
         let (outcome, view) = self.title.show(ui, atlas, lang, &info);
