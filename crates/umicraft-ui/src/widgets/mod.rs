@@ -21,7 +21,7 @@
 //! not change what the widgets mean.
 
 pub(crate) mod style;
-mod util;
+pub(crate) mod util;
 
 pub mod button;
 pub mod death;

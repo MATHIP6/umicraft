@@ -158,8 +158,12 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Screens | pause, death, disconnect, options, main menu, server list | Missing | P10 | — | Death screen logic lands in P2. |
 | Server list data | saved servers (add, edit, remove, reorder), status ping with MOTD, players, latency, favicon, version mismatch | Partial | P10 | `servers::{book,pinger}` unit tests | Book and pinger exist (ADR-0041); the list screen, SRV lookup and the resource-pack mode per server are not done. |
+| Screens | pause, death, options | Missing | P10 | — | Death screen logic lands in P2. |
+| Screens | title screen | Partial — widgets only, wired in D | P10 | Unit tests (`umicraft_ui::menus::title`, `panorama`; `umicraft_assets::panorama`) | ADR-0042. Vanilla button layout and rotation maths; Singleplayer greyed (multiplayer-only), original logo text and splash list. Missing until wiring: the panorama cube in the renderer (the blur passes are skipped), the tilted splash (drawn upright), the Realms row. |
+| Screens | server list (ping, add, edit, delete, direct connect) | Partial — widgets only, wired in D | P10 | Unit tests (`umicraft_ui::menus::{server_list,server_row,server_edit,confirm}`) | ADR-0042. Rows, buttons, scrollbar, selection, double click, move arrows, latency bars and tooltips at the MCP coordinates. Missing: LAN entries, server icons, the resource-pack toggle, the client-side ping and the server file. |
+| Screens | connecting, disconnected | Partial — widgets only, wired in D | P10 | Unit tests (`umicraft_ui::menus::{connecting,disconnected}`) | ADR-0042. Not yet shown by the client. |
+| Screens | statistics | Partial — widgets only, wired in D | P10 | Unit tests (`umicraft_ui::menus::stats`) | ADR-0042. General list only; no achievements, no block/item/mob tabs, no server statistics request. |
 | Screens | controls rebinding, persisted options | Missing | P10 | — |  |
 
 ## Audio

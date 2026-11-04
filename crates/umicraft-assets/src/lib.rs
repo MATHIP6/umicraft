@@ -75,6 +75,7 @@ pub mod install;
 pub mod languages;
 pub mod manifest;
 pub mod objects;
+pub mod panorama;
 pub mod profile_textures;
 pub mod progress;
 pub mod resource_pack;
