@@ -124,7 +124,7 @@ fn an_old_file_without_the_cloud_keys_keeps_the_defaults() {
     let path = folder.join(FILE_NAME);
     std::fs::write(&path, "[video]\nclouds = false\nrender_distance = 4\n").unwrap();
     let loaded = Options::load(&path);
-    assert!(!loaded.video.clouds);
+    assert_eq!(loaded.video.clouds, 0);
     assert!(loaded.video.fancy_graphics);
     assert_eq!(loaded.video.render_distance, 4);
     let _ = std::fs::remove_dir_all(&folder);

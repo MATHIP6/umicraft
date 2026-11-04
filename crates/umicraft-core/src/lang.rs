@@ -336,6 +336,12 @@ const BUILTIN: &[(&str, &str)] = &[
     // ("Invalid Item!"), `ItemStack.getTooltip` ("Durability: x / y") and the attribute line (`+%d %s`, whose key does
     // exist in the files and only guards the offline case).
     ("umicraft.options.shaders", "Super Secret Settings..."),
+    // `ResourcePackListEntryDefault` hard-codes its name and description.
+    ("umicraft.resourcePack.default", "Default"),
+    (
+        "umicraft.resourcePack.defaultDescription",
+        "The default look of Minecraft",
+    ),
     ("umicraft.hover.invalidItem", "Invalid Item!"),
     ("umicraft.hover.invalidEntity", "Invalid Entity!"),
     ("item.durability", "Durability: %s / %s"),
