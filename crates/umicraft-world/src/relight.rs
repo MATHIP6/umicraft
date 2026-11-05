@@ -56,11 +56,12 @@ fn opacity(state: BlockState) -> u8 {
     }
 }
 
-/// `Block.getLightValue` of the 1.8 blocks that emit light.
+/// `Block.getLightValue` of the 1.8 blocks that emit light (public so the
+/// mesher can keep them out of the smooth-lighting path).
 ///
 /// Source: the `setLightLevel` calls in MCP `Block.registerBlocks` (the block
 /// ids are the 1.8 numeric ids). Blocks that are not listed emit nothing.
-fn emission(state: BlockState) -> u8 {
+pub fn light_emission(state: BlockState) -> u8 {
     match state.id() {
         10 | 11 | 51 | 89 | 91 | 119 | 124 | 138 | 169 => 15,
         50 => 14,
@@ -216,7 +217,7 @@ impl LightEditor<'_> {
         state: BlockState,
         queue: &mut VecDeque<BlockPos>,
     ) {
-        let glow = emission(state);
+        let glow = light_emission(state);
         if channel == Channel::Block && glow > 0 {
             self.set(channel, pos, glow);
             queue.push_back(pos);

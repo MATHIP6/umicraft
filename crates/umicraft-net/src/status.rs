@@ -60,15 +60,18 @@ pub struct PlayerSample {
 }
 
 impl ServerStatus {
-    /// Flattens `description` into readable text (components concatenated in
-    /// order; `"§"` color codes left as-is for M1).
+    /// Flattens `description` into text with legacy `§` codes: the JSON
+    /// `color`, `bold`, `italic`, `underlined`, `strikethrough` and
+    /// `obfuscated` of every component become the codes the server list
+    /// draws, as `IChatComponent.getFormattedText` does (MCP 1.8). Codes
+    /// already written in the text are kept.
     ///
     /// Returns an empty string when there is no description at all.
     #[must_use]
     pub fn motd_text(&self) -> String {
         self.description
             .as_ref()
-            .map(json_to_plain_text)
+            .map(json_to_legacy_text)
             .unwrap_or_default()
     }
 }
@@ -95,6 +98,136 @@ pub fn json_to_plain_text(value: &serde_json::Value) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// The legacy code letter of each JSON colour name, in `§0`..`§f` order.
+const COLOR_NAMES: [&str; 16] = [
+    "black",
+    "dark_blue",
+    "dark_green",
+    "dark_aqua",
+    "dark_red",
+    "dark_purple",
+    "gold",
+    "gray",
+    "dark_gray",
+    "blue",
+    "green",
+    "aqua",
+    "red",
+    "light_purple",
+    "yellow",
+    "white",
+];
+/// The JSON style flags and their legacy code letters.
+const FLAGS: [(&str, char); 5] = [
+    ("obfuscated", 'k'),
+    ("bold", 'l'),
+    ("strikethrough", 'm'),
+    ("underlined", 'n'),
+    ("italic", 'o'),
+];
+/// The deepest `extra` nesting followed; a hostile server must not overflow
+/// the stack.
+const MAX_DEPTH: usize = 16;
+
+/// The style of a component with what it inherits from its parent.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct LegacyStyle {
+    color: Option<char>,
+    flags: [bool; 5],
+}
+
+impl LegacyStyle {
+    /// This style with the fields `value` sets on top of it.
+    fn with(&self, value: &serde_json::Value) -> Self {
+        let color = value
+            .get("color")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|name| {
+                COLOR_NAMES
+                    .iter()
+                    .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            })
+            .and_then(|index| char::from_digit(index as u32, 16))
+            .or(self.color);
+        let mut flags = self.flags;
+        for (flag, (name, _)) in flags.iter_mut().zip(FLAGS) {
+            if let Some(set) = value.get(name).and_then(serde_json::Value::as_bool) {
+                *flag = set;
+            }
+        }
+        Self { color, flags }
+    }
+
+    /// The codes that switch to this style from a reset.
+    fn codes(&self) -> String {
+        let mut codes = String::new();
+        if let Some(color) = self.color {
+            codes.extend(['§', color]);
+        }
+        for (on, (_, letter)) in self.flags.iter().zip(FLAGS) {
+            if *on {
+                codes.extend(['§', letter]);
+            }
+        }
+        codes
+    }
+}
+
+/// Converts a chat-JSON value to text with legacy `§` codes (see
+/// [`ServerStatus::motd_text`]). Unknown shapes contribute nothing.
+#[must_use]
+pub fn json_to_legacy_text(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    let mut styled = false;
+    walk_legacy(value, &LegacyStyle::default(), 0, &mut styled, &mut out);
+    out
+}
+
+/// Appends the text of `value` and its `extra` list, each piece preceded by
+/// the codes of its own style (a reset first once anything was styled).
+fn walk_legacy(
+    value: &serde_json::Value,
+    parent: &LegacyStyle,
+    depth: usize,
+    styled: &mut bool,
+    out: &mut String,
+) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    match value {
+        serde_json::Value::String(text) => push_styled(text, parent, styled, out),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                walk_legacy(item, parent, depth + 1, styled, out);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            let style = parent.with(value);
+            if let Some(text) = map.get("text").and_then(serde_json::Value::as_str) {
+                push_styled(text, &style, styled, out);
+            }
+            if let Some(extra) = map.get("extra") {
+                walk_legacy(extra, &style, depth + 1, styled, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_styled(text: &str, style: &LegacyStyle, styled: &mut bool, out: &mut String) {
+    if text.is_empty() {
+        return;
+    }
+    let codes = style.codes();
+    if !codes.is_empty() || *styled {
+        out.push_str("§r");
+        out.push_str(&codes);
+        *styled = !codes.is_empty();
+    }
+    out.push_str(text);
 }
 
 /// Parses a raw login/play `Disconnect` reason (chat JSON) to plain text,
@@ -132,6 +265,34 @@ mod tests {
             serde_json::from_str(r#"{"description":{"text":"base","extra":[{"text":" plus"}]}}"#)
                 .unwrap();
         assert_eq!(nested.motd_text(), "base plus");
+    }
+
+    #[test]
+    fn motd_keeps_json_colours_and_styles_as_legacy_codes() {
+        let status: ServerStatus = serde_json::from_str(
+            r##"{"description":{"text":"Prisme","color":"light_purple","bold":true,
+            "extra":[{"text":" - Practice","color":"white","bold":false},{"text":"!"}]}}"##,
+        )
+        .unwrap();
+        assert_eq!(status.motd_text(), "§r§d§lPrisme§r§f - Practice§r§d§l!");
+    }
+
+    #[test]
+    fn motd_resets_after_a_styled_piece_and_ignores_unknown_colours() {
+        let status: ServerStatus = serde_json::from_str(
+            r#"{"description":[{"text":"a","color":"red"},{"text":"b"},{"text":"c","color":"nope"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(status.motd_text(), "§r§ca§rbc");
+    }
+
+    #[test]
+    fn motd_nesting_is_capped() {
+        let mut json = serde_json::json!({"text": "x"});
+        for _ in 0..100 {
+            json = serde_json::json!({"text": "y", "extra": [json]});
+        }
+        assert!(!json_to_legacy_text(&json).contains('x'));
     }
 
     #[test]

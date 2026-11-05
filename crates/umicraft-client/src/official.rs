@@ -93,53 +93,41 @@ pub(crate) fn load_gui_atlas() -> Option<umicraft_assets::GuiAtlas> {
     umicraft_assets::GuiAtlas::from_jar(&jar).ok()
 }
 
-/// Converts the GUI atlas into [`HudSheets`] for textured HUD rendering.
-pub(crate) fn hud_sheets(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> HudSheets {
-    HudSheets {
-        widgets: gui_atlas
-            .and_then(|a| a.region("widgets"))
-            .map(|r| SpriteSheet {
-                u_min: r.u_min,
-                v_min: r.v_min,
-                u_max: r.u_max,
-                v_max: r.v_max,
-                width: r.pixel_width,
-                height: r.pixel_height,
-            }),
-        icons: gui_atlas
-            .and_then(|a| a.region("icons"))
-            .map(|r| SpriteSheet {
-                u_min: r.u_min,
-                v_min: r.v_min,
-                u_max: r.u_max,
-                v_max: r.v_max,
-                width: r.pixel_width,
-                height: r.pixel_height,
-            }),
+/// The sprite sheet of an atlas region.
+pub(crate) fn sprite(region: &umicraft_assets::GuiRegion) -> SpriteSheet {
+    SpriteSheet {
+        u_min: region.u_min,
+        v_min: region.v_min,
+        u_max: region.u_max,
+        v_max: region.v_max,
+        width: region.pixel_width,
+        height: region.pixel_height,
     }
 }
 
-/// The menu textures of the GUI atlas: the dirt of `options_background.png`
-/// and the title logo `title/minecraft.png`. A texture the atlas lacks stays
-/// `None`, which selects the flat and text fallbacks of the menus.
+/// Converts the GUI atlas into [`HudSheets`] for textured HUD rendering.
+pub(crate) fn hud_sheets(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> HudSheets {
+    let sheet = |name: &str| gui_atlas.and_then(|a| a.region(name)).map(sprite);
+    HudSheets {
+        widgets: sheet("widgets"),
+        icons: sheet("icons"),
+    }
+}
+
+/// The menu textures of the GUI atlas: the dirt of `options_background.png`,
+/// the title logo `title/minecraft.png` and the server list art (`icons.png`,
+/// `unknown_server.png`, `server_selection.png`). A texture the atlas lacks
+/// stays `None`, which selects the flat and text fallbacks of the menus.
 pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt {
-    let sheet = |name: &str| {
-        gui_atlas
-            .and_then(|atlas| atlas.region(name))
-            .map(|r| SpriteSheet {
-                u_min: r.u_min,
-                v_min: r.v_min,
-                u_max: r.u_max,
-                v_max: r.v_max,
-                width: r.pixel_width,
-                height: r.pixel_height,
-            })
-    };
+    let sheet = |name: &str| gui_atlas.and_then(|a| a.region(name)).map(sprite);
     MenuArt {
         dirt: sheet("options_background"),
         logo: sheet("title/minecraft"),
         stats_icons: sheet("container/stats_icons"),
         achievements: achievement_art(&sheet),
+        icons: sheet("icons"),
+        unknown_server: sheet("misc/unknown_server"),
+        server_selection: sheet("server_selection"),
     }
 }
 

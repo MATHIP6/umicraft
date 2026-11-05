@@ -91,6 +91,7 @@ pub(super) const BINDABLE: &[(&str, KeyCode)] = bindable_keys![
     Numpad7,
     Numpad8,
     Numpad9,
+    F2,
     F5,
     F6,
     F7,
@@ -120,14 +121,14 @@ pub fn key_from_name(name: &str) -> Option<KeyCode> {
         .map(|(_, key)| *key)
 }
 
-/// Whether the client keeps a key for itself: `Escape` closes screens and
-/// `F1` to `F4` toggle the overlay, the debug screen, the `F3` combinations
-/// and the resource reload.
+/// Whether the client keeps a key for itself: `Escape` closes screens, `F1`
+/// hides the HUD, `F3` opens the debug text and starts its combinations and
+/// `F4` toggles the Umicraft debug screen. `F2` (screenshot) is a binding.
 #[must_use]
 pub fn is_reserved(key: KeyCode) -> bool {
     matches!(
         key,
-        KeyCode::Escape | KeyCode::F1 | KeyCode::F2 | KeyCode::F3 | KeyCode::F4
+        KeyCode::Escape | KeyCode::F1 | KeyCode::F3 | KeyCode::F4
     )
 }
 

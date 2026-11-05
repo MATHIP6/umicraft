@@ -35,7 +35,7 @@ impl App {
         let anvil = self.anvil_open();
         // The anvil name field takes the inventory key and the digits as text.
         let closes =
-            code == KeyCode::Escape || (!anvil && code == self.options.keys.get(Action::Inventory));
+            code == KeyCode::Escape || (!anvil && self.options.keys.get(Action::Inventory) == code);
         if event.state == ElementState::Pressed && anvil && !closes && self.anvil_key(&event) {
             return;
         }

@@ -12,6 +12,7 @@
 //! Nothing here is read from the player's machine except the UI font, and the
 //! texts are original Umicraft or generic player names.
 
+use umicraft_assets::GuiAtlas;
 use umicraft_core::lang::Lang;
 use umicraft_game::chat::ChatInput;
 use umicraft_game::hud::{vitals_view, BottomBar, VitalsInput};
@@ -27,7 +28,7 @@ use umicraft_render::{
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
 use umicraft_ui::menus::{
-    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, RowStatus, StatsTab,
+    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab,
 };
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
@@ -38,11 +39,12 @@ use crate::dials::DialFrames;
 use crate::error::ClientError;
 use crate::game::hud_after;
 use crate::hud_demo_panorama;
+use crate::hud_demo_servers;
 use crate::hud_demo_stats;
 use crate::item_icons::{IconSource, ItemResources, ItemView};
 use crate::menu_flow::{MenuContext, MenuFlow};
 use crate::options::{Action, Options};
-use crate::options_screen::OptionsScreen;
+use crate::options_screen::{Catalog, OptionsScreen};
 use crate::screen::Screen;
 use crate::screenshot::write_png;
 use crate::servers::ServerBook;
@@ -243,12 +245,17 @@ fn run_options(
     atlas: &FontAtlas,
     options: &mut Options,
     clicks: &[&str],
-    widgets_sheet: Option<SpriteSheet>,
+    (widgets_sheet, art): (Option<SpriteSheet>, MenuArt),
+    catalog: Option<Catalog>,
 ) -> (OptionsScreen, DrawList) {
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     let mut ui = Ui::new(viewport);
     ui.set_widgets_sheet(widgets_sheet);
+    ui.set_menu_art(art);
     let mut screen = OptionsScreen::new();
+    if let Some(catalog) = catalog {
+        screen.set_catalog(catalog);
+    }
     let lang = crate::language::load(Lang::DEFAULT_CODE);
     let mut frame = |screen: &mut OptionsScreen, ui: &mut Ui, input: UiInput| {
         ui.begin_frame(viewport, input);
@@ -268,32 +275,48 @@ fn run_options(
     (screen, output.draw_list)
 }
 
+/// Whether `view` is a scene of the menu flow.
+fn is_menu_view(view: &str) -> bool {
+    matches!(
+        view,
+        "title"
+            | "servers"
+            | "server-edit"
+            | "connecting"
+            | "disconnected"
+            | "stats"
+            | "stats-blocks"
+            | "stats-items"
+            | "achievements"
+    )
+}
+
 /// The title screen, the server list or the Add Server form of the menu flow.
 /// The demo opens no socket: the sample entries get scripted ping results (an
-/// online server with a description, a full one, an unreachable one).
+/// online server with a description, a full one with an icon, an unreachable
+/// one, one still pinging, a version mismatch; see [`hud_demo_servers`]).
 fn menu_scene(
     view: &str,
     (width, height): (u32, u32),
     atlas: &FontAtlas,
     (sheets, art): (&HudSheets, MenuArt),
-    (panorama, items): (Option<PanoramaTextures>, ItemView<'_>),
+    (panorama, gui_atlas, items): (Option<PanoramaTextures>, Option<&GuiAtlas>, ItemView<'_>),
 ) -> (Demo, Option<PanoramaView>) {
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     let mut ui = Ui::new(viewport);
     ui.set_widgets_sheet(sheets.widgets);
     ui.set_menu_art(art);
     let mut book = ServerBook::open(&std::env::temp_dir().join("umicraft-menu-demo-missing.toml"));
-    for (name, address) in [
-        ("Survival", "play.example.net"),
-        ("Creative", "build.example.net:25570"),
-        ("Minigames", "10.0.0.7"),
-    ] {
+    for (name, address) in hud_demo_servers::ENTRIES {
         if book.add(name, address).is_err() {
             break;
         }
     }
     let mut flow = MenuFlow::new(book, None, String::new(), 3);
-    script_pings(&mut flow);
+    hud_demo_servers::script_pings(&mut flow);
+    if let Some(atlas) = gui_atlas {
+        flow.assign_icon_sheets(atlas);
+    }
     let screen = match view {
         "title" => Screen::Title,
         "server-edit" => Screen::ServerEdit,
@@ -351,23 +374,6 @@ fn menu_scene(
     (demo, frame.panorama)
 }
 
-/// Gives the three sample entries the results of a ping: online with a
-/// description, unreachable and still pinging.
-fn script_pings(flow: &mut MenuFlow) {
-    flow.set_row_status(
-        0,
-        RowStatus::Online {
-            motd: "Welcome to the Survival server".to_string(),
-            players: 12,
-            max: 100,
-            version: "1.8.8".to_string(),
-            latency_ms: 40,
-            sample: vec!["Steve".to_string(), "Alex".to_string()],
-        },
-    );
-    flow.set_row_status(1, RowStatus::Unreachable);
-}
-
 fn build(
     view: &str,
     (width, height): (u32, u32),
@@ -408,8 +414,15 @@ fn build(
             let mut options = Options::default();
             options.video.fov = 95.0;
             options.video.render_distance = 12;
-            let (screen, draw_list) =
-                run_options(width, height, atlas, &mut options, &[], sheets.widgets);
+            let (screen, draw_list) = run_options(
+                width,
+                height,
+                atlas,
+                &mut options,
+                &[],
+                (sheets.widgets, art),
+                None,
+            );
             Demo {
                 lines: vec![
                     ("page", format!("{:?}", screen.page())),
@@ -424,17 +437,27 @@ fn build(
         "title" | "servers" | "server-edit" | "connecting" | "disconnected" | "stats"
         | "stats-blocks" | "stats-items" | "achievements" => {
             let items = ItemView::new(None, DialFrames::default());
-            menu_scene(view, (width, height), atlas, (sheets, art), (None, items)).0
+            let scene = (None, None, items);
+            menu_scene(view, (width, height), atlas, (sheets, art), scene).0
         }
-        "video" | "chat-options" => {
+        "video" | "chat-options" | "sounds" | "skin" | "language" | "packs" => {
             let mut options = Options::default();
-            let click = if view == "video" {
-                "nav:video"
-            } else {
-                "nav:chat"
+            let click = match view {
+                "video" => "nav:video",
+                "chat-options" => "nav:chat",
+                "packs" => "resourcepacks",
+                other => other,
             };
-            let (screen, draw_list) =
-                run_options(width, height, atlas, &mut options, &[click], sheets.widgets);
+            let catalog = matches!(view, "language" | "packs").then(Catalog::discover);
+            let (screen, draw_list) = run_options(
+                width,
+                height,
+                atlas,
+                &mut options,
+                &[click],
+                (sheets.widgets, art),
+                catalog,
+            );
             Demo {
                 lines: vec![
                     ("page", format!("{:?}", screen.page())),
@@ -445,7 +468,7 @@ fn build(
         }
         "controls" => {
             let mut options = Options::default();
-            // Two actions on one key show the conflict bar; a click on Hotbar Slot 3
+            // Two actions on one key show the conflict bar; a click on Attack/Destroy
             // leaves it waiting for a key.
             options.keys.set(Action::Hotbar2, KeyCode::Digit1);
             let (screen, draw_list) = run_options(
@@ -453,8 +476,9 @@ fn build(
                 height,
                 atlas,
                 &mut options,
-                &["nav:controls", "key:hotbar3"],
-                sheets.widgets,
+                &["nav:controls", "key:attack"],
+                (sheets.widgets, art),
+                None,
             );
             let conflicts = Action::ALL
                 .iter()
@@ -467,7 +491,7 @@ fn build(
                         "waiting for a key",
                         screen
                             .capturing()
-                            .map_or_else(|| "none".to_string(), |a| a.label().to_string()),
+                            .map_or_else(|| "none".to_string(), |a| a.id().to_string()),
                     ),
                     ("actions in conflict", conflicts.to_string()),
                     ("draw commands", draw_list.len().to_string()),
@@ -556,6 +580,11 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     };
     let font = ui_font::load();
     let gui_atlas = crate::official::load_gui_atlas();
+    // The server list shows an icon of its own, so its atlas grows by one.
+    let gui_atlas = match view {
+        "servers" => gui_atlas.map(|atlas| atlas.with_dynamic(&hud_demo_servers::icon_images())),
+        _ => gui_atlas,
+    };
     let sheets = crate::official::hud_sheets(gui_atlas.as_ref());
     let art = crate::official::menu_art(gui_atlas.as_ref());
     let viewport = (args.width, args.height);
@@ -580,25 +609,15 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let items = hud_demo_stats::needs_items(view)
         .then(|| hud_demo_stats::load_items(&mut renderer))
         .flatten();
-    let (demo, panorama) = if view == "title" {
-        let textures = hud_demo_panorama::upload(args, &mut renderer);
-        let none = ItemView::new(None, DialFrames::default());
-        menu_scene(
-            view,
-            viewport,
-            &installed.atlas,
-            (&sheets, art),
-            (textures, none),
-        )
-    } else if hud_demo_stats::needs_items(view) {
+    let (demo, panorama) = if is_menu_view(view) {
+        let textures = if view == "title" {
+            hud_demo_panorama::upload(args, &mut renderer)
+        } else {
+            None
+        };
         let icons = ItemView::new(items.as_deref(), DialFrames::default());
-        menu_scene(
-            view,
-            viewport,
-            &installed.atlas,
-            (&sheets, art),
-            (None, icons),
-        )
+        let scene = (textures, gui_atlas.as_ref(), icons);
+        menu_scene(view, viewport, &installed.atlas, (&sheets, art), scene)
     } else {
         (
             build(view, viewport, &installed.atlas, (&sheets, art)),
@@ -733,7 +752,7 @@ mod tests {
     #[test]
     fn the_controls_view_waits_for_a_key_and_flags_the_conflict() {
         let text = report("controls");
-        assert!(text.contains("waiting for a key : HOTBAR 3"), "{text}");
+        assert!(text.contains("waiting for a key : attack"), "{text}");
         assert!(text.contains("actions in conflict: 2"), "{text}");
     }
 

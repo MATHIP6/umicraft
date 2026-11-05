@@ -5,7 +5,7 @@
 
 use umicraft_ui::menus::{
     confirm_layout, connecting_cancel_rect, server_edit_layout, server_list_layout,
-    stats_done_rect, title_layout, ConnectStage, EditMode, RowStatus,
+    stats_done_rect, title_layout, ConnectStage, EditMode, ResourcePackMode, RowStatus,
 };
 use umicraft_ui::{InputEvent, Key, PointerButton, Rect, UiInput};
 
@@ -184,7 +184,12 @@ fn edit_and_delete_buttons_need_a_selection() {
 #[test]
 fn adding_a_server_saves_it_and_returns_to_the_list() {
     let (mut flow, path) = flow_with("add", &[]);
-    let command = flow.finish_edit(EditMode::Add, "Home", "home.example.net:25570");
+    let command = flow.finish_edit(
+        EditMode::Add,
+        "Home",
+        "home.example.net:25570",
+        ResourcePackMode::Prompt,
+    );
     assert_eq!(command, Some(MenuCommand::GoTo(Screen::ServerList)));
     assert_eq!(flow.rows.len(), 1);
     assert_eq!(flow.rows[0].name, "Home");
@@ -242,7 +247,12 @@ fn the_add_form_starts_with_the_default_server_name() {
 fn editing_changes_the_pending_entry_only() {
     let (mut flow, path) = flow_with("edit", &[("One", "one"), ("Two", "two")]);
     flow.begin_edit(1);
-    let command = flow.finish_edit(EditMode::Edit, "Second", "second.example.net");
+    let command = flow.finish_edit(
+        EditMode::Edit,
+        "Second",
+        "second.example.net",
+        ResourcePackMode::Prompt,
+    );
     assert_eq!(command, Some(MenuCommand::GoTo(Screen::ServerList)));
     let saved = ServerBook::open(&path);
     assert_eq!(saved.get(0).map(ServerEntry::name), Some("One"));
@@ -294,7 +304,12 @@ fn reordering_swaps_the_rows_and_the_saved_order() {
 #[test]
 fn a_direct_connection_remembers_its_address() {
     let (mut flow, _) = flow_with("direct", &[]);
-    let command = flow.finish_edit(EditMode::DirectConnect, "", " play.example.net:25570 ");
+    let command = flow.finish_edit(
+        EditMode::DirectConnect,
+        "",
+        " play.example.net:25570 ",
+        ResourcePackMode::Prompt,
+    );
     assert_eq!(
         command,
         Some(MenuCommand::Connect(ServerAddress {
@@ -304,7 +319,12 @@ fn a_direct_connection_remembers_its_address() {
     );
     assert_eq!(flow.last_server(), "play.example.net:25570");
     assert_eq!(
-        flow.finish_edit(EditMode::DirectConnect, "", "bad host!"),
+        flow.finish_edit(
+            EditMode::DirectConnect,
+            "",
+            "bad host!",
+            ResourcePackMode::Prompt
+        ),
         None
     );
     assert_eq!(flow.last_server(), "play.example.net:25570");

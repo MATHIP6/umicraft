@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use umicraft_mesh::tint::{BiomeTints, WHITE};
 use umicraft_mesh::{
-    mesh_chunk, mesh_chunk_with_models, BlockSource, ChunkSnapshot, Mesh, ModelMeshContext, Vertex,
-    VertexLight,
+    mesh_chunk, mesh_chunk_with_models, mesh_chunk_with_settings, BlockSource, ChunkSnapshot,
+    Lighting, Mesh, MeshSettings, ModelMeshContext, Vertex, VertexLight,
 };
 use umicraft_model::{
     AtlasLayout, BlockDefinition, BlockModelSet, ModelError, ModelResult, ResourceSource, StateDef,
@@ -645,6 +645,58 @@ fn weighted_variants_are_deterministic_and_vary_by_position() {
         }
     }
     assert_eq!(seen, [true, true], "both weighted variants must be used");
+}
+
+#[test]
+fn without_block_alternatives_every_position_uses_the_heaviest_variant() {
+    let source = Memory::new()
+        .model("variant_a", &CUBE_JSON.replace("#all", "blocks/stone"))
+        .model("variant_b", &CUBE_JSON.replace("#all", "blocks/dirt"))
+        .blockstate(
+            "weighted",
+            r#"{ "variants": { "normal": [
+                { "model": "variant_a", "weight": 1 },
+                { "model": "variant_b", "weight": 3 }
+            ] } }"#,
+        );
+    let context = context(
+        BlockModelSet::build(&source, &[WEIGHTED]).expect("synthetic weighted model set"),
+        &["blocks/dirt", "blocks/stone"],
+    );
+    let dirt_layer = layer(&context, "blocks/dirt");
+    let settings = MeshSettings {
+        lighting: Lighting::Smooth,
+        block_alternatives: false,
+    };
+    for x in 0..16 {
+        for z in 0..16 {
+            let blocks = Single {
+                position: [x, 0, z],
+                state: BlockState::new(4, 0),
+            };
+            let mesh = mesh_chunk_with_settings(ChunkPos::new(0, 0), &blocks, &context, settings);
+            assert!(
+                mesh.vertices
+                    .iter()
+                    .all(|vertex| vertex.layer == dirt_layer),
+                "({x}, {z}) must use the weight 3 variant"
+            );
+        }
+    }
+    // The default settings are the old behaviour.
+    let blocks = Single {
+        position: [3, 0, 5],
+        state: BlockState::new(4, 0),
+    };
+    assert_eq!(
+        mesh_chunk_with_settings(
+            ChunkPos::new(0, 0),
+            &blocks,
+            &context,
+            MeshSettings::default()
+        ),
+        mesh_chunk_with_models(ChunkPos::new(0, 0), &blocks, &context)
+    );
 }
 
 #[test]

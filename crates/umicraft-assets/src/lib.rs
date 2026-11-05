@@ -91,7 +91,7 @@ pub use client_resources::{ClientResources, GlintTexture, ACHIEVEMENT_TILES};
 pub use colormap::{BiomeColormaps, Colormap};
 pub use dial::{DialKind, DialSprite};
 pub use error::{AssetsError, AssetsResult};
-pub use gui_atlas::{GuiAtlas, GuiRegion};
+pub use gui_atlas::{DynamicImage, GuiAtlas, GuiRegion, DYNAMIC_PREFIX};
 pub use progress::{Progress, ProgressSnapshot};
 pub use resource_pack::{PackMetadata, ResourcePack, ResourceStack};
 pub use setup::{find_existing_jar, run_setup, SetupStep, TARGET_VERSION};

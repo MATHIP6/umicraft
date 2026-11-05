@@ -34,13 +34,14 @@ use std::sync::Arc;
 
 use umicraft_model::{AtlasLayout, BlockModel, BlockModelSet, ModelVariant};
 use umicraft_world::fluid::Liquid;
-use umicraft_world::{BlockState, ChunkPos};
+use umicraft_world::{light_emission, BlockState, ChunkPos};
 
 use crate::fluid::{self, FluidLayers};
 
 use crate::actual_state;
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, occludes};
-use crate::lighting::quad_light;
+use crate::lighting::{quad_light, Lighting};
+use crate::settings::{base_variant, MeshSettings};
 use crate::{tint, BlockEntityKind, BlockEntityRef, BlockSource, Mesh, Vertex};
 
 /// The baked models and the texture layers the model mesher reads.
@@ -84,6 +85,20 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
     source: &S,
     context: &ModelMeshContext,
 ) -> Mesh {
+    mesh_chunk_with_settings(pos, source, context, MeshSettings::default())
+}
+
+/// [`mesh_chunk_with_models`] with the player's [`MeshSettings`]. A block that
+/// emits light is lit flat whatever `Smooth Lighting` says
+/// (`BlockModelRenderer.renderModel` requires `getLightValue() == 0` for the
+/// smooth path).
+#[must_use]
+pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
+    pos: ChunkPos,
+    source: &S,
+    context: &ModelMeshContext,
+    settings: MeshSettings,
+) -> Mesh {
     let mut mesh = Mesh::default();
     let base_x = pos.x * 16;
     let base_z = pos.z * 16;
@@ -117,9 +132,15 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                 }
                 let model = actual_state::model_for(&context.models, &source, position, state)
                     .or_else(|| context.models.model(state));
-                let variant = model.and_then(|model| select_variant(model, position));
+                let variant = model
+                    .and_then(|model| pick_variant(model, position, settings.block_alternatives));
+                let lighting = if light_emission(state) == 0 {
+                    settings.lighting
+                } else {
+                    Lighting::Flat
+                };
                 if let Some(variant) = variant {
-                    let placement = Placement::in_world(position);
+                    let placement = Placement::in_world(position).lit(lighting);
                     emit_model_quads(&mut mesh, source, context, state, variant, placement);
                 } else if state.is_renderable() {
                     let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
@@ -128,9 +149,14 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
                     // No model and not a liquid: the checker, never a
                     // procedural layer index (ADR-0012).
                     let missing = context.atlas.missing_layer();
-                    emit_legacy_faces_with(&mut mesh, source, [wx, y, wz], state, tint, |_| {
-                        missing
-                    });
+                    emit_legacy_faces_with(
+                        &mut mesh,
+                        source,
+                        [wx, y, wz],
+                        (state, lighting),
+                        tint,
+                        |_| missing,
+                    );
                 }
             }
         }
@@ -150,6 +176,21 @@ fn fluid_layers(liquid: Liquid, atlas: &AtlasLayout) -> FluidLayers {
     FluidLayers {
         still: layer(still),
         flow: layer(flow),
+    }
+}
+
+/// The variant a block uses: the weighted pick of [`select_variant`], or the
+/// base variant when `block_alternatives` is off
+/// (`BlockRendererDispatcher.getBakedModel`).
+fn pick_variant(
+    model: &BlockModel,
+    position: [i32; 3],
+    alternatives: bool,
+) -> Option<&ModelVariant> {
+    if alternatives {
+        select_variant(model, position)
+    } else {
+        base_variant(model)
     }
 }
 
@@ -248,6 +289,8 @@ pub(crate) struct Placement {
     pub(crate) shift: [f32; 3],
     /// Whether `cullface` quads are dropped against an occluding neighbour.
     pub(crate) cull: bool,
+    /// How the quads are lit.
+    pub(crate) lighting: Lighting,
 }
 
 impl Placement {
@@ -257,7 +300,13 @@ impl Placement {
             position,
             shift: [0.0; 3],
             cull: true,
+            lighting: Lighting::Smooth,
         }
+    }
+
+    /// The same placement lit with `lighting`.
+    fn lit(self, lighting: Lighting) -> Self {
+        Self { lighting, ..self }
     }
 }
 
@@ -315,6 +364,7 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
             &quad.positions,
             variant.model.ambient_occlusion,
             quad.shade,
+            placement.lighting,
         );
         let vertices = std::array::from_fn(|index| {
             let corner = quad.positions[index];

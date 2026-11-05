@@ -49,6 +49,8 @@ pub enum Key {
     PageUp,
     /// Scroll one page down.
     PageDown,
+    /// The refresh key of the server list (`GuiMultiplayer`: key code 63).
+    F5,
 }
 
 /// The modifier keys held during an event.

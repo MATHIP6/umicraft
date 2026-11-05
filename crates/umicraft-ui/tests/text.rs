@@ -8,6 +8,7 @@
 
 use std::error::Error;
 
+use umicraft_ui::font_grid::GRID_CHARS;
 use umicraft_ui::text::FontError;
 use umicraft_ui::FontAtlas;
 
@@ -35,9 +36,18 @@ fn encode_png(
     Ok(bytes)
 }
 
+/// Grid slot of `character` in the reference `charList` order.
+fn slot_of(character: char) -> u32 {
+    let slot = GRID_CHARS
+        .chars()
+        .position(|candidate| candidate == character)
+        .expect("the character is in the grid");
+    slot as u32
+}
+
 /// Paints `columns` opaque white columns in the cell of `character`.
 fn paint_glyph(pixels: &mut [u8], character: char, columns: u32) {
-    let slot = character as u32;
+    let slot = slot_of(character);
     let cell_x = (slot % 16) * CELL;
     let cell_y = (slot / 16) * CELL;
     for row in 0..CELL {
@@ -58,6 +68,7 @@ fn synthetic_png() -> Result<Vec<u8>, png::EncodingError> {
     paint_glyph(&mut pixels, 'B', 8);
     paint_glyph(&mut pixels, '?', 5);
     paint_glyph(&mut pixels, 'i', 1);
+    paint_glyph(&mut pixels, 'é', 5);
     encode_png(SIZE, SIZE, png::ColorType::Rgba, &pixels)
 }
 
@@ -82,7 +93,7 @@ fn synthetic_png_decodes_to_coverage_and_glyphs() -> Result<(), Box<dyn Error>> 
     assert_eq!(atlas.width, SIZE + WHITE_STRIP);
     assert_eq!(atlas.height, SIZE);
     assert_eq!(atlas.pixels.len(), ((SIZE + WHITE_STRIP) * SIZE) as usize);
-    assert_eq!(atlas.glyphs.len(), 95);
+    assert_eq!(atlas.glyphs.len(), 247);
     assert_eq!(atlas.line_height, 9.0);
     assert_eq!(atlas.line_height(2.0), 18.0);
 
@@ -106,7 +117,7 @@ fn synthetic_png_decodes_to_coverage_and_glyphs() -> Result<(), Box<dyn Error>> 
 
     assert!(atlas.glyph('~').is_some());
     assert!(atlas.glyph('\u{7f}').is_none());
-    assert!(atlas.glyph('é').is_none(), "only ASCII slots are exposed");
+    assert!(atlas.glyph('é').is_some(), "the accent cells are exposed");
     assert!(atlas.glyph_or_fallback('\u{7f}').is_none());
     Ok(())
 }
@@ -359,7 +370,7 @@ fn decodes_a_real_client_font() -> Result<(), Box<dyn Error>> {
 
     assert_eq!((atlas.width, atlas.height), (SIZE + WHITE_STRIP, SIZE));
     assert_eq!(atlas.line_height, 9.0);
-    assert_eq!(atlas.glyphs.len(), 95);
+    assert_eq!(atlas.glyphs.len(), 247);
     assert_eq!(atlas.glyph('A').map(|glyph| glyph.advance), Some(6.0));
     assert_eq!(atlas.glyph('W').map(|glyph| glyph.advance), Some(6.0));
     assert_eq!(atlas.glyph('i').map(|glyph| glyph.advance), Some(2.0));
@@ -367,5 +378,51 @@ fn decodes_a_real_client_font() -> Result<(), Box<dyn Error>> {
     assert_eq!(atlas.glyph(' ').map(|glyph| glyph.advance), Some(4.0));
     assert_eq!(atlas.glyph('@').map(|glyph| glyph.advance), Some(7.0));
     assert_eq!(atlas.measure("hello", 1.0), 24.0);
+    Ok(())
+}
+
+#[test]
+fn accented_and_box_characters_get_their_own_glyphs() -> Result<(), Box<dyn Error>> {
+    let atlas = FontAtlas::from_png(&synthetic_png()?)?;
+    for character in ['é', 'ê', 'ç', 'ñ', 'à', 'Ç', 'ü', '│', '█', 'π', '°'] {
+        let glyph = atlas.glyph(character).expect("the grid has the character");
+        assert_ne!(
+            atlas.glyph_or_fallback(character),
+            atlas.glyph('?'),
+            "{character} must not render as ?"
+        );
+        assert_eq!(glyph.character, character);
+    }
+    // The cell of 'é' is slot 130: column 2, row 8 of the 16x16 grid.
+    let e_acute = atlas.glyph('é').expect("é is in the grid");
+    assert!((e_acute.uv_min[0] - 16.0 / 132.0).abs() < f32::EPSILON);
+    assert!((e_acute.uv_min[1] - 64.0 / 128.0).abs() < f32::EPSILON);
+    assert_eq!(e_acute.advance, 6.0);
+    Ok(())
+}
+
+#[test]
+fn unknown_characters_still_fall_back_to_the_question_mark() -> Result<(), Box<dyn Error>> {
+    let atlas = FontAtlas::from_png(&synthetic_png()?)?;
+    assert!(
+        atlas.glyph('€').is_none(),
+        "the euro sign is not in the 1.8 grid"
+    );
+    assert_eq!(atlas.glyph_or_fallback('€'), atlas.glyph('?'));
+    assert_eq!(atlas.glyph_or_fallback('\u{4e2d}'), atlas.glyph('?'));
+    Ok(())
+}
+
+/// Regression: the server list showed `Prisme B?ta` for `Prisme Bêta`.
+#[test]
+fn prisme_beta_measures_with_the_real_glyph() -> Result<(), Box<dyn Error>> {
+    let atlas = FontAtlas::from_png(&synthetic_png()?)?;
+    let question = atlas.advance('?', 1.0);
+    let accent = atlas.advance('ê', 1.0);
+    assert_ne!(question, accent);
+    assert_eq!(
+        atlas.measure("Bêta", 1.0),
+        atlas.advance('B', 1.0) + accent + atlas.advance('t', 1.0) + atlas.advance('a', 1.0)
+    );
     Ok(())
 }

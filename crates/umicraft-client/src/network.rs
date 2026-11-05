@@ -309,6 +309,13 @@ pub enum ClientCommand {
     },
 }
 
+/// The `Client Settings` locale of a language code: lowercase (`fr_FR` is
+/// sent as `fr_fr`), as `Minecraft.getLanguageManager().getCurrentLanguage()
+/// .getLanguageCode()` is lowercased by the 1.8 client.
+fn locale_of(code: &str) -> String {
+    code.to_lowercase()
+}
+
 impl ClientCommand {
     /// The wire packet of the command.
     #[must_use]
@@ -467,7 +474,7 @@ impl ClientCommand {
                 chat_colors,
                 skin_parts,
             } => PlayServerbound::ClientSettings(serverbound::ClientSettings {
-                locale: "en_us".to_string(),
+                locale: locale_of(crate::language::current().code()),
                 view_distance,
                 chat_mode,
                 chat_colors,
@@ -648,6 +655,26 @@ mod tests {
         };
         assert_eq!(settings.skin_parts, 0b0100_0101);
         assert_eq!((settings.view_distance, settings.chat_mode), (10, 1));
+    }
+
+    #[test]
+    fn the_locale_is_the_lowercase_language_code() {
+        assert_eq!(locale_of("fr_FR"), "fr_fr");
+        assert_eq!(locale_of("en_US"), "en_us");
+        let packet = ClientCommand::ClientSettings {
+            view_distance: 8,
+            chat_mode: 0,
+            chat_colors: true,
+            skin_parts: 0,
+        }
+        .into_packet();
+        let PlayServerbound::ClientSettings(settings) = packet else {
+            panic!("not a Client Settings packet");
+        };
+        assert_eq!(
+            settings.locale,
+            locale_of(crate::language::current().code())
+        );
     }
 
     #[test]

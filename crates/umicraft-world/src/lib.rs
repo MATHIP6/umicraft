@@ -46,5 +46,6 @@ pub use chunk::{ChunkColumn, ChunkPayload, SECTION_COUNT, WORLD_HEIGHT};
 pub use error::WorldError;
 pub use light::LightLevel;
 pub use pos::{BlockPos, ChunkPos};
+pub use relight::light_emission;
 pub use section::Section;
 pub use world::World;

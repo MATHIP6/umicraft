@@ -543,11 +543,7 @@ connecting and disconnected screens (a kick shows the reason and returns to
 the list instead of closing the client), the pause menu (Disconnect, Options,
 Statistics), the statistics screen fed by `Client Status` request-stats, every
 options page and the options file, the language system and the rotating
-title panorama (ADR-0045). **F3 (ADR-0049, 2026-11-05):** connecting stages and
-vanilla failure texts, the statistics screen with General, Blocks, Items and
-Mobs tabs and live refresh, the achievements screen and toast, the tilted
-splash from `splashes.txt` and the vanilla panorama
-blur.
+title panorama (ADR-0045). **F3 (ADR-0049, 2026-11-05):** connecting stages and vanilla failure texts, the statistics screen with General, Blocks, Items and Mobs tabs and live refresh, the achievements screen and toast, the tilted splash from `splashes.txt` and the vanilla panorama blur (no Realms row, owner decision). Server list parity (ADR-0047): the whole `ascii.png` grid renders (accents), descriptions keep their `§` colours, favicons, the red X and pinging cells and the arrows are drawn, the keys follow `GuiMultiplayer`, and each server has a Prompt/Enabled/Disabled resource pack mode (handling the packet is P12).
 
 **Remaining before P10 is done**
 - Owner validation in a real window: title to server list to a live server,
@@ -555,8 +551,13 @@ blur.
   the pause menu, statistics against a real server; screenshot comparison
   with vanilla. `--hud-demo --hud-view title|servers` shows the two screens
   offscreen.
-- Out of P10 and inert: Singleplayer, Realms, Open to LAN, LAN entries, server
-  icons, SRV lookup.
+- Live since F2 (ADR-0048): Smooth Lighting, Mipmap Levels, Other Block
+  Variants, mouse-button bindings with attack/use/pick/drop/screenshot (F2)/
+  fullscreen (F11) bindings, the Snooper page, the Client Settings locale and
+  the incompatible-pack confirmation. Still stored-only or missing: pack
+  icons, Super Secret Settings, Force Unicode Font, Smooth Camera.
+- Out of P10 and inert: Singleplayer, Realms, Open to LAN, LAN entries, SRV
+  lookup.
 
 ### P11 — Audio
 

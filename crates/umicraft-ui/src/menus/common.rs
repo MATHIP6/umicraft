@@ -12,6 +12,8 @@ use crate::draw::{Color, TextStyle};
 use crate::geom::{Rect, ScrollArea};
 use crate::id::WidgetId;
 use crate::input::{InputEvent, Key};
+use crate::legacy_text::parse_legacy;
+use crate::styled_text::draw_styled;
 use crate::text::FontAtlas;
 use crate::widgets::{button_enabled, gui_scale};
 
@@ -127,6 +129,24 @@ impl Gui {
         ui.draw()
             .text([x + scale, y + scale], text, TextStyle::new(scale, shadow));
         ui.draw().text([x, y], text, TextStyle::new(scale, c));
+    }
+
+    /// Draws `text` at GUI `at`, honouring legacy `§` codes; `base` colours
+    /// the text before any code. `shadow` selects `drawStringWithShadow`
+    /// over `drawString`. Returns the GUI width.
+    pub(crate) fn legacy_text(
+        &self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        text: &str,
+        (at, base, shadow): ([f32; 2], Color, bool),
+    ) -> f32 {
+        let runs = parse_legacy(text, base);
+        let pixel = [
+            self.origin[0] + at[0] * self.scale,
+            self.origin[1] + at[1] * self.scale,
+        ];
+        draw_styled(ui.draw(), atlas, pixel, &runs, self.scale, shadow, 0) / self.scale
     }
 
     /// Draws white text centred on GUI x `x` at GUI y `y`.

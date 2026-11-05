@@ -47,6 +47,14 @@ pub struct MenuArt {
     pub stats_icons: Option<SpriteSheet>,
     /// The achievement screen's background texture and map tiles.
     pub achievements: Option<super::achievements::AchievementArt>,
+    /// `textures/gui/icons.png` (256x256): the latency cells of the server list.
+    pub icons: Option<SpriteSheet>,
+    /// `textures/misc/unknown_server.png` (64x64): the icon of a server
+    /// without a favicon.
+    pub unknown_server: Option<SpriteSheet>,
+    /// `textures/gui/server_selection.png` (256x256): the arrows of a hovered
+    /// server row.
+    pub server_selection: Option<SpriteSheet>,
 }
 
 /// Fills `rect` with the dirt texture tinted by `tint`.

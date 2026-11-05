@@ -19,17 +19,33 @@ pub fn pinging_row(entry: &ServerEntry) -> ServerRow {
         name: entry.name().to_string(),
         address: entry.address().to_string(),
         status: RowStatus::Pinging,
+        favicon: None,
     }
 }
 
+/// The protocol version of 1.8: a newer server makes the client out of date,
+/// an older one (or none) the server (`ServerListEntryNormal`: `version > 47`).
+const PROTOCOL: i32 = 47;
+
 /// The row status a ping outcome shows (`ServerListEntryNormal`): a version
-/// mismatch is greyed, an unreachable server shows the failure text.
+/// mismatch keeps the description and shows the server's version, an
+/// unreachable server shows the failure text.
 #[must_use]
 pub fn row_status(outcome: &PingOutcome) -> RowStatus {
     match outcome {
         PingOutcome::Online(info) => online(info),
-        PingOutcome::VersionMismatch(_) => RowStatus::VersionMismatch,
+        PingOutcome::VersionMismatch(info) => mismatch(info),
         PingOutcome::Unreachable(_) => RowStatus::Unreachable,
+    }
+}
+
+fn mismatch(info: &ServerInfo) -> RowStatus {
+    RowStatus::VersionMismatch {
+        motd: info.motd.clone(),
+        version: info.version_name.clone(),
+        client_outdated: info.protocol.unwrap_or(0) > PROTOCOL,
+        players: info.players_online,
+        sample: info.player_sample.clone(),
     }
 }
 
@@ -78,11 +94,32 @@ mod tests {
     }
 
     #[test]
-    fn a_mismatch_and_a_failure_map_to_their_own_rows() {
-        assert_eq!(
-            row_status(&PingOutcome::VersionMismatch(info(Some(5)))),
-            RowStatus::VersionMismatch
-        );
+    fn a_mismatch_keeps_the_description_and_says_which_side_is_old() {
+        let mismatch = |protocol| row_status(&PingOutcome::VersionMismatch(info(protocol)));
+        let RowStatus::VersionMismatch {
+            motd,
+            version,
+            client_outdated,
+            ..
+        } = mismatch(Some(107))
+        else {
+            panic!("a mismatch row");
+        };
+        assert_eq!((motd.as_str(), version.as_str()), ("Hello", "1.8.8"));
+        assert!(client_outdated, "a newer server outdates the client");
+        for older in [Some(5), None] {
+            assert!(matches!(
+                mismatch(older),
+                RowStatus::VersionMismatch {
+                    client_outdated: false,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn a_failure_maps_to_its_own_row() {
         assert_eq!(
             row_status(&PingOutcome::Unreachable("timed out".to_string())),
             RowStatus::Unreachable

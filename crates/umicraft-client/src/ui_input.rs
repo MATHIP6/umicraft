@@ -48,6 +48,7 @@ pub fn ui_key(code: KeyCode) -> Option<Key> {
         KeyCode::End => Some(Key::End),
         KeyCode::PageUp => Some(Key::PageUp),
         KeyCode::PageDown => Some(Key::PageDown),
+        KeyCode::F5 => Some(Key::F5),
         _ => None,
     }
 }

@@ -12,6 +12,7 @@
 //! edits are applied here. Nothing in this module touches winit, the GPU or a
 //! socket of its own, so the flow is unit-tested without a window.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::achievements_view::{self, AchievementsContext};
@@ -31,7 +32,10 @@ use crate::item_icons::ItemView;
 use crate::menu_rows::{pinging_row, row_status};
 use crate::options_screen::Page;
 use crate::screen::Screen;
-use crate::servers::{parse_address, PingResult, PingTarget, Pinger, ServerAddress, ServerBook};
+use crate::servers::{
+    decode_favicon, parse_address, PingOutcome, PingResult, PingTarget, Pinger, ServerAddress,
+    ServerBook,
+};
 use crate::stats_view::{self, StatsContext};
 
 /// What the window has to do after a menu frame.
@@ -105,6 +109,9 @@ pub struct MenuFlow {
     book: ServerBook,
     pinger: Option<Pinger>,
     rows: Vec<ServerRow>,
+    /// The RGBA favicon of each pinged address (see [`icons`]).
+    favicons: HashMap<String, Vec<u8>>,
+    icons_revision: u64,
     pending: Option<Pending>,
     last_server: String,
     tick_time: Duration,
@@ -129,6 +136,8 @@ impl MenuFlow {
             book,
             pinger,
             rows: Vec::new(),
+            favicons: HashMap::new(),
+            icons_revision: 0,
             pending: None,
             last_server,
             tick_time: Duration::ZERO,
@@ -262,7 +271,7 @@ impl MenuFlow {
     }
 
     fn show_list(&mut self, ui: &mut Ui, atlas: &FontAtlas, lang: &Lang) -> Option<MenuCommand> {
-        let outcome = self.list.show(ui, atlas, lang, &self.rows, None)?;
+        let outcome = self.list.show(ui, atlas, lang, &self.rows)?;
         match outcome {
             ServerListOutcome::Join(index) => self.join(index),
             ServerListOutcome::DirectConnect => {
@@ -299,7 +308,11 @@ impl MenuFlow {
         let mode = screen.mode();
         match screen.show(ui, atlas, lang)? {
             ServerEditOutcome::Cancel => Some(self.close_edit()),
-            ServerEditOutcome::Done { name, address } => self.finish_edit(mode, &name, &address),
+            ServerEditOutcome::Done {
+                name,
+                address,
+                pack_mode,
+            } => self.finish_edit(mode, &name, &address, pack_mode),
         }
     }
 
@@ -402,6 +415,7 @@ impl MenuFlow {
 
     fn rebuild_rows(&mut self) {
         self.rows = self.book.iter().map(pinging_row).collect();
+        self.prune_favicons();
     }
 
     fn refresh_pings(&mut self) {
@@ -421,9 +435,27 @@ impl MenuFlow {
     }
 
     fn apply_result(&mut self, result: PingResult) {
+        let Some(address) = self
+            .book
+            .get(result.id)
+            .map(|entry| entry.address().to_string())
+        else {
+            return;
+        };
         if let Some(row) = self.rows.get_mut(result.id) {
             row.status = row_status(&result.outcome);
         }
+        self.set_favicon(&address, favicon_pixels(&result.outcome));
+    }
+}
+
+/// The decoded favicon of an answer; a failed ping or a bad icon has none.
+fn favicon_pixels(outcome: &PingOutcome) -> Option<Vec<u8>> {
+    match outcome {
+        PingOutcome::Online(info) | PingOutcome::VersionMismatch(info) => {
+            info.favicon_png.as_deref().and_then(decode_favicon)
+        }
+        PingOutcome::Unreachable(_) => None,
     }
 }
 
@@ -433,5 +465,6 @@ fn valid_address(text: &str) -> bool {
 }
 
 mod edit;
+mod icons;
 #[cfg(test)]
 mod tests;
