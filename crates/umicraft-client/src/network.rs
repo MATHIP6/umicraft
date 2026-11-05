@@ -16,7 +16,7 @@ use std::thread::JoinHandle;
 use tokio::sync::mpsc::Receiver as CommandReceiver;
 use umicraft_net::login::login_offline;
 use umicraft_net::play::{drive, PlayOptions, PlaySession, SessionCounters, SessionEnd};
-use umicraft_net::{Connection, NetError};
+use umicraft_net::Connection;
 use umicraft_protocol::packets::play::serverbound::{
     self, ClickWindow as ServerClickWindow, CloseWindow as ServerCloseWindow, DiggingStatus,
     EntityActionKind, HeldItemChange as ServerHeldItemChange, Input, PlayerBlockPlacement,
@@ -24,7 +24,9 @@ use umicraft_protocol::packets::play::serverbound::{
 };
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_protocol::PlayServerbound;
+use umicraft_ui::menus::ConnectStage;
 
+use crate::connection_end::{ConnectionEnd, EndPhase};
 use crate::error::ClientError;
 use crate::game::GameEvent;
 
@@ -560,8 +562,9 @@ fn run_thread(
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            let _ = events.send(GameEvent::Disconnected(format!(
-                "could not start network runtime: {error}"
+            let _ = events.send(GameEvent::Disconnected(ConnectionEnd::other(
+                EndPhase::Connecting,
+                format!("could not start network runtime: {error}"),
             )));
             return;
         }
@@ -581,11 +584,14 @@ async fn run_session(
     events: &SyncSender<GameEvent>,
     mut commands: CommandReceiver<PlayServerbound>,
     counters: &SessionCounters,
-) -> Option<String> {
+) -> Option<ConnectionEnd> {
     let mut connection = match Connection::connect(&config.host, config.port).await {
         Ok(connection) => connection,
-        Err(error) => return Some(error.to_string()),
+        Err(error) => return Some(ConnectionEnd::from_error(EndPhase::Connecting, &error)),
     };
+    // `GuiConnecting` switches from `connect.connecting` to
+    // `connect.authorizing` as soon as the socket is open.
+    let _ = events.send(GameEvent::ConnectStage(ConnectStage::LoggingIn));
     let profile = match login_offline(
         &mut connection,
         &config.name,
@@ -594,7 +600,7 @@ async fn run_session(
     .await
     {
         Ok(profile) => profile,
-        Err(error) => return Some(error.to_string()),
+        Err(error) => return Some(ConnectionEnd::from_error(EndPhase::Connecting, &error)),
     };
     tracing::info!(
         host = %config.host,
@@ -626,8 +632,8 @@ async fn run_session(
     .await
     {
         Ok(SessionEnd::CommandsClosed) => None,
-        Ok(SessionEnd::Kicked(reason)) => Some(NetError::KickedAtPlay { reason }.to_string()),
-        Err(error) => Some(error.to_string()),
+        Ok(SessionEnd::Kicked(reason)) => Some(ConnectionEnd::kicked(reason)),
+        Err(error) => Some(ConnectionEnd::from_error(EndPhase::Playing, &error)),
     }
 }
 

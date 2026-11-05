@@ -5,11 +5,12 @@
 
 use umicraft_ui::menus::{
     confirm_layout, connecting_cancel_rect, server_edit_layout, server_list_layout,
-    stats_done_rect, title_layout, EditMode, ResourcePackMode, RowStatus,
+    stats_done_rect, title_layout, ConnectStage, EditMode, ResourcePackMode, RowStatus,
 };
 use umicraft_ui::{InputEvent, Key, PointerButton, Rect, UiInput};
 
 use super::*;
+use crate::dials::DialFrames;
 use crate::servers::{PingOutcome, ServerEntry, ServerInfo};
 
 const VIEWPORT: Rect = Rect {
@@ -64,6 +65,12 @@ fn frame_with(
     ui.begin_frame(VIEWPORT, UiInput::new(events));
     let context = MenuContext {
         version: "test",
+        connect_stage: ConnectStage::Connecting,
+        stats_revision: 1,
+        stats_loading: false,
+        items: ItemView::new(None, DialFrames::default()),
+        inventory_key: "E",
+        player_hash: 0,
         stats,
         panorama: None,
     };
@@ -199,6 +206,12 @@ fn the_add_form_starts_with_the_default_server_name() {
     let atlas = FontAtlas::fallback();
     let context = MenuContext {
         version: "test",
+        connect_stage: ConnectStage::Connecting,
+        stats_revision: 1,
+        stats_loading: false,
+        items: ItemView::new(None, DialFrames::default()),
+        inventory_key: "E",
+        player_hash: 0,
         stats: &[],
         panorama: None,
     };
@@ -356,7 +369,7 @@ fn connecting_cancel_and_the_disconnect_button_lead_back_to_the_list() {
         click_on(&mut flow, Screen::Connecting, cancel),
         Some(MenuCommand::GoTo(Screen::ServerList))
     );
-    flow.set_disconnected("Kicked: flying");
+    flow.set_disconnected(&ConnectionEnd::kicked("Kicked: flying"), &Lang::builtin());
     let button = DisconnectedScreen::button_rect(VIEWPORT, 1);
     assert_eq!(
         click_on(&mut flow, Screen::Disconnected, button),

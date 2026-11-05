@@ -397,6 +397,41 @@ const BUILTIN: &[(&str, &str)] = &[
         "Not affiliated with Mojang or Microsoft",
     ),
     ("attribute.modifier.plus.0", "+%s %s"),
+    // The connection failure texts: `connect.failed` and the `disconnect.*`
+    // reasons exist in the files; "Unknown host" is hard-coded by
+    // `GuiConnecting` and the two socket wordings are what the JVM prints for
+    // a refused or timed out connect.
+    ("connect.failed", "Failed to connect to the server"),
+    ("disconnect.genericReason", "%s"),
+    ("disconnect.timeout", "Timed out"),
+    ("disconnect.endOfStream", "End of stream"),
+    // The statistics and achievements screens.
+    ("multiplayer.downloadingStats", "Downloading statistics..."),
+    ("stat.generalButton", "General"),
+    ("stat.blocksButton", "Blocks"),
+    ("stat.itemsButton", "Items"),
+    ("stat.mobsButton", "Mobs"),
+    ("stat.crafted", "Times Crafted"),
+    ("stat.used", "Times Used"),
+    ("stat.mined", "Times Mined"),
+    ("stat.depleted", "Times Depleted"),
+    ("achievement.requires", "You need '%1$s' first"),
+    ("achievement.unknown", "???"),
+    ("achievement.taken", "Taken!"),
+    ("achievement.get", "Achievement get!"),
+    ("umicraft.connect.unknownHost", "Unknown host"),
+    (
+        "umicraft.connect.refused",
+        "Connection refused: no further information",
+    ),
+    (
+        "umicraft.connect.timedOut",
+        "Connection timed out: no further information",
+    ),
+    (
+        "umicraft.connect.onlineMode",
+        "This server needs a premium login, which Umicraft does not support yet",
+    ),
 ];
 
 #[cfg(test)]

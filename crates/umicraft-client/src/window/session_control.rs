@@ -12,6 +12,7 @@
 
 use super::App;
 use crate::args::Args;
+use crate::connection_end::{ConnectionEnd, EndPhase};
 use crate::game::{GameEvent, Session};
 use crate::network::NetworkConfig;
 use crate::options::Options;
@@ -26,7 +27,7 @@ pub(super) enum Lifecycle {
     /// The server placed the player: leave the connecting screen.
     StartPlaying,
     /// The session ended (a kick or a connection error) for this reason.
-    Disconnect(String),
+    Disconnect(ConnectionEnd),
 }
 
 /// Decides the next step from the current screen, whether the player has
@@ -36,9 +37,13 @@ pub(super) enum Lifecycle {
 /// placement still shows the reason. A placement only matters while the
 /// connecting screen is up; the server places the player again after a
 /// respawn or a teleport and that must not close the game menu.
-pub(super) fn lifecycle_step(screen: Screen, placed: bool, ended: Option<&str>) -> Lifecycle {
-    if let Some(reason) = ended {
-        Lifecycle::Disconnect(reason.to_string())
+pub(super) fn lifecycle_step(
+    screen: Screen,
+    placed: bool,
+    ended: Option<&ConnectionEnd>,
+) -> Lifecycle {
+    if let Some(end) = ended {
+        Lifecycle::Disconnect(end.clone())
     } else if screen == Screen::Connecting && placed {
         Lifecycle::StartPlaying
     } else {
@@ -108,7 +113,10 @@ impl App {
                 self.send_particle_setting();
                 self.set_screen(Screen::Connecting);
             }
-            Err(error) => self.show_disconnected(&error.to_string()),
+            Err(error) => self.show_disconnected(&ConnectionEnd::other(
+                EndPhase::Connecting,
+                error.to_string(),
+            )),
         }
     }
 
@@ -131,10 +139,11 @@ impl App {
         self.set_screen(Screen::ServerList);
     }
 
-    /// Ends the session and shows the disconnected screen with `reason`.
-    pub(super) fn show_disconnected(&mut self, reason: &str) {
+    /// Ends the session and shows the disconnected screen for `end`, in the
+    /// player's language.
+    pub(super) fn show_disconnected(&mut self, end: &ConnectionEnd) {
         self.stop_session();
-        self.menu.set_disconnected(reason);
+        self.menu.set_disconnected(end, &self.lang);
         self.set_screen(Screen::Disconnected);
     }
 
@@ -143,7 +152,7 @@ impl App {
         match step {
             Lifecycle::Stay => {}
             Lifecycle::StartPlaying => self.set_screen(Screen::None),
-            Lifecycle::Disconnect(reason) => self.show_disconnected(&reason),
+            Lifecycle::Disconnect(end) => self.show_disconnected(&end),
         }
     }
 
@@ -213,12 +222,20 @@ mod tests {
     #[test]
     fn the_end_of_the_session_wins_over_the_placement() {
         assert_eq!(
-            lifecycle_step(Screen::Connecting, true, Some("kicked")),
-            Lifecycle::Disconnect("kicked".to_string())
+            lifecycle_step(
+                Screen::Connecting,
+                true,
+                Some(&ConnectionEnd::kicked("kicked"))
+            ),
+            Lifecycle::Disconnect(ConnectionEnd::kicked("kicked"))
         );
         assert_eq!(
-            lifecycle_step(Screen::None, false, Some("timed out")),
-            Lifecycle::Disconnect("timed out".to_string())
+            lifecycle_step(
+                Screen::None,
+                false,
+                Some(&ConnectionEnd::kicked("timed out"))
+            ),
+            Lifecycle::Disconnect(ConnectionEnd::kicked("timed out"))
         );
     }
 

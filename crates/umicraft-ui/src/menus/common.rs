@@ -199,6 +199,19 @@ pub(crate) fn wheel_scrolled(
     content_height: f32,
     offset: f32,
 ) -> f32 {
+    wheel_scrolled_by(ui, gui, view, content_height, offset, WHEEL_STEP)
+}
+
+/// [`wheel_scrolled`] with the notch size of a list whose rows are `2 * step`
+/// units high (`GuiSlot.handleMouseInput` scrolls `slotHeight / 2` per notch).
+pub(crate) fn wheel_scrolled_by(
+    ui: &Ui,
+    gui: &Gui,
+    view: Rect,
+    content_height: f32,
+    offset: f32,
+    step: f32,
+) -> f32 {
     let mut scroll = ScrollArea::new(Rect::new(0.0, 0.0, 1.0, view.height / gui.scale));
     scroll.set_content_height(content_height);
     scroll.set_offset(offset);
@@ -212,7 +225,7 @@ pub(crate) fn wheel_scrolled(
                 _ => None,
             })
             .sum();
-        scroll.scroll_by(notches * WHEEL_STEP);
+        scroll.scroll_by(notches * step);
     }
     scroll.offset()
 }

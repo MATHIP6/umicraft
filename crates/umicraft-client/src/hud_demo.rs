@@ -27,15 +27,21 @@ use umicraft_render::{
     SpriteSheet,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
-use umicraft_ui::menus::{MenuArt, PanoramaTextures, PanoramaView};
+use umicraft_ui::menus::{
+    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab,
+};
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
 
 use crate::args::{Args, HUD_VIEWS};
+use crate::connection_end::{ConnectionEnd, EndPhase};
+use crate::dials::DialFrames;
 use crate::error::ClientError;
 use crate::game::hud_after;
 use crate::hud_demo_panorama;
 use crate::hud_demo_servers;
+use crate::hud_demo_stats;
+use crate::item_icons::{IconSource, ItemResources, ItemView};
 use crate::menu_flow::{MenuContext, MenuFlow};
 use crate::options::{Action, Options};
 use crate::options_screen::{Catalog, OptionsScreen};
@@ -269,6 +275,22 @@ fn run_options(
     (screen, output.draw_list)
 }
 
+/// Whether `view` is a scene of the menu flow.
+fn is_menu_view(view: &str) -> bool {
+    matches!(
+        view,
+        "title"
+            | "servers"
+            | "server-edit"
+            | "connecting"
+            | "disconnected"
+            | "stats"
+            | "stats-blocks"
+            | "stats-items"
+            | "achievements"
+    )
+}
+
 /// The title screen, the server list or the Add Server form of the menu flow.
 /// The demo opens no socket: the sample entries get scripted ping results (an
 /// online server with a description, a full one with an icon, an unreachable
@@ -278,7 +300,7 @@ fn menu_scene(
     (width, height): (u32, u32),
     atlas: &FontAtlas,
     (sheets, art): (&HudSheets, MenuArt),
-    (panorama, gui_atlas): (Option<PanoramaTextures>, Option<&GuiAtlas>),
+    (panorama, gui_atlas, items): (Option<PanoramaTextures>, Option<&GuiAtlas>, ItemView<'_>),
 ) -> (Demo, Option<PanoramaView>) {
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     let mut ui = Ui::new(viewport);
@@ -298,17 +320,46 @@ fn menu_scene(
     let screen = match view {
         "title" => Screen::Title,
         "server-edit" => Screen::ServerEdit,
+        "connecting" => Screen::Connecting,
+        "disconnected" => Screen::Disconnected,
+        "stats" | "stats-blocks" | "stats-items" => Screen::Stats,
+        "achievements" => Screen::Achievements,
         _ => Screen::ServerList,
     };
     let lang = crate::language::load(Lang::DEFAULT_CODE);
     if screen == Screen::ServerEdit {
         flow.begin_add(&lang);
     }
+    let stats = hud_demo_stats::sample_statistics();
+    if screen == Screen::Disconnected {
+        let refused = ConnectionEnd::from_error(
+            EndPhase::Connecting,
+            &umicraft_net::NetError::Io(std::io::ErrorKind::ConnectionRefused.into()),
+        );
+        flow.set_disconnected(&refused, &lang);
+    }
     let context = MenuContext {
         version: "Umicraft",
-        stats: &[],
+        connect_stage: ConnectStage::LoggingIn,
+        stats_revision: 1,
+        stats_loading: false,
+        items,
+        inventory_key: "E",
+        player_hash: 0,
+        stats: &stats,
         panorama,
     };
+    if let Some(tab) = match view {
+        "stats-blocks" => Some(StatsTab::Blocks),
+        "stats-items" => Some(StatsTab::Items),
+        _ => None,
+    } {
+        // One frame with a click on the tab button, as the player would.
+        ui.begin_frame(viewport, click(stats_tab_rect(viewport, tab)));
+        flow.show(screen, &mut ui, atlas, &lang, &context);
+        let output = ui.end_frame();
+        ui.recycle_output(output);
+    }
     ui.begin_frame(viewport, UiInput::default());
     let frame = flow.show(screen, &mut ui, atlas, &lang, &context);
     let output = ui.end_frame();
@@ -383,8 +434,11 @@ fn build(
                 scene: draw_list,
             }
         }
-        "title" | "servers" | "server-edit" => {
-            menu_scene(view, (width, height), atlas, (sheets, art), (None, None)).0
+        "title" | "servers" | "server-edit" | "connecting" | "disconnected" | "stats"
+        | "stats-blocks" | "stats-items" | "achievements" => {
+            let items = ItemView::new(None, DialFrames::default());
+            let scene = (None, None, items);
+            menu_scene(view, (width, height), atlas, (sheets, art), scene).0
         }
         "video" | "chat-options" | "sounds" | "skin" | "language" | "packs" => {
             let mut options = Options::default();
@@ -552,13 +606,17 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     } else {
         font.source
     };
-    let (demo, panorama) = if matches!(view, "title" | "servers" | "server-edit") {
+    let items = hud_demo_stats::needs_items(view)
+        .then(|| hud_demo_stats::load_items(&mut renderer))
+        .flatten();
+    let (demo, panorama) = if is_menu_view(view) {
         let textures = if view == "title" {
             hud_demo_panorama::upload(args, &mut renderer)
         } else {
             None
         };
-        let scene = (textures, gui_atlas.as_ref());
+        let icons = ItemView::new(items.as_deref(), DialFrames::default());
+        let scene = (textures, gui_atlas.as_ref(), icons);
         menu_scene(view, viewport, &installed.atlas, (&sheets, art), scene)
     } else {
         (
@@ -568,7 +626,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     };
     print!("{}", demo.render(view, viewport, source));
     renderer.set_panorama(panorama);
-    render_scene(&mut renderer, &demo, viewport)?;
+    render_scene(&mut renderer, &demo, viewport, items.as_deref())?;
     let image = renderer.read_pixels()?;
     write_png(path, &image.rgba, image.width, image.height)?;
     println!(
@@ -585,15 +643,23 @@ fn render_scene(
     renderer: &mut Renderer,
     demo: &Demo,
     viewport: (u32, u32),
+    items: Option<&ItemResources>,
 ) -> Result<(), ClientError> {
     let camera = Camera::default();
     let overlay = Overlay::new(viewport.0, viewport.1);
-    renderer.render_with_ui(
-        &camera,
-        &overlay,
-        &demo.scene,
-        &mut umicraft_render::NoIcons,
-    )?;
+    match items {
+        Some(items) => {
+            renderer.render_with_ui(&camera, &overlay, &demo.scene, &mut IconSource(items))?;
+        }
+        None => {
+            renderer.render_with_ui(
+                &camera,
+                &overlay,
+                &demo.scene,
+                &mut umicraft_render::NoIcons,
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -719,7 +785,7 @@ mod tests {
             }
         }
         let demo = build(view, (640, 360), &installed.atlas, (&sheets, art));
-        render_scene(&mut renderer, &demo, (640, 360)).expect("render");
+        render_scene(&mut renderer, &demo, (640, 360), None).expect("render");
         let image = renderer.read_pixels().expect("readback");
         let background = [image.rgba[0], image.rgba[1], image.rgba[2]];
         image

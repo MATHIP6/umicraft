@@ -8,16 +8,22 @@
 
 use std::time::Duration;
 
+use umicraft_core::lang::Lang;
 use umicraft_ui::game_menu::GameMenuAction;
+use umicraft_ui::menus::{draw_toast, Toast};
+use umicraft_ui::{FontAtlas, Ui};
 use winit::event::KeyEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 
 use super::{upload_gui_atlas, App};
+use crate::achievements_view::{toast_content, AchievementsContext};
 use crate::game::GameEvent;
+use crate::item_icons::ItemView;
 use crate::menu_flow::MenuCommand;
 use crate::options_screen::Page;
 use crate::screen::Screen;
+use crate::world_view::WorldView;
 
 /// The version line of the title screen.
 pub(super) const VERSION_LINE: &str = concat!("Umicraft ", env!("CARGO_PKG_VERSION"));
@@ -70,10 +76,18 @@ impl App {
                 self.capture_mouse(true);
             }
             GameMenuAction::Options => self.open_options(Page::Main),
-            // Out of P10: vanilla opens GuiAchievements here (docs/parity.md).
-            GameMenuAction::Achievements => {}
+            GameMenuAction::Achievements => {
+                self.send_event(GameEvent::RequestStats);
+                if let Some(world) = self.world.as_mut() {
+                    world.expect_stats();
+                }
+                self.set_screen(Screen::Achievements);
+            }
             GameMenuAction::Stats => {
                 self.send_event(GameEvent::RequestStats);
+                if let Some(world) = self.world.as_mut() {
+                    world.expect_stats();
+                }
                 self.set_screen(Screen::Stats);
             }
             GameMenuAction::Quit => self.disconnect(),
@@ -112,4 +126,33 @@ impl App {
             self.save_options();
         }
     }
+}
+
+/// Draws the "Achievement get!" plaque over the current screen while the
+/// toast of the last unlocked achievement lasts (`GuiAchievement`).
+pub(super) fn draw_achievement_toast(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    world: Option<&WorldView>,
+    (lang, items): (&Lang, ItemView<'_>),
+) {
+    let Some((id, since)) = world.and_then(WorldView::toast) else {
+        return;
+    };
+    let context = AchievementsContext {
+        lang,
+        items,
+        inventory_key: "",
+    };
+    let Some((name, icon)) = toast_content(id, context) else {
+        return;
+    };
+    let toast = Toast {
+        title: lang.tr("achievement.get"),
+        name: &name,
+        icon,
+        elapsed: since.elapsed(),
+    };
+    let art = ui.menu_art().achievements;
+    draw_toast(ui, atlas, &toast, art.as_ref());
 }

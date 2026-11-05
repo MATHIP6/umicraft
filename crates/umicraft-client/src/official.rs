@@ -15,7 +15,7 @@ use umicraft_assets::install::OfficialInstall;
 use umicraft_assets::manifest::VersionJson;
 use umicraft_assets::AssetsError;
 use umicraft_render::{HudSheets, SpriteSheet};
-use umicraft_ui::menus::MenuArt;
+use umicraft_ui::menus::{AchievementArt, MapTile, MenuArt};
 
 /// The only game version the client supports (protocol 47, spec §1.3).
 pub(crate) const VERSION_ID: &str = "1.8.8";
@@ -123,10 +123,23 @@ pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt
     MenuArt {
         dirt: sheet("options_background"),
         logo: sheet("title/minecraft"),
+        stats_icons: sheet("container/stats_icons"),
+        achievements: achievement_art(&sheet),
         icons: sheet("icons"),
         unknown_server: sheet("misc/unknown_server"),
         server_selection: sheet("server_selection"),
     }
+}
+
+/// The achievement screen's textures: the background and all eight map
+/// tiles, or nothing when one is missing.
+fn achievement_art(sheet: &dyn Fn(&str) -> Option<SpriteSheet>) -> Option<AchievementArt> {
+    let background = sheet("achievement/achievement_background")?;
+    let mut tiles = [background; 8];
+    for (slot, name) in tiles.iter_mut().zip(MapTile::TEXTURES) {
+        *slot = sheet(&format!("blocks/{name}"))?;
+    }
+    Some(AchievementArt { background, tiles })
 }
 
 /// The client jar path of the installation, with a typed missing-file error.

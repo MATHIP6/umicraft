@@ -42,6 +42,11 @@ pub struct MenuArt {
     pub dirt: Option<SpriteSheet>,
     /// `textures/gui/title/minecraft.png` (256x256), the title logo.
     pub logo: Option<SpriteSheet>,
+    /// `textures/gui/container/stats_icons.png` (128x128), the sprites of the
+    /// statistics tables.
+    pub stats_icons: Option<SpriteSheet>,
+    /// The achievement screen's background texture and map tiles.
+    pub achievements: Option<super::achievements::AchievementArt>,
     /// `textures/gui/icons.png` (256x256): the latency cells of the server list.
     pub icons: Option<SpriteSheet>,
     /// `textures/misc/unknown_server.png` (64x64): the icon of a server
@@ -183,6 +188,7 @@ mod tests {
     fn with_dirt() -> MenuArt {
         MenuArt {
             dirt: Some(DIRT),
+            logo: None,
             ..MenuArt::default()
         }
     }

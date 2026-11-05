@@ -81,13 +81,29 @@ pub struct TextStyle {
     pub scale: f32,
     /// Straight-alpha RGBA colour.
     pub color: Color,
+    /// Clockwise turn in radians around the text origin (the top-left
+    /// corner of its first glyph); `0.0` draws upright text. Used by the
+    /// tilted splash of the title screen (`GuiMainMenu` rotates by -20
+    /// degrees).
+    pub rotation: f32,
 }
 
 impl TextStyle {
-    /// Creates a text style.
+    /// Creates an upright text style.
     #[must_use]
     pub const fn new(scale: f32, color: Color) -> Self {
-        Self { scale, color }
+        Self {
+            scale,
+            color,
+            rotation: 0.0,
+        }
+    }
+
+    /// The same style turned by `radians` around the text origin.
+    #[must_use]
+    pub const fn rotated(mut self, radians: f32) -> Self {
+        self.rotation = radians;
+        self
     }
 }
 
@@ -96,6 +112,7 @@ impl Default for TextStyle {
         Self {
             scale: 1.0,
             color: [1.0; 4],
+            rotation: 0.0,
         }
     }
 }

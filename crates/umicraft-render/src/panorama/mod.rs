@@ -12,21 +12,22 @@
 //! renderer draws it right after the sky, the world passes behind it fail
 //! their depth test and the menu draws on top.
 //!
-//! # Deviation
+//! # Blur
 //!
-//! Vanilla draws the cube 64 times with sub-pixel offsets at falling alpha and
-//! then blends seven shifted copies of the 256 x 256 capture
-//! (`rotateAndBlurSkybox`). That blur is **skipped**: the cube is drawn once
-//! with bilinear filtering, which already softens the strongly magnified
-//! 256 px faces. The rotation, the field of view and the crop are exact.
+//! By default the cube is drawn the way `rotateAndBlurSkybox` does: 64
+//! jittered passes and seven box-filter passes on a 256 x 256 capture (see
+//! [`blur`]). [`PanoramaRenderer::set_blur`] switches back to the single
+//! sharp pass straight to the screen, which has the same rotation, field of
+//! view and crop.
 
+mod blur;
 mod view;
 
-use glam::Mat4;
 use umicraft_ui::menus::{PanoramaTextures, PanoramaView};
 use wgpu::util::DeviceExt;
 
 use crate::sky::SkyImage;
+use blur::{BlurChain, PASS_UNIFORM};
 use view::{clip_from_cube, cube_vertices, FaceVertex, FACE_VERTICES};
 
 /// Number of faces of the panorama cube.
@@ -42,6 +43,10 @@ pub(crate) struct PanoramaRenderer {
     faces: Option<Uploaded>,
     generation: u64,
     active: bool,
+    blur: BlurChain,
+    blur_enabled: bool,
+    /// Distance between two pass uniforms in the uniform buffer.
+    stride: u64,
 }
 
 /// The uploaded faces and the ids that were handed out for them.
@@ -63,7 +68,12 @@ impl PanoramaRenderer {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
+        let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment);
+        let stride = PASS_UNIFORM.next_multiple_of(alignment);
         Self {
+            blur: BlurChain::new(device, &pipeline_layout, &shader, format),
+            blur_enabled: true,
+            stride,
             pipeline: pipeline(device, &pipeline_layout, &shader, format),
             sampler: device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("panorama sampler"),
@@ -73,7 +83,7 @@ impl PanoramaRenderer {
             }),
             uniform_buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("panorama uniforms"),
-                size: std::mem::size_of::<Mat4>() as u64,
+                size: stride * u64::from(blur::CUBE_PASSES),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
@@ -114,7 +124,11 @@ impl PanoramaRenderer {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: self.uniform_buffer.as_entire_binding(),
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &self.uniform_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(PASS_UNIFORM),
+                        }),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -149,25 +163,51 @@ impl PanoramaRenderer {
         if view.textures != faces.textures {
             return;
         }
-        let matrix = clip_from_cube(target.0, target.1, view.rotation);
-        queue.write_buffer(
-            &self.uniform_buffer,
-            0,
-            bytemuck::cast_slice(&matrix.to_cols_array()),
-        );
+        if self.blur_enabled {
+            let rotation = (view.rotation, target);
+            self.blur
+                .update(queue, &self.uniform_buffer, self.stride, rotation);
+        } else {
+            let matrix = clip_from_cube(target.0, target.1, view.rotation);
+            let mut slot = [0u8; PASS_UNIFORM as usize];
+            slot[..64].copy_from_slice(bytemuck::cast_slice(&matrix.to_cols_array()));
+            slot[64..].copy_from_slice(bytemuck::cast_slice(&[1.0f32, 0.0, 0.0, 0.0]));
+            queue.write_buffer(&self.uniform_buffer, 0, &slot);
+        }
         self.active = true;
     }
 
-    /// Draws the six faces when a view is set.
+    /// Chooses between the blurred capture (default) and the single sharp
+    /// pass; takes effect with the next [`Self::set_view`].
+    pub(crate) fn set_blur(&mut self, enabled: bool) {
+        self.blur_enabled = enabled;
+    }
+
+    /// Renders the capture and its blur before the main pass; nothing without
+    /// a view or with the blur off.
+    pub(crate) fn prepare(&self, encoder: &mut wgpu::CommandEncoder) {
+        let (true, true, Some(faces)) = (self.active, self.blur_enabled, self.faces.as_ref())
+        else {
+            return;
+        };
+        let cube = (&self.vertex_buffer, &faces.bind_groups[..], self.stride);
+        self.blur.encode(encoder, cube);
+    }
+
+    /// Draws the panorama in the main pass when a view is set.
     pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         let (true, Some(faces)) = (self.active, self.faces.as_ref()) else {
             return;
         };
+        if self.blur_enabled {
+            self.blur.blit(pass);
+            return;
+        }
         pass.set_pipeline(&self.pipeline);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         for (index, bind_group) in faces.bind_groups.iter().enumerate() {
             let first = index as u32 * FACE_VERTICES;
-            pass.set_bind_group(0, bind_group, &[]);
+            pass.set_bind_group(0, bind_group, &[0]);
             pass.draw(first..first + FACE_VERTICES, 0..1);
         }
     }
@@ -186,11 +226,11 @@ fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         entries: &[
             entry(
                 0,
-                wgpu::ShaderStages::VERTEX,
+                wgpu::ShaderStages::VERTEX_FRAGMENT,
                 wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<Mat4>() as u64),
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(PASS_UNIFORM),
                 },
             ),
             entry(

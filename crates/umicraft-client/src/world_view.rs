@@ -30,9 +30,12 @@ use umicraft_render::{
     BorderView, Camera, FogContext, FogMedium, HudState, OutlineBox, PrecipitationField,
     RenderEnvironment, Renderer, ScreenOverlays,
 };
+use umicraft_ui::menus::ConnectStage;
 use umicraft_world::{ChunkPos, LightLevel};
 
+use crate::achievements_view::newly_unlocked;
 use crate::block_entity_render::push_pot_plants;
+use crate::connection_end::ConnectionEnd;
 use crate::cracks::{crack_mesh, Crack, STAGES};
 use crate::creative_view::CreativeView;
 use crate::error::ClientError;
@@ -89,7 +92,19 @@ pub struct WorldView {
     status: GameStatus,
     /// The newest statistic counters the server sent, by name.
     stats: Vec<(String, i32)>,
-    ended: Option<String>,
+    /// How many `Statistics` answers arrived (never reset).
+    stats_revision: u64,
+    /// Whether a statistics request is waiting for its answer.
+    stats_loading: bool,
+    /// Whether a `Statistics` answer arrived before: only later ones can
+    /// unlock an achievement worth a toast (`field_147308_k`).
+    stats_baseline: bool,
+    /// The newest achievement the server unlocked and when it was seen.
+    toast: Option<(&'static str, Instant)>,
+    /// Why the session ended, once it has.
+    ended: Option<ConnectionEnd>,
+    /// How far the connection attempt is, for the connecting screen.
+    connect_stage: ConnectStage,
     frames: usize,
     /// Active living entities interpolation data from the latest frame.
     entities: Arc<[EntityFrameData]>,
@@ -150,6 +165,11 @@ impl WorldView {
             status: GameStatus::default(),
             stats: Vec::new(),
             ended: None,
+            stats_revision: 0,
+            stats_loading: false,
+            stats_baseline: false,
+            toast: None,
+            connect_stage: ConnectStage::Connecting,
             frames: 0,
             entities: Arc::from([]),
             local_body: None,
@@ -320,6 +340,30 @@ impl WorldView {
         &self.stats
     }
 
+    /// How many statistics answers arrived, to tell a new one from the last.
+    #[must_use]
+    pub fn stats_revision(&self) -> u64 {
+        self.stats_revision
+    }
+
+    /// Whether a statistics request has no answer yet.
+    #[must_use]
+    pub fn stats_loading(&self) -> bool {
+        self.stats_loading
+    }
+
+    /// The achievement the server unlocked last and when, for its toast.
+    #[must_use]
+    pub fn toast(&self) -> Option<(&'static str, Instant)> {
+        self.toast
+    }
+
+    /// Notes that a statistics request was sent: the screen shows the
+    /// download text until the answer arrives.
+    pub fn expect_stats(&mut self) {
+        self.stats_loading = true;
+    }
+
     /// Whether the server placed the player: the world is ready to be shown.
     #[must_use]
     pub fn placed(&self) -> bool {
@@ -328,8 +372,14 @@ impl WorldView {
 
     /// Why the session ended, once it has.
     #[must_use]
-    pub fn ended(&self) -> Option<&str> {
-        self.ended.as_deref()
+    pub fn ended(&self) -> Option<&ConnectionEnd> {
+        self.ended.as_ref()
+    }
+
+    /// How far the connection attempt has come.
+    #[must_use]
+    pub fn connect_stage(&self) -> ConnectStage {
+        self.connect_stage
     }
 
     /// The chunks whose current mesh has faces.
@@ -459,8 +509,20 @@ impl WorldView {
             RenderEvent::Creative(view) => self.creative = Some(*view),
             RenderEvent::TextScreen(request) => self.text_request = Some(*request),
             RenderEvent::Status(status) => self.status = *status,
-            RenderEvent::Stats(stats) => self.stats = stats,
-            RenderEvent::Ended(reason) => self.ended = Some(reason),
+            RenderEvent::Stats(stats) => {
+                if self.stats_baseline {
+                    let unlocked = newly_unlocked(&self.stats, &stats);
+                    if let Some(id) = unlocked.last() {
+                        self.toast = Some((id, Instant::now()));
+                    }
+                }
+                self.stats_baseline = true;
+                self.stats = stats;
+                self.stats_revision += 1;
+                self.stats_loading = false;
+            }
+            RenderEvent::Connect(stage) => self.connect_stage = stage,
+            RenderEvent::Ended(end) => self.ended = Some(end),
             RenderEvent::Reset => self.reset(target),
         }
     }
@@ -517,7 +579,11 @@ impl WorldView {
         self.creative = None;
         self.status = GameStatus::default();
         self.stats.clear();
+        self.stats_loading = false;
+        self.stats_baseline = false;
+        self.toast = None;
         self.ended = None;
+        self.connect_stage = ConnectStage::Connecting;
         self.frames = 0;
         self.local_body = None;
         self.text_request = None;
@@ -894,7 +960,7 @@ mod tests {
             RenderEvent::Hud(Box::new(hud)),
             RenderEvent::Status(Box::new(status)),
             RenderEvent::Stats(vec![("stat.jump".to_string(), 4)]),
-            RenderEvent::Ended("kicked".to_string()),
+            RenderEvent::Ended(ConnectionEnd::kicked("kicked")),
         ] {
             harness.frames.0.send(event).expect("frame queue");
         }
@@ -903,7 +969,57 @@ mod tests {
         assert_eq!(harness.world_view.status().chunks, 3);
         assert!(harness.world_view.placed());
         assert_eq!(harness.world_view.stats(), [("stat.jump".to_string(), 4)]);
-        assert_eq!(harness.world_view.ended(), Some("kicked"));
+        assert_eq!(
+            harness.world_view.ended(),
+            Some(&ConnectionEnd::kicked("kicked"))
+        );
+    }
+
+    #[test]
+    fn only_an_achievement_unlocked_after_the_first_answer_makes_a_toast() {
+        let mut harness = Harness::new();
+        let answer = |names: &[&str]| {
+            RenderEvent::Stats(
+                names
+                    .iter()
+                    .map(|name| (format!("achievement.{name}"), 1))
+                    .collect(),
+            )
+        };
+        harness
+            .frames
+            .0
+            .send(answer(&["openInventory"]))
+            .expect("queue");
+        harness.sync();
+        assert!(
+            harness.world_view.toast().is_none(),
+            "the first answer is the baseline"
+        );
+        harness
+            .frames
+            .0
+            .send(answer(&["openInventory", "mineWood"]))
+            .expect("queue");
+        harness.sync();
+        assert_eq!(
+            harness.world_view.toast().map(|(id, _)| id),
+            Some("mineWood")
+        );
+        harness.world_view.clear_session(&mut harness.target);
+        assert!(harness.world_view.toast().is_none());
+    }
+
+    #[test]
+    fn the_connect_stage_follows_the_event_and_resets_with_the_session() {
+        let mut harness = Harness::new();
+        assert_eq!(harness.world_view.connect_stage(), ConnectStage::Connecting);
+        let event = RenderEvent::Connect(ConnectStage::LoggingIn);
+        harness.frames.0.send(event).expect("frame queue");
+        harness.sync();
+        assert_eq!(harness.world_view.connect_stage(), ConnectStage::LoggingIn);
+        harness.world_view.clear_session(&mut harness.target);
+        assert_eq!(harness.world_view.connect_stage(), ConnectStage::Connecting);
     }
 
     #[test]
@@ -921,7 +1037,7 @@ mod tests {
             })),
             RenderEvent::Status(Box::new(status)),
             RenderEvent::Stats(vec![("stat.jump".to_string(), 4)]),
-            RenderEvent::Ended("kicked".to_string()),
+            RenderEvent::Ended(ConnectionEnd::kicked("kicked")),
         ] {
             harness.frames.0.send(event).expect("frame queue");
         }

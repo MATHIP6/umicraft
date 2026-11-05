@@ -37,6 +37,7 @@
 //! for later milestones (tab list, scoreboard, effects, border, titles) in
 //! [`server`].
 
+pub mod achievements;
 mod block_data;
 pub mod chat;
 pub mod collision;

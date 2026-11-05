@@ -52,6 +52,8 @@ pub enum Screen {
     Disconnected,
     /// The statistics, opened from the game menu.
     Stats,
+    /// The achievements, opened from the game menu.
+    Achievements,
 }
 
 impl Screen {
@@ -68,6 +70,7 @@ impl Screen {
                 | Self::Book
                 | Self::Debug
                 | Self::Stats
+                | Self::Achievements
         ) || self.is_menu()
     }
 
@@ -120,7 +123,7 @@ impl Screen {
             Self::ServerEdit | Self::ConfirmDelete | Self::Connecting | Self::Disconnected => {
                 Self::ServerList
             }
-            Self::Stats => Self::GameMenu,
+            Self::Stats | Self::Achievements => Self::GameMenu,
         }
     }
 
@@ -158,6 +161,7 @@ mod tests {
             Screen::Connecting,
             Screen::Disconnected,
             Screen::Stats,
+            Screen::Achievements,
         ] {
             assert!(screen.blocks_game_input(), "{screen:?} must own the input");
         }
@@ -212,6 +216,7 @@ mod tests {
             Screen::Connecting,
             Screen::Disconnected,
             Screen::Stats,
+            Screen::Achievements,
         ] {
             assert!(screen.uses_ui(), "{screen:?} is drawn by the UI");
         }
@@ -235,6 +240,7 @@ mod tests {
             Screen::ServerList
         );
         assert_eq!(Screen::Stats.after_escape(origin), Screen::GameMenu);
+        assert_eq!(Screen::Achievements.after_escape(origin), Screen::GameMenu);
         assert_eq!(Screen::Title.after_escape(origin), Screen::Title);
     }
 

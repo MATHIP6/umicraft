@@ -11,6 +11,7 @@
 //! [`umicraft_core::lang::Lang`]; positions are the MCP ones in GUI units
 //! times the GUI scale.
 
+pub mod achievements;
 pub mod background;
 mod common;
 pub mod confirm;
@@ -25,6 +26,11 @@ mod server_row;
 pub mod stats;
 pub mod title;
 
+pub use achievements::{
+    achievements_done_rect, AchievementArt, AchievementNode, AchievementsData, AchievementsOutcome,
+    AchievementsScreen, MapTile, Progress, Toast, TOAST_DURATION,
+};
+pub use achievements::{draw_toast, toast_offset};
 pub use background::{
     draw_dirt, draw_list_background, draw_list_overlay, draw_menu_background, MenuArt,
 };
@@ -43,7 +49,10 @@ pub use server_list::{
     latency_level, server_list_layout, RowStatus, ServerListLayout, ServerListOutcome,
     ServerListScreen, ServerRow,
 };
-pub use stats::{stats_done_rect, StatRow, StatsOutcome, StatsScreen};
+pub use stats::{
+    stats_done_rect, stats_tab_rect, MobRow, ObjectRow, StatCell, StatRow, StatsData, StatsOutcome,
+    StatsScreen, StatsTab,
+};
 pub use title::{
     title_layout, TitleInfo, TitleLayout, TitleOutcome, TitleScreen, LOGO_TEXT, SPLASHES,
 };

@@ -87,7 +87,7 @@ mod zip;
 
 pub use animation::TextureAnimation;
 pub use atlas::BlockAtlas;
-pub use client_resources::{ClientResources, GlintTexture};
+pub use client_resources::{ClientResources, GlintTexture, ACHIEVEMENT_TILES};
 pub use colormap::{BiomeColormaps, Colormap};
 pub use dial::{DialKind, DialSprite};
 pub use error::{AssetsError, AssetsResult};

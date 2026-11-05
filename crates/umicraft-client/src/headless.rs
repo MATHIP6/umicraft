@@ -120,14 +120,15 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                     report.breaks_acknowledged = report.status.breaks_acknowledged;
                     report.placements_acknowledged = report.status.placements_acknowledged;
                 }
-                RenderEvent::Ended(reason) => {
-                    report.error = Some(reason);
+                RenderEvent::Ended(end) => {
+                    report.error = Some(end.to_string());
                 }
                 RenderEvent::Inventory(_)
                 | RenderEvent::Creative(_)
                 | RenderEvent::TextScreen(_)
                 | RenderEvent::Look(_)
                 | RenderEvent::Stats(_)
+                | RenderEvent::Connect(_)
                 | RenderEvent::Reset => {}
             }
             if report.error.is_some() {

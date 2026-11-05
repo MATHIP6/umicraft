@@ -5,8 +5,10 @@
 // pictures come from the user's installation at runtime (spec section 3).
 
 struct Panorama {
-    // Projection times the rotation of the current frame.
+    // Projection times the rotation of the current pass.
     clip_from_cube: mat4x4<f32>,
+    // x: the opacity of the pass (`255 / (j + 1)` of `drawPanorama`).
+    alpha: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> panorama: Panorama;
@@ -36,5 +38,5 @@ fn vs_main(in: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(textureSample(face, face_sampler, in.uv).rgb, 1.0);
+    return vec4<f32>(textureSample(face, face_sampler, in.uv).rgb, panorama.alpha.x);
 }
