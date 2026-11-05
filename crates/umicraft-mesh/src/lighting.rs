@@ -259,7 +259,7 @@ pub(crate) fn quad_light<S: BlockSource + ?Sized>(
 /// face, any other (a cross, an inset torch) by the block's own cell.
 fn lies_on_face_plane(frame: FaceFrame, corners: &[[f32; 3]; 4]) -> bool {
     let first = frame.axis.component(corners[0]);
-    let on_boundary = first < 1.0e-4 || first > 0.9999;
+    let on_boundary = !(1.0e-4..=0.9999).contains(&first);
     on_boundary
         && corners
             .iter()

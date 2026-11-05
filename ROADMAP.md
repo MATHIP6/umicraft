@@ -551,6 +551,11 @@ title panorama (ADR-0045; the vanilla blur is skipped).
   the pause menu, statistics against a real server; screenshot comparison
   with vanilla. `--hud-demo --hud-view title|servers` shows the two screens
   offscreen.
+- Live since F2 (ADR-0048): Smooth Lighting, Mipmap Levels, Other Block
+  Variants, mouse-button bindings with attack/use/pick/drop/screenshot (F2)/
+  fullscreen (F11) bindings, the Snooper page, the Client Settings locale and
+  the incompatible-pack confirmation. Still stored-only or missing: pack
+  icons, Super Secret Settings, Force Unicode Font, Smooth Camera.
 - Out of P10 and inert: Singleplayer, Achievements, Open to LAN, the
   statistics block, item and mob tabs, LAN entries, server icons, SRV lookup.
 
