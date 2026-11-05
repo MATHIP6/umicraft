@@ -24,10 +24,11 @@ pub mod index;
 pub mod limits;
 pub mod music;
 pub mod request;
+pub mod stream;
 pub mod thread;
 
 pub use category::{CategoryVolumes, SoundCategory};
 pub use error::AudioError;
-pub use handle::{channel, AudioHandle, AudioMessage};
+pub use handle::{channel, AudioHandle, AudioMessage, MusicActivity};
 pub use index::{SeededRng, SoundIndex, SoundRng};
 pub use request::{Listener, SoundRequest};

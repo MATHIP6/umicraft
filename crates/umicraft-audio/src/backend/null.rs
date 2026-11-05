@@ -45,6 +45,10 @@ impl AudioBackend for NullBackend {
     fn reap(&mut self) -> Reaped {
         std::mem::take(&mut self.finished)
     }
+
+    fn stop_streaming(&mut self) {
+        self.finished.streaming += std::mem::take(&mut self.playing.streaming);
+    }
 }
 
 #[cfg(test)]
@@ -81,5 +85,20 @@ mod tests {
             }
         );
         assert_eq!(backend.reap(), Reaped::default());
+    }
+
+    #[test]
+    fn stopping_streams_reaps_only_the_streaming_voices() {
+        let mut backend = NullBackend::new();
+        backend.play(voice(false)).expect("null never fails");
+        backend.play(voice(true)).expect("null never fails");
+        backend.stop_streaming();
+        assert_eq!(
+            backend.reap(),
+            Reaped {
+                normal: 0,
+                streaming: 1
+            }
+        );
     }
 }

@@ -73,6 +73,16 @@ impl Mixer {
         self.voices.is_empty()
     }
 
+    /// Removes every streaming voice and reports how many went.
+    pub fn stop_streaming(&mut self) -> Reaped {
+        let before = self.voices.len();
+        self.voices.retain(|voice| !voice.streaming);
+        Reaped {
+            normal: 0,
+            streaming: before - self.voices.len(),
+        }
+    }
+
     /// Fills `out` (interleaved, `channels` per frame) with the mix and removes
     /// the voices that ran out. Channels beyond the first two stay silent.
     pub fn render(&mut self, out: &mut [f32], channels: usize) -> Reaped {
@@ -199,6 +209,17 @@ mod tests {
         let mut out = [0.0; 2];
         mixer.render(&mut out, 1);
         assert_eq!(out, [0.25, 0.0]);
+    }
+
+    #[test]
+    fn stopping_streams_keeps_the_normal_voices() {
+        let mut mixer = Mixer::new(100);
+        let mut music = voice(vec![[0.5, 0.5]; 6], 100);
+        music.streaming = true;
+        mixer.add(music);
+        mixer.add(voice(vec![[0.5, 0.5]; 6], 100));
+        assert_eq!(mixer.stop_streaming().streaming, 1);
+        assert_eq!(mixer.len(), 1);
     }
 
     #[test]

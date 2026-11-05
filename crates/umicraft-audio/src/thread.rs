@@ -83,11 +83,15 @@ where
     F: FnOnce() -> Result<B, AudioError> + Send + 'static,
 {
     let (handle, receiver) = channel(QUEUE_CAPACITY);
+    let music = handle.music_activity();
     let join = Builder::new()
         .name("umicraft-audio".into())
         .spawn(move || match make_backend() {
             Ok(backend) => {
-                run(Engine::new(backend, loader, seed), &receiver);
+                run(
+                    Engine::new(backend, loader, seed).with_music_activity(music),
+                    &receiver,
+                );
             }
             Err(error) => tracing::error!(%error, "audio backend failed to start"),
         })?;

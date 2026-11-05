@@ -6,7 +6,7 @@
 //! hands voices to it through a bounded channel and reads how many ended from
 //! atomics, so neither side ever waits for the other.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::Arc;
 
@@ -28,6 +28,8 @@ struct Ended {
 pub struct CpalBackend {
     voices: SyncSender<Voice>,
     ended: Arc<Ended>,
+    /// Set by `stop_streaming`; the callback ends the streaming voices.
+    stop_streams: Arc<AtomicBool>,
     /// Dropping the stream stops the device, so it is kept alive here.
     _stream: Stream,
 }
@@ -53,6 +55,8 @@ impl CpalBackend {
         let (voices, incoming) = sync_channel::<Voice>(MAX_VOICES);
         let ended = Arc::new(Ended::default());
         let ended_in_callback = Arc::clone(&ended);
+        let stop_streams = Arc::new(AtomicBool::new(false));
+        let stop_in_callback = Arc::clone(&stop_streams);
         let stream = device
             .build_output_stream(
                 config,
@@ -60,13 +64,19 @@ impl CpalBackend {
                     while let Ok(voice) = incoming.try_recv() {
                         mixer.add(voice);
                     }
+                    // After the drain: a voice queued before the stop is stopped too.
+                    let stopped = if stop_in_callback.swap(false, Ordering::AcqRel) {
+                        mixer.stop_streaming().streaming
+                    } else {
+                        0
+                    };
                     let reaped = mixer.render(data, channels);
                     ended_in_callback
                         .normal
                         .fetch_add(reaped.normal, Ordering::Relaxed);
                     ended_in_callback
                         .streaming
-                        .fetch_add(reaped.streaming, Ordering::Relaxed);
+                        .fetch_add(reaped.streaming + stopped, Ordering::Relaxed);
                 },
                 |error| tracing::warn!(%error, "audio stream error"),
                 None,
@@ -76,6 +86,7 @@ impl CpalBackend {
         Ok(Self {
             voices,
             ended,
+            stop_streams,
             _stream: stream,
         })
     }
@@ -93,5 +104,9 @@ impl AudioBackend for CpalBackend {
             normal: self.ended.normal.swap(0, Ordering::Relaxed),
             streaming: self.ended.streaming.swap(0, Ordering::Relaxed),
         }
+    }
+
+    fn stop_streaming(&mut self) {
+        self.stop_streams.store(true, Ordering::Release);
     }
 }

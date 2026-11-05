@@ -52,6 +52,10 @@ pub trait AudioBackend {
     /// Removes the voices that finished and reports how many, so the caller
     /// can give their sources back.
     fn reap(&mut self) -> Reaped;
+
+    /// Ends every streaming voice (the music track). They are reported by a
+    /// later [`Self::reap`], like voices that ended by themselves.
+    fn stop_streaming(&mut self);
 }
 
 impl AudioBackend for Box<dyn AudioBackend> {
@@ -61,5 +65,9 @@ impl AudioBackend for Box<dyn AudioBackend> {
 
     fn reap(&mut self) -> Reaped {
         (**self).reap()
+    }
+
+    fn stop_streaming(&mut self) {
+        (**self).stop_streaming();
     }
 }
