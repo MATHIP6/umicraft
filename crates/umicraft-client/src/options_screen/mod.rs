@@ -21,6 +21,7 @@ use std::collections::HashMap;
 
 use umicraft_core::lang::Lang;
 use umicraft_ui::game_menu::draw_default_background;
+use umicraft_ui::menus::draw_menu_background;
 use umicraft_ui::widgets::{button_tinted, slider, SliderState};
 use umicraft_ui::{Color, FontAtlas, Rect, Ui};
 use winit::keyboard::KeyCode;
@@ -98,6 +99,9 @@ pub struct OptionsScreen {
     pack_scroll: [f32; 2],
     /// The rectangle of every widget in the last frame, by id.
     rects: HashMap<String, Rect>,
+    /// Whether a world is behind the screen (opened from the game menu):
+    /// the translucent gradient instead of the dirt background.
+    over_world: bool,
 }
 
 impl Default for OptionsScreen {
@@ -119,7 +123,14 @@ impl OptionsScreen {
             pack_draft: Vec::new(),
             pack_scroll: [0.0; 2],
             rects: HashMap::new(),
+            over_world: false,
         }
+    }
+
+    /// Chooses the background: the gradient over a running session (options
+    /// opened from the game menu), the dirt of `drawBackground` otherwise.
+    pub fn set_over_world(&mut self, over_world: bool) {
+        self.over_world = over_world;
     }
 
     /// Gives the language and resource pack pages what they list. The window
@@ -203,7 +214,11 @@ impl OptionsScreen {
         self.rects.clear();
         let gui = Gui::new(ui.viewport());
         let mut outcome = Outcome::default();
-        draw_default_background(ui);
+        if self.over_world {
+            draw_default_background(ui);
+        } else {
+            draw_menu_background(ui);
+        }
         ui.push_id("options");
         match self.page {
             Page::Main => self.show_main(ui, atlas, options, gui, lang, &mut outcome),

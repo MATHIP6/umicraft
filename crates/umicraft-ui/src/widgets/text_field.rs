@@ -15,8 +15,11 @@
 //! character index with the same metrics the renderer uses. W5 passes the
 //! atlas it loaded, or [`FontAtlas::fallback`] before the assets exist.
 //!
-//! The caret is static while the field is focused: the widget has no clock,
-//! because the debug screen must stay a pure function of its state and input.
+//! The look is vanilla's `GuiTextField`: a 1 unit `0xA0A0A0` border around a
+//! black fill (focused or not), white-grey text inset 4 units and a `_` caret
+//! after the text, or a thin bar inside it. The widget has no clock, so the
+//! caret blink (`cursorCounter / 6 % 2`) counts [`TextFieldState::tick`]
+//! calls; a field nobody ticks keeps a steady caret.
 //!
 //! Editing uses the input events of the current frame, in arrival order:
 //!
@@ -39,12 +42,16 @@ use crate::text::FontAtlas;
 use super::style;
 use super::util;
 
-/// Distance between the field border and its text, in pixels.
-const FIELD_PADDING: f32 = 6.0;
-/// Width of the caret in physical pixels.
-const CARET_WIDTH: f32 = 1.5;
-/// Shown while the field is empty and does not own the focus.
-const PLACEHOLDER: &str = "TYPE HERE";
+/// Border width, in GUI units (`drawRect(x - 1, ...)`).
+const BORDER_UNITS: f32 = 1.0;
+/// Distance between the field edge and its text, in GUI units.
+const TEXT_INSET_UNITS: f32 = 4.0;
+/// Glyph height used to centre the text (`(height - 8) / 2`).
+const GLYPH_UNITS: f32 = 8.0;
+/// Ticks per half period of the caret blink (`cursorCounter / 6 % 2`).
+const BLINK_TICKS: u32 = 6;
+/// The caret glyph drawn after the text.
+const CARET_GLYPH: &str = "_";
 
 /// The editable state of one text field.
 ///
@@ -56,6 +63,7 @@ pub struct TextFieldState {
     text: String,
     caret: usize,
     scroll: f32,
+    blink: u32,
 }
 
 impl TextFieldState {
@@ -76,7 +84,19 @@ impl TextFieldState {
             text,
             caret,
             scroll: 0.0,
+            blink: 0,
         }
+    }
+
+    /// Advances the caret blink by one game tick (`GuiTextField.updateCursorCounter`).
+    pub fn tick(&mut self) {
+        self.blink = self.blink.wrapping_add(1);
+    }
+
+    /// Whether the caret is in the visible half of its blink period.
+    #[must_use]
+    pub fn caret_blink_on(&self) -> bool {
+        (self.blink / BLINK_TICKS).is_multiple_of(2)
     }
 
     /// The current text.
@@ -241,13 +261,31 @@ pub fn text_field(
     atlas: &FontAtlas,
     state: &mut TextFieldState,
 ) -> UiResponse {
+    text_field_scaled(ui, id, rect, atlas, state, style::TEXT_SCALE)
+}
+
+/// Like [`text_field`], with one GUI unit of the field (border, text inset,
+/// glyph size) equal to `scale` pixels. The menu screens pass the GUI scale so
+/// the field is 200x20 units like `GuiTextField`.
+pub fn text_field_scaled(
+    ui: &mut Ui,
+    id: WidgetId,
+    rect: Rect,
+    atlas: &FontAtlas,
+    state: &mut TextFieldState,
+    scale: f32,
+) -> UiResponse {
     let mut response = ui.response(id, rect);
-    let scale = style::TEXT_SCALE;
 
     // A caller may have replaced the text or the caret between frames.
     state.caret = state.caret.min(state.char_count());
 
-    let inner = rect.deflate(Insets::all(FIELD_PADDING));
+    let inner = rect.deflate(Insets {
+        left: TEXT_INSET_UNITS * scale,
+        right: TEXT_INSET_UNITS * scale,
+        top: BORDER_UNITS * scale,
+        bottom: BORDER_UNITS * scale,
+    });
     let mut changed = false;
 
     if response.clicked {
@@ -288,12 +326,11 @@ pub fn text_field(
         }
     }
 
-    let line_height = atlas.line_height(scale);
     let caret_x = atlas.char_index_to_x(&state.text, state.caret, scale);
     let text_width = atlas.measure(&state.text, scale);
-    // Reserve the caret width so the caret at the end of a full line stays
-    // inside the clip instead of being cut in half at the right edge.
-    let caret_space = (inner.width - CARET_WIDTH).max(0.0);
+    // Reserve the caret glyph so the caret at the end of a full line stays
+    // inside the clip instead of being cut at the right edge.
+    let caret_space = (inner.width - atlas.measure(CARET_GLYPH, scale)).max(0.0);
     if caret_x < state.scroll {
         state.scroll = caret_x;
     } else if caret_x > state.scroll + caret_space {
@@ -302,46 +339,7 @@ pub fn text_field(
     state.scroll = state.scroll.clamp(0.0, (text_width - caret_space).max(0.0));
 
     if !rect.is_empty() {
-        let border = if response.focused {
-            style::FIELD_BORDER_FOCUSED
-        } else {
-            style::FIELD_BORDER
-        };
-        ui.draw().rect(rect, border);
-        ui.draw()
-            .rect(rect.deflate(Insets::all(1.0)), style::FIELD_BACKGROUND);
-
-        if !inner.is_empty() {
-            let text_y = inner.y + (inner.height - line_height).max(0.0) * 0.5;
-            ui.push_clip(inner);
-            if state.text.is_empty() {
-                if !response.focused {
-                    ui.draw().text(
-                        [inner.x, text_y],
-                        PLACEHOLDER,
-                        TextStyle::new(scale, style::TEXT_DIM),
-                    );
-                }
-            } else {
-                ui.draw().text(
-                    [inner.x - state.scroll, text_y],
-                    state.text.as_str(),
-                    TextStyle::new(scale, style::TEXT),
-                );
-            }
-            if response.focused {
-                ui.draw().rect(
-                    Rect::new(
-                        inner.x - state.scroll + caret_x,
-                        text_y,
-                        CARET_WIDTH,
-                        line_height,
-                    ),
-                    style::CARET,
-                );
-            }
-            ui.pop_clip();
-        }
+        draw_field(ui, rect, inner, atlas, state, response.focused, scale);
     }
 
     if changed {
@@ -349,6 +347,61 @@ pub fn text_field(
         ui.mark_changed(id);
     }
     response
+}
+
+/// Draws the border, the fill, the text and the caret of a field
+/// (`GuiTextField.drawTextBox`).
+fn draw_field(
+    ui: &mut Ui,
+    rect: Rect,
+    inner: Rect,
+    atlas: &FontAtlas,
+    state: &TextFieldState,
+    focused: bool,
+    scale: f32,
+) {
+    ui.draw().rect(rect, style::FIELD_BORDER);
+    ui.draw().rect(
+        rect.deflate(Insets::all(BORDER_UNITS * scale)),
+        style::FIELD_BACKGROUND,
+    );
+    if inner.is_empty() {
+        return;
+    }
+    let text_y = rect.y + (rect.height - GLYPH_UNITS * scale) * 0.5;
+    let text_x = inner.x - state.scroll;
+    ui.push_clip(inner);
+    if !state.text.is_empty() {
+        draw_shadowed(ui, [text_x, text_y], &state.text, scale);
+    }
+    if focused && state.caret_blink_on() {
+        let caret_x = text_x + atlas.char_index_to_x(&state.text, state.caret, scale);
+        if state.caret < state.text.chars().count() {
+            let bar = Rect::new(
+                caret_x - scale,
+                text_y - scale,
+                scale,
+                (GLYPH_UNITS + 2.0) * scale,
+            );
+            ui.draw().rect(bar, style::CARET_BAR);
+        } else {
+            draw_shadowed(ui, [caret_x, text_y], CARET_GLYPH, scale);
+        }
+    }
+    ui.pop_clip();
+}
+
+/// Draws `text` with the vanilla shadow (a quarter of the brightness, one
+/// unit down and right, `drawStringWithShadow`).
+fn draw_shadowed(ui: &mut Ui, at: [f32; 2], text: &str, scale: f32) {
+    let shadow = style::TEXT_FIELD_SHADOW;
+    ui.draw().text(
+        [at[0] + scale, at[1] + scale],
+        text,
+        TextStyle::new(scale, shadow),
+    );
+    ui.draw()
+        .text(at, text, TextStyle::new(scale, style::TEXT_FIELD));
 }
 
 /// Removes every control character, keeping the field single-line.

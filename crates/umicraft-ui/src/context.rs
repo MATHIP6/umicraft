@@ -26,6 +26,7 @@ use crate::draw::{DrawList, SpriteSheet};
 use crate::geom::Rect;
 use crate::id::WidgetId;
 use crate::input::{InputEvent, Key, PointerButton, UiInput};
+use crate::menus::MenuArt;
 
 /// What one widget reports after it has been drawn.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -89,6 +90,8 @@ pub struct Ui {
     click_consumed: bool,
     /// The optional widgets sprite sheet used for skinning buttons and sliders.
     widgets_sheet: Option<SpriteSheet>,
+    /// The menu textures (dirt, title logo) of the user's client jar.
+    menu_art: MenuArt,
 }
 
 impl Ui {
@@ -109,6 +112,7 @@ impl Ui {
             primary_pressed: None,
             click_consumed: false,
             widgets_sheet: None,
+            menu_art: MenuArt::default(),
         }
     }
 
@@ -260,6 +264,17 @@ impl Ui {
     /// Sets the widgets sprite sheet for textured UI widgets (buttons, sliders).
     pub fn set_widgets_sheet(&mut self, sheet: Option<SpriteSheet>) {
         self.widgets_sheet = sheet;
+    }
+
+    /// Sets the textures the menu screens draw as sprites.
+    pub fn set_menu_art(&mut self, art: MenuArt) {
+        self.menu_art = art;
+    }
+
+    /// The menu textures; empty fields select the original fallbacks.
+    #[must_use]
+    pub fn menu_art(&self) -> MenuArt {
+        self.menu_art
     }
 
     /// The active widgets sprite sheet, if any.

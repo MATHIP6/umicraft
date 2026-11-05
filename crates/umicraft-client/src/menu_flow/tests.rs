@@ -4,10 +4,10 @@
 //! mapping of ping results to rows.
 
 use umicraft_ui::menus::{
-    confirm_layout, connecting_cancel_rect, server_list_layout, stats_done_rect, title_layout,
-    EditMode, RowStatus,
+    confirm_layout, connecting_cancel_rect, server_edit_layout, server_list_layout,
+    stats_done_rect, title_layout, EditMode, RowStatus,
 };
-use umicraft_ui::{InputEvent, PointerButton, Rect, UiInput};
+use umicraft_ui::{InputEvent, Key, PointerButton, Rect, UiInput};
 
 use super::*;
 use crate::servers::{PingOutcome, ServerEntry, ServerInfo};
@@ -183,6 +183,46 @@ fn adding_a_server_saves_it_and_returns_to_the_list() {
     assert_eq!(flow.rows[0].name, "Home");
     assert_eq!(flow.list.selected(), Some(0));
     assert_eq!(ServerBook::open(&path).len(), 1);
+}
+
+#[test]
+fn the_add_form_starts_with_the_default_server_name() {
+    let (mut flow, path) = flow_with("add-default", &[]);
+    flow.begin_add(&Lang::builtin());
+    // One `Ui` for all frames: the focus lives in it.
+    let mut ui = Ui::new(VIEWPORT);
+    let atlas = FontAtlas::fallback();
+    let context = MenuContext {
+        version: "test",
+        stats: &[],
+        panorama: None,
+    };
+    let inputs = [
+        vec![],
+        click(server_edit_layout(VIEWPORT, EditMode::Add).address),
+        vec![InputEvent::Text("play.example.net".to_string())],
+        vec![InputEvent::KeyPressed(Key::Enter)],
+    ];
+    let mut command = None;
+    for events in inputs {
+        ui.begin_frame(VIEWPORT, UiInput::new(events));
+        command = flow
+            .show(
+                Screen::ServerEdit,
+                &mut ui,
+                &atlas,
+                &Lang::builtin(),
+                &context,
+            )
+            .command;
+        ui.end_frame();
+    }
+    assert_eq!(command, Some(MenuCommand::GoTo(Screen::ServerList)));
+    let saved = ServerBook::open(&path);
+    assert_eq!(
+        saved.get(0).map(ServerEntry::name),
+        Some("Minecraft Server")
+    );
 }
 
 #[test]

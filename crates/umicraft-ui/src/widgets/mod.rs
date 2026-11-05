@@ -41,4 +41,4 @@ pub use list::{list, ListState, ROW_HEIGHT, SCROLLBAR_WIDTH};
 pub use panel::{panel, PANEL_INSET};
 pub use slider::{slider, SliderState};
 pub use slot::{slot, SlotItem};
-pub use text_field::{text_field, TextFieldState};
+pub use text_field::{text_field, text_field_scaled, TextFieldState};

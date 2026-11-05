@@ -11,8 +11,8 @@
 
 use umicraft_core::lang::Lang;
 
+use super::background::draw_menu_background;
 use crate::context::Ui;
-use crate::game_menu::draw_default_background;
 use crate::geom::Rect;
 use crate::text::FontAtlas;
 
@@ -84,7 +84,7 @@ impl StatsScreen {
         lang: &Lang,
         rows: &[StatRow],
     ) -> Option<StatsOutcome> {
-        draw_default_background(ui);
+        draw_menu_background(ui);
         let viewport = ui.viewport();
         let gui = Gui::new(viewport);
         gui.title(ui, atlas, lang.tr("gui.stats"), gui.cx(), 20.0);

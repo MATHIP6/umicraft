@@ -10,14 +10,16 @@
 //! - Language `(cx - 124, j + 84)` 20x20 (`GuiButtonLanguage`)
 //!
 //! The Minecraft Realms row (`j + 48`) does not exist. The logo is the
-//! original word "Umicraft" instead of the Mojang logo (spec §3), the splash
-//! comes from an original list and is drawn upright (the draw list cannot
-//! rotate text; vanilla tilts it by -20 degrees).
+//! vanilla texture from the user's client jar when [`crate::menus::MenuArt`]
+//! has it (owner-approved, never committed, spec §3) and the original word
+//! "Umicraft" otherwise; the splash comes from an original list and is drawn
+//! upright (the draw list cannot rotate text; vanilla tilts it by -20
+//! degrees).
 
 use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
-use crate::draw::Color;
+use crate::draw::{Color, SpriteSheet};
 use crate::geom::Rect;
 use crate::text::FontAtlas;
 use crate::widgets::style;
@@ -46,6 +48,14 @@ const LOGO_COLOR: Color = [0.96, 0.78, 0.28, 1.0];
 /// The logo text is this many times the GUI scale (the vanilla logo is 44
 /// units high, 32 units fit its band).
 const LOGO_FACTOR: f32 = 4.0;
+/// Width of one half of the logo texture, in texels and GUI units.
+const LOGO_HALF_WIDTH: f32 = 155.0;
+/// Height of the logo, in texels and GUI units.
+const LOGO_HEIGHT: f32 = 44.0;
+/// The row of the second half in `minecraft.png`.
+const LOGO_HALF_ROW: u32 = 45;
+/// The top of the logo in GUI units.
+const LOGO_TOP: f32 = 30.0;
 
 /// What the player chose on the title screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,16 +217,35 @@ impl TitleScreen {
         (outcome, view)
     }
 
+    /// The vanilla logo: two 155x44 blits of `minecraft.png`, the left half
+    /// at `(0, 0)` and the right half at `(0, 45)`, side by side from
+    /// `x = width / 2 - 137`, `y = 30` (`GuiMainMenu.drawScreen`). The rare
+    /// easter-egg variant that reorders the left half is not reproduced.
+    fn draw_logo_texture(ui: &mut Ui, gui: &Gui, sheet: SpriteSheet) {
+        let left = gui.cx() - 137.0;
+        let halves = [(left, 0), (left + LOGO_HALF_WIDTH, LOGO_HALF_ROW)];
+        for (x, v) in halves {
+            let src = sheet.sub(0, v, LOGO_HALF_WIDTH as u32, LOGO_HEIGHT as u32);
+            let dst = gui.rect(x, LOGO_TOP, LOGO_HALF_WIDTH, LOGO_HEIGHT);
+            ui.draw().image(src, dst, WHITE);
+        }
+    }
+
     /// The logo band and the pulsing splash.
     fn draw_logo(&self, ui: &mut Ui, atlas: &FontAtlas, gui: &Gui, partial_tick: f32) {
         let cx = gui.cx();
-        let logo = TextPlacement {
-            at: [cx, 30.0 + 6.0],
-            color: LOGO_COLOR,
-            factor: LOGO_FACTOR,
-            centered: true,
-        };
-        gui.text(ui, atlas, LOGO_TEXT, logo);
+        match ui.menu_art().logo {
+            Some(sheet) => Self::draw_logo_texture(ui, gui, sheet),
+            None => {
+                let logo = TextPlacement {
+                    at: [cx, 30.0 + 6.0],
+                    color: LOGO_COLOR,
+                    factor: LOGO_FACTOR,
+                    centered: true,
+                };
+                gui.text(ui, atlas, LOGO_TEXT, logo);
+            }
+        }
 
         // Vanilla pulses with the wall clock (`getSystemTime() % 1000`); the
         // tick count keeps the screen free of a clock, 20 ticks = 1 second.
@@ -324,5 +353,58 @@ mod tests {
         screen.tick();
         let view = show(&mut screen, UiInput::default(), Some(textures)).1;
         assert_eq!(view.map(|v| v.textures), Some(textures));
+    }
+
+    #[test]
+    fn the_logo_texture_is_two_155_by_44_blits_at_the_vanilla_position() {
+        let sheet = SpriteSheet::new(0.0, 0.0, 1.0, 1.0, 256, 256);
+        let mut screen = TitleScreen::new(0);
+        let commands = frame(UiInput::default(), |ui| {
+            ui.set_menu_art(crate::menus::MenuArt {
+                dirt: None,
+                logo: Some(sheet),
+            });
+            let atlas = FontAtlas::fallback();
+            let info = TitleInfo {
+                version: "v",
+                panorama: None,
+                partial_tick: 0.0,
+            };
+            screen.show(ui, &atlas, &Lang::builtin(), &info);
+            ui.draw().commands().to_vec()
+        });
+        // Scale 3, cx = 213: x = (213 - 137) * 3, y = 30 * 3.
+        let logo: Vec<_> = commands
+            .iter()
+            .filter_map(|command| match command {
+                crate::draw::DrawCommand::Image { src, dst, .. } if dst.height == 132.0 => {
+                    Some((*src, *dst))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(logo.len(), 2);
+        assert_eq!(logo[0].1, Rect::new(228.0, 90.0, 465.0, 132.0));
+        assert_eq!(logo[1].1, Rect::new(693.0, 90.0, 465.0, 132.0));
+        assert_eq!(logo[0].0, sheet.sub(0, 0, 155, 44));
+        assert_eq!(logo[1].0, sheet.sub(0, 45, 155, 44));
+    }
+
+    #[test]
+    fn without_the_texture_the_text_logo_is_drawn() {
+        let mut screen = TitleScreen::new(0);
+        let drawn = frame(UiInput::default(), |ui| {
+            let atlas = FontAtlas::fallback();
+            let info = TitleInfo {
+                version: "v",
+                panorama: None,
+                partial_tick: 0.0,
+            };
+            screen.show(ui, &atlas, &Lang::builtin(), &info);
+            ui.draw().commands().iter().any(|command| {
+                matches!(command, crate::draw::DrawCommand::Text { text, .. } if text == LOGO_TEXT)
+            })
+        });
+        assert!(drawn);
     }
 }

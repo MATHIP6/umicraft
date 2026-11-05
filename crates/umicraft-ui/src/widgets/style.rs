@@ -36,14 +36,16 @@ pub(crate) const BUTTON_HOVER: Color = [0.27, 0.30, 0.38, 1.0];
 /// Button fill on the frame of the press.
 pub(crate) const BUTTON_PRESSED: Color = [0.12, 0.38, 0.62, 1.0];
 
-/// Text-field outline while it is unfocused.
-pub(crate) const FIELD_BORDER: Color = [0.24, 0.26, 0.32, 1.0];
-/// Text-field outline while it owns the focus.
-pub(crate) const FIELD_BORDER_FOCUSED: Color = [0.20, 0.55, 0.90, 1.0];
-/// Text-field fill.
-pub(crate) const FIELD_BACKGROUND: Color = [0.07, 0.08, 0.10, 1.0];
-/// Colour of the text caret.
-pub(crate) const CARET: Color = [0.85, 0.92, 1.0, 1.0];
+/// Text-field outline, focused or not (`0xFFA0A0A0`).
+pub(crate) const FIELD_BORDER: Color = [0.627, 0.627, 0.627, 1.0];
+/// Text-field fill (`0xFF000000`).
+pub(crate) const FIELD_BACKGROUND: Color = [0.0, 0.0, 0.0, 1.0];
+/// Text-field text (`0xE0E0E0`, `GuiTextField.enabledColor`).
+pub(crate) const TEXT_FIELD: Color = [0.878, 0.878, 0.878, 1.0];
+/// The shadow of [`TEXT_FIELD`] (`(0xE0E0E0 & 0xFCFCFC) >> 2`).
+pub(crate) const TEXT_FIELD_SHADOW: Color = [0.220, 0.220, 0.220, 1.0];
+/// The bar caret drawn inside the text (`0xFFD0D0D0`).
+pub(crate) const CARET_BAR: Color = [0.816, 0.816, 0.816, 1.0];
 
 /// List fill.
 pub(crate) const LIST_BACKGROUND: Color = [0.07, 0.08, 0.11, 1.0];

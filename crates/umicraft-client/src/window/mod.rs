@@ -804,6 +804,8 @@ impl App {
         let input = self.ui_input.take();
         self.ui.begin_frame(viewport, input);
         self.ui.set_widgets_sheet(sheets.widgets);
+        self.ui
+            .set_menu_art(crate::official::menu_art(self.gui_atlas.as_ref()));
 
         if in_game {
             let mut game_hud = self

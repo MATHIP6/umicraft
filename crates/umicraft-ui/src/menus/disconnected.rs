@@ -9,8 +9,8 @@
 
 use umicraft_core::lang::Lang;
 
+use super::background::draw_menu_background;
 use crate::context::Ui;
-use crate::game_menu::draw_default_background;
 use crate::geom::Rect;
 use crate::text::FontAtlas;
 
@@ -62,7 +62,7 @@ impl DisconnectedScreen {
 
     /// Draws one frame and returns the player's choice.
     pub fn show(&self, ui: &mut Ui, atlas: &FontAtlas, lang: &Lang) -> Option<DisconnectedOutcome> {
-        draw_default_background(ui);
+        draw_menu_background(ui);
         let viewport = ui.viewport();
         let gui = Gui::new(viewport);
         let lines = wrap_lines(

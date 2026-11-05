@@ -332,6 +332,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("selectServer.select", "Join Server"),
     ("selectServer.direct", "Direct Connect"),
     ("selectServer.add", "Add server"),
+    ("selectServer.defaultName", "Minecraft Server"),
     ("selectServer.edit", "Edit"),
     ("selectServer.delete", "Delete"),
     ("selectServer.refresh", "Refresh"),

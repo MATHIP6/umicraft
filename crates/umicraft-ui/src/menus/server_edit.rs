@@ -15,12 +15,12 @@
 
 use umicraft_core::lang::Lang;
 
+use super::background::draw_menu_background;
 use crate::context::Ui;
-use crate::game_menu::draw_default_background;
 use crate::geom::Rect;
 use crate::input::Key;
 use crate::text::FontAtlas;
-use crate::widgets::{text_field, TextFieldState};
+use crate::widgets::{text_field_scaled, TextFieldState};
 
 use super::common::{escape_pressed, key_pressed, Gui, TextPlacement, LABEL_GRAY};
 
@@ -141,6 +141,12 @@ impl ServerEditScreen {
         named && (self.is_valid)(self.address.text())
     }
 
+    /// Advances the caret blink of both fields by one game tick.
+    pub fn tick(&mut self) {
+        self.name.tick();
+        self.address.tick();
+    }
+
     /// Draws one frame and returns the player's choice.
     pub fn show(
         &mut self,
@@ -148,7 +154,7 @@ impl ServerEditScreen {
         atlas: &FontAtlas,
         lang: &Lang,
     ) -> Option<ServerEditOutcome> {
-        draw_default_background(ui);
+        draw_menu_background(ui);
         let viewport = ui.viewport();
         let gui = Gui::new(viewport);
         let layout = server_edit_layout(viewport, self.mode);
@@ -166,9 +172,16 @@ impl ServerEditScreen {
             ui.set_focus(Some(first));
         }
         if self.mode != EditMode::DirectConnect {
-            text_field(ui, name_id, layout.name, atlas, &mut self.name);
+            text_field_scaled(ui, name_id, layout.name, atlas, &mut self.name, gui.scale);
         }
-        text_field(ui, address_id, layout.address, atlas, &mut self.address);
+        text_field_scaled(
+            ui,
+            address_id,
+            layout.address,
+            atlas,
+            &mut self.address,
+            gui.scale,
+        );
         self.limit_address();
 
         let (done_id, cancel_id) = (ui.id("done"), ui.id("cancel"));

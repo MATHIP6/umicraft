@@ -14,10 +14,9 @@
 //! blur passes over it (`rotateAndBlurSkybox`). That blur is **skipped**: the
 //! renderer draws the cube once. The rotation is exact.
 
-use crate::context::Ui;
-use crate::game_menu::draw_default_background;
-
+use super::background::draw_menu_background;
 use super::common::gradient;
+use crate::context::Ui;
 
 /// The vertical field of view of the panorama camera in degrees.
 pub const FIELD_OF_VIEW_DEGREES: f32 = 120.0;
@@ -114,8 +113,8 @@ impl PanoramaBackground {
     ///
     /// With `textures`, the white fade and the dark fade of
     /// `GuiMainMenu.drawScreen` are drawn here and the returned view tells
-    /// the renderer to draw the cube first. Without them the dirt-style
-    /// default background is drawn and nothing is returned.
+    /// the renderer to draw the cube first. Without them the dirt
+    /// background is drawn and nothing is returned.
     pub fn draw(
         &self,
         ui: &mut Ui,
@@ -123,7 +122,7 @@ impl PanoramaBackground {
         partial_tick: f32,
     ) -> Option<PanoramaView> {
         let Some(textures) = textures else {
-            draw_default_background(ui);
+            draw_menu_background(ui);
             return None;
         };
         let viewport = ui.viewport();

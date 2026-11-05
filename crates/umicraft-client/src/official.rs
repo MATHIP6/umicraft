@@ -15,6 +15,7 @@ use umicraft_assets::install::OfficialInstall;
 use umicraft_assets::manifest::VersionJson;
 use umicraft_assets::AssetsError;
 use umicraft_render::{HudSheets, SpriteSheet};
+use umicraft_ui::menus::MenuArt;
 
 /// The only game version the client supports (protocol 47, spec §1.3).
 pub(crate) const VERSION_ID: &str = "1.8.8";
@@ -115,6 +116,28 @@ pub(crate) fn hud_sheets(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> HudSh
                 width: r.pixel_width,
                 height: r.pixel_height,
             }),
+    }
+}
+
+/// The menu textures of the GUI atlas: the dirt of `options_background.png`
+/// and the title logo `title/minecraft.png`. A texture the atlas lacks stays
+/// `None`, which selects the flat and text fallbacks of the menus.
+pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt {
+    let sheet = |name: &str| {
+        gui_atlas
+            .and_then(|atlas| atlas.region(name))
+            .map(|r| SpriteSheet {
+                u_min: r.u_min,
+                v_min: r.v_min,
+                u_max: r.u_max,
+                v_max: r.v_max,
+                width: r.pixel_width,
+                height: r.pixel_height,
+            })
+    };
+    MenuArt {
+        dirt: sheet("options_background"),
+        logo: sheet("title/minecraft"),
     }
 }
 

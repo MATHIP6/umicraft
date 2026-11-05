@@ -88,14 +88,19 @@ fn text_run(output: &UiOutput, text: &str) -> Option<([f32; 2], f32)> {
         })
 }
 
-/// The thin vertical rectangle of a caret, if the frame drew one.
-fn caret_rect(output: &UiOutput) -> Option<Rect> {
+/// The caret of the frame: the `_` glyph after the text, or the thin bar
+/// drawn inside the text. Returns its left edge and its width.
+fn caret_mark(output: &UiOutput) -> Option<(f32, f32)> {
     output
         .draw_list
         .commands()
         .iter()
+        .rev()
         .find_map(|command| match command {
-            DrawCommand::Rect { rect, .. } if rect.width < 4.0 && rect.height >= 8.0 => Some(*rect),
+            DrawCommand::Text { position, text, .. } if text == "_" => Some((position[0], 0.0)),
+            DrawCommand::Rect { rect, .. } if rect.width < 4.0 && rect.height >= 8.0 => {
+                Some((rect.x, rect.width))
+            }
             _ => None,
         })
 }
@@ -617,13 +622,12 @@ fn text_field_scrolls_and_clips_long_text() {
     );
     assert!(state.scroll_offset() > 0.0);
 
-    let caret = caret_rect(&output).expect("the focused field draws a caret");
-    assert!(caret.x >= clip.x - 0.01, "the caret stays inside the clip");
+    let (caret_x, _) = caret_mark(&output).expect("the focused field draws a caret");
+    assert!(caret_x >= clip.x - 0.01, "the caret stays inside the clip");
     assert!(
-        caret.right() <= clip.right() + 0.01,
+        caret_x + atlas.measure("_", scale) <= clip.right() + 0.01,
         "the caret stays inside the clip"
     );
-    assert!((caret.height - atlas.line_height(scale)).abs() < 0.01);
 
     // Home returns the view to the start of the text.
     run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, key(Key::Home));
@@ -647,7 +651,7 @@ fn text_field_draws_the_caret_only_when_focused() {
         UiInput::default(),
     );
     assert!(
-        caret_rect(&output).is_none(),
+        caret_mark(&output).is_none(),
         "an unfocused field has no caret"
     );
 
@@ -661,7 +665,7 @@ fn text_field_draws_the_caret_only_when_focused() {
         UiInput::default(),
     );
     assert!(
-        caret_rect(&output).is_some(),
+        caret_mark(&output).is_some(),
         "a focused empty field shows the caret"
     );
 
@@ -683,7 +687,7 @@ fn text_field_draws_the_caret_only_when_focused() {
         &mut state,
         UiInput::default(),
     );
-    assert!(caret_rect(&output).is_none());
+    assert!(caret_mark(&output).is_none());
 }
 
 // ------------------------------------------------------------------ list ----
@@ -1135,4 +1139,144 @@ fn debug_screen_list_scrolls_at_720p() {
         "the original list used to fit entirely in a 720-pixel panel"
     );
     assert_eq!(output.draw_list.clip_depth(), 0);
+}
+
+// ----------------------------------------------------------- vanilla look ----
+
+#[test]
+fn the_field_is_a_grey_border_around_a_black_fill_focused_or_not() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::new();
+    let inner = Rect::new(
+        FIELD_RECT.x + 2.0,
+        FIELD_RECT.y + 2.0,
+        FIELD_RECT.width - 4.0,
+        FIELD_RECT.height - 4.0,
+    );
+    for focused in [false, true] {
+        if focused {
+            focus_field(&mut ui, id, FIELD_RECT, &atlas, &mut state);
+        }
+        let (_, output) = run_field(
+            &mut ui,
+            id,
+            FIELD_RECT,
+            &atlas,
+            &mut state,
+            UiInput::default(),
+        );
+        let border = rect_color(&output, FIELD_RECT).expect("a border");
+        let fill = rect_color(&output, inner).expect("a fill");
+        assert_eq!(border, [0.627, 0.627, 0.627, 1.0], "focused: {focused}");
+        assert_eq!(fill, [0.0, 0.0, 0.0, 1.0], "focused: {focused}");
+    }
+}
+
+#[test]
+fn an_empty_field_has_no_placeholder() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::new();
+    let (_, output) = run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        UiInput::default(),
+    );
+    assert_eq!(
+        text_count(&output, ""),
+        0,
+        "an unfocused empty field is blank"
+    );
+}
+
+#[test]
+fn the_caret_blinks_every_six_ticks_and_sits_after_the_text() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::with_text("ab");
+    focus_field(&mut ui, id, FIELD_RECT, &atlas, &mut state);
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, key(Key::End));
+
+    let (_, output) = run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        UiInput::default(),
+    );
+    let (x, width) = caret_mark(&output).expect("visible at the start");
+    assert_eq!(width, 0.0, "an end caret is the underscore glyph");
+    let (text_at, _) = text_run(&output, "ab").expect("the text");
+    assert!(x > text_at[0], "the underscore follows the text");
+
+    for _ in 0..6 {
+        state.tick();
+    }
+    let (_, output) = run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        UiInput::default(),
+    );
+    assert!(caret_mark(&output).is_none(), "hidden in the second half");
+    for _ in 0..6 {
+        state.tick();
+    }
+    let (_, output) = run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        UiInput::default(),
+    );
+    assert!(caret_mark(&output).is_some());
+}
+
+#[test]
+fn a_caret_inside_the_text_is_a_thin_bar() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::with_text("abc");
+    focus_field(&mut ui, id, FIELD_RECT, &atlas, &mut state);
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, key(Key::Home));
+    let (_, output) = run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        UiInput::default(),
+    );
+    let (_, width) = caret_mark(&output).expect("a bar");
+    assert!(width > 0.0);
+}
+
+#[test]
+fn the_scaled_field_uses_the_gui_unit_for_border_and_inset() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::with_text("x");
+    let rect = Rect::new(30.0, 30.0, 600.0, 60.0);
+    ui.begin_frame(VIEWPORT, UiInput::default());
+    umicraft_ui::widgets::text_field_scaled(&mut ui, id, rect, &atlas, &mut state, 3.0);
+    let output = ui.end_frame();
+    let fill = Rect::new(33.0, 33.0, 594.0, 54.0);
+    assert!(rect_color(&output, fill).is_some(), "a 1 unit border");
+    let (position, scale) = text_run(&output, "x").expect("the text");
+    assert_eq!(scale, 3.0);
+    // The first run is the shadow, one unit right of the text.
+    assert_eq!(position[0] - 3.0, 30.0 + 12.0, "inset 4 units");
 }

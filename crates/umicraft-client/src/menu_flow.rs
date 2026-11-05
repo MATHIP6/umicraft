@@ -17,9 +17,9 @@ use std::time::Duration;
 use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
     ConfirmOutcome, ConfirmScreen, ConnectStage, ConnectingOutcome, ConnectingScreen,
-    DisconnectedOutcome, DisconnectedScreen, PanoramaTextures, PanoramaView, ServerEditOutcome,
-    ServerEditScreen, ServerListOutcome, ServerListScreen, ServerRow, StatsOutcome, StatsScreen,
-    TitleInfo, TitleOutcome, TitleScreen,
+    DisconnectedOutcome, DisconnectedScreen, PanoramaTextures, PanoramaView, RowStatus,
+    ServerEditOutcome, ServerEditScreen, ServerListOutcome, ServerListScreen, ServerRow,
+    StatsOutcome, StatsScreen, TitleInfo, TitleOutcome, TitleScreen,
 };
 use umicraft_ui::{FontAtlas, Ui};
 
@@ -129,6 +129,14 @@ impl MenuFlow {
         }
     }
 
+    /// Shows `status` on row `index`, as a ping result would (the demo has
+    /// no socket).
+    pub(crate) fn set_row_status(&mut self, index: usize, status: RowStatus) {
+        if let Some(row) = self.rows.get_mut(index) {
+            row.status = status;
+        }
+    }
+
     /// Remembers why a session ended, for the disconnected screen.
     pub fn set_disconnected(&mut self, reason: &str) {
         self.disconnected = Some(DisconnectedScreen::new("disconnect.lost", reason));
@@ -144,6 +152,9 @@ impl MenuFlow {
             self.tick_time -= TICK;
             self.title.tick();
             self.list.tick();
+            if let Some(edit) = self.edit.as_mut() {
+                edit.tick();
+            }
             ticks += 1;
         }
         self.tick_time = self.tick_time.min(TICK);
@@ -223,11 +234,7 @@ impl MenuFlow {
                 self.pending = None;
                 Some(MenuCommand::GoTo(Screen::ServerEdit))
             }
-            ServerListOutcome::Add => {
-                self.edit = Some(ServerEditScreen::add("", valid_address));
-                self.pending = None;
-                Some(MenuCommand::GoTo(Screen::ServerEdit))
-            }
+            ServerListOutcome::Add => Some(self.begin_add(lang)),
             ServerListOutcome::Edit(index) => self.begin_edit(index),
             ServerListOutcome::Delete(index) => self.begin_delete(index, lang),
             ServerListOutcome::Refresh => {

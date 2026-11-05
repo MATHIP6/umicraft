@@ -73,6 +73,8 @@ impl App {
     /// from: the title screen or the game menu.
     pub(super) fn open_options(&mut self, page: Page) {
         self.options_origin = self.screen;
+        self.options_screen
+            .set_over_world(self.options_origin == Screen::GameMenu);
         self.options_screen.set_catalog(Catalog::discover());
         if page != Page::Main {
             self.options_screen.open_page(page, &self.options);

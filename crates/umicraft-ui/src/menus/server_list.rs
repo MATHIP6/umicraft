@@ -19,13 +19,13 @@ use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
 use crate::draw::SpriteSheet;
-use crate::game_menu::draw_default_background;
 use crate::geom::Rect;
 use crate::input::Key;
 use crate::text::FontAtlas;
 use crate::widgets::tooltip::TooltipRow;
 use crate::widgets::util::last_primary_press;
 
+use super::background::{draw_list_background, draw_list_overlay, draw_menu_background};
 use super::common::{draw_scrollbar, escape_pressed, key_pressed, wheel_scrolled, Gui};
 use super::server_row::{
     draw_tips, zone_at, RowContext, RowFlags, RowZone, ENTRY_HEIGHT, ENTRY_LEFT, ENTRY_WIDTH,
@@ -151,7 +151,7 @@ impl ServerListScreen {
         rows: &[ServerRow],
         icons: Option<SpriteSheet>,
     ) -> Option<ServerListOutcome> {
-        draw_default_background(ui);
+        draw_menu_background(ui);
         let viewport = ui.viewport();
         let gui = Gui::new(viewport);
         let layout = server_list_layout(viewport);
@@ -165,7 +165,9 @@ impl ServerListScreen {
         let click = clicked.then(|| last_primary_press(ui)).flatten();
         let mut outcome = click.and_then(|position| self.click_row(&gui, position, rows.len()));
         outcome = outcome.or_else(|| self.keyboard(ui, rows.len()));
+        draw_list_background(ui, layout.list, self.offset * gui.scale);
         self.draw_rows(ui, atlas, lang, rows, icons, &gui);
+        draw_list_overlay(ui, layout.list);
         draw_scrollbar(
             ui,
             &gui,

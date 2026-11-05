@@ -11,6 +11,14 @@ use crate::screen::Screen;
 use crate::servers::parse_address;
 
 impl MenuFlow {
+    /// Opens the Add Server form with the default name
+    /// (`selectServer.defaultName`), as `GuiScreenAddServer` does.
+    pub(crate) fn begin_add(&mut self, lang: &Lang) -> MenuCommand {
+        let name = lang.tr("selectServer.defaultName");
+        self.edit = Some(ServerEditScreen::add(name, valid_address));
+        self.pending = None;
+        MenuCommand::GoTo(Screen::ServerEdit)
+    }
     pub(super) fn begin_edit(&mut self, index: usize) -> Option<MenuCommand> {
         let entry = self.book.get(index)?;
         self.edit = Some(ServerEditScreen::edit(
