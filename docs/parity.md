@@ -177,6 +177,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
 | Audio | sound engine, sound packets, music | Missing | P11 | — |  |
+| Audio | client-side sound cues (steps, swim, splash, landing, dig hits, break, rain) and packet cues | Partial — cues only, no playback | P11 | Unit tests (`sound::step`, `sound::block_events`, `sound::weather`, `sound::queue`, `interaction`, `particles::ambient::weather`) | `GameState::drain_sound_cues` returns `SoundCue`s from the player's movement (`Entity.moveEntity` step counter, `game.player.swim`, splash, `game.player.hurt.fall.*` plus the 0.5/0.75 block thud), the attack tick (hit every 4th tick with the step sound at `(v+1)/8`, break via Effect 2001 logic) and the rain pass (`ambient.weather.rain`), plus Sound Effect and Effect packets. Not client-side in 1.8 and so not generated: placing sounds, thunder, other players' steps and fall sounds (server packets). No jump sound exists in 1.8. Categories are inferred from names. No device playback yet. |
 
 ## Resources
 

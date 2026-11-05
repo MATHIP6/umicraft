@@ -2108,7 +2108,17 @@ fn apply_net_event(
         }
         PlayEvent::Explosion(packet) => apply_explosion(game, &packet),
         PlayEvent::Particle(packet) => spawn_particles(game, &packet),
-        PlayEvent::Effect(packet) => apply_effect(game, &packet),
+        PlayEvent::Effect(packet) => {
+            if let Some(state) = game.state.as_mut() {
+                state.on_effect(&packet);
+            }
+            apply_effect(game, &packet);
+        }
+        PlayEvent::SoundEffect(packet) => {
+            if let Some(state) = game.state.as_mut() {
+                state.on_sound_effect(&packet);
+            }
+        }
         PlayEvent::PlayerAbilities(packet) => {
             game.server.apply_abilities(&packet);
             apply_mode_rules(game);
@@ -2251,7 +2261,7 @@ fn spawn_ambient_particles(game: &mut Game) {
                 .selected_item()
                 .is_some_and(|stack| stack.item_id == BARRIER_ITEM),
     };
-    game.ambient.tick(
+    let rain = game.ambient.tick(
         &mut game.particles,
         world,
         &viewer,
@@ -2259,6 +2269,9 @@ fn spawn_ambient_particles(game: &mut Game) {
         i32::try_from(game.status_data.ticks).unwrap_or(0),
         game.particle_setting,
     );
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues(rain);
+    }
 }
 
 /// Creates the particles a `Particle` packet asks for, seen from the player
@@ -2674,6 +2687,9 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
         digger,
     });
     let effects = swing_effects(game);
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues(output.sounds);
+    }
     for outgoing in output.packets {
         match outgoing {
             Outgoing::Swing => {

@@ -78,7 +78,7 @@ impl HitSounds {
     /// with the first) the block's step sound plays at `(volume + 1) / 8`
     /// and half its pitch, at the block centre.
     pub fn hit(&mut self, block: BlockPos, block_id: u16) -> Option<SoundCue> {
-        let due = self.counter % HIT_INTERVAL == 0;
+        let due = self.counter.is_multiple_of(HIT_INTERVAL);
         self.counter += 1;
         if !due {
             return None;

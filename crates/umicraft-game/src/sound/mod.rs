@@ -26,8 +26,10 @@ pub mod block_events;
 mod block_sounds;
 pub mod cue;
 pub mod effect_packet;
+pub mod queue;
 pub mod sound_packet;
 pub mod step;
+pub mod weather;
 
 use std::borrow::Cow;
 use std::fmt;
