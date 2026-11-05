@@ -1,101 +1,110 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The key bindings: which key triggers which [`Action`].
+//! The key bindings: which key or mouse button triggers which [`Action`].
 
 use std::collections::BTreeMap;
 
-use winit::keyboard::KeyCode;
-
 mod action;
+mod binding;
 mod names;
 #[cfg(test)]
 mod tests;
 
 pub use action::Action;
+pub use binding::Binding;
 pub use names::{is_reserved, key_from_name, key_label, key_name};
 
-/// The key bound to every [`Action`].
+/// The [`Binding`] of every [`Action`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyBindings {
-    keys: [KeyCode; Action::ALL.len()],
+    bindings: [Binding; Action::ALL.len()],
 }
 
 impl Default for KeyBindings {
     fn default() -> Self {
         Self {
-            keys: Action::ALL.map(Action::default_key),
+            bindings: Action::ALL.map(Action::default_binding),
         }
     }
 }
 
 impl KeyBindings {
-    /// The key bound to `action`.
+    /// The binding of `action`.
     #[must_use]
-    pub fn get(&self, action: Action) -> KeyCode {
-        self.keys[action.index()]
+    pub fn get(&self, action: Action) -> Binding {
+        self.bindings[action.index()]
     }
 
-    /// Binds `key` to `action`. A reserved or unbindable key is refused and
-    /// `false` is returned; two actions may share a key, the controls screen
-    /// flags it (see [`Self::conflicts`]).
-    pub fn set(&mut self, action: Action, key: KeyCode) -> bool {
-        if is_reserved(key) || key_name(key).is_none() {
+    /// Binds `binding` to `action`. A reserved or unbindable key is refused
+    /// and `false` is returned; two actions may share a binding, the
+    /// controls screen flags it (see [`Self::conflicts`]).
+    pub fn set(&mut self, action: Action, binding: impl Into<Binding>) -> bool {
+        let binding = binding.into();
+        if !binding.is_bindable() {
             return false;
         }
-        self.keys[action.index()] = key;
+        self.bindings[action.index()] = binding;
         true
     }
 
-    /// Restores every default key.
+    /// Restores every default binding.
     pub fn reset(&mut self) {
         *self = Self::default();
     }
 
-    /// The other actions that use the same key as `action`.
+    /// Whether every action has its default binding.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The other actions that use the same binding as `action`.
     #[must_use]
     pub fn conflicts(&self, action: Action) -> Vec<Action> {
-        let key = self.get(action);
-        Action::ALL
-            .iter()
-            .copied()
-            .filter(|other| *other != action && self.get(*other) == key)
+        let binding = self.get(action);
+        self.actions_for(binding)
+            .filter(|other| *other != action)
             .collect()
     }
 
-    /// The first action bound to `key`.
+    /// The first action bound to `binding`.
     #[must_use]
-    pub fn action_for(&self, key: KeyCode) -> Option<Action> {
+    pub fn action_for(&self, binding: impl Into<Binding>) -> Option<Action> {
+        self.actions_for(binding).next()
+    }
+
+    /// Every action bound to `binding`, in listing order.
+    pub fn actions_for(&self, binding: impl Into<Binding>) -> impl Iterator<Item = Action> + '_ {
+        let binding = binding.into();
         Action::ALL
             .iter()
             .copied()
-            .find(|action| self.get(*action) == key)
+            .filter(move |action| self.get(*action) == binding)
     }
 
-    /// Every action bound to `key`, in listing order.
-    pub fn actions_for(&self, key: KeyCode) -> impl Iterator<Item = Action> + '_ {
-        Action::ALL
-            .iter()
-            .copied()
-            .filter(move |action| self.get(*action) == key)
-    }
-
-    /// The `[keys]` section: action id to key name.
-    pub(super) fn to_map(&self) -> BTreeMap<String, String> {
+    /// The `[keys]` section: action id to key or `MouseN` name.
+    pub(in crate::options) fn to_map(&self) -> BTreeMap<String, String> {
         Action::ALL
             .iter()
             .filter_map(|action| {
-                key_name(self.get(*action)).map(|name| (action.id().to_string(), name.to_string()))
+                self.get(*action)
+                    .name()
+                    .map(|name| (action.id().to_string(), name))
             })
             .collect()
     }
 
-    /// Reads the `[keys]` section. An action that is missing, or whose key is
-    /// unknown or reserved, keeps its default.
-    pub(super) fn from_map(map: &BTreeMap<String, String>) -> Self {
+    /// Reads the `[keys]` section. An action that is missing, or whose key
+    /// is unknown or reserved, keeps its default, so a file written before
+    /// mouse bindings existed loads unchanged.
+    pub(in crate::options) fn from_map(map: &BTreeMap<String, String>) -> Self {
         let mut bindings = Self::default();
         for action in Action::ALL {
-            if let Some(key) = map.get(action.id()).and_then(|name| key_from_name(name)) {
-                bindings.set(action, key);
+            if let Some(binding) = map
+                .get(action.id())
+                .and_then(|name| Binding::from_name(name))
+            {
+                bindings.set(action, binding);
             }
         }
         bindings

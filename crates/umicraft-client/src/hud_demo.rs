@@ -408,7 +408,7 @@ fn build(
         }
         "controls" => {
             let mut options = Options::default();
-            // Two actions on one key show the conflict bar; a click on Hotbar Slot 3
+            // Two actions on one key show the conflict bar; a click on Attack/Destroy
             // leaves it waiting for a key.
             options.keys.set(Action::Hotbar2, KeyCode::Digit1);
             let (screen, draw_list) = run_options(
@@ -416,7 +416,7 @@ fn build(
                 height,
                 atlas,
                 &mut options,
-                &["nav:controls", "key:hotbar3"],
+                &["nav:controls", "key:attack"],
                 sheets.widgets,
             );
             let conflicts = Action::ALL
@@ -430,7 +430,7 @@ fn build(
                         "waiting for a key",
                         screen
                             .capturing()
-                            .map_or_else(|| "none".to_string(), |a| a.label().to_string()),
+                            .map_or_else(|| "none".to_string(), |a| a.id().to_string()),
                     ),
                     ("actions in conflict", conflicts.to_string()),
                     ("draw commands", draw_list.len().to_string()),
@@ -669,7 +669,7 @@ mod tests {
     #[test]
     fn the_controls_view_waits_for_a_key_and_flags_the_conflict() {
         let text = report("controls");
-        assert!(text.contains("waiting for a key : HOTBAR 3"), "{text}");
+        assert!(text.contains("waiting for a key : attack"), "{text}");
         assert!(text.contains("actions in conflict: 2"), "{text}");
     }
 

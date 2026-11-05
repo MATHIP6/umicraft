@@ -16,6 +16,7 @@ mod adapter;
 mod block_atlas;
 mod border;
 mod camera;
+mod capture;
 mod clouds;
 mod dynamic_blocks;
 pub mod entity_pass;

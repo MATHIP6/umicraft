@@ -24,9 +24,8 @@ use umicraft_ui::game_menu::draw_default_background;
 use umicraft_ui::menus::draw_menu_background;
 use umicraft_ui::widgets::{button_tinted, slider, SliderState};
 use umicraft_ui::{Color, FontAtlas, Rect, Ui};
-use winit::keyboard::KeyCode;
 
-use crate::options::{Action, Options};
+use crate::options::{Action, Binding, Options};
 
 mod catalog;
 mod chat_page;
@@ -186,14 +185,15 @@ impl OptionsScreen {
         self.rects.get(id).copied()
     }
 
-    /// Binds `key` to the action that is waiting for one. A key the client
-    /// keeps for itself is refused and the capture goes on. Returns whether
-    /// the binding changed.
-    pub fn capture_key(&mut self, options: &mut Options, key: KeyCode) -> bool {
+    /// Binds a key or mouse button to the action that is waiting for one
+    /// (`GuiControls.keyTyped` and `mouseClicked`). A key the client keeps
+    /// for itself is refused and the capture goes on. Returns whether the
+    /// binding changed.
+    pub fn capture(&mut self, options: &mut Options, binding: Binding) -> bool {
         let Some(action) = self.capturing else {
             return false;
         };
-        if options.keys.set(action, key) {
+        if options.keys.set(action, binding) {
             self.capturing = None;
             true
         } else {

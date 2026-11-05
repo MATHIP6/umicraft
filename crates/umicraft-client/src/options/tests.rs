@@ -52,6 +52,28 @@ fn options_survive_a_restart() {
 }
 
 #[test]
+fn mouse_bindings_survive_a_restart_and_an_old_file_keeps_the_defaults() {
+    let folder = temp_folder("mouse");
+    let path = folder.join(FILE_NAME);
+    let mut options = Options::default();
+    options.keys.set(Action::Attack, KeyCode::KeyJ);
+    options.keys.set(Action::Sprint, Binding::Mouse(4));
+    options.save(&path).unwrap();
+    let loaded = Options::load(&path);
+    assert_eq!(loaded.keys.get(Action::Attack), KeyCode::KeyJ);
+    assert_eq!(loaded.keys.get(Action::Sprint), Binding::Mouse(4));
+
+    // Written before mouse bindings existed: no attack, use or pick entries.
+    std::fs::write(&path, "[keys]\nforward = \"KeyI\"\njump = \"Space\"\n").unwrap();
+    let old = Options::load(&path);
+    assert_eq!(old.keys.get(Action::Forward), KeyCode::KeyI);
+    assert_eq!(old.keys.get(Action::Attack), Binding::Mouse(0));
+    assert_eq!(old.keys.get(Action::Use), Binding::Mouse(1));
+    assert_eq!(old.keys.get(Action::PickBlock), Binding::Mouse(2));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
 fn a_missing_file_gives_the_defaults() {
     let folder = temp_folder("missing");
     assert_eq!(Options::load(&folder.join(FILE_NAME)), Options::default());

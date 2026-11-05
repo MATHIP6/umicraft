@@ -31,7 +31,7 @@ mod video;
 
 pub use chat::{ChatOptions, ChatVisibility};
 pub use controls::ControlOptions;
-pub use keys::{is_reserved, key_from_name, key_label, key_name, Action, KeyBindings};
+pub use keys::{is_reserved, key_from_name, key_label, key_name, Action, Binding, KeyBindings};
 pub use language::LanguageOptions;
 pub use multiplayer::MultiplayerOptions;
 pub use packs::{is_pack_name, ResourcePackOptions, PACKS_FOLDER};

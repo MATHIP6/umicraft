@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use winit::event::{ElementState, KeyEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use super::{upload_glint_texture, upload_gui_atlas, upload_sky_textures, App};
@@ -19,6 +19,7 @@ use crate::game::GameEvent;
 use crate::language;
 use crate::map_render::MapTextures;
 use crate::mesher::default_worker_count;
+use crate::options::Binding;
 use crate::options_effects::{open_folder, pack_paths, packs_folder, ServerSettings};
 use crate::options_screen::{Catalog, Outcome as OptionsOutcome, Page};
 use crate::screen::Screen;
@@ -38,7 +39,8 @@ impl App {
                 if code == KeyCode::Escape {
                     self.options_screen.cancel_capture();
                 } else {
-                    self.options_screen.capture_key(&mut self.options, code);
+                    self.options_screen
+                        .capture(&mut self.options, Binding::Key(code));
                 }
             }
             return;
@@ -48,6 +50,26 @@ impl App {
             return;
         }
         self.ui_input.key(code, event.state, event.text.as_deref());
+    }
+
+    /// Binds a mouse button pressed while the controls page waits for a key
+    /// (`GuiControls.mouseClicked`). Returns whether the click was taken.
+    pub(super) fn capture_mouse_binding(
+        &mut self,
+        screen: Screen,
+        state: ElementState,
+        button: MouseButton,
+    ) -> bool {
+        if screen != Screen::Options
+            || state != ElementState::Pressed
+            || self.options_screen.capturing().is_none()
+        {
+            return false;
+        }
+        if let Some(binding) = Binding::from_mouse(button) {
+            self.options_screen.capture(&mut self.options, binding);
+        }
+        true
     }
 
     /// Writes the options to disk when they changed since the last write.

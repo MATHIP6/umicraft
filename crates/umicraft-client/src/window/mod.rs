@@ -60,7 +60,7 @@ use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
 use crate::mesher::default_worker_count;
-use crate::options::{self, Action, Options};
+use crate::options::{self, Action, Binding, Options};
 use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
 use crate::panorama_faces::load_panorama_faces;
@@ -74,6 +74,7 @@ use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
 
+mod binding_input;
 mod chat_control;
 mod creative_window;
 mod inventory_control;
@@ -165,8 +166,8 @@ struct App {
     look: (f32, f32),
     select_slot: Option<u8>,
     break_block: bool,
-    /// The attack button is down.
-    attack_held: bool,
+    /// The mouse buttons that are down, by `Binding::Mouse` index.
+    buttons: HashSet<u8>,
     /// When the death screen opened; `None` while the player lives.
     death_started: Option<Instant>,
     /// The player pressed "Respawn" and waits for the server.
@@ -195,14 +196,14 @@ struct App {
     pointer: (f32, f32),
     /// The chat run under the pointer in the last frame (click and hover).
     chat_hover: Option<umicraft_render::ChatRunView>,
-    /// The use (right) button is down.
-    use_held: bool,
-    /// The pick block (middle) button went down since the last input update.
+    /// The pick block binding went down since the last input update.
     pick_block: bool,
     /// The drop key was pressed since the last input update.
     drop_item: Option<DropKind>,
     /// The perspective key was pressed since the last input update.
     toggle_perspective: bool,
+    /// The screenshot binding was pressed; the next frame is saved.
+    screenshot_requested: bool,
     /// Turns the mouse and keys on the creative screen into game events.
     creative_input: CreativeInput,
     /// Whether a server container was displayed on the previous frame.
@@ -313,7 +314,7 @@ impl App {
             look: (0.0, 0.0),
             select_slot: None,
             break_block: false,
-            attack_held: false,
+            buttons: HashSet::new(),
             death_started: None,
             respawn_requested: false,
             place_block: false,
@@ -333,10 +334,10 @@ impl App {
             shift_held: false,
             pointer: (0.0, 0.0),
             chat_hover: None,
-            use_held: false,
             pick_block: false,
             drop_item: None,
             toggle_perspective: false,
+            screenshot_requested: false,
             creative_input: CreativeInput::new(),
             container_was_open: false,
             ui: Ui::new(ui_viewport),
@@ -452,49 +453,18 @@ impl App {
                         }
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
                         KeyCode::F3 => self.show_f3 = !self.show_f3,
-                        KeyCode::F5 => self.toggle_perspective = true,
                         // F3 + T reloads the resource packs, whatever the
                         // chat key is bound to.
                         KeyCode::KeyT if self.keys.contains(&KeyCode::F3) => {
                             self.reload_resources();
                         }
-                        KeyCode::KeyQ if self.mouse_captured => {
-                            self.drop_item = Some(self.drop_kind());
-                        }
-                        _ => self.press_bound_key(code),
+                        _ => self.press_binding(Binding::Key(code)),
                     }
                 }
                 self.keys.insert(code);
             }
             ElementState::Released => {
                 self.keys.remove(&code);
-            }
-        }
-    }
-
-    /// Whether the key bound to `action`, or its left/right twin, is held.
-    fn held(&self, action: Action) -> bool {
-        let key = self.options.keys.get(action);
-        self.keys.contains(&key) || modifier_twin(key).is_some_and(|twin| self.keys.contains(&twin))
-    }
-
-    /// Runs the actions bound to a key that was just pressed.
-    fn press_bound_key(&mut self, code: KeyCode) {
-        let actions: Vec<Action> = self.options.keys.actions_for(code).collect();
-        for action in actions {
-            // An action that opened a screen takes the key; the others wait.
-            if self.screen != Screen::None {
-                break;
-            }
-            match action {
-                Action::Chat => self.open_chat(""),
-                Action::Command => self.open_chat("/"),
-                Action::Inventory => self.open_inventory(),
-                other => {
-                    if let Some(slot) = other.hotbar_slot() {
-                        self.select_slot = Some(slot);
-                    }
-                }
             }
         }
     }
@@ -539,6 +509,7 @@ impl App {
         self.ui_input.clear();
         self.chat_scroll = 0;
         self.keys.clear();
+        self.buttons.clear();
         self.select_slot = None;
         self.break_block = false;
         self.place_block = false;
@@ -605,7 +576,6 @@ impl App {
         if self.death_started.is_none() {
             self.death_started = Some(now);
             self.set_screen(Screen::None);
-            self.attack_held = false;
             self.capture_mouse(false);
         }
     }
@@ -643,10 +613,6 @@ impl App {
 
     fn capture_mouse(&mut self, capture: bool) {
         self.mouse_captured = capture;
-        if !capture {
-            self.attack_held = false;
-            self.use_held = false;
-        }
         if let Some(window) = &self.window {
             if capture {
                 // Locked is preferred (infinite relative motion); fall back to
@@ -683,8 +649,8 @@ impl App {
         state.jump = self.held(Action::Jump);
         state.sneak = self.held(Action::Sneak);
         state.sprint = self.held(Action::Sprint);
-        state.attack = self.attack_held;
-        state.use_item = self.use_held;
+        state.attack = self.mouse_captured && self.held(Action::Attack);
+        state.use_item = self.mouse_captured && self.held(Action::Use);
         state
     }
 
@@ -1222,6 +1188,9 @@ impl App {
             self.entity_icons
                 .prepare(&frame.draw_list, items, textures, renderer);
         }
+        if std::mem::take(&mut self.screenshot_requested) {
+            renderer.request_capture();
+        }
         let rendered = match (ui_frame.as_ref(), self.items.as_deref()) {
             (Some(frame), Some(items)) => renderer.render_with_ui(
                 &self.camera,
@@ -1234,8 +1203,12 @@ impl App {
             }
             (None, _) => renderer.render(&self.camera, &self.overlay),
         };
+        let captured = renderer.take_capture();
         if let Some(frame) = ui_frame {
             self.ui.recycle_output(frame);
+        }
+        if let Some(captured) = captured {
+            self.save_screenshot(captured);
         }
         if let Err(error) = rendered {
             self.exit_error = Some(error.to_string());
@@ -1351,20 +1324,6 @@ fn hotbar_slot_items(
             .as_ref()
             .map(|stack| slot_item(items, stack))
     })
-}
-
-/// The key on the other side of the keyboard that counts as the same
-/// modifier: holding either Shift, Control or Alt triggers the binding.
-fn modifier_twin(key: KeyCode) -> Option<KeyCode> {
-    match key {
-        KeyCode::ShiftLeft => Some(KeyCode::ShiftRight),
-        KeyCode::ShiftRight => Some(KeyCode::ShiftLeft),
-        KeyCode::ControlLeft => Some(KeyCode::ControlRight),
-        KeyCode::ControlRight => Some(KeyCode::ControlLeft),
-        KeyCode::AltLeft => Some(KeyCode::AltRight),
-        KeyCode::AltRight => Some(KeyCode::AltLeft),
-        _ => None,
-    }
 }
 
 impl ApplicationHandler for App {
@@ -1483,7 +1442,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let screen = self.screen();
-                if screen.uses_ui() || self.death_screen_visible() {
+                if self.capture_mouse_binding(screen, state, button) {
+                    // The button became the binding that was waiting for one.
+                } else if screen.uses_ui() || self.death_screen_visible() {
                     self.ui_input.pointer_button(state, button);
                     self.inventory_button(state, button);
                     self.creative_button(state, button);
@@ -1495,31 +1456,7 @@ impl ApplicationHandler for App {
                         self.chat_click();
                     }
                 } else {
-                    match button {
-                        MouseButton::Left => {
-                            self.attack_held =
-                                state == ElementState::Pressed && self.mouse_captured;
-                            if state == ElementState::Pressed {
-                                if self.mouse_captured {
-                                    self.break_block = true;
-                                } else {
-                                    self.capture_mouse(true);
-                                }
-                            }
-                        }
-                        MouseButton::Right => {
-                            self.use_held = state == ElementState::Pressed && self.mouse_captured;
-                            if self.use_held {
-                                self.place_block = true;
-                            }
-                        }
-                        MouseButton::Middle
-                            if state == ElementState::Pressed && self.mouse_captured =>
-                        {
-                            self.pick_block = true;
-                        }
-                        _ => {}
-                    }
+                    self.handle_game_mouse(state, button);
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -1552,6 +1489,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(false) => {
                 self.keys.clear();
+                self.buttons.clear();
                 self.capture_mouse(false);
                 self.ui_input.clear();
             }

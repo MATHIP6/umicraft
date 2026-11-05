@@ -18,7 +18,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
@@ -34,6 +34,7 @@ use crate::adapter::AdapterSummary;
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::border::{BorderRenderer, BorderView};
 use crate::camera::{Camera, Frustum};
+use crate::capture;
 use crate::clouds::{CloudMode, CloudRenderer};
 use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
@@ -57,8 +58,6 @@ pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth3
 const OVERLAY_MIN_BYTES: u64 = 64 * 1024;
 /// Initial capacity of the per-frame item buffers.
 pub(crate) const MIN_DYNAMIC_BYTES: u64 = 16 * 1024;
-/// WebGPU requires 256-byte row alignment for buffer↔texture copies.
-const ROW_ALIGNMENT: u32 = 256;
 
 pub(crate) const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
     0 => Float32x3,
@@ -179,6 +178,10 @@ pub struct Renderer {
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
     surface_config: Option<wgpu::SurfaceConfiguration>,
+    /// A screenshot of the next presented frame was requested.
+    capture_requested: bool,
+    /// The last captured frame, waiting for [`Renderer::take_capture`].
+    captured: Option<Result<Image, RenderError>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     width: u32,
@@ -331,6 +334,15 @@ impl Renderer {
         // products a second time and wash every colour out, so the surface
         // keeps the plain format and the textures are sampled as stored.
         config.format = config.format.remove_srgb_suffix();
+        // The F2 screenshot copies the presented frame, when the surface
+        // allows it.
+        if surface
+            .get_capabilities(&adapter)
+            .usages
+            .contains(wgpu::TextureUsages::COPY_SRC)
+        {
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
+        }
         // The "Max Framerate" option paces the frames; the "Use VSync" option
         // decides whether the display refresh does too (`set_vsync`). Start
         // without, as the first frame has not read the options yet.
@@ -755,6 +767,8 @@ impl Renderer {
             window,
             surface,
             surface_config,
+            capture_requested: false,
+            captured: None,
             device,
             queue,
             width,
@@ -1807,83 +1821,58 @@ impl Renderer {
         let Some(target) = self.offscreen.as_ref() else {
             return Err(RenderError::NotOffscreen);
         };
-        let bytes_per_row = self.width * 4;
-        let padded_row = bytes_per_row.div_ceil(ROW_ALIGNMENT) * ROW_ALIGNMENT;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: u64::from(padded_row) * u64::from(self.height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("readback encoder"),
-            });
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &target.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_row),
-                    rows_per_image: Some(self.height),
-                },
-            },
-            wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
+        capture::read_texture(
+            &self.device,
+            &self.queue,
+            &target.texture,
+            (self.width, self.height),
+            false,
+        )
+    }
+
+    /// Asks the windowed renderer to keep the next frame it presents; fetch
+    /// it with [`Renderer::take_capture`]. The surface must allow copies
+    /// (see [`Renderer::can_capture`]).
+    pub fn request_capture(&mut self) {
+        self.capture_requested = true;
+    }
+
+    /// Whether the window surface can be read back (`COPY_SRC` usage).
+    #[must_use]
+    pub fn can_capture(&self) -> bool {
+        self.surface_config
+            .as_ref()
+            .is_some_and(|config| config.usage.contains(wgpu::TextureUsages::COPY_SRC))
+    }
+
+    /// The frame kept after [`Renderer::request_capture`], once it was
+    /// presented; `None` while nothing is waiting.
+    ///
+    /// # Errors
+    /// [`RenderError::Readback`] when the copy of the frame failed.
+    pub fn take_capture(&mut self) -> Option<Result<Image, RenderError>> {
+        self.captured.take()
+    }
+
+    /// Copies the frame about to be presented when a capture was requested.
+    fn capture_frame(&mut self, texture: &wgpu::Texture) {
+        if !std::mem::take(&mut self.capture_requested) || !self.can_capture() {
+            return;
+        }
+        let Some(format) = self.surface_config.as_ref().map(|config| config.format) else {
+            return;
+        };
+        let blue_first = matches!(
+            format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
-        self.queue.submit(Some(encoder.finish()));
-
-        let mapping = Arc::new(Mutex::new(None));
-        let signal = Arc::clone(&mapping);
-        buffer
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |result| {
-                if let Ok(mut slot) = signal.lock() {
-                    *slot = Some(result);
-                }
-            });
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|error| RenderError::Readback(format!("{error:?}")))?;
-        {
-            let slot = mapping
-                .lock()
-                .map_err(|_| RenderError::Readback("mapping state was poisoned".into()))?;
-            let result = slot
-                .as_ref()
-                .ok_or_else(|| RenderError::Readback("mapping callback did not run".into()))?;
-            result
-                .as_ref()
-                .map_err(|error| RenderError::Readback(format!("{error:?}")))?;
-        }
-
-        let mapped = buffer
-            .slice(..)
-            .get_mapped_range()
-            .map_err(|error| RenderError::Readback(format!("{error:?}")))?;
-        let mut rgba = Vec::with_capacity((bytes_per_row * self.height) as usize);
-        for row in 0..self.height {
-            let start = (row * padded_row) as usize;
-            let end = start + bytes_per_row as usize;
-            rgba.extend_from_slice(&mapped[start..end]);
-        }
-        drop(mapped);
-        buffer.unmap();
-        Ok(Image {
-            width: self.width,
-            height: self.height,
-            rgba,
-        })
+        self.captured = Some(capture::read_texture(
+            &self.device,
+            &self.queue,
+            texture,
+            (self.width, self.height),
+            blue_first,
+        ));
     }
 
     fn write_camera(&self, camera: &Camera, sky: &SkyState) {
@@ -1971,6 +1960,7 @@ impl Renderer {
                         });
                 self.draw(&view, overlay, &mut encoder, sky_state);
                 self.queue.submit(Some(encoder.finish()));
+                self.capture_frame(&frame.texture);
                 if let Some(window) = &self.window {
                     window.pre_present_notify();
                 }

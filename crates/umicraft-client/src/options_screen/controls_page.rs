@@ -7,68 +7,36 @@ use umicraft_ui::{FontAtlas, TextStyle, Ui};
 
 use super::layout::{Gui, BUTTON_H, HALF_W, KEY_ROW, RED, YELLOW};
 use super::{on_off, option_label, OptionsScreen, Outcome};
-use crate::options::{key_label, Action, Options};
+use crate::options::{Action, Options};
 
-/// The language key of the name of an action (`KeyBinding` description).
-fn action_key(action: Action) -> &'static str {
-    match action {
-        Action::Forward => "key.forward",
-        Action::Back => "key.back",
-        Action::Left => "key.left",
-        Action::Right => "key.right",
-        Action::Jump => "key.jump",
-        Action::Sneak => "key.sneak",
-        Action::Sprint => "key.sprint",
-        Action::Inventory => "key.inventory",
-        Action::Chat => "key.chat",
-        Action::Command => "key.command",
-        Action::PlayerList => "key.playerlist",
-        Action::Hotbar1 => "key.hotbar.1",
-        Action::Hotbar2 => "key.hotbar.2",
-        Action::Hotbar3 => "key.hotbar.3",
-        Action::Hotbar4 => "key.hotbar.4",
-        Action::Hotbar5 => "key.hotbar.5",
-        Action::Hotbar6 => "key.hotbar.6",
-        Action::Hotbar7 => "key.hotbar.7",
-        Action::Hotbar8 => "key.hotbar.8",
-        Action::Hotbar9 => "key.hotbar.9",
-    }
-}
-
-/// One entry of the key list, in the order `GuiKeyBindingList` sorts them
-/// (categories, then descriptions, both alphabetically).
-#[derive(Debug, Clone, Copy)]
-enum KeyEntry {
+/// One entry of the key list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum KeyEntry {
     /// A category heading, by language key.
     Category(&'static str),
     Key(Action),
 }
 
-const KEY_ENTRIES: [KeyEntry; 23] = [
-    KeyEntry::Category("key.categories.inventory"),
-    KeyEntry::Key(Action::Hotbar1),
-    KeyEntry::Key(Action::Hotbar2),
-    KeyEntry::Key(Action::Hotbar3),
-    KeyEntry::Key(Action::Hotbar4),
-    KeyEntry::Key(Action::Hotbar5),
-    KeyEntry::Key(Action::Hotbar6),
-    KeyEntry::Key(Action::Hotbar7),
-    KeyEntry::Key(Action::Hotbar8),
-    KeyEntry::Key(Action::Hotbar9),
-    KeyEntry::Key(Action::Inventory),
-    KeyEntry::Category("key.categories.movement"),
-    KeyEntry::Key(Action::Jump),
-    KeyEntry::Key(Action::Sneak),
-    KeyEntry::Key(Action::Sprint),
-    KeyEntry::Key(Action::Left),
-    KeyEntry::Key(Action::Right),
-    KeyEntry::Key(Action::Back),
-    KeyEntry::Key(Action::Forward),
-    KeyEntry::Category("key.categories.multiplayer"),
-    KeyEntry::Key(Action::PlayerList),
-    KeyEntry::Key(Action::Chat),
-    KeyEntry::Key(Action::Command),
-];
+/// The entries in the order `GuiKeyBindingList` shows them: `KeyBinding`
+/// sorts by the translated category, then by the translated description, so
+/// the order follows the language.
+pub(super) fn key_entries(lang: &Lang) -> Vec<KeyEntry> {
+    let mut actions = Action::ALL.to_vec();
+    actions.sort_by(|a, b| {
+        (lang.tr(a.category()), lang.tr(a.lang_key()))
+            .cmp(&(lang.tr(b.category()), lang.tr(b.lang_key())))
+    });
+    let mut entries = Vec::with_capacity(actions.len() + 6);
+    let mut last = None;
+    for action in actions {
+        if last != Some(action.category()) {
+            last = Some(action.category());
+            entries.push(KeyEntry::Category(action.category()));
+        }
+        entries.push(KeyEntry::Key(action));
+    }
+    entries
+}
 
 impl OptionsScreen {
     /// `GuiControls`.
@@ -83,17 +51,18 @@ impl OptionsScreen {
     ) {
         let (top, bottom) = (63.0, gui.height - 32.0);
         let cx = gui.cx();
-        let content = KEY_ENTRIES.len() as f32 * KEY_ROW;
+        let entries = key_entries(lang);
+        let content = entries.len() as f32 * KEY_ROW;
         self.scroll_list(ui, content, bottom - top, KEY_ROW);
         Self::list_background(ui, gui, top, bottom);
 
         let label_width = Action::ALL
             .iter()
-            .map(|action| atlas.measure(lang.tr(action_key(*action)), 1.0))
+            .map(|action| atlas.measure(lang.tr(action.lang_key()), 1.0))
             .fold(0.0_f32, f32::max);
         let x = cx - 110.0 + 2.0;
         ui.push_clip(gui.rect(0.0, top, gui.width, bottom - top));
-        for (index, entry) in KEY_ENTRIES.iter().enumerate() {
+        for (index, entry) in entries.iter().enumerate() {
             let y = top + 4.0 - self.scroll + index as f32 * KEY_ROW;
             match *entry {
                 KeyEntry::Category(key) => {
@@ -169,9 +138,7 @@ impl OptionsScreen {
 
         Self::title(ui, atlas, gui, lang.tr("controls.title"), 8.0);
 
-        let all_default = Action::ALL
-            .iter()
-            .all(|action| options.keys.get(*action) == action.default_key());
+        let all_default = options.keys.is_default();
         let done = gui.rect(cx - 155.0, gui.height - 29.0, HALF_W, BUTTON_H);
         self.back(ui, atlas, done, lang);
         let reset = gui.rect(cx - 155.0 + 160.0, gui.height - 29.0, HALF_W, BUTTON_H);
@@ -204,7 +171,7 @@ impl OptionsScreen {
         label_width: f32,
         inside: bool,
     ) {
-        let name = lang.tr(action_key(action));
+        let name = lang.tr(action.lang_key());
         let at = [
             ((x + 90.0 - label_width) * gui.scale).round(),
             ((y + KEY_ROW / 2.0 - 4.0) * gui.scale).round(),
@@ -214,7 +181,7 @@ impl OptionsScreen {
 
         let waiting = self.capturing == Some(action);
         let conflicted = !options.keys.conflicts(action).is_empty();
-        let key = key_label(options.keys.get(action));
+        let key = options.keys.get(action).label(lang);
         let (label, tint) = if waiting {
             (format!("> {key} <"), Some(YELLOW))
         } else if conflicted {
@@ -229,7 +196,7 @@ impl OptionsScreen {
         }
         let reset = gui.rect(x + 190.0, y, 50.0, BUTTON_H);
         let id = format!("keyreset:{}", action.id());
-        let changed = options.keys.get(action) != action.default_key();
+        let changed = options.keys.get(action) != action.default_binding();
         if self.button(
             ui,
             atlas,
@@ -239,7 +206,7 @@ impl OptionsScreen {
             inside && changed,
             None,
         ) {
-            options.keys.set(action, action.default_key());
+            options.keys.set(action, action.default_binding());
             self.capturing = None;
         }
     }

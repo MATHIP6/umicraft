@@ -357,6 +357,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("gui.stats", "Statistics"),
     ("gui.done", "Done"),
     ("gui.cancel", "Cancel"),
+    ("key.mouseButton", "Button %s"),
     ("deathScreen.title", "You died!"),
     ("deathScreen.score", "Score"),
     ("deathScreen.respawn", "Respawn"),
