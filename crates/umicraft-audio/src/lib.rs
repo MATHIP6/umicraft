@@ -22,6 +22,7 @@ pub mod error;
 pub mod handle;
 pub mod index;
 pub mod limits;
+pub mod music;
 pub mod request;
 pub mod thread;
 
