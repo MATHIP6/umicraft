@@ -51,6 +51,7 @@ mod language;
 pub mod map_render;
 mod menu_flow;
 mod menu_rows;
+pub mod mesh_settings;
 pub mod mesher;
 pub mod model_resources;
 pub mod moving_blocks_draw;

@@ -1032,12 +1032,18 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        self.video_applier.apply(
+        let remesh = self.video_applier.apply(
             &self.options.video,
             self.window.as_deref(),
             renderer,
             self.entity_textures.as_ref(),
         );
+        if remesh {
+            self.send_event(GameEvent::ReMeshAll);
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);

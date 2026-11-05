@@ -116,14 +116,16 @@ impl VideoApplier {
     /// Applies `video` for this frame: the GUI scale, vsync, fullscreen and
     /// the entity shadows. Brightness, bobbing and the cloud mode are read
     /// where they are used (the render environment, the camera and the cloud
-    /// pass).
+    /// pass). Returns whether an option the mesh workers read changed, so the
+    /// caller re-meshes the loaded columns.
+    #[must_use]
     pub fn apply(
         &mut self,
         video: &VideoOptions,
         window: Option<&Window>,
         renderer: &mut Renderer,
         entities: Option<&EntityTextures>,
-    ) {
+    ) -> bool {
         umicraft_ui::set_gui_scale_option(u32::from(video.gui_scale));
         renderer.set_vsync(video.vsync);
         if let Some(entities) = entities {
@@ -135,6 +137,7 @@ impl VideoApplier {
             // the change is instant and safe on every platform.
             window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
         }
+        crate::mesh_settings::set_smooth_lighting(video.smooth_lighting)
     }
 }
 

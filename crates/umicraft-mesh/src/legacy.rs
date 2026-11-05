@@ -7,7 +7,8 @@ use umicraft_world::fluid::Liquid;
 use umicraft_world::{BlockKind, BlockState, ChunkPos};
 
 use crate::face::{Face, FaceDef, ALL_FACES, FACE_DEFS};
-use crate::{fluid, lighting::quad_light, tint, BlockSource, Mesh, Vertex};
+use crate::lighting::{quad_light, Lighting};
+use crate::{fluid, tint, BlockSource, Mesh, Vertex};
 
 /// Builds the mesh for one chunk column with the legacy procedural cubes.
 ///
@@ -17,6 +18,16 @@ use crate::{fluid, lighting::quad_light, tint, BlockSource, Mesh, Vertex};
 /// This is the no-assets fallback of [`mesh_chunk_with_models`].
 #[must_use]
 pub fn mesh_chunk<S: BlockSource + ?Sized>(pos: ChunkPos, source: &S) -> Mesh {
+    mesh_chunk_lit(pos, source, Lighting::Smooth)
+}
+
+/// [`mesh_chunk`] with the lighting of the `Smooth Lighting` option.
+#[must_use]
+pub fn mesh_chunk_lit<S: BlockSource + ?Sized>(
+    pos: ChunkPos,
+    source: &S,
+    lighting: Lighting,
+) -> Mesh {
     let mut mesh = Mesh::default();
     let base_x = pos.x * 16;
     let base_z = pos.z * 16;
@@ -39,7 +50,7 @@ pub fn mesh_chunk<S: BlockSource + ?Sized>(pos: ChunkPos, source: &S) -> Mesh {
                     fluid::emit_fluid(&mut mesh, source, [wx, y, wz], liquid, layers, tint::WHITE);
                     continue;
                 }
-                emit_legacy_faces(&mut mesh, source, wx, y, wz, state);
+                emit_legacy_faces(&mut mesh, source, wx, y, wz, state, lighting);
             }
         }
     }
@@ -90,10 +101,16 @@ fn emit_legacy_faces<S: BlockSource + ?Sized>(
     y: i32,
     z: i32,
     state: BlockState,
+    lighting: Lighting,
 ) {
-    emit_legacy_faces_with(mesh, source, [x, y, z], state, tint::WHITE, |face| {
-        texture_layer(state, face)
-    });
+    emit_legacy_faces_with(
+        mesh,
+        source,
+        [x, y, z],
+        (state, lighting),
+        tint::WHITE,
+        |face| texture_layer(state, face),
+    );
 }
 
 /// Emits the legacy cube faces with a caller-selected texture layer.
@@ -106,7 +123,7 @@ pub(crate) fn emit_legacy_faces_with<S, F>(
     mesh: &mut Mesh,
     source: &S,
     position: [i32; 3],
-    state: BlockState,
+    (state, lighting): (BlockState, Lighting),
     tint: u32,
     mut layer_for_face: F,
 ) where
@@ -126,8 +143,11 @@ pub(crate) fn emit_legacy_faces_with<S, F>(
             position,
             def,
             state,
-            layer_for_face(face),
-            tint,
+            FaceStyle {
+                layer: layer_for_face(face),
+                tint,
+                lighting,
+            },
         );
     }
 }
@@ -152,17 +172,36 @@ pub(crate) fn is_transparent_pass(state: BlockState) -> bool {
     matches!(state.kind(), BlockKind::Transparent | BlockKind::Liquid)
 }
 
+/// What a legacy face is drawn with besides its geometry.
+struct FaceStyle {
+    layer: u32,
+    tint: u32,
+    lighting: Lighting,
+}
+
 fn emit_face<S: BlockSource + ?Sized>(
     mesh: &mut Mesh,
     source: &S,
     position: [i32; 3],
     def: &FaceDef,
     state: BlockState,
-    layer: u32,
-    tint: u32,
+    style: FaceStyle,
 ) {
+    let FaceStyle {
+        layer,
+        tint,
+        lighting,
+    } = style;
     let [x, y, z] = position;
-    let lights = quad_light(source, position, def.normal, &def.corners, true, true);
+    let lights = quad_light(
+        source,
+        position,
+        def.normal,
+        &def.corners,
+        true,
+        true,
+        lighting,
+    );
     let vertices = std::array::from_fn(|index| {
         let corner = def.corners[index];
         Vertex {
