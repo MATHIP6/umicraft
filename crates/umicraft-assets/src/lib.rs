@@ -82,6 +82,7 @@ pub mod progress;
 pub mod resource_pack;
 pub mod setup;
 pub mod skin;
+pub mod sound_assets;
 
 mod zip;
 
@@ -109,3 +110,4 @@ pub use skin::{
     procedural_wither_texture, procedural_wolf_texture, procedural_zombie_pigman_texture,
     procedural_zombie_skin, procedural_zombie_villager_texture, SkinModel,
 };
+pub use sound_assets::SoundAssets;

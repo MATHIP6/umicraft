@@ -36,7 +36,7 @@ pub use language::LanguageOptions;
 pub use multiplayer::MultiplayerOptions;
 pub use packs::{is_pack_name, ResourcePackOptions, PACKS_FOLDER};
 pub use skin::{SkinOptions, SkinPart};
-pub use sound::{SoundCategory, SoundOptions};
+pub use sound::{CategoryLabel, SoundCategory, SoundOptions};
 pub use video::{
     VideoOptions, FOV, MAX_CLOUD_SETTING, MAX_FPS, MAX_GUI_SCALE, MAX_PARTICLE_SETTING,
     MAX_SMOOTH_LIGHTING, MIPMAP_LEVELS, RENDER_DISTANCE, UNLIMITED_FPS,

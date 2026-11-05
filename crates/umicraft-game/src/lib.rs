@@ -72,6 +72,7 @@ pub mod scoreboard;
 pub mod selection;
 pub mod server;
 pub mod shapes;
+pub mod sound;
 pub mod title;
 pub mod traffic;
 pub mod view;
@@ -162,6 +163,8 @@ pub struct GameState {
     previous_position: DVec3,
     tick: u64,
     history: PredictionHistory,
+    stepper: sound::step::Stepper,
+    sounds: sound::queue::SoundQueue,
 }
 
 impl GameState {
@@ -173,6 +176,8 @@ impl GameState {
             previous_position: position,
             tick: 0,
             history: PredictionHistory::new(),
+            stepper: sound::step::Stepper::new(),
+            sounds: sound::queue::SoundQueue::new(),
         }
     }
 
@@ -187,9 +192,16 @@ impl GameState {
     ///
     /// The tick allocates nothing: the pending-input history is a fixed
     /// capacity ring buffer and the physics only uses stack values.
+    /// Only a sound cue allocates (its name), once per footstep.
     pub fn tick<S: BlockSource + ?Sized>(&mut self, intent: &InputIntent, world: &S) {
         self.previous_position = self.player.position;
         physics::step(&mut self.player, intent, world);
+        self.sounds.record_steps(
+            &mut self.stepper,
+            &self.player,
+            self.previous_position,
+            world,
+        );
         self.tick += 1;
         self.history.push(PendingTick {
             intent: *intent,
@@ -199,6 +211,42 @@ impl GameState {
             yaw: self.player.yaw,
             pitch: self.player.pitch,
         });
+    }
+
+    /// Takes the sound cues produced since the last call, oldest first.
+    ///
+    /// The cues come from the player's own movement (footsteps, swimming,
+    /// landing), from the digging and rain code that call
+    /// [`GameState::queue_sound_cues`], and from the server's Sound Effect and
+    /// Effect packets. The render thread plays them; the game state does no
+    /// audio I/O. The client calls this once per tick on the game thread and
+    /// forwards the cues to the render thread, which hands them to the audio
+    /// thread (`umicraft-client::audio_bridge`).
+    pub fn drain_sound_cues(&mut self) -> Vec<sound::cue::SoundCue> {
+        self.sounds.drain()
+    }
+
+    /// Queues cues made outside the movement step, such as the break and hit
+    /// sounds of the attack tick or the rain.
+    pub fn queue_sound_cues(&mut self, cues: impl IntoIterator<Item = sound::cue::SoundCue>) {
+        self.sounds.extend(cues);
+    }
+
+    /// Queues the cue of a Sound Effect packet.
+    pub fn on_sound_effect(
+        &mut self,
+        packet: &umicraft_protocol::packets::play::clientbound::sound_effect::SoundEffect,
+    ) {
+        self.sounds.sound_effect(packet);
+    }
+
+    /// Queues the cues of an Effect packet (clicks, doors, records, block
+    /// breaks).
+    pub fn on_effect(
+        &mut self,
+        packet: &umicraft_protocol::packets::play::clientbound::effect::Effect,
+    ) {
+        self.sounds.effect(packet);
     }
 
     /// Applies an authoritative server position and replays the pending

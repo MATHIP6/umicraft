@@ -24,6 +24,8 @@ use crate::entity::EntityId;
 use crate::gamemode::GameMode;
 use crate::raycast::{Face, RayHit};
 use crate::shapes::{Aabb, BlockSource};
+use crate::sound::block_events::{break_cue, HitSounds};
+use crate::sound::cue::SoundCue;
 
 /// The ticks between two creative breaks and after a survival one
 /// (MCP `PlayerControllerMP.blockHitDelay`, lines 224, 292, 324).
@@ -149,6 +151,9 @@ pub struct AttackOutput {
     pub broken: Vec<BlockPos>,
     /// The new crack stage of the block being dug, if it changed.
     pub progress: Option<BreakProgress>,
+    /// The sounds the client plays itself: the hits while digging and the
+    /// break (see [`crate::sound::block_events`]).
+    pub sounds: Vec<SoundCue>,
 }
 
 /// The block being dug (MCP `PlayerControllerMP.currentBlock` and friends).
@@ -174,6 +179,8 @@ pub struct Interaction {
     expected_break: Option<BlockPos>,
     /// The block whose placement the server is expected to confirm.
     expected_placement: Option<BlockPos>,
+    /// Paces the hit sounds (`stepSoundTickCounter`).
+    hit_sounds: HitSounds,
 }
 
 impl Interaction {
@@ -358,6 +365,8 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
         if self.tick.mode == GameMode::Creative && sword {
             return;
         }
+        let id = self.block_id(block);
+        self.output.sounds.extend(break_cue(block, id));
         self.output.broken.push(block);
         self.interaction.digging = None;
     }
@@ -392,6 +401,7 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
             if id != 0 && digging::relative_hardness(id, &self.tick.digger) >= 1.0 {
                 self.destroy(block);
             } else {
+                self.interaction.hit_sounds.restart();
                 self.interaction.digging = Some(Digging {
                     block,
                     item: self.tick.digger.held.cloned(),
@@ -428,7 +438,10 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
         };
         digging.damage += per_tick;
         let damage = digging.damage;
+        let cue = self.interaction.hit_sounds.hit(block, id);
+        self.output.sounds.extend(cue);
         if damage >= 1.0 {
+            self.interaction.hit_sounds.restart();
             self.send_dig(DiggingStatus::StopDestroyBlock, block, wire_face(hit.face));
             self.destroy(block);
             self.interaction.hit_delay = BLOCK_HIT_DELAY;
@@ -638,6 +651,54 @@ mod tests {
         assert_eq!(dig_status(&last), [DiggingStatus::StopDestroyBlock]);
         assert_eq!(last.broken, [BlockPos::new(3, 4, 5)]);
         assert_eq!(interaction.digging_block(), None);
+    }
+
+    #[test]
+    fn digging_hits_every_fourth_tick_and_breaks_with_the_dig_sound() {
+        let world = One(BlockPos::new(3, 4, 5), DIRT);
+        let mut interaction = Interaction::new();
+        let mut sounds = Vec::new();
+        for index in 0..20 {
+            let output = tick(
+                &mut interaction,
+                GameMode::Survival,
+                &world,
+                Some(stone()),
+                index == 0,
+                true,
+            );
+            sounds.extend(output.sounds);
+            if !output.broken.is_empty() {
+                break;
+            }
+        }
+        let names: Vec<_> = sounds.iter().map(|cue| cue.name.as_ref()).collect();
+        // 15 ticks of damage: hits on the 1st, 5th, 9th and 13th, then the break.
+        assert_eq!(
+            names,
+            [
+                "step.gravel",
+                "step.gravel",
+                "step.gravel",
+                "step.gravel",
+                "dig.gravel"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_block_that_breaks_at_once_only_plays_the_break_sound() {
+        let world = One(BlockPos::new(3, 4, 5), TALL_GRASS);
+        let output = tick(
+            &mut Interaction::new(),
+            GameMode::Survival,
+            &world,
+            Some(stone()),
+            true,
+            true,
+        );
+        let names: Vec<_> = output.sounds.iter().map(|cue| cue.name.as_ref()).collect();
+        assert_eq!(names, ["dig.grass"]);
     }
 
     #[test]

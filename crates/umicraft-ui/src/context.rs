@@ -88,6 +88,8 @@ pub struct Ui {
     primary_pressed: Option<[f32; 2]>,
     /// The press was claimed by a widget, so it no longer clears the focus.
     click_consumed: bool,
+    /// Buttons and sliders pressed since the last [`Ui::take_button_presses`].
+    button_presses: u32,
     /// The optional widgets sprite sheet used for skinning buttons and sliders.
     widgets_sheet: Option<SpriteSheet>,
     /// The menu textures (dirt, title logo) of the user's client jar.
@@ -111,6 +113,7 @@ impl Ui {
             pointer: None,
             primary_pressed: None,
             click_consumed: false,
+            button_presses: 0,
             widgets_sheet: None,
             menu_art: MenuArt::default(),
         }
@@ -375,6 +378,20 @@ impl Ui {
         };
         self.responses.push(response);
         response
+    }
+
+    /// Records that an enabled button or slider was pressed.
+    ///
+    /// Vanilla plays `gui.button.press` at that moment (`GuiButton.playPressSound`
+    /// in `GuiScreen.mouseClicked`); the UI crate has no audio, so it only counts
+    /// and the window plays the sound.
+    pub fn note_button_press(&mut self) {
+        self.button_presses = self.button_presses.saturating_add(1);
+    }
+
+    /// The buttons and sliders pressed since the last call; resets the count.
+    pub fn take_button_presses(&mut self) -> u32 {
+        std::mem::take(&mut self.button_presses)
     }
 
     /// Marks the response stored for `id` in this frame as changed.

@@ -67,6 +67,7 @@ use umicraft_game::server::maps::MapStore;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
 use umicraft_game::shapes::Aabb;
+use umicraft_game::sound::cue::SoundCue;
 use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::view::{camera_pose, Perspective};
@@ -269,6 +270,8 @@ pub struct Frame {
     pub world_time: i64,
     /// The current dimension (`0` overworld, `-1` Nether, `1` End).
     pub dimension: i8,
+    /// The game mode of the local player; the music depends on it.
+    pub gamemode: GameMode,
     /// The world spawn point the server announced, which the compass shows.
     pub spawn: Option<(i32, i32, i32)>,
     /// Per-entity interpolation data for the render thread.
@@ -349,6 +352,10 @@ pub enum RenderEvent {
     /// The view of the player changed between two ticks (mouse look); it
     /// replaces the newest frame's view without restarting the interpolation.
     Look(RenderState),
+    /// The sounds the tick produced (footsteps, digging, rain, server
+    /// effects), oldest first; the render thread hands them to the audio
+    /// thread. Never empty.
+    Sounds(Vec<SoundCue>),
     /// The HUD state changed.
     Hud(Box<HudState>),
     /// The inventory/container state changed.
@@ -1247,6 +1254,22 @@ fn publish_look(game: &Game, frames: &SyncSender<RenderEvent>) {
     }
 }
 
+/// Publishes the sound cues the tick produced, once per tick.
+///
+/// Cues travel as their own event, not inside the [`Frame`]: a frame is skipped
+/// when the queue is full, and a footstep should not disappear with it. When
+/// even this event does not fit, the render thread is far behind and the cues
+/// are dropped (a sound that late is worthless); the game thread never waits.
+fn publish_sounds(game: &mut Game, frames: &SyncSender<RenderEvent>) {
+    let Some(state) = game.state.as_mut() else {
+        return;
+    };
+    let cues = state.drain_sound_cues();
+    if !cues.is_empty() {
+        let _ = frames.try_send(RenderEvent::Sounds(cues));
+    }
+}
+
 /// Publishes the current player state as a frame.
 ///
 /// The frame queue is polled by the render thread, so the game thread never
@@ -1310,6 +1333,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
+        gamemode: game.gamemode,
         spawn: game.spawn,
         entities: entities.into(),
         local_body: Arc::new(game.body.frame_data()),
@@ -2108,7 +2132,17 @@ fn apply_net_event(
         }
         PlayEvent::Explosion(packet) => apply_explosion(game, &packet),
         PlayEvent::Particle(packet) => spawn_particles(game, &packet),
-        PlayEvent::Effect(packet) => apply_effect(game, &packet),
+        PlayEvent::Effect(packet) => {
+            if let Some(state) = game.state.as_mut() {
+                state.on_effect(&packet);
+            }
+            apply_effect(game, &packet);
+        }
+        PlayEvent::SoundEffect(packet) => {
+            if let Some(state) = game.state.as_mut() {
+                state.on_sound_effect(&packet);
+            }
+        }
         PlayEvent::PlayerAbilities(packet) => {
             game.server.apply_abilities(&packet);
             apply_mode_rules(game);
@@ -2251,7 +2285,7 @@ fn spawn_ambient_particles(game: &mut Game) {
                 .selected_item()
                 .is_some_and(|stack| stack.item_id == BARRIER_ITEM),
     };
-    game.ambient.tick(
+    let rain = game.ambient.tick(
         &mut game.particles,
         world,
         &viewer,
@@ -2259,6 +2293,9 @@ fn spawn_ambient_particles(game: &mut Game) {
         i32::try_from(game.status_data.ticks).unwrap_or(0),
         game.particle_setting,
     );
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues(rain);
+    }
 }
 
 /// Creates the particles a `Particle` packet asks for, seen from the player
@@ -2674,6 +2711,9 @@ fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
         digger,
     });
     let effects = swing_effects(game);
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues(output.sounds);
+    }
     for outgoing in output.packets {
         match outgoing {
             Outgoing::Swing => {
@@ -3003,6 +3043,7 @@ fn tick(
     publish_chunks(game, chunks);
 
     publish_frame(game, frames, tick_time);
+    publish_sounds(game, frames);
     tick_hud_view(game);
     if let Some(strength) = game.hud_view.take_jump() {
         queue.ordered.push_back(ClientCommand::RidingJump {

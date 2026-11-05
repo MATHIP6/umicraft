@@ -189,3 +189,30 @@ fn the_language_defaults_to_english_and_a_bad_code_is_replaced() {
     assert_eq!(Options::load(&path).language.code, "fr_FR");
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Regression: the sound section keeps its field names now that the category
+/// enum lives in `umicraft-audio` (a file written before must still load).
+#[test]
+fn the_sound_section_keeps_its_file_format() {
+    let folder = temp_folder("sound-format");
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join(FILE_NAME);
+    std::fs::write(
+        &path,
+        "[sound]\nmaster = 0.5\nmusic = 0.25\nrecords = 1.0\nweather = 0.75\nblocks = 0.0\nmobs = 1.0\nanimals = 1.0\nplayers = 1.0\nambient = 0.125\n",
+    )
+    .unwrap();
+    let loaded = Options::load(&path);
+    assert_eq!(loaded.sound.volume(SoundCategory::Master), 0.5);
+    assert_eq!(loaded.sound.volume(SoundCategory::Blocks), 0.0);
+    assert_eq!(loaded.sound.volume(SoundCategory::Ambient), 0.125);
+    loaded.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    for field in [
+        "master", "music", "records", "weather", "blocks", "mobs", "animals", "players", "ambient",
+    ] {
+        assert!(text.contains(&format!("{field} = ")), "{field} in {text}");
+    }
+    assert_eq!(Options::load(&path).sound, loaded.sound);
+    let _ = std::fs::remove_dir_all(&folder);
+}

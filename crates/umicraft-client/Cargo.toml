@@ -19,6 +19,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 umicraft-assets.workspace = true
+umicraft-audio.workspace = true
 umicraft-core.workspace = true
 umicraft-game.workspace = true
 umicraft-mesh.workspace = true

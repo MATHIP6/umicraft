@@ -13,6 +13,8 @@ use super::surface::is_open_air;
 use crate::particles::{ParticleKind, ParticleSetting};
 use crate::selection::selection_shape;
 use crate::shapes::BlockSource;
+use crate::sound::cue::SoundCue;
+use crate::sound::weather::{RainDrops, RainSound};
 
 /// How far around the viewer a drop can fall (`i = 10`).
 const RAIN_RADIUS: u32 = 10;
@@ -67,7 +69,8 @@ pub struct RainView {
 /// The splash drops of one tick around `viewer` (MCP
 /// `EntityRenderer.addRainParticles`, line 1509): up to `100 * strength^2`
 /// random columns within 10 blocks, each making a droplet on what the rain
-/// hits, or smoke on lava. The rain sound is not played.
+/// hits, or smoke on lava. Afterwards the rain sound may play, which is the
+/// returned cue (`sound` is its `rainSoundCounter`).
 ///
 /// The draws are seeded from `view.update_count` like the reference, so the
 /// same tick always splashes the same columns. The height of a column is
@@ -78,7 +81,9 @@ pub fn rain_splashes<S, W>(
     viewer: BlockPos,
     view: &RainView,
     out: &mut Requests,
-) where
+    sound: &mut RainSound,
+) -> Option<SoundCue>
+where
     S: BlockSource + ?Sized,
     W: Weather + ?Sized,
 {
@@ -88,6 +93,7 @@ pub fn rain_splashes<S, W>(
         view.strength / 2.0
     };
     let mut rng = JavaRandom::new((i64::from(view.update_count) * SEED_FACTOR) as u64);
+    let mut drops = RainDrops::default();
     for _ in 0..drop_count(strength, view.setting) {
         let dx = rng.next_int(RAIN_RADIUS) as i32 - rng.next_int(RAIN_RADIUS) as i32;
         let dz = rng.next_int(RAIN_RADIUS) as i32 - rng.next_int(RAIN_RADIUS) as i32;
@@ -103,8 +109,12 @@ pub fn rain_splashes<S, W>(
             continue;
         }
         let (across_x, across_z) = (rng.next_double(), rng.next_double());
-        splash(world, surface, (across_x, across_z), out);
+        if let Some(landing) = splash(world, surface, (across_x, across_z), out) {
+            drops.record(landing - DVec3::Y, &mut rng);
+        }
     }
+    let sheltered = precipitation_height(world, viewer.x, viewer.z, viewer.y).is_some();
+    sound.decide(&drops, viewer.y, sheltered, &mut rng)
 }
 
 /// `(int)(100.0F * f * f)`, thinned by the particle setting.
@@ -135,13 +145,14 @@ fn precipitation_height<S: BlockSource + ?Sized>(
         .map(|y| y + 1)
 }
 
-/// The particle a drop makes where it lands on the block under `surface`.
+/// The particle a drop makes where it lands on the block under `surface`;
+/// the position of a droplet, `None` for smoke or nothing.
 fn splash<S: BlockSource + ?Sized>(
     world: &S,
     surface: BlockPos,
     (across_x, across_z): (f64, f64),
     out: &mut Requests,
-) {
+) -> Option<DVec3> {
     let below = BlockPos::new(surface.x, surface.y - 1, surface.z);
     let state = world.block(below.x, below.y, below.z);
     let lift = |y: i32| f64::from(y as f32 + SPLASH_LIFT);
@@ -153,6 +164,7 @@ fn splash<S: BlockSource + ?Sized>(
             f64::from(surface.z) + across_z,
         );
         emit(out, ParticleKind::Smoke, position);
+        None
     } else if !state.is_air() {
         let position = DVec3::new(
             f64::from(below.x) + across_x,
@@ -160,6 +172,9 @@ fn splash<S: BlockSource + ?Sized>(
             f64::from(below.z) + across_z,
         );
         emit(out, ParticleKind::Droplet, position);
+        Some(position)
+    } else {
+        None
     }
 }
 
@@ -212,7 +227,15 @@ mod tests {
 
     fn splashes(world: &World, view: &RainView) -> Requests {
         let mut out = Vec::new();
-        rain_splashes(world, &Everywhere, BlockPos::new(0, 64, 0), view, &mut out);
+        let mut sound = RainSound::default();
+        rain_splashes(
+            world,
+            &Everywhere,
+            BlockPos::new(0, 64, 0),
+            view,
+            &mut out,
+            &mut sound,
+        );
         out
     }
 
@@ -289,7 +312,59 @@ mod tests {
             BlockPos::new(0, 64, 0),
             &view(1.0),
             &mut out,
+            &mut RainSound::default(),
         );
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn steady_rain_plays_the_rain_sound_now_and_then() {
+        let world = floor_world();
+        let mut sound = RainSound::default();
+        let mut cues = Vec::new();
+        for tick in 0..40 {
+            let mut view = view(1.0);
+            view.update_count = tick;
+            let mut out = Vec::new();
+            let viewer = BlockPos::new(0, 64, 0);
+            cues.extend(rain_splashes(
+                &world,
+                &Everywhere,
+                viewer,
+                &view,
+                &mut out,
+                &mut sound,
+            ));
+        }
+        assert!(!cues.is_empty() && cues.len() < 40, "{}", cues.len());
+        for cue in &cues {
+            assert_eq!(cue.name, "ambient.weather.rain");
+            // The floor is open to the sky above the viewer's row.
+            assert_eq!((cue.volume, cue.pitch), (0.2, 1.0));
+            assert!((cue.pos[1] - 63.1).abs() < 1e-4, "{}", cue.pos[1]);
+        }
+    }
+
+    #[test]
+    fn rain_heard_from_under_the_ground_is_muffled() {
+        // The viewer stands in a cave under the floor: the rain falls above it.
+        let world = floor_world();
+        let mut sound = RainSound::default();
+        let mut cues = Vec::new();
+        for tick in 0..40 {
+            let mut view = view(1.0);
+            view.update_count = tick;
+            let mut out = Vec::new();
+            cues.extend(rain_splashes(
+                &world,
+                &Everywhere,
+                BlockPos::new(0, 60, 0),
+                &view,
+                &mut out,
+                &mut sound,
+            ));
+        }
+        assert!(!cues.is_empty());
+        assert!(cues.iter().all(|cue| (cue.volume, cue.pitch) == (0.1, 0.5)));
     }
 }

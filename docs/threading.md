@@ -193,9 +193,70 @@ ADR-0005).
   increments. A result of an older generation is discarded, so a mesh of a
   replaced world that was still being built is never drawn in the new one.
 
+### Audio boundary (P11-A)
+
+- `umicraft-audio::thread::spawn` starts one std thread named `umicraft-audio`.
+  It owns the `Engine` (sound index, PCM cache, source limits, delayed sounds,
+  category volumes, the listener) and the backend. The backend is built on that
+  thread because audio streams are often not `Send`.
+- The game and render threads hold only an `AudioHandle`: a cloneable
+  `SyncSender` of `AudioMessage`s over `sync_channel(256)`. Every call is a
+  `try_send`; a full or closed queue **drops the message and counts it**
+  (`AudioHandle::dropped`), so a stuck audio device can never stall the
+  simulation or a frame. The listener and volume messages are repeated by the
+  caller, so a dropped one is superseded.
+- The audio thread drains the queue with `recv_timeout` and runs a 20 Hz tick
+  (`SoundManager.updateAllSounds`): it frees finished sources and starts the
+  sounds whose delay is over. A missed tick is skipped, not replayed.
+- The device callback runs on a third, realtime thread owned by cpal. The audio
+  thread hands it voices through a bounded `sync_channel(64)` (`try_send`) and
+  reads how many ended from two atomics; the callback never takes a lock and
+  does not allocate (the voice list is reserved up front, a voice that does not
+  fit is dropped). The PCM is `Arc`-shared, so no sample data is copied between
+  threads.
+- File reads and Ogg decoding of effects happen only on the audio thread, on a
+  cache miss. Streamed entries (music) are decoded on a fourth thread,
+  `umicraft-audio-decode`, started on the first track (ADR-0052): the audio thread
+  reads the bytes, sends them over a channel and polls the result with
+  `try_recv` on its tick, so a 3-minute track never delays an effect.
+- Music state crosses threads as atomics only: `MusicActivity` (two counters,
+  `AudioHandle::music_playing`) tells the render thread whether its track is in
+  flight; `AudioMessage::StopMusic` is another `try_send`. The render thread
+  runs `MusicTicker` at 20 Hz (`audio_bridge::music`).
+- Measured (`tests/stall_latency.rs`): with a loader and a backend that sleep
+  40 ms per operation, the game thread (20 Hz) and the render thread (60 fps)
+  see p99 about 9 us and max about 27 us per call (release); the queue overflows
+  and drops instead of waiting. Numbers in `docs/perf-log.md`.
+- The crate depends on neither `umicraft-game` nor `umicraft-net`: callers
+  translate their events into `SoundRequest`s.
+
+### Audio bridge in the client (P11-E)
+
+- **Cues cross the thread boundary as their own event.** Once per tick the
+  game thread calls `GameState::drain_sound_cues()` (`publish_sounds`) and, when
+  the list is not empty, `try_send`s `RenderEvent::Sounds(Vec<SoundCue>)` on the
+  frame queue. It is not part of `Frame`, because a full frame queue skips
+  frames and a footstep should not vanish with one. If the event does not fit
+  either, the cues are dropped; the game thread never waits.
+- The render thread's `WorldView` collects the cues (`take_sounds`); the window
+  takes them once per frame, turns each into a `SoundRequest`
+  (`audio_bridge::cues`) and calls `AudioHandle::play` (a `try_send`). The
+  listener is rebuilt from the interpolated camera every frame
+  (`audio_bridge::listener`), so the pan follows the mouse look.
+- The window owns the `AudioBridge` (and with it the `AudioThread`). It is
+  created at start-up: the asset index, `sounds.json` (about 38 KB) and the
+  options are read there, once, before the first frame; no `.ogg` is read on
+  the render thread (the audio thread loads and decodes on a cache miss).
+- Menu clicks: `Ui` counts the presses of enabled buttons and of sliders
+  (`take_button_presses`); the window plays `gui.button.press` after the UI
+  frame. Volumes: `VolumeSync` sends the sliders that changed once per frame
+  (a dropped message is retried on the next frame).
+- Without a bridge (`--no-audio`, no downloaded assets, headless, tests) there
+  is no audio thread and every call returns at once.
+
 ### Current deviations from the target model
 
-- Lighting workers, asset/IO pool, audio thread, and mod workers do not exist
+- Lighting workers, asset/IO pool and mod workers do not exist
   yet. Add each to this table when introduced.
 - The player inventory is not received in M3: the 1.8 protocol only sends it
   with the window packets, which belong to M9. The client therefore knows

@@ -15,7 +15,7 @@ use super::video_page::gamma_value;
 use super::*;
 use winit::keyboard::KeyCode;
 
-use crate::options::{Binding, SkinPart, SoundCategory};
+use crate::options::{Binding, CategoryLabel, SkinPart, SoundCategory};
 
 const VIEWPORT: Rect = Rect {
     x: 0.0,

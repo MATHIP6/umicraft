@@ -39,6 +39,9 @@ use self::menu_screens::VERSION_LINE;
 use self::session_control::lifecycle_step;
 use crate::anvil_field::AnvilField;
 use crate::args::Args;
+use crate::audio_bridge::listener::listener_of;
+use crate::audio_bridge::music::MusicWorld;
+use crate::audio_bridge::AudioBridge;
 use crate::creative_input::CreativeInput;
 use crate::creative_layout::CreativeLayout;
 use crate::creative_screen::{draw_creative_overlay, CreativeScene};
@@ -142,6 +145,9 @@ struct App {
     options_outcome: OptionsOutcome,
     /// Applies the video options that act on the window and the renderer.
     video_applier: VideoApplier,
+    /// The audio thread and its handle; silent with `--no-audio` or without
+    /// downloaded assets (P11-E).
+    audio: AudioBridge,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// The uploaded title panorama, when the user's assets provide it.
@@ -285,6 +291,11 @@ impl App {
             packs_folder().as_deref(),
         )));
         let font = ui_font::load();
+        let audio = if args.no_audio {
+            AudioBridge::disabled()
+        } else {
+            AudioBridge::start(&options.sound)
+        };
         let args_has_server = args.server().is_some();
         let last_server = options.multiplayer.last_server.clone();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
@@ -297,6 +308,7 @@ impl App {
             options_screen: OptionsScreen::new(),
             options_outcome: OptionsOutcome::default(),
             video_applier: VideoApplier::default(),
+            audio,
             window: None,
             renderer: None,
             panorama: None,
@@ -711,8 +723,29 @@ impl App {
         };
         world.sync(session.frames(), session.chunks(), renderer);
         world.update_camera(&mut self.camera, now, self.options.video.view_bobbing);
+        self.audio.play_cues(&world.take_sounds());
+        self.audio
+            .set_listener(listener_of(self.camera.position, self.camera.yaw));
         let step = lifecycle_step(self.screen, world.placed(), world.ended());
         self.apply_lifecycle(step);
+    }
+
+    /// Drives the background music: the menu music until the server placed the
+    /// player, then the music of the dimension and game mode.
+    fn update_music(&mut self, now: Instant) {
+        let in_world = self.session.is_some()
+            && !matches!(self.screen, Screen::Connecting | Screen::Disconnected);
+        let world = match self.world.as_ref() {
+            Some(world) if in_world => {
+                let (dimension, gamemode) = world.music_world();
+                MusicWorld::Playing {
+                    dimension,
+                    gamemode,
+                }
+            }
+            _ => MusicWorld::Menu,
+        };
+        self.audio.update_music(now, world, &self.options.sound);
     }
 
     /// Builds the frame-time graph; the rest of the HUD is drawn by the UI
@@ -958,6 +991,9 @@ impl App {
             (&self.lang, items),
         );
         let output = self.ui.end_frame();
+        self.audio.sync_volumes(&self.options.sound);
+        self.audio
+            .play_button_presses(self.ui.take_button_presses());
         if respawn_clicked {
             self.respawn();
         }
@@ -1017,6 +1053,7 @@ impl App {
         self.camera.set_fov_degrees(self.options.video.fov);
         self.advance_menus(Duration::from_secs_f32(elapsed));
         self.sync_world(now);
+        self.update_music(now);
         self.process_completions();
         self.update_death_screen(now);
         self.update_container_cursor();
