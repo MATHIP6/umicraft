@@ -20,7 +20,8 @@
 //! baseline-to-baseline distance. Both are in atlas pixels at scale 1.
 //!
 //! The 1.8 atlas is a 16×16 grid of 8×8 cells in a 128×128 RGBA PNG. The
-//! printable ASCII character `c` occupies slot `c` (32..=126). The width of a
+//! printable ASCII character `c` occupies slot `c` (32..=126); the other cells
+//! hold the accented letters and symbols listed in [`crate::font_grid`]. The width of a
 //! glyph is the number of non-transparent columns counted from the left plus
 //! one pixel of spacing; the space character is forced to four pixels. These
 //! rules were derived from the reference renderer consulted under ADR-0001,
@@ -55,6 +56,8 @@
 //! All text indices in this module are `char` indices, never byte offsets.
 
 use thiserror::Error;
+
+use crate::font_grid::{GRID_CELLS, GRID_CHARS};
 
 /// One glyph in a [`FontAtlas`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -106,12 +109,6 @@ const GLYPH_GRID: u32 = 16;
 /// The 1.8 `ascii.png` is exactly 128×128 pixels; the reference renderer
 /// hard-codes 128-pixel UVs (`FontRenderer.java:254-261`).
 const REFERENCE_ATLAS_SIDE: u32 = 128;
-/// The first printable ASCII code point, which is also its atlas slot.
-const ASCII_FIRST: u32 = 32;
-/// The last printable ASCII code point, which is also its atlas slot.
-const ASCII_LAST: u32 = 126;
-/// Number of printable ASCII glyphs in [`FontAtlas::from_png`].
-const ASCII_GLYPH_COUNT: usize = (ASCII_LAST - ASCII_FIRST + 1) as usize;
 /// Opaque white columns appended to a decoded atlas for solid rectangles.
 const WHITE_STRIP_WIDTH: u32 = 4;
 /// `FONT_HEIGHT` of the 1.8 renderer (`FontRenderer.java:35`).
@@ -332,10 +329,9 @@ impl FontAtlas {
     /// The image must be the 128×128 PNG of the 1.8 font: a 16×16 grid of
     /// 8×8 cells. For images with an alpha channel (the 1.8 asset is RGBA) the
     /// alpha sample is the glyph coverage; without alpha, the Rec. 601
-    /// luminance is used. Printable ASCII (`' '..='~'`) is mapped to the cell
-    /// with the same code point, which is the layout of the reference atlas
-    /// (`FontRenderer.java:247-248`). The remaining cells use a
-    /// Mojang-specific mapping and are not exposed in M4.
+    /// luminance is used. Every character of the grid is mapped to its cell
+    /// by the `charList` order of the reference ([`crate::font_grid`]), so the
+    /// Latin-1 accents and box characters render too.
     ///
     /// The returned atlas is four texels wider than the image: the appended
     /// columns are opaque white and back [`Self::white_uv`], so a rectangle
@@ -380,7 +376,7 @@ impl FontAtlas {
         let (width, height) = (info.width, info.height);
         let coverage = coverage_from_frame(&info, &buffer)?;
         let atlas_width = width + WHITE_STRIP_WIDTH;
-        let glyphs = build_ascii_glyphs(width, height, atlas_width, &coverage);
+        let glyphs = build_grid_glyphs(width, height, atlas_width, &coverage);
         let (atlas_width, pixels) = append_white_strip(width, height, coverage);
         let white_uv = [
             (width as f32 + 1.0) / atlas_width as f32,
@@ -654,19 +650,24 @@ fn append_white_strip(width: u32, height: u32, coverage: Vec<u8>) -> (u32, Vec<u
     (atlas_width, pixels)
 }
 
-/// Builds the glyph records for printable ASCII.
+/// Builds the glyph records for every character of the 1.8 grid.
 ///
-/// The real 1.8 atlas stores printable ASCII at the slot with the same code
-/// point (`FontRenderer.java:237,247-248`). Only those cells are exposed: the
-/// extended cells use a Mojang-specific ordering that M4 does not need, and
-/// unknown characters use the documented replacement glyph instead.
-fn build_ascii_glyphs(width: u32, height: u32, atlas_width: u32, coverage: &[u8]) -> Vec<Glyph> {
+/// The cell of a character is its index in [`GRID_CHARS`]
+/// (`FontRenderer.java:237,247-248`): printable ASCII keeps its code point as
+/// slot, the Latin-1 accents, box characters and symbols sit in the others.
+/// Unused cells (`'\0'`) get no glyph. The result is sorted by character so
+/// that printable ASCII stays first and the replacement policy of
+/// [`FontAtlas::glyph_or_fallback`] finds `' '` as the first glyph.
+fn build_grid_glyphs(width: u32, height: u32, atlas_width: u32, coverage: &[u8]) -> Vec<Glyph> {
     let cell_width = width / GLYPH_GRID;
     let cell_height = height / GLYPH_GRID;
-    let mut glyphs = Vec::with_capacity(ASCII_GLYPH_COUNT);
+    let mut glyphs = Vec::with_capacity(GRID_CELLS);
 
-    for character in ' '..='~' {
-        let slot = character as u32;
+    for (slot, character) in GRID_CHARS.chars().enumerate() {
+        if character == '\0' {
+            continue;
+        }
+        let slot = slot as u32;
         let origin_x = (slot % GLYPH_GRID) * cell_width;
         let origin_y = (slot / GLYPH_GRID) * cell_height;
 
@@ -691,6 +692,7 @@ fn build_ascii_glyphs(width: u32, height: u32, atlas_width: u32, coverage: &[u8]
             advance: used as f32 + 1.0,
         });
     }
+    glyphs.sort_by_key(|glyph| glyph.character);
     glyphs
 }
 
