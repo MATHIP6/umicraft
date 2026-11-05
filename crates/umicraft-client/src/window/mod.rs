@@ -1032,13 +1032,15 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        let remesh = self.video_applier.apply(
+        let effects = self.video_applier.apply(
             &self.options.video,
             self.window.as_deref(),
             renderer,
             self.entity_textures.as_ref(),
         );
-        if remesh {
+        if effects.reload_atlas {
+            self.reload_resources();
+        } else if effects.remesh {
             self.send_event(GameEvent::ReMeshAll);
         }
         let Some(renderer) = self.renderer.as_mut() else {
@@ -1378,11 +1380,9 @@ impl ApplicationHandler for App {
         }
         // The mesh workers only exist once the terrain textures are bound,
         // so they never write layers of another array (ADR-0012).
-        let terrain = self
-            .terrain
-            .take()
-            .unwrap_or(TerrainTextures::Procedural)
-            .install(&mut renderer);
+        let terrain = self.terrain.take().unwrap_or(TerrainTextures::Procedural);
+        renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
+        let terrain = terrain.install(&mut renderer);
         upload_gui_atlas(&mut renderer, terrain.gui_atlas());
         upload_glint_texture(&mut renderer, terrain.glint_texture());
         upload_sky_textures(&mut renderer);
