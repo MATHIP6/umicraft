@@ -543,7 +543,11 @@ connecting and disconnected screens (a kick shows the reason and returns to
 the list instead of closing the client), the pause menu (Disconnect, Options,
 Statistics), the statistics screen fed by `Client Status` request-stats, every
 options page and the options file, the language system and the rotating
-title panorama (ADR-0045; the vanilla blur is skipped).
+title panorama (ADR-0045). **F3 (ADR-0049, 2026-11-05):** connecting stages and
+vanilla failure texts, the statistics screen with General, Blocks, Items and
+Mobs tabs and live refresh, the achievements screen and toast, the tilted
+splash from `splashes.txt` and the vanilla panorama
+blur.
 
 **Remaining before P10 is done**
 - Owner validation in a real window: title to server list to a live server,
@@ -551,8 +555,8 @@ title panorama (ADR-0045; the vanilla blur is skipped).
   the pause menu, statistics against a real server; screenshot comparison
   with vanilla. `--hud-demo --hud-view title|servers` shows the two screens
   offscreen.
-- Out of P10 and inert: Singleplayer, Achievements, Open to LAN, the
-  statistics block, item and mob tabs, LAN entries, server icons, SRV lookup.
+- Out of P10 and inert: Singleplayer, Realms, Open to LAN, LAN entries, server
+  icons, SRV lookup.
 
 ### P11 — Audio
 

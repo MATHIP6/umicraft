@@ -1610,21 +1610,6 @@ impl ApplicationHandler for App {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_fresh_f2_press_is_the_only_toggle() {
-        assert!(is_debug_toggle(KeyCode::F4, ElementState::Pressed, false));
-        assert!(!is_debug_toggle(KeyCode::F4, ElementState::Pressed, true));
-        assert!(!is_debug_toggle(KeyCode::F4, ElementState::Released, false));
-        assert!(!is_debug_toggle(KeyCode::F3, ElementState::Pressed, false));
-        assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, false));
-        assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
-    }
-}
-
 /// The menu flow, with the splash of the user's `splashes.txt` when there is
 /// one (the title screen keeps its original list otherwise).
 fn new_menu(last_server: String) -> MenuFlow {
@@ -1640,4 +1625,19 @@ fn new_menu(last_server: String) -> MenuFlow {
         menu.set_splash(splash);
     }
     menu
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fresh_f2_press_is_the_only_toggle() {
+        assert!(is_debug_toggle(KeyCode::F4, ElementState::Pressed, false));
+        assert!(!is_debug_toggle(KeyCode::F4, ElementState::Pressed, true));
+        assert!(!is_debug_toggle(KeyCode::F4, ElementState::Released, false));
+        assert!(!is_debug_toggle(KeyCode::F3, ElementState::Pressed, false));
+        assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, false));
+        assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
+    }
 }

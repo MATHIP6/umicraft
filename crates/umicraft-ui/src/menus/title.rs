@@ -9,10 +9,8 @@
 //! - Options `(cx - 100, j + 84)` 98x20, Quit Game `(cx + 2, j + 84)` 98x20
 //! - Language `(cx - 124, j + 84)` 20x20 (`GuiButtonLanguage`)
 //!
-//! - Realms `(cx - 100, j + 48)` 200x20 (`menu.online`, always disabled:
-//!   it is a Mojang online service Umicraft does not implement; the row stays
-//!   so the layout is the vanilla one)
 //!
+//! The Minecraft Realms row (`j + 48`) is not drawn, by the owner's decision.
 //! The logo is the
 //! vanilla texture from the user's client jar when [`crate::menus::MenuArt`]
 //! has it (owner-approved, never committed, spec §3) and the original word
@@ -83,8 +81,6 @@ pub struct TitleLayout {
     pub singleplayer: Rect,
     /// The Multiplayer button.
     pub multiplayer: Rect,
-    /// The disabled Minecraft Realms button.
-    pub realms: Rect,
     /// The Options button.
     pub options: Rect,
     /// The Quit Game button.
@@ -101,7 +97,6 @@ pub fn title_layout(viewport: Rect) -> TitleLayout {
     TitleLayout {
         singleplayer: gui.rect(cx - 100.0, j, 200.0, 20.0),
         multiplayer: gui.rect(cx - 100.0, j + 24.0, 200.0, 20.0),
-        realms: gui.rect(cx - 100.0, j + 48.0, 200.0, 20.0),
         options: gui.rect(cx - 100.0, j + 84.0, 98.0, 20.0),
         quit: gui.rect(cx + 2.0, j + 84.0, 98.0, 20.0),
         language: gui.rect(cx - 124.0, j + 84.0, 20.0, 20.0),
@@ -188,7 +183,6 @@ impl TitleScreen {
         let options_id = ui.id("options");
         let quit_id = ui.id("quit");
         let singleplayer_id = ui.id("singleplayer");
-        let realms_id = ui.id("realms");
         let singleplayer = lang.tr("menu.singleplayer");
         gui.button(
             ui,
@@ -196,14 +190,6 @@ impl TitleScreen {
             layout.singleplayer,
             atlas,
             singleplayer,
-            false,
-        );
-        gui.button(
-            ui,
-            realms_id,
-            layout.realms,
-            atlas,
-            lang.tr("menu.online"),
             false,
         );
         let multiplayer = gui.button(
