@@ -22,6 +22,7 @@
 //! assert_eq!(glass.break_sound().to_string(), "dig.glass");
 //! ```
 
+pub mod block_events;
 mod block_sounds;
 pub mod cue;
 pub mod effect_packet;
