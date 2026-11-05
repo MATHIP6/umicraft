@@ -75,6 +75,11 @@ pub fn slider(
     state: &mut SliderState,
 ) -> (f32, bool) {
     let response = ui.response(id, rect);
+    if response.clicked {
+        // `GuiOptionSlider.mousePressed` is a button press: it clicks once on
+        // the press, not while dragging.
+        ui.note_button_press();
+    }
     // With the real texture the handle and text follow the GUI scale, as in vanilla.
     let skin = if ui.widgets_sheet().is_some() {
         (rect.height / 20.0).round().max(1.0)
@@ -381,5 +386,30 @@ mod tests {
             .count();
         // 2 images for track, 2 images for handle = 4 images
         assert_eq!(images, 4);
+    }
+
+    #[test]
+    fn a_press_clicks_once_and_dragging_does_not() {
+        let viewport = Rect::new(0.0, 0.0, 400.0, 200.0);
+        let mut ui = Ui::new(viewport);
+        let mut state = SliderState::default();
+        let id = ui.id("volume");
+        let press = |x: f32| {
+            UiInput::new(vec![InputEvent::PointerPressed {
+                position: [x, 20.0],
+                button: PointerButton::Left,
+            }])
+        };
+        let drag = |x: f32| {
+            UiInput::new(vec![InputEvent::PointerMoved {
+                position: [x, 20.0],
+            }])
+        };
+        let atlas = FontAtlas::fallback();
+        for (input, presses) in [(press(30.0), 1), (drag(60.0), 0), (drag(90.0), 0)] {
+            ui.begin_frame(viewport, input);
+            slider(&mut ui, id, BAR, &atlas, "V", 0.5, &mut state);
+            assert_eq!(ui.take_button_presses(), presses);
+        }
     }
 }

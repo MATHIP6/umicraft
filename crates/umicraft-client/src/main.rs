@@ -9,7 +9,8 @@ use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 use umicraft_client::args::{Args, Mode, USAGE};
 use umicraft_client::{
-    block_demo, entity_demo, headless, hud_demo, screenshot, setup_cli, ui_demo, window,
+    audio_bridge, block_demo, entity_demo, headless, hud_demo, screenshot, setup_cli, ui_demo,
+    window,
 };
 
 fn main() -> ExitCode {
@@ -34,6 +35,7 @@ fn main() -> ExitCode {
 
     let result = match args.mode() {
         Mode::SetupAssets => setup_cli::run(),
+        Mode::AudioProbe => audio_bridge::probe::run(),
         Mode::UiDemo => ui_demo::run(&args),
         Mode::HudDemo => hud_demo::run(&args),
         Mode::BlockDemo => block_demo::run(&args),

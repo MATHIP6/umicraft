@@ -2,14 +2,15 @@
 
 //! The sound volume page (`GuiScreenOptionsSounds`).
 //!
-//! The volumes are stored for the audio engine of P11; nothing plays yet.
+//! The sliders change `options.sound`; the window pushes the volumes to the
+//! audio thread (`audio_bridge::settings`).
 
 use umicraft_core::lang::Lang;
 use umicraft_ui::{FontAtlas, Ui};
 
 use super::layout::{Gui, BUTTON_H, HALF_W};
 use super::{option_label, OptionsScreen, Outcome};
-use crate::options::{Options, SoundCategory};
+use crate::options::{CategoryLabel, Options, SoundCategory};
 
 /// Width of the master volume slider (`GuiScreenOptionsSounds.Button`).
 const MASTER_W: f32 = 310.0;

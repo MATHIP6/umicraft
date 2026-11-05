@@ -2,51 +2,24 @@
 
 //! The sound volumes (`GuiScreenOptionsSounds`).
 //!
-//! These are values only: the audio engine is P11, which will read them. The
-//! page edits and saves them so the choice already survives a restart.
+//! The page edits and saves them; `crate::audio_bridge::settings` pushes them to
+//! the audio thread at start-up and on every change.
 
 use serde::{Deserialize, Serialize};
 
-/// A volume category of MCP `SoundCategory`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SoundCategory {
-    /// The master volume, applied to every other category.
-    Master,
-    /// Music.
-    Music,
-    /// Jukebox and note block records.
-    Records,
-    /// Rain and thunder.
-    Weather,
-    /// Blocks.
-    Blocks,
-    /// Hostile creatures.
-    Mobs,
-    /// Friendly and neutral creatures.
-    Animals,
-    /// Players.
-    Players,
-    /// Ambient and environment sounds.
-    Ambient,
+pub use umicraft_audio::SoundCategory;
+
+/// The language key of a category label, which only the options page needs.
+///
+/// The enum itself lives in `umicraft-audio` (the engine and the options share
+/// one type); the label is a UI concern, so it is an extension here.
+pub trait CategoryLabel {
+    /// The language key of the label (`soundCategory.<category name>`).
+    fn lang_key(self) -> &'static str;
 }
 
-impl SoundCategory {
-    /// The categories in the order of the page: the master volume first.
-    pub const ALL: [Self; 9] = [
-        Self::Master,
-        Self::Music,
-        Self::Records,
-        Self::Weather,
-        Self::Blocks,
-        Self::Mobs,
-        Self::Animals,
-        Self::Players,
-        Self::Ambient,
-    ];
-
-    /// The language key of the label (`soundCategory.<category name>`).
-    #[must_use]
-    pub const fn lang_key(self) -> &'static str {
+impl CategoryLabel for SoundCategory {
+    fn lang_key(self) -> &'static str {
         match self {
             Self::Master => "soundCategory.master",
             Self::Music => "soundCategory.music",

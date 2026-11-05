@@ -3628,6 +3628,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "umicraft-assets",
+ "umicraft-audio",
  "umicraft-core",
  "umicraft-game",
  "umicraft-mesh",

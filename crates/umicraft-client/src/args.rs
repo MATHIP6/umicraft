@@ -122,6 +122,8 @@ options:
   --dump-mobs DIR     render each mob individually 1-by-1 to PNG images in DIR
   --resource-pack PATH path to a resource pack directory or .zip (repeatable)
   --setup-assets      download and verify official 1.8.8 assets then exit
+  --no-audio          start without the sound engine (no device, no thread)
+  --audio-probe       play a few sound events on the system device and exit
   --time N            world time in ticks (signed; default: 6000 noon)
   --demo-view NAME    acceptance camera: overview, day, night, cave, transparency,
                       back, closeup, walk-cycle, mobs (default: overview)
@@ -180,6 +182,8 @@ pub enum Mode {
     EntityDemo,
     /// First-run download and verification of official assets.
     SetupAssets,
+    /// Plays a few sounds on the system audio device and exits.
+    AudioProbe,
 }
 
 /// Parsed client options.
@@ -226,6 +230,10 @@ pub struct Args {
     pub dump_mobs: Option<PathBuf>,
     /// Whether asset setup/download was explicitly requested.
     pub setup_assets: bool,
+    /// Whether the sound engine stays off (`--no-audio`).
+    pub no_audio: bool,
+    /// Whether the audio probe was requested (`--audio-probe`).
+    pub audio_probe: bool,
     /// Active resource pack paths, layered in argument order.
     pub resource_packs: Vec<PathBuf>,
     /// World time in ticks (signed; default: 6000 noon). Only used by `--block-demo`.
@@ -260,6 +268,8 @@ impl Args {
     pub fn mode(&self) -> Mode {
         if self.setup_assets {
             Mode::SetupAssets
+        } else if self.audio_probe {
+            Mode::AudioProbe
         } else if self.ui_demo {
             Mode::UiDemo
         } else if self.hud_demo {
@@ -304,6 +314,8 @@ impl Args {
         let mut mob = None;
         let mut dump_mobs = None;
         let mut setup_assets = false;
+        let mut no_audio = false;
+        let mut audio_probe = false;
         let mut resource_packs = Vec::new();
         let mut time = 6000_i64;
         let mut demo_view = DemoView::Overview;
@@ -412,6 +424,14 @@ impl Args {
                     setup_assets = true;
                     index += 1;
                 }
+                "--no-audio" => {
+                    no_audio = true;
+                    index += 1;
+                }
+                "--audio-probe" => {
+                    audio_probe = true;
+                    index += 1;
+                }
                 "--resource-pack" => {
                     let value = words.get(index + 1).ok_or_else(help)?;
                     if value.is_empty() {
@@ -486,7 +506,8 @@ impl Args {
             || entity_demo
             || mob.is_some()
             || dump_mobs.is_some()
-            || setup_assets;
+            || setup_assets
+            || audio_probe;
         let title_screen = !headless && screenshot.is_none();
         let complete = host.is_some() && port.is_some();
         let absent = host.is_none() && port.is_none();
@@ -515,6 +536,8 @@ impl Args {
             mob,
             dump_mobs,
             setup_assets,
+            no_audio,
+            audio_probe,
             resource_packs,
             time,
             demo_view,
@@ -838,6 +861,21 @@ mod tests {
         let args = Args::parse(&words(&["--setup-assets"])).expect("setup assets parses");
         assert!(args.setup_assets);
         assert_eq!(args.mode(), Mode::SetupAssets);
+    }
+
+    #[test]
+    fn no_audio_is_a_flag_that_keeps_the_windowed_mode() {
+        let args = Args::parse(&words(&["--no-audio"])).expect("title screen with no audio");
+        assert!(args.no_audio);
+        assert_eq!(args.mode(), Mode::Windowed);
+        assert!(!Args::parse(&words(&[])).expect("defaults").no_audio);
+    }
+
+    #[test]
+    fn audio_probe_needs_no_server_and_picks_its_mode() {
+        let args = Args::parse(&words(&["--audio-probe"])).expect("audio probe parses");
+        assert!(args.audio_probe);
+        assert_eq!(args.mode(), Mode::AudioProbe);
     }
 
     #[test]
