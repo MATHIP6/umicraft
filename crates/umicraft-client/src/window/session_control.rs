@@ -171,8 +171,7 @@ impl App {
         self.text_screens = crate::text_screens::TextScreens::default();
         self.inventory_input.reset();
         self.creative_input.reset();
-        self.attack_held = false;
-        self.use_held = false;
+        self.buttons.clear();
     }
 }
 

@@ -18,7 +18,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
@@ -34,12 +34,14 @@ use crate::adapter::AdapterSummary;
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::border::{BorderRenderer, BorderView};
 use crate::camera::{Camera, Frustum};
+use crate::capture;
 use crate::clouds::{CloudMode, CloudRenderer};
 use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
+use crate::mipmap;
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::overlays::{Pictures, ScreenOverlays, ScreenRenderer};
@@ -57,8 +59,11 @@ pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth3
 const OVERLAY_MIN_BYTES: u64 = 64 * 1024;
 /// Initial capacity of the per-frame item buffers.
 pub(crate) const MIN_DYNAMIC_BYTES: u64 = 16 * 1024;
-/// WebGPU requires 256-byte row alignment for buffer↔texture copies.
-const ROW_ALIGNMENT: u32 = 256;
+
+/// The highest `Mipmap Levels` option (`GameSettings`, slider 0 to 4).
+pub(crate) const MAX_MIPMAP_LEVELS: u32 = 4;
+/// The reference default (`GameSettings.mipmapLevels = 4`).
+const DEFAULT_MIPMAP_LEVELS: u32 = 4;
 
 pub(crate) const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
     0 => Float32x3,
@@ -179,6 +184,10 @@ pub struct Renderer {
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
     surface_config: Option<wgpu::SurfaceConfiguration>,
+    /// A screenshot of the next presented frame was requested.
+    capture_requested: bool,
+    /// The last captured frame, waiting for [`Renderer::take_capture`].
+    captured: Option<Result<Image, RenderError>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     width: u32,
@@ -200,6 +209,13 @@ pub struct Renderer {
     /// The vertices of the hand and its skin texture, if one is drawn.
     hand: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
     terrain_bind_group: wgpu::BindGroup,
+    /// The same array with the mip sampler, for the chunk passes only.
+    chunk_bind_group: wgpu::BindGroup,
+    /// Nearest texel, linear between the mip levels.
+    mip_sampler: wgpu::Sampler,
+    /// Mip levels below the base the next block atlas is uploaded with
+    /// (`GameSettings.mipmapLevels`).
+    mipmap_levels: u32,
     /// Layout of the terrain camera + texture binding, kept so
     /// [`Renderer::set_block_atlas`] can bind a replacement array without
     /// rebuilding the pipeline.
@@ -331,6 +347,15 @@ impl Renderer {
         // products a second time and wash every colour out, so the surface
         // keeps the plain format and the textures are sampled as stored.
         config.format = config.format.remove_srgb_suffix();
+        // The F2 screenshot copies the presented frame, when the surface
+        // allows it.
+        if surface
+            .get_capabilities(&adapter)
+            .usages
+            .contains(wgpu::TextureUsages::COPY_SRC)
+        {
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
+        }
         // The "Max Framerate" option paces the frames; the "Use VSync" option
         // decides whether the display refresh does too (`set_vsync`). Start
         // without, as the first frame has not read the options yet.
@@ -489,6 +514,21 @@ impl Renderer {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            // Items, particles and icons never use the mips
+            // (`setBlurMipmap(false, false)` in the reference).
+            lod_max_clamp: 0.0,
+            ..Default::default()
+        });
+        // The chunks: `GL_NEAREST_MIPMAP_LINEAR` (`setBlurMipmapDirect(false,
+        // true)`), nearest texel in each level and a linear blend of the two.
+        let mip_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain mip sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
 
@@ -559,6 +599,13 @@ impl Renderer {
             &terrain_layout,
             &camera_buffer,
             &block_sampler,
+            &block_view,
+        );
+        let chunk_bind_group = create_terrain_bind_group(
+            &device,
+            &terrain_layout,
+            &camera_buffer,
+            &mip_sampler,
             &block_view,
         );
         let overlay_bind_group =
@@ -755,6 +802,8 @@ impl Renderer {
             window,
             surface,
             surface_config,
+            capture_requested: false,
+            captured: None,
             device,
             queue,
             width,
@@ -770,6 +819,9 @@ impl Renderer {
             hand_camera_bind_group,
             hand: Vec::new(),
             terrain_bind_group,
+            chunk_bind_group,
+            mip_sampler,
+            mipmap_levels: DEFAULT_MIPMAP_LEVELS,
             terrain_layout,
             transparent_order: Vec::with_capacity(64),
             visible_opaque: Vec::with_capacity(256),
@@ -1377,36 +1429,14 @@ impl Renderer {
                 height,
                 depth_or_array_layers: layers,
             },
-            mip_level_count: 1,
+            mip_level_count: 1 + mipmap::level_count(width, height, self.mipmap_levels),
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            pixels,
-            // `Queue::write_texture` stages the data internally, so rows need
-            // no 256-byte alignment here (unlike texture↔buffer copies). The
-            // device limit check above caps `width`, so `width * 4` cannot
-            // overflow.
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: layers,
-            },
-        );
+        self.upload_block_layers(&texture, (width, height), pixels);
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("block texture array view"),
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -1419,9 +1449,91 @@ impl Renderer {
             &self.block_sampler,
             &view,
         );
+        self.chunk_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.camera_buffer,
+            &self.mip_sampler,
+            &view,
+        );
         self.rebind_icons(&view);
         self.official_blocks = Some((texture, width, height));
         Ok(())
+    }
+
+    /// Sets how many mip levels below the base the next
+    /// [`Renderer::set_block_atlas`] builds (`GameSettings.mipmapLevels`,
+    /// `0..=4`). The current array keeps its levels: like the reference, the
+    /// caller reloads the atlas to apply a change.
+    pub fn set_mipmap_levels(&mut self, levels: u32) {
+        self.mipmap_levels = levels.min(MAX_MIPMAP_LEVELS);
+    }
+
+    /// The mip levels the next block atlas is built with.
+    #[must_use]
+    pub fn mipmap_levels(&self) -> u32 {
+        self.mipmap_levels
+    }
+
+    /// Writes every layer of `pixels` (layer-major RGBA8) and its mip chain.
+    fn upload_block_layers(
+        &self,
+        texture: &wgpu::Texture,
+        (width, height): (u32, u32),
+        pixels: &[u8],
+    ) {
+        let layers = texture.depth_or_array_layers();
+        let layer_bytes = width as usize * height as usize * 4;
+        let levels = texture.mip_level_count() - 1;
+        self.write_block_level(texture, 0, (width, height, layers), pixels);
+        if levels == 0 {
+            return;
+        }
+        let chains: Vec<Vec<Vec<u8>>> = pixels
+            .chunks_exact(layer_bytes)
+            .map(|layer| mipmap::generate_chain(layer, width, height, levels))
+            .collect();
+        for level in 1..=levels {
+            let joined: Vec<u8> = chains
+                .iter()
+                .flat_map(|chain| chain[level as usize - 1].iter().copied())
+                .collect();
+            let size = ((width >> level).max(1), (height >> level).max(1), layers);
+            self.write_block_level(texture, level, size, &joined);
+        }
+    }
+
+    /// One `write_texture` of `size.2` layers of mip `level`.
+    fn write_block_level(
+        &self,
+        texture: &wgpu::Texture,
+        level: u32,
+        (width, height, layers): (u32, u32, u32),
+        pixels: &[u8],
+    ) {
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: level,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            // `Queue::write_texture` stages the data internally, so rows need
+            // no 256-byte alignment here (unlike texture to buffer copies).
+            // The device limit check in `set_block_atlas` caps `width`, so
+            // `width * 4` cannot overflow.
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: layers,
+            },
+        );
     }
 
     /// Rewrites one layer of the official block array (an animation frame).
@@ -1437,6 +1549,38 @@ impl Renderer {
         let expected = u64::from(*width) * u64::from(*height) * 4;
         if layer >= texture.depth_or_array_layers() || pixels.len() as u64 != expected {
             return false;
+        }
+        // An animation frame replaces the whole mip chain of the layer, as
+        // `TextureAtlasSprite.updateAnimation` uploads every level.
+        let levels = texture.mip_level_count() - 1;
+        for (index, mip) in mipmap::generate_chain(pixels, *width, *height, levels)
+            .iter()
+            .enumerate()
+        {
+            let level = index as u32 + 1;
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: level,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                mip,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some((width >> level).max(1) * 4),
+                    rows_per_image: Some((height >> level).max(1)),
+                },
+                wgpu::Extent3d {
+                    width: (width >> level).max(1),
+                    height: (height >> level).max(1),
+                    depth_or_array_layers: 1,
+                },
+            );
         }
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -1477,6 +1621,13 @@ impl Renderer {
             &self.terrain_layout,
             &self.camera_buffer,
             &self.block_sampler,
+            &self.procedural_blocks,
+        );
+        self.chunk_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.camera_buffer,
+            &self.mip_sampler,
             &self.procedural_blocks,
         );
         let view = self.procedural_blocks.clone();
@@ -1807,83 +1958,58 @@ impl Renderer {
         let Some(target) = self.offscreen.as_ref() else {
             return Err(RenderError::NotOffscreen);
         };
-        let bytes_per_row = self.width * 4;
-        let padded_row = bytes_per_row.div_ceil(ROW_ALIGNMENT) * ROW_ALIGNMENT;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: u64::from(padded_row) * u64::from(self.height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("readback encoder"),
-            });
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &target.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_row),
-                    rows_per_image: Some(self.height),
-                },
-            },
-            wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
+        capture::read_texture(
+            &self.device,
+            &self.queue,
+            &target.texture,
+            (self.width, self.height),
+            false,
+        )
+    }
+
+    /// Asks the windowed renderer to keep the next frame it presents; fetch
+    /// it with [`Renderer::take_capture`]. The surface must allow copies
+    /// (see [`Renderer::can_capture`]).
+    pub fn request_capture(&mut self) {
+        self.capture_requested = true;
+    }
+
+    /// Whether the window surface can be read back (`COPY_SRC` usage).
+    #[must_use]
+    pub fn can_capture(&self) -> bool {
+        self.surface_config
+            .as_ref()
+            .is_some_and(|config| config.usage.contains(wgpu::TextureUsages::COPY_SRC))
+    }
+
+    /// The frame kept after [`Renderer::request_capture`], once it was
+    /// presented; `None` while nothing is waiting.
+    ///
+    /// # Errors
+    /// [`RenderError::Readback`] when the copy of the frame failed.
+    pub fn take_capture(&mut self) -> Option<Result<Image, RenderError>> {
+        self.captured.take()
+    }
+
+    /// Copies the frame about to be presented when a capture was requested.
+    fn capture_frame(&mut self, texture: &wgpu::Texture) {
+        if !std::mem::take(&mut self.capture_requested) || !self.can_capture() {
+            return;
+        }
+        let Some(format) = self.surface_config.as_ref().map(|config| config.format) else {
+            return;
+        };
+        let blue_first = matches!(
+            format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
-        self.queue.submit(Some(encoder.finish()));
-
-        let mapping = Arc::new(Mutex::new(None));
-        let signal = Arc::clone(&mapping);
-        buffer
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |result| {
-                if let Ok(mut slot) = signal.lock() {
-                    *slot = Some(result);
-                }
-            });
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|error| RenderError::Readback(format!("{error:?}")))?;
-        {
-            let slot = mapping
-                .lock()
-                .map_err(|_| RenderError::Readback("mapping state was poisoned".into()))?;
-            let result = slot
-                .as_ref()
-                .ok_or_else(|| RenderError::Readback("mapping callback did not run".into()))?;
-            result
-                .as_ref()
-                .map_err(|error| RenderError::Readback(format!("{error:?}")))?;
-        }
-
-        let mapped = buffer
-            .slice(..)
-            .get_mapped_range()
-            .map_err(|error| RenderError::Readback(format!("{error:?}")))?;
-        let mut rgba = Vec::with_capacity((bytes_per_row * self.height) as usize);
-        for row in 0..self.height {
-            let start = (row * padded_row) as usize;
-            let end = start + bytes_per_row as usize;
-            rgba.extend_from_slice(&mapped[start..end]);
-        }
-        drop(mapped);
-        buffer.unmap();
-        Ok(Image {
-            width: self.width,
-            height: self.height,
-            rgba,
-        })
+        self.captured = Some(capture::read_texture(
+            &self.device,
+            &self.queue,
+            texture,
+            (self.width, self.height),
+            blue_first,
+        ));
     }
 
     fn write_camera(&self, camera: &Camera, sky: &SkyState) {
@@ -1971,6 +2097,7 @@ impl Renderer {
                         });
                 self.draw(&view, overlay, &mut encoder, sky_state);
                 self.queue.submit(Some(encoder.finish()));
+                self.capture_frame(&frame.texture);
                 if let Some(window) = &self.window {
                     window.pre_present_notify();
                 }
@@ -2051,7 +2178,7 @@ impl Renderer {
 
         // Opaque terrain: depth write on, alpha cutout, order-independent.
         pass.set_pipeline(&self.terrain_pipeline);
-        pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+        pass.set_bind_group(0, &self.chunk_bind_group, &[]);
         for pos in &self.visible_opaque {
             if let Some(opaque) = self.chunks.get(pos).and_then(|mesh| mesh.opaque.as_ref()) {
                 draw_gpu_pass(&mut pass, opaque);
@@ -2128,7 +2255,7 @@ impl Renderer {
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
         pass.set_pipeline(&self.terrain_transparent_pipeline);
-        pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+        pass.set_bind_group(0, &self.chunk_bind_group, &[]);
         for draw in &self.transparent_order {
             let Some(mesh) = self.chunks.get(&draw.pos) else {
                 continue;

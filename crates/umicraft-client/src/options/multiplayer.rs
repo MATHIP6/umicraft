@@ -15,6 +15,9 @@ pub struct MultiplayerOptions {
     /// What the player typed on the direct-connect screen last time, so the
     /// field starts filled (MCP `GuiMultiplayer` keeps `lastServer`).
     pub last_server: String,
+    /// `GameSettings.snooperEnabled`. Stored only: the client never collects
+    /// or sends usage data, whatever this says. Off by default.
+    pub snooper: bool,
 }
 
 impl MultiplayerOptions {
@@ -31,6 +34,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_snooper_is_off_by_default() {
+        assert!(!MultiplayerOptions::default().snooper);
+    }
+
+    #[test]
     fn the_default_address_is_empty() {
         assert_eq!(MultiplayerOptions::default().last_server, "");
     }
@@ -39,6 +47,7 @@ mod tests {
     fn a_very_long_address_is_cut() {
         let mut options = MultiplayerOptions {
             last_server: "a".repeat(500),
+            snooper: false,
         };
         options.clamp();
         assert_eq!(options.last_server.chars().count(), MAX_ADDRESS_CHARS);

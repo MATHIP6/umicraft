@@ -154,6 +154,7 @@ pub(crate) fn push_variant(
             position[2] as f32 + offset[2],
         ],
         cull: false,
+        lighting: crate::Lighting::Smooth,
     };
     emit_model_quads(mesh, &source, context, state, variant, placement);
 }

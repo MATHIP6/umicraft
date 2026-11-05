@@ -6,6 +6,33 @@ use umicraft_world::LightLevel;
 
 use crate::{BlockSource, VertexLight};
 
+/// How the light of a quad is sampled: the `Smooth Lighting` video option.
+///
+/// 1.8.8 only tests `ambientOcclusion != 0` (`Minecraft.isAmbientOcclusionEnabled`),
+/// so the options "Minimum" and "Maximum" mesh identically and map to
+/// [`Self::Smooth`]; "Off" is [`Self::Flat`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Lighting {
+    /// Per-corner light and ambient occlusion (`renderModelAmbientOcclusion`).
+    #[default]
+    Smooth,
+    /// One light per quad, sampled outside the face (`renderModelStandard`).
+    Flat,
+}
+
+impl Lighting {
+    /// The lighting of the `Smooth Lighting` option value (`0` off, `1` and
+    /// `2` on).
+    #[must_use]
+    pub const fn from_option(level: u8) -> Self {
+        if level == 0 {
+            Self::Flat
+        } else {
+            Self::Smooth
+        }
+    }
+}
+
 /// Axis of a face normal.
 #[derive(Debug, Clone, Copy)]
 enum Axis {
@@ -141,12 +168,13 @@ impl FaceSamples {
 ///
 /// The returned array lives on the stack; the sampler performs no allocation.
 ///
-/// When `ambient_occlusion` is `false` (cross and plant models), the function
-/// returns flat lighting: all four corners share the same light sampled from the
-/// block's own position.  This matches `renderModelStandardQuads` in the 1.8
-/// reference, which uses `getMixedBrightnessForBlock(pos)` uniformly.  Without
-/// this, cross-model faces pick up dark samples from the ground block below and
-/// show a visible shadow at their base.
+/// When `ambient_occlusion` is `false` (cross and plant models) or `lighting`
+/// is [`Lighting::Flat`], the function returns flat lighting: all four corners
+/// share one light. This matches `renderModelStandardQuads` in the 1.8
+/// reference, which uses `getMixedBrightnessForBlock` uniformly: the cell
+/// outside the face for a quad on the cube boundary, the block's own cell
+/// otherwise. Without the own cell, cross-model faces pick up dark samples
+/// from the ground block below and show a visible shadow at their base.
 pub(crate) fn quad_light<S: BlockSource + ?Sized>(
     source: &S,
     block: [i32; 3],
@@ -154,14 +182,20 @@ pub(crate) fn quad_light<S: BlockSource + ?Sized>(
     corners: &[[f32; 3]; 4],
     ambient_occlusion: bool,
     shade: bool,
+    lighting: Lighting,
 ) -> [VertexLight; 4] {
-    if !ambient_occlusion {
-        let light = source.light(block[0], block[1], block[2]);
+    let frame = FaceFrame::from_normal(normal);
+    if !ambient_occlusion || lighting == Lighting::Flat {
+        let cell = if lies_on_face_plane(frame, corners) {
+            frame.axis.offset(block, frame.sign)
+        } else {
+            block
+        };
+        let light = source.light(cell[0], cell[1], cell[2]);
         let flat = VertexLight::new(light.block, light.sky, VertexLight::AO_OPEN, shade);
         return [flat; 4];
     }
 
-    let frame = FaceFrame::from_normal(normal);
     let ao_enabled = shade;
     let samples = FaceSamples::new(source, block, frame, ao_enabled);
 
@@ -218,6 +252,18 @@ pub(crate) fn quad_light<S: BlockSource + ?Sized>(
 
         VertexLight::new(block_light, sky_light, ao, shade)
     })
+}
+
+/// Whether every corner of the quad sits on the cube face the normal points
+/// to (`fillQuadBounds` flag 0): such a quad is lit by the cell outside the
+/// face, any other (a cross, an inset torch) by the block's own cell.
+fn lies_on_face_plane(frame: FaceFrame, corners: &[[f32; 3]; 4]) -> bool {
+    let first = frame.axis.component(corners[0]);
+    let on_boundary = !(1.0e-4..=0.9999).contains(&first);
+    on_boundary
+        && corners
+            .iter()
+            .all(|corner| (frame.axis.component(*corner) - first).abs() < 1.0e-4)
 }
 
 /// `getAoBrightness`: a corner sample with no light at all (a solid block's

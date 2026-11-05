@@ -38,7 +38,7 @@ use crate::hud_demo_panorama;
 use crate::hud_demo_servers;
 use crate::menu_flow::{MenuContext, MenuFlow};
 use crate::options::{Action, Options};
-use crate::options_screen::OptionsScreen;
+use crate::options_screen::{Catalog, OptionsScreen};
 use crate::screen::Screen;
 use crate::screenshot::write_png;
 use crate::servers::ServerBook;
@@ -239,12 +239,17 @@ fn run_options(
     atlas: &FontAtlas,
     options: &mut Options,
     clicks: &[&str],
-    widgets_sheet: Option<SpriteSheet>,
+    (widgets_sheet, art): (Option<SpriteSheet>, MenuArt),
+    catalog: Option<Catalog>,
 ) -> (OptionsScreen, DrawList) {
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     let mut ui = Ui::new(viewport);
     ui.set_widgets_sheet(widgets_sheet);
+    ui.set_menu_art(art);
     let mut screen = OptionsScreen::new();
+    if let Some(catalog) = catalog {
+        screen.set_catalog(catalog);
+    }
     let lang = crate::language::load(Lang::DEFAULT_CODE);
     let mut frame = |screen: &mut OptionsScreen, ui: &mut Ui, input: UiInput| {
         ui.begin_frame(viewport, input);
@@ -358,8 +363,15 @@ fn build(
             let mut options = Options::default();
             options.video.fov = 95.0;
             options.video.render_distance = 12;
-            let (screen, draw_list) =
-                run_options(width, height, atlas, &mut options, &[], sheets.widgets);
+            let (screen, draw_list) = run_options(
+                width,
+                height,
+                atlas,
+                &mut options,
+                &[],
+                (sheets.widgets, art),
+                None,
+            );
             Demo {
                 lines: vec![
                     ("page", format!("{:?}", screen.page())),
@@ -374,15 +386,24 @@ fn build(
         "title" | "servers" | "server-edit" => {
             menu_scene(view, (width, height), atlas, (sheets, art), (None, None)).0
         }
-        "video" | "chat-options" => {
+        "video" | "chat-options" | "sounds" | "skin" | "language" | "packs" => {
             let mut options = Options::default();
-            let click = if view == "video" {
-                "nav:video"
-            } else {
-                "nav:chat"
+            let click = match view {
+                "video" => "nav:video",
+                "chat-options" => "nav:chat",
+                "packs" => "resourcepacks",
+                other => other,
             };
-            let (screen, draw_list) =
-                run_options(width, height, atlas, &mut options, &[click], sheets.widgets);
+            let catalog = matches!(view, "language" | "packs").then(Catalog::discover);
+            let (screen, draw_list) = run_options(
+                width,
+                height,
+                atlas,
+                &mut options,
+                &[click],
+                (sheets.widgets, art),
+                catalog,
+            );
             Demo {
                 lines: vec![
                     ("page", format!("{:?}", screen.page())),
@@ -393,7 +414,7 @@ fn build(
         }
         "controls" => {
             let mut options = Options::default();
-            // Two actions on one key show the conflict bar; a click on Hotbar Slot 3
+            // Two actions on one key show the conflict bar; a click on Attack/Destroy
             // leaves it waiting for a key.
             options.keys.set(Action::Hotbar2, KeyCode::Digit1);
             let (screen, draw_list) = run_options(
@@ -401,8 +422,9 @@ fn build(
                 height,
                 atlas,
                 &mut options,
-                &["nav:controls", "key:hotbar3"],
-                sheets.widgets,
+                &["nav:controls", "key:attack"],
+                (sheets.widgets, art),
+                None,
             );
             let conflicts = Action::ALL
                 .iter()
@@ -415,7 +437,7 @@ fn build(
                         "waiting for a key",
                         screen
                             .capturing()
-                            .map_or_else(|| "none".to_string(), |a| a.label().to_string()),
+                            .map_or_else(|| "none".to_string(), |a| a.id().to_string()),
                     ),
                     ("actions in conflict", conflicts.to_string()),
                     ("draw commands", draw_list.len().to_string()),
@@ -664,7 +686,7 @@ mod tests {
     #[test]
     fn the_controls_view_waits_for_a_key_and_flags_the_conflict() {
         let text = report("controls");
-        assert!(text.contains("waiting for a key : HOTBAR 3"), "{text}");
+        assert!(text.contains("waiting for a key : attack"), "{text}");
         assert!(text.contains("actions in conflict: 2"), "{text}");
     }
 

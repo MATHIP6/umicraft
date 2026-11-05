@@ -13,7 +13,9 @@ use super::main_page::fov_label;
 use super::sounds_page::volume_text;
 use super::video_page::gamma_value;
 use super::*;
-use crate::options::{SkinPart, SoundCategory};
+use winit::keyboard::KeyCode;
+
+use crate::options::{Binding, SkinPart, SoundCategory};
 
 const VIEWPORT: Rect = Rect {
     x: 0.0,
@@ -107,7 +109,7 @@ fn done_on_the_hub_closes_and_done_on_a_page_goes_back() {
 fn a_hub_button_without_a_backend_does_nothing() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
-    for id in ["shaders", "stream", "snooper"] {
+    for id in ["shaders", "stream"] {
         let outcome = click_widget(&mut screen, &mut options, id);
         assert_eq!(screen.page(), Page::Main, "{id}");
         assert_eq!(outcome, Outcome::default(), "{id}");
@@ -176,14 +178,66 @@ fn the_controls_page_rebinds_a_key_and_resets_it() {
     frame(
         &mut screen,
         &mut options,
-        vec![InputEvent::Wheel { delta: 16.0 }],
+        vec![InputEvent::Wheel { delta: 40.0 }],
     );
     click_widget(&mut screen, &mut options, "key:jump");
     assert_eq!(screen.capturing(), Some(Action::Jump));
-    assert!(screen.capture_key(&mut options, KeyCode::KeyJ));
+    assert!(screen.capture(&mut options, Binding::Key(KeyCode::KeyJ)));
     assert_eq!(options.keys.get(Action::Jump), KeyCode::KeyJ);
     click_widget(&mut screen, &mut options, "keyreset:jump");
     assert_eq!(options.keys.get(Action::Jump), KeyCode::Space);
+}
+
+#[test]
+fn a_mouse_button_can_be_captured_and_a_reserved_key_cannot() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "nav:controls");
+    frame(
+        &mut screen,
+        &mut options,
+        vec![InputEvent::Wheel { delta: 40.0 }],
+    );
+    click_widget(&mut screen, &mut options, "key:jump");
+    assert!(!screen.capture(&mut options, Binding::Key(KeyCode::Escape)));
+    assert_eq!(screen.capturing(), Some(Action::Jump), "capture goes on");
+    assert!(screen.capture(&mut options, Binding::Mouse(3)));
+    assert_eq!(screen.capturing(), None);
+    assert_eq!(options.keys.get(Action::Jump), Binding::Mouse(3));
+}
+
+#[test]
+fn the_key_list_follows_the_translated_order() {
+    let entries = controls_page::key_entries(&Lang::builtin());
+    let keys = entries
+        .iter()
+        .filter(|entry| matches!(entry, controls_page::KeyEntry::Key(_)))
+        .count();
+    assert_eq!(keys, Action::ALL.len(), "every action is listed once");
+    // Vanilla order with the English file: Gameplay, Inventory, Miscellaneous,
+    // Movement, Multiplayer.
+    let english = Lang::from_texts(
+        "en_US",
+        Some("key.categories.gameplay=Gameplay\nkey.categories.inventory=Inventory\nkey.categories.misc=Miscellaneous\nkey.categories.movement=Movement\nkey.categories.multiplayer=Multiplayer\n"),
+        None,
+    );
+    let headings: Vec<_> = controls_page::key_entries(&english)
+        .into_iter()
+        .filter_map(|entry| match entry {
+            controls_page::KeyEntry::Category(key) => Some(key),
+            controls_page::KeyEntry::Key(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        headings,
+        [
+            "key.categories.gameplay",
+            "key.categories.inventory",
+            "key.categories.misc",
+            "key.categories.movement",
+            "key.categories.multiplayer"
+        ]
+    );
 }
 
 #[test]
@@ -421,6 +475,23 @@ fn the_resource_pack_page_moves_packs_between_the_lists() {
 }
 
 #[test]
+fn an_incompatible_pack_asks_before_it_is_enabled() {
+    let mut screen = catalog_screen();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "resourcepacks");
+    click_widget(&mut screen, &mut options, "pack:Available:2");
+    assert!(screen.pack_draft().is_empty(), "the question comes first");
+    // No: nothing changes.
+    let layout = umicraft_ui::menus::confirm_layout(VIEWPORT);
+    frame(&mut screen, &mut options, click(layout.no));
+    assert!(screen.pack_draft().is_empty());
+    // Yes: the pack is enabled.
+    click_widget(&mut screen, &mut options, "pack:Available:2");
+    frame(&mut screen, &mut options, click(layout.yes));
+    assert_eq!(screen.pack_draft(), ["old.zip"]);
+}
+
+#[test]
 fn done_applies_the_pack_draft_lowest_priority_first_and_signals_the_reload() {
     let mut screen = catalog_screen();
     let mut options = Options::default();
@@ -517,4 +588,17 @@ fn the_new_labels_follow_game_settings() {
     assert_eq!(gamma_value(&lang, 0.0), "Moody");
     assert_eq!(gamma_value(&lang, 1.0), "Bright");
     assert_eq!(gamma_value(&lang, 0.5), "+50%");
+}
+
+#[test]
+fn the_snooper_button_opens_its_page_and_the_switch_is_stored() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "snooper");
+    assert_eq!(screen.page(), Page::Snooper);
+    assert!(!options.multiplayer.snooper);
+    let outcome = click_widget(&mut screen, &mut options, "snooper_toggle");
+    assert!(outcome.changed && options.multiplayer.snooper);
+    click_widget(&mut screen, &mut options, "done");
+    assert_eq!(screen.page(), Page::Main);
 }

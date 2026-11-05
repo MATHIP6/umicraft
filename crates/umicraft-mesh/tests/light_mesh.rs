@@ -10,7 +10,9 @@
 
 use std::sync::Arc;
 
-use umicraft_mesh::{mesh_chunk, BlockSource, ChunkSnapshot, Mesh, Vertex, VertexLight};
+use umicraft_mesh::{
+    mesh_chunk, mesh_chunk_lit, BlockSource, ChunkSnapshot, Lighting, Mesh, Vertex, VertexLight,
+};
 use umicraft_world::{BlockState, ChunkColumn, ChunkPos, LightLevel};
 
 /// A synthetic scene with explicit blocks and light; anything unspecified is
@@ -259,4 +261,60 @@ fn the_no_light_fallback_keeps_the_legacy_geometry() {
         let light = VertexLight::unpack(vertex.light);
         light.block == 0 && light.sky == 15 && light.ao == 15 && light.shade
     }));
+}
+
+/// The up face of a block beside a taller block: smooth lighting darkens the
+/// corner next to the wall, flat lighting gives the four corners one value.
+fn up_face_corner_lights(lighting: Lighting) -> Vec<VertexLight> {
+    let stone = BlockState::new(1, 0);
+    let scene = Scene::new(&[([0, 0, 0], stone), ([1, 1, 0], stone)])
+        .with_lights(
+            &[[0, 1, 0], [-1, 1, 0], [0, 1, 1], [-1, 1, 1], [0, 1, -1]],
+            LightLevel::new(0, 15),
+        )
+        .with_light([1, 1, 1], LightLevel::new(0, 5));
+    let mesh = mesh_chunk_lit(ChunkPos::new(0, 0), &scene, lighting);
+    [
+        [0.0, 1.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [1.0, 1.0, 1.0],
+        [0.0, 1.0, 1.0],
+    ]
+    .iter()
+    .map(|corner| vertex_light(&mesh, *corner, [0.0, 1.0, 0.0]))
+    .collect()
+}
+
+#[test]
+fn flat_lighting_gives_every_corner_of_a_face_the_same_light() {
+    let flat = up_face_corner_lights(Lighting::Flat);
+    assert!(flat.iter().all(|light| *light == flat[0]), "{flat:?}");
+    assert_eq!(flat[0].sky, 15, "the cell outside the face is sampled");
+    assert_eq!(flat[0].ao, VertexLight::AO_OPEN);
+}
+
+#[test]
+fn smooth_lighting_varies_across_the_face_next_to_a_wall() {
+    let smooth = up_face_corner_lights(Lighting::Smooth);
+    assert!(smooth.iter().any(|light| *light != smooth[0]), "{smooth:?}");
+    assert_eq!(
+        mesh_chunk(
+            ChunkPos::new(0, 0),
+            &Blocks(vec![([0, 0, 0], BlockState::new(1, 0))])
+        ),
+        mesh_chunk_lit(
+            ChunkPos::new(0, 0),
+            &Blocks(vec![([0, 0, 0], BlockState::new(1, 0))]),
+            Lighting::Smooth
+        ),
+        "mesh_chunk is the smooth mesh"
+    );
+}
+
+#[test]
+fn the_option_values_one_and_two_mesh_alike() {
+    // 1.8.8 only tests ambientOcclusion != 0 (Minecraft.isAmbientOcclusionEnabled).
+    assert_eq!(Lighting::from_option(0), Lighting::Flat);
+    assert_eq!(Lighting::from_option(1), Lighting::Smooth);
+    assert_eq!(Lighting::from_option(2), Lighting::Smooth);
 }

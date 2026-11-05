@@ -3,6 +3,7 @@
 //! The geometry and drawing helpers shared by the options pages: GUI-unit
 //! constants, the [`Gui`] scale and the list chrome of `GuiSlot`.
 
+use umicraft_ui::menus::{draw_list_background, draw_list_overlay};
 use umicraft_ui::widgets::gui_scale;
 use umicraft_ui::FontAtlas;
 use umicraft_ui::{Color, InputEvent, Rect, TextStyle, Ui};
@@ -23,8 +24,6 @@ pub(super) const RED: Color = [1.0, 0.333, 0.333, 1.0];
 pub(super) const YELLOW: Color = [1.0, 1.0, 0.333, 1.0];
 /// The shadow of white text (`0xFFFFFF >> 2 & 0xFCFCFC`).
 pub(super) const SHADOW: Color = [0.247, 0.247, 0.247, 1.0];
-/// The tint of the dirt background behind a list (`0x202020`).
-pub(super) const LIST_BACKGROUND: Color = [0.125, 0.125, 0.125, 1.0];
 /// The tint of the bars above and below a list (`0x404040`).
 pub(super) const LIST_BAR: Color = [0.25, 0.25, 0.25, 1.0];
 /// The grey of secondary text (`0x808080`).
@@ -105,33 +104,30 @@ impl OptionsScreen {
         Self::text_at(ui, gui, (left, y), text, color);
     }
 
-    /// Draws the dirt-less list background: the middle tint, the bars above
-    /// and below and the 4-unit shadows of `GuiSlot.overlayBackground`.
-    pub(super) fn list_background(ui: &mut Ui, gui: Gui, top: f32, bottom: f32) {
-        let width = gui.width * gui.scale;
-        ui.draw()
-            .rect(gui.rect(0.0, top, gui.width, bottom - top), LIST_BACKGROUND);
-        ui.draw()
-            .rect(Rect::new(0.0, 0.0, width, top * gui.scale), LIST_BAR);
-        ui.draw().rect(
-            Rect::new(
-                0.0,
-                bottom * gui.scale,
-                width,
-                (gui.height - bottom) * gui.scale,
-            ),
-            LIST_BAR,
-        );
-        for step in 0..4 {
-            let alpha = 1.0 - step as f32 / 4.0;
-            let color = [0.0, 0.0, 0.0, alpha];
-            ui.draw()
-                .rect(gui.rect(0.0, top + step as f32, gui.width, 1.0), color);
-            ui.draw().rect(
-                gui.rect(0.0, bottom - 1.0 - step as f32, gui.width, 1.0),
-                color,
-            );
-        }
+    /// The container of a `GuiSlot` (`drawContainerBackground`): the dark
+    /// dirt of the list area between `x` and `x + width` (GUI units), which
+    /// scrolls with the content. Drawn before the rows.
+    pub(super) fn list_container(
+        ui: &mut Ui,
+        gui: Gui,
+        (x, width): (f32, f32),
+        (top, bottom): (f32, f32),
+        scroll: f32,
+    ) {
+        let area = gui.rect(x, top, width, bottom - top);
+        draw_list_background(ui, area, scroll.floor() * gui.scale);
+    }
+
+    /// What `GuiSlot` paints over its rows (`overlayBackground`): the dirt
+    /// bands above and below the list and the 4-unit shadows on its edges.
+    /// Drawn after the rows so the bands hide the rows that overflow.
+    pub(super) fn list_overlay(
+        ui: &mut Ui,
+        gui: Gui,
+        (x, width): (f32, f32),
+        (top, bottom): (f32, f32),
+    ) {
+        draw_list_overlay(ui, gui.rect(x, top, width, bottom - top));
     }
 
     /// Applies the wheel to the scroll offset.

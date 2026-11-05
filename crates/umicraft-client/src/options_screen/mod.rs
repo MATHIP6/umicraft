@@ -24,9 +24,8 @@ use umicraft_ui::game_menu::draw_default_background;
 use umicraft_ui::menus::draw_menu_background;
 use umicraft_ui::widgets::{button_tinted, slider, SliderState};
 use umicraft_ui::{Color, FontAtlas, Rect, Ui};
-use winit::keyboard::KeyCode;
 
-use crate::options::{Action, Options};
+use crate::options::{Action, Binding, Options};
 
 mod catalog;
 mod chat_page;
@@ -36,6 +35,7 @@ mod layout;
 mod main_page;
 mod packs_page;
 mod skin_page;
+mod snooper_page;
 mod sounds_page;
 #[cfg(test)]
 mod tests;
@@ -63,6 +63,8 @@ pub enum Page {
     ResourcePacks,
     /// `GuiLanguage`.
     Language,
+    /// `GuiSnooper`.
+    Snooper,
 }
 
 /// What one frame of the screen did.
@@ -88,6 +90,9 @@ pub struct Outcome {
 pub struct OptionsScreen {
     page: Page,
     capturing: Option<Action>,
+    /// The pack waiting for the answer of the "made for another version"
+    /// dialog, and the dialog.
+    pack_confirm: Option<(String, umicraft_ui::menus::ConfirmScreen)>,
     /// Scroll offset of the list of the page, in GUI units.
     scroll: f32,
     sliders: HashMap<String, SliderState>,
@@ -117,6 +122,7 @@ impl OptionsScreen {
         Self {
             page: Page::Main,
             capturing: None,
+            pack_confirm: None,
             scroll: 0.0,
             sliders: HashMap::new(),
             catalog: Catalog::default(),
@@ -186,14 +192,15 @@ impl OptionsScreen {
         self.rects.get(id).copied()
     }
 
-    /// Binds `key` to the action that is waiting for one. A key the client
-    /// keeps for itself is refused and the capture goes on. Returns whether
-    /// the binding changed.
-    pub fn capture_key(&mut self, options: &mut Options, key: KeyCode) -> bool {
+    /// Binds a key or mouse button to the action that is waiting for one
+    /// (`GuiControls.keyTyped` and `mouseClicked`). A key the client keeps
+    /// for itself is refused and the capture goes on. Returns whether the
+    /// binding changed.
+    pub fn capture(&mut self, options: &mut Options, binding: Binding) -> bool {
         let Some(action) = self.capturing else {
             return false;
         };
-        if options.keys.set(action, key) {
+        if options.keys.set(action, binding) {
             self.capturing = None;
             true
         } else {
@@ -229,6 +236,7 @@ impl OptionsScreen {
             Page::Sounds => self.show_sounds(ui, atlas, options, gui, lang, &mut outcome),
             Page::ResourcePacks => self.show_packs(ui, atlas, options, gui, lang, &mut outcome),
             Page::Language => self.show_language(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Snooper => self.show_snooper(ui, atlas, options, gui, lang, &mut outcome),
         }
         ui.pop_id();
         outcome

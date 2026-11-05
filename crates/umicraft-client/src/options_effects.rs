@@ -101,6 +101,18 @@ pub fn open_folder(folder: &Path) {
 #[derive(Debug, Default)]
 pub struct VideoApplier {
     fullscreen: bool,
+    /// The mip levels the block atlas was last built with, once known.
+    mipmap_levels: Option<u32>,
+}
+
+/// What a changed video option asks the window to redo.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct VideoEffects {
+    /// An option the mesh workers read changed: re-mesh the loaded columns.
+    pub remesh: bool,
+    /// The mip levels changed: rebuild the block atlas (the reference
+    /// reloads the texture map the same way).
+    pub reload_atlas: bool,
 }
 
 impl VideoApplier {
@@ -113,17 +125,27 @@ impl VideoApplier {
         })
     }
 
+    /// Whether the mip levels differ from the ones the atlas was built with.
+    /// The first call only records them: the atlas was built from the same
+    /// options at start-up.
+    fn mipmap_change(&mut self, levels: u32) -> bool {
+        self.mipmap_levels
+            .replace(levels)
+            .is_some_and(|previous| previous != levels)
+    }
+
     /// Applies `video` for this frame: the GUI scale, vsync, fullscreen and
     /// the entity shadows. Brightness, bobbing and the cloud mode are read
     /// where they are used (the render environment, the camera and the cloud
-    /// pass).
+    /// pass). Returns what the window has to redo.
+    #[must_use]
     pub fn apply(
         &mut self,
         video: &VideoOptions,
         window: Option<&Window>,
         renderer: &mut Renderer,
         entities: Option<&EntityTextures>,
-    ) {
+    ) -> VideoEffects {
         umicraft_ui::set_gui_scale_option(u32::from(video.gui_scale));
         renderer.set_vsync(video.vsync);
         if let Some(entities) = entities {
@@ -134,6 +156,12 @@ impl VideoApplier {
             // Borderless on the current monitor: no video mode switch, so
             // the change is instant and safe on every platform.
             window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
+        }
+        let levels = u32::from(video.mipmap_levels);
+        renderer.set_mipmap_levels(levels);
+        VideoEffects {
+            remesh: crate::mesh_settings::store(video),
+            reload_atlas: self.mipmap_change(levels),
         }
     }
 }
@@ -199,6 +227,16 @@ mod tests {
             [folder.join("saved.zip")]
         );
         assert!(pack_paths(&[], &options, None).is_empty());
+    }
+
+    #[test]
+    fn a_new_mipmap_level_asks_for_an_atlas_reload_once() {
+        let mut applier = VideoApplier::default();
+        assert!(!applier.mipmap_change(4), "the first frame only records");
+        assert!(!applier.mipmap_change(4));
+        assert!(applier.mipmap_change(2));
+        assert!(!applier.mipmap_change(2));
+        assert!(applier.mipmap_change(0));
     }
 
     #[test]
