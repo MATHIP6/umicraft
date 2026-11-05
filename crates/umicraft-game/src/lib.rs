@@ -72,6 +72,7 @@ pub mod scoreboard;
 pub mod selection;
 pub mod server;
 pub mod shapes;
+pub mod sound;
 pub mod title;
 pub mod traffic;
 pub mod view;
