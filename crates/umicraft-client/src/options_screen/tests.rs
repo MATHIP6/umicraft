@@ -109,7 +109,7 @@ fn done_on_the_hub_closes_and_done_on_a_page_goes_back() {
 fn a_hub_button_without_a_backend_does_nothing() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
-    for id in ["shaders", "stream", "snooper"] {
+    for id in ["shaders", "stream"] {
         let outcome = click_widget(&mut screen, &mut options, id);
         assert_eq!(screen.page(), Page::Main, "{id}");
         assert_eq!(outcome, Outcome::default(), "{id}");
@@ -571,4 +571,17 @@ fn the_new_labels_follow_game_settings() {
     assert_eq!(gamma_value(&lang, 0.0), "Moody");
     assert_eq!(gamma_value(&lang, 1.0), "Bright");
     assert_eq!(gamma_value(&lang, 0.5), "+50%");
+}
+
+#[test]
+fn the_snooper_button_opens_its_page_and_the_switch_is_stored() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "snooper");
+    assert_eq!(screen.page(), Page::Snooper);
+    assert!(!options.multiplayer.snooper);
+    let outcome = click_widget(&mut screen, &mut options, "snooper_toggle");
+    assert!(outcome.changed && options.multiplayer.snooper);
+    click_widget(&mut screen, &mut options, "done");
+    assert_eq!(screen.page(), Page::Main);
 }

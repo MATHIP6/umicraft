@@ -35,6 +35,7 @@ mod layout;
 mod main_page;
 mod packs_page;
 mod skin_page;
+mod snooper_page;
 mod sounds_page;
 #[cfg(test)]
 mod tests;
@@ -62,6 +63,8 @@ pub enum Page {
     ResourcePacks,
     /// `GuiLanguage`.
     Language,
+    /// `GuiSnooper`.
+    Snooper,
 }
 
 /// What one frame of the screen did.
@@ -229,6 +232,7 @@ impl OptionsScreen {
             Page::Sounds => self.show_sounds(ui, atlas, options, gui, lang, &mut outcome),
             Page::ResourcePacks => self.show_packs(ui, atlas, options, gui, lang, &mut outcome),
             Page::Language => self.show_language(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Snooper => self.show_snooper(ui, atlas, options, gui, lang, &mut outcome),
         }
         ui.pop_id();
         outcome

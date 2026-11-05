@@ -109,6 +109,8 @@ impl App {
         let lang = Arc::new(language::load(&self.options.language.code));
         language::install(Arc::clone(&lang));
         self.lang = lang;
+        // The server learns the new locale.
+        self.send_event(ServerSettings::of(&self.options).event());
     }
 
     /// Applies what the options screen reported in its last frame.
