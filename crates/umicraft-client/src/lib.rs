@@ -39,6 +39,7 @@ pub mod game;
 pub mod headless;
 pub mod hud_demo;
 mod hud_demo_panorama;
+mod hud_demo_servers;
 mod hud_view;
 pub mod input;
 pub mod inventory_input;

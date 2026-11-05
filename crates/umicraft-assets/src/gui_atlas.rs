@@ -60,8 +60,8 @@ pub struct GuiAtlas {
     height: u32,
     pixels: Vec<u8>,
     regions: BTreeMap<String, GuiRegion>,
-    /// Rows of the packed jar textures; [`GuiAtlas::with_dynamic`] appends
-    /// below them.
+    /// Rows holding the packed jar textures (the content, not the power-of-two
+    /// padding below it); [`GuiAtlas::with_dynamic`] appends below them.
     static_height: u32,
 }
 
@@ -280,7 +280,8 @@ pub(crate) fn pack_gui_atlas(mut images: Vec<GuiImage>) -> GuiAtlas {
         cursor_x += image.width;
     }
 
-    let atlas_height = (cursor_y + row_height).next_power_of_two().max(1);
+    let content_height = cursor_y + row_height;
+    let atlas_height = content_height.next_power_of_two().max(1);
     let pixel_count = (atlas_width as usize)
         .checked_mul(atlas_height as usize)
         .and_then(|n| n.checked_mul(4))
@@ -322,7 +323,9 @@ pub(crate) fn pack_gui_atlas(mut images: Vec<GuiImage>) -> GuiAtlas {
         height: atlas_height,
         pixels,
         regions,
-        static_height: atlas_height,
+        // Without the power-of-two padding, so that appended images stay
+        // under the GPU's texture size limit.
+        static_height: content_height,
     }
 }
 
@@ -424,6 +427,18 @@ mod tests {
         assert!(
             (icons.v_max * grown.height() as f32 - old.v_max * base.height() as f32).abs() < 1e-3
         );
+    }
+
+    /// The jar atlas is padded to a power of two; the appended images must go
+    /// right after the content, or a tall atlas exceeds the GPU limit.
+    #[test]
+    fn dynamic_images_start_below_the_content_not_the_padding() {
+        let base = pack_gui_atlas(vec![test_image("tall", 256, 300)]);
+        assert_eq!(base.height(), 512);
+        let grown = base.with_dynamic(&[dynamic("a", 64, 1)]);
+        assert_eq!(grown.height(), 300 + 64);
+        let tall = grown.region("tall").expect("tall");
+        assert!((tall.v_max * grown.height() as f32 - 300.0).abs() < 1e-3);
     }
 
     #[test]

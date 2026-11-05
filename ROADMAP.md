@@ -543,7 +543,7 @@ connecting and disconnected screens (a kick shows the reason and returns to
 the list instead of closing the client), the pause menu (Disconnect, Options,
 Statistics), the statistics screen fed by `Client Status` request-stats, every
 options page and the options file, the language system and the rotating
-title panorama (ADR-0045; the vanilla blur is skipped).
+title panorama (ADR-0045; the vanilla blur is skipped). Server list parity (ADR-0047): the whole `ascii.png` grid renders (accents), descriptions keep their `§` colours, favicons, the red X and pinging cells and the arrows are drawn, the keys follow `GuiMultiplayer`, and each server has a Prompt/Enabled/Disabled resource pack mode (handling the packet is P12).
 
 **Remaining before P10 is done**
 - Owner validation in a real window: title to server list to a live server,
@@ -552,7 +552,7 @@ title panorama (ADR-0045; the vanilla blur is skipped).
   with vanilla. `--hud-demo --hud-view title|servers` shows the two screens
   offscreen.
 - Out of P10 and inert: Singleplayer, Achievements, Open to LAN, the
-  statistics block, item and mob tabs, LAN entries, server icons, SRV lookup.
+  statistics block, item and mob tabs, LAN entries, SRV lookup.
 
 ### P11 — Audio
 
