@@ -170,7 +170,6 @@ mod tests {
     use super::*;
     use crate::index::SeededRng;
 
-    /// Returns `value` clamped into the bound, to test exact edge values.
     struct Const(u32);
 
     impl SoundRng for Const {
@@ -181,7 +180,6 @@ mod tests {
 
     use MusicSituation::{Creative, Credits, Game, Menu};
 
-    /// Ticks (without a running track) until a track starts.
     fn run_until_play(
         ticker: &mut MusicTicker,
         situation: MusicSituation,
@@ -231,8 +229,6 @@ mod tests {
             let mut ticker = MusicTicker::new();
             let mut rng = SeededRng::new(seed);
             run_until_play(&mut ticker, Game, &mut rng);
-            // The track ends: the first call draws the delay (the pending
-            // value is the "playing" sentinel, so the draw wins in full).
             let wait = run_until_play(&mut ticker, Game, &mut rng);
             assert!((12_000..=24_000).contains(&wait), "{wait}");
         }
@@ -270,7 +266,6 @@ mod tests {
         }
         run_until_play(&mut ticker, Menu, &mut rng);
         assert!(ticker.update(Menu, 0.0, true, &mut rng).stop);
-        // Raising the volume again starts music at once.
         assert!(ticker.update(Menu, 1.0, false, &mut rng).play.is_some());
     }
 
