@@ -53,9 +53,9 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files unused, animated textures missing | P7, P9 |
 | M8 Entities | Partial / defective — animations, metadata, skins, armour, held items, objects, lighting | P5 |
 | M9 Inventory & containers | Partial — `Click Window` never sent, no item icons | P3, P4 |
-| M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and the options pages done in P10 (code complete, owner validation open) | P9, P10 |
+| M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
 | M11 Audio | Not started | P11 |
-| M12 Accounts & main menu | Main menu, server list, connecting and disconnected screens done in P10 (code complete, owner validation open); accounts not started | P10 (rest of menus), F1 (accounts) |
+| M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); accounts not started | P10 (rest of menus), F1 (accounts) |
 | M13 Premium authentication | Not started | P12 |
 | M14 Performance pass | Not started | F2 |
 | M15 Modding API v1 | Not started | F3 |
@@ -535,29 +535,36 @@ server's scoreboard and tab list display correctly.
 every vanilla option, rebind a key, disconnect and quit without the command
 line; the options survive a restart.
 
-**Status (2026-11-04): code complete, owner validation open.** Implemented (ADR-0039, ADR-0041, ADR-0042, ADR-0043,
-ADR-0044, `docs/parity.md`): the client starts on the title screen without
-`<host> <port>` (with them it still connects at start), the multiplayer list
-with ping, add, edit, delete, reorder and direct connect on a saved book, the
-connecting and disconnected screens (a kick shows the reason and returns to
-the list instead of closing the client), the pause menu (Disconnect, Options,
-Statistics), the statistics screen fed by `Client Status` request-stats, every
-options page and the options file, the language system and the rotating
-title panorama (ADR-0045). **F3 (ADR-0049, 2026-11-05):** connecting stages and vanilla failure texts, the statistics screen with General, Blocks, Items and Mobs tabs and live refresh, the achievements screen and toast, the tilted splash from `splashes.txt` and the vanilla panorama blur (no Realms row, owner decision). Server list parity (ADR-0047): the whole `ascii.png` grid renders (accents), descriptions keep their `§` colours, favicons, the red X and pinging cells and the arrows are drawn, the keys follow `GuiMultiplayer`, and each server has a Prompt/Enabled/Disabled resource pack mode (handling the packet is P12).
+**Status (2026-11-05): code complete, owner validation open.** Done (ADR-0039,
+ADR-0041 to ADR-0045, ADR-0047 to ADR-0049, `docs/parity.md` Screens rows):
+the client starts on the title screen without `<host> <port>` (with them it
+still connects at start); title screen with tilted splash and the blurred
+rotating panorama; multiplayer list with ping, favicons, add, edit, delete,
+reorder, direct connect and per-server resource pack mode; connecting stages
+and vanilla failure texts; disconnected screen (a kick shows the reason and
+returns to the list); pause menu (Disconnect, Options, Statistics,
+Achievements); statistics screen (General, Blocks, Items, Mobs) and
+achievements screen with toast; every vanilla options page (video incl.
+Smooth Lighting, Mipmap Levels and Other Block Variants, controls with key
+and mouse-button rebinding, chat, skin, sounds, resource packs, language,
+Snooper) persisted in `options.toml`; language system.
 
-**Remaining before P10 is done**
-- Owner validation in a real window: title to server list to a live server,
-  kick, Disconnect, Escape while connecting, options from the title and from
-  the pause menu, statistics against a real server; screenshot comparison
-  with vanilla. `--hud-demo --hud-view title|servers` shows the two screens
-  offscreen.
-- Live since F2 (ADR-0048): Smooth Lighting, Mipmap Levels, Other Block
-  Variants, mouse-button bindings with attack/use/pick/drop/screenshot (F2)/
-  fullscreen (F11) bindings, the Snooper page, the Client Settings locale and
-  the incompatible-pack confirmation. Still stored-only or missing: pack
-  icons, Super Secret Settings, Force Unicode Font, Smooth Camera.
-- Out of P10 and inert: Singleplayer, Realms, Open to LAN, LAN entries, SRV
-  lookup.
+**Deliberately out or inert** (see `docs/parity.md`): Singleplayer, Minecraft
+Realms (no row, owner decision), Open to LAN and LAN entries, SRV lookup,
+Super Secret Settings, Broadcast Settings (Twitch), 3D Anaglyph, Use VBOs,
+Force Unicode Font and right-to-left text, resource pack icons (`pack.png`),
+Smooth Camera, Spectator Outlines and the streaming keys, the title logo
+easter egg, premium login (P12), sound playback (P11; volumes are stored).
+
+**Owner validation checklist:** start the client without arguments, add a
+server, connect, change options (video, sounds, language), rebind a key,
+open the statistics, disconnect from the pause menu, get kicked once and
+check the reason, quit, restart and see the options and the server kept.
+Compare the screens with vanilla in a real window (`--hud-demo --hud-view
+title|servers` shows two of them offscreen).
+
+**Still to do:** Tests de bout en bout du cycle menu/session, persistance des
+options et audit des clés de langue: à faire (autre session).
 
 ### P11 — Audio
 
