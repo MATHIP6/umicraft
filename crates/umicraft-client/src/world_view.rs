@@ -30,9 +30,11 @@ use umicraft_render::{
     BorderView, Camera, FogContext, FogMedium, HudState, OutlineBox, PrecipitationField,
     RenderEnvironment, Renderer, ScreenOverlays,
 };
+use umicraft_ui::menus::ConnectStage;
 use umicraft_world::{ChunkPos, LightLevel};
 
 use crate::block_entity_render::push_pot_plants;
+use crate::connection_end::ConnectionEnd;
 use crate::cracks::{crack_mesh, Crack, STAGES};
 use crate::creative_view::CreativeView;
 use crate::error::ClientError;
@@ -89,7 +91,10 @@ pub struct WorldView {
     status: GameStatus,
     /// The newest statistic counters the server sent, by name.
     stats: Vec<(String, i32)>,
-    ended: Option<String>,
+    /// Why the session ended, once it has.
+    ended: Option<ConnectionEnd>,
+    /// How far the connection attempt is, for the connecting screen.
+    connect_stage: ConnectStage,
     frames: usize,
     /// Active living entities interpolation data from the latest frame.
     entities: Arc<[EntityFrameData]>,
@@ -150,6 +155,7 @@ impl WorldView {
             status: GameStatus::default(),
             stats: Vec::new(),
             ended: None,
+            connect_stage: ConnectStage::Connecting,
             frames: 0,
             entities: Arc::from([]),
             local_body: None,
@@ -328,8 +334,14 @@ impl WorldView {
 
     /// Why the session ended, once it has.
     #[must_use]
-    pub fn ended(&self) -> Option<&str> {
-        self.ended.as_deref()
+    pub fn ended(&self) -> Option<&ConnectionEnd> {
+        self.ended.as_ref()
+    }
+
+    /// How far the connection attempt has come.
+    #[must_use]
+    pub fn connect_stage(&self) -> ConnectStage {
+        self.connect_stage
     }
 
     /// The chunks whose current mesh has faces.
@@ -460,7 +472,8 @@ impl WorldView {
             RenderEvent::TextScreen(request) => self.text_request = Some(*request),
             RenderEvent::Status(status) => self.status = *status,
             RenderEvent::Stats(stats) => self.stats = stats,
-            RenderEvent::Ended(reason) => self.ended = Some(reason),
+            RenderEvent::Connect(stage) => self.connect_stage = stage,
+            RenderEvent::Ended(end) => self.ended = Some(end),
             RenderEvent::Reset => self.reset(target),
         }
     }
@@ -518,6 +531,7 @@ impl WorldView {
         self.status = GameStatus::default();
         self.stats.clear();
         self.ended = None;
+        self.connect_stage = ConnectStage::Connecting;
         self.frames = 0;
         self.local_body = None;
         self.text_request = None;
@@ -894,7 +908,7 @@ mod tests {
             RenderEvent::Hud(Box::new(hud)),
             RenderEvent::Status(Box::new(status)),
             RenderEvent::Stats(vec![("stat.jump".to_string(), 4)]),
-            RenderEvent::Ended("kicked".to_string()),
+            RenderEvent::Ended(ConnectionEnd::kicked("kicked")),
         ] {
             harness.frames.0.send(event).expect("frame queue");
         }
@@ -903,7 +917,22 @@ mod tests {
         assert_eq!(harness.world_view.status().chunks, 3);
         assert!(harness.world_view.placed());
         assert_eq!(harness.world_view.stats(), [("stat.jump".to_string(), 4)]);
-        assert_eq!(harness.world_view.ended(), Some("kicked"));
+        assert_eq!(
+            harness.world_view.ended(),
+            Some(&ConnectionEnd::kicked("kicked"))
+        );
+    }
+
+    #[test]
+    fn the_connect_stage_follows_the_event_and_resets_with_the_session() {
+        let mut harness = Harness::new();
+        assert_eq!(harness.world_view.connect_stage(), ConnectStage::Connecting);
+        let event = RenderEvent::Connect(ConnectStage::LoggingIn);
+        harness.frames.0.send(event).expect("frame queue");
+        harness.sync();
+        assert_eq!(harness.world_view.connect_stage(), ConnectStage::LoggingIn);
+        harness.world_view.clear_session(&mut harness.target);
+        assert_eq!(harness.world_view.connect_stage(), ConnectStage::Connecting);
     }
 
     #[test]
@@ -921,7 +950,7 @@ mod tests {
             })),
             RenderEvent::Status(Box::new(status)),
             RenderEvent::Stats(vec![("stat.jump".to_string(), 4)]),
-            RenderEvent::Ended("kicked".to_string()),
+            RenderEvent::Ended(ConnectionEnd::kicked("kicked")),
         ] {
             harness.frames.0.send(event).expect("frame queue");
         }

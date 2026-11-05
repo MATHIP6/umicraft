@@ -26,7 +26,7 @@ use umicraft_render::{
     SpriteSheet,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
-use umicraft_ui::menus::{MenuArt, PanoramaTextures, PanoramaView, RowStatus};
+use umicraft_ui::menus::{ConnectStage, MenuArt, PanoramaTextures, PanoramaView, RowStatus};
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
 
@@ -299,6 +299,7 @@ fn menu_scene(
     }
     let context = MenuContext {
         version: "Umicraft",
+        connect_stage: ConnectStage::Connecting,
         stats: &[],
         panorama,
     };

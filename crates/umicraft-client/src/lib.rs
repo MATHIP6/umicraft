@@ -22,6 +22,7 @@ mod block_entity_render;
 mod border_view;
 mod caption;
 pub mod chat;
+pub mod connection_end;
 pub mod cracks;
 pub mod creative_input;
 mod creative_layout;

@@ -390,6 +390,27 @@ const BUILTIN: &[(&str, &str)] = &[
         "Not affiliated with Mojang or Microsoft",
     ),
     ("attribute.modifier.plus.0", "+%s %s"),
+    // The connection failure texts: `connect.failed` and the `disconnect.*`
+    // reasons exist in the files; "Unknown host" is hard-coded by
+    // `GuiConnecting` and the two socket wordings are what the JVM prints for
+    // a refused or timed out connect.
+    ("connect.failed", "Failed to connect to the server"),
+    ("disconnect.genericReason", "%s"),
+    ("disconnect.timeout", "Timed out"),
+    ("disconnect.endOfStream", "End of stream"),
+    ("umicraft.connect.unknownHost", "Unknown host"),
+    (
+        "umicraft.connect.refused",
+        "Connection refused: no further information",
+    ),
+    (
+        "umicraft.connect.timedOut",
+        "Connection timed out: no further information",
+    ),
+    (
+        "umicraft.connect.onlineMode",
+        "This server needs a premium login, which Umicraft does not support yet",
+    ),
 ];
 
 #[cfg(test)]

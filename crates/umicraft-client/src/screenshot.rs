@@ -55,8 +55,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
     while Instant::now() < deadline {
         world.sync(session.frames(), session.chunks(), &mut renderer);
-        if let Some(reason) = world.ended() {
-            return Err(ClientError::Network(reason.to_string()));
+        if let Some(end) = world.ended() {
+            return Err(ClientError::Network(end.to_string()));
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }

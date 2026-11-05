@@ -22,7 +22,7 @@ use umicraft_render::{
     RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
-use umicraft_ui::menus::PanoramaTextures;
+use umicraft_ui::menus::{ConnectStage, PanoramaTextures};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, SlotItem, Ui, UiOutput};
 use winit::application::ApplicationHandler;
@@ -957,6 +957,10 @@ impl App {
                     let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
                     let context = MenuContext {
                         version: VERSION_LINE,
+                        connect_stage: self
+                            .world
+                            .as_ref()
+                            .map_or(ConnectStage::Connecting, WorldView::connect_stage),
                         stats,
                         panorama: self.panorama,
                     };

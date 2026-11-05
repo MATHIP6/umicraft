@@ -38,10 +38,25 @@ pub struct Connection {
 impl Connection {
     /// Opens a TCP connection after resolving `host` (DNS-resolvable or IP).
     ///
+    /// The lookup is a separate step so that a name that does not resolve is
+    /// told apart from a refused or timed out connection, as vanilla's
+    /// `GuiConnecting` does (`UnknownHostException`).
+    ///
     /// # Errors
+    /// [`NetError::UnknownHost`] when the name gives no address,
     /// [`NetError::Io`] on connect failure.
     pub async fn connect(host: &str, port: u16) -> Result<Self, NetError> {
-        let stream = TcpStream::connect((host, port)).await?;
+        let unknown = || NetError::UnknownHost {
+            host: host.to_string(),
+        };
+        let addresses: Vec<_> = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|_| unknown())?
+            .collect();
+        if addresses.is_empty() {
+            return Err(unknown());
+        }
+        let stream = TcpStream::connect(&addresses[..]).await?;
         // The vanilla client sets TCP_NODELAY (netty `TCP_NODELAY`). Without
         // it Nagle's algorithm holds a small packet until the previous one is
         // acknowledged, so a swing and its attack sent in one tick reached the
@@ -215,6 +230,27 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let connection = Connection::connect("127.0.0.1", port).await.unwrap();
         assert!(connection.write_half.as_ref().nodelay().unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_name_without_an_address_is_an_unknown_host() {
+        // `.invalid` never resolves (RFC 2606).
+        let error = Connection::connect("no-such-host.invalid", 25565).await;
+        assert!(
+            matches!(error, Err(NetError::UnknownHost { ref host }) if host == "no-such-host.invalid")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_port_is_a_refused_connection() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let error = Connection::connect("127.0.0.1", port).await;
+        assert!(matches!(
+            error,
+            Err(NetError::Io(ref io)) if io.kind() == std::io::ErrorKind::ConnectionRefused
+        ));
     }
 
     #[test]

@@ -83,6 +83,7 @@ use umicraft_protocol::PlayServerbound;
 use umicraft_render::{BorderView, ChatLineView, FogContext, HudState, OutlineBox};
 use umicraft_world::{BlockPos, BlockState, ChunkPayload, ChunkPos, LightLevel, World};
 
+use crate::connection_end::ConnectionEnd;
 use crate::cracks::Crack;
 use crate::creative_input::CreativeEvent;
 use crate::creative_view::CreativeView;
@@ -97,6 +98,7 @@ use umicraft_game::chat::unformatted_text;
 use umicraft_game::editors::book::{BookPacket, WRITABLE_BOOK, WRITTEN_BOOK};
 use umicraft_game::inventory::payload;
 use umicraft_protocol::packets::play::ItemStack;
+use umicraft_ui::menus::ConnectStage;
 
 #[path = "combat.rs"]
 mod combat;
@@ -199,7 +201,10 @@ pub enum GameEvent {
     Net(PlayEvent),
     /// The network session ended: a failure or a kick, already formatted for
     /// the overlay.
-    Disconnected(String),
+    Disconnected(ConnectionEnd),
+    /// The connection attempt reached a new stage (`connect.authorizing`
+    /// once the socket is open).
+    ConnectStage(ConnectStage),
     /// An input update from an input source.
     Input(InputUpdate),
     /// A chat line the player typed.
@@ -357,10 +362,12 @@ pub enum RenderEvent {
     /// The server answered a statistics request (`Statistics`, 0x37): every
     /// `(name, value)` pair it knows, by name.
     Stats(Vec<(String, i32)>),
+    /// The connection attempt reached a new stage.
+    Connect(ConnectStage),
     /// The world was replaced; the render thread drops its meshes.
     Reset,
     /// The session ended.
-    Ended(String),
+    Ended(ConnectionEnd),
 }
 
 /// A screen for editing text that the game thread asks the window to open.
@@ -526,6 +533,8 @@ struct Game {
     dirty: BTreeSet<ChunkPos>,
     /// The human-readable status.
     status: String,
+    /// Why the session ended, once the network thread said so.
+    end: Option<ConnectionEnd>,
     /// The entity id of the local player.
     entity_id: i32,
     /// The gamemode of the local player.
@@ -640,6 +649,7 @@ impl Game {
             overlays: crate::overlay_state::OverlayTracker::default(),
             dirty: BTreeSet::new(),
             status: "CONNECTING".to_string(),
+            end: None,
             entity_id: 0,
             gamemode: GameMode::Survival,
             dimension: 0,
@@ -998,7 +1008,7 @@ fn run(
         sender: Some(commands),
     };
     let mut next_tick = Instant::now();
-    let mut ended: Option<String> = None;
+    let mut ended: Option<ConnectionEnd> = None;
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -1007,7 +1017,7 @@ fn run(
         // Drain everything that is pending before looking at the clock.
         while let Ok(event) = events.try_recv() {
             if handle_event(&mut game, event, &mut queue, &frames) {
-                ended = Some(game.status.clone());
+                ended = game.end.take();
                 break;
             }
         }
@@ -1031,7 +1041,7 @@ fn run(
         match events.recv_timeout(next_tick - now) {
             Ok(event) => {
                 if handle_event(&mut game, event, &mut queue, &frames) {
-                    ended = Some(game.status.clone());
+                    ended = game.end.take();
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -1078,12 +1088,17 @@ fn handle_event(
             handle_net(game, event, queue, frames);
             false
         }
-        GameEvent::Disconnected(message) => {
-            tracing::error!(%message, "network session ended");
-            game.status = format!("ERROR {message}");
+        GameEvent::Disconnected(end) => {
+            tracing::error!(%end, "network session ended");
+            game.status = format!("ERROR {end}");
             game.status_data.status = game.status.clone();
+            game.end = Some(end);
             publish_status(game, frames);
             true
+        }
+        GameEvent::ConnectStage(stage) => {
+            let _ = frames.try_send(RenderEvent::Connect(stage));
+            false
         }
         GameEvent::Input(update) => {
             let before = (game.yaw, game.pitch);

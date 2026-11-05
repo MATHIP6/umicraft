@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use crate::connection_end::ConnectionEnd;
 use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
     ConfirmOutcome, ConfirmScreen, ConnectStage, ConnectingOutcome, ConnectingScreen,
@@ -50,6 +51,8 @@ pub enum MenuCommand {
 pub struct MenuContext<'a> {
     /// The version line of the title screen.
     pub version: &'a str,
+    /// How far the connection attempt is, for [`Screen::Connecting`].
+    pub connect_stage: ConnectStage,
     /// The statistics of the last server answer, for [`Screen::Stats`].
     pub stats: &'a [(String, i32)],
     /// The uploaded panorama faces, when the user's assets provide them.
@@ -138,8 +141,8 @@ impl MenuFlow {
     }
 
     /// Remembers why a session ended, for the disconnected screen.
-    pub fn set_disconnected(&mut self, reason: &str) {
-        self.disconnected = Some(DisconnectedScreen::new("disconnect.lost", reason));
+    pub fn set_disconnected(&mut self, end: &ConnectionEnd, lang: &Lang) {
+        self.disconnected = Some(DisconnectedScreen::new(end.title_key(), &end.reason(lang)));
     }
 
     /// Advances the animations and the double-click timer by `elapsed`.
@@ -189,7 +192,7 @@ impl MenuFlow {
             Screen::ServerList => self.show_list(ui, atlas, lang),
             Screen::ServerEdit => self.show_edit(ui, atlas, lang),
             Screen::ConfirmDelete => self.show_confirm(ui, atlas, lang),
-            Screen::Connecting => Self::show_connecting(ui, atlas, lang),
+            Screen::Connecting => Self::show_connecting(ui, atlas, lang, context),
             Screen::Disconnected => self.show_disconnected(ui, atlas, lang),
             Screen::Stats => self.show_stats(ui, atlas, lang, context),
             _ => None,
@@ -274,9 +277,13 @@ impl MenuFlow {
         Some(MenuCommand::GoTo(Screen::ServerList))
     }
 
-    fn show_connecting(ui: &mut Ui, atlas: &FontAtlas, lang: &Lang) -> Option<MenuCommand> {
-        let outcome =
-            ConnectingScreen::new().show(ui, atlas, lang, ConnectStage::Connecting, None)?;
+    fn show_connecting(
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        lang: &Lang,
+        context: &MenuContext<'_>,
+    ) -> Option<MenuCommand> {
+        let outcome = ConnectingScreen::new().show(ui, atlas, lang, context.connect_stage, None)?;
         match outcome {
             ConnectingOutcome::Cancel => Some(MenuCommand::GoTo(Screen::ServerList)),
         }
