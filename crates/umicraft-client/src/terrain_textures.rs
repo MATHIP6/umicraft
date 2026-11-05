@@ -22,7 +22,7 @@ use std::sync::Arc;
 use umicraft_assets::DialSprite;
 use umicraft_assets::{BlockAtlas, GlintTexture, GuiAtlas, TextureAnimation};
 use umicraft_mesh::{
-    mesh_chunk_lit, mesh_chunk_with_models_lit, ChunkSnapshot, Mesh, ModelMeshContext,
+    mesh_chunk_lit, mesh_chunk_with_settings, ChunkSnapshot, Mesh, ModelMeshContext,
 };
 use umicraft_render::{BlockAtlasError, Renderer};
 
@@ -310,11 +310,11 @@ impl TerrainMesher {
     /// Meshes one chunk column from its immutable snapshot.
     #[must_use]
     pub fn mesh(&self, pos: ChunkPos, snapshot: &ChunkSnapshot) -> Mesh {
-        let lighting = crate::mesh_settings::lighting();
+        let settings = crate::mesh_settings::current();
         match &self.0 {
-            MesherKind::Procedural => mesh_chunk_lit(pos, snapshot, lighting),
+            MesherKind::Procedural => mesh_chunk_lit(pos, snapshot, settings.lighting),
             MesherKind::Models(context) => {
-                mesh_chunk_with_models_lit(pos, snapshot, context, lighting)
+                mesh_chunk_with_settings(pos, snapshot, context, settings)
             }
         }
     }

@@ -41,6 +41,7 @@ use crate::fluid::{self, FluidLayers};
 use crate::actual_state;
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, occludes};
 use crate::lighting::{quad_light, Lighting};
+use crate::settings::{base_variant, MeshSettings};
 use crate::{tint, BlockEntityKind, BlockEntityRef, BlockSource, Mesh, Vertex};
 
 /// The baked models and the texture layers the model mesher reads.
@@ -84,19 +85,19 @@ pub fn mesh_chunk_with_models<S: BlockSource + ?Sized>(
     source: &S,
     context: &ModelMeshContext,
 ) -> Mesh {
-    mesh_chunk_with_models_lit(pos, source, context, Lighting::Smooth)
+    mesh_chunk_with_settings(pos, source, context, MeshSettings::default())
 }
 
-/// [`mesh_chunk_with_models`] with the lighting of the `Smooth Lighting`
-/// option. A block that emits light is lit flat whatever the option says
+/// [`mesh_chunk_with_models`] with the player's [`MeshSettings`]. A block that
+/// emits light is lit flat whatever `Smooth Lighting` says
 /// (`BlockModelRenderer.renderModel` requires `getLightValue() == 0` for the
 /// smooth path).
 #[must_use]
-pub fn mesh_chunk_with_models_lit<S: BlockSource + ?Sized>(
+pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
     pos: ChunkPos,
     source: &S,
     context: &ModelMeshContext,
-    lighting: Lighting,
+    settings: MeshSettings,
 ) -> Mesh {
     let mut mesh = Mesh::default();
     let base_x = pos.x * 16;
@@ -131,9 +132,10 @@ pub fn mesh_chunk_with_models_lit<S: BlockSource + ?Sized>(
                 }
                 let model = actual_state::model_for(&context.models, &source, position, state)
                     .or_else(|| context.models.model(state));
-                let variant = model.and_then(|model| select_variant(model, position));
+                let variant = model
+                    .and_then(|model| pick_variant(model, position, settings.block_alternatives));
                 let lighting = if light_emission(state) == 0 {
-                    lighting
+                    settings.lighting
                 } else {
                     Lighting::Flat
                 };
@@ -174,6 +176,21 @@ fn fluid_layers(liquid: Liquid, atlas: &AtlasLayout) -> FluidLayers {
     FluidLayers {
         still: layer(still),
         flow: layer(flow),
+    }
+}
+
+/// The variant a block uses: the weighted pick of [`select_variant`], or the
+/// base variant when `block_alternatives` is off
+/// (`BlockRendererDispatcher.getBakedModel`).
+fn pick_variant(
+    model: &BlockModel,
+    position: [i32; 3],
+    alternatives: bool,
+) -> Option<&ModelVariant> {
+    if alternatives {
+        select_variant(model, position)
+    } else {
+        base_variant(model)
     }
 }
 

@@ -72,6 +72,7 @@ mod lighting;
 mod mesh;
 pub mod models;
 mod moving;
+mod settings;
 mod source;
 pub mod tint;
 mod vertex;
@@ -82,8 +83,9 @@ pub use flower_pot::push_flower_pot_plant;
 pub use legacy::{mesh_chunk, mesh_chunk_lit, texture_layer};
 pub use lighting::Lighting;
 pub use mesh::Mesh;
-pub use models::{mesh_chunk_with_models, mesh_chunk_with_models_lit, ModelMeshContext};
+pub use models::{mesh_chunk_with_models, mesh_chunk_with_settings, ModelMeshContext};
 pub use moving::{push_moving_block, push_piston_head, PistonHead};
+pub use settings::MeshSettings;
 pub use source::{BlockSource, ChunkSnapshot};
 pub use vertex::{Vertex, VertexLight};
 

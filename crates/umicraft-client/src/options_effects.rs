@@ -160,7 +160,7 @@ impl VideoApplier {
         let levels = u32::from(video.mipmap_levels);
         renderer.set_mipmap_levels(levels);
         VideoEffects {
-            remesh: crate::mesh_settings::set_smooth_lighting(video.smooth_lighting),
+            remesh: crate::mesh_settings::store(video),
             reload_atlas: self.mipmap_change(levels),
         }
     }
