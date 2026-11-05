@@ -42,6 +42,11 @@ pub struct MenuArt {
     pub dirt: Option<SpriteSheet>,
     /// `textures/gui/title/minecraft.png` (256x256), the title logo.
     pub logo: Option<SpriteSheet>,
+    /// `textures/gui/container/stats_icons.png` (128x128), the sprites of the
+    /// statistics tables.
+    pub stats_icons: Option<SpriteSheet>,
+    /// The achievement screen's background texture and map tiles.
+    pub achievements: Option<super::achievements::AchievementArt>,
 }
 
 /// Fills `rect` with the dirt texture tinted by `tint`.
@@ -176,6 +181,7 @@ mod tests {
         MenuArt {
             dirt: Some(DIRT),
             logo: None,
+            ..MenuArt::default()
         }
     }
 

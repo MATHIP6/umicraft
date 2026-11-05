@@ -14,21 +14,25 @@
 
 use std::time::Duration;
 
+use crate::achievements_view::{self, AchievementsContext};
 use crate::connection_end::ConnectionEnd;
 use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
-    ConfirmOutcome, ConfirmScreen, ConnectStage, ConnectingOutcome, ConnectingScreen,
-    DisconnectedOutcome, DisconnectedScreen, PanoramaTextures, PanoramaView, RowStatus,
-    ServerEditOutcome, ServerEditScreen, ServerListOutcome, ServerListScreen, ServerRow,
-    StatsOutcome, StatsScreen, TitleInfo, TitleOutcome, TitleScreen,
+    AchievementsData, AchievementsOutcome, AchievementsScreen, ConfirmOutcome, ConfirmScreen,
+    ConnectStage, ConnectingOutcome, ConnectingScreen, DisconnectedOutcome, DisconnectedScreen,
+    PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome, ServerEditScreen,
+    ServerListOutcome, ServerListScreen, ServerRow, StatsData, StatsOutcome, StatsScreen,
+    TitleInfo, TitleOutcome, TitleScreen,
 };
 use umicraft_ui::{FontAtlas, Ui};
 
 use crate::game::TICK;
-use crate::menu_rows::{pinging_row, row_status, stat_rows};
+use crate::item_icons::ItemView;
+use crate::menu_rows::{pinging_row, row_status};
 use crate::options_screen::Page;
 use crate::screen::Screen;
 use crate::servers::{parse_address, PingResult, PingTarget, Pinger, ServerAddress, ServerBook};
+use crate::stats_view::{self, StatsContext};
 
 /// What the window has to do after a menu frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +59,17 @@ pub struct MenuContext<'a> {
     pub connect_stage: ConnectStage,
     /// The statistics of the last server answer, for [`Screen::Stats`].
     pub stats: &'a [(String, i32)],
+    /// Counts the answers, so the screen rebuilds its rows only when a new
+    /// one arrived.
+    pub stats_revision: u64,
+    /// Whether the request is still unanswered ("Downloading statistics...").
+    pub stats_loading: bool,
+    /// The item icons of the statistics tables and the achievements.
+    pub items: ItemView<'a>,
+    /// The name of the inventory key, for the first achievement's text.
+    pub inventory_key: &'a str,
+    /// Seeds the achievement map's ground (`hashCode` of the player id).
+    pub player_hash: i32,
     /// The uploaded panorama faces, when the user's assets provide them.
     pub panorama: Option<PanoramaTextures>,
 }
@@ -84,6 +99,9 @@ pub struct MenuFlow {
     confirm: Option<ConfirmScreen>,
     disconnected: Option<DisconnectedScreen>,
     stats: StatsScreen,
+    stats_data: Option<(u64, StatsData)>,
+    achievements: AchievementsScreen,
+    achievements_data: Option<(u64, AchievementsData)>,
     book: ServerBook,
     pinger: Option<Pinger>,
     rows: Vec<ServerRow>,
@@ -105,6 +123,9 @@ impl MenuFlow {
             confirm: None,
             disconnected: None,
             stats: StatsScreen::new(),
+            stats_data: None,
+            achievements: AchievementsScreen::new(),
+            achievements_data: None,
             book,
             pinger,
             rows: Vec::new(),
@@ -127,7 +148,14 @@ impl MenuFlow {
     pub fn enter(&mut self, screen: Screen) {
         match screen {
             Screen::ServerList => self.refresh_pings(),
-            Screen::Stats => self.stats = StatsScreen::new(),
+            Screen::Stats => {
+                self.stats = StatsScreen::new();
+                self.stats_data = None;
+            }
+            Screen::Achievements => {
+                self.achievements = AchievementsScreen::new();
+                self.achievements_data = None;
+            }
             _ => {}
         }
     }
@@ -155,6 +183,8 @@ impl MenuFlow {
             self.tick_time -= TICK;
             self.title.tick();
             self.list.tick();
+            self.stats.tick();
+            self.achievements.tick();
             if let Some(edit) = self.edit.as_mut() {
                 edit.tick();
             }
@@ -195,6 +225,7 @@ impl MenuFlow {
             Screen::Connecting => Self::show_connecting(ui, atlas, lang, context),
             Screen::Disconnected => self.show_disconnected(ui, atlas, lang),
             Screen::Stats => self.show_stats(ui, atlas, lang, context),
+            Screen::Achievements => self.show_achievements(ui, atlas, lang, context),
             _ => None,
         };
         MenuFrame { command, panorama }
@@ -313,9 +344,49 @@ impl MenuFlow {
         lang: &Lang,
         context: &MenuContext<'_>,
     ) -> Option<MenuCommand> {
-        let rows = stat_rows(context.stats);
-        match self.stats.show(ui, atlas, lang, &rows)? {
+        let current = self.stats_data.as_ref().map(|(revision, _)| *revision);
+        if current != Some(context.stats_revision) {
+            let built = StatsContext {
+                lang,
+                items: context.items,
+            };
+            let data = stats_view::build(context.stats, built);
+            self.stats.refresh(&data);
+            self.stats_data = Some((context.stats_revision, data));
+        }
+        let (_, data) = self.stats_data.as_ref()?;
+        match self
+            .stats
+            .show(ui, atlas, lang, data, context.stats_loading)?
+        {
             StatsOutcome::Done => Some(MenuCommand::GoTo(Screen::GameMenu)),
+        }
+    }
+
+    fn show_achievements(
+        &mut self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        lang: &Lang,
+        context: &MenuContext<'_>,
+    ) -> Option<MenuCommand> {
+        let current = self
+            .achievements_data
+            .as_ref()
+            .map(|(revision, _)| *revision);
+        if current != Some(context.stats_revision) {
+            let built = AchievementsContext {
+                lang,
+                items: context.items,
+                inventory_key: context.inventory_key,
+            };
+            let data = achievements_view::build(context.stats, built);
+            self.achievements_data = Some((context.stats_revision, data));
+        }
+        let (_, data) = self.achievements_data.as_ref()?;
+        let state = (context.stats_loading, context.player_hash);
+        match self.achievements.show(ui, atlas, lang, data, state)? {
+            AchievementsOutcome::Done => Some(MenuCommand::GoTo(Screen::GameMenu)),
         }
     }
 

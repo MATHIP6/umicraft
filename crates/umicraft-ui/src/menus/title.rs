@@ -363,6 +363,7 @@ mod tests {
             ui.set_menu_art(crate::menus::MenuArt {
                 dirt: None,
                 logo: Some(sheet),
+                ..crate::menus::MenuArt::default()
             });
             let atlas = FontAtlas::fallback();
             let info = TitleInfo {

@@ -40,6 +40,18 @@ const BLOCK_TEXTURES_PREFIX: &str = "assets/minecraft/textures/blocks/";
 const ITEM_TEXTURES_PREFIX: &str = "assets/minecraft/textures/items/";
 /// Prefix of the 1.8 GUI textures (backgrounds, widgets, icons).
 const GUI_TEXTURES_PREFIX: &str = "assets/minecraft/textures/gui/";
+/// The block textures the achievement screen tiles its map with
+/// (`GuiAchievements`); they join the GUI atlas as `blocks/<name>`.
+pub const ACHIEVEMENT_TILES: [&str; 8] = [
+    "sand",
+    "diamond_ore",
+    "redstone_ore",
+    "iron_ore",
+    "coal_ore",
+    "stone",
+    "dirt",
+    "bedrock",
+];
 /// The enchantment glint texture, drawn additively over enchanted items.
 const GLINT_PATH: &str = "assets/minecraft/textures/misc/enchanted_item_glint.png";
 /// Prefix shared by every texture key.
@@ -367,7 +379,8 @@ impl ClientResources {
             decoded_colormaps.insert(path.clone(), DecodedPng::decode(path, bytes)?);
         }
 
-        let gui_images = decode_gui_textures(&raw_gui)?;
+        let mut gui_images = decode_gui_textures(&raw_gui)?;
+        gui_images.extend(decode_tile_textures(&files)?);
         let atlas = build_atlas(textures, &files)?;
         let colormaps = decode_colormaps(&mut decoded_colormaps)?;
         let gui_atlas = pack_gui_atlas(gui_images);
@@ -444,14 +457,18 @@ impl GuiAtlas {
     /// # Errors
     /// [`AssetsError`] on archive read or PNG decode failure.
     pub fn from_jar(jar: &ClientJar) -> AssetsResult<Self> {
-        let entries = jar.read_prefixes(&[GUI_TEXTURES_PREFIX])?;
+        let entries = jar.read_prefixes(&[GUI_TEXTURES_PREFIX, BLOCK_TEXTURES_PREFIX])?;
         let mut raw_gui = BTreeMap::new();
+        let mut tiles = BTreeMap::new();
         for (path, bytes) in entries {
             if is_gui_texture(&path) {
                 raw_gui.insert(path, bytes);
+            } else if tile_name(&path).is_some() {
+                tiles.insert(path, bytes);
             }
         }
-        let gui_images = decode_gui_textures(&raw_gui)?;
+        let mut gui_images = decode_gui_textures(&raw_gui)?;
+        gui_images.extend(decode_tile_textures(&tiles)?);
         Ok(pack_gui_atlas(gui_images))
     }
 }
@@ -533,6 +550,32 @@ fn gui_texture_name(path: &str) -> Option<String> {
         return None;
     }
     Some(relative.to_string())
+}
+
+/// The name of an achievement map tile texture, `None` for any other path.
+fn tile_name(path: &str) -> Option<&'static str> {
+    let name = path
+        .strip_prefix(BLOCK_TEXTURES_PREFIX)?
+        .strip_suffix(".png")?;
+    ACHIEVEMENT_TILES.iter().copied().find(|tile| *tile == name)
+}
+
+/// Decodes the achievement map tiles among `files` for atlas packing.
+fn decode_tile_textures(files: &BTreeMap<String, Vec<u8>>) -> AssetsResult<Vec<GuiImage>> {
+    let mut images = Vec::new();
+    for (path, bytes) in files {
+        let Some(name) = tile_name(path) else {
+            continue;
+        };
+        let decoded = DecodedPng::decode(path, bytes)?;
+        images.push(GuiImage {
+            name: format!("blocks/{name}"),
+            width: decoded.width,
+            height: decoded.height,
+            pixels: decoded.pixels,
+        });
+    }
+    Ok(images)
 }
 
 /// Decodes all GUI PNGs into images ready for atlas packing.
@@ -700,6 +743,15 @@ fn gray_to_rgba(pixels: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::AssetsError;
+
+    #[test]
+    fn only_the_achievement_tiles_join_the_gui_atlas() {
+        let path = |name: &str| format!("assets/minecraft/textures/blocks/{name}.png");
+        assert_eq!(tile_name(&path("sand")), Some("sand"));
+        assert_eq!(tile_name(&path("diamond_ore")), Some("diamond_ore"));
+        assert_eq!(tile_name(&path("glass")), None);
+        assert_eq!(tile_name("assets/minecraft/textures/items/sand.png"), None);
+    }
 
     #[test]
     fn texture_keys_are_relative_to_the_texture_root() {

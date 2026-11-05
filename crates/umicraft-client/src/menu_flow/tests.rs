@@ -10,6 +10,7 @@ use umicraft_ui::menus::{
 use umicraft_ui::{InputEvent, Key, PointerButton, Rect, UiInput};
 
 use super::*;
+use crate::dials::DialFrames;
 use crate::servers::{PingOutcome, ServerEntry, ServerInfo};
 
 const VIEWPORT: Rect = Rect {
@@ -65,6 +66,11 @@ fn frame_with(
     let context = MenuContext {
         version: "test",
         connect_stage: ConnectStage::Connecting,
+        stats_revision: 1,
+        stats_loading: false,
+        items: ItemView::new(None, DialFrames::default()),
+        inventory_key: "E",
+        player_hash: 0,
         stats,
         panorama: None,
     };
@@ -196,6 +202,11 @@ fn the_add_form_starts_with_the_default_server_name() {
     let context = MenuContext {
         version: "test",
         connect_stage: ConnectStage::Connecting,
+        stats_revision: 1,
+        stats_loading: false,
+        items: ItemView::new(None, DialFrames::default()),
+        inventory_key: "E",
+        player_hash: 0,
         stats: &[],
         panorama: None,
     };

@@ -54,6 +54,7 @@ use crate::menu_flow::{MenuCommand, MenuContext, MenuFlow, MenuFrame};
 use crate::nametag_draw::{draw_tags, place_tags};
 use crate::text_screens::TextScreens;
 
+use crate::achievements_view::java_string_hash;
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
 use crate::entity_icons::EntityIcons;
 use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
@@ -437,7 +438,8 @@ impl App {
             | Screen::ConfirmDelete
             | Screen::Connecting
             | Screen::Disconnected
-            | Screen::Stats => {
+            | Screen::Stats
+            | Screen::Achievements => {
                 self.handle_menu_screen_key(&event);
                 return;
             }
@@ -789,6 +791,7 @@ impl App {
         }
         self.open_text_screen();
         let mut text_done = None;
+        let mut respawn_clicked = false;
         let inventory_facts = self.inventory_facts();
         let atlas = self.ui_atlas.as_ref()?;
         let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
@@ -877,11 +880,9 @@ impl App {
         if self.death_screen_visible() {
             let score = self.world.as_ref().map_or(0, |world| world.hud().score);
             let enabled = self.death_buttons_enabled(Instant::now());
-            if death_screen(&mut self.ui, atlas, viewport, score, enabled, &self.lang)
-                == DeathAction::Respawn
-            {
-                self.respawn();
-            }
+            respawn_clicked =
+                death_screen(&mut self.ui, atlas, viewport, score, enabled, &self.lang)
+                    == DeathAction::Respawn;
         } else {
             match screen {
                 Screen::Debug => self.debug_screen.show(&mut self.ui, atlas),
@@ -953,9 +954,17 @@ impl App {
                 | Screen::ConfirmDelete
                 | Screen::Connecting
                 | Screen::Disconnected
-                | Screen::Stats => {
+                | Screen::Stats
+                | Screen::Achievements => {
                     let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
+                    let inventory_key =
+                        options::key_label(self.options.keys.get(Action::Inventory));
                     let context = MenuContext {
+                        stats_revision: self.world.as_ref().map_or(0, WorldView::stats_revision),
+                        stats_loading: self.world.as_ref().is_some_and(WorldView::stats_loading),
+                        items: ItemView::new(self.items.as_deref(), self.dials.frames()),
+                        inventory_key: &inventory_key,
+                        player_hash: java_string_hash(&self.args.name),
                         version: VERSION_LINE,
                         connect_stage: self
                             .world
@@ -976,7 +985,17 @@ impl App {
                 Screen::None | Screen::Chat => {}
             }
         }
+        let items = ItemView::new(self.items.as_deref(), self.dials.frames());
+        menu_screens::draw_achievement_toast(
+            &mut self.ui,
+            atlas,
+            self.world.as_ref(),
+            (&self.lang, items),
+        );
         let output = self.ui.end_frame();
+        if respawn_clicked {
+            self.respawn();
+        }
         if let Some(done) = text_done {
             self.finish_text_screen(done);
         }
