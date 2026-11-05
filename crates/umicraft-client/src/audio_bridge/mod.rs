@@ -5,8 +5,8 @@
 //! [`AudioBridge`] owns the audio thread of `umicraft-audio` and is the only
 //! audio type the window touches. It turns the game's sound cues
 //! ([`cues`]), the camera ([`listener`]), the menu clicks ([`ui_sounds`]) and
-//! the sound options ([`settings`]) into messages for the audio thread, and
-//! finds the user's sound files ([`loader`]).
+//! the sound options ([`settings`]) and the background music ([`music`]) into
+//! messages for the audio thread, and finds the user's sound files ([`loader`]).
 //!
 //! Every call is non-blocking (`AudioHandle` is a `try_send` on a bounded
 //! queue, see `docs/threading.md`). A bridge without a handle is silent:
@@ -16,6 +16,7 @@
 pub mod cues;
 pub mod listener;
 pub mod loader;
+pub mod music;
 pub mod probe;
 pub mod settings;
 pub mod ui_sounds;
@@ -27,6 +28,7 @@ use umicraft_audio::{AudioHandle, Listener, SoundRequest};
 use umicraft_game::sound::cue::SoundCue;
 
 use crate::options::SoundOptions;
+use music::MusicDriver;
 use settings::VolumeSync;
 
 /// The audio thread and the handle that feeds it, or nothing.
@@ -35,6 +37,7 @@ pub struct AudioBridge {
     handle: Option<AudioHandle>,
     thread: Option<AudioThread>,
     volumes: VolumeSync,
+    music: MusicDriver,
 }
 
 impl AudioBridge {
@@ -72,6 +75,7 @@ impl AudioBridge {
             handle: Some(handle),
             thread: Some(thread),
             volumes: VolumeSync::default(),
+            music: MusicDriver::new(seed()),
         };
         bridge.sync_volumes(options);
         bridge
@@ -84,6 +88,7 @@ impl AudioBridge {
             handle: Some(handle),
             thread: None,
             volumes: VolumeSync::default(),
+            music: MusicDriver::default(),
         }
     }
 

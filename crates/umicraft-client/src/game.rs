@@ -270,6 +270,8 @@ pub struct Frame {
     pub world_time: i64,
     /// The current dimension (`0` overworld, `-1` Nether, `1` End).
     pub dimension: i8,
+    /// The game mode of the local player; the music depends on it.
+    pub gamemode: GameMode,
     /// The world spawn point the server announced, which the compass shows.
     pub spawn: Option<(i32, i32, i32)>,
     /// Per-entity interpolation data for the render thread.
@@ -1331,6 +1333,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
+        gamemode: game.gamemode,
         spawn: game.spawn,
         entities: entities.into(),
         local_body: Arc::new(game.body.frame_data()),

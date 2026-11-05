@@ -40,6 +40,7 @@ use self::session_control::lifecycle_step;
 use crate::anvil_field::AnvilField;
 use crate::args::Args;
 use crate::audio_bridge::listener::listener_of;
+use crate::audio_bridge::music::MusicWorld;
 use crate::audio_bridge::AudioBridge;
 use crate::creative_input::CreativeInput;
 use crate::creative_layout::CreativeLayout;
@@ -729,6 +730,24 @@ impl App {
         self.apply_lifecycle(step);
     }
 
+    /// Drives the background music: the menu music until the server placed the
+    /// player, then the music of the dimension and game mode.
+    fn update_music(&mut self, now: Instant) {
+        let in_world = self.session.is_some()
+            && !matches!(self.screen, Screen::Connecting | Screen::Disconnected);
+        let world = match self.world.as_ref() {
+            Some(world) if in_world => {
+                let (dimension, gamemode) = world.music_world();
+                MusicWorld::Playing {
+                    dimension,
+                    gamemode,
+                }
+            }
+            _ => MusicWorld::Menu,
+        };
+        self.audio.update_music(now, world, &self.options.sound);
+    }
+
     /// Builds the frame-time graph; the rest of the HUD is drawn by the UI
     /// pass (`build_ui_frame`).
     fn build_overlay(&mut self) {
@@ -1034,6 +1053,7 @@ impl App {
         self.camera.set_fov_degrees(self.options.video.fov);
         self.advance_menus(Duration::from_secs_f32(elapsed));
         self.sync_world(now);
+        self.update_music(now);
         self.process_completions();
         self.update_death_screen(now);
         self.update_container_cursor();

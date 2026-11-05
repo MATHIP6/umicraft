@@ -17,6 +17,7 @@ use std::time::Instant;
 use umicraft_game::entity::{EntityFrameData, EntityRenderSnapshot};
 #[cfg(test)]
 use umicraft_game::entity::{EntityId, EntityKind, EntityRecord};
+use umicraft_game::gamemode::GameMode;
 use umicraft_game::hand::HandPose;
 use umicraft_game::inventory::WindowView;
 use umicraft_game::piston::MovingBlocks;
@@ -300,6 +301,12 @@ impl WorldView {
     #[must_use]
     pub fn compass_world(&self) -> (i8, Option<(i32, i32, i32)>) {
         (self.view.dimension, self.view.spawn)
+    }
+
+    /// The dimension and game mode of the newest frame, which pick the music.
+    #[must_use]
+    pub fn music_world(&self) -> (i8, GameMode) {
+        (self.view.dimension, self.view.gamemode)
     }
 
     /// The world facts of the F3 screen from the newest frame.
@@ -693,6 +700,8 @@ struct View {
     world_time: i64,
     /// The dimension of the newest frame.
     dimension: i8,
+    /// The game mode of the local player in the newest frame.
+    gamemode: GameMode,
     /// The newest announced world spawn point.
     spawn: Option<(i32, i32, i32)>,
     /// The biome temperature at the player, for the sky colour.
@@ -723,6 +732,7 @@ impl View {
         self.tick_time = Some(frame.tick_time);
         self.world_time = frame.world_time;
         self.dimension = frame.dimension;
+        self.gamemode = frame.gamemode;
         self.spawn = frame.spawn;
         self.sky_temperature = frame.sky_temperature;
         self.fog = frame.fog;
@@ -1077,6 +1087,7 @@ mod tests {
             tick_time,
             world_time,
             dimension: -1,
+            gamemode: GameMode::default(),
             spawn: None,
             entities: Arc::from([]),
             local_body: Arc::new(
