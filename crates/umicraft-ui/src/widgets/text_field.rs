@@ -33,7 +33,7 @@
 //! that a future shortcut handler does not accidentally insert a character.
 
 use crate::context::{Ui, UiResponse};
-use crate::draw::TextStyle;
+use crate::draw::{Color, TextStyle};
 use crate::geom::{Insets, Rect};
 use crate::id::WidgetId;
 use crate::input::{InputEvent, Key};
@@ -64,6 +64,7 @@ pub struct TextFieldState {
     caret: usize,
     scroll: f32,
     blink: u32,
+    disabled: bool,
 }
 
 impl TextFieldState {
@@ -85,7 +86,21 @@ impl TextFieldState {
             caret,
             scroll: 0.0,
             blink: 0,
+            disabled: false,
         }
+    }
+
+    /// Turns editing off (`GuiTextField.setEnabled(false)`): the field ignores
+    /// clicks and keys, shows no caret and draws its text in the dim
+    /// `0x707070`.
+    pub fn set_disabled(&mut self, disabled: bool) {
+        self.disabled = disabled;
+    }
+
+    /// Whether the field is disabled.
+    #[must_use]
+    pub fn is_disabled(&self) -> bool {
+        self.disabled
     }
 
     /// Advances the caret blink by one game tick (`GuiTextField.updateCursorCounter`).
@@ -288,7 +303,7 @@ pub fn text_field_scaled(
     });
     let mut changed = false;
 
-    if response.clicked {
+    if response.clicked && !state.disabled {
         if let Some(position) = util::last_primary_press(ui) {
             let local_x = position[0] - inner.x + state.scroll;
             let caret = atlas.x_to_char_index(&state.text, local_x, scale);
@@ -299,7 +314,7 @@ pub fn text_field_scaled(
         }
     }
 
-    if response.focused {
+    if response.focused && !state.disabled {
         // Text events may be IME or paste and can carry several characters.
         // Ctrl/Meta combinations belong to future shortcuts, not to the text.
         let shortcut = ui.input().modifiers.control || ui.input().modifiers.meta;
@@ -339,7 +354,15 @@ pub fn text_field_scaled(
     state.scroll = state.scroll.clamp(0.0, (text_width - caret_space).max(0.0));
 
     if !rect.is_empty() {
-        draw_field(ui, rect, inner, atlas, state, response.focused, scale);
+        draw_field(
+            ui,
+            rect,
+            inner,
+            atlas,
+            state,
+            response.focused && !state.disabled,
+            scale,
+        );
     }
 
     if changed {
@@ -372,7 +395,15 @@ fn draw_field(
     let text_x = inner.x - state.scroll;
     ui.push_clip(inner);
     if !state.text.is_empty() {
-        draw_shadowed(ui, [text_x, text_y], &state.text, scale);
+        let (color, shadow) = if state.disabled {
+            (
+                style::TEXT_FIELD_DISABLED,
+                style::TEXT_FIELD_DISABLED_SHADOW,
+            )
+        } else {
+            (style::TEXT_FIELD, style::TEXT_FIELD_SHADOW)
+        };
+        draw_shadowed(ui, [text_x, text_y], &state.text, (color, shadow), scale);
     }
     if focused && state.caret_blink_on() {
         let caret_x = text_x + atlas.char_index_to_x(&state.text, state.caret, scale);
@@ -385,7 +416,13 @@ fn draw_field(
             );
             ui.draw().rect(bar, style::CARET_BAR);
         } else {
-            draw_shadowed(ui, [caret_x, text_y], CARET_GLYPH, scale);
+            draw_shadowed(
+                ui,
+                [caret_x, text_y],
+                CARET_GLYPH,
+                (style::TEXT_FIELD, style::TEXT_FIELD_SHADOW),
+                scale,
+            );
         }
     }
     ui.pop_clip();
@@ -393,15 +430,19 @@ fn draw_field(
 
 /// Draws `text` with the vanilla shadow (a quarter of the brightness, one
 /// unit down and right, `drawStringWithShadow`).
-fn draw_shadowed(ui: &mut Ui, at: [f32; 2], text: &str, scale: f32) {
-    let shadow = style::TEXT_FIELD_SHADOW;
+fn draw_shadowed(
+    ui: &mut Ui,
+    at: [f32; 2],
+    text: &str,
+    (color, shadow): (Color, Color),
+    scale: f32,
+) {
     ui.draw().text(
         [at[0] + scale, at[1] + scale],
         text,
         TextStyle::new(scale, shadow),
     );
-    ui.draw()
-        .text(at, text, TextStyle::new(scale, style::TEXT_FIELD));
+    ui.draw().text(at, text, TextStyle::new(scale, color));
 }
 
 /// Removes every control character, keeping the field single-line.

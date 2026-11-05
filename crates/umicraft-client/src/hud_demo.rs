@@ -36,7 +36,7 @@ use crate::game::hud_after;
 use crate::hud_demo_panorama;
 use crate::menu_flow::{MenuContext, MenuFlow};
 use crate::options::{Action, Options};
-use crate::options_screen::OptionsScreen;
+use crate::options_screen::{Catalog, OptionsScreen};
 use crate::screen::Screen;
 use crate::screenshot::write_png;
 use crate::servers::ServerBook;
@@ -237,12 +237,17 @@ fn run_options(
     atlas: &FontAtlas,
     options: &mut Options,
     clicks: &[&str],
-    widgets_sheet: Option<SpriteSheet>,
+    (widgets_sheet, art): (Option<SpriteSheet>, MenuArt),
+    catalog: Option<Catalog>,
 ) -> (OptionsScreen, DrawList) {
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     let mut ui = Ui::new(viewport);
     ui.set_widgets_sheet(widgets_sheet);
+    ui.set_menu_art(art);
     let mut screen = OptionsScreen::new();
+    if let Some(catalog) = catalog {
+        screen.set_catalog(catalog);
+    }
     let lang = crate::language::load(Lang::DEFAULT_CODE);
     let mut frame = |screen: &mut OptionsScreen, ui: &mut Ui, input: UiInput| {
         ui.begin_frame(viewport, input);
@@ -373,8 +378,15 @@ fn build(
             let mut options = Options::default();
             options.video.fov = 95.0;
             options.video.render_distance = 12;
-            let (screen, draw_list) =
-                run_options(width, height, atlas, &mut options, &[], sheets.widgets);
+            let (screen, draw_list) = run_options(
+                width,
+                height,
+                atlas,
+                &mut options,
+                &[],
+                (sheets.widgets, art),
+                None,
+            );
             Demo {
                 lines: vec![
                     ("page", format!("{:?}", screen.page())),
@@ -389,15 +401,24 @@ fn build(
         "title" | "servers" | "server-edit" => {
             menu_scene(view, (width, height), atlas, (sheets, art), None).0
         }
-        "video" | "chat-options" => {
+        "video" | "chat-options" | "sounds" | "skin" | "language" | "packs" => {
             let mut options = Options::default();
-            let click = if view == "video" {
-                "nav:video"
-            } else {
-                "nav:chat"
+            let click = match view {
+                "video" => "nav:video",
+                "chat-options" => "nav:chat",
+                "packs" => "resourcepacks",
+                other => other,
             };
-            let (screen, draw_list) =
-                run_options(width, height, atlas, &mut options, &[click], sheets.widgets);
+            let catalog = matches!(view, "language" | "packs").then(Catalog::discover);
+            let (screen, draw_list) = run_options(
+                width,
+                height,
+                atlas,
+                &mut options,
+                &[click],
+                (sheets.widgets, art),
+                catalog,
+            );
             Demo {
                 lines: vec![
                     ("page", format!("{:?}", screen.page())),
@@ -417,7 +438,8 @@ fn build(
                 atlas,
                 &mut options,
                 &["nav:controls", "key:attack"],
-                sheets.widgets,
+                (sheets.widgets, art),
+                None,
             );
             let conflicts = Action::ALL
                 .iter()

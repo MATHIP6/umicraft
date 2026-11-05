@@ -34,7 +34,7 @@ impl OptionsScreen {
         let cx = gui.cx();
         let content = self.catalog.languages().len() as f32 * ROW;
         self.scroll_list(ui, content, bottom - top, ROW);
-        Self::list_background(ui, gui, top, bottom);
+        Self::list_container(ui, gui, (0.0, gui.width), (top, bottom), self.scroll);
 
         ui.push_clip(gui.rect(0.0, top, gui.width, bottom - top));
         let mut picked = None;
@@ -54,6 +54,7 @@ impl OptionsScreen {
             }
         }
         ui.pop_clip();
+        Self::list_overlay(ui, gui, (0.0, gui.width), (top, bottom));
         Self::scrollbar(ui, gui, cx + 124.0, (top, bottom), content, self.scroll);
         if let Some(code) = picked.filter(|code| *code != options.language.code) {
             options.language.code = code;

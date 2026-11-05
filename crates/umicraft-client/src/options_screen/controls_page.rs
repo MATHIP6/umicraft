@@ -54,7 +54,7 @@ impl OptionsScreen {
         let entries = key_entries(lang);
         let content = entries.len() as f32 * KEY_ROW;
         self.scroll_list(ui, content, bottom - top, KEY_ROW);
-        Self::list_background(ui, gui, top, bottom);
+        Self::list_container(ui, gui, (0.0, gui.width), (top, bottom), self.scroll);
 
         let label_width = Action::ALL
             .iter()
@@ -92,6 +92,7 @@ impl OptionsScreen {
             }
         }
         ui.pop_clip();
+        Self::list_overlay(ui, gui, (0.0, gui.width), (top, bottom));
         Self::scrollbar(
             ui,
             gui,

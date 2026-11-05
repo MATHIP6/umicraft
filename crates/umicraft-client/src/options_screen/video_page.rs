@@ -101,7 +101,7 @@ impl OptionsScreen {
         let rows = VIDEO_ENTRIES.len().div_ceil(2);
         let content = rows as f32 * VIDEO_ROW;
         self.scroll_list(ui, content, bottom - top, VIDEO_ROW);
-        Self::list_background(ui, gui, top, bottom);
+        Self::list_container(ui, gui, (0.0, gui.width), (top, bottom), self.scroll);
 
         // The list is clipped to its area; a row is only clickable while it
         // lies inside.
@@ -117,6 +117,7 @@ impl OptionsScreen {
             self.video_entry(ui, atlas, options, lang, entry, slot, outcome);
         }
         ui.pop_clip();
+        Self::list_overlay(ui, gui, (0.0, gui.width), (top, bottom));
         Self::scrollbar(ui, gui, cx + 156.0, (top, bottom), content, self.scroll);
 
         Self::title(ui, atlas, gui, lang.tr("options.videoTitle"), 5.0);

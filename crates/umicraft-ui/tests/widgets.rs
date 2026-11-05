@@ -1280,3 +1280,35 @@ fn the_scaled_field_uses_the_gui_unit_for_border_and_inset() {
     // The first run is the shadow, one unit right of the text.
     assert_eq!(position[0] - 3.0, 30.0 + 12.0, "inset 4 units");
 }
+
+#[test]
+fn a_disabled_text_field_ignores_input_and_draws_dim_text() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::with_text("locked");
+    focus_field(&mut ui, id, FIELD_RECT, &atlas, &mut state);
+    state.set_disabled(true);
+    assert!(state.is_disabled());
+
+    let (response, output) = run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, typed("x"));
+    assert!(!response.changed, "a disabled field takes no text");
+    assert_eq!(state.text(), "locked");
+    assert!(caret_mark(&output).is_none(), "and shows no caret");
+    let dim = output
+        .draw_list
+        .commands()
+        .iter()
+        .any(|command| match command {
+            DrawCommand::Text { text, style, .. } => {
+                text == "locked" && (style.color[0] - 0.439).abs() < 0.01
+            }
+            _ => false,
+        });
+    assert!(dim, "the text is drawn in 0x707070");
+
+    state.set_disabled(false);
+    let (_, output) = run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, typed("x"));
+    assert_eq!(state.text(), "lockedx");
+    assert!(caret_mark(&output).is_some());
+}

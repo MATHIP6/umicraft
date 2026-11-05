@@ -129,8 +129,6 @@ impl OptionsScreen {
     ) {
         let (top, bottom) = (32.0, gui.height - 51.0);
         let cx = gui.cx();
-        Self::list_background(ui, gui, top, bottom);
-
         let available: Vec<Row> = self
             .catalog
             .packs()
@@ -271,6 +269,7 @@ impl OptionsScreen {
             Column::Selected => "resourcePack.selected.title",
         });
         let mut action = None;
+        Self::list_container(ui, gui, (x, LIST_W), (top, bottom), scroll);
         ui.push_clip(gui.rect(x, top, LIST_W, bottom - top));
         for (index, row) in rows.iter().enumerate() {
             let y = top + 4.0 + HEADER - scroll + index as f32 * ROW;
@@ -284,6 +283,7 @@ impl OptionsScreen {
             }
         }
         ui.pop_clip();
+        Self::list_overlay(ui, gui, (x, LIST_W), (top, bottom));
         Self::list_header(ui, atlas, gui, (x, top), header);
         Self::scrollbar(
             ui,
