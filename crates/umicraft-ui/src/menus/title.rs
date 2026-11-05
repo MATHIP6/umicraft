@@ -361,8 +361,8 @@ mod tests {
         let mut screen = TitleScreen::new(0);
         let commands = frame(UiInput::default(), |ui| {
             ui.set_menu_art(crate::menus::MenuArt {
-                dirt: None,
                 logo: Some(sheet),
+                ..crate::menus::MenuArt::default()
             });
             let atlas = FontAtlas::fallback();
             let info = TitleInfo {

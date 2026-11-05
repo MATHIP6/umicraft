@@ -17,6 +17,7 @@ fn row(name: &str) -> ServerRow {
             latency_ms: 40,
             sample: vec!["Alex".into()],
         },
+        favicon: None,
     }
 }
 
@@ -30,7 +31,7 @@ fn run(
     rows: &[ServerRow],
 ) -> Option<ServerListOutcome> {
     frame(input, |ui| {
-        screen.show(ui, &FontAtlas::fallback(), &Lang::builtin(), rows, None)
+        screen.show(ui, &FontAtlas::fallback(), &Lang::builtin(), rows)
     })
 }
 
@@ -153,14 +154,77 @@ fn the_icon_arrows_play_and_move() {
 fn keys_move_the_selection_and_enter_joins() {
     let rows = rows(3);
     let mut screen = ServerListScreen::new();
+    screen.set_selected(Some(0));
     run(&mut screen, key(Key::ArrowDown), &rows);
     run(&mut screen, key(Key::ArrowDown), &rows);
-    assert_eq!(screen.selected(), Some(1));
+    assert_eq!(screen.selected(), Some(2));
     run(&mut screen, key(Key::ArrowUp), &rows);
-    assert_eq!(screen.selected(), Some(0));
+    assert_eq!(screen.selected(), Some(1));
     assert_eq!(
         run(&mut screen, key(Key::Enter), &rows),
-        Some(ServerListOutcome::Join(0))
+        Some(ServerListOutcome::Join(1))
+    );
+}
+
+#[test]
+fn the_arrows_do_nothing_without_a_selection() {
+    let rows = rows(3);
+    let mut screen = ServerListScreen::new();
+    run(&mut screen, key(Key::ArrowDown), &rows);
+    assert_eq!(screen.selected(), None);
+    assert_eq!(run(&mut screen, key(Key::Enter), &rows), None);
+}
+
+/// Vanilla `keyTyped`: Up on the first row and Down on the last deselect.
+#[test]
+fn stepping_past_either_end_clears_the_selection() {
+    let rows = rows(2);
+    let mut screen = ServerListScreen::new();
+    screen.set_selected(Some(0));
+    run(&mut screen, key(Key::ArrowUp), &rows);
+    assert_eq!(screen.selected(), None);
+    screen.set_selected(Some(1));
+    run(&mut screen, key(Key::ArrowDown), &rows);
+    assert_eq!(screen.selected(), None);
+}
+
+fn shifted(code: Key) -> UiInput {
+    UiInput {
+        modifiers: crate::input::Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+        ..key(code)
+    }
+}
+
+#[test]
+fn shift_arrows_move_the_entry_and_the_selection_follows() {
+    let rows = rows(3);
+    let mut screen = ServerListScreen::new();
+    screen.set_selected(Some(1));
+    assert_eq!(
+        run(&mut screen, shifted(Key::ArrowUp), &rows),
+        Some(ServerListOutcome::MoveUp(1))
+    );
+    assert_eq!(screen.selected(), Some(0));
+    assert_eq!(run(&mut screen, shifted(Key::ArrowUp), &rows), None);
+    assert_eq!(screen.selected(), Some(0), "the first row cannot move up");
+    screen.set_selected(Some(1));
+    assert_eq!(
+        run(&mut screen, shifted(Key::ArrowDown), &rows),
+        Some(ServerListOutcome::MoveDown(1))
+    );
+    assert_eq!(screen.selected(), Some(2));
+}
+
+#[test]
+fn f5_refreshes_with_or_without_a_selection() {
+    let rows = rows(2);
+    let mut screen = ServerListScreen::new();
+    assert_eq!(
+        run(&mut screen, key(Key::F5), &rows),
+        Some(ServerListOutcome::Refresh)
     );
 }
 
@@ -193,7 +257,13 @@ fn every_status_draws_and_the_latency_icon_has_a_tooltip() {
     let others = [
         RowStatus::Pinging,
         RowStatus::Unreachable,
-        RowStatus::VersionMismatch,
+        RowStatus::VersionMismatch {
+            motd: String::new(),
+            version: "1.12".into(),
+            client_outdated: true,
+            players: 0,
+            sample: Vec::new(),
+        },
     ];
     let rows: Vec<ServerRow> = others
         .into_iter()
@@ -201,6 +271,7 @@ fn every_status_draws_and_the_latency_icon_has_a_tooltip() {
             name: "x".into(),
             address: "x".into(),
             status,
+            favicon: None,
         })
         .chain(rows(1))
         .collect();
@@ -209,7 +280,7 @@ fn every_status_draws_and_the_latency_icon_has_a_tooltip() {
     let hover = UiInput::new(vec![InputEvent::PointerMoved { position: icon }]);
     let mut screen = ServerListScreen::new();
     let shown = frame(hover, |ui| {
-        screen.show(ui, &FontAtlas::fallback(), &Lang::builtin(), &rows, None);
+        screen.show(ui, &FontAtlas::fallback(), &Lang::builtin(), &rows);
         ui.draw()
             .commands()
             .iter()

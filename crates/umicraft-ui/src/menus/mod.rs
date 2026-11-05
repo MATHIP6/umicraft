@@ -16,7 +16,9 @@ mod common;
 pub mod confirm;
 pub mod connecting;
 pub mod disconnected;
+pub mod pack_mode;
 pub mod panorama;
+mod row_draw;
 pub mod server_edit;
 pub mod server_list;
 mod server_row;
@@ -29,6 +31,7 @@ pub use background::{
 pub use confirm::{confirm_layout, ConfirmLayout, ConfirmOutcome, ConfirmScreen};
 pub use connecting::{connecting_cancel_rect, ConnectStage, ConnectingOutcome, ConnectingScreen};
 pub use disconnected::{DisconnectedOutcome, DisconnectedScreen};
+pub use pack_mode::ResourcePackMode;
 pub use panorama::{
     panorama_rotation, PanoramaBackground, PanoramaRotation, PanoramaTextures, PanoramaView,
     CLIP_PLANES, FACE_TURNS_DEGREES, FIELD_OF_VIEW_DEGREES,

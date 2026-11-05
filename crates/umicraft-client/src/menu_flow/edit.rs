@@ -4,7 +4,7 @@
 //! for an entry and applying what they report (ADR-0044).
 
 use umicraft_core::lang::Lang;
-use umicraft_ui::menus::{ConfirmScreen, EditMode, ServerEditScreen};
+use umicraft_ui::menus::{ConfirmScreen, EditMode, ResourcePackMode, ServerEditScreen};
 
 use super::{valid_address, MenuCommand, MenuFlow, Pending};
 use crate::screen::Screen;
@@ -21,11 +21,10 @@ impl MenuFlow {
     }
     pub(super) fn begin_edit(&mut self, index: usize) -> Option<MenuCommand> {
         let entry = self.book.get(index)?;
-        self.edit = Some(ServerEditScreen::edit(
-            entry.name(),
-            entry.address(),
-            valid_address,
-        ));
+        self.edit = Some(
+            ServerEditScreen::edit(entry.name(), entry.address(), valid_address)
+                .with_pack_mode(entry.pack_mode()),
+        );
         self.pending = Some(Pending::Edit(index));
         Some(MenuCommand::GoTo(Screen::ServerEdit))
     }
@@ -46,6 +45,7 @@ impl MenuFlow {
         mode: EditMode,
         name: &str,
         address: &str,
+        pack_mode: ResourcePackMode,
     ) -> Option<MenuCommand> {
         let pending = self.pending;
         match (mode, pending) {
@@ -58,6 +58,7 @@ impl MenuFlow {
             (EditMode::Add, _) => {
                 let added = self.book.add(name, address);
                 if let Ok(index) = added {
+                    self.book.set_pack_mode(index, pack_mode);
                     self.list.set_selected(Some(index));
                 }
                 self.saved(added.map(|_| ()).map_err(|error| error.to_string()));
@@ -65,6 +66,7 @@ impl MenuFlow {
             }
             (EditMode::Edit, Some(Pending::Edit(index))) => {
                 let edited = self.book.edit(index, name, address);
+                self.book.set_pack_mode(index, pack_mode);
                 self.saved(edited.map_err(|error| error.to_string()));
                 Some(self.close_edit())
             }
@@ -83,6 +85,7 @@ impl MenuFlow {
             return;
         };
         self.rows.swap(from, to);
+        self.icons_revision += 1;
         self.persist();
     }
     /// Saves the book after `change` and pings the new list. A failed change

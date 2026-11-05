@@ -13,7 +13,7 @@ use winit::event::KeyEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 
-use super::App;
+use super::{upload_gui_atlas, App};
 use crate::game::GameEvent;
 use crate::menu_flow::MenuCommand;
 use crate::options_screen::Page;
@@ -78,6 +78,29 @@ impl App {
             }
             GameMenuAction::Quit => self.disconnect(),
         }
+    }
+
+    /// Grows the GUI atlas with the favicons of the server list and uploads it
+    /// when they changed since the last frame, then points the rows at their
+    /// regions. Other screens leave the atlas alone.
+    pub(super) fn sync_server_icons(&mut self) {
+        if self.screen != Screen::ServerList {
+            return;
+        }
+        self.menu.poll();
+        let revision = self.menu.icons_revision();
+        if revision == self.server_icons_revision {
+            return;
+        }
+        let (Some(atlas), Some(renderer)) = (self.gui_atlas.as_ref(), self.renderer.as_mut())
+        else {
+            return;
+        };
+        let grown = atlas.with_dynamic(&self.menu.icon_images());
+        upload_gui_atlas(renderer, Some(&grown));
+        self.menu.assign_icon_sheets(&grown);
+        self.gui_atlas = Some(grown);
+        self.server_icons_revision = revision;
     }
 
     /// Saves the address of a direct connection as the option that fills the
