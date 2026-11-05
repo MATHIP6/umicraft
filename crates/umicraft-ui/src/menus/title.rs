@@ -9,17 +9,21 @@
 //! - Options `(cx - 100, j + 84)` 98x20, Quit Game `(cx + 2, j + 84)` 98x20
 //! - Language `(cx - 124, j + 84)` 20x20 (`GuiButtonLanguage`)
 //!
-//! The Minecraft Realms row (`j + 48`) does not exist. The logo is the
+//! - Realms `(cx - 100, j + 48)` 200x20 (`menu.online`, always disabled:
+//!   it is a Mojang online service Umicraft does not implement; the row stays
+//!   so the layout is the vanilla one)
+//!
+//! The logo is the
 //! vanilla texture from the user's client jar when [`crate::menus::MenuArt`]
 //! has it (owner-approved, never committed, spec §3) and the original word
-//! "Umicraft" otherwise; the splash comes from an original list and is drawn
-//! upright (the draw list cannot rotate text; vanilla tilts it by -20
-//! degrees).
+//! "Umicraft" otherwise. The splash is tilted by -20 degrees and pulses like
+//! vanilla; it comes from the user's `splashes.txt` when the caller sets one
+//! ([`TitleScreen::set_splash`]) and from an original list otherwise.
 
 use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
-use crate::draw::{Color, SpriteSheet};
+use crate::draw::{Color, SpriteSheet, TextStyle};
 use crate::geom::Rect;
 use crate::text::FontAtlas;
 use crate::widgets::style;
@@ -43,6 +47,8 @@ pub const SPLASHES: [&str; 8] = [
 ];
 /// The yellow of the splash (`0xFFFF00`).
 const SPLASH_COLOR: Color = [1.0, 1.0, 0.0, 1.0];
+/// The turn of the splash (`rotate(-20, 0, 0, 1)`).
+const SPLASH_TURN_DEGREES: f32 = -20.0;
 /// The warm colour of the logo.
 const LOGO_COLOR: Color = [0.96, 0.78, 0.28, 1.0];
 /// The logo text is this many times the GUI scale (the vanilla logo is 44
@@ -77,6 +83,8 @@ pub struct TitleLayout {
     pub singleplayer: Rect,
     /// The Multiplayer button.
     pub multiplayer: Rect,
+    /// The disabled Minecraft Realms button.
+    pub realms: Rect,
     /// The Options button.
     pub options: Rect,
     /// The Quit Game button.
@@ -93,6 +101,7 @@ pub fn title_layout(viewport: Rect) -> TitleLayout {
     TitleLayout {
         singleplayer: gui.rect(cx - 100.0, j, 200.0, 20.0),
         multiplayer: gui.rect(cx - 100.0, j + 24.0, 200.0, 20.0),
+        realms: gui.rect(cx - 100.0, j + 48.0, 200.0, 20.0),
         options: gui.rect(cx - 100.0, j + 84.0, 98.0, 20.0),
         quit: gui.rect(cx + 2.0, j + 84.0, 98.0, 20.0),
         language: gui.rect(cx - 124.0, j + 84.0, 20.0, 20.0),
@@ -113,7 +122,7 @@ pub struct TitleInfo<'a> {
 /// The title screen state: the splash and the panorama clock.
 #[derive(Debug, Clone)]
 pub struct TitleScreen {
-    splash: &'static str,
+    splash: String,
     panorama: PanoramaBackground,
 }
 
@@ -122,15 +131,20 @@ impl TitleScreen {
     #[must_use]
     pub fn new(seed: u64) -> Self {
         Self {
-            splash: SPLASHES[(seed % SPLASHES.len() as u64) as usize],
+            splash: SPLASHES[(seed % SPLASHES.len() as u64) as usize].to_string(),
             panorama: PanoramaBackground::new(),
         }
     }
 
     /// The splash line of this start.
     #[must_use]
-    pub fn splash(&self) -> &'static str {
-        self.splash
+    pub fn splash(&self) -> &str {
+        &self.splash
+    }
+
+    /// Replaces the splash line (for example one read from `splashes.txt`).
+    pub fn set_splash(&mut self, splash: impl Into<String>) {
+        self.splash = splash.into();
     }
 
     /// Advances the panorama and the splash pulse by one game tick.
@@ -174,6 +188,7 @@ impl TitleScreen {
         let options_id = ui.id("options");
         let quit_id = ui.id("quit");
         let singleplayer_id = ui.id("singleplayer");
+        let realms_id = ui.id("realms");
         let singleplayer = lang.tr("menu.singleplayer");
         gui.button(
             ui,
@@ -181,6 +196,14 @@ impl TitleScreen {
             layout.singleplayer,
             atlas,
             singleplayer,
+            false,
+        );
+        gui.button(
+            ui,
+            realms_id,
+            layout.realms,
+            atlas,
+            lang.tr("menu.online"),
             false,
         );
         let multiplayer = gui.button(
@@ -249,16 +272,42 @@ impl TitleScreen {
 
         // Vanilla pulses with the wall clock (`getSystemTime() % 1000`); the
         // tick count keeps the screen free of a clock, 20 ticks = 1 second.
+        self.draw_splash(ui, atlas, gui, partial_tick);
+    }
+
+    /// The splash: translate to `(width / 2 + 90, 70)`, turn by -20 degrees,
+    /// scale by `(1.8 - |sin(t) * 0.1|) * 100 / (width + 32)` and draw the
+    /// text centred at `y = -8` (`GuiMainMenu.drawScreen`).
+    fn draw_splash(&self, ui: &mut Ui, atlas: &FontAtlas, gui: &Gui, partial_tick: f32) {
+        // Vanilla pulses with the wall clock (`getSystemTime() % 1000`); the
+        // tick count keeps the screen free of a clock, 20 ticks = 1 second.
         let phase = ((self.panorama.ticks() % 20) as f32 + partial_tick) / 20.0;
         let pulse = 1.8 - ((phase * std::f32::consts::TAU).sin() * 0.1).abs();
-        let width = atlas.measure(self.splash, gui.scale) / gui.scale;
-        let splash = TextPlacement {
-            at: [cx + 90.0, 70.0 - 4.0 * pulse],
-            color: SPLASH_COLOR,
-            factor: pulse * 100.0 / (width + 32.0),
-            centered: true,
+        let units = atlas.measure(&self.splash, 1.0);
+        let scale = gui.scale * pulse * 100.0 / (units + 32.0);
+        let angle = SPLASH_TURN_DEGREES.to_radians();
+        let pivot = gui.rect(gui.cx() + 90.0, 70.0, 0.0, 0.0);
+        let (sin, cos) = angle.sin_cos();
+        // The text origin in turned space, then turned around the pivot.
+        let place = |local: [f32; 2]| {
+            [
+                pivot.x + local[0] * cos - local[1] * sin,
+                pivot.y + local[0] * sin + local[1] * cos,
+            ]
         };
-        gui.text(ui, atlas, self.splash, splash);
+        let local = [-units * scale / 2.0, -8.0 * scale];
+        let style = |color: Color| TextStyle::new(scale, color).rotated(angle);
+        let shadow = [
+            SPLASH_COLOR[0] * 0.25,
+            SPLASH_COLOR[1] * 0.25,
+            SPLASH_COLOR[2] * 0.25,
+            1.0,
+        ];
+        let shadow_at = place([local[0] + scale, local[1] + scale]);
+        ui.draw()
+            .text(shadow_at, self.splash.as_str(), style(shadow));
+        ui.draw()
+            .text(place(local), self.splash.as_str(), style(SPLASH_COLOR));
     }
 
     /// The 20x20 language button with the globe cell of `widgets.png`.

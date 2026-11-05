@@ -77,6 +77,7 @@ pub mod servers;
 pub mod setup_cli;
 mod sky_textures;
 mod social_view;
+mod splash;
 mod stats_view;
 pub mod terrain_textures;
 #[cfg(test)]

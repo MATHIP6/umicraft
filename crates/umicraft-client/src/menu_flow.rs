@@ -137,6 +137,11 @@ impl MenuFlow {
         flow
     }
 
+    /// Replaces the title screen's splash line.
+    pub fn set_splash(&mut self, splash: impl Into<String>) {
+        self.title.set_splash(splash);
+    }
+
     /// The address typed on the last direct connection, to save as an option.
     #[must_use]
     pub fn last_server(&self) -> &str {

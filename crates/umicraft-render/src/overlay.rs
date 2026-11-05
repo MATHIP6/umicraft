@@ -152,22 +152,38 @@ impl Overlay {
         uv_max: [f32; 2],
         color: [f32; 4],
     ) {
-        let x0 = 2.0 * x / self.width - 1.0;
-        let x1 = 2.0 * (x + width) / self.width - 1.0;
-        let y0 = 1.0 - 2.0 * y / self.height;
-        let y1 = 1.0 - 2.0 * (y + height) / self.height;
+        let corners = [
+            [x, y],
+            [x + width, y],
+            [x + width, y + height],
+            [x, y + height],
+        ];
+        self.push_corners(corners, uv_min, uv_max, color);
+    }
+
+    /// Appends a quad given by its four pixel-space corners (top-left,
+    /// top-right, bottom-right, bottom-left), which may be turned.
+    pub(crate) fn push_corners(
+        &mut self,
+        corners: [[f32; 2]; 4],
+        uv_min: [f32; 2],
+        uv_max: [f32; 2],
+        color: [f32; 4],
+    ) {
+        let ndc = |[x, y]: [f32; 2]| [2.0 * x / self.width - 1.0, 1.0 - 2.0 * y / self.height];
+        let [p0, p1, p2, p3] = corners.map(ndc);
         let vertex = |position: [f32; 2], uv: [f32; 2]| OverlayVertex {
             position,
             uv,
             color,
         };
         self.vertices.extend_from_slice(&[
-            vertex([x0, y0], uv_min),
-            vertex([x1, y0], [uv_max[0], uv_min[1]]),
-            vertex([x1, y1], uv_max),
-            vertex([x0, y0], uv_min),
-            vertex([x1, y1], uv_max),
-            vertex([x0, y1], [uv_min[0], uv_max[1]]),
+            vertex(p0, uv_min),
+            vertex(p1, [uv_max[0], uv_min[1]]),
+            vertex(p2, uv_max),
+            vertex(p0, uv_min),
+            vertex(p2, uv_max),
+            vertex(p3, [uv_min[0], uv_max[1]]),
         ]);
     }
 }

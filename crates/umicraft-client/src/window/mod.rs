@@ -303,12 +303,7 @@ impl App {
             keys: HashSet::new(),
             world: None,
             session: None,
-            menu: MenuFlow::new(
-                ServerBook::open_default(),
-                start_pinger(),
-                last_server,
-                menu_seed(),
-            ),
+            menu: new_menu(last_server),
             options_origin: Screen::GameMenu,
             last_input: InputState::default(),
             look: (0.0, 0.0),
@@ -1628,4 +1623,21 @@ mod tests {
         assert!(!is_debug_toggle(KeyCode::F2, ElementState::Pressed, false));
         assert!(!is_debug_toggle(KeyCode::F1, ElementState::Pressed, false));
     }
+}
+
+/// The menu flow, with the splash of the user's `splashes.txt` when there is
+/// one (the title screen keeps its original list otherwise).
+fn new_menu(last_server: String) -> MenuFlow {
+    let seed = menu_seed();
+    let mut menu = MenuFlow::new(
+        ServerBook::open_default(),
+        start_pinger(),
+        last_server,
+        seed,
+    );
+    let lines = crate::splash::load_lines();
+    if let Some(splash) = crate::splash::choose(&lines, crate::splash::today(), seed) {
+        menu.set_splash(splash);
+    }
+    menu
 }

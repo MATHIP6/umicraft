@@ -29,7 +29,7 @@
 //! emitted, exactly as a scissor rectangle covering the target would do.
 
 use thiserror::Error;
-use umicraft_ui::{DrawCommand, DrawList, FontAtlas, Glyph, Rect};
+use umicraft_ui::{DrawCommand, DrawList, FontAtlas, Glyph, Rect, TextStyle};
 
 use crate::font;
 use crate::overlay::{Overlay, OverlayVertex};
@@ -336,7 +336,7 @@ impl UiPass {
                         &mut current_kind,
                         &mut batch_start,
                     );
-                    self.push_text(*position, text, style.scale, style.color, atlas);
+                    self.push_text(*position, text, style, atlas);
                 }
                 DrawCommand::Image { src, dst, color } => {
                     self.flush_batch_if_needed(
@@ -457,14 +457,8 @@ impl UiPass {
         *start = total;
     }
 
-    fn push_text(
-        &mut self,
-        position: [f32; 2],
-        text: &str,
-        scale: f32,
-        color: [f32; 4],
-        atlas: &FontAtlas,
-    ) {
+    fn push_text(&mut self, position: [f32; 2], text: &str, style: &TextStyle, atlas: &FontAtlas) {
+        let (scale, color) = (style.scale, style.color);
         let Some(clip) = self.clip else {
             return;
         };
@@ -486,6 +480,11 @@ impl UiPass {
                 continue;
             };
             let quad = glyph_quad(cursor, glyph, atlas, scale);
+            if style.rotation != 0.0 {
+                self.push_turned_glyph(quad, (position, style.rotation), glyph, color, clip);
+                cursor[0] += glyph.advance * scale;
+                continue;
+            }
             if let Some(visible) = drawable(quad).and_then(|quad| quad.intersect(clip)) {
                 let (uv_min, uv_max) = clipped_uv(glyph, quad, visible);
                 self.overlay.push_quad(
@@ -496,6 +495,29 @@ impl UiPass {
                 );
             }
             cursor[0] += glyph.advance * scale;
+        }
+    }
+
+    /// A glyph of turned text: its quad turned around the text origin. The
+    /// clip only culls glyphs whose bounding box is outside it; a glyph that
+    /// straddles the clip edge is drawn whole.
+    fn push_turned_glyph(
+        &mut self,
+        quad: Rect,
+        (origin, radians): ([f32; 2], f32),
+        glyph: &Glyph,
+        color: [f32; 4],
+        clip: Rect,
+    ) {
+        let corners = turned_corners(quad, origin, radians);
+        let xs = corners.map(|c| c[0]);
+        let ys = corners.map(|c| c[1]);
+        let low = |v: [f32; 4]| v.into_iter().fold(f32::INFINITY, f32::min);
+        let high = |v: [f32; 4]| v.into_iter().fold(f32::NEG_INFINITY, f32::max);
+        let bounds = Rect::new(low(xs), low(ys), high(xs) - low(xs), high(ys) - low(ys));
+        if bounds.intersect(clip).is_some() {
+            self.overlay
+                .push_corners(corners, glyph.uv_min, glyph.uv_max, color);
         }
     }
 
@@ -540,6 +562,25 @@ fn glyph_quad(cursor: [f32; 2], glyph: &Glyph, atlas: &FontAtlas, scale: f32) ->
     )
 }
 
+/// The corners of `quad` (top-left first, clockwise) turned by `radians`
+/// around `origin`.
+fn turned_corners(quad: Rect, origin: [f32; 2], radians: f32) -> [[f32; 2]; 4] {
+    let (sin, cos) = radians.sin_cos();
+    [
+        [quad.x, quad.y],
+        [quad.right(), quad.y],
+        [quad.right(), quad.bottom()],
+        [quad.x, quad.bottom()],
+    ]
+    .map(|[x, y]| {
+        let (dx, dy) = (x - origin[0], y - origin[1]);
+        [
+            origin[0] + dx * cos - dy * sin,
+            origin[1] + dx * sin + dy * cos,
+        ]
+    })
+}
+
 /// The part of `glyph`'s UV rectangle that corresponds to `visible`.
 fn clipped_uv(glyph: &Glyph, quad: Rect, visible: Rect) -> ([f32; 2], [f32; 2]) {
     let u_span = glyph.uv_max[0] - glyph.uv_min[0];
@@ -569,6 +610,37 @@ mod tests {
     use umicraft_ui::{Glyph, TextStyle};
 
     const COLOR: [f32; 4] = [0.2, 0.4, 0.6, 0.8];
+
+    #[test]
+    fn a_quarter_turn_swaps_the_axes_of_a_quad() {
+        let quad = umicraft_ui::Rect::new(10.0, 10.0, 8.0, 4.0);
+        let corners = turned_corners(quad, [10.0, 10.0], std::f32::consts::FRAC_PI_2);
+        // The top-right corner (+8, 0) goes to (0, +8): text turned
+        // clockwise on a y-down screen runs downwards.
+        assert!((corners[1][0] - 10.0).abs() < 1e-4 && (corners[1][1] - 18.0).abs() < 1e-4);
+        assert!((corners[3][0] - 6.0).abs() < 1e-4 && (corners[3][1] - 10.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn turned_text_covers_a_taller_box_than_upright_text() {
+        let height = |rotation: f32| {
+            let mut list = DrawList::new();
+            let style = TextStyle::new(2.0, COLOR).rotated(rotation);
+            list.text([10.0, 40.0], "WWWWWWWW", style);
+            let mut pass = UiPass::new(128, 128);
+            pass.rebuild(&list, &atlas());
+            let ys: Vec<f32> = pass
+                .overlay
+                .vertices()
+                .iter()
+                .map(|v| v.position[1])
+                .collect();
+            let low = ys.iter().copied().fold(f32::INFINITY, f32::min);
+            let high = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            high - low
+        };
+        assert!(height(-20f32.to_radians()) > height(0.0) * 1.5);
+    }
 
     #[test]
     fn an_inverted_image_gets_its_own_batch() {
