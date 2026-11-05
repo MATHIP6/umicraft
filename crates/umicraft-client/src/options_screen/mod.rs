@@ -90,6 +90,9 @@ pub struct Outcome {
 pub struct OptionsScreen {
     page: Page,
     capturing: Option<Action>,
+    /// The pack waiting for the answer of the "made for another version"
+    /// dialog, and the dialog.
+    pack_confirm: Option<(String, umicraft_ui::menus::ConfirmScreen)>,
     /// Scroll offset of the list of the page, in GUI units.
     scroll: f32,
     sliders: HashMap<String, SliderState>,
@@ -119,6 +122,7 @@ impl OptionsScreen {
         Self {
             page: Page::Main,
             capturing: None,
+            pack_confirm: None,
             scroll: 0.0,
             sliders: HashMap::new(),
             catalog: Catalog::default(),

@@ -475,6 +475,23 @@ fn the_resource_pack_page_moves_packs_between_the_lists() {
 }
 
 #[test]
+fn an_incompatible_pack_asks_before_it_is_enabled() {
+    let mut screen = catalog_screen();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "resourcepacks");
+    click_widget(&mut screen, &mut options, "pack:Available:2");
+    assert!(screen.pack_draft().is_empty(), "the question comes first");
+    // No: nothing changes.
+    let layout = umicraft_ui::menus::confirm_layout(VIEWPORT);
+    frame(&mut screen, &mut options, click(layout.no));
+    assert!(screen.pack_draft().is_empty());
+    // Yes: the pack is enabled.
+    click_widget(&mut screen, &mut options, "pack:Available:2");
+    frame(&mut screen, &mut options, click(layout.yes));
+    assert_eq!(screen.pack_draft(), ["old.zip"]);
+}
+
+#[test]
 fn done_applies_the_pack_draft_lowest_priority_first_and_signals_the_reload() {
     let mut screen = catalog_screen();
     let mut options = Options::default();

@@ -10,13 +10,17 @@
 //! [`Outcome::packs_changed`] tells the window to reload the resources, as
 //! vanilla does in `actionPerformed(1)`.
 //!
-//! Not drawn: the `pack.png` icons (the slot is left empty). A pack whose
-//! `pack_format` is not 1 is tinted red like vanilla but selects without the
-//! confirmation screen. See `docs/parity.md`.
+//! A pack whose `pack_format` is not 1 is tinted red and asks "made for an
+//! older/newer version" before it is enabled (`GuiYesNo`). Not drawn: the
+//! `pack.png` icons, because the UI draws sprites of the GUI atlas only and
+//! has no path for arbitrary textures (the slot is left empty). See
+//! `docs/parity.md`.
 
 use umicraft_assets::pack_discovery::DiscoveredPack;
 use umicraft_core::lang::Lang;
 use umicraft_ui::{Color, FontAtlas, InputEvent, Rect, Ui};
+
+use umicraft_ui::menus::{ConfirmOutcome, ConfirmScreen};
 
 use super::layout::{fit_text, strip_formatting, Gui, BUTTON_H, GREY, HALF_W, LIST_BAR};
 use super::{OptionsScreen, Outcome, Page};
@@ -32,6 +36,8 @@ const HEADER: f32 = 13.0;
 const ICON: f32 = 32.0;
 /// Side of a priority arrow button.
 const ARROW: f32 = 11.0;
+/// The `pack_format` of 1.8 packs (`ResourcePackRepository`).
+const PACK_FORMAT: u32 = 1;
 /// The background of an incompatible pack (`0xFF770000`).
 /// White text.
 const WHITE: Color = [1.0; 4];
@@ -53,6 +59,9 @@ enum Action {
     Up(String),
     /// Gave it a lower priority.
     Down(String),
+    /// Clicked an incompatible pack in the available list: ask first.
+    /// `newer` is whether it was made for a newer `pack_format`.
+    Ask { name: String, newer: bool },
 }
 
 /// One entry to draw.
@@ -62,18 +71,22 @@ struct Row {
     title: String,
     description: String,
     compatible: bool,
+    /// The `pack_format` of the metadata, when there is one.
+    format: Option<u32>,
 }
 
 impl Row {
     fn of(pack: &DiscoveredPack, lang: &Lang) -> Self {
-        let (description, compatible) = match &pack.metadata {
+        let (description, compatible, format) = match &pack.metadata {
             Some(metadata) => (
                 strip_formatting(&metadata.description),
-                metadata.pack_format == 1,
+                metadata.pack_format == PACK_FORMAT,
+                Some(metadata.pack_format),
             ),
             None => (
                 lang.tr("umicraft.resourcePack.missingMetadata").to_string(),
                 true,
+                None,
             ),
         };
         Self {
@@ -81,6 +94,7 @@ impl Row {
             title: pack.name.clone(),
             description,
             compatible,
+            format,
         }
     }
 
@@ -92,6 +106,7 @@ impl Row {
                 .tr("umicraft.resourcePack.defaultDescription")
                 .to_string(),
             compatible: true,
+            format: None,
         }
     }
 }
@@ -127,6 +142,15 @@ impl OptionsScreen {
         lang: &Lang,
         outcome: &mut Outcome,
     ) {
+        if let Some((name, confirm)) = self.pack_confirm.take() {
+            // `GuiYesNo` replaces the screen until answered.
+            match confirm.show(ui, atlas, lang) {
+                Some(ConfirmOutcome::Yes) => self.apply_pack_action(Action::Move(name), lang),
+                Some(ConfirmOutcome::No) => {}
+                None => self.pack_confirm = Some((name, confirm)),
+            }
+            return;
+        }
         let (top, bottom) = (32.0, gui.height - 51.0);
         let cx = gui.cx();
         let available: Vec<Row> = self
@@ -165,7 +189,7 @@ impl OptionsScreen {
         );
         action = action.or(selected_action);
         if let Some(action) = action {
-            self.apply_pack_action(action);
+            self.apply_pack_action(action, lang);
         }
 
         Self::title(ui, atlas, gui, lang.tr("resourcePack.title"), 16.0);
@@ -200,9 +224,23 @@ impl OptionsScreen {
     }
 
     /// Moves, raises or lowers a pack of the draft.
-    fn apply_pack_action(&mut self, action: Action) {
+    fn apply_pack_action(&mut self, action: Action, lang: &Lang) {
         let draft = &mut self.pack_draft;
         match action {
+            Action::Ask { name, newer } => {
+                let message = lang.tr(if newer {
+                    "resourcePack.incompatible.confirm.new"
+                } else {
+                    "resourcePack.incompatible.confirm.old"
+                });
+                let screen = ConfirmScreen::new(
+                    "resourcePack.incompatible.confirm.title",
+                    message,
+                    "gui.yes",
+                    "gui.no",
+                );
+                self.pack_confirm = Some((name, screen));
+            }
             Action::Move(name) => {
                 if let Some(index) = draft.iter().position(|item| *item == name) {
                     draft.remove(index);
@@ -330,9 +368,17 @@ impl OptionsScreen {
         let rect = gui.rect(x, y, LIST_W - 8.0 - ARROW * 2.0, ROW);
         self.rects.insert(id.clone(), rect);
         let widget = ui.id(&id);
-        ui.response(widget, rect)
-            .clicked
-            .then_some(Action::Move(pack))
+        let clicked = ui.response(widget, rect).clicked;
+        let selected = self.pack_draft.contains(&pack);
+        // `ResourcePackListEntry.mouseClicked`: enabling an incompatible pack
+        // asks first; taking one out does not.
+        match row.format {
+            Some(format) if clicked && !row.compatible && !selected => Some(Action::Ask {
+                name: pack,
+                newer: format > PACK_FORMAT,
+            }),
+            _ => clicked.then_some(Action::Move(pack)),
+        }
     }
 
     /// The up and down arrows of a selected pack.
