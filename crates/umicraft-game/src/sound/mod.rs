@@ -22,11 +22,16 @@
 //! assert_eq!(glass.break_sound().to_string(), "dig.glass");
 //! ```
 
+pub mod block_events;
 mod block_sounds;
 pub mod cue;
 pub mod effect_packet;
+pub mod queue;
 pub mod sound_packet;
+pub mod step;
+pub mod weather;
 
+use std::borrow::Cow;
 use std::fmt;
 
 pub use block_sounds::sound_type;
@@ -54,6 +59,17 @@ pub enum SoundEvent {
     /// A fixed event name that does not follow the material rule, such as
     /// `random.anvil_land`.
     Named(&'static str),
+}
+
+impl SoundEvent {
+    /// The event name as a cue name; only a material event allocates.
+    #[must_use]
+    pub fn into_cow(self) -> Cow<'static, str> {
+        match self {
+            Self::Named(name) => Cow::Borrowed(name),
+            material @ Self::Material { .. } => Cow::Owned(material.to_string()),
+        }
+    }
 }
 
 impl fmt::Display for SoundEvent {

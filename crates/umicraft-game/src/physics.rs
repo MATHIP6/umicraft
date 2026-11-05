@@ -22,6 +22,7 @@ use crate::collision::{self, MoveOptions};
 use crate::input::{InputIntent, SPRINT_FORWARD_THRESHOLD};
 use crate::media;
 use crate::shapes::{is_normal_cube, Aabb, BlockSource};
+use crate::sound::step::StepFacts;
 use crate::view;
 use umicraft_world::BlockState;
 
@@ -285,6 +286,9 @@ pub struct Player {
     pub fov_modifier: f32,
     /// [`Player::fov_modifier`] of the previous tick.
     pub prev_fov_modifier: f32,
+    /// What the last [`step`] did that the footsteps depend on; see
+    /// [`crate::sound::step`].
+    pub step_facts: StepFacts,
 }
 
 impl Default for Player {
@@ -327,6 +331,7 @@ impl Default for Player {
             prev_camera_tilt: 0.0,
             fov_modifier: 1.0,
             prev_fov_modifier: 1.0,
+            step_facts: StepFacts::default(),
         }
     }
 }
@@ -394,15 +399,21 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     player.yaw = intent.yaw;
     player.pitch = intent.pitch;
     player.sneaking = intent.sneak;
+    player.step_facts = StepFacts::default();
     player.prev_walk_distance = player.walk_distance;
     player.prev_camera_sway = player.camera_sway;
     player.prev_camera_tilt = player.camera_tilt;
 
     // The water check and the current, MCP `Entity.onEntityUpdate`, which
     // runs before the living update. A spectator is no part of the world.
+    let was_in_water = player.in_water;
     player.in_water = !player.no_clip && media::handle_water_movement(player, world);
     if player.in_water {
         player.fall_distance = 0.0;
+        if !was_in_water {
+            // `Entity.handleWaterMovement` splashes with the motion it has now.
+            player.step_facts.splash_velocity = Some(player.velocity);
+        }
     }
 
     update_sprint(player, intent);
@@ -875,6 +886,7 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
         delta *= DVec3::new(0.25, WEB_VERTICAL_FACTOR, 0.25);
         player.velocity = DVec3::ZERO;
     }
+    let was_on_ground = player.on_ground;
     let result = collision::move_entity(
         player.bounding_box(),
         delta,
@@ -894,6 +906,11 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
     player.collided_horizontally = result.blocked_horizontally;
     player.on_ground = result.on_ground;
     // MCP `Entity.updateFallState`.
+    let landed_fall = if result.on_ground {
+        player.fall_distance
+    } else {
+        0.0
+    };
     if result.on_ground {
         player.fall_distance = 0.0;
     } else if result.delta.y < 0.0 {
@@ -908,6 +925,17 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
     if result.blocked_vertically {
         land(player, world);
     }
+    // `canTriggerWalking` and the safe-walk flag of `Entity.moveEntity`.
+    let walks = !player.flying && !(was_on_ground && player.sneaking);
+    // The footsteps read the motion before `doBlockCollisions` changes it.
+    player.step_facts = StepFacts {
+        moved: true,
+        walks,
+        delta: result.delta,
+        velocity: player.velocity,
+        landed_fall,
+        splash_velocity: player.step_facts.splash_velocity,
+    };
     media::collide_with_blocks(player, world);
 }
 

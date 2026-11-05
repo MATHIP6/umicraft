@@ -110,7 +110,7 @@ fn door_pitch(rng: &mut impl CueRandom) -> f32 {
 }
 
 /// `nextFloat() - nextFloat()`, evaluated left to right like Java.
-fn spread(rng: &mut impl CueRandom) -> f32 {
+pub(super) fn spread(rng: &mut impl CueRandom) -> f32 {
     let first = rng.next_float();
     first - rng.next_float()
 }

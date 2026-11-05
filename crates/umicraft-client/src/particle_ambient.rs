@@ -13,6 +13,8 @@ use umicraft_game::particles::ambient::{
     rain_splashes, running_dust, sample_around, RainView, Requests, RunningBody, Weather,
 };
 use umicraft_game::particles::{ParticleEngine, ParticleSetting, SpawnFilter};
+use umicraft_game::sound::cue::SoundCue;
+use umicraft_game::sound::weather::RainSound;
 use umicraft_mesh::climate::biome_climate;
 use umicraft_world::{BlockPos, World};
 
@@ -73,12 +75,14 @@ pub struct Viewer {
 #[derive(Debug, Default)]
 pub struct AmbientSpawner {
     requests: Requests,
+    rain_sound: RainSound,
 }
 
 impl AmbientSpawner {
     /// Runs the ambient sources for one tick.
     ///
     /// `update_count` is the client tick counter that seeds the rain splashes.
+    /// The rain sound of the tick, if it plays, is returned.
     pub fn tick(
         &mut self,
         engine: &mut ParticleEngine,
@@ -87,7 +91,7 @@ impl AmbientSpawner {
         rain_strength: f32,
         update_count: i32,
         setting: ParticleSetting,
-    ) {
+    ) -> Option<SoundCue> {
         let weather = ClimateWeather {
             world,
             rain_strength,
@@ -106,6 +110,7 @@ impl AmbientSpawner {
             engine.rng(),
             &mut self.requests,
         );
+        let mut rain = None;
         if rain_strength > 0.0 {
             let view = RainView {
                 strength: rain_strength,
@@ -115,7 +120,14 @@ impl AmbientSpawner {
                 setting,
                 update_count,
             };
-            rain_splashes(world, &weather, feet, &view, &mut self.requests);
+            rain = rain_splashes(
+                world,
+                &weather,
+                feet,
+                &view,
+                &mut self.requests,
+                &mut self.rain_sound,
+            );
         }
         for request in self.requests.drain(..) {
             engine.spawn(&request, &filter);
@@ -123,6 +135,7 @@ impl AmbientSpawner {
         if viewer.running {
             spawn_dust(engine, world, viewer, &filter);
         }
+        rain
     }
 }
 
