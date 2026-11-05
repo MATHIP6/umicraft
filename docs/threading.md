@@ -193,9 +193,34 @@ ADR-0005).
   increments. A result of an older generation is discarded, so a mesh of a
   replaced world that was still being built is never drawn in the new one.
 
+### Audio boundary (P11-A)
+
+- `umicraft-audio::thread::spawn` starts one std thread named `umicraft-audio`.
+  It owns the `Engine` (sound index, PCM cache, source limits, delayed sounds,
+  category volumes, the listener) and the backend. The backend is built on that
+  thread because audio streams are often not `Send`.
+- The game and render threads hold only an `AudioHandle`: a cloneable
+  `SyncSender` of `AudioMessage`s over `sync_channel(256)`. Every call is a
+  `try_send`; a full or closed queue **drops the message and counts it**
+  (`AudioHandle::dropped`), so a stuck audio device can never stall the
+  simulation or a frame. The listener and volume messages are repeated by the
+  caller, so a dropped one is superseded.
+- The audio thread drains the queue with `recv_timeout` and runs a 20 Hz tick
+  (`SoundManager.updateAllSounds`): it frees finished sources and starts the
+  sounds whose delay is over. A missed tick is skipped, not replayed.
+- The device callback runs on a third, realtime thread owned by cpal. The audio
+  thread hands it voices through a bounded `sync_channel(64)` (`try_send`) and
+  reads how many ended from two atomics; the callback never takes a lock and
+  does not allocate (the voice list is reserved up front, a voice that does not
+  fit is dropped). The PCM is `Arc`-shared, so no sample data is copied between
+  threads.
+- File reads and Ogg decoding happen only on the audio thread, on a cache miss.
+- The crate depends on neither `umicraft-game` nor `umicraft-net`: callers
+  translate their events into `SoundRequest`s.
+
 ### Current deviations from the target model
 
-- Lighting workers, asset/IO pool, audio thread, and mod workers do not exist
+- Lighting workers, asset/IO pool and mod workers do not exist
   yet. Add each to this table when introduced.
 - The player inventory is not received in M3: the 1.8 protocol only sends it
   with the window packets, which belong to M9. The client therefore knows
