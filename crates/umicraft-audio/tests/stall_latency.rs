@@ -98,7 +98,7 @@ fn game_tick(handle: &AudioHandle, tick: u32, calls: &mut Vec<Duration>) {
             handle.play(SoundRequest::new(event.as_str()).at([1.0, 64.0, 2.0]));
         });
     }
-    if tick % 20 == 0 {
+    if tick.is_multiple_of(20) {
         timed(&|| {
             handle.stop_music();
         });
@@ -106,7 +106,7 @@ fn game_tick(handle: &AudioHandle, tick: u32, calls: &mut Vec<Duration>) {
             handle.play_music(SoundRequest::new("music.menu"));
         });
     }
-    if tick % 10 == 0 {
+    if tick.is_multiple_of(10) {
         timed(&|| {
             handle.set_volume(SoundCategory::Blocks, 0.5);
         });

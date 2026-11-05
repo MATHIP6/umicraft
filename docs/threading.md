@@ -214,7 +214,19 @@ ADR-0005).
   does not allocate (the voice list is reserved up front, a voice that does not
   fit is dropped). The PCM is `Arc`-shared, so no sample data is copied between
   threads.
-- File reads and Ogg decoding happen only on the audio thread, on a cache miss.
+- File reads and Ogg decoding of effects happen only on the audio thread, on a
+  cache miss. Streamed entries (music) are decoded on a fourth thread,
+  `umicraft-audio-decode`, started on the first track (ADR-0052): the audio thread
+  reads the bytes, sends them over a channel and polls the result with
+  `try_recv` on its tick, so a 3-minute track never delays an effect.
+- Music state crosses threads as atomics only: `MusicActivity` (two counters,
+  `AudioHandle::music_playing`) tells the render thread whether its track is in
+  flight; `AudioMessage::StopMusic` is another `try_send`. The render thread
+  runs `MusicTicker` at 20 Hz (`audio_bridge::music`).
+- Measured (`tests/stall_latency.rs`): with a loader and a backend that sleep
+  40 ms per operation, the game thread (20 Hz) and the render thread (60 fps)
+  see p99 about 9 us and max about 27 us per call (release); the queue overflows
+  and drops instead of waiting. Numbers in `docs/perf-log.md`.
 - The crate depends on neither `umicraft-game` nor `umicraft-net`: callers
   translate their events into `SoundRequest`s.
 

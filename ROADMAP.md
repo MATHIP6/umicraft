@@ -54,7 +54,7 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M8 Entities | Partial / defective — animations, metadata, skins, armour, held items, objects, lighting | P5 |
 | M9 Inventory & containers | Partial — `Click Window` never sent, no item icons | P3, P4 |
 | M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
-| M11 Audio | Not started | P11 |
+| M11 Audio | Partial — code complete (index, engine, cues, packets, GUI clicks, volumes, music, non-blocking measured); owner validation by ear open | P11 |
 | M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); accounts not started | P10 (rest of menus), F1 (accounts) |
 | M13 Premium authentication | Not started | P12 |
 | M14 Performance pass | Not started | F2 |
@@ -578,6 +578,38 @@ volume categories; music.
 
 **Done when:** a reference session's sounds match vanilla on the checklist;
 the audio thread never blocks the game or render thread (measured).
+
+**State (P11 a-g):** code complete, not heard by the agent. `umicraft-audio`
+holds the sound index, the engine (28 normal and 4 streaming sources, linear
+fade, pan, delayed sounds), the audio thread, a cpal backend and the music
+scheduler; the client has the `AudioBridge` (cues, listener, GUI clicks,
+volumes, `--no-audio`, `--audio-probe`) and the 20 Hz music driver. Music
+tracks decode on a worker thread (ADR-0052). Measured: with a loader and a
+device that stall 40 ms per operation, calls from the 20 Hz game thread and the
+60 fps render thread take p99 9 us, max 27 us (`tests/stall_latency.rs`,
+`docs/perf-log.md`). Out: jukebox/record playback, end-boss and credits music,
+HRTF, pack-aware sounds.
+
+**Owner validation checklist** (needs the assets from `--setup-assets` and a
+sound device):
+1. `umicraft-client --audio-probe` plays five distinct sounds and exits.
+2. Footsteps on grass, stone, sand, wood, gravel, snow and in water; the
+   rhythm matches vanilla when walking and sprinting, silent when sneaking.
+3. Dig hits while mining and the break sound; landing sounds after a fall.
+4. Rain loops while it rains (and not in the Nether or under a roof as
+   vanilla does).
+5. A door, a chest and a note block played by another client or by a command
+   (Sound Effect and Effect packets); the sound is louder and pans correctly
+   when you turn.
+6. GUI clicks on every button and slider press (not on slider drag or on
+   list rows).
+7. Options > Sounds: master mutes everything; the music slider moves the
+   music (new tracks; a running one keeps its volume, ADR-0050).
+8. Music: menu music on the title screen within about a minute, a different
+   track after joining a world (stops when the world changes), creative music
+   in creative mode, Nether and End music in those dimensions; nothing plays
+   with the music slider at 0.
+9. While music loads or plays, footsteps and clicks stay on time.
 
 ### P12 — Online mode & real-server compatibility
 
