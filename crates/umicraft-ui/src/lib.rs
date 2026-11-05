@@ -42,6 +42,7 @@ pub mod game_menu;
 pub mod geom;
 pub mod id;
 pub mod input;
+pub mod legacy_text;
 pub mod menus;
 pub mod screens;
 pub mod styled_text;
