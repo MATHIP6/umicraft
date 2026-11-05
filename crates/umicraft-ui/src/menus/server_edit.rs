@@ -11,7 +11,8 @@
 //! `height / 4 + 132`. Vanilla limits the address to 128 characters and
 //! enables the first button only when the address (and for Add/Edit the
 //! name) is not empty; Umicraft asks the caller's `is_valid` for the address.
-//! The server resource pack toggle of Add/Edit is not offered.
+//! Add/Edit also has the `Server Resource Packs: <mode>` button at
+//! `(cx - 100, height / 4 + 72)`, which cycles [`ResourcePackMode`].
 
 use umicraft_core::lang::Lang;
 
@@ -23,6 +24,7 @@ use crate::text::FontAtlas;
 use crate::widgets::{text_field_scaled, TextFieldState};
 
 use super::common::{escape_pressed, key_pressed, Gui, TextPlacement, LABEL_GRAY};
+use super::pack_mode::ResourcePackMode;
 
 /// The address length limit of `GuiTextField.setMaxStringLength(128)`.
 const MAX_ADDRESS_CHARS: usize = 128;
@@ -48,6 +50,8 @@ pub enum ServerEditOutcome {
         name: String,
         /// The server address.
         address: String,
+        /// The resource pack mode the button was left on.
+        pack_mode: ResourcePackMode,
     },
     /// Cancel or Escape.
     Cancel,
@@ -60,6 +64,9 @@ pub struct ServerEditLayout {
     pub name: Rect,
     /// The address field.
     pub address: Rect,
+    /// The server resource packs button (a zero rectangle in Direct Connect
+    /// mode).
+    pub packs: Rect,
     /// The Done / Join button.
     pub done: Rect,
     /// The Cancel button.
@@ -75,6 +82,7 @@ pub fn server_edit_layout(viewport: Rect, mode: EditMode) -> ServerEditLayout {
         return ServerEditLayout {
             name: Rect::ZERO,
             address: gui.rect(x, 116.0, 200.0, 20.0),
+            packs: Rect::ZERO,
             done: gui.rect(x, quarter + 108.0, 200.0, 20.0),
             cancel: gui.rect(x, quarter + 132.0, 200.0, 20.0),
         };
@@ -82,6 +90,7 @@ pub fn server_edit_layout(viewport: Rect, mode: EditMode) -> ServerEditLayout {
     ServerEditLayout {
         name: gui.rect(x, 66.0, 200.0, 20.0),
         address: gui.rect(x, 106.0, 200.0, 20.0),
+        packs: gui.rect(x, quarter + 72.0, 200.0, 20.0),
         done: gui.rect(x, quarter + 114.0, 200.0, 20.0),
         cancel: gui.rect(x, quarter + 138.0, 200.0, 20.0),
     }
@@ -93,6 +102,7 @@ pub struct ServerEditScreen {
     mode: EditMode,
     name: TextFieldState,
     address: TextFieldState,
+    pack_mode: ResourcePackMode,
     is_valid: fn(&str) -> bool,
     focused: bool,
 }
@@ -122,9 +132,18 @@ impl ServerEditScreen {
             mode,
             name: TextFieldState::with_text(name),
             address: TextFieldState::with_text(address),
+            pack_mode: ResourcePackMode::default(),
             is_valid,
             focused: false,
         }
+    }
+
+    /// The screen with the resource pack button set to `mode` (an entry
+    /// being edited keeps its own).
+    #[must_use]
+    pub fn with_pack_mode(mut self, mode: ResourcePackMode) -> Self {
+        self.pack_mode = mode;
+        self
     }
 
     /// The mode of this screen.
@@ -184,6 +203,17 @@ impl ServerEditScreen {
         );
         self.limit_address();
 
+        if self.mode != EditMode::DirectConnect {
+            let packs_id = ui.id("packs");
+            let label = format!(
+                "{}: {}",
+                lang.tr("addServer.resourcePack"),
+                lang.tr(self.pack_mode.lang_key())
+            );
+            if gui.button(ui, packs_id, layout.packs, atlas, &label, true) {
+                self.pack_mode = self.pack_mode.next();
+            }
+        }
         let (done_id, cancel_id) = (ui.id("done"), ui.id("cancel"));
         let done_key = if self.mode == EditMode::DirectConnect {
             "selectServer.select"
@@ -206,6 +236,7 @@ impl ServerEditScreen {
             return Some(ServerEditOutcome::Done {
                 name: self.name.text().to_string(),
                 address: self.address.text().to_string(),
+                pack_mode: self.pack_mode,
             });
         }
         (cancel || escape_pressed(ui)).then_some(ServerEditOutcome::Cancel)
@@ -268,7 +299,8 @@ mod tests {
             run(&mut screen, click_at(layout.done)),
             Some(ServerEditOutcome::Done {
                 name: "Home".into(),
-                address: "play.example.org".into()
+                address: "play.example.org".into(),
+                pack_mode: ResourcePackMode::Prompt,
             })
         );
     }
@@ -290,9 +322,57 @@ mod tests {
             run(&mut screen, key(Key::Enter)),
             Some(ServerEditOutcome::Done {
                 name: String::new(),
-                address: "host:25565".into()
+                address: "host:25565".into(),
+                pack_mode: ResourcePackMode::Prompt,
             })
         );
+    }
+
+    #[test]
+    fn the_pack_button_cycles_and_done_returns_the_mode() {
+        let layout = server_edit_layout(VIEWPORT, EditMode::Edit);
+        // scale 3, height / 4 = 60: the vanilla position (cx - 100, 60 + 72).
+        assert_eq!(layout.packs, Rect::new(339.0, 132.0 * 3.0, 600.0, 60.0));
+        let mut screen = ServerEditScreen::edit("Home", "host", not_empty)
+            .with_pack_mode(ResourcePackMode::Enabled);
+        assert_eq!(run(&mut screen, click_at(layout.packs)), None);
+        assert_eq!(screen.pack_mode, ResourcePackMode::Disabled);
+        assert_eq!(run(&mut screen, click_at(layout.packs)), None);
+        let done = run(&mut screen, click_at(layout.done));
+        assert!(matches!(
+            done,
+            Some(ServerEditOutcome::Done {
+                pack_mode: ResourcePackMode::Prompt,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn the_pack_button_shows_the_mode_and_direct_connect_has_none() {
+        let labels = |mode: EditMode| {
+            let mut screen = match mode {
+                EditMode::DirectConnect => ServerEditScreen::direct_connect("h", not_empty),
+                _ => ServerEditScreen::edit("n", "h", not_empty),
+            };
+            frame(UiInput::default(), |ui| {
+                screen.show(ui, &FontAtlas::fallback(), &Lang::builtin());
+                ui.draw()
+                    .commands()
+                    .iter()
+                    .filter_map(|c| match c {
+                        crate::draw::DrawCommand::Text { text, .. } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert!(labels(EditMode::Edit)
+            .iter()
+            .any(|t| t == "Server Resource Packs: Prompt"));
+        assert!(!labels(EditMode::DirectConnect)
+            .iter()
+            .any(|t| t.starts_with("Server Resource Packs")));
     }
 
     #[test]

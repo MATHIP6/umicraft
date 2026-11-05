@@ -285,6 +285,7 @@ impl ClientResources {
             ITEM_TEXTURES_PREFIX,
             COLORMAP_PREFIX,
             GUI_TEXTURES_PREFIX,
+            UNKNOWN_SERVER_PATH,
             GLINT_PATH,
         ])?;
 
@@ -444,7 +445,7 @@ impl GuiAtlas {
     /// # Errors
     /// [`AssetsError`] on archive read or PNG decode failure.
     pub fn from_jar(jar: &ClientJar) -> AssetsResult<Self> {
-        let entries = jar.read_prefixes(&[GUI_TEXTURES_PREFIX])?;
+        let entries = jar.read_prefixes(&[GUI_TEXTURES_PREFIX, UNKNOWN_SERVER_PATH])?;
         let mut raw_gui = BTreeMap::new();
         for (path, bytes) in entries {
             if is_gui_texture(&path) {
@@ -518,14 +519,22 @@ fn texture_key(path: &str) -> Option<String> {
     Some(relative.to_string())
 }
 
-/// True for a GUI texture PNG (container backgrounds, widgets, icons).
+/// The default server icon, which lives outside `textures/gui/` but is only
+/// drawn by the server list, so it joins the GUI atlas as `misc/unknown_server`.
+const UNKNOWN_SERVER_PATH: &str = "assets/minecraft/textures/misc/unknown_server.png";
+
+/// True for a GUI texture PNG (container backgrounds, widgets, icons) or the
+/// default server icon.
 fn is_gui_texture(path: &str) -> bool {
-    path.starts_with(GUI_TEXTURES_PREFIX) && path.ends_with(".png")
+    (path.starts_with(GUI_TEXTURES_PREFIX) && path.ends_with(".png")) || path == UNKNOWN_SERVER_PATH
 }
 
 /// The region name for a GUI texture path, e.g.
 /// `"assets/minecraft/textures/gui/container/inventory.png"` → `"container/inventory"`.
 fn gui_texture_name(path: &str) -> Option<String> {
+    if path == UNKNOWN_SERVER_PATH {
+        return Some("misc/unknown_server".to_string());
+    }
     let relative = path
         .strip_prefix(GUI_TEXTURES_PREFIX)?
         .strip_suffix(".png")?;
@@ -777,6 +786,12 @@ mod tests {
             "assets/minecraft/textures/gui/container/inventory.png"
         ));
         assert!(is_gui_texture("assets/minecraft/textures/gui/widgets.png"));
+        assert!(is_gui_texture(UNKNOWN_SERVER_PATH));
+        assert_eq!(
+            gui_texture_name(UNKNOWN_SERVER_PATH).as_deref(),
+            Some("misc/unknown_server")
+        );
+        assert!(!is_gui_texture("assets/minecraft/textures/misc/shadow.png"));
         assert!(!is_gui_texture(
             "assets/minecraft/textures/gui/container/inventory.png.mcmeta"
         ));

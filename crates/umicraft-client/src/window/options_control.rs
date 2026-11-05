@@ -143,6 +143,7 @@ impl App {
         upload_glint_texture(renderer, installed.glint_texture());
         upload_sky_textures(renderer);
         self.gui_atlas = installed.gui_atlas().cloned();
+        self.server_icons_revision = u64::MAX;
         self.items = installed.items();
         self.dials = DialAnimator::new(installed.dials());
         self.texture_animator = TextureAnimator::new(installed.animations().to_vec());

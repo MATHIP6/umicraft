@@ -7,9 +7,7 @@
 //! below the top (see [`super::server_row`]); two button rows at
 //! `height - 52` (Join 100, Direct Connect 100, Add 100) and `height - 28`
 //! (Edit 70, Delete 70, Refresh 70, Cancel 75). The scrollbar sits at
-//! `cx + 154`. Differences: the LAN scan entries and the server icons are not
-//! shown (the icon cell is a dark square), and the arrows of a row are drawn
-//! with plain glyphs instead of `server_selection.png`.
+//! `cx + 154`. Difference: the LAN scan entries are not shown (vanilla's "Scanning for games on your local network" row).
 //!
 //! Double click: vanilla compares wall-clock times (250 ms); the screen
 //! counts [`ServerListScreen::tick`] calls, so two clicks on one row within
@@ -18,7 +16,6 @@
 use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
-use crate::draw::SpriteSheet;
 use crate::geom::Rect;
 use crate::input::Key;
 use crate::text::FontAtlas;
@@ -27,11 +24,9 @@ use crate::widgets::util::last_primary_press;
 
 use super::background::{draw_list_background, draw_list_overlay, draw_menu_background};
 use super::common::{draw_scrollbar, escape_pressed, key_pressed, wheel_scrolled, Gui};
-use super::server_row::{
-    draw_tips, zone_at, RowContext, RowFlags, RowZone, ENTRY_HEIGHT, ENTRY_LEFT, ENTRY_WIDTH,
-    SLOT_HEIGHT,
-};
+use super::row_draw::{draw_tips, RowContext, RowFlags};
 pub use super::server_row::{latency_level, RowStatus, ServerRow};
+use super::server_row::{zone_at, RowZone, ENTRY_HEIGHT, ENTRY_LEFT, ENTRY_WIDTH, SLOT_HEIGHT};
 
 /// The ticks within which a second click on a row joins (250 ms).
 const DOUBLE_CLICK_TICKS: u32 = 5;
@@ -139,17 +134,15 @@ impl ServerListScreen {
         self.offset
     }
 
-    /// Draws one frame of `rows` and returns the player's choice.
-    ///
-    /// `icons` is the `icons.png` cell sheet for the latency bars; without it
-    /// the bars are drawn as rectangles.
+    /// Draws one frame of `rows` and returns the player's choice. The sheets
+    /// of the rows come from [`Ui::menu_art`]; without them the icons and
+    /// arrows are drawn as flat shapes.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         atlas: &FontAtlas,
         lang: &Lang,
         rows: &[ServerRow],
-        icons: Option<SpriteSheet>,
     ) -> Option<ServerListOutcome> {
         draw_menu_background(ui);
         let viewport = ui.viewport();
@@ -158,15 +151,17 @@ impl ServerListScreen {
         self.selected = self.selected.filter(|&index| index < rows.len());
 
         let content = rows.len() as f32 * SLOT_HEIGHT + LIST_PADDING;
+        let key_outcome = self.keyboard(ui, rows.len());
         self.offset = wheel_scrolled(ui, &gui, layout.list, content, self.offset);
         ui.push_id("server-list");
         let list_id = ui.id("rows");
         let clicked = ui.response(list_id, layout.list).clicked;
         let click = clicked.then(|| last_primary_press(ui)).flatten();
-        let mut outcome = click.and_then(|position| self.click_row(&gui, position, rows.len()));
-        outcome = outcome.or_else(|| self.keyboard(ui, rows.len()));
+        let outcome = click
+            .and_then(|position| self.click_row(&gui, position, rows.len()))
+            .or(key_outcome);
         draw_list_background(ui, layout.list, self.offset * gui.scale);
-        self.draw_rows(ui, atlas, lang, rows, icons, &gui);
+        self.draw_rows(ui, atlas, lang, rows, &gui);
         draw_list_overlay(ui, layout.list);
         draw_scrollbar(
             ui,
@@ -227,19 +222,53 @@ impl ServerListScreen {
         double.then_some(ServerListOutcome::Join(index))
     }
 
-    /// Arrow keys move the selection, Enter joins it.
+    /// The keys of `GuiMultiplayer.keyTyped`: F5 refreshes; with a row
+    /// selected, Up and Down move the selection (Up on the first row and
+    /// Down on the last clear it), Shift moves the entry itself, and Enter
+    /// joins. With no selection the arrows do nothing. Each step also scrolls
+    /// the list by one slot, as vanilla's `scrollBy` does.
     fn keyboard(&mut self, ui: &Ui, count: usize) -> Option<ServerListOutcome> {
-        if count == 0 {
-            return None;
+        if key_pressed(ui, Key::F5) {
+            return Some(ServerListOutcome::Refresh);
+        }
+        let index = self.selected?;
+        let shift = ui.input().modifiers.shift;
+        if key_pressed(ui, Key::ArrowUp) {
+            return self.step(index, false, shift, count);
         }
         if key_pressed(ui, Key::ArrowDown) {
-            self.selected = Some(self.selected.map_or(0, |i| (i + 1).min(count - 1)));
+            return self.step(index, true, shift, count);
         }
-        if key_pressed(ui, Key::ArrowUp) {
-            self.selected = Some(self.selected.map_or(count - 1, |i| i.saturating_sub(1)));
+        key_pressed(ui, Key::Enter).then_some(ServerListOutcome::Join(index))
+    }
+
+    /// One Up (`down == false`) or Down step from `index`.
+    fn step(
+        &mut self,
+        index: usize,
+        down: bool,
+        shift: bool,
+        count: usize,
+    ) -> Option<ServerListOutcome> {
+        let target = if down {
+            (index + 1 < count).then_some(index + 1)
+        } else {
+            index.checked_sub(1)
+        };
+        let Some(target) = target else {
+            // Past either end: a plain step deselects, a shifted one stays.
+            if !shift {
+                self.selected = None;
+            }
+            return None;
+        };
+        self.selected = Some(target);
+        self.offset += if down { SLOT_HEIGHT } else { -SLOT_HEIGHT };
+        match (shift, down) {
+            (false, _) => None,
+            (true, true) => Some(ServerListOutcome::MoveDown(index)),
+            (true, false) => Some(ServerListOutcome::MoveUp(index)),
         }
-        let join = key_pressed(ui, Key::Enter);
-        self.selected.filter(|_| join).map(ServerListOutcome::Join)
     }
 
     fn draw_rows(
@@ -248,7 +277,6 @@ impl ServerListScreen {
         atlas: &FontAtlas,
         lang: &Lang,
         rows: &[ServerRow],
-        icons: Option<SpriteSheet>,
         gui: &Gui,
     ) {
         let layout = server_list_layout(ui.viewport());
@@ -256,7 +284,6 @@ impl ServerListScreen {
             gui,
             atlas,
             lang,
-            icons,
             ticks: self.ticks,
         };
         let pointer = ui
@@ -272,6 +299,7 @@ impl ServerListScreen {
                 continue;
             }
             let flags = RowFlags {
+                index,
                 hovered: hovered == Some(index),
                 selected: self.selected == Some(index),
                 can_up: index > 0,
@@ -335,5 +363,7 @@ fn row_at(gui: &Gui, pointer: [f32; 2], offset: f32) -> Option<usize> {
     (inside_x && relative >= 0.0).then(|| (relative / SLOT_HEIGHT) as usize)
 }
 
+#[cfg(test)]
+mod row_tests;
 #[cfg(test)]
 mod tests;

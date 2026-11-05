@@ -232,6 +232,9 @@ struct App {
     ui_atlas: Option<FontAtlas>,
     /// The GUI texture atlas for inventory/container backgrounds.
     gui_atlas: Option<umicraft_assets::GuiAtlas>,
+    /// The favicon revision of the menus the GUI atlas was last grown for
+    /// (`u64::MAX` after the atlas was replaced).
+    server_icons_revision: u64,
     /// The baked item models, once the official assets are bound.
     items: Option<std::sync::Arc<ItemResources>>,
     /// The compass and clock frames of the bound block array.
@@ -351,6 +354,7 @@ impl App {
             terrain,
             ui_atlas: None,
             gui_atlas: None,
+            server_icons_revision: u64::MAX,
             items: None,
             dials: DialAnimator::default(),
             world_items: WorldItems::default(),
@@ -788,6 +792,7 @@ impl App {
             renderer.set_panorama(None);
         }
         self.open_text_screen();
+        self.sync_server_icons();
         let mut text_done = None;
         let inventory_facts = self.inventory_facts();
         let atlas = self.ui_atlas.as_ref()?;
@@ -1423,6 +1428,7 @@ impl ApplicationHandler for App {
         upload_sky_textures(&mut renderer);
         self.panorama = upload_panorama(&mut renderer);
         self.gui_atlas = terrain.gui_atlas().cloned();
+        self.server_icons_revision = u64::MAX;
         self.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());
         self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());

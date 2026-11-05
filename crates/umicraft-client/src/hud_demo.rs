@@ -12,6 +12,7 @@
 //! Nothing here is read from the player's machine except the UI font, and the
 //! texts are original Umicraft or generic player names.
 
+use umicraft_assets::GuiAtlas;
 use umicraft_core::lang::Lang;
 use umicraft_game::chat::ChatInput;
 use umicraft_game::hud::{vitals_view, BottomBar, VitalsInput};
@@ -26,7 +27,7 @@ use umicraft_render::{
     SpriteSheet,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
-use umicraft_ui::menus::{MenuArt, PanoramaTextures, PanoramaView, RowStatus};
+use umicraft_ui::menus::{MenuArt, PanoramaTextures, PanoramaView};
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
 
@@ -34,6 +35,7 @@ use crate::args::{Args, HUD_VIEWS};
 use crate::error::ClientError;
 use crate::game::hud_after;
 use crate::hud_demo_panorama;
+use crate::hud_demo_servers;
 use crate::menu_flow::{MenuContext, MenuFlow};
 use crate::options::{Action, Options};
 use crate::options_screen::OptionsScreen;
@@ -264,30 +266,30 @@ fn run_options(
 
 /// The title screen, the server list or the Add Server form of the menu flow.
 /// The demo opens no socket: the sample entries get scripted ping results (an
-/// online server with a description, a full one, an unreachable one).
+/// online server with a description, a full one with an icon, an unreachable
+/// one, one still pinging, a version mismatch; see [`hud_demo_servers`]).
 fn menu_scene(
     view: &str,
     (width, height): (u32, u32),
     atlas: &FontAtlas,
     (sheets, art): (&HudSheets, MenuArt),
-    panorama: Option<PanoramaTextures>,
+    (panorama, gui_atlas): (Option<PanoramaTextures>, Option<&GuiAtlas>),
 ) -> (Demo, Option<PanoramaView>) {
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     let mut ui = Ui::new(viewport);
     ui.set_widgets_sheet(sheets.widgets);
     ui.set_menu_art(art);
     let mut book = ServerBook::open(&std::env::temp_dir().join("umicraft-menu-demo-missing.toml"));
-    for (name, address) in [
-        ("Survival", "play.example.net"),
-        ("Creative", "build.example.net:25570"),
-        ("Minigames", "10.0.0.7"),
-    ] {
+    for (name, address) in hud_demo_servers::ENTRIES {
         if book.add(name, address).is_err() {
             break;
         }
     }
     let mut flow = MenuFlow::new(book, None, String::new(), 3);
-    script_pings(&mut flow);
+    hud_demo_servers::script_pings(&mut flow);
+    if let Some(atlas) = gui_atlas {
+        flow.assign_icon_sheets(atlas);
+    }
     let screen = match view {
         "title" => Screen::Title,
         "server-edit" => Screen::ServerEdit,
@@ -314,23 +316,6 @@ fn menu_scene(
         scene: output.draw_list,
     };
     (demo, frame.panorama)
-}
-
-/// Gives the three sample entries the results of a ping: online with a
-/// description, unreachable and still pinging.
-fn script_pings(flow: &mut MenuFlow) {
-    flow.set_row_status(
-        0,
-        RowStatus::Online {
-            motd: "Welcome to the Survival server".to_string(),
-            players: 12,
-            max: 100,
-            version: "1.8.8".to_string(),
-            latency_ms: 40,
-            sample: vec!["Steve".to_string(), "Alex".to_string()],
-        },
-    );
-    flow.set_row_status(1, RowStatus::Unreachable);
 }
 
 fn build(
@@ -387,7 +372,7 @@ fn build(
             }
         }
         "title" | "servers" | "server-edit" => {
-            menu_scene(view, (width, height), atlas, (sheets, art), None).0
+            menu_scene(view, (width, height), atlas, (sheets, art), (None, None)).0
         }
         "video" | "chat-options" => {
             let mut options = Options::default();
@@ -519,6 +504,11 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     };
     let font = ui_font::load();
     let gui_atlas = crate::official::load_gui_atlas();
+    // The server list shows an icon of its own, so its atlas grows by one.
+    let gui_atlas = match view {
+        "servers" => gui_atlas.map(|atlas| atlas.with_dynamic(&hud_demo_servers::icon_images())),
+        _ => gui_atlas,
+    };
     let sheets = crate::official::hud_sheets(gui_atlas.as_ref());
     let art = crate::official::menu_art(gui_atlas.as_ref());
     let viewport = (args.width, args.height);
@@ -540,9 +530,14 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     } else {
         font.source
     };
-    let (demo, panorama) = if view == "title" {
-        let textures = hud_demo_panorama::upload(args, &mut renderer);
-        menu_scene(view, viewport, &installed.atlas, (&sheets, art), textures)
+    let (demo, panorama) = if matches!(view, "title" | "servers" | "server-edit") {
+        let textures = if view == "title" {
+            hud_demo_panorama::upload(args, &mut renderer)
+        } else {
+            None
+        };
+        let scene = (textures, gui_atlas.as_ref());
+        menu_scene(view, viewport, &installed.atlas, (&sheets, art), scene)
     } else {
         (
             build(view, viewport, &installed.atlas, (&sheets, art)),

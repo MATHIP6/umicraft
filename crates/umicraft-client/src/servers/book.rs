@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use umicraft_core::{ConfigStore, CoreError};
 
+use umicraft_ui::menus::ResourcePackMode;
+
 /// The port used when an address omits it (vanilla default).
 pub const DEFAULT_PORT: u16 = 25565;
 
@@ -160,6 +162,7 @@ fn parse_port(text: &str) -> Result<u16, AddressError> {
 pub struct ServerEntry {
     name: String,
     address: String,
+    pack_mode: ResourcePackMode,
 }
 
 impl ServerEntry {
@@ -179,7 +182,21 @@ impl ServerEntry {
                 name
             },
             address: address.trim().to_string(),
+            pack_mode: ResourcePackMode::default(),
         })
+    }
+
+    /// The entry with another resource pack mode.
+    #[must_use]
+    pub fn with_pack_mode(mut self, pack_mode: ResourcePackMode) -> Self {
+        self.pack_mode = pack_mode;
+        self
+    }
+
+    /// What to do when this server offers a resource pack.
+    #[must_use]
+    pub fn pack_mode(&self) -> ResourcePackMode {
+        self.pack_mode
     }
 
     /// The display name.
@@ -222,6 +239,20 @@ pub enum BookError {
 struct StoredEntry {
     name: String,
     address: String,
+    /// Absent in files written before the setting existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resource_packs: Option<String>,
+}
+
+impl From<&ServerEntry> for StoredEntry {
+    fn from(entry: &ServerEntry) -> Self {
+        Self {
+            name: entry.name.clone(),
+            address: entry.address.clone(),
+            resource_packs: (entry.pack_mode != ResourcePackMode::default())
+                .then(|| entry.pack_mode.name().to_string()),
+        }
+    }
 }
 
 /// On-disk shape of the `[servers]` section.
@@ -280,7 +311,14 @@ impl ServerBook {
             .entries
             .into_iter()
             .filter_map(|value| serde_json::from_value::<StoredEntry>(value).ok())
-            .filter_map(|entry| ServerEntry::new(&entry.name, &entry.address).ok())
+            .filter_map(|entry| {
+                let built = ServerEntry::new(&entry.name, &entry.address).ok()?;
+                let mode = entry
+                    .resource_packs
+                    .as_deref()
+                    .and_then(ResourcePackMode::from_name);
+                Some(built.with_pack_mode(mode.unwrap_or_default()))
+            })
             .collect())
     }
 
@@ -295,7 +333,7 @@ impl ServerBook {
             entries: self
                 .entries
                 .iter()
-                .map(|entry| serde_json::json!({ "name": entry.name, "address": entry.address }))
+                .filter_map(|entry| serde_json::to_value(StoredEntry::from(entry)).ok())
                 .collect(),
         };
         let mut store = ConfigStore::default();
@@ -324,8 +362,17 @@ impl ServerBook {
             .entries
             .get_mut(index)
             .ok_or(EditError::NoSuchEntry(index))?;
-        *slot = replacement;
+        *slot = replacement.with_pack_mode(slot.pack_mode);
         Ok(())
+    }
+
+    /// Sets the resource pack mode of the entry at `index`; false when out of
+    /// range.
+    pub fn set_pack_mode(&mut self, index: usize, mode: ResourcePackMode) -> bool {
+        self.entries
+            .get_mut(index)
+            .map(|entry| entry.pack_mode = mode)
+            .is_some()
     }
 
     /// Removes and returns the entry at `index`, or `None` when out of range.
@@ -400,6 +447,56 @@ pub enum EditError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pack_mode_survives_a_save_and_old_files_read_as_prompt() {
+        let folder = std::env::temp_dir().join("umicraft-book-pack-mode");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).expect("temp folder");
+        let path = folder.join("servers.toml");
+        // A file from before the setting existed.
+        std::fs::write(
+            &path,
+            "[[servers.entries]]\nname = \"Old\"\naddress = \"old.example\"\n",
+        )
+        .expect("write");
+        let mut book = ServerBook::open(&path);
+        assert_eq!(
+            book.get(0).expect("entry").pack_mode(),
+            ResourcePackMode::Prompt
+        );
+        book.add("New", "new.example").expect("add");
+        assert!(book.set_pack_mode(1, ResourcePackMode::Disabled));
+        assert!(!book.set_pack_mode(9, ResourcePackMode::Enabled));
+        book.save().expect("save");
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(
+            text.matches("resource_packs").count(),
+            1,
+            "the default is omitted"
+        );
+        let reloaded = ServerBook::open(&path);
+        assert_eq!(
+            reloaded.get(0).expect("old").pack_mode(),
+            ResourcePackMode::Prompt
+        );
+        assert_eq!(
+            reloaded.get(1).expect("new").pack_mode(),
+            ResourcePackMode::Disabled
+        );
+    }
+
+    #[test]
+    fn editing_keeps_the_pack_mode() {
+        let mut book = ServerBook::default();
+        book.add("A", "a.example").expect("add");
+        book.set_pack_mode(0, ResourcePackMode::Enabled);
+        book.edit(0, "B", "b.example").expect("edit");
+        assert_eq!(
+            book.get(0).expect("entry").pack_mode(),
+            ResourcePackMode::Enabled
+        );
+    }
 
     fn address(host: &str, port: u16) -> ServerAddress {
         ServerAddress {

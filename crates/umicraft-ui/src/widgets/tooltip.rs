@@ -7,10 +7,13 @@
 //! `0x5028007F`, three GUI pixels of padding, a two pixel gap after the
 //! title row and a box placed 12 GUI pixels right of and above the pointer
 //! (flipped left, or pushed up, at the screen edges). The widget knows no
-//! item types: the caller turns a stack into rows of text and colour.
+//! item types: the caller turns a stack into rows of text and colour. A row
+//! may carry legacy `§` codes, which colour and style it like vanilla.
 
-use crate::draw::{Color, DrawList, TextStyle};
+use crate::draw::{Color, DrawList};
 use crate::geom::Rect;
+use crate::legacy_text::parse_legacy;
+use crate::styled_text::{draw_styled, styled_width, StyledRun};
 use crate::text::FontAtlas;
 use crate::Ui;
 
@@ -82,21 +85,21 @@ pub fn tooltip(
     if rows.is_empty() {
         return;
     }
-    let width = rows
+    let runs: Vec<Vec<StyledRun>> = rows
         .iter()
-        .map(|row| atlas.measure(&row.text, scale))
+        .map(|row| parse_legacy(&row.text, rgba(row.rgb, 1.0)))
+        .collect();
+    let width = runs
+        .iter()
+        .map(|row| styled_width(atlas, row, scale))
         .fold(0.0, f32::max);
     let size = [width, tooltip_height(rows.len()) * scale];
     let [x, y] = tooltip_origin(pointer, size, viewport, scale);
     draw_box(ui, [x, y], size, scale);
 
     let mut row_y = y;
-    for (index, row) in rows.iter().enumerate() {
-        let shadow = TextStyle::new(scale, rgba(row.rgb, 0.25));
-        let style = TextStyle::new(scale, rgba(row.rgb, 1.0));
-        ui.draw()
-            .text([x + scale, row_y + scale], row.text.clone(), shadow);
-        ui.draw().text([x, row_y], row.text.clone(), style);
+    for (index, row) in runs.iter().enumerate() {
+        draw_styled(ui.draw(), atlas, [x, row_y], row, scale, true, 0);
         row_y += if index == 0 {
             LINE_HEIGHT + TITLE_GAP
         } else {
