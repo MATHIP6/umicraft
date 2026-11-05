@@ -23,6 +23,9 @@
 //! ```
 
 mod block_sounds;
+pub mod cue;
+pub mod effect_packet;
+pub mod sound_packet;
 
 use std::fmt;
 
