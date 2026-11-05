@@ -938,6 +938,12 @@ impl Renderer {
             .set_view(&self.queue, view, (self.width, self.height));
     }
 
+    /// Turns the title panorama's blur on (default) or off; off draws the
+    /// single sharp pass. Applies from the next [`Self::set_panorama`].
+    pub fn set_panorama_blur(&mut self, enabled: bool) {
+        self.panorama.set_blur(enabled);
+    }
+
     /// Replaces the break cracks drawn over the terrain.
     ///
     /// `vertices` and `indices` are the faces of the blocks being dug, with
@@ -2015,6 +2021,7 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         sky_state: &SkyState,
     ) {
+        self.panorama.prepare(encoder);
         // The reference clears to the fog colour; the dome fades into it.
         let clear = sky_state.fog.color;
         let color_attachment = Some(wgpu::RenderPassColorAttachment {

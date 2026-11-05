@@ -70,6 +70,13 @@ fn magnification(width: f32, height: f32) -> (f32, f32) {
     (per_pixel * larger / width, per_pixel * larger / height)
 }
 
+/// How much the screen magnifies the square capture along its two axes
+/// (`kx`, `ky`) for a `width` x `height` target.
+pub(super) fn fit_scale(width: u32, height: u32) -> [f32; 2] {
+    let (kx, ky) = magnification(width.max(1) as f32, height.max(1) as f32);
+    [kx, ky]
+}
+
 /// The matrix from cube space to clip space for a `width` x `height` target
 /// and the rotation of this frame. Depth is wgpu's 0..1.
 ///
@@ -77,13 +84,21 @@ fn magnification(width: f32, height: f32) -> (f32, f32) {
 /// coordinates transposed: screen right is capture down and screen up is
 /// capture right, a quarter turn the matrix `fit` reproduces.
 pub(super) fn clip_from_cube(width: u32, height: u32, rotation: PanoramaRotation) -> Mat4 {
-    let (kx, ky) = magnification(width.max(1) as f32, height.max(1) as f32);
+    let [kx, ky] = fit_scale(width, height);
     let fit = Mat4::from_cols(
         Vec4::new(0.0, ky, 0.0, 0.0),
         Vec4::new(-kx, 0.0, 0.0, 0.0),
         Vec4::Z,
         Vec4::W,
     );
+    fit * capture_from_cube(rotation, [0.0, 0.0])
+}
+
+/// The matrix from cube space to the clip space of the square 256 x 256
+/// capture. `jitter` is the sub-pixel translation of one of the 64 passes of
+/// `drawPanorama`, applied after the base rotations and before the pitch and
+/// the yaw.
+pub(super) fn capture_from_cube(rotation: PanoramaRotation, jitter: [f32; 2]) -> Mat4 {
     let capture = glam::camera::rh::proj::directx::perspective(
         FIELD_OF_VIEW_DEGREES.to_radians(),
         1.0,
@@ -92,9 +107,10 @@ pub(super) fn clip_from_cube(width: u32, height: u32, rotation: PanoramaRotation
     );
     let model_view = Mat4::from_rotation_x(180f32.to_radians())
         * Mat4::from_rotation_z(90f32.to_radians())
+        * Mat4::from_translation(Vec3::new(jitter[0], jitter[1], 0.0))
         * Mat4::from_rotation_x(rotation.pitch_degrees.to_radians())
         * Mat4::from_rotation_y(rotation.yaw_degrees.to_radians());
-    fit * capture * model_view
+    capture * model_view
 }
 
 #[cfg(test)]
@@ -142,6 +158,20 @@ mod tests {
         let (kx, ky) = magnification(1600.0, 900.0);
         assert!((kx - 256.0 / 240.0).abs() < 1e-5);
         assert!((ky - kx * 1600.0 / 900.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_jitter_moves_the_picture_by_less_than_a_texel() {
+        let point = Vec3::new(0.3, 0.2, 1.0).extend(1.0);
+        let at = |jitter: [f32; 2]| {
+            let clip = capture_from_cube(rotation(0.0, 0.0), jitter) * point;
+            (clip.x / clip.w, clip.y / clip.w)
+        };
+        let (x0, y0) = at([0.0, 0.0]);
+        let (x1, y1) = at([-1.0 / 128.0, 1.0 / 128.0]);
+        // One texel of the 256 px capture is 2 / 256 of clip space.
+        assert!((x1 - x0).abs() + (y1 - y0).abs() < 2.0 / 256.0 * 2.0);
+        assert!((x1 - x0).abs() + (y1 - y0).abs() > 0.0);
     }
 
     #[test]

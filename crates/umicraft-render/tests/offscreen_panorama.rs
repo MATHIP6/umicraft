@@ -31,9 +31,15 @@ fn faces() -> [SkyImage; 6] {
     })
 }
 
-/// Renders the panorama at `yaw_degrees` / `pitch_degrees`.
+/// Renders the sharp (unblurred) panorama at `yaw_degrees` / `pitch_degrees`.
 fn frame(yaw_degrees: f32, pitch_degrees: f32, shown: bool) -> Image {
+    render(yaw_degrees, pitch_degrees, shown, false)
+}
+
+/// Renders the panorama with or without the vanilla blur.
+fn render(yaw_degrees: f32, pitch_degrees: f32, shown: bool, blur: bool) -> Image {
     let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    renderer.set_panorama_blur(blur);
     let textures = renderer.upload_panorama(&faces()).expect("valid faces");
     renderer.set_panorama(shown.then_some(PanoramaView {
         textures,
@@ -93,6 +99,7 @@ fn without_a_view_nothing_is_drawn() {
 #[ignore = "requires a GPU adapter"]
 fn the_world_passes_do_not_show_through_the_panorama() {
     let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    renderer.set_panorama_blur(false);
     renderer.set_cloud_mode(CloudMode::Fancy);
     let textures = renderer.upload_panorama(&faces()).expect("valid faces");
     renderer.set_panorama(Some(PanoramaView {
@@ -115,4 +122,75 @@ fn the_world_passes_do_not_show_through_the_panorama() {
         .count();
     // Only the seams between faces, where bilinear filtering blends, differ.
     assert!(foreign < 200, "{foreign} pixels are not a face colour");
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn the_blur_softens_the_seams_without_opening_gaps() {
+    // 45 degrees puts the seam of two faces through the middle.
+    let sharp = render(-45.0, 0.0, true, false);
+    let blurred = render(-45.0, 0.0, true, true);
+    let differing = (0..HEIGHT)
+        .flat_map(|y| (0..WIDTH).map(move |x| (x, y)))
+        .filter(|&(x, y)| pixel(&sharp, x, y) != pixel(&blurred, x, y))
+        .count();
+    assert!(differing > 100, "{differing} pixels changed");
+    // The blur mixes face colours near the seam; it never leaves black
+    // pixels (a gap in the cube or a missed pass).
+    let dark = (0..HEIGHT)
+        .flat_map(|y| (0..WIDTH).map(move |x| (x, y)))
+        .filter(|&(x, y)| pixel(&blurred, x, y).iter().all(|&c| c < 40))
+        .count();
+    assert_eq!(dark, 0, "{dark} dark pixels");
+    // Far from a seam the colour is the face colour.
+    let corner = pixel(&blurred, 6, HEIGHT / 2);
+    assert!(
+        corner
+            .iter()
+            .zip(COLOURS[0])
+            .all(|(a, b)| a.abs_diff(b) < 25),
+        "{corner:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn the_blurred_centre_still_shows_the_face_the_rotation_points_at() {
+    let ahead = render(0.0, 0.0, true, true);
+    let centre = pixel(&ahead, WIDTH / 2, HEIGHT / 2);
+    assert!(
+        centre
+            .iter()
+            .zip(COLOURS[0])
+            .all(|(a, b)| a.abs_diff(b) < 25),
+        "{centre:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU adapter; prints timings for docs/perf-log.md"]
+fn the_blur_cost_per_frame() {
+    let time = |blur: bool| {
+        let mut renderer = Renderer::new_offscreen(1280, 720).expect("offscreen renderer");
+        renderer.set_panorama_blur(blur);
+        let textures = renderer.upload_panorama(&faces()).expect("valid faces");
+        let camera = Camera::new(glam::Vec3::new(0.0, 100.0, 0.0), 0.0, 0.0);
+        let overlay = Overlay::new(1280, 720);
+        let view = PanoramaView {
+            textures,
+            rotation: PanoramaRotation {
+                yaw_degrees: -30.0,
+                pitch_degrees: 20.0,
+            },
+        };
+        let start = std::time::Instant::now();
+        for _ in 0..60 {
+            renderer.set_panorama(Some(view));
+            renderer.render(&camera, &overlay).expect("render");
+            renderer.read_pixels().expect("read pixels");
+        }
+        start.elapsed().as_secs_f64() * 1000.0 / 60.0
+    };
+    let (sharp, blurred) = (time(false), time(true));
+    println!("panorama frame at 1280x720 (render + readback): sharp {sharp:.2} ms, blurred {blurred:.2} ms");
 }
