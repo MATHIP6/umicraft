@@ -26,9 +26,8 @@ mod tests {
 
     #[test]
     fn ascii_keeps_its_code_point_as_slot() {
-        let chars: Vec<char> = GRID_CHARS.chars().collect();
-        for code in 32..=126usize {
-            assert_eq!(chars[code] as usize, code);
+        for (slot, character) in GRID_CHARS.chars().enumerate().take(127).skip(32) {
+            assert_eq!(character as usize, slot);
         }
     }
 
