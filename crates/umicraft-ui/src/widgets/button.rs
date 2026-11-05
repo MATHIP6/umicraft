@@ -89,6 +89,8 @@ pub fn button_tinted(
     if !enabled {
         response.clicked = false;
         response.hovered = false;
+    } else if response.clicked {
+        ui.note_button_press();
     }
 
     if let Some(sheet) = ui.widgets_sheet() {
@@ -209,5 +211,44 @@ mod tests {
             .filter(|cmd| matches!(cmd, crate::draw::DrawCommand::Image { .. }))
             .count();
         assert_eq!(images, 2);
+    }
+
+    fn press_at(position: [f32; 2]) -> UiInput {
+        use crate::input::{InputEvent, PointerButton};
+        UiInput::new(vec![InputEvent::PointerPressed {
+            position,
+            button: PointerButton::Left,
+        }])
+    }
+
+    #[test]
+    fn pressing_an_enabled_button_counts_one_press() {
+        let viewport = Rect::new(0.0, 0.0, 320.0, 240.0);
+        let mut ui = Ui::new(viewport);
+        ui.begin_frame(viewport, press_at([20.0, 20.0]));
+        let id = ui.id("ok");
+        let rect = Rect::new(10.0, 10.0, 80.0, 20.0);
+        assert!(button(&mut ui, id, rect, &FontAtlas::fallback(), "OK").clicked);
+        assert_eq!(ui.take_button_presses(), 1);
+        assert_eq!(ui.take_button_presses(), 0, "taking resets the count");
+    }
+
+    #[test]
+    fn a_disabled_button_or_a_miss_counts_no_press() {
+        let viewport = Rect::new(0.0, 0.0, 320.0, 240.0);
+        let mut ui = Ui::new(viewport);
+        ui.begin_frame(viewport, press_at([20.0, 20.0]));
+        let id = ui.id("off");
+        let rect = Rect::new(10.0, 10.0, 80.0, 20.0);
+        button_enabled(&mut ui, id, rect, &FontAtlas::fallback(), "OFF", false);
+        let other = ui.id("far");
+        button(
+            &mut ui,
+            other,
+            Rect::new(200.0, 200.0, 20.0, 20.0),
+            &FontAtlas::fallback(),
+            "X",
+        );
+        assert_eq!(ui.take_button_presses(), 0);
     }
 }

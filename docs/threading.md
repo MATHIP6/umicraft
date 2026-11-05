@@ -218,6 +218,30 @@ ADR-0005).
 - The crate depends on neither `umicraft-game` nor `umicraft-net`: callers
   translate their events into `SoundRequest`s.
 
+### Audio bridge in the client (P11-E)
+
+- **Cues cross the thread boundary as their own event.** Once per tick the
+  game thread calls `GameState::drain_sound_cues()` (`publish_sounds`) and, when
+  the list is not empty, `try_send`s `RenderEvent::Sounds(Vec<SoundCue>)` on the
+  frame queue. It is not part of `Frame`, because a full frame queue skips
+  frames and a footstep should not vanish with one. If the event does not fit
+  either, the cues are dropped; the game thread never waits.
+- The render thread's `WorldView` collects the cues (`take_sounds`); the window
+  takes them once per frame, turns each into a `SoundRequest`
+  (`audio_bridge::cues`) and calls `AudioHandle::play` (a `try_send`). The
+  listener is rebuilt from the interpolated camera every frame
+  (`audio_bridge::listener`), so the pan follows the mouse look.
+- The window owns the `AudioBridge` (and with it the `AudioThread`). It is
+  created at start-up: the asset index, `sounds.json` (about 38 KB) and the
+  options are read there, once, before the first frame; no `.ogg` is read on
+  the render thread (the audio thread loads and decodes on a cache miss).
+- Menu clicks: `Ui` counts the presses of enabled buttons and of sliders
+  (`take_button_presses`); the window plays `gui.button.press` after the UI
+  frame. Volumes: `VolumeSync` sends the sliders that changed once per frame
+  (a dropped message is retried on the next frame).
+- Without a bridge (`--no-audio`, no downloaded assets, headless, tests) there
+  is no audio thread and every call returns at once.
+
 ### Current deviations from the target model
 
 - Lighting workers, asset/IO pool and mod workers do not exist

@@ -18,6 +18,7 @@
 mod achievements_view;
 mod anvil_field;
 pub mod args;
+pub mod audio_bridge;
 pub mod block_demo;
 mod block_entity_render;
 mod border_view;

@@ -67,6 +67,7 @@ use umicraft_game::server::maps::MapStore;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
 use umicraft_game::shapes::Aabb;
+use umicraft_game::sound::cue::SoundCue;
 use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::view::{camera_pose, Perspective};
@@ -349,6 +350,10 @@ pub enum RenderEvent {
     /// The view of the player changed between two ticks (mouse look); it
     /// replaces the newest frame's view without restarting the interpolation.
     Look(RenderState),
+    /// The sounds the tick produced (footsteps, digging, rain, server
+    /// effects), oldest first; the render thread hands them to the audio
+    /// thread. Never empty.
+    Sounds(Vec<SoundCue>),
     /// The HUD state changed.
     Hud(Box<HudState>),
     /// The inventory/container state changed.
@@ -1244,6 +1249,22 @@ fn player_view(game: &Game) -> Option<(RenderState, bool)> {
 fn publish_look(game: &Game, frames: &SyncSender<RenderEvent>) {
     if let Some((view, _)) = player_view(game) {
         let _ = frames.try_send(RenderEvent::Look(view));
+    }
+}
+
+/// Publishes the sound cues the tick produced, once per tick.
+///
+/// Cues travel as their own event, not inside the [`Frame`]: a frame is skipped
+/// when the queue is full, and a footstep should not disappear with it. When
+/// even this event does not fit, the render thread is far behind and the cues
+/// are dropped (a sound that late is worthless); the game thread never waits.
+fn publish_sounds(game: &mut Game, frames: &SyncSender<RenderEvent>) {
+    let Some(state) = game.state.as_mut() else {
+        return;
+    };
+    let cues = state.drain_sound_cues();
+    if !cues.is_empty() {
+        let _ = frames.try_send(RenderEvent::Sounds(cues));
     }
 }
 
@@ -3019,6 +3040,7 @@ fn tick(
     publish_chunks(game, chunks);
 
     publish_frame(game, frames, tick_time);
+    publish_sounds(game, frames);
     tick_hud_view(game);
     if let Some(strength) = game.hud_view.take_jump() {
         queue.ordered.push_back(ClientCommand::RidingJump {

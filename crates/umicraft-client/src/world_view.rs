@@ -24,6 +24,7 @@ use umicraft_game::server::block_entities::EntityTable;
 use umicraft_game::server::block_entities::SignTable;
 use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
+use umicraft_game::sound::cue::SoundCue;
 use umicraft_game::RenderState;
 use umicraft_mesh::{BlockEntityRef, ChunkSnapshot, Mesh, Vertex};
 use umicraft_render::{
@@ -103,6 +104,8 @@ pub struct WorldView {
     toast: Option<(&'static str, Instant)>,
     /// Why the session ended, once it has.
     ended: Option<ConnectionEnd>,
+    /// The sound cues received and not yet handed to the audio bridge.
+    sounds: Vec<SoundCue>,
     /// How far the connection attempt is, for the connecting screen.
     connect_stage: ConnectStage,
     frames: usize,
@@ -165,6 +168,7 @@ impl WorldView {
             status: GameStatus::default(),
             stats: Vec::new(),
             ended: None,
+            sounds: Vec::new(),
             stats_revision: 0,
             stats_loading: false,
             stats_baseline: false,
@@ -370,6 +374,13 @@ impl WorldView {
         self.status.placed
     }
 
+    /// Takes the sound cues of the ticks received since the last call, oldest
+    /// first. The window calls it once per frame and gives them to the audio
+    /// thread.
+    pub fn take_sounds(&mut self) -> Vec<SoundCue> {
+        std::mem::take(&mut self.sounds)
+    }
+
     /// Why the session ended, once it has.
     #[must_use]
     pub fn ended(&self) -> Option<&ConnectionEnd> {
@@ -504,6 +515,7 @@ impl WorldView {
                 self.view.push(*frame);
             }
             RenderEvent::Look(state) => self.view.retarget(state),
+            RenderEvent::Sounds(cues) => self.sounds.extend(cues),
             RenderEvent::Hud(hud) => self.hud = *hud,
             RenderEvent::Inventory(view) => self.window_view = *view,
             RenderEvent::Creative(view) => self.creative = Some(*view),
@@ -1087,6 +1099,40 @@ mod tests {
             debug: Arc::default(),
             signs: Arc::default(),
         })
+    }
+
+    #[test]
+    fn sound_cues_wait_for_the_window_in_order_and_are_taken_once() {
+        use std::borrow::Cow;
+        use umicraft_game::sound::cue::CueCategory;
+
+        let cue = |name: &'static str| SoundCue {
+            name: Cow::Borrowed(name),
+            pos: [0.0; 3],
+            volume: 1.0,
+            pitch: 1.0,
+            category: CueCategory::Blocks,
+        };
+        let mut harness = Harness::new();
+        for cues in [
+            vec![cue("step.stone")],
+            vec![cue("dig.stone"), cue("random.pop")],
+        ] {
+            harness
+                .frames
+                .0
+                .send(RenderEvent::Sounds(cues))
+                .expect("frame queue");
+        }
+        harness.sync();
+        let names: Vec<_> = harness
+            .world_view
+            .take_sounds()
+            .into_iter()
+            .map(|cue| cue.name)
+            .collect();
+        assert_eq!(names, ["step.stone", "dig.stone", "random.pop"]);
+        assert!(harness.world_view.take_sounds().is_empty());
     }
 
     #[test]

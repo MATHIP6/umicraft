@@ -219,7 +219,9 @@ impl GameState {
     /// landing), from the digging and rain code that call
     /// [`GameState::queue_sound_cues`], and from the server's Sound Effect and
     /// Effect packets. The render thread plays them; the game state does no
-    /// audio I/O.
+    /// audio I/O. The client calls this once per tick on the game thread and
+    /// forwards the cues to the render thread, which hands them to the audio
+    /// thread (`umicraft-client::audio_bridge`).
     pub fn drain_sound_cues(&mut self) -> Vec<sound::cue::SoundCue> {
         self.sounds.drain()
     }
