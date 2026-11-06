@@ -9,7 +9,7 @@
 //!   each stream direction.
 //! - **Shared secret and verify token travel RSA-wrapped** (PKCS#1 v1.5
 //!   padding, 128-byte blocks at the 1024-bit vanilla key size).
-//! - **Server id hash**: `SHA1(shared_secret || server_nonce)` rendered as a
+//! - **Server id hash**: `SHA1(server_id || shared_secret || public_key)` as a
 //!   *signed* hex string (leading `-`, no leading zeros), matching what the
 //!   Mojang session server looked up on its join endpoint.
 //!
@@ -148,15 +148,34 @@ pub fn rsa_encrypt(public_key_der: &[u8], data: &[u8]) -> Result<Vec<u8>, Protoc
         .map_err(|e| ProtocolError::Invariant(format!("rsa encryption failed: {e}")))
 }
 
-/// Computes the session-server "server hash string": signed SHA-1 hex of
-/// `sha1(shared_secret || server_nonce)`.
+/// Computes the session-server "server hash string" of the join request:
+/// the signed hex of `SHA1(server_id || shared_secret || public_key)`.
+///
+/// `server_id` is the ASCII string of the `Encryption Request` (empty on
+/// vanilla servers) and `public_key` is the server's SPKI DER key, exactly as
+/// received (MCP `NetHandlerLoginClient.handleEncryptionRequest` and
+/// `CryptManager.getServerIdHash`).
 #[must_use]
-pub fn server_id_hash(shared_secret: &[u8], server_nonce: &[u8]) -> String {
+pub fn server_id_hash(server_id: &str, shared_secret: &[u8], public_key: &[u8]) -> String {
     let mut sha = Sha1::new();
+    Digest::update(&mut sha, server_id.as_bytes());
     Digest::update(&mut sha, shared_secret);
-    Digest::update(&mut sha, server_nonce);
+    Digest::update(&mut sha, public_key);
     let digest = sha.finalize();
     BigInt::from_signed_bytes_be(&digest).to_str_radix(16)
+}
+
+/// Draws a fresh 16-byte shared secret from the operating system's CSPRNG.
+///
+/// # Panics
+/// Never in practice: `OsRng` only fails when the OS has no entropy source,
+/// which no supported platform allows.
+#[must_use]
+pub fn random_shared_secret() -> [u8; 16] {
+    use rsa::rand_core::{OsRng, RngCore};
+    let mut secret = [0u8; 16];
+    OsRng.fill_bytes(&mut secret);
+    secret
 }
 
 #[cfg(test)]
@@ -240,28 +259,40 @@ mod tests {
         assert_eq!(plain_back, payload);
     }
 
+    /// Published vectors of the Minecraft server hash (wiki.vg "Protocol
+    /// Encryption"): the hash of a bare name, positive and negative.
     #[test]
-    fn server_hash_matches_signed_bigint_hex() {
-        // Deterministic input; the expected value comes from sha1 of the two
-        // concatenated slices interpreted as a signed big-endian integer.
-        let shared = b"0123456789abcdef";
-        let nonce = [0x9Au8; 16];
-        let mut sha = Sha1::new();
-        Digest::update(&mut sha, shared);
-        Digest::update(&mut sha, nonce);
-        let digest = sha.finalize();
-
-        let expected = BigInt::from_signed_bytes_be(&digest).to_str_radix(16);
-        assert_eq!(server_id_hash(shared, &nonce), expected);
-
-        // High-bit first byte must surface the '-' sign.
-        let negative_input = [0xFFu8; 20];
-        assert!(
-            BigInt::from_signed_bytes_be(&negative_input)
-                .to_str_radix(16)
-                .starts_with('-'),
-            "sanity: sign convention must apply to SHA1-first-byte negatives"
+    fn server_hash_matches_the_published_vectors() {
+        assert_eq!(
+            server_id_hash("Notch", &[], &[]),
+            "4ed1f46bbe04bc756bcb17c0c7ce3e4632f06a48"
         );
-        assert!(server_id_hash(&negative_input, &[]).starts_with('-'));
+        assert_eq!(
+            server_id_hash("jeb_", &[], &[]),
+            "-7c9d5b0044c130109a5d7b5fb5c317c02b4e28c1"
+        );
+        assert_eq!(
+            server_id_hash("simon", &[], &[]),
+            "88e16a1019277b15d58faf0541e11910eb756f6"
+        );
+    }
+
+    /// Regression: the hash covers the server id, the secret and the public
+    /// key, in that order (it used to hash the secret and the verify token).
+    #[test]
+    fn server_hash_concatenates_id_secret_and_key() {
+        assert_eq!(
+            server_id_hash("Not", b"ch", &[]),
+            server_id_hash("Notch", &[], &[])
+        );
+        assert_eq!(
+            server_id_hash("No", b"tc", b"h"),
+            server_id_hash("Notch", &[], &[])
+        );
+    }
+
+    #[test]
+    fn shared_secrets_are_sixteen_distinct_bytes() {
+        assert_ne!(random_shared_secret(), random_shared_secret());
     }
 }
