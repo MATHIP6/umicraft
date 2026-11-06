@@ -69,6 +69,7 @@ impl SkinSet {
             Some(_) => None,
             None => {
                 self.states.insert(url.to_owned(), State::Loading(kind));
+                tracing::debug!(url, ?kind, "requesting texture");
                 self.fetcher.request(url);
                 None
             }
@@ -87,6 +88,9 @@ impl SkinSet {
             };
             let upload = fetched
                 .image
+                .inspect_err(
+                    |error| tracing::warn!(url = %fetched.url, %error, "texture download failed"),
+                )
                 .ok()
                 .and_then(|(rgba, width, height)| match kind {
                     SkinKind::Skin => skin_from_image(&rgba, width, height)

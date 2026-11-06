@@ -21,10 +21,19 @@ const TEXTURES_PROPERTY: &str = "textures";
 #[must_use]
 pub fn profile_from_properties(name: &str, properties: &[PlayerProperty]) -> PlayerProfile {
     let mut profile = PlayerProfile::named(name);
-    let textures = properties
+    let property = properties
         .iter()
-        .find(|property| property.name == TEXTURES_PROPERTY)
-        .and_then(|property| parse_textures_property(&property.value).ok());
+        .find(|property| property.name == TEXTURES_PROPERTY);
+    if property.is_none() {
+        tracing::debug!(player = name, "no textures property: default skin");
+    }
+    let textures = property.and_then(|property| {
+        parse_textures_property(&property.value)
+            .inspect_err(
+                |error| tracing::warn!(player = name, %error, "unreadable textures property"),
+            )
+            .ok()
+    });
     if let Some(textures) = textures {
         profile.slim = textures.skin.is_some().then_some(textures.slim);
         profile.skin_url = textures.skin.as_deref().map(Into::into);
