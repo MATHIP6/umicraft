@@ -153,3 +153,19 @@ fn the_input_command_carries_the_raw_wire_values() {
     assert!(!input.jumping);
     assert!(input.sneaking);
 }
+
+#[test]
+fn the_resource_pack_status_is_serverbound_0x19_and_keeps_hash_and_result() {
+    let hash = "a".repeat(40);
+    let packet = ClientCommand::ResourcePackStatus {
+        hash: hash.clone(),
+        result: serverbound::ResourcePackResult::Accepted,
+    }
+    .into_packet();
+    assert_eq!(packet.packet_id(), 0x19);
+    let PlayServerbound::ResourcePackStatus(status) = packet else {
+        panic!("not a Resource Pack Status packet");
+    };
+    assert_eq!(status.hash, hash);
+    assert_eq!(status.result, serverbound::ResourcePackResult::Accepted);
+}

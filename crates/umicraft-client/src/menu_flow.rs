@@ -33,8 +33,8 @@ use crate::menu_rows::{pinging_row, row_status};
 use crate::options_screen::Page;
 use crate::screen::Screen;
 use crate::servers::{
-    decode_favicon, parse_address, PingOutcome, PingResult, PingTarget, Pinger, ServerAddress,
-    ServerBook,
+    decode_favicon, parse_address, PingOutcome, PingResult, PingTarget, Pinger, ResourcePackMode,
+    ServerAddress, ServerBook,
 };
 use crate::stats_view::{self, StatsContext};
 
@@ -406,6 +406,12 @@ impl MenuFlow {
         match self.achievements.show(ui, atlas, lang, data, state)? {
             AchievementsOutcome::Done => Some(MenuCommand::GoTo(Screen::GameMenu)),
         }
+    }
+
+    /// The pack mode saved for the server at `address`.
+    #[must_use]
+    pub fn pack_mode_for(&self, address: &ServerAddress) -> ResourcePackMode {
+        self.book.pack_mode_for(address)
     }
 
     fn join(&self, index: usize) -> Option<MenuCommand> {

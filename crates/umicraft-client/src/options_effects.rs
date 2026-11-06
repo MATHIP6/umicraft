@@ -67,13 +67,23 @@ pub fn packs_folder() -> Option<PathBuf> {
 /// The packs to load, lowest priority first.
 ///
 /// A `--resource-pack` on the command line wins over the saved list, as the
-/// command-line render distance does over the saved one.
+/// command-line render distance does over the saved one. The pack of the
+/// connected server comes last, so it wins over both (the reference client
+/// puts it on top of the repository's pack list).
 #[must_use]
-pub fn pack_paths(cli: &[PathBuf], options: &Options, folder: Option<&Path>) -> Vec<PathBuf> {
-    if !cli.is_empty() {
-        return cli.to_vec();
-    }
-    folder.map_or_else(Vec::new, |folder| options.resource_packs.paths_in(folder))
+pub fn pack_paths(
+    cli: &[PathBuf],
+    options: &Options,
+    folder: Option<&Path>,
+    server_pack: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut paths = if cli.is_empty() {
+        folder.map_or_else(Vec::new, |folder| options.resource_packs.paths_in(folder))
+    } else {
+        cli.to_vec()
+    };
+    paths.extend(server_pack.map(Path::to_path_buf));
+    paths
 }
 
 /// Opens `folder` in the file manager of the platform (the "Open resource
@@ -221,12 +231,33 @@ mod tests {
         options.resource_packs.enabled = vec!["saved.zip".to_string()];
         let folder = Path::new("/data/resourcepacks");
         let cli = vec![PathBuf::from("cli_pack")];
-        assert_eq!(pack_paths(&cli, &options, Some(folder)), cli);
+        assert_eq!(pack_paths(&cli, &options, Some(folder), None), cli);
         assert_eq!(
-            pack_paths(&[], &options, Some(folder)),
+            pack_paths(&[], &options, Some(folder), None),
             [folder.join("saved.zip")]
         );
-        assert!(pack_paths(&[], &options, None).is_empty());
+        assert!(pack_paths(&[], &options, None, None).is_empty());
+    }
+
+    #[test]
+    fn the_server_pack_has_the_top_priority() {
+        let mut options = Options::default();
+        options.resource_packs.enabled = vec!["saved.zip".to_string()];
+        let folder = Path::new("/data/resourcepacks");
+        let server = Path::new("/cache/server-resourcepacks/abc");
+        assert_eq!(
+            pack_paths(&[], &options, Some(folder), Some(server)),
+            [folder.join("saved.zip"), server.to_path_buf()]
+        );
+        let cli = vec![PathBuf::from("cli_pack")];
+        assert_eq!(
+            pack_paths(&cli, &options, Some(folder), Some(server)),
+            [PathBuf::from("cli_pack"), server.to_path_buf()]
+        );
+        assert_eq!(
+            pack_paths(&[], &options, None, Some(server)),
+            [server.to_path_buf()]
+        );
     }
 
     #[test]

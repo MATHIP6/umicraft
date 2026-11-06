@@ -400,6 +400,15 @@ impl ServerBook {
         Some(index + 1)
     }
 
+    /// The pack mode of the saved server at `address`; a server that is not
+    /// saved (a command-line or direct connection) asks, as a new entry does.
+    #[must_use]
+    pub fn pack_mode_for(&self, address: &ServerAddress) -> ResourcePackMode {
+        self.iter()
+            .find(|entry| entry.socket_address() == *address)
+            .map_or_else(ResourcePackMode::default, ServerEntry::pack_mode)
+    }
+
     /// The entry at `index`.
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&ServerEntry> {
@@ -495,6 +504,21 @@ mod tests {
         assert_eq!(
             book.get(0).expect("entry").pack_mode(),
             ResourcePackMode::Enabled
+        );
+    }
+
+    #[test]
+    fn the_pack_mode_is_found_by_address_and_defaults_for_unknown_servers() {
+        let mut book = ServerBook::default();
+        book.add("A", "a.example").expect("add");
+        book.set_pack_mode(0, ResourcePackMode::Disabled);
+        assert_eq!(
+            book.pack_mode_for(&address("a.example", 25565)),
+            ResourcePackMode::Disabled
+        );
+        assert_eq!(
+            book.pack_mode_for(&address("other.example", 25565)),
+            ResourcePackMode::Prompt
         );
     }
 

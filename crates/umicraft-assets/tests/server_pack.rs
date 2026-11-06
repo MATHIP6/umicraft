@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use umicraft_assets::hash::sha1_hex;
 use umicraft_assets::server_pack::{
-    fetch_server_pack, validate_offer, ServerPackError, ServerPackOffer, ValidatedOffer,
+    fetch_server_pack, fetch_server_pack_blocking, server_pack_path, validate_offer,
+    ServerPackError, ServerPackOffer, ValidatedOffer,
 };
 
 #[allow(dead_code)] // shared helper; this suite uses only some routes
@@ -199,4 +200,33 @@ async fn level_offer_is_not_fetchable() {
     let offer = ValidatedOffer::Level("p.zip".into());
     let err = fetch_server_pack(&client, &offer, &temp_root("lvl"), 1024).await;
     assert!(matches!(err, Err(ServerPackError::LocalOffer(_))));
+}
+
+#[tokio::test]
+async fn the_blocking_fetch_returns_the_cached_path() {
+    let zip = empty_zip();
+    let hash = sha1_hex(&zip);
+    let server = serve(zip.clone()).await;
+    let root = temp_root("blocking");
+    let offer = remote(
+        format!("{}/pack.zip", server.base_url()),
+        Some(hash.clone()),
+    );
+
+    let (offer_for_thread, root_for_thread) = (offer.clone(), root.clone());
+    let path = tokio::task::spawn_blocking(move || {
+        fetch_server_pack_blocking(&offer_for_thread, &root_for_thread, 1024)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(path, root.join("server-resourcepacks").join(&hash));
+    assert_eq!(server_pack_path(&root, &offer), Some(path.clone()));
+    assert_eq!(std::fs::read(path).unwrap(), zip);
+    assert!(matches!(
+        fetch_server_pack_blocking(&ValidatedOffer::Level("a.zip".into()), &root, 1),
+        Err(ServerPackError::LocalOffer(_))
+    ));
+    let _ = std::fs::remove_dir_all(&root);
 }

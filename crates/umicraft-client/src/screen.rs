@@ -32,6 +32,8 @@ pub enum Screen {
     GameMenu,
     /// The options, opened from the game menu.
     Options,
+    /// The question whether to install the resource pack a server offers.
+    PackPrompt,
     /// The sign editor.
     Sign,
     /// A book and quill or a written book.
@@ -66,6 +68,7 @@ impl Screen {
                 | Self::Creative
                 | Self::GameMenu
                 | Self::Options
+                | Self::PackPrompt
                 | Self::Sign
                 | Self::Book
                 | Self::Debug
@@ -114,6 +117,7 @@ impl Screen {
             | Self::Inventory
             | Self::Creative
             | Self::GameMenu
+            | Self::PackPrompt
             | Self::Sign
             | Self::Book => Self::None,
             Self::Options => options_origin,

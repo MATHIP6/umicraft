@@ -69,6 +69,7 @@ pub mod options_effects;
 pub mod options_screen;
 pub mod overlay_state;
 pub mod overlay_view;
+pub mod pack_offer;
 mod panorama_faces;
 pub mod particle_ambient;
 pub mod particle_view;

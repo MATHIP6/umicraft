@@ -46,4 +46,7 @@ pub struct NetworkConfig {
     pub skin_parts: u8,
     /// The address of the `Handshake` when it is not `host`.
     pub handshake_host: Option<String>,
+    /// Answer every server resource pack offer with `Declined` at once
+    /// (the saved server's pack mode is Disabled, or no window can ask).
+    pub decline_server_packs: bool,
 }

@@ -72,6 +72,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         chat_colors: true,
         skin_parts: crate::options::SkinOptions::default().parts_mask(),
         handshake_host: args.handshake_host.clone(),
+        // No window can ask the player, so no pack is installed.
+        decline_server_packs: true,
     })?;
 
     let mut script = Script::new(phases(&args.script));
@@ -127,6 +129,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 RenderEvent::Inventory(_)
                 | RenderEvent::Creative(_)
                 | RenderEvent::TextScreen(_)
+                | RenderEvent::ServerPack(_)
                 | RenderEvent::Sounds(_)
                 | RenderEvent::Look(_)
                 | RenderEvent::Stats(_)

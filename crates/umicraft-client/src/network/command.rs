@@ -179,6 +179,15 @@ pub enum ClientCommand {
         /// What the player did.
         action: serverbound::UseEntityAction,
     },
+    /// `Resource Pack Status` (0x19): the answer to a server resource pack
+    /// offer, repeated as the download goes on (accepted, then loaded or
+    /// failed).
+    ResourcePackStatus {
+        /// The hash of the offered pack, echoed back as the server sent it.
+        hash: String,
+        /// How the offer went.
+        result: serverbound::ResourcePackResult,
+    },
     /// `Client Status` (0x16): the respawn request of the death screen.
     Respawn,
     /// `Client Status` (0x16): the statistics request of the statistics screen.
@@ -410,6 +419,12 @@ impl ClientCommand {
             Self::Swing => PlayServerbound::Animation(serverbound::Animation),
             Self::UseEntity { target, action } => {
                 PlayServerbound::UseEntity(serverbound::UseEntity { target, action })
+            }
+            Self::ResourcePackStatus { hash, result } => {
+                PlayServerbound::ResourcePackStatus(serverbound::ResourcePackStatus {
+                    hash,
+                    result,
+                })
             }
             Self::Respawn => PlayServerbound::ClientStatus(serverbound::ClientStatus {
                 action: serverbound::ClientStatusAction::PerformRespawn,

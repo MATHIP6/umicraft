@@ -25,6 +25,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::entity_render::fishing::first_person_tip;
+use crate::pack_offer::ServerPackRequest;
 use crate::social_view;
 use glam::{DVec3, Vec3};
 use tokio::sync::mpsc::error::TrySendError;
@@ -78,6 +79,7 @@ use umicraft_protocol::packets::play::clientbound::player_list_item::PlayerListI
 use umicraft_protocol::packets::play::clientbound::{
     BlockBreakAnim, ChunkData, Explosion, MapChunkBulk, UseBed,
 };
+use umicraft_protocol::packets::play::serverbound::ResourcePackResult;
 use umicraft_protocol::packets::play::serverbound::UseEntityAction;
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_protocol::PlayServerbound;
@@ -212,6 +214,14 @@ pub enum GameEvent {
     Chat(String),
     /// The player pressed Tab: ask the server to complete this text.
     TabComplete(String),
+    /// How the player or the download handled the server's resource pack
+    /// offer; becomes `Resource Pack Status`.
+    ServerPackStatus {
+        /// The hash of the offer, as the server sent it.
+        hash: String,
+        /// How it went.
+        result: ResourcePackResult,
+    },
     /// The player changed an option the server must know: the render
     /// distance, the chat visibility, the chat colours or the skin layers.
     ClientSettings {
@@ -364,6 +374,8 @@ pub enum RenderEvent {
     Creative(Box<CreativeView>),
     /// The server or the held item asks for a book or sign screen.
     TextScreen(Box<TextScreenRequest>),
+    /// The server offers a resource pack (`Resource Pack Send`).
+    ServerPack(Box<ServerPackRequest>),
     /// The statistics changed.
     Status(Box<GameStatus>),
     /// The server answered a statistics request (`Statistics`, 0x37): every
@@ -1130,6 +1142,10 @@ fn handle_event(
             }
             false
         }
+        GameEvent::ServerPackStatus { hash, result } => {
+            queue.push(ClientCommand::ResourcePackStatus { hash, result });
+            false
+        }
         GameEvent::ClientSettings {
             view_distance,
             chat_mode,
@@ -1564,7 +1580,11 @@ fn handle_net(
             | PlayEvent::EntityMetadata(_)
     );
     let answers_stats = matches!(event, PlayEvent::Statistics(_));
+    let offers_pack = matches!(event, PlayEvent::ResourcePackSend(_));
     apply_net_event(game, event, queue, frames);
+    if offers_pack {
+        publish_server_pack(game, frames);
+    }
     if answers_stats {
         publish_stats(game, frames);
     }
@@ -2925,6 +2945,15 @@ fn command_of(outgoing: Outgoing) -> ClientCommand {
 /// The `Use Entity` command of an entity click.
 fn use_entity(target: i32, action: UseEntityAction) -> ClientCommand {
     ClientCommand::UseEntity { target, action }
+}
+
+/// Hands the resource pack offer the server just made to the window, which
+/// asks the player or downloads it (NET-11).
+fn publish_server_pack(game: &Game, frames: &SyncSender<RenderEvent>) {
+    if let Some(offer) = game.server.resource_pack_offer() {
+        let request = ServerPackRequest::from(offer);
+        let _ = frames.try_send(RenderEvent::ServerPack(Box::new(request)));
+    }
 }
 
 /// Asks the window to open the sign editor the server requested and the book

@@ -17,7 +17,7 @@ use crate::game::{GameEvent, Session};
 use crate::network::NetworkConfig;
 use crate::options::Options;
 use crate::screen::Screen;
-use crate::servers::ServerAddress;
+use crate::servers::{ResourcePackMode, ServerAddress};
 
 /// What the window does with the session this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +59,7 @@ pub(super) fn network_config(
     args: &Args,
     options: &Options,
     address: &ServerAddress,
+    pack_mode: ResourcePackMode,
 ) -> NetworkConfig {
     let is_cli_server = args.server() == Some((address.host.as_str(), address.port));
     NetworkConfig {
@@ -71,6 +72,7 @@ pub(super) fn network_config(
         chat_colors: options.chat.colors,
         skin_parts: options.skin.parts_mask(),
         handshake_host: args.handshake_host.clone().filter(|_| is_cli_server),
+        decline_server_packs: pack_mode == ResourcePackMode::Disabled,
     }
 }
 
@@ -108,8 +110,11 @@ impl App {
     /// with the error as its reason.
     pub(super) fn connect(&mut self, address: &ServerAddress) {
         self.stop_session();
-        match Session::start(network_config(&self.args, &self.options, address)) {
+        let pack_mode = self.menu.pack_mode_for(address);
+        let config = network_config(&self.args, &self.options, address, pack_mode);
+        match Session::start(config) {
             Ok(session) => {
+                self.server_pack.set_mode(pack_mode);
                 self.session = Some(session);
                 self.send_particle_setting();
                 self.set_screen(Screen::Connecting);
@@ -167,6 +172,7 @@ impl App {
             world.clear_session(renderer);
         }
         self.forget_play_state();
+        self.drop_server_pack();
         self.capture_mouse(false);
     }
 
@@ -249,6 +255,7 @@ mod tests {
             &args(&["--name", "Pixel"]),
             &options,
             &address("play.example.net", 25570),
+            ResourcePackMode::Prompt,
         );
         assert_eq!(config.host, "play.example.net");
         assert_eq!(config.port, 25570);
@@ -262,9 +269,29 @@ mod tests {
     fn the_handshake_override_only_applies_to_the_server_of_the_command_line() {
         let args = args(&["10.0.0.1", "25565", "--handshake-host", "play.example.net"]);
         let options = Options::default();
-        let cli = network_config(&args, &options, &address("10.0.0.1", 25565));
+        let cli = network_config(
+            &args,
+            &options,
+            &address("10.0.0.1", 25565),
+            ResourcePackMode::Prompt,
+        );
         assert_eq!(cli.handshake_host.as_deref(), Some("play.example.net"));
-        let other = network_config(&args, &options, &address("10.0.0.2", 25565));
+        let other = network_config(
+            &args,
+            &options,
+            &address("10.0.0.2", 25565),
+            ResourcePackMode::Prompt,
+        );
         assert_eq!(other.handshake_host, None);
+    }
+
+    #[test]
+    fn only_a_disabled_pack_mode_declines_offers_at_the_network_layer() {
+        let (args, options) = (args(&[]), Options::default());
+        let declines =
+            |mode| network_config(&args, &options, &address("h", 1), mode).decline_server_packs;
+        assert!(declines(ResourcePackMode::Disabled));
+        assert!(!declines(ResourcePackMode::Prompt));
+        assert!(!declines(ResourcePackMode::Enabled));
     }
 }

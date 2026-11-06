@@ -117,6 +117,7 @@ async fn run_session(
         chat_mode: config.chat_mode,
         chat_colors: config.chat_colors,
         skin_parts: config.skin_parts,
+        decline_server_packs: config.decline_server_packs,
         ..PlayOptions::default()
     });
     // A full inbox blocks this thread in `send`, which slows the server down

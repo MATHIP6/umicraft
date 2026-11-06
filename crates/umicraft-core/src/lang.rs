@@ -361,6 +361,16 @@ const BUILTIN: &[(&str, &str)] = &[
     ("gui.stats", "Statistics"),
     ("gui.done", "Done"),
     ("gui.cancel", "Cancel"),
+    ("gui.yes", "Yes"),
+    ("gui.no", "No"),
+    (
+        "multiplayer.texturePrompt.line1",
+        "This server recommends the use of a custom resource pack.",
+    ),
+    (
+        "multiplayer.texturePrompt.line2",
+        "Do you want to download and install it automatically?",
+    ),
     ("key.mouseButton", "Button %s"),
     ("deathScreen.title", "You died!"),
     ("deathScreen.score", "Score"),
@@ -442,6 +452,17 @@ const BUILTIN: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_resource_pack_question_has_vanilla_text() {
+        let lang = Lang::builtin();
+        assert_eq!(
+            lang.tr("multiplayer.texturePrompt.line1"),
+            "This server recommends the use of a custom resource pack."
+        );
+        assert_eq!(lang.tr("gui.yes"), "Yes");
+        assert_eq!(lang.tr("gui.no"), "No");
+    }
 
     #[test]
     fn the_title_and_server_list_texts_work_offline() {

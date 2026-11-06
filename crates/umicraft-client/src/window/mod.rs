@@ -84,6 +84,8 @@ mod creative_window;
 mod inventory_control;
 mod menu_screens;
 mod options_control;
+mod server_pack;
+mod server_pack_control;
 mod session_control;
 
 /// The look speed at the default sensitivity, in radians per pixel; the
@@ -257,6 +259,8 @@ struct App {
     anvil_field: AnvilField,
     /// The open book or sign screen.
     text_screens: TextScreens,
+    /// The resource pack the connected server offered (NET-11).
+    server_pack: server_pack_control::ServerPackRuntime,
     /// The first-person held item geometry of the frame.
     hand_layers: ItemLayers,
     /// Steps the water, lava and fire textures once per game tick.
@@ -289,6 +293,7 @@ impl App {
             &args.resource_packs,
             &options,
             packs_folder().as_deref(),
+            None,
         )));
         let font = ui_font::load();
         let audio = if args.no_audio {
@@ -371,6 +376,7 @@ impl App {
             portrait: None,
             anvil_field: AnvilField::default(),
             text_screens: TextScreens::default(),
+            server_pack: server_pack_control::ServerPackRuntime::default(),
             hand_layers: ItemLayers::default(),
             texture_animator: TextureAnimator::default(),
             entity_textures: None,
@@ -412,7 +418,7 @@ impl App {
             return;
         }
         match self.screen() {
-            Screen::Debug => {
+            Screen::Debug | Screen::PackPrompt => {
                 self.ui_input.key(code, event.state, event.text.as_deref());
                 return;
             }
@@ -980,6 +986,9 @@ impl App {
                     }
                     self.menu_command = command;
                 }
+                Screen::PackPrompt => self
+                    .server_pack
+                    .show_prompt(&mut self.ui, atlas, &self.lang),
                 Screen::None | Screen::Chat => {}
             }
         }
@@ -1053,6 +1062,7 @@ impl App {
         self.camera.set_fov_degrees(self.options.video.fov);
         self.advance_menus(Duration::from_secs_f32(elapsed));
         self.sync_world(now);
+        self.update_server_pack();
         self.update_music(now);
         self.process_completions();
         self.update_death_screen(now);

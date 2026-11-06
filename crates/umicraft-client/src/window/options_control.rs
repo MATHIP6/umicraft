@@ -158,6 +158,7 @@ impl App {
             &self.args.resource_packs,
             &self.options,
             packs_folder().as_deref(),
+            self.server_pack.active_path(),
         ));
         let Some(renderer) = self.renderer.as_mut() else {
             return;

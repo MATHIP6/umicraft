@@ -49,6 +49,7 @@ use crate::mesher::{MeshPool, MeshResult};
 use crate::moving_blocks_draw::mesh_moving_blocks;
 use crate::overlay_state::OverlayInputs;
 use crate::overlay_view::{compose, SpriteLayers, ViewFacts, VignetteShade};
+use crate::pack_offer::ServerPackRequest;
 use crate::terrain_textures::{InstalledTerrain, TerrainMesher};
 use crate::weather_view::WeatherView;
 
@@ -114,6 +115,8 @@ pub struct WorldView {
     entities: Arc<[EntityFrameData]>,
     /// A text screen the game thread asked for, until the window takes it.
     text_request: Option<TextScreenRequest>,
+    /// Resource pack offers the window has not taken yet, oldest first.
+    pack_requests: Vec<ServerPackRequest>,
     /// The body of the local player in the newest frame.
     local_body: Option<Arc<EntityFrameData>>,
     /// The light at the eye of the local player in the latest frame.
@@ -179,6 +182,7 @@ impl WorldView {
             entities: Arc::from([]),
             local_body: None,
             text_request: None,
+            pack_requests: Vec::new(),
             hand_light: LightLevel::FULL_SKY,
             selection: Arc::from([]),
             cracks: Arc::from([]),
@@ -462,6 +466,11 @@ impl WorldView {
         self.text_request.take()
     }
 
+    /// Takes the resource pack offers received since the last call.
+    pub fn take_pack_requests(&mut self) -> Vec<ServerPackRequest> {
+        std::mem::take(&mut self.pack_requests)
+    }
+
     /// The body of the local player at the newest tick, once a frame arrived.
     #[must_use]
     pub fn local_body(&self) -> Option<EntityRenderSnapshot> {
@@ -527,6 +536,7 @@ impl WorldView {
             RenderEvent::Inventory(view) => self.window_view = *view,
             RenderEvent::Creative(view) => self.creative = Some(*view),
             RenderEvent::TextScreen(request) => self.text_request = Some(*request),
+            RenderEvent::ServerPack(request) => self.pack_requests.push(*request),
             RenderEvent::Status(status) => self.status = *status,
             RenderEvent::Stats(stats) => {
                 if self.stats_baseline {
@@ -606,6 +616,7 @@ impl WorldView {
         self.frames = 0;
         self.local_body = None;
         self.text_request = None;
+        self.pack_requests.clear();
         self.hand_light = LightLevel::FULL_SKY;
         self.selection = Arc::from([]);
         self.cracks = Arc::from([]);

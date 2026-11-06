@@ -94,6 +94,9 @@ pub enum ServerPackError {
     /// The downloaded file is not a valid resource pack.
     #[error(transparent)]
     Pack(#[from] AssetsError),
+    /// The runtime of a blocking download could not be started.
+    #[error("could not start the download runtime: {0}")]
+    Runtime(#[source] std::io::Error),
 }
 
 /// A resource pack offer as received from the server.
@@ -164,6 +167,53 @@ fn is_sha1_hex(text: &str) -> bool {
 /// Returns the cache path of a pack with the given (optional) hash.
 fn cache_path(cache_root: &Path, sha1: Option<&str>) -> PathBuf {
     cache_root.join(CACHE_DIR).join(sha1.unwrap_or(LEGACY_SLOT))
+}
+
+/// Where [`fetch_server_pack`] keeps the pack of `offer`: `None` for a
+/// `level://` offer, which is a local file and never cached.
+#[must_use]
+pub fn server_pack_path(cache_root: &Path, offer: &ValidatedOffer) -> Option<PathBuf> {
+    match offer {
+        ValidatedOffer::Remote { sha1, .. } => Some(cache_path(cache_root, sha1.as_deref())),
+        ValidatedOffer::Level(_) => None,
+    }
+}
+
+/// Gets the offered pack on the calling thread and returns where it is
+/// cached, for callers without an async runtime (the window's worker thread).
+///
+/// Runs [`fetch_server_pack`] on a short-lived current-thread runtime with
+/// connect and total timeouts, so a stalled server cannot hang the worker.
+///
+/// # Errors
+///
+/// See [`ServerPackError`]; [`ServerPackError::Runtime`] when the runtime
+/// cannot start, and [`ServerPackError::LocalOffer`] for `level://`.
+pub fn fetch_server_pack_blocking(
+    offer: &ValidatedOffer,
+    cache_root: &Path,
+    max_bytes: u64,
+) -> Result<PathBuf, ServerPackError> {
+    let (url, sha1) = match offer {
+        ValidatedOffer::Remote { url, sha1 } => (url, sha1),
+        ValidatedOffer::Level(name) => return Err(ServerPackError::LocalOffer(name.clone())),
+    };
+    let path = cache_path(cache_root, sha1.as_deref());
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("umicraft-assets/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|source| ServerPackError::Http {
+            url: url.clone(),
+            source,
+        })?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(ServerPackError::Runtime)?;
+    runtime.block_on(fetch_server_pack(&client, offer, cache_root, max_bytes))?;
+    Ok(path)
 }
 
 /// Gets the offered pack, from the cache when its hash matches, else by
