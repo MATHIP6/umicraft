@@ -100,12 +100,7 @@ impl OptionsScreen {
         let cx = gui.cx();
         let rows = VIDEO_ENTRIES.len().div_ceil(2);
         let content = rows as f32 * VIDEO_ROW;
-        self.scroll_list(
-            ui,
-            gui,
-            (cx + 156.0, top, bottom),
-            (content, VIDEO_ROW),
-        );
+        self.scroll_list(ui, gui, (cx + 156.0, top, bottom), (content, VIDEO_ROW));
         Self::list_container(ui, gui, (0.0, gui.width), (top, bottom), self.scroll);
 
         // The list is clipped to its area; a row is only clickable while it

@@ -83,13 +83,7 @@ impl ListFrame {
     }
 
     /// Applies the wheel and returns the clamped offset.
-    pub(super) fn scrolled(
-        &self,
-        ui: &Ui,
-        gui: &Gui,
-        offset: f32,
-        bar: &mut ScrollbarDrag,
-    ) -> f32 {
+    pub(super) fn scrolled(&self, ui: &Ui, gui: &Gui, offset: f32, bar: &mut ScrollbarDrag) -> f32 {
         let step = self.slot_height / 2.0;
         let content = self.content_height();
         let offset = wheel_scrolled_by(ui, gui, Self::view(gui), content, offset, step);

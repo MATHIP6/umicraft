@@ -431,7 +431,10 @@ fn unicode_pages_draw_the_characters_outside_the_grid() -> Result<(), Box<dyn Er
     assert_eq!(glyph.scale, 0.5, "drawn at half size");
     assert_eq!(atlas.advance(star, 1.0), 9.0);
     let width = (glyph.uv_max[0] - glyph.uv_min[0]) * atlas.width as f32;
-    assert!((width - 11.98).abs() < 1e-3, "`renderUnicodeChar` quad: {width}");
+    assert!(
+        (width - 11.98).abs() < 1e-3,
+        "`renderUnicodeChar` quad: {width}"
+    );
     let (u, v) = (glyph.uv_min[0] + 1e-4, glyph.uv_min[1] + 1e-4);
     assert_eq!(sample_uv(&atlas, u, v), 255, "the UV points into the page");
 
@@ -474,13 +477,27 @@ fn a_wide_unicode_glyph_measures_a_cell_and_draws_its_own_width() -> Result<(), 
     let atlas = grid.with_unicode(&sizes, |index| (index == 0x27).then(|| page_png.clone()));
 
     let wide = '\u{2727}';
-    assert_eq!(atlas.advance(wide, 1.0), 9.0, "getCharWidth: (15 + 1 - 0) / 2 + 1");
-    assert_eq!(atlas.glyph(wide).map(|glyph| glyph.pen), Some(6.0), "(10 + 1 - 1) / 2 + 1");
+    assert_eq!(
+        atlas.advance(wide, 1.0),
+        9.0,
+        "getCharWidth: (15 + 1 - 0) / 2 + 1"
+    );
+    assert_eq!(
+        atlas.glyph(wide).map(|glyph| glyph.pen),
+        Some(6.0),
+        "(10 + 1 - 1) / 2 + 1"
+    );
     assert_eq!(atlas.pen_advance(wide), 6.0);
-    assert!(atlas.glyph('\u{2728}').is_none(), "a size from 0x80 is ignored");
+    assert!(
+        atlas.glyph('\u{2728}').is_none(),
+        "a size from 0x80 is ignored"
+    );
     assert!(atlas.is_unicode(wide));
     assert!(!atlas.is_unicode('A'));
-    assert!(atlas.grid_glyphs().iter().all(|glyph| !atlas.is_unicode(glyph.character)));
+    assert!(atlas
+        .grid_glyphs()
+        .iter()
+        .all(|glyph| !atlas.is_unicode(glyph.character)));
     // The grid keeps measuring and drawing the same.
     assert_eq!(atlas.pen_advance('A'), atlas.advance('A', 1.0));
     Ok(())
@@ -542,14 +559,25 @@ fn obfuscated_text_never_turns_into_a_unicode_glyph() -> Result<(), Box<dyn Erro
     run.obfuscated = true;
     for tick in 0..50 {
         let mut list = DrawList::new();
-        draw_styled(&mut list, &atlas, [0.0, 0.0], std::slice::from_ref(&run), 1.0, false, tick);
+        draw_styled(
+            &mut list,
+            &atlas,
+            [0.0, 0.0],
+            std::slice::from_ref(&run),
+            1.0,
+            false,
+            tick,
+        );
         for command in list.commands() {
             if let DrawCommand::Text { text, .. } = command {
                 assert!(
                     text.chars().take(4).all(|c| !atlas.is_unicode(c)),
                     "scrambled into a Unicode glyph: {text:?}"
                 );
-                assert!(text.ends_with('\u{2726}'), "a Unicode glyph is kept: {text:?}");
+                assert!(
+                    text.ends_with('\u{2726}'),
+                    "a Unicode glyph is kept: {text:?}"
+                );
             }
         }
     }

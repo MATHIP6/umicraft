@@ -301,7 +301,11 @@ impl OptionsScreen {
             }
             *scroll = scroll.clamp(0.0, max);
             // The scrollbar sits inside the right edge of its list.
-            let left = if column == 1 { cx + 4.0 } else { cx - 4.0 - LIST_W };
+            let left = if column == 1 {
+                cx + 4.0
+            } else {
+                cx - 4.0 - LIST_W
+            };
             *scroll = self.pack_bars[column].apply(
                 ui,
                 gui.scale,

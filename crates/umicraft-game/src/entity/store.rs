@@ -177,7 +177,10 @@ impl EntityStore {
             self.dismount(rider);
             return;
         };
-        let mut seat = self.entities.get(&vehicle).and_then(|record| record.vehicle);
+        let mut seat = self
+            .entities
+            .get(&vehicle)
+            .and_then(|record| record.vehicle);
         for _ in 0..self.entities.len() {
             match seat {
                 Some(id) if id == rider => return,
@@ -802,7 +805,11 @@ mod tests {
         store.attach(EntityId(2), None);
         let item = &store.entities[&EntityId(2)];
         assert_eq!(item.vehicle, None);
-        assert!((item.position.y - 0.3125).abs() < 1e-9, "{}", item.position.y);
+        assert!(
+            (item.position.y - 0.3125).abs() < 1e-9,
+            "{}",
+            item.position.y
+        );
         assert_eq!(item.previous_position, item.position);
         assert_eq!(item.target_position, item.position);
     }

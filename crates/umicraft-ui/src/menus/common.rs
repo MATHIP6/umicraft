@@ -537,7 +537,9 @@ mod scrollbar_drag_tests {
         };
         step(&mut drag, release, moved);
         assert!(!drag.is_active());
-        let after = InputEvent::PointerMoved { position: at(200.0) };
+        let after = InputEvent::PointerMoved {
+            position: at(200.0),
+        };
         assert_eq!(step(&mut drag, after, moved), moved);
     }
 
