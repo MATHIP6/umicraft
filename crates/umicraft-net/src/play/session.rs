@@ -161,6 +161,10 @@ pub struct PlayOptions {
     pub skin_parts: u8,
     /// Client brand sent on the `MC|Brand` channel (spec NET-9).
     pub brand: String,
+    /// Whether the server entry disables server resource packs: the offer is
+    /// then declined at once. Otherwise the game thread answers with
+    /// `Resource Pack Status` packets (accepted, loaded, failed or declined).
+    pub decline_server_packs: bool,
 }
 
 impl Default for PlayOptions {
@@ -172,6 +176,7 @@ impl Default for PlayOptions {
             chat_mode: 0,
             skin_parts: ALL_SKIN_PARTS,
             brand: "umicraft".to_string(),
+            decline_server_packs: false,
         }
     }
 }
@@ -667,7 +672,7 @@ impl PlaySession {
                 ..Reaction::default()
             },
             clientbound::ResourcePackSend::ID => {
-                Self::resource_pack(clientbound::ResourcePackSend::decode(body)?)
+                self.resource_pack(clientbound::ResourcePackSend::decode(body)?)
             }
             clientbound::Disconnect::ID => {
                 let packet = clientbound::Disconnect::decode(body)?;
@@ -685,20 +690,22 @@ impl PlaySession {
         })
     }
 
-    /// Declines a server resource pack and forwards the offer.
+    /// Forwards a server resource pack offer; declines it at once when the
+    /// server entry disables server packs.
     ///
-    /// Vanilla answers `Declined` at once when the server-pack option of the
-    /// server entry is *disabled* (MCP `NetHandlerPlayClient.handleResourcePack`);
-    /// without the prompt of P12 that is the only vanilla answer the client
-    /// can give (ADR-0020 §2).
-    fn resource_pack(packet: clientbound::ResourcePackSend) -> Reaction {
-        let reply = PlayServerbound::ResourcePackStatus(ResourcePackStatus {
-            hash: packet.hash.clone(),
-            result: ResourcePackResult::Declined,
+    /// Vanilla answers `Declined` immediately in that case and otherwise
+    /// downloads the pack and reports its status (MCP
+    /// `NetHandlerPlayClient.handleResourcePack`), which the game thread does.
+    fn resource_pack(&self, packet: clientbound::ResourcePackSend) -> Reaction {
+        let reply = self.options.decline_server_packs.then(|| {
+            PlayServerbound::ResourcePackStatus(ResourcePackStatus {
+                hash: packet.hash.clone(),
+                result: ResourcePackResult::Declined,
+            })
         });
         Reaction {
             event: Some(PlayEvent::ResourcePackSend(packet)),
-            replies: [Some(reply), None],
+            replies: [reply, None],
             ..Reaction::default()
         }
     }
@@ -897,6 +904,7 @@ mod tests {
             chat_mode: 2,
             skin_parts: 0b0100_0010,
             brand: "test".to_string(),
+            ..PlayOptions::default()
         };
         let mut session = PlaySession::new(options);
         let reaction = react(&mut session, join_game());
@@ -1253,8 +1261,11 @@ mod tests {
     }
 
     #[test]
-    fn a_resource_pack_offer_is_declined_and_forwarded() {
-        let mut session = PlaySession::new(PlayOptions::default());
+    fn a_resource_pack_offer_is_declined_and_forwarded_when_disabled() {
+        let mut session = PlaySession::new(PlayOptions {
+            decline_server_packs: true,
+            ..PlayOptions::default()
+        });
         let offer = clientbound::ResourcePackSend {
             url: "http://example.invalid/pack.zip".to_string(),
             hash: "0123456789abcdef0123456789abcdef01234567".to_string(),
@@ -1271,6 +1282,24 @@ mod tests {
                 result: ResourcePackResult::Declined,
             })]
         );
+        assert_eq!(
+            reaction.into_event(),
+            Some(PlayEvent::ResourcePackSend(offer))
+        );
+    }
+
+    #[test]
+    fn a_resource_pack_offer_is_only_forwarded_when_packs_are_allowed() {
+        let mut session = PlaySession::new(PlayOptions::default());
+        let offer = clientbound::ResourcePackSend {
+            url: "https://example.invalid/pack.zip".to_string(),
+            hash: String::new(),
+        };
+        let reaction = react(
+            &mut session,
+            PlayClientbound::ResourcePackSend(offer.clone()),
+        );
+        assert_eq!(reaction.replies().count(), 0);
         assert_eq!(
             reaction.into_event(),
             Some(PlayEvent::ResourcePackSend(offer))
