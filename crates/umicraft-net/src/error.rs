@@ -46,6 +46,10 @@ pub enum NetError {
         verify_token: Vec<u8>,
     },
 
+    /// The session server refused the join (bad or expired token).
+    #[error("session authentication failed: {0}")]
+    Auth(#[from] umicraft_auth::AuthError),
+
     /// The server sent a login-state `Disconnect`.
     #[error("kicked during login: {reason}")]
     KickedAtLogin {
