@@ -13,6 +13,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # cpal links ALSA on Linux (see docs/decisions/0050-p11-audio.md).
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -42,6 +44,7 @@ jobs:
           # reviewed on every pull request.
           allowed=(
             # "crates/umicraft-render/assets/fallback.png CC0-1.0, Umicraft contributors"
+            "crates/umicraft-audio/tests/fixtures/tone_440hz_mono.ogg CC0-1.0, Umicraft contributors"
           )
 
           is_allowed() {

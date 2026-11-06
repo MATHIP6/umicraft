@@ -335,8 +335,10 @@ mod tests {
     fn the_tag_of_an_armour_stand_follows_its_size() {
         let tag_y = |flags: u8| {
             let mut stand = tagged(EntityKind::ArmorStand, Vec3::new(0.0, 0.0, 5.0), "Shop");
-            let mut meta = umicraft_game::entity::meta::ArmorStandMeta::default();
-            meta.flags = flags;
+            let meta = umicraft_game::entity::meta::ArmorStandMeta {
+                flags,
+                ..Default::default()
+            };
             stand.meta.variant = Variant::ArmorStand(meta);
             place_tags(&[stand], &camera(), 1280.0, 720.0)[0].anchor[1]
         };
