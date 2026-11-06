@@ -94,9 +94,11 @@ impl SkinSet {
                 .ok()
                 .and_then(|(rgba, width, height)| match kind {
                     SkinKind::Skin => skin_from_image(&rgba, width, height)
+                        .inspect_err(|error| tracing::warn!(url = %fetched.url, %error, "unusable skin image"))
                         .ok()
                         .map(|skin| (skin, 64, 64)),
                     SkinKind::Cape => check_cape_image(width, height)
+                        .inspect_err(|error| tracing::warn!(url = %fetched.url, %error, "unusable cape image"))
                         .ok()
                         .map(|()| (rgba, width, height)),
                 });
@@ -109,6 +111,7 @@ impl SkinSet {
                         SkinKind::Cape => TextureSlot::Cape(index),
                     };
                     textures.insert(slot, renderer.create_entity_texture(&rgba, width, height));
+                    tracing::debug!(url = %fetched.url, index, "texture ready");
                     State::Ready(index)
                 }
                 None => State::Failed,
