@@ -45,11 +45,11 @@ session is [`parity-harness.md`](parity-harness.md).
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
 | Connection | status ping, offline login, compression, keep-alive, disconnect reason | Partial — not verified against vanilla | P1 | `docs/fuzzing.md`, `umicraft-protocol/tests/roundtrip.rs` | Fuzzed (10 min per target) and property-tested in P1; compression switched in play state too (0x46). |
-| Connection | online-mode login (launcher session, session join, encryption; Microsoft auth is F1, ADR-0053) | Missing | P12 | — |  |
+| Connection | online-mode login (launcher session, session join, encryption; Microsoft auth is F1, ADR-0053) | Partial — tested against a fake encrypting server, not a real premium server | P12 | `umicraft-testkit/tests/online_login.rs`, `umicraft_auth` tests, `umicraft_protocol::encryption` vectors, `client::launch_session` | ADR-0054. `--username`, `--uuid`, `--accessToken` (or `UMICRAFT_*`) give a `Session`; the join is registered before the `Encryption Response`; the token never reaches `Debug` or error text. A refused join shows "Failed to login: Invalid session". Owner check open: a real token on a real online-mode server. |
 | Connection | brand + client settings | Partial — not verified against vanilla | P1 | — | Skin-layer bits move to P10. |
-| Connection | plugin channels (MC\|Brand in, REGISTER, BungeeCord) | Missing | P12 | — |  |
-| Connection | proxy server switch (dimension-swap respawn trick) | Unverified | P12 | — |  |
-| Connection | server resource packs | Missing | P12 | — | P1 declines every offer, as vanilla with server packs disabled (ADR-0020). |
+| Connection | plugin channels (MC\|Brand in, REGISTER, BungeeCord) | Done | P12 | `umicraft_net::play::session` tests | Vanilla 1.8.8 sends only `MC|Brand` (on every `Join Game`); it never sends `REGISTER` itself. Incoming plugin messages are forwarded; the `BungeeCord` channel is server-side only. |
+| Connection | proxy server switch (dimension-swap respawn trick) | Partial — not tried on a real BungeeCord or Velocity | P12 | `umicraft_net::play::session` (second `Join Game`), `client::game` (`a_second_join_game_replaces_the_world…`) | A switch is a second `Join Game` on the same socket: the world, entities, scoreboard and tab list are rebuilt, and `Client Settings` and `MC|Brand` are resent (they were not before P12). |
+| Connection | server resource packs | Partial — unit-tested, not seen in a window | P12 | `umicraft_assets::server_pack`, `client::window::server_pack`, `client::options_effects` | Prompt, Enabled and Disabled from the server entry; checked download (50 MiB, SHA-1) with the vanilla cache name; Accepted, SuccessfullyLoaded, FailedDownload and Declined replies; the pack sits on top and is removed on disconnect. Deviations: the prompt uses the dirt background, `level://` answers FailedDownload, a second offer while busy is declined. |
 
 ## Movement
 

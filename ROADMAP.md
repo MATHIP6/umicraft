@@ -56,7 +56,7 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
 | M11 Audio | Partial — code complete (index, engine, cues, packets, GUI clicks, volumes, music, non-blocking measured); owner validation by ear open | P11 |
 | M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); accounts not started | P10 (rest of menus), F1 (accounts) |
-| M13 Premium authentication | Session join and encryption in P12 (session from launcher arguments, ADR-0053); Microsoft login, keychain and isolation in F1 | P12, F1 |
+| M13 Premium authentication | Session join and encryption done in P12 (launcher session, ADR-0053/0054; tested against a fake server, owner check with a real token open); Microsoft login, keychain and isolation in F1 | P12, F1 |
 | M14 Performance pass | Not started | F2 |
 | M15 Modding API v1 | Not started | F3 |
 | M16 Hardening & v1.0 | Not started | P12 (proxies), F4 |
@@ -635,6 +635,24 @@ login itself is not vanilla behaviour and belongs to F1 (ADR-0053).
 an online-mode 1.8 server and a BungeeCord network, switches servers without
 reconnecting and accepts a server resource pack; the token never appears in
 the logs.
+
+**State (P12):** code complete, not tried against a real premium server.
+`umicraft-auth` (session, redacted token, join), `umicraft-net::login`
+(`login_online`, encryption handshake), the proxy-switch fix (entry packets on
+every `Join Game`), `umicraft_assets::server_pack` and the client pack flow
+(ADR-0054). The server hash helper was wrong and is fixed. Tested against
+`umicraft-testkit`'s encrypting fake server and fake session server.
+
+**Owner validation checklist** (needs a launcher token):
+1. Start with `--username N --uuid U --accessToken T <host> 25565` against an
+   online-mode 1.8 server: the join succeeds; a wrong token shows "Invalid
+   session".
+2. On a BungeeCord or Velocity network, switch servers with `/server`: no
+   reconnect, the new world loads, settings apply on the new server.
+3. Join a server that sends a resource pack: the prompt appears (Prompt
+   mode), Yes downloads and applies it, leaving the server restores the
+   previous packs; Enabled and Disabled modes skip the prompt.
+4. Run with `RUST_LOG=trace` and search the output for the token: no match.
 
 ### P13 — Parity sign-off
 
