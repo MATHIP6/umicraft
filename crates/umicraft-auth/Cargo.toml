@@ -1,0 +1,21 @@
+[package]
+name = "umicraft-auth"
+description = "Player session (username, UUID, access token) from launcher arguments, and the session-server join call for online mode."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true
