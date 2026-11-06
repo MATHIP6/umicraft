@@ -26,6 +26,29 @@ impl App {
         }
     }
 
+    /// Notes that `button` went up, whatever screen is open.
+    ///
+    /// `Minecraft.runTick` updates the state of every key binding on each
+    /// event before the screen sees it, so a button pressed in the game and
+    /// released over a container the server opened (the lobby compass) is not
+    /// left held for the game that comes next.
+    pub(super) fn release_button(&mut self, button: MouseButton) {
+        if let Some(Binding::Mouse(index)) = Binding::from_mouse(button) {
+            self.buttons.remove(&index);
+        }
+    }
+
+    /// Lets go of every held key and button and drops the clicks that wait
+    /// (`KeyBinding.unPressAllKeys`, which `Minecraft.setIngameNotInFocus`
+    /// calls when a screen takes the mouse).
+    pub(super) fn unpress_all(&mut self) {
+        self.keys.clear();
+        self.buttons.clear();
+        self.break_block = false;
+        self.place_block = false;
+        self.pick_block = false;
+    }
+
     /// Runs the actions bound to a key or button that was just pressed.
     pub(super) fn press_binding(&mut self, binding: Binding) {
         let actions: Vec<Action> = self.options.keys.actions_for(binding).collect();

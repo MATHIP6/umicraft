@@ -33,7 +33,7 @@ impl OptionsScreen {
         let (top, bottom) = (32.0, gui.height - 61.0);
         let cx = gui.cx();
         let content = self.catalog.languages().len() as f32 * ROW;
-        self.scroll_list(ui, content, bottom - top, ROW);
+        self.scroll_list(ui, gui, (cx + 124.0, top, bottom), (content, ROW));
         Self::list_container(ui, gui, (0.0, gui.width), (top, bottom), self.scroll);
 
         ui.push_clip(gui.rect(0.0, top, gui.width, bottom - top));

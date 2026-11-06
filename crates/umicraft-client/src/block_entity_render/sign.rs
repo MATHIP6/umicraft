@@ -97,7 +97,8 @@ fn text_vertices(
                 if !character.is_whitespace() {
                     push_glyph(&mut out, glyph_rect(font, glyph, pen, top), &plane, normal);
                 }
-                pen += font.advance(character, 1.0);
+                // The pen moves by what drawing returns, `(int) f`.
+                pen += glyph.pen.trunc();
             }
         }
     }
@@ -110,8 +111,8 @@ type GlyphRect = ([f32; 4], [f32; 4]);
 
 /// The rectangle of `glyph` with its pen at `(x, y)`.
 fn glyph_rect(font: &FontAtlas, glyph: &umicraft_ui::Glyph, x: f32, y: f32) -> GlyphRect {
-    let width = (glyph.uv_max[0] - glyph.uv_min[0]) * font.width as f32;
-    let height = (glyph.uv_max[1] - glyph.uv_min[1]) * font.height as f32;
+    let width = (glyph.uv_max[0] - glyph.uv_min[0]) * font.width as f32 * glyph.scale;
+    let height = (glyph.uv_max[1] - glyph.uv_min[1]) * font.height as f32 * glyph.scale;
     (
         [x, y, x + width, y + height],
         [

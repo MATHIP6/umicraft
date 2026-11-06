@@ -25,6 +25,10 @@ use crate::official;
 
 /// The font entry inside the 1.8 client jar.
 const FONT_ENTRY: &str = "assets/minecraft/textures/font/ascii.png";
+/// The glyph widths of the Unicode pages (`FontRenderer.readGlyphSizes`).
+const SIZES_ENTRY: &str = "assets/minecraft/font/glyph_sizes.bin";
+/// The start of the names of the Unicode pages, `unicode_page_XX.png`.
+const PAGE_PREFIX: &str = "assets/minecraft/textures/font/unicode_page_";
 
 /// Where the UI font of a run came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,7 +89,18 @@ pub fn load() -> LoadedFont {
     // `--setup-assets` fills; the terrain loader searches both the same way.
     let loaded = official::find_verified_jar()
         .map_err(FontLoadError::from)
-        .and_then(|jar| Ok(FontAtlas::from_png(&jar.read_entry(FONT_ENTRY)?)?));
+        .and_then(|jar| {
+            let grid = FontAtlas::from_png(&jar.read_entry(FONT_ENTRY)?)?;
+            // The Unicode pages are an addition: without them the grid font
+            // alone still works, so their failure is only a warning.
+            let entries = jar
+                .read_prefixes(&[SIZES_ENTRY, PAGE_PREFIX])
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "could not read the Unicode font pages");
+                    Vec::new()
+                });
+            Ok::<_, FontLoadError>(with_unicode(grid, entries))
+        });
     match loaded {
         Ok(atlas) => {
             tracing::info!("loaded the 1.8 font from the client jar");
@@ -170,6 +185,33 @@ fn load_official(install: &OfficialInstall) -> Result<FontAtlas, FontLoadError> 
     Ok(FontAtlas::from_png(&png)?)
 }
 
+/// `grid` extended with the Unicode pages found in `entries` (the jar entries
+/// of `glyph_sizes.bin` and `unicode_page_XX.png`), so that characters outside
+/// the 1.8 grid draw as in vanilla instead of as `?`. Without the sizes file
+/// the grid is returned as it is.
+fn with_unicode(grid: FontAtlas, entries: Vec<(String, Vec<u8>)>) -> FontAtlas {
+    let mut sizes = None;
+    let mut pages = std::collections::HashMap::new();
+    for (name, bytes) in entries {
+        if name == SIZES_ENTRY {
+            sizes = Some(bytes);
+        } else if let Some(page) = name
+            .strip_prefix(PAGE_PREFIX)
+            .and_then(|rest| rest.strip_suffix(".png"))
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+        {
+            pages.insert(page, bytes);
+        }
+    }
+    let Some(sizes) = sizes else {
+        return grid;
+    };
+    let count = pages.len();
+    let atlas = grid.with_unicode(&sizes, |page| pages.remove(&page));
+    tracing::info!(pages = count, "loaded the Unicode font pages");
+    atlas
+}
+
 /// The built-in original font.
 fn fallback_font() -> LoadedFont {
     LoadedFont {
@@ -218,6 +260,24 @@ mod tests {
         );
     }
 
+    /// With a real jar the symbols outside the 1.8 grid have their glyph, as
+    /// the star of a scoreboard line; without one the test has nothing to read.
+    #[test]
+    fn an_official_font_draws_unicode_symbols() {
+        let font = load();
+        if font.source != FontSource::Official {
+            return;
+        }
+        let atlas = font.atlas;
+        for symbol in ['\u{2726}', '\u{2764}', '\u{4e2d}'] {
+            let glyph = atlas.glyph(symbol).expect("the Unicode pages have it");
+            assert_eq!(glyph.scale, 0.5, "{symbol}");
+            assert!(atlas.advance(symbol, 1.0) > 0.0, "{symbol}");
+        }
+        assert_eq!(atlas.glyph('A').map(|glyph| glyph.scale), Some(1.0));
+        assert!(atlas.width <= 8192 && atlas.height <= 8192);
+    }
+
     #[test]
     fn the_font_source_labels_are_stable() {
         assert_eq!(FontSource::Official.to_string(), "official");
@@ -228,14 +288,7 @@ mod tests {
     #[ignore = "requires a GPU adapter"]
     fn a_rejected_atlas_retries_the_fallback() {
         let mut renderer = Renderer::new_offscreen(16, 16).expect("offscreen renderer");
-        let rejected = FontAtlas {
-            width: 0,
-            height: 0,
-            pixels: Vec::new(),
-            glyphs: Vec::new(),
-            line_height: 8.0,
-            white_uv: [0.0; 4],
-        };
+        let rejected = FontAtlas::new(0, 0, Vec::new(), Vec::new(), 8.0, [0.0; 4]);
         let (installed, messages) = test_support::capture(|| install(&mut renderer, &rejected));
         let installed = installed.expect("the fallback atlas is accepted");
 

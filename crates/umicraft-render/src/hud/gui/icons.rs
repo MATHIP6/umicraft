@@ -4,7 +4,7 @@
 //! order of the layer (crosshair, boss bar, status rows, bar above the
 //! hotbar) and the boss bar.
 
-use umicraft_ui::screens::ScaledResolution;
+use umicraft_ui::screens::{gui_scale_option, ScaledResolution};
 use umicraft_ui::{DrawList, FontAtlas, Rect, SpriteSheet};
 
 use super::crosshair::draw_crosshair;
@@ -30,7 +30,9 @@ pub(super) struct Canvas<'a> {
 impl<'a> Canvas<'a> {
     /// A canvas over `list` for a physical `viewport`.
     pub(super) fn new(list: &'a mut DrawList, viewport: (u32, u32)) -> Self {
-        let resolution = ScaledResolution::new(viewport.0, viewport.1, 0);
+        // The "GUI Scale" option caps the scale, as for the rest of the HUD
+        // (`GuiIngame` builds its `ScaledResolution` from `gameSettings.guiScale`).
+        let resolution = ScaledResolution::new(viewport.0, viewport.1, gui_scale_option());
         Self {
             list,
             width: resolution.scaled_width as i32,

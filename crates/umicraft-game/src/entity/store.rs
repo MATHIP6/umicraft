@@ -164,9 +164,53 @@ impl EntityStore {
 
     /// Seats `rider` on `vehicle`, or stands it up when `vehicle` is `None`
     /// (`Attach Entity` with leash 0). The seat is followed in [`Self::tick`].
+    ///
+    /// As `NetHandlerPlayClient.handleEntityAttach` and `Entity.mountEntity`
+    /// do: a rider the client does not track is ignored, a vehicle it does not
+    /// track makes the call a dismount, and a mount that would seat the
+    /// vehicle on its own rider, however far up the chain, is refused.
     pub fn attach(&mut self, rider: EntityId, vehicle: Option<EntityId>) {
+        if !self.entities.contains_key(&rider) {
+            return;
+        }
+        let Some(vehicle) = vehicle.filter(|id| self.entities.contains_key(id)) else {
+            self.dismount(rider);
+            return;
+        };
+        let mut seat = self.entities.get(&vehicle).and_then(|record| record.vehicle);
+        for _ in 0..self.entities.len() {
+            match seat {
+                Some(id) if id == rider => return,
+                Some(id) => seat = self.entities.get(&id).and_then(|record| record.vehicle),
+                None => break,
+            }
+        }
         if let Some(record) = self.entities.get_mut(&rider) {
-            record.vehicle = vehicle;
+            record.vehicle = Some(vehicle);
+        }
+    }
+
+    /// `Entity.mountEntity(null)`: the rider leaves its vehicle and is put
+    /// right over it, where it stays until it moves or falls. Nothing happens
+    /// to an entity that rides nothing.
+    fn dismount(&mut self, rider: EntityId) {
+        let Some(vehicle) = self.entities.get(&rider).and_then(|record| record.vehicle) else {
+            return;
+        };
+        let top = self
+            .entities
+            .get(&vehicle)
+            .map(crate::riding::dismount_position);
+        if let Some(record) = self.entities.get_mut(&rider) {
+            record.vehicle = None;
+            if let Some(top) = top {
+                // `setLocationAndAngles` also sets the previous position, so
+                // the rider does not glide there; the target is reset so it
+                // does not glide back to where the server last said it was.
+                record.position = top;
+                record.previous_position = top;
+                record.target_position = top;
+            }
         }
     }
 
@@ -235,6 +279,16 @@ impl EntityStore {
     /// Removes entities by network id.
     pub fn destroy(&mut self, entity_ids: &[i32]) {
         for &id in entity_ids {
+            // `World.removeEntity`: whatever rides the entity is put over it.
+            let riders: Vec<EntityId> = self
+                .entities
+                .iter()
+                .filter(|(_, rider)| rider.vehicle == Some(EntityId(id)))
+                .map(|(rider, _)| *rider)
+                .collect();
+            for rider in riders {
+                self.dismount(rider);
+            }
             self.entities.remove(&EntityId(id));
         }
         for angler in self.entities.values_mut() {
@@ -259,9 +313,12 @@ impl EntityStore {
         let alpha_f64 = f64::from(alpha.clamp(0.0, 1.0));
         let feet = record.previous_position.lerp(record.position, alpha_f64);
         let eye = feet + DVec3::Y * EYE_HEIGHT;
+        let eye = Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
         let lerp = |from: f32, to: f32| from + (to - from) * alpha.clamp(0.0, 1.0);
         Some(RenderState {
-            position: Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32),
+            position: eye,
+            eye,
+            orbit_start: Vec3::ZERO,
             yaw: lerp(record.previous_head_yaw, record.head_yaw).to_radians(),
             pitch: lerp(record.previous_pitch, record.pitch).to_radians(),
             on_ground: record.on_ground,
@@ -526,13 +583,29 @@ impl EntityStore {
             entity.meta.tick();
             entity.age_ticks = entity.age_ticks.saturating_add(1);
         }
+        // `World.updateEntities`: a rider whose vehicle is gone is let go.
+        let orphans: Vec<EntityId> = self
+            .entities
+            .iter()
+            .filter(|(_, rider)| {
+                rider
+                    .vehicle
+                    .is_some_and(|vehicle| !self.entities.contains_key(&vehicle))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in orphans {
+            if let Some(rider) = self.entities.get_mut(&id) {
+                rider.vehicle = None;
+            }
+        }
         // MCP `Entity.updateRidden`: a rider is put at the seat of its vehicle.
         let seats: Vec<(EntityId, DVec3)> = self
             .entities
             .iter()
             .filter_map(|(id, rider)| {
                 let vehicle = self.entities.get(&rider.vehicle?)?;
-                Some((*id, crate::riding::rider_feet(vehicle)))
+                Some((*id, crate::riding::rider_position(vehicle, rider)))
             })
             .collect();
         for (id, feet) in seats {
@@ -562,7 +635,9 @@ impl EntityStore {
     /// Call it right after [`Self::tick`].
     pub fn tick_objects<S: crate::shapes::BlockSource + ?Sized>(&mut self, world: &S) {
         for entity in self.entities.values_mut() {
-            if entity.collecting.is_none() {
+            // `World.updateEntities` skips a rider: its vehicle puts it at the
+            // seat, so an item on a hologram mount does not fall.
+            if entity.collecting.is_none() && entity.vehicle.is_none() {
                 super::objects::step(entity, world);
             }
         }
@@ -660,11 +735,114 @@ mod tests {
         let snaps = store.snapshots(1.0);
         let rider = snaps.iter().find(|s| s.id == EntityId(2)).unwrap();
         assert!(rider.riding);
-        // A boat at the origin seats the rider 0.4 along its yaw and 0.65 down.
-        assert!((rider.position - glam::Vec3::new(0.4, -0.65, 0.0)).length() < 1e-4);
+        // A boat at the origin seats the rider 0.4 along its yaw and 0.3 down
+        // (a pig has no `getYOffset` of its own, a player would sit 0.35 lower).
+        assert!((rider.position - glam::Vec3::new(0.4, -0.3, 0.0)).length() < 1e-4);
         store.attach(EntityId(2), None);
         store.tick();
         assert!(!store.snapshots(1.0).iter().any(|s| s.riding));
+    }
+
+    #[test]
+    fn an_item_on_a_hologram_mount_stays_put_instead_of_falling() {
+        struct Air;
+        impl crate::shapes::BlockSource for Air {
+            fn block(&self, _x: i32, _y: i32, _z: i32) -> umicraft_world::BlockState {
+                umicraft_world::BlockState::AIR
+            }
+        }
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 66, 0);
+        spawn_object_at_origin(&mut store, 2, 2, 0);
+        store.attach(EntityId(2), Some(EntityId(1)));
+        for _ in 0..20 {
+            store.tick();
+            store.tick_objects(&Air);
+        }
+        let snaps = store.snapshots(1.0);
+        let item = snaps.iter().find(|s| s.id == EntityId(2)).unwrap();
+        assert!(
+            (item.position.y - 0.3125 * 0.75).abs() < 1e-4,
+            "the item fell to {}",
+            item.position.y
+        );
+        // Taken off its mount, it falls again.
+        store.attach(EntityId(2), None);
+        for _ in 0..20 {
+            store.tick();
+            store.tick_objects(&Air);
+        }
+        let snaps = store.snapshots(1.0);
+        let item = snaps.iter().find(|s| s.id == EntityId(2)).unwrap();
+        assert!(item.position.y < 0.0, "free again: {}", item.position.y);
+    }
+
+    /// A wither skull with an item on it, as a hologram item line.
+    fn item_on_a_skull() -> EntityStore {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 66, 0);
+        spawn_object_at_origin(&mut store, 2, 2, 0);
+        store.attach(EntityId(2), Some(EntityId(1)));
+        store.tick();
+        store
+    }
+
+    struct Air;
+    impl crate::shapes::BlockSource for Air {
+        fn block(&self, _x: i32, _y: i32, _z: i32) -> umicraft_world::BlockState {
+            umicraft_world::BlockState::AIR
+        }
+    }
+
+    #[test]
+    fn leaving_a_mount_puts_the_rider_over_it() {
+        // `Entity.mountEntity(null)`: on top of the vehicle's hitbox, with no
+        // glide from the old seat.
+        let mut store = item_on_a_skull();
+        store.attach(EntityId(2), None);
+        let item = &store.entities[&EntityId(2)];
+        assert_eq!(item.vehicle, None);
+        assert!((item.position.y - 0.3125).abs() < 1e-9, "{}", item.position.y);
+        assert_eq!(item.previous_position, item.position);
+        assert_eq!(item.target_position, item.position);
+    }
+
+    #[test]
+    fn destroying_the_vehicle_lets_its_rider_go_and_fall() {
+        let mut store = item_on_a_skull();
+        store.destroy(&[1]);
+        assert_eq!(store.entities[&EntityId(2)].vehicle, None);
+        for _ in 0..10 {
+            store.tick();
+            store.tick_objects(&Air);
+        }
+        let y = store.entities[&EntityId(2)].position.y;
+        assert!(y < 0.3125 - 0.1, "the item falls from the skull top: {y}");
+    }
+
+    #[test]
+    fn attach_follows_handle_entity_attach_for_unknown_entities() {
+        // An unknown rider is ignored.
+        let mut store = item_on_a_skull();
+        store.attach(EntityId(99), Some(EntityId(1)));
+        assert!(!store.entities.contains_key(&EntityId(99)));
+        // An unknown vehicle is `mountEntity(null)`: the item steps off.
+        store.attach(EntityId(2), Some(EntityId(98)));
+        assert_eq!(store.entities[&EntityId(2)].vehicle, None);
+    }
+
+    #[test]
+    fn a_mount_that_seats_the_vehicle_on_its_rider_is_refused() {
+        let mut store = EntityStore::new();
+        for id in 1..=3 {
+            spawn_object_at_origin(&mut store, id, 66, 0);
+        }
+        store.attach(EntityId(2), Some(EntityId(1)));
+        store.attach(EntityId(3), Some(EntityId(2)));
+        // 1 on 3 would close the loop 1 -> 3 -> 2 -> 1.
+        store.attach(EntityId(1), Some(EntityId(3)));
+        assert_eq!(store.entities[&EntityId(1)].vehicle, None);
+        assert_eq!(store.entities[&EntityId(3)].vehicle, Some(EntityId(2)));
     }
 
     #[test]

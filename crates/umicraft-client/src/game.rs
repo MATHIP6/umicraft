@@ -20,7 +20,7 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -344,14 +344,34 @@ pub struct GameStatus {
     pub placed: bool,
 }
 
+/// What the mouse look changed since the newest tick.
+#[derive(Debug, Clone, Copy)]
+pub struct Look {
+    /// The view of the player: it replaces the newest frame's view without
+    /// restarting the interpolation.
+    pub view: RenderState,
+    /// The pitch of the local body in degrees. `Entity.setAngles` moves the
+    /// pitch and its previous value together, every frame, so the body looks
+    /// where the mouse points at once; the yaw of the body and the head is
+    /// the one of the tick, interpolated.
+    pub body_pitch: f32,
+}
+
+/// The newest [`Look`], shared by the game thread and the render thread.
+///
+/// A mouse look overwrites it instead of queueing an event: the mouse sends
+/// hundreds of looks a second, and as events they filled the frame queue until
+/// the tick frames, which carry the body of the player and the entities, were
+/// dropped.
+pub type LookSlot = Arc<Mutex<Option<Look>>>;
+
 /// A message the game thread sends to the render thread.
 #[derive(Debug)]
 pub enum RenderEvent {
     /// A simulation frame.
     Frame(Box<Frame>),
-    /// The view of the player changed between two ticks (mouse look); it
-    /// replaces the newest frame's view without restarting the interpolation.
-    Look(RenderState),
+    /// The slot the mouse look goes to, sent once at the start of the session.
+    LookSlot(LookSlot),
     /// The sounds the tick produced (footsteps, digging, rain, server
     /// effects), oldest first; the render thread hands them to the audio
     /// thread. Never empty.
@@ -607,6 +627,8 @@ struct Game {
     /// The body of the local player, animated like any other player; drawn
     /// in the third-person perspectives.
     body: EntityRecord,
+    /// Where the mouse look is published to the render thread.
+    look: LookSlot,
     /// The statistics of the session.
     status_data: GameStatus,
     /// Whether the HUD has to be published again.
@@ -688,6 +710,7 @@ impl Game {
             attack_pressed: false,
             hand: HandState::new(),
             body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
+            look: LookSlot::default(),
             status_data: GameStatus::default(),
             hud_dirty: true,
             hit_emitters: Vec::new(),
@@ -808,34 +831,23 @@ impl Game {
         cracks
     }
 
-    /// True when the chunks around the player are loaded.
+    /// True when the chunk the player stands in is loaded.
     ///
-    /// The simulation must not run on an incomplete world: the collision
-    /// solver would see air, the player would fall through the floor and the
-    /// server would reject the position.
+    /// The simulation must not run without it: the collision solver would see
+    /// air, the player would fall through the floor and the server would reject
+    /// the position. Only that chunk counts (MCP `EntityPlayerSP.onUpdate`,
+    /// `isBlockLoaded(posX, 0, posZ)`): a server that sends a single chunk, such
+    /// as a proxy's waiting world, still sees the player fall.
     fn world_ready(&self) -> bool {
-        let Some(world) = self.world.as_ref() else {
-            return false;
-        };
-        let Some(state) = self.state.as_ref() else {
+        let (Some(world), Some(state)) = (self.world.as_ref(), self.state.as_ref()) else {
             return false;
         };
         let position = state.position();
         let chunk = ChunkPos::new(
-            (position.x as i32).div_euclid(16),
-            (position.z as i32).div_euclid(16),
+            (position.x.floor() as i32).div_euclid(16),
+            (position.z.floor() as i32).div_euclid(16),
         );
-        for dx in -1..=1 {
-            for dz in -1..=1 {
-                if world
-                    .chunk(ChunkPos::new(chunk.x + dx, chunk.z + dz))
-                    .is_none()
-                {
-                    return false;
-                }
-            }
-        }
-        true
+        world.chunk(chunk).is_some()
     }
 
     /// The HUD state of the session.
@@ -1008,6 +1020,9 @@ fn run(
 ) {
     let mut game = Game::new();
     game.own_name = own_name;
+    // The first event of the queue, which is still empty: the render thread
+    // reads the mouse look from this slot, never from the queue.
+    let _ = frames.try_send(RenderEvent::LookSlot(Arc::clone(&game.look)));
     let mut queue = CommandQueue {
         ordered: VecDeque::new(),
         input: None,
@@ -1113,7 +1128,7 @@ fn handle_event(
             if (game.yaw, game.pitch) != before {
                 // The view changed between two ticks: publish it right away,
                 // so the mouse look does not wait for the next tick.
-                publish_look(game, frames);
+                publish_look(game);
             }
             false
         }
@@ -1248,9 +1263,15 @@ fn player_view(game: &Game) -> Option<(RenderState, bool)> {
 /// A full [`Frame`] would restart the render thread's interpolation (its
 /// `tick_time` is the arrival) and, at mouse rate, fill the frame queue until
 /// tick frames are dropped: entities and the camera then stutter while moving.
-fn publish_look(game: &Game, frames: &SyncSender<RenderEvent>) {
+fn publish_look(game: &Game) {
     if let Some((view, _)) = player_view(game) {
-        let _ = frames.try_send(RenderEvent::Look(view));
+        let look = Look {
+            view,
+            body_pitch: game.pitch.to_degrees(),
+        };
+        if let Ok(mut slot) = game.look.lock() {
+            *slot = Some(look);
+        }
     }
 }
 
@@ -1410,8 +1431,18 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
     };
     let eye = first_person.position.as_dvec3();
     let pose = camera_pose(game.perspective, eye, game.yaw, game.pitch, world);
+    // The same angles from the eye of the previous tick: the wall rays of
+    // `orientCamera` start from the interpolated eye every frame, so the
+    // renderer blends this orbit with the one above over the tick.
+    let start = game
+        .state
+        .as_ref()
+        .map_or(eye, |state| state.interpolated(0.0).position.as_dvec3());
+    let start_pose = camera_pose(game.perspective, start, game.yaw, game.pitch, world);
     RenderState {
         position: pose.position.as_vec3(),
+        eye: first_person.position,
+        orbit_start: (start_pose.position - start).as_vec3(),
         yaw: pose.yaw,
         pitch: pose.pitch,
         ..first_person
@@ -1601,6 +1632,16 @@ fn apply_net_event(
             game.server.on_join(info.entity_id);
             game.server_view = ServerView::default();
             game.vehicle = None;
+            // `handleJoinGame` makes a new `PlayerControllerMP` and a new
+            // player, and closes the screen: nothing of the old session's dig,
+            // item use, pending click or open window survives a server switch.
+            game.interaction = Interaction::new();
+            game.item_use = ItemUse::new();
+            game.attack_pressed = false;
+            game.use_pressed = false;
+            game.pending_book = None;
+            game.windows = WindowManager::new();
+            publish_inventory(game, frames);
             set_gamemode(game, GameMode::from_wire(info.gamemode));
             game.dimension = info.dimension;
             // The world clock of the new session is unknown until the first
@@ -1640,6 +1681,12 @@ fn apply_net_event(
             if let PlayerListItem::AddPlayer(entries) = &packet {
                 for entry in entries {
                     let profile = profile_from_properties(&entry.name, &entry.properties);
+                    // A skin plugin re-sends the own entry once the skin is
+                    // applied, so the local body must follow the update.
+                    if entry.name == game.own_name {
+                        game.body.uuid = Some(entry.uuid.to_be_bytes());
+                        game.body.profile = Some(std::sync::Arc::new(profile.clone()));
+                    }
                     game.entities.set_profile(entry.uuid.to_be_bytes(), profile);
                 }
             }
@@ -5299,6 +5346,35 @@ mod tests {
         );
         assert_eq!(game.world_time, 0);
         assert_eq!(game.dimension, -1);
+    }
+
+    #[test]
+    fn joining_another_server_starts_without_the_old_clicks_and_item_use() {
+        // A lobby compass: the right click is still pending and an item is in
+        // use when the proxy sends the player to another server.
+        use umicraft_net::play::JoinGameInfo;
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        game.use_pressed = true;
+        game.attack_pressed = true;
+        let join = JoinGameInfo {
+            entity_id: 1,
+            gamemode: 0,
+            dimension: 0,
+            difficulty: 0,
+            max_players: 20,
+            level_type: "default".to_string(),
+            reduced_debug_info: false,
+        };
+        handle_net(&mut game, PlayEvent::JoinGame(join), &mut queue, &frames);
+        assert!(!game.use_pressed && !game.attack_pressed);
+        assert!(!game.item_use.is_using());
+        assert!(
+            game.windows.view().container.is_none(),
+            "no window stays open"
+        );
     }
 
     #[test]

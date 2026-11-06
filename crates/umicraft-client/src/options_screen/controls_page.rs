@@ -53,7 +53,12 @@ impl OptionsScreen {
         let cx = gui.cx();
         let entries = key_entries(lang);
         let content = entries.len() as f32 * KEY_ROW;
-        self.scroll_list(ui, content, bottom - top, KEY_ROW);
+        self.scroll_list(
+            ui,
+            gui,
+            (cx + 124.0 + 32.0, top, bottom),
+            (content, KEY_ROW),
+        );
         Self::list_container(ui, gui, (0.0, gui.width), (top, bottom), self.scroll);
 
         let label_width = Action::ALL

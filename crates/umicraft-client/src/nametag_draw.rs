@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use glam::{Vec3, Vec4};
+use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_game::hud::team_names::SCORE_LABEL_RANGE_SQ;
 use umicraft_render::Camera;
@@ -65,7 +66,9 @@ pub fn place_tags(
             if entity.position.distance(camera.position) >= range {
                 return None;
             }
-            let lift = entity.kind.height() + ABOVE_HEAD;
+            // `renderName` lowers the label of a child by half its height.
+            let (body, child) = hitbox(entity);
+            let lift = body + ABOVE_HEAD - if child { body / 2.0 } else { 0.0 };
             let lift = if sneaking { lift - SNEAK_DROP } else { lift };
             let anchor = entity.position + Vec3::Y * lift;
             let top = project(view_projection, anchor, width, height)?;
@@ -111,6 +114,24 @@ pub fn place_tags(
         })
         .flatten()
         .collect()
+}
+
+/// The hitbox height under the tag and whether the entity counts as a child
+/// (MCP `Entity.height`, `isChild`). An armour stand is 1.975 high, a marker
+/// has no size at all (`EntityArmorStand.func_181550_a`) and a small one is a
+/// child.
+fn hitbox(entity: &EntityRenderSnapshot) -> (f32, bool) {
+    match &entity.meta.variant {
+        Variant::ArmorStand(stand) => (
+            if stand.marker() {
+                0.0
+            } else {
+                entity.kind.height()
+            },
+            stand.small(),
+        ),
+        _ => (entity.kind.height(), entity.meta.baby),
+    }
 }
 
 /// The screen position of a world point, `None` behind the camera.
@@ -308,6 +329,21 @@ mod tests {
         // The name is a line and 15 % higher up the screen than the score.
         let lift = tags[0].anchor[1] - tags[1].anchor[1];
         assert!((lift - FONT_HEIGHT * 1.15 * tags[0].scale).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_tag_of_an_armour_stand_follows_its_size() {
+        let tag_y = |flags: u8| {
+            let mut stand = tagged(EntityKind::ArmorStand, Vec3::new(0.0, 0.0, 5.0), "Shop");
+            let mut meta = umicraft_game::entity::meta::ArmorStandMeta::default();
+            meta.flags = flags;
+            stand.meta.variant = Variant::ArmorStand(meta);
+            place_tags(&[stand], &camera(), 1280.0, 720.0)[0].anchor[1]
+        };
+        // Lower on the screen is a larger y: a full stand (1.975 + 0.5), a
+        // small one (half the height lower) and a marker (0 + 0.5).
+        let (full, small, marker) = (tag_y(0), tag_y(1), tag_y(16));
+        assert!(full < small && small < marker, "{full} {small} {marker}");
     }
 
     #[test]

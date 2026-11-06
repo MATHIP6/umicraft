@@ -158,6 +158,9 @@ impl EntityKind {
             Self::Wither => 3.5,
             Self::Arrow => 0.5,
             Self::Item => 0.25,
+            Self::ArmorStand => 1.975,
+            Self::WitherSkull | Self::SmallFireball => 0.3125,
+            Self::LargeFireball => 1.0,
             _ => 1.8,
         }
     }
@@ -217,6 +220,9 @@ impl EntityKind {
     #[must_use]
     pub const fn from_mob_type(id: u8) -> Self {
         match id {
+            // 1.8 sends an armour stand as a mob (`EntityList` id 30), the
+            // object type 78 being the 1.9 form.
+            30 => Self::ArmorStand,
             50 => Self::Creeper,
             51 => Self::Skeleton,
             52 => Self::Spider,
@@ -310,6 +316,7 @@ mod tests {
     #[test]
     fn armour_stands_are_object_type_78() {
         assert_eq!(EntityKind::from_object_type(78), EntityKind::ArmorStand);
+        assert_eq!(EntityKind::from_mob_type(30), EntityKind::ArmorStand);
     }
 
     #[test]

@@ -10,7 +10,9 @@
 use crate::draw::Color;
 use crate::geom::Rect;
 use crate::menus::background::{draw_list_background, draw_list_overlay};
-use crate::menus::common::{draw_scrollbar, wheel_scrolled_by, Gui, TextPlacement, WHITE};
+use crate::menus::common::{
+    draw_scrollbar, wheel_scrolled_by, Gui, ScrollbarDrag, TextPlacement, WHITE,
+};
 use crate::text::FontAtlas;
 use crate::Ui;
 
@@ -81,16 +83,33 @@ impl ListFrame {
     }
 
     /// Applies the wheel and returns the clamped offset.
-    pub(super) fn scrolled(&self, ui: &Ui, gui: &Gui, offset: f32) -> f32 {
+    pub(super) fn scrolled(
+        &self,
+        ui: &Ui,
+        gui: &Gui,
+        offset: f32,
+        bar: &mut ScrollbarDrag,
+    ) -> f32 {
         let step = self.slot_height / 2.0;
-        wheel_scrolled_by(
+        let content = self.content_height();
+        let offset = wheel_scrolled_by(ui, gui, Self::view(gui), content, offset, step);
+        let geometry = Self::bar(gui);
+        bar.apply(
             ui,
-            gui,
-            Self::view(gui),
-            self.content_height(),
+            gui.scale,
+            geometry,
+            (content, (content - geometry[2]).max(0.0)),
             offset,
-            step,
         )
+    }
+
+    /// The scrollbar as `[x, top, height]` in GUI units.
+    fn bar(gui: &Gui) -> [f32; 3] {
+        [
+            gui.cx() + SCROLLBAR_OFFSET,
+            LIST_TOP,
+            Self::bottom(gui) - LIST_TOP,
+        ]
     }
 
     /// Draws the dirt container, runs `rows` clipped to it, then paints the
@@ -102,12 +121,7 @@ impl ListFrame {
         rows(ui);
         ui.pop_clip();
         draw_list_overlay(ui, view);
-        let bar = [
-            gui.cx() + SCROLLBAR_OFFSET,
-            LIST_TOP,
-            Self::bottom(gui) - LIST_TOP,
-        ];
-        draw_scrollbar(ui, gui, bar, self.content_height(), offset);
+        draw_scrollbar(ui, gui, Self::bar(gui), self.content_height(), offset);
     }
 }
 
