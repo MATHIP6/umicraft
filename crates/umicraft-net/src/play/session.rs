@@ -411,7 +411,6 @@ impl Reaction {
 #[derive(Debug)]
 pub struct PlaySession {
     options: PlayOptions,
-    entry_sent: bool,
     placement: Option<PlayerPlacement>,
 }
 
@@ -421,7 +420,6 @@ impl PlaySession {
     pub fn new(options: PlayOptions) -> Self {
         Self {
             options,
-            entry_sent: false,
             placement: None,
         }
     }
@@ -710,8 +708,12 @@ impl PlaySession {
         }
     }
 
-    /// Forwards `Join Game` and, the first time only, answers with the entry
-    /// packets.
+    /// Forwards `Join Game` and answers with the entry packets.
+    ///
+    /// Vanilla sends `Client Settings` and `MC|Brand` on *every* `Join Game`
+    /// (MCP `NetHandlerPlayClient.handleJoinGame`), which is how the backend
+    /// server reached through a BungeeCord or Velocity switch learns them
+    /// (NET-10).
     ///
     /// The order matters: a 1.8 server that receives them before it switched
     /// to the play state logs `Bad packet id 21`.
@@ -725,10 +727,7 @@ impl PlaySession {
             level_type: packet.level_type,
             reduced_debug_info: packet.reduced_debug_info,
         }));
-        if !self.entry_sent {
-            reaction.replies = self.entry_packets()?;
-            self.entry_sent = true;
-        }
+        reaction.replies = self.entry_packets()?;
         Ok(reaction)
     }
 
@@ -935,11 +934,17 @@ mod tests {
     }
 
     #[test]
-    fn a_second_join_game_does_not_resend_the_entry_packets() {
+    fn a_second_join_game_after_a_proxy_switch_resends_the_entry_packets() {
         let mut session = PlaySession::new(PlayOptions::default());
-        let _ = react(&mut session, join_game());
-        let event = event(&mut session, join_game());
-        assert!(matches!(event, PlayEvent::JoinGame(_)));
+        let first: Vec<_> = react(&mut session, join_game())
+            .replies()
+            .cloned()
+            .collect();
+        let second = react(&mut session, join_game());
+        let replies: Vec<_> = second.replies().cloned().collect();
+        assert_eq!(replies, first);
+        assert_eq!(replies.len(), 2);
+        assert!(matches!(second.into_event(), Some(PlayEvent::JoinGame(_))));
     }
 
     #[test]

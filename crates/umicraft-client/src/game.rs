@@ -5241,6 +5241,58 @@ mod tests {
         assert_send_sync::<Frame>();
     }
 
+    /// NET-10: a BungeeCord or Velocity switch is a second `Join Game` on the
+    /// same connection; the new server's world replaces the old one.
+    #[test]
+    fn a_second_join_game_replaces_the_world_of_the_previous_server() {
+        use umicraft_net::play::JoinGameInfo;
+        use umicraft_protocol::packets::play::clientbound::TimeUpdate;
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let join = |entity_id, dimension| JoinGameInfo {
+            entity_id,
+            gamemode: 0,
+            dimension,
+            difficulty: 0,
+            max_players: 20,
+            level_type: "default".to_string(),
+            reduced_debug_info: false,
+        };
+
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join(7, 0)),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::TimeUpdate(TimeUpdate {
+                world_age: 1,
+                time_of_day: 9_000,
+            }),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join(99, -1)),
+            &mut queue,
+            &frames,
+        );
+
+        assert_eq!(game.entity_id, 99);
+        assert_eq!(game.dimension, -1);
+        assert_eq!(game.world_time, 0);
+        assert_eq!(game.entities.len(), 0);
+        assert!(game
+            .world
+            .as_ref()
+            .is_some_and(|world| world.dimension() == -1));
+    }
+
     #[test]
     fn joining_and_changing_dimension_reset_the_world_clock() {
         use umicraft_net::play::JoinGameInfo;
