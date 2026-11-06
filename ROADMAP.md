@@ -56,7 +56,7 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
 | M11 Audio | Partial — code complete (index, engine, cues, packets, GUI clicks, volumes, music, non-blocking measured); owner validation by ear open | P11 |
 | M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); accounts not started | P10 (rest of menus), F1 (accounts) |
-| M13 Premium authentication | Not started | P12 |
+| M13 Premium authentication | Session join and encryption in P12 (session from launcher arguments, ADR-0053); Microsoft login, keychain and isolation in F1 | P12, F1 |
 | M14 Performance pass | Not started | F2 |
 | M15 Modding API v1 | Not started | F3 |
 | M16 Hardening & v1.0 | Not started | P12 (proxies), F4 |
@@ -84,9 +84,9 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | 17 | F3 — Modding API v1 | F2 |
 | 18 | F4 — Hardening & v1.0 release | F1–F3 |
 
-P3 and P7 can run in parallel with P2 (different crates). The P12
-authentication spike carries external risk and blocks nothing in the parity
-track, so it may start at any time.
+P3 and P7 can run in parallel with P2 (different crates). The Microsoft
+authentication spike (now owned by F1, ADR-0053) carries external risk and
+blocks nothing in the parity track, so it may start at any time.
 
 ```
 P0 ─► P1 ─┬─► P2 ─────────────┬─► P4 ─┬─► P6 ─┐
@@ -94,7 +94,7 @@ P0 ─► P1 ─┬─► P2 ─────────────┬─► P4
           │     └────────► P5 ────────┘       │
           ├─► P7 ─────────► P8 ◄── P5          ├─► P13 ─► F1 / F2 ─► F3 ─► F4
           ├─► P9 (after P3, P4) ─► P10 ─► P11 ─┤
-          └─► P12 (spike any time; finish after P10)
+          └─► P12 (finish after P10; Microsoft spike lives in F1)
 ```
 
 ---
@@ -554,7 +554,7 @@ Realms (no row, owner decision), Open to LAN and LAN entries, SRV lookup,
 Super Secret Settings, Broadcast Settings (Twitch), 3D Anaglyph, Use VBOs,
 Force Unicode Font and right-to-left text, resource pack icons (`pack.png`),
 Smooth Camera, Spectator Outlines and the streaming keys, the title logo
-easter egg, premium login (P12), sound playback (P11; volumes are stored).
+easter egg, premium login (F1; P12 accepts a launcher session), sound playback (P11; volumes are stored).
 
 **Owner validation checklist:** start the client without arguments, add a
 server, connect, change options (video, sounds, language), rebind a key,
@@ -613,12 +613,17 @@ sound device):
 
 ### P12 — Online mode & real-server compatibility
 
+The client authenticates the way vanilla 1.8.8 does: a launcher hands it a
+session (username, UUID, access token) and the client uses it. The Microsoft
+login itself is not vanilla behaviour and belongs to F1 (ADR-0053).
+
 **Features**
-- A short spike first: current Microsoft endpoints, the device-code flow,
-  the licence of the secret-storage crate.
-- Microsoft device code → Xbox Live → XSTS → Minecraft services → profile;
-  session join; encryption handshake; keychain token storage
-  (ACC-4/5/6/7, NET-4). One account is enough here; the manager is F1.
+- A `Session { username, uuid, access_token }` seam in the client, filled from
+  launch arguments (`--username`, `--uuid`, `--accessToken`) or environment
+  variables; absent = offline session as today. F1 plugs the account manager
+  into the same seam.
+- Session join (`sessionserver` `join` with the server hash) and the
+  encryption handshake (NET-4/5); the access token is never logged.
 - BungeeCord and Velocity server switching (NET-10), server resource packs
   with prompt and SHA-1 check (NET-11), plugin-channel handshake.
 
@@ -626,9 +631,10 @@ sound device):
 `NetHandlerPlayClient.handleResourcePack`, `handleRespawn`,
 `ResourcePackRepository`.
 
-**Done when:** a premium account joins an online-mode 1.8 server and a
-BungeeCord network, switches servers without reconnecting and accepts a
-server resource pack; tokens never appear in the logs.
+**Done when:** a premium account, whose session comes from a launcher, joins
+an online-mode 1.8 server and a BungeeCord network, switches servers without
+reconnecting and accepts a server resource pack; the token never appears in
+the logs.
 
 ### P13 — Parity sign-off
 
@@ -645,7 +651,7 @@ approved deviation.
 
 | Milestone | Content | Done when |
 |---|---|---|
-| **F1 — Account manager & live switching** | `umicraft-auth`, offline accounts with the standard UUID, multi-account manager, live switch, account UI in menus (ACC-1/2/3/8/10). | Former M12 and M13 acceptance criteria. |
+| **F1 — Account manager & live switching** | Starts with a short spike (current Microsoft endpoints, device-code flow, licence of the secret-storage crate). `umicraft-auth`: Microsoft device code → Xbox Live → XSTS → Minecraft services → profile, token refresh, keychain storage (ACC-4/6/7); offline accounts with the standard UUID, multi-account manager, live switch, account UI in menus (ACC-1/2/3/8/10), plugged into the P12 `Session` seam. | Former M12 and M13 acceptance criteria. |
 | **F2 — Performance pass** | Frustum and occlusion culling, mesh priority queue, GPU-driven rendering, upload budget, allocation audit, CI benchmarks (backlog "Performance"). | Before/after numbers in `docs/perf-log.md`; spec §7 targets met or explained. |
 | **F3 — Modding API v1** | Former M15, including the move of built-in features onto `umicraft-core`. Resolve first the contradiction between spec §8.4 (ECS for mods) and ADR-0015 (typed `EntityStore`). | Former M15 acceptance criteria. |
 | **F4 — Hardening & v1.0** | Former M16 minus proxies (moved to P12): long sessions, packaging, crash reports, docs site, legal review. | `docs/release.md` fully ticked. |

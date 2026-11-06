@@ -45,7 +45,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
 | Connection | status ping, offline login, compression, keep-alive, disconnect reason | Partial — not verified against vanilla | P1 | `docs/fuzzing.md`, `umicraft-protocol/tests/roundtrip.rs` | Fuzzed (10 min per target) and property-tested in P1; compression switched in play state too (0x46). |
-| Connection | online-mode login (Microsoft auth, session join, encryption) | Missing | P12 | — |  |
+| Connection | online-mode login (launcher session, session join, encryption; Microsoft auth is F1, ADR-0053) | Missing | P12 | — |  |
 | Connection | brand + client settings | Partial — not verified against vanilla | P1 | — | Skin-layer bits move to P10. |
 | Connection | plugin channels (MC\|Brand in, REGISTER, BungeeCord) | Missing | P12 | — |  |
 | Connection | proxy server switch (dimension-swap respawn trick) | Unverified | P12 | — |  |
