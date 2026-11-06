@@ -2055,6 +2055,13 @@ fn apply_net_event(
             if status.entity_id == game.entity_id && status.status == 2 {
                 game.body.animation.hurt_by_status();
             }
+            // Only the local player hears its own status: other entities'
+            // sounds arrive as Sound Effect packets (`sound::entity_sounds`).
+            if status.entity_id == game.entity_id {
+                if let Some(state) = game.state.as_mut() {
+                    state.on_local_player_status(status.status);
+                }
+            }
             game.entities
                 .status(EntityId(status.entity_id), status.status);
         }
@@ -4902,6 +4909,40 @@ mod tests {
         other.entity_id = 7;
         handle_net(&mut other, hurt_status(8, 2), &mut queue, &frames);
         assert_eq!(other.body.animation.hurt_time(), 0);
+    }
+
+    #[test]
+    fn a_hurt_status_of_the_local_player_plays_the_hurt_sound_once() {
+        // Regression: no damage sound was played when the player was hit.
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 7;
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let feet = game.state.as_ref().unwrap().position();
+        handle_net(&mut game, hurt_status(7, 2), &mut queue, &frames);
+        let cues = game.state.as_mut().unwrap().drain_sound_cues();
+        let hurt: Vec<_> = cues
+            .iter()
+            .filter(|c| c.name == "game.player.hurt")
+            .collect();
+        assert_eq!(hurt.len(), 1);
+        assert_eq!(hurt[0].pos, feet.to_array());
+        handle_net(&mut game, hurt_status(7, 3), &mut queue, &frames);
+        let cues = game.state.as_mut().unwrap().drain_sound_cues();
+        assert!(cues.iter().any(|c| c.name == "game.player.die"));
+    }
+
+    #[test]
+    fn a_hurt_status_of_another_entity_is_silent_because_the_server_sends_the_sound() {
+        // `RenderGlobal.playSound` is empty in 1.8: playing it here too would
+        // double the Sound Effect packet of the same hit.
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 7;
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, hurt_status(8, 2), &mut queue, &frames);
+        let cues = game.state.as_mut().unwrap().drain_sound_cues();
+        assert!(cues.iter().all(|c| c.name != "game.player.hurt"));
     }
 
     #[test]

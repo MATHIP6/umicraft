@@ -16,6 +16,7 @@ use umicraft_protocol::packets::play::clientbound::sound_effect::SoundEffect;
 use super::block_events::break_sound;
 use super::cue::SoundCue;
 use super::effect_packet::effect_cues;
+use super::entity_sounds::local_player_status_cue;
 use super::sound_packet::cue_from_packet;
 use super::step::Stepper;
 use crate::physics::Player;
@@ -79,6 +80,13 @@ impl SoundQueue {
     pub fn effect(&mut self, packet: &Effect) {
         let cues = effect_cues(packet, &mut self.rng, break_sound);
         self.cues.extend(cues);
+    }
+
+    /// Queues the hurt or death sound of the local player for an `Entity
+    /// Status` code (see [`super::entity_sounds`]).
+    pub fn local_player_status(&mut self, status: i8, feet: DVec3) {
+        let cue = local_player_status_cue(status, feet, &mut self.rng);
+        self.cues.extend(cue);
     }
 
     /// Queues the movement sounds of the tick the player just ran.
@@ -146,6 +154,17 @@ mod tests {
         queue.effect(&effect(2000, 0));
         assert_eq!(queue.drain()[0].name, "random.click");
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn the_local_player_status_queues_its_hurt_sound_and_ignores_others() {
+        let mut queue = SoundQueue::new();
+        queue.local_player_status(9, DVec3::ZERO);
+        assert!(queue.is_empty());
+        queue.local_player_status(2, DVec3::new(1.0, 2.0, 3.0));
+        let cues = queue.drain();
+        assert_eq!(cues[0].name, "game.player.hurt");
+        assert_eq!(cues[0].pos, [1.0, 2.0, 3.0]);
     }
 
     struct Floor;

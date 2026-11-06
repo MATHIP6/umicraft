@@ -232,6 +232,13 @@ impl GameState {
         self.sounds.extend(cues);
     }
 
+    /// Queues the hurt or death sound of the local player for an `Entity
+    /// Status` (2 or 3) addressed to it; other codes are ignored.
+    pub fn on_local_player_status(&mut self, status: i8) {
+        self.sounds
+            .local_player_status(status, self.player.position);
+    }
+
     /// Queues the cue of a Sound Effect packet.
     pub fn on_sound_effect(
         &mut self,
