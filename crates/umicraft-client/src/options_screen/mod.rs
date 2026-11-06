@@ -95,6 +95,8 @@ pub struct OptionsScreen {
     pack_confirm: Option<(String, umicraft_ui::menus::ConfirmScreen)>,
     /// Scroll offset of the list of the page, in GUI units.
     scroll: f32,
+    /// The drag of the scrollbar of the list of the page.
+    scroll_bar: umicraft_ui::menus::ScrollbarDrag,
     sliders: HashMap<String, SliderState>,
     /// The languages and packs the pages choose from.
     catalog: Catalog,
@@ -102,6 +104,8 @@ pub struct OptionsScreen {
     pack_draft: Vec<String>,
     /// Scroll offsets of the available and selected pack lists.
     pack_scroll: [f32; 2],
+    /// The drags of the scrollbars of the two pack lists.
+    pack_bars: [umicraft_ui::menus::ScrollbarDrag; 2],
     /// The rectangle of every widget in the last frame, by id.
     rects: HashMap<String, Rect>,
     /// Whether a world is behind the screen (opened from the game menu):
@@ -124,10 +128,12 @@ impl OptionsScreen {
             capturing: None,
             pack_confirm: None,
             scroll: 0.0,
+            scroll_bar: Default::default(),
             sliders: HashMap::new(),
             catalog: Catalog::default(),
             pack_draft: Vec::new(),
             pack_scroll: [0.0; 2],
+            pack_bars: Default::default(),
             rects: HashMap::new(),
             over_world: false,
         }

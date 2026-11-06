@@ -96,6 +96,8 @@ pub fn fallback_atlas() -> FontAtlas {
             uv_min,
             uv_max,
             advance: font::CELL_WIDTH as f32,
+            pen: font::CELL_WIDTH as f32,
+            scale: 1.0,
         });
     }
     let (white_min, white_max) = font::cell_uv(font::WHITE_SLOT);
@@ -482,7 +484,7 @@ impl UiPass {
             let quad = glyph_quad(cursor, glyph, atlas, scale);
             if style.rotation != 0.0 {
                 self.push_turned_glyph(quad, (position, style.rotation), glyph, color, clip);
-                cursor[0] += glyph.advance * scale;
+                cursor[0] += glyph.pen.trunc() * scale;
                 continue;
             }
             if let Some(visible) = drawable(quad).and_then(|quad| quad.intersect(clip)) {
@@ -494,7 +496,9 @@ impl UiPass {
                     color,
                 );
             }
-            cursor[0] += glyph.advance * scale;
+            // `renderStringAtPos`: `posX += (float)((int) f)` of what the
+            // glyph drew, which is not what `getCharWidth` measures.
+            cursor[0] += glyph.pen.trunc() * scale;
         }
     }
 
@@ -557,8 +561,8 @@ fn glyph_quad(cursor: [f32; 2], glyph: &Glyph, atlas: &FontAtlas, scale: f32) ->
     Rect::new(
         cursor[0],
         cursor[1],
-        (glyph.uv_max[0] - glyph.uv_min[0]) * atlas.width as f32 * scale,
-        (glyph.uv_max[1] - glyph.uv_min[1]) * atlas.height as f32 * scale,
+        (glyph.uv_max[0] - glyph.uv_min[0]) * atlas.width as f32 * scale * glyph.scale,
+        (glyph.uv_max[1] - glyph.uv_min[1]) * atlas.height as f32 * scale * glyph.scale,
     )
 }
 
@@ -669,12 +673,16 @@ mod tests {
                     uv_min: [0.0, 0.0],
                     uv_max: [0.5, 1.0],
                     advance: 4.0,
+                    pen: 4.0,
+                    scale: 1.0,
                 },
                 Glyph {
                     character: 'B',
                     uv_min: [0.5, 0.0],
                     uv_max: [1.0, 1.0],
                     advance: 6.0,
+                    pen: 6.0,
+                    scale: 1.0,
                 },
             ],
             10.0,

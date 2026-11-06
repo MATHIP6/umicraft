@@ -141,8 +141,20 @@ impl ServerCorrection {
 /// What the renderer needs: plain data, no game types.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderState {
-    /// The eye position in world space.
+    /// The camera position in world space: the eye in the first person, the
+    /// orbit around it in the third.
     pub position: Vec3,
+    /// The eye position the third-person camera orbits, equal to `position`
+    /// in the first person. The renderer interpolates it between ticks and
+    /// adds the orbit offset of the newest look, as `EntityRenderer.orientCamera`
+    /// places the camera from the interpolated eye and the current angles.
+    pub eye: Vec3,
+    /// The orbit offset (camera minus eye) the same angles give from the eye
+    /// of the previous tick. The offset from the current eye is
+    /// `position - eye`; the renderer blends the two over the tick, which
+    /// follows the clear distance of the wall rays as `orientCamera` casts
+    /// them every frame from the interpolated eye.
+    pub orbit_start: Vec3,
     /// The horizontal view angle in radians.
     pub yaw: f32,
     /// The vertical view angle in radians.
@@ -370,8 +382,11 @@ impl GameState {
             physics::EYE_HEIGHT
         };
         let eye = feet + DVec3::Y * eye_height;
+        let eye = Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
         RenderState {
-            position: Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32),
+            position: eye,
+            eye,
+            orbit_start: Vec3::ZERO,
             yaw: self.player.yaw,
             pitch: self.player.pitch,
             on_ground: self.player.on_ground,

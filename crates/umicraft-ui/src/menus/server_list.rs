@@ -23,7 +23,9 @@ use crate::widgets::tooltip::TooltipRow;
 use crate::widgets::util::last_primary_press;
 
 use super::background::{draw_list_background, draw_list_overlay, draw_menu_background};
-use super::common::{draw_scrollbar, escape_pressed, key_pressed, wheel_scrolled, Gui};
+use super::common::{
+    draw_scrollbar, escape_pressed, key_pressed, wheel_scrolled, Gui, ScrollbarDrag,
+};
 use super::row_draw::{draw_tips, RowContext, RowFlags};
 pub use super::server_row::{latency_level, RowStatus, ServerRow};
 use super::server_row::{zone_at, RowZone, ENTRY_HEIGHT, ENTRY_LEFT, ENTRY_WIDTH, SLOT_HEIGHT};
@@ -103,6 +105,7 @@ pub struct ServerListScreen {
     selected: Option<usize>,
     ticks: u32,
     last_click: Option<(usize, u32)>,
+    bar: ScrollbarDrag,
 }
 
 impl ServerListScreen {
@@ -153,9 +156,14 @@ impl ServerListScreen {
         let content = rows.len() as f32 * SLOT_HEIGHT + LIST_PADDING;
         let key_outcome = self.keyboard(ui, rows.len());
         self.offset = wheel_scrolled(ui, &gui, layout.list, content, self.offset);
+        let bar = [gui.cx() + 154.0, LIST_TOP, gui.height - 96.0];
+        let max = (content - bar[2]).max(0.0);
+        self.offset = self
+            .bar
+            .apply(ui, gui.scale, bar, (content, max), self.offset);
         ui.push_id("server-list");
         let list_id = ui.id("rows");
-        let clicked = ui.response(list_id, layout.list).clicked;
+        let clicked = ui.response(list_id, layout.list).clicked && !self.bar.is_active();
         let click = clicked.then(|| last_primary_press(ui)).flatten();
         let outcome = click
             .and_then(|position| self.click_row(&gui, position, rows.len()))
@@ -163,13 +171,7 @@ impl ServerListScreen {
         draw_list_background(ui, layout.list, self.offset * gui.scale);
         self.draw_rows(ui, atlas, lang, rows, &gui);
         draw_list_overlay(ui, layout.list);
-        draw_scrollbar(
-            ui,
-            &gui,
-            [gui.cx() + 154.0, LIST_TOP, gui.height - 96.0],
-            content,
-            self.offset,
-        );
+        draw_scrollbar(ui, &gui, bar, content, self.offset);
         gui.title(ui, atlas, lang.tr("multiplayer.title"), gui.cx(), 20.0);
         let button = self.buttons(ui, atlas, lang, &gui, &layout, !rows.is_empty());
         ui.pop_id();

@@ -43,7 +43,7 @@ use crate::creative_view::CreativeView;
 use crate::error::ClientError;
 use crate::fog_context::FogLight;
 use crate::game::{
-    camera_angles, ChunkEvent, Frame, GameStatus, RenderEvent, TextScreenRequest, TICK,
+    camera_angles, ChunkEvent, Frame, GameStatus, LookSlot, RenderEvent, TextScreenRequest, TICK,
 };
 use crate::mesher::{MeshPool, MeshResult};
 use crate::moving_blocks_draw::mesh_moving_blocks;
@@ -206,6 +206,8 @@ impl WorldView {
         while let Ok(event) = frames.try_recv() {
             self.apply(event, target);
         }
+        // After the frames, so a look newer than the tick they carry wins.
+        self.view.take_look();
         while let Ok(ChunkEvent { pos, snapshot }) = chunks.try_recv() {
             self.queue(pos, snapshot);
         }
@@ -454,7 +456,21 @@ impl WorldView {
     #[must_use]
     pub fn entities(&self, now: Instant) -> Vec<EntityRenderSnapshot> {
         let alpha = self.view.partial_tick(now);
-        self.entities.iter().map(|e| e.interpolate(alpha)).collect()
+        self.entities
+            .iter()
+            .map(|entity| {
+                let mut snapshot = entity.interpolate(alpha);
+                // `Entity.setAngles` shifts the pitch and its previous value
+                // together every frame, so what `RendererLivingEntity` draws
+                // is the pitch of the mouse, not one interpolated over a tick.
+                if snapshot.local {
+                    if let Some(pitch) = self.view.body_pitch {
+                        snapshot.pitch = pitch;
+                    }
+                }
+                snapshot
+            })
+            .collect()
     }
 
     /// Takes the text screen the game thread asked for, if any.
@@ -521,7 +537,7 @@ impl WorldView {
                 }
                 self.view.push(*frame);
             }
-            RenderEvent::Look(state) => self.view.retarget(state),
+            RenderEvent::LookSlot(slot) => self.view.look_slot = Some(slot),
             RenderEvent::Sounds(cues) => self.sounds.extend(cues),
             RenderEvent::Hud(hud) => self.hud = *hud,
             RenderEvent::Inventory(view) => self.window_view = *view,
@@ -696,6 +712,10 @@ struct View {
     current: Option<RenderState>,
     /// The instant of the newest tick.
     tick_time: Option<Instant>,
+    /// Where the game thread leaves the mouse look.
+    look_slot: Option<LookSlot>,
+    /// The pitch of the local body in degrees, as of the newest look or tick.
+    body_pitch: Option<f32>,
     /// The newest signed world time in ticks.
     world_time: i64,
     /// The dimension of the newest frame.
@@ -729,6 +749,7 @@ impl View {
     fn push(&mut self, frame: Frame) {
         self.previous = self.current;
         self.current = Some(frame.state);
+        self.body_pitch = Some(frame.local_body.pitch);
         self.tick_time = Some(frame.tick_time);
         self.world_time = frame.world_time;
         self.dimension = frame.dimension;
@@ -742,6 +763,20 @@ impl View {
         self.particles = frame.particles;
         self.overlays = frame.overlays;
         self.debug = frame.debug;
+    }
+
+    /// Applies the mouse look the game thread left in the slot since the last
+    /// call: the camera turns at once and the body looks up or down with it.
+    fn take_look(&mut self) {
+        let Some(look) = self
+            .look_slot
+            .as_ref()
+            .and_then(|slot| slot.lock().ok()?.take())
+        else {
+            return;
+        };
+        self.retarget(look.view);
+        self.body_pitch = Some(look.body_pitch);
     }
 
     /// Replaces the view of the newest tick, keeping the tick it belongs to.
@@ -804,8 +839,17 @@ impl View {
             return Some(current);
         };
         let alpha = self.partial_tick(now);
+        // `orientCamera`: the interpolated eye plus the orbit of the current
+        // angles. Interpolating the camera positions of two ticks instead
+        // would drag the third-person camera behind its own angle.
+        let eye = previous.eye.lerp(current.eye, alpha);
+        let orbit = current
+            .orbit_start
+            .lerp(current.position - current.eye, alpha);
         Some(RenderState {
-            position: previous.position.lerp(current.position, alpha),
+            position: eye + orbit,
+            eye,
+            orbit_start: current.orbit_start,
             yaw: current.yaw,
             pitch: current.pitch,
             on_ground: current.on_ground,
@@ -1079,6 +1123,8 @@ mod tests {
         Box::new(Frame {
             state: RenderState {
                 position,
+                eye: position,
+                orbit_start: glam::Vec3::ZERO,
                 yaw: 0.0,
                 pitch: 0.0,
                 on_ground: true,
@@ -1159,12 +1205,29 @@ mod tests {
         }
         let mut turned = frame(glam::Vec3::new(2.0, 0.0, 0.0), later, 0).state;
         turned.yaw = 1.0;
+        // The mouse never queues an event: it overwrites the shared slot, so
+        // a hundred looks leave the frame queue as empty as one.
+        let slot = crate::game::LookSlot::default();
         harness
             .frames
             .0
-            .send(RenderEvent::Look(turned))
+            .send(RenderEvent::LookSlot(slot.clone()))
             .expect("frame queue");
+        for yaw in 0..100 {
+            let mut state = turned;
+            state.yaw = yaw as f32 / 100.0;
+            *slot.lock().expect("slot") = Some(crate::game::Look {
+                view: state,
+                body_pitch: 7.0,
+            });
+        }
+        *slot.lock().expect("slot") = Some(crate::game::Look {
+            view: turned,
+            body_pitch: 12.0,
+        });
         harness.sync();
+        assert_eq!(harness.world_view.view.body_pitch, Some(12.0));
+        assert!(slot.lock().expect("slot").is_none(), "the look was taken");
 
         let halfway = later + TICK / 2;
         let mut camera = Camera::default();
@@ -1176,6 +1239,69 @@ mod tests {
         );
         assert!((camera.yaw - (1.0 + std::f32::consts::PI)).abs() < 1e-4);
         assert!((harness.world_view.view.partial_tick(halfway) - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_third_person_camera_orbits_the_interpolated_eye_with_the_newest_angles() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let later = tick + TICK;
+        // Tick 1: eye at the origin, camera 4 blocks behind it (south).
+        let mut first = frame(glam::Vec3::ZERO, tick, 0);
+        first.state.position = glam::Vec3::new(0.0, 0.0, -4.0);
+        // Tick 2: eye 2 blocks east, the player turned and the camera is now
+        // 4 blocks east of the eye.
+        let mut second = frame(glam::Vec3::new(2.0, 0.0, 0.0), later, 0);
+        second.state.position = glam::Vec3::new(6.0, 0.0, 0.0);
+        second.state.orbit_start = glam::Vec3::new(4.0, 0.0, 0.0);
+        for event in [RenderEvent::Frame(first), RenderEvent::Frame(second)] {
+            harness.frames.0.send(event).expect("frame queue");
+        }
+        harness.sync();
+
+        let mut camera = Camera::default();
+        harness
+            .world_view
+            .update_camera(&mut camera, later + TICK / 2, true);
+        // `orientCamera`: eye at (1, 0, 0) plus the orbit of the newest angles.
+        // Blending the two camera positions would give (3, 0, -2) and drag the
+        // camera behind the turn.
+        let expected = glam::Vec3::new(5.0, 0.0, 0.0);
+        assert!(
+            (camera.position - expected).length() < 1e-4,
+            "{}",
+            camera.position
+        );
+    }
+
+    #[test]
+    fn the_camera_distance_follows_the_wall_while_the_eye_moves() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let later = tick + TICK;
+        let first = frame(glam::Vec3::ZERO, tick, 0);
+        // The eye walks 1 block towards a wall behind it: the camera was 4
+        // blocks back from the old eye and is only 1 back from the new one.
+        let mut second = frame(glam::Vec3::new(0.0, 0.0, 1.0), later, 0);
+        second.state.position = glam::Vec3::new(0.0, 0.0, 0.0);
+        second.state.orbit_start = glam::Vec3::new(0.0, 0.0, -4.0);
+        for event in [RenderEvent::Frame(first), RenderEvent::Frame(second)] {
+            harness.frames.0.send(event).expect("frame queue");
+        }
+        harness.sync();
+
+        // Each frame casts the rays from the eye of that frame: halfway the
+        // eye is 0.5 along and the camera 2.5 behind it, not a step at the
+        // tick that jumps from 4 to 1.
+        let mut camera = Camera::default();
+        harness
+            .world_view
+            .update_camera(&mut camera, later + TICK / 2, true);
+        assert!(
+            (camera.position.z - (0.5 - 2.5)).abs() < 1e-4,
+            "{}",
+            camera.position.z
+        );
     }
 
     #[test]

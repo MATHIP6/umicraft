@@ -413,6 +413,149 @@ fn unknown_characters_still_fall_back_to_the_question_mark() -> Result<(), Box<d
     Ok(())
 }
 
+/// Regression: a scoreboard line showed `Prismas: 0 ?` where vanilla draws the
+/// symbol from its Unicode pages.
+#[test]
+fn unicode_pages_draw_the_characters_outside_the_grid() -> Result<(), Box<dyn Error>> {
+    let grid = FontAtlas::from_png(&synthetic_png()?)?;
+    let star = '\u{2726}';
+    let (page, cell) = (0x27_u8, 0x26_usize);
+    let mut sizes = vec![0u8; 65_536];
+    // Texel columns 0 to 11 of the cell, which `getCharWidth` counts as a
+    // whole cell: 16 / 2 + 1.
+    sizes[usize::from(page) * 256 + cell] = 0x0b;
+    let page_png = encode_png(256, 256, png::ColorType::Grayscale, &vec![255u8; 256 * 256])?;
+    let atlas = grid.with_unicode(&sizes, |index| (index == page).then(|| page_png.clone()));
+
+    let glyph = atlas.glyph(star).expect("the page gives the star a glyph");
+    assert_eq!(glyph.scale, 0.5, "drawn at half size");
+    assert_eq!(atlas.advance(star, 1.0), 9.0);
+    let width = (glyph.uv_max[0] - glyph.uv_min[0]) * atlas.width as f32;
+    assert!((width - 11.98).abs() < 1e-3, "`renderUnicodeChar` quad: {width}");
+    let (u, v) = (glyph.uv_min[0] + 1e-4, glyph.uv_min[1] + 1e-4);
+    assert_eq!(sample_uv(&atlas, u, v), 255, "the UV points into the page");
+
+    // The grid glyphs are unchanged in look and advance; only their UVs moved.
+    for character in ['A', 'B', '?', 'é'] {
+        assert_eq!(
+            atlas.advance(character, 1.0),
+            grid.advance(character, 1.0),
+            "{character}"
+        );
+    }
+    let (before, after) = (grid.glyph('A').unwrap(), atlas.glyph('A').unwrap());
+    assert_eq!(
+        sample_uv(&atlas, after.uv_min[0], after.uv_min[1]),
+        sample_uv(&grid, before.uv_min[0], before.uv_min[1])
+    );
+    // With the pages loaded a character that has no glyph is what vanilla
+    // makes of it: no width and nothing drawn, not a `?`.
+    for missing in ['\u{2728}', '\u{4e2d}'] {
+        assert!(atlas.glyph_or_fallback(missing).is_none(), "{missing}");
+        assert_eq!(atlas.advance(missing, 1.0), 0.0, "{missing}");
+        assert_eq!(atlas.pen_advance(missing), 0.0, "{missing}");
+    }
+    // Without the table the atlas is returned as it is.
+    assert_eq!(grid.with_unicode(&[], |_| None), grid);
+    Ok(())
+}
+
+/// `getCharWidth` counts a glyph that ends after column 7 as a whole cell,
+/// but drawing moves the pen by what `renderUnicodeChar` returns.
+#[test]
+fn a_wide_unicode_glyph_measures_a_cell_and_draws_its_own_width() -> Result<(), Box<dyn Error>> {
+    let grid = FontAtlas::from_png(&synthetic_png()?)?;
+    let mut sizes = vec![0u8; 65_536];
+    // First column 1, last column 10: 10 texels wide.
+    sizes[0x2700 + 0x27] = 0x1a;
+    // 0x80 and up is a negative Java byte whose `>>> 4` is a huge column.
+    sizes[0x2700 + 0x28] = 0x8f;
+    let page_png = encode_png(256, 256, png::ColorType::Grayscale, &vec![255u8; 256 * 256])?;
+    let atlas = grid.with_unicode(&sizes, |index| (index == 0x27).then(|| page_png.clone()));
+
+    let wide = '\u{2727}';
+    assert_eq!(atlas.advance(wide, 1.0), 9.0, "getCharWidth: (15 + 1 - 0) / 2 + 1");
+    assert_eq!(atlas.glyph(wide).map(|glyph| glyph.pen), Some(6.0), "(10 + 1 - 1) / 2 + 1");
+    assert_eq!(atlas.pen_advance(wide), 6.0);
+    assert!(atlas.glyph('\u{2728}').is_none(), "a size from 0x80 is ignored");
+    assert!(atlas.is_unicode(wide));
+    assert!(!atlas.is_unicode('A'));
+    assert!(atlas.grid_glyphs().iter().all(|glyph| !atlas.is_unicode(glyph.character)));
+    // The grid keeps measuring and drawing the same.
+    assert_eq!(atlas.pen_advance('A'), atlas.advance('A', 1.0));
+    Ok(())
+}
+
+/// `renderStringAtPos` pulls the shadow of a Unicode glyph back onto it, so
+/// only the grid glyphs have a visible offset.
+#[test]
+fn the_shadow_of_a_unicode_glyph_is_not_offset() -> Result<(), Box<dyn Error>> {
+    use umicraft_ui::styled_text::{draw_styled, StyledRun};
+    use umicraft_ui::{DrawCommand, DrawList};
+
+    let grid = FontAtlas::from_png(&synthetic_png()?)?;
+    let mut sizes = vec![0u8; 65_536];
+    sizes[0x2700 + 0x26] = 0x0b;
+    let page_png = encode_png(256, 256, png::ColorType::Grayscale, &vec![255u8; 256 * 256])?;
+    let atlas = grid.with_unicode(&sizes, |index| (index == 0x27).then(|| page_png.clone()));
+
+    let mut list = DrawList::new();
+    let runs = [StyledRun::plain("A\u{2726}", [1.0; 4])];
+    let advance = draw_styled(&mut list, &atlas, [10.0, 20.0], &runs, 3.0, true, 0);
+    let drawn: Vec<([f32; 2], String)> = list
+        .commands()
+        .iter()
+        .filter_map(|command| match command {
+            DrawCommand::Text { position, text, .. } => Some((*position, text.clone())),
+            _ => None,
+        })
+        .collect();
+    // Shadow pass first: the grid glyph one unit (3 px) down and right, the
+    // star on its own spot; then the text pass.
+    let pen = atlas.pen_advance('A') * 3.0;
+    assert_eq!(
+        drawn,
+        vec![
+            ([13.0, 23.0], "A".to_owned()),
+            ([10.0 + pen, 20.0], "\u{2726}".to_owned()),
+            ([10.0, 20.0], "A\u{2726}".to_owned()),
+        ]
+    );
+    assert_eq!(advance, pen + atlas.pen_advance('\u{2726}') * 3.0);
+    Ok(())
+}
+
+/// `randomStyle && j != -1`: obfuscated text scrambles the grid only.
+#[test]
+fn obfuscated_text_never_turns_into_a_unicode_glyph() -> Result<(), Box<dyn Error>> {
+    use umicraft_ui::styled_text::{draw_styled, StyledRun};
+    use umicraft_ui::{DrawCommand, DrawList};
+
+    let grid = FontAtlas::from_png(&synthetic_png()?)?;
+    let mut sizes = vec![0u8; 65_536];
+    // Every character of the page has the width of `A`.
+    sizes[0x2700..0x2800].fill(0x03);
+    let page_png = encode_png(256, 256, png::ColorType::Grayscale, &vec![255u8; 256 * 256])?;
+    let atlas = grid.with_unicode(&sizes, |index| (index == 0x27).then(|| page_png.clone()));
+
+    let mut run = StyledRun::plain("AAAA\u{2726}", [1.0; 4]);
+    run.obfuscated = true;
+    for tick in 0..50 {
+        let mut list = DrawList::new();
+        draw_styled(&mut list, &atlas, [0.0, 0.0], std::slice::from_ref(&run), 1.0, false, tick);
+        for command in list.commands() {
+            if let DrawCommand::Text { text, .. } = command {
+                assert!(
+                    text.chars().take(4).all(|c| !atlas.is_unicode(c)),
+                    "scrambled into a Unicode glyph: {text:?}"
+                );
+                assert!(text.ends_with('\u{2726}'), "a Unicode glyph is kept: {text:?}");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Regression: the server list showed `Prisme B?ta` for `Prisme Bêta`.
 #[test]
 fn prisme_beta_measures_with_the_real_glyph() -> Result<(), Box<dyn Error>> {

@@ -68,8 +68,19 @@ pub struct Glyph {
     pub uv_min: [f32; 2],
     /// Maximum UV in the atlas, normalised to `0.0..=1.0`.
     pub uv_max: [f32; 2],
-    /// Horizontal advance in atlas pixels at scale 1.
+    /// Horizontal advance in atlas pixels at scale 1, as `getCharWidth`
+    /// measures it: what layout, wrapping and centring use.
     pub advance: f32,
+    /// What drawing the glyph returns (`renderDefaultChar`,
+    /// `renderUnicodeChar`): the pen moves by `pen.trunc()` and an underline
+    /// is `pen` wide. It is `advance` for the 1.8 grid and differs for a
+    /// Unicode glyph that ends after column 7, which `getCharWidth` counts as
+    /// a whole cell.
+    pub pen: f32,
+    /// How many screen pixels one atlas texel covers at scale 1: `1.0` for
+    /// the 1.8 grid, `0.5` for a Unicode page, whose 16-texel glyphs are drawn
+    /// 8 units tall (`FontRenderer.renderUnicodeChar`).
+    pub scale: f32,
 }
 
 /// An R8 bitmap font atlas and the metrics needed to lay out text.
@@ -87,6 +98,9 @@ pub struct FontAtlas {
     pub line_height: f32,
     /// UV rectangle of a solid white texel, used for rectangles.
     pub white_uv: [f32; 4],
+    /// Where the Unicode glyphs start in `glyphs`: they follow the grid
+    /// glyphs, sorted by character, so that a lookup can bisect them.
+    unicode_from: usize,
 }
 
 /// Atlas width of the built-in 3×5 font.
@@ -109,6 +123,12 @@ const GLYPH_GRID: u32 = 16;
 /// The 1.8 `ascii.png` is exactly 128×128 pixels; the reference renderer
 /// hard-codes 128-pixel UVs (`FontRenderer.java:254-261`).
 const REFERENCE_ATLAS_SIDE: u32 = 128;
+/// Code points of the basic multilingual plane, the size of `glyph_sizes.bin`.
+const UNICODE_CODE_POINTS: usize = 65_536;
+/// A Unicode page is 256×256 texels: a 16×16 grid of 16×16 glyph cells.
+const UNICODE_PAGE_SIDE: u32 = 256;
+/// The sheet of the 256 pages: 16 pages across and 16 down.
+const UNICODE_SHEET_SIDE: u32 = 16 * UNICODE_PAGE_SIDE;
 /// Opaque white columns appended to a decoded atlas for solid rectangles.
 const WHITE_STRIP_WIDTH: u32 = 4;
 /// `FONT_HEIGHT` of the 1.8 renderer (`FontRenderer.java:35`).
@@ -241,6 +261,7 @@ impl FontAtlas {
             width,
             height,
             pixels,
+            unicode_from: glyphs.len(),
             glyphs,
             line_height,
             white_uv,
@@ -288,6 +309,8 @@ impl FontAtlas {
                     (origin_y + FALLBACK_CELL_HEIGHT) as f32 / FALLBACK_HEIGHT as f32,
                 ],
                 advance: FALLBACK_CELL_WIDTH as f32,
+                pen: FALLBACK_CELL_WIDTH as f32,
+                scale: 1.0,
             };
             glyphs.push(glyph);
 
@@ -408,9 +431,138 @@ impl FontAtlas {
     /// glyph that is drawn.
     #[must_use]
     pub fn glyph(&self, character: char) -> Option<&Glyph> {
-        self.glyphs
-            .iter()
+        let (grid, unicode) = self
+            .glyphs
+            .split_at(self.unicode_from.min(self.glyphs.len()));
+        grid.iter()
             .find(|glyph| glyph.character == character)
+            .or_else(|| {
+                unicode
+                    .binary_search_by_key(&character, |glyph| glyph.character)
+                    .ok()
+                    .map(|index| &unicode[index])
+            })
+    }
+
+    /// The glyphs of the 1.8 grid, without the Unicode ones: the characters of
+    /// `FontRenderer`'s `charList`, which obfuscated text picks from.
+    #[must_use]
+    pub fn grid_glyphs(&self) -> &[Glyph] {
+        &self.glyphs[..self.unicode_from.min(self.glyphs.len())]
+    }
+
+    /// Whether `character` is drawn from a Unicode page rather than the 1.8
+    /// grid. Vanilla gives such a character no visible shadow offset and
+    /// never scrambles it (`renderStringAtPos`: `j == -1`).
+    #[must_use]
+    pub fn is_unicode(&self, character: char) -> bool {
+        let unicode = &self.glyphs[self.unicode_from.min(self.glyphs.len())..];
+        unicode
+            .binary_search_by_key(&character, |glyph| glyph.character)
+            .is_ok()
+    }
+
+    /// An atlas that also draws the characters outside the 1.8 grid from the
+    /// Unicode pages, as `FontRenderer` does (`renderUnicodeChar`).
+    ///
+    /// `glyph_sizes` is `font/glyph_sizes.bin`: one byte per code point whose
+    /// high nibble is the first used texel column of the glyph and whose low
+    /// nibble is the last (`0` for a character with no glyph). `page` returns
+    /// the PNG of `textures/font/unicode_page_XX.png` for a page, `None` when
+    /// it does not exist. A page that is missing or is not 256×256 leaves
+    /// its characters on the replacement glyph.
+    ///
+    /// The pages are laid out under the grid atlas in a 16×16 sheet of
+    /// 256×256 pages, so the result is 4096 texels wide and the height of the
+    /// grid atlas plus 4096. The grid glyphs keep their look and advance; a
+    /// character the grid has is never taken from a page. Without the full
+    /// 65 536 sizes the atlas is returned unchanged.
+    #[must_use]
+    pub fn with_unicode(
+        &self,
+        glyph_sizes: &[u8],
+        mut page: impl FnMut(u8) -> Option<Vec<u8>>,
+    ) -> Self {
+        if glyph_sizes.len() != UNICODE_CODE_POINTS || self.unicode_from != self.glyphs.len() {
+            return self.clone();
+        }
+        let width = self.width.max(UNICODE_SHEET_SIDE);
+        let height = self.height + UNICODE_SHEET_SIDE;
+        let mut pixels = vec![0u8; width as usize * height as usize];
+        for (row, source) in self.pixels.chunks_exact(self.width as usize).enumerate() {
+            let start = row * width as usize;
+            pixels[start..start + source.len()].copy_from_slice(source);
+        }
+
+        // The grid keeps its texels but not its UVs, which were normalised to
+        // the smaller image.
+        let (to_u, to_v) = (
+            self.width as f32 / width as f32,
+            self.height as f32 / height as f32,
+        );
+        let mut glyphs: Vec<Glyph> = self
+            .glyphs
+            .iter()
+            .map(|glyph| Glyph {
+                uv_min: [glyph.uv_min[0] * to_u, glyph.uv_min[1] * to_v],
+                uv_max: [glyph.uv_max[0] * to_u, glyph.uv_max[1] * to_v],
+                ..*glyph
+            })
+            .collect();
+        let white_uv = [
+            self.white_uv[0] * to_u,
+            self.white_uv[1] * to_v,
+            self.white_uv[2] * to_u,
+            self.white_uv[3] * to_v,
+        ];
+        let unicode_from = glyphs.len();
+
+        for index in 0..=u8::MAX {
+            let Some(coverage) = page(index).and_then(|png| decode_unicode_page(&png)) else {
+                continue;
+            };
+            let side = UNICODE_PAGE_SIDE as usize;
+            let (origin_x, origin_y) = (
+                u32::from(index % 16) * UNICODE_PAGE_SIDE,
+                self.height + u32::from(index / 16) * UNICODE_PAGE_SIDE,
+            );
+            for (row, source) in coverage.chunks_exact(side).enumerate() {
+                let start = (origin_y as usize + row) * width as usize + origin_x as usize;
+                pixels[start..start + side].copy_from_slice(source);
+            }
+            for low in 0..=u8::MAX {
+                let code = u32::from(index) * 256 + u32::from(low);
+                let size = glyph_sizes[code as usize];
+                let Some(character) = char::from_u32(code) else {
+                    continue;
+                };
+                // Java reads the byte signed, so `>>> 4` of a size from 0x80
+                // up is a huge column and vanilla draws nothing sensible
+                // (50 code points of 1.8): they keep the replacement glyph.
+                if size == 0 || size >= 0x80 || self.glyph(character).is_some() {
+                    continue;
+                }
+                glyphs.push(unicode_glyph(
+                    character,
+                    size,
+                    [
+                        origin_x + u32::from(low % 16) * 16,
+                        origin_y + u32::from(low / 16) * 16,
+                    ],
+                    (width, height),
+                ));
+            }
+        }
+
+        Self {
+            width,
+            height,
+            pixels,
+            glyphs,
+            line_height: self.line_height,
+            white_uv,
+            unicode_from,
+        }
     }
 
     /// The glyph to draw for `character`, applying the replacement policy.
@@ -423,10 +575,28 @@ impl FontAtlas {
         if character.is_control() {
             return None;
         }
-        self.glyph(character)
-            .or_else(|| self.glyph('?'))
+        if let Some(glyph) = self.glyph(character) {
+            return Some(glyph);
+        }
+        // With the Unicode pages loaded this is vanilla's own answer: a
+        // character that has no glyph there has no width and draws nothing
+        // (`glyphWidth[c] == 0`). The `?` stands in only for a font that
+        // cannot draw the Unicode range at all.
+        if self.unicode_from < self.glyphs.len() {
+            return None;
+        }
+        self.glyph('?')
             .or_else(|| self.glyph(' '))
             .or_else(|| self.glyphs.first())
+    }
+
+    /// How far drawing `character` moves the pen at scale 1: the `(int) f` of
+    /// `renderStringAtPos`, not the width `getCharWidth` measures. A bold
+    /// glyph adds one unit on top of it.
+    #[must_use]
+    pub fn pen_advance(&self, character: char) -> f32 {
+        self.glyph_or_fallback(character)
+            .map_or(0.0, |glyph| glyph.pen.trunc())
     }
 
     /// The advance of `character` at `scale`.
@@ -650,6 +820,55 @@ fn append_white_strip(width: u32, height: u32, coverage: Vec<u8>) -> (u32, Vec<u
     (atlas_width, pixels)
 }
 
+/// The coverage of one Unicode page, `None` unless it is a 256×256 PNG.
+///
+/// The header is checked before the pixel buffer is allocated, so a page that
+/// claims a huge size costs nothing.
+fn decode_unicode_page(bytes: &[u8]) -> Option<Vec<u8>> {
+    if !bytes.starts_with(&PNG_SIGNATURE) {
+        return None;
+    }
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let header = decoder.read_header_info().ok()?;
+    if (header.width, header.height) != (UNICODE_PAGE_SIDE, UNICODE_PAGE_SIDE) {
+        return None;
+    }
+    let mut reader = decoder.read_info().ok()?;
+    let mut buffer = vec![0u8; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buffer).ok()?;
+    coverage_from_frame(&info, &buffer).ok()
+}
+
+/// The glyph of `character` whose 16×16 cell starts at texel `cell` of an
+/// atlas of `atlas` texels, given its `glyph_sizes.bin` byte.
+///
+/// The quad is the one of `FontRenderer.renderUnicodeChar`: from the first
+/// used column, `last + 1 - first - 0.02` texels wide and 15.98 rows tall,
+/// drawn at half size. The advance is `getCharWidth`'s, which treats a glyph
+/// ending after column 7 as spanning the whole cell.
+fn unicode_glyph(character: char, size: u8, cell: [u32; 2], atlas: (u32, u32)) -> Glyph {
+    let (first, last) = (i32::from(size >> 4), i32::from(size & 15));
+    let (width, height) = (atlas.0 as f32, atlas.1 as f32);
+    let u0 = (cell[0] as i32 + first) as f32 / width;
+    let v0 = cell[1] as f32 / height;
+    // `getCharWidth`: Java's `int` division, which rounds towards zero as
+    // Rust's does.
+    let (counted_first, counted_last) = if last > 7 { (0, 15) } else { (first, last) };
+    Glyph {
+        character,
+        uv_min: [u0, v0],
+        uv_max: [
+            u0 + ((last + 1 - first) as f32 - 0.02) / width,
+            v0 + 15.98 / height,
+        ],
+        advance: ((counted_last + 1 - counted_first) / 2 + 1) as f32,
+        // `renderUnicodeChar` returns `(f1 - f) / 2 + 1` of the real columns.
+        pen: (last + 1 - first) as f32 / 2.0 + 1.0,
+        scale: 0.5,
+    }
+}
+
 /// Builds the glyph records for every character of the 1.8 grid.
 ///
 /// The cell of a character is its index in [`GRID_CHARS`]
@@ -690,6 +909,8 @@ fn build_grid_glyphs(width: u32, height: u32, atlas_width: u32, coverage: &[u8])
                 (origin_y + cell_height) as f32 / height as f32,
             ],
             advance: used as f32 + 1.0,
+            pen: used as f32 + 1.0,
+            scale: 1.0,
         });
     }
     glyphs.sort_by_key(|glyph| glyph.character);
@@ -769,24 +990,32 @@ mod tests {
                     uv_min: [0.0, 0.0],
                     uv_max: [0.5, 0.5],
                     advance: 6.0,
+                    pen: 6.0,
+                    scale: 1.0,
                 },
                 Glyph {
                     character: 'B',
                     uv_min: [0.5, 0.0],
                     uv_max: [1.0, 0.5],
                     advance: 4.0,
+                    pen: 4.0,
+                    scale: 1.0,
                 },
                 Glyph {
                     character: '?',
                     uv_min: [0.0, 0.5],
                     uv_max: [0.5, 1.0],
                     advance: 5.0,
+                    pen: 5.0,
+                    scale: 1.0,
                 },
                 Glyph {
                     character: ' ',
                     uv_min: [0.5, 0.5],
                     uv_max: [1.0, 1.0],
                     advance: 3.0,
+                    pen: 3.0,
+                    scale: 1.0,
                 },
             ],
             9.0,

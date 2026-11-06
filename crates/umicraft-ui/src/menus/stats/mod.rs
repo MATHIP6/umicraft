@@ -27,7 +27,7 @@ use self::lists::{draw_general, draw_mobs, GENERAL_HEIGHT, MOB_HEIGHT};
 pub use self::model::{MobRow, ObjectRow, StatCell, StatRow, StatsData};
 use self::objects::{Sort, Table, TableView, SLOT_HEIGHT};
 use super::background::draw_menu_background;
-use super::common::{escape_pressed, Gui, TextPlacement, WHITE};
+use super::common::{escape_pressed, Gui, ScrollbarDrag, TextPlacement, WHITE};
 use crate::context::Ui;
 use crate::geom::Rect;
 use crate::text::FontAtlas;
@@ -109,6 +109,7 @@ pub struct StatsScreen {
     sorts: [Sort; 2],
     orders: [Vec<usize>; 2],
     pressed: Option<usize>,
+    bar: ScrollbarDrag,
     ticks: u32,
 }
 
@@ -211,7 +212,7 @@ impl StatsScreen {
             header,
             rows,
         };
-        let offset = frame.scrolled(ui, gui, self.offsets[tab.index()]);
+        let offset = frame.scrolled(ui, gui, self.offsets[tab.index()], &mut self.bar);
         self.offsets[tab.index()] = offset;
         match tab {
             StatsTab::General => draw_general(ui, atlas, lang, gui, &data.general, offset),

@@ -168,7 +168,13 @@ impl OptionsScreen {
             .chain(std::iter::once(Row::default_pack(lang)))
             .collect();
 
-        self.scroll_columns(ui, gui, cx, [available.len(), selected.len()], bottom - top);
+        self.scroll_columns(
+            ui,
+            gui,
+            (cx, top),
+            [available.len(), selected.len()],
+            bottom - top,
+        );
         let left = cx - 4.0 - LIST_W;
         let right = cx + 4.0;
         let mut action = self.pack_column(
@@ -266,7 +272,14 @@ impl OptionsScreen {
     }
 
     /// Applies the wheel to the list under the pointer.
-    fn scroll_columns(&mut self, ui: &Ui, gui: Gui, cx: f32, rows: [usize; 2], visible: f32) {
+    fn scroll_columns(
+        &mut self,
+        ui: &Ui,
+        gui: Gui,
+        (cx, top): (f32, f32),
+        rows: [usize; 2],
+        visible: f32,
+    ) {
         let wheel: f32 = ui
             .input()
             .events
@@ -287,6 +300,15 @@ impl OptionsScreen {
                 *scroll += wheel * ROW / 2.0;
             }
             *scroll = scroll.clamp(0.0, max);
+            // The scrollbar sits inside the right edge of its list.
+            let left = if column == 1 { cx + 4.0 } else { cx - 4.0 - LIST_W };
+            *scroll = self.pack_bars[column].apply(
+                ui,
+                gui.scale,
+                [left + LIST_W - 6.0, top, visible],
+                (content, max),
+                *scroll,
+            );
         }
     }
 

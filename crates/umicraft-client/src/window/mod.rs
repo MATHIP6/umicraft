@@ -399,6 +399,11 @@ impl App {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
+        // A key that goes up is released for the game whatever screen is open
+        // (`Minecraft.runTick` sets the key binding state before the screen).
+        if event.state == ElementState::Released {
+            self.keys.remove(&code);
+        }
         // F4 is the Umicraft debug-screen toggle (F3 is the vanilla text
         // screen, F2 stays free for the screenshot). It is handled before the
         // UI translation so it can never be typed into the screen, and it is
@@ -625,6 +630,10 @@ impl App {
     }
 
     fn capture_mouse(&mut self, capture: bool) {
+        if self.mouse_captured && !capture {
+            // A screen takes the mouse: the game forgets what was held.
+            self.unpress_all();
+        }
         self.mouse_captured = capture;
         if let Some(window) = &self.window {
             if capture {
@@ -1507,6 +1516,9 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                if state == ElementState::Released {
+                    self.release_button(button);
+                }
                 let screen = self.screen();
                 if self.capture_mouse_binding(screen, state, button) {
                     // The button became the binding that was waiting for one.
