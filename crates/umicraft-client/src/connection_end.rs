@@ -37,8 +37,10 @@ pub enum EndCause {
     TimedOut,
     /// The server closed the socket.
     EndOfStream,
-    /// The server wants premium authentication, which is not built yet.
+    /// The server wants premium authentication and the client has no session.
     OnlineMode,
+    /// The session server refused the join.
+    InvalidSession,
     /// The server sent a disconnect with this reason.
     Kicked(String),
     /// Any other failure, with its text.
@@ -90,6 +92,7 @@ impl ConnectionEnd {
             NetError::ConnectionClosed => EndCause::EndOfStream,
             NetError::TimedOut { .. } => EndCause::TimedOut,
             NetError::OnlineModeRequired { .. } => EndCause::OnlineMode,
+            NetError::Auth(_) => EndCause::InvalidSession,
             NetError::KickedAtLogin { reason } | NetError::KickedAtPlay { reason } => {
                 EndCause::Kicked(reason.clone())
             }
@@ -125,6 +128,10 @@ impl ConnectionEnd {
             EndCause::TimedOut => lang.tr("umicraft.connect.timedOut").to_string(),
             EndCause::EndOfStream => lang.tr("disconnect.endOfStream").to_string(),
             EndCause::OnlineMode => lang.tr("umicraft.connect.onlineMode").to_string(),
+            EndCause::InvalidSession => {
+                let reason = lang.tr("disconnect.loginFailedInfo.invalidSession");
+                return lang.tr_args("disconnect.loginFailedInfo", &[reason]);
+            }
             EndCause::Kicked(reason) => return reason.clone(),
             EndCause::Other(text) => text.clone(),
         };
@@ -225,5 +232,16 @@ mod tests {
     fn an_unclassified_error_keeps_its_text() {
         let end = ConnectionEnd::other(EndPhase::Connecting, "boom");
         assert_eq!(end.reason(&Lang::builtin()), "boom");
+    }
+
+    #[test]
+    fn a_refused_join_reads_as_an_invalid_session() {
+        let error = NetError::Auth(umicraft_auth::AuthError::JoinRejected { status: 403 });
+        let ended = end(EndPhase::Connecting, &error);
+        assert_eq!(ended.cause, EndCause::InvalidSession);
+        assert_eq!(
+            ended.reason(&Lang::builtin()),
+            "Failed to login: Invalid session (Try restarting your game and the launcher)"
+        );
     }
 }

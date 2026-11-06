@@ -430,7 +430,12 @@ const BUILTIN: &[(&str, &str)] = &[
     ),
     (
         "umicraft.connect.onlineMode",
-        "This server needs a premium login, which Umicraft does not support yet",
+        "This server needs a premium session: start Umicraft from a launcher that passes --username, --uuid and --accessToken",
+    ),
+    ("disconnect.loginFailedInfo", "Failed to login: %s"),
+    (
+        "disconnect.loginFailedInfo.invalidSession",
+        "Invalid session (Try restarting your game and the launcher)",
     ),
 ];
 

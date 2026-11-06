@@ -6,7 +6,7 @@ use crate::{error::AuthError, secret::Secret};
 /// A player identity plus the token proving it to the session server.
 ///
 /// `Debug` is safe to log: the token is a [`Secret`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
     /// Player name, 1 to 16 characters of `[A-Za-z0-9_]`.
     pub username: String,

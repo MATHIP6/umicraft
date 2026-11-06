@@ -26,6 +26,7 @@ use umicraft_protocol::{
 };
 
 use crate::capture::{Capture, Direction};
+use crate::fake_online::{self, EncryptionScript};
 
 /// Offline UUID string handed out by the fake server.
 pub const FAKE_UUID: &str = "00000000-0000-0000-0000-000000000001";
@@ -73,6 +74,9 @@ pub struct FakeServerConfig {
     pub compression_threshold: Option<i32>,
     /// Sends an `Encryption Request` instead of logging the player in.
     pub online_mode: bool,
+    /// Runs a real `Encryption Request` exchange (RSA key, AES/CFB8) before
+    /// the normal login continues; see [`crate::fake_online`].
+    pub encryption: Option<EncryptionScript>,
     /// Kicks with this reason during login instead of succeeding.
     pub kick_at_login: Option<String>,
     /// Play-state `Join Game` values.
@@ -95,6 +99,7 @@ impl Default for FakeServerConfig {
             status_json: r#"{"version":{"name":"UmicraftFake 1.8","protocol":47},"players":{"online":0,"max":20},"description":{"text":"Umicraft Test Server"}}"#.to_string(),
             compression_threshold: Some(256),
             online_mode: false,
+            encryption: None,
             kick_at_login: None,
             join: JoinScript::default(),
             placement: Some((0.5, 64.0, 0.5, 0.0, 0.0)),
@@ -127,7 +132,15 @@ pub struct Observed {
     pub brand: Option<Vec<u8>>,
     /// Teleport answers as `(x, y, z, yaw, pitch, on_ground)`.
     pub placements: Vec<(f64, f64, f64, f32, f32, bool)>,
+    /// `Encryption Response` packets received.
+    pub encryption_responses: u32,
+    /// Session-server hash of the secret the client sent, computed by the
+    /// server (`server_id_hash(server_id, secret, public_key)`).
+    pub encryption_hash: Option<String>,
+    /// Responses rejected (undecryptable or wrong verify token).
+    pub encryption_failures: u32,
 }
+
 /// Shared observation state handed to tests.
 #[derive(Clone, Debug)]
 pub struct ObservedHandle {
@@ -161,7 +174,7 @@ impl FakeServer {
     }
 }
 
-type Shared = Arc<Mutex<Observed>>;
+pub(crate) type Shared = Arc<Mutex<Observed>>;
 
 /// Starts the fake server bound to `127.0.0.1` on an ephemeral port.
 ///
@@ -206,7 +219,7 @@ pub async fn start(config: FakeServerConfig) -> std::io::Result<FakeServer> {
 }
 
 /// Applies one mutation to the shared observation state.
-fn observe(shared: &Shared, mutate: impl FnOnce(&mut Observed)) {
+pub(crate) fn observe(shared: &Shared, mutate: impl FnOnce(&mut Observed)) {
     mutate(&mut shared.lock().expect("observed mutex is not poisoned"));
 }
 
@@ -232,7 +245,7 @@ fn record(capture: &Option<Arc<Mutex<Capture>>>, direction: Direction, id: u8, b
 
 /// Sends one packet and records it (direction: server to client). Socket
 /// failures surface on the next read, so this returns plain success.
-async fn send_packet<PKT: EncodablePacket>(
+pub(crate) async fn send_packet<PKT: EncodablePacket>(
     conn: &mut Connection,
     capture: &Option<Arc<Mutex<Capture>>>,
     packet: &PKT,
@@ -253,7 +266,7 @@ async fn send_packet<PKT: EncodablePacket>(
 }
 
 /// Reads one packet; `None` ends the current phase (socket closed or broken).
-async fn read_packet(
+pub(crate) async fn read_packet(
     conn: &mut Connection,
     capture: &Option<Arc<Mutex<Capture>>>,
 ) -> Option<(u8, Vec<u8>)> {
@@ -352,6 +365,12 @@ async fn run_login_then_play(
     observe(observed, |state| {
         state.login_usernames.push(start.username.clone())
     });
+
+    if let Some(script) = &config.encryption {
+        if !fake_online::negotiate(conn, capture, observed, script).await {
+            return;
+        }
+    }
 
     // Scripted login outcomes.
     if config.online_mode {

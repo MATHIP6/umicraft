@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use tokio::sync::mpsc::Receiver as CommandReceiver;
-use umicraft_net::login::login_offline;
+use umicraft_auth::HttpSessionServer;
+use umicraft_net::login::{login_offline, login_online};
 use umicraft_net::play::{drive, PlayOptions, PlaySession, SessionCounters, SessionEnd};
 use umicraft_net::Connection;
 use umicraft_protocol::PlayServerbound;
@@ -81,13 +82,26 @@ async fn run_session(
     // `GuiConnecting` switches from `connect.connecting` to
     // `connect.authorizing` as soon as the socket is open.
     let _ = events.send(GameEvent::ConnectStage(ConnectStage::LoggingIn));
-    let profile = match login_offline(
-        &mut connection,
-        &config.name,
-        config.handshake_host.as_deref(),
-    )
-    .await
-    {
+    let logged_in = match &config.session {
+        Some(session) => {
+            login_online(
+                &mut connection,
+                session,
+                &HttpSessionServer::new(),
+                config.handshake_host.as_deref(),
+            )
+            .await
+        }
+        None => {
+            login_offline(
+                &mut connection,
+                &config.name,
+                config.handshake_host.as_deref(),
+            )
+            .await
+        }
+    };
+    let profile = match logged_in {
         Ok(profile) => profile,
         Err(error) => return Some(ConnectionEnd::from_error(EndPhase::Connecting, &error)),
     };

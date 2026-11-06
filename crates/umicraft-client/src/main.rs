@@ -9,8 +9,8 @@ use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 use umicraft_client::args::{Args, Mode, USAGE};
 use umicraft_client::{
-    audio_bridge, block_demo, entity_demo, headless, hud_demo, screenshot, setup_cli, ui_demo,
-    window,
+    audio_bridge, block_demo, entity_demo, headless, hud_demo, launch_session, screenshot,
+    setup_cli, ui_demo, window,
 };
 
 fn main() -> ExitCode {
@@ -25,7 +25,9 @@ fn main() -> ExitCode {
         println!("{USAGE}");
         return ExitCode::SUCCESS;
     }
-    let args = match Args::parse(&words) {
+    let parsed = launch_session::split(&words)
+        .and_then(|(rest, session)| Args::parse(&rest).map(|args| Args { session, ..args }));
+    let args = match parsed {
         Ok(args) => args,
         Err(message) => {
             eprintln!("{message}");

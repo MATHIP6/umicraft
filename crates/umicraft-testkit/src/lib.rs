@@ -7,6 +7,8 @@
 //! - [`fake_server`] — a scriptable loopback 1.8 server (trustworthy local
 //!   answer to spec M1's "local Paper" acceptance when no real server is
 //!   available in CI).
+//! - [`fake_online`] / [`fake_session`] — the encrypting login mode of the
+//!   fake server and a recording session server (NET-4 tests).
 //! - [`capture`] — an in-scoped packet capture format with file round-trip,
 //!   recording either complete wire frames or decoded logical packets, plus
 //!   offline frame description ( [`capture::describe_frame`] ).
@@ -27,7 +29,9 @@
 //!   (`umicraft-trajectory-diff`, `umicraft-movement-probe --trajectory`).
 
 pub mod capture;
+pub mod fake_online;
 pub mod fake_server;
+pub mod fake_session;
 pub mod replay;
 pub mod screenshot;
 pub mod tick_diff;

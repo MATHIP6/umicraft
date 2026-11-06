@@ -32,8 +32,10 @@ pub struct NetworkConfig {
     pub host: String,
     /// Server port.
     pub port: u16,
-    /// Offline-mode username.
+    /// Username of an offline login; an online login uses the session's.
     pub name: String,
+    /// The launcher session; `None` logs in offline (ADR-0053).
+    pub session: Option<umicraft_auth::Session>,
     /// Client Settings view distance.
     pub view_distance: u8,
     /// Client Settings chat visibility: `0` all, `1` commands, `2` hidden.

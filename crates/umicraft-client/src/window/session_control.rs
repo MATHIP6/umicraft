@@ -65,6 +65,7 @@ pub(super) fn network_config(
         host: address.host.clone(),
         port: address.port,
         name: args.name.clone(),
+        session: args.session.clone(),
         view_distance: options.video.render_distance,
         chat_mode: options.chat.visibility.wire(),
         chat_colors: options.chat.colors,

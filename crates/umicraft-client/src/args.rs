@@ -94,6 +94,9 @@ usage: umicraft-client [<host> <port>] [options]
 
 options:
   --name NAME         offline username (default: umicraft)
+  --username NAME --uuid UUID --accessToken TOKEN
+                      launcher session: log in to online-mode servers
+                      (also UMICRAFT_USERNAME, UMICRAFT_UUID, UMICRAFT_ACCESS_TOKEN)
   --view-distance N   requested chunk view distance, 2-16 (default: 8)
   --screenshot PATH   render one offscreen PNG to PATH instead of opening a window
   --collect-secs N    world collection time for screenshots (default: 8)
@@ -195,6 +198,9 @@ pub struct Args {
     pub port: Option<u16>,
     /// Offline-mode username.
     pub name: String,
+    /// The launcher session of `--username`, `--uuid` and `--accessToken`;
+    /// filled by `main` (see [`crate::launch_session`]), `None` = offline.
+    pub session: Option<umicraft_auth::Session>,
     /// Requested chunk view distance.
     pub view_distance: u8,
     /// Offscreen output path; `None` opens a window.
@@ -519,6 +525,7 @@ impl Args {
             host,
             port,
             name,
+            session: None,
             view_distance,
             screenshot,
             collect: Duration::from_secs_f64(collect_secs),
