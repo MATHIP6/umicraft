@@ -34,6 +34,7 @@ pub use achievements::{draw_toast, toast_offset};
 pub use background::{
     draw_dirt, draw_list_background, draw_list_overlay, draw_menu_background, MenuArt,
 };
+pub use common::ScrollbarDrag;
 pub use confirm::{confirm_layout, ConfirmLayout, ConfirmOutcome, ConfirmScreen};
 pub use connecting::{connecting_cancel_rect, ConnectStage, ConnectingOutcome, ConnectingScreen};
 pub use disconnected::{DisconnectedOutcome, DisconnectedScreen};

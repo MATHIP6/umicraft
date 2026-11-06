@@ -11,7 +11,7 @@ use crate::context::Ui;
 use crate::draw::{Color, TextStyle};
 use crate::geom::{Rect, ScrollArea};
 use crate::id::WidgetId;
-use crate::input::{InputEvent, Key};
+use crate::input::{InputEvent, Key, PointerButton};
 use crate::legacy_text::parse_legacy;
 use crate::styled_text::draw_styled;
 use crate::text::FontAtlas;
@@ -258,6 +258,82 @@ pub(crate) fn draw_scrollbar(
     );
 }
 
+/// A drag of a list scrollbar under way: the grab, in GUI units from the top
+/// of the thumb. The caller stores it next to the list offset, as a slider
+/// stores its [`crate::widgets::SliderState`].
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ScrollbarDrag(Option<f32>);
+
+impl ScrollbarDrag {
+    /// Whether the thumb is being dragged, so a list can ignore the press
+    /// that started it.
+    #[must_use]
+    pub fn is_active(self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Moves `offset` with the pointer over the bar [`draw_scrollbar`] draws.
+    ///
+    /// `bar` is `[x, top, height]` in GUI units, `scale` the pixels per GUI
+    /// unit, `content` the content height and `max` the largest offset. A
+    /// press on the thumb keeps its grab; a press on the track centres the
+    /// thumb on the pointer. The drag follows the pointer outside the bar and
+    /// ends on the release.
+    pub fn apply(
+        &mut self,
+        ui: &Ui,
+        scale: f32,
+        bar: [f32; 3],
+        (content, max): (f32, f32),
+        offset: f32,
+    ) -> f32 {
+        let [x, top, height] = bar;
+        if max <= 0.0 || height < 40.0 {
+            self.0 = None;
+            return offset;
+        }
+        let thumb = (height * height / content).clamp(32.0, height - 8.0);
+        let travel = height - thumb;
+        let origin = ui.viewport();
+        let to_gui = |p: [f32; 2]| [(p[0] - origin.x) / scale, (p[1] - origin.y) / scale];
+        let to_offset = |y: f32, grab: f32| ((y - top - grab) / travel * max).clamp(0.0, max);
+        let mut offset = offset;
+        for event in &ui.input().events {
+            match event {
+                InputEvent::PointerPressed {
+                    position,
+                    button: PointerButton::Left,
+                } => {
+                    let p = to_gui(*position);
+                    if (x..x + SCROLLBAR_WIDTH).contains(&p[0])
+                        && (top..top + height).contains(&p[1])
+                    {
+                        let thumb_top = offset * travel / max + top;
+                        let grab = if (thumb_top..thumb_top + thumb).contains(&p[1]) {
+                            p[1] - thumb_top
+                        } else {
+                            thumb / 2.0
+                        };
+                        self.0 = Some(grab);
+                        offset = to_offset(p[1], grab);
+                    }
+                }
+                InputEvent::PointerMoved { position } => {
+                    if let Some(grab) = self.0 {
+                        offset = to_offset(to_gui(*position)[1], grab);
+                    }
+                }
+                InputEvent::PointerReleased {
+                    button: PointerButton::Left,
+                    ..
+                } => self.0 = None,
+                _ => {}
+            }
+        }
+        offset
+    }
+}
+
 /// Draws a vertical gradient as horizontal bands.
 pub(crate) fn gradient(ui: &mut Ui, rect: Rect, top: Color, bottom: Color) {
     const BANDS: u32 = 32;
@@ -414,5 +490,71 @@ mod tests {
         let lines = wrap_lines(&atlas, "aaaaaaa", width, 1.0);
         assert!(lines.len() >= 2);
         assert_eq!(lines.concat(), "aaaaaaa");
+    }
+}
+
+#[cfg(test)]
+mod scrollbar_drag_tests {
+    use super::testing::{frame, VIEWPORT};
+    use super::ScrollbarDrag;
+    use crate::input::{InputEvent, PointerButton, UiInput};
+
+    // Scale 3: bar at x = 100, top 32, height 200; content 600, so the thumb
+    // is 66.7 high and the largest offset 400.
+    const BAR: [f32; 3] = [100.0, 32.0, 200.0];
+
+    fn step(drag: &mut ScrollbarDrag, event: InputEvent, offset: f32) -> f32 {
+        frame(UiInput::new(vec![event]), |ui| {
+            drag.apply(ui, 3.0, BAR, (600.0, 400.0), offset)
+        })
+    }
+
+    fn at(y: f32) -> [f32; 2] {
+        [102.0 * 3.0 + VIEWPORT.x, y * 3.0 + VIEWPORT.y]
+    }
+
+    #[test]
+    fn dragging_the_thumb_moves_the_offset_until_the_release() {
+        let mut drag = ScrollbarDrag::default();
+        let press = InputEvent::PointerPressed {
+            position: at(40.0),
+            button: PointerButton::Left,
+        };
+        assert_eq!(step(&mut drag, press, 0.0), 0.0);
+        assert!(drag.is_active());
+        // The thumb travels 133.3 units for 400 of offset.
+        let moved = step(
+            &mut drag,
+            InputEvent::PointerMoved {
+                position: at(40.0 + 66.667),
+            },
+            0.0,
+        );
+        assert!((moved - 200.0).abs() < 0.1, "{moved}");
+        let release = InputEvent::PointerReleased {
+            position: at(100.0),
+            button: PointerButton::Left,
+        };
+        step(&mut drag, release, moved);
+        assert!(!drag.is_active());
+        let after = InputEvent::PointerMoved { position: at(200.0) };
+        assert_eq!(step(&mut drag, after, moved), moved);
+    }
+
+    #[test]
+    fn a_press_on_the_track_centres_the_thumb_and_a_press_beside_it_does_nothing() {
+        let mut drag = ScrollbarDrag::default();
+        let press = InputEvent::PointerPressed {
+            position: at(231.0),
+            button: PointerButton::Left,
+        };
+        assert_eq!(step(&mut drag, press, 0.0), 400.0);
+        let mut other = ScrollbarDrag::default();
+        let beside = InputEvent::PointerPressed {
+            position: [50.0 * 3.0, 100.0 * 3.0],
+            button: PointerButton::Left,
+        };
+        assert_eq!(step(&mut other, beside, 7.0), 7.0);
+        assert!(!other.is_active());
     }
 }

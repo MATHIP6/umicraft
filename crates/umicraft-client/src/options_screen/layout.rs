@@ -130,8 +130,16 @@ impl OptionsScreen {
         draw_list_overlay(ui, gui.rect(x, top, width, bottom - top));
     }
 
-    /// Applies the wheel to the scroll offset.
-    pub(super) fn scroll_list(&mut self, ui: &Ui, content: f32, visible: f32, row: f32) {
+    /// Applies the wheel and a drag of the scrollbar at GUI `x` to the
+    /// scroll offset.
+    pub(super) fn scroll_list(
+        &mut self,
+        ui: &Ui,
+        gui: Gui,
+        (x, top, bottom): (f32, f32, f32),
+        (content, row): (f32, f32),
+    ) {
+        let visible = bottom - top;
         let max = (content - (visible - 4.0)).max(0.0);
         for event in &ui.input().events {
             if let InputEvent::Wheel { delta } = event {
@@ -139,6 +147,13 @@ impl OptionsScreen {
             }
         }
         self.scroll = self.scroll.clamp(0.0, max);
+        self.scroll = self.scroll_bar.apply(
+            ui,
+            gui.scale,
+            [x, top, visible],
+            (content, max),
+            self.scroll,
+        );
     }
 
     /// The vanilla scrollbar of a `GuiSlot`.
