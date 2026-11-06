@@ -80,6 +80,7 @@ pub mod panorama;
 pub mod profile_textures;
 pub mod progress;
 pub mod resource_pack;
+pub mod server_pack;
 pub mod setup;
 pub mod skin;
 pub mod sound_assets;
