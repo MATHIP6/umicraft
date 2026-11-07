@@ -13,7 +13,9 @@ use crate::{BlockEntityRef, Vertex};
 pub struct Mesh {
     /// Opaque interleaved vertices, four per face.
     pub vertices: Vec<Vertex>,
-    /// Opaque triangle indices, six per face.
+    /// Opaque triangle indices, six per face. Every face has the pattern
+    /// `[0, 1, 2, 0, 2, 3] + 4 * face`: the renderer relies on it to draw
+    /// chunks with one shared index buffer and never uploads these.
     pub indices: Vec<u32>,
     /// Transparent interleaved vertices (water, glass, leaves), four per face.
     pub transparent_vertices: Vec<Vertex>,
@@ -104,5 +106,29 @@ mod tests {
         assert_eq!(mesh.transparent_face_count(), 2);
         assert_eq!(mesh.face_count(), 3);
         assert_eq!(mesh.triangle_count(), 6);
+    }
+
+    #[test]
+    fn every_quad_has_the_fixed_index_pattern() {
+        let vertex = Vertex {
+            position: [0.0; 3],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0; 2],
+            layer: 0,
+            light: 0,
+            tint: 0,
+        };
+        let mut mesh = Mesh::default();
+        for _ in 0..3 {
+            mesh.push_quad(false, [vertex; 4]);
+            mesh.push_quad(true, [vertex; 4]);
+        }
+        let pattern = |quads: u32| -> Vec<u32> {
+            (0..quads)
+                .flat_map(|q| [4 * q, 4 * q + 1, 4 * q + 2, 4 * q, 4 * q + 2, 4 * q + 3])
+                .collect()
+        };
+        assert_eq!(mesh.indices, pattern(3));
+        assert_eq!(mesh.transparent_indices, pattern(3));
     }
 }

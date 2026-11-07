@@ -111,10 +111,10 @@ Optimisation steps also get a criterion benchmark or a scene measurement in
 
 | Step | Content |
 |---|---|
-| F2-2a | The mesher tags each quad SOLID or CUTOUT from the texture's alpha. Two pipelines: SOLID without `discard`, drawn first; then CUTOUT. |
-| F2-2b | Sort the visible opaque list near to far, reusing its buffer as the translucent sort does. |
+| F2-2a (**done**, ADR-0061) | The renderer tags each quad SOLID or CUTOUT from the texture's alpha. Two pipelines: SOLID without `discard`, drawn first; then CUTOUT. |
+| F2-2b (**done**) | Sort the visible opaque list near to far, reusing its buffer as the translucent sort does. |
 | F2-2c | Lightmap as a 16×16 `Rgba8Unorm` texture with a linear sampler, written per frame (parity check against `lightmap.rs`). |
-| F2-2d | One shared quad index buffer, grown on demand. Meshes upload vertices only. |
+| F2-2d (**done**) | One shared quad index buffer, grown on demand. Meshes upload vertices only. |
 
 ### Phase 3 — Sections (B3, B4, B5, C1); needs its own ADR
 

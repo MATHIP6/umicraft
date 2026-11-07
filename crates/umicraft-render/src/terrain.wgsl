@@ -142,6 +142,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(shade_fragment(in, texel), 1.0);
 }
 
+// Opaque pass for quads whose texture has no texel under the alpha test (the
+// renderer sorts them from the atlas): no `discard`, so the GPU may reject
+// hidden fragments before shading them.
+@fragment
+fn fs_solid(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    return vec4<f32>(shade_fragment(in, texel), 1.0);
+}
+
 // Item icons: the reference draws GUI items with alpha test 0.1 and alpha
 // blending (`RenderItem.renderItemModelIntoGUI`), so the translucent interior
 // of stained glass keeps its colour. The icon is rendered into a transparent

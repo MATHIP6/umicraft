@@ -37,6 +37,7 @@ use crate::block_atlas::{self, BlockAtlasError};
 use crate::border::{BorderRenderer, BorderView};
 use crate::camera::{Camera, Frustum};
 use crate::capture;
+use crate::chunk_pass::{create_chunk_pass, cutout_layers, ChunkPass, QuadIndices};
 use crate::clouds::{CloudMode, CloudRenderer};
 use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
@@ -162,13 +163,14 @@ pub(crate) struct GpuMeshPass {
 /// after every opaque chunk without touching vertex data. A pass with no faces
 /// is absent rather than being a zero-sized buffer (which wgpu rejects).
 struct GpuMesh {
-    opaque: Option<GpuMeshPass>,
-    transparent: Option<GpuMeshPass>,
+    opaque: Option<ChunkPass>,
+    transparent: Option<ChunkPass>,
 }
 
-/// One transparent chunk queued for the back-to-front pass.
+/// One chunk queued for a sorted pass: opaque ones go near to far (less
+/// overdraw), transparent ones far to near.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct TransparentDraw {
+struct ChunkDraw {
     pos: ChunkPos,
     distance_sq: f32,
 }
@@ -216,6 +218,20 @@ pub struct Renderer {
     /// The block array with [`Renderer::local_camera_buffer`].
     local_terrain_bind_group: wgpu::BindGroup,
     terrain_pipeline: wgpu::RenderPipeline,
+    /// The opaque pipeline without `discard`, for the quads whose texture has
+    /// no cutout texel (F2-2a).
+    terrain_solid_pipeline: wgpu::RenderPipeline,
+    /// The index buffer every chunk pass is drawn with (F2-2d).
+    quad_indices: QuadIndices,
+    /// Which layers of the bound block array need the alpha test.
+    cutout: Vec<bool>,
+    /// Bumped whenever `cutout` changes; chunk passes sorted with an older
+    /// one are drawn whole with the alpha test until they are uploaded again.
+    cutout_epoch: u32,
+    /// The same for the built-in array, restored by `use_procedural_blocks`.
+    procedural_cutout: Vec<bool>,
+    /// Reused by `upload_mesh` to put the solid quads first.
+    chunk_scratch: Vec<Vertex>,
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
     terrain_transparent_pipeline: wgpu::RenderPipeline,
@@ -244,10 +260,10 @@ pub struct Renderer {
     /// Reused per-frame queue of transparent chunks, farthest first. Its
     /// capacity is bounded by the number of uploaded meshes and is retained
     /// across frames, so sorting allocates nothing in steady state.
-    transparent_order: Vec<TransparentDraw>,
+    transparent_order: Vec<ChunkDraw>,
     /// Reused per-frame list of the chunks with opaque geometry that are
     /// inside the render distance and the view frustum.
-    visible_opaque: Vec<ChunkPos>,
+    visible_opaque: Vec<ChunkDraw>,
     /// Sky dome, sun, moon, stars and the End cube.
     sky: SkyRenderer,
     /// The clouds, drawn with the depth test after the opaque passes.
@@ -667,6 +683,14 @@ impl Renderer {
             format,
             TerrainPipelineState::opaque(),
         );
+        let quad_indices = QuadIndices::new(&device);
+        let terrain_solid_pipeline = create_terrain_pipeline(
+            &device,
+            &terrain_shader,
+            &terrain_layout,
+            format,
+            TerrainPipelineState::solid(),
+        );
         let terrain_transparent_pipeline = create_terrain_pipeline(
             &device,
             &terrain_shader,
@@ -888,6 +912,15 @@ impl Renderer {
             local_camera_bind_group,
             local_terrain_bind_group,
             terrain_pipeline,
+            terrain_solid_pipeline,
+            quad_indices,
+            procedural_cutout: cutout_layers(
+                &block_data,
+                (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize,
+            ),
+            cutout: cutout_layers(&block_data, (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize),
+            cutout_epoch: 0,
+            chunk_scratch: Vec::new(),
             terrain_transparent_pipeline,
             crack_pipeline,
             crack_mesh: None,
@@ -1331,16 +1364,18 @@ impl Renderer {
             if !chunk_is_visible(*pos, eye_chunk, reach, &frustum, origin) {
                 continue;
             }
+            let draw = ChunkDraw {
+                pos: *pos,
+                distance_sq: squared_distance_to_chunk(*pos, eye),
+            };
             if mesh.opaque.is_some() {
-                self.visible_opaque.push(*pos);
+                self.visible_opaque.push(draw);
             }
             if mesh.transparent.is_some() {
-                self.transparent_order.push(TransparentDraw {
-                    pos: *pos,
-                    distance_sq: squared_distance_to_chunk(*pos, eye),
-                });
+                self.transparent_order.push(draw);
             }
         }
+        sort_nearest_first(&mut self.visible_opaque);
         sort_transparent_farthest_first(&mut self.transparent_order);
     }
 
@@ -1594,6 +1629,8 @@ impl Renderer {
             &view,
         );
         self.rebind_icons(&view);
+        self.cutout = cutout_layers(pixels, width as usize * height as usize * 4);
+        self.cutout_epoch += 1;
         self.official_blocks = Some((texture, width, height));
         Ok(())
     }
@@ -1753,6 +1790,8 @@ impl Renderer {
     /// fresh renderer changes nothing.
     pub fn use_procedural_blocks(&mut self) {
         self.official_blocks = None;
+        self.cutout.clone_from(&self.procedural_cutout);
+        self.cutout_epoch += 1;
         self.terrain_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
@@ -1810,21 +1849,34 @@ impl Renderer {
             self.chunks.remove(&pos);
             return;
         }
-        let opaque =
-            create_gpu_mesh_pass(&self.device, "chunk opaque", &mesh.vertices, &mesh.indices);
-        let transparent = create_gpu_mesh_pass(
+        let opaque = create_chunk_pass(
+            &self.device,
+            "chunk opaque",
+            &mesh.vertices,
+            Some((&self.cutout, self.cutout_epoch)),
+            &mut self.chunk_scratch,
+        );
+        let transparent = create_chunk_pass(
             &self.device,
             "chunk transparent",
             &mesh.transparent_vertices,
-            &mesh.transparent_indices,
+            None,
+            &mut self.chunk_scratch,
         );
-        // A pass without indices has no drawable faces. If neither half
-        // produced a buffer (including a malformed mesh with vertices but no
-        // indices), drop any previous mesh instead of keeping an empty entry.
+        // A pass without a whole quad has nothing to draw. If neither half
+        // produced a buffer, drop any previous mesh instead of keeping an
+        // empty entry.
         if opaque.is_none() && transparent.is_none() {
             self.chunks.remove(&pos);
             return;
         }
+        let most_quads = [&opaque, &transparent]
+            .into_iter()
+            .flatten()
+            .map(|pass| pass.quads)
+            .max()
+            .unwrap_or(0);
+        self.quad_indices.ensure(&self.device, most_quads);
         let mesh = GpuMesh {
             opaque,
             transparent,
@@ -2382,14 +2434,15 @@ impl Renderer {
         self.panorama.draw(&mut pass);
         self.stamp(&mut pass, 1);
 
-        // Opaque terrain: depth write on, alpha cutout, order-independent.
-        pass.set_pipeline(&self.terrain_pipeline);
+        // Opaque terrain, nearest chunk first: the SOLID quads (no alpha
+        // test, early depth rejection) and then the CUTOUT ones, which
+        // discard texels. Both write depth and do not depend on the order.
+        self.quad_indices.bind(&mut pass);
         pass.set_bind_group(0, &self.chunk_bind_group, &[]);
-        for pos in &self.visible_opaque {
-            if let Some(opaque) = self.chunks.get(pos).and_then(|mesh| mesh.opaque.as_ref()) {
-                draw_gpu_pass(&mut pass, opaque);
-            }
-        }
+        pass.set_pipeline(&self.terrain_solid_pipeline);
+        self.draw_visible_opaque(&mut pass, true);
+        pass.set_pipeline(&self.terrain_pipeline);
+        self.draw_visible_opaque(&mut pass, false);
         self.moving_blocks.draw_opaque(&mut pass);
         self.stamp(&mut pass, 2);
 
@@ -2470,13 +2523,17 @@ impl Renderer {
         // each other by submission order.
         pass.set_pipeline(&self.terrain_transparent_pipeline);
         pass.set_bind_group(0, &self.chunk_bind_group, &[]);
+        self.quad_indices.bind(&mut pass);
         for draw in &self.transparent_order {
-            let Some(mesh) = self.chunks.get(&draw.pos) else {
+            let Some(transparent) = self
+                .chunks
+                .get(&draw.pos)
+                .and_then(|mesh| mesh.transparent.as_ref())
+            else {
                 continue;
             };
-            if let Some(transparent) = mesh.transparent.as_ref() {
-                draw_gpu_pass(&mut pass, transparent);
-            }
+            pass.set_vertex_buffer(0, transparent.vertex_buffer.slice(..));
+            pass.draw_indexed(transparent.all_indices(), 0, 0..1);
         }
         // Drawn after the chunks' blended faces: a handful of quads, so no
         // sorting against them.
@@ -2572,6 +2629,33 @@ impl Renderer {
             }
         }
         self.stamp(&mut pass, 5);
+    }
+
+    /// Draws the SOLID (`solid`) or the CUTOUT quads of every visible opaque
+    /// chunk, nearest first. The quad index buffer and the pipeline are bound
+    /// by the caller. A chunk sorted with an outdated atlas has no valid
+    /// split: it is drawn whole, with the alpha test.
+    fn draw_visible_opaque(&self, pass: &mut wgpu::RenderPass<'_>, solid: bool) {
+        for draw in &self.visible_opaque {
+            let Some(opaque) = self
+                .chunks
+                .get(&draw.pos)
+                .and_then(|mesh| mesh.opaque.as_ref())
+            else {
+                continue;
+            };
+            let indices = match (opaque.epoch == self.cutout_epoch, solid) {
+                (true, true) => opaque.solid_indices(),
+                (true, false) => opaque.cutout_indices(),
+                (false, true) => 0..0,
+                (false, false) => opaque.all_indices(),
+            };
+            if indices.is_empty() {
+                continue;
+            }
+            pass.set_vertex_buffer(0, opaque.vertex_buffer.slice(..));
+            pass.draw_indexed(indices, 0, 0..1);
+        }
     }
 
     fn reconfigure_surface(&mut self) -> Result<(), RenderError> {
@@ -2708,6 +2792,17 @@ impl TerrainPipelineState {
             blend: wgpu::BlendState::REPLACE,
             bias: wgpu::DepthBiasState::default(),
             cull_mode: Some(wgpu::Face::Back),
+        }
+    }
+
+    /// The opaque pass for quads that never need the alpha test: the same
+    /// state, a fragment shader without `discard`, so the GPU keeps early
+    /// depth rejection.
+    fn solid() -> Self {
+        Self {
+            label: "terrain solid pipeline",
+            fragment_entry: "fs_solid",
+            ..Self::opaque()
         }
     }
 
@@ -2925,9 +3020,20 @@ fn squared_distance_to_chunk(pos: ChunkPos, eye: DVec3) -> f32 {
     chunk_centre(pos).distance_squared(eye) as f32
 }
 
+/// Orders opaque chunks nearest first, so what stands in front is drawn
+/// before what hides behind it and fewer fragments are shaded for nothing
+/// (F2-2b); `ChunkPos` is the deterministic tie-break.
+fn sort_nearest_first(chunks: &mut [ChunkDraw]) {
+    chunks.sort_unstable_by(|a, b| {
+        a.distance_sq
+            .total_cmp(&b.distance_sq)
+            .then_with(|| a.pos.cmp(&b.pos))
+    });
+}
+
 /// Orders transparent chunks farthest first, with `ChunkPos` as the
 /// deterministic tie-break (ADR-0008 §3).
-fn sort_transparent_farthest_first(chunks: &mut [TransparentDraw]) {
+fn sort_transparent_farthest_first(chunks: &mut [ChunkDraw]) {
     chunks.sort_unstable_by(|a, b| {
         b.distance_sq
             .total_cmp(&a.distance_sq)
@@ -3098,15 +3204,15 @@ mod tests {
     fn transparent_sort_is_farthest_first() {
         let camera = DVec3::ZERO;
         let mut chunks = vec![
-            TransparentDraw {
+            ChunkDraw {
                 pos: ChunkPos::new(0, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(0, 0), camera),
             },
-            TransparentDraw {
+            ChunkDraw {
                 pos: ChunkPos::new(2, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(2, 0), camera),
             },
-            TransparentDraw {
+            ChunkDraw {
                 pos: ChunkPos::new(1, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(1, 0), camera),
             },
@@ -3131,7 +3237,7 @@ mod tests {
             ChunkPos::new(0, 1),
             ChunkPos::new(-1, 0),
         ]
-        .map(|pos| TransparentDraw {
+        .map(|pos| ChunkDraw {
             pos,
             distance_sq: squared_distance_to_chunk(pos, camera),
         });
@@ -3153,7 +3259,7 @@ mod tests {
 
     #[test]
     fn transparent_sort_of_an_empty_list_is_a_no_op() {
-        let mut chunks: Vec<TransparentDraw> = Vec::new();
+        let mut chunks: Vec<ChunkDraw> = Vec::new();
         sort_transparent_farthest_first(&mut chunks);
         assert!(chunks.is_empty());
     }
@@ -3203,7 +3309,13 @@ mod tests {
         )
         .validate(&module)
         .expect("the shader validates");
-        for entry in ["fs_main", "fs_icon", "fs_transparent", "fs_crack"] {
+        for entry in [
+            "fs_main",
+            "fs_solid",
+            "fs_icon",
+            "fs_transparent",
+            "fs_crack",
+        ] {
             assert!(
                 module.entry_points.iter().any(|point| point.name == entry),
                 "missing {entry}"
