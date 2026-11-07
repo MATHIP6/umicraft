@@ -131,6 +131,8 @@ pub fn run(args: Args) -> Result<(), ClientError> {
 
 struct App {
     args: Args,
+    /// The name tags of the frame, drawn by the renderer in the world pass.
+    nametags: Vec<umicraft_render::Nametag>,
     /// The user's options: video, mouse, chat and the key bindings.
     options: Options,
     /// The language every UI text comes from (ADR-0039); also installed as
@@ -348,6 +350,7 @@ impl App {
             seen_completions: 0,
             ctrl_held: false,
             shift_held: false,
+            nametags: Vec::new(),
             pointer: (0.0, 0.0),
             chat_hover: None,
             pick_block: false,
@@ -797,6 +800,7 @@ impl App {
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
         self.portrait = None;
+        self.nametags.clear();
         // Only the title screen sets it again below; every other frame,
         // in particular a session's, draws the world.
         if let Some(renderer) = self.renderer.as_mut() {
@@ -887,7 +891,7 @@ impl App {
             if !matches!(screen, Screen::Inventory | Screen::Creative) {
                 let entities = world.entities(Instant::now());
                 let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
-                draw_tags(&mut self.ui, atlas, &tags);
+                self.nametags = draw_tags(atlas, &tags);
             }
         }
 
@@ -1151,6 +1155,7 @@ impl App {
                 renderer.write_block_layer(layer, pixels);
             });
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
+        renderer.set_nametags(&self.nametags, (width, height));
         if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
         {
             renderer.set_block_cracks(&vertices, &indices);
@@ -1165,6 +1170,7 @@ impl App {
         {
             let entities = world.entities(now);
             let hand = world.hand_pose(now);
+            let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
             entity_textures.set_camera_position(self.camera.position);
@@ -1218,16 +1224,22 @@ impl App {
                         (&hand, bob, world.hand_light()),
                         renderer,
                     );
-                    entity_textures.upload_hand_map(&hand, bob, &held, renderer);
+                    entity_textures.upload_hand_map(&hand, bob, hand_skin, &held, renderer);
                 }
                 _ => match &hand_item {
                     Some((slot, vertices)) => entity_textures.upload_hand_item(
                         &hand,
                         self.camera.view_bob(),
+                        hand_skin,
                         (*slot, vertices),
                         renderer,
                     ),
-                    None => entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer),
+                    None => entity_textures.upload_hand(
+                        &hand,
+                        self.camera.view_bob(),
+                        hand_skin,
+                        renderer,
+                    ),
                 },
             }
             if let Some(items) = self.items.as_deref() {

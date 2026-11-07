@@ -24,6 +24,8 @@ use super::banner_cache::BannerCache;
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
+use super::mobs::skin_slot;
+use super::player::posed_player;
 use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
 use crate::map_render::{map_arm_vertices, MapBatch};
@@ -189,14 +191,29 @@ impl EntityTextures {
         self.viewer_is_spectator.set(spectator);
     }
 
+    /// The texture and arm model of the first-person hand: those of the local
+    /// player's body (the downloaded skin and its slim flag), or the default
+    /// skin until the local profile is known.
+    #[must_use]
+    pub fn hand_skin(&self, local: Option<&EntityRenderSnapshot>) -> HandSkin {
+        match local {
+            Some(body) => {
+                let (_, is_slim) = posed_player(body);
+                (
+                    skin_slot(body, is_slim, self),
+                    is_slim,
+                    body.flags.skin_parts,
+                )
+            }
+            None => (TextureSlot::Steve, false, ALL_SKIN_PARTS),
+        }
+    }
+
     /// Uploads the first-person hand, or hides it when `pose` shows no arm.
-    ///
-    /// The arm wears the default skin until the local profile is known (the
-    /// same one the third-person body wears).
-    pub fn upload_hand(&self, pose: &HandPose, bob: Mat4, renderer: &mut Renderer) {
-        let vertices = hand_vertices(pose, bob, false);
+    pub fn upload_hand(&self, pose: &HandPose, bob: Mat4, skin: HandSkin, renderer: &mut Renderer) {
+        let vertices = hand_vertices(pose, bob, (skin.1, skin.2));
         let textures = self.textures.borrow();
-        match (vertices.is_empty(), textures.get(&TextureSlot::Steve)) {
+        match (vertices.is_empty(), textures.get(&skin.0)) {
             (false, Some(skin)) => renderer.set_hand(&vertices, skin.bind_group()),
             _ => renderer.clear_hand(),
         }
@@ -229,14 +246,13 @@ impl EntityTextures {
         &self,
         pose: &HandPose,
         bob: Mat4,
+        skin: HandSkin,
         item: (TextureSlot, &[EntityVertex]),
         renderer: &mut Renderer,
     ) {
-        let arm = hand_vertices(pose, bob, false);
+        let arm = hand_vertices(pose, bob, (skin.1, skin.2));
         let textures = self.textures.borrow();
-        let (Some(skin), Some(texture)) =
-            (textures.get(&TextureSlot::Steve), textures.get(&item.0))
-        else {
+        let (Some(skin), Some(texture)) = (textures.get(&skin.0), textures.get(&item.0)) else {
             return renderer.clear_hand();
         };
         renderer.set_hand_batches(&[
@@ -250,12 +266,13 @@ impl EntityTextures {
         &self,
         pose: &HandPose,
         bob: Mat4,
+        skin: HandSkin,
         map: &[MapBatch],
         renderer: &mut Renderer,
     ) {
-        let arms = map_arm_vertices(pose, bob, false);
+        let arms = map_arm_vertices(pose, bob, (skin.1, skin.2));
         let textures = self.textures.borrow();
-        let Some(skin) = textures.get(&TextureSlot::Steve) else {
+        let Some(skin) = textures.get(&skin.0) else {
             return renderer.clear_hand();
         };
         let mut batches = vec![(arms.as_slice(), skin.bind_group())];
@@ -431,6 +448,13 @@ impl EntityTextures {
         }
     }
 }
+
+/// The texture of the first-person arm, whether its model is slim and the
+/// skin layers the player shows (`EnumPlayerModelParts`).
+pub type HandSkin = (TextureSlot, bool, u8);
+
+/// Every skin layer on, as before the local profile is known.
+const ALL_SKIN_PARTS: u8 = 0x7F;
 
 impl SkinLookup for EntityTextures {
     fn skin(&self, url: &str) -> Option<u32> {

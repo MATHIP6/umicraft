@@ -205,7 +205,11 @@ const GIANT_SCALE: f32 = 6.0;
 
 /// The texture of a player: the downloaded skin, or the default skin that
 /// matches the arm model.
-fn skin_slot(ent: &EntityRenderSnapshot, is_slim: bool, skins: &dyn SkinLookup) -> TextureSlot {
+pub(crate) fn skin_slot(
+    ent: &EntityRenderSnapshot,
+    is_slim: bool,
+    skins: &dyn SkinLookup,
+) -> TextureSlot {
     let downloaded = ent
         .profile
         .as_ref()

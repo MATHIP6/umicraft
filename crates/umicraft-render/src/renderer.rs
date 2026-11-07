@@ -16,6 +16,7 @@
 //! copy-on-write when remeshed. The HUD and the UI share the overlay pipeline;
 //! [`Renderer::render_with_ui`] appends [`UiPass`] geometry after the HUD.
 
+use crate::nametag::{Nametag, NametagRenderer};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -73,7 +74,7 @@ pub(crate) const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_a
     4 => Uint32,
     5 => Uint32
 ];
-const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+pub(crate) const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
 
 /// Half the depth range of the icon camera, in GUI pixels; a lit block's
@@ -257,6 +258,8 @@ pub struct Renderer {
     /// can be rewritten in place; `None` while the procedural array is bound.
     official_blocks: Option<(wgpu::Texture, u32, u32)>,
     overlay_pipeline: wgpu::RenderPipeline,
+    /// The name tags of the frame, drawn in the world pass.
+    nametags: NametagRenderer,
     /// Pipeline for GUI texture quads (RGBA, no coverage threshold).
     gui_overlay_pipeline: wgpu::RenderPipeline,
     /// `gui_overlay_pipeline` with the inverting blend of the crosshair.
@@ -641,6 +644,7 @@ impl Renderer {
             format,
             wgpu::BlendState::ALPHA_BLENDING,
         );
+        let nametags = NametagRenderer::new(&device, &overlay_shader, &overlay_layout, format);
         let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gui overlay shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gui_overlay.wgsl").into()),
@@ -840,6 +844,7 @@ impl Renderer {
             procedural_blocks: block_view,
             official_blocks: None,
             overlay_pipeline,
+            nametags,
             gui_overlay_pipeline,
             gui_inverted_pipeline,
             overlay_layout,
@@ -1059,6 +1064,12 @@ impl Renderer {
         self.ui_pass
             .rebuild_with_icons(draw_list, &self.ui_atlas, &|key| atlas.uv(key));
         self.render_frame(camera, overlay)
+    }
+
+    /// Replaces the name tags drawn in the world pass of the next frames; an
+    /// empty slice hides them. `size` is the window in pixels.
+    pub fn set_nametags(&mut self, tags: &[Nametag], size: (u32, u32)) {
+        self.nametags.set(&self.device, tags, size, &self.ui_atlas);
     }
 
     /// Whether the icon atlas holds the icon `key`.
@@ -2241,6 +2252,11 @@ impl Renderer {
             self.entity_renderer
                 .render_glint(&mut pass, &self.camera_bind_group, batches);
         }
+
+        // `renderEntities` draws the labels with the entities, before the
+        // particles and the translucent terrain.
+        self.nametags
+            .draw(&mut pass, &self.overlay_pipeline, &self.ui_bind_group);
 
         // Dropped items share the terrain pipeline and its texture array.
         pass.set_pipeline(&self.terrain_pipeline);

@@ -5,9 +5,12 @@
 //! Vanilla draws the tag as a billboard in the world (MCP
 //! `Render.renderLivingLabel`, `RendererLivingEntity.renderName`): the text
 //! is 0.0266667 blocks per font pixel, on a 25 % black box, turned to face
-//! the camera. Here the anchor is projected to the screen and the text drawn
-//! by the UI with the scale perspective gives it; there is no depth test, so a
-//! tag shows through terrain (vanilla fades it to a ghost there).
+//! the camera. Here the anchor is projected to the screen and the text laid
+//! out flat with the scale perspective gives it, at the depth of the anchor.
+//! The renderer draws it in the world pass (`umicraft_render::Nametag`): a
+//! standing player's box and a faint copy of the text show through terrain,
+//! the full text only where nothing hides it; a crouching player's tag is
+//! only the box and the faint text, hidden by terrain.
 
 use std::sync::Arc;
 
@@ -15,8 +18,8 @@ use glam::{Vec3, Vec4};
 use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_game::hud::team_names::SCORE_LABEL_RANGE_SQ;
-use umicraft_render::Camera;
-use umicraft_ui::{Color, FontAtlas, Rect, TextStyle, Ui};
+use umicraft_render::{Camera, Nametag};
+use umicraft_ui::{Color, DrawList, FontAtlas, Rect, TextStyle};
 
 /// World size of one font pixel of a tag (MCP `0.016666668 * 1.6`).
 const WORLD_PER_FONT_PIXEL: f32 = 0.026_666_67;
@@ -32,6 +35,8 @@ const SNEAK_TAG_RANGE: f32 = 32.0;
 /// Opacity of the box behind the text.
 const BOX_COLOR: Color = [0.0, 0.0, 0.0, 0.25];
 const WHITE: Color = [1.0, 1.0, 1.0, 1.0];
+/// The alpha of the see-through copy of the text (`0x20FFFFFF`).
+const FAINT_ALPHA: f32 = 32.0 / 255.0;
 /// Height of a font glyph box in font pixels.
 const FONT_HEIGHT: f32 = 9.0;
 
@@ -44,6 +49,10 @@ pub struct PlacedTag {
     pub anchor: [f32; 2],
     /// Pixels per font pixel.
     pub scale: f32,
+    /// Normalised device depth of the anchor, as the world pass writes it.
+    pub depth: f32,
+    /// Whether the player is crouching, which keeps the tag behind terrain.
+    pub sneaking: bool,
 }
 
 /// Where each visible tag goes on a `width` x `height` screen.
@@ -71,7 +80,8 @@ pub fn place_tags(
             let lift = body + ABOVE_HEAD - if child { body / 2.0 } else { 0.0 };
             let lift = if sneaking { lift - SNEAK_DROP } else { lift };
             let anchor = entity.position + Vec3::Y * lift;
-            let top = project(view_projection, anchor, width, height)?;
+            let [top_x, top_y, depth] = project(view_projection, anchor, width, height)?;
+            let top = [top_x, top_y];
             let above = project(
                 view_projection,
                 anchor + up * WORLD_PER_FONT_PIXEL,
@@ -80,6 +90,13 @@ pub fn place_tags(
             )?;
             // A font pixel is as many screen pixels as `up` moves it.
             let scale = (top[1] - above[1]).abs();
+            let placed = |text: Arc<str>, anchor: [f32; 2]| PlacedTag {
+                text,
+                anchor,
+                scale,
+                depth,
+                sneaking,
+            };
             let near =
                 f64::from(entity.position.distance_squared(camera.position)) < SCORE_LABEL_RANGE_SQ;
             (scale > 0.0).then(|| match text.split_once('\n') {
@@ -88,28 +105,15 @@ pub fn place_tags(
                 // 1.15 line heights. A crouching player's tag goes through
                 // `renderName`'s own branch, which has no score line, and the
                 // score needs the player within 10 blocks.
-                Some((name, _)) if sneaking || !near => vec![PlacedTag {
-                    text: Arc::from(name),
-                    anchor: top,
-                    scale,
-                }],
+                Some((name, _)) if sneaking || !near => vec![placed(Arc::from(name), top)],
                 Some((name, score)) => vec![
-                    PlacedTag {
-                        text: Arc::from(score),
-                        anchor: top,
-                        scale,
-                    },
-                    PlacedTag {
-                        text: Arc::from(name),
-                        anchor: [top[0], top[1] - FONT_HEIGHT * 1.15 * scale],
-                        scale,
-                    },
+                    placed(Arc::from(score), top),
+                    placed(
+                        Arc::from(name),
+                        [top[0], top[1] - FONT_HEIGHT * 1.15 * scale],
+                    ),
                 ],
-                None => vec![PlacedTag {
-                    text: Arc::clone(text),
-                    anchor: top,
-                    scale,
-                }],
+                None => vec![placed(Arc::clone(text), top)],
             })
         })
         .flatten()
@@ -134,40 +138,67 @@ fn hitbox(entity: &EntityRenderSnapshot) -> (f32, bool) {
     }
 }
 
-/// The screen position of a world point, `None` behind the camera.
-fn project(view_projection: glam::Mat4, point: Vec3, width: f32, height: f32) -> Option<[f32; 2]> {
+/// The screen position and the depth of a world point, `None` behind the
+/// camera.
+fn project(view_projection: glam::Mat4, point: Vec3, width: f32, height: f32) -> Option<[f32; 3]> {
     let clip = view_projection * Vec4::new(point.x, point.y, point.z, 1.0);
     if clip.w <= 0.0 {
         return None;
     }
     let (x, y) = (clip.x / clip.w, clip.y / clip.w);
-    Some([(x * 0.5 + 0.5) * width, (0.5 - y * 0.5) * height])
+    Some([
+        (x * 0.5 + 0.5) * width,
+        (0.5 - y * 0.5) * height,
+        clip.z / clip.w,
+    ])
 }
 
-/// Draws the tags: a dark box and the text over it.
-pub fn draw_tags(ui: &mut Ui, font: &FontAtlas, tags: &[PlacedTag]) {
-    for tag in tags {
-        let runs = format_runs(&tag.text);
-        let plain: String = runs.iter().map(|(text, _)| text.as_str()).collect();
-        let width = font.measure(&plain, tag.scale);
-        let [cx, top] = tag.anchor;
-        let left = cx - width / 2.0;
-        ui.draw().rect(
-            Rect::new(
-                left - tag.scale,
-                top - tag.scale,
-                width + 2.0 * tag.scale,
-                FONT_HEIGHT * tag.scale,
-            ),
-            BOX_COLOR,
-        );
-        let mut x = left;
-        for (text, color) in runs {
-            ui.draw()
-                .text([x, top], text.clone(), TextStyle::new(tag.scale, color));
-            x += font.measure(&text, tag.scale);
-        }
-    }
+/// The tags as the renderer draws them (MCP `Render.renderLivingLabel`): the
+/// box, then the text at `0x20FFFFFF` without the depth test, then the text at
+/// full strength with it. A crouching player's tag (`renderName`) has the
+/// box and the faint text only, both under the depth test.
+#[must_use]
+pub fn draw_tags(font: &FontAtlas, tags: &[PlacedTag]) -> Vec<Nametag> {
+    tags.iter()
+        .map(|tag| {
+            let runs = format_runs(&tag.text);
+            let plain: String = runs.iter().map(|(text, _)| text.as_str()).collect();
+            let width = font.measure(&plain, tag.scale);
+            let [cx, top] = tag.anchor;
+            let left = cx - width / 2.0;
+            let mut backdrop = DrawList::new();
+            backdrop.rect(
+                Rect::new(
+                    left - tag.scale,
+                    top - tag.scale,
+                    width + 2.0 * tag.scale,
+                    FONT_HEIGHT * tag.scale,
+                ),
+                BOX_COLOR,
+            );
+            let text = |alpha: f32, list: &mut DrawList| {
+                let mut x = left;
+                for (run, color) in &runs {
+                    let color = [color[0], color[1], color[2], alpha];
+                    list.text([x, top], run.clone(), TextStyle::new(tag.scale, color));
+                    x += font.measure(run, tag.scale);
+                }
+            };
+            text(FAINT_ALPHA, &mut backdrop);
+            let mut full = DrawList::new();
+            let (always, tested) = if tag.sneaking {
+                (DrawList::new(), backdrop)
+            } else {
+                text(1.0, &mut full);
+                (backdrop, full)
+            };
+            Nametag {
+                always,
+                tested,
+                depth: tag.depth,
+            }
+        })
+        .collect()
 }
 
 /// The colours of the formatting codes `0`-`f` (MCP `EnumChatFormatting`).
@@ -249,6 +280,71 @@ mod tests {
         let mut camera = Camera::new(Vec3::ZERO, std::f32::consts::PI, 0.0);
         camera.set_aspect(1280, 720);
         camera
+    }
+
+    fn placed(sneaking: bool) -> PlacedTag {
+        PlacedTag {
+            text: Arc::from("§cBob"),
+            anchor: [100.0, 50.0],
+            scale: 2.0,
+            depth: 0.9,
+            sneaking,
+        }
+    }
+
+    fn texts(list: &DrawList) -> Vec<f32> {
+        list.commands()
+            .iter()
+            .filter_map(|command| match command {
+                umicraft_ui::DrawCommand::Text { style, .. } => Some(style.color[3]),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_standing_tag_shows_through_terrain_faintly_and_fully_where_visible() {
+        let [tag] = &draw_tags(&FontAtlas::fallback(), &[placed(false)])[..] else {
+            panic!("one tag");
+        };
+        assert_eq!(tag.depth, 0.9);
+        // The box and the faint text have no depth test, the full text has.
+        assert!(!tag.always.commands().is_empty());
+        assert_eq!(texts(&tag.always), [FAINT_ALPHA]);
+        assert_eq!(texts(&tag.tested), [1.0]);
+    }
+
+    #[test]
+    fn a_crouching_tag_is_only_the_faint_text_behind_the_depth_test() {
+        let [tag] = &draw_tags(&FontAtlas::fallback(), &[placed(true)])[..] else {
+            panic!("one tag");
+        };
+        assert!(tag.always.commands().is_empty());
+        assert_eq!(texts(&tag.tested), [FAINT_ALPHA]);
+        assert!(tag.tested.commands().len() > 1, "the box comes with it");
+    }
+
+    #[test]
+    fn a_placed_tag_carries_the_depth_of_its_anchor_and_the_crouch() {
+        let tags = place_tags(
+            &[tagged(EntityKind::Player, Vec3::new(0.0, 0.0, 5.0), "Bob")],
+            &camera(),
+            1280.0,
+            720.0,
+        );
+        assert!(
+            tags[0].depth > 0.0 && tags[0].depth < 1.0,
+            "{}",
+            tags[0].depth
+        );
+        assert!(!tags[0].sneaking);
+        let far = place_tags(
+            &[tagged(EntityKind::Player, Vec3::new(0.0, 0.0, 20.0), "Bob")],
+            &camera(),
+            1280.0,
+            720.0,
+        );
+        assert!(far[0].depth > tags[0].depth, "farther is deeper");
     }
 
     #[test]

@@ -12,12 +12,16 @@ use umicraft_render::EntityVertex;
 /// Empty when the pose shows no arm. `bob` is the view-bobbing transform of
 /// the frame (MCP applies it to the hand as well).
 #[must_use]
-pub fn hand_vertices(pose: &HandPose, bob: Mat4, is_slim: bool) -> Vec<EntityVertex> {
+pub fn hand_vertices(
+    pose: &HandPose,
+    bob: Mat4,
+    (is_slim, skin_parts): (bool, u8),
+) -> Vec<EntityVertex> {
     if !pose.shows_arm {
         return Vec::new();
     }
     let to_camera = bob * pose.arm_matrix();
-    HumanoidModel::first_person_arm(is_slim)
+    HumanoidModel::first_person_arm(is_slim, skin_parts)
         .into_iter()
         .map(|vertex| EntityVertex {
             position: to_camera
@@ -51,12 +55,12 @@ mod tests {
 
     #[test]
     fn a_hand_that_shows_no_arm_has_no_vertices() {
-        assert!(hand_vertices(&HandPose::default(), Mat4::IDENTITY, false).is_empty());
+        assert!(hand_vertices(&HandPose::default(), Mat4::IDENTITY, (false, 0x7F)).is_empty());
     }
 
     #[test]
     fn the_resting_arm_is_in_the_lower_right_in_front_of_the_camera() {
-        let vertices = hand_vertices(&shown(), Mat4::IDENTITY, false);
+        let vertices = hand_vertices(&shown(), Mat4::IDENTITY, (false, 0x7F));
         assert_eq!(vertices.len(), 72);
         let count = vertices.len() as f32;
         let centre = vertices
@@ -74,11 +78,11 @@ mod tests {
 
     #[test]
     fn the_view_bobbing_moves_the_hand_with_the_camera() {
-        let still = hand_vertices(&shown(), Mat4::IDENTITY, false);
+        let still = hand_vertices(&shown(), Mat4::IDENTITY, (false, 0x7F));
         let bobbed = hand_vertices(
             &shown(),
             Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)),
-            false,
+            (false, 0x7F),
         );
         assert!((bobbed[0].position[1] - still[0].position[1] + 0.05).abs() < 1e-5);
     }
@@ -93,7 +97,7 @@ mod tests {
         let (width, height) = (320, 180);
         let mut renderer = Renderer::new_offscreen(width, height).expect("offscreen renderer");
         let skin = renderer.create_entity_texture(&[255, 0, 0, 255], 1, 1);
-        let vertices = hand_vertices(&shown(), Mat4::IDENTITY, false);
+        let vertices = hand_vertices(&shown(), Mat4::IDENTITY, (false, 0x7F));
         renderer.set_hand(&vertices, skin.bind_group());
 
         let mut camera = Camera::default();
