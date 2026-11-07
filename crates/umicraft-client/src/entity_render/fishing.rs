@@ -46,15 +46,10 @@ fn rod_tip(angler: &EntityRenderSnapshot) -> (Vec3, f32) {
 }
 
 /// The tip of the rod of the local player seen from their own eyes
-/// (`RenderFish.doRender`, first person): `feet` and the angles in degrees,
-/// `swing` the progress of the swing of the arm.
-pub(crate) fn first_person_tip(
-    feet: Vec3,
-    yaw: f32,
-    pitch: f32,
-    swing: f32,
-    sneaking: bool,
-) -> Vec3 {
+/// (`RenderFish.doRender`, first person), as an offset from the feet: the
+/// angles in degrees, `swing` the progress of the swing of the arm. The caller
+/// adds it to the feet in f64 (F2-1b).
+pub(crate) fn first_person_tip(yaw: f32, pitch: f32, swing: f32, sneaking: bool) -> Vec3 {
     let f8 = (swing.sqrt() * PI).sin();
     let rotate_pitch = |v: Vec3, angle: f32| {
         let (sin, cos) = angle.sin_cos();
@@ -71,7 +66,7 @@ pub(crate) fn first_person_tip(
     hand = rotate_pitch(hand, -f8 * 0.7);
     // The eye height is added to the drop of the line in the reference.
     let eye = if sneaking { 1.54 } else { 1.62 };
-    feet + hand + Vec3::Y * eye
+    hand + Vec3::Y * eye
 }
 
 /// The points of the line from the bobber at `hook` to the tip of the rod.
@@ -220,15 +215,15 @@ mod tests {
     fn the_first_person_rod_tip_is_at_the_right_hand_in_front_of_the_eyes() {
         // Looking south (yaw 0), level: the hand is 0.36 to the right (west
         // of a south facing player is +x), 0.35 ahead, at eye height.
-        let tip = first_person_tip(Vec3::ZERO, 0.0, 0.0, 0.0, false);
+        let tip = first_person_tip(0.0, 0.0, 0.0, false);
         assert!(
             (tip - Vec3::new(-0.36, 1.65, 0.35)).length() < 1e-5,
             "{tip}"
         );
         // Sneaking lowers it by 0.08, and the swing moves it forward.
-        let low = first_person_tip(Vec3::ZERO, 0.0, 0.0, 0.0, true);
+        let low = first_person_tip(0.0, 0.0, 0.0, true);
         assert!((tip.y - low.y - 0.08).abs() < 1e-5);
-        let swung = first_person_tip(Vec3::ZERO, 0.0, 0.0, 0.5, false);
+        let swung = first_person_tip(0.0, 0.0, 0.5, false);
         assert!(swung.distance(tip) > 0.1);
     }
 

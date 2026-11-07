@@ -1316,8 +1316,6 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     let Some((view, first_person)) = player_view(game) else {
         return;
     };
-    // Entity frames are f32 until F2-1b; only the camera is f64 so far.
-    let view_eye = view.position.as_vec3();
     let mut entities = game.entities.frame_data();
     if let Some(vehicle) = game.vehicle {
         for frame in &mut entities {
@@ -1331,13 +1329,15 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     // not among the frames from the first person.
     if first_person && !game.perspective.shows_player() {
         let body = game.body.frame_data();
-        let tip = first_person_tip(
-            view_eye - Vec3::Y * umicraft_game::physics::EYE_HEIGHT as f32,
-            game.yaw.to_degrees(),
-            game.pitch.to_degrees(),
-            game.body.animation.swing_progress_at(1.0),
-            body.flags.is_sneaking(),
-        );
+        let feet = view.position - DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
+        let tip = feet
+            + first_person_tip(
+                game.yaw.to_degrees(),
+                game.pitch.to_degrees(),
+                game.body.animation.swing_progress_at(1.0),
+                body.flags.is_sneaking(),
+            )
+            .as_dvec3();
         for bobber in &mut entities {
             if bobber.kind == EntityKind::FishHook && bobber.object_data == game.entity_id {
                 bobber.rod_tip = Some(tip);
@@ -1349,9 +1349,10 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     // The local player holds leashes too, and is not among the frames from the
     // first person.
     let eye_height = umicraft_game::physics::EYE_HEIGHT as f32;
+    let feet = view.position - DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
     let me = LeashFrame {
-        prev_position: view_eye - Vec3::Y * eye_height,
-        position: view_eye - Vec3::Y * eye_height,
+        prev_position: feet,
+        position: feet,
         prev_yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
         yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
         prev_pitch: (-view.pitch).to_degrees(),
@@ -1365,7 +1366,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         light_entities(world, &mut entities);
         light_paintings(world, &mut entities);
         shadow_entities(world, &mut entities, game.world_time);
-        eye_light(world, view_eye)
+        eye_light(world, view.position)
     });
     let _ = frames.try_send(RenderEvent::Frame(Box::new(Frame {
         state: view,
@@ -1384,11 +1385,11 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         moving_blocks: Arc::new(game.server.moving_blocks().clone()),
         block_entity_data: game.server.block_entities().entity_table(),
         signs: game.server.block_entities().sign_table(),
-        sky_temperature: sky_temperature(game, view_eye),
+        sky_temperature: sky_temperature(game, view.position),
         fog: fog_context(
             game.world.as_ref(),
             game.server.effects(),
-            view_eye,
+            view.position,
             game.dimension,
             game.world_time,
         ),
@@ -1430,7 +1431,7 @@ fn debug_world(game: &Game) -> crate::debug_world::DebugWorld {
 /// The base temperature of the biome at `position`, which the sky takes its
 /// colour from (`World.getSkyColor` reads the biome at the camera). The
 /// default plains value applies without a loaded column.
-fn sky_temperature(game: &Game, position: Vec3) -> f32 {
+fn sky_temperature(game: &Game, position: DVec3) -> f32 {
     let block = BlockPos::new(position.x.floor() as i32, 0, position.z.floor() as i32);
     game.world
         .as_ref()
@@ -3157,7 +3158,7 @@ fn tick(
 fn tick_hud_view(game: &mut Game) {
     let head_in_water = match (game.state.as_ref(), game.world.as_ref()) {
         (Some(state), Some(world)) => {
-            crate::fog_context::medium_at(world, state.player().eye_position().as_vec3())
+            crate::fog_context::medium_at(world, state.player().eye_position())
                 == umicraft_render::FogMedium::Water
         }
         _ => false,

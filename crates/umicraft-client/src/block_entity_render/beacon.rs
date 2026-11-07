@@ -52,16 +52,18 @@ pub(super) fn add_beam(
     entry: &BlockEntityRef,
     scene: &BlockEntityScene<'_>,
 ) {
+    // The table is keyed by world position; the beam is drawn at the local one.
+    let [wx, wy, wz] = scene.world_position(entry);
     let [x, y, z] = entry.position;
     let pyramid = scene
         .data
-        .get(&(x, y, z))
+        .get(&(wx, wy, wz))
         .filter(|data| data.action == BEACON_ACTION)
         .map_or(0, |data| levels(data.nbt.as_deref()));
     if pyramid <= 0 || entry.light.sky < OPEN_SKY {
         return;
     }
-    let height = BUILD_LIMIT - f64::from(y);
+    let height = BUILD_LIMIT - f64::from(wy);
     let ticks = f64::from(scene.seconds) * TICKS_PER_SECOND;
     batches
         .entry(TextureSlot::BeaconBeam)
@@ -205,6 +207,7 @@ mod tests {
             font: None,
             partial_tick: 0.0,
             camera: glam::Vec3::ZERO,
+            origin: [0; 3],
         };
         let mut batches = HashMap::new();
         add_beam(&mut batches, entry, &scene);

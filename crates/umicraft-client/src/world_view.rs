@@ -272,11 +272,16 @@ impl WorldView {
     /// The quads of the newest frame's particles at `partial_ticks` into the
     /// tick, for `Renderer::set_particles`. Block fragments find their sprite
     /// in the bound terrain; the procedural terrain has none, so they are
-    /// left out.
+    /// left out. The centres are relative to `origin`, the render origin of the
+    /// camera (F2-1b).
     #[must_use]
-    pub fn particle_sprites(&self, partial_ticks: f32) -> Vec<umicraft_render::ParticleSprite> {
+    pub fn particle_sprites(
+        &self,
+        partial_ticks: f32,
+        origin: glam::DVec3,
+    ) -> Vec<umicraft_render::ParticleSprite> {
         let context = self.mesher.model_context();
-        crate::particle_view::sprites(&self.view.particles, partial_ticks, &|state| {
+        crate::particle_view::sprites(&self.view.particles, partial_ticks, origin, &|state| {
             crate::particle_view::block_sprite(context?, state)
         })
     }
@@ -464,14 +469,15 @@ impl WorldView {
     /// Interpolated entity render snapshots for the current render instant.
     ///
     /// Uses the same partial tick fraction as the camera so entities and the
-    /// world stay in sync.
+    /// world stay in sync. Every position is relative to `origin`, the render
+    /// origin of the camera (F2-1b).
     #[must_use]
-    pub fn entities(&self, now: Instant) -> Vec<EntityRenderSnapshot> {
+    pub fn entities(&self, now: Instant, origin: glam::DVec3) -> Vec<EntityRenderSnapshot> {
         let alpha = self.view.partial_tick(now);
         self.entities
             .iter()
             .map(|entity| {
-                let mut snapshot = entity.interpolate(alpha);
+                let mut snapshot = entity.interpolate(alpha, origin);
                 // `Entity.setAngles` shifts the pitch and its previous value
                 // together every frame, so what `RendererLivingEntity` draws
                 // is the pitch of the mouse, not one interpolated over a tick.
@@ -498,7 +504,9 @@ impl WorldView {
     /// The body of the local player at the newest tick, once a frame arrived.
     #[must_use]
     pub fn local_body(&self) -> Option<EntityRenderSnapshot> {
-        self.local_body.as_ref().map(|body| body.interpolate(1.0))
+        self.local_body
+            .as_ref()
+            .map(|body| body.interpolate(1.0, glam::DVec3::ZERO))
     }
 
     /// The light that lights the first-person item in the newest frame.

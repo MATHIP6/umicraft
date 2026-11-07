@@ -397,6 +397,7 @@ mod tests {
         EntityTextures::load(&renderer).mesh_and_upload(&snapshots, &mut renderer);
         let mut camera = Camera::new(Vec3::new(0.0, 65.0, -2.2), std::f32::consts::PI, 0.0);
         camera.set_aspect(640, 240);
+        camera.pin_render_origin(glam::DVec3::ZERO);
         renderer
             .render(&camera, &Overlay::new(640, 240))
             .expect("render");

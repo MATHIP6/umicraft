@@ -103,9 +103,9 @@ Optimisation steps also get a criterion benchmark or a scene measurement in
 | Step | Content |
 |---|---|
 | F2-1a (**done**) | Carry the eye as `DVec3` from `GameState::interpolated` through `RenderState`, `View::sample` and `retarget`. The render origin is `floor(eye)` in f64. `Camera` gets the small `eye - origin` and the integer origin. |
-| F2-1b | Entity snapshots, particles, name tags and held items become origin-relative in f64 before the f32 cast. Weather, clouds and border read the f64 eye. |
+| F2-1b (**done**, ADR-0060) | Entity snapshots, particles, name tags and held items become origin-relative in f64 before the f32 cast. Weather, clouds and border read the f64 eye. |
 | F2-1c (**done**) | Fog distance in origin-relative coordinates. The frustum comes from `view_projection_from(origin)`. |
-| F2-1d | Regression tests: an eye at x = 1 000 000.5 that moves 0.01 yields two different view matrices, and an entity lerp stays smooth at 1M. |
+| F2-1d (**done**) | Regression tests: an eye at x = 1 000 000.5 that moves 0.01 yields two different view matrices, and an entity lerp stays smooth at 1M. |
 
 ### Phase 2 — Quick GPU wins on terrain (B1, B2, B6, B7)
 

@@ -26,6 +26,8 @@ pub struct Camera {
     /// steps around x = 1 000 000 (F2-1a), so it is only ever cast after the
     /// render origin is subtracted.
     eye: DVec3,
+    /// A fixed render origin, or `None` for the usual `floor(eye)`.
+    pinned_origin: Option<DVec3>,
     /// Horizontal rotation in radians.
     pub yaw: f32,
     /// Vertical rotation in radians, clamped to ±89°.
@@ -42,6 +44,7 @@ impl Default for Camera {
     fn default() -> Self {
         Self {
             eye: DVec3::new(0.0, 80.0, 0.0),
+            pinned_origin: None,
             yaw: 0.0,
             pitch: -0.15,
             fov_y: DEFAULT_FOV,
@@ -110,11 +113,20 @@ impl Camera {
     /// small remainder [`Camera::relative_eye`].
     #[must_use]
     pub fn render_origin(&self) -> DVec3 {
-        self.eye.floor()
+        self.pinned_origin.unwrap_or_else(|| self.eye.floor())
+    }
+
+    /// Fixes the render origin instead of following the eye.
+    ///
+    /// For scenes built in world coordinates near the world origin (the
+    /// acceptance demos and tests): with `DVec3::ZERO` their geometry stays
+    /// valid as it is. The game never pins it.
+    pub fn pin_render_origin(&mut self, origin: DVec3) {
+        self.pinned_origin = Some(origin);
     }
 
     /// The eye relative to [`Camera::render_origin`]: within 0..1 on each
-    /// axis, computed in f64 before the cast.
+    /// axis (unless the origin is pinned), computed in f64 before the cast.
     #[must_use]
     pub fn relative_eye(&self) -> Vec3 {
         (self.eye - self.render_origin()).as_vec3()

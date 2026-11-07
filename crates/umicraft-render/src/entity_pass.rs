@@ -15,7 +15,9 @@ const ENTITY_WGSL: &str = concat!(
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct EntityVertex {
-    /// World-space vertex position.
+    /// Vertex position, relative to the render origin of the camera
+    /// ([`Camera::render_origin`](crate::Camera::render_origin)) in the world
+    /// pass (F2-1b); in camera space for the hand.
     pub position: [f32; 3],
     /// Normal vector.
     pub normal: [f32; 3],

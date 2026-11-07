@@ -915,7 +915,7 @@ impl App {
         }
         if let Some(world) = self.world.as_ref().filter(|_| in_game) {
             if !matches!(screen, Screen::Inventory | Screen::Creative) {
-                let entities = world.entities(Instant::now());
+                let entities = world.entities(Instant::now(), self.camera.render_origin());
                 let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
                 self.nametags = draw_tags(atlas, &tags);
             }
@@ -1167,7 +1167,9 @@ impl App {
         renderer.set_cloud_ticks((now - self.started).as_secs_f64() * 20.0);
         if let Some(world) = self.world.as_ref() {
             renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
-            renderer.set_particles(&world.particle_sprites(environment.partial_tick));
+            renderer.set_particles(
+                &world.particle_sprites(environment.partial_tick, self.camera.render_origin()),
+            );
         }
         renderer.set_screen_overlays(
             self.world
@@ -1199,12 +1201,21 @@ impl App {
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())
         {
-            let entities = world.entities(now);
+            // Everything below is built relative to this origin and the eye
+            // relative to it (F2-1b); the entity pass draws with a camera
+            // whose origin is zero.
+            let render_origin = self.camera.render_origin();
+            let render_origin_blocks = [
+                render_origin.x as i32,
+                render_origin.y as i32,
+                render_origin.z as i32,
+            ];
+            let entities = world.entities(now, render_origin);
             let hand = world.hand_pose(now);
             let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
-            entity_textures.set_camera_position(self.camera.position());
+            entity_textures.set_camera_position(self.camera.relative_eye());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
                     == umicraft_game::gamemode::GameMode::Spectator,
@@ -1225,7 +1236,8 @@ impl App {
                     seconds: (now - self.started).as_secs_f32(),
                     font: self.ui_atlas.as_ref(),
                     partial_tick: environment.partial_tick,
-                    camera: self.camera.position(),
+                    camera: self.camera.relative_eye(),
+                    origin: render_origin_blocks,
                 },
             );
             let mut hand_item = None;

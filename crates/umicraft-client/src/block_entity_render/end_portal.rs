@@ -66,7 +66,14 @@ pub(super) fn add_end_portal(
     if height <= 0.0 {
         return;
     }
-    let camera = [f64::from(scene.camera.x), f64::from(scene.camera.z)];
+    // The vertices are relative to the render origin, but the texture
+    // coordinates are generated from world positions (the reference's
+    // `TexGen`), so the origin goes back in for them, in f64.
+    let origin = [f64::from(scene.origin[0]), f64::from(scene.origin[2])];
+    let camera = [
+        f64::from(scene.camera.x) + origin[0],
+        f64::from(scene.camera.z) + origin[1],
+    ];
     let scroll = (f64::from(scene.seconds) * 1000.0 % SCROLL_PERIOD_MS) / SCROLL_PERIOD_MS;
     let mut random = JavaRandom::new(COLOUR_SEED);
     for layer in 0..LAYERS {
@@ -76,7 +83,10 @@ pub(super) fn add_end_portal(
         } else {
             TextureSlot::EndPortal
         };
-        let uv = |corner: [f64; 2]| layer_uv(layer, corner, camera, height, scroll);
+        let uv = |corner: [f64; 2]| {
+            let world = [corner[0] + origin[0], corner[1] + origin[1]];
+            layer_uv(layer, world, camera, height, scroll)
+        };
         let (x, z) = (f64::from(x), f64::from(z));
         let corners = [[x, z], [x, z + 1.0], [x + 1.0, z + 1.0], [x + 1.0, z]];
         let quad = layer_quad(corners, f64::from(y) + f64::from(SURFACE), tint, uv);
@@ -195,6 +205,7 @@ mod tests {
             font: None,
             partial_tick: 0.0,
             camera,
+            origin: [0; 3],
         };
         let mut batches = HashMap::new();
         add_end_portal(&mut batches, &portal(), &scene);

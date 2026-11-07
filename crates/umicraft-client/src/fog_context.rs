@@ -8,7 +8,7 @@
 //! `EntityRenderer.updateFogColor` / `setupFog` (the effects) and
 //! `EntityRenderer.updateRenderer` (the `fogColor1` smoothing).
 
-use glam::Vec3;
+use glam::DVec3;
 use umicraft_game::server::effects::Effects;
 use umicraft_render::{light_brightness, FogContext, FogMedium};
 use umicraft_world::fluid::{height_percent, Liquid};
@@ -32,7 +32,7 @@ const SURFACE_SINK: f32 = 0.111_111_11;
 pub(crate) fn fog_context(
     world: Option<&World>,
     effects: &Effects,
-    eye: Vec3,
+    eye: DVec3,
     dimension: i8,
     world_time: i64,
 ) -> FogContext {
@@ -54,14 +54,14 @@ pub(crate) fn fog_context(
         blindness_ticks: remaining(BLINDNESS),
         night_vision_ticks: remaining(NIGHT_VISION),
         water_breathing: effects.get(WATER_BREATHING).is_some(),
-        eye_y: eye.y,
+        eye_y: eye.y as f32,
         light_brightness: light_brightness(light.block, light.sky, dimension, world_time),
     }
 }
 
 /// The liquid the eye is in. A liquid block whose surface lies below the eye
 /// counts as the block above it (a pool surface does not tint the air).
-pub(crate) fn medium_at(world: &World, eye: Vec3) -> FogMedium {
+pub(crate) fn medium_at(world: &World, eye: DVec3) -> FogMedium {
     let pos = BlockPos::new(
         eye.x.floor() as i32,
         eye.y.floor() as i32,
@@ -71,7 +71,7 @@ pub(crate) fn medium_at(world: &World, eye: Vec3) -> FogMedium {
     let Some(liquid) = Liquid::of(state) else {
         return FogMedium::Air;
     };
-    let surface = (pos.y + 1) as f32 - (height_percent(state.metadata()) - SURFACE_SINK);
+    let surface = f64::from(pos.y + 1) - f64::from(height_percent(state.metadata()) - SURFACE_SINK);
     let inside = if eye.y >= surface {
         Liquid::of(world.block(BlockPos::new(pos.x, pos.y + 1, pos.z)))
     } else {
@@ -147,7 +147,13 @@ mod tests {
     }
 
     fn context(world: &World, effects: &Effects, y: f32) -> FogContext {
-        fog_context(Some(world), effects, Vec3::new(8.5, y, 8.5), 0, 6_000)
+        fog_context(
+            Some(world),
+            effects,
+            DVec3::new(8.5, f64::from(y), 8.5),
+            0,
+            6_000,
+        )
     }
 
     #[test]
@@ -182,7 +188,7 @@ mod tests {
         let fog = fog_context(
             None,
             &Effects::default(),
-            Vec3::new(0.0, 70.0, 0.0),
+            DVec3::new(0.0, 70.0, 0.0),
             0,
             6_000,
         );

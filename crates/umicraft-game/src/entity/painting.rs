@@ -145,16 +145,7 @@ pub fn light_paintings(world: &World, entities: &mut [EntityFrameData]) {
         };
         // The yaw of a painting is its facing times 90 degrees.
         let facing = (entity.yaw / 90.0).round().rem_euclid(4.0) as u8;
-        entity.block_lights = Arc::from(block_lights(
-            world,
-            art,
-            DVec3::new(
-                f64::from(entity.position.x),
-                f64::from(entity.position.y),
-                f64::from(entity.position.z),
-            ),
-            facing,
-        ));
+        entity.block_lights = Arc::from(block_lights(world, art, entity.position, facing));
     }
 }
 

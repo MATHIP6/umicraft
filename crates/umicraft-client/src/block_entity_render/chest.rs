@@ -31,7 +31,7 @@ pub(super) fn add_chest(
     // An ender chest never merges: the mesher only compares equal block ids,
     // and it would have to be two ender chests, which vanilla draws apart.
     let large = kind != Some(BlockEntityKind::EnderChest) && (around.east || around.south);
-    let [x, y, z] = entry.position;
+    let [x, y, z] = scene.world_position(entry);
     let angle = scene.lids.lid_angle((x, y, z), scene.partial_tick);
     let facing = chest_facing_degrees(entry.state.metadata());
     push_at_block(
@@ -80,6 +80,7 @@ mod tests {
             font: None,
             partial_tick: 0.0,
             camera: glam::Vec3::ZERO,
+            origin: [0; 3],
         };
         let mut batches = HashMap::new();
         add_chest(&mut batches, entry, &scene);

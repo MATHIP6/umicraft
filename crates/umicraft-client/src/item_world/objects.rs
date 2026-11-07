@@ -377,6 +377,7 @@ mod tests {
         renderer.set_world_items(&world.build(&snapshots, &items).items);
         let mut camera = Camera::new(Vec3::new(0.0, 64.6, -7.5), std::f32::consts::PI, -0.02);
         camera.set_aspect(960, 320);
+        camera.pin_render_origin(glam::DVec3::ZERO);
         renderer
             .render(&camera, &Overlay::new(960, 320))
             .expect("render");

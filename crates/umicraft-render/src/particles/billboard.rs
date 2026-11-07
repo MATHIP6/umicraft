@@ -38,7 +38,9 @@ pub(super) const SHEET_LAYER: f32 = -1.0;
 /// world or the game crate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParticleSprite {
-    /// The centre in world coordinates, already interpolated.
+    /// The centre, already interpolated, relative to the render origin of the
+    /// camera ([`Camera::render_origin`](crate::Camera::render_origin)); the
+    /// client subtracts it in f64 (F2-1b).
     pub center: Vec3,
     /// Half the side of the quad (`0.1 * scale` in the reference).
     pub half_size: f32,

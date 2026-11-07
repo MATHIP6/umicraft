@@ -462,6 +462,7 @@ mod tests {
         textures.mesh_and_upload(&snapshots, &mut renderer);
         let mut camera = Camera::new(Vec3::new(1.0, 65.4, -9.0), std::f32::consts::PI, -0.12);
         camera.set_aspect(800, 320);
+        camera.pin_render_origin(glam::DVec3::ZERO);
         renderer
             .render(&camera, &Overlay::new(800, 320))
             .expect("render");
@@ -516,6 +517,7 @@ mod tests {
         EntityTextures::load(&renderer).mesh_and_upload(&[dragon, crystal], &mut renderer);
         let mut camera = Camera::new(Vec3::new(0.0, 74.0, -8.0), std::f32::consts::PI, -0.35);
         camera.set_aspect(800, 400);
+        camera.pin_render_origin(glam::DVec3::ZERO);
         renderer
             .render(&camera, &Overlay::new(800, 400))
             .expect("render");
@@ -551,6 +553,7 @@ mod tests {
             .mesh_and_upload(&[cart(1, -1.2, 0.0), cart(2, 1.2, 90.0)], &mut renderer);
         let mut camera = Camera::new(Vec3::new(0.0, 65.4, -4.0), std::f32::consts::PI, -0.2);
         camera.set_aspect(600, 300);
+        camera.pin_render_origin(glam::DVec3::ZERO);
         renderer
             .render(&camera, &Overlay::new(600, 300))
             .expect("render");

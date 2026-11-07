@@ -208,6 +208,13 @@ pub struct Renderer {
     height: u32,
     depth_view: wgpu::TextureView,
     camera_buffer: wgpu::Buffer,
+    /// The camera for passes whose vertices are already relative to the
+    /// render origin (entities, particles, dropped items): the same matrix,
+    /// with `origin` zero so the shader subtracts nothing (F2-1b).
+    local_camera_buffer: wgpu::Buffer,
+    local_camera_bind_group: wgpu::BindGroup,
+    /// The block array with [`Renderer::local_camera_buffer`].
+    local_terrain_bind_group: wgpu::BindGroup,
     terrain_pipeline: wgpu::RenderPipeline,
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
@@ -628,6 +635,19 @@ impl Renderer {
             &block_sampler,
             &block_view,
         );
+        let local_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("local camera uniform"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let local_terrain_bind_group = create_terrain_bind_group(
+            &device,
+            &terrain_layout,
+            &local_camera_buffer,
+            &block_sampler,
+            &block_view,
+        );
         let chunk_bind_group = create_terrain_bind_group(
             &device,
             &terrain_layout,
@@ -764,6 +784,14 @@ impl Renderer {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
+        let local_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("local entity camera bind group"),
+            layout: &camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: local_camera_buffer.as_entire_binding(),
+            }],
+        });
         let hand_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hand camera uniform"),
             size: std::mem::size_of::<CameraUniform>() as u64,
@@ -856,6 +884,9 @@ impl Renderer {
             height,
             depth_view,
             camera_buffer,
+            local_camera_buffer,
+            local_camera_bind_group,
+            local_terrain_bind_group,
             terrain_pipeline,
             terrain_transparent_pipeline,
             crack_pipeline,
@@ -972,7 +1003,7 @@ impl Renderer {
     }
 
     /// Sets the particles to draw this frame, already resolved by the client
-    /// (position, picture, tint, light). Call once per frame; the list is
+    /// (position relative to the render origin, picture, tint, light). Call once per frame; the list is
     /// copied into a reused buffer.
     pub fn set_particles(&mut self, sprites: &[ParticleSprite]) {
         self.particle_sprites.clear();
@@ -1192,7 +1223,8 @@ impl Renderer {
     }
 
     /// Replaces the world-space item geometry drawn after the entities
-    /// (dropped items, frames), already positioned in world coordinates.
+    /// (dropped items, frames), already positioned relative to the render
+    /// origin of the camera (F2-1b).
     pub fn set_world_items(&mut self, mesh: &ItemMesh) {
         self.world_items.update(&self.device, &self.queue, mesh);
     }
@@ -1547,6 +1579,13 @@ impl Renderer {
             &self.block_sampler,
             &view,
         );
+        self.local_terrain_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.local_camera_buffer,
+            &self.block_sampler,
+            &view,
+        );
         self.chunk_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
@@ -1718,6 +1757,13 @@ impl Renderer {
             &self.device,
             &self.terrain_layout,
             &self.camera_buffer,
+            &self.block_sampler,
+            &self.procedural_blocks,
+        );
+        self.local_terrain_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.local_camera_buffer,
             &self.block_sampler,
             &self.procedural_blocks,
         );
@@ -2134,6 +2180,13 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+        // Same matrix and eye: the vertices of this one are already relative.
+        let local = CameraUniform {
+            origin: [0.0; 3],
+            ..uniform
+        };
+        self.queue
+            .write_buffer(&self.local_camera_buffer, 0, bytemuck::bytes_of(&local));
 
         // The hand lives in camera space, far from any fog.
         let hand_uniform = CameraUniform {
@@ -2347,7 +2400,7 @@ impl Renderer {
                 .iter()
                 .map(|(buf, count, bg)| (buf, *count, bg));
             self.entity_renderer
-                .render_shadows(&mut pass, &self.camera_bind_group, batches);
+                .render_shadows(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // Entities: depth write on, cutout discard, rendered between opaque and transparent passes.
@@ -2357,7 +2410,7 @@ impl Renderer {
                 .iter()
                 .map(|(buf, count, bg)| (buf, *count, bg));
             self.entity_renderer
-                .render(&mut pass, &self.camera_bind_group, batches);
+                .render(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // The invisible entities a spectator sees, over the opaque ones.
@@ -2367,7 +2420,7 @@ impl Renderer {
                 .iter()
                 .map(|(buf, count, bg)| (buf, *count, bg));
             self.entity_renderer
-                .render_ghosts(&mut pass, &self.camera_bind_group, batches);
+                .render_ghosts(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // The glow of the entities is added over them, without writing depth.
@@ -2377,7 +2430,7 @@ impl Renderer {
                 .iter()
                 .map(|(buf, count, bg)| (buf, *count, bg));
             self.entity_renderer
-                .render_additive(&mut pass, &self.camera_bind_group, batches);
+                .render_additive(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         if !self.glint_batches.is_empty() {
@@ -2386,7 +2439,7 @@ impl Renderer {
                 .iter()
                 .map(|(buf, count, bg)| (buf, *count, bg));
             self.entity_renderer
-                .render_glint(&mut pass, &self.camera_bind_group, batches);
+                .render_glint(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // `renderEntities` draws the labels with the entities, before the
@@ -2396,10 +2449,10 @@ impl Renderer {
 
         // Dropped items share the terrain pipeline and its texture array.
         pass.set_pipeline(&self.terrain_pipeline);
-        pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+        pass.set_bind_group(0, &self.local_terrain_bind_group, &[]);
         self.world_items.draw(&mut pass);
         self.world_glint
-            .draw_world(&mut pass, &self.terrain_bind_group);
+            .draw_world(&mut pass, &self.local_terrain_bind_group);
         self.stamp(&mut pass, 3);
 
         // The clouds hide behind terrain and hide the water behind them, as in
@@ -2408,8 +2461,9 @@ impl Renderer {
 
         // `renderParticles` follows the entities; `renderRainSnow` comes after
         // both and before the translucent terrain.
-        self.particles.draw(&mut pass, &self.terrain_bind_group);
-        self.weather.draw(&mut pass, &self.camera_bind_group);
+        self.particles
+            .draw(&mut pass, &self.local_terrain_bind_group);
+        self.weather.draw(&mut pass, &self.local_camera_bind_group);
 
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude

@@ -65,7 +65,7 @@ pub(super) fn add_skull(
     entry: &BlockEntityRef,
     scene: &BlockEntityScene<'_>,
 ) {
-    let [x, y, z] = entry.position;
+    let [x, y, z] = scene.world_position(entry);
     let bytes = scene
         .data
         .get(&(x, y, z))
@@ -172,6 +172,7 @@ mod tests {
             font: None,
             partial_tick: 0.0,
             camera: Vec3::ZERO,
+            origin: [0; 3],
         };
         let mut batches = HashMap::new();
         add_skull(&mut batches, entry, &scene);

@@ -391,6 +391,7 @@ mod tests {
             Camera::new(Vec3::new(0.5, 65.6, -9.5), std::f32::consts::PI, -0.08)
         };
         camera.set_aspect(900, 340);
+        camera.pin_render_origin(glam::DVec3::ZERO);
         renderer
             .render(&camera, &Overlay::new(900, 340))
             .expect("render");
