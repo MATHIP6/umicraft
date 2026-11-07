@@ -50,6 +50,20 @@ and lighting, and the server-less `--entity-demo` acceptance path (ADR-0015).
 - An offline-mode 1.8.x server for live testing. The development notes use a
   Paper/PandaSpigot 1.8.8 server on `127.0.0.1:25599` with an FLAT world.
 
+## Download the official assets (first run)
+
+Umicraft ships no Mojang asset. Before the first launch, download and verify
+the official 1.8.8 client jar and assets once (SHA-1 checked, resumable):
+
+```sh
+cargo run --release -p umicraft-client -- --setup-assets
+```
+
+They are stored in the local Umicraft cache and reused on every later run. If
+an official `.minecraft/versions/1.8.8` installation already exists, it is used
+first and this step is not needed. Without assets the client falls back to the
+original procedural textures and font (and `--block-demo` refuses to start).
+
 ## Run the graphical client
 
 ```sh
