@@ -55,6 +55,20 @@ pub struct MenuArt {
     /// `textures/gui/server_selection.png` (256x256): the arrows of a hovered
     /// server row.
     pub server_selection: Option<SpriteSheet>,
+    /// Umicraft's own menu art from the client pack (ADR-0056).
+    pub brand: BrandArt,
+}
+
+/// The client pack sprites of the modern title screen (ADR-0056). Each is
+/// `None` until the client has put the image into the GUI atlas.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct BrandArt {
+    /// `umicraft/textures/ui/logo.png`, the white Umicraft logo.
+    pub logo: Option<SpriteSheet>,
+    /// `umicraft/textures/ui/power.png` (64x64), the quit icon.
+    pub power: Option<SpriteSheet>,
+    /// `umicraft/textures/ui/settings.png` (64x64), the options icon.
+    pub settings: Option<SpriteSheet>,
 }
 
 /// Fills `rect` with the dirt texture tinted by `tint`.

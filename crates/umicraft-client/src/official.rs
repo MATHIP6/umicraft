@@ -128,6 +128,7 @@ pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt
         icons: sheet("icons"),
         unknown_server: sheet("misc/unknown_server"),
         server_selection: sheet("server_selection"),
+        brand: umicraft_ui::menus::BrandArt::default(),
     }
 }
 

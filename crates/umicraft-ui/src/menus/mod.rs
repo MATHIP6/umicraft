@@ -32,7 +32,7 @@ pub use achievements::{
 };
 pub use achievements::{draw_toast, toast_offset};
 pub use background::{
-    draw_dirt, draw_list_background, draw_list_overlay, draw_menu_background, MenuArt,
+    draw_dirt, draw_list_background, draw_list_overlay, draw_menu_background, BrandArt, MenuArt,
 };
 pub use common::ScrollbarDrag;
 pub use confirm::{confirm_layout, ConfirmLayout, ConfirmOutcome, ConfirmScreen};
@@ -55,5 +55,6 @@ pub use stats::{
     StatsScreen, StatsTab,
 };
 pub use title::{
-    title_layout, TitleInfo, TitleLayout, TitleOutcome, TitleScreen, LOGO_TEXT, SPLASHES,
+    title_layout, TitleInfo, TitleLayout, TitleOutcome, TitleScreen, TitleStyle, LOGO_TEXT,
+    SPLASHES,
 };
