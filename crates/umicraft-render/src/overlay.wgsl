@@ -52,3 +52,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(in.color.rgb, in.color.a * coverage);
 }
+
+// Smooth text (the brand face): the antialiased coverage of the glyph is the
+// alpha, with no threshold, because the atlas is sampled with linear filtering.
+@fragment
+fn fs_smooth(in: VertexOut) -> @location(0) vec4<f32> {
+    let coverage = textureSample(font_atlas, font_sampler, in.uv).r;
+    return vec4<f32>(in.color.rgb, in.color.a * coverage);
+}

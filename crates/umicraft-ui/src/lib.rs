@@ -34,6 +34,7 @@
 //! assert!(output.focus.is_none());
 //! ```
 
+pub mod brand_font;
 pub mod context;
 pub mod debug_screen;
 pub mod draw;
@@ -44,13 +45,14 @@ pub mod id;
 pub mod input;
 pub mod legacy_text;
 pub mod menus;
+pub mod modern;
 pub mod screens;
 pub mod styled_text;
 pub mod text;
 pub mod widgets;
 
 pub use context::{Ui, UiOutput, UiResponse};
-pub use draw::{Color, DrawCommand, DrawList, SpriteSheet, TextStyle};
+pub use draw::{Color, DrawCommand, DrawList, FontFace, SpriteSheet, TextStyle};
 pub use geom::{Axis, Insets, Layout, Rect, ScrollArea};
 pub use id::WidgetId;
 pub use input::{InputEvent, Key, Modifiers, PointerButton, UiInput};

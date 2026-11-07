@@ -4,8 +4,9 @@
 //! mapping of ping results to rows.
 
 use umicraft_ui::menus::{
-    confirm_layout, connecting_cancel_rect, server_edit_layout, server_list_layout,
-    stats_done_rect, title_layout, ConnectStage, EditMode, ResourcePackMode, RowStatus,
+    confirm_layout, connecting_cancel_rect, modern_title_layout, server_edit_layout,
+    server_list_layout, stats_done_rect, title_layout, ConnectStage, EditMode, ResourcePackMode,
+    RowStatus, TitleStyle,
 };
 use umicraft_ui::{InputEvent, Key, PointerButton, Rect, UiInput};
 
@@ -61,6 +62,17 @@ fn frame_with(
     events: Vec<InputEvent>,
     stats: &[(String, i32)],
 ) -> MenuFrame {
+    frame_styled(flow, screen, events, stats, TitleStyle::Classic)
+}
+
+fn frame_styled(
+    flow: &mut MenuFlow,
+    screen: Screen,
+    events: Vec<InputEvent>,
+    stats: &[(String, i32)],
+    title_style: TitleStyle,
+) -> MenuFrame {
+    let atlas = FontAtlas::fallback();
     let mut ui = Ui::new(VIEWPORT);
     ui.begin_frame(VIEWPORT, UiInput::new(events));
     let context = MenuContext {
@@ -73,11 +85,13 @@ fn frame_with(
         player_hash: 0,
         stats,
         panorama: None,
+        title_style,
+        brand_font: &atlas,
     };
     let result = flow.show(
         screen,
         &mut ui,
-        &FontAtlas::fallback(),
+        &atlas,
         &umicraft_core::lang::Lang::builtin(),
         &context,
     );
@@ -124,6 +138,25 @@ fn the_title_buttons_emit_their_commands() {
     ];
     for (rect, expected) in cases {
         assert_eq!(click_on(&mut flow, Screen::Title, rect), Some(expected));
+    }
+}
+
+#[test]
+fn the_modern_title_buttons_emit_their_commands() {
+    let layout = modern_title_layout(VIEWPORT);
+    let (mut flow, _) = flow_with("modern-title", &[]);
+    let cases = [
+        (layout.play, MenuCommand::GoTo(Screen::ServerList)),
+        (
+            layout.options,
+            MenuCommand::OpenOptions { page: Page::Main },
+        ),
+    ];
+    for (rect, expected) in cases {
+        let style = TitleStyle::Modern;
+        frame_styled(&mut flow, Screen::Title, vec![], &[], style);
+        let command = frame_styled(&mut flow, Screen::Title, click(rect), &[], style).command;
+        assert_eq!(command, Some(expected));
     }
 }
 
@@ -214,6 +247,8 @@ fn the_add_form_starts_with_the_default_server_name() {
         player_hash: 0,
         stats: &[],
         panorama: None,
+        title_style: TitleStyle::Classic,
+        brand_font: &atlas,
     };
     let inputs = [
         vec![],
@@ -398,4 +433,20 @@ fn the_animation_clock_runs_in_whole_ticks_and_caps_a_stall() {
     assert_eq!(flow.tick_time, TICK / 2);
     flow.advance(TICK * 100);
     assert!(flow.tick_time <= TICK);
+}
+
+#[test]
+fn the_classic_title_is_shown_without_a_brand_font() {
+    assert_eq!(
+        shown_title_style(TitleStyle::Modern, true),
+        TitleStyle::Modern
+    );
+    assert_eq!(
+        shown_title_style(TitleStyle::Modern, false),
+        TitleStyle::Classic
+    );
+    assert_eq!(
+        shown_title_style(TitleStyle::Classic, true),
+        TitleStyle::Classic
+    );
 }

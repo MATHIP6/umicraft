@@ -242,6 +242,9 @@ struct App {
     terrain: Option<TerrainTextures>,
     /// The atlas the renderer accepted; the UI metrics must match it.
     ui_atlas: Option<FontAtlas>,
+    /// The brand atlas the renderer accepted; `None` keeps the classic
+    /// title screen (ADR-0056).
+    brand_atlas: Option<FontAtlas>,
     /// The GUI texture atlas for inventory/container backgrounds.
     gui_atlas: Option<umicraft_assets::GuiAtlas>,
     /// The favicon revision of the menus the GUI atlas was last grown for
@@ -370,6 +373,7 @@ impl App {
             font,
             terrain,
             ui_atlas: None,
+            brand_atlas: None,
             gui_atlas: None,
             server_icons_revision: u64::MAX,
             items: None,
@@ -1010,6 +1014,8 @@ impl App {
                             .map_or(ConnectStage::Connecting, WorldView::connect_stage),
                         stats,
                         panorama: self.panorama,
+                        title_style: self.title_style(),
+                        brand_font: self.brand_atlas.as_ref().unwrap_or(atlas),
                     };
                     let shown = self
                         .menu
@@ -1493,16 +1499,18 @@ impl ApplicationHandler for App {
                 return;
             }
         }
+        self.brand_atlas = ui_font::install_brand(&mut renderer);
         // The mesh workers only exist once the terrain textures are bound,
         // so they never write layers of another array (ADR-0012).
         let terrain = self.terrain.take().unwrap_or(TerrainTextures::Procedural);
         renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
         let terrain = terrain.install(&mut renderer);
-        upload_gui_atlas(&mut renderer, terrain.gui_atlas());
+        let gui_atlas = crate::official::grow_atlas(terrain.gui_atlas(), &[]);
+        upload_gui_atlas(&mut renderer, Some(&gui_atlas));
         upload_glint_texture(&mut renderer, terrain.glint_texture());
         upload_sky_textures(&mut renderer);
         self.panorama = upload_panorama(&mut renderer);
-        self.gui_atlas = terrain.gui_atlas().cloned();
+        self.gui_atlas = Some(gui_atlas);
         self.server_icons_revision = u64::MAX;
         self.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());

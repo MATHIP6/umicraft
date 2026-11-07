@@ -9,13 +9,15 @@
 //! the repository or a release.
 
 use std::path::Path;
+use std::sync::OnceLock;
 
 use umicraft_assets::client_jar::ClientJar;
+use umicraft_assets::client_pack;
 use umicraft_assets::install::OfficialInstall;
 use umicraft_assets::manifest::VersionJson;
-use umicraft_assets::AssetsError;
+use umicraft_assets::{AssetsError, DynamicImage, DYNAMIC_PREFIX};
 use umicraft_render::{HudSheets, SpriteSheet};
-use umicraft_ui::menus::{AchievementArt, MapTile, MenuArt};
+use umicraft_ui::menus::{AchievementArt, BrandArt, MapTile, MenuArt};
 
 /// The only game version the client supports (protocol 47, spec §1.3).
 pub(crate) const VERSION_ID: &str = "1.8.8";
@@ -87,10 +89,41 @@ pub(crate) fn load_en_us_lang() -> Option<String> {
     None
 }
 
-/// Loads the GUI atlas from the verified client jar if available.
+/// Loads the GUI atlas from the verified client jar and adds the brand art.
+///
+/// Always `Some`: without a jar the atlas holds the brand art alone.
 pub(crate) fn load_gui_atlas() -> Option<umicraft_assets::GuiAtlas> {
-    let jar = find_verified_jar().ok()?;
-    umicraft_assets::GuiAtlas::from_jar(&jar).ok()
+    let jar_atlas = find_verified_jar()
+        .ok()
+        .and_then(|jar| umicraft_assets::GuiAtlas::from_jar(&jar).ok());
+    Some(grow_atlas(jar_atlas.as_ref(), &[]))
+}
+
+/// The brand images of the client pack, decoded once.
+fn brand_images() -> &'static [DynamicImage] {
+    static IMAGES: OnceLock<Vec<DynamicImage>> = OnceLock::new();
+    IMAGES.get_or_init(|| {
+        client_pack::brand_images().unwrap_or_else(|error| {
+            tracing::warn!(%error, "client pack brand art unavailable");
+            Vec::new()
+        })
+    })
+}
+
+/// A copy of `atlas` (or of an empty atlas, when there is no client jar)
+/// holding the brand art and then `extra` runtime images.
+///
+/// `GuiAtlas::with_dynamic` drops earlier dynamic images, so everything that
+/// grows the atlas goes through here to keep the brand art in it.
+pub(crate) fn grow_atlas(
+    atlas: Option<&umicraft_assets::GuiAtlas>,
+    extra: &[DynamicImage],
+) -> umicraft_assets::GuiAtlas {
+    let images: Vec<DynamicImage> = brand_images().iter().chain(extra).cloned().collect();
+    atlas
+        .cloned()
+        .unwrap_or_else(umicraft_assets::GuiAtlas::empty)
+        .with_dynamic(&images)
 }
 
 /// The sprite sheet of an atlas region.
@@ -116,7 +149,8 @@ pub(crate) fn hud_sheets(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> HudSh
 
 /// The menu textures of the GUI atlas: the dirt of `options_background.png`,
 /// the title logo `title/minecraft.png` and the server list art (`icons.png`,
-/// `unknown_server.png`, `server_selection.png`). A texture the atlas lacks
+/// `unknown_server.png`, `server_selection.png`) and the brand art of the
+/// client pack (`dynamic/umicraft/{logo,settings}`). A texture the atlas lacks
 /// stays `None`, which selects the flat and text fallbacks of the menus.
 pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt {
     let sheet = |name: &str| gui_atlas.and_then(|a| a.region(name)).map(sprite);
@@ -128,7 +162,16 @@ pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt
         icons: sheet("icons"),
         unknown_server: sheet("misc/unknown_server"),
         server_selection: sheet("server_selection"),
+        brand: BrandArt {
+            logo: sheet(&brand_region("logo")),
+            settings: sheet(&brand_region("settings")),
+        },
     }
+}
+
+/// The atlas region of the brand image `name` (`logo`, `settings`).
+fn brand_region(name: &str) -> String {
+    format!("{DYNAMIC_PREFIX}umicraft/{name}")
 }
 
 /// The achievement screen's textures: the background and all eight map

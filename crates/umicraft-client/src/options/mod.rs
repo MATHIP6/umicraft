@@ -5,7 +5,7 @@
 //!
 //! The options live in one TOML file, `options.toml`, in the Umicraft data
 //! folder, as the sections `[video]`, `[controls]`, `[chat]`, `[language]`,
-//! `[skin]`, `[sound]`, `[resource_packs]`, `[multiplayer]` and `[keys]`
+//! `[skin]`, `[sound]`, `[resource_packs]`, `[multiplayer]`, `[menu]` and `[keys]`
 //! (ADR-0017, ADR-0044). Loading never fails: a missing file gives the defaults, a
 //! section that does not parse is replaced by its defaults without touching
 //! the others, and every number is clamped to its range. Saving is atomic
@@ -21,6 +21,7 @@ mod chat;
 mod controls;
 mod keys;
 mod language;
+mod menu;
 mod multiplayer;
 mod packs;
 mod skin;
@@ -33,6 +34,7 @@ pub use chat::{ChatOptions, ChatVisibility};
 pub use controls::ControlOptions;
 pub use keys::{is_reserved, key_from_name, key_label, key_name, Action, Binding, KeyBindings};
 pub use language::LanguageOptions;
+pub use menu::{MenuOptions, TitleStyleSetting};
 pub use multiplayer::MultiplayerOptions;
 pub use packs::{is_pack_name, ResourcePackOptions, PACKS_FOLDER};
 pub use skin::{SkinOptions, SkinPart};
@@ -73,6 +75,8 @@ pub struct Options {
     pub keys: KeyBindings,
     /// The multiplayer screen's memory.
     pub multiplayer: MultiplayerOptions,
+    /// The menu options (title screen style).
+    pub menu: MenuOptions,
 }
 
 impl Options {
@@ -131,6 +135,7 @@ impl Options {
             resource_packs: section(store, "resource_packs"),
             keys: KeyBindings::from_map(&keys),
             multiplayer: section(store, "multiplayer"),
+            menu: section(store, "menu"),
         };
         options.clamp();
         options
@@ -167,6 +172,7 @@ impl Options {
         store.set_section("sound", &self.sound)?;
         store.set_section("resource_packs", &self.resource_packs)?;
         store.set_section("multiplayer", &self.multiplayer)?;
+        store.set_section("menu", &self.menu)?;
         store.set_section("keys", &self.keys.to_map())?;
         store.save(path)
     }

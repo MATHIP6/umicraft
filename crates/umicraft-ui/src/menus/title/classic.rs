@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The title screen (MCP `GuiMainMenu`).
+//! The classic title screen (MCP `GuiMainMenu`).
 //!
 //! Layout in GUI units, `cx = width / 2`, `j = height / 4 + 48`:
 //! - Singleplayer `(cx - 100, j)` 200x20 (disabled: Umicraft only plays on
@@ -16,7 +16,7 @@
 //! has it (owner-approved, never committed, spec §3) and the original word
 //! "Umicraft" otherwise. The splash is tilted by -20 degrees and pulses like
 //! vanilla; it comes from the user's `splashes.txt` when the caller sets one
-//! ([`TitleScreen::set_splash`]) and from an original list otherwise.
+//! ([`ClassicTitle::set_splash`]) and from an original list otherwise.
 
 use umicraft_core::lang::Lang;
 
@@ -26,8 +26,10 @@ use crate::geom::Rect;
 use crate::text::FontAtlas;
 use crate::widgets::style;
 
-use super::common::{Gui, TextPlacement, WHITE};
-use super::panorama::{PanoramaBackground, PanoramaTextures, PanoramaView};
+use crate::menus::common::{Gui, TextPlacement, WHITE};
+use crate::menus::panorama::{PanoramaBackground, PanoramaView};
+
+use super::{TitleInfo, TitleOutcome};
 
 /// The product name drawn as the logo.
 pub const LOGO_TEXT: &str = "Umicraft";
@@ -61,19 +63,6 @@ const LOGO_HALF_ROW: u32 = 45;
 /// The top of the logo in GUI units.
 const LOGO_TOP: f32 = 30.0;
 
-/// What the player chose on the title screen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TitleOutcome {
-    /// Open the server list.
-    Multiplayer,
-    /// Open the options.
-    Options,
-    /// Open the language choice.
-    Language,
-    /// Quit the game.
-    Quit,
-}
-
 /// The rectangles of the title screen buttons.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TitleLayout {
@@ -103,25 +92,14 @@ pub fn title_layout(viewport: Rect) -> TitleLayout {
     }
 }
 
-/// What the caller supplies each frame.
-#[derive(Debug, Clone, Copy)]
-pub struct TitleInfo<'a> {
-    /// The version line at the bottom left (for example `Umicraft 0.1.0`).
-    pub version: &'a str,
-    /// The uploaded panorama faces, if the textures are installed.
-    pub panorama: Option<PanoramaTextures>,
-    /// The fraction of a tick since the last [`TitleScreen::tick`].
-    pub partial_tick: f32,
-}
-
-/// The title screen state: the splash and the panorama clock.
+/// The classic title screen state: the splash and the panorama clock.
 #[derive(Debug, Clone)]
-pub struct TitleScreen {
+pub struct ClassicTitle {
     splash: String,
     panorama: PanoramaBackground,
 }
 
-impl TitleScreen {
+impl ClassicTitle {
     /// Creates the screen; `seed` (for example the start time) picks the splash.
     #[must_use]
     pub fn new(seed: u64) -> Self {
@@ -323,19 +301,27 @@ mod tests {
     use super::*;
     use crate::input::UiInput;
     use crate::menus::common::testing::{click_at, frame, VIEWPORT};
+    use crate::menus::panorama::PanoramaTextures;
+    use crate::menus::title::TitleStyle;
+
+    fn info<'a>(atlas: &'a FontAtlas, panorama: Option<PanoramaTextures>) -> TitleInfo<'a> {
+        TitleInfo {
+            version: "Umicraft test",
+            panorama,
+            partial_tick: 0.0,
+            style: TitleStyle::Classic,
+            brand_font: atlas,
+        }
+    }
 
     fn show(
-        screen: &mut TitleScreen,
+        screen: &mut ClassicTitle,
         input: UiInput,
         panorama: Option<PanoramaTextures>,
     ) -> (Option<TitleOutcome>, Option<PanoramaView>) {
         let atlas = FontAtlas::fallback();
         let lang = Lang::builtin();
-        let info = TitleInfo {
-            version: "Umicraft test",
-            panorama,
-            partial_tick: 0.0,
-        };
+        let info = info(&atlas, panorama);
         frame(input, |ui| screen.show(ui, &atlas, &lang, &info))
     }
 
@@ -353,7 +339,7 @@ mod tests {
     #[test]
     fn each_button_reports_its_outcome() {
         let layout = title_layout(VIEWPORT);
-        let mut screen = TitleScreen::new(0);
+        let mut screen = ClassicTitle::new(0);
         for (rect, expected) in [
             (layout.multiplayer, TitleOutcome::Multiplayer),
             (layout.options, TitleOutcome::Options),
@@ -367,7 +353,7 @@ mod tests {
     #[test]
     fn singleplayer_is_disabled() {
         let layout = title_layout(VIEWPORT);
-        let mut screen = TitleScreen::new(0);
+        let mut screen = ClassicTitle::new(0);
         assert_eq!(
             show(&mut screen, click_at(layout.singleplayer), None).0,
             None
@@ -376,13 +362,13 @@ mod tests {
 
     #[test]
     fn the_seed_picks_a_splash_from_the_list() {
-        assert_eq!(TitleScreen::new(3).splash(), SPLASHES[3]);
-        assert_eq!(TitleScreen::new(8).splash(), SPLASHES[0]);
+        assert_eq!(ClassicTitle::new(3).splash(), SPLASHES[3]);
+        assert_eq!(ClassicTitle::new(8).splash(), SPLASHES[0]);
     }
 
     #[test]
     fn the_panorama_is_returned_only_with_textures() {
-        let mut screen = TitleScreen::new(0);
+        let mut screen = ClassicTitle::new(0);
         assert_eq!(show(&mut screen, UiInput::default(), None).1, None);
         let textures = PanoramaTextures { faces: [1; 6] };
         screen.tick();
@@ -393,18 +379,14 @@ mod tests {
     #[test]
     fn the_logo_texture_is_two_155_by_44_blits_at_the_vanilla_position() {
         let sheet = SpriteSheet::new(0.0, 0.0, 1.0, 1.0, 256, 256);
-        let mut screen = TitleScreen::new(0);
+        let mut screen = ClassicTitle::new(0);
         let commands = frame(UiInput::default(), |ui| {
             ui.set_menu_art(crate::menus::MenuArt {
                 logo: Some(sheet),
                 ..crate::menus::MenuArt::default()
             });
             let atlas = FontAtlas::fallback();
-            let info = TitleInfo {
-                version: "v",
-                panorama: None,
-                partial_tick: 0.0,
-            };
+            let info = info(&atlas, None);
             screen.show(ui, &atlas, &Lang::builtin(), &info);
             ui.draw().commands().to_vec()
         });
@@ -427,14 +409,10 @@ mod tests {
 
     #[test]
     fn without_the_texture_the_text_logo_is_drawn() {
-        let mut screen = TitleScreen::new(0);
+        let mut screen = ClassicTitle::new(0);
         let drawn = frame(UiInput::default(), |ui| {
             let atlas = FontAtlas::fallback();
-            let info = TitleInfo {
-                version: "v",
-                panorama: None,
-                partial_tick: 0.0,
-            };
+            let info = info(&atlas, None);
             screen.show(ui, &atlas, &Lang::builtin(), &info);
             ui.draw().commands().iter().any(|command| {
                 matches!(command, crate::draw::DrawCommand::Text { text, .. } if text == LOGO_TEXT)

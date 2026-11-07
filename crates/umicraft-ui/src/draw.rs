@@ -74,6 +74,19 @@ impl SpriteSheet {
     }
 }
 
+/// The typeface of a text run (ADR-0056).
+///
+/// Vanilla screens use [`FontFace::Game`]; Umicraft's own screens may use
+/// [`FontFace::Brand`], the sans-serif face rasterized from the client pack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FontFace {
+    /// The game bitmap font (the user's `ascii.png` or the built-in fallback).
+    #[default]
+    Game,
+    /// The Umicraft brand face (Inter SemiBold).
+    Brand,
+}
+
 /// The visual parameters of a text run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextStyle {
@@ -86,6 +99,8 @@ pub struct TextStyle {
     /// tilted splash of the title screen (`GuiMainMenu` rotates by -20
     /// degrees).
     pub rotation: f32,
+    /// The typeface; [`FontFace::Game`] by default.
+    pub face: FontFace,
 }
 
 impl TextStyle {
@@ -96,6 +111,7 @@ impl TextStyle {
             scale,
             color,
             rotation: 0.0,
+            face: FontFace::Game,
         }
     }
 
@@ -105,15 +121,18 @@ impl TextStyle {
         self.rotation = radians;
         self
     }
+
+    /// The same style in typeface `face`.
+    #[must_use]
+    pub const fn with_face(mut self, face: FontFace) -> Self {
+        self.face = face;
+        self
+    }
 }
 
 impl Default for TextStyle {
     fn default() -> Self {
-        Self {
-            scale: 1.0,
-            color: [1.0; 4],
-            rotation: 0.0,
-        }
+        Self::new(1.0, [1.0; 4])
     }
 }
 
@@ -126,6 +145,30 @@ pub enum DrawCommand {
         rect: Rect,
         /// Straight-alpha RGBA colour.
         color: Color,
+    },
+    /// Fill a rectangle with rounded corners (ADR-0056).
+    ///
+    /// The renderer tessellates the corners on the CPU and fades a
+    /// one-pixel fringe for anti-aliasing.
+    RoundedRect {
+        /// Rectangle to fill, in physical pixels.
+        rect: Rect,
+        /// Corner radius in physical pixels, clamped to half the shorter side.
+        radius: f32,
+        /// Straight-alpha RGBA colour.
+        color: Color,
+    },
+    /// Fill a rectangle with a vertical gradient from `top` to `bottom`.
+    ///
+    /// The renderer interpolates the colours per vertex, so the gradient has
+    /// no bands (`Gui.drawGradientRect` shades the same way).
+    VerticalGradient {
+        /// Rectangle to fill, in physical pixels.
+        rect: Rect,
+        /// Straight-alpha RGBA colour of the top edge.
+        top: Color,
+        /// Straight-alpha RGBA colour of the bottom edge.
+        bottom: Color,
     },
     /// Draw one line of text at `position` (top-left of the first glyph).
     Text {
@@ -250,6 +293,21 @@ impl DrawList {
         self.commands.push(DrawCommand::Rect { rect, color });
     }
 
+    /// Appends a rectangle with corners rounded by `radius` pixels.
+    pub fn rounded_rect(&mut self, rect: Rect, radius: f32, color: Color) {
+        self.commands.push(DrawCommand::RoundedRect {
+            rect,
+            radius,
+            color,
+        });
+    }
+
+    /// Appends a rectangle shaded from `top` to `bottom`.
+    pub fn vertical_gradient(&mut self, rect: Rect, top: Color, bottom: Color) {
+        self.commands
+            .push(DrawCommand::VerticalGradient { rect, top, bottom });
+    }
+
     /// Appends a text run.
     pub fn text(&mut self, position: [f32; 2], text: impl Into<String>, style: TextStyle) {
         self.commands.push(DrawCommand::Text {
@@ -336,6 +394,21 @@ mod tests {
         assert_eq!(list.len(), 4);
         assert!(matches!(list.commands()[0], DrawCommand::PushClip { .. }));
         assert!(matches!(list.commands()[3], DrawCommand::PopClip));
+    }
+
+    #[test]
+    fn vertical_gradient_appends_its_command() {
+        let mut list = DrawList::new();
+        let rect = Rect::new(0.0, 0.0, 4.0, 8.0);
+        list.vertical_gradient(rect, [1.0; 4], [0.0; 4]);
+        assert_eq!(
+            list.commands(),
+            [DrawCommand::VerticalGradient {
+                rect,
+                top: [1.0; 4],
+                bottom: [0.0; 4]
+            }]
+        );
     }
 
     #[test]

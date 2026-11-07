@@ -334,21 +334,6 @@ impl ScrollbarDrag {
     }
 }
 
-/// Draws a vertical gradient as horizontal bands.
-pub(crate) fn gradient(ui: &mut Ui, rect: Rect, top: Color, bottom: Color) {
-    const BANDS: u32 = 32;
-    let band = rect.height / BANDS as f32;
-    for index in 0..BANDS {
-        let t = (index as f32 + 0.5) / BANDS as f32;
-        let mix = |i: usize| top[i] + (bottom[i] - top[i]) * t;
-        let y = rect.y + index as f32 * band;
-        ui.draw().rect(
-            Rect::new(rect.x, y, rect.width, band),
-            [mix(0), mix(1), mix(2), mix(3)],
-        );
-    }
-}
-
 /// Removes legacy `§x` formatting codes (`EnumChatFormatting.getTextWithoutFormattingCodes`).
 ///
 /// Server descriptions carry them; the menus draw plain text, so the codes
@@ -417,6 +402,20 @@ pub(crate) mod testing {
     use crate::context::Ui;
     use crate::geom::Rect;
     use crate::input::{InputEvent, Key, PointerButton, UiInput};
+
+    /// The Umicraft texts the server rows need. The UI crate cannot read the
+    /// client pack (`umicraft-assets`), so the tests carry the few lines
+    /// they assert on; the real texts are `client-pack/umicraft/lang`.
+    const SERVER_TEXTS: &str = "\
+umicraft.server.clientOutdated=Client out of date!
+umicraft.server.andMore=... and %s more ...
+umicraft.server.unreachable=Can't connect to server.
+";
+
+    /// The built-in language plus [`SERVER_TEXTS`] as the Umicraft layer.
+    pub(crate) fn lang_with_server_texts() -> umicraft_core::lang::Lang {
+        umicraft_core::lang::Lang::builtin().with_client_layer(Some(SERVER_TEXTS), None)
+    }
 
     /// The viewport of the tests: GUI scale 3, 427x240 GUI units.
     pub(crate) const VIEWPORT: Rect = Rect {

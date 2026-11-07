@@ -161,6 +161,28 @@ impl Overlay {
         self.push_corners(corners, uv_min, uv_max, color);
     }
 
+    /// Appends one triangle given by its pixel-space corners, all sampling
+    /// the texel at `uv`, each with its own colour. Per-corner colours let the
+    /// UI pass fade the edge of a rounded shape without a shader change.
+    pub(crate) fn push_triangle(
+        &mut self,
+        corners: [[f32; 2]; 3],
+        uv: [f32; 2],
+        colors: [[f32; 4]; 3],
+    ) {
+        let (width, height) = (self.width, self.height);
+        self.vertices.extend(
+            corners
+                .iter()
+                .zip(colors)
+                .map(|(&[x, y], color)| OverlayVertex {
+                    position: [2.0 * x / width - 1.0, 1.0 - 2.0 * y / height],
+                    uv,
+                    color,
+                }),
+        );
+    }
+
     /// Appends a quad given by its four pixel-space corners (top-left,
     /// top-right, bottom-right, bottom-left), which may be turned.
     pub(crate) fn push_corners(

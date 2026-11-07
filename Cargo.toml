@@ -28,6 +28,7 @@ license = "MIT OR Apache-2.0"
 aes = "0.8"
 bytemuck = { version = "1", features = ["derive"] }
 flate2 = "1.0"
+fontdue = "0.9"
 num-bigint = "0.5"
 png = "0.18"
 proptest = "1"

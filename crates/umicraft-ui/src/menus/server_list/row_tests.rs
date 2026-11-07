@@ -6,7 +6,7 @@
 use super::*;
 use crate::draw::{Color, DrawCommand, SpriteSheet};
 use crate::input::{InputEvent, UiInput};
-use crate::menus::common::testing::frame;
+use crate::menus::common::testing::{frame, lang_with_server_texts};
 use crate::menus::common::DIM_GRAY;
 use crate::menus::MenuArt;
 
@@ -63,7 +63,7 @@ fn draw(
     screen.set_selected(selected);
     frame(input, |ui| {
         ui.set_menu_art(art());
-        screen.show(ui, &FontAtlas::fallback(), &Lang::builtin(), rows);
+        screen.show(ui, &FontAtlas::fallback(), &lang_with_server_texts(), rows);
         ui.draw().commands().to_vec()
     })
 }
@@ -163,7 +163,7 @@ fn a_pinging_row_animates_with_time_and_its_index() {
         }
         frame(UiInput::default(), |ui| {
             ui.set_menu_art(art());
-            screen.show(ui, &FontAtlas::fallback(), &Lang::builtin(), &rows);
+            screen.show(ui, &FontAtlas::fallback(), &lang_with_server_texts(), &rows);
             images(ui.draw().commands())
         })
     };

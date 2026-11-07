@@ -271,6 +271,9 @@ pub struct Renderer {
     overlay_pipeline: wgpu::RenderPipeline,
     /// The name tags of the frame, drawn in the world pass.
     nametags: NametagRenderer,
+    /// `overlay_pipeline` with smooth coverage instead of a threshold, for
+    /// the brand font.
+    brand_pipeline: wgpu::RenderPipeline,
     /// Pipeline for GUI texture quads (RGBA, no coverage threshold).
     gui_overlay_pipeline: wgpu::RenderPipeline,
     /// `gui_overlay_pipeline` with the inverting blend of the crosshair.
@@ -283,6 +286,12 @@ pub struct Renderer {
     /// paired with `gui_overlay_pipeline`.
     gui_overlay_layout: wgpu::BindGroupLayout,
     font_sampler: wgpu::Sampler,
+    /// Linear sampler of the brand font: its glyphs are antialiased outlines,
+    /// not pixel art.
+    brand_sampler: wgpu::Sampler,
+    /// Brand font texture binding; `None` until
+    /// [`Renderer::set_brand_font`] is called.
+    brand_bind_group: Option<wgpu::BindGroup>,
     /// Fallback-atlas binding kept for the M3 HUD (`Overlay::text`).
     overlay_bind_group: wgpu::BindGroup,
     /// Binding for the UI pass; starts on the fallback atlas and is replaced
@@ -656,6 +665,22 @@ impl Renderer {
             wgpu::BlendState::ALPHA_BLENDING,
         );
         let nametags = NametagRenderer::new(&device, &overlay_shader, &overlay_layout, format);
+        let brand_pipeline = create_overlay_pipeline_with_entry(
+            &device,
+            &overlay_shader,
+            &overlay_layout,
+            format,
+            wgpu::BlendState::ALPHA_BLENDING,
+            "fs_smooth",
+        );
+        let brand_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("brand font sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gui overlay shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gui_overlay.wgsl").into()),
@@ -857,11 +882,14 @@ impl Renderer {
             official_blocks: None,
             overlay_pipeline,
             nametags,
+            brand_pipeline,
             gui_overlay_pipeline,
             gui_inverted_pipeline,
             overlay_layout,
             gui_overlay_layout,
             font_sampler,
+            brand_sampler,
+            brand_bind_group: None,
             overlay_bind_group,
             ui_bind_group,
             gui_bind_group: None,
@@ -1289,14 +1317,57 @@ impl Renderer {
     /// size, the atlas exceeds the device texture limit, or its white UV
     /// rectangle is malformed.
     pub fn set_font_atlas(&mut self, atlas: &FontAtlas) -> Result<(), FontAtlasError> {
+        let view = self.upload_font_texture("ui font atlas", atlas)?;
+        self.ui_bind_group = create_font_bind_group(
+            &self.device,
+            &self.overlay_layout,
+            &self.font_sampler,
+            &view,
+        );
+        self.ui_atlas = atlas.clone();
+        Ok(())
+    }
+
+    /// Uploads the brand font atlas (see `umicraft_ui::brand_font`) as a
+    /// second font texture, sampled with linear filtering, and hands its
+    /// metrics to the UI pass.
+    ///
+    /// Text drawn with [`umicraft_ui::FontFace::Brand`] uses it from the next
+    /// frame on; until this is called such text is drawn with the game font.
+    /// Call once at startup; it performs one texture upload and no blocking
+    /// wait.
+    ///
+    /// # Errors
+    ///
+    /// [`FontAtlasError`] under the same conditions as
+    /// [`Renderer::set_font_atlas`]; the previous brand font, if any, stays.
+    pub fn set_brand_font(&mut self, atlas: &FontAtlas) -> Result<(), FontAtlasError> {
+        let view = self.upload_font_texture("brand font atlas", atlas)?;
+        self.brand_bind_group = Some(create_font_bind_group(
+            &self.device,
+            &self.overlay_layout,
+            &self.brand_sampler,
+            &view,
+        ));
+        self.ui_pass.set_brand_atlas(Some(atlas.clone()));
+        Ok(())
+    }
+
+    /// Validates `atlas` and uploads it as an R8 texture.
+    fn upload_font_texture(
+        &self,
+        label: &str,
+        atlas: &FontAtlas,
+    ) -> Result<wgpu::TextureView, FontAtlasError> {
         ui_pass::validate_font_atlas(atlas, self.device.limits().max_texture_dimension_2d)?;
+        let size = wgpu::Extent3d {
+            width: atlas.width,
+            height: atlas.height,
+            depth_or_array_layers: 1,
+        };
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("ui font atlas"),
-            size: wgpu::Extent3d {
-                width: atlas.width,
-                height: atlas.height,
-                depth_or_array_layers: 1,
-            },
+            label: Some(label),
+            size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -1317,21 +1388,9 @@ impl Renderer {
                 bytes_per_row: Some(atlas.width),
                 rows_per_image: Some(atlas.height),
             },
-            wgpu::Extent3d {
-                width: atlas.width,
-                height: atlas.height,
-                depth_or_array_layers: 1,
-            },
+            size,
         );
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.ui_bind_group = create_font_bind_group(
-            &self.device,
-            &self.overlay_layout,
-            &self.font_sampler,
-            &view,
-        );
-        self.ui_atlas = atlas.clone();
-        Ok(())
+        Ok(texture.create_view(&wgpu::TextureViewDescriptor::default()))
     }
 
     /// Uploads the RGBA GUI texture atlas for inventory/container backgrounds.
@@ -2362,6 +2421,15 @@ impl Renderer {
                         pass.set_pipeline(&self.overlay_pipeline);
                         pass.set_bind_group(0, &self.ui_bind_group, &[]);
                     }
+                    UiBatchKind::BrandFont => {
+                        // `UiPass` only emits this kind with a brand atlas,
+                        // which `set_brand_font` uploads together.
+                        let Some(brand) = &self.brand_bind_group else {
+                            continue;
+                        };
+                        pass.set_pipeline(&self.brand_pipeline);
+                        pass.set_bind_group(0, brand, &[]);
+                    }
                     UiBatchKind::Icon => {
                         pass.set_pipeline(&self.gui_overlay_pipeline);
                         pass.set_bind_group(0, &self.icon_gui_bind_group, &[]);
@@ -2799,6 +2867,18 @@ pub(crate) fn create_overlay_pipeline(
     format: wgpu::TextureFormat,
     blend: wgpu::BlendState,
 ) -> wgpu::RenderPipeline {
+    create_overlay_pipeline_with_entry(device, shader, bind_group_layout, format, blend, "fs_main")
+}
+
+/// [`create_overlay_pipeline`] with a named fragment entry point of `shader`.
+fn create_overlay_pipeline_with_entry(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    bind_group_layout: &wgpu::BindGroupLayout,
+    format: wgpu::TextureFormat,
+    blend: wgpu::BlendState,
+    fragment_entry: &str,
+) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("overlay pipeline layout"),
         bind_group_layouts: &[Some(bind_group_layout)],
@@ -2828,7 +2908,7 @@ pub(crate) fn create_overlay_pipeline(
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(fragment_entry),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,

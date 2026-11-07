@@ -6,6 +6,7 @@ use umicraft_assets::languages::LanguageInfo;
 use umicraft_assets::pack_discovery::DiscoveredPack;
 use umicraft_assets::PackMetadata;
 use umicraft_core::lang::Lang;
+use umicraft_ui::menus::TitleStyle;
 use umicraft_ui::{FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 
 use super::controls_page::sensitivity_label;
@@ -601,4 +602,43 @@ fn the_snooper_button_opens_its_page_and_the_switch_is_stored() {
     assert!(outcome.changed && options.multiplayer.snooper);
     click_widget(&mut screen, &mut options, "done");
     assert_eq!(screen.page(), Page::Main);
+}
+
+#[test]
+fn the_title_style_button_toggles_the_option() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    assert_eq!(options.menu.style(), TitleStyle::Modern);
+    let outcome = click_widget(&mut screen, &mut options, "title_style");
+    assert!(outcome.changed);
+    assert_eq!(options.menu.style(), TitleStyle::Classic);
+    click_widget(&mut screen, &mut options, "title_style");
+    assert_eq!(options.menu.style(), TitleStyle::Modern);
+}
+
+#[test]
+fn the_title_style_button_spans_both_columns() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    frame(&mut screen, &mut options, vec![]);
+    let style = screen.rect_of("title_style").expect("title style button");
+    let fov = screen.rect_of("fov").expect("fov slider");
+    let difficulty = screen.rect_of("difficulty").expect("difficulty button");
+    assert_eq!(style.x, fov.x);
+    assert_eq!(style.x + style.width, difficulty.x + difficulty.width);
+}
+
+#[test]
+fn the_title_style_label_names_the_current_style() {
+    let lang = Lang::from_texts("en_US", None, None)
+        .with_client_layer(umicraft_assets::client_pack::lang("en_US"), None);
+    let options = Options::default();
+    assert_eq!(
+        option_label(
+            &lang,
+            "umicraft.options.titleStyle",
+            main_page::title_style_text(&lang, &options)
+        ),
+        "Title screen: Modern"
+    );
 }

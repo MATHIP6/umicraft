@@ -28,7 +28,7 @@ use umicraft_render::{
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
 use umicraft_ui::menus::{
-    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab,
+    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab, TitleStyle,
 };
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
@@ -42,7 +42,7 @@ use crate::hud_demo_panorama;
 use crate::hud_demo_servers;
 use crate::hud_demo_stats;
 use crate::item_icons::{IconSource, ItemResources, ItemView};
-use crate::menu_flow::{MenuContext, MenuFlow};
+use crate::menu_flow::{shown_title_style, MenuContext, MenuFlow};
 use crate::options::{Action, Options};
 use crate::options_screen::{Catalog, OptionsScreen};
 use crate::screen::Screen;
@@ -275,11 +275,23 @@ fn run_options(
     (screen, output.draw_list)
 }
 
+/// The title style of `view`: `title-modern` shows the modern screen when
+/// the brand font is bound, every other view the classic one.
+fn demo_title_style(view: &str, brand_ready: bool) -> TitleStyle {
+    let chosen = if view == "title-modern" {
+        TitleStyle::Modern
+    } else {
+        TitleStyle::Classic
+    };
+    shown_title_style(chosen, brand_ready)
+}
+
 /// Whether `view` is a scene of the menu flow.
 fn is_menu_view(view: &str) -> bool {
     matches!(
         view,
         "title"
+            | "title-modern"
             | "servers"
             | "server-edit"
             | "connecting"
@@ -298,7 +310,7 @@ fn is_menu_view(view: &str) -> bool {
 fn menu_scene(
     view: &str,
     (width, height): (u32, u32),
-    atlas: &FontAtlas,
+    (atlas, brand): (&FontAtlas, Option<&FontAtlas>),
     (sheets, art): (&HudSheets, MenuArt),
     (panorama, gui_atlas, items): (Option<PanoramaTextures>, Option<&GuiAtlas>, ItemView<'_>),
 ) -> (Demo, Option<PanoramaView>) {
@@ -318,7 +330,7 @@ fn menu_scene(
         flow.assign_icon_sheets(atlas);
     }
     let screen = match view {
-        "title" => Screen::Title,
+        "title" | "title-modern" => Screen::Title,
         "server-edit" => Screen::ServerEdit,
         "connecting" => Screen::Connecting,
         "disconnected" => Screen::Disconnected,
@@ -348,6 +360,8 @@ fn menu_scene(
         player_hash: 0,
         stats: &stats,
         panorama,
+        title_style: demo_title_style(view, brand.is_some()),
+        brand_font: brand.unwrap_or(atlas),
     };
     if let Some(tab) = match view {
         "stats-blocks" => Some(StatsTab::Blocks),
@@ -434,11 +448,12 @@ fn build(
                 scene: draw_list,
             }
         }
-        "title" | "servers" | "server-edit" | "connecting" | "disconnected" | "stats"
-        | "stats-blocks" | "stats-items" | "achievements" => {
+        "title" | "title-modern" | "servers" | "server-edit" | "connecting" | "disconnected"
+        | "stats" | "stats-blocks" | "stats-items" | "achievements" => {
             let items = ItemView::new(None, DialFrames::default());
             let scene = (None, None, items);
-            menu_scene(view, (width, height), atlas, (sheets, art), scene).0
+            let fonts = (atlas, None);
+            menu_scene(view, (width, height), fonts, (sheets, art), scene).0
         }
         "video" | "chat-options" | "sounds" | "skin" | "language" | "packs" => {
             let mut options = Options::default();
@@ -582,7 +597,10 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let gui_atlas = crate::official::load_gui_atlas();
     // The server list shows an icon of its own, so its atlas grows by one.
     let gui_atlas = match view {
-        "servers" => gui_atlas.map(|atlas| atlas.with_dynamic(&hud_demo_servers::icon_images())),
+        "servers" => Some(crate::official::grow_atlas(
+            gui_atlas.as_ref(),
+            &hud_demo_servers::icon_images(),
+        )),
         _ => gui_atlas,
     };
     let sheets = crate::official::hud_sheets(gui_atlas.as_ref());
@@ -596,6 +614,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
     let mut renderer = Renderer::new_offscreen(viewport.0, viewport.1)?;
     let installed = ui_font::install(&mut renderer, &font.atlas)?;
+    let brand = ui_font::install_brand(&mut renderer);
     if let Some(atlas) = gui_atlas.as_ref() {
         if !atlas.is_empty() {
             renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels());
@@ -610,14 +629,15 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         .then(|| hud_demo_stats::load_items(&mut renderer))
         .flatten();
     let (demo, panorama) = if is_menu_view(view) {
-        let textures = if view == "title" {
+        let textures = if matches!(view, "title" | "title-modern") {
             hud_demo_panorama::upload(args, &mut renderer)
         } else {
             None
         };
         let icons = ItemView::new(items.as_deref(), DialFrames::default());
         let scene = (textures, gui_atlas.as_ref(), icons);
-        menu_scene(view, viewport, &installed.atlas, (&sheets, art), scene)
+        let fonts = (&installed.atlas, brand.as_ref());
+        menu_scene(view, viewport, fonts, (&sheets, art), scene)
     } else {
         (
             build(view, viewport, &installed.atlas, (&sheets, art)),
