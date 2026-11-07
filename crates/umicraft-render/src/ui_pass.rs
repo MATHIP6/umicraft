@@ -328,6 +328,16 @@ impl UiPass {
                     );
                     self.push_rect(*rect, *color, atlas);
                 }
+                // Placeholder until the tessellation lands (ADR-0056): a
+                // square-cornered fill.
+                DrawCommand::RoundedRect { rect, color, .. } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Font,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_rect(*rect, *color, atlas);
+                }
                 DrawCommand::Text {
                     position,
                     text,

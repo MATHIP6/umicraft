@@ -74,6 +74,19 @@ impl SpriteSheet {
     }
 }
 
+/// The typeface of a text run (ADR-0056).
+///
+/// Vanilla screens use [`FontFace::Game`]; Umicraft's own screens may use
+/// [`FontFace::Brand`], the sans-serif face rasterized from the client pack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FontFace {
+    /// The game bitmap font (the user's `ascii.png` or the built-in fallback).
+    #[default]
+    Game,
+    /// The Umicraft brand face (Inter SemiBold).
+    Brand,
+}
+
 /// The visual parameters of a text run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextStyle {
@@ -86,6 +99,8 @@ pub struct TextStyle {
     /// tilted splash of the title screen (`GuiMainMenu` rotates by -20
     /// degrees).
     pub rotation: f32,
+    /// The typeface; [`FontFace::Game`] by default.
+    pub face: FontFace,
 }
 
 impl TextStyle {
@@ -96,6 +111,7 @@ impl TextStyle {
             scale,
             color,
             rotation: 0.0,
+            face: FontFace::Game,
         }
     }
 
@@ -105,15 +121,18 @@ impl TextStyle {
         self.rotation = radians;
         self
     }
+
+    /// The same style in typeface `face`.
+    #[must_use]
+    pub const fn with_face(mut self, face: FontFace) -> Self {
+        self.face = face;
+        self
+    }
 }
 
 impl Default for TextStyle {
     fn default() -> Self {
-        Self {
-            scale: 1.0,
-            color: [1.0; 4],
-            rotation: 0.0,
-        }
+        Self::new(1.0, [1.0; 4])
     }
 }
 
@@ -124,6 +143,18 @@ pub enum DrawCommand {
     Rect {
         /// Rectangle to fill, in physical pixels.
         rect: Rect,
+        /// Straight-alpha RGBA colour.
+        color: Color,
+    },
+    /// Fill a rectangle with rounded corners (ADR-0056).
+    ///
+    /// The renderer tessellates the corners on the CPU and fades a
+    /// one-pixel fringe for anti-aliasing.
+    RoundedRect {
+        /// Rectangle to fill, in physical pixels.
+        rect: Rect,
+        /// Corner radius in physical pixels, clamped to half the shorter side.
+        radius: f32,
         /// Straight-alpha RGBA colour.
         color: Color,
     },
@@ -248,6 +279,15 @@ impl DrawList {
     /// Appends a solid rectangle.
     pub fn rect(&mut self, rect: Rect, color: Color) {
         self.commands.push(DrawCommand::Rect { rect, color });
+    }
+
+    /// Appends a rectangle with corners rounded by `radius` pixels.
+    pub fn rounded_rect(&mut self, rect: Rect, radius: f32, color: Color) {
+        self.commands.push(DrawCommand::RoundedRect {
+            rect,
+            radius,
+            color,
+        });
     }
 
     /// Appends a text run.
