@@ -1013,6 +1013,10 @@ impl App {
             (&self.lang, items),
         );
         let output = self.ui.end_frame();
+        // Control+C and Control+X of a text field.
+        if let Some(text) = self.ui.take_clipboard() {
+            crate::clipboard::write(&text);
+        }
         self.audio.sync_volumes(&self.options.sound);
         self.audio
             .play_button_presses(self.ui.take_button_presses());

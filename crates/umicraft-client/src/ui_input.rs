@@ -49,6 +49,10 @@ pub fn ui_key(code: KeyCode) -> Option<Key> {
         KeyCode::PageUp => Some(Key::PageUp),
         KeyCode::PageDown => Some(Key::PageDown),
         KeyCode::F5 => Some(Key::F5),
+        KeyCode::KeyA => Some(Key::A),
+        KeyCode::KeyC => Some(Key::C),
+        KeyCode::KeyV => Some(Key::V),
+        KeyCode::KeyX => Some(Key::X),
         _ => None,
     }
 }
@@ -183,6 +187,18 @@ impl UiInputTranslator {
         if let Some(event) = key_event(code, state) {
             self.events.push(event);
         }
+        // Control+V (Command on macOS) hands the clipboard to the focused text
+        // field; the V itself reaches the UI only as the key.
+        let shortcut = (self.modifiers.control || self.modifiers.meta) && !self.modifiers.alt;
+        if state == ElementState::Pressed
+            && code == KeyCode::KeyV
+            && shortcut
+            && !self.modifiers.shift
+        {
+            if let Some(text) = crate::clipboard::read() {
+                self.events.push(InputEvent::Paste(text));
+            }
+        }
         if state == ElementState::Pressed {
             if let Some(text) = text {
                 self.text(text);
@@ -217,6 +233,26 @@ mod tests {
     use winit::keyboard::ModifiersState;
 
     #[test]
+    fn the_letters_of_the_text_shortcuts_are_mapped() {
+        assert_eq!(ui_key(KeyCode::KeyA), Some(Key::A));
+        assert_eq!(ui_key(KeyCode::KeyC), Some(Key::C));
+        assert_eq!(ui_key(KeyCode::KeyV), Some(Key::V));
+        assert_eq!(ui_key(KeyCode::KeyX), Some(Key::X));
+        assert_eq!(ui_key(KeyCode::KeyB), None);
+    }
+
+    #[test]
+    fn a_plain_v_asks_for_no_paste() {
+        let mut translator = UiInputTranslator::new();
+        translator.key(KeyCode::KeyV, ElementState::Pressed, None);
+        assert_eq!(
+            translator.take().events,
+            vec![InputEvent::KeyPressed(Key::V)],
+            "no Control, so the clipboard is not read"
+        );
+    }
+
+    #[test]
     fn key_down_and_up_are_translated() {
         let mut translator = UiInputTranslator::new();
         translator.key(KeyCode::Backspace, ElementState::Pressed, None);
@@ -238,7 +274,11 @@ mod tests {
         translator.key(KeyCode::KeyA, ElementState::Pressed, Some("a"));
         assert_eq!(
             translator.take().events,
-            vec![InputEvent::Text("a".to_string())]
+            // The key comes first (Control+A reads it), then the text.
+            vec![
+                InputEvent::KeyPressed(Key::A),
+                InputEvent::Text("a".to_string())
+            ]
         );
 
         // F2 is the window's toggle, not a UI key, so only text (none here)

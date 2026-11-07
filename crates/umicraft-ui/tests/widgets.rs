@@ -11,7 +11,7 @@ use umicraft_ui::widgets::{
     button, list, panel, text_field, ListState, TextFieldState, PANEL_INSET, ROW_HEIGHT,
 };
 use umicraft_ui::{
-    DrawCommand, FontAtlas, InputEvent, Key, PointerButton, Rect, Ui, UiInput, UiOutput,
+    DrawCommand, FontAtlas, InputEvent, Key, Modifiers, PointerButton, Rect, Ui, UiInput, UiOutput,
     UiResponse, WidgetId,
 };
 
@@ -1311,4 +1311,300 @@ fn a_disabled_text_field_ignores_input_and_draws_dim_text() {
     let (_, output) = run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, typed("x"));
     assert_eq!(state.text(), "lockedx");
     assert!(caret_mark(&output).is_some());
+}
+
+// Selection, clipboard and word shortcuts of the text field
+// (`GuiTextField.textboxKeyTyped`).
+
+const CONTROL: Modifiers = Modifiers {
+    shift: false,
+    control: true,
+    alt: false,
+    meta: false,
+};
+const SHIFT: Modifiers = Modifiers {
+    shift: true,
+    control: false,
+    alt: false,
+    meta: false,
+};
+const CONTROL_SHIFT: Modifiers = Modifiers {
+    shift: true,
+    control: true,
+    alt: false,
+    meta: false,
+};
+
+/// A key press with `modifiers` held.
+fn chord(modifiers: Modifiers, key: Key) -> UiInput {
+    UiInput {
+        events: vec![InputEvent::KeyPressed(key)],
+        modifiers,
+    }
+}
+
+/// A focused field holding `text`, caret at the end, and its UI.
+fn focused(text: &str) -> (Ui, WidgetId, TextFieldState, FontAtlas) {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::with_text(text);
+    focus_field(&mut ui, id, FIELD_RECT, &atlas, &mut state);
+    (ui, id, state, atlas)
+}
+
+#[test]
+fn control_a_selects_everything_and_typing_replaces_it() {
+    let (mut ui, id, mut state, atlas) = focused("hello");
+    let (response, output) = run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::A),
+    );
+    assert!(response.changed);
+    assert_eq!(state.selected_text(), "hello");
+    assert!(
+        output.draw_list.commands().iter().any(|command| matches!(
+            command,
+            DrawCommand::Rect { color, .. } if *color == [0.0, 0.0, 1.0, 0.85]
+        )),
+        "the selection is highlighted"
+    );
+
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, typed("x"));
+    assert_eq!(state.text(), "x");
+    assert!(!state.has_selection());
+}
+
+#[test]
+fn control_c_copies_the_selection_and_nothing_when_there_is_none() {
+    let (mut ui, id, mut state, atlas) = focused("hello");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::C),
+    );
+    assert_eq!(
+        ui.take_clipboard(),
+        None,
+        "an empty selection copies nothing"
+    );
+
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::A),
+    );
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::C),
+    );
+    assert_eq!(ui.take_clipboard().as_deref(), Some("hello"));
+    assert_eq!(state.text(), "hello", "a copy leaves the text alone");
+}
+
+#[test]
+fn control_x_cuts_the_selection() {
+    let (mut ui, id, mut state, atlas) = focused("hello");
+    for _ in 0..2 {
+        run_field(
+            &mut ui,
+            id,
+            FIELD_RECT,
+            &atlas,
+            &mut state,
+            chord(SHIFT, Key::ArrowLeft),
+        );
+    }
+    assert_eq!(state.selected_text(), "lo");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::X),
+    );
+    assert_eq!(ui.take_clipboard().as_deref(), Some("lo"));
+    assert_eq!(state.text(), "hel");
+    assert_eq!(state.caret(), 3);
+}
+
+#[test]
+fn a_paste_replaces_the_selection_and_drops_control_characters() {
+    let (mut ui, id, mut state, atlas) = focused("hello");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::A),
+    );
+    let paste = UiInput::new(vec![InputEvent::Paste("play.\nexample.net".to_owned())]);
+    let (response, _) = run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, paste);
+    assert!(response.changed);
+    assert_eq!(state.text(), "play.example.net");
+    assert_eq!(state.caret(), 16);
+}
+
+#[test]
+fn control_backspace_and_control_delete_remove_a_word() {
+    let (mut ui, id, mut state, atlas) = focused("foo bar baz");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::Backspace),
+    );
+    assert_eq!(state.text(), "foo bar ");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::Backspace),
+    );
+    assert_eq!(state.text(), "foo ");
+
+    state.set_caret(0);
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::Delete),
+    );
+    assert_eq!(state.text(), "", "the word and the space after it");
+}
+
+#[test]
+fn backspace_and_delete_remove_only_the_selection() {
+    let (mut ui, id, mut state, atlas) = focused("abcdef");
+    for _ in 0..3 {
+        run_field(
+            &mut ui,
+            id,
+            FIELD_RECT,
+            &atlas,
+            &mut state,
+            chord(SHIFT, Key::ArrowLeft),
+        );
+    }
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        key(Key::Backspace),
+    );
+    assert_eq!(state.text(), "abc");
+
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(SHIFT, Key::Home),
+    );
+    assert_eq!(state.selected_text(), "abc");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        key(Key::Delete),
+    );
+    assert_eq!(state.text(), "");
+}
+
+#[test]
+fn control_arrows_jump_by_words_and_shift_extends_the_selection() {
+    let (mut ui, id, mut state, atlas) = focused("one two  three");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::ArrowLeft),
+    );
+    assert_eq!(state.caret(), 9, "the start of `three`");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::ArrowLeft),
+    );
+    assert_eq!(state.caret(), 4);
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::ArrowRight),
+    );
+    assert_eq!(state.caret(), 9, "past the word and the spaces");
+
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL_SHIFT, Key::ArrowLeft),
+    );
+    assert_eq!(state.selected_text(), "two  ");
+    // A plain arrow collapses the selection from the moving end.
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        key(Key::ArrowRight),
+    );
+    assert!(!state.has_selection());
+    assert_eq!(state.caret(), 5);
+}
+
+#[test]
+fn a_control_chord_never_types_its_letter_but_altgr_does() {
+    let (mut ui, id, mut state, atlas) = focused("");
+    let with = |modifiers| UiInput {
+        events: vec![InputEvent::Text("a".to_owned())],
+        modifiers,
+    };
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, with(CONTROL));
+    assert_eq!(state.text(), "");
+    let altgr = Modifiers {
+        control: true,
+        alt: true,
+        ..Modifiers::default()
+    };
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, with(altgr));
+    assert_eq!(state.text(), "a");
 }

@@ -94,6 +94,8 @@ pub struct Ui {
     widgets_sheet: Option<SpriteSheet>,
     /// The menu textures (dirt, title logo) of the user's client jar.
     menu_art: MenuArt,
+    /// Text a widget asked to put on the clipboard (Control+C or Control+X).
+    clipboard: Option<String>,
 }
 
 impl Ui {
@@ -116,6 +118,7 @@ impl Ui {
             button_presses: 0,
             widgets_sheet: None,
             menu_art: MenuArt::default(),
+            clipboard: None,
         }
     }
 
@@ -169,7 +172,8 @@ impl Ui {
                 InputEvent::Wheel { .. }
                 | InputEvent::KeyPressed(_)
                 | InputEvent::KeyReleased(_)
-                | InputEvent::Text(_) => {}
+                | InputEvent::Text(_)
+                | InputEvent::Paste(_) => {}
             }
         }
         self.pending_traversal = pending;
@@ -387,6 +391,16 @@ impl Ui {
     /// and the window plays the sound.
     pub fn note_button_press(&mut self) {
         self.button_presses = self.button_presses.saturating_add(1);
+    }
+
+    /// Asks the window to put `text` on the system clipboard.
+    pub fn set_clipboard(&mut self, text: String) {
+        self.clipboard = Some(text);
+    }
+
+    /// The text a widget put on the clipboard since the last call, if any.
+    pub fn take_clipboard(&mut self) -> Option<String> {
+        self.clipboard.take()
     }
 
     /// The buttons and sliders pressed since the last call; resets the count.
