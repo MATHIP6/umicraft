@@ -327,6 +327,9 @@ enum Kind {
     Anvil,
     /// A snow layer, whose height depends on the metadata.
     SnowLayer,
+    /// A chest, trapped chest or ender chest: 0.875 high, inset by a sixteenth
+    /// except towards a neighbouring chest.
+    Chest,
     /// A piston base, shorter when extended.
     PistonBase,
     /// A piston head: plate and rod.
@@ -368,6 +371,7 @@ fn classify(id: u16, metadata: u8) -> Kind {
         29 | 33 => Kind::PistonBase,
         34 => Kind::PistonHead,
         144 => Kind::Skull,
+        54 | 130 | 146 => Kind::Chest,
         81 => Kind::Cactus,
         145 => Kind::Anvil,
         78 => Kind::SnowLayer,
@@ -448,7 +452,10 @@ pub fn shape_of<S: BlockSource + ?Sized>(
                 ))
             }
         }
-        Kind::SnowLayer => BlockShape::column(f64::from(state.metadata() + 1) / 8.0),
+        // `BlockSnow.getCollisionBoundingBox` is `layers - 1` eighths high, one
+        // layer under the selection box (`getBoundsForLayers`): a player
+        // walks onto a single layer and steps up to five.
+        Kind::SnowLayer => BlockShape::column(f64::from(state.metadata() & 7) / 8.0),
         Kind::Pane => pane_shape(state, world, pos),
         Kind::PistonBase => piston_shape::base_shape(state.metadata()),
         Kind::PistonHead => piston_shape::head_shape(state.metadata()),
@@ -456,6 +463,9 @@ pub fn shape_of<S: BlockSource + ?Sized>(
         // `setBlockBoundsBasedOnState` and returns the block bounds, which
         // are exactly the selection bounds.
         Kind::Skull => selection_shape(state, world, pos),
+        // The chest blocks have no `getCollisionBoundingBox` of their own, so
+        // the collision is their bounds, which are the selection bounds.
+        Kind::Chest => selection_shape(state, world, pos),
         Kind::Stairs => stair_shape(state),
         Kind::Fence => fence_shape(world, pos),
     }
@@ -810,6 +820,31 @@ mod tests {
         let world = TestBlocks::default();
         let plate = shape_of(BlockState::new(70, 0), &world, BlockPos::new(0, 0, 0));
         assert_eq!(plate.boxes()[0].max.y, 0.0625);
+    }
+
+    #[test]
+    fn a_snow_layer_collides_one_layer_lower_than_it_is_selected() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        for layers in 1..=8_u8 {
+            let state = BlockState::new(78, layers - 1);
+            let collision = shape_of(state, &world, pos);
+            let top = collision.boxes().first().map_or(0.0, |b| b.max.y);
+            assert_eq!(top, f64::from(layers - 1) / 8.0, "{layers} layers");
+            let selected = selection_shape(state, &world, pos);
+            assert_eq!(selected.boxes()[0].max.y, f64::from(layers) / 8.0);
+        }
+    }
+
+    #[test]
+    fn a_chest_is_an_inset_box_seven_eighths_high_not_a_full_cube() {
+        let world = TestBlocks::default();
+        for id in [54, 130, 146] {
+            let shape = shape_of(BlockState::new(id, 2), &world, BlockPos::new(0, 0, 0));
+            let chest = shape.boxes()[0];
+            assert_eq!(chest.max.y, 0.875, "chest {id}");
+            assert_eq!((chest.min.x, chest.max.x), (0.0625, 0.9375), "chest {id}");
+        }
     }
 
     #[test]
