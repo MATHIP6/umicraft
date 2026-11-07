@@ -2261,6 +2261,13 @@ impl Renderer {
         }
     }
 
+    /// Blocks until the GPU finished every submitted frame, for benchmarks
+    /// that time a whole frame.
+    pub fn wait_idle(&self) {
+        // A failed poll means the device is lost; the next draw reports it.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
     /// The GPU time of the newest finished frame per group of draws, two or
     /// three frames old. `None` when the adapter has no timestamp queries or
     /// no frame has come back yet.
