@@ -216,11 +216,18 @@ fn frame_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
 
 /// The first-person arms that hold a map, in camera space.
 #[must_use]
-pub fn map_arm_vertices(pose: &HandPose, bob: Mat4, is_slim: bool) -> Vec<EntityVertex> {
+pub fn map_arm_vertices(
+    pose: &HandPose,
+    bob: Mat4,
+    (is_slim, skin_parts): (bool, u8),
+) -> Vec<EntityVertex> {
     let [right, left] = pose.map_arm_matrices();
     [
-        (right, HumanoidModel::first_person_arm(is_slim)),
-        (left, HumanoidModel::first_person_left_arm(is_slim)),
+        (right, HumanoidModel::first_person_arm(is_slim, skin_parts)),
+        (
+            left,
+            HumanoidModel::first_person_left_arm(is_slim, skin_parts),
+        ),
     ]
     .into_iter()
     .flat_map(|(matrix, model)| arm_vertices(&(bob * matrix), model))
@@ -292,7 +299,7 @@ mod tests {
 
     #[test]
     fn both_arms_make_two_models_of_vertices() {
-        let arms = map_arm_vertices(&HandPose::default(), Mat4::IDENTITY, false);
+        let arms = map_arm_vertices(&HandPose::default(), Mat4::IDENTITY, (false, 0x7F));
         assert_eq!(arms.len(), 144);
     }
 }

@@ -318,3 +318,79 @@ fn the_option_values_one_and_two_mesh_alike() {
     assert_eq!(Lighting::from_option(1), Lighting::Smooth);
     assert_eq!(Lighting::from_option(2), Lighting::Smooth);
 }
+
+// `Block.getMixedBrightnessForBlock` and `World.getCombinedLight`.
+
+const STONE: u16 = 1;
+const SLAB: u16 = 44;
+const LEAVES: u16 = 18;
+const GLASS: u16 = 20;
+const TORCH: u16 = 50;
+const WATER: u16 = 9;
+
+#[test]
+fn a_slab_cell_is_lit_by_the_cells_above_and_beside_it() {
+    // The engine stores a slab's own cell as dark: it stops light.
+    let scene = Scene::new(&[([0, 0, 0], BlockState::new(SLAB, 0))])
+        .with_light([0, 1, 0], LightLevel::new(3, 12))
+        .with_light([1, 0, 0], LightLevel::new(5, 9));
+    assert_eq!(scene.mixed_light(0, 0, 0), LightLevel::new(5, 12));
+}
+
+#[test]
+fn a_slab_in_the_dark_takes_the_cell_below_it() {
+    let scene = Scene::new(&[
+        ([0, 0, 0], BlockState::new(SLAB, 0)),
+        ([0, -1, 0], BlockState::new(STONE, 0)),
+    ])
+    .with_light([0, -1, 0], LightLevel::new(0, 7));
+    assert_eq!(scene.mixed_light(0, 0, 0), LightLevel::new(0, 7));
+}
+
+#[test]
+fn a_solid_cube_keeps_its_own_light() {
+    let scene = Scene::new(&[([0, 0, 0], BlockState::new(STONE, 0))])
+        .with_light([0, 0, 0], LightLevel::new(2, 4))
+        .with_light([0, 1, 0], LightLevel::new(15, 15));
+    assert_eq!(scene.mixed_light(0, 0, 0), LightLevel::new(2, 4));
+}
+
+#[test]
+fn blocks_that_let_light_through_take_their_neighbours_but_leaves_water_do_not() {
+    for (id, own, expected) in [
+        (GLASS, LightLevel::new(0, 5), LightLevel::new(0, 9)),
+        (LEAVES, LightLevel::new(0, 5), LightLevel::new(0, 5)),
+        (WATER, LightLevel::new(0, 5), LightLevel::new(0, 5)),
+    ] {
+        let scene = Scene::new(&[([0, 0, 0], BlockState::new(id, 0))])
+            .with_light([0, 0, 0], own)
+            .with_light([0, 1, 0], LightLevel::new(0, 9));
+        assert_eq!(scene.mixed_light(0, 0, 0), expected, "block {id}");
+    }
+}
+
+#[test]
+fn a_torch_keeps_its_emission_over_dimmer_neighbours() {
+    let scene = Scene::new(&[([0, 0, 0], BlockState::new(TORCH, 5))])
+        .with_light([1, 0, 0], LightLevel::new(13, 0));
+    assert_eq!(scene.mixed_light(0, 0, 0), LightLevel::new(14, 0));
+}
+
+#[test]
+fn a_wall_face_beside_a_slab_is_lit_like_its_surroundings() {
+    // A stone block with a slab against its east face: the face's outward
+    // cell is the slab's, which the engine stores as dark.
+    let scene = Scene::new(&[
+        ([0, 0, 0], BlockState::new(STONE, 0)),
+        ([1, 0, 0], BlockState::new(SLAB, 0)),
+    ])
+    .with_lights(
+        &[[1, 1, 0], [1, 0, 1], [1, 0, -1], [1, 1, 1], [1, 1, -1]],
+        LightLevel::new(0, 14),
+    );
+    let mesh = mesh_chunk(ChunkPos::new(0, 0), &scene);
+    let light = vertex_light(&mesh, [1.0, 1.0, 1.0], [1.0, 0.0, 0.0]);
+    // The four cells around the corner are all 14; the dark slab cell used to
+    // drag the average down to 11.
+    assert_eq!(light.sky, 14, "the east face is lit like its surroundings");
+}

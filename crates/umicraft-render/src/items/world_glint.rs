@@ -22,6 +22,7 @@ use crate::renderer::{DEPTH_FORMAT, TERRAIN_ATTRIBUTES};
 const WORLD_GLINT_WGSL: &str = concat!(
     include_str!("../glint_common.wgsl"),
     include_str!("../fog.wgsl"),
+    include_str!("../lightmap.wgsl"),
     include_str!("../terrain.wgsl"),
     include_str!("../item_glint.wgsl"),
 );

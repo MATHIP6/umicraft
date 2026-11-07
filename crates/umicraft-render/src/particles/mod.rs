@@ -138,7 +138,11 @@ impl ParticleRenderer {
 }
 
 /// The shader with the shared fog falloff in front.
-const SHADER: &str = concat!(include_str!("../fog.wgsl"), include_str!("particles.wgsl"));
+const SHADER: &str = concat!(
+    include_str!("../fog.wgsl"),
+    include_str!("../lightmap.wgsl"),
+    include_str!("particles.wgsl")
+);
 
 /// The bind layout of the sheet: texture and sampler.
 fn sheet_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {

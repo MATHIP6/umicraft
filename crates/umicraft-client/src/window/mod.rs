@@ -26,7 +26,7 @@ use umicraft_ui::menus::{ConnectStage, PanoramaTextures};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, SlotItem, Ui, UiOutput};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{
     DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
@@ -131,6 +131,8 @@ pub fn run(args: Args) -> Result<(), ClientError> {
 
 struct App {
     args: Args,
+    /// The name tags of the frame, drawn by the renderer in the world pass.
+    nametags: Vec<umicraft_render::Nametag>,
     /// The user's options: video, mouse, chat and the key bindings.
     options: Options,
     /// The language every UI text comes from (ADR-0039); also installed as
@@ -348,6 +350,7 @@ impl App {
             seen_completions: 0,
             ctrl_held: false,
             shift_held: false,
+            nametags: Vec::new(),
             pointer: (0.0, 0.0),
             chat_hover: None,
             pick_block: false,
@@ -636,11 +639,13 @@ impl App {
     }
 
     fn capture_mouse(&mut self, capture: bool) {
-        if self.mouse_captured && !capture {
+        let was_captured = self.mouse_captured;
+        if was_captured && !capture {
             // A screen takes the mouse: the game forgets what was held.
             self.unpress_all();
         }
         self.mouse_captured = capture;
+        let mut centred = None;
         if let Some(window) = &self.window {
             if capture {
                 // Locked is preferred (infinite relative motion); fall back to
@@ -650,8 +655,27 @@ impl App {
                     .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined));
             } else {
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
+                if was_captured {
+                    // `MouseHelper.ungrabMouseCursor`: the freed cursor starts in
+                    // the middle of the window, not where the look left it.
+                    let size = window.inner_size();
+                    let middle = PhysicalPosition::new(
+                        f64::from(size.width) / 2.0,
+                        f64::from(size.height) / 2.0,
+                    );
+                    let _ = window.set_cursor_position(middle);
+                    centred = Some(middle);
+                }
             }
             window.set_cursor_visible(!capture);
+        }
+        if let Some(position) = centred {
+            // The move event may arrive late or not at all (it depends on the
+            // platform); the screens must already know where the cursor is.
+            self.pointer = (position.x as f32, position.y as f32);
+            self.ui_input.pointer_moved(position);
+            self.inventory_pointer(position);
+            self.creative_pointer(position);
         }
     }
 
@@ -797,6 +821,7 @@ impl App {
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
         self.portrait = None;
+        self.nametags.clear();
         // Only the title screen sets it again below; every other frame,
         // in particular a session's, draws the world.
         if let Some(renderer) = self.renderer.as_mut() {
@@ -887,7 +912,7 @@ impl App {
             if !matches!(screen, Screen::Inventory | Screen::Creative) {
                 let entities = world.entities(Instant::now());
                 let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
-                draw_tags(&mut self.ui, atlas, &tags);
+                self.nametags = draw_tags(atlas, &tags);
             }
         }
 
@@ -1009,6 +1034,10 @@ impl App {
             (&self.lang, items),
         );
         let output = self.ui.end_frame();
+        // Control+C and Control+X of a text field.
+        if let Some(text) = self.ui.take_clipboard() {
+            crate::clipboard::write(&text);
+        }
         self.audio.sync_volumes(&self.options.sound);
         self.audio
             .play_button_presses(self.ui.take_button_presses());
@@ -1151,6 +1180,7 @@ impl App {
                 renderer.write_block_layer(layer, pixels);
             });
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
+        renderer.set_nametags(&self.nametags, (width, height));
         if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
         {
             renderer.set_block_cracks(&vertices, &indices);
@@ -1165,6 +1195,7 @@ impl App {
         {
             let entities = world.entities(now);
             let hand = world.hand_pose(now);
+            let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
             entity_textures.set_camera_position(self.camera.position);
@@ -1218,16 +1249,22 @@ impl App {
                         (&hand, bob, world.hand_light()),
                         renderer,
                     );
-                    entity_textures.upload_hand_map(&hand, bob, &held, renderer);
+                    entity_textures.upload_hand_map(&hand, bob, hand_skin, &held, renderer);
                 }
                 _ => match &hand_item {
                     Some((slot, vertices)) => entity_textures.upload_hand_item(
                         &hand,
                         self.camera.view_bob(),
+                        hand_skin,
                         (*slot, vertices),
                         renderer,
                     ),
-                    None => entity_textures.upload_hand(&hand, self.camera.view_bob(), renderer),
+                    None => entity_textures.upload_hand(
+                        &hand,
+                        self.camera.view_bob(),
+                        hand_skin,
+                        renderer,
+                    ),
                 },
             }
             if let Some(items) = self.items.as_deref() {

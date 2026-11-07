@@ -19,6 +19,8 @@ struct Camera {
     // GPU relative to it (`view_proj` is built for that origin), so f32
     // keeps its precision far from the world origin.
     origin: vec3<f32>,
+    // The vanilla lightmap, `[sky * 16 + block]` (`lightmap.rs`).
+    lightmap: array<vec4<f32>, 256>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -36,7 +38,7 @@ struct VertexOut {
     @invariant @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) uv: vec2<f32>,
-    @location(2) light: f32,
+    @location(2) light: vec3<f32>,
     @location(3) shade: f32,
     @location(4) @interpolate(flat) hurt: f32,
     @location(5) @interpolate(flat) flash: f32,
@@ -65,16 +67,6 @@ var<private> DYES = array<vec3<f32>, 16>(
     vec3<f32>(0.1, 0.1, 0.1),
 );
 
-fn light_brightness(level: f32) -> f32 {
-    return level / (3.0 * (1.0 - level) + 1.0);
-}
-
-fn gamma_correct(value: f32) -> f32 {
-    let inv = 1.0 - value;
-    let corrected = 1.0 - inv * inv * inv * inv;
-    return value * (1.0 - camera.gamma) + corrected * camera.gamma;
-}
-
 fn face_shade(normal: vec3<f32>) -> f32 {
     let ax = abs(normal.x);
     let ay = abs(normal.y);
@@ -94,12 +86,7 @@ fn entity_vertex(in: VertexIn) -> VertexOut {
     out.uv = in.uv;
 
     // Unpack light nibbles: bits 0..=3 block, 4..=7 sky
-    let block_nibble = f32(in.light & 0x0Fu) / 15.0;
-    let sky_nibble = f32((in.light >> 4u) & 0x0Fu) / 15.0;
-
-    let block_light = light_brightness(block_nibble);
-    let sky_light = light_brightness(sky_nibble) * camera.sun_brightness;
-    out.light = gamma_correct(clamp(block_light + sky_light, 0.05, 1.0));
+    out.light = lightmap_sample(f32(in.light & 0x0Fu), f32((in.light >> 4u) & 0x0Fu));
     out.shade = face_shade(in.normal);
     // Bit 8: hurt tint. Bits 9..=12: white flash level (the creeper fuse).
     // Bit 13: dye tint, bits 14..=17 the dye.
@@ -151,7 +138,7 @@ fn gui_shade(normal: vec3<f32>) -> f32 {
 @vertex
 fn vs_gui(in: VertexIn) -> VertexOut {
     var out = entity_vertex(in);
-    out.light = 1.0;
+    out.light = vec3<f32>(1.0);
     out.shade = gui_shade(in.normal);
     return out;
 }

@@ -51,6 +51,15 @@ pub enum Key {
     PageDown,
     /// The refresh key of the server list (`GuiMultiplayer`: key code 63).
     F5,
+    /// The A key: with Control, select all of a text field.
+    A,
+    /// The C key: with Control, copy the selection of a text field.
+    C,
+    /// The V key: with Control, paste into a text field (the client sends the
+    /// text as [`InputEvent::Paste`]).
+    V,
+    /// The X key: with Control, cut the selection of a text field.
+    X,
 }
 
 /// The modifier keys held during an event.
@@ -107,6 +116,8 @@ pub enum InputEvent {
     KeyReleased(Key),
     /// Text was typed; may contain several characters (IME, paste).
     Text(String),
+    /// The clipboard text of a Control+V, for the focused text field.
+    Paste(String),
 }
 
 /// All input delivered to one UI frame.

@@ -49,6 +49,8 @@ pub(crate) const TEXT_FIELD_DISABLED: Color = [0.439, 0.439, 0.439, 1.0];
 /// The shadow of [`TEXT_FIELD_DISABLED`] (`(0x707070 & 0xFCFCFC) >> 2`).
 pub(crate) const TEXT_FIELD_DISABLED_SHADOW: Color = [0.110, 0.110, 0.110, 1.0];
 /// The bar caret drawn inside the text (`0xFFD0D0D0`).
+/// The highlight behind selected text (`drawCursorVertical`: pure blue).
+pub(crate) const SELECTION: Color = [0.0, 0.0, 1.0, 0.85];
 pub(crate) const CARET_BAR: Color = [0.816, 0.816, 0.816, 1.0];
 
 /// List fill.

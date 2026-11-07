@@ -310,17 +310,19 @@ impl HumanoidModel {
     /// gives it (`ModelBiped.setRotationAngles` with an age of 0:
     /// `rotateAngleZ = 0.1`).
     #[must_use]
-    pub fn first_person_arm(is_slim: bool) -> Vec<ModelVertex> {
-        let model = Self::new(is_slim);
+    pub fn first_person_arm(is_slim: bool, skin_parts: u8) -> Vec<ModelVertex> {
+        let mut model = Self::new(is_slim);
+        model.show_skin_layers(skin_parts);
         Self::first_person_part(&model.right_arm, [-5.0, 2.0, 0.0], IDLE_ROLL)
     }
 
-    /// The left arm and its sleeve, posed like [`Self::first_person_arm`]
+    /// The left arm and its sleeve (if `skin_parts` enables it), posed like [`Self::first_person_arm`]
     /// with the opposite idle roll (MCP `RenderPlayer.renderLeftArm`, drawn
     /// when a map is held in both hands).
     #[must_use]
-    pub fn first_person_left_arm(is_slim: bool) -> Vec<ModelVertex> {
-        let model = Self::new(is_slim);
+    pub fn first_person_left_arm(is_slim: bool, skin_parts: u8) -> Vec<ModelVertex> {
+        let mut model = Self::new(is_slim);
+        model.show_skin_layers(skin_parts);
         Self::first_person_part(&model.left_arm, [5.0, 2.0, 0.0], -IDLE_ROLL)
     }
 
@@ -441,13 +443,15 @@ mod tests {
 
     #[test]
     fn the_first_person_arm_is_the_arm_and_its_sleeve() {
-        let arm = HumanoidModel::first_person_arm(false);
+        let arm = HumanoidModel::first_person_arm(false, 0x7F);
         assert_eq!(arm.len(), 72, "two boxes of 36 vertices");
+        let bare = HumanoidModel::first_person_arm(false, 0x7F & !0x08);
+        assert_eq!(bare.len(), 36, "the right sleeve is switched off");
     }
 
     #[test]
     fn the_first_person_arm_hangs_down_from_the_shoulder_in_vanilla_space() {
-        let arm = HumanoidModel::first_person_arm(false);
+        let arm = HumanoidModel::first_person_arm(false, 0x7F);
         // Vanilla space: y down, the arm spans 12 pixels below the shoulder
         // line (0.75 block) plus the sleeve dilation of 0.25 pixel.
         let (top, bottom) = extent(&arm, 1);
@@ -461,14 +465,14 @@ mod tests {
 
     #[test]
     fn the_slim_arm_is_one_pixel_narrower() {
-        let wide = extent(&HumanoidModel::first_person_arm(false), 0);
-        let slim = extent(&HumanoidModel::first_person_arm(true), 0);
+        let wide = extent(&HumanoidModel::first_person_arm(false, 0x7F), 0);
+        let slim = extent(&HumanoidModel::first_person_arm(true, 0x7F), 0);
         assert!(((wide.1 - wide.0) - (slim.1 - slim.0) - 1.0 / 16.0).abs() < 0.01);
     }
 
     #[test]
     fn the_arm_normals_stay_unit_length() {
-        for vertex in HumanoidModel::first_person_arm(false) {
+        for vertex in HumanoidModel::first_person_arm(false, 0x7F) {
             let length = Vec3::from(vertex.normal).length();
             assert!((length - 1.0).abs() < 1e-4, "{length}");
         }

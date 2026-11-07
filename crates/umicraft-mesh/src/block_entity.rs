@@ -150,7 +150,7 @@ impl BlockEntityRef {
         Self {
             position,
             state,
-            light: source.light(x, y, z),
+            light: source.combined_light(x, y, z, 0),
             same_neighbour: SameNeighbours {
                 west: same(-1, 0),
                 east: same(1, 0),

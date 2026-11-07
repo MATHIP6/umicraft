@@ -139,7 +139,7 @@ impl FaceSamples {
             for du in -1..=1 {
                 let cell = frame.v.offset(frame.u.offset(base, du), dv);
                 let index = grid_index(du, dv);
-                samples.light[index] = source.light(cell[0], cell[1], cell[2]);
+                samples.light[index] = source.mixed_light(cell[0], cell[1], cell[2]);
                 // AO only ever reads the edge and diagonal cells; the centre
                 // is needed for smooth light but never for occlusion.
                 if ao_enabled && (du != 0 || dv != 0) {
@@ -191,7 +191,7 @@ pub(crate) fn quad_light<S: BlockSource + ?Sized>(
         } else {
             block
         };
-        let light = source.light(cell[0], cell[1], cell[2]);
+        let light = source.mixed_light(cell[0], cell[1], cell[2]);
         let flat = VertexLight::new(light.block, light.sky, VertexLight::AO_OPEN, shade);
         return [flat; 4];
     }

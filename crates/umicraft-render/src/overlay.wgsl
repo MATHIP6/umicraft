@@ -27,6 +27,23 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
+// A name tag: a flat quad at the depth of its anchor, one depth per instance.
+struct TagIn {
+    @location(0) position: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) depth: f32,
+};
+
+@vertex
+fn vs_tag(in: TagIn) -> VertexOut {
+    var out: VertexOut;
+    out.position = vec4<f32>(in.position, in.depth, 1.0);
+    out.uv = in.uv;
+    out.color = in.color;
+    return out;
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let coverage = textureSample(font_atlas, font_sampler, in.uv).r;

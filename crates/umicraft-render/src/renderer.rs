@@ -16,6 +16,8 @@
 //! copy-on-write when remeshed. The HUD and the UI share the overlay pipeline;
 //! [`Renderer::render_with_ui`] appends [`UiPass`] geometry after the HUD.
 
+use crate::lightmap::{self, LightmapParams, TorchFlicker};
+use crate::nametag::{Nametag, NametagRenderer};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -73,14 +75,18 @@ pub(crate) const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_a
     4 => Uint32,
     5 => Uint32
 ];
-const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+pub(crate) const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
 
 /// Half the depth range of the icon camera, in GUI pixels; a lit block's
 /// rotated corners stay within about 17.
 const ICON_DEPTH: f32 = 32.0;
 /// The terrain shader with the shared fog falloff in front.
-const TERRAIN_WGSL: &str = concat!(include_str!("fog.wgsl"), include_str!("terrain.wgsl"));
+const TERRAIN_WGSL: &str = concat!(
+    include_str!("fog.wgsl"),
+    include_str!("lightmap.wgsl"),
+    include_str!("terrain.wgsl")
+);
 
 /// A fog distance the hand never reaches.
 const HAND_FOG_FREE: f32 = 1.0e6;
@@ -109,6 +115,8 @@ pub(crate) struct CameraUniform {
     /// from every position, which keeps f32 exact far from the origin.
     origin: [f32; 3],
     _pad_origin: f32,
+    /// The vanilla lightmap, `[sky * 16 + block]` (see [`crate::lightmap`]).
+    lightmap: [[f32; 4]; lightmap::ENTRIES],
 }
 
 impl CameraUniform {
@@ -132,6 +140,8 @@ impl CameraUniform {
             _pad: 0.0,
             origin: [0.0; 3],
             _pad_origin: 0.0,
+            // GUI items are drawn without the lightmap.
+            lightmap: lightmap::unlit(),
         }
     }
 }
@@ -234,6 +244,8 @@ pub struct Renderer {
     /// Client ticks (with the fraction) that drive the cloud drift and the
     /// animation of the rain and snow.
     cloud_ticks: f64,
+    /// The torch flicker of the lightmap, stepped once per client tick.
+    torch_flicker: TorchFlicker,
     /// Rain and snow, drawn before the translucent terrain.
     weather: WeatherRenderer,
     particles: ParticleRenderer,
@@ -257,6 +269,8 @@ pub struct Renderer {
     /// can be rewritten in place; `None` while the procedural array is bound.
     official_blocks: Option<(wgpu::Texture, u32, u32)>,
     overlay_pipeline: wgpu::RenderPipeline,
+    /// The name tags of the frame, drawn in the world pass.
+    nametags: NametagRenderer,
     /// Pipeline for GUI texture quads (RGBA, no coverage threshold).
     gui_overlay_pipeline: wgpu::RenderPipeline,
     /// `gui_overlay_pipeline` with the inverting blend of the crosshair.
@@ -641,6 +655,7 @@ impl Renderer {
             format,
             wgpu::BlendState::ALPHA_BLENDING,
         );
+        let nametags = NametagRenderer::new(&device, &overlay_shader, &overlay_layout, format);
         let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gui overlay shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gui_overlay.wgsl").into()),
@@ -828,6 +843,7 @@ impl Renderer {
             sky,
             clouds,
             cloud_ticks: 0.0,
+            torch_flicker: TorchFlicker::new(),
             weather,
             particles,
             particle_sprites: Vec::new(),
@@ -840,6 +856,7 @@ impl Renderer {
             procedural_blocks: block_view,
             official_blocks: None,
             overlay_pipeline,
+            nametags,
             gui_overlay_pipeline,
             gui_inverted_pipeline,
             overlay_layout,
@@ -1061,6 +1078,12 @@ impl Renderer {
         self.render_frame(camera, overlay)
     }
 
+    /// Replaces the name tags drawn in the world pass of the next frames; an
+    /// empty slice hides them. `size` is the window in pixels.
+    pub fn set_nametags(&mut self, tags: &[Nametag], size: (u32, u32)) {
+        self.nametags.set(&self.device, tags, size, &self.ui_atlas);
+    }
+
     /// Whether the icon atlas holds the icon `key`.
     #[must_use]
     pub fn has_icon(&self, key: u64) -> bool {
@@ -1187,7 +1210,8 @@ impl Renderer {
         // One SkyState per frame: the clear colour, the fog uniform and the
         // sky pass must agree even if W3's model changes between calls.
         let sky_state = SkyState::at_looking(self.environment, camera.forward().to_array());
-        self.write_camera(camera, &sky_state);
+        let flicker = self.torch_flicker.at(self.cloud_ticks as u64);
+        self.write_camera(camera, &sky_state, flicker);
         self.sky
             .update(&self.queue, camera, self.environment, &sky_state);
         self.clouds.update(
@@ -2018,7 +2042,7 @@ impl Renderer {
         ));
     }
 
-    fn write_camera(&self, camera: &Camera, sky: &SkyState) {
+    fn write_camera(&self, camera: &Camera, sky: &SkyState, flicker: f32) {
         let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
         let origin = camera.position.floor();
         let uniform = CameraUniform {
@@ -2033,6 +2057,11 @@ impl Renderer {
             _pad: 0.0,
             origin: origin.to_array(),
             _pad_origin: 0.0,
+            lightmap: lightmap::colors(&LightmapParams::of(
+                &self.environment,
+                sky.sun_brightness,
+                flicker,
+            )),
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -2241,6 +2270,11 @@ impl Renderer {
             self.entity_renderer
                 .render_glint(&mut pass, &self.camera_bind_group, batches);
         }
+
+        // `renderEntities` draws the labels with the entities, before the
+        // particles and the translucent terrain.
+        self.nametags
+            .draw(&mut pass, &self.overlay_pipeline, &self.ui_bind_group);
 
         // Dropped items share the terrain pipeline and its texture array.
         pass.set_pipeline(&self.terrain_pipeline);
@@ -2831,9 +2865,10 @@ mod tests {
             _pad: 0.0,
             origin: [0.0; 3],
             _pad_origin: 0.0,
+            lightmap: lightmap::unlit(),
         };
         let bytes = bytemuck::bytes_of(&uniform);
-        assert_eq!(bytes.len(), 128);
+        assert_eq!(bytes.len(), 128 + 256 * 16);
         assert_eq!(bytes.len() % 16, 0);
         // These offsets must match the WGSL `Camera` struct in terrain.wgsl.
         assert_eq!(std::mem::offset_of!(CameraUniform, camera_pos), 64);
@@ -2844,6 +2879,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(CameraUniform, gamma), 100);
         assert_eq!(std::mem::offset_of!(CameraUniform, fog_density), 104);
         assert_eq!(std::mem::offset_of!(CameraUniform, origin), 112);
+        assert_eq!(std::mem::offset_of!(CameraUniform, lightmap), 128);
     }
 
     #[test]

@@ -24,6 +24,7 @@ mod block_entity_render;
 mod border_view;
 mod caption;
 pub mod chat;
+mod clipboard;
 pub mod connection_end;
 pub mod cracks;
 pub mod creative_input;

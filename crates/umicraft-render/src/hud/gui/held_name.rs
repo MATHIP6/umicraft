@@ -3,6 +3,7 @@
 //! The name of the held item above the status rows (MCP
 //! `GuiIngame.func_181551_a`).
 
+use umicraft_game::chat::local;
 use umicraft_game::hud::HeldNameView;
 use umicraft_ui::styled_text::{draw_styled, styled_width, StyledRun};
 use umicraft_ui::FontAtlas;
@@ -14,9 +15,30 @@ use super::icons::Canvas;
 /// player named the stack; the font draws it upright (see
 /// [`umicraft_ui::styled_text`]).
 pub(super) fn draw_held_name(canvas: &mut Canvas<'_>, name: &HeldNameView, font: &FontAtlas) {
-    let mut run = StyledRun::plain(&name.text, [1.0, 1.0, 1.0, f32::from(name.alpha) / 255.0]);
-    run.italic = name.italic;
-    let runs = [run];
+    // The name of a stack keeps its `§` codes (a renamed or plugin item).
+    let alpha = f32::from(name.alpha) / 255.0;
+    let runs: Vec<StyledRun> = local(&name.text)
+        .into_iter()
+        .map(|run| {
+            let [r, g, b] = run.style.color.map_or([255; 3], |color| color.rgb());
+            StyledRun {
+                bold: run.style.bold,
+                italic: run.style.italic || name.italic,
+                underlined: run.style.underlined,
+                strikethrough: run.style.strikethrough,
+                obfuscated: run.style.obfuscated,
+                ..StyledRun::plain(
+                    run.text,
+                    [
+                        f32::from(r) / 255.0,
+                        f32::from(g) / 255.0,
+                        f32::from(b) / 255.0,
+                        alpha,
+                    ],
+                )
+            }
+        })
+        .collect();
     let width = styled_width(font, &runs, 1.0) as i32;
     let x = (canvas.width - width) / 2;
     let y = canvas.height - 59 + name.dy;
@@ -60,6 +82,30 @@ mod tests {
             .collect();
         assert!(alphas.len() >= 2, "shadow and text");
         assert!(alphas.iter().all(|a| (*a - 128.0 / 255.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn section_codes_colour_the_name_and_are_not_drawn() {
+        let mut list = DrawList::new();
+        let font = FontAtlas::fallback();
+        let view = HeldNameView {
+            text: "§bSel §7(Clic)".to_owned(),
+            italic: false,
+            alpha: 255,
+            dy: 0,
+        };
+        let mut canvas = Canvas::new(&mut list, (640, 480));
+        draw_held_name(&mut canvas, &view, &font);
+        let texts: Vec<String> = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Text { text, .. } => Some(text.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.iter().all(|t| !t.contains('§')), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Sel "), "{texts:?}");
     }
 
     #[test]
