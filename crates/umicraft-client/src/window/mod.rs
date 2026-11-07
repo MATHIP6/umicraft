@@ -1463,11 +1463,12 @@ impl ApplicationHandler for App {
         let terrain = self.terrain.take().unwrap_or(TerrainTextures::Procedural);
         renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
         let terrain = terrain.install(&mut renderer);
-        upload_gui_atlas(&mut renderer, terrain.gui_atlas());
+        let gui_atlas = crate::official::grow_atlas(terrain.gui_atlas(), &[]);
+        upload_gui_atlas(&mut renderer, Some(&gui_atlas));
         upload_glint_texture(&mut renderer, terrain.glint_texture());
         upload_sky_textures(&mut renderer);
         self.panorama = upload_panorama(&mut renderer);
-        self.gui_atlas = terrain.gui_atlas().cloned();
+        self.gui_atlas = Some(gui_atlas);
         self.server_icons_revision = u64::MAX;
         self.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());

@@ -3,6 +3,7 @@
 //! The hub page (`GuiOptions`).
 
 use umicraft_core::lang::Lang;
+use umicraft_ui::menus::TitleStyle;
 use umicraft_ui::{FontAtlas, Ui};
 
 use super::layout::{Gui, BUTTON_H, HALF_W};
@@ -49,6 +50,18 @@ impl OptionsScreen {
             None,
         );
 
+        // Umicraft's own option, in the free row between the sliders and the pages.
+        let style = gui.rect(left, h6 + 18.0, 2.0 * HALF_W, BUTTON_H);
+        let label = option_label(
+            lang,
+            "umicraft.options.titleStyle",
+            title_style_text(lang, options),
+        );
+        if self.button(ui, atlas, "title_style", style, &label, true, None) {
+            options.menu.toggle_title_style();
+            outcome.changed = true;
+        }
+
         // (id, label key, y offset, x): the pages the client has no backend
         // for (shaders, stream) are drawn and inert.
         let entries: [(&str, &str, f32, f32); 10] = [
@@ -88,6 +101,14 @@ impl OptionsScreen {
             outcome.done = true;
         }
     }
+}
+
+/// The translated name of the current title screen style.
+pub(super) fn title_style_text<'a>(lang: &'a Lang, options: &Options) -> &'a str {
+    lang.tr(match options.menu.style() {
+        TitleStyle::Modern => "umicraft.options.titleStyle.modern",
+        TitleStyle::Classic => "umicraft.options.titleStyle.classic",
+    })
 }
 
 /// `GameSettings.getKeyBinding(FOV)`.

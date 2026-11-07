@@ -3,7 +3,8 @@
 //! The language the client shows its texts in (ADR-0039).
 //!
 //! [`load`] builds a [`Lang`] from the downloaded `.lang` files: `en_US` is
-//! always read (the vanilla fallback), then the selected language on top. The
+//! always read (the vanilla fallback), then the selected language on top, and
+//! Umicraft's own embedded texts (client pack, ADR-0056) above both. The
 //! window holds the result in an `Arc` and also [`install`]s it as the shared
 //! current language, so code on other threads (the game thread parses chat
 //! components) sees the same texts. A language switch is one [`install`] of a
@@ -12,6 +13,7 @@
 use std::sync::{Arc, RwLock};
 
 use umicraft_assets::cache::AssetCache;
+use umicraft_assets::client_pack;
 use umicraft_core::lang::Lang;
 
 /// The shared current language; the builtin fallback until [`install`].
@@ -31,7 +33,16 @@ pub(crate) fn load(code: &str) -> Lang {
     } else {
         Lang::DEFAULT_CODE
     };
-    Lang::from_texts(code, english.as_deref(), selected.as_deref())
+    Lang::from_texts(code, english.as_deref(), selected.as_deref()).with_client_layer(
+        client_pack::lang(Lang::DEFAULT_CODE),
+        client_pack::lang(code),
+    )
+}
+
+/// The offline fallback with Umicraft's own English texts, so the client's
+/// own screens read well before any language file is downloaded.
+pub(crate) fn offline() -> Lang {
+    Lang::builtin().with_client_layer(client_pack::lang(Lang::DEFAULT_CODE), None)
 }
 
 fn load_selected(code: &str) -> Option<String> {
@@ -58,7 +69,7 @@ pub(crate) fn current() -> Arc<Lang> {
         .read()
         .ok()
         .and_then(|current| current.clone())
-        .unwrap_or_else(|| Arc::new(Lang::builtin()))
+        .unwrap_or_else(|| Arc::new(offline()))
 }
 
 #[cfg(test)]
@@ -70,7 +81,12 @@ mod tests {
         let lang = Arc::new(Lang::from_texts("xx_XX", None, Some("k=v\n")));
         install(lang);
         assert_eq!(current().tr("k"), "v");
-        install(Arc::new(Lang::builtin()));
+        install(Arc::new(offline()));
         assert_eq!(current().tr("k"), "k");
+    }
+
+    #[test]
+    fn the_offline_language_has_the_client_pack_texts() {
+        assert_eq!(offline().tr("umicraft.title.play"), "Play");
     }
 }

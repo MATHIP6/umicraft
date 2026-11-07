@@ -1,0 +1,24 @@
+# Umicraft's own texts (umicraft.* keys only), ADR-0056.
+umicraft.options.shaders=Super Secret Settings...
+umicraft.resourcePack.default=Default
+umicraft.resourcePack.defaultDescription=The default look of Minecraft
+umicraft.resourcePack.missingMetadata=Missing pack.mcmeta :(
+umicraft.hover.invalidItem=Invalid Item!
+umicraft.hover.invalidEntity=Invalid Entity!
+umicraft.server.pinging=Pinging...
+umicraft.server.noConnection=(no connection)
+umicraft.server.clientOutdated=Client out of date!
+umicraft.server.serverOutdated=Server out of date!
+umicraft.server.andMore=... and %s more ...
+umicraft.server.unreachable=Can't connect to server.
+umicraft.title.credit=Not affiliated with Mojang or Microsoft
+umicraft.connect.unknownHost=Unknown host
+umicraft.connect.refused=Connection refused: no further information
+umicraft.connect.timedOut=Connection timed out: no further information
+umicraft.connect.onlineMode=This server needs a premium session: start Umicraft from a launcher that passes --username, --uuid and --accessToken
+umicraft.title.play=Play
+umicraft.title.options=Options
+umicraft.title.quit=Quit
+umicraft.options.titleStyle=Title screen
+umicraft.options.titleStyle.modern=Modern
+umicraft.options.titleStyle.classic=Classic

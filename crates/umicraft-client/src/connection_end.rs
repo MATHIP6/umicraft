@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn a_failed_attempt_gives_the_vanilla_reasons() {
-        let lang = Lang::builtin();
+        let lang = crate::language::offline();
         let unknown = NetError::UnknownHost {
             host: "h".to_string(),
         };

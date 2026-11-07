@@ -110,7 +110,7 @@ impl App {
         else {
             return;
         };
-        let grown = atlas.with_dynamic(&self.menu.icon_images());
+        let grown = crate::official::grow_atlas(Some(atlas), &self.menu.icon_images());
         upload_gui_atlas(renderer, Some(&grown));
         self.menu.assign_icon_sheets(&grown);
         self.gui_atlas = Some(grown);
