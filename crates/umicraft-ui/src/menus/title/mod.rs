@@ -58,7 +58,7 @@ pub enum TitleOutcome {
     Options,
     /// Open the language choice (classic screen only).
     Language,
-    /// Quit the game.
+    /// Quit the game (classic screen only).
     Quit,
 }
 

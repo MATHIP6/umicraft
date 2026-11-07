@@ -18,7 +18,6 @@ umicraft.connect.timedOut=Connection timed out: no further information
 umicraft.connect.onlineMode=This server needs a premium session: start Umicraft from a launcher that passes --username, --uuid and --accessToken
 umicraft.title.play=Play
 umicraft.title.options=Options
-umicraft.title.quit=Quit
 umicraft.options.titleStyle=Title screen
 umicraft.options.titleStyle.modern=Modern
 umicraft.options.titleStyle.classic=Classic

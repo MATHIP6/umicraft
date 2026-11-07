@@ -4,8 +4,9 @@
 //!
 //! Over the blurred panorama and a vignette: the Umicraft logo, the
 //! "UMICRAFT" wordmark in the brand face, a **Play** button that opens the
-//! server list, an **Options** button and a small power icon to quit. The
-//! version and the non-affiliation credit sit in the bottom corners.
+//! server list, and an **Options** button. There is no quit button: the
+//! player closes the window (owner decision, ADR-0056). The version and the
+//! non-affiliation credit sit in the bottom corners.
 
 mod layout;
 mod wordmark;
@@ -18,7 +19,7 @@ use umicraft_core::lang::Lang;
 use crate::context::Ui;
 use crate::menus::common::Gui;
 use crate::menus::panorama::{PanoramaBackground, PanoramaView};
-use crate::modern::{draw_text, theme, vignette, Align, HoverFade, IconButton, ModernButton};
+use crate::modern::{draw_text, theme, vignette, Align, HoverFade, ModernButton};
 use crate::text::FontAtlas;
 
 use super::{TitleInfo, TitleOutcome};
@@ -27,11 +28,7 @@ use super::{TitleInfo, TitleOutcome};
 const FOOTER_MARGIN: f32 = 4.0;
 
 /// The buttons of the screen, in [`ModernTitle::fades`] order.
-const BUTTONS: [TitleOutcome; 3] = [
-    TitleOutcome::Multiplayer,
-    TitleOutcome::Options,
-    TitleOutcome::Quit,
-];
+const BUTTONS: [TitleOutcome; 2] = [TitleOutcome::Multiplayer, TitleOutcome::Options];
 
 /// The modern title screen state: the panorama clock and the hover fades.
 #[derive(Debug, Clone, Default)]
@@ -93,9 +90,6 @@ impl ModernTitle {
         let responses = [
             play.show(ui, brand, gui.scale, levels[0]),
             options.show(ui, brand, gui.scale, levels[1]),
-            IconButton::new(ui.id("quit"), layout.quit, art.power)
-                .round()
-                .show(ui, gui.scale, levels[2]),
         ];
         ui.pop_id();
 

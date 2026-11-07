@@ -151,7 +151,6 @@ fn the_modern_title_buttons_emit_their_commands() {
             layout.options,
             MenuCommand::OpenOptions { page: Page::Main },
         ),
-        (layout.quit, MenuCommand::Quit),
     ];
     for (rect, expected) in cases {
         let style = TitleStyle::Modern;

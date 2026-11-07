@@ -25,7 +25,6 @@ const LANGS: [(&str, &str); 2] = [
 ];
 
 const LOGO: &[u8] = include_bytes!("../client-pack/umicraft/textures/ui/logo.png");
-const POWER: &[u8] = include_bytes!("../client-pack/umicraft/textures/ui/power.png");
 const SETTINGS: &[u8] = include_bytes!("../client-pack/umicraft/textures/ui/settings.png");
 const BRAND_FONT: &[u8] = include_bytes!("../client-pack/umicraft/font/Inter-SemiBold.ttf");
 
@@ -53,12 +52,6 @@ pub fn lang(code: &str) -> Option<&'static str> {
 #[must_use]
 pub fn logo_png() -> &'static [u8] {
     LOGO
-}
-
-/// The quit icon of the modern title screen (64x64 PNG).
-#[must_use]
-pub fn power_png() -> &'static [u8] {
-    POWER
 }
 
 /// The options icon of the modern title screen (64x64 PNG).
@@ -98,8 +91,8 @@ pub fn panorama() -> AssetsResult<PanoramaImages> {
     })
 }
 
-/// The brand images as GUI atlas images named `umicraft/logo`,
-/// `umicraft/power` and `umicraft/settings`, ready for
+/// The brand images as GUI atlas images named `umicraft/logo` and
+/// `umicraft/settings`, ready for
 /// [`crate::GuiAtlas::with_dynamic`] (its regions get the
 /// [`crate::DYNAMIC_PREFIX`]).
 ///
@@ -107,22 +100,18 @@ pub fn panorama() -> AssetsResult<PanoramaImages> {
 ///
 /// [`AssetsError::Image`] when an embedded PNG does not decode.
 pub fn brand_images() -> AssetsResult<Vec<DynamicImage>> {
-    [
-        ("umicraft/logo", LOGO),
-        ("umicraft/power", POWER),
-        ("umicraft/settings", SETTINGS),
-    ]
-    .into_iter()
-    .map(|(name, bytes)| {
-        let png = DecodedPng::decode(name, bytes)?;
-        Ok(DynamicImage {
-            name: name.to_string(),
-            width: png.width,
-            height: png.height,
-            pixels: png.pixels,
+    [("umicraft/logo", LOGO), ("umicraft/settings", SETTINGS)]
+        .into_iter()
+        .map(|(name, bytes)| {
+            let png = DecodedPng::decode(name, bytes)?;
+            Ok(DynamicImage {
+                name: name.to_string(),
+                width: png.width,
+                height: png.height,
+                pixels: png.pixels,
+            })
         })
-    })
-    .collect()
+        .collect()
 }
 
 #[cfg(test)]
@@ -131,7 +120,7 @@ mod tests {
 
     #[test]
     fn every_embedded_png_decodes() {
-        for (name, bytes) in [("logo", LOGO), ("power", POWER), ("settings", SETTINGS)] {
+        for (name, bytes) in [("logo", LOGO), ("settings", SETTINGS)] {
             DecodedPng::decode(name, bytes).expect("embedded PNG decodes");
         }
         assert!(panorama_png(FACE_COUNT).is_none());
@@ -149,10 +138,7 @@ mod tests {
     fn brand_images_have_their_pixels() {
         let images = brand_images().expect("brand images decode");
         let names: Vec<_> = images.iter().map(|image| image.name.as_str()).collect();
-        assert_eq!(
-            names,
-            ["umicraft/logo", "umicraft/power", "umicraft/settings"]
-        );
+        assert_eq!(names, ["umicraft/logo", "umicraft/settings"]);
         assert!(images
             .iter()
             .all(|image| image.pixels.len() == image.width as usize * image.height as usize * 4));

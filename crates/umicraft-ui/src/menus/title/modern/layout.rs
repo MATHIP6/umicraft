@@ -3,8 +3,8 @@
 //! The layout of the modern title screen, in GUI units times the GUI scale.
 //!
 //! Original design (ADR-0056): the logo and the wordmark sit just above the
-//! vertical centre, the two buttons just below it, and the quit icon in the
-//! top-right corner. Everything is centred on `width / 2`, so the screen
+//! vertical centre and the two buttons just below it. Everything is centred
+//! on `width / 2`, so the screen
 //! keeps its balance from the smallest window to a wide monitor.
 
 use crate::geom::Rect;
@@ -24,10 +24,6 @@ const BUTTON_WIDTH: f32 = 160.0;
 const BUTTON_HEIGHT: f32 = 22.0;
 /// Vertical gap between the two main buttons.
 const BUTTON_GAP: f32 = 6.0;
-/// Edge of the square quit icon button.
-const QUIT_SIZE: f32 = 18.0;
-/// Distance of the quit button from the window edges.
-const EDGE_MARGIN: f32 = 8.0;
 
 /// The rectangles of the modern title screen, in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,8 +36,6 @@ pub struct ModernTitleLayout {
     pub play: Rect,
     /// The Options button.
     pub options: Rect,
-    /// The small quit icon button.
-    pub quit: Rect,
 }
 
 /// Computes the modern layout for `viewport`.
@@ -63,12 +57,6 @@ pub fn modern_title_layout(viewport: Rect) -> ModernTitleLayout {
         wordmark: gui.rect(0.0, wordmark_top, gui.width, WORDMARK_HEIGHT),
         play: button(play_top),
         options: button(play_top + BUTTON_HEIGHT + BUTTON_GAP),
-        quit: gui.rect(
-            gui.width - QUIT_SIZE - EDGE_MARGIN,
-            EDGE_MARGIN,
-            QUIT_SIZE,
-            QUIT_SIZE,
-        ),
     }
 }
 
@@ -108,14 +96,5 @@ mod tests {
         let layout = modern_title_layout(viewport);
         assert!(layout.logo.y >= 0.0);
         assert!(layout.options.y + layout.options.height <= 240.0);
-        assert!(layout.quit.x + layout.quit.width <= 320.0);
-    }
-
-    #[test]
-    fn the_quit_button_hugs_the_top_right_corner() {
-        let layout = modern_title_layout(VIEWPORT);
-        let right = VIEWPORT.x + VIEWPORT.width;
-        assert!(right - (layout.quit.x + layout.quit.width) < 30.0);
-        assert!(layout.quit.y - VIEWPORT.y < 30.0);
     }
 }

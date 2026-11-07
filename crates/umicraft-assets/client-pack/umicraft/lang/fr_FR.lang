@@ -18,7 +18,6 @@ umicraft.connect.timedOut=Délai de connexion dépassé : aucune autre informati
 umicraft.connect.onlineMode=Ce serveur exige une session premium : lancez Umicraft depuis un lanceur qui passe --username, --uuid et --accessToken
 umicraft.title.play=Jouer
 umicraft.title.options=Options
-umicraft.title.quit=Quitter
 umicraft.options.titleStyle=Écran titre
 umicraft.options.titleStyle.modern=Moderne
 umicraft.options.titleStyle.classic=Classique

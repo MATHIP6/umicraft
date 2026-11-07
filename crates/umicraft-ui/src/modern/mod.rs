@@ -20,7 +20,7 @@ mod panel;
 mod text;
 pub mod theme;
 
-pub use button::{HoverFade, IconButton, ModernButton};
+pub use button::{HoverFade, ModernButton};
 pub use panel::{panel, vignette};
 pub use text::{brand_text_style, draw_text, measure_text, Align};
 

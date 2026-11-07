@@ -92,6 +92,9 @@ fringe for anti-aliasing. No shader changes.
 rounded button with an animated hover), `panel` (translucent panel, vignette)
 and `icons` (original icons built from primitives: gear, power).
 
+> Update 2026-11-07: the power icon and the icon-only button were removed with
+> the quit button (see below). The gear icon stays in the pack, unused so far.
+
 ### Title screen
 
 `menus/title.rs` becomes `menus/title/`:
@@ -101,14 +104,16 @@ and `icons` (original icons built from primitives: gear, power).
 - `classic.rs`: the vanilla screen, unchanged.
 - `modern/`: `layout.rs` (pure layout), `wordmark.rs` (logo and "UMICRAFT"),
   `mod.rs` (`show`). The modern screen has two buttons, **Play** (opens the
-  server list) and **Options**, and a small power icon to quit.
+  server list) and **Options**. The first version also had a small power
+  icon to quit; the owner removed it on 2026-11-07, so the player quits by
+  closing the window (the classic style keeps its Quit Game button).
 
 The style is stored in `options.toml` as `[menu] title_style = "modern"` and
 switched from the main options page. While no brand atlas is bound (the font
 failed to rasterize or upload) the window shows the classic screen.
 
 The brand images enter the GUI atlas as dynamic images, so their regions are
-`dynamic/umicraft/{logo,power,settings}`. `GuiAtlas::with_dynamic` replaces
+`dynamic/umicraft/{logo,settings}`. `GuiAtlas::with_dynamic` replaces
 earlier dynamic images, so every atlas growth goes through
 `official::grow_atlas`.
 

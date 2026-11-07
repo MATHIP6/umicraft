@@ -65,8 +65,6 @@ pub struct MenuArt {
 pub struct BrandArt {
     /// `umicraft/textures/ui/logo.png`, the white Umicraft logo.
     pub logo: Option<SpriteSheet>,
-    /// `umicraft/textures/ui/power.png` (64x64), the quit icon.
-    pub power: Option<SpriteSheet>,
     /// `umicraft/textures/ui/settings.png` (64x64), the options icon.
     pub settings: Option<SpriteSheet>,
 }

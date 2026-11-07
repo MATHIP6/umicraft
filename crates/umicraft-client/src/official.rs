@@ -150,7 +150,7 @@ pub(crate) fn hud_sheets(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> HudSh
 /// The menu textures of the GUI atlas: the dirt of `options_background.png`,
 /// the title logo `title/minecraft.png` and the server list art (`icons.png`,
 /// `unknown_server.png`, `server_selection.png`) and the brand art of the
-/// client pack (`dynamic/umicraft/{logo,power,settings}`). A texture the atlas lacks
+/// client pack (`dynamic/umicraft/{logo,settings}`). A texture the atlas lacks
 /// stays `None`, which selects the flat and text fallbacks of the menus.
 pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt {
     let sheet = |name: &str| gui_atlas.and_then(|a| a.region(name)).map(sprite);
@@ -164,13 +164,12 @@ pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt
         server_selection: sheet("server_selection"),
         brand: BrandArt {
             logo: sheet(&brand_region("logo")),
-            power: sheet(&brand_region("power")),
             settings: sheet(&brand_region("settings")),
         },
     }
 }
 
-/// The atlas region of the brand image `name` (`logo`, `power`, `settings`).
+/// The atlas region of the brand image `name` (`logo`, `settings`).
 fn brand_region(name: &str) -> String {
     format!("{DYNAMIC_PREFIX}umicraft/{name}")
 }

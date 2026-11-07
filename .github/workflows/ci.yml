@@ -53,7 +53,6 @@ jobs:
             "crates/umicraft-assets/client-pack/umicraft/textures/ui/panorama/panorama_4.png owner waiver ADR-0056, TheLake"
             "crates/umicraft-assets/client-pack/umicraft/textures/ui/panorama/panorama_5.png owner waiver ADR-0056, TheLake"
             "crates/umicraft-assets/client-pack/umicraft/font/Inter-SemiBold.ttf OFL-1.1, The Inter Project Authors"
-            "crates/umicraft-assets/client-pack/umicraft/textures/ui/power.png MIT OR Apache-2.0, Umicraft contributors"
             "crates/umicraft-assets/client-pack/umicraft/textures/ui/settings.png MIT OR Apache-2.0, Umicraft contributors"
           )
 

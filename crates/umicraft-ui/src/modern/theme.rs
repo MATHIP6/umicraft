@@ -34,8 +34,6 @@ pub const RADIUS: f32 = 3.0;
 pub const SPACING: f32 = 4.0;
 /// Height of a standard button.
 pub const BUTTON_HEIGHT: f32 = 16.0;
-/// Edge of a small icon-only button.
-pub const ICON_BUTTON_SIZE: f32 = 14.0;
 
 /// Size of button labels.
 pub const TEXT_SIZE_BODY: f32 = 7.0;

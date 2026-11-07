@@ -91,23 +91,6 @@ fn icon_is_drawn_only_when_present() {
 }
 
 #[test]
-fn icon_button_clicks_and_respects_shape() {
-    let rect = Rect::new(10.0, 10.0, 40.0, 40.0);
-    let (response, commands) = frame(click_in(rect), |ui| {
-        let id = ui.id("power");
-        IconButton::new(id, rect, Some(sheet()))
-            .round()
-            .show(ui, 3.0, 0.0)
-    });
-    assert!(response.clicked);
-    assert!(matches!(
-        commands[0],
-        DrawCommand::RoundedRect { radius, .. } if radius == 20.0
-    ));
-    assert!(matches!(commands[1], DrawCommand::Image { .. }));
-}
-
-#[test]
 fn hover_fade_rises_and_falls_back() {
     let mut fade = HoverFade::default();
     assert_eq!(fade.level(1.0), 0.0);

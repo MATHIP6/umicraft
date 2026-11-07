@@ -55,11 +55,27 @@ fn each_modern_button_reports_its_outcome() {
     for (rect, expected) in [
         (layout.play, TitleOutcome::Multiplayer),
         (layout.options, TitleOutcome::Options),
-        (layout.quit, TitleOutcome::Quit),
     ] {
         let outcome = show(&mut screen, click_at(rect), TitleStyle::Modern);
         assert_eq!(outcome, Some(expected));
     }
+}
+
+#[test]
+fn the_modern_screen_has_no_quit_button() {
+    // Regression: the power icon in the top-right corner was removed.
+    let mut screen = TitleScreen::new(0);
+    let corner = Rect::new(VIEWPORT.width - 80.0, 0.0, 80.0, 80.0);
+    assert_eq!(
+        show(&mut screen, click_at(corner), TitleStyle::Modern),
+        None
+    );
+    let drawn = commands(&mut screen, MenuArt::default(), TitleStyle::Modern);
+    let round_buttons = drawn
+        .iter()
+        .filter(|command| matches!(command, DrawCommand::RoundedRect { .. }))
+        .count();
+    assert_eq!(round_buttons, 2, "only Play and Options");
 }
 
 #[test]

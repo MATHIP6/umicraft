@@ -16,8 +16,6 @@ use super::theme::{
 
 /// Share of the button height the icon of a labelled button takes.
 const LABEL_ICON_SHARE: f32 = 0.5;
-/// Share of the button edge the icon of an icon-only button takes.
-const ICON_ONLY_SHARE: f32 = 0.6;
 
 /// The hover animation of one button.
 ///
@@ -127,59 +125,6 @@ impl<'a> ModernButton<'a> {
         let color = with_opacity(TEXT, opacity(self.enabled));
         let at = (left + icon_span, middle);
         draw_text(ui, brand, self.label, at, (size, color, Align::Left));
-        response
-    }
-}
-
-/// A small icon-only button, square with rounded corners or fully round.
-#[derive(Debug, Clone, Copy)]
-pub struct IconButton {
-    id: WidgetId,
-    rect: Rect,
-    icon: Option<SpriteSheet>,
-    round: bool,
-}
-
-impl IconButton {
-    /// An enabled square button; `rect` is in physical pixels.
-    #[must_use]
-    pub fn new(id: WidgetId, rect: Rect, icon: Option<SpriteSheet>) -> Self {
-        Self {
-            id,
-            rect,
-            icon,
-            round: false,
-        }
-    }
-
-    /// Makes the corners a half circle.
-    #[must_use]
-    pub fn round(mut self) -> Self {
-        self.round = true;
-        self
-    }
-
-    /// Draws the button and reports its interaction state; `scale` and `fade`
-    /// are as in [`ModernButton::show`].
-    pub fn show(self, ui: &mut Ui, scale: f32, fade: f32) -> UiResponse {
-        let response = respond(ui, self.id, self.rect, true);
-        let edge = self.rect.width.min(self.rect.height);
-        let radius = if self.round {
-            edge * 0.5
-        } else {
-            RADIUS * scale
-        };
-        draw_surface(ui, self.rect, radius, fade, true);
-        if let Some(sheet) = self.icon {
-            let size = edge * ICON_ONLY_SHARE;
-            let dst = Rect::new(
-                self.rect.x + (self.rect.width - size) * 0.5,
-                self.rect.y + (self.rect.height - size) * 0.5,
-                size,
-                size,
-            );
-            draw_icon(ui, sheet, dst, true);
-        }
         response
     }
 }
