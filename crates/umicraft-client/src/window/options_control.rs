@@ -164,10 +164,11 @@ impl App {
             return;
         };
         let installed = terrain.install(renderer);
-        upload_gui_atlas(renderer, installed.gui_atlas());
+        let gui_atlas = crate::official::grow_atlas(installed.gui_atlas(), &[]);
+        upload_gui_atlas(renderer, Some(&gui_atlas));
         upload_glint_texture(renderer, installed.glint_texture());
         upload_sky_textures(renderer);
-        self.gui_atlas = installed.gui_atlas().cloned();
+        self.gui_atlas = Some(gui_atlas);
         self.server_icons_revision = u64::MAX;
         self.items = installed.items();
         self.dials = DialAnimator::new(installed.dials());
