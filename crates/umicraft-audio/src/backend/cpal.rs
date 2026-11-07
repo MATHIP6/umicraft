@@ -24,6 +24,26 @@ struct Ended {
     streaming: AtomicUsize,
 }
 
+/// The device buffer asked for, in frames: about 43 ms at 48 kHz.
+///
+/// The device default is often a few milliseconds, which the callback misses
+/// whenever the machine is busy (the render thread runs flat out): the stream
+/// reports an underrun and the sound crackles. Sounds are not latency
+/// critical at this scale, so a larger buffer trades a little delay for
+/// stability.
+const WANTED_BUFFER_FRAMES: u32 = 2048;
+
+/// The fixed buffer size to request, clamped to what the device supports;
+/// the device default when it does not say.
+fn buffer_size(supported: &cpal::SupportedBufferSize) -> cpal::BufferSize {
+    match *supported {
+        cpal::SupportedBufferSize::Range { min, max } if min <= max => {
+            cpal::BufferSize::Fixed(WANTED_BUFFER_FRAMES.clamp(min, max))
+        }
+        _ => cpal::BufferSize::Default,
+    }
+}
+
 /// Plays voices on the default output device.
 pub struct CpalBackend {
     voices: SyncSender<Voice>,
@@ -46,10 +66,9 @@ impl CpalBackend {
         let device = cpal::default_host()
             .default_output_device()
             .ok_or_else(|| AudioError::Backend("no output device".into()))?;
-        let config: cpal::StreamConfig = device
-            .default_output_config()
-            .map_err(backend_error)?
-            .into();
+        let supported = device.default_output_config().map_err(backend_error)?;
+        let mut config: cpal::StreamConfig = supported.into();
+        config.buffer_size = buffer_size(supported.buffer_size());
         let channels = usize::from(config.channels);
         let mut mixer = Mixer::new(config.sample_rate);
         let (voices, incoming) = sync_channel::<Voice>(MAX_VOICES);
@@ -108,5 +127,32 @@ impl AudioBackend for CpalBackend {
 
     fn stop_streaming(&mut self) {
         self.stop_streams.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_buffer_is_clamped_to_the_device_range() {
+        let range = |min, max| cpal::SupportedBufferSize::Range { min, max };
+        assert_eq!(
+            buffer_size(&range(64, 8192)),
+            cpal::BufferSize::Fixed(WANTED_BUFFER_FRAMES)
+        );
+        assert_eq!(
+            buffer_size(&range(4096, 8192)),
+            cpal::BufferSize::Fixed(4096)
+        );
+        assert_eq!(buffer_size(&range(16, 512)), cpal::BufferSize::Fixed(512));
+    }
+
+    #[test]
+    fn an_unknown_range_keeps_the_device_default() {
+        assert_eq!(
+            buffer_size(&cpal::SupportedBufferSize::Unknown),
+            cpal::BufferSize::Default
+        );
     }
 }
