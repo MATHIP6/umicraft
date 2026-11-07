@@ -3038,6 +3038,7 @@ fn tick(
     chunks: &SyncSender<ChunkEvent>,
     tick_time: Instant,
 ) {
+    umicraft_core::profile_scope!("game tick");
     game.status_data.ticks += 1;
     run_attack(game, queue);
     run_use(game, queue);

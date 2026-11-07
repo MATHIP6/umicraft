@@ -12,6 +12,12 @@ thiserror.workspace = true
 serde.workspace = true
 toml.workspace = true
 tracing.workspace = true
+puffin = { version = "0.20", optional = true }
+puffin_http = { version = "0.17", optional = true }
+
+[features]
+# CPU spans for the puffin viewer (ADR-0059). Off by default: the macros expand to nothing.
+profiling = ["dep:puffin", "dep:puffin_http"]
 
 [lints]
 workspace = true

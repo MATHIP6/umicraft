@@ -1235,6 +1235,7 @@ impl Renderer {
     }
 
     fn render_frame(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
+        umicraft_core::profile_scope!("render_frame");
         // One SkyState per frame: the clear colour, the fog uniform and the
         // sky pass must agree even if W3's model changes between calls.
         let sky_state = SkyState::at_looking(self.environment, camera.forward().to_array());
@@ -1278,6 +1279,7 @@ impl Renderer {
     /// the cull happens here. The transparent list is sorted farthest first;
     /// both lists keep their capacity across frames.
     fn prepare_visible_chunks(&mut self, camera: &Camera) {
+        umicraft_core::profile_scope!("prepare_visible_chunks");
         let frustum = Frustum::from_view_projection(camera.view_projection());
         let eye_chunk = ChunkPos::new(
             (camera.position.x / 16.0).floor() as i32,
@@ -1750,6 +1752,7 @@ impl Renderer {
     /// index buffers so the renderer can submit every opaque chunk before the
     /// sorted transparent pass. A half with no faces gets no buffer.
     pub fn upload_mesh(&mut self, pos: ChunkPos, mesh: &Mesh) {
+        umicraft_core::profile_scope!("upload_mesh");
         if mesh.is_empty() {
             self.chunks.remove(&pos);
             return;

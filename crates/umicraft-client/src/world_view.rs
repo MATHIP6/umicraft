@@ -207,6 +207,7 @@ impl WorldView {
         chunks: &Receiver<ChunkEvent>,
         target: &mut impl MeshTarget,
     ) {
+        umicraft_core::profile_scope!("WorldView::sync");
         while let Ok(event) = frames.try_recv() {
             self.apply(event, target);
         }

@@ -165,6 +165,7 @@ fn worker_loop(
                 Err(_) => return,
             }
         };
+        umicraft_core::profile_scope!("mesh job");
         let mesh = mesher.mesh(job.pos, &job.snapshot);
         let result = MeshResult {
             pos: job.pos,

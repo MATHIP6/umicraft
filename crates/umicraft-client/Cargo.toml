@@ -41,5 +41,9 @@ toml.workspace = true
 name = "umicraft-client"
 path = "src/main.rs"
 
+[features]
+# Forwards to `umicraft-core/profiling`: puffin CPU spans.
+profiling = ["umicraft-core/profiling"]
+
 [lints]
 workspace = true

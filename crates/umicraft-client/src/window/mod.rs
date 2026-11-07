@@ -757,6 +757,7 @@ impl App {
     /// applies the session lifecycle: leaving the connecting screen, showing
     /// the disconnected screen (ADR-0044).
     fn sync_world(&mut self, now: Instant) {
+        umicraft_core::profile_scope!("sync_world");
         let (Some(session), Some(world), Some(renderer)) = (
             self.session.as_ref(),
             self.world.as_mut(),
@@ -1083,6 +1084,8 @@ impl App {
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
+        umicraft_core::profiling::new_frame();
+        umicraft_core::profile_scope!("redraw");
         let now = Instant::now();
         let elapsed = (now - self.last_frame).as_secs_f32();
         self.last_frame = now;

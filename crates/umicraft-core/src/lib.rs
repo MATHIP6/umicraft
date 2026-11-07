@@ -32,6 +32,7 @@ pub mod events;
 pub mod java_random;
 pub mod lang;
 pub mod module;
+pub mod profiling;
 pub mod scheduler;
 pub mod service;
 

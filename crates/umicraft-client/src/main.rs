@@ -20,6 +20,9 @@ fn main() -> ExitCode {
         )
         .init();
 
+    // Kept alive for the whole run: dropping it stops the puffin stream.
+    let _profiler = umicraft_core::profiling::serve();
+
     let words: Vec<String> = std::env::args().skip(1).collect();
     if words.iter().any(|word| word == "--help" || word == "-h") {
         println!("{USAGE}");
