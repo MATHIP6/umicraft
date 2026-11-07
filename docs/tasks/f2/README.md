@@ -81,7 +81,7 @@ Optimisation steps also get a criterion benchmark or a scene measurement in
 | Step | Content | Done when |
 |---|---|---|
 | F2-0a (**done**, ADR-0059) | CPU spans behind a `profiling` cargo feature (puffin or tracy, ADR choice) on `redraw`, `WorldView::sync`, `prepare_visible_chunks`, uploads, mesh jobs, the game tick. | Spans visible in the viewer. Zero cost with the feature off. |
-| F2-0b | GPU timestamp queries per pass group (sky, opaque, entities, translucent, UI), when the adapter has `TIMESTAMP_QUERY`. Shown in F3. | F3 shows the GPU ms per group, or "n/a". |
+| F2-0b (**done**, ADR-0059) | GPU timestamp queries per pass group (sky, opaque, entities, translucent, UI), when the adapter has `TIMESTAMP_QUERY`. Shown in F3. | F3 shows the GPU ms per group, or "n/a". |
 | F2-0c | A reproducible benchmark scene: a fixed capture or world replay, a scripted camera path, and a frame-time report (mean, p95, p99). Run at the origin and at x = 1 000 000. | One command prints the report. The baseline is in `perf-log.md`. |
 | F2-0d | Measure `lto = "thin"` and `codegen-units = 1` in `[profile.release]`. | Kept only if the scene shows a gain. |
 

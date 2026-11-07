@@ -28,3 +28,17 @@ pass, uploads, mesh jobs and the game tick, with zero cost in normal builds.
 Spans: `redraw`, `sync_world`, `WorldView::sync`, `prepare_visible_chunks`,
 `upload_mesh`, `render_frame` (render thread), `mesh job` (workers) and
 `game tick` (game thread).
+
+## GPU timestamps (F2-0b)
+
+The frame is a single render pass, so the groups are timed with
+`RenderPass::write_timestamp` (features `TIMESTAMP_QUERY`,
+`TIMESTAMP_QUERY_INSIDE_ENCODERS`, `TIMESTAMP_QUERY_INSIDE_PASSES`, requested
+only when the adapter offers all three). Six stamps delimit five groups: sky
+(sky + panorama), opaque (terrain + moving blocks), entities (shadows to
+dropped items), translucent (particles, weather, transparent terrain, clouds,
+border, cracks, outline) and ui (hand, screen overlays, HUD). Results are
+resolved into a ring of three readback buffers and polled without blocking, so
+they are two to three frames old; a frame is skipped when all slots are in
+flight. F3 shows `GPU <total> ms: ...`, or `GPU time: n/a` without support.
+`gpu_timer.rs` in `umicraft-render`; test `offscreen_gpu_timer` (`--ignored`).

@@ -24,6 +24,7 @@ mod environment;
 mod error;
 mod fog;
 mod font;
+mod gpu_timer;
 pub mod hud;
 pub mod hud_hearts;
 mod items;
@@ -50,6 +51,7 @@ pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
+pub use gpu_timer::{GpuTimings, GROUP_NAMES};
 pub use hud::{chat_run_at, draw_hud_gui, HudSheets};
 pub use hud::{
     plain_text, ActionBarView, BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle,

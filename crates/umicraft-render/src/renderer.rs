@@ -42,6 +42,7 @@ use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
+use crate::gpu_timer::{self, GpuTimer, GpuTimings};
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::mipmap;
 use crate::outline::{OutlineBox, OutlineRenderer};
@@ -190,6 +191,7 @@ struct OffscreenTarget {
 /// Windowed or offscreen wgpu renderer.
 pub struct Renderer {
     adapter: AdapterSummary,
+    gpu_timer: Option<GpuTimer>,
     instance: wgpu::Instance,
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
@@ -836,8 +838,10 @@ impl Renderer {
         let glint = GlintPass::new(&device, format);
         let world_glint = WorldGlint::new(&device, &terrain_layout, format);
 
+        let gpu_timer = GpuTimer::new(&device, &queue);
         Ok(Self {
             adapter,
+            gpu_timer,
             instance,
             window,
             surface,
@@ -2192,8 +2196,9 @@ impl Renderer {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("frame encoder"),
                         });
+                self.begin_gpu_timing();
                 self.draw(&view, overlay, &mut encoder, sky_state);
-                self.queue.submit(Some(encoder.finish()));
+                self.submit_timed(encoder);
                 self.capture_frame(&frame.texture);
                 if let Some(window) = &self.window {
                     window.pre_present_notify();
@@ -2219,6 +2224,7 @@ impl Renderer {
         overlay: &Overlay,
         sky_state: &SkyState,
     ) -> Result<(), RenderError> {
+        self.begin_gpu_timing();
         let Some(target) = self.offscreen.as_ref() else {
             return Err(RenderError::NotOffscreen);
         };
@@ -2228,8 +2234,45 @@ impl Renderer {
                 label: Some("offscreen encoder"),
             });
         self.draw(&target.view, overlay, &mut encoder, sky_state);
-        self.queue.submit(Some(encoder.finish()));
+        self.submit_timed(encoder);
         Ok(())
+    }
+
+    fn begin_gpu_timing(&mut self) {
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.begin_frame();
+        }
+    }
+
+    /// Submits the frame and collects the finished GPU timings.
+    fn submit_timed(&mut self, mut encoder: wgpu::CommandEncoder) {
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.resolve(&mut encoder);
+        }
+        self.queue.submit(Some(encoder.finish()));
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.after_submit(&self.device);
+        }
+    }
+
+    fn stamp(&self, pass: &mut wgpu::RenderPass<'_>, index: u32) {
+        if let Some(timer) = &self.gpu_timer {
+            timer.stamp(pass, index);
+        }
+    }
+
+    /// The GPU time of the newest finished frame per group of draws, two or
+    /// three frames old. `None` when the adapter has no timestamp queries or
+    /// no frame has come back yet.
+    #[must_use]
+    pub fn gpu_timings(&self) -> Option<GpuTimings> {
+        self.gpu_timer.as_ref().and_then(GpuTimer::latest)
+    }
+
+    /// Whether the adapter can time the GPU (F3 shows "n/a" otherwise).
+    #[must_use]
+    pub fn gpu_timing_supported(&self) -> bool {
+        self.gpu_timer.is_some()
     }
 
     fn draw(
@@ -2271,8 +2314,10 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        self.stamp(&mut pass, 0);
         self.sky.draw(&mut pass);
         self.panorama.draw(&mut pass);
+        self.stamp(&mut pass, 1);
 
         // Opaque terrain: depth write on, alpha cutout, order-independent.
         pass.set_pipeline(&self.terrain_pipeline);
@@ -2283,6 +2328,7 @@ impl Renderer {
             }
         }
         self.moving_blocks.draw_opaque(&mut pass);
+        self.stamp(&mut pass, 2);
 
         // The shadows lie on the ground, drawn before the entities.
         if !self.shadow_batches.is_empty() {
@@ -2344,6 +2390,7 @@ impl Renderer {
         self.world_items.draw(&mut pass);
         self.world_glint
             .draw_world(&mut pass, &self.terrain_bind_group);
+        self.stamp(&mut pass, 3);
 
         // The clouds hide behind terrain and hide the water behind them, as in
         // `renderWorldPass`: before the translucent layer from below.
@@ -2384,6 +2431,7 @@ impl Renderer {
         }
 
         self.outline.draw(&mut pass, &self.camera_bind_group);
+        self.stamp(&mut pass, 4);
 
         // The hand: camera-space vertices under a squeezed depth range.
         if !self.hand.is_empty() {
@@ -2459,6 +2507,7 @@ impl Renderer {
                 pass.draw(first..end, 0..1);
             }
         }
+        self.stamp(&mut pass, 5);
     }
 
     fn reconfigure_surface(&mut self) -> Result<(), RenderError> {
@@ -2520,7 +2569,12 @@ fn request_adapter(
 fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), RenderError> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("umicraft device"),
-        required_features: wgpu::Features::empty(),
+        // Timestamps are optional: without them F3 shows "n/a".
+        required_features: if adapter.features().contains(gpu_timer::REQUIRED_FEATURES) {
+            gpu_timer::REQUIRED_FEATURES
+        } else {
+            wgpu::Features::empty()
+        },
         required_limits: adapter.limits(),
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
         memory_hints: wgpu::MemoryHints::Performance,
