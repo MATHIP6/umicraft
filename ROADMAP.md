@@ -672,10 +672,12 @@ approved deviation.
 | **F1 — Account manager & live switching** | Starts with a short spike (current Microsoft endpoints, device-code flow, licence of the secret-storage crate). `umicraft-auth`: Microsoft device code → Xbox Live → XSTS → Minecraft services → profile, token refresh, keychain storage (ACC-4/6/7); offline accounts with the standard UUID, multi-account manager, live switch, account UI in menus (ACC-1/2/3/8/10), plugged into the P12 `Session` seam. | Former M12 and M13 acceptance criteria. |
 | **F2 — Performance pass** | Frustum and occlusion culling, mesh priority queue, GPU-driven rendering, upload budget, allocation audit, CI benchmarks (backlog "Performance"). | Before/after numbers in `docs/perf-log.md`; spec §7 targets met or explained. |
 | **F3 — Modding API v1** | Former M15, including the move of built-in features onto `umicraft-core`. Resolve first the contradiction between spec §8.4 (ECS for mods) and ADR-0015 (typed `EntityStore`). | Former M15 acceptance criteria. |
+| **F5 — Client identity** (started, ADR-0056) | Umicraft's own assets and texts in the client pack (`umicraft-assets/client-pack`, `umicraft.*` language layer); modern title screen (logo, wordmark, Play, Options, quit icon) with the classic one behind `[menu] title_style`; brand font, rounded shapes and gradients in the UI pass. Next: more client-specific screens on the `umicraft_ui::modern` widgets. | Modern title shipped (done); the panorama waiver of ADR-0056 is resolved (permission recorded or original panorama) before any public release. |
 | **F4 — Hardening & v1.0** | Former M16 minus proxies (moved to P12): long sessions, packaging, crash reports, docs site, legal review. | `docs/release.md` fully ticked. |
 
 The legal review of the code derived from MCP (ADR-0001, backlog "Decisions
-needed") blocks **any public release**, not only F4.
+needed") blocks **any public release**, not only F4. So does the open
+panorama waiver of ADR-0056.
 
 ## 7. Requirement families to add to spec §6
 
