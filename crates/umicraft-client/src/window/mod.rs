@@ -26,7 +26,7 @@ use umicraft_ui::menus::{ConnectStage, PanoramaTextures};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, SlotItem, Ui, UiOutput};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{
     DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
@@ -639,11 +639,13 @@ impl App {
     }
 
     fn capture_mouse(&mut self, capture: bool) {
-        if self.mouse_captured && !capture {
+        let was_captured = self.mouse_captured;
+        if was_captured && !capture {
             // A screen takes the mouse: the game forgets what was held.
             self.unpress_all();
         }
         self.mouse_captured = capture;
+        let mut centred = None;
         if let Some(window) = &self.window {
             if capture {
                 // Locked is preferred (infinite relative motion); fall back to
@@ -653,8 +655,27 @@ impl App {
                     .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined));
             } else {
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
+                if was_captured {
+                    // `MouseHelper.ungrabMouseCursor`: the freed cursor starts in
+                    // the middle of the window, not where the look left it.
+                    let size = window.inner_size();
+                    let middle = PhysicalPosition::new(
+                        f64::from(size.width) / 2.0,
+                        f64::from(size.height) / 2.0,
+                    );
+                    let _ = window.set_cursor_position(middle);
+                    centred = Some(middle);
+                }
             }
             window.set_cursor_visible(!capture);
+        }
+        if let Some(position) = centred {
+            // The move event may arrive late or not at all (it depends on the
+            // platform); the screens must already know where the cursor is.
+            self.pointer = (position.x as f32, position.y as f32);
+            self.ui_input.pointer_moved(position);
+            self.inventory_pointer(position);
+            self.creative_pointer(position);
         }
     }
 
