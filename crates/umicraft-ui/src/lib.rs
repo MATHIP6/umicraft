@@ -34,6 +34,7 @@
 //! assert!(output.focus.is_none());
 //! ```
 
+pub mod brand_font;
 pub mod context;
 pub mod debug_screen;
 pub mod draw;

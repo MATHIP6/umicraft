@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+fontdue.workspace = true
 png.workspace = true
 thiserror.workspace = true
 umicraft-core.workspace = true
