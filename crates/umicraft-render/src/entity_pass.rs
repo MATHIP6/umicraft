@@ -5,7 +5,11 @@
 use bytemuck::{Pod, Zeroable};
 
 /// The entity shader with the shared fog falloff in front.
-const ENTITY_WGSL: &str = concat!(include_str!("fog.wgsl"), include_str!("entity.wgsl"));
+const ENTITY_WGSL: &str = concat!(
+    include_str!("fog.wgsl"),
+    include_str!("lightmap.wgsl"),
+    include_str!("entity.wgsl")
+);
 
 /// Entity vertex format consumed by `entity.wgsl`.
 #[repr(C)]

@@ -34,6 +34,12 @@ use crate::{Camera, RenderEnvironment};
 pub use field::{PrecipitationCell, PrecipitationField, FIELD_RADIUS};
 use geometry::{FrameInput, Precipitation, WeatherMesh, WeatherVertex, MAX_VERTICES};
 
+/// The shader with the vanilla lightmap in front.
+const SHADER: &str = concat!(
+    include_str!("../lightmap.wgsl"),
+    include_str!("weather.wgsl")
+);
+
 /// GPU resources of the weather pass.
 pub(crate) struct WeatherRenderer {
     pipeline: wgpu::RenderPipeline,
@@ -59,7 +65,7 @@ impl WeatherRenderer {
         let layout = picture_layout(device);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("weather shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("weather.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("weather pipeline layout"),
@@ -271,8 +277,7 @@ mod tests {
     /// The shader is only compiled on a GPU device; this validates it without one.
     #[test]
     fn the_weather_shader_is_valid_wgsl() {
-        let module =
-            naga::front::wgsl::parse_str(include_str!("weather.wgsl")).expect("the shader parses");
+        let module = naga::front::wgsl::parse_str(SHADER).expect("the shader parses");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),

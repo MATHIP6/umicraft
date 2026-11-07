@@ -42,6 +42,8 @@ struct Camera {
     // GPU relative to it (`view_proj` is built for that origin), so f32
     // keeps its precision far from the world origin.
     origin: vec3<f32>,
+    // The vanilla lightmap, `[sky * 16 + block]` (`lightmap.rs`).
+    lightmap: array<vec4<f32>, 256>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -66,25 +68,14 @@ struct VertexOut {
     @location(2) @interpolate(flat) layer: u32,
     // Interpolated smooth lighting, AO and face shade. Interpolating the
     // baked per-corner values reproduces 1.8 smooth lighting across the quad.
-    @location(3) light: f32,
+    // Block and sky light levels, 0..=15, interpolated; the lightmap is
+    // sampled per fragment like the reference.
+    @location(3) levels: vec2<f32>,
     @location(4) ao: f32,
     @location(5) shade: f32,
     // Constant over a quad, so flat interpolation loses no information.
     @location(6) @interpolate(flat) tint: vec3<f32>,
 };
-
-// 1.8 light-brightness curve. The input is a normalized nibble in 0..=1.
-fn light_brightness(level: f32) -> f32 {
-    return level / (3.0 * (1.0 - level) + 1.0);
-}
-
-// 1.8 brightness gamma curve from `EntityRenderer.updateLightmap`.
-// corrected = 1 - (1 - raw)^4, result = lerp(raw, corrected, gamma).
-fn gamma_correct(value: f32) -> f32 {
-    let inv = 1.0 - value;
-    let corrected = 1.0 - inv * inv * inv * inv;
-    return value * (1.0 - camera.gamma) + corrected * camera.gamma;
-}
 
 // 1.8 face shading from `BlockModelRenderer.EnumNeighborInfo`: top 1.0,
 // bottom 0.5, north/south 0.8, west/east 0.6. Used only when the mesher
@@ -116,9 +107,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
         f32(in.tint & 0xFFu),
     ) / 255.0;
 
-    let block = light_brightness(f32(in.light & 0xFu) / 15.0);
-    let sky = light_brightness(f32((in.light >> 4u) & 0xFu) / 15.0) * camera.sun_brightness;
-    out.light = gamma_correct(min(1.0, sky + block));
+    out.levels = vec2<f32>(f32(in.light & 0xFu), f32((in.light >> 4u) & 0xFu));
     out.ao = 0.4 + 0.6 * (f32((in.light >> 8u) & 0xFu) / 15.0);
 
     let shaded = (in.light & (1u << 12u)) != 0u;
@@ -134,8 +123,9 @@ fn vs_main(in: VertexIn) -> VertexOut {
 // target is darkened by the fragment light so a cave does not show a bright
 // sky-coloured haze (`ADR-0008` §3).
 fn shade_fragment(in: VertexOut, texel: vec4<f32>) -> vec3<f32> {
-    let lit = texel.rgb * in.tint * in.light * in.ao * in.shade;
-    let fog_target = camera.fog_color * (0.15 + 0.85 * in.light);
+    let light = lightmap_sample(in.levels.x, in.levels.y);
+    let lit = texel.rgb * in.tint * light * in.ao * in.shade;
+    let fog_target = camera.fog_color * (0.15 + 0.85 * light);
     let distance = distance(in.world_position, camera.camera_pos);
     let fog = fog_amount(distance, camera.fog_start, camera.fog_end, camera.fog_density);
     return mix(lit, fog_target, fog);

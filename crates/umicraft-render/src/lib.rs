@@ -27,6 +27,7 @@ mod font;
 pub mod hud;
 pub mod hud_hearts;
 mod items;
+mod lightmap;
 mod mipmap;
 mod nametag;
 mod outline;

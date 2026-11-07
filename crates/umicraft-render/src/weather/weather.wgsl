@@ -19,6 +19,8 @@ struct Camera {
     // GPU relative to it (`view_proj` is built for that origin), so f32
     // keeps its precision far from the world origin.
     origin: vec3<f32>,
+    // The vanilla lightmap, `[sky * 16 + block]` (`lightmap.rs`).
+    lightmap: array<vec4<f32>, 256>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -38,19 +40,8 @@ struct VertexOut {
     @location(0) world_position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) alpha: f32,
-    @location(3) light: f32,
+    @location(3) light: vec3<f32>,
 };
-
-// The 1.8 light curve and gamma, as in terrain.wgsl.
-fn light_brightness(level: f32) -> f32 {
-    return level / (3.0 * (1.0 - level) + 1.0);
-}
-
-fn gamma_correct(value: f32) -> f32 {
-    let inv = 1.0 - value;
-    let corrected = 1.0 - inv * inv * inv * inv;
-    return value * (1.0 - camera.gamma) + corrected * camera.gamma;
-}
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
@@ -59,9 +50,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.world_position = in.position;
     out.uv = in.uv;
     out.alpha = in.alpha;
-    let sky = light_brightness(in.light.x / 15.0) * camera.sun_brightness;
-    let block = light_brightness(in.light.y / 15.0);
-    out.light = gamma_correct(min(1.0, sky + block));
+    out.light = lightmap_sample(in.light.y, in.light.x);
     return out;
 }
 
