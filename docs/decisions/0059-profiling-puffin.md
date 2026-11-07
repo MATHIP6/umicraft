@@ -42,3 +42,12 @@ resolved into a ring of three readback buffers and polled without blocking, so
 they are two to three frames old; a frame is skipped when all slots are in
 flight. F3 shows `GPU <total> ms: ...`, or `GPU time: n/a` without support.
 `gpu_timer.rs` in `umicraft-render`; test `offscreen_gpu_timer` (`--ignored`).
+
+## Benchmark scene and release profile (F2-0c, F2-0d)
+
+`umicraft-client --bench-scene [--bench-origin N] [--bench-frames N]` draws a
+fixed synthetic world along a scripted camera path offscreen and prints the
+frame time (mean, p50, p95, p99, max) and the GPU time per group. The terrain
+depends only on the position relative to the origin chunk, so two origins draw
+the same geometry. `lto = "thin"` with `codegen-units = 1` was measured and
+**not kept** (no gain, 5.7× slower release build); numbers in `docs/perf-log.md`.

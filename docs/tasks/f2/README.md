@@ -1,6 +1,6 @@
 # F2 — Performance pass: audit and plan
 
-Status: **planned, nothing implemented**. Decision: `docs/decisions/0058-f2-performance-plan.md`.
+Status: **phase 0 done** (F2-0a to F2-0d); phases 1–5 planned. Decision: `docs/decisions/0058-f2-performance-plan.md`.
 Roadmap entry: `ROADMAP.md` §6 (F2).
 
 The owner started F2 ahead of P13 (2026-11-07) for two reasons:
@@ -14,6 +14,19 @@ The audit below is a code reading at `debffee`. **Nothing has been measured
 yet**, so Phase 0 adds the instruments first. Every later step must record
 before/after numbers in `docs/perf-log.md` (AGENTS.md, spec §7). Line numbers
 are the ones at `debffee`.
+
+## Phase 0 results (2026-11-07)
+
+Baseline in `docs/perf-log.md`; run `umicraft-client --release --bench-scene
+[--bench-origin 1000000]`. Findings that shape the next steps:
+
+- 289 columns, 518k faces: about 4.0 ms per frame (250 fps), GPU 2.5 ms.
+- **Opaque terrain is 82 % of the GPU time** (2.05 of 2.50 ms): phases 2 and 3
+  target exactly this.
+- The frame time is the same at x = 0 and x = 1 000 000: the far-from-origin
+  problem is precision only (phase 1), as audited.
+- `lto = "thin"` gives nothing here (not kept).
+- CPU spans: `--features profiling` and `puffin_viewer` (ADR-0059).
 
 ## Audit
 
@@ -83,7 +96,7 @@ Optimisation steps also get a criterion benchmark or a scene measurement in
 | F2-0a (**done**, ADR-0059) | CPU spans behind a `profiling` cargo feature (puffin or tracy, ADR choice) on `redraw`, `WorldView::sync`, `prepare_visible_chunks`, uploads, mesh jobs, the game tick. | Spans visible in the viewer. Zero cost with the feature off. |
 | F2-0b (**done**, ADR-0059) | GPU timestamp queries per pass group (sky, opaque, entities, translucent, UI), when the adapter has `TIMESTAMP_QUERY`. Shown in F3. | F3 shows the GPU ms per group, or "n/a". |
 | F2-0c (**done**) | A reproducible benchmark scene: a fixed capture or world replay, a scripted camera path, and a frame-time report (mean, p95, p99). Run at the origin and at x = 1 000 000. | One command prints the report. The baseline is in `perf-log.md`. |
-| F2-0d | Measure `lto = "thin"` and `codegen-units = 1` in `[profile.release]`. | Kept only if the scene shows a gain. |
+| F2-0d (**done**: not kept) | Measure `lto = "thin"` and `codegen-units = 1` in `[profile.release]`. | Kept only if the scene shows a gain. |
 
 ### Phase 1 — Precision far from the origin (fixes A1–A5)
 
