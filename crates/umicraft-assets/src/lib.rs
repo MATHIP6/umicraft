@@ -64,6 +64,7 @@ pub mod animation;
 pub mod atlas;
 pub mod cache;
 pub mod client_jar;
+pub mod client_pack;
 pub mod client_resources;
 pub mod colormap;
 pub mod dial;

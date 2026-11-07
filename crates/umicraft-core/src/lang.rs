@@ -201,8 +201,9 @@ pub fn expand_format(format: &str) -> Result<Vec<Piece>, FormatError> {
 /// The texts a UI language handle serves.
 ///
 /// One merged table, built in the order of the fallback chain (lowest
-/// priority first): the [`LangTable::builtin`] offline fallback, the `en_US`
-/// file, then the selected language. A key found nowhere gives the key itself
+/// priority first): the [`LangTable::builtin`] offline fallback, the vanilla
+/// `en_US` file, the vanilla selected language, then Umicraft's own `en_US`
+/// and selected language ([`Lang::with_client_layer`], ADR-0056). A key found nowhere gives the key itself
 /// (`I18n.format` behaviour), which makes a missing translation visible
 /// instead of blank.
 #[derive(Debug, Clone)]
@@ -238,6 +239,27 @@ impl Lang {
             code: code.to_string(),
             table,
         }
+    }
+
+    /// Puts Umicraft's own texts (the client pack, `umicraft.*` keys) on top
+    /// of every vanilla layer: its `en_US` text first, then the text of the
+    /// selected language. Either may be absent.
+    ///
+    /// `umicraft-core` cannot read the client pack itself, so the client
+    /// passes the embedded texts in.
+    ///
+    /// ```
+    /// use umicraft_core::lang::Lang;
+    /// let lang = Lang::from_texts("fr_FR", None, None)
+    ///     .with_client_layer(Some("k=Play\n"), Some("k=Jouer\n"));
+    /// assert_eq!(lang.tr("k"), "Jouer");
+    /// ```
+    #[must_use]
+    pub fn with_client_layer(mut self, english: Option<&str>, selected: Option<&str>) -> Self {
+        for text in [english, selected].into_iter().flatten() {
+            self.table.extend(LangTable::from_lang(text));
+        }
+        self
     }
 
     /// The code of the selected language (`en_US`, `de_DE`, ...).
@@ -376,41 +398,12 @@ const BUILTIN: &[(&str, &str)] = &[
     ("deathScreen.score", "Score"),
     ("deathScreen.respawn", "Respawn"),
     ("deathScreen.titleScreen", "Title screen"),
-    // Texts vanilla hard-codes in its classes, so no `.lang` file has them:
-    // `GuiOptions` ("Super Secret Settings..."), `GuiScreen.handleComponentHover`
-    // ("Invalid Item!"), `ItemStack.getTooltip` ("Durability: x / y") and the attribute line (`+%d %s`, whose key does
-    // exist in the files and only guards the offline case).
-    ("umicraft.options.shaders", "Super Secret Settings..."),
-    // `ResourcePackListEntryDefault` hard-codes its name and description.
-    ("umicraft.resourcePack.default", "Default"),
-    (
-        "umicraft.resourcePack.defaultDescription",
-        "The default look of Minecraft",
-    ),
-    (
-        "umicraft.resourcePack.missingMetadata",
-        "Missing pack.mcmeta :(",
-    ),
-    ("umicraft.hover.invalidItem", "Invalid Item!"),
-    ("umicraft.hover.invalidEntity", "Invalid Entity!"),
+    // `ItemStack.getTooltip` hard-codes "Durability: x / y" and the attribute line
+    // (`+%d %s`, whose key does exist in the files and only guards the offline case).
     ("item.durability", "Durability: %s / %s"),
-    // Menu texts vanilla hard-codes (`ServerListEntryNormal`) or that are
-    // Umicraft's own (title screen credit); the first group has no key in the files.
-    ("umicraft.server.pinging", "Pinging..."),
-    ("umicraft.server.noConnection", "(no connection)"),
-    ("umicraft.server.clientOutdated", "Client out of date!"),
-    ("umicraft.server.serverOutdated", "Server out of date!"),
-    ("umicraft.server.andMore", "... and %s more ..."),
-    ("umicraft.server.unreachable", "Can't connect to server."),
-    (
-        "umicraft.title.credit",
-        "Not affiliated with Mojang or Microsoft",
-    ),
     ("attribute.modifier.plus.0", "+%s %s"),
     // The connection failure texts: `connect.failed` and the `disconnect.*`
-    // reasons exist in the files; "Unknown host" is hard-coded by
-    // `GuiConnecting` and the two socket wordings are what the JVM prints for
-    // a refused or timed out connect.
+    // reasons exist in the files.
     ("connect.failed", "Failed to connect to the server"),
     ("disconnect.genericReason", "%s"),
     ("disconnect.timeout", "Timed out"),
@@ -429,19 +422,6 @@ const BUILTIN: &[(&str, &str)] = &[
     ("achievement.unknown", "???"),
     ("achievement.taken", "Taken!"),
     ("achievement.get", "Achievement get!"),
-    ("umicraft.connect.unknownHost", "Unknown host"),
-    (
-        "umicraft.connect.refused",
-        "Connection refused: no further information",
-    ),
-    (
-        "umicraft.connect.timedOut",
-        "Connection timed out: no further information",
-    ),
-    (
-        "umicraft.connect.onlineMode",
-        "This server needs a premium session: start Umicraft from a launcher that passes --username, --uuid and --accessToken",
-    ),
     ("disconnect.loginFailedInfo", "Failed to login: %s"),
     (
         "disconnect.loginFailedInfo.invalidSession",
@@ -471,6 +451,27 @@ mod tests {
         assert_eq!(lang.tr("selectServer.direct"), "Direct Connect");
         assert_eq!(lang.tr("disconnect.lost"), "Connection Lost");
         assert_eq!(lang.tr("gui.toMenu"), "Back to server list");
+    }
+
+    #[test]
+    fn the_client_layer_outranks_every_vanilla_layer() {
+        let lang = Lang::from_texts(
+            "fr_FR",
+            Some("a=vanilla en\nb=vanilla en\nc=vanilla en\nd=vanilla en\n"),
+            Some("b=vanilla fr\nc=vanilla fr\nd=vanilla fr\n"),
+        )
+        .with_client_layer(Some("c=client en\nd=client en\n"), Some("d=client fr\n"));
+        assert_eq!(lang.tr("a"), "vanilla en");
+        assert_eq!(lang.tr("b"), "vanilla fr");
+        assert_eq!(lang.tr("c"), "client en");
+        assert_eq!(lang.tr("d"), "client fr");
+    }
+
+    #[test]
+    fn the_client_layer_overrides_the_builtin_table() {
+        let lang = Lang::builtin().with_client_layer(Some("gui.yes=Oui\n"), None);
+        assert_eq!(lang.tr("gui.yes"), "Oui");
+        assert_eq!(lang.tr("gui.no"), "No");
     }
 
     fn text(value: &str) -> Piece {
