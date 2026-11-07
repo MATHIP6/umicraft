@@ -153,7 +153,10 @@ impl HandState {
             visible: true,
             shows_arm: self.item.is_none(),
             equip: 1.0 - self.equipped,
-            swing: self.swing_progress(1.0),
+            // The raw progress of the tick: `HandPose::lerp` applies the wrap
+            // rule of `getSwingProgress` between two ticks, and a value already
+            // pushed past 1 would make a restarted swing run backwards.
+            swing: self.swing_progress,
             sway_pitch: self.pitch_delta,
             sway_yaw: self.yaw_delta,
             view_pitch: self.view_pitch,
@@ -436,12 +439,26 @@ mod tests {
         assert_eq!(seen[0], 0.0);
         assert!((seen[3] - 3.0 / 6.0).abs() < 1e-6);
         assert!((seen[5] - 5.0 / 6.0).abs() < 1e-6);
-        assert_eq!(
-            seen[6], 1.0,
-            "the wrapped tick counts as the end of the swing"
-        );
+        assert_eq!(seen[6], 0.0, "the pose holds the raw progress");
         assert_eq!(hand.swing_progress(0.5), 0.0);
         assert!(!hand.swinging);
+    }
+
+    #[test]
+    fn a_restarted_swing_never_runs_backwards_between_ticks() {
+        let mut hand = HandState::new();
+        let mut previous = hand.pose();
+        for tick in 0..40 {
+            // Holding the attack button swings again every tick.
+            hand.swing(idle());
+            hand.tick(None, 0.0, 0.0, idle());
+            let pose = hand.pose();
+            for step in 0..=10 {
+                let swing = previous.lerp(pose, step as f32 / 10.0).swing;
+                assert!((0.0..=1.0 + 1e-4).contains(&swing), "tick {tick}: {swing}");
+            }
+            previous = pose;
+        }
     }
 
     #[test]
