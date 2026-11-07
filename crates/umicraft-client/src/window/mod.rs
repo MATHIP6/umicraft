@@ -22,7 +22,7 @@ use umicraft_render::{
     RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
-use umicraft_ui::menus::{ConnectStage, PanoramaTextures, TitleStyle};
+use umicraft_ui::menus::{ConnectStage, PanoramaTextures};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, SlotItem, Ui, UiOutput};
 use winit::application::ApplicationHandler;
@@ -240,6 +240,9 @@ struct App {
     terrain: Option<TerrainTextures>,
     /// The atlas the renderer accepted; the UI metrics must match it.
     ui_atlas: Option<FontAtlas>,
+    /// The brand atlas the renderer accepted; `None` keeps the classic
+    /// title screen (ADR-0056).
+    brand_atlas: Option<FontAtlas>,
     /// The GUI texture atlas for inventory/container backgrounds.
     gui_atlas: Option<umicraft_assets::GuiAtlas>,
     /// The favicon revision of the menus the GUI atlas was last grown for
@@ -367,6 +370,7 @@ impl App {
             font,
             terrain,
             ui_atlas: None,
+            brand_atlas: None,
             gui_atlas: None,
             server_icons_revision: u64::MAX,
             items: None,
@@ -985,8 +989,8 @@ impl App {
                             .map_or(ConnectStage::Connecting, WorldView::connect_stage),
                         stats,
                         panorama: self.panorama,
-                        title_style: TitleStyle::Classic,
-                        brand_font: atlas,
+                        title_style: self.title_style(),
+                        brand_font: self.brand_atlas.as_ref().unwrap_or(atlas),
                     };
                     let shown = self
                         .menu
@@ -1458,6 +1462,7 @@ impl ApplicationHandler for App {
                 return;
             }
         }
+        self.brand_atlas = ui_font::install_brand(&mut renderer);
         // The mesh workers only exist once the terrain textures are bound,
         // so they never write layers of another array (ADR-0012).
         let terrain = self.terrain.take().unwrap_or(TerrainTextures::Procedural);

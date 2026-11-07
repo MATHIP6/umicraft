@@ -38,6 +38,20 @@ use crate::servers::{
 };
 use crate::stats_view::{self, StatsContext};
 
+/// The title screen to draw for the `chosen` style.
+///
+/// The modern screen measures and draws its text with the brand face; without
+/// a bound brand atlas (`brand_ready` false) it would fall back to the tiny
+/// game font at brand scales, so the classic screen is shown instead.
+#[must_use]
+pub fn shown_title_style(chosen: TitleStyle, brand_ready: bool) -> TitleStyle {
+    if brand_ready {
+        chosen
+    } else {
+        TitleStyle::Classic
+    }
+}
+
 /// What the window has to do after a menu frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuCommand {

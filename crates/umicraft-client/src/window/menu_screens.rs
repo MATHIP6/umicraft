@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use umicraft_core::lang::Lang;
 use umicraft_ui::game_menu::GameMenuAction;
-use umicraft_ui::menus::{draw_toast, Toast};
+use umicraft_ui::menus::{draw_toast, TitleStyle, Toast};
 use umicraft_ui::{FontAtlas, Ui};
 use winit::event::KeyEvent;
 use winit::event_loop::ActiveEventLoop;
@@ -20,7 +20,7 @@ use super::{upload_gui_atlas, App};
 use crate::achievements_view::{toast_content, AchievementsContext};
 use crate::game::GameEvent;
 use crate::item_icons::ItemView;
-use crate::menu_flow::MenuCommand;
+use crate::menu_flow::{shown_title_style, MenuCommand};
 use crate::options_screen::Page;
 use crate::screen::Screen;
 use crate::world_view::WorldView;
@@ -38,6 +38,12 @@ impl App {
     }
 
     /// Advances the title animation and the double-click timer.
+    /// The title screen to draw: the one the options select, or the
+    /// classic one while no brand font is bound.
+    pub(super) fn title_style(&self) -> TitleStyle {
+        shown_title_style(self.options.menu.style(), self.brand_atlas.is_some())
+    }
+
     pub(super) fn advance_menus(&mut self, elapsed: Duration) {
         if self.screen.uses_ui() {
             self.menu.advance(elapsed);

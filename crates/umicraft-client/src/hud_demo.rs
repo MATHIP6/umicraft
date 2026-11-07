@@ -584,7 +584,10 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let gui_atlas = crate::official::load_gui_atlas();
     // The server list shows an icon of its own, so its atlas grows by one.
     let gui_atlas = match view {
-        "servers" => gui_atlas.map(|atlas| atlas.with_dynamic(&hud_demo_servers::icon_images())),
+        "servers" => Some(crate::official::grow_atlas(
+            gui_atlas.as_ref(),
+            &hud_demo_servers::icon_images(),
+        )),
         _ => gui_atlas,
     };
     let sheets = crate::official::hud_sheets(gui_atlas.as_ref());

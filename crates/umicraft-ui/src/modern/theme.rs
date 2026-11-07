@@ -7,11 +7,9 @@
 
 use crate::draw::Color;
 
-/// Pixel size the brand face is rasterized at.
-///
-/// Must equal `crate::brand_font::BRAND_PIXEL_SIZE`; text scales are
+/// Pixel size the brand face is rasterized at; text scales are
 /// `wanted_px / BRAND_PIXEL_SIZE`.
-pub const BRAND_PIXEL_SIZE: f32 = 48.0;
+pub use crate::brand_font::BRAND_PIXEL_SIZE;
 
 /// Fill of buttons and panels at rest.
 pub const SURFACE: Color = [0.07, 0.08, 0.10, 0.55];

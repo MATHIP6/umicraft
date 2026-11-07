@@ -17,8 +17,9 @@
 use thiserror::Error;
 #[cfg(test)]
 use umicraft_assets::install::OfficialInstall;
-use umicraft_assets::AssetsError;
+use umicraft_assets::{client_pack, AssetsError};
 use umicraft_render::{FontAtlasError, Renderer};
+use umicraft_ui::brand_font::{self, BrandFontError};
 use umicraft_ui::{FontAtlas, FontError};
 
 use crate::official;
@@ -144,6 +145,35 @@ pub fn install(
             })
         }
     }
+}
+
+/// Rasterizes the client pack's brand face and uploads it to `renderer`
+/// (ADR-0056).
+///
+/// Returns the atlas the UI must measure brand text with, or `None` when the
+/// font does not rasterize or the renderer rejects it; the failure is logged
+/// and the caller then keeps the classic title screen, whose layout does not
+/// depend on the brand face.
+pub fn install_brand(renderer: &mut Renderer) -> Option<FontAtlas> {
+    let atlas = match brand_atlas() {
+        Ok(atlas) => atlas,
+        Err(error) => {
+            tracing::warn!(%error, "could not rasterize the brand font");
+            return None;
+        }
+    };
+    match renderer.set_brand_font(&atlas) {
+        Ok(()) => Some(atlas),
+        Err(error) => {
+            tracing::warn!(%error, "brand font atlas rejected by the renderer");
+            None
+        }
+    }
+}
+
+/// The brand atlas rasterized from the embedded TTF.
+fn brand_atlas() -> Result<FontAtlas, BrandFontError> {
+    brand_font::rasterize(client_pack::brand_font_ttf(), brand_font::BRAND_PIXEL_SIZE)
 }
 
 /// Loads from an optional installation, logging the reason on fallback.

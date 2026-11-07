@@ -435,3 +435,19 @@ fn the_animation_clock_runs_in_whole_ticks_and_caps_a_stall() {
     flow.advance(TICK * 100);
     assert!(flow.tick_time <= TICK);
 }
+
+#[test]
+fn the_classic_title_is_shown_without_a_brand_font() {
+    assert_eq!(
+        shown_title_style(TitleStyle::Modern, true),
+        TitleStyle::Modern
+    );
+    assert_eq!(
+        shown_title_style(TitleStyle::Modern, false),
+        TitleStyle::Classic
+    );
+    assert_eq!(
+        shown_title_style(TitleStyle::Classic, true),
+        TitleStyle::Classic
+    );
+}

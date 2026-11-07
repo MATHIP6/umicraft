@@ -104,7 +104,13 @@ and `icons` (original icons built from primitives: gear, power).
   server list) and **Options**, and a small power icon to quit.
 
 The style is stored in `options.toml` as `[menu] title_style = "modern"` and
-switched from the main options page.
+switched from the main options page. While no brand atlas is bound (the font
+failed to rasterize or upload) the window shows the classic screen.
+
+The brand images enter the GUI atlas as dynamic images, so their regions are
+`dynamic/umicraft/{logo,power,settings}`. `GuiAtlas::with_dynamic` replaces
+earlier dynamic images, so every atlas growth goes through
+`official::grow_atlas`.
 
 ## Consequences
 

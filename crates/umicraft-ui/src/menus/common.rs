@@ -418,6 +418,20 @@ pub(crate) mod testing {
     use crate::geom::Rect;
     use crate::input::{InputEvent, Key, PointerButton, UiInput};
 
+    /// The Umicraft texts the server rows need. The UI crate cannot read the
+    /// client pack (`umicraft-assets`), so the tests carry the few lines
+    /// they assert on; the real texts are `client-pack/umicraft/lang`.
+    const SERVER_TEXTS: &str = "\
+umicraft.server.clientOutdated=Client out of date!
+umicraft.server.andMore=... and %s more ...
+umicraft.server.unreachable=Can't connect to server.
+";
+
+    /// The built-in language plus [`SERVER_TEXTS`] as the Umicraft layer.
+    pub(crate) fn lang_with_server_texts() -> umicraft_core::lang::Lang {
+        umicraft_core::lang::Lang::builtin().with_client_layer(Some(SERVER_TEXTS), None)
+    }
+
     /// The viewport of the tests: GUI scale 3, 427x240 GUI units.
     pub(crate) const VIEWPORT: Rect = Rect {
         x: 0.0,
