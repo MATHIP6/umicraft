@@ -264,8 +264,8 @@ fn fluid_height<S: BlockSource + ?Sized>(source: &S, liquid: Liquid, [x, y, z]: 
 /// `BlockLiquid.getMixedBrightnessForBlock`: the brighter of the block and
 /// the block above it, per channel, without smoothing or occlusion.
 fn flat_light<S: BlockSource + ?Sized>(source: &S, [x, y, z]: [i32; 3]) -> VertexLight {
-    let here: LightLevel = source.light(x, y, z);
-    let above: LightLevel = source.light(x, y + 1, z);
+    let here: LightLevel = source.combined_light(x, y, z, 0);
+    let above: LightLevel = source.combined_light(x, y + 1, z, 0);
     VertexLight::new(
         here.block.max(above.block),
         here.sky.max(above.sky),

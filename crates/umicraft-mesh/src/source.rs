@@ -5,7 +5,10 @@
 
 use std::sync::Arc;
 
-use umicraft_world::{BlockPos, BlockState, ChunkColumn, ChunkPos, LightLevel, World};
+use umicraft_world::{
+    is_slab, light_emission, uses_neighbor_brightness, BlockPos, BlockState, ChunkColumn, ChunkPos,
+    LightLevel, World,
+};
 
 /// Read access to block states and light by world coordinate.
 ///
@@ -25,6 +28,39 @@ pub trait BlockSource {
     /// visible edge of a snapshot is not artificially dark.
     fn light(&self, _x: i32, _y: i32, _z: i32) -> LightLevel {
         LightLevel::FULL_SKY
+    }
+
+    /// `World.getCombinedLight(pos, emission)`: the light of a cell as vanilla
+    /// reads it. A cell that uses neighbour brightness (slabs, stairs, and
+    /// every block that lets light through) takes the brightest of the cells
+    /// above and beside it, per channel, instead of its own; the block light
+    /// is at least `emission`.
+    fn combined_light(&self, x: i32, y: i32, z: i32, emission: u8) -> LightLevel {
+        let mut level = if uses_neighbor_brightness(self.block(x, y, z)) {
+            [(0, 1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)]
+                .into_iter()
+                .map(|(dx, dy, dz)| self.light(x + dx, y + dy, z + dz))
+                .fold(LightLevel::DARK, |best, next| LightLevel {
+                    block: best.block.max(next.block),
+                    sky: best.sky.max(next.sky),
+                })
+        } else {
+            self.light(x, y, z)
+        };
+        level.block = level.block.max(emission);
+        level
+    }
+
+    /// `Block.getMixedBrightnessForBlock`: [`Self::combined_light`] with the
+    /// block's own emission, and for a slab in the dark the cell below it.
+    fn mixed_light(&self, x: i32, y: i32, z: i32) -> LightLevel {
+        let state = self.block(x, y, z);
+        let level = self.combined_light(x, y, z, light_emission(state));
+        if level == LightLevel::DARK && is_slab(state) {
+            let below = self.block(x, y - 1, z);
+            return self.combined_light(x, y - 1, z, light_emission(below));
+        }
+        level
     }
 
     /// Biome id at a world column, or `None` without biome data.

@@ -75,6 +75,38 @@ pub fn light_emission(state: BlockState) -> u8 {
     }
 }
 
+/// A half or double slab (`BlockSlab`, ids 43, 44, 125, 126, 181 and 182).
+#[must_use]
+pub fn is_slab(state: BlockState) -> bool {
+    matches!(state.id(), 43 | 44 | 125 | 126 | 181 | 182)
+}
+
+/// `Block.getUseNeighborBrightness`, set in `Block.registerBlocks`: stairs,
+/// slabs, farmland, and every block that lets light through (a material that
+/// does not block light, or a light opacity of 0). The light of such a cell is
+/// the brightest of the five cells above and beside it, not its own, which
+/// the engine stores as dark for the slabs, stairs and farmland that stop
+/// light.
+///
+/// A non-opaque block keeps its own light only when `setLightOpacity` gave it
+/// a value: water, web, ice and leaves. Opaque cubes keep theirs too.
+#[must_use]
+pub fn uses_neighbor_brightness(state: BlockState) -> bool {
+    let id = state.id();
+    if id == 0 {
+        return false;
+    }
+    if is_slab(state) || id == 60 || STAIRS.contains(&id) {
+        return true;
+    }
+    !state.is_opaque() && !matches!(id, 8 | 9 | 18 | 30 | 79 | 161)
+}
+
+/// The `BlockStairs` ids.
+const STAIRS: [u16; 13] = [
+    53, 67, 108, 109, 114, 128, 134, 135, 136, 156, 163, 164, 180,
+];
+
 impl World {
     /// Recomputes block and sky light around a block that just changed.
     ///
