@@ -19,10 +19,10 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use super::{App, CARET_BLINK_MS};
 use crate::anvil_field::Edit;
 use crate::game::GameEvent;
-use crate::inventory_input::{Button, ContainerAction, Context, InventoryAction};
+use crate::inventory_input::{Button, ContainerAction, Context, InventoryAction, InventoryKey};
 use crate::inventory_screen::{screen_input, ScreenFacts};
 use crate::inventory_winit;
-use crate::options::Action;
+use crate::options::{Action, Binding};
 use crate::screen::Screen;
 use crate::text_screens::{Done, Key, TextScreens};
 
@@ -43,7 +43,7 @@ impl App {
             self.close_inventory();
         }
         if event.state == ElementState::Pressed && !event.repeat {
-            self.inventory_key(code);
+            self.inventory_key(Binding::Key(code));
         }
         self.ui_input.key(code, event.state, event.text.as_deref());
         let _ = event_loop;
@@ -170,6 +170,10 @@ impl App {
     }
     /// Feeds a mouse button to the inventory input.
     pub(super) fn inventory_button(&mut self, state: ElementState, button: MouseButton) {
+        // A mouse button bound to a hotbar slot or to drop acts like its key.
+        if let (ElementState::Pressed, Some(binding)) = (state, Binding::from_mouse(button)) {
+            self.inventory_key(binding);
+        }
         let (Some((layout, context)), Some(button)) =
             (self.inventory_screen(), inventory_winit::button(button))
         else {
@@ -192,11 +196,24 @@ impl App {
         };
         self.send_inventory(action);
     }
-    /// Feeds a key press (number keys, Q) to the inventory input.
-    pub(super) fn inventory_key(&mut self, code: KeyCode) {
-        let (Some((layout, context)), Some(key)) =
-            (self.inventory_screen(), inventory_winit::key(code))
+    /// Feeds a key or mouse button press to the inventory input through the
+    /// key bindings: the hotbar bindings swap the hovered slot, the drop
+    /// binding drops it (`GuiContainer.checkHotbarKeys`).
+    pub(super) fn inventory_key(&mut self, binding: Binding) {
+        let Some(key) = self
+            .options
+            .keys
+            .actions_for(binding)
+            .find_map(|action| match action {
+                Action::Drop => Some(InventoryKey::Drop),
+                other => other
+                    .hotbar_slot()
+                    .map(|slot| InventoryKey::Number(slot + 1)),
+            })
         else {
+            return;
+        };
+        let Some((layout, context)) = self.inventory_screen() else {
             return;
         };
         let action = self.inventory_input.key_pressed(&layout, key, context);
