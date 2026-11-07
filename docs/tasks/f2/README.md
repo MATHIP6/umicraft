@@ -1,6 +1,6 @@
 # F2 — Performance pass: audit and plan
 
-Status: **phase 0 done** (F2-0a to F2-0d); phases 1–5 planned. Decision: `docs/decisions/0058-f2-performance-plan.md`.
+Status: **phases 0, 1 and 2 done** (F2-2c deferred); phases 3–5 planned. Decision: `docs/decisions/0058-f2-performance-plan.md`.
 Roadmap entry: `ROADMAP.md` §6 (F2).
 
 The owner started F2 ahead of P13 (2026-11-07) for two reasons:
@@ -113,7 +113,7 @@ Optimisation steps also get a criterion benchmark or a scene measurement in
 |---|---|
 | F2-2a (**done**, ADR-0061) | The renderer tags each quad SOLID or CUTOUT from the texture's alpha. Two pipelines: SOLID without `discard`, drawn first; then CUTOUT. |
 | F2-2b (**done**) | Sort the visible opaque list near to far, reusing its buffer as the translucent sort does. |
-| F2-2c | Lightmap as a 16×16 `Rgba8Unorm` texture with a linear sampler, written per frame (parity check against `lightmap.rs`). |
+| F2-2c (**deferred**: at most 0.2 ms, see perf-log) | Lightmap as a 16×16 `Rgba8Unorm` texture with a linear sampler, written per frame (parity check against `lightmap.rs`). |
 | F2-2d (**done**) | One shared quad index buffer, grown on demand. Meshes upload vertices only. |
 
 ### Phase 3 — Sections (B3, B4, B5, C1); needs its own ADR
