@@ -617,6 +617,18 @@ fn the_title_style_button_toggles_the_option() {
 }
 
 #[test]
+fn the_title_style_button_spans_both_columns() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    frame(&mut screen, &mut options, vec![]);
+    let style = screen.rect_of("title_style").expect("title style button");
+    let fov = screen.rect_of("fov").expect("fov slider");
+    let difficulty = screen.rect_of("difficulty").expect("difficulty button");
+    assert_eq!(style.x, fov.x);
+    assert_eq!(style.x + style.width, difficulty.x + difficulty.width);
+}
+
+#[test]
 fn the_title_style_label_names_the_current_style() {
     let lang = Lang::from_texts("en_US", None, None)
         .with_client_layer(umicraft_assets::client_pack::lang("en_US"), None);

@@ -51,7 +51,8 @@ impl OptionsScreen {
         );
 
         // Umicraft's own option, in the free row between the sliders and the pages.
-        let style = gui.rect(left, h6 + 18.0, 2.0 * HALF_W, BUTTON_H);
+        // It spans both columns, gap included, so its edges line up with them.
+        let style = gui.rect(left, h6 + 18.0, right + HALF_W - left, BUTTON_H);
         let label = option_label(
             lang,
             "umicraft.options.titleStyle",
