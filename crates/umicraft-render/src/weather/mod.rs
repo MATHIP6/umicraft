@@ -127,7 +127,7 @@ impl WeatherRenderer {
         ticks: f64,
     ) {
         let input = FrameInput {
-            eye: camera.position.as_dvec3(),
+            eye: camera.eye(),
             strength: environment.rain_strength,
             fancy: self.fancy,
             ticks,

@@ -33,8 +33,6 @@ mod texture;
 
 use std::ops::Range;
 
-use glam::Mat4;
-
 use crate::sky::{self, SkyImage, SkyKind, SkyState};
 use crate::{Camera, RenderEnvironment};
 use geometry::FancyRanges;
@@ -210,14 +208,13 @@ impl CloudRenderer {
         if SkyKind::of(environment.dimension) != SkyKind::Overworld {
             return;
         }
-        let eye = camera.position.as_dvec3().to_array();
+        let eye = camera.eye().to_array();
         let Some(placement) = drift::placement(self.mode, eye, ticks) else {
             return;
         };
         let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
         let uniform = CloudUniform {
-            view_proj: (camera.view_projection() * Mat4::from_translation(camera.position))
-                .to_cols_array_2d(),
+            view_proj: camera.view_projection_around_eye().to_cols_array_2d(),
             shift: [
                 placement.shift[0],
                 placement.shift[1],

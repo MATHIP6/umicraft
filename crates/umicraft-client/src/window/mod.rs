@@ -769,7 +769,7 @@ impl App {
         world.update_camera(&mut self.camera, now, self.options.video.view_bobbing);
         self.audio.play_cues(&world.take_sounds());
         self.audio
-            .set_listener(listener_of(self.camera.position, self.camera.yaw));
+            .set_listener(listener_of(self.camera.position(), self.camera.yaw));
         let step = lifecycle_step(self.screen, world.placed(), world.ended());
         self.apply_lifecycle(step);
     }
@@ -1064,10 +1064,7 @@ impl App {
             let (_, spawn) = world.compass_world();
             DialInputs {
                 surface: environment.dimension == 0,
-                position: (
-                    f64::from(self.camera.position.x),
-                    f64::from(self.camera.position.z),
-                ),
+                position: (self.camera.eye().x, self.camera.eye().z),
                 // The camera yaw is the server yaw turned by half a circle.
                 yaw_degrees: f64::from((self.camera.yaw - std::f32::consts::PI).to_degrees()),
                 spawn: spawn.map(|(x, _, z)| (f64::from(x), f64::from(z))),
@@ -1207,7 +1204,7 @@ impl App {
             let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
-            entity_textures.set_camera_position(self.camera.position);
+            entity_textures.set_camera_position(self.camera.position());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
                     == umicraft_game::gamemode::GameMode::Spectator,
@@ -1228,7 +1225,7 @@ impl App {
                     seconds: (now - self.started).as_secs_f32(),
                     font: self.ui_atlas.as_ref(),
                     partial_tick: environment.partial_tick,
-                    camera: self.camera.position,
+                    camera: self.camera.position(),
                 },
             );
             let mut hand_item = None;

@@ -23,7 +23,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Instant;
 
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 use umicraft_mesh::{ChunkSnapshot, Mesh};
 use umicraft_render::{Camera, Overlay, RenderEnvironment, Renderer, GROUP_NAMES};
 use umicraft_world::{BlockState, ChunkColumn, ChunkPos};
@@ -239,7 +239,7 @@ struct Measurement {
 fn measure(
     renderer: &mut Renderer,
     args: &Args,
-    origin_block: Vec3,
+    origin_block: DVec3,
     frames: u32,
 ) -> Result<Measurement, ClientError> {
     let mut camera = Camera::default();
@@ -252,7 +252,7 @@ fn measure(
     };
     for frame in 0..WARMUP_FRAMES + frames {
         let pose = pose_at(frame.saturating_sub(WARMUP_FRAMES), frames);
-        camera.position = origin_block + pose.offset;
+        camera.set_eye(origin_block + pose.offset.as_dvec3());
         camera.yaw = pose.yaw;
         camera.pitch = pose.pitch;
         let start = Instant::now();
@@ -358,10 +358,10 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         renderer.upload_mesh(*pos, mesh);
     }
 
-    let origin_block = Vec3::new(
-        (origin.x * 16) as f32 + 8.0,
+    let origin_block = DVec3::new(
+        f64::from(origin.x * 16) + 8.0,
         0.0,
-        (origin.z * 16) as f32 + 8.0,
+        f64::from(origin.z * 16) + 8.0,
     );
     let measurement = measure(&mut renderer, args, origin_block, args.bench_frames)?;
     print!("{}", report(args, &facts, &measurement));

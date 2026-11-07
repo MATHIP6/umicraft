@@ -316,7 +316,6 @@ impl EntityStore {
         let alpha_f64 = f64::from(alpha.clamp(0.0, 1.0));
         let feet = record.previous_position.lerp(record.position, alpha_f64);
         let eye = feet + DVec3::Y * EYE_HEIGHT;
-        let eye = Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
         let lerp = |from: f32, to: f32| from + (to - from) * alpha.clamp(0.0, 1.0);
         Some(RenderState {
             position: eye,

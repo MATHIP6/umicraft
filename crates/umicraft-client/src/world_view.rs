@@ -229,7 +229,7 @@ impl WorldView {
         let Some(state) = self.view.sample(now) else {
             return;
         };
-        camera.position = state.position;
+        camera.set_eye(state.position);
         let (yaw, pitch) = camera_angles(&state);
         camera.yaw = yaw;
         camera.pitch = pitch;
@@ -868,12 +868,15 @@ impl View {
         // `orientCamera`: the interpolated eye plus the orbit of the current
         // angles. Interpolating the camera positions of two ticks instead
         // would drag the third-person camera behind its own angle.
-        let eye = previous.eye.lerp(current.eye, alpha);
+        // The eye is lerped in f64: casting it first would round it to the
+        // 6-12 cm grain of f32 around x = 1 000 000 (F2-1a). The orbit is a
+        // small offset, so f32 is exact enough for it.
+        let eye = previous.eye.lerp(current.eye, f64::from(alpha));
         let orbit = current
             .orbit_start
-            .lerp(current.position - current.eye, alpha);
+            .lerp((current.position - current.eye).as_vec3(), alpha);
         Some(RenderState {
-            position: eye + orbit,
+            position: eye + orbit.as_dvec3(),
             eye,
             orbit_start: current.orbit_start,
             yaw: current.yaw,
@@ -1148,8 +1151,8 @@ mod tests {
     fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Box<Frame> {
         Box::new(Frame {
             state: RenderState {
-                position,
-                eye: position,
+                position: position.as_dvec3(),
+                eye: position.as_dvec3(),
                 orbit_start: glam::Vec3::ZERO,
                 yaw: 0.0,
                 pitch: 0.0,
@@ -1259,9 +1262,9 @@ mod tests {
         let mut camera = Camera::default();
         harness.world_view.update_camera(&mut camera, halfway, true);
         assert!(
-            (camera.position.x - 1.0).abs() < 1e-4,
+            (camera.position().x - 1.0).abs() < 1e-4,
             "{}",
-            camera.position.x
+            camera.position().x
         );
         assert!((camera.yaw - (1.0 + std::f32::consts::PI)).abs() < 1e-4);
         assert!((harness.world_view.view.partial_tick(halfway) - 0.5).abs() < 1e-4);
@@ -1334,9 +1337,9 @@ mod tests {
             .update_camera(&mut camera, later + TICK / 2, true);
         // Halfway between the eyes of the two ticks the view knows, not 3.
         assert!(
-            (camera.position.x - 1.0).abs() < 1e-4,
+            (camera.position().x - 1.0).abs() < 1e-4,
             "{}",
-            camera.position.x
+            camera.position().x
         );
         assert!((camera.yaw - (0.5 + std::f32::consts::PI)).abs() < 1e-4);
     }
@@ -1348,11 +1351,11 @@ mod tests {
         let later = tick + TICK;
         // Tick 1: eye at the origin, camera 4 blocks behind it (south).
         let mut first = frame(glam::Vec3::ZERO, tick, 0);
-        first.state.position = glam::Vec3::new(0.0, 0.0, -4.0);
+        first.state.position = glam::DVec3::new(0.0, 0.0, -4.0);
         // Tick 2: eye 2 blocks east, the player turned and the camera is now
         // 4 blocks east of the eye.
         let mut second = frame(glam::Vec3::new(2.0, 0.0, 0.0), later, 0);
-        second.state.position = glam::Vec3::new(6.0, 0.0, 0.0);
+        second.state.position = glam::DVec3::new(6.0, 0.0, 0.0);
         second.state.orbit_start = glam::Vec3::new(4.0, 0.0, 0.0);
         for event in [RenderEvent::Frame(first), RenderEvent::Frame(second)] {
             harness.frames.0.send(event).expect("frame queue");
@@ -1368,9 +1371,9 @@ mod tests {
         // camera behind the turn.
         let expected = glam::Vec3::new(5.0, 0.0, 0.0);
         assert!(
-            (camera.position - expected).length() < 1e-4,
+            (camera.position() - expected).length() < 1e-4,
             "{}",
-            camera.position
+            camera.position()
         );
     }
 
@@ -1383,7 +1386,7 @@ mod tests {
         // The eye walks 1 block towards a wall behind it: the camera was 4
         // blocks back from the old eye and is only 1 back from the new one.
         let mut second = frame(glam::Vec3::new(0.0, 0.0, 1.0), later, 0);
-        second.state.position = glam::Vec3::new(0.0, 0.0, 0.0);
+        second.state.position = glam::DVec3::new(0.0, 0.0, 0.0);
         second.state.orbit_start = glam::Vec3::new(0.0, 0.0, -4.0);
         for event in [RenderEvent::Frame(first), RenderEvent::Frame(second)] {
             harness.frames.0.send(event).expect("frame queue");
@@ -1398,9 +1401,9 @@ mod tests {
             .world_view
             .update_camera(&mut camera, later + TICK / 2, true);
         assert!(
-            (camera.position.z - (0.5 - 2.5)).abs() < 1e-4,
+            (camera.position().z - (0.5 - 2.5)).abs() < 1e-4,
             "{}",
-            camera.position.z
+            camera.position().z
         );
     }
 
@@ -1441,7 +1444,7 @@ mod tests {
         harness
             .world_view
             .update_camera(&mut camera, tick + TICK * 2, true);
-        assert_eq!(camera.position, start);
+        assert_eq!(camera.position(), start);
         assert_eq!(
             harness
                 .world_view
@@ -1462,7 +1465,7 @@ mod tests {
 
         let halfway = later + TICK / 2;
         harness.world_view.update_camera(&mut camera, halfway, true);
-        assert!((camera.position.x - 1.0).abs() < 1e-3);
+        assert!((camera.position().x - 1.0).abs() < 1e-3);
         let environment = harness.world_view.environment(halfway, 12);
         assert!((environment.partial_tick - 0.5).abs() < 1e-3);
         assert_eq!(environment.world_time, -5_900);

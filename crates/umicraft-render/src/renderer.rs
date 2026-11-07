@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 use umicraft_mesh::item::ItemMesh;
 use umicraft_mesh::{Mesh, Vertex, TEXTURE_LAYERS};
 use umicraft_ui::menus::{PanoramaTextures, PanoramaView};
@@ -96,6 +96,8 @@ const HAND_FOG_FREE: f32 = 1.0e6;
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    /// The eye relative to `origin` (small), so the fog distance is computed
+    /// from two small numbers (F2-1c).
     camera_pos: [f32; 3],
     /// Sun-light factor from [`SkyState::sun_brightness`].
     sun_brightness: f32,
@@ -1284,16 +1286,17 @@ impl Renderer {
     /// both lists keep their capacity across frames.
     fn prepare_visible_chunks(&mut self, camera: &Camera) {
         umicraft_core::profile_scope!("prepare_visible_chunks");
-        let frustum = Frustum::from_view_projection(camera.view_projection());
-        let eye_chunk = ChunkPos::new(
-            (camera.position.x / 16.0).floor() as i32,
-            (camera.position.z / 16.0).floor() as i32,
-        );
+        // Boxes are made relative to the render origin in f64, so the frustum
+        // planes and the boxes stay precise far from the world origin (A5).
+        let origin = camera.render_origin();
+        let frustum = Frustum::from_view_projection(camera.view_projection_from(origin));
+        let eye = camera.eye();
+        let eye_chunk = ChunkPos::new((eye.x / 16.0).floor() as i32, (eye.z / 16.0).floor() as i32);
         let reach = i32::from(self.environment.view_distance);
         self.visible_opaque.clear();
         self.transparent_order.clear();
         for (pos, mesh) in &self.chunks {
-            if !chunk_is_visible(*pos, eye_chunk, reach, &frustum) {
+            if !chunk_is_visible(*pos, eye_chunk, reach, &frustum, origin) {
                 continue;
             }
             if mesh.opaque.is_some() {
@@ -1302,7 +1305,7 @@ impl Renderer {
             if mesh.transparent.is_some() {
                 self.transparent_order.push(TransparentDraw {
                     pos: *pos,
-                    distance_sq: squared_distance_to_chunk(*pos, camera.position),
+                    distance_sq: squared_distance_to_chunk(*pos, eye),
                 });
             }
         }
@@ -2110,10 +2113,10 @@ impl Renderer {
 
     fn write_camera(&self, camera: &Camera, sky: &SkyState, flicker: f32) {
         let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
-        let origin = camera.position.floor();
+        let origin = camera.render_origin();
         let uniform = CameraUniform {
             view_proj: camera.view_projection_from(origin).to_cols_array_2d(),
-            camera_pos: camera.position.to_array(),
+            camera_pos: camera.relative_eye().to_array(),
             sun_brightness: sky.sun_brightness,
             fog_color: sky.fog.color,
             fog_start,
@@ -2121,7 +2124,7 @@ impl Renderer {
             gamma: self.environment.gamma,
             fog_density,
             _pad: 0.0,
-            origin: origin.to_array(),
+            origin: origin.as_vec3().to_array(),
             _pad_origin: 0.0,
             lightmap: lightmap::colors(&LightmapParams::of(
                 &self.environment,
@@ -2837,24 +2840,35 @@ pub(crate) fn draw_gpu_pass_buffers(
 
 /// The chunk centre used for transparent sorting: the middle of the 16×16
 /// column at the cloud/terrain reference height of y = 128.
-fn chunk_centre(pos: ChunkPos) -> Vec3 {
-    Vec3::new(pos.x as f32 * 16.0 + 8.0, 128.0, pos.z as f32 * 16.0 + 8.0)
+fn chunk_centre(pos: ChunkPos) -> DVec3 {
+    DVec3::new(
+        f64::from(pos.x) * 16.0 + 8.0,
+        128.0,
+        f64::from(pos.z) * 16.0 + 8.0,
+    )
 }
 
 /// True when the column is within `reach` chunks of the eye (a square, like
 /// the reference's `renderDistanceChunks`) and its bounding box touches the
-/// frustum.
-fn chunk_is_visible(pos: ChunkPos, eye: ChunkPos, reach: i32, frustum: &Frustum) -> bool {
+/// frustum. `frustum` and the box are relative to `origin`.
+fn chunk_is_visible(
+    pos: ChunkPos,
+    eye: ChunkPos,
+    reach: i32,
+    frustum: &Frustum,
+    origin: DVec3,
+) -> bool {
     if (pos.x - eye.x).abs() > reach || (pos.z - eye.z).abs() > reach {
         return false;
     }
-    let min = Vec3::new(pos.x as f32 * 16.0, 0.0, pos.z as f32 * 16.0);
+    let min = DVec3::new(f64::from(pos.x) * 16.0, 0.0, f64::from(pos.z) * 16.0) - origin;
+    let min = min.as_vec3();
     frustum.intersects_aabb(min, min + Vec3::new(16.0, 256.0, 16.0))
 }
 
 /// Squared camera-to-chunk-centre distance; avoids a square root per chunk.
-fn squared_distance_to_chunk(pos: ChunkPos, camera_position: Vec3) -> f32 {
-    chunk_centre(pos).distance_squared(camera_position)
+fn squared_distance_to_chunk(pos: ChunkPos, eye: DVec3) -> f32 {
+    chunk_centre(pos).distance_squared(eye) as f32
 }
 
 /// Orders transparent chunks farthest first, with `ChunkPos` as the
@@ -3028,7 +3042,7 @@ mod tests {
 
     #[test]
     fn transparent_sort_is_farthest_first() {
-        let camera = Vec3::ZERO;
+        let camera = DVec3::ZERO;
         let mut chunks = vec![
             TransparentDraw {
                 pos: ChunkPos::new(0, 0),
@@ -3094,7 +3108,7 @@ mod tests {
     fn chunk_centre_is_the_column_middle() {
         assert_eq!(
             chunk_centre(ChunkPos::new(-1, 2)),
-            Vec3::new(-8.0, 128.0, 40.0)
+            DVec3::new(-8.0, 128.0, 40.0)
         );
     }
 

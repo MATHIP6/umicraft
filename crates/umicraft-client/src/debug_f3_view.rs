@@ -232,7 +232,7 @@ mod tests {
     fn the_feet_come_from_the_game_not_from_the_camera() {
         // A sneaking player's eye is not 1.62 above the feet.
         let mut camera = Camera::default();
-        camera.position = glam::Vec3::new(1.5, 65.27, -2.0);
+        camera.set_position(glam::Vec3::new(1.5, 65.27, -2.0));
         let world = DebugWorld {
             feet: [1.5, 64.0, -2.0],
             ..DebugWorld::default()

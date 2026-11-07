@@ -95,9 +95,9 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 RenderEvent::Frame(frame) => {
                     report.ticks = report.status.ticks.max(1);
                     report.position = (
-                        f64::from(frame.state.position.x),
-                        f64::from(frame.state.position.y),
-                        f64::from(frame.state.position.z),
+                        frame.state.position.x,
+                        frame.state.position.y,
+                        frame.state.position.z,
                     );
                     // The chat line goes out once the player is placed.
                     if let (Some(message), false) = (args.chat.as_ref(), chat_sent) {

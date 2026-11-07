@@ -1316,6 +1316,8 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     let Some((view, first_person)) = player_view(game) else {
         return;
     };
+    // Entity frames are f32 until F2-1b; only the camera is f64 so far.
+    let view_eye = view.position.as_vec3();
     let mut entities = game.entities.frame_data();
     if let Some(vehicle) = game.vehicle {
         for frame in &mut entities {
@@ -1330,7 +1332,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     if first_person && !game.perspective.shows_player() {
         let body = game.body.frame_data();
         let tip = first_person_tip(
-            view.position - Vec3::Y * umicraft_game::physics::EYE_HEIGHT as f32,
+            view_eye - Vec3::Y * umicraft_game::physics::EYE_HEIGHT as f32,
             game.yaw.to_degrees(),
             game.pitch.to_degrees(),
             game.body.animation.swing_progress_at(1.0),
@@ -1348,8 +1350,8 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     // first person.
     let eye_height = umicraft_game::physics::EYE_HEIGHT as f32;
     let me = LeashFrame {
-        prev_position: view.position - Vec3::Y * eye_height,
-        position: view.position - Vec3::Y * eye_height,
+        prev_position: view_eye - Vec3::Y * eye_height,
+        position: view_eye - Vec3::Y * eye_height,
         prev_yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
         yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
         prev_pitch: (-view.pitch).to_degrees(),
@@ -1363,7 +1365,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         light_entities(world, &mut entities);
         light_paintings(world, &mut entities);
         shadow_entities(world, &mut entities, game.world_time);
-        eye_light(world, view.position)
+        eye_light(world, view_eye)
     });
     let _ = frames.try_send(RenderEvent::Frame(Box::new(Frame {
         state: view,
@@ -1382,11 +1384,11 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         moving_blocks: Arc::new(game.server.moving_blocks().clone()),
         block_entity_data: game.server.block_entities().entity_table(),
         signs: game.server.block_entities().sign_table(),
-        sky_temperature: sky_temperature(game, view.position),
+        sky_temperature: sky_temperature(game, view_eye),
         fog: fog_context(
             game.world.as_ref(),
             game.server.effects(),
-            view.position,
+            view_eye,
             game.dimension,
             game.world_time,
         ),
@@ -1445,7 +1447,7 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
     let Some(world) = game.world.as_ref() else {
         return first_person;
     };
-    let eye = first_person.position.as_dvec3();
+    let eye = first_person.position;
     let pose = camera_pose(game.perspective, eye, game.yaw, game.pitch, world);
     // The same angles from the eye of the previous tick: the wall rays of
     // `orientCamera` start from the interpolated eye every frame, so the
@@ -1453,10 +1455,10 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
     let start = game
         .state
         .as_ref()
-        .map_or(eye, |state| state.interpolated(0.0).position.as_dvec3());
+        .map_or(eye, |state| state.interpolated(0.0).position);
     let start_pose = camera_pose(game.perspective, start, game.yaw, game.pitch, world);
     RenderState {
-        position: pose.position.as_vec3(),
+        position: pose.position,
         eye: first_person.position,
         orbit_start: (start_pose.position - start).as_vec3(),
         yaw: pose.yaw,

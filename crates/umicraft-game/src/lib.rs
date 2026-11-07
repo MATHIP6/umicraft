@@ -141,14 +141,14 @@ impl ServerCorrection {
 /// What the renderer needs: plain data, no game types.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderState {
-    /// The camera position in world space: the eye in the first person, the
+    /// The camera position in world space, in f64: the eye in the first person, the
     /// orbit around it in the third.
-    pub position: Vec3,
+    pub position: DVec3,
     /// The eye position the third-person camera orbits, equal to `position`
     /// in the first person. The renderer interpolates it between ticks and
     /// adds the orbit offset of the newest look, as `EntityRenderer.orientCamera`
     /// places the camera from the interpolated eye and the current angles.
-    pub eye: Vec3,
+    pub eye: DVec3,
     /// The orbit offset (camera minus eye) the same angles give from the eye
     /// of the previous tick. The offset from the current eye is
     /// `position - eye`; the renderer blends the two over the tick, which
@@ -381,8 +381,8 @@ impl GameState {
         } else {
             physics::EYE_HEIGHT
         };
+        // Stays f64: the renderer subtracts its origin before any cast (F2-1a).
         let eye = feet + DVec3::Y * eye_height;
-        let eye = Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
         RenderState {
             position: eye,
             eye,
@@ -791,6 +791,6 @@ mod tests {
         let middle = state.interpolated(0.5).position;
         assert!((middle.z - (previous.z + current.z) / 2.0).abs() < 1e-5);
         // The eye sits 1.62 above the feet.
-        assert!((current.y - (1.0 + physics::EYE_HEIGHT) as f32).abs() < 1e-5);
+        assert!((current.y - (1.0 + physics::EYE_HEIGHT)).abs() < 1e-9);
     }
 }

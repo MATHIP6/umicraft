@@ -37,8 +37,6 @@ mod vertex;
 
 use std::ops::Range;
 
-use glam::Mat4;
-
 use crate::{Camera, RenderEnvironment};
 use plan::{Blend, Layer, Mesh, PlanInput, MAX_LAYERS};
 
@@ -268,8 +266,8 @@ impl SkyRenderer {
             state,
             // The camera matrix without the eye translation: the sky is
             // drawn around the eye, so it never parallaxes.
-            view_proj: camera.view_projection() * Mat4::from_translation(camera.position),
-            eye_y: camera.position.y,
+            view_proj: camera.view_projection_around_eye(),
+            eye_y: camera.eye().y as f32,
         };
         plan::build(&mut self.layers, &input);
 
