@@ -265,3 +265,41 @@ fn a_rejected_block_atlas_keeps_the_fallback_array_bound() {
         "a rejected upload must leave the fallback frame untouched"
     );
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn brand_text_and_rounded_rects_render_through_their_own_pipelines() {
+    use umicraft_ui::brand_font::{rasterize, BRAND_PIXEL_SIZE};
+    use umicraft_ui::FontFace;
+
+    let ttf = include_bytes!("../../umicraft-assets/client-pack/umicraft/font/Inter-SemiBold.ttf");
+    let brand = rasterize(ttf, BRAND_PIXEL_SIZE).expect("brand font");
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    let mut camera = Camera::default();
+    camera.set_aspect(WIDTH, HEIGHT);
+    let hud = Overlay::new(WIDTH, HEIGHT);
+
+    let mut list = DrawList::new();
+    list.rounded_rect(Rect::new(8.0, 8.0, 100.0, 40.0), 12.0, [0.9, 0.2, 0.2, 1.0]);
+    let style = TextStyle::new(24.0 / BRAND_PIXEL_SIZE, [1.0; 4]).with_face(FontFace::Brand);
+    list.text([16.0, 14.0], "Umicraft", style);
+
+    // Without the brand font the text falls back to the game font.
+    renderer
+        .render_with_ui(&camera, &hud, &list, &mut NoIcons)
+        .expect("render without brand font");
+    let fallback = renderer.read_pixels().expect("read fallback");
+
+    renderer.set_brand_font(&brand).expect("upload brand font");
+    renderer
+        .render_with_ui(&camera, &hud, &list, &mut NoIcons)
+        .expect("render with brand font");
+    let smooth = renderer.read_pixels().expect("read brand");
+    assert_ne!(smooth.rgba, fallback.rgba, "the brand face must be drawn");
+
+    // The rounded corner leaves the background visible; the body is the fill.
+    let corner = pixel(&smooth, 8, 8);
+    assert!(corner[0] < 200 && corner[2] > 200, "corner {corner:?}");
+    let body = pixel(&smooth, 60, 46);
+    assert!(body[0] >= 225 && body[1] <= 55, "body {body:?}");
+}
