@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The title screen (MCP `GuiMainMenu`).
+//! The classic title screen (MCP `GuiMainMenu`).
 //!
 //! Layout in GUI units, `cx = width / 2`, `j = height / 4 + 48`:
 //! - Singleplayer `(cx - 100, j)` 200x20 (disabled: Umicraft only plays on
@@ -26,8 +26,8 @@ use crate::geom::Rect;
 use crate::text::FontAtlas;
 use crate::widgets::style;
 
-use super::common::{Gui, TextPlacement, WHITE};
-use super::panorama::{PanoramaBackground, PanoramaTextures, PanoramaView};
+use crate::menus::common::{Gui, TextPlacement, WHITE};
+use crate::menus::panorama::{PanoramaBackground, PanoramaTextures, PanoramaView};
 
 /// The product name drawn as the logo.
 pub const LOGO_TEXT: &str = "Umicraft";
