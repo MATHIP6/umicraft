@@ -33,8 +33,10 @@ pub(crate) fn load(code: &str) -> Lang {
     } else {
         Lang::DEFAULT_CODE
     };
-    Lang::from_texts(code, english.as_deref(), selected.as_deref())
-        .with_client_layer(client_pack::lang(Lang::DEFAULT_CODE), client_pack::lang(code))
+    Lang::from_texts(code, english.as_deref(), selected.as_deref()).with_client_layer(
+        client_pack::lang(Lang::DEFAULT_CODE),
+        client_pack::lang(code),
+    )
 }
 
 /// The offline fallback with Umicraft's own English texts, so the client's

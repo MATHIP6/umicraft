@@ -42,6 +42,7 @@ fn options_survive_a_restart() {
     options.chat.colors = false;
     options.language.code = "de_DE".to_string();
     options.multiplayer.last_server = "play.example.net:25570".to_string();
+    options.menu.title_style = TitleStyleSetting::Classic;
     options.save(&path).unwrap();
 
     let loaded = Options::load(&path);
@@ -214,5 +215,20 @@ fn the_sound_section_keeps_its_file_format() {
         assert!(text.contains(&format!("{field} = ")), "{field} in {text}");
     }
     assert_eq!(Options::load(&path).sound, loaded.sound);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn the_title_style_lives_in_the_menu_section() {
+    let folder = temp_folder("menu");
+    let path = folder.join(FILE_NAME);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(&path, "[menu]\ntitle_style = \"classic\"\n").unwrap();
+    assert_eq!(
+        Options::load(&path).menu.title_style,
+        TitleStyleSetting::Classic
+    );
+    std::fs::write(&path, "[video]\nfov = 80.0\n").unwrap();
+    assert_eq!(Options::load(&path).menu, MenuOptions::default());
     let _ = std::fs::remove_dir_all(&folder);
 }
