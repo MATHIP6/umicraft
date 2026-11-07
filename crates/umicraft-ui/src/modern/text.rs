@@ -15,6 +15,8 @@ pub enum Align {
     Left,
     /// `x` is the centre.
     Center,
+    /// `x` is the right edge.
+    Right,
 }
 
 /// The brand-face style for text whose em is `size_px` physical pixels.
@@ -44,6 +46,7 @@ pub fn draw_text(
     let left = match align {
         Align::Left => x,
         Align::Center => x - measure_text(brand, text, size_px) * 0.5,
+        Align::Right => x - measure_text(brand, text, size_px),
     };
     let top = y - brand.line_height(style.scale) * 0.5;
     ui.draw().text([left, top], text, style);

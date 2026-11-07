@@ -200,3 +200,22 @@ fn centered_text_straddles_its_anchor() {
         DrawCommand::Text { position, .. } if (position[0] - (200.0 - width * 0.5)).abs() < 1e-3
     ));
 }
+
+#[test]
+fn right_aligned_text_ends_at_its_anchor() {
+    let atlas = FontAtlas::fallback();
+    let (_, commands) = frame(UiInput::default(), |ui| {
+        draw_text(
+            ui,
+            &atlas,
+            "Umicraft",
+            (200.0, 50.0),
+            (24.0, theme::TEXT, Align::Right),
+        );
+    });
+    let width = measure_text(&atlas, "Umicraft", 24.0);
+    assert!(matches!(
+        commands[0],
+        DrawCommand::Text { position, .. } if (position[0] - (200.0 - width)).abs() < 1e-3
+    ));
+}

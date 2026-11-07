@@ -28,7 +28,7 @@ use umicraft_render::{
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
 use umicraft_ui::menus::{
-    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab,
+    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab, TitleStyle,
 };
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
@@ -348,6 +348,8 @@ fn menu_scene(
         player_hash: 0,
         stats: &stats,
         panorama,
+        title_style: TitleStyle::Classic,
+        brand_font: atlas,
     };
     if let Some(tab) = match view {
         "stats-blocks" => Some(StatsTab::Blocks),

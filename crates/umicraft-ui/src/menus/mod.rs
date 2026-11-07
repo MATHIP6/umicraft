@@ -55,6 +55,6 @@ pub use stats::{
     StatsScreen, StatsTab,
 };
 pub use title::{
-    title_layout, TitleInfo, TitleLayout, TitleOutcome, TitleScreen, TitleStyle, LOGO_TEXT,
-    SPLASHES,
+    modern_title_layout, title_layout, ModernTitleLayout, TitleInfo, TitleLayout, TitleOutcome,
+    TitleScreen, TitleStyle, LOGO_TEXT, SPLASHES, WORDMARK,
 };

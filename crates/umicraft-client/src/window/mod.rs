@@ -22,7 +22,7 @@ use umicraft_render::{
     RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
-use umicraft_ui::menus::{ConnectStage, PanoramaTextures};
+use umicraft_ui::menus::{ConnectStage, PanoramaTextures, TitleStyle};
 use umicraft_ui::widgets::{death_screen, DeathAction, BUTTON_DELAY_TICKS};
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, SlotItem, Ui, UiOutput};
 use winit::application::ApplicationHandler;
@@ -985,6 +985,8 @@ impl App {
                             .map_or(ConnectStage::Connecting, WorldView::connect_stage),
                         stats,
                         panorama: self.panorama,
+                        title_style: TitleStyle::Classic,
+                        brand_font: atlas,
                     };
                     let shown = self
                         .menu

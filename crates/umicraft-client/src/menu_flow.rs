@@ -23,7 +23,7 @@ use umicraft_ui::menus::{
     ConnectStage, ConnectingOutcome, ConnectingScreen, DisconnectedOutcome, DisconnectedScreen,
     PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome, ServerEditScreen,
     ServerListOutcome, ServerListScreen, ServerRow, StatsData, StatsOutcome, StatsScreen,
-    TitleInfo, TitleOutcome, TitleScreen,
+    TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
 };
 use umicraft_ui::{FontAtlas, Ui};
 
@@ -76,6 +76,10 @@ pub struct MenuContext<'a> {
     pub player_hash: i32,
     /// The uploaded panorama faces, when the user's assets provide them.
     pub panorama: Option<PanoramaTextures>,
+    /// The title screen the options select (ADR-0056).
+    pub title_style: TitleStyle,
+    /// The brand atlas the renderer draws `FontFace::Brand` with.
+    pub brand_font: &'a FontAtlas,
 }
 
 /// The result of one menu frame.
@@ -257,6 +261,8 @@ impl MenuFlow {
             version: context.version,
             panorama: context.panorama,
             partial_tick: self.partial_tick(),
+            style: context.title_style,
+            brand_font: context.brand_font,
         };
         let (outcome, view) = self.title.show(ui, atlas, lang, &info);
         *panorama = view;
