@@ -376,6 +376,14 @@ impl UiPass {
                     );
                     self.push_rounded_rect(*rect, *radius, *color, atlas);
                 }
+                DrawCommand::VerticalGradient { rect, top, bottom } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Font,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_vertical_gradient(*rect, [*top, *bottom], atlas);
+                }
                 DrawCommand::Text {
                     position,
                     text,
@@ -463,6 +471,35 @@ impl UiPass {
             uv,
             uv,
             color,
+        );
+    }
+
+    /// Two triangles whose corner colours interpolate `colors` (top, bottom)
+    /// at the clipped edges, so a clipped gradient keeps its slope.
+    fn push_vertical_gradient(&mut self, rect: Rect, colors: [[f32; 4]; 2], atlas: &FontAtlas) {
+        let (Some(full), Some(clip)) = (drawable(rect), self.clip) else {
+            return;
+        };
+        let Some(visible) = full.intersect(clip) else {
+            return;
+        };
+        let at = |y: f32| -> [f32; 4] {
+            let t = (y - full.y) / full.height;
+            std::array::from_fn(|i| colors[0][i] + (colors[1][i] - colors[0][i]) * t)
+        };
+        let (top, bottom) = (visible.y, visible.y + visible.height);
+        let (left, right) = (visible.x, visible.x + visible.width);
+        let (upper, lower) = (at(top), at(bottom));
+        let uv = white_texel_uv(atlas);
+        self.overlay.push_triangle(
+            [[left, top], [right, top], [right, bottom]],
+            uv,
+            [upper, upper, lower],
+        );
+        self.overlay.push_triangle(
+            [[left, top], [right, bottom], [left, bottom]],
+            uv,
+            [upper, lower, lower],
         );
     }
 
@@ -1441,6 +1478,51 @@ mod tests {
             .vertices()
             .iter()
             .all(|v| v.position.iter().all(|c| c.is_finite())));
+    }
+
+    fn gradient_pass(clip: Option<Rect>) -> UiPass {
+        let mut list = DrawList::new();
+        if let Some(clip) = clip {
+            list.push_clip(clip);
+        }
+        let top = [1.0, 0.0, 0.0, 1.0];
+        let bottom = [0.0, 0.0, 1.0, 0.0];
+        list.vertical_gradient(Rect::new(0.0, 0.0, 10.0, 100.0), top, bottom);
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+        pass
+    }
+
+    #[test]
+    fn a_vertical_gradient_is_two_triangles_with_the_edge_colours() {
+        let pass = gradient_pass(None);
+        let vertices = pass.vertices();
+        assert_eq!(vertices.len(), 6);
+        for vertex in vertices {
+            let expected = if vertex.position[1] > 0.0 {
+                [1.0, 0.0, 0.0, 1.0]
+            } else {
+                [0.0, 0.0, 1.0, 0.0]
+            };
+            assert_eq!(vertex.color, expected);
+        }
+    }
+
+    #[test]
+    fn a_clipped_gradient_keeps_its_slope() {
+        let pass = gradient_pass(Some(Rect::new(0.0, 25.0, 100.0, 50.0)));
+        let top = pass
+            .vertices()
+            .iter()
+            .find(|vertex| vertex.position == ndc(0.0, 25.0))
+            .map(|vertex| vertex.color);
+        assert_eq!(top, Some([0.75, 0.0, 0.25, 0.75]));
+    }
+
+    #[test]
+    fn a_gradient_outside_the_clip_draws_nothing() {
+        let pass = gradient_pass(Some(Rect::new(50.0, 0.0, 10.0, 10.0)));
+        assert!(pass.vertices().is_empty());
     }
 
     fn ndc(x: f32, y: f32) -> [f32; 2] {

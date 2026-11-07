@@ -8,8 +8,6 @@ use crate::geom::Rect;
 
 use super::theme::{RADIUS, SURFACE, VIGNETTE};
 
-/// Bands per vignette gradient; the draw list has no gradient primitive.
-const VIGNETTE_BANDS: u32 = 8;
 /// Share of the screen height the top gradient covers.
 const TOP_SHARE: f32 = 0.3;
 /// Share of the screen height the bottom gradient covers.
@@ -25,7 +23,7 @@ pub fn panel(ui: &mut Ui, rect: Rect, scale: f32) {
 }
 
 /// Darkens `viewport` for the panorama: a light uniform tint, plus darker
-/// bands fading out from the top and the bottom edges.
+/// gradients fading out from the top and the bottom edges.
 pub fn vignette(ui: &mut Ui, viewport: Rect) {
     ui.draw().rect(viewport, strength(BASE_STRENGTH));
     let top = Rect::new(
@@ -34,7 +32,8 @@ pub fn vignette(ui: &mut Ui, viewport: Rect) {
         viewport.width,
         viewport.height * TOP_SHARE,
     );
-    fade_band(ui, top, true);
+    ui.draw()
+        .vertical_gradient(top, strength(EDGE_STRENGTH), strength(0.0));
     let height = viewport.height * BOTTOM_SHARE;
     let bottom = Rect::new(
         viewport.x,
@@ -42,7 +41,8 @@ pub fn vignette(ui: &mut Ui, viewport: Rect) {
         viewport.width,
         height,
     );
-    fade_band(ui, bottom, false);
+    ui.draw()
+        .vertical_gradient(bottom, strength(0.0), strength(EDGE_STRENGTH));
 }
 
 /// The vignette colour at `fraction` of its strength.
@@ -53,20 +53,4 @@ fn strength(fraction: f32) -> Color {
         VIGNETTE[2],
         VIGNETTE[3] * fraction,
     ]
-}
-
-/// Stacks bands inside `area` that are darkest at its top (`dark_at_top`) or
-/// bottom edge.
-fn fade_band(ui: &mut Ui, area: Rect, dark_at_top: bool) {
-    let band = area.height / VIGNETTE_BANDS as f32;
-    for index in 0..VIGNETTE_BANDS {
-        let from_edge = if dark_at_top {
-            index
-        } else {
-            VIGNETTE_BANDS - 1 - index
-        };
-        let fraction = 1.0 - from_edge as f32 / VIGNETTE_BANDS as f32;
-        let rect = Rect::new(area.x, area.y + index as f32 * band, area.width, band);
-        ui.draw().rect(rect, strength(fraction * EDGE_STRENGTH));
-    }
 }

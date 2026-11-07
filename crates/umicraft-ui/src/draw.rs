@@ -158,6 +158,18 @@ pub enum DrawCommand {
         /// Straight-alpha RGBA colour.
         color: Color,
     },
+    /// Fill a rectangle with a vertical gradient from `top` to `bottom`.
+    ///
+    /// The renderer interpolates the colours per vertex, so the gradient has
+    /// no bands (`Gui.drawGradientRect` shades the same way).
+    VerticalGradient {
+        /// Rectangle to fill, in physical pixels.
+        rect: Rect,
+        /// Straight-alpha RGBA colour of the top edge.
+        top: Color,
+        /// Straight-alpha RGBA colour of the bottom edge.
+        bottom: Color,
+    },
     /// Draw one line of text at `position` (top-left of the first glyph).
     Text {
         /// Top-left position of the text run.
@@ -290,6 +302,12 @@ impl DrawList {
         });
     }
 
+    /// Appends a rectangle shaded from `top` to `bottom`.
+    pub fn vertical_gradient(&mut self, rect: Rect, top: Color, bottom: Color) {
+        self.commands
+            .push(DrawCommand::VerticalGradient { rect, top, bottom });
+    }
+
     /// Appends a text run.
     pub fn text(&mut self, position: [f32; 2], text: impl Into<String>, style: TextStyle) {
         self.commands.push(DrawCommand::Text {
@@ -376,6 +394,21 @@ mod tests {
         assert_eq!(list.len(), 4);
         assert!(matches!(list.commands()[0], DrawCommand::PushClip { .. }));
         assert!(matches!(list.commands()[3], DrawCommand::PopClip));
+    }
+
+    #[test]
+    fn vertical_gradient_appends_its_command() {
+        let mut list = DrawList::new();
+        let rect = Rect::new(0.0, 0.0, 4.0, 8.0);
+        list.vertical_gradient(rect, [1.0; 4], [0.0; 4]);
+        assert_eq!(
+            list.commands(),
+            [DrawCommand::VerticalGradient {
+                rect,
+                top: [1.0; 4],
+                bottom: [0.0; 4]
+            }]
+        );
     }
 
     #[test]

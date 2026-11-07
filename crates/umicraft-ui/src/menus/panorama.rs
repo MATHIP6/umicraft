@@ -15,7 +15,6 @@
 //! renderer draws the cube once. The rotation is exact.
 
 use super::background::draw_menu_background;
-use super::common::gradient;
 use crate::context::Ui;
 
 /// The vertical field of view of the panorama camera in degrees.
@@ -126,8 +125,9 @@ impl PanoramaBackground {
             return None;
         };
         let viewport = ui.viewport();
-        gradient(ui, viewport, [1.0, 1.0, 1.0, 0.5], [1.0, 1.0, 1.0, 0.0]);
-        gradient(ui, viewport, [0.0; 4], [0.0, 0.0, 0.0, 0.5]);
+        let draw = ui.draw();
+        draw.vertical_gradient(viewport, [1.0, 1.0, 1.0, 0.5], [1.0, 1.0, 1.0, 0.0]);
+        draw.vertical_gradient(viewport, [0.0; 4], [0.0, 0.0, 0.0, 0.5]);
         Some(PanoramaView {
             textures,
             rotation: self.rotation(partial_tick),

@@ -135,7 +135,7 @@ options:
   --help, -h          print this help";
 
 /// The scenes of `--hud-demo`.
-pub const HUD_VIEWS: [&str; 21] = [
+pub const HUD_VIEWS: [&str; 22] = [
     "overview",
     "tab",
     "chat",
@@ -149,6 +149,7 @@ pub const HUD_VIEWS: [&str; 21] = [
     "language",
     "packs",
     "title",
+    "title-modern",
     "servers",
     "server-edit",
     "connecting",
