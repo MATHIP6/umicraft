@@ -63,11 +63,13 @@ pub struct HandState {
     swing_ticks_done: i32,
     swing_progress: f32,
     previous_swing_progress: f32,
-    sway_pitch: f32,
-    sway_yaw: f32,
+    /// `EntityPlayerSP.renderArmPitch` and `renderArmYaw`, in degrees. The yaw
+    /// is continuous: it keeps counting past a full turn like `rotationYaw`.
+    arm_pitch: f32,
+    arm_yaw: f32,
+    /// The view as of the last tick, the yaw continuous with `arm_yaw`.
     view_pitch: f32,
-    pitch_delta: f32,
-    yaw_delta: f32,
+    view_yaw: f32,
 }
 
 impl HandState {
@@ -97,12 +99,13 @@ impl HandState {
     pub fn tick(&mut self, held: Option<&ItemStack>, yaw: f32, pitch: f32, effects: SwingEffects) {
         self.tick_swing(effects);
         self.tick_equip(held);
-        // MCP `EntityPlayerSP.updateEntityActionState`.
+        // MCP `EntityPlayerSP.onLivingUpdate`. The yaw of the caller is wrapped
+        // to one turn; vanilla's `rotationYaw` is not, so the difference to the
+        // arm would jump by 360 when the view crosses north.
         self.view_pitch = pitch;
-        self.sway_pitch += (pitch - self.sway_pitch) * SWAY_SMOOTHING;
-        self.sway_yaw += (yaw - self.sway_yaw) * SWAY_SMOOTHING;
-        self.pitch_delta = (pitch - self.sway_pitch) * SWAY_SCALE;
-        self.yaw_delta = (yaw - self.sway_yaw) * SWAY_SCALE;
+        self.view_yaw += wrap_degrees(yaw - self.view_yaw);
+        self.arm_pitch += (pitch - self.arm_pitch) * SWAY_SMOOTHING;
+        self.arm_yaw += (self.view_yaw - self.arm_yaw) * SWAY_SMOOTHING;
     }
 
     /// MCP `EntityLivingBase.updateArmSwingProgress`.
@@ -157,11 +160,12 @@ impl HandState {
             // rule of `getSwingProgress` between two ticks, and a value already
             // pushed past 1 would make a restarted swing run backwards.
             swing: self.swing_progress,
-            sway_pitch: self.pitch_delta,
-            sway_yaw: self.yaw_delta,
-            view_pitch: self.view_pitch,
+            arm_pitch: self.arm_pitch,
+            arm_yaw: self.arm_yaw,
             item_use: None,
+            ..HandPose::default()
         }
+        .swayed_by(self.view_yaw, self.view_pitch)
     }
 }
 
@@ -178,6 +182,11 @@ pub struct HandPose {
     pub equip: f32,
     /// The swing progress, `0` at rest to `1` at the end of a swing.
     pub swing: f32,
+    /// `renderArmPitch` and `renderArmYaw` of the tick, in degrees; the yaw is
+    /// continuous. [`Self::swayed_by`] turns them into the sway of a frame.
+    pub arm_pitch: f32,
+    /// See [`Self::arm_pitch`].
+    pub arm_yaw: f32,
     /// The pitch sway of the arm in degrees.
     pub sway_pitch: f32,
     /// The yaw sway of the arm in degrees.
@@ -188,7 +197,27 @@ pub struct HandPose {
     pub item_use: Option<ItemUseView>,
 }
 
+/// An angle in degrees brought to `-180..180`.
+fn wrap_degrees(angle: f32) -> f32 {
+    (angle + 180.0).rem_euclid(360.0) - 180.0
+}
+
 impl HandPose {
+    /// The pose with the sway of the view as it is at this frame (MCP
+    /// `ItemRenderer.func_178110_a`): the arm angles of the tick are
+    /// interpolated, but the view is the live one, so the hand follows the
+    /// mouse between two ticks instead of stepping at 20 Hz. `yaw` and
+    /// `pitch` are the game's view angles in degrees.
+    #[must_use]
+    pub fn swayed_by(self, yaw: f32, pitch: f32) -> Self {
+        Self {
+            sway_pitch: (pitch - self.arm_pitch) * SWAY_SCALE,
+            sway_yaw: wrap_degrees(yaw - self.arm_yaw) * SWAY_SCALE,
+            view_pitch: pitch,
+            ..self
+        }
+    }
+
     /// The blend of the poses of two frames.
     ///
     /// A swing that wrapped from the end back to 0 counts as 1, like MCP
@@ -206,6 +235,8 @@ impl HandPose {
             shows_arm: other.shows_arm,
             equip: mix(self.equip, other.equip),
             swing: mix(self.swing, swing_end),
+            arm_pitch: mix(self.arm_pitch, other.arm_pitch),
+            arm_yaw: mix(self.arm_yaw, other.arm_yaw),
             sway_pitch: mix(self.sway_pitch, other.sway_pitch),
             sway_yaw: mix(self.sway_yaw, other.sway_yaw),
             view_pitch: mix(self.view_pitch, other.view_pitch),
@@ -537,6 +568,38 @@ mod tests {
             hand.tick(None, 90.0, 0.0, idle());
         }
         assert!(hand.pose().sway_yaw.abs() < 0.01);
+    }
+
+    #[test]
+    fn turning_across_north_does_not_throw_the_arm() {
+        let mut hand = HandState::new();
+        // Settle at 350 degrees, then turn through 0 to 10 in one tick.
+        for _ in 0..30 {
+            hand.tick(None, 350.0, 0.0, idle());
+        }
+        hand.tick(None, 10.0, 0.0, idle());
+        let swing = hand.pose().sway_yaw;
+        // A 20 degree turn sways the arm a degree or two, not the 36 a jump of
+        // 360 degrees gave.
+        assert!(swing.abs() < 3.0, "{swing}");
+        // Going back the other way is as small, with the opposite sign.
+        hand.tick(None, 350.0, 0.0, idle());
+        assert!(hand.pose().sway_yaw.abs() < 3.0, "{}", hand.pose().sway_yaw);
+    }
+
+    #[test]
+    fn the_sway_of_a_frame_follows_the_live_view_between_ticks() {
+        let mut hand = HandState::new();
+        for _ in 0..30 {
+            hand.tick(None, 0.0, 0.0, idle());
+        }
+        let pose = hand.pose();
+        assert!(pose.sway_yaw.abs() < 1e-3);
+        // The mouse turned 40 degrees since the tick; across the wrap too.
+        assert!((pose.swayed_by(40.0, 0.0).sway_yaw - 4.0).abs() < 1e-3);
+        assert!((pose.swayed_by(-40.0, 0.0).sway_yaw + 4.0).abs() < 1e-3);
+        assert!((pose.swayed_by(320.0, 0.0).sway_yaw + 4.0).abs() < 1e-3);
+        assert_eq!(pose.swayed_by(0.0, 12.0).view_pitch, 12.0);
     }
 
     #[test]

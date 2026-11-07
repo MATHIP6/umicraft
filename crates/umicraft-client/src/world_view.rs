@@ -243,9 +243,16 @@ impl WorldView {
     /// The pose of the first-person hand for `now`.
     #[must_use]
     pub fn hand_pose(&self, now: Instant) -> HandPose {
+        // The sway reads the live view (`ItemRenderer.func_178110_a` uses the
+        // `rotationYaw` of the frame), not the one of the last tick.
         self.view
             .sample(now)
-            .map_or_else(HandPose::default, |state| state.effects.hand)
+            .map_or_else(HandPose::default, |state| {
+                state
+                    .effects
+                    .hand
+                    .swayed_by(state.yaw.to_degrees(), state.pitch.to_degrees())
+            })
     }
 
     /// The sky, fog and light environment for `now`, in step with the camera.
@@ -1257,6 +1264,40 @@ mod tests {
         );
         assert!((camera.yaw - (1.0 + std::f32::consts::PI)).abs() < 1e-4);
         assert!((harness.world_view.view.partial_tick(halfway) - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_hand_sways_with_the_live_look_not_the_one_of_the_tick() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let later = tick + TICK;
+        for event in [
+            RenderEvent::Frame(frame(glam::Vec3::ZERO, tick, 0)),
+            RenderEvent::Frame(frame(glam::Vec3::new(2.0, 0.0, 0.0), later, 0)),
+        ] {
+            harness.frames.0.send(event).expect("frame queue");
+        }
+        harness.sync();
+        let at_rest = harness.world_view.hand_pose(later).sway_yaw;
+        assert!(at_rest.abs() < 1e-4, "{at_rest}");
+        // The mouse turned 0.7 radians since the tick: 40 degrees against an
+        // arm that has not moved, a tenth of it as sway.
+        let mut turned = frame(glam::Vec3::new(2.0, 0.0, 0.0), later, 0).state;
+        turned.yaw = 0.7;
+        let slot = crate::game::LookSlot::default();
+        harness
+            .frames
+            .0
+            .send(RenderEvent::LookSlot(slot.clone()))
+            .expect("frame queue");
+        *slot.lock().expect("slot") = Some(crate::game::Look {
+            view: turned,
+            body_pitch: 0.0,
+        });
+        harness.sync();
+        let swayed = harness.world_view.hand_pose(later).sway_yaw;
+        let expected = 0.7_f32.to_degrees() * 0.1;
+        assert!((swayed - expected).abs() < 1e-3, "{swayed} vs {expected}");
     }
 
     #[test]
