@@ -5,11 +5,15 @@
 //! (`Minecraft.runTick` reads `KeyBinding.isKeyDown` / `isPressed` the same
 //! way for keys and mouse buttons).
 
+use std::path::PathBuf;
+
+use umicraft_core::lang::Lang;
 use umicraft_render::RenderError;
 use winit::event::{ElementState, MouseButton};
 use winit::keyboard::KeyCode;
 
 use super::App;
+use crate::game::GameEvent;
 use crate::options::{Action, Binding};
 use crate::screenshot_file;
 
@@ -96,10 +100,15 @@ impl App {
             (Err(error), _) => Err(error.to_string()),
             (_, None) => Err("no data folder".to_string()),
         };
-        match saved {
+        match &saved {
             Ok(path) => tracing::info!(path = %path.display(), "saved screenshot"),
             Err(error) => tracing::warn!(%error, "could not save the screenshot"),
         }
+        // `Minecraft.runTick` prints the result in the chat. Without a game
+        // there is no chat to print in: the log above is all there is.
+        self.send_event(GameEvent::LocalChat(screenshot_chat_line(
+            &self.lang, &saved,
+        )));
     }
 
     /// Handles a mouse button while the game owns the mouse. A click with the
@@ -122,6 +131,21 @@ impl App {
     }
 }
 
+/// The chat line that tells how the screenshot went: the name of the file
+/// (`ScreenShotHelper`: `screenshot.success`), or the reason it failed
+/// (`screenshot.failure`).
+fn screenshot_chat_line(lang: &Lang, saved: &Result<PathBuf, String>) -> String {
+    match saved {
+        Ok(path) => {
+            let name = path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            lang.tr_args("umicraft.screenshot.saved", &[&name])
+        }
+        Err(error) => lang.tr_args("umicraft.screenshot.failed", &[error]),
+    }
+}
+
 /// The key on the other side of the keyboard that counts as the same
 /// modifier: holding either Alt triggers the binding. Shift and Control have
 /// no twin: the left and the right key are two different keys.
@@ -136,6 +160,31 @@ fn modifier_twin(key: KeyCode) -> Option<KeyCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lang() -> Lang {
+        Lang::builtin().with_client_layer(
+            Some("umicraft.screenshot.saved=Saved screenshot as %s\numicraft.screenshot.failed=Failed: %s\n"),
+            None,
+        )
+    }
+
+    #[test]
+    fn the_chat_names_the_file_that_was_saved() {
+        let saved = Ok(PathBuf::from("C:/data/screenshots/2026-11-08_06.47.56.png"));
+        assert_eq!(
+            screenshot_chat_line(&lang(), &saved),
+            "Saved screenshot as 2026-11-08_06.47.56.png"
+        );
+    }
+
+    #[test]
+    fn the_chat_gives_the_reason_when_the_screenshot_failed() {
+        let failed = Err("no data folder".to_string());
+        assert_eq!(
+            screenshot_chat_line(&lang(), &failed),
+            "Failed: no data folder"
+        );
+    }
 
     #[test]
     fn alt_is_held_through_its_twin() {

@@ -52,7 +52,7 @@ use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
-use umicraft_game::item_use::{drop_item, ItemUse, UseAction, UseTick};
+use umicraft_game::item_use::{drop_item, DoorToggle, ItemUse, UseAction, UseTick};
 use umicraft_game::movement::movement_stats;
 use umicraft_game::particles::{EffectContext, SpawnFilter};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
@@ -280,6 +280,9 @@ pub struct Frame {
     pub world_time: i64,
     /// The current dimension (`0` overworld, `-1` Nether, `1` End).
     pub dimension: i8,
+    /// Whether the world is a superflat one (`WorldType.FLAT`), which moves the
+    /// horizon of the sky and the void fog.
+    pub flat_world: bool,
     /// The game mode of the local player; the music depends on it.
     pub gamemode: GameMode,
     /// The world spawn point the server announced, which the compass shows.
@@ -580,6 +583,9 @@ struct Game {
     gamemode: GameMode,
     /// The current dimension; `0` is the overworld.
     dimension: i8,
+    /// Whether the world is a superflat one, from the world type the server
+    /// names in `Join Game` and in the `Respawn` that changes the dimension.
+    flat_world: bool,
     /// The latest signed time of day from `Time Update`.
     ///
     /// It is never advanced locally: the server sends updates regularly and a
@@ -694,6 +700,7 @@ impl Game {
             entity_id: 0,
             gamemode: GameMode::Survival,
             dimension: 0,
+            flat_world: false,
             world_time: 0,
             playing: false,
             spawn: None,
@@ -1375,6 +1382,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
+        flat_world: game.flat_world,
         gamemode: game.gamemode,
         spawn: game.spawn,
         entities: entities.into(),
@@ -1669,6 +1677,7 @@ fn apply_net_event(
             publish_inventory(game, frames);
             set_gamemode(game, GameMode::from_wire(info.gamemode));
             game.dimension = info.dimension;
+            game.flat_world = is_flat(&info.level_type);
             // The world clock of the new session is unknown until the first
             // `Time Update`; start at the beginning of the cycle.
             game.world_time = 0;
@@ -1835,6 +1844,9 @@ fn apply_net_event(
                 .is_none_or(|world| world.dimension() != dimension);
             game.server.on_respawn(changed);
             if changed {
+                // `handleRespawn` builds the new world with the type of the
+                // packet; a same-dimension respawn keeps the old one.
+                game.flat_world = is_flat(&packet.world_type);
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
                 game.entities.clear();
@@ -2397,6 +2409,12 @@ fn particle_filter(game: &Game) -> Option<SpawnFilter> {
     })
 }
 
+/// Whether the world type the server names is `flat` (`WorldType.FLAT`;
+/// `WorldType.parseWorldType` compares the names without regard to case).
+fn is_flat(world_type: &str) -> bool {
+    world_type.eq_ignore_ascii_case("flat")
+}
+
 /// `Effect` 2001 (`RenderGlobal.playAuxSFX`): a block broke somewhere, so its
 /// fragments fly. The data is the broken state, `id | metadata << 12`.
 fn apply_effect(game: &mut Game, packet: &umicraft_protocol::packets::play::clientbound::Effect) {
@@ -2880,6 +2898,9 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         }
         queue.push(command_of(outgoing));
     }
+    if let Some(door) = output.door {
+        swing_door(game, door);
+    }
     if output.swing {
         // MCP `Minecraft.rightClickMouse`: a used item swings the arm.
         queue.push(ClientCommand::Swing);
@@ -2887,6 +2908,29 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         game.hand.swing(effects);
         game.body.animation.swing_item();
     }
+}
+
+/// MCP `BlockDoor.onBlockActivated` runs on the client too: the door swings at
+/// once and the player hears it. The server sends that sound to everyone but
+/// the player who clicked (`playAuxSFXAtEntity`), so the clicking client has
+/// to make it: it takes the same path as the `Effect` packet the others get.
+fn swing_door(game: &mut Game, door: DoorToggle) {
+    if let Some(world) = game.world.as_mut() {
+        game.dirty
+            .extend(world.apply_block_change(door.lower, door.state));
+    }
+    let Some(state) = game.state.as_mut() else {
+        return;
+    };
+    // 1003 opens, 1006 closes (`RenderGlobal.playAuxSFX`).
+    state.on_effect(&umicraft_protocol::packets::play::clientbound::Effect {
+        effect_id: if door.opens() { 1003 } else { 1006 },
+        x: door.clicked.x,
+        y: door.clicked.y,
+        z: door.clicked.z,
+        data: 0,
+        disable_relative_volume: false,
+    });
 }
 
 /// Picks the targeted block into the hotbar (the middle button).
@@ -5442,6 +5486,85 @@ mod tests {
         );
         assert_eq!(game.world_time, 0);
         assert_eq!(game.dimension, -1);
+    }
+
+    #[test]
+    fn a_flat_world_is_known_from_the_join_and_the_respawn_that_changes_dimension() {
+        use umicraft_net::play::JoinGameInfo;
+        use umicraft_protocol::packets::play::clientbound::Respawn;
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let join = |level_type: &str| JoinGameInfo {
+            entity_id: 1,
+            gamemode: 0,
+            dimension: 0,
+            difficulty: 0,
+            max_players: 20,
+            level_type: level_type.to_string(),
+            reduced_debug_info: false,
+        };
+        let respawn = |dimension, world_type: &str| Respawn {
+            dimension,
+            difficulty: 0,
+            game_mode: 0,
+            world_type: world_type.to_string(),
+        };
+
+        assert!(!game.flat_world, "a normal world until the server says");
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join("flat")),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.flat_world);
+        // Names are compared without regard to case.
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join("FLAT")),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.flat_world);
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join("default")),
+            &mut queue,
+            &frames,
+        );
+        assert!(!game.flat_world);
+
+        // A respawn in the same dimension keeps the world, and its type.
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join("flat")),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(respawn(0, "default")),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.flat_world, "the same world stays flat");
+        // A new dimension is built with the type of the packet.
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(respawn(-1, "default")),
+            &mut queue,
+            &frames,
+        );
+        assert!(!game.flat_world);
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(respawn(0, "flat")),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.flat_world);
     }
 
     #[test]

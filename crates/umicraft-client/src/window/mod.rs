@@ -436,6 +436,17 @@ impl App {
             }
             return;
         }
+        // The screenshot key works on every screen, the options aside (a key
+        // being rebound there must reach the page): in the reference tick it
+        // sits outside the key handling of the screens.
+        if event.state == ElementState::Pressed
+            && !event.repeat
+            && self.screen() != Screen::Options
+            && matches!(self.options.keys.get(Action::Screenshot), Binding::Key(key) if key == code)
+        {
+            self.screenshot_requested = true;
+            return;
+        }
         // The right Shift key opens the mods menu over a game and closes it
         // again; the left one stays the sneak key. It is taken before the key
         // bindings so it triggers no action bound to it, and only where it
