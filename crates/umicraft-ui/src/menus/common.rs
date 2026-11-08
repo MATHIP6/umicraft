@@ -244,7 +244,9 @@ pub(crate) fn draw_scrollbar(
     if max <= 0.0 {
         return;
     }
-    let thumb = (height * height / content_height).clamp(32.0, height - 8.0);
+    let thumb = (height * height / content_height)
+        .max(32.0)
+        .min(height - 8.0);
     let y = (offset * (height - thumb) / max + top).max(top);
     ui.draw().rect(
         gui.rect(x, top, SCROLLBAR_WIDTH, height),
@@ -292,7 +294,7 @@ impl ScrollbarDrag {
             self.0 = None;
             return offset;
         }
-        let thumb = (height * height / content).clamp(32.0, height - 8.0);
+        let thumb = (height * height / content).max(32.0).min(height - 8.0);
         let travel = height - thumb;
         let origin = ui.viewport();
         let to_gui = |p: [f32; 2]| [(p[0] - origin.x) / scale, (p[1] - origin.y) / scale];
