@@ -65,6 +65,7 @@ use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
 use crate::mesher::worker_count;
+use crate::mods_runtime::ModsRuntime;
 use crate::options::{self, Action, Binding, Options};
 use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
@@ -289,6 +290,8 @@ struct App {
     fps: f32,
     /// Refreshes `fps` once per second for the F3 screen.
     fps_meter: FpsMeter,
+    /// The built-in mods (ADR-0065).
+    mods: ModsRuntime,
     exit_error: Option<String>,
 }
 
@@ -320,6 +323,7 @@ impl App {
             args,
             saved_options: options.clone(),
             lang,
+            mods: ModsRuntime::new(&options.mods),
             options,
             options_path,
             options_screen: OptionsScreen::new(),
@@ -745,7 +749,8 @@ impl App {
         if self.session.is_none() {
             return;
         }
-        let state = self.key_state();
+        let mut state = self.key_state();
+        self.mods.apply_to_state(&mut state);
         let changed = state != self.last_input
             || self.look != (0.0, 0.0)
             || self.select_slot.is_some()
@@ -918,6 +923,12 @@ impl App {
                 }),
                 now: Some(Instant::now()),
                 show_tab_list: self.screen() == Screen::None && self.held(Action::PlayerList),
+                mod_widgets: mods_menu::hud_widgets(
+                    self.screen(),
+                    &self.mods,
+                    atlas,
+                    (width, height),
+                ),
                 ..game_hud
             };
             draw_hud_gui(self.ui.draw(), &hud, (width, height), atlas, &sheets);
@@ -1030,6 +1041,11 @@ impl App {
                 | Screen::Achievements
                 | Screen::Mods => {
                     let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
+                    let mods_view = mods_menu::view_for(
+                        screen,
+                        (&self.mods, &self.lang),
+                        (atlas, (width, height)),
+                    );
                     let inventory_key = self.options.keys.get(Action::Inventory).label(&self.lang);
                     let context = MenuContext {
                         stats_revision: self.world.as_ref().map_or(0, WorldView::stats_revision),
@@ -1046,6 +1062,7 @@ impl App {
                         panorama: self.panorama,
                         title_style: self.title_style(),
                         brand_font: self.brand_atlas.as_ref().unwrap_or(atlas),
+                        mods: &mods_view,
                     };
                     let shown = self
                         .menu
@@ -1122,6 +1139,7 @@ impl App {
             self.frame_ms * 0.9 + frame_ms * 0.1
         };
         self.fps = self.fps_meter.tick(now);
+        self.update_mods(now);
         self.frame_times.push(frame_ms);
         if self.frame_times.len() > FRAME_HISTORY {
             self.frame_times.remove(0);

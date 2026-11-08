@@ -93,6 +93,8 @@ fn the_attack_use_and_pick_defaults_are_mouse_buttons_one_to_three() {
     assert_eq!(bindings.get(Action::Screenshot), KeyCode::F2);
     assert_eq!(bindings.get(Action::Fullscreen), KeyCode::F11);
     assert_eq!(bindings.get(Action::Drop), KeyCode::KeyQ);
+    assert_eq!(bindings.get(Action::Mods), KeyCode::ShiftRight);
+    assert_eq!(bindings.get(Action::Sneak), KeyCode::ShiftLeft);
 }
 
 #[test]

@@ -28,7 +28,8 @@ use umicraft_render::{
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
 use umicraft_ui::menus::{
-    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab, TitleStyle,
+    landing_layout, stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView,
+    StatsTab, TitleStyle,
 };
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
@@ -38,6 +39,7 @@ use crate::connection_end::{ConnectionEnd, EndPhase};
 use crate::dials::DialFrames;
 use crate::error::ClientError;
 use crate::game::hud_after;
+use crate::hud_demo_mods;
 use crate::hud_demo_panorama;
 use crate::hud_demo_servers;
 use crate::hud_demo_stats;
@@ -300,6 +302,8 @@ fn is_menu_view(view: &str) -> bool {
             | "stats-blocks"
             | "stats-items"
             | "achievements"
+            | "mods"
+            | "mods_list"
     )
 }
 
@@ -336,6 +340,7 @@ fn menu_scene(
         "disconnected" => Screen::Disconnected,
         "stats" | "stats-blocks" | "stats-items" => Screen::Stats,
         "achievements" => Screen::Achievements,
+        "mods" | "mods_list" => Screen::Mods,
         _ => Screen::ServerList,
     };
     let lang = crate::language::load(Lang::DEFAULT_CODE);
@@ -343,6 +348,11 @@ fn menu_scene(
         flow.begin_add(&lang);
     }
     let stats = hud_demo_stats::sample_statistics();
+    let mods = if screen == Screen::Mods {
+        hud_demo_mods::view(&lang, atlas, (width, height))
+    } else {
+        umicraft_ui::menus::ModsView::default()
+    };
     if screen == Screen::Disconnected {
         let refused = ConnectionEnd::from_error(
             EndPhase::Connecting,
@@ -362,6 +372,7 @@ fn menu_scene(
         panorama,
         title_style: demo_title_style(view, brand.is_some()),
         brand_font: brand.unwrap_or(atlas),
+        mods: &mods,
     };
     if let Some(tab) = match view {
         "stats-blocks" => Some(StatsTab::Blocks),
@@ -370,6 +381,14 @@ fn menu_scene(
     } {
         // One frame with a click on the tab button, as the player would.
         ui.begin_frame(viewport, click(stats_tab_rect(viewport, tab)));
+        flow.show(screen, &mut ui, atlas, &lang, &context);
+        let output = ui.end_frame();
+        ui.recycle_output(output);
+    }
+    if view == "mods_list" {
+        // One frame with a click on the Mods button, as the player would.
+        let button = landing_layout(viewport).mods;
+        ui.begin_frame(viewport, click(button));
         flow.show(screen, &mut ui, atlas, &lang, &context);
         let output = ui.end_frame();
         ui.recycle_output(output);
@@ -449,7 +468,7 @@ fn build(
             }
         }
         "title" | "title-modern" | "servers" | "server-edit" | "connecting" | "disconnected"
-        | "stats" | "stats-blocks" | "stats-items" | "achievements" => {
+        | "stats" | "stats-blocks" | "stats-items" | "achievements" | "mods" | "mods_list" => {
             let items = ItemView::new(None, DialFrames::default());
             let scene = (None, None, items);
             let fonts = (atlas, None);

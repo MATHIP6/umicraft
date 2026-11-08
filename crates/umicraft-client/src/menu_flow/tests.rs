@@ -29,7 +29,7 @@ fn book_in(name: &str) -> (ServerBook, std::path::PathBuf) {
     (ServerBook::open(&path), path)
 }
 
-fn flow_with(name: &str, entries: &[(&str, &str)]) -> (MenuFlow, std::path::PathBuf) {
+pub(super) fn flow_with(name: &str, entries: &[(&str, &str)]) -> (MenuFlow, std::path::PathBuf) {
     let (mut book, path) = book_in(name);
     for (entry_name, address) in entries {
         book.add(entry_name, address).expect("valid entry");
@@ -72,6 +72,23 @@ fn frame_styled(
     stats: &[(String, i32)],
     title_style: TitleStyle,
 ) -> MenuFrame {
+    frame_core(
+        flow,
+        screen,
+        events,
+        (stats, title_style),
+        &ModsView::default(),
+    )
+}
+
+/// One frame of `screen` with the list and the HUD widgets the mods menu shows.
+pub(super) fn frame_core(
+    flow: &mut MenuFlow,
+    screen: Screen,
+    events: Vec<InputEvent>,
+    (stats, title_style): (&[(String, i32)], TitleStyle),
+    mods: &ModsView,
+) -> MenuFrame {
     let atlas = FontAtlas::fallback();
     let mut ui = Ui::new(VIEWPORT);
     ui.begin_frame(VIEWPORT, UiInput::new(events));
@@ -87,6 +104,7 @@ fn frame_styled(
         panorama: None,
         title_style,
         brand_font: &atlas,
+        mods,
     };
     let result = flow.show(
         screen,
@@ -249,6 +267,7 @@ fn the_add_form_starts_with_the_default_server_name() {
         panorama: None,
         title_style: TitleStyle::Classic,
         brand_font: &atlas,
+        mods: &ModsView::default(),
     };
     let inputs = [
         vec![],

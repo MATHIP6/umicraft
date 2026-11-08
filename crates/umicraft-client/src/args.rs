@@ -146,7 +146,7 @@ options:
   --help, -h          print this help";
 
 /// The scenes of `--hud-demo`.
-pub const HUD_VIEWS: [&str; 22] = [
+pub const HUD_VIEWS: [&str; 24] = [
     "overview",
     "tab",
     "chat",
@@ -169,6 +169,8 @@ pub const HUD_VIEWS: [&str; 22] = [
     "stats-blocks",
     "stats-items",
     "achievements",
+    "mods",
+    "mods_list",
 ];
 
 /// The scripted sessions the headless mode knows.

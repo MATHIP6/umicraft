@@ -21,9 +21,9 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
     AchievementsData, AchievementsOutcome, AchievementsScreen, ConfirmOutcome, ConfirmScreen,
     ConnectStage, ConnectingOutcome, ConnectingScreen, DisconnectedOutcome, DisconnectedScreen,
-    ModsScreen, PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome, ServerEditScreen,
-    ServerListOutcome, ServerListScreen, ServerRow, StatsData, StatsOutcome, StatsScreen,
-    TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
+    ModsOutcome, ModsScreen, ModsView, PanoramaTextures, PanoramaView, RowStatus,
+    ServerEditOutcome, ServerEditScreen, ServerListOutcome, ServerListScreen, ServerRow, StatsData,
+    StatsOutcome, StatsScreen, TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
 };
 use umicraft_ui::{FontAtlas, Ui};
 
@@ -53,7 +53,7 @@ pub fn shown_title_style(chosen: TitleStyle, brand_ready: bool) -> TitleStyle {
 }
 
 /// What the window has to do after a menu frame.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MenuCommand {
     /// Start a session on this server.
     Connect(ServerAddress),
@@ -66,6 +66,9 @@ pub enum MenuCommand {
     Quit,
     /// Show another screen.
     GoTo(Screen),
+    /// Apply a change the player made on the mods menu (a switch, a setting or
+    /// a HUD widget) and save it.
+    Mods(ModsOutcome),
 }
 
 /// What the window gives the menus each frame.
@@ -94,6 +97,9 @@ pub struct MenuContext<'a> {
     pub title_style: TitleStyle,
     /// The brand atlas the renderer draws `FontFace::Brand` with.
     pub brand_font: &'a FontAtlas,
+    /// The mods the mods menu lists and the HUD widgets it lets the player
+    /// move; empty on every other screen.
+    pub mods: &'a ModsView,
 }
 
 /// The result of one menu frame.
@@ -269,7 +275,7 @@ impl MenuFlow {
             Screen::Disconnected => self.show_disconnected(ui, atlas, lang),
             Screen::Stats => self.show_stats(ui, atlas, lang, context),
             Screen::Achievements => self.show_achievements(ui, atlas, lang, context),
-            Screen::Mods => self.show_mods(ui, lang, context),
+            Screen::Mods => self.show_mods(ui, (atlas, lang), context),
             _ => None,
         };
         MenuFrame { command, panorama }
