@@ -20,6 +20,9 @@ const MAX_FAR_PLANE: f32 = 500.0;
 /// `WorldProvider.getVoidFogYFactor` for a non-flat world: fog turns black
 /// as the eye sinks toward `y = 0`, fully dark at `y = 1 / 0.03125 = 32`.
 const VOID_FOG_Y_FACTOR: f32 = 0.031_25;
+/// The same factor for a superflat world: the fog only darkens below `y = 1`,
+/// so a player on the flat ground (around `y = 5`) sees the plain fog colour.
+const FLAT_VOID_FOG_Y_FACTOR: f32 = 1.0;
 /// Exponential density in water (`setupFog`, no Respiration).
 const WATER_DENSITY: f32 = 0.1;
 /// Exponential density in water while water breathing.
@@ -217,7 +220,7 @@ fn final_color(base: [f32; 3], environment: &RenderEnvironment) -> [f32; 3] {
     let light = context.light_brightness * (1.0 - view) + view;
     color = color.map(|channel| channel * light);
 
-    let void = void_factor(context);
+    let void = void_factor(context, environment.flat_world);
     if void < 1.0 {
         color = color.map(|channel| channel * void * void);
     }
@@ -230,10 +233,16 @@ fn final_color(base: [f32; 3], environment: &RenderEnvironment) -> [f32; 3] {
     color
 }
 
-/// The `d1` of `updateFogColor`: the eye height over 32, forced to `0` by
-/// Blindness until its last second, clamped at zero.
-fn void_factor(context: &FogContext) -> f32 {
-    let mut factor = context.eye_y * VOID_FOG_Y_FACTOR;
+/// The `d1` of `updateFogColor`: the eye height times the void fog factor of
+/// the world type (over 32 in a normal world, the height itself in a flat
+/// one), forced to `0` by Blindness until its last second, clamped at zero.
+fn void_factor(context: &FogContext, flat_world: bool) -> f32 {
+    let scale = if flat_world {
+        FLAT_VOID_FOG_Y_FACTOR
+    } else {
+        VOID_FOG_Y_FACTOR
+    };
+    let mut factor = context.eye_y * scale;
     if let Some(ticks) = context.blindness_ticks {
         factor = if ticks < BLINDNESS_FADE_TICKS {
             factor * (1.0 - ticks as f32 / BLINDNESS_FADE_TICKS as f32)

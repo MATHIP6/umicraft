@@ -39,6 +39,10 @@ pub struct RenderEnvironment {
     /// The medium at the eye, the potion effects and the eye light that
     /// shape the fog (P7g).
     pub fog: FogContext,
+    /// Whether the world is a superflat one (`WorldType.FLAT`): its horizon
+    /// is at `y = 0` instead of 63 (`World.getHorizon`) and the void fog does
+    /// not darken the fog near the ground (`WorldProvider.getVoidFogYFactor`).
+    pub flat_world: bool,
 }
 
 impl RenderEnvironment {
@@ -54,6 +58,7 @@ impl RenderEnvironment {
         thunder_strength: 0.0,
         lightning_ticks: 0,
         fog: FogContext::DEFAULT,
+        flat_world: false,
     };
 
     /// `BiomeGenBase.plains` temperature, the default sky tint.

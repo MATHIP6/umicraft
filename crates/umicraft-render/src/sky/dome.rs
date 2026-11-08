@@ -25,7 +25,9 @@ pub(super) const SKY_HEIGHT: f32 = 16.0;
 /// Height of the void list below the eye, before its translations.
 pub(super) const VOID_HEIGHT: f32 = -16.0;
 /// `getHorizon()` of a default world: the plane the void dome lies on.
-pub(super) const HORIZON_Y: f32 = 63.0;
+const HORIZON_Y: f32 = 63.0;
+/// `getHorizon()` of a superflat world (`WorldType.FLAT`).
+const FLAT_HORIZON_Y: f32 = 0.0;
 /// Squares per axis: `-384..=384` in steps of 64.
 const SQUARES_PER_AXIS: usize = ((LAST - FIRST) / STEP + 1) as usize;
 /// Triangle-list vertices of the grid.
@@ -67,9 +69,15 @@ pub(super) fn black_model() -> Mat4 {
     Mat4::from_translation(glam::Vec3::new(0.0, VOID_HEIGHT + 12.0, 0.0))
 }
 
-/// The eye height above the world horizon (`d0` of the reference).
-pub(super) fn below_horizon(eye_y: f32) -> f32 {
-    eye_y - HORIZON_Y
+/// The eye height above the world horizon (`d0` of the reference); a flat
+/// world has its horizon at the bottom of the world.
+pub(super) fn below_horizon(eye_y: f32, flat_world: bool) -> f32 {
+    eye_y
+        - if flat_world {
+            FLAT_HORIZON_Y
+        } else {
+            HORIZON_Y
+        }
 }
 
 /// The five faces (no bottom) of the black box around the eye, with its
@@ -154,12 +162,26 @@ mod tests {
         let origin = glam::Vec3::ZERO;
         assert_eq!(sky_model().transform_point3(origin).y, 16.0);
         // Eye at y = 80: d0 = 17, the horizon (y = 63) is 17 below the eye.
-        let d0 = below_horizon(80.0);
+        let d0 = below_horizon(80.0, false);
         assert_eq!(void_model(d0).transform_point3(origin).y, -17.0);
         // Eye at y = 40: the same plane is 23 above... d0 = -23.
-        let d0 = below_horizon(40.0);
+        let d0 = below_horizon(40.0, false);
         assert_eq!(void_model(d0).transform_point3(origin).y, 23.0);
         assert_eq!(black_model().transform_point3(origin).y, -4.0);
+    }
+
+    #[test]
+    fn a_flat_world_has_its_horizon_at_the_bottom_not_at_63() {
+        // The bug: a player on a superflat ground (y = 5) was taken to be 58
+        // blocks below the horizon, so the void planes hung above the world.
+        assert_eq!(below_horizon(5.0, false), -58.0);
+        assert_eq!(below_horizon(5.0, true), 5.0);
+        // On the flat ground the eye is above the horizon, so the black plane
+        // and box (drawn only below it) are left out.
+        assert!(below_horizon(5.0, true) > 0.0);
+        // The horizon plane lies 5 blocks below the eye, `-d0`.
+        let plane = void_model(below_horizon(5.0, true)).transform_point3(glam::Vec3::ZERO);
+        assert_eq!(plane.y, -5.0);
     }
 
     #[test]

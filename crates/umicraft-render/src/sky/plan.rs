@@ -97,6 +97,8 @@ pub(super) struct PlanInput<'a> {
     pub view_proj: Mat4,
     /// Eye height in world blocks.
     pub eye_y: f32,
+    /// Whether the world is a superflat one, whose horizon is at `y = 0`.
+    pub flat_world: bool,
 }
 
 /// Appends the layers of the frame to `layers` (cleared first), in draw order.
@@ -185,7 +187,7 @@ fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
 /// The void below the horizon: the black plane and box while the eye is under
 /// it, then the dark sky-coloured plane on the horizon.
 fn void_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
-    let below = dome::below_horizon(input.eye_y);
+    let below = dome::below_horizon(input.eye_y, input.flat_world);
     let black = [0.0, 0.0, 0.0, 1.0];
     if below < 0.0 {
         layers.push(layer(
@@ -266,6 +268,7 @@ mod tests {
             state: &state,
             view_proj: Mat4::IDENTITY,
             eye_y,
+            flat_world: environment.flat_world,
         };
         let mut layers = Vec::new();
         build(&mut layers, &input);

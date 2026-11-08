@@ -148,6 +148,33 @@ fn the_void_darkens_the_fog_below_y_32() {
 }
 
 #[test]
+fn a_flat_world_keeps_its_fog_colour_on_the_ground_instead_of_going_black() {
+    // The bug: on a superflat ground (eye around y = 5) the void fog factor of
+    // a normal world, 1/32, took the fog to 2 % of its colour, a black horizon.
+    let at = |flat_world, eye_y| {
+        FogParams::new(
+            BASE,
+            &RenderEnvironment {
+                flat_world,
+                ..env(FogContext {
+                    eye_y,
+                    ..FogContext::DEFAULT
+                })
+            },
+        )
+        .color[0]
+    };
+    assert!(
+        at(false, 5.0) < 0.6 * 0.05,
+        "a normal world is nearly black"
+    );
+    assert!(near(at(true, 5.0), 0.6), "a flat one is not darkened");
+    // Below y = 1 even a flat world darkens toward the void.
+    assert!(near(at(true, 0.5), 0.6 * 0.25));
+    assert!(near(at(true, -1.0), 0.0));
+}
+
+#[test]
 fn the_nether_and_the_end_close_the_fog_in() {
     for dimension in [-1, 1] {
         let fog = FogParams::new(
