@@ -12,6 +12,7 @@ use std::time::Instant;
 use super::overlay_views::{ActionBarView, BossView, SidebarView, TabListView, TitleView};
 use umicraft_game::chat::{ClickEvent, HoverEvent};
 use umicraft_game::hud::{vitals_view, BottomBar, HeldNameView, VitalsInput, VitalsView};
+use umicraft_ui::mod_widget::ModWidgetView;
 use umicraft_ui::SlotItem;
 
 /// Number of hotbar slots drawn by the HUD.
@@ -77,6 +78,12 @@ pub struct HudState {
     pub boss: Option<BossView>,
     /// The score shown on the death screen (MCP `EntityPlayer.getScore`).
     pub score: i32,
+    /// The built-in mod widgets with their resolved positions, drawn last;
+    /// empty by default.
+    pub mod_widgets: Vec<ModWidgetView>,
+    /// The latency the server reports for the local player, in milliseconds,
+    /// for the ping mod; `None` until the tab list has the player's entry.
+    pub ping_ms: Option<u32>,
 }
 
 /// The two columns of the vanilla F3 screen, as built by
@@ -224,6 +231,8 @@ impl Default for HudState {
             completions_serial: 0,
             boss: None,
             score: 0,
+            mod_widgets: Vec::new(),
+            ping_ms: None,
         }
     }
 }

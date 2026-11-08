@@ -57,7 +57,7 @@ pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
 pub use gpu_timer::{GpuTimings, GROUP_NAMES};
-pub use hud::{chat_run_at, draw_hud_gui, HudSheets};
+pub use hud::{chat_run_at, draw_hud_gui, measure_mod_widget, HudSheets, ModLine, ModWidgetView};
 pub use hud::{
     plain_text, ActionBarView, BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle,
     DebugF3View, HudState, SidebarLineView, SidebarView, TabEntryView, TabListView, TabValueStyle,
