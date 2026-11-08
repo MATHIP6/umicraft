@@ -303,3 +303,41 @@ fn brand_text_and_rounded_rects_render_through_their_own_pipelines() {
     let body = pixel(&smooth, 60, 46);
     assert!(body[0] >= 225 && body[1] <= 55, "body {body:?}");
 }
+
+/// A pack's crosshair cell holds transparent white texels. The inverting blend
+/// ignores alpha, so without the alpha test of the reference (`alphaFunc(GREATER,
+/// 0.1)`) they invert the scene like the opaque cross does.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn the_inverted_crosshair_skips_transparent_texels() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    let mut camera = Camera::default();
+    camera.set_aspect(WIDTH, HEIGHT);
+    let hud = Overlay::new(WIDTH, HEIGHT);
+    // Two texels: transparent white on the left, opaque white on the right.
+    renderer.set_gui_atlas(2, 1, &[255, 255, 255, 0, 255, 255, 255, 255]);
+
+    renderer
+        .render_with_ui(&camera, &hud, &DrawList::new(), &mut NoIcons)
+        .expect("render the scene");
+    let scene = renderer.read_pixels().expect("read the scene");
+
+    let mut list = DrawList::new();
+    list.image_inverted([0.0, 0.0, 0.5, 1.0], Rect::new(8.0, 8.0, 32.0, 32.0));
+    list.image_inverted([0.5, 0.0, 1.0, 1.0], Rect::new(60.0, 8.0, 32.0, 32.0));
+    renderer
+        .render_with_ui(&camera, &hud, &list, &mut NoIcons)
+        .expect("render the crosshair");
+    let drawn = renderer.read_pixels().expect("read the crosshair");
+
+    assert_eq!(
+        pixel(&drawn, 24, 24),
+        pixel(&scene, 24, 24),
+        "a transparent texel must leave the scene untouched"
+    );
+    let (before, after) = (pixel(&scene, 76, 24), pixel(&drawn, 76, 24));
+    assert!(
+        (0..3).all(|c| u16::from(before[c]) + u16::from(after[c]) >= 250),
+        "an opaque white texel inverts the scene: {before:?} -> {after:?}"
+    );
+}

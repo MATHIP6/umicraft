@@ -32,3 +32,16 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(gui_atlas, gui_sampler, in.uv);
     return texel * in.color;
 }
+
+// The inverted crosshair: the reference runs it with the alpha test on
+// (`GuiIngame.renderGameOverlay` calls `enableAlpha`, `Minecraft` sets
+// `alphaFunc(GL_GREATER, 0.1)`), because the inverting blend ignores alpha and
+// a pack's transparent white texels would invert the scene like opaque ones.
+@fragment
+fn fs_alpha_test(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(gui_atlas, gui_sampler, in.uv) * in.color;
+    if (texel.a <= 0.1) {
+        discard;
+    }
+    return texel;
+}
