@@ -336,6 +336,14 @@ enum Kind {
     PistonHead,
     /// A skull, whose box follows its facing (the same as its selection box).
     Skull,
+    /// A door: a thin board that turns with its facing, hinge and open state,
+    /// read from both halves (the same as its selection box).
+    Door,
+    /// A block that collides with exactly its selection box: a ladder, a lily
+    /// pad, a cocoa pod or a flower pot.
+    Bounds,
+    /// The frame of the End portal: a base, and the eye of Ender when set.
+    EndPortalFrame,
 }
 
 /// Classifies a 1.8 block id (and its metadata) into a collision kind.
@@ -358,9 +366,16 @@ fn classify(id: u16, metadata: u8) -> Kind {
         101 | 102 | 160 => Kind::Pane,
         // Trap doors.
         96 | 167 => Kind::Column(0.1875),
-        // Pressure plates, rails, repeaters, comparators, redstone wire and
-        // carpet are one sixteenth high.
-        27 | 28 | 55 | 66 | 70 | 72 | 93 | 94 | 147 | 148 | 149 | 150 | 171 => Kind::Column(0.0625),
+        // No collision box at all: `getCollisionBoundingBox` returns null in
+        // `BlockBush` (the stems 104 and 105 included, with the saplings, the
+        // flowers, the crops...), `BlockRailBase` (rails 27, 28, 66, 157),
+        // `BlockBasePressurePlate` (70, 72, 147, 148), `BlockRedstoneWire` (55)
+        // and `BlockPortal` (90). Their selection boxes are separate.
+        27 | 28 | 55 | 66 | 70 | 72 | 90 | 104 | 105 | 147 | 148 | 157 => Kind::Empty,
+        // Repeaters and comparators (`BlockRedstoneDiode` bounds) are an eighth
+        // high, carpet (`BlockCarpet`) a sixteenth.
+        93 | 94 | 149 | 150 => Kind::Column(0.125),
+        171 => Kind::Column(0.0625),
         // Daylight detectors.
         151 | 178 => Kind::Column(0.375),
         // Cake, bed, enchanting table, brewing stand, cauldron and hopper.
@@ -375,45 +390,18 @@ fn classify(id: u16, metadata: u8) -> Kind {
         81 => Kind::Cactus,
         145 => Kind::Anvil,
         78 => Kind::SnowLayer,
+        // Wooden, iron and the five other doors: `BlockDoor` collides with the
+        // bounds of its state.
+        64 | 71 | 193..=197 => Kind::Door,
+        // Ladders (`BlockLadder`), lily pads (`BlockLilyPad`), cocoa pods
+        // (`BlockCocoa`) and flower pots (`BlockFlowerPot`) collide with their
+        // bounds, which are their selection bounds.
+        65 | 111 | 127 | 140 => Kind::Bounds,
+        // The frame of the End portal.
+        120 => Kind::EndPortalFrame,
         // Decorations and other blocks without a collision box.
-        6
-        | 30
-        | 31
-        | 32
-        | 36
-        | 37
-        | 38
-        | 39
-        | 40
-        | 50
-        | 51
-        | 59
-        | 63
-        | 64
-        | 65
-        | 68
-        | 69
-        | 71
-        | 75
-        | 76
-        | 77
-        | 83
-        | 106
-        | 111
-        | 115
-        | 119
-        | 120
-        | 127
-        | 131
-        | 132
-        | 140
-        | 141
-        | 142
-        | 143
-        | 175
-        | 176
-        | 177
-        | 193..=197 => Kind::Empty,
+        6 | 30 | 31 | 32 | 36 | 37 | 38 | 39 | 40 | 50 | 51 | 59 | 63 | 68 | 69 | 75 | 76 | 77
+        | 83 | 106 | 115 | 119 | 131 | 132 | 141 | 142 | 143 | 175 | 176 | 177 => Kind::Empty,
         // Everything else is a full cube.
         _ => Kind::Cube,
     }
@@ -463,6 +451,28 @@ pub fn shape_of<S: BlockSource + ?Sized>(
         // `setBlockBoundsBasedOnState` and returns the block bounds, which
         // are exactly the selection bounds.
         Kind::Skull => selection_shape(state, world, pos),
+        // `BlockDoor.getCollisionBoundingBox` applies `setBlockBoundsBasedOnState`
+        // (`combineMetadata` over the two halves) and returns the bounds, which
+        // are exactly the selection bounds.
+        Kind::Door => selection_shape(state, world, pos),
+        // `BlockLadder` and `BlockCocoa` apply `setBlockBoundsBasedOnState` and
+        // return the bounds; `BlockLilyPad` returns its bounds directly and the
+        // flower pot has no override, so the default is its constructor bounds.
+        Kind::Bounds => selection_shape(state, world, pos),
+        // `BlockEndPortalFrame.addCollisionBoxesToList`: the 0.8125 high base,
+        // then the eye (bit 4 of the metadata) as a small box on top.
+        Kind::EndPortalFrame => {
+            let base = Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.8125, 1.0));
+            if state.metadata() & 4 == 0 {
+                BlockShape::single(base)
+            } else {
+                let eye = Aabb::new(
+                    DVec3::new(0.3125, 0.8125, 0.3125),
+                    DVec3::new(0.6875, 1.0, 0.6875),
+                );
+                BlockShape::pair(base, eye)
+            }
+        }
         // The chest blocks have no `getCollisionBoundingBox` of their own, so
         // the collision is their bounds, which are the selection bounds.
         Kind::Chest => selection_shape(state, world, pos),
@@ -816,10 +826,148 @@ mod tests {
     }
 
     #[test]
-    fn pressure_plates_are_one_sixteenth_high() {
+    fn plants_rails_plates_wire_and_portals_have_no_collision_box() {
         let world = TestBlocks::default();
-        let plate = shape_of(BlockState::new(70, 0), &world, BlockPos::new(0, 0, 0));
-        assert_eq!(plate.boxes()[0].max.y, 0.0625);
+        let pos = BlockPos::new(0, 0, 0);
+        // The ids of every class whose `getCollisionBoundingBox` is null in
+        // the reference source (`BlockBush` and its subclasses, the rails, the
+        // pressure plates, the redstone wire, the portal), stems included.
+        let ids = [
+            6, 27, 28, 30, 31, 32, 37, 38, 39, 40, 55, 59, 66, 70, 72, 83, 90, 104, 105, 106, 115,
+            141, 142, 147, 148, 157, 175,
+        ];
+        for id in ids {
+            for metadata in [0, 7, 15] {
+                let shape = shape_of(BlockState::new(id, metadata), &world, pos);
+                assert!(shape.is_empty(), "block {id}:{metadata} must not collide");
+            }
+        }
+    }
+
+    /// A door of `id`: the lower half with `lower` metadata at the origin, the
+    /// upper half (bit 8, hinge bit 1 for the left hinge) above it.
+    fn door_world(id: u16, lower: u8, hinge_left: bool) -> TestBlocks {
+        TestBlocks::with(&[
+            (0, 0, 0, BlockState::new(id, lower)),
+            (0, 1, 0, BlockState::new(id, 8 | u8::from(hinge_left))),
+        ])
+    }
+
+    #[test]
+    fn every_door_block_collides_with_a_board_a_sixteenth_and_a_half_thick() {
+        let pos = BlockPos::new(0, 0, 0);
+        for id in [64, 71, 193, 194, 195, 196, 197] {
+            // Closed, facing east: a board on the west side of the block.
+            let world = door_world(id, 0, false);
+            for half in [BlockPos::new(0, 0, 0), BlockPos::new(0, 1, 0)] {
+                let state = world.block(half.x, half.y, half.z);
+                let door = shape_of(state, &world, half);
+                assert_eq!(door.boxes().len(), 1, "door {id}");
+                assert_eq!(door.boxes()[0].max.x, 0.1875, "door {id}");
+                assert_eq!(door.boxes()[0].max.y, 1.0);
+            }
+            let _ = pos;
+        }
+    }
+
+    #[test]
+    fn an_open_door_swings_to_the_side_its_hinge_says() {
+        let pos = BlockPos::new(0, 0, 0);
+        let boards = |hinge_left| {
+            // Open (bit 4), facing east.
+            let world = door_world(64, 4, hinge_left);
+            shape_of(world.block(0, 0, 0), &world, pos).boxes()[0]
+        };
+        let right = boards(false);
+        let left = boards(true);
+        // Right hinge: along the north side; left hinge: along the south side.
+        assert_eq!((right.min.z, right.max.z), (0.0, 0.1875));
+        assert_eq!((left.min.z, left.max.z), (0.8125, 1.0));
+        assert_eq!((right.min.x, right.max.x), (0.0, 1.0));
+    }
+
+    #[test]
+    fn ladders_lily_pads_cocoa_and_flower_pots_collide_with_their_selection_box() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        for (id, metadata) in [(65, 2), (65, 5), (111, 0), (127, 0), (127, 9), (140, 0)] {
+            let state = BlockState::new(id, metadata);
+            let collision = shape_of(state, &world, pos);
+            let selection = selection_shape(state, &world, pos);
+            assert!(!collision.is_empty(), "block {id}:{metadata}");
+            assert_eq!(collision, selection, "block {id}:{metadata}");
+        }
+    }
+
+    #[test]
+    fn a_ladder_is_a_board_an_eighth_thick_against_its_wall() {
+        let world = TestBlocks::default();
+        // Facing 2 (north): the board lies against the south side.
+        let ladder = shape_of(BlockState::new(65, 2), &world, BlockPos::new(0, 0, 0));
+        let board = ladder.boxes()[0];
+        assert_eq!(board.max.y, 1.0);
+        assert_eq!(board.max.z - board.min.z, 0.125);
+    }
+
+    #[test]
+    fn a_lily_pad_is_a_film_and_a_flower_pot_a_small_block() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        let pad = shape_of(BlockState::new(111, 0), &world, pos).boxes()[0];
+        assert_eq!(pad.max.y, 0.015_625);
+        let pot = shape_of(BlockState::new(140, 0), &world, pos).boxes()[0];
+        assert_eq!(pot.max.y, 0.375);
+        assert_eq!((pot.min.x, pot.max.x), (0.3125, 0.6875));
+    }
+
+    #[test]
+    fn an_end_portal_frame_has_a_base_and_an_eye_when_it_holds_one() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        let empty = shape_of(BlockState::new(120, 0), &world, pos);
+        assert_eq!(empty.boxes().len(), 1);
+        assert_eq!(empty.boxes()[0].max.y, 0.8125);
+        let eye = shape_of(BlockState::new(120, 4), &world, pos);
+        assert_eq!(eye.boxes().len(), 2);
+        assert_eq!(eye.boxes()[1].min.y, 0.8125);
+        assert_eq!(eye.boxes()[1].max.y, 1.0);
+        assert_eq!(
+            (eye.boxes()[1].min.x, eye.boxes()[1].max.x),
+            (0.3125, 0.6875)
+        );
+    }
+
+    #[test]
+    fn a_player_cannot_walk_through_a_closed_door() {
+        // The shape is what the collision uses: no longer empty.
+        let world = door_world(64, 0, false);
+        assert!(!shape_of(world.block(0, 0, 0), &world, BlockPos::new(0, 0, 0)).is_empty());
+    }
+
+    #[test]
+    fn the_stems_of_pumpkins_and_melons_do_not_block_the_player() {
+        // The bug: 104 and 105 fell through to the full cube.
+        let world = TestBlocks::default();
+        for id in [104, 105] {
+            let stem = BlockState::new(id, 7);
+            assert!(shape_of(stem, &world, BlockPos::new(0, 0, 0)).is_empty());
+            // Still targetable, so the stem can be broken.
+            assert!(!selection_shape(stem, &world, BlockPos::new(0, 0, 0)).is_empty());
+        }
+    }
+
+    #[test]
+    fn repeaters_and_comparators_are_an_eighth_high_and_carpet_a_sixteenth() {
+        let world = TestBlocks::default();
+        let height = |id| {
+            shape_of(BlockState::new(id, 0), &world, BlockPos::new(0, 0, 0)).boxes()[0]
+                .max
+                .y
+        };
+        for id in [93, 94, 149, 150] {
+            assert_eq!(height(id), 0.125, "block {id}");
+        }
+        assert_eq!(height(171), 0.0625);
     }
 
     #[test]
