@@ -448,7 +448,7 @@ fn additional_lines(
 
 /// The `StoredEnchantments` list of an enchanted book
 /// (`ItemEnchantedBook.getEnchantments`).
-fn stored_enchantments(root: Option<&Nbt>) -> Vec<Enchantment> {
+pub(crate) fn stored_enchantments(root: Option<&Nbt>) -> Vec<Enchantment> {
     let list = root
         .and_then(|r| r.get("StoredEnchantments"))
         .and_then(Nbt::as_list)

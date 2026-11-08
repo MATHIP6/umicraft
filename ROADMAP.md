@@ -333,10 +333,10 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
   tab (offscreen portrait block of the icon atlas, ADR-0025 addendum).
 - **Active effects list** in the inventory (needs the `Entity Effect` state of
   P1/P2 drawn left of the window, `GuiInventory.drawActivePotionEffects`).
-- **Creative inventory gaps:** tab-name line in the Search tooltip, Shift +
+- **Creative inventory gaps:** Shift +
   double click, middle-button drag, double click outside the Inventory tab,
-  banner patterns. Search by variant name is done (2026-11-07, see the
-  language entry below).
+  banner patterns. Search by variant name and the tab-name line of the Search
+  tooltip are done (2026-11-07; the line is blue but not bold).
 - **Survival gaps:** Shift + double click (collect every matching slot), pick
   block key over a slot, touchscreen mode, empty-cursor outside click (mode 4).
 - **Language keys of item names (done 2026-11-07):** the loader itself
