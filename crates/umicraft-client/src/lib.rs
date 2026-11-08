@@ -40,6 +40,7 @@ mod entity_icons;
 pub mod entity_render;
 pub mod error;
 mod fog_context;
+mod fps_meter;
 pub mod game;
 pub mod headless;
 pub mod hud_demo;

@@ -60,6 +60,7 @@ use crate::text_screens::TextScreens;
 use crate::achievements_view::java_string_hash;
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
 use crate::entity_icons::EntityIcons;
+use crate::fps_meter::FpsMeter;
 use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
@@ -284,6 +285,8 @@ struct App {
     frame_times: Vec<f32>,
     frame_ms: f32,
     fps: f32,
+    /// Refreshes `fps` once per second for the F3 screen.
+    fps_meter: FpsMeter,
     exit_error: Option<String>,
 }
 
@@ -397,6 +400,7 @@ impl App {
             frame_times: Vec::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
             fps: 0.0,
+            fps_meter: FpsMeter::new(Instant::now()),
             exit_error: None,
         })
     }
@@ -1096,12 +1100,7 @@ impl App {
         } else {
             self.frame_ms * 0.9 + frame_ms * 0.1
         };
-        let instant_fps = 1.0 / elapsed.max(1e-6);
-        self.fps = if self.fps == 0.0 {
-            instant_fps
-        } else {
-            self.fps * 0.9 + instant_fps * 0.1
-        };
+        self.fps = self.fps_meter.tick(now);
         self.frame_times.push(frame_ms);
         if self.frame_times.len() > FRAME_HISTORY {
             self.frame_times.remove(0);
