@@ -17,7 +17,7 @@
 
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack};
-use umicraft_world::BlockPos;
+use umicraft_world::{BlockPos, BlockState};
 
 use crate::combat::{interact_packets, ClickViewer, EntityHit, InteractTick};
 use crate::entity::EntityRecord;
@@ -118,12 +118,14 @@ pub fn use_action(item: &ItemStack) -> Option<UseAction> {
 /// repeaters, trapdoors, fences (leads), fence gates, enchanting table,
 /// brewing stand, cauldron, dragon egg, ender chest, command block, beacon,
 /// anvil, trapped chest, comparators, daylight sensors, hopper, dropper.
-/// An iron door (71) returns `false`; a jukebox, a flower pot and TNT only
-/// depend on the held item or a block entity, and are left out.
+/// An iron door (71) consumes the click without doing anything
+/// (`BlockDoor.onBlockActivated` returns `true` for `Material.iron`); a
+/// jukebox, a flower pot and TNT only depend on the held item or a block
+/// entity, and are left out.
 const ACTIVATABLE: &[u16] = &[
-    23, 25, 26, 54, 58, 61, 62, 64, 69, 77, 85, 92, 93, 94, 96, 107, 113, 116, 117, 118, 122, 130,
-    137, 138, 143, 145, 146, 149, 150, 151, 154, 158, 167, 178, 183, 184, 185, 186, 187, 188, 189,
-    190, 191, 192, 193, 194, 195, 196, 197,
+    23, 25, 26, 54, 58, 61, 62, 64, 69, 71, 77, 85, 92, 93, 94, 96, 107, 113, 116, 117, 118, 122,
+    130, 137, 138, 143, 145, 146, 149, 150, 151, 154, 158, 167, 178, 183, 184, 185, 186, 187, 188,
+    189, 190, 191, 192, 193, 194, 195, 196, 197,
 ];
 
 /// Whether a right click on the block with this id is consumed by the block.
@@ -133,6 +135,57 @@ const ACTIVATABLE: &[u16] = &[
 #[must_use]
 pub fn is_activatable(block_id: u16) -> bool {
     ACTIVATABLE.contains(&block_id)
+}
+
+/// The open bit of the lower half of a door.
+const DOOR_OPEN: u8 = 4;
+/// The bit that marks the upper half of a door.
+const DOOR_UPPER: u8 = 8;
+
+/// A wooden door that swings under a right click.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DoorToggle {
+    /// The block that was clicked, where the sound comes from.
+    pub clicked: BlockPos,
+    /// The lower half, which holds the open bit.
+    pub lower: BlockPos,
+    /// The lower half once toggled.
+    pub state: BlockState,
+}
+
+impl DoorToggle {
+    /// Whether the door is open once toggled: it plays the opening sound
+    /// (`Effect` 1003) rather than the closing one (1006).
+    #[must_use]
+    pub fn opens(&self) -> bool {
+        self.state.metadata() & DOOR_OPEN != 0
+    }
+}
+
+/// What a right click does to a wooden door (MCP `BlockDoor.onBlockActivated`,
+/// which the client runs too): the open bit of the lower half flips at once and
+/// the player hears the door. The server sends that sound to everyone but the
+/// player who clicked, so without this the clicking player hears nothing.
+///
+/// `None` for anything that is not a wooden door (the iron door only consumes
+/// the click) and for a half whose other half is gone.
+#[must_use]
+pub fn door_toggle<W: BlockSource + ?Sized>(world: &W, clicked: BlockPos) -> Option<DoorToggle> {
+    let state = world.block(clicked.x, clicked.y, clicked.z);
+    if !matches!(state.id(), 64 | 193..=197) {
+        return None;
+    }
+    let lower = if state.metadata() & DOOR_UPPER != 0 {
+        BlockPos::new(clicked.x, clicked.y - 1, clicked.z)
+    } else {
+        clicked
+    };
+    let below = world.block(lower.x, lower.y, lower.z);
+    (below.id() == state.id()).then(|| DoorToggle {
+        clicked,
+        lower,
+        state: BlockState::new(below.id(), below.metadata() ^ DOOR_OPEN),
+    })
 }
 
 /// Whether the item is a block item: its id is the id of its block
@@ -231,6 +284,8 @@ pub struct UseOutput {
     pub packets: Vec<Outgoing>,
     /// Whether the arm swings (the click was consumed by a block).
     pub swing: bool,
+    /// The wooden door the click swings, to apply and play at once.
+    pub door: Option<DoorToggle>,
 }
 
 /// The use state of the local player (MCP `EntityPlayer.itemInUse`).
@@ -336,18 +391,23 @@ impl ItemUse {
             let activated = tick.mode != GameMode::Spectator
                 && (!tick.sneaking || held.is_none())
                 && is_activatable(block_id(tick.world, &hit));
+            if activated {
+                output.door = door_toggle(tick.world, hit.block);
+            }
             let item = held.cloned().unwrap_or(ItemStack::EMPTY);
             let places = held.is_some_and(is_block_item) && tick.mode.can_place();
-            if let Some(place) =
-                interaction.place_block(tick.mode, &hit, tick.player.as_ref(), item)
-            {
-                output.packets.push(place);
+            // The placement is skipped when the player stands in the way, but a
+            // click the block consumes (a door) still goes to the server and
+            // still swings the arm.
+            let packet = interaction
+                .place_block(tick.mode, &hit, tick.player.as_ref(), item.clone())
+                .or_else(|| activated.then(|| Interaction::activate_block(&hit, item)));
+            if let Some(packet) = packet {
+                output.packets.push(packet);
                 if activated || places {
                     output.swing = true;
                     return;
                 }
-            } else if activated {
-                return;
             }
         }
         if let Some(item) = held.filter(|_| tick.mode != GameMode::Spectator) {
@@ -726,6 +786,201 @@ mod tests {
         assert!(!output.swing && using);
         let (output, _) = attempt(true, None);
         assert!(output.swing);
+    }
+
+    /// A door of `id` at the origin: the lower half with `lower` metadata and
+    /// the upper half (bit 8) above it.
+    struct DoorWorld {
+        id: u16,
+        lower: u8,
+    }
+
+    impl BlockSource for DoorWorld {
+        fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+            match (x, y, z) {
+                (0, 0, 0) => BlockState::new(self.id, self.lower),
+                (0, 1, 0) => BlockState::new(self.id, 8),
+                _ => BlockState::AIR,
+            }
+        }
+    }
+
+    #[test]
+    fn a_click_swings_a_closed_wooden_door_open_and_the_sound_is_the_opening_one() {
+        let world = DoorWorld { id: 64, lower: 0 };
+        let toggle = door_toggle(&world, BlockPos::new(0, 0, 0)).expect("a wooden door");
+        assert_eq!(toggle.lower, BlockPos::new(0, 0, 0));
+        assert_eq!(toggle.state, BlockState::new(64, 4));
+        assert!(toggle.opens());
+    }
+
+    #[test]
+    fn an_open_door_closes_and_the_sound_is_the_closing_one() {
+        let world = DoorWorld {
+            id: 64,
+            lower: 4 | 2,
+        };
+        let toggle = door_toggle(&world, BlockPos::new(0, 0, 0)).expect("a wooden door");
+        assert_eq!(
+            toggle.state,
+            BlockState::new(64, 2),
+            "only the open bit flips"
+        );
+        assert!(!toggle.opens());
+    }
+
+    #[test]
+    fn clicking_the_upper_half_swings_the_lower_one_but_sounds_where_it_was_clicked() {
+        let world = DoorWorld { id: 64, lower: 0 };
+        let toggle = door_toggle(&world, BlockPos::new(0, 1, 0)).expect("the upper half");
+        assert_eq!(toggle.clicked, BlockPos::new(0, 1, 0));
+        assert_eq!(toggle.lower, BlockPos::new(0, 0, 0));
+        assert_eq!(toggle.state, BlockState::new(64, 4));
+    }
+
+    #[test]
+    fn every_wooden_door_swings_and_the_iron_door_only_eats_the_click() {
+        for id in [64, 193, 194, 195, 196, 197] {
+            let world = DoorWorld { id, lower: 0 };
+            assert!(
+                door_toggle(&world, BlockPos::new(0, 0, 0)).is_some(),
+                "door {id}"
+            );
+        }
+        let iron = DoorWorld { id: 71, lower: 0 };
+        assert_eq!(door_toggle(&iron, BlockPos::new(0, 0, 0)), None);
+        // It still consumes the click (`BlockDoor.onBlockActivated` returns true).
+        assert!(is_activatable(71));
+    }
+
+    #[test]
+    fn a_half_without_its_other_half_does_not_swing() {
+        struct Lone;
+        impl BlockSource for Lone {
+            fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+                // Only an upper half, with nothing under it.
+                if (x, y, z) == (0, 1, 0) {
+                    BlockState::new(64, 8)
+                } else {
+                    BlockState::AIR
+                }
+            }
+        }
+        assert_eq!(door_toggle(&Lone, BlockPos::new(0, 1, 0)), None);
+    }
+
+    #[test]
+    fn a_right_click_on_a_wooden_door_reports_the_swing_unless_sneaking_with_an_item() {
+        let attempt = |id: u16, sneaking: bool, held: Option<&ItemStack>| {
+            let world = DoorWorld { id, lower: 0 };
+            let (mut state, mut interaction) = (ItemUse::new(), Interaction::new());
+            let click = UseTick {
+                mode: GameMode::Survival,
+                entity: None,
+                pressed: true,
+                held: true,
+                target: Some(hit()),
+                world: &world,
+                player: None,
+                sneaking,
+                slot: 0,
+                item: held,
+                food: 10,
+                has_arrow: false,
+                viewer: ClickViewer::default(),
+            };
+            state.tick(&mut interaction, &click)
+        };
+        let cobble = item(4, 0);
+        let opened = attempt(64, false, Some(&cobble));
+        assert_eq!(opened.door.map(|door| door.opens()), Some(true));
+        assert!(opened.swing, "the click is consumed");
+        // Sneaking with a block in hand skips the door and places instead.
+        assert_eq!(attempt(64, true, Some(&cobble)).door, None);
+        // With an empty hand the door still opens while sneaking.
+        assert!(attempt(64, true, None).door.is_some());
+        // The iron door eats the click without swinging.
+        let iron = attempt(71, false, Some(&cobble));
+        assert_eq!(iron.door, None);
+        assert!(iron.swing);
+    }
+
+    /// The box of a player standing in the cell above the origin, which is the
+    /// cell next to the top face the `hit()` clicks.
+    fn player_in_the_way() -> Aabb {
+        Aabb::new(DVec3::new(0.2, 1.0, 0.2), DVec3::new(0.8, 2.8, 0.8))
+    }
+
+    fn click_with_player_in_the_way<W: BlockSource>(
+        world: &W,
+        held: Option<&ItemStack>,
+    ) -> UseOutput {
+        let (mut state, mut interaction) = (ItemUse::new(), Interaction::new());
+        let click = UseTick {
+            mode: GameMode::Survival,
+            entity: None,
+            pressed: true,
+            held: true,
+            target: Some(hit()),
+            world,
+            player: Some(player_in_the_way()),
+            sneaking: false,
+            slot: 0,
+            item: held,
+            food: 10,
+            has_arrow: false,
+            viewer: ClickViewer::default(),
+        };
+        state.tick(&mut interaction, &click)
+    }
+
+    fn places(output: &UseOutput) -> usize {
+        output
+            .packets
+            .iter()
+            .filter(|packet| matches!(packet, Outgoing::Place { .. }))
+            .count()
+    }
+
+    #[test]
+    fn a_door_clicked_from_right_up_against_it_still_opens_and_swings_the_arm() {
+        // The bug: standing in the cell next to the clicked face skipped the
+        // packet, and with it the swing and the opening.
+        let world = DoorWorld { id: 64, lower: 0 };
+        for held in [None, Some(item(4, 0))] {
+            let output = click_with_player_in_the_way(&world, held.as_ref());
+            assert_eq!(places(&output), 1, "the click reaches the server");
+            assert!(output.swing, "the arm swings");
+            assert!(output.door.is_some(), "the door swings at once");
+        }
+    }
+
+    #[test]
+    fn a_chest_or_a_table_clicked_from_up_against_it_swings_the_arm_too() {
+        struct Table(u16);
+        impl BlockSource for Table {
+            fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+                if (x, y, z) == (0, 0, 0) {
+                    BlockState::new(self.0, 0)
+                } else {
+                    BlockState::AIR
+                }
+            }
+        }
+        for id in [54, 58, 69, 77] {
+            let output = click_with_player_in_the_way(&Table(id), None);
+            assert_eq!(places(&output), 1, "block {id}");
+            assert!(output.swing, "block {id}");
+        }
+    }
+
+    #[test]
+    fn a_placement_inside_the_player_is_still_skipped() {
+        // Stone is not activatable: the block would land on the player.
+        let cobble = item(4, 0);
+        let output = click_with_player_in_the_way(&Stone, Some(&cobble));
+        assert_eq!(places(&output), 0);
+        assert!(!output.swing);
     }
 
     fn entity_click(kind: EntityKind, held: Option<&ItemStack>) -> UseOutput {

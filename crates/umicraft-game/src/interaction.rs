@@ -262,16 +262,31 @@ impl Interaction {
         if mode.can_place() {
             self.expected_placement = Some(target);
         }
-        Some(Outgoing::Place {
+        Some(Self::block_click(hit, item))
+    }
+
+    /// The packet of a click that the block itself consumes (a door, a chest,
+    /// a lever...), which is sent even when the player stands in the cell
+    /// next to the clicked face: only a *placement* is skipped there (MCP
+    /// `onPlayerRightClick` sends the packet in every case). Without this, a
+    /// door clicked from right up against it did nothing at all.
+    #[must_use]
+    pub fn activate_block(hit: &RayHit, item: ItemStack) -> Outgoing {
+        Self::block_click(hit, item)
+    }
+
+    /// The `Block Placement` packet of a click on `hit`.
+    fn block_click(hit: &RayHit, item: ItemStack) -> Outgoing {
+        Outgoing::Place {
             block: hit.block,
-            face,
+            face: wire_face(hit.face),
             item,
             cursor: [
                 cursor(hit.position.x - f64::from(hit.block.x)),
                 cursor(hit.position.y - f64::from(hit.block.y)),
                 cursor(hit.position.z - f64::from(hit.block.z)),
             ],
-        })
+        }
     }
 
     /// Records a block change of the server and tells what it confirmed.
