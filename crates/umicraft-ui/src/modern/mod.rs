@@ -17,12 +17,22 @@
 
 mod button;
 mod panel;
+pub mod search_field;
+mod slider;
+mod tabs;
 mod text;
 pub mod theme;
+mod toggle;
 
 pub use button::{HoverFade, ModernButton};
 pub use panel::{panel, vignette};
-pub use text::{brand_text_style, draw_text, measure_text, Align};
+pub use search_field::search_field;
+pub use slider::{modern_slider, SliderDrag, SliderRange};
+pub use tabs::{tab_at, tab_rects, tabs};
+pub use text::{brand_text_style, draw_text, fit_text, measure_text, Align};
+pub use toggle::{knob_rect, toggle, TOGGLE_HEIGHT, TOGGLE_WIDTH};
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod widget_tests;

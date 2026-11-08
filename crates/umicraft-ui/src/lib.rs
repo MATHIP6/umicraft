@@ -45,6 +45,7 @@ pub mod id;
 pub mod input;
 pub mod legacy_text;
 pub mod menus;
+pub mod mod_widget;
 pub mod modern;
 pub mod screens;
 pub mod styled_text;
