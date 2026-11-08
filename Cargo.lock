@@ -3783,6 +3783,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-builtin-mods"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
 name = "umicraft-client"
 version = "0.1.0"
 dependencies = [
@@ -3802,6 +3811,7 @@ dependencies = [
  "umicraft-assets",
  "umicraft-audio",
  "umicraft-auth",
+ "umicraft-builtin-mods",
  "umicraft-core",
  "umicraft-game",
  "umicraft-mesh",
