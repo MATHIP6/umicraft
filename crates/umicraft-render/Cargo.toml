@@ -23,5 +23,9 @@ winit = "0.30.8"
 [dev-dependencies]
 naga = { version = "30.0.1", features = ["wgsl-in"] }
 
+[features]
+# Forwards to `umicraft-core/profiling`: puffin CPU spans.
+profiling = ["umicraft-core/profiling"]
+
 [lints]
 workspace = true

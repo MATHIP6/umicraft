@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 
 use super::kind::{EntityId, EntityKind};
 use super::snapshot::EntityFrameData;
@@ -21,9 +21,9 @@ const PLAYER_EYE_HEIGHT: f32 = 1.62;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LeashFrame {
     /// Feet at the previous tick.
-    pub prev_position: Vec3,
+    pub prev_position: DVec3,
     /// Feet now.
-    pub position: Vec3,
+    pub position: DVec3,
     /// Yaw in degrees at the previous tick.
     pub prev_yaw: f32,
     /// Yaw in degrees now.
@@ -55,14 +55,15 @@ pub struct LeashAnchor {
 }
 
 impl LeashFrame {
-    /// The holder at the sub-tick fraction `alpha`.
+    /// The holder at the sub-tick fraction `alpha`, with the position relative
+    /// to `origin` (subtracted in f64).
     ///
     /// `RenderLiving.renderLeash` interpolates the angles with `partialTicks *
     /// 0.5` and the position with `partialTicks`.
     #[must_use]
-    pub fn at(&self, alpha: f32) -> LeashAnchor {
+    pub fn at(&self, alpha: f32, origin: DVec3) -> LeashAnchor {
         LeashAnchor {
-            position: self.prev_position.lerp(self.position, alpha),
+            position: (self.prev_position.lerp(self.position, f64::from(alpha)) - origin).as_vec3(),
             yaw: self.prev_yaw + (self.yaw - self.prev_yaw) * alpha * 0.5,
             pitch: self.prev_pitch + (self.pitch - self.prev_pitch) * alpha * 0.5,
             eye_height: self.eye_height,
@@ -132,7 +133,7 @@ mod tests {
         leash_entities(&mut frames, None);
         let holder = frames[0].leash.expect("holder");
         assert!(holder.hanging);
-        assert_eq!(holder.position, Vec3::new(4.5, 64.5, 4.5));
+        assert_eq!(holder.position, DVec3::new(4.5, 64.5, 4.5));
         assert!(frames[1].leash.is_none(), "the knot holds nothing");
     }
 
@@ -141,8 +142,8 @@ mod tests {
         let mut pig = frame(1, EntityKind::Pig, Vec3::ZERO);
         pig.leash_holder = Some(EntityId(9));
         let me = LeashFrame {
-            prev_position: Vec3::new(1.0, 64.0, 1.0),
-            position: Vec3::new(2.0, 64.0, 1.0),
+            prev_position: DVec3::new(1.0, 64.0, 1.0),
+            position: DVec3::new(2.0, 64.0, 1.0),
             prev_yaw: 0.0,
             yaw: 90.0,
             prev_pitch: 0.0,
@@ -152,7 +153,7 @@ mod tests {
         };
         let mut frames = [pig];
         leash_entities(&mut frames, Some((EntityId(9), me)));
-        let anchor = frames[0].leash.expect("holder").at(1.0);
+        let anchor = frames[0].leash.expect("holder").at(1.0, DVec3::ZERO);
         assert_eq!(anchor.position, Vec3::new(2.0, 64.0, 1.0));
         // The angles move by half the fraction only.
         assert!((anchor.yaw - 45.0).abs() < 1e-4);

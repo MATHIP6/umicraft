@@ -30,8 +30,17 @@ fn sprite(color: [f32; 4]) -> ParticleSprite {
 /// turns by pi).
 fn frame(sprites: &[ParticleSprite]) -> Image {
     let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
-    renderer.set_particles(sprites);
     let mut camera = Camera::new(Vec3::new(0.5, 66.0, 0.5), std::f32::consts::PI, 0.0);
+    // Sprite centres are relative to the render origin of the camera.
+    let origin = camera.render_origin().as_vec3();
+    let relative: Vec<ParticleSprite> = sprites
+        .iter()
+        .map(|sprite| ParticleSprite {
+            center: sprite.center - origin,
+            ..*sprite
+        })
+        .collect();
+    renderer.set_particles(&relative);
     camera.set_aspect(WIDTH, HEIGHT);
     renderer
         .render(&camera, &Overlay::new(WIDTH, HEIGHT))

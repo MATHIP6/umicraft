@@ -316,7 +316,6 @@ impl EntityStore {
         let alpha_f64 = f64::from(alpha.clamp(0.0, 1.0));
         let feet = record.previous_position.lerp(record.position, alpha_f64);
         let eye = feet + DVec3::Y * EYE_HEIGHT;
-        let eye = Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
         let lerp = |from: f32, to: f32| from + (to - from) * alpha.clamp(0.0, 1.0);
         Some(RenderState {
             position: eye,
@@ -655,12 +654,14 @@ impl EntityStore {
 
     /// Produces interpolated render snapshots for all tracked entities.
     ///
-    /// `alpha` is the partial tick fraction in `0.0..=1.0`.
+    /// `alpha` is the partial tick fraction in `0.0..=1.0`. Positions are in
+    /// world coordinates (the render thread interpolates the frame data
+    /// itself, relative to its render origin).
     #[must_use]
     pub fn snapshots(&self, alpha: f32) -> Vec<EntityRenderSnapshot> {
         self.entities
             .values()
-            .map(|entity| entity.frame_data().interpolate(alpha))
+            .map(|entity| entity.frame_data().interpolate(alpha, DVec3::ZERO))
             .collect()
     }
 
@@ -927,7 +928,7 @@ mod tests {
         store.tick();
         store.tick();
         assert!((store.snapshots(0.5)[0].age - 2.5).abs() < 1e-6);
-        let from_frame = store.frame_data()[0].interpolate(0.5);
+        let from_frame = store.frame_data()[0].interpolate(0.5, DVec3::ZERO);
         assert!((from_frame.age - 2.5).abs() < 1e-6);
     }
 

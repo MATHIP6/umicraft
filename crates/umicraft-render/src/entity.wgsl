@@ -82,7 +82,7 @@ fn face_shade(normal: vec3<f32>) -> f32 {
 fn entity_vertex(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
-    out.world_position = in.position;
+    out.world_position = in.position - camera.origin;
     out.uv = in.uv;
 
     // Unpack light nibbles: bits 0..=3 block, 4..=7 sky
@@ -201,7 +201,7 @@ struct AdditiveOut {
 fn vs_additive(in: VertexIn) -> AdditiveOut {
     var out: AdditiveOut;
     out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
-    out.world_position = in.position;
+    out.world_position = in.position - camera.origin;
     out.uv = in.uv;
     out.tint = vec3<f32>(
         f32(in.light & 0xFFu),
@@ -239,7 +239,7 @@ struct ShadowOut {
 fn vs_shadow(in: VertexIn) -> ShadowOut {
     var out: ShadowOut;
     out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
-    out.world_position = in.position;
+    out.world_position = in.position - camera.origin;
     out.uv = in.uv;
     out.alpha = f32(in.light & 0xFFu) / 255.0;
     return out;

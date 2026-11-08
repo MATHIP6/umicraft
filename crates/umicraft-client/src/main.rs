@@ -9,8 +9,8 @@ use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 use umicraft_client::args::{Args, Mode, USAGE};
 use umicraft_client::{
-    audio_bridge, block_demo, entity_demo, headless, hud_demo, launch_session, screenshot,
-    setup_cli, ui_demo, window,
+    audio_bridge, bench_scene, block_demo, entity_demo, headless, hud_demo, launch_session,
+    screenshot, setup_cli, ui_demo, window,
 };
 
 fn main() -> ExitCode {
@@ -19,6 +19,9 @@ fn main() -> ExitCode {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
         )
         .init();
+
+    // Kept alive for the whole run: dropping it stops the puffin stream.
+    let _profiler = umicraft_core::profiling::serve();
 
     let words: Vec<String> = std::env::args().skip(1).collect();
     if words.iter().any(|word| word == "--help" || word == "-h") {
@@ -43,6 +46,7 @@ fn main() -> ExitCode {
         Mode::BlockDemo => block_demo::run(&args),
         Mode::EntityDemo => entity_demo::run(&args),
         Mode::Headless => headless::run(&args),
+        Mode::BenchScene => bench_scene::run(&args),
         Mode::Screenshot => screenshot::run(&args),
         Mode::Windowed => window::run(args.clone()),
     };

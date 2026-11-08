@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 use umicraft_world::LightLevel;
 
 use super::angle::lerp_degrees;
@@ -34,10 +34,11 @@ pub struct EntityFrameData {
     /// The world light at the entity (see [`super::light`]); full sky until
     /// the game thread samples it.
     pub light: LightLevel,
-    /// Position at the previous simulation tick.
-    pub prev_position: Vec3,
+    /// Position at the previous simulation tick, in f64: the render thread
+    /// subtracts its origin before any cast to f32 (F2-1b).
+    pub prev_position: DVec3,
     /// Position at the current simulation tick.
-    pub position: Vec3,
+    pub position: DVec3,
     /// Previous facing direction in degrees.
     pub prev_yaw: f32,
     /// Current facing direction in degrees.
@@ -61,9 +62,9 @@ pub struct EntityFrameData {
     /// The typed metadata.
     pub meta: EntityMeta,
     /// The cape position one tick ago.
-    pub prev_cape_chase: Vec3,
+    pub prev_cape_chase: DVec3,
     /// The cape position now.
-    pub cape_chase: Vec3,
+    pub cape_chase: DVec3,
     /// The text of the name tag above the entity.
     pub name_tag: Option<Arc<str>>,
     /// The profile of a player.
@@ -102,7 +103,7 @@ pub struct EntityFrameData {
     pub block_lights: Arc<[LightLevel]>,
     /// Where the line of this bobber ties to the rod when the angler is the
     /// local player in first person; set by the game thread.
-    pub rod_tip: Option<Vec3>,
+    pub rod_tip: Option<DVec3>,
     /// Whether this is the body of the local player.
     pub local: bool,
     /// Whether the viewer sees the invisible body as a ghost by team.
@@ -127,10 +128,16 @@ impl EntityFrameData {
     /// Produces an interpolated render snapshot at the given sub-tick fraction.
     ///
     /// `alpha` is in `0.0..=1.0` where 0 is the previous tick and 1 the current.
+    /// Every position of the snapshot is relative to `origin` (the render
+    /// origin of the camera; pass `DVec3::ZERO` for world coordinates): the
+    /// interpolation and the subtraction happen in f64, so an entity far from
+    /// the world origin keeps its smooth motion (F2-1b).
     #[must_use]
-    pub fn interpolate(&self, alpha: f32) -> EntityRenderSnapshot {
+    pub fn interpolate(&self, alpha: f32, origin: DVec3) -> EntityRenderSnapshot {
         let a = alpha.clamp(0.0, 1.0);
-        let position = self.prev_position.lerp(self.position, a);
+        let wide = f64::from(a);
+        let world_position = self.prev_position.lerp(self.position, wide);
+        let position = (world_position - origin).as_vec3();
         let yaw = lerp_degrees(self.prev_yaw, self.yaw, a);
         let body_yaw = lerp_degrees(self.prev_body_yaw, self.body_yaw, a);
         let pitch = self.prev_pitch + (self.pitch - self.prev_pitch) * a;
@@ -140,6 +147,7 @@ impl EntityFrameData {
             id: self.id,
             kind: self.kind,
             light: self.light,
+            origin,
             position,
             yaw,
             body_yaw,
@@ -154,7 +162,7 @@ impl EntityFrameData {
             bed: self.animation.bed,
             meta: self.meta.clone(),
             cape: cape_angles(
-                self.prev_cape_chase.lerp(self.cape_chase, a) - position,
+                (self.prev_cape_chase.lerp(self.cape_chase, wide) - world_position).as_vec3(),
                 body_yaw,
                 self.flags.is_sneaking(),
             ),
@@ -170,14 +178,14 @@ impl EntityFrameData {
             use_ticks: self.use_ticks,
             fishing: self.fishing,
             riding: self.riding,
-            leash: self.leash.map(|holder| holder.at(a)),
+            leash: self.leash.map(|holder| holder.at(a, origin)),
             local: self.local,
             ghost_visible: self.ghost_visible,
             squish: self.squish,
             horse: self.horse.map(|horse| horse.pose(a)),
             ridden: self.ridden,
             block_lights: self.block_lights.clone(),
-            rod_tip: self.rod_tip,
+            rod_tip: self.rod_tip.map(|tip| (tip - origin).as_vec3()),
             flight: self
                 .flight
                 .as_ref()
@@ -199,7 +207,10 @@ pub struct EntityRenderSnapshot {
     pub kind: EntityKind,
     /// The world light the entity is drawn with.
     pub light: LightLevel,
-    /// Interpolated world space position.
+    /// The world position that `(0, 0, 0)` of this snapshot stands for: every
+    /// position below is relative to it. Zero outside the renderer.
+    pub origin: DVec3,
+    /// Interpolated position, relative to [`Self::origin`].
     pub position: Vec3,
     /// Interpolated facing direction in degrees.
     pub yaw: f32,
@@ -267,7 +278,8 @@ pub struct EntityRenderSnapshot {
     /// The light in front of each block of a painting, column by column; empty
     /// when the whole entity takes `light`.
     pub block_lights: Arc<[LightLevel]>,
-    /// Where the line of this bobber ties to the rod (first person only).
+    /// Where the line of this bobber ties to the rod (first person only),
+    /// relative to [`Self::origin`].
     pub rod_tip: Option<Vec3>,
     /// Whether this is the body of the local player: it is not lowered further
     /// when crouching (`RenderPlayer.doRender`).
@@ -295,6 +307,7 @@ impl EntityRenderSnapshot {
             id,
             kind,
             light: LightLevel::FULL_SKY,
+            origin: DVec3::ZERO,
             position,
             yaw: 0.0,
             body_yaw: 0.0,
@@ -335,5 +348,49 @@ impl EntityRenderSnapshot {
             frame_rotation: 0,
             flags: EntityFlags::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::EntityRecord;
+
+    fn walker(from: f64, to: f64) -> EntityFrameData {
+        let mut record = EntityRecord::new(
+            EntityId(1),
+            EntityKind::Pig,
+            DVec3::new(to, 64.0, 1_000_000.25),
+            0.0,
+            0.0,
+        );
+        record.previous_position = DVec3::new(from, 64.0, 1_000_000.25);
+        record.frame_data()
+    }
+
+    #[test]
+    fn an_entity_far_from_the_origin_moves_smoothly() {
+        // F2-1b regression: a pig walks 5 cm per tick at x = 1 000 000. An f32
+        // position has a 6 cm grain there, so the steps used to vanish and
+        // the pig advanced in jumps; relative to the origin they stay exact.
+        let origin = DVec3::new(1_000_000.0, 64.0, 1_000_000.0);
+        let frame = walker(1_000_000.40, 1_000_000.45);
+        let x_at = |alpha: f32| frame.interpolate(alpha, origin).position.x;
+        let steps: Vec<f32> = (0..=5).map(|n| x_at(n as f32 / 5.0)).collect();
+        for pair in steps.windows(2) {
+            assert!((pair[1] - pair[0] - 0.01).abs() < 1e-5, "{steps:?}");
+        }
+        assert!((steps[0] - 0.40).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_origin_is_carried_and_subtracted_from_every_position() {
+        let origin = DVec3::new(1_000_000.0, 60.0, 1_000_000.0);
+        let mut frame = walker(1_000_001.0, 1_000_002.0);
+        frame.rod_tip = Some(DVec3::new(1_000_003.5, 65.0, 1_000_000.5));
+        let snapshot = frame.interpolate(1.0, origin);
+        assert_eq!(snapshot.origin, origin);
+        assert_eq!(snapshot.position, Vec3::new(2.0, 4.0, 0.25));
+        assert_eq!(snapshot.rod_tip, Some(Vec3::new(3.5, 5.0, 0.5)));
     }
 }

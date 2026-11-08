@@ -27,8 +27,6 @@ mod plan;
 mod texture;
 mod view;
 
-use glam::Mat4;
-
 use crate::sky::{self, SkyImage, SkyVertex};
 use crate::Camera;
 use plan::MAX_VERTICES;
@@ -145,7 +143,7 @@ impl BorderRenderer {
     pub(crate) fn update(&mut self, queue: &wgpu::Queue, camera: &Camera, reach: f64) {
         self.vertex_count = 0;
         let Some(view) = self.view else { return };
-        let eye = camera.position.as_dvec3().to_array();
+        let eye = camera.eye().to_array();
         let Some(walls) = plan::plan(&view, eye, reach, plan::scroll(self.clock)) else {
             return;
         };
@@ -156,8 +154,7 @@ impl BorderRenderer {
             bytemuck::cast_slice(&walls.vertices[..count]),
         );
         let uniform = BorderUniform {
-            view_proj: (camera.view_projection() * Mat4::from_translation(camera.position))
-                .to_cols_array_2d(),
+            view_proj: camera.view_projection_around_eye().to_cols_array_2d(),
             tint: walls.colour,
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));

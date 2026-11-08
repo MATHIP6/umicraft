@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use glam::Vec3;
+use glam::DVec3;
 use umicraft_world::{BlockPos, LightLevel, World};
 
 use super::kind::EntityKind;
@@ -22,10 +22,12 @@ use crate::shapes::is_normal_cube;
 /// One block a shadow falls on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadowBlock {
-    /// West and east edges of the block top.
-    pub x: [f32; 2],
-    /// North and south edges of the block top.
-    pub z: [f32; 2],
+    /// The west edge of the block top, as the block coordinate. The block is
+    /// one wide: an integer keeps it exact far from the origin, where the
+    /// renderer subtracts its origin in f64.
+    pub x: i32,
+    /// The north edge of the block top, as the block coordinate.
+    pub z: i32,
     /// Height of the top of the block.
     pub top: f32,
     /// `World.getLightBrightness` of the cell above the block, `0..=1`.
@@ -132,13 +134,14 @@ pub fn shadow_opacity(kind: EntityKind) -> f32 {
 /// be tested.
 #[must_use]
 pub fn shadow_blocks_with(
-    position: Vec3,
+    position: DVec3,
     size: f32,
     sky_subtracted: u8,
     full_cube: impl Fn(BlockPos) -> bool,
     light: impl Fn(BlockPos) -> LightLevel,
 ) -> Vec<ShadowBlock> {
-    let floor = |value: f32| value.floor() as i32;
+    let size = f64::from(size);
+    let floor = |value: f64| value.floor() as i32;
     let (x0, x1) = (floor(position.x - size), floor(position.x + size));
     let (y0, y1) = (floor(position.y - size), floor(position.y));
     let (z0, z1) = (floor(position.z - size), floor(position.z + size));
@@ -155,8 +158,8 @@ pub fn shadow_blocks_with(
                     continue;
                 }
                 blocks.push(ShadowBlock {
-                    x: [x as f32, x as f32 + 1.0],
-                    z: [z as f32, z as f32 + 1.0],
+                    x,
+                    z,
                     top: y as f32,
                     brightness: light_brightness(lit),
                 });
@@ -220,7 +223,7 @@ mod tests {
 
     #[test]
     fn a_pig_standing_on_a_block_casts_a_shadow_on_it() {
-        let blocks = shadow_blocks_with(Vec3::new(0.5, 64.0, 0.5), 0.7, 0, ground(64), day);
+        let blocks = shadow_blocks_with(DVec3::new(0.5, 64.0, 0.5), 0.7, 0, ground(64), day);
         assert!(!blocks.is_empty());
         // The ground is the layer under the feet; the box 0.7 wide reaches the
         // blocks around the one it stands on.
@@ -228,30 +231,29 @@ mod tests {
         // layer hides.
         assert!(blocks.iter().any(|block| block.top == 64.0));
         assert!(blocks.iter().all(|block| block.top <= 64.0));
-        let columns: std::collections::BTreeSet<i32> =
-            blocks.iter().map(|block| block.x[0] as i32).collect();
+        let columns: std::collections::BTreeSet<i32> = blocks.iter().map(|block| block.x).collect();
         assert_eq!(columns, [-1, 0, 1].into_iter().collect());
     }
 
     #[test]
     fn no_shadow_without_ground_or_without_light() {
-        let hovering = shadow_blocks_with(Vec3::new(0.5, 80.0, 0.5), 0.5, 0, ground(64), day);
+        let hovering = shadow_blocks_with(DVec3::new(0.5, 80.0, 0.5), 0.5, 0, ground(64), day);
         assert!(hovering.is_empty(), "the ground is more than the size away");
-        let dark = shadow_blocks_with(Vec3::new(0.5, 64.0, 0.5), 0.5, 0, ground(64), |_| {
+        let dark = shadow_blocks_with(DVec3::new(0.5, 64.0, 0.5), 0.5, 0, ground(64), |_| {
             LightLevel { block: 3, sky: 0 }
         });
         assert!(dark.is_empty(), "light 3 is not above 3");
         // At night the sky light is reduced by 11: 15 still leaves 4, which is
         // above 3 but dim, and 14 leaves exactly 3.
-        let night = shadow_blocks_with(Vec3::new(0.5, 64.0, 0.5), 0.5, 11, ground(64), day);
+        let night = shadow_blocks_with(DVec3::new(0.5, 64.0, 0.5), 0.5, 11, ground(64), day);
         assert!(!night.is_empty());
-        let noon = shadow_blocks_with(Vec3::new(0.5, 64.0, 0.5), 0.5, 0, ground(64), day);
+        let noon = shadow_blocks_with(DVec3::new(0.5, 64.0, 0.5), 0.5, 0, ground(64), day);
         assert!(night[0].brightness < noon[0].brightness);
-        let moonless = shadow_blocks_with(Vec3::new(0.5, 64.0, 0.5), 0.5, 11, ground(64), |_| {
+        let moonless = shadow_blocks_with(DVec3::new(0.5, 64.0, 0.5), 0.5, 11, ground(64), |_| {
             LightLevel { block: 0, sky: 14 }
         });
         assert!(moonless.is_empty());
-        let torch = shadow_blocks_with(Vec3::new(0.5, 64.0, 0.5), 0.5, 11, ground(64), |_| {
+        let torch = shadow_blocks_with(DVec3::new(0.5, 64.0, 0.5), 0.5, 11, ground(64), |_| {
             LightLevel { block: 10, sky: 15 }
         });
         assert!(!torch.is_empty());

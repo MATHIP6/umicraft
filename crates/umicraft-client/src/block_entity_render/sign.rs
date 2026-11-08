@@ -50,7 +50,7 @@ pub(super) fn add_sign(
         SignModel::emit(standing, degrees),
         entry,
     );
-    let [x, y, z] = entry.position;
+    let [x, y, z] = scene.world_position(entry);
     let pos: Pos = (x, y, z);
     let (Some(font), Some(lines)) = (scene.font, scene.signs.get(&pos)) else {
         return;
@@ -197,6 +197,7 @@ mod tests {
             font,
             partial_tick: 0.0,
             camera: Vec3::ZERO,
+            origin: [0; 3],
         };
         let mut batches = HashMap::new();
         add_sign(&mut batches, entry, &scene);

@@ -48,14 +48,22 @@ pub(super) fn add_shadow(
         return;
     }
     let batch = batches.entry(TextureSlot::Shadow).or_default();
+    // The blocks are whole numbers in world coordinates; the entity and the
+    // vertices are relative to its origin, so the corners are made relative
+    // in f64 (F2-1b).
+    let relative = |world: f64, origin: f64| (world - origin) as f32;
     for block in ent.shadow.iter() {
+        let top = relative(f64::from(block.top), ent.origin.y);
         // `(alpha - (y - top) / 2) * 0.5 * brightness`, kept to `0..=1`.
-        let opacity =
-            ((base - (ent.position.y - block.top) / 2.0) * 0.5 * block.brightness).min(1.0);
+        let opacity = ((base - (ent.position.y - top) / 2.0) * 0.5 * block.brightness).min(1.0);
         if opacity < 0.0 {
             continue;
         }
-        let height = block.top + LIFT;
+        let height = top + LIFT;
+        let (west, north) = (
+            relative(f64::from(block.x), ent.origin.x),
+            relative(f64::from(block.z), ent.origin.z),
+        );
         // Texture coordinates centre the blob on the entity.
         let u = |x: f32| (ent.position.x - x) / 2.0 / size + 0.5;
         let v = |z: f32| (ent.position.z - z) / 2.0 / size + 0.5;
@@ -67,10 +75,10 @@ pub(super) fn add_shadow(
             light,
         };
         let quad = [
-            corner(block.x[0], block.z[0]),
-            corner(block.x[0], block.z[1]),
-            corner(block.x[1], block.z[1]),
-            corner(block.x[1], block.z[0]),
+            corner(west, north),
+            corner(west, north + 1.0),
+            corner(west + 1.0, north + 1.0),
+            corner(west + 1.0, north),
         ];
         for index in [0, 1, 2, 0, 2, 3] {
             batch.push(quad[index]);
@@ -92,10 +100,10 @@ mod tests {
         pig
     }
 
-    fn block(x: f32, z: f32, top: f32) -> ShadowBlock {
+    fn block(x: i32, z: i32, top: f32) -> ShadowBlock {
         ShadowBlock {
-            x: [x, x + 1.0],
-            z: [z, z + 1.0],
+            x,
+            z,
             top,
             brightness: 1.0,
         }
@@ -109,7 +117,7 @@ mod tests {
 
     #[test]
     fn each_block_gets_a_square_lifted_above_its_top() {
-        let pig = pig_over(&[block(0.0, 0.0, 64.0), block(1.0, 0.0, 64.0)]);
+        let pig = pig_over(&[block(0, 0, 64.0), block(1, 0, 64.0)]);
         let vertices = shadow_of(&pig, Vec3::new(0.5, 65.0, 4.0));
         assert_eq!(vertices.len(), 2 * 6);
         assert!(vertices
@@ -122,7 +130,7 @@ mod tests {
         // A block centred under the pig: the texture spans 0..1 over a block
         // when the shadow size is 0.7 and the block 1.4 wide would; here the
         // block corners are 0.5 away, so the centre of the block is `0.5`.
-        let pig = pig_over(&[block(0.0, 0.0, 64.0)]);
+        let pig = pig_over(&[block(0, 0, 64.0)]);
         let vertices = shadow_of(&pig, Vec3::new(0.5, 65.0, 4.0));
         let (u_min, u_max) = vertices
             .iter()
@@ -133,14 +141,14 @@ mod tests {
 
     #[test]
     fn the_shadow_fades_with_height_and_with_the_distance_to_the_camera() {
-        let low = pig_over(&[block(0.0, 0.0, 63.5)]);
+        let low = pig_over(&[block(0, 0, 63.5)]);
         let near = Vec3::new(0.5, 65.0, 3.0);
         let strong = shadow_of(&low, near)[0].light;
         // Higher above the ground: lighter, and gone when it is too high.
-        let mut high = pig_over(&[block(0.0, 0.0, 63.0)]);
+        let mut high = pig_over(&[block(0, 0, 63.0)]);
         high.position.y = 64.0;
         assert!(shadow_of(&high, near)[0].light < strong);
-        let mut floating = pig_over(&[block(0.0, 0.0, 61.0)]);
+        let mut floating = pig_over(&[block(0, 0, 61.0)]);
         floating.position.y = 64.0;
         assert!(shadow_of(&floating, near).is_empty());
         // Further from the camera: lighter, and gone at 16 blocks.
@@ -151,7 +159,7 @@ mod tests {
 
     #[test]
     fn invisible_entities_and_those_without_blocks_cast_nothing() {
-        let mut pig = pig_over(&[block(0.0, 0.0, 64.0)]);
+        let mut pig = pig_over(&[block(0, 0, 64.0)]);
         pig.flags = EntityFlags::new(0x20, 0x7F);
         assert!(shadow_of(&pig, Vec3::new(0.5, 65.0, 3.0)).is_empty());
         let bare = pig_over(&[]);

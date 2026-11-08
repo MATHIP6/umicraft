@@ -87,6 +87,7 @@ usage: umicraft-client [<host> <port>] [options]
        umicraft-client --hud-demo [--hud-view NAME] [--screenshot PATH] [options]
        umicraft-client --block-demo [--screenshot PATH] [options]
        umicraft-client --entity-demo [--screenshot PATH] [options]
+       umicraft-client --bench-scene [--bench-origin N] [--bench-frames N] [options]
   <host> <port>       Minecraft 1.8 server (protocol 47). The window connects to it
                       at start; without it the window opens on the title screen.
                       Required with --headless and --screenshot; not needed with
@@ -119,6 +120,16 @@ options:
                       faces instead of the panorama of the user's jar
   --block-demo        mesh and report the M5/M6 acceptance blocks from the official
                       1.8.8 jar; no server or GPU unless --screenshot is given
+  --bench-scene       draw a fixed synthetic world along a scripted camera path
+                      offscreen and print the frame time (mean, p95, p99) and the
+                      GPU time per group; no server (F2-0c)
+  --bench-origin N    centre of --bench-scene on both axes, in blocks (default: 0;
+                      try 1000000 to test precision far from the origin)
+  --bench-frames N    measured frames of --bench-scene (default: 600)
+  --bench-no-cave-culling  draw --bench-scene without cave culling (to compare)
+  --bench-workers N   mesh workers of --bench-stream (default 0: automatic)
+  --bench-stream      with --bench-scene: load the world as one burst of chunks
+                      through the real mesh pool and report the frames meanwhile
   --entity-demo       mesh and report the M8 acceptance entities (Steve, Alex,
                       Zombie, Cow, Item); no server or GPU unless --screenshot is given
   --mob NAME          render a single mob by name (e.g. creeper, zombie, cow, or 'list')
@@ -174,6 +185,8 @@ pub enum Mode {
     Windowed,
     /// The offscreen terrain screenshot.
     Screenshot,
+    /// The reproducible benchmark scene (F2-0c).
+    BenchScene,
     /// The scripted headless session.
     Headless,
     /// The server-less scripted UI acceptance run.
@@ -229,6 +242,19 @@ pub struct Args {
     pub synthetic_panorama: bool,
     /// Whether the server-less M5/M6 block acceptance run is requested.
     pub block_demo: bool,
+    /// Whether the reproducible benchmark scene is requested (F2-0c).
+    pub bench_scene: bool,
+    /// X and Z, in blocks, of the centre of the benchmark scene.
+    pub bench_origin: i32,
+    /// Measured frames of the benchmark scene.
+    pub bench_frames: u32,
+    /// Whether the benchmark scene draws without cave culling (F2-3d).
+    pub bench_no_cave_culling: bool,
+    /// Whether the benchmark loads its world as a burst of chunks through the
+    /// real meshing pipeline and measures the frames meanwhile (F2-4).
+    pub bench_stream: bool,
+    /// Mesh workers of `--bench-stream`; `0` is automatic.
+    pub bench_workers: u8,
     /// Whether the server-less M8 entity acceptance run is requested.
     pub entity_demo: bool,
     /// Specific mob name to view or screenshot in entity demo (e.g. "creeper", "cow").
@@ -283,6 +309,8 @@ impl Args {
             Mode::HudDemo
         } else if self.block_demo {
             Mode::BlockDemo
+        } else if self.bench_scene {
+            Mode::BenchScene
         } else if self.entity_demo || self.mob.is_some() || self.dump_mobs.is_some() {
             Mode::EntityDemo
         } else if self.headless {
@@ -317,6 +345,12 @@ impl Args {
         let mut synthetic_panorama = false;
         let mut hud_view = HUD_VIEWS[0].to_string();
         let mut block_demo = false;
+        let mut bench_scene = false;
+        let mut bench_origin = 0_i32;
+        let mut bench_frames = 600_u32;
+        let mut bench_no_cave_culling = false;
+        let mut bench_stream = false;
+        let mut bench_workers = 0_u8;
         let mut entity_demo = false;
         let mut mob = None;
         let mut dump_mobs = None;
@@ -406,6 +440,30 @@ impl Args {
                 "--block-demo" => {
                     block_demo = true;
                     index += 1;
+                }
+                "--bench-scene" => {
+                    bench_scene = true;
+                    index += 1;
+                }
+                "--bench-origin" => {
+                    bench_origin = parse_number(words.get(index + 1), "--bench-origin")?;
+                    index += 2;
+                }
+                "--bench-workers" => {
+                    bench_workers = parse_number(words.get(index + 1), "--bench-workers")?;
+                    index += 2;
+                }
+                "--bench-stream" => {
+                    bench_stream = true;
+                    index += 1;
+                }
+                "--bench-no-cave-culling" => {
+                    bench_no_cave_culling = true;
+                    index += 1;
+                }
+                "--bench-frames" => {
+                    bench_frames = parse_number(words.get(index + 1), "--bench-frames")?;
+                    index += 2;
                 }
                 "--entity-demo" => {
                     entity_demo = true;
@@ -497,6 +555,16 @@ impl Args {
                 "--play-secs must be 1-3600, got {play_secs}\n{USAGE}"
             ));
         }
+        if !(1..=100_000).contains(&bench_frames) {
+            return Err(format!(
+                "--bench-frames must be 1-100000, got {bench_frames}\n{USAGE}"
+            ));
+        }
+        if bench_origin.unsigned_abs() > 29_000_000 {
+            return Err(format!(
+                "--bench-origin must be within 29000000 of 0, got {bench_origin}\n{USAGE}"
+            ));
+        }
         if !(64..=7680).contains(&width) || !(64..=4320).contains(&height) {
             return Err(format!(
                 "framebuffer must be 64-7680 × 64-4320, got {width}×{height}\n{USAGE}"
@@ -510,6 +578,7 @@ impl Args {
         let serverless_demo = ui_demo
             || hud_demo
             || block_demo
+            || bench_scene
             || entity_demo
             || mob.is_some()
             || dump_mobs.is_some()
@@ -540,6 +609,12 @@ impl Args {
             hud_view,
             synthetic_panorama,
             block_demo,
+            bench_scene,
+            bench_origin,
+            bench_frames,
+            bench_no_cave_culling,
+            bench_stream,
+            bench_workers,
             entity_demo,
             mob,
             dump_mobs,
@@ -943,5 +1018,27 @@ mod tests {
             Some(std::path::PathBuf::from("target/mobs"))
         );
         assert_eq!(args.mode(), Mode::EntityDemo);
+    }
+
+    #[test]
+    fn parses_the_serverless_bench_scene() {
+        let args = Args::parse(&words(&[
+            "--bench-scene",
+            "--bench-origin",
+            "-1000000",
+            "--bench-frames",
+            "120",
+        ]))
+        .expect("the bench scene needs no server");
+        assert_eq!(args.mode(), Mode::BenchScene);
+        assert_eq!((args.bench_origin, args.bench_frames), (-1_000_000, 120));
+        assert_eq!(
+            Args::parse(&words(&["--bench-scene"]))
+                .expect("defaults")
+                .bench_frames,
+            600
+        );
+        assert!(Args::parse(&words(&["--bench-scene", "--bench-frames", "0"])).is_err());
+        assert!(Args::parse(&words(&["--bench-scene", "--bench-origin", "30000000"])).is_err());
     }
 }

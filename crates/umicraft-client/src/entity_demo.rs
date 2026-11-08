@@ -424,6 +424,7 @@ fn make_snapshot(
         id: EntityId(id),
         kind,
         light: umicraft_world::LightLevel::FULL_SKY,
+        origin: glam::DVec3::ZERO,
         position: pos,
         yaw: 180.0,
         body_yaw: 180.0,
@@ -1199,7 +1200,7 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
                 umicraft_game::entity::shadow::shadow_size(mob.kind, false, &snapshot.meta.variant);
             let floor = (64.0 + mob.world_y_offset).floor() as i32;
             snapshot.shadow = umicraft_game::entity::shadow::shadow_blocks_with(
-                snapshot.position,
+                snapshot.position.as_dvec3(),
                 size,
                 0,
                 |pos| pos.y < floor,
@@ -1292,6 +1293,7 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
 
         let eye = Vec3::new(0.0, 64.0 + mob.camera_y, -mob.camera_dist);
         let mut camera = Camera::new(eye, std::f32::consts::PI, mob.camera_pitch);
+        camera.pin_render_origin(glam::DVec3::ZERO);
         camera.set_aspect(args.width, args.height);
 
         let lines = [
@@ -1444,6 +1446,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
         let eye = Vec3::new(0.0, 64.0 + mob.camera_y, -mob.camera_dist);
         let mut camera = Camera::new(eye, std::f32::consts::PI, mob.camera_pitch);
+        camera.pin_render_origin(glam::DVec3::ZERO);
         camera.set_aspect(args.width, args.height);
 
         let verified_jar = crate::official::find_verified_jar().ok();
@@ -1530,6 +1533,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         _ => (Vec3::new(8.0, 65.2, 1.2), std::f32::consts::PI, -0.12),
     };
     let mut camera = Camera::new(eye, yaw, pitch);
+    // The scene is built in world coordinates: keep them as they are.
+    camera.pin_render_origin(glam::DVec3::ZERO);
     camera.set_aspect(args.width, args.height);
 
     // Look for verified official jar

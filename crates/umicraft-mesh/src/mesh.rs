@@ -2,7 +2,28 @@
 
 //! The CPU mesh of one chunk column, split into an opaque and a blended pass.
 
+use crate::visibility::Connectivity;
 use crate::{BlockEntityRef, Vertex};
+
+/// A run of vertices of one pass, in vertices.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VertexSpan {
+    /// The first vertex.
+    pub start: u32,
+    /// How many vertices; a multiple of four (whole quads).
+    pub len: u32,
+}
+
+/// What one 16³ section of a column added to the mesh (ADR-0062).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SectionSpan {
+    /// The vertices of the section in [`Mesh::vertices`].
+    pub opaque: VertexSpan,
+    /// The vertices of the section in [`Mesh::transparent_vertices`].
+    pub transparent: VertexSpan,
+    /// Which faces of the section see each other.
+    pub connectivity: Connectivity,
+}
 
 /// CPU mesh for one chunk column.
 ///
@@ -13,7 +34,9 @@ use crate::{BlockEntityRef, Vertex};
 pub struct Mesh {
     /// Opaque interleaved vertices, four per face.
     pub vertices: Vec<Vertex>,
-    /// Opaque triangle indices, six per face.
+    /// Opaque triangle indices, six per face. Every face has the pattern
+    /// `[0, 1, 2, 0, 2, 3] + 4 * face`: the renderer relies on it to draw
+    /// chunks with one shared index buffer and never uploads these.
     pub indices: Vec<u32>,
     /// Transparent interleaved vertices (water, glass, leaves), four per face.
     pub transparent_vertices: Vec<Vertex>,
@@ -22,6 +45,10 @@ pub struct Mesh {
     /// Blocks a tile-entity renderer draws (chests, signs), which have no
     /// quad here.
     pub block_entities: Vec<BlockEntityRef>,
+    /// One entry per section from the bottom, in vertex order, when the mesher
+    /// produced the mesh: the spans tile `vertices` and `transparent_vertices`.
+    /// Empty for a hand-built mesh, which is then drawn whole.
+    pub sections: Vec<SectionSpan>,
 }
 
 impl Mesh {
@@ -55,6 +82,25 @@ impl Mesh {
     #[must_use]
     pub fn transparent_face_count(&self) -> usize {
         self.transparent_vertices.len() / 4
+    }
+
+    /// Closes the section that started at `(opaque, transparent)` vertices: its
+    /// span runs to the current end of both passes.
+    pub(crate) fn finish_section(&mut self, start: (usize, usize), connectivity: Connectivity) {
+        let span = |start: usize, end: usize| VertexSpan {
+            start: start as u32,
+            len: (end - start) as u32,
+        };
+        self.sections.push(SectionSpan {
+            opaque: span(start.0, self.vertices.len()),
+            transparent: span(start.1, self.transparent_vertices.len()),
+            connectivity,
+        });
+    }
+
+    /// The current end of both passes, to pass to [`Mesh::finish_section`].
+    pub(crate) fn section_start(&self) -> (usize, usize) {
+        (self.vertices.len(), self.transparent_vertices.len())
     }
 
     /// Appends one quad to the selected pass.
@@ -104,5 +150,29 @@ mod tests {
         assert_eq!(mesh.transparent_face_count(), 2);
         assert_eq!(mesh.face_count(), 3);
         assert_eq!(mesh.triangle_count(), 6);
+    }
+
+    #[test]
+    fn every_quad_has_the_fixed_index_pattern() {
+        let vertex = Vertex {
+            position: [0.0; 3],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0; 2],
+            layer: 0,
+            light: 0,
+            tint: 0,
+        };
+        let mut mesh = Mesh::default();
+        for _ in 0..3 {
+            mesh.push_quad(false, [vertex; 4]);
+            mesh.push_quad(true, [vertex; 4]);
+        }
+        let pattern = |quads: u32| -> Vec<u32> {
+            (0..quads)
+                .flat_map(|q| [4 * q, 4 * q + 1, 4 * q + 2, 4 * q, 4 * q + 2, 4 * q + 3])
+                .collect()
+        };
+        assert_eq!(mesh.indices, pattern(3));
+        assert_eq!(mesh.transparent_indices, pattern(3));
     }
 }

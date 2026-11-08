@@ -60,10 +60,11 @@ use crate::text_screens::TextScreens;
 use crate::achievements_view::java_string_hash;
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
 use crate::entity_icons::EntityIcons;
+use crate::fps_meter::FpsMeter;
 use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
-use crate::mesher::default_worker_count;
+use crate::mesher::worker_count;
 use crate::options::{self, Action, Binding, Options};
 use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
@@ -133,6 +134,8 @@ struct App {
     args: Args,
     /// The name tags of the frame, drawn by the renderer in the world pass.
     nametags: Vec<umicraft_render::Nametag>,
+    /// The particle quads of the frame, rebuilt in place.
+    particle_sprites: Vec<umicraft_render::ParticleSprite>,
     /// The user's options: video, mouse, chat and the key bindings.
     options: Options,
     /// The language every UI text comes from (ADR-0039); also installed as
@@ -282,6 +285,8 @@ struct App {
     frame_times: Vec<f32>,
     frame_ms: f32,
     fps: f32,
+    /// Refreshes `fps` once per second for the F3 screen.
+    fps_meter: FpsMeter,
     exit_error: Option<String>,
 }
 
@@ -354,6 +359,7 @@ impl App {
             ctrl_held: false,
             shift_held: false,
             nametags: Vec::new(),
+            particle_sprites: Vec::new(),
             pointer: (0.0, 0.0),
             chat_hover: None,
             pick_block: false,
@@ -394,6 +400,7 @@ impl App {
             frame_times: Vec::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
             fps: 0.0,
+            fps_meter: FpsMeter::new(Instant::now()),
             exit_error: None,
         })
     }
@@ -757,6 +764,7 @@ impl App {
     /// applies the session lifecycle: leaving the connecting screen, showing
     /// the disconnected screen (ADR-0044).
     fn sync_world(&mut self, now: Instant) {
+        umicraft_core::profile_scope!("sync_world");
         let (Some(session), Some(world), Some(renderer)) = (
             self.session.as_ref(),
             self.world.as_mut(),
@@ -766,9 +774,10 @@ impl App {
         };
         world.sync(session.frames(), session.chunks(), renderer);
         world.update_camera(&mut self.camera, now, self.options.video.view_bobbing);
+        world.focus_on(&self.camera);
         self.audio.play_cues(&world.take_sounds());
         self.audio
-            .set_listener(listener_of(self.camera.position, self.camera.yaw));
+            .set_listener(listener_of(self.camera.position(), self.camera.yaw));
         let step = lifecycle_step(self.screen, world.placed(), world.ended());
         self.apply_lifecycle(step);
     }
@@ -914,7 +923,7 @@ impl App {
         }
         if let Some(world) = self.world.as_ref().filter(|_| in_game) {
             if !matches!(screen, Screen::Inventory | Screen::Creative) {
-                let entities = world.entities(Instant::now());
+                let entities = world.entities(Instant::now(), self.camera.render_origin());
                 let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
                 self.nametags = draw_tags(atlas, &tags);
             }
@@ -1063,10 +1072,7 @@ impl App {
             let (_, spawn) = world.compass_world();
             DialInputs {
                 surface: environment.dimension == 0,
-                position: (
-                    f64::from(self.camera.position.x),
-                    f64::from(self.camera.position.z),
-                ),
+                position: (self.camera.eye().x, self.camera.eye().z),
                 // The camera yaw is the server yaw turned by half a circle.
                 yaw_degrees: f64::from((self.camera.yaw - std::f32::consts::PI).to_degrees()),
                 spawn: spawn.map(|(x, _, z)| (f64::from(x), f64::from(z))),
@@ -1083,6 +1089,8 @@ impl App {
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
+        umicraft_core::profiling::new_frame();
+        umicraft_core::profile_scope!("redraw");
         let now = Instant::now();
         let elapsed = (now - self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -1092,12 +1100,7 @@ impl App {
         } else {
             self.frame_ms * 0.9 + frame_ms * 0.1
         };
-        let instant_fps = 1.0 / elapsed.max(1e-6);
-        self.fps = if self.fps == 0.0 {
-            instant_fps
-        } else {
-            self.fps * 0.9 + instant_fps * 0.1
-        };
+        self.fps = self.fps_meter.tick(now);
         self.frame_times.push(frame_ms);
         if self.frame_times.len() > FRAME_HISTORY {
             self.frame_times.remove(0);
@@ -1167,7 +1170,12 @@ impl App {
         renderer.set_cloud_ticks((now - self.started).as_secs_f64() * 20.0);
         if let Some(world) = self.world.as_ref() {
             renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
-            renderer.set_particles(&world.particle_sprites(environment.partial_tick));
+            world.particle_sprites_into(
+                &mut self.particle_sprites,
+                environment.partial_tick,
+                self.camera.render_origin(),
+            );
+            renderer.set_particles(&self.particle_sprites);
         }
         renderer.set_screen_overlays(
             self.world
@@ -1199,12 +1207,21 @@ impl App {
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())
         {
-            let entities = world.entities(now);
+            // Everything below is built relative to this origin and the eye
+            // relative to it (F2-1b); the entity pass draws with a camera
+            // whose origin is zero.
+            let render_origin = self.camera.render_origin();
+            let render_origin_blocks = [
+                render_origin.x as i32,
+                render_origin.y as i32,
+                render_origin.z as i32,
+            ];
+            let entities = world.entities(now, render_origin);
             let hand = world.hand_pose(now);
             let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
-            entity_textures.set_camera_position(self.camera.position);
+            entity_textures.set_camera_position(self.camera.relative_eye());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
                     == umicraft_game::gamemode::GameMode::Spectator,
@@ -1225,7 +1242,8 @@ impl App {
                     seconds: (now - self.started).as_secs_f32(),
                     font: self.ui_atlas.as_ref(),
                     partial_tick: environment.partial_tick,
-                    camera: self.camera.position,
+                    camera: self.camera.relative_eye(),
+                    origin: render_origin_blocks,
                 },
             );
             let mut hand_item = None;
@@ -1515,7 +1533,7 @@ impl ApplicationHandler for App {
         self.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());
         self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
-        match WorldView::new(&terrain, default_worker_count()) {
+        match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
             Ok(world) => self.world = Some(world),
             Err(error) => {
                 self.exit_error = Some(error.to_string());

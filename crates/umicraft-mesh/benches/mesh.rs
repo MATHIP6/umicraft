@@ -339,6 +339,35 @@ fn mesh_dense_tinted_grass(criterion: &mut Criterion) {
     });
 }
 
+/// F2-4d: a checkerboard of still water, so every cell is a liquid cell with
+/// faces; isolates the cost of finding the liquid's atlas layers per cell.
+fn mesh_water_checkerboard(criterion: &mut Criterion) {
+    let centre = ChunkPos::new(0, 0);
+    let mut column = ChunkColumn::new(centre);
+    for y in 60..76_usize {
+        for z in 0..16_usize {
+            for x in 0..16_usize {
+                if (x + y + z) % 2 == 0 {
+                    column.set_block(x, y, z, BlockState::new(9, 0));
+                }
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(centre, [Arc::new(column)]);
+    let context = model_context();
+    let faces = mesh_chunk_with_models(centre, &snapshot, &context).face_count();
+    assert!(faces > 10_000, "the water fixture must emit faces: {faces}");
+    criterion.bench_function("mesh/water_checkerboard", |bencher| {
+        bencher.iter(|| {
+            black_box(mesh_chunk_with_models(
+                centre,
+                black_box(&snapshot),
+                black_box(&context),
+            ))
+        });
+    });
+}
+
 criterion_group!(
     benches,
     mesh_flat_chunk,
@@ -347,6 +376,7 @@ criterion_group!(
     mesh_dense_section,
     mesh_dense_models,
     mesh_dense_tinted_grass,
-    mesh_lit_cave
+    mesh_lit_cave,
+    mesh_water_checkerboard
 );
 criterion_main!(benches);

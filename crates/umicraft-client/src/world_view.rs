@@ -9,7 +9,6 @@
 //! is removed, a world reset drops every mesh of the old world (including the
 //! ones still being meshed), and each chunk's faces are counted once.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,13 +26,21 @@ use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::sound::cue::SoundCue;
 use umicraft_game::RenderState;
-use umicraft_mesh::{BlockEntityRef, ChunkSnapshot, Mesh, Vertex};
+use umicraft_mesh::{BlockEntityRef, Mesh, Vertex};
 use umicraft_render::{
     BorderView, Camera, FogContext, FogMedium, HudState, OutlineBox, PrecipitationField,
     RenderEnvironment, Renderer, ScreenOverlays,
 };
 use umicraft_ui::menus::ConnectStage;
-use umicraft_world::{ChunkPos, LightLevel};
+use umicraft_world::{ChunkMap, ChunkPos, LightLevel};
+
+/// Mesh jobs kept in flight per worker: enough to keep the worker busy, few
+/// enough that a newly important chunk is picked soon.
+const JOBS_PER_WORKER: usize = 2;
+/// The vertex bytes the render thread uploads per frame at most (one chunk at
+/// least): a burst of finished meshes is spread over frames instead of making
+/// one long frame (F2-4b).
+const UPLOAD_BUDGET_BYTES: usize = 1 << 20;
 
 use crate::achievements_view::newly_unlocked;
 use crate::block_entity_render::push_pot_plants;
@@ -45,6 +52,7 @@ use crate::fog_context::FogLight;
 use crate::game::{
     camera_angles, ChunkEvent, Frame, GameStatus, LookSlot, RenderEvent, TextScreenRequest, TICK,
 };
+use crate::mesh_queue::MeshQueue;
 use crate::mesher::{MeshPool, MeshResult};
 use crate::moving_blocks_draw::mesh_moving_blocks;
 use crate::overlay_state::OverlayInputs;
@@ -79,15 +87,19 @@ pub struct WorldView {
     /// Incremented by every world reset; jobs carry it so a mesh of the
     /// replaced world is dropped when it comes back.
     generation: u64,
-    /// Snapshots waiting for a free mesh worker, at most one per chunk.
-    waiting: Vec<(ChunkPos, ChunkSnapshot)>,
-    /// Chunks with a job in flight for the current generation.
-    pending: HashSet<ChunkPos>,
+    /// The chunks waiting for a free mesh worker, nearest first, and the ones
+    /// with a job in flight for the current generation.
+    queue: MeshQueue,
+    /// The vertex bytes [`WorldView::collect`] uploads per call, at most.
+    upload_budget: usize,
+    /// A fixed limit of jobs in flight, for tests; `None` derives it from the
+    /// workers.
+    max_in_flight: Option<usize>,
     /// Faces of every chunk whose current mesh is not empty.
-    faces: HashMap<ChunkPos, usize>,
+    faces: ChunkMap<usize>,
     /// The chests and signs of every chunk, which a tile-entity renderer
     /// draws (P7c).
-    block_entities: HashMap<ChunkPos, Vec<BlockEntityRef>>,
+    block_entities: ChunkMap<Vec<BlockEntityRef>>,
     hud: HudState,
     window_view: WindowView,
     /// The newest creative screen snapshot, once one was published.
@@ -162,10 +174,11 @@ impl WorldView {
             view: View::default(),
             pool: MeshPool::new(worker_count, terrain)?,
             generation: 0,
-            waiting: Vec::new(),
-            pending: HashSet::new(),
-            faces: HashMap::new(),
-            block_entities: HashMap::new(),
+            queue: MeshQueue::default(),
+            upload_budget: UPLOAD_BUDGET_BYTES,
+            max_in_flight: None,
+            faces: ChunkMap::default(),
+            block_entities: ChunkMap::default(),
             hud: HudState::default(),
             window_view: empty_window_view(),
             creative: None,
@@ -207,13 +220,14 @@ impl WorldView {
         chunks: &Receiver<ChunkEvent>,
         target: &mut impl MeshTarget,
     ) {
+        umicraft_core::profile_scope!("WorldView::sync");
         while let Ok(event) = frames.try_recv() {
             self.apply(event, target);
         }
         // After the frames, so a look newer than the tick they carry wins.
         self.view.take_look();
         while let Ok(ChunkEvent { pos, snapshot }) = chunks.try_recv() {
-            self.queue(pos, snapshot);
+            self.queue.queue(pos, snapshot);
         }
         // Collect before dispatching: a job submitted by this call comes back
         // in a later one, after any reset this call applied.
@@ -228,7 +242,7 @@ impl WorldView {
         let Some(state) = self.view.sample(now) else {
             return;
         };
-        camera.position = state.position;
+        camera.set_eye(state.position);
         let (yaw, pitch) = camera_angles(&state);
         camera.yaw = yaw;
         camera.pitch = pitch;
@@ -271,13 +285,22 @@ impl WorldView {
     /// The quads of the newest frame's particles at `partial_ticks` into the
     /// tick, for `Renderer::set_particles`. Block fragments find their sprite
     /// in the bound terrain; the procedural terrain has none, so they are
-    /// left out.
-    #[must_use]
-    pub fn particle_sprites(&self, partial_ticks: f32) -> Vec<umicraft_render::ParticleSprite> {
+    /// left out. The centres are relative to `origin`, the render origin of the
+    /// camera (F2-1b).
+    pub fn particle_sprites_into(
+        &self,
+        out: &mut Vec<umicraft_render::ParticleSprite>,
+        partial_ticks: f32,
+        origin: glam::DVec3,
+    ) {
         let context = self.mesher.model_context();
-        crate::particle_view::sprites(&self.view.particles, partial_ticks, &|state| {
-            crate::particle_view::block_sprite(context?, state)
-        })
+        crate::particle_view::sprites_into(
+            out,
+            &self.view.particles,
+            partial_ticks,
+            origin,
+            &|state| crate::particle_view::block_sprite(context?, state),
+        );
     }
 
     /// The full-screen overlays of the frame at `now`, for
@@ -419,6 +442,12 @@ impl WorldView {
         self.faces.len()
     }
 
+    /// Whether chunk `pos` has a mesh with faces.
+    #[must_use]
+    pub fn is_meshed(&self, pos: ChunkPos) -> bool {
+        self.faces.contains_key(&pos)
+    }
+
     /// The faces of every current chunk mesh.
     #[must_use]
     pub fn face_count(&self) -> usize {
@@ -463,14 +492,15 @@ impl WorldView {
     /// Interpolated entity render snapshots for the current render instant.
     ///
     /// Uses the same partial tick fraction as the camera so entities and the
-    /// world stay in sync.
+    /// world stay in sync. Every position is relative to `origin`, the render
+    /// origin of the camera (F2-1b).
     #[must_use]
-    pub fn entities(&self, now: Instant) -> Vec<EntityRenderSnapshot> {
+    pub fn entities(&self, now: Instant, origin: glam::DVec3) -> Vec<EntityRenderSnapshot> {
         let alpha = self.view.partial_tick(now);
         self.entities
             .iter()
             .map(|entity| {
-                let mut snapshot = entity.interpolate(alpha);
+                let mut snapshot = entity.interpolate(alpha, origin);
                 // `Entity.setAngles` shifts the pitch and its previous value
                 // together every frame, so what `RendererLivingEntity` draws
                 // is the pitch of the mouse, not one interpolated over a tick.
@@ -497,7 +527,9 @@ impl WorldView {
     /// The body of the local player at the newest tick, once a frame arrived.
     #[must_use]
     pub fn local_body(&self) -> Option<EntityRenderSnapshot> {
-        self.local_body.as_ref().map(|body| body.interpolate(1.0))
+        self.local_body
+            .as_ref()
+            .map(|body| body.interpolate(1.0, glam::DVec3::ZERO))
     }
 
     /// The light that lights the first-person item in the newest frame.
@@ -654,34 +686,31 @@ impl WorldView {
     /// Forgets the replaced world, including the jobs still in flight.
     fn reset(&mut self, target: &mut impl MeshTarget) {
         self.generation += 1;
-        self.waiting.clear();
-        self.pending.clear();
+        self.queue.clear();
         self.faces.clear();
         self.block_entities.clear();
         self.entities = Arc::from([]);
         target.clear_meshes();
     }
 
-    /// Queues a snapshot; a newer snapshot of a waiting chunk replaces it.
-    fn queue(&mut self, pos: ChunkPos, snapshot: ChunkSnapshot) {
-        match self.waiting.iter_mut().find(|(waiting, _)| *waiting == pos) {
-            Some(entry) => entry.1 = snapshot,
-            None => self.waiting.push((pos, snapshot)),
-        }
-    }
-
     fn collect(&mut self, target: &mut impl MeshTarget) {
-        while let Some(MeshResult {
-            pos,
-            generation,
-            mesh,
-        }) = self.pool.try_recv()
-        {
+        let mut uploaded = 0_usize;
+        // The budget is checked before taking a result, so one mesh always
+        // goes through and the rest wait in the channel for the next frame.
+        while uploaded < self.upload_budget {
+            let Some(MeshResult {
+                pos,
+                generation,
+                mesh,
+            }) = self.pool.try_recv()
+            else {
+                break;
+            };
             if generation != self.generation {
                 // A mesh of the world a reset replaced: never drawn.
                 continue;
             }
-            self.pending.remove(&pos);
+            self.queue.finished(pos);
             if mesh.is_empty() {
                 self.faces.remove(&pos);
             } else {
@@ -692,32 +721,39 @@ impl WorldView {
             } else {
                 self.block_entities.insert(pos, mesh.block_entities.clone());
             }
+            uploaded += (mesh.vertices.len() + mesh.transparent_vertices.len())
+                * std::mem::size_of::<Vertex>();
             target.upload_mesh(pos, &mesh);
         }
     }
 
-    /// Hands waiting chunks to the workers; a chunk already being meshed
-    /// waits for its result first, so meshes arrive in snapshot order.
+    /// Hands the waiting chunks to the workers, nearest first, keeping only a
+    /// couple of jobs per worker in flight so that the order can still change
+    /// when the player moves (F2-4a).
     fn dispatch(&mut self) {
-        let mut index = 0;
-        while index < self.waiting.len() {
-            let pos = self.waiting[index].0;
-            if self.pending.contains(&pos) {
-                index += 1;
-                continue;
-            }
-            let (_, snapshot) = self.waiting.remove(index);
-            match self.pool.submit(pos, self.generation, snapshot) {
-                Ok(()) => {
-                    self.pending.insert(pos);
-                }
-                Err(snapshot) => {
-                    // The job queue is full: retry on a later call.
-                    self.waiting.insert(index, (pos, snapshot));
-                    break;
-                }
+        let in_flight = self
+            .max_in_flight
+            .unwrap_or(self.pool.worker_count() * JOBS_PER_WORKER);
+        while let Some((pos, snapshot)) = self.queue.next(in_flight) {
+            if let Err(snapshot) = self.pool.submit(pos, self.generation, snapshot) {
+                // The job queue is full or the workers are gone: retry later.
+                self.queue.give_back(pos, snapshot);
+                break;
             }
         }
+    }
+
+    /// Limits the jobs in flight to `limit` whatever the worker count.
+    #[cfg(test)]
+    fn queue_limit_for_tests(&mut self, limit: usize) {
+        self.max_in_flight = Some(limit);
+    }
+
+    /// Tells the mesh queue where the player is and where they look, so the
+    /// chunks around and ahead of them are meshed first. Call it every frame
+    /// with the camera.
+    pub fn focus_on(&mut self, camera: &Camera) {
+        self.queue.focus_on(camera.eye(), camera.yaw);
     }
 }
 
@@ -867,12 +903,15 @@ impl View {
         // `orientCamera`: the interpolated eye plus the orbit of the current
         // angles. Interpolating the camera positions of two ticks instead
         // would drag the third-person camera behind its own angle.
-        let eye = previous.eye.lerp(current.eye, alpha);
+        // The eye is lerped in f64: casting it first would round it to the
+        // 6-12 cm grain of f32 around x = 1 000 000 (F2-1a). The orbit is a
+        // small offset, so f32 is exact enough for it.
+        let eye = previous.eye.lerp(current.eye, f64::from(alpha));
         let orbit = current
             .orbit_start
-            .lerp(current.position - current.eye, alpha);
+            .lerp((current.position - current.eye).as_vec3(), alpha);
         Some(RenderState {
-            position: eye + orbit,
+            position: eye + orbit.as_dvec3(),
             eye,
             orbit_start: current.orbit_start,
             yaw: current.yaw,
@@ -885,8 +924,11 @@ impl View {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::mpsc::{self, SyncSender};
     use std::time::Duration;
+
+    use umicraft_mesh::ChunkSnapshot;
 
     use umicraft_world::{BlockPos, BlockState, ChunkPayload, World};
 
@@ -991,6 +1033,54 @@ mod tests {
         harness.sync_until(|h| h.target.uploaded.get(&ORIGIN) == Some(&12));
         assert_eq!(harness.world_view.face_count(), 12);
         assert_eq!(harness.world_view.chunk_count(), 1);
+    }
+
+    /// F2-4b: a burst of finished meshes is spread over several syncs when it
+    /// exceeds the upload budget, and none is lost.
+    #[test]
+    fn a_small_upload_budget_spreads_a_burst_over_frames() {
+        let mut harness = Harness::new();
+        harness.world_view.upload_budget = 1;
+        let chunks = [ORIGIN, ChunkPos::new(1, 0), ChunkPos::new(2, 0)];
+        for pos in chunks {
+            harness.send_chunk(pos, &[BlockPos::new(pos.x * 16 + 1, 1, 1)]);
+        }
+        // Let every job finish before the first collection can take more than
+        // its budget.
+        harness.sync();
+        std::thread::sleep(Duration::from_millis(200));
+        let mut per_sync = Vec::new();
+        for _ in 0..40 {
+            let before = harness.target.uploads;
+            harness.sync();
+            per_sync.push(harness.target.uploads - before);
+            if harness.target.uploads == 3 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(harness.target.uploads, 3, "every mesh arrives");
+        assert!(
+            per_sync.iter().all(|&count| count <= 1),
+            "one mesh per sync at most: {per_sync:?}"
+        );
+    }
+
+    #[test]
+    fn the_nearest_chunk_is_meshed_before_a_far_one_sent_first() {
+        let mut harness = Harness::new();
+        let far = ChunkPos::new(12, 0);
+        let near = ChunkPos::new(0, 0);
+        harness.send_chunk(far, &[BlockPos::new(12 * 16 + 1, 1, 1)]);
+        harness.send_chunk(near, &[BlockPos::new(1, 1, 1)]);
+        let mut camera = Camera::default();
+        camera.set_eye(glam::DVec3::new(8.0, 70.0, 8.0));
+        harness.world_view.focus_on(&camera);
+        // One job in flight at a time: the order is the dispatch order.
+        harness.world_view.queue_limit_for_tests(1);
+        harness.sync_until(|h| h.target.uploads >= 1);
+        assert!(harness.target.uploaded.contains_key(&near));
+        assert!(!harness.target.uploaded.contains_key(&far));
     }
 
     #[test]
@@ -1147,8 +1237,8 @@ mod tests {
     fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Box<Frame> {
         Box::new(Frame {
             state: RenderState {
-                position,
-                eye: position,
+                position: position.as_dvec3(),
+                eye: position.as_dvec3(),
                 orbit_start: glam::Vec3::ZERO,
                 yaw: 0.0,
                 pitch: 0.0,
@@ -1258,9 +1348,9 @@ mod tests {
         let mut camera = Camera::default();
         harness.world_view.update_camera(&mut camera, halfway, true);
         assert!(
-            (camera.position.x - 1.0).abs() < 1e-4,
+            (camera.position().x - 1.0).abs() < 1e-4,
             "{}",
-            camera.position.x
+            camera.position().x
         );
         assert!((camera.yaw - (1.0 + std::f32::consts::PI)).abs() < 1e-4);
         assert!((harness.world_view.view.partial_tick(halfway) - 0.5).abs() < 1e-4);
@@ -1333,9 +1423,9 @@ mod tests {
             .update_camera(&mut camera, later + TICK / 2, true);
         // Halfway between the eyes of the two ticks the view knows, not 3.
         assert!(
-            (camera.position.x - 1.0).abs() < 1e-4,
+            (camera.position().x - 1.0).abs() < 1e-4,
             "{}",
-            camera.position.x
+            camera.position().x
         );
         assert!((camera.yaw - (0.5 + std::f32::consts::PI)).abs() < 1e-4);
     }
@@ -1347,11 +1437,11 @@ mod tests {
         let later = tick + TICK;
         // Tick 1: eye at the origin, camera 4 blocks behind it (south).
         let mut first = frame(glam::Vec3::ZERO, tick, 0);
-        first.state.position = glam::Vec3::new(0.0, 0.0, -4.0);
+        first.state.position = glam::DVec3::new(0.0, 0.0, -4.0);
         // Tick 2: eye 2 blocks east, the player turned and the camera is now
         // 4 blocks east of the eye.
         let mut second = frame(glam::Vec3::new(2.0, 0.0, 0.0), later, 0);
-        second.state.position = glam::Vec3::new(6.0, 0.0, 0.0);
+        second.state.position = glam::DVec3::new(6.0, 0.0, 0.0);
         second.state.orbit_start = glam::Vec3::new(4.0, 0.0, 0.0);
         for event in [RenderEvent::Frame(first), RenderEvent::Frame(second)] {
             harness.frames.0.send(event).expect("frame queue");
@@ -1367,9 +1457,9 @@ mod tests {
         // camera behind the turn.
         let expected = glam::Vec3::new(5.0, 0.0, 0.0);
         assert!(
-            (camera.position - expected).length() < 1e-4,
+            (camera.position() - expected).length() < 1e-4,
             "{}",
-            camera.position
+            camera.position()
         );
     }
 
@@ -1382,7 +1472,7 @@ mod tests {
         // The eye walks 1 block towards a wall behind it: the camera was 4
         // blocks back from the old eye and is only 1 back from the new one.
         let mut second = frame(glam::Vec3::new(0.0, 0.0, 1.0), later, 0);
-        second.state.position = glam::Vec3::new(0.0, 0.0, 0.0);
+        second.state.position = glam::DVec3::new(0.0, 0.0, 0.0);
         second.state.orbit_start = glam::Vec3::new(0.0, 0.0, -4.0);
         for event in [RenderEvent::Frame(first), RenderEvent::Frame(second)] {
             harness.frames.0.send(event).expect("frame queue");
@@ -1397,9 +1487,9 @@ mod tests {
             .world_view
             .update_camera(&mut camera, later + TICK / 2, true);
         assert!(
-            (camera.position.z - (0.5 - 2.5)).abs() < 1e-4,
+            (camera.position().z - (0.5 - 2.5)).abs() < 1e-4,
             "{}",
-            camera.position.z
+            camera.position().z
         );
     }
 
@@ -1440,7 +1530,7 @@ mod tests {
         harness
             .world_view
             .update_camera(&mut camera, tick + TICK * 2, true);
-        assert_eq!(camera.position, start);
+        assert_eq!(camera.position(), start);
         assert_eq!(
             harness
                 .world_view
@@ -1461,7 +1551,7 @@ mod tests {
 
         let halfway = later + TICK / 2;
         harness.world_view.update_camera(&mut camera, halfway, true);
-        assert!((camera.position.x - 1.0).abs() < 1e-3);
+        assert!((camera.position().x - 1.0).abs() < 1e-3);
         let environment = harness.world_view.environment(halfway, 12);
         assert!((environment.partial_tick - 0.5).abs() < 1e-3);
         assert_eq!(environment.world_time, -5_900);

@@ -433,13 +433,14 @@ mod render_tests {
     use super::*;
     use crate::model_resources::ModelResources;
     use umicraft_game::entity::{EntityFlags, EntityId};
-    use umicraft_render::{Camera, Overlay, Renderer};
+    use umicraft_render::{Overlay, Renderer};
 
     fn dropped(id: i32, x: f32, item_id: i16, count: u8) -> EntityRenderSnapshot {
         EntityRenderSnapshot {
             id: EntityId(id),
             kind: EntityKind::Item,
             light: LightLevel::FULL_SKY,
+            origin: glam::DVec3::ZERO,
             position: Vec3::new(x, 79.6, -3.0),
             yaw: 0.0,
             body_yaw: 0.0,
@@ -593,7 +594,10 @@ mod render_tests {
         );
         renderer.set_hand_items(&hand.items);
         renderer
-            .render(&Camera::default(), &Overlay::new(320, 180))
+            .render(
+                &crate::test_support::world_camera(),
+                &Overlay::new(320, 180),
+            )
             .expect("render");
         let image = renderer.read_pixels().expect("readback");
         let first = &image.rgba[..4];
@@ -617,13 +621,14 @@ mod player_render_tests {
     use crate::entity_render::EntityTextures;
     use crate::model_resources::ModelResources;
     use umicraft_game::entity::{EntityFlags, EntityId};
-    use umicraft_render::{Camera, Overlay, Renderer};
+    use umicraft_render::{Overlay, Renderer};
 
     fn player(id: i32, x: f32, held: i16, sneaking: bool) -> EntityRenderSnapshot {
         EntityRenderSnapshot {
             id: EntityId(id),
             kind: EntityKind::Player,
             light: LightLevel::FULL_SKY,
+            origin: glam::DVec3::ZERO,
             position: Vec3::new(x, 78.4, -4.0),
             yaw: -70.0,
             body_yaw: -70.0,
@@ -708,7 +713,10 @@ mod player_render_tests {
         let mut world = WorldItems::default();
         renderer.set_world_items(&world.build(&snapshots, &items).items);
         renderer
-            .render(&Camera::default(), &Overlay::new(320, 180))
+            .render(
+                &crate::test_support::world_camera(),
+                &Overlay::new(320, 180),
+            )
             .expect("render");
         let image = renderer.read_pixels().expect("readback");
         if let Ok(path) = std::env::var("UMICRAFT_PLAYER_DUMP") {
@@ -729,7 +737,7 @@ mod use_render_tests {
     use super::*;
     use crate::model_resources::ModelResources;
     use umicraft_game::item_use::ItemUseView;
-    use umicraft_render::{Camera, Overlay, Renderer};
+    use umicraft_render::{Overlay, Renderer};
 
     fn render_hand(item: (i16, i16), pose: HandPose, dump: &str) {
         let resources = ModelResources::load().expect("official resources");
@@ -755,7 +763,10 @@ mod use_render_tests {
         assert!(!mesh.items.is_empty(), "the held item has geometry");
         renderer.set_hand_items(&mesh.items);
         renderer
-            .render(&Camera::default(), &Overlay::new(320, 180))
+            .render(
+                &crate::test_support::world_camera(),
+                &Overlay::new(320, 180),
+            )
             .expect("render");
         let image = renderer.read_pixels().expect("readback");
         if let Ok(dir) = std::env::var("UMICRAFT_USE_DUMP") {
@@ -795,7 +806,7 @@ mod glint_render_tests {
     use crate::model_resources::ModelResources;
     use std::sync::Arc;
     use umicraft_game::entity::{EntityFlags, EntityId};
-    use umicraft_render::{Camera, Overlay, Renderer};
+    use umicraft_render::{Overlay, Renderer};
 
     /// `{ench: [{id: 16, lvl: 5}]}` as a server sends it.
     fn enchanted_nbt() -> Arc<[u8]> {
@@ -822,6 +833,7 @@ mod glint_render_tests {
             id: EntityId(id),
             kind: EntityKind::Item,
             light: LightLevel::FULL_SKY,
+            origin: glam::DVec3::ZERO,
             position: Vec3::new(x, 79.6, -2.5),
             yaw: 0.0,
             body_yaw: 0.0,
@@ -915,7 +927,10 @@ mod glint_render_tests {
         renderer.set_hand_glint(&hand.glint);
         assert!(!layers.glint.is_empty() && !hand.glint.is_empty());
         renderer
-            .render(&Camera::default(), &Overlay::new(320, 180))
+            .render(
+                &crate::test_support::world_camera(),
+                &Overlay::new(320, 180),
+            )
             .expect("render");
         let image = renderer.read_pixels().expect("readback");
         if let Ok(path) = std::env::var("UMICRAFT_GLINT_DUMP") {

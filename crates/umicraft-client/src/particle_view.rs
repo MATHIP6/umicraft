@@ -7,6 +7,7 @@
 //! render thread interpolates, scales and tints them with its own partial tick
 //! and never reads the world (as for the weather, ADR-0031).
 
+use glam::DVec3;
 use umicraft_game::particles::{Behaviour, Layer, Particle, ParticleEngine, Texture};
 use umicraft_mesh::tint::tint_class;
 use umicraft_mesh::ModelMeshContext;
@@ -102,6 +103,7 @@ fn light_position(particle: &Particle) -> BlockPos {
 pub fn sprite(
     draw: &ParticleDraw,
     partial_ticks: f32,
+    origin: DVec3,
     blocks: &impl Fn(BlockState) -> Option<BlockSprite>,
 ) -> Option<ParticleSprite> {
     let particle = &draw.particle;
@@ -134,7 +136,9 @@ pub fn sprite(
     let [red, green, blue] = particle.color;
     let behaviour = particle.behaviour;
     Some(ParticleSprite {
-        center: particle.interpolated_position(partial_ticks).as_vec3(),
+        // Subtracted in f64: an absolute f32 centre jitters far from the
+        // world origin (F2-1b).
+        center: (particle.interpolated_position(partial_ticks) - origin).as_vec3(),
         half_size: 0.1 * behaviour.render_scale(particle, partial_ticks),
         uv_min,
         uv_max,
@@ -150,23 +154,27 @@ pub fn sprite(
     })
 }
 
-/// The quads of every particle that can be drawn, for `Renderer::set_particles`.
-#[must_use]
-pub fn sprites(
+/// Fills `out` with the quads of every particle that can be drawn, for
+/// `Renderer::set_particles`. `out` keeps its capacity from frame to frame
+/// (F2-5c), so a steady scene allocates nothing here.
+pub fn sprites_into(
+    out: &mut Vec<ParticleSprite>,
     draws: &[ParticleDraw],
     partial_ticks: f32,
+    origin: DVec3,
     blocks: &impl Fn(BlockState) -> Option<BlockSprite>,
-) -> Vec<ParticleSprite> {
-    draws
-        .iter()
-        .filter_map(|draw| sprite(draw, partial_ticks, blocks))
-        .collect()
+) {
+    out.clear();
+    out.extend(
+        draws
+            .iter()
+            .filter_map(|draw| sprite(draw, partial_ticks, origin, blocks)),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glam::DVec3;
     use umicraft_game::particles::{create, ParticleKind};
 
     fn no_blocks(_: BlockState) -> Option<BlockSprite> {
@@ -185,6 +193,38 @@ mod tests {
     }
 
     #[test]
+    fn a_particle_far_from_the_origin_is_placed_relative_to_the_render_origin() {
+        // F2-1b: the centre is subtracted in f64, so a 1 cm step survives at
+        // x = 1 000 000 where an absolute f32 centre has a 6 cm grain.
+        let origin = DVec3::new(1_000_000.0, 64.0, 1_000_000.0);
+        let mut engine = ParticleEngine::new(1);
+        let mut at = |x: f64| {
+            let mut particle = create(
+                ParticleKind::Flame,
+                DVec3::new(1_000_000.0 + x, 64.5, 1_000_000.5),
+                DVec3::ZERO,
+                engine.rng(),
+            )
+            .expect("flame is ported");
+            particle.texture = Texture::Cell { index: 0 };
+            ParticleDraw {
+                particle,
+                block_light: 0,
+                sky_light: 15,
+            }
+        };
+        let centre = |draw: &ParticleDraw| {
+            sprite(draw, 0.0, origin, &no_blocks)
+                .expect("a sheet cell")
+                .center
+        };
+        let first = centre(&at(0.5));
+        let second = centre(&at(0.51));
+        assert!((first.x - 0.5).abs() < 1e-6, "{first}");
+        assert!((second.x - first.x - 0.01).abs() < 1e-5, "{second}");
+    }
+
+    #[test]
     fn a_sheet_particle_becomes_a_quad_in_its_cell() {
         let mut particle = flame();
         particle.texture = Texture::Cell { index: 0x23 };
@@ -193,7 +233,7 @@ mod tests {
             block_light: 3,
             sky_light: 15,
         };
-        let sprite = sprite(&draw, 0.5, &no_blocks).expect("a sheet cell");
+        let sprite = sprite(&draw, 0.5, DVec3::ZERO, &no_blocks).expect("a sheet cell");
         assert_eq!(sprite.uv_min, [3.0 / 16.0, 2.0 / 16.0]);
         assert!(sprite.atlas_layer.is_none() && !sprite.flat);
         assert!(sprite.half_size > 0.0);
@@ -210,7 +250,7 @@ mod tests {
             block_light: 0,
             sky_light: 15,
         };
-        assert!(sprite(&draw, 0.0, &no_blocks).is_none());
+        assert!(sprite(&draw, 0.0, DVec3::ZERO, &no_blocks).is_none());
     }
 
     #[test]
@@ -232,7 +272,7 @@ mod tests {
                 tint: [0.5, 1.0, 0.0],
             })
         };
-        let sprite = sprite(&draw, 0.0, &blocks).expect("a block sprite");
+        let sprite = sprite(&draw, 0.0, DVec3::ZERO, &blocks).expect("a block sprite");
         assert_eq!(sprite.atlas_layer, Some(9));
         assert_eq!(sprite.uv_min, [0.5, 0.25]);
         assert_eq!(sprite.uv_max, [0.75, 0.5]);

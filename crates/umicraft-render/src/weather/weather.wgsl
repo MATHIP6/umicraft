@@ -47,7 +47,7 @@ struct VertexOut {
 fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
-    out.world_position = in.position;
+    out.world_position = in.position - camera.origin;
     out.uv = in.uv;
     out.alpha = in.alpha;
     out.light = lightmap_sample(in.light.y, in.light.x);

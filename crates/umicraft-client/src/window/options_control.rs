@@ -18,7 +18,7 @@ use crate::entity_render::EntityTextures;
 use crate::game::GameEvent;
 use crate::language;
 use crate::map_render::MapTextures;
-use crate::mesher::default_worker_count;
+use crate::mesher::worker_count;
 use crate::options::Binding;
 use crate::options_effects::{open_folder, pack_paths, packs_folder, ServerSettings};
 use crate::options_screen::{Catalog, Outcome as OptionsOutcome, Page};
@@ -179,7 +179,11 @@ impl App {
         ));
         self.map_textures = Some(MapTextures::load(renderer));
         if let Some(world) = self.world.as_mut() {
-            world.reload_terrain(&installed, default_worker_count(), renderer);
+            world.reload_terrain(
+                &installed,
+                worker_count(self.options.video.mesh_threads),
+                renderer,
+            );
             self.send_event(GameEvent::ReMeshAll);
         }
         tracing::info!("resource packs reloaded");

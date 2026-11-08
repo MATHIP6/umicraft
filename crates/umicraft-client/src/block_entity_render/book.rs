@@ -53,6 +53,8 @@ pub(super) fn add_book(
 ) {
     let [x, y, z] = entry.position;
     let origin = Vec3::new(x as f32, y as f32, z as f32);
+    // The state of a table is keyed by its world position.
+    let key = scene.world_position(entry);
     let clock = f64::from(scene.seconds.max(0.0)) * f64::from(TICKS_PER_SECOND);
     let tick = clock as u64;
     let partial = (clock - tick as f64) as f32;
@@ -61,10 +63,12 @@ pub(super) fn add_book(
         if books.len() >= MAX_STATES {
             books.retain(|_, tracked| tracked.tick + STALE_TICKS > tick);
         }
-        let tracked = books.entry((x, y, z)).or_insert_with(|| Tracked {
-            state: BookState::new(seed(entry.position)),
-            tick,
-        });
+        let tracked = books
+            .entry((key[0], key[1], key[2]))
+            .or_insert_with(|| Tracked {
+                state: BookState::new(seed(key)),
+                tick,
+            });
         advance(tracked, tick, origin + Vec3::splat(0.5), scene.camera);
         pose_of(&tracked.state, partial)
     });
@@ -156,6 +160,7 @@ mod tests {
             skins: &crate::entity_render::NoSkins,
             partial_tick: 0.0,
             camera,
+            origin: [0; 3],
         };
         let mut batches = Batches::new();
         add_book(&mut batches, &entry(), &scene);

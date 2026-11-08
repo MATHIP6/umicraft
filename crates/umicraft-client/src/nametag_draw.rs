@@ -56,6 +56,10 @@ pub struct PlacedTag {
 }
 
 /// Where each visible tag goes on a `width` x `height` screen.
+///
+/// `entities` must be relative to the render origin of `camera` (the origin
+/// given to `WorldView::entities`), so the projection works on small numbers
+/// even at x = 1 000 000 (F2-1b).
 #[must_use]
 pub fn place_tags(
     entities: &[EntityRenderSnapshot],
@@ -63,7 +67,8 @@ pub fn place_tags(
     width: f32,
     height: f32,
 ) -> Vec<PlacedTag> {
-    let view_projection = camera.view_projection();
+    let view_projection = camera.view_projection_from(camera.render_origin());
+    let eye = camera.relative_eye();
     let forward = camera.forward();
     let up = camera.horizontal_right().cross(forward);
     entities
@@ -72,7 +77,7 @@ pub fn place_tags(
             let text = entity.name_tag.as_ref()?;
             let sneaking = entity.kind == EntityKind::Player && entity.flags.is_sneaking();
             let range = if sneaking { SNEAK_TAG_RANGE } else { TAG_RANGE };
-            if entity.position.distance(camera.position) >= range {
+            if entity.position.distance(eye) >= range {
                 return None;
             }
             // `renderName` lowers the label of a child by half its height.
@@ -97,8 +102,7 @@ pub fn place_tags(
                 depth,
                 sneaking,
             };
-            let near =
-                f64::from(entity.position.distance_squared(camera.position)) < SCORE_LABEL_RANGE_SQ;
+            let near = f64::from(entity.position.distance_squared(eye)) < SCORE_LABEL_RANGE_SQ;
             (scale > 0.0).then(|| match text.split_once('\n') {
                 // `RenderPlayer.renderOffsetLivingLabel`: the score line sits
                 // where the tag would, and the name is lifted over it by

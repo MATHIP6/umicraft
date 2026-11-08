@@ -15,6 +15,10 @@ umicraft-core.workspace = true
 umicraft-protocol.workspace = true
 umicraft-world.workspace = true
 
+[features]
+# Forwards to `umicraft-core/profiling`: puffin CPU spans.
+profiling = ["umicraft-core/profiling"]
+
 [lints]
 workspace = true
 

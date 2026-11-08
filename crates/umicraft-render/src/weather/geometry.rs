@@ -36,7 +36,7 @@ pub(super) const MAX_VERTICES: usize = 6 * (2 * FANCY_RADIUS as usize + 1).pow(2
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub(super) struct WeatherVertex {
-    /// World position.
+    /// Position relative to the render origin.
     pub position: [f32; 3],
     /// Texture coordinate; the sampler repeats.
     pub uv: [f32; 2],
@@ -104,6 +104,9 @@ impl WeatherMesh {
 pub(super) struct FrameInput {
     /// The camera position.
     pub eye: DVec3,
+    /// The render origin the quads are made relative to, in f64 before the
+    /// cast to f32 (F2-1b).
+    pub origin: DVec3,
     /// `getRainStrength`, the opacity scale.
     pub strength: f32,
     /// Fancy graphics reach 10 blocks, fast ones 5.
@@ -179,6 +182,7 @@ pub(super) fn build(field: &PrecipitationField, input: &FrameInput, mesh: &mut W
                 top: (eye_y + radius).max(cell.height),
                 offset,
                 distance: column_distance(input.eye, x, z, radius),
+                origin: input.origin,
             };
             if column.bottom == column.top {
                 continue;
@@ -203,6 +207,8 @@ struct Column {
     offset: (f64, f64),
     /// Distance to the viewer in units of the radius (`f3`).
     distance: f32,
+    /// The render origin of the vertices.
+    origin: DVec3,
 }
 
 fn column_distance(eye: DVec3, x: i32, z: i32, radius: i32) -> f32 {
@@ -222,7 +228,11 @@ fn corners(
     let (cx, cz) = (f64::from(column.x) + 0.5, f64::from(column.z) + 0.5);
     let (bottom, top) = (f64::from(column.bottom), f64::from(column.top));
     let at = |x: f64, y: f64, z: f64, uv: (f64, f64)| WeatherVertex {
-        position: [x as f32, y as f32, z as f32],
+        position: [
+            (x - column.origin.x) as f32,
+            (y - column.origin.y) as f32,
+            (z - column.origin.z) as f32,
+        ],
         uv: [uv.0 as f32, uv.1 as f32],
         alpha,
         light,
@@ -324,10 +334,34 @@ mod tests {
     fn input(fancy: bool) -> FrameInput {
         FrameInput {
             eye: EYE,
+            origin: DVec3::ZERO,
             strength: 1.0,
             fancy,
             ticks: 100.25,
         }
+    }
+
+    #[test]
+    fn quads_are_relative_to_the_render_origin() {
+        // F2-1b: far from the world origin an absolute f32 vertex has a 6 cm
+        // grain; relative ones stay within the radius of the viewer.
+        let mut field = PrecipitationField::new(1_000_000, 1_000_000);
+        for z in 999_988..=1_000_012 {
+            for x in 999_988..=1_000_012 {
+                field.set(x, z, cell(0.8));
+            }
+        }
+        let far = FrameInput {
+            eye: DVec3::new(1_000_000.5, 70.0, 1_000_000.5),
+            origin: DVec3::new(1_000_000.0, 70.0, 1_000_000.0),
+            ..input(true)
+        };
+        let mesh = mesh_of(&field, &far);
+        assert!(!mesh.vertices.is_empty());
+        assert!(mesh
+            .vertices
+            .iter()
+            .all(|v| v.position[0].abs() < 16.0 && v.position[2].abs() < 16.0));
     }
 
     fn mesh_of(field: &PrecipitationField, input: &FrameInput) -> WeatherMesh {

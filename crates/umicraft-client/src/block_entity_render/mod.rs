@@ -74,8 +74,23 @@ pub(crate) struct BlockEntityScene<'a> {
     pub font: Option<&'a FontAtlas>,
     /// Interpolation between two ticks.
     pub partial_tick: f32,
-    /// The camera, for the distance cut.
+    /// The camera relative to [`Self::origin`], for the distance cut.
     pub camera: Vec3,
+    /// The render origin (whole blocks): the entries the renderers get have
+    /// their `position` relative to it, so the vertices are built from small
+    /// numbers (F2-1b). Lookups by world position use
+    /// [`BlockEntityScene::world_position`].
+    pub origin: [i32; 3],
+}
+
+impl BlockEntityScene<'_> {
+    /// The world position of `entry`, whose `position` is relative to the
+    /// origin: the key of the data tables and the seed of the animations.
+    pub(crate) fn world_position(&self, entry: &BlockEntityRef) -> [i32; 3] {
+        let [x, y, z] = entry.position;
+        let [ox, oy, oz] = self.origin;
+        [x + ox, y + oy, z + oz]
+    }
 }
 
 /// Vertices grouped by the texture they sample.
@@ -106,7 +121,16 @@ pub(crate) fn mesh_block_entities<'a>(
     let batches = &mut meshes.solid;
     let banners = &mut meshes.banners;
     let additive = &mut meshes.additive;
-    for entry in entries.filter(|entry| in_range(entry, scene.camera)) {
+    for world in entries {
+        let [x, y, z] = world.position;
+        let [ox, oy, oz] = scene.origin;
+        let entry = &BlockEntityRef {
+            position: [x - ox, y - oy, z - oz],
+            ..*world
+        };
+        if !in_range(entry, scene.camera) {
+            continue;
+        }
         match BlockEntityKind::of(entry.state) {
             Some(BlockEntityKind::Beacon) => beacon::add_beam(additive, entry, scene),
             Some(BlockEntityKind::EndPortal) => end_portal::add_end_portal(additive, entry, scene),
@@ -131,7 +155,7 @@ pub(crate) fn mesh_block_entities<'a>(
     meshes
 }
 
-/// Whether the block is near enough to draw.
+/// Whether the block is near enough to draw; both are relative to the origin.
 fn in_range(entry: &BlockEntityRef, camera: Vec3) -> bool {
     let [x, y, z] = entry.position;
     let centre = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);

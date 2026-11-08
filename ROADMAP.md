@@ -57,7 +57,7 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M11 Audio | Partial — code complete (index, engine, cues, packets, GUI clicks, volumes, music, non-blocking measured); owner validation by ear open | P11 |
 | M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); accounts not started | P10 (rest of menus), F1 (accounts) |
 | M13 Premium authentication | Session join and encryption done in P12 (launcher session, ADR-0053/0054; tested against a fake server, owner check with a real token open); Microsoft login, keychain and isolation in F1 | P12, F1 |
-| M14 Performance pass | Not started | F2 |
+| M14 Performance pass | Started early as F2 (ADR-0058): audit and plan in `docs/tasks/f2/README.md`, nothing implemented yet | F2 |
 | M15 Modding API v1 | Not started | F3 |
 | M16 Hardening & v1.0 | Not started | P12 (proxies), F4 |
 
@@ -80,7 +80,7 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | 13 | P12 — Online mode & real-server compatibility | P1, P10 |
 | 14 | P13 — Parity sign-off | P0–P12 |
 | 15 | F1 — Account manager & live switching | P12 |
-| 16 | F2 — Performance pass | P13 |
+| 16 | F2 — Performance pass | P13 (started early by ADR-0058) |
 | 17 | F3 — Modding API v1 | F2 |
 | 18 | F4 — Hardening & v1.0 release | F1–F3 |
 
@@ -670,7 +670,7 @@ approved deviation.
 | Milestone | Content | Done when |
 |---|---|---|
 | **F1 — Account manager & live switching** | Starts with a short spike (current Microsoft endpoints, device-code flow, licence of the secret-storage crate). `umicraft-auth`: Microsoft device code → Xbox Live → XSTS → Minecraft services → profile, token refresh, keychain storage (ACC-4/6/7); offline accounts with the standard UUID, multi-account manager, live switch, account UI in menus (ACC-1/2/3/8/10), plugged into the P12 `Session` seam. | Former M12 and M13 acceptance criteria. |
-| **F2 — Performance pass** | Frustum and occlusion culling, mesh priority queue, GPU-driven rendering, upload budget, allocation audit, CI benchmarks (backlog "Performance"). | Before/after numbers in `docs/perf-log.md`; spec §7 targets met or explained. |
+| **F2 — Performance pass** (started early, ADR-0058; plan in `docs/tasks/f2/README.md`) | Instruments first (CPU spans, GPU timestamps, reproducible scene); f64 eye and origin-relative rendering (jitter far from the origin); solid/cutout split and near-to-far order; per-section meshing, frustum and occlusion culling, packed vertices; mesh priority queue, GPU-driven rendering, upload budget, allocation audit, CI benchmarks (backlog "Performance"). | Before/after numbers in `docs/perf-log.md`; spec §7 targets met or explained. |
 | **F3 — Modding API v1** | Former M15, including the move of built-in features onto `umicraft-core`. Resolve first the contradiction between spec §8.4 (ECS for mods) and ADR-0015 (typed `EntityStore`). | Former M15 acceptance criteria. |
 | **F5 — Client identity** (started, ADR-0056) | Umicraft's own assets and texts in the client pack (`umicraft-assets/client-pack`, `umicraft.*` language layer); modern title screen (logo, wordmark, Play, Options; quit by closing the window) with the classic one behind `[menu] title_style`; brand font, rounded shapes and gradients in the UI pass. Next: more client-specific screens on the `umicraft_ui::modern` widgets. | Modern title shipped (done); the panorama waiver of ADR-0056 is resolved (permission recorded or original panorama) before any public release. |
 | **F4 — Hardening & v1.0** | Former M16 minus proxies (moved to P12): long sessions, packaging, crash reports, docs site, legal review. | `docs/release.md` fully ticked. |

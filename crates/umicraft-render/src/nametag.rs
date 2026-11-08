@@ -13,8 +13,8 @@
 use std::ops::Range;
 
 use umicraft_ui::{DrawList, FontAtlas};
-use wgpu::util::DeviceExt;
 
+use crate::batch_buffer::GrowBuffer;
 use crate::overlay::OverlayVertex;
 use crate::renderer::{DEPTH_FORMAT, OVERLAY_ATTRIBUTES};
 use crate::ui_pass::UiPass;
@@ -42,10 +42,16 @@ struct Span {
 pub(crate) struct NametagRenderer {
     pipeline: wgpu::RenderPipeline,
     scratch: UiPass,
-    vertices: Option<wgpu::Buffer>,
+    vertices: GrowBuffer,
     /// One depth per tag, read per instance.
-    depths: Option<wgpu::Buffer>,
+    depths: GrowBuffer,
     spans: Vec<Span>,
+    /// What the buffers hold this frame: the vertices of every tag and the
+    /// depth of each, rebuilt in place so a steady frame allocates nothing.
+    vertex_list: Vec<OverlayVertex>,
+    depth_list: Vec<f32>,
+    /// Whether the frame has tags to draw.
+    active: bool,
 }
 
 impl NametagRenderer {
@@ -110,59 +116,66 @@ impl NametagRenderer {
         Self {
             pipeline,
             scratch: UiPass::new(1, 1),
-            vertices: None,
-            depths: None,
+            vertices: GrowBuffer::default(),
+            depths: GrowBuffer::default(),
             spans: Vec::new(),
+            vertex_list: Vec::new(),
+            depth_list: Vec::new(),
+            active: false,
         }
     }
 
     /// Replaces the tags of the frame; `size` is the window in pixels.
     ///
-    /// The buffers are made anew each frame: a few tags are a few hundred
-    /// vertices, and the buffer of the overlay is not shared on purpose.
+    /// The buffers persist and only grow, and the lists that fill them are
+    /// reused (F2-5b); a frame with no tag writes nothing.
     pub(crate) fn set(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         tags: &[Nametag],
         size: (u32, u32),
         atlas: &FontAtlas,
     ) {
         self.spans.clear();
-        self.vertices = None;
-        self.depths = None;
+        self.vertex_list.clear();
+        self.depth_list.clear();
+        self.active = false;
         if tags.is_empty() {
             return;
         }
         self.scratch.resize(size.0, size.1);
-        let mut vertices: Vec<OverlayVertex> = Vec::new();
-        let mut depths: Vec<f32> = Vec::with_capacity(tags.len());
         for tag in tags {
             let mut append = |list: &DrawList| {
                 self.scratch.rebuild(list, atlas);
-                let first = vertices.len() as u32;
-                vertices.extend_from_slice(self.scratch.vertices());
-                first..vertices.len() as u32
+                let first = self.vertex_list.len() as u32;
+                self.vertex_list.extend_from_slice(self.scratch.vertices());
+                first..self.vertex_list.len() as u32
             };
             let always = append(&tag.always);
             let tested = append(&tag.tested);
             self.spans.push(Span { always, tested });
-            depths.push(tag.depth);
+            self.depth_list.push(tag.depth);
         }
         // Tags clipped away entirely leave nothing to bind (an empty buffer
         // slice is invalid).
-        if vertices.is_empty() {
+        if self.vertex_list.is_empty() {
             self.spans.clear();
             return;
         }
-        let buffer = |label, contents: &[u8]| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents,
-                usage: wgpu::BufferUsages::VERTEX,
-            })
-        };
-        self.vertices = Some(buffer("nametag vertices", bytemuck::cast_slice(&vertices)));
-        self.depths = Some(buffer("nametag depths", bytemuck::cast_slice(&depths)));
+        self.vertices.write(
+            device,
+            queue,
+            "nametag vertices",
+            bytemuck::cast_slice(&self.vertex_list),
+        );
+        self.depths.write(
+            device,
+            queue,
+            "nametag depths",
+            bytemuck::cast_slice(&self.depth_list),
+        );
+        self.active = true;
     }
 
     /// Draws the tags: `always` with the overlay pipeline, `tested` with the
@@ -173,7 +186,9 @@ impl NametagRenderer {
         overlay_pipeline: &wgpu::RenderPipeline,
         font_bind_group: &wgpu::BindGroup,
     ) {
-        let (Some(vertices), Some(depths)) = (&self.vertices, &self.depths) else {
+        let (true, Some(vertices), Some(depths)) =
+            (self.active, self.vertices.get(), self.depths.get())
+        else {
             return;
         };
         pass.set_bind_group(0, font_bind_group, &[]);

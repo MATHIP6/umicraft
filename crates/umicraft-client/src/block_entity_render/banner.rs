@@ -38,11 +38,11 @@ pub(super) fn add_banner(
     } else {
         wall_sign_degrees(metadata)
     };
-    let [x, y, z] = entry.position;
+    let [x, y, z] = scene.world_position(entry);
     let design = design_at(scene, (x, y, z));
     let slot = design.slot();
     designs.entry(slot).or_insert(design);
-    let sway = banner_sway(sway_phase(entry.position, scene.seconds));
+    let sway = banner_sway(sway_phase(scene.world_position(entry), scene.seconds));
     push_at_block(
         batches.entry(slot).or_default(),
         BannerModel::emit(standing, degrees, sway),
@@ -101,6 +101,7 @@ mod tests {
             font: None,
             partial_tick: 0.0,
             camera: Vec3::ZERO,
+            origin: [0; 3],
         };
         let (mut batches, mut designs) = (HashMap::new(), HashMap::new());
         add_banner(&mut batches, &mut designs, entry, &scene);

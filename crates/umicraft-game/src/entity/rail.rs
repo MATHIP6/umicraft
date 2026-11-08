@@ -9,7 +9,7 @@
 //! renderer has no world, so the game thread does it once per tick, on both
 //! ends of the interpolation.
 
-use glam::Vec3;
+use glam::DVec3;
 use umicraft_world::{BlockPos, World};
 
 use super::kind::EntityKind;
@@ -112,23 +112,15 @@ fn ahead(world: &World, x: f64, y: f64, z: f64, span: f64) -> Option<[f64; 3]> {
 
 /// A cart laid on its rail: where it is, and its yaw and pitch in degrees when
 /// the track gives it a direction.
-type Laid = (Vec3, Option<(f32, f32)>);
+type Laid = (DVec3, Option<(f32, f32)>);
 
 /// The cart at `position` laid on its rail, or `None` when it is not on one.
-fn on_rail(world: &World, position: Vec3) -> Option<Laid> {
-    let (x, y, z) = (
-        f64::from(position.x),
-        f64::from(position.y),
-        f64::from(position.z),
-    );
+fn on_rail(world: &World, position: DVec3) -> Option<Laid> {
+    let (x, y, z) = (position.x, position.y, position.z);
     let here = snap(world, x, y, z)?;
     let front = ahead(world, x, y, z, SPAN).unwrap_or(here);
     let back = ahead(world, x, y, z, -SPAN).unwrap_or(here);
-    let laid = Vec3::new(
-        here[0] as f32,
-        ((front[1] + back[1]) / 2.0) as f32,
-        here[2] as f32,
-    );
+    let laid = DVec3::new(here[0], (front[1] + back[1]) / 2.0, here[2]);
     // `RenderMinecart` turns the cart along `vec32 - vec31`, back minus front.
     let along = [back[0] - front[0], back[1] - front[1], back[2] - front[2]];
     let length = along.iter().map(|d| d * d).sum::<f64>().sqrt();
@@ -198,34 +190,23 @@ mod tests {
         world
     }
 
-    fn cart(position: Vec3) -> EntityFrameData {
-        EntityRecord::new(
-            EntityId(1),
-            EntityKind::Minecart,
-            glam::DVec3::new(
-                f64::from(position.x),
-                f64::from(position.y),
-                f64::from(position.z),
-            ),
-            0.0,
-            0.0,
-        )
-        .frame_data()
+    fn cart(position: DVec3) -> EntityFrameData {
+        EntityRecord::new(EntityId(1), EntityKind::Minecart, position, 0.0, 0.0).frame_data()
     }
 
     #[test]
     fn a_cart_between_rails_is_not_moved() {
         let world = world_with(0, 0);
-        let mut frame = [cart(Vec3::new(0.3, 5.0, 0.8))];
+        let mut frame = [cart(DVec3::new(0.3, 5.0, 0.8))];
         rail_entities(&world, &mut frame);
-        assert_eq!(frame[0].position, Vec3::new(0.3, 5.0, 0.8));
+        assert_eq!(frame[0].position, DVec3::new(0.3, 5.0, 0.8));
     }
 
     #[test]
     fn a_cart_on_a_straight_rail_is_centred_and_lowered_onto_it() {
         // Shape 1 runs east-west.
         let world = world_with(66, 1);
-        let (position, angles) = on_rail(&world, Vec3::new(0.3, 5.0, 0.8)).expect("a rail");
+        let (position, angles) = on_rail(&world, DVec3::new(0.3, 5.0, 0.8)).expect("a rail");
         assert!((position.z - 0.5).abs() < 1e-6, "{position}");
         assert!((position.x - 0.3).abs() < 1e-6, "{position}");
         assert!((position.y - 5.0625).abs() < 1e-5, "{position}");
@@ -241,7 +222,7 @@ mod tests {
     fn a_cart_on_a_slope_tilts_along_it() {
         // Shape 2 rises to the east.
         let world = world_with(66, 2);
-        let (position, angles) = on_rail(&world, Vec3::new(0.5, 5.0, 0.5)).expect("a rail");
+        let (position, angles) = on_rail(&world, DVec3::new(0.5, 5.0, 0.5)).expect("a rail");
         let (_, pitch) = angles.expect("a direction");
         assert!(pitch.abs() > 10.0, "{pitch}");
         assert!(position.y > 5.4, "{position}");
@@ -250,15 +231,15 @@ mod tests {
     #[test]
     fn the_powered_bit_of_a_golden_rail_is_not_a_shape() {
         let world = world_with(27, 8 | 1);
-        assert!(on_rail(&world, Vec3::new(0.5, 5.0, 0.5)).is_some());
+        assert!(on_rail(&world, DVec3::new(0.5, 5.0, 0.5)).is_some());
     }
 
     #[test]
     fn only_carts_are_moved() {
         let world = world_with(66, 1);
-        let mut frame = [cart(Vec3::new(0.3, 5.0, 0.8))];
+        let mut frame = [cart(DVec3::new(0.3, 5.0, 0.8))];
         frame[0].kind = EntityKind::Pig;
         rail_entities(&world, &mut frame);
-        assert_eq!(frame[0].position, Vec3::new(0.3, 5.0, 0.8));
+        assert_eq!(frame[0].position, DVec3::new(0.3, 5.0, 0.8));
     }
 }

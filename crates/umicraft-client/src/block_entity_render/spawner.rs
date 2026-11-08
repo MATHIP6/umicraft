@@ -112,7 +112,7 @@ pub(super) fn add_spawner(
     entry: &BlockEntityRef,
     scene: &BlockEntityScene<'_>,
 ) {
-    let [x, y, z] = entry.position;
+    let [x, y, z] = scene.world_position(entry);
     let Some(update) = scene
         .data
         .get(&(x, y, z))
@@ -185,6 +185,7 @@ mod tests {
             skins: &crate::entity_render::NoSkins,
             partial_tick: 0.0,
             camera: Vec3::ZERO,
+            origin: [0; 3],
         };
         let mut batches = Batches::new();
         add_spawner(&mut batches, &entry(), &scene);

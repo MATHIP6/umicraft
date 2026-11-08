@@ -108,3 +108,11 @@ impl BlockTextureTarget for TextureTarget {
         self.procedural_calls += 1;
     }
 }
+
+/// A camera whose render origin is the world origin, for GPU tests that build
+/// their scene in world coordinates (the game itself follows the eye).
+pub(crate) fn world_camera() -> umicraft_render::Camera {
+    let mut camera = umicraft_render::Camera::default();
+    camera.pin_render_origin(glam::DVec3::ZERO);
+    camera
+}

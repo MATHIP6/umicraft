@@ -8,13 +8,54 @@
 //! [`DebugWorld`]; the GPU names from [`AdapterSummary`].
 
 use umicraft_game::debug_f3::{DebugF3Input, DebugF3Lines};
-use umicraft_render::{AdapterSummary, Camera, DebugF3View, Renderer};
+use umicraft_render::{AdapterSummary, Camera, DebugF3View, GpuTimings, Renderer, GROUP_NAMES};
 
 use crate::debug_world::DebugWorld;
 use crate::process_memory::MemoryUse;
 
 use crate::options::{VideoOptions, UNLIMITED_FPS};
 use crate::world_view::WorldView;
+
+/// What the renderer knows about the GPU time of a frame (F2-0b).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GpuReading {
+    /// The adapter has no timestamp queries.
+    Unsupported,
+    /// Supported, but no frame has come back yet.
+    Pending,
+    /// The newest finished frame.
+    Ready(GpuTimings),
+}
+
+impl GpuReading {
+    /// Reads the renderer, or `Unsupported` before it exists.
+    #[must_use]
+    pub fn of(renderer: Option<&Renderer>) -> Self {
+        match renderer {
+            Some(renderer) if renderer.gpu_timing_supported() => {
+                renderer.gpu_timings().map_or(Self::Pending, Self::Ready)
+            }
+            _ => Self::Unsupported,
+        }
+    }
+
+    /// The F3 line, e.g. `GPU 3.1 ms: sky 0.1, opaque 1.8, ...`.
+    #[must_use]
+    pub fn line(self) -> String {
+        match self {
+            Self::Unsupported => "GPU time: n/a".to_owned(),
+            Self::Pending => "GPU time: ...".to_owned(),
+            Self::Ready(timings) => {
+                let groups: Vec<String> = GROUP_NAMES
+                    .iter()
+                    .zip(timings.ms)
+                    .map(|(name, ms)| format!("{name} {ms:.2}"))
+                    .collect();
+                format!("GPU {:.2} ms: {}", timings.total_ms(), groups.join(", "))
+            }
+        }
+    }
+}
 
 /// The numbers the window hands over each frame.
 #[derive(Debug, Clone, Copy)]
@@ -37,6 +78,8 @@ pub struct F3Frame<'a> {
     pub adapter: &'a AdapterSummary,
     /// The process memory.
     pub memory: MemoryUse,
+    /// The GPU time per group of draws.
+    pub gpu: GpuReading,
 }
 
 /// What only the window knows when F3 is drawn.
@@ -72,6 +115,7 @@ pub fn build_live(
         drawn: world.map_or((0, 0), WorldView::drawn_counts),
         adapter: renderer.map_or(&no_adapter, Renderer::adapter),
         memory: crate::process_memory::read(),
+        gpu: GpuReading::of(renderer),
     })
 }
 
@@ -118,9 +162,11 @@ pub fn build(frame: &F3Frame<'_>) -> DebugF3View {
         ..DebugF3Input::default()
     };
     let lines = DebugF3Lines::build(&input);
+    let mut right = lines.right;
+    right.push(frame.gpu.line());
     DebugF3View {
         left: lines.left,
-        right: lines.right,
+        right,
     }
 }
 
@@ -147,7 +193,21 @@ mod tests {
                 used: 300 * 1024 * 1024,
                 max: 1024 * 1024 * 1024,
             },
+            gpu: GpuReading::Unsupported,
         }
+    }
+
+    #[test]
+    fn the_gpu_line_shows_n_a_pending_or_the_groups() {
+        assert_eq!(GpuReading::Unsupported.line(), "GPU time: n/a");
+        assert_eq!(GpuReading::Pending.line(), "GPU time: ...");
+        let timings = GpuTimings {
+            ms: [0.1, 1.5, 0.25, 0.5, 0.05],
+        };
+        assert_eq!(
+            GpuReading::Ready(timings).line(),
+            "GPU 2.40 ms: sky 0.10, opaque 1.50, entities 0.25, translucent 0.50, ui 0.05"
+        );
     }
 
     #[test]
@@ -172,7 +232,7 @@ mod tests {
     fn the_feet_come_from_the_game_not_from_the_camera() {
         // A sneaking player's eye is not 1.62 above the feet.
         let mut camera = Camera::default();
-        camera.position = glam::Vec3::new(1.5, 65.27, -2.0);
+        camera.set_position(glam::Vec3::new(1.5, 65.27, -2.0));
         let world = DebugWorld {
             feet: [1.5, 64.0, -2.0],
             ..DebugWorld::default()

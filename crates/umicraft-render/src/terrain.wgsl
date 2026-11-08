@@ -98,7 +98,7 @@ fn face_shade(normal: vec3<f32>) -> f32 {
 fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
-    out.world_position = in.position;
+    out.world_position = in.position - camera.origin;
     out.uv = in.uv;
     out.layer = in.layer;
     out.tint = vec3<f32>(
@@ -139,6 +139,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if (texel.a < 0.5) {
         discard;
     }
+    return vec4<f32>(shade_fragment(in, texel), 1.0);
+}
+
+// Opaque pass for quads whose texture has no texel under the alpha test (the
+// renderer sorts them from the atlas): no `discard`, so the GPU may reject
+// hidden fragments before shading them.
+@fragment
+fn fs_solid(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
     return vec4<f32>(shade_fragment(in, texel), 1.0);
 }
 

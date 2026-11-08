@@ -19,29 +19,35 @@
 use crate::lightmap::{self, LightmapParams, TorchFlicker};
 use crate::nametag::{Nametag, NametagRenderer};
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 use umicraft_mesh::item::ItemMesh;
-use umicraft_mesh::{Mesh, Vertex, TEXTURE_LAYERS};
+use umicraft_mesh::visibility::Connectivity;
+use umicraft_mesh::{Mesh, Vertex, VertexSpan, TEXTURE_LAYERS};
 use umicraft_ui::menus::{PanoramaTextures, PanoramaView};
 use umicraft_ui::{DrawCommand, DrawList, FontAtlas};
-use umicraft_world::ChunkPos;
+use umicraft_world::{ChunkMap, ChunkPos};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::adapter::AdapterSummary;
+use crate::batch_buffer::BatchBuffer;
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::border::{BorderRenderer, BorderView};
 use crate::camera::{Camera, Frustum};
 use crate::capture;
+use crate::cave_graph::CaveGraph;
+use crate::chunk_pass::{
+    create_chunk_pass, cutout_layers, ChunkPass, Group, QuadIndices, SECTIONS,
+};
 use crate::clouds::{CloudMode, CloudRenderer};
 use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
+use crate::gpu_timer::{self, GpuTimer, GpuTimings};
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::mipmap;
 use crate::outline::{OutlineBox, OutlineRenderer};
@@ -88,6 +94,13 @@ const TERRAIN_WGSL: &str = concat!(
     include_str!("terrain.wgsl")
 );
 
+/// Frames the presentation queue may hold (F2-5e). The wgpu default is 2, which
+/// lets the CPU run a frame ahead of the display and adds up to a frame of
+/// input latency with vsync; 1 keeps the pipeline full for a game whose frame
+/// fits the refresh. Not measured on a display here: revert to 2 if a
+/// GPU-bound scene loses frames.
+const FRAME_LATENCY: u32 = 1;
+
 /// A fog distance the hand never reaches.
 const HAND_FOG_FREE: f32 = 1.0e6;
 
@@ -95,6 +108,8 @@ const HAND_FOG_FREE: f32 = 1.0e6;
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    /// The eye relative to `origin` (small), so the fog distance is computed
+    /// from two small numbers (F2-1c).
     camera_pos: [f32; 3],
     /// Sun-light factor from [`SkyState::sun_brightness`].
     sun_brightness: f32,
@@ -159,15 +174,22 @@ pub(crate) struct GpuMeshPass {
 /// after every opaque chunk without touching vertex data. A pass with no faces
 /// is absent rather than being a zero-sized buffer (which wgpu rejects).
 struct GpuMesh {
-    opaque: Option<GpuMeshPass>,
-    transparent: Option<GpuMeshPass>,
+    opaque: Option<ChunkPass>,
+    transparent: Option<ChunkPass>,
+    /// Which faces of each section see each other, for cave culling; all open
+    /// for a mesh that came without sections.
+    connectivity: [Connectivity; SECTIONS],
 }
 
-/// One transparent chunk queued for the back-to-front pass.
+/// One chunk queued for a sorted pass: opaque ones go near to far (less
+/// overdraw), transparent ones far to near.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct TransparentDraw {
+struct ChunkDraw {
     pos: ChunkPos,
     distance_sq: f32,
+    /// The sections to draw (bit `s` = section `s`): in the frustum and not
+    /// hidden by the cave graph.
+    sections: u16,
 }
 
 /// RGBA8 pixels returned by [`Renderer::read_pixels`].
@@ -190,6 +212,7 @@ struct OffscreenTarget {
 /// Windowed or offscreen wgpu renderer.
 pub struct Renderer {
     adapter: AdapterSummary,
+    gpu_timer: Option<GpuTimer>,
     instance: wgpu::Instance,
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
@@ -204,7 +227,34 @@ pub struct Renderer {
     height: u32,
     depth_view: wgpu::TextureView,
     camera_buffer: wgpu::Buffer,
+    /// The camera for passes whose vertices are already relative to the
+    /// render origin (entities, particles, dropped items): the same matrix,
+    /// with `origin` zero so the shader subtracts nothing (F2-1b).
+    local_camera_buffer: wgpu::Buffer,
+    local_camera_bind_group: wgpu::BindGroup,
+    /// The block array with [`Renderer::local_camera_buffer`].
+    local_terrain_bind_group: wgpu::BindGroup,
     terrain_pipeline: wgpu::RenderPipeline,
+    /// The opaque pipeline without `discard`, for the quads whose texture has
+    /// no cutout texel (F2-2a).
+    terrain_solid_pipeline: wgpu::RenderPipeline,
+    /// The index buffer every chunk pass is drawn with (F2-2d).
+    quad_indices: QuadIndices,
+    /// Which layers of the bound block array need the alpha test.
+    cutout: Vec<bool>,
+    /// Bumped whenever `cutout` changes; chunk passes sorted with an older
+    /// one are drawn whole with the alpha test until they are uploaded again.
+    cutout_epoch: u32,
+    /// The same for the built-in array, restored by `use_procedural_blocks`.
+    procedural_cutout: Vec<bool>,
+    /// Reused by `upload_mesh` to put the solid quads first.
+    chunk_scratch: Vec<Vertex>,
+    /// Cave culling (F2-3d): the sections the camera can see through the
+    /// connectivity of the others.
+    cave_graph: CaveGraph,
+    cave_culling: bool,
+    /// Bumped whenever a chunk mesh is added, replaced or removed.
+    chunks_version: u64,
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
     terrain_transparent_pipeline: wgpu::RenderPipeline,
@@ -217,7 +267,7 @@ pub struct Renderer {
     hand_camera_buffer: wgpu::Buffer,
     hand_camera_bind_group: wgpu::BindGroup,
     /// The vertices of the hand and its skin texture, if one is drawn.
-    hand: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    hand: BatchBuffer,
     terrain_bind_group: wgpu::BindGroup,
     /// The same array with the mip sampler, for the chunk passes only.
     chunk_bind_group: wgpu::BindGroup,
@@ -233,10 +283,10 @@ pub struct Renderer {
     /// Reused per-frame queue of transparent chunks, farthest first. Its
     /// capacity is bounded by the number of uploaded meshes and is retained
     /// across frames, so sorting allocates nothing in steady state.
-    transparent_order: Vec<TransparentDraw>,
+    transparent_order: Vec<ChunkDraw>,
     /// Reused per-frame list of the chunks with opaque geometry that are
     /// inside the render distance and the view frustum.
-    visible_opaque: Vec<ChunkPos>,
+    visible_opaque: Vec<ChunkDraw>,
     /// Sky dome, sun, moon, stars and the End cube.
     sky: SkyRenderer,
     /// The clouds, drawn with the depth test after the opaque passes.
@@ -328,19 +378,19 @@ pub struct Renderer {
     overlay_buffer: wgpu::Buffer,
     overlay_capacity: u64,
     offscreen: Option<OffscreenTarget>,
-    chunks: HashMap<ChunkPos, GpuMesh>,
+    chunks: ChunkMap<GpuMesh>,
     camera_bind_group: wgpu::BindGroup,
     entity_renderer: EntityRenderer,
     outline: OutlineRenderer,
-    entity_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    entity_batches: BatchBuffer,
     /// The glowing layers of the entities, drawn after them.
-    additive_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    additive_batches: BatchBuffer,
     /// The enchantment glint of worn armour, drawn over it at equal depth.
-    glint_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    glint_batches: BatchBuffer,
     /// Invisible entities a spectator sees, drawn translucent.
-    ghost_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    ghost_batches: BatchBuffer,
     /// The shadows under the entities.
-    shadow_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    shadow_batches: BatchBuffer,
 }
 
 impl Renderer {
@@ -383,6 +433,7 @@ impl Renderer {
         // decides whether the display refresh does too (`set_vsync`). Start
         // without, as the first frame has not read the options yet.
         config.present_mode = present_mode(false);
+        config.desired_maximum_frame_latency = FRAME_LATENCY;
         let format = config.format;
         surface.configure(&device, &config);
         Self::create(
@@ -624,6 +675,19 @@ impl Renderer {
             &block_sampler,
             &block_view,
         );
+        let local_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("local camera uniform"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let local_terrain_bind_group = create_terrain_bind_group(
+            &device,
+            &terrain_layout,
+            &local_camera_buffer,
+            &block_sampler,
+            &block_view,
+        );
         let chunk_bind_group = create_terrain_bind_group(
             &device,
             &terrain_layout,
@@ -642,6 +706,14 @@ impl Renderer {
             &terrain_layout,
             format,
             TerrainPipelineState::opaque(),
+        );
+        let quad_indices = QuadIndices::new(&device);
+        let terrain_solid_pipeline = create_terrain_pipeline(
+            &device,
+            &terrain_shader,
+            &terrain_layout,
+            format,
+            TerrainPipelineState::solid(),
         );
         let terrain_transparent_pipeline = create_terrain_pipeline(
             &device,
@@ -760,6 +832,14 @@ impl Renderer {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
+        let local_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("local entity camera bind group"),
+            layout: &camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: local_camera_buffer.as_entire_binding(),
+            }],
+        });
         let hand_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hand camera uniform"),
             size: std::mem::size_of::<CameraUniform>() as u64,
@@ -836,8 +916,10 @@ impl Renderer {
         let glint = GlintPass::new(&device, format);
         let world_glint = WorldGlint::new(&device, &terrain_layout, format);
 
+        let gpu_timer = GpuTimer::new(&device, &queue);
         Ok(Self {
             adapter,
+            gpu_timer,
             instance,
             window,
             surface,
@@ -850,14 +932,29 @@ impl Renderer {
             height,
             depth_view,
             camera_buffer,
+            local_camera_buffer,
+            local_camera_bind_group,
+            local_terrain_bind_group,
             terrain_pipeline,
+            terrain_solid_pipeline,
+            quad_indices,
+            procedural_cutout: cutout_layers(
+                &block_data,
+                (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize,
+            ),
+            cutout: cutout_layers(&block_data, (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize),
+            cutout_epoch: 0,
+            cave_graph: CaveGraph::default(),
+            cave_culling: true,
+            chunks_version: 0,
+            chunk_scratch: Vec::new(),
             terrain_transparent_pipeline,
             crack_pipeline,
             crack_mesh: None,
             moving_blocks,
             hand_camera_buffer,
             hand_camera_bind_group,
-            hand: Vec::new(),
+            hand: BatchBuffer::default(),
             terrain_bind_group,
             chunk_bind_group,
             mip_sampler,
@@ -909,15 +1006,15 @@ impl Renderer {
             overlay_buffer,
             overlay_capacity: OVERLAY_MIN_BYTES,
             offscreen,
-            chunks: HashMap::new(),
+            chunks: ChunkMap::default(),
             camera_bind_group,
             entity_renderer,
             outline,
-            entity_batches: Vec::new(),
-            additive_batches: Vec::new(),
-            glint_batches: Vec::new(),
-            ghost_batches: Vec::new(),
-            shadow_batches: Vec::new(),
+            entity_batches: BatchBuffer::default(),
+            additive_batches: BatchBuffer::default(),
+            glint_batches: BatchBuffer::default(),
+            ghost_batches: BatchBuffer::default(),
+            shadow_batches: BatchBuffer::default(),
         })
     }
 
@@ -966,7 +1063,7 @@ impl Renderer {
     }
 
     /// Sets the particles to draw this frame, already resolved by the client
-    /// (position, picture, tint, light). Call once per frame; the list is
+    /// (position relative to the render origin, picture, tint, light). Call once per frame; the list is
     /// copied into a reused buffer.
     pub fn set_particles(&mut self, sprites: &[ParticleSprite]) {
         self.particle_sprites.clear();
@@ -1109,7 +1206,8 @@ impl Renderer {
     /// Replaces the name tags drawn in the world pass of the next frames; an
     /// empty slice hides them. `size` is the window in pixels.
     pub fn set_nametags(&mut self, tags: &[Nametag], size: (u32, u32)) {
-        self.nametags.set(&self.device, tags, size, &self.ui_atlas);
+        self.nametags
+            .set(&self.device, &self.queue, tags, size, &self.ui_atlas);
     }
 
     /// Whether the icon atlas holds the icon `key`.
@@ -1147,7 +1245,7 @@ impl Renderer {
                 contents: bytemuck::cast_slice(vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
-        let batch = [(&buffer, vertices.len() as u32, texture)];
+        let batch = [(buffer.slice(..), vertices.len() as u32, texture)];
         let (entities, camera) = (&self.entity_renderer, &self.icon_entity_bind_group);
         self.icon_atlas
             .render_with(&self.device, &self.queue, key, |pass| {
@@ -1181,12 +1279,17 @@ impl Renderer {
         let (entities, camera) = (&self.entity_renderer, &self.icon_entity_bind_group);
         self.icon_atlas
             .render_portrait(&self.device, &self.queue, |pass| {
-                entities.render_icon(pass, camera, buffers.iter().map(|(b, n, t)| (b, *n, *t)));
+                entities.render_icon(
+                    pass,
+                    camera,
+                    buffers.iter().map(|(b, n, t)| (b.slice(..), *n, *t)),
+                );
             });
     }
 
     /// Replaces the world-space item geometry drawn after the entities
-    /// (dropped items, frames), already positioned in world coordinates.
+    /// (dropped items, frames), already positioned relative to the render
+    /// origin of the camera (F2-1b).
     pub fn set_world_items(&mut self, mesh: &ItemMesh) {
         self.world_items.update(&self.device, &self.queue, mesh);
     }
@@ -1235,6 +1338,7 @@ impl Renderer {
     }
 
     fn render_frame(&mut self, camera: &Camera, overlay: &Overlay) -> Result<(), RenderError> {
+        umicraft_core::profile_scope!("render_frame");
         // One SkyState per frame: the clear colour, the fog uniform and the
         // sky pass must agree even if W3's model changes between calls.
         let sky_state = SkyState::at_looking(self.environment, camera.forward().to_array());
@@ -1278,28 +1382,48 @@ impl Renderer {
     /// the cull happens here. The transparent list is sorted farthest first;
     /// both lists keep their capacity across frames.
     fn prepare_visible_chunks(&mut self, camera: &Camera) {
-        let frustum = Frustum::from_view_projection(camera.view_projection());
-        let eye_chunk = ChunkPos::new(
-            (camera.position.x / 16.0).floor() as i32,
-            (camera.position.z / 16.0).floor() as i32,
-        );
+        umicraft_core::profile_scope!("prepare_visible_chunks");
+        // Boxes are made relative to the render origin in f64, so the frustum
+        // planes and the boxes stay precise far from the world origin (A5).
+        let origin = camera.render_origin();
+        let frustum = Frustum::from_view_projection(camera.view_projection_from(origin));
+        let eye = camera.eye();
+        let eye_chunk = ChunkPos::new((eye.x / 16.0).floor() as i32, (eye.z / 16.0).floor() as i32);
         let reach = i32::from(self.environment.view_distance);
         self.visible_opaque.clear();
         self.transparent_order.clear();
-        for (pos, mesh) in &self.chunks {
-            if !chunk_is_visible(*pos, eye_chunk, reach, &frustum) {
+        let chunks = &self.chunks;
+        if self.cave_culling {
+            self.cave_graph
+                .update((eye.x, eye.y, eye.z), reach, self.chunks_version, |pos| {
+                    chunks.get(&pos).map(|mesh| &mesh.connectivity)
+                });
+        }
+        let cave = self.cave_culling.then_some(&self.cave_graph);
+        for (pos, mesh) in chunks {
+            if !chunk_is_visible(*pos, eye_chunk, reach, &frustum, origin) {
                 continue;
             }
+            let mut sections = sections_in_frustum(*pos, &frustum, origin);
+            if let Some(cave) = cave {
+                sections &= cave.mask(*pos);
+            }
+            if sections == 0 {
+                continue;
+            }
+            let draw = ChunkDraw {
+                pos: *pos,
+                distance_sq: squared_distance_to_chunk(*pos, eye),
+                sections,
+            };
             if mesh.opaque.is_some() {
-                self.visible_opaque.push(*pos);
+                self.visible_opaque.push(draw);
             }
             if mesh.transparent.is_some() {
-                self.transparent_order.push(TransparentDraw {
-                    pos: *pos,
-                    distance_sq: squared_distance_to_chunk(*pos, camera.position),
-                });
+                self.transparent_order.push(draw);
             }
         }
+        sort_nearest_first(&mut self.visible_opaque);
         sort_transparent_farthest_first(&mut self.transparent_order);
     }
 
@@ -1538,6 +1662,13 @@ impl Renderer {
             &self.block_sampler,
             &view,
         );
+        self.local_terrain_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.local_camera_buffer,
+            &self.block_sampler,
+            &view,
+        );
         self.chunk_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
@@ -1546,6 +1677,8 @@ impl Renderer {
             &view,
         );
         self.rebind_icons(&view);
+        self.cutout = cutout_layers(pixels, width as usize * height as usize * 4);
+        self.cutout_epoch += 1;
         self.official_blocks = Some((texture, width, height));
         Ok(())
     }
@@ -1705,10 +1838,19 @@ impl Renderer {
     /// fresh renderer changes nothing.
     pub fn use_procedural_blocks(&mut self) {
         self.official_blocks = None;
+        self.cutout.clone_from(&self.procedural_cutout);
+        self.cutout_epoch += 1;
         self.terrain_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
             &self.camera_buffer,
+            &self.block_sampler,
+            &self.procedural_blocks,
+        );
+        self.local_terrain_bind_group = create_terrain_bind_group(
+            &self.device,
+            &self.terrain_layout,
+            &self.local_camera_buffer,
             &self.block_sampler,
             &self.procedural_blocks,
         );
@@ -1750,28 +1892,63 @@ impl Renderer {
     /// index buffers so the renderer can submit every opaque chunk before the
     /// sorted transparent pass. A half with no faces gets no buffer.
     pub fn upload_mesh(&mut self, pos: ChunkPos, mesh: &Mesh) {
+        umicraft_core::profile_scope!("upload_mesh");
+        self.chunks_version += 1;
         if mesh.is_empty() {
             self.chunks.remove(&pos);
             return;
         }
-        let opaque =
-            create_gpu_mesh_pass(&self.device, "chunk opaque", &mesh.vertices, &mesh.indices);
-        let transparent = create_gpu_mesh_pass(
+        // The spans of each pass, when the mesher produced them.
+        let has_sections = mesh.sections.len() == SECTIONS;
+        let opaque_spans: [VertexSpan; SECTIONS] = std::array::from_fn(|i| {
+            mesh.sections
+                .get(i)
+                .map_or_else(Default::default, |s| s.opaque)
+        });
+        let transparent_spans: [VertexSpan; SECTIONS] = std::array::from_fn(|i| {
+            mesh.sections
+                .get(i)
+                .map_or_else(Default::default, |s| s.transparent)
+        });
+        let opaque = create_chunk_pass(
+            &self.device,
+            "chunk opaque",
+            &mesh.vertices,
+            has_sections.then_some(&opaque_spans[..]),
+            Some((&self.cutout, self.cutout_epoch)),
+            &mut self.chunk_scratch,
+        );
+        let transparent = create_chunk_pass(
             &self.device,
             "chunk transparent",
             &mesh.transparent_vertices,
-            &mesh.transparent_indices,
+            has_sections.then_some(&transparent_spans[..]),
+            None,
+            &mut self.chunk_scratch,
         );
-        // A pass without indices has no drawable faces. If neither half
-        // produced a buffer (including a malformed mesh with vertices but no
-        // indices), drop any previous mesh instead of keeping an empty entry.
+        // A pass without a whole quad has nothing to draw. If neither half
+        // produced a buffer, drop any previous mesh instead of keeping an
+        // empty entry.
         if opaque.is_none() && transparent.is_none() {
             self.chunks.remove(&pos);
             return;
         }
+        let most_quads = [&opaque, &transparent]
+            .into_iter()
+            .flatten()
+            .map(|pass| pass.quads)
+            .max()
+            .unwrap_or(0);
+        self.quad_indices.ensure(&self.device, most_quads);
+        let connectivity = std::array::from_fn(|i| {
+            mesh.sections
+                .get(i)
+                .map_or(Connectivity::OPEN, |section| section.connectivity)
+        });
         let mesh = GpuMesh {
             opaque,
             transparent,
+            connectivity,
         };
         if let Entry::Occupied(mut entry) = self.chunks.entry(pos) {
             *entry.get_mut() = mesh;
@@ -1782,12 +1959,20 @@ impl Renderer {
 
     /// Removes the GPU mesh for one chunk column.
     pub fn remove_chunk(&mut self, pos: ChunkPos) {
+        self.chunks_version += 1;
         self.chunks.remove(&pos);
     }
 
     /// Removes every uploaded chunk mesh (e.g. after a dimension change).
     pub fn clear_meshes(&mut self) {
+        self.chunks_version += 1;
         self.chunks.clear();
+    }
+
+    /// Turns the cave culling of the terrain sections on or off (on by
+    /// default). Off draws every section in the frustum.
+    pub fn set_cave_culling(&mut self, enabled: bool) {
+        self.cave_culling = enabled;
     }
 
     /// The GPU adapter the renderer runs on, for the F3 screen.
@@ -1867,102 +2052,33 @@ impl Renderer {
 
     /// Uploads entity vertex batches to be drawn in the next frame.
     pub fn upload_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.entity_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.entity_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.entity_batches.set(&self.device, &self.queue, batches);
     }
 
     /// Uploads the glowing entity layers (eyes, charge, aura, glint) to be
     /// drawn after the entities. The `light` of their vertices is the tint
     /// (bits 0..=23, `0xBBGGRR`) and bit 24 squares the colour.
     pub fn upload_additive_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.additive_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity additive batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.additive_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.additive_batches
+            .set(&self.device, &self.queue, batches);
     }
 
     /// Uploads the shadows under the entities: squares whose `light` is the
     /// opacity in its low byte.
     pub fn upload_shadow_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.shadow_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity shadow batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.shadow_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.shadow_batches.set(&self.device, &self.queue, batches);
     }
 
     /// Uploads the invisible entities a spectator sees (their model, drawn at
     /// 15 % opacity without writing depth).
     pub fn upload_ghost_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.ghost_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity ghost batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.ghost_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.ghost_batches.set(&self.device, &self.queue, batches);
     }
 
     /// Uploads the enchantment glint of worn armour: the same vertices as the
     /// armour, drawn only where the armour wrote its depth.
     pub fn upload_glint_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.glint_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity glint batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.glint_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.glint_batches.set(&self.device, &self.queue, batches);
     }
 
     /// Sets the first-person hand for the following frames.
@@ -1979,20 +2095,7 @@ impl Renderer {
     /// arms, then a held map with its background, pixels and markers).
     /// Empty batches are skipped.
     pub fn set_hand_batches(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.hand = batches
-            .iter()
-            .filter(|(vertices, _)| !vertices.is_empty())
-            .map(|(vertices, bind_group)| {
-                let buffer = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("hand vertices"),
-                        contents: bytemuck::cast_slice(vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                (buffer, vertices.len() as u32, (*bind_group).clone())
-            })
-            .collect();
+        self.hand.set(&self.device, &self.queue, batches);
     }
 
     /// Hides the first-person hand.
@@ -2103,10 +2206,10 @@ impl Renderer {
 
     fn write_camera(&self, camera: &Camera, sky: &SkyState, flicker: f32) {
         let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
-        let origin = camera.position.floor();
+        let origin = camera.render_origin();
         let uniform = CameraUniform {
             view_proj: camera.view_projection_from(origin).to_cols_array_2d(),
-            camera_pos: camera.position.to_array(),
+            camera_pos: camera.relative_eye().to_array(),
             sun_brightness: sky.sun_brightness,
             fog_color: sky.fog.color,
             fog_start,
@@ -2114,7 +2217,7 @@ impl Renderer {
             gamma: self.environment.gamma,
             fog_density,
             _pad: 0.0,
-            origin: origin.to_array(),
+            origin: origin.as_vec3().to_array(),
             _pad_origin: 0.0,
             lightmap: lightmap::colors(&LightmapParams::of(
                 &self.environment,
@@ -2124,6 +2227,13 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+        // Same matrix and eye: the vertices of this one are already relative.
+        let local = CameraUniform {
+            origin: [0.0; 3],
+            ..uniform
+        };
+        self.queue
+            .write_buffer(&self.local_camera_buffer, 0, bytemuck::bytes_of(&local));
 
         // The hand lives in camera space, far from any fog.
         let hand_uniform = CameraUniform {
@@ -2189,8 +2299,9 @@ impl Renderer {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("frame encoder"),
                         });
+                self.begin_gpu_timing();
                 self.draw(&view, overlay, &mut encoder, sky_state);
-                self.queue.submit(Some(encoder.finish()));
+                self.submit_timed(encoder);
                 self.capture_frame(&frame.texture);
                 if let Some(window) = &self.window {
                     window.pre_present_notify();
@@ -2216,6 +2327,7 @@ impl Renderer {
         overlay: &Overlay,
         sky_state: &SkyState,
     ) -> Result<(), RenderError> {
+        self.begin_gpu_timing();
         let Some(target) = self.offscreen.as_ref() else {
             return Err(RenderError::NotOffscreen);
         };
@@ -2225,8 +2337,52 @@ impl Renderer {
                 label: Some("offscreen encoder"),
             });
         self.draw(&target.view, overlay, &mut encoder, sky_state);
-        self.queue.submit(Some(encoder.finish()));
+        self.submit_timed(encoder);
         Ok(())
+    }
+
+    fn begin_gpu_timing(&mut self) {
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.begin_frame();
+        }
+    }
+
+    /// Submits the frame and collects the finished GPU timings.
+    fn submit_timed(&mut self, mut encoder: wgpu::CommandEncoder) {
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.resolve(&mut encoder);
+        }
+        self.queue.submit(Some(encoder.finish()));
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.after_submit(&self.device);
+        }
+    }
+
+    fn stamp(&self, pass: &mut wgpu::RenderPass<'_>, index: u32) {
+        if let Some(timer) = &self.gpu_timer {
+            timer.stamp(pass, index);
+        }
+    }
+
+    /// Blocks until the GPU finished every submitted frame, for benchmarks
+    /// that time a whole frame.
+    pub fn wait_idle(&self) {
+        // A failed poll means the device is lost; the next draw reports it.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
+    /// The GPU time of the newest finished frame per group of draws, two or
+    /// three frames old. `None` when the adapter has no timestamp queries or
+    /// no frame has come back yet.
+    #[must_use]
+    pub fn gpu_timings(&self) -> Option<GpuTimings> {
+        self.gpu_timer.as_ref().and_then(GpuTimer::latest)
+    }
+
+    /// Whether the adapter can time the GPU (F3 shows "n/a" otherwise).
+    #[must_use]
+    pub fn gpu_timing_supported(&self) -> bool {
+        self.gpu_timer.is_some()
     }
 
     fn draw(
@@ -2268,66 +2424,55 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        self.stamp(&mut pass, 0);
         self.sky.draw(&mut pass);
         self.panorama.draw(&mut pass);
+        self.stamp(&mut pass, 1);
 
-        // Opaque terrain: depth write on, alpha cutout, order-independent.
-        pass.set_pipeline(&self.terrain_pipeline);
+        // Opaque terrain, nearest chunk first: the SOLID quads (no alpha
+        // test, early depth rejection) and then the CUTOUT ones, which
+        // discard texels. Both write depth and do not depend on the order.
+        self.quad_indices.bind(&mut pass);
         pass.set_bind_group(0, &self.chunk_bind_group, &[]);
-        for pos in &self.visible_opaque {
-            if let Some(opaque) = self.chunks.get(pos).and_then(|mesh| mesh.opaque.as_ref()) {
-                draw_gpu_pass(&mut pass, opaque);
-            }
-        }
+        pass.set_pipeline(&self.terrain_solid_pipeline);
+        self.draw_visible_opaque(&mut pass, true);
+        pass.set_pipeline(&self.terrain_pipeline);
+        self.draw_visible_opaque(&mut pass, false);
         self.moving_blocks.draw_opaque(&mut pass);
+        self.stamp(&mut pass, 2);
 
         // The shadows lie on the ground, drawn before the entities.
         if !self.shadow_batches.is_empty() {
-            let batches = self
-                .shadow_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.shadow_batches.iter();
             self.entity_renderer
-                .render_shadows(&mut pass, &self.camera_bind_group, batches);
+                .render_shadows(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // Entities: depth write on, cutout discard, rendered between opaque and transparent passes.
         if !self.entity_batches.is_empty() {
-            let batches = self
-                .entity_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.entity_batches.iter();
             self.entity_renderer
-                .render(&mut pass, &self.camera_bind_group, batches);
+                .render(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // The invisible entities a spectator sees, over the opaque ones.
         if !self.ghost_batches.is_empty() {
-            let batches = self
-                .ghost_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.ghost_batches.iter();
             self.entity_renderer
-                .render_ghosts(&mut pass, &self.camera_bind_group, batches);
+                .render_ghosts(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // The glow of the entities is added over them, without writing depth.
         if !self.additive_batches.is_empty() {
-            let batches = self
-                .additive_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.additive_batches.iter();
             self.entity_renderer
-                .render_additive(&mut pass, &self.camera_bind_group, batches);
+                .render_additive(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         if !self.glint_batches.is_empty() {
-            let batches = self
-                .glint_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.glint_batches.iter();
             self.entity_renderer
-                .render_glint(&mut pass, &self.camera_bind_group, batches);
+                .render_glint(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // `renderEntities` draws the labels with the entities, before the
@@ -2337,10 +2482,11 @@ impl Renderer {
 
         // Dropped items share the terrain pipeline and its texture array.
         pass.set_pipeline(&self.terrain_pipeline);
-        pass.set_bind_group(0, &self.terrain_bind_group, &[]);
+        pass.set_bind_group(0, &self.local_terrain_bind_group, &[]);
         self.world_items.draw(&mut pass);
         self.world_glint
-            .draw_world(&mut pass, &self.terrain_bind_group);
+            .draw_world(&mut pass, &self.local_terrain_bind_group);
+        self.stamp(&mut pass, 3);
 
         // The clouds hide behind terrain and hide the water behind them, as in
         // `renderWorldPass`: before the translucent layer from below.
@@ -2348,21 +2494,28 @@ impl Renderer {
 
         // `renderParticles` follows the entities; `renderRainSnow` comes after
         // both and before the translucent terrain.
-        self.particles.draw(&mut pass, &self.terrain_bind_group);
-        self.weather.draw(&mut pass, &self.camera_bind_group);
+        self.particles
+            .draw(&mut pass, &self.local_terrain_bind_group);
+        self.weather.draw(&mut pass, &self.local_camera_bind_group);
 
         // Transparent terrain: water/glass/leaves, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
         pass.set_pipeline(&self.terrain_transparent_pipeline);
         pass.set_bind_group(0, &self.chunk_bind_group, &[]);
+        self.quad_indices.bind(&mut pass);
         for draw in &self.transparent_order {
-            let Some(mesh) = self.chunks.get(&draw.pos) else {
+            let Some(transparent) = self
+                .chunks
+                .get(&draw.pos)
+                .and_then(|mesh| mesh.transparent.as_ref())
+            else {
                 continue;
             };
-            if let Some(transparent) = mesh.transparent.as_ref() {
-                draw_gpu_pass(&mut pass, transparent);
-            }
+            transparent.visible_runs(draw.sections, Group::Solid, |indices| {
+                pass.set_vertex_buffer(0, transparent.vertex_buffer.slice(..));
+                pass.draw_indexed(indices, 0, 0..1);
+            });
         }
         // Drawn after the chunks' blended faces: a handful of quads, so no
         // sorting against them.
@@ -2381,16 +2534,12 @@ impl Renderer {
         }
 
         self.outline.draw(&mut pass, &self.camera_bind_group);
+        self.stamp(&mut pass, 4);
 
         // The hand: camera-space vertices under a squeezed depth range.
         if !self.hand.is_empty() {
-            self.entity_renderer.render(
-                &mut pass,
-                &self.hand_camera_bind_group,
-                self.hand
-                    .iter()
-                    .map(|(buffer, count, texture)| (buffer, *count, texture)),
-            );
+            self.entity_renderer
+                .render(&mut pass, &self.hand_camera_bind_group, self.hand.iter());
         }
 
         pass.set_pipeline(&self.terrain_pipeline);
@@ -2456,6 +2605,36 @@ impl Renderer {
                 pass.draw(first..end, 0..1);
             }
         }
+        self.stamp(&mut pass, 5);
+    }
+
+    /// Draws the SOLID (`solid`) or the CUTOUT quads of every visible opaque
+    /// chunk, nearest first. The quad index buffer and the pipeline are bound
+    /// by the caller. A chunk sorted with an outdated atlas has no valid
+    /// split: it is drawn whole, with the alpha test.
+    fn draw_visible_opaque(&self, pass: &mut wgpu::RenderPass<'_>, solid: bool) {
+        for draw in &self.visible_opaque {
+            let Some(opaque) = self
+                .chunks
+                .get(&draw.pos)
+                .and_then(|mesh| mesh.opaque.as_ref())
+            else {
+                continue;
+            };
+            let mut run = |indices: std::ops::Range<u32>| {
+                pass.set_vertex_buffer(0, opaque.vertex_buffer.slice(..));
+                pass.draw_indexed(indices, 0, 0..1);
+            };
+            match (opaque.epoch == self.cutout_epoch, solid) {
+                (true, true) => opaque.visible_runs(draw.sections, Group::Solid, &mut run),
+                (true, false) => opaque.visible_runs(draw.sections, Group::Cutout, &mut run),
+                (false, true) => {}
+                (false, false) => {
+                    opaque.visible_runs(draw.sections, Group::Solid, &mut run);
+                    opaque.visible_runs(draw.sections, Group::Cutout, &mut run);
+                }
+            }
+        }
     }
 
     fn reconfigure_surface(&mut self) -> Result<(), RenderError> {
@@ -2517,7 +2696,12 @@ fn request_adapter(
 fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), RenderError> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("umicraft device"),
-        required_features: wgpu::Features::empty(),
+        // Timestamps are optional: without them F3 shows "n/a".
+        required_features: if adapter.features().contains(gpu_timer::REQUIRED_FEATURES) {
+            gpu_timer::REQUIRED_FEATURES
+        } else {
+            wgpu::Features::empty()
+        },
         required_limits: adapter.limits(),
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
         memory_hints: wgpu::MemoryHints::Performance,
@@ -2587,6 +2771,17 @@ impl TerrainPipelineState {
             blend: wgpu::BlendState::REPLACE,
             bias: wgpu::DepthBiasState::default(),
             cull_mode: Some(wgpu::Face::Back),
+        }
+    }
+
+    /// The opaque pass for quads that never need the alpha test: the same
+    /// state, a fragment shader without `discard`, so the GPU keeps early
+    /// depth rejection.
+    fn solid() -> Self {
+        Self {
+            label: "terrain solid pipeline",
+            fragment_entry: "fs_solid",
+            ..Self::opaque()
         }
     }
 
@@ -2773,29 +2968,61 @@ pub(crate) fn draw_gpu_pass_buffers(
 
 /// The chunk centre used for transparent sorting: the middle of the 16×16
 /// column at the cloud/terrain reference height of y = 128.
-fn chunk_centre(pos: ChunkPos) -> Vec3 {
-    Vec3::new(pos.x as f32 * 16.0 + 8.0, 128.0, pos.z as f32 * 16.0 + 8.0)
+fn chunk_centre(pos: ChunkPos) -> DVec3 {
+    DVec3::new(
+        f64::from(pos.x) * 16.0 + 8.0,
+        128.0,
+        f64::from(pos.z) * 16.0 + 8.0,
+    )
 }
 
 /// True when the column is within `reach` chunks of the eye (a square, like
 /// the reference's `renderDistanceChunks`) and its bounding box touches the
-/// frustum.
-fn chunk_is_visible(pos: ChunkPos, eye: ChunkPos, reach: i32, frustum: &Frustum) -> bool {
+/// frustum. `frustum` and the box are relative to `origin`.
+fn chunk_is_visible(
+    pos: ChunkPos,
+    eye: ChunkPos,
+    reach: i32,
+    frustum: &Frustum,
+    origin: DVec3,
+) -> bool {
     if (pos.x - eye.x).abs() > reach || (pos.z - eye.z).abs() > reach {
         return false;
     }
-    let min = Vec3::new(pos.x as f32 * 16.0, 0.0, pos.z as f32 * 16.0);
+    let min = DVec3::new(f64::from(pos.x) * 16.0, 0.0, f64::from(pos.z) * 16.0) - origin;
+    let min = min.as_vec3();
     frustum.intersects_aabb(min, min + Vec3::new(16.0, 256.0, 16.0))
 }
 
+/// The sections of column `pos` whose 16³ box touches the frustum (bit `s` =
+/// section `s`). Boxes are relative to the render `origin`.
+fn sections_in_frustum(pos: ChunkPos, frustum: &Frustum, origin: DVec3) -> u16 {
+    let base = DVec3::new(f64::from(pos.x) * 16.0, 0.0, f64::from(pos.z) * 16.0) - origin;
+    (0..SECTIONS).fold(0_u16, |mask, section| {
+        let min = (base + DVec3::new(0.0, section as f64 * 16.0, 0.0)).as_vec3();
+        mask | u16::from(frustum.intersects_aabb(min, min + Vec3::splat(16.0))) << section
+    })
+}
+
 /// Squared camera-to-chunk-centre distance; avoids a square root per chunk.
-fn squared_distance_to_chunk(pos: ChunkPos, camera_position: Vec3) -> f32 {
-    chunk_centre(pos).distance_squared(camera_position)
+fn squared_distance_to_chunk(pos: ChunkPos, eye: DVec3) -> f32 {
+    chunk_centre(pos).distance_squared(eye) as f32
+}
+
+/// Orders opaque chunks nearest first, so what stands in front is drawn
+/// before what hides behind it and fewer fragments are shaded for nothing
+/// (F2-2b); `ChunkPos` is the deterministic tie-break.
+fn sort_nearest_first(chunks: &mut [ChunkDraw]) {
+    chunks.sort_unstable_by(|a, b| {
+        a.distance_sq
+            .total_cmp(&b.distance_sq)
+            .then_with(|| a.pos.cmp(&b.pos))
+    });
 }
 
 /// Orders transparent chunks farthest first, with `ChunkPos` as the
 /// deterministic tie-break (ADR-0008 §3).
-fn sort_transparent_farthest_first(chunks: &mut [TransparentDraw]) {
+fn sort_transparent_farthest_first(chunks: &mut [ChunkDraw]) {
     chunks.sort_unstable_by(|a, b| {
         b.distance_sq
             .total_cmp(&a.distance_sq)
@@ -2964,19 +3191,22 @@ mod tests {
 
     #[test]
     fn transparent_sort_is_farthest_first() {
-        let camera = Vec3::ZERO;
+        let camera = DVec3::ZERO;
         let mut chunks = vec![
-            TransparentDraw {
+            ChunkDraw {
                 pos: ChunkPos::new(0, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(0, 0), camera),
+                sections: 1,
             },
-            TransparentDraw {
+            ChunkDraw {
                 pos: ChunkPos::new(2, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(2, 0), camera),
+                sections: 1,
             },
-            TransparentDraw {
+            ChunkDraw {
                 pos: ChunkPos::new(1, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(1, 0), camera),
+                sections: 1,
             },
         ];
         sort_transparent_farthest_first(&mut chunks);
@@ -2999,9 +3229,10 @@ mod tests {
             ChunkPos::new(0, 1),
             ChunkPos::new(-1, 0),
         ]
-        .map(|pos| TransparentDraw {
+        .map(|pos| ChunkDraw {
             pos,
             distance_sq: squared_distance_to_chunk(pos, camera),
+            sections: 1,
         });
         // Every chunk centre is exactly 16 blocks from the camera centre.
         assert!(chunks
@@ -3021,7 +3252,7 @@ mod tests {
 
     #[test]
     fn transparent_sort_of_an_empty_list_is_a_no_op() {
-        let mut chunks: Vec<TransparentDraw> = Vec::new();
+        let mut chunks: Vec<ChunkDraw> = Vec::new();
         sort_transparent_farthest_first(&mut chunks);
         assert!(chunks.is_empty());
     }
@@ -3030,7 +3261,7 @@ mod tests {
     fn chunk_centre_is_the_column_middle() {
         assert_eq!(
             chunk_centre(ChunkPos::new(-1, 2)),
-            Vec3::new(-8.0, 128.0, 40.0)
+            DVec3::new(-8.0, 128.0, 40.0)
         );
     }
 
@@ -3071,7 +3302,13 @@ mod tests {
         )
         .validate(&module)
         .expect("the shader validates");
-        for entry in ["fs_main", "fs_icon", "fs_transparent", "fs_crack"] {
+        for entry in [
+            "fs_main",
+            "fs_solid",
+            "fs_icon",
+            "fs_transparent",
+            "fs_crack",
+        ] {
             assert!(
                 module.entry_points.iter().any(|point| point.name == entry),
                 "missing {entry}"

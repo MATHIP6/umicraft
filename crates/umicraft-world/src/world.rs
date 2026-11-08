@@ -2,11 +2,11 @@
 
 //! The loaded-world container and the updates the server sends.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::block::BlockState;
 use crate::chunk::{ChunkColumn, ChunkPayload, WORLD_HEIGHT};
+use crate::chunk_map::ChunkMap;
 use crate::error::WorldError;
 use crate::light::LightLevel;
 use crate::pos::{BlockPos, ChunkPos};
@@ -18,7 +18,7 @@ use crate::pos::{BlockPos, ChunkPos};
 #[derive(Debug, Default)]
 pub struct World {
     dimension: i8,
-    chunks: HashMap<ChunkPos, Arc<ChunkColumn>>,
+    chunks: ChunkMap<Arc<ChunkColumn>>,
 }
 
 impl World {
@@ -28,7 +28,7 @@ impl World {
     pub fn new(dimension: i8) -> Self {
         Self {
             dimension,
-            chunks: HashMap::new(),
+            chunks: ChunkMap::default(),
         }
     }
 
@@ -369,7 +369,7 @@ impl World {
 }
 
 fn push_with_neighbours(
-    chunks: &HashMap<ChunkPos, Arc<ChunkColumn>>,
+    chunks: &ChunkMap<Arc<ChunkColumn>>,
     pos: ChunkPos,
     out: &mut Vec<ChunkPos>,
 ) {
@@ -379,11 +379,7 @@ fn push_with_neighbours(
     }
 }
 
-fn push_if_loaded(
-    chunks: &HashMap<ChunkPos, Arc<ChunkColumn>>,
-    pos: ChunkPos,
-    out: &mut Vec<ChunkPos>,
-) {
+fn push_if_loaded(chunks: &ChunkMap<Arc<ChunkColumn>>, pos: ChunkPos, out: &mut Vec<ChunkPos>) {
     if chunks.contains_key(&pos) {
         out.push(pos);
     }

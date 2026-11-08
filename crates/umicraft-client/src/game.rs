@@ -1329,13 +1329,15 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     // not among the frames from the first person.
     if first_person && !game.perspective.shows_player() {
         let body = game.body.frame_data();
-        let tip = first_person_tip(
-            view.position - Vec3::Y * umicraft_game::physics::EYE_HEIGHT as f32,
-            game.yaw.to_degrees(),
-            game.pitch.to_degrees(),
-            game.body.animation.swing_progress_at(1.0),
-            body.flags.is_sneaking(),
-        );
+        let feet = view.position - DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
+        let tip = feet
+            + first_person_tip(
+                game.yaw.to_degrees(),
+                game.pitch.to_degrees(),
+                game.body.animation.swing_progress_at(1.0),
+                body.flags.is_sneaking(),
+            )
+            .as_dvec3();
         for bobber in &mut entities {
             if bobber.kind == EntityKind::FishHook && bobber.object_data == game.entity_id {
                 bobber.rod_tip = Some(tip);
@@ -1347,9 +1349,10 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
     // The local player holds leashes too, and is not among the frames from the
     // first person.
     let eye_height = umicraft_game::physics::EYE_HEIGHT as f32;
+    let feet = view.position - DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
     let me = LeashFrame {
-        prev_position: view.position - Vec3::Y * eye_height,
-        position: view.position - Vec3::Y * eye_height,
+        prev_position: feet,
+        position: feet,
         prev_yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
         yaw: (view.yaw - std::f32::consts::PI).to_degrees(),
         prev_pitch: (-view.pitch).to_degrees(),
@@ -1428,7 +1431,7 @@ fn debug_world(game: &Game) -> crate::debug_world::DebugWorld {
 /// The base temperature of the biome at `position`, which the sky takes its
 /// colour from (`World.getSkyColor` reads the biome at the camera). The
 /// default plains value applies without a loaded column.
-fn sky_temperature(game: &Game, position: Vec3) -> f32 {
+fn sky_temperature(game: &Game, position: DVec3) -> f32 {
     let block = BlockPos::new(position.x.floor() as i32, 0, position.z.floor() as i32);
     game.world
         .as_ref()
@@ -1445,7 +1448,7 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
     let Some(world) = game.world.as_ref() else {
         return first_person;
     };
-    let eye = first_person.position.as_dvec3();
+    let eye = first_person.position;
     let pose = camera_pose(game.perspective, eye, game.yaw, game.pitch, world);
     // The same angles from the eye of the previous tick: the wall rays of
     // `orientCamera` start from the interpolated eye every frame, so the
@@ -1453,10 +1456,10 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
     let start = game
         .state
         .as_ref()
-        .map_or(eye, |state| state.interpolated(0.0).position.as_dvec3());
+        .map_or(eye, |state| state.interpolated(0.0).position);
     let start_pose = camera_pose(game.perspective, start, game.yaw, game.pitch, world);
     RenderState {
-        position: pose.position.as_vec3(),
+        position: pose.position,
         eye: first_person.position,
         orbit_start: (start_pose.position - start).as_vec3(),
         yaw: pose.yaw,
@@ -3038,6 +3041,7 @@ fn tick(
     chunks: &SyncSender<ChunkEvent>,
     tick_time: Instant,
 ) {
+    umicraft_core::profile_scope!("game tick");
     game.status_data.ticks += 1;
     run_attack(game, queue);
     run_use(game, queue);
@@ -3154,7 +3158,7 @@ fn tick(
 fn tick_hud_view(game: &mut Game) {
     let head_in_water = match (game.state.as_ref(), game.world.as_ref()) {
         (Some(state), Some(world)) => {
-            crate::fog_context::medium_at(world, state.player().eye_position().as_vec3())
+            crate::fog_context::medium_at(world, state.player().eye_position())
                 == umicraft_render::FogMedium::Water
         }
         _ => false,
