@@ -319,6 +319,49 @@ fn a_strip_with_mcmeta_becomes_an_animated_layer() {
         .all(|pixel| pixel == [0, 255, 0, 255]));
 }
 
+/// Items share the atlas of the blocks, so an animated item of a resource pack
+/// plays its `.mcmeta` like a block does; a strip without metadata, the
+/// compass and the clock are not on a timeline.
+#[test]
+fn an_animated_item_becomes_an_animated_layer() {
+    let dir = TempDir::new("animated-item");
+    let mut strip = vec![[255, 0, 0, 255]; 4];
+    strip.extend_from_slice(&[[0, 255, 0, 255]; 4]);
+    let strip_png = png_rgba(2, 4, &strip);
+    let item = |name: &str| format!("assets/minecraft/textures/items/{name}.png");
+    let sword_meta = format!("{}.mcmeta", item("diamond_sword"));
+    let clock_meta = format!("{}.mcmeta", item("clock"));
+    let jar = jar_with(
+        &dir,
+        &[
+            (item("diamond_sword").as_str(), &strip_png),
+            (
+                sword_meta.as_str(),
+                br#"{"animation": {"frametime": 3, "interpolate": true}}"#,
+            ),
+            (item("stick").as_str(), &strip_png),
+            (item("clock").as_str(), &strip_png),
+            (clock_meta.as_str(), br#"{"animation": {}}"#),
+        ],
+    );
+
+    let resources = ClientResources::load(&jar).expect("the animated item loads");
+    let atlas = resources.atlas();
+    let sword = atlas
+        .layout()
+        .layer("items/diamond_sword")
+        .expect("sword layer");
+    let animations = atlas.animations();
+    assert_eq!(animations.len(), 1, "only the item with metadata animates");
+    assert_eq!(animations[0].layer(), sword);
+    assert_eq!(texel(atlas, sword, 0, 0), [255, 0, 0, 255]);
+    // The strip without metadata stays on its first frame.
+    let stick = atlas.layout().layer("items/stick").expect("stick layer");
+    assert_eq!(texel(atlas, stick, 0, 0), [255, 0, 0, 255]);
+    // The clock keeps its dial, whatever its metadata says.
+    assert_eq!(atlas.dials().len(), 1);
+}
+
 /// The compass and the clock keep every frame of their strip for the game
 /// state to choose from; the layer starts on the first one and no timeline
 /// animation is created for them.
