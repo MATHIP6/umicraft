@@ -82,6 +82,7 @@ use crate::world_view::WorldView;
 mod binding_input;
 mod chat_control;
 mod creative_window;
+mod hotbar_scroll;
 mod inventory_control;
 mod menu_screens;
 mod mods_menu;
@@ -1652,6 +1653,9 @@ impl ApplicationHandler for App {
                         0
                     };
                     self.scroll_chat(rows);
+                } else {
+                    // In a running game the wheel scrolls the hotbar.
+                    self.scroll_hotbar(delta);
                 }
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
