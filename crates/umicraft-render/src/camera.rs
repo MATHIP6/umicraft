@@ -10,6 +10,10 @@ const NEAR: f32 = 0.1;
 const FAR: f32 = 512.0;
 /// The near plane of the hand projection (MCP `EntityRenderer.java:1236`).
 const HAND_NEAR: f32 = 0.05;
+/// The field of view of the hand: fixed, whatever the "FOV" option says
+/// (MCP `EntityRenderer.java:842` asks `getFOVModifier(partialTicks, false)`,
+/// which starts from `70.0F`, and `:558`).
+const HAND_FOV: f32 = DEFAULT_FOV;
 const HAND_FAR: f32 = 16.0;
 /// The part of the depth range the hand is squeezed into.
 pub const HAND_DEPTH_RANGE: f32 = 1.0e-4;
@@ -209,15 +213,16 @@ impl Camera {
 
     /// The projection of the first-person hand.
     ///
-    /// MCP `EntityRenderer.renderHand` uses the base field of view (no
-    /// sprint or flight modifier), a near plane of 0.05 and clears the depth
-    /// buffer first. The depth is instead squeezed into the first
+    /// MCP `EntityRenderer.renderHand` uses a fixed 70 degree field of view
+    /// (not the "FOV" option, no sprint or flight modifier), a near plane of
+    /// 0.05 and clears the depth buffer first. The depth is instead squeezed
+    /// into the first
     /// [`HAND_DEPTH_RANGE`] of the range, so the hand always wins the depth
     /// test against the world while its own parts still sort correctly.
     #[must_use]
     pub fn hand_projection(&self) -> Mat4 {
         let projection = glam::camera::rh::proj::directx::perspective(
-            self.fov_y,
+            HAND_FOV,
             self.aspect,
             HAND_NEAR,
             HAND_FAR,
@@ -442,6 +447,19 @@ mod tests {
             .view_projection()
             .project_point3(camera.position() + camera.forward());
         assert!(world.z > HAND_DEPTH_RANGE * 10.0);
+    }
+
+    /// The hand keeps its 70 degrees whatever the "FOV" option is, as in the
+    /// reference: a wide FOV only widens the world.
+    #[test]
+    fn the_hand_ignores_the_fov_option() {
+        let mut camera = Camera::default();
+        let point = Vec3::new(0.3, -0.2, -1.0);
+        let before = camera.hand_projection().project_point3(point);
+        let world_before = camera.view_projection().project_point3(point);
+        camera.set_fov_degrees(110.0);
+        assert_eq!(camera.hand_projection().project_point3(point), before);
+        assert_ne!(camera.view_projection().project_point3(point), world_before);
     }
 
     #[test]
