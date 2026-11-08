@@ -701,9 +701,10 @@ fn decode_gui_textures(raw: &BTreeMap<String, Vec<u8>>) -> AssetsResult<Vec<GuiI
 
 /// Builds the deterministic atlas from decoded textures.
 ///
-/// A texture whose `.mcmeta` describes an animation keeps its first frame in
-/// the layer and hands all its frames to a [`TextureAnimation`]; a strip
-/// without metadata stays on its first frame, as in the reference.
+/// A block or item texture whose `.mcmeta` describes an animation keeps its
+/// first frame in the layer and hands all its frames to a
+/// [`TextureAnimation`]; a strip without metadata stays on its first frame, as
+/// in the reference.
 fn build_atlas(
     textures: Vec<TextureLayer>,
     files: &BTreeMap<String, Vec<u8>>,
@@ -734,7 +735,12 @@ fn build_atlas(
             dial_strips.push((key, kind, frames));
             continue;
         }
-        let animated = key.starts_with("blocks/");
+        // Items share the atlas of the blocks in the reference and play their
+        // `.mcmeta` the same way (`TextureMap.updateAnimations`).
+        // shortcut: the frames of an animated item are brought to the block
+        // edge, so a high-resolution animated item is blurrier than a still
+        // one (see `hires_layers`); upgrade if a pack needs it.
+        let animated = key.starts_with("blocks/") || key.starts_with("items/");
         if let (Some(meta), true, true) = (meta, count > 1, animated) {
             let frames = frames()?;
             layers.insert(key.clone(), frames[0].clone());

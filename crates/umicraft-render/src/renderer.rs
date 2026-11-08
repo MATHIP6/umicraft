@@ -821,7 +821,7 @@ impl Renderer {
         );
         // MCP `GuiIngame.renderGameOverlay`: `tryBlendFuncSeparate(775, 769,
         // 1, 0)` for the crosshair, i.e. `src * (1 - dst) + dst * (1 - src)`.
-        let gui_inverted_pipeline = create_overlay_pipeline(
+        let gui_inverted_pipeline = create_overlay_pipeline_with_entry(
             &device,
             &gui_overlay_shader,
             &gui_overlay_layout,
@@ -838,6 +838,7 @@ impl Renderer {
                     operation: wgpu::BlendOperation::Add,
                 },
             },
+            "fs_alpha_test",
         );
         let sky = SkyRenderer::new(&device, &queue, format);
         let clouds = CloudRenderer::new(&device, &queue, format);

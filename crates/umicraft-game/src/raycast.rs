@@ -102,6 +102,20 @@ pub fn raycast<S: BlockSource + ?Sized>(
     max_distance: f64,
     world: &S,
 ) -> Option<RayHit> {
+    raycast_where(origin, direction, max_distance, world, |state, _| {
+        is_targetable(state)
+    })
+}
+
+/// [`raycast`] that only stops at the blocks `accept` takes, given the block
+/// state and its position.
+pub fn raycast_where<S: BlockSource + ?Sized>(
+    origin: DVec3,
+    direction: DVec3,
+    max_distance: f64,
+    world: &S,
+    accept: impl Fn(umicraft_world::BlockState, BlockPos) -> bool,
+) -> Option<RayHit> {
     let direction = direction.normalize();
     if direction == DVec3::ZERO || max_distance <= 0.0 {
         return None;
@@ -127,7 +141,7 @@ pub fn raycast<S: BlockSource + ?Sized>(
 
     for _ in 0..MAX_VISITED_CELLS {
         let state = world.block(cell.x, cell.y, cell.z);
-        if is_targetable(state) {
+        if accept(state, cell) {
             let block_origin = DVec3::new(cell.x as f64, cell.y as f64, cell.z as f64);
             for local in selection_shape(state, world, cell).boxes() {
                 let shape_box = Aabb::new(local.min + block_origin, local.max + block_origin);

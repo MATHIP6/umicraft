@@ -666,6 +666,8 @@ struct Game {
     use_pressed: bool,
     /// Where the camera sits (`F5`).
     perspective: Perspective,
+    /// The `F5` presses since the last tick, applied by the next one.
+    perspective_presses: u8,
     /// The attack button went down since the last tick.
     attack_pressed: bool,
     /// The animation state of the first-person hand.
@@ -756,6 +758,7 @@ impl Game {
             pending_book: None,
             use_pressed: false,
             perspective: Perspective::default(),
+            perspective_presses: 0,
             attack_pressed: false,
             hand: HandState::new(),
             body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
@@ -2791,8 +2794,13 @@ fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) 
         select_slot(game, slot, queue);
     }
 
+    // The perspective changes with the next tick, with the frame that
+    // brings the body of the player (`Minecraft.runTick` reads the key once
+    // per tick). Switching at once left the view, published right away when
+    // the mouse moves, ahead of the entities of the last frame: back in the
+    // first person the camera sat inside the head that was still drawn.
     if update.toggle_perspective {
-        game.perspective = game.perspective.next();
+        game.perspective_presses = game.perspective_presses.saturating_add(1);
     }
     game.attack_pressed |= update.break_block;
     game.use_pressed |= update.place_block;
@@ -3138,6 +3146,13 @@ fn publish_text_screens(game: &mut Game, frames: &SyncSender<RenderEvent>) {
     }
 }
 
+/// Cycles the perspective once per `F5` press since the last tick.
+fn apply_perspective_presses(game: &mut Game) {
+    for _ in 0..std::mem::take(&mut game.perspective_presses) {
+        game.perspective = game.perspective.next();
+    }
+}
+
 /// Runs one simulation tick.
 fn tick(
     game: &mut Game,
@@ -3148,6 +3163,7 @@ fn tick(
 ) {
     umicraft_core::profile_scope!("game tick");
     game.status_data.ticks += 1;
+    apply_perspective_presses(game);
     run_attack(game, queue);
     run_use(game, queue);
     publish_text_screens(game, frames);
@@ -3924,17 +3940,62 @@ mod tests {
             ..InputUpdate::default()
         };
         handle_input(&mut game, toggle, &mut queue);
+        apply_perspective_presses(&mut game);
         let third = frame(&game);
         assert_eq!(third.entities.len(), 1);
         assert_eq!(third.entities[0].id, EntityId(1));
         let moved = (third.state.position - first.state.position).length();
         assert!((moved - 4.0).abs() < 0.5, "moved {moved}");
 
+        // Two quick presses inside one tick are both counted.
         handle_input(&mut game, toggle, &mut queue);
         handle_input(&mut game, toggle, &mut queue);
+        apply_perspective_presses(&mut game);
         assert!(
             frame(&game).entities.is_empty(),
             "the cycle is back to first person"
+        );
+    }
+
+    /// Regression: a press that comes with a mouse move published the look of
+    /// the new perspective at once, while the entities of the last frame still
+    /// held the body. Back in the first person the camera then sat inside the
+    /// head until the next tick.
+    #[test]
+    fn f5_waits_for_the_tick_so_the_view_and_the_body_agree() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        let mut queue = CommandQueue::default();
+        let (frames, received) = mpsc::sync_channel(16);
+        follow_body(&mut game);
+        let toggle = InputUpdate {
+            toggle_perspective: true,
+            look_yaw: 0.1,
+            ..InputUpdate::default()
+        };
+        // First person -> back view: the published frame carries both.
+        handle_input(&mut game, toggle, &mut queue);
+        apply_perspective_presses(&mut game);
+        publish_frame(&game, &frames, Instant::now());
+        let Ok(RenderEvent::Frame(back)) = received.try_recv() else {
+            panic!("a frame was expected");
+        };
+        assert_eq!(back.entities.len(), 1, "the body is drawn in the back view");
+
+        // Two more presses (front view, then first person), the mouse moving:
+        // until the tick applies them, the look keeps the view of the frame.
+        handle_input(&mut game, toggle, &mut queue);
+        handle_input(&mut game, toggle, &mut queue);
+        let (view, _) = player_view(&game).expect("view");
+        assert!(
+            ((view.position - view.eye).length() - 4.0).abs() < 0.5,
+            "the look still orbits the player, not the eye"
+        );
+        apply_perspective_presses(&mut game);
+        let (view, _) = player_view(&game).expect("view");
+        assert!(
+            (view.position - view.eye).length() < 1e-6,
+            "first person after the tick"
         );
     }
 
@@ -4709,11 +4770,13 @@ mod tests {
             ..InputUpdate::default()
         };
         handle_input(&mut game, toggle, &mut queue);
+        apply_perspective_presses(&mut game);
         assert!(!frame(&game).state.effects.hand.shows_arm, "third person");
         // Regression: the first-person item stayed drawn in F5.
         assert!(!frame(&game).state.effects.hand.visible, "third person");
         handle_input(&mut game, toggle, &mut queue);
         handle_input(&mut game, toggle, &mut queue);
+        apply_perspective_presses(&mut game);
 
         // Holding an item hides the bare arm once the item is shown.
         game.windows.apply_set_slot(

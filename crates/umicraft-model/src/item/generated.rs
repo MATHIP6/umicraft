@@ -233,11 +233,16 @@ fn side_element(span: &Span, mask: &SpriteMask, layer: usize, texture: &str) -> 
             16.0 / w,
             16.0 / (h - 1.0),
         ),
+        // The texture rows of a left or right side run from `end` to `start`
+        // (`ItemModelGenerator.java:113-118`, `f8 = end`, `f9 = start`): the
+        // face is built from its top down, so the other order shows the column
+        // upside down, which a column spanning gaps (a faint pixel far from
+        // the others) makes plain.
         Side::Left => (
             (line, line),
             (start, end),
             (line, line),
-            (start, end),
+            (end, start),
             16.0 / (w - 1.0),
             16.0 / h,
         ),
@@ -245,7 +250,7 @@ fn side_element(span: &Span, mask: &SpriteMask, layer: usize, texture: &str) -> 
             (line + 1.0, line + 1.0),
             (start, end),
             (line, line),
-            (start, end),
+            (end, start),
             16.0 / (w - 1.0),
             16.0 / h,
         ),
@@ -316,6 +321,63 @@ mod tests {
         let mask = SpriteMask::from_rgba(16, 16, &rgba).expect("16x16");
         // body + up + down (one each for the 4-wide run) + left + right
         assert_eq!(generate_elements(&[mask]).len(), 5);
+    }
+
+    /// A 16x16 sprite with the pixels `(x, y)` of `pixels` visible.
+    fn pixels(pixels: &[(usize, usize)]) -> SpriteMask {
+        let mut rgba = vec![0_u8; 16 * 16 * 4];
+        for &(x, y) in pixels {
+            rgba[(y * 16 + x) * 4 + 3] = 255;
+        }
+        SpriteMask::from_rgba(16, 16, &rgba).expect("16x16")
+    }
+
+    fn uv_of(elements: &[Element], face: Face) -> [f64; 4] {
+        elements
+            .iter()
+            .find_map(|element| element.faces.get(&face))
+            .and_then(|spec| spec.uv)
+            .expect("the side exists")
+    }
+
+    /// `ItemModelGenerator.java:113-129`: the rows of a left or right side are
+    /// given from its `end` to its `start`; the columns of an up or down side
+    /// from `start` to `end`. Reading the rows the other way up showed a tall
+    /// column upside down.
+    #[test]
+    fn the_rows_of_a_vertical_side_run_from_its_end_to_its_start() {
+        // A column of two pixels, rows 4 and 5, in column 3.
+        let elements = generate_elements(&[pixels(&[(3, 4), (3, 5)])]);
+        let scale = 16.0 / 15.0;
+        let left = uv_of(&elements, Face::East);
+        assert!((left[0] - 3.0 * scale).abs() < 1e-5 && left[0] == left[2]);
+        assert_eq!((left[1], left[3]), (6.0, 4.0), "end then start");
+        let right = uv_of(&elements, Face::West);
+        assert!((right[0] - 3.0 * scale).abs() < 1e-5 && right[0] == right[2]);
+        assert_eq!((right[1], right[3]), (6.0, 4.0), "end then start");
+
+        // A row of two pixels: the columns keep the start-to-end order.
+        let elements = generate_elements(&[pixels(&[(3, 4), (4, 4)])]);
+        let up = uv_of(&elements, Face::Up);
+        assert_eq!((up[0], up[2]), (3.0, 5.0), "start then end");
+        assert_eq!(up[1], up[3]);
+    }
+
+    /// A column that spans a gap (a faint pixel far from the others, as in
+    /// some resource packs) must show each row at its own height.
+    #[test]
+    fn a_side_spanning_a_gap_keeps_every_row_at_its_height() {
+        // Pixels in rows 3 and 13 of column 0: one left span from row 3 to 13.
+        let elements = generate_elements(&[pixels(&[(0, 3), (0, 13)])]);
+        let east = elements
+            .iter()
+            .find(|element| element.faces.contains_key(&Face::East))
+            .expect("left side");
+        // The face runs from row 3 (y = 13) down to row 14 (y = 2) ...
+        assert_eq!((east.from[1], east.to[1]), (13.0, 2.0));
+        // ... and its texture rows from 14 (at the lower end) to 3 (the upper).
+        let uv = east.faces[&Face::East].uv.expect("uv");
+        assert_eq!((uv[1], uv[3]), (14.0, 3.0));
     }
 
     #[test]
