@@ -1,7 +1,7 @@
 # 0062. Section spans, per-section culling and cave visibility graph (F2-3)
 
-Status: accepted. The packed vertex (F2-3c) gets its own ADR after the
-measurements of 3a, 3b and 3d.
+Status: accepted. The packed vertex (F2-3c) was tried and **not kept** (see the
+last section).
 
 ## Context
 
@@ -59,3 +59,12 @@ over vanilla in dense and underground scenes.
   vanilla; the switch exists for that reason.
 - Frame cost: a flood fill of at most 17 × 16 × 17 sections when the camera
   changes section, and 16 box tests per visible chunk per frame.
+
+## F2-3c result: packed vertex not kept
+
+A 16-byte chunk vertex (fixed-point position relative to the column corner,
+15-bit uv, 10-bit layer, packed light and tint, a per-chunk offset read per
+instance) was implemented and measured: 70 % slower on the owner's Intel iGPU
+and not pixel-identical because of the uv grid. The vertex fetch is not the
+bound on this hardware. The 44-byte vertex stays. See `docs/perf-log.md`
+(2026-11-07, F2-3c) for the numbers and when to retry.
