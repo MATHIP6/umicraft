@@ -223,6 +223,163 @@ fn worker(
     }
 }
 
+/// The Mojang service that turns a player name into a profile id.
+const NAME_LOOKUP_URL: &str = "https://api.minecraftservices.com/minecraft/profile/lookup/name/";
+/// The session server route that gives a profile with its `textures` property.
+const PROFILE_URL: &str = "https://sessionserver.mojang.com/session/minecraft/profile/";
+/// Largest profile answer accepted, in bytes (a profile is about a kilobyte).
+const MAX_PROFILE_BYTES: usize = 1 << 18;
+
+/// Whether `name` is a player name that is safe to put in a URL: 1 to 16
+/// characters of `[A-Za-z0-9_]`.
+fn is_valid_name(name: &str) -> bool {
+    (1..=16).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Whether `uuid` is 32 hexadecimal digits, without dashes.
+fn is_valid_uuid(uuid: &str) -> bool {
+    uuid.len() == 32 && uuid.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// The URL that finds the profile id of the player named `name`, `None` for a
+/// name that is not a valid player name.
+#[must_use]
+pub fn name_lookup_url(name: &str) -> Option<String> {
+    is_valid_name(name).then(|| format!("{NAME_LOOKUP_URL}{name}"))
+}
+
+/// The URL of the session server profile of `uuid` (32 hex digits, no dashes),
+/// `None` for anything else.
+#[must_use]
+pub fn profile_url(uuid: &str) -> Option<String> {
+    is_valid_uuid(uuid).then(|| format!("{PROFILE_URL}{}", uuid.to_ascii_lowercase()))
+}
+
+#[derive(Deserialize)]
+struct NameLookup {
+    id: String,
+}
+
+/// The profile id of a name lookup answer (`{"id": "...", "name": "..."}`).
+///
+/// # Errors
+///
+/// [`AssetsError::Json`] for a document of another shape, and
+/// [`AssetsError::Image`] when the id is not 32 hex digits.
+pub fn parse_name_lookup(json: &[u8]) -> AssetsResult<String> {
+    let lookup: NameLookup = serde_json::from_slice(json).map_err(|source| AssetsError::Json {
+        what: "name lookup".to_string(),
+        source,
+    })?;
+    if is_valid_uuid(&lookup.id) {
+        Ok(lookup.id.to_ascii_lowercase())
+    } else {
+        Err(image_error("name lookup", "the id is not a profile id"))
+    }
+}
+
+#[derive(Deserialize)]
+struct ProfileBody {
+    #[serde(default)]
+    properties: Vec<ProfileProperty>,
+}
+
+#[derive(Deserialize)]
+struct ProfileProperty {
+    name: String,
+    value: String,
+}
+
+/// The skin and cape of a session server profile answer: the `textures`
+/// property among its `properties`. A profile without one is `Ok` and empty.
+///
+/// # Errors
+///
+/// [`AssetsError::Json`] for a document of another shape, and the errors of
+/// [`parse_textures_property`].
+pub fn parse_profile_textures(json: &[u8]) -> AssetsResult<ProfileTextures> {
+    let profile: ProfileBody =
+        serde_json::from_slice(json).map_err(|source| AssetsError::Json {
+            what: "profile".to_string(),
+            source,
+        })?;
+    profile
+        .properties
+        .iter()
+        .find(|property| property.name == "textures")
+        .map_or_else(
+            || Ok(ProfileTextures::default()),
+            |property| parse_textures_property(&property.value),
+        )
+}
+
+/// Finds the skin and cape of an account, whether it is a premium one or not,
+/// on a worker thread, so the game never waits on the network.
+///
+/// A premium session knows its profile id (the launcher gave it), so the
+/// profile is fetched directly. An offline account only has a name: the name
+/// is looked up first, so a player who logs in offline with the name of an
+/// account wears its skin. Either way the skin shows whatever the server
+/// sends, which on an offline server is nothing.
+#[derive(Debug)]
+pub struct AccountSkinFetcher {
+    results: Receiver<ProfileTextures>,
+}
+
+impl AccountSkinFetcher {
+    /// Starts the lookup for the player `name`, with the profile id `uuid`
+    /// when the launcher gave one.
+    #[must_use]
+    pub fn spawn(name: &str, uuid: Option<&str>) -> Self {
+        let (sender, results) = mpsc::channel();
+        let (name, uuid) = (name.to_owned(), uuid.map(str::to_owned));
+        thread::Builder::new()
+            .name("account-skin".to_owned())
+            .spawn(move || {
+                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
+                    return;
+                };
+                match runtime.block_on(resolve_account(&name, uuid.as_deref())) {
+                    Ok(textures) if textures.skin.is_some() || textures.cape.is_some() => {
+                        sender.send(textures).ok();
+                    }
+                    Ok(_) => tracing::debug!(player = %name, "the account has no skin"),
+                    // No skin is not an error for the game: the player keeps
+                    // the default skin of their UUID.
+                    Err(error) => {
+                        tracing::debug!(player = %name, %error, "account skin not found");
+                    }
+                }
+            })
+            .ok();
+        Self { results }
+    }
+
+    /// The skin and cape of the account once found; `None` until then, and
+    /// for good when the account has none.
+    pub fn poll(&self) -> Option<ProfileTextures> {
+        self.results.try_recv().ok()
+    }
+}
+
+/// The profile id (given, or looked up by name), then its textures.
+async fn resolve_account(name: &str, uuid: Option<&str>) -> AssetsResult<ProfileTextures> {
+    let client = HttpClient::new(Endpoints::official())?;
+    let id = match uuid.filter(|uuid| is_valid_uuid(uuid)) {
+        Some(uuid) => uuid.to_ascii_lowercase(),
+        None => {
+            let url = name_lookup_url(name)
+                .ok_or_else(|| image_error(name, "not a valid player name"))?;
+            parse_name_lookup(&client.get_bytes_limited(&url, MAX_PROFILE_BYTES).await?)?
+        }
+    };
+    let url = profile_url(&id).ok_or_else(|| image_error(&id, "not a profile id"))?;
+    parse_profile_textures(&client.get_bytes_limited(&url, MAX_PROFILE_BYTES).await?)
+}
+
 /// The cache file of a texture URL: its last segment, when that is a hex hash.
 fn cache_file(cache: &std::path::Path, url: &str) -> Option<PathBuf> {
     let name = url.rsplit('/').next()?;
@@ -289,6 +446,65 @@ mod tests {
                 cape: Some("http://textures.minecraft.net/texture/def".into()),
             }
         );
+    }
+
+    #[test]
+    fn the_account_urls_only_take_a_valid_name_or_profile_id() {
+        assert_eq!(
+            name_lookup_url("Notch").as_deref(),
+            Some("https://api.minecraftservices.com/minecraft/profile/lookup/name/Notch")
+        );
+        assert_eq!(
+            profile_url("069A79F444E94726A5BEFCA90E38AAF5").as_deref(),
+            Some(
+                "https://sessionserver.mojang.com/session/minecraft/profile/069a79f444e94726a5befca90e38aaf5"
+            )
+        );
+        // Nothing that could change the path or the host gets into a URL.
+        for name in ["", "seventeen_chars_xx", "a/../b", "a?b", "a b", "é"] {
+            assert_eq!(name_lookup_url(name), None, "{name:?}");
+        }
+        for id in ["", "1234", "../../x", "zz9a79f444e94726a5befca90e38aaf5"] {
+            assert_eq!(profile_url(id), None, "{id:?}");
+        }
+    }
+
+    #[test]
+    fn a_name_lookup_answer_gives_the_profile_id() {
+        let json = br#"{"id":"069A79F444E94726A5BEFCA90E38AAF5","name":"Notch"}"#;
+        assert_eq!(
+            parse_name_lookup(json).expect("an id"),
+            "069a79f444e94726a5befca90e38aaf5"
+        );
+        assert!(parse_name_lookup(br#"{"id":"not-an-id"}"#).is_err());
+        assert!(parse_name_lookup(br#"{"errorMessage":"no such player"}"#).is_err());
+        assert!(parse_name_lookup(b"<html>").is_err());
+    }
+
+    #[test]
+    fn a_profile_answer_gives_the_skin_and_cape_of_its_textures_property() {
+        let textures = encode(
+            r#"{"textures":{"SKIN":{"url":"http://textures.minecraft.net/texture/abc"},"CAPE":{"url":"http://textures.minecraft.net/texture/def"}}}"#,
+        );
+        let profile = format!(
+            r#"{{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch","properties":[{{"name":"other","value":"x"}},{{"name":"textures","value":"{textures}"}}]}}"#
+        );
+        let parsed = parse_profile_textures(profile.as_bytes()).expect("a profile");
+        assert_eq!(
+            parsed.skin.as_deref(),
+            Some("http://textures.minecraft.net/texture/abc")
+        );
+        assert_eq!(
+            parsed.cape.as_deref(),
+            Some("http://textures.minecraft.net/texture/def")
+        );
+        // No textures property, or no properties at all: an empty profile.
+        let bare = br#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch"}"#;
+        assert_eq!(
+            parse_profile_textures(bare).expect("an empty profile"),
+            ProfileTextures::default()
+        );
+        assert!(parse_profile_textures(b"nope").is_err());
     }
 
     #[test]

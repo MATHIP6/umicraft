@@ -95,7 +95,8 @@ use crate::fog_context::fog_context;
 use crate::input::InputUpdate;
 use crate::inventory_input::{ContainerAction, InventoryAction};
 use crate::network::{self, ClientCommand, NetworkConfig};
-use crate::profiles::profile_from_properties;
+use crate::profiles::{profile_from_properties, with_account_textures};
+use umicraft_assets::profile_textures::{AccountSkinFetcher, ProfileTextures};
 use umicraft_game::chat::lang::LangTable;
 use umicraft_game::chat::unformatted_text;
 use umicraft_game::editors::book::{BookPacket, WRITABLE_BOOK, WRITTEN_BOOK};
@@ -470,6 +471,15 @@ impl Session {
         let stop = Arc::new(AtomicBool::new(false));
         let counters = Arc::new(SessionCounters::default());
         let own_name = config.name.clone();
+        // The skin of the account, premium or not: a premium session names its
+        // profile, an offline account only has a name to look up.
+        let account_skin = config.account_skin.then(|| {
+            let (name, uuid) = match &config.session {
+                Some(session) => (session.username.as_str(), Some(session.uuid.as_str())),
+                None => (config.name.as_str(), None),
+            };
+            AccountSkinFetcher::spawn(name, uuid)
+        });
 
         let network = network::spawn(
             config,
@@ -484,6 +494,7 @@ impl Session {
             commands_tx,
             Arc::clone(&stop),
             own_name,
+            account_skin,
         )?;
 
         Ok(Self {
@@ -552,10 +563,21 @@ fn spawn_game_thread(
     commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
     own_name: String,
+    account_skin: Option<AccountSkinFetcher>,
 ) -> Result<JoinHandle<()>, ClientError> {
     std::thread::Builder::new()
         .name("umicraft-game".to_string())
-        .spawn(move || run(events, frames, chunks, commands, stop, own_name))
+        .spawn(move || {
+            run(
+                events,
+                frames,
+                chunks,
+                commands,
+                stop,
+                own_name,
+                account_skin,
+            )
+        })
         .map_err(|error| ClientError::Worker(format!("spawn game thread: {error}")))
 }
 
@@ -581,6 +603,12 @@ struct Game {
     entity_id: i32,
     /// The gamemode of the local player.
     gamemode: GameMode,
+    /// The lookup of the skin and cape of the account at Mojang, when the
+    /// session asked for one.
+    account_skin: Option<AccountSkinFetcher>,
+    /// What the lookup found: worn by the local player for what the server
+    /// does not send.
+    account_textures: Option<ProfileTextures>,
     /// The current dimension; `0` is the overworld.
     dimension: i8,
     /// Whether the world is a superflat one, from the world type the server
@@ -699,6 +727,8 @@ impl Game {
             end: None,
             entity_id: 0,
             gamemode: GameMode::Survival,
+            account_skin: None,
+            account_textures: None,
             dimension: 0,
             flat_world: false,
             world_time: 0,
@@ -1038,9 +1068,11 @@ fn run(
     commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
     own_name: String,
+    account_skin: Option<AccountSkinFetcher>,
 ) {
     let mut game = Game::new();
     game.own_name = own_name;
+    game.account_skin = account_skin;
     // The first event of the queue, which is still empty: the render thread
     // reads the mouse look from this slot, never from the queue.
     let _ = frames.try_send(RenderEvent::LookSlot(Arc::clone(&game.look)));
@@ -1482,7 +1514,34 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
 ///
 /// The body is animated every tick, also in first person, so that a switch
 /// to the third person does not start from a standing pose.
+/// Collects the skin of the account when the lookup finished, and puts it on
+/// the profile of the local body for what that profile lacks. The profile is
+/// replaced again when the tab list re-sends it without the skin.
+fn apply_account_skin(game: &mut Game) {
+    if let Some(found) = game
+        .account_skin
+        .as_ref()
+        .and_then(AccountSkinFetcher::poll)
+    {
+        tracing::debug!(skin = ?found.skin, cape = ?found.cape, "skin of the account found");
+        game.account_textures = Some(found);
+    }
+    let (Some(profile), Some(account)) =
+        (game.body.profile.as_ref(), game.account_textures.as_ref())
+    else {
+        return;
+    };
+    if let Some(worn) = with_account_textures(profile, account) {
+        game.body.profile = Some(std::sync::Arc::new(worn));
+    }
+}
+
 fn follow_body(game: &mut Game) {
+    // The skin of the account, premium or not: the tab list of an offline
+    // server has none for the local player, whose account has one all the same.
+    // The account is only asked when the server sent no texture at all, as
+    // `SkinManager.loadProfileTextures` does.
+    apply_account_skin(game);
     let Some(state) = game.state.as_ref() else {
         return;
     };
@@ -5486,6 +5545,45 @@ mod tests {
         );
         assert_eq!(game.world_time, 0);
         assert_eq!(game.dimension, -1);
+    }
+
+    #[test]
+    fn the_local_body_wears_the_skin_of_the_account_when_the_server_sends_none() {
+        use umicraft_game::entity::PlayerProfile;
+
+        let account = ProfileTextures {
+            skin: Some("http://textures.minecraft.net/texture/ab".to_string()),
+            slim: true,
+            cape: None,
+        };
+        let mut game = Game::new();
+        // Before the profile is listed there is nothing to dress.
+        game.account_textures = Some(account.clone());
+        apply_account_skin(&mut game);
+        assert!(game.body.profile.is_none());
+
+        // An offline server lists the player without textures.
+        game.body.profile = Some(std::sync::Arc::new(PlayerProfile::named("Me")));
+        apply_account_skin(&mut game);
+        let worn = game.body.profile.as_ref().expect("the profile stays");
+        assert_eq!(
+            worn.skin_url.as_deref(),
+            Some("http://textures.minecraft.net/texture/ab")
+        );
+        assert_eq!(worn.slim, Some(true));
+
+        // A skin the server sent is not replaced by the account's.
+        let mut sent = PlayerProfile::named("Me");
+        sent.skin_url = Some("http://textures.minecraft.net/texture/cd".into());
+        game.body.profile = Some(std::sync::Arc::new(sent));
+        apply_account_skin(&mut game);
+        assert_eq!(
+            game.body
+                .profile
+                .as_ref()
+                .and_then(|profile| profile.skin_url.as_deref()),
+            Some("http://textures.minecraft.net/texture/cd")
+        );
     }
 
     #[test]
