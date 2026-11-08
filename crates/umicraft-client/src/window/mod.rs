@@ -133,6 +133,8 @@ struct App {
     args: Args,
     /// The name tags of the frame, drawn by the renderer in the world pass.
     nametags: Vec<umicraft_render::Nametag>,
+    /// The particle quads of the frame, rebuilt in place.
+    particle_sprites: Vec<umicraft_render::ParticleSprite>,
     /// The user's options: video, mouse, chat and the key bindings.
     options: Options,
     /// The language every UI text comes from (ADR-0039); also installed as
@@ -354,6 +356,7 @@ impl App {
             ctrl_held: false,
             shift_held: false,
             nametags: Vec::new(),
+            particle_sprites: Vec::new(),
             pointer: (0.0, 0.0),
             chat_hover: None,
             pick_block: false,
@@ -1168,9 +1171,12 @@ impl App {
         renderer.set_cloud_ticks((now - self.started).as_secs_f64() * 20.0);
         if let Some(world) = self.world.as_ref() {
             renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
-            renderer.set_particles(
-                &world.particle_sprites(environment.partial_tick, self.camera.render_origin()),
+            world.particle_sprites_into(
+                &mut self.particle_sprites,
+                environment.partial_tick,
+                self.camera.render_origin(),
             );
+            renderer.set_particles(&self.particle_sprites);
         }
         renderer.set_screen_overlays(
             self.world

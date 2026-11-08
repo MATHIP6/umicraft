@@ -287,16 +287,20 @@ impl WorldView {
     /// in the bound terrain; the procedural terrain has none, so they are
     /// left out. The centres are relative to `origin`, the render origin of the
     /// camera (F2-1b).
-    #[must_use]
-    pub fn particle_sprites(
+    pub fn particle_sprites_into(
         &self,
+        out: &mut Vec<umicraft_render::ParticleSprite>,
         partial_ticks: f32,
         origin: glam::DVec3,
-    ) -> Vec<umicraft_render::ParticleSprite> {
+    ) {
         let context = self.mesher.model_context();
-        crate::particle_view::sprites(&self.view.particles, partial_ticks, origin, &|state| {
-            crate::particle_view::block_sprite(context?, state)
-        })
+        crate::particle_view::sprites_into(
+            out,
+            &self.view.particles,
+            partial_ticks,
+            origin,
+            &|state| crate::particle_view::block_sprite(context?, state),
+        );
     }
 
     /// The full-screen overlays of the frame at `now`, for

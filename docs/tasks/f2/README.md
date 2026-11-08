@@ -1,6 +1,6 @@
 # F2 — Performance pass: audit and plan
 
-Status: **phases 0 to 4 done** (F2-2c deferred, F2-3c not kept, F2-4c and 4f not done after measuring); phase 5 planned. Decision: `docs/decisions/0058-f2-performance-plan.md`.
+Status: **phases 0 to 5 done**; steps not done or not kept after measuring: F2-2c, F2-3c, F2-4c, F2-4f, F2-5d, block entities of F2-5c, the sky write of F2-5e. Decision: `docs/decisions/0058-f2-performance-plan.md`.
 Roadmap entry: `ROADMAP.md` §6 (F2).
 
 The owner started F2 ahead of P13 (2026-11-07) for two reasons:
@@ -140,11 +140,11 @@ Optimisation steps also get a criterion benchmark or a scene measurement in
 
 | Step | Content |
 |---|---|
-| F2-5a | One persistent growable vertex arena for entities, hand, shadows, glint and ghosts, with `(offset, count)` per batch. |
-| F2-5b | Persistent name-tag buffers. One draw for all tags where depth allows it. |
-| F2-5c | Reuse the vectors behind `particle_sprites` and the block-entity meshes. Re-mesh block entities only when their state changes. |
-| F2-5d | Cache the UI tessellation while the draw list is unchanged. |
-| F2-5e | `desired_maximum_frame_latency = 1` (measure the input latency). One write for the sky uniforms. |
+| F2-5a (**done**, ADR-0064) | One persistent growable vertex arena for entities, hand, shadows, glint and ghosts, with `(offset, count)` per batch. |
+| F2-5b (**done**, draws not merged) | Persistent name-tag buffers. One draw for all tags where depth allows it. |
+| F2-5c (**particles done**, block entities not done) | Reuse the vectors behind `particle_sprites` and the block-entity meshes. Re-mesh block entities only when their state changes. |
+| F2-5d (**not done**: 37 us, see ADR-0064) | Cache the UI tessellation while the draw list is unchanged. |
+| F2-5e (**latency 1 done, not measured**; sky write not done) | `desired_maximum_frame_latency = 1` (measure the input latency). One write for the sky uniforms. |
 
 ## Order
 

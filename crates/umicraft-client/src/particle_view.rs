@@ -154,18 +154,22 @@ pub fn sprite(
     })
 }
 
-/// The quads of every particle that can be drawn, for `Renderer::set_particles`.
-#[must_use]
-pub fn sprites(
+/// Fills `out` with the quads of every particle that can be drawn, for
+/// `Renderer::set_particles`. `out` keeps its capacity from frame to frame
+/// (F2-5c), so a steady scene allocates nothing here.
+pub fn sprites_into(
+    out: &mut Vec<ParticleSprite>,
     draws: &[ParticleDraw],
     partial_ticks: f32,
     origin: DVec3,
     blocks: &impl Fn(BlockState) -> Option<BlockSprite>,
-) -> Vec<ParticleSprite> {
-    draws
-        .iter()
-        .filter_map(|draw| sprite(draw, partial_ticks, origin, blocks))
-        .collect()
+) {
+    out.clear();
+    out.extend(
+        draws
+            .iter()
+            .filter_map(|draw| sprite(draw, partial_ticks, origin, blocks)),
+    );
 }
 
 #[cfg(test)]

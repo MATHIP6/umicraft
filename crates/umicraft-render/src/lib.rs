@@ -13,6 +13,7 @@
 //! vertices and font atlas.
 
 mod adapter;
+mod batch_buffer;
 mod block_atlas;
 mod border;
 mod camera;

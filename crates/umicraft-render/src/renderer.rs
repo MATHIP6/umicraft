@@ -33,6 +33,7 @@ use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::adapter::AdapterSummary;
+use crate::batch_buffer::BatchBuffer;
 use crate::block_atlas::{self, BlockAtlasError};
 use crate::border::{BorderRenderer, BorderView};
 use crate::camera::{Camera, Frustum};
@@ -92,6 +93,13 @@ const TERRAIN_WGSL: &str = concat!(
     include_str!("lightmap.wgsl"),
     include_str!("terrain.wgsl")
 );
+
+/// Frames the presentation queue may hold (F2-5e). The wgpu default is 2, which
+/// lets the CPU run a frame ahead of the display and adds up to a frame of
+/// input latency with vsync; 1 keeps the pipeline full for a game whose frame
+/// fits the refresh. Not measured on a display here: revert to 2 if a
+/// GPU-bound scene loses frames.
+const FRAME_LATENCY: u32 = 1;
 
 /// A fog distance the hand never reaches.
 const HAND_FOG_FREE: f32 = 1.0e6;
@@ -259,7 +267,7 @@ pub struct Renderer {
     hand_camera_buffer: wgpu::Buffer,
     hand_camera_bind_group: wgpu::BindGroup,
     /// The vertices of the hand and its skin texture, if one is drawn.
-    hand: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    hand: BatchBuffer,
     terrain_bind_group: wgpu::BindGroup,
     /// The same array with the mip sampler, for the chunk passes only.
     chunk_bind_group: wgpu::BindGroup,
@@ -374,15 +382,15 @@ pub struct Renderer {
     camera_bind_group: wgpu::BindGroup,
     entity_renderer: EntityRenderer,
     outline: OutlineRenderer,
-    entity_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    entity_batches: BatchBuffer,
     /// The glowing layers of the entities, drawn after them.
-    additive_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    additive_batches: BatchBuffer,
     /// The enchantment glint of worn armour, drawn over it at equal depth.
-    glint_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    glint_batches: BatchBuffer,
     /// Invisible entities a spectator sees, drawn translucent.
-    ghost_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    ghost_batches: BatchBuffer,
     /// The shadows under the entities.
-    shadow_batches: Vec<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    shadow_batches: BatchBuffer,
 }
 
 impl Renderer {
@@ -425,6 +433,7 @@ impl Renderer {
         // decides whether the display refresh does too (`set_vsync`). Start
         // without, as the first frame has not read the options yet.
         config.present_mode = present_mode(false);
+        config.desired_maximum_frame_latency = FRAME_LATENCY;
         let format = config.format;
         surface.configure(&device, &config);
         Self::create(
@@ -945,7 +954,7 @@ impl Renderer {
             moving_blocks,
             hand_camera_buffer,
             hand_camera_bind_group,
-            hand: Vec::new(),
+            hand: BatchBuffer::default(),
             terrain_bind_group,
             chunk_bind_group,
             mip_sampler,
@@ -1001,11 +1010,11 @@ impl Renderer {
             camera_bind_group,
             entity_renderer,
             outline,
-            entity_batches: Vec::new(),
-            additive_batches: Vec::new(),
-            glint_batches: Vec::new(),
-            ghost_batches: Vec::new(),
-            shadow_batches: Vec::new(),
+            entity_batches: BatchBuffer::default(),
+            additive_batches: BatchBuffer::default(),
+            glint_batches: BatchBuffer::default(),
+            ghost_batches: BatchBuffer::default(),
+            shadow_batches: BatchBuffer::default(),
         })
     }
 
@@ -1197,7 +1206,8 @@ impl Renderer {
     /// Replaces the name tags drawn in the world pass of the next frames; an
     /// empty slice hides them. `size` is the window in pixels.
     pub fn set_nametags(&mut self, tags: &[Nametag], size: (u32, u32)) {
-        self.nametags.set(&self.device, tags, size, &self.ui_atlas);
+        self.nametags
+            .set(&self.device, &self.queue, tags, size, &self.ui_atlas);
     }
 
     /// Whether the icon atlas holds the icon `key`.
@@ -1235,7 +1245,7 @@ impl Renderer {
                 contents: bytemuck::cast_slice(vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
-        let batch = [(&buffer, vertices.len() as u32, texture)];
+        let batch = [(buffer.slice(..), vertices.len() as u32, texture)];
         let (entities, camera) = (&self.entity_renderer, &self.icon_entity_bind_group);
         self.icon_atlas
             .render_with(&self.device, &self.queue, key, |pass| {
@@ -1269,7 +1279,11 @@ impl Renderer {
         let (entities, camera) = (&self.entity_renderer, &self.icon_entity_bind_group);
         self.icon_atlas
             .render_portrait(&self.device, &self.queue, |pass| {
-                entities.render_icon(pass, camera, buffers.iter().map(|(b, n, t)| (b, *n, *t)));
+                entities.render_icon(
+                    pass,
+                    camera,
+                    buffers.iter().map(|(b, n, t)| (b.slice(..), *n, *t)),
+                );
             });
     }
 
@@ -2038,102 +2052,33 @@ impl Renderer {
 
     /// Uploads entity vertex batches to be drawn in the next frame.
     pub fn upload_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.entity_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.entity_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.entity_batches.set(&self.device, &self.queue, batches);
     }
 
     /// Uploads the glowing entity layers (eyes, charge, aura, glint) to be
     /// drawn after the entities. The `light` of their vertices is the tint
     /// (bits 0..=23, `0xBBGGRR`) and bit 24 squares the colour.
     pub fn upload_additive_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.additive_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity additive batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.additive_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.additive_batches
+            .set(&self.device, &self.queue, batches);
     }
 
     /// Uploads the shadows under the entities: squares whose `light` is the
     /// opacity in its low byte.
     pub fn upload_shadow_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.shadow_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity shadow batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.shadow_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.shadow_batches.set(&self.device, &self.queue, batches);
     }
 
     /// Uploads the invisible entities a spectator sees (their model, drawn at
     /// 15 % opacity without writing depth).
     pub fn upload_ghost_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.ghost_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity ghost batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.ghost_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.ghost_batches.set(&self.device, &self.queue, batches);
     }
 
     /// Uploads the enchantment glint of worn armour: the same vertices as the
     /// armour, drawn only where the armour wrote its depth.
     pub fn upload_glint_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.glint_batches.clear();
-        for (vertices, bind_group) in batches {
-            if vertices.is_empty() {
-                continue;
-            }
-            let buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("entity glint batch vertices"),
-                    contents: bytemuck::cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            self.glint_batches
-                .push((buffer, vertices.len() as u32, (*bind_group).clone()));
-        }
+        self.glint_batches.set(&self.device, &self.queue, batches);
     }
 
     /// Sets the first-person hand for the following frames.
@@ -2150,20 +2095,7 @@ impl Renderer {
     /// arms, then a held map with its background, pixels and markers).
     /// Empty batches are skipped.
     pub fn set_hand_batches(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
-        self.hand = batches
-            .iter()
-            .filter(|(vertices, _)| !vertices.is_empty())
-            .map(|(vertices, bind_group)| {
-                let buffer = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("hand vertices"),
-                        contents: bytemuck::cast_slice(vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                (buffer, vertices.len() as u32, (*bind_group).clone())
-            })
-            .collect();
+        self.hand.set(&self.device, &self.queue, batches);
     }
 
     /// Hides the first-person hand.
@@ -2511,49 +2443,34 @@ impl Renderer {
 
         // The shadows lie on the ground, drawn before the entities.
         if !self.shadow_batches.is_empty() {
-            let batches = self
-                .shadow_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.shadow_batches.iter();
             self.entity_renderer
                 .render_shadows(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // Entities: depth write on, cutout discard, rendered between opaque and transparent passes.
         if !self.entity_batches.is_empty() {
-            let batches = self
-                .entity_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.entity_batches.iter();
             self.entity_renderer
                 .render(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // The invisible entities a spectator sees, over the opaque ones.
         if !self.ghost_batches.is_empty() {
-            let batches = self
-                .ghost_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.ghost_batches.iter();
             self.entity_renderer
                 .render_ghosts(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // The glow of the entities is added over them, without writing depth.
         if !self.additive_batches.is_empty() {
-            let batches = self
-                .additive_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.additive_batches.iter();
             self.entity_renderer
                 .render_additive(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         if !self.glint_batches.is_empty() {
-            let batches = self
-                .glint_batches
-                .iter()
-                .map(|(buf, count, bg)| (buf, *count, bg));
+            let batches = self.glint_batches.iter();
             self.entity_renderer
                 .render_glint(&mut pass, &self.local_camera_bind_group, batches);
         }
@@ -2621,13 +2538,8 @@ impl Renderer {
 
         // The hand: camera-space vertices under a squeezed depth range.
         if !self.hand.is_empty() {
-            self.entity_renderer.render(
-                &mut pass,
-                &self.hand_camera_bind_group,
-                self.hand
-                    .iter()
-                    .map(|(buffer, count, texture)| (buffer, *count, texture)),
-            );
+            self.entity_renderer
+                .render(&mut pass, &self.hand_camera_bind_group, self.hand.iter());
         }
 
         pass.set_pipeline(&self.terrain_pipeline);
