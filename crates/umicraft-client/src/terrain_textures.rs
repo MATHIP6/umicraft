@@ -47,6 +47,22 @@ pub trait BlockTextureTarget {
         pixels: &[u8],
     ) -> Result<(), BlockAtlasError>;
 
+    /// Keeps the textures larger than the layers of the bound array at their
+    /// own size: `(layer, RGBA8 pixels)` pairs, each `edge` squared. Call it
+    /// after [`Self::set_block_atlas`]. A target with nothing to draw
+    /// ignores it, which is what this default does.
+    ///
+    /// # Errors
+    /// [`BlockAtlasError`] when the target cannot hold them; the array stays
+    /// as bound, with the shrunk copies.
+    fn set_hires_blocks(
+        &mut self,
+        _edge: u32,
+        _layers: &[(u32, &[u8])],
+    ) -> Result<(), BlockAtlasError> {
+        Ok(())
+    }
+
     /// Binds the built-in procedural array.
     fn use_procedural_blocks(&mut self);
 }
@@ -60,6 +76,14 @@ impl BlockTextureTarget for Renderer {
         pixels: &[u8],
     ) -> Result<(), BlockAtlasError> {
         Renderer::set_block_atlas(self, width, height, layers, pixels)
+    }
+
+    fn set_hires_blocks(
+        &mut self,
+        edge: u32,
+        layers: &[(u32, &[u8])],
+    ) -> Result<(), BlockAtlasError> {
+        Renderer::set_hires_blocks(self, edge, layers)
     }
 
     fn use_procedural_blocks(&mut self) {
@@ -170,8 +194,19 @@ impl TerrainTextures {
                 );
                 match bound {
                     Ok(()) => {
+                        let large: Vec<(u32, &[u8])> = atlas
+                            .hires_layers()
+                            .iter()
+                            .map(|one| (one.layer, one.pixels.as_slice()))
+                            .collect();
+                        if let Err(error) = target.set_hires_blocks(atlas.hires_edge(), &large) {
+                            tracing::warn!(%error, "large textures stay shrunk");
+                        }
                         tracing::info!(
+                            large = large.len(),
+                            large_edge = atlas.hires_edge(),
                             layers = atlas.layers(),
+                            edge = atlas.width(),
                             "uploaded the 1.8 block texture array"
                         );
                         InstalledTerrain {

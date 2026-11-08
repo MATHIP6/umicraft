@@ -49,6 +49,14 @@ struct Camera {
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var block_textures: texture_2d_array<f32>;
 @group(0) @binding(2) var block_sampler: sampler;
+// The textures larger than the layers of `block_textures` (a pack's 512 pixel
+// item), kept at their size in a second array; `hires_map` gives, for a layer
+// of the first array, its layer here or -1 (`hires_blocks.rs`).
+@group(0) @binding(3) var hires_textures: texture_2d_array<f32>;
+struct HiresMap {
+    slots: array<vec4<i32>, 1024>,
+};
+@group(0) @binding(4) var<uniform> hires_map: HiresMap;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -131,11 +139,27 @@ fn shade_fragment(in: VertexOut, texel: vec4<f32>) -> vec3<f32> {
     return mix(lit, fog_target, fog);
 }
 
+// The block or item texel at `uv` in `layer`: from the second array when the
+// texture has a large copy, else from the first. The derivatives are taken
+// before the branch (they need uniform control flow) and handed to the sample.
+fn sample_block(uv: vec2<f32>, layer: u32) -> vec4<f32> {
+    let dx = dpdx(uv);
+    let dy = dpdy(uv);
+    var slot = -1;
+    if (layer < 4096u) {
+        slot = hires_map.slots[layer / 4u][layer % 4u];
+    }
+    if (slot >= 0) {
+        return textureSampleGrad(hires_textures, block_sampler, uv, slot, dx, dy);
+    }
+    return textureSampleGrad(block_textures, block_sampler, uv, i32(layer), dx, dy);
+}
+
 // Opaque pass: alpha cutout, depth write on. Returns opaque alpha so the
 // REPLACE blend state stays well-defined.
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    let texel = sample_block(in.uv, in.layer);
     if (texel.a < 0.5) {
         discard;
     }
@@ -147,7 +171,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 // hidden fragments before shading them.
 @fragment
 fn fs_solid(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    let texel = sample_block(in.uv, in.layer);
     return vec4<f32>(shade_fragment(in, texel), 1.0);
 }
 
@@ -157,7 +181,7 @@ fn fs_solid(in: VertexOut) -> @location(0) vec4<f32> {
 // cell that the UI pass later blends, so the straight alpha is stored as is.
 @fragment
 fn fs_icon(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    let texel = sample_block(in.uv, in.layer);
     if (texel.a < 0.1) {
         discard;
     }
@@ -168,7 +192,7 @@ fn fs_icon(in: VertexOut) -> @location(0) vec4<f32> {
 // blended with SrcAlpha/OneMinusSrcAlpha. No cutout: water uses partial alpha.
 @fragment
 fn fs_transparent(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    let texel = sample_block(in.uv, in.layer);
     return vec4<f32>(shade_fragment(in, texel), texel.a);
 }
 
@@ -177,7 +201,7 @@ fn fs_transparent(in: VertexOut) -> @location(0) vec4<f32> {
 // the reference.
 @fragment
 fn fs_crack(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(block_textures, block_sampler, in.uv, i32(in.layer));
+    let texel = sample_block(in.uv, in.layer);
     if (texel.a < 0.1) {
         discard;
     }

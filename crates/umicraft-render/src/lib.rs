@@ -28,6 +28,7 @@ mod error;
 mod fog;
 mod font;
 mod gpu_timer;
+mod hires_blocks;
 pub mod hud;
 pub mod hud_hearts;
 mod items;

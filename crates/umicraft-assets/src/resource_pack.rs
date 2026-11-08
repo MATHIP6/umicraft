@@ -296,14 +296,11 @@ fn collect_dir_files(
         source,
     })?;
 
-    for entry in entries {
-        let entry = entry.map_err(|source| AssetsError::Io {
-            path: current.display().to_string(),
-            source,
-        })?;
+    // An entry that cannot be read costs only itself, not the whole pack.
+    for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_dir_files(root, &path, files)?;
+            let _ = collect_dir_files(root, &path, files);
         } else if path.is_file() {
             if let Ok(relative) = path.strip_prefix(root) {
                 let virtual_path = relative

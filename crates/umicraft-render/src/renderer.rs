@@ -48,6 +48,7 @@ use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
 use crate::gpu_timer::{self, GpuTimer, GpuTimings};
+use crate::hires_blocks::{self, HiresBlocks};
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::mipmap;
 use crate::outline::{OutlineBox, OutlineRenderer};
@@ -319,6 +320,9 @@ pub struct Renderer {
     /// The official block array and its layer size, kept so animated layers
     /// can be rewritten in place; `None` while the procedural array is bound.
     official_blocks: Option<(wgpu::Texture, u32, u32)>,
+    /// The textures larger than the layers of the block array, kept at their
+    /// size in a second array.
+    hires: HiresBlocks,
     overlay_pipeline: wgpu::RenderPipeline,
     /// The name tags of the frame, drawn in the world pass.
     nametags: NametagRenderer,
@@ -648,6 +652,27 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // The large textures: a second array and the map to it.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let overlay_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -672,12 +697,14 @@ impl Renderer {
             ],
         });
 
+        let hires = HiresBlocks::none(&device, &queue);
         let terrain_bind_group = create_terrain_bind_group(
             &device,
             &terrain_layout,
             &camera_buffer,
             &block_sampler,
             &block_view,
+            &hires,
         );
         let local_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("local camera uniform"),
@@ -691,6 +718,7 @@ impl Renderer {
             &local_camera_buffer,
             &block_sampler,
             &block_view,
+            &hires,
         );
         let chunk_bind_group = create_terrain_bind_group(
             &device,
@@ -698,6 +726,7 @@ impl Renderer {
             &camera_buffer,
             &mip_sampler,
             &block_view,
+            &hires,
         );
         let overlay_bind_group =
             create_font_bind_group(&device, &overlay_layout, &font_sampler, &font_view);
@@ -893,6 +922,7 @@ impl Renderer {
             icon_atlas.camera_buffer(),
             &block_sampler,
             &block_view,
+            &hires,
         );
         let icon_entity_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("icon entity camera bind group"),
@@ -911,6 +941,7 @@ impl Renderer {
             &hand_camera_buffer,
             &block_sampler,
             &block_view,
+            &hires,
         );
         let icon_gui_bind_group = create_font_bind_group(
             &device,
@@ -981,6 +1012,7 @@ impl Renderer {
             environment: RenderEnvironment::default(),
             block_sampler,
             procedural_blocks: block_view,
+            hires,
             official_blocks: None,
             overlay_pipeline,
             nametags,
@@ -1672,28 +1704,9 @@ impl Renderer {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
-        self.terrain_bind_group = create_terrain_bind_group(
-            &self.device,
-            &self.terrain_layout,
-            &self.camera_buffer,
-            &self.block_sampler,
-            &view,
-        );
-        self.local_terrain_bind_group = create_terrain_bind_group(
-            &self.device,
-            &self.terrain_layout,
-            &self.local_camera_buffer,
-            &self.block_sampler,
-            &view,
-        );
-        self.chunk_bind_group = create_terrain_bind_group(
-            &self.device,
-            &self.terrain_layout,
-            &self.camera_buffer,
-            &self.mip_sampler,
-            &view,
-        );
-        self.rebind_icons(&view);
+        // The large textures of the previous array belong to it.
+        self.hires = HiresBlocks::none(&self.device, &self.queue);
+        self.rebind_block_groups(&view);
         self.cutout = cutout_layers(pixels, width as usize * height as usize * 4);
         self.cutout_epoch += 1;
         self.official_blocks = Some((texture, width, height));
@@ -1728,10 +1741,7 @@ impl Renderer {
         if levels == 0 {
             return;
         }
-        let chains: Vec<Vec<Vec<u8>>> = pixels
-            .chunks_exact(layer_bytes)
-            .map(|layer| mipmap::generate_chain(layer, width, height, levels))
-            .collect();
+        let chains = mipmap::generate_chains(pixels, layer_bytes, (width, height), levels);
         for level in 1..=levels {
             let joined: Vec<u8> = chains
                 .iter()
@@ -1857,29 +1867,96 @@ impl Renderer {
         self.official_blocks = None;
         self.cutout.clone_from(&self.procedural_cutout);
         self.cutout_epoch += 1;
+        self.hires = HiresBlocks::none(&self.device, &self.queue);
+        let view = self.procedural_blocks.clone();
+        self.rebind_block_groups(&view);
+    }
+
+    /// Binds the block array `view` and the current large textures to every
+    /// pass that samples them: the chunks, the local entities and items, and
+    /// the icon and hand cameras.
+    fn rebind_block_groups(&mut self, view: &wgpu::TextureView) {
         self.terrain_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
             &self.camera_buffer,
             &self.block_sampler,
-            &self.procedural_blocks,
+            view,
+            &self.hires,
         );
         self.local_terrain_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
             &self.local_camera_buffer,
             &self.block_sampler,
-            &self.procedural_blocks,
+            view,
+            &self.hires,
         );
         self.chunk_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
             &self.camera_buffer,
             &self.mip_sampler,
-            &self.procedural_blocks,
+            view,
+            &self.hires,
         );
-        let view = self.procedural_blocks.clone();
-        self.rebind_icons(&view);
+        self.rebind_icons(view);
+    }
+
+    /// Keeps the textures of the official array that are larger than its
+    /// layers at their own size, in a second array (see `hires_blocks.rs`).
+    ///
+    /// `layers` are `(layer of the block array, RGBA8 pixels)` pairs, each
+    /// `edge` squared; the block array keeps a shrunk copy of each, which the
+    /// shader replaces by the large one. Call it after
+    /// [`Renderer::set_block_atlas`], which clears the previous large
+    /// textures. Nothing happens without an official array, with no layers, or
+    /// with more block layers than the shader's map covers.
+    ///
+    /// # Errors
+    /// [`BlockAtlasError`] when the layers do not fit the device or their
+    /// pixel count does not match; the block array stays as it was.
+    pub fn set_hires_blocks(
+        &mut self,
+        edge: u32,
+        layers: &[(u32, &[u8])],
+    ) -> Result<(), BlockAtlasError> {
+        let Some((blocks, _, _)) = &self.official_blocks else {
+            return Ok(());
+        };
+        if layers.is_empty() || blocks.depth_or_array_layers() > hires_blocks::MAX_MAPPED_LAYERS {
+            return Ok(());
+        }
+        let view = blocks.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("block texture array view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let count = u32::try_from(layers.len()).unwrap_or(u32::MAX);
+        let pixels: Vec<u8> = layers
+            .iter()
+            .flat_map(|(_, one)| one.iter().copied())
+            .collect();
+        let limits = self.device.limits();
+        block_atlas::validate(
+            edge,
+            edge,
+            count,
+            pixels.len(),
+            limits.max_texture_dimension_2d,
+            limits.max_texture_array_layers,
+        )?;
+        let levels = mipmap::level_count(edge, edge, self.mipmap_levels);
+        let texture = hires_blocks::create_array(&self.device, (edge, edge), count, levels);
+        self.upload_block_layers(&texture, (edge, edge), &pixels);
+        let pairs: Vec<(u32, u32)> = layers
+            .iter()
+            .zip(0..)
+            .map(|((layer, _), here)| (*layer, here))
+            .collect();
+        self.hires = HiresBlocks::with_map(&self.device, &self.queue, &texture, &pairs);
+        self.rebind_block_groups(&view);
+        Ok(())
     }
 
     /// Points the icon camera at a replaced block array and forgets the
@@ -1891,6 +1968,7 @@ impl Renderer {
             self.icon_atlas.camera_buffer(),
             &self.block_sampler,
             block_view,
+            &self.hires,
         );
         self.hand_item_bind_group = create_terrain_bind_group(
             &self.device,
@@ -1898,6 +1976,7 @@ impl Renderer {
             &self.hand_camera_buffer,
             &self.block_sampler,
             block_view,
+            &self.hires,
         );
         self.icon_atlas.invalidate();
     }
@@ -3099,8 +3178,8 @@ fn sort_transparent_farthest_first(chunks: &mut [ChunkDraw]) {
     });
 }
 
-/// Binds the camera uniform, one block texture-array view and the block
-/// sampler.
+/// Binds the camera uniform, one block texture-array view, the block sampler
+/// and the second array of large textures with its layer map.
 ///
 /// Shared by [`Renderer::create`] (procedural fallback array) and
 /// [`Renderer::set_block_atlas`] (installed array), so replacing the terrain
@@ -3111,6 +3190,7 @@ fn create_terrain_bind_group(
     camera: &wgpu::Buffer,
     sampler: &wgpu::Sampler,
     view: &wgpu::TextureView,
+    hires: &HiresBlocks,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("terrain bind group"),
@@ -3127,6 +3207,14 @@ fn create_terrain_bind_group(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(hires.view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: hires.map().as_entire_binding(),
             },
         ],
     })

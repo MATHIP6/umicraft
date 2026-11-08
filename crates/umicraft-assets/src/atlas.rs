@@ -5,8 +5,9 @@
 //! Every layer is an RGBA8 image of the same size. The builder normalises each
 //! texture to its first square frame (the animated block textures keep the other
 //! frames in a [`crate::TextureAnimation`]) and scales it to the largest frame
-//! edge in the source (32×32 for the 1.8.8 jar), but the type keeps the dimensions
-//! explicit so a resource pack can use a different size. The layout (and
+//! edge of the blocks (32×32 for the 1.8.8 jar), but the type keeps the dimensions
+//! explicit so a resource pack can use a different size. A still texture larger
+//! than that also keeps its own size in a [`HiresLayer`]. The layout (and
 //! therefore the layer order) is the deterministic [`AtlasLayout`] from
 //! `umicraft-model`; layer zero is the original missing-texture checker.
 
@@ -14,6 +15,22 @@ use umicraft_model::AtlasLayout;
 
 use crate::animation::TextureAnimation;
 use crate::dial::DialSprite;
+
+/// One texture that is larger than the layers of its atlas, kept at its own
+/// resolution next to the layer that holds its shrunk copy.
+///
+/// Vanilla keeps the items in a separate atlas whose sprites keep their size,
+/// so a 512 pixel ender pearl costs 1 MB. Here every layer of the array has the
+/// same size, and giving a single large texture a layer of its own size would
+/// make all of them that large; these go to a second, small array instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HiresLayer {
+    /// The layer of the main array that holds the shrunk copy: the renderer
+    /// samples this texture instead of it.
+    pub layer: u32,
+    /// RGBA8 pixels, `hires_edge` squared.
+    pub pixels: Vec<u8>,
+}
 
 /// One texture-array upload: layer-major RGBA8 pixels plus their key layout.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +41,8 @@ pub struct BlockAtlas {
     layout: AtlasLayout,
     animations: Vec<TextureAnimation>,
     dials: Vec<DialSprite>,
+    hires_edge: u32,
+    hires: Vec<HiresLayer>,
 }
 
 impl BlockAtlas {
@@ -74,7 +93,29 @@ impl BlockAtlas {
             layout,
             animations: Vec::new(),
             dials: Vec::new(),
+            hires_edge: 0,
+            hires: Vec::new(),
         })
+    }
+
+    /// Attaches the textures kept at a larger size, each `edge` squared.
+    #[must_use]
+    pub(crate) fn with_hires(mut self, edge: u32, hires: Vec<HiresLayer>) -> Self {
+        self.hires_edge = edge;
+        self.hires = hires;
+        self
+    }
+
+    /// Edge of the layers of the second array, `0` when there are none.
+    #[must_use]
+    pub fn hires_edge(&self) -> u32 {
+        self.hires_edge
+    }
+
+    /// The textures that keep a larger size than the layers of the main array.
+    #[must_use]
+    pub fn hires_layers(&self) -> &[HiresLayer] {
+        &self.hires
     }
 
     /// Attaches the animated layers of this atlas.
