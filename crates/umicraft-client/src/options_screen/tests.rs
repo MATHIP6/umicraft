@@ -458,16 +458,16 @@ fn the_resource_pack_page_moves_packs_between_the_lists() {
     let mut options = Options::default();
     click_widget(&mut screen, &mut options, "resourcepacks");
     assert!(screen.pack_draft().is_empty());
-    click_widget(&mut screen, &mut options, "pack:Available:0");
+    click_widget(&mut screen, &mut options, "pack:icon:Available:0");
     assert_eq!(screen.pack_draft(), ["a.zip"]);
     // The next pack goes on top: highest priority first.
-    click_widget(&mut screen, &mut options, "pack:Available:0");
+    click_widget(&mut screen, &mut options, "pack:icon:Available:0");
     assert_eq!(screen.pack_draft(), ["b.zip", "a.zip"]);
     click_widget(&mut screen, &mut options, "pack:down:Selected:0");
     assert_eq!(screen.pack_draft(), ["a.zip", "b.zip"]);
     click_widget(&mut screen, &mut options, "pack:up:Selected:1");
     assert_eq!(screen.pack_draft(), ["b.zip", "a.zip"]);
-    click_widget(&mut screen, &mut options, "pack:Selected:0");
+    click_widget(&mut screen, &mut options, "pack:out:Selected:0");
     assert_eq!(screen.pack_draft(), ["a.zip"]);
     assert!(
         options.resource_packs.enabled.is_empty(),
@@ -480,14 +480,14 @@ fn an_incompatible_pack_asks_before_it_is_enabled() {
     let mut screen = catalog_screen();
     let mut options = Options::default();
     click_widget(&mut screen, &mut options, "resourcepacks");
-    click_widget(&mut screen, &mut options, "pack:Available:2");
+    click_widget(&mut screen, &mut options, "pack:icon:Available:2");
     assert!(screen.pack_draft().is_empty(), "the question comes first");
     // No: nothing changes.
     let layout = umicraft_ui::menus::confirm_layout(VIEWPORT);
     frame(&mut screen, &mut options, click(layout.no));
     assert!(screen.pack_draft().is_empty());
     // Yes: the pack is enabled.
-    click_widget(&mut screen, &mut options, "pack:Available:2");
+    click_widget(&mut screen, &mut options, "pack:icon:Available:2");
     frame(&mut screen, &mut options, click(layout.yes));
     assert_eq!(screen.pack_draft(), ["old.zip"]);
 }
@@ -497,8 +497,8 @@ fn done_applies_the_pack_draft_lowest_priority_first_and_signals_the_reload() {
     let mut screen = catalog_screen();
     let mut options = Options::default();
     click_widget(&mut screen, &mut options, "resourcepacks");
-    click_widget(&mut screen, &mut options, "pack:Available:0");
-    click_widget(&mut screen, &mut options, "pack:Available:0");
+    click_widget(&mut screen, &mut options, "pack:icon:Available:0");
+    click_widget(&mut screen, &mut options, "pack:icon:Available:0");
     let outcome = click_widget(&mut screen, &mut options, "done");
     assert!(outcome.packs_changed && outcome.changed);
     assert_eq!(screen.page(), Page::Main);
@@ -641,4 +641,35 @@ fn the_title_style_label_names_the_current_style() {
         ),
         "Title screen: Modern"
     );
+}
+
+#[test]
+fn a_tiny_window_draws_every_page_without_panicking() {
+    // A minimized window is a few pixels high: the scrollbars used to `clamp`
+    // with min > max.
+    let tiny = Rect::new(0.0, 0.0, 1.0, 1.0);
+    for page in [
+        Page::Main,
+        Page::Video,
+        Page::Controls,
+        Page::Chat,
+        Page::Skin,
+        Page::Sounds,
+        Page::ResourcePacks,
+        Page::Language,
+        Page::Snooper,
+    ] {
+        let mut screen = OptionsScreen::new();
+        let mut options = Options::default();
+        screen.open_page(page, &options);
+        let mut ui = Ui::new(tiny);
+        ui.begin_frame(tiny, UiInput::new(vec![]));
+        screen.show(
+            &mut ui,
+            &FontAtlas::fallback(),
+            &mut options,
+            &Lang::builtin(),
+        );
+        ui.end_frame();
+    }
 }

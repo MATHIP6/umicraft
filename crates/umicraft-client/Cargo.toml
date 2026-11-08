@@ -11,6 +11,7 @@ publish = false
 base64 = "0.22"
 glam = "0.34"
 png.workspace = true
+jpeg-decoder.workspace = true
 pollster = "1"
 serde.workspace = true
 serde_json.workspace = true

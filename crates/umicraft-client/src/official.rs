@@ -161,6 +161,9 @@ pub(crate) fn menu_art(gui_atlas: Option<&umicraft_assets::GuiAtlas>) -> MenuArt
         achievements: achievement_art(&sheet),
         icons: sheet("icons"),
         unknown_server: sheet("misc/unknown_server"),
+        unknown_pack: sheet("misc/unknown_pack"),
+        default_pack: sheet("misc/default_pack"),
+        pack_arrows: sheet("resource_packs"),
         server_selection: sheet("server_selection"),
         brand: BrandArt {
             logo: sheet(&brand_region("logo")),

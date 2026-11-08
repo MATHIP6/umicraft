@@ -49,4 +49,9 @@ pub struct NetworkConfig {
     /// Answer every server resource pack offer with `Declined` at once
     /// (the saved server's pack mode is Disabled, or no window can ask).
     pub decline_server_packs: bool,
+    /// Look up the skin and the cape of the account at Mojang, so they show
+    /// even when the server sends none (an offline server, or an offline
+    /// account). Off for the scripted sessions, which must not use the network
+    /// beyond their server.
+    pub account_skin: bool,
 }

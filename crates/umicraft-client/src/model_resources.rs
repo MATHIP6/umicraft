@@ -131,8 +131,15 @@ impl ModelResources {
     pub fn load_with_pack_paths(paths: &[std::path::PathBuf]) -> Result<Self, ModelResourcesError> {
         let mut packs = Vec::with_capacity(paths.len());
         for path in paths {
-            let pack = umicraft_assets::ResourcePack::from_path(path)?;
-            packs.push(pack);
+            // A pack that cannot be read (deleted, unreadable folder, broken
+            // zip) is skipped: one bad pack must not turn every texture into
+            // the procedural fallback.
+            match umicraft_assets::ResourcePack::from_path(path) {
+                Ok(pack) => packs.push(pack),
+                Err(error) => {
+                    tracing::warn!(pack = %path.display(), %error, "skipping a resource pack that could not be loaded");
+                }
+            }
         }
         Self::load_with_packs(&packs)
     }

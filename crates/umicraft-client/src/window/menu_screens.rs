@@ -46,6 +46,11 @@ impl App {
 
     pub(super) fn advance_menus(&mut self, elapsed: Duration) {
         if self.screen.uses_ui() {
+            // The opening animation of the title screen waits for the focus
+            // (a fullscreen window that loses it goes to the taskbar anyway).
+            // With no window (a headless run) there is nothing to wait for.
+            let focused = self.window.as_ref().is_none_or(|window| window.has_focus());
+            self.menu.set_window_focused(focused);
             self.menu.advance(elapsed);
         }
     }

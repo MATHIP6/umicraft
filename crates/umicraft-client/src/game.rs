@@ -52,7 +52,7 @@ use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
-use umicraft_game::item_use::{drop_item, ItemUse, UseAction, UseTick};
+use umicraft_game::item_use::{drop_item, DoorToggle, ItemUse, UseAction, UseTick};
 use umicraft_game::movement::movement_stats;
 use umicraft_game::particles::{EffectContext, SpawnFilter};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
@@ -95,7 +95,8 @@ use crate::fog_context::fog_context;
 use crate::input::InputUpdate;
 use crate::inventory_input::{ContainerAction, InventoryAction};
 use crate::network::{self, ClientCommand, NetworkConfig};
-use crate::profiles::profile_from_properties;
+use crate::profiles::{profile_from_properties, with_account_textures};
+use umicraft_assets::profile_textures::{AccountSkinFetcher, ProfileTextures};
 use umicraft_game::chat::lang::LangTable;
 use umicraft_game::chat::unformatted_text;
 use umicraft_game::editors::book::{BookPacket, WRITABLE_BOOK, WRITTEN_BOOK};
@@ -280,6 +281,9 @@ pub struct Frame {
     pub world_time: i64,
     /// The current dimension (`0` overworld, `-1` Nether, `1` End).
     pub dimension: i8,
+    /// Whether the world is a superflat one (`WorldType.FLAT`), which moves the
+    /// horizon of the sky and the void fog.
+    pub flat_world: bool,
     /// The game mode of the local player; the music depends on it.
     pub gamemode: GameMode,
     /// The world spawn point the server announced, which the compass shows.
@@ -467,6 +471,15 @@ impl Session {
         let stop = Arc::new(AtomicBool::new(false));
         let counters = Arc::new(SessionCounters::default());
         let own_name = config.name.clone();
+        // The skin of the account, premium or not: a premium session names its
+        // profile, an offline account only has a name to look up.
+        let account_skin = config.account_skin.then(|| {
+            let (name, uuid) = match &config.session {
+                Some(session) => (session.username.as_str(), Some(session.uuid.as_str())),
+                None => (config.name.as_str(), None),
+            };
+            AccountSkinFetcher::spawn(name, uuid)
+        });
 
         let network = network::spawn(
             config,
@@ -481,6 +494,7 @@ impl Session {
             commands_tx,
             Arc::clone(&stop),
             own_name,
+            account_skin,
         )?;
 
         Ok(Self {
@@ -549,10 +563,21 @@ fn spawn_game_thread(
     commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
     own_name: String,
+    account_skin: Option<AccountSkinFetcher>,
 ) -> Result<JoinHandle<()>, ClientError> {
     std::thread::Builder::new()
         .name("umicraft-game".to_string())
-        .spawn(move || run(events, frames, chunks, commands, stop, own_name))
+        .spawn(move || {
+            run(
+                events,
+                frames,
+                chunks,
+                commands,
+                stop,
+                own_name,
+                account_skin,
+            )
+        })
         .map_err(|error| ClientError::Worker(format!("spawn game thread: {error}")))
 }
 
@@ -578,8 +603,17 @@ struct Game {
     entity_id: i32,
     /// The gamemode of the local player.
     gamemode: GameMode,
+    /// The lookup of the skin and cape of the account at Mojang, when the
+    /// session asked for one.
+    account_skin: Option<AccountSkinFetcher>,
+    /// What the lookup found: worn by the local player for what the server
+    /// does not send.
+    account_textures: Option<ProfileTextures>,
     /// The current dimension; `0` is the overworld.
     dimension: i8,
+    /// Whether the world is a superflat one, from the world type the server
+    /// names in `Join Game` and in the `Respawn` that changes the dimension.
+    flat_world: bool,
     /// The latest signed time of day from `Time Update`.
     ///
     /// It is never advanced locally: the server sends updates regularly and a
@@ -693,7 +727,10 @@ impl Game {
             end: None,
             entity_id: 0,
             gamemode: GameMode::Survival,
+            account_skin: None,
+            account_textures: None,
             dimension: 0,
+            flat_world: false,
             world_time: 0,
             playing: false,
             spawn: None,
@@ -792,10 +829,12 @@ impl Game {
     ///
     /// MCP `EntityRenderer.isDrawBlockOutline` hides the outline for a
     /// spectator unless a container is targeted (not modelled: spectators
-    /// never get an outline), and `RenderGlobal.drawSelectionBox` draws the
-    /// block's selected bounding box, offset to its position.
+    /// never get an outline) and, without `allowEdit` (adventure), unless the
+    /// held item's `CanDestroy`/`CanPlaceOn` lists the block (item NBT is not
+    /// read yet: adventure never gets an outline). `RenderGlobal.drawSelectionBox`
+    /// draws the block's selected bounding box, offset to its position.
     fn selection_outline(&self) -> Vec<OutlineBox> {
-        if self.gamemode == GameMode::Spectator {
+        if matches!(self.gamemode, GameMode::Spectator | GameMode::Adventure) {
             return Vec::new();
         }
         let (Some(hit), Some(world)) = (self.target(), self.world.as_ref()) else {
@@ -1029,9 +1068,11 @@ fn run(
     commands: CommandSender<PlayServerbound>,
     stop: Arc<AtomicBool>,
     own_name: String,
+    account_skin: Option<AccountSkinFetcher>,
 ) {
     let mut game = Game::new();
     game.own_name = own_name;
+    game.account_skin = account_skin;
     // The first event of the queue, which is still empty: the render thread
     // reads the mouse look from this slot, never from the queue.
     let _ = frames.try_send(RenderEvent::LookSlot(Arc::clone(&game.look)));
@@ -1373,6 +1414,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         tick_time,
         world_time: game.world_time,
         dimension: game.dimension,
+        flat_world: game.flat_world,
         gamemode: game.gamemode,
         spawn: game.spawn,
         entities: entities.into(),
@@ -1472,7 +1514,34 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
 ///
 /// The body is animated every tick, also in first person, so that a switch
 /// to the third person does not start from a standing pose.
+/// Collects the skin of the account when the lookup finished, and puts it on
+/// the profile of the local body for what that profile lacks. The profile is
+/// replaced again when the tab list re-sends it without the skin.
+fn apply_account_skin(game: &mut Game) {
+    if let Some(found) = game
+        .account_skin
+        .as_ref()
+        .and_then(AccountSkinFetcher::poll)
+    {
+        tracing::debug!(skin = ?found.skin, cape = ?found.cape, "skin of the account found");
+        game.account_textures = Some(found);
+    }
+    let (Some(profile), Some(account)) =
+        (game.body.profile.as_ref(), game.account_textures.as_ref())
+    else {
+        return;
+    };
+    if let Some(worn) = with_account_textures(profile, account) {
+        game.body.profile = Some(std::sync::Arc::new(worn));
+    }
+}
+
 fn follow_body(game: &mut Game) {
+    // The skin of the account, premium or not: the tab list of an offline
+    // server has none for the local player, whose account has one all the same.
+    // The account is only asked when the server sent no texture at all, as
+    // `SkinManager.loadProfileTextures` does.
+    apply_account_skin(game);
     let Some(state) = game.state.as_ref() else {
         return;
     };
@@ -1667,6 +1736,7 @@ fn apply_net_event(
             publish_inventory(game, frames);
             set_gamemode(game, GameMode::from_wire(info.gamemode));
             game.dimension = info.dimension;
+            game.flat_world = is_flat(&info.level_type);
             // The world clock of the new session is unknown until the first
             // `Time Update`; start at the beginning of the cycle.
             game.world_time = 0;
@@ -1833,6 +1903,9 @@ fn apply_net_event(
                 .is_none_or(|world| world.dimension() != dimension);
             game.server.on_respawn(changed);
             if changed {
+                // `handleRespawn` builds the new world with the type of the
+                // packet; a same-dimension respawn keeps the old one.
+                game.flat_world = is_flat(&packet.world_type);
                 game.world = Some(World::new(dimension));
                 game.dirty.clear();
                 game.entities.clear();
@@ -2395,6 +2468,12 @@ fn particle_filter(game: &Game) -> Option<SpawnFilter> {
     })
 }
 
+/// Whether the world type the server names is `flat` (`WorldType.FLAT`;
+/// `WorldType.parseWorldType` compares the names without regard to case).
+fn is_flat(world_type: &str) -> bool {
+    world_type.eq_ignore_ascii_case("flat")
+}
+
 /// `Effect` 2001 (`RenderGlobal.playAuxSFX`): a block broke somewhere, so its
 /// fragments fly. The data is the broken state, `id | metadata << 12`.
 fn apply_effect(game: &mut Game, packet: &umicraft_protocol::packets::play::clientbound::Effect) {
@@ -2878,6 +2957,9 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         }
         queue.push(command_of(outgoing));
     }
+    if let Some(door) = output.door {
+        swing_door(game, door);
+    }
     if output.swing {
         // MCP `Minecraft.rightClickMouse`: a used item swings the arm.
         queue.push(ClientCommand::Swing);
@@ -2885,6 +2967,29 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         game.hand.swing(effects);
         game.body.animation.swing_item();
     }
+}
+
+/// MCP `BlockDoor.onBlockActivated` runs on the client too: the door swings at
+/// once and the player hears it. The server sends that sound to everyone but
+/// the player who clicked (`playAuxSFXAtEntity`), so the clicking client has
+/// to make it: it takes the same path as the `Effect` packet the others get.
+fn swing_door(game: &mut Game, door: DoorToggle) {
+    if let Some(world) = game.world.as_mut() {
+        game.dirty
+            .extend(world.apply_block_change(door.lower, door.state));
+    }
+    let Some(state) = game.state.as_mut() else {
+        return;
+    };
+    // 1003 opens, 1006 closes (`RenderGlobal.playAuxSFX`).
+    state.on_effect(&umicraft_protocol::packets::play::clientbound::Effect {
+        effect_id: if door.opens() { 1003 } else { 1006 },
+        x: door.clicked.x,
+        y: door.clicked.y,
+        z: door.clicked.z,
+        data: 0,
+        disable_relative_volume: false,
+    });
 }
 
 /// Picks the targeted block into the hotbar (the middle button).
@@ -5234,6 +5339,15 @@ mod tests {
         assert!(game.selection_outline().is_empty());
     }
 
+    #[test]
+    fn an_adventure_player_gets_no_selection_outline() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        assert!(!game.selection_outline().is_empty());
+        game.gamemode = GameMode::Adventure;
+        assert!(game.selection_outline().is_empty());
+    }
+
     /// Regression: every tick lifted a player standing in a plant, in water
     /// or under leaves onto the top of the block, which put players on
     /// flowers and on top of trees.
@@ -5431,6 +5545,124 @@ mod tests {
         );
         assert_eq!(game.world_time, 0);
         assert_eq!(game.dimension, -1);
+    }
+
+    #[test]
+    fn the_local_body_wears_the_skin_of_the_account_when_the_server_sends_none() {
+        use umicraft_game::entity::PlayerProfile;
+
+        let account = ProfileTextures {
+            skin: Some("http://textures.minecraft.net/texture/ab".to_string()),
+            slim: true,
+            cape: None,
+        };
+        let mut game = Game::new();
+        // Before the profile is listed there is nothing to dress.
+        game.account_textures = Some(account.clone());
+        apply_account_skin(&mut game);
+        assert!(game.body.profile.is_none());
+
+        // An offline server lists the player without textures.
+        game.body.profile = Some(std::sync::Arc::new(PlayerProfile::named("Me")));
+        apply_account_skin(&mut game);
+        let worn = game.body.profile.as_ref().expect("the profile stays");
+        assert_eq!(
+            worn.skin_url.as_deref(),
+            Some("http://textures.minecraft.net/texture/ab")
+        );
+        assert_eq!(worn.slim, Some(true));
+
+        // A skin the server sent is not replaced by the account's.
+        let mut sent = PlayerProfile::named("Me");
+        sent.skin_url = Some("http://textures.minecraft.net/texture/cd".into());
+        game.body.profile = Some(std::sync::Arc::new(sent));
+        apply_account_skin(&mut game);
+        assert_eq!(
+            game.body
+                .profile
+                .as_ref()
+                .and_then(|profile| profile.skin_url.as_deref()),
+            Some("http://textures.minecraft.net/texture/cd")
+        );
+    }
+
+    #[test]
+    fn a_flat_world_is_known_from_the_join_and_the_respawn_that_changes_dimension() {
+        use umicraft_net::play::JoinGameInfo;
+        use umicraft_protocol::packets::play::clientbound::Respawn;
+
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let join = |level_type: &str| JoinGameInfo {
+            entity_id: 1,
+            gamemode: 0,
+            dimension: 0,
+            difficulty: 0,
+            max_players: 20,
+            level_type: level_type.to_string(),
+            reduced_debug_info: false,
+        };
+        let respawn = |dimension, world_type: &str| Respawn {
+            dimension,
+            difficulty: 0,
+            game_mode: 0,
+            world_type: world_type.to_string(),
+        };
+
+        assert!(!game.flat_world, "a normal world until the server says");
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join("flat")),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.flat_world);
+        // Names are compared without regard to case.
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join("FLAT")),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.flat_world);
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join("default")),
+            &mut queue,
+            &frames,
+        );
+        assert!(!game.flat_world);
+
+        // A respawn in the same dimension keeps the world, and its type.
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(join("flat")),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(respawn(0, "default")),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.flat_world, "the same world stays flat");
+        // A new dimension is built with the type of the packet.
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(respawn(-1, "default")),
+            &mut queue,
+            &frames,
+        );
+        assert!(!game.flat_world);
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(respawn(0, "flat")),
+            &mut queue,
+            &frames,
+        );
+        assert!(game.flat_world);
     }
 
     #[test]

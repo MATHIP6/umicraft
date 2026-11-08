@@ -75,10 +75,12 @@ pub struct ModernButton<'a> {
     label: &'a str,
     icon: Option<SpriteSheet>,
     enabled: bool,
+    alpha: f32,
 }
 
 impl<'a> ModernButton<'a> {
-    /// An enabled button without icon; `rect` is in physical pixels.
+    /// An enabled, fully opaque button without icon; `rect` is in physical
+    /// pixels.
     #[must_use]
     pub fn new(id: WidgetId, rect: Rect, label: &'a str) -> Self {
         Self {
@@ -87,7 +89,16 @@ impl<'a> ModernButton<'a> {
             label,
             icon: None,
             enabled: true,
+            alpha: 1.0,
         }
+    }
+
+    /// Scales the opacity of the whole button, `0.0..=1.0`: a screen fades its
+    /// buttons in with it.
+    #[must_use]
+    pub fn with_alpha(mut self, alpha: f32) -> Self {
+        self.alpha = alpha.clamp(0.0, 1.0);
+        self
     }
 
     /// Shows `icon` before the label; `None` leaves it out.
@@ -111,7 +122,13 @@ impl<'a> ModernButton<'a> {
     /// [`HoverFade::level`] of this button.
     pub fn show(self, ui: &mut Ui, brand: &FontAtlas, scale: f32, fade: f32) -> UiResponse {
         let response = respond(ui, self.id, self.rect, self.enabled);
-        draw_surface(ui, self.rect, RADIUS * scale, fade, self.enabled);
+        draw_surface(
+            ui,
+            self.rect,
+            RADIUS * scale,
+            (fade, self.enabled),
+            self.alpha,
+        );
         let size = TEXT_SIZE_BODY * scale;
         let text_width = measure_text(brand, self.label, size);
         let icon_size = self.rect.height * LABEL_ICON_SHARE;
@@ -120,9 +137,9 @@ impl<'a> ModernButton<'a> {
         let middle = self.rect.y + self.rect.height * 0.5;
         if let Some(sheet) = self.icon {
             let dst = Rect::new(left, middle - icon_size * 0.5, icon_size, icon_size);
-            draw_icon(ui, sheet, dst, self.enabled);
+            draw_icon(ui, sheet, dst, opacity(self.enabled) * self.alpha);
         }
-        let color = with_opacity(TEXT, opacity(self.enabled));
+        let color = with_opacity(TEXT, opacity(self.enabled) * self.alpha);
         let at = (left + icon_span, middle);
         draw_text(ui, brand, self.label, at, (size, color, Align::Left));
         response
@@ -141,20 +158,24 @@ fn respond(ui: &mut Ui, id: WidgetId, rect: Rect, enabled: bool) -> UiResponse {
     response
 }
 
-/// Draws the rounded background, blended towards the hover colour by `fade`.
-fn draw_surface(ui: &mut Ui, rect: Rect, radius: f32, fade: f32, enabled: bool) {
+/// Draws the rounded background, blended towards the hover colour by the
+/// first of `state` (`fade`), dimmed when the second (`enabled`) is false, and
+/// scaled by `alpha`.
+fn draw_surface(ui: &mut Ui, rect: Rect, radius: f32, state: (f32, bool), alpha: f32) {
+    let (fade, enabled) = state;
     let color = if enabled {
         mix(SURFACE, SURFACE_HOVER, fade)
     } else {
         SURFACE_DISABLED
     };
-    ui.draw().rounded_rect(rect, radius, color);
+    ui.draw()
+        .rounded_rect(rect, radius, with_opacity(color, alpha));
 }
 
-/// Draws the whole of `sheet` into `dst`, dimmed when disabled.
-fn draw_icon(ui: &mut Ui, sheet: SpriteSheet, dst: Rect, enabled: bool) {
+/// Draws the whole of `sheet` into `dst` with `opacity`.
+fn draw_icon(ui: &mut Ui, sheet: SpriteSheet, dst: Rect, opacity: f32) {
     let src = sheet.sub(0, 0, sheet.width, sheet.height);
-    let tint: Color = [1.0, 1.0, 1.0, opacity(enabled)];
+    let tint: Color = [1.0, 1.0, 1.0, opacity];
     ui.draw().image(src, dst, tint);
 }
 

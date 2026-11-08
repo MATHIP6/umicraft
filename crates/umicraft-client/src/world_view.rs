@@ -774,6 +774,8 @@ struct View {
     world_time: i64,
     /// The dimension of the newest frame.
     dimension: i8,
+    /// Whether the world of the newest frame is a superflat one.
+    flat_world: bool,
     /// The game mode of the local player in the newest frame.
     gamemode: GameMode,
     /// The newest announced world spawn point.
@@ -807,6 +809,7 @@ impl View {
         self.tick_time = Some(frame.tick_time);
         self.world_time = frame.world_time;
         self.dimension = frame.dimension;
+        self.flat_world = frame.flat_world;
         self.gamemode = frame.gamemode;
         self.spawn = frame.spawn;
         self.sky_temperature = frame.sky_temperature;
@@ -880,6 +883,7 @@ impl View {
             rain_strength: self.weather.rain_strength,
             thunder_strength: self.weather.thunder_strength,
             lightning_ticks: self.weather.lightning_ticks,
+            flat_world: self.flat_world,
             ..RenderEnvironment::new(
                 self.dimension,
                 self.world_time,
@@ -1248,6 +1252,7 @@ mod tests {
             tick_time,
             world_time,
             dimension: -1,
+            flat_world: true,
             gamemode: GameMode::default(),
             spawn: None,
             entities: Arc::from([]),
@@ -1556,6 +1561,8 @@ mod tests {
         assert!((environment.partial_tick - 0.5).abs() < 1e-3);
         assert_eq!(environment.world_time, -5_900);
         assert_eq!(environment.dimension, -1);
+        // The world type of the frame reaches the sky and the fog.
+        assert!(environment.flat_world);
         assert_eq!(environment.view_distance, 12);
 
         // Before the newest tick and after a full tick the fraction is

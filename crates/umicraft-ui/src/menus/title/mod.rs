@@ -108,6 +108,12 @@ impl TitleScreen {
         self.classic.set_splash(splash);
     }
 
+    /// Tells the screen whether the window has the focus: the opening of the
+    /// modern style waits for it.
+    pub fn set_focused(&mut self, focused: bool) {
+        self.modern.set_focused(focused);
+    }
+
     /// Advances both styles by one game tick.
     pub fn tick(&mut self) {
         self.classic.tick();

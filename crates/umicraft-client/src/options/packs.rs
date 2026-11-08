@@ -41,11 +41,29 @@ impl ResourcePackOptions {
     }
 }
 
-/// Whether `name` is a plain file or folder name.
+/// Whether `name` names a pack that lies inside the packs folder: a file or
+/// folder name, or the path of one below other folders (`Faithful/32x.zip`,
+/// with `/` between them, at most [`MAX_PACK_DEPTH`] folders deep).
+///
+/// Nothing that could leave the folder is a pack name: no empty, `.` or `..`
+/// part, no backslash, no NUL, and no `:` (a drive such as `C:` replaces the
+/// whole path on Windows when it is joined).
 #[must_use]
 pub fn is_pack_name(name: &str) -> bool {
-    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
+    let mut parts = 0;
+    for part in name.split('/') {
+        parts += 1;
+        let plain = !part.is_empty() && part != "." && part != "..";
+        if !plain || part.contains(['\\', '\0', ':']) {
+            return false;
+        }
+    }
+    parts <= MAX_PACK_DEPTH + 1
 }
+
+/// How many folders deep a pack may sit, as the search of
+/// [`umicraft_assets::pack_discovery::discover_packs`] goes.
+pub const MAX_PACK_DEPTH: usize = umicraft_assets::pack_discovery::MAX_DEPTH;
 
 #[cfg(test)]
 mod tests {
@@ -65,15 +83,46 @@ mod tests {
                 "",
                 "a",
                 "b.zip",
-                "x/y",
+                "x/../../y",
                 "..",
                 "c\\d",
+                "/abs.zip",
+                "x//y",
+                "C:evil.zip",
+                "a/b.zip:stream",
+                "nul\0.zip",
             ]
             .map(String::from)
             .to_vec(),
         };
         packs.clamp();
         assert_eq!(packs.enabled, ["b.zip", "a"]);
+    }
+
+    #[test]
+    fn a_pack_inside_a_folder_is_a_valid_name_down_to_the_search_depth() {
+        assert!(is_pack_name("Faithful/32x.zip"));
+        assert!(is_pack_name("a/b/c/d/pack.zip"), "four folders deep");
+        assert!(!is_pack_name("a/b/c/d/e/pack.zip"), "five folders is out");
+        let mut packs = ResourcePackOptions {
+            enabled: ["one.zip", "Folder/two.zip", "Folder/two.zip", "x/./y"]
+                .map(String::from)
+                .to_vec(),
+        };
+        packs.clamp();
+        assert_eq!(packs.enabled, ["one.zip", "Folder/two.zip"]);
+    }
+
+    #[test]
+    fn the_path_of_a_nested_pack_stays_inside_the_folder() {
+        let packs = ResourcePackOptions {
+            enabled: vec!["Faithful/32x.zip".to_string()],
+        };
+        let folder = Path::new("/data/resourcepacks");
+        assert_eq!(
+            packs.paths_in(folder),
+            [folder.join("Faithful").join("32x.zip")]
+        );
     }
 
     #[test]

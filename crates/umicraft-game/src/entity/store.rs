@@ -533,6 +533,8 @@ impl EntityStore {
                 entity.animation.hurt_by_status();
             }
             3 if entity.kind != EntityKind::Dragon => entity.animation.die(),
+            // MCP `EntitySquid.handleStatusUpdate`: the swim cycle restarts.
+            19 if entity.kind == EntityKind::Squid => entity.animation.restart_squid_cycle(),
             // MCP `EntityPlayer.handleStatusUpdate`: the item use finished.
             9 => entity.use_ticks = 0,
             _ => {}
@@ -580,6 +582,9 @@ impl EntityStore {
                 // A lit creeper fuses whatever its state says.
                 let state = if creeper.ignited { 1 } else { creeper.state };
                 entity.animation.tick_fuse(state);
+            }
+            if entity.kind == EntityKind::Squid {
+                entity.animation.tick_squid(entity.velocity, entity.id.0);
             }
             entity.tick_use();
             entity.meta.tick();

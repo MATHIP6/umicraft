@@ -7,7 +7,7 @@
 //! `SkinManager.loadProfileTextures`). The client reads the URLs from it; it
 //! does not check the signature, as vanilla does not either.
 
-use umicraft_assets::profile_textures::parse_textures_property;
+use umicraft_assets::profile_textures::{parse_textures_property, ProfileTextures};
 use umicraft_game::entity::PlayerProfile;
 use umicraft_protocol::packets::play::clientbound::player_list_item::PlayerProperty;
 
@@ -42,6 +42,38 @@ pub fn profile_from_properties(name: &str, properties: &[PlayerProperty]) -> Pla
     profile
 }
 
+/// `profile` wearing the skin and the cape of the account, for what the
+/// profile lacks: the tab list of an offline server (or of an offline
+/// account) carries no `textures` property, and the account has a skin at
+/// Mojang all the same.
+///
+/// MCP `SkinManager.loadProfileTextures` asks the account only when the
+/// textures of the tab list came out empty, that is neither a skin nor a cape
+/// (`map.isEmpty()`), and then takes what the account has. A server that sent
+/// either one decides, so a server skin without a cape stays without a cape.
+/// `None` when the profile already has a texture, or the account has none.
+#[must_use]
+pub fn with_account_textures(
+    profile: &PlayerProfile,
+    account: &ProfileTextures,
+) -> Option<PlayerProfile> {
+    if profile.skin_url.is_some() || profile.cape_url.is_some() {
+        return None;
+    }
+    if account.skin.is_none() && account.cape.is_none() {
+        return None;
+    }
+    let mut updated = profile.clone();
+    if let Some(url) = &account.skin {
+        updated.skin_url = Some(url.as_str().into());
+        updated.slim = Some(account.slim);
+    }
+    if let Some(url) = &account.cape {
+        updated.cape_url = Some(url.as_str().into());
+    }
+    Some(updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,6 +100,82 @@ mod tests {
         );
         assert_eq!(profile.slim, Some(true));
         assert_eq!(profile.cape_url, None);
+    }
+
+    fn account(skin: Option<&str>, slim: bool, cape: Option<&str>) -> ProfileTextures {
+        ProfileTextures {
+            skin: skin.map(str::to_owned),
+            slim,
+            cape: cape.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn an_offline_profile_wears_the_skin_and_cape_of_the_account() {
+        // The tab list of an offline server carries no textures.
+        let listed = profile_from_properties("Steve", &[]);
+        let worn = with_account_textures(
+            &listed,
+            &account(
+                Some("http://textures.minecraft.net/texture/ab"),
+                true,
+                Some("http://textures.minecraft.net/texture/cd"),
+            ),
+        )
+        .expect("the account fills what is missing");
+        assert_eq!(
+            worn.skin_url.as_deref(),
+            Some("http://textures.minecraft.net/texture/ab")
+        );
+        assert_eq!(worn.slim, Some(true), "the arm model follows the skin");
+        assert_eq!(
+            worn.cape_url.as_deref(),
+            Some("http://textures.minecraft.net/texture/cd")
+        );
+        assert_eq!(&*worn.name, "Steve");
+    }
+
+    #[test]
+    fn a_server_that_sent_any_texture_decides_and_the_account_is_not_asked() {
+        // `SkinManager.loadProfileTextures`: the account only fills an empty map.
+        let everything = account(
+            Some("http://textures.minecraft.net/texture/zz"),
+            false,
+            Some("http://textures.minecraft.net/texture/cd"),
+        );
+        // A skin and no cape: the skin stays, and no cape is added either.
+        let skin_only = profile_from_properties("Steve", &[property("textures", SLIM_SKIN)]);
+        assert_eq!(with_account_textures(&skin_only, &everything), None);
+        // A cape and no skin: the player keeps the default skin of their UUID.
+        let mut cape_only = PlayerProfile::named("Steve");
+        cape_only.cape_url = Some("http://textures.minecraft.net/texture/ee".into());
+        assert_eq!(with_account_textures(&cape_only, &everything), None);
+    }
+
+    #[test]
+    fn an_account_with_only_a_cape_gives_only_the_cape() {
+        let listed = profile_from_properties("Steve", &[]);
+        let worn = with_account_textures(
+            &listed,
+            &account(
+                None,
+                false,
+                Some("http://textures.minecraft.net/texture/cd"),
+            ),
+        )
+        .expect("a cape is something");
+        assert_eq!(worn.skin_url, None, "no skin: the default skin stays");
+        assert_eq!(worn.slim, None);
+        assert!(worn.cape_url.is_some());
+    }
+
+    #[test]
+    fn an_account_without_a_skin_changes_nothing() {
+        let listed = profile_from_properties("Steve", &[]);
+        assert_eq!(
+            with_account_textures(&listed, &account(None, false, None)),
+            None
+        );
     }
 
     #[test]

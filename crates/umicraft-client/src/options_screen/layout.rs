@@ -170,7 +170,9 @@ impl OptionsScreen {
         if max <= 0.0 {
             return;
         }
-        let thumb = (visible * visible / content).clamp(32.0, visible - 8.0);
+        // `max` then `min`, not `clamp`: a tiny (minimized) window has a
+        // negative `visible`, and `clamp` panics when min > max.
+        let thumb = (visible * visible / content).max(32.0).min(visible - 8.0);
         let y = (scroll * (visible - thumb) / max + top).max(top);
         ui.draw()
             .rect(gui.rect(x, top, 6.0, visible), [0.0, 0.0, 0.0, 1.0]);
@@ -193,18 +195,4 @@ pub(super) fn fit_text(atlas: &FontAtlas, text: &str, max_width: f32) -> String 
         }
     }
     fitted
-}
-
-/// `text` without its `§x` formatting codes, for a single-colour line.
-pub(super) fn strip_formatting(text: &str) -> String {
-    let mut plain = String::with_capacity(text.len());
-    let mut characters = text.chars();
-    while let Some(character) = characters.next() {
-        if character == '\u{a7}' {
-            characters.next();
-        } else {
-            plain.push(character);
-        }
-    }
-    plain
 }

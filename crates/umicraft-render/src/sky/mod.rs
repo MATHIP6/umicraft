@@ -268,6 +268,7 @@ impl SkyRenderer {
             // drawn around the eye, so it never parallaxes.
             view_proj: camera.view_projection_around_eye(),
             eye_y: camera.eye().y as f32,
+            flat_world: environment.flat_world,
         };
         plan::build(&mut self.layers, &input);
 

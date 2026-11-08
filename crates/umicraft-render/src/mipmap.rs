@@ -70,6 +70,40 @@ pub(crate) fn generate_chain(base: &[u8], width: u32, height: u32, levels: u32) 
     chain
 }
 
+/// The mip chains of every layer of `pixels` (layer-major RGBA8, `layer_bytes`
+/// each), computed on all the cores: a layer does not depend on another, so
+/// the result is the same as calling [`generate_chain`] one after the other.
+///
+/// A texture pack with 64 pixel layers made this the longest step of a
+/// resource reload (about 3 s on one core).
+#[must_use]
+pub(crate) fn generate_chains(
+    pixels: &[u8],
+    layer_bytes: usize,
+    (width, height): (u32, u32),
+    levels: u32,
+) -> Vec<Vec<Vec<u8>>> {
+    let layers: Vec<&[u8]> = pixels.chunks_exact(layer_bytes).collect();
+    let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    let per_thread = layers.len().div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = layers
+            .chunks(per_thread)
+            .map(|part| {
+                scope.spawn(move || {
+                    part.iter()
+                        .map(|layer| generate_chain(layer, width, height, levels))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("a mip worker panicked"))
+            .collect()
+    })
+}
+
 /// The reference's `flag`: a texel with alpha 0 among the first `checked`.
 fn has_see_through_texel(base: &[u8], checked: usize) -> bool {
     base.chunks_exact(4)
@@ -118,6 +152,20 @@ mod tests {
 
     fn layer(width: usize, texel: impl Fn(usize) -> [u8; 4]) -> Vec<u8> {
         (0..width * width).flat_map(texel).collect()
+    }
+
+    #[test]
+    fn the_parallel_chains_equal_the_sequential_ones_in_order() {
+        let layers: Vec<u8> = (0..9_usize)
+            .flat_map(|n| layer(16, |i| [(i * 7 + n * 13) as u8, n as u8, i as u8, 255]))
+            .collect();
+        let layer_bytes = 16 * 16 * 4;
+        let parallel = generate_chains(&layers, layer_bytes, (16, 16), 4);
+        let sequential: Vec<_> = layers
+            .chunks_exact(layer_bytes)
+            .map(|one| generate_chain(one, 16, 16, 4))
+            .collect();
+        assert_eq!(parallel, sequential);
     }
 
     #[test]

@@ -457,6 +457,7 @@ fn make_snapshot(
         leash: None,
         flight: None,
         squish: 0.0,
+        squid: Default::default(),
         horse: None,
         ridden: false,
         block_lights: std::sync::Arc::default(),

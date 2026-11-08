@@ -5,17 +5,23 @@
 //! (`Minecraft.runTick` reads `KeyBinding.isKeyDown` / `isPressed` the same
 //! way for keys and mouse buttons).
 
+use std::path::PathBuf;
+
+use umicraft_core::lang::Lang;
 use umicraft_render::RenderError;
 use winit::event::{ElementState, MouseButton};
 use winit::keyboard::KeyCode;
 
 use super::App;
+use crate::game::GameEvent;
 use crate::options::{Action, Binding};
 use crate::screenshot_file;
 
 impl App {
-    /// Whether the binding of `action` is held. A key also counts through its
-    /// left/right twin, so either Shift, Control or Alt triggers a modifier.
+    /// Whether the binding of `action` is held. Shift and Control are told
+    /// apart: only the key that is bound counts, so the left Shift sneaks and
+    /// the right one is free (it opens the mods menu). Alt still counts
+    /// through its twin.
     pub(super) fn held(&self, action: Action) -> bool {
         match self.options.keys.get(action) {
             Binding::Key(key) => {
@@ -94,10 +100,15 @@ impl App {
             (Err(error), _) => Err(error.to_string()),
             (_, None) => Err("no data folder".to_string()),
         };
-        match saved {
+        match &saved {
             Ok(path) => tracing::info!(path = %path.display(), "saved screenshot"),
             Err(error) => tracing::warn!(%error, "could not save the screenshot"),
         }
+        // `Minecraft.runTick` prints the result in the chat. Without a game
+        // there is no chat to print in: the log above is all there is.
+        self.send_event(GameEvent::LocalChat(screenshot_chat_line(
+            &self.lang, &saved,
+        )));
     }
 
     /// Handles a mouse button while the game owns the mouse. A click with the
@@ -120,14 +131,26 @@ impl App {
     }
 }
 
+/// The chat line that tells how the screenshot went: the name of the file
+/// (`ScreenShotHelper`: `screenshot.success`), or the reason it failed
+/// (`screenshot.failure`).
+fn screenshot_chat_line(lang: &Lang, saved: &Result<PathBuf, String>) -> String {
+    match saved {
+        Ok(path) => {
+            let name = path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            lang.tr_args("umicraft.screenshot.saved", &[&name])
+        }
+        Err(error) => lang.tr_args("umicraft.screenshot.failed", &[error]),
+    }
+}
+
 /// The key on the other side of the keyboard that counts as the same
-/// modifier: holding either Shift, Control or Alt triggers the binding.
+/// modifier: holding either Alt triggers the binding. Shift and Control have
+/// no twin: the left and the right key are two different keys.
 fn modifier_twin(key: KeyCode) -> Option<KeyCode> {
     match key {
-        KeyCode::ShiftLeft => Some(KeyCode::ShiftRight),
-        KeyCode::ShiftRight => Some(KeyCode::ShiftLeft),
-        KeyCode::ControlLeft => Some(KeyCode::ControlRight),
-        KeyCode::ControlRight => Some(KeyCode::ControlLeft),
         KeyCode::AltLeft => Some(KeyCode::AltRight),
         KeyCode::AltRight => Some(KeyCode::AltLeft),
         _ => None,
@@ -138,10 +161,47 @@ fn modifier_twin(key: KeyCode) -> Option<KeyCode> {
 mod tests {
     use super::*;
 
+    fn lang() -> Lang {
+        Lang::builtin().with_client_layer(
+            Some("umicraft.screenshot.saved=Saved screenshot as %s\numicraft.screenshot.failed=Failed: %s\n"),
+            None,
+        )
+    }
+
     #[test]
-    fn a_modifier_is_held_through_its_twin() {
-        assert_eq!(modifier_twin(KeyCode::ShiftLeft), Some(KeyCode::ShiftRight));
+    fn the_chat_names_the_file_that_was_saved() {
+        let saved = Ok(PathBuf::from("C:/data/screenshots/2026-11-08_06.47.56.png"));
+        assert_eq!(
+            screenshot_chat_line(&lang(), &saved),
+            "Saved screenshot as 2026-11-08_06.47.56.png"
+        );
+    }
+
+    #[test]
+    fn the_chat_gives_the_reason_when_the_screenshot_failed() {
+        let failed = Err("no data folder".to_string());
+        assert_eq!(
+            screenshot_chat_line(&lang(), &failed),
+            "Failed: no data folder"
+        );
+    }
+
+    #[test]
+    fn alt_is_held_through_its_twin() {
+        assert_eq!(modifier_twin(KeyCode::AltLeft), Some(KeyCode::AltRight));
         assert_eq!(modifier_twin(KeyCode::AltRight), Some(KeyCode::AltLeft));
         assert_eq!(modifier_twin(KeyCode::KeyW), None);
+    }
+
+    #[test]
+    fn the_left_and_right_shift_and_control_are_different_keys() {
+        for key in [
+            KeyCode::ShiftLeft,
+            KeyCode::ShiftRight,
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+        ] {
+            assert_eq!(modifier_twin(key), None, "{key:?}");
+        }
     }
 }

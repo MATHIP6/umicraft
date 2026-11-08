@@ -104,9 +104,10 @@ and `icons` (original icons built from primitives: gear, power).
 - `classic.rs`: the vanilla screen, unchanged.
 - `modern/`: `layout.rs` (pure layout), `wordmark.rs` (logo and "UMICRAFT"),
   `mod.rs` (`show`). The modern screen has two buttons, **Play** (opens the
-  server list) and **Options**. The first version also had a small power
-  icon to quit; the owner removed it on 2026-11-07, so the player quits by
-  closing the window (the classic style keeps its Quit Game button).
+  server list) and **Options**, and a small rounded cross (`×`) in the top
+  right corner that quits. The first version had a power icon to quit; the
+  owner removed it on 2026-11-07, then asked on 2026-11-08 for a simple, small
+  cross in the top right corner instead.
 
 The style is stored in `options.toml` as `[menu] title_style = "modern"` and
 switched from the main options page. While no brand atlas is bound (the font

@@ -21,7 +21,7 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
     AchievementsData, AchievementsOutcome, AchievementsScreen, ConfirmOutcome, ConfirmScreen,
     ConnectStage, ConnectingOutcome, ConnectingScreen, DisconnectedOutcome, DisconnectedScreen,
-    PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome, ServerEditScreen,
+    ModsScreen, PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome, ServerEditScreen,
     ServerListOutcome, ServerListScreen, ServerRow, StatsData, StatsOutcome, StatsScreen,
     TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
 };
@@ -124,6 +124,7 @@ pub struct MenuFlow {
     stats_data: Option<(u64, StatsData)>,
     achievements: AchievementsScreen,
     achievements_data: Option<(u64, AchievementsData)>,
+    mods: ModsScreen,
     book: ServerBook,
     pinger: Option<Pinger>,
     rows: Vec<ServerRow>,
@@ -151,6 +152,7 @@ impl MenuFlow {
             stats_data: None,
             achievements: AchievementsScreen::new(),
             achievements_data: None,
+            mods: ModsScreen::new(),
             book,
             pinger,
             rows: Vec::new(),
@@ -188,6 +190,8 @@ impl MenuFlow {
                 self.achievements = AchievementsScreen::new();
                 self.achievements_data = None;
             }
+            // A new menu each time: its opening animation plays again.
+            Screen::Mods => self.mods = ModsScreen::new(),
             _ => {}
         }
     }
@@ -205,6 +209,12 @@ impl MenuFlow {
         self.disconnected = Some(DisconnectedScreen::new(end.title_key(), &end.reason(lang)));
     }
 
+    /// Tells the title screen whether the window has the focus, so its opening
+    /// animation starts when the player is there to see it.
+    pub fn set_window_focused(&mut self, focused: bool) {
+        self.title.set_focused(focused);
+    }
+
     /// Advances the animations and the double-click timer by `elapsed`.
     pub fn advance(&mut self, elapsed: Duration) {
         /// A stalled frame must not replay seconds of animation.
@@ -217,6 +227,7 @@ impl MenuFlow {
             self.list.tick();
             self.stats.tick();
             self.achievements.tick();
+            self.mods.tick();
             if let Some(edit) = self.edit.as_mut() {
                 edit.tick();
             }
@@ -258,6 +269,7 @@ impl MenuFlow {
             Screen::Disconnected => self.show_disconnected(ui, atlas, lang),
             Screen::Stats => self.show_stats(ui, atlas, lang, context),
             Screen::Achievements => self.show_achievements(ui, atlas, lang, context),
+            Screen::Mods => self.show_mods(ui, lang, context),
             _ => None,
         };
         MenuFrame { command, panorama }
@@ -492,5 +504,6 @@ fn valid_address(text: &str) -> bool {
 
 mod edit;
 mod icons;
+mod mods;
 #[cfg(test)]
 mod tests;

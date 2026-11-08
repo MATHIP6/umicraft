@@ -48,6 +48,7 @@ use crate::entity_pass::{EntityRenderer, EntityVertex};
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
 use crate::gpu_timer::{self, GpuTimer, GpuTimings};
+use crate::hires_blocks::{self, HiresBlocks};
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::mipmap;
 use crate::outline::{OutlineBox, OutlineRenderer};
@@ -55,6 +56,7 @@ use crate::overlay::{Overlay, OverlayVertex};
 use crate::overlays::{Pictures, ScreenOverlays, ScreenRenderer};
 use crate::panorama::PanoramaRenderer;
 use crate::particles::{ParticleRenderer, ParticleSprite};
+use crate::scene_blur::SceneBlur;
 use crate::sky::{SkyImage, SkyRenderer, SkyState, SkyTextures};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
 use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
@@ -318,6 +320,9 @@ pub struct Renderer {
     /// The official block array and its layer size, kept so animated layers
     /// can be rewritten in place; `None` while the procedural array is bound.
     official_blocks: Option<(wgpu::Texture, u32, u32)>,
+    /// The textures larger than the layers of the block array, kept at their
+    /// size in a second array.
+    hires: HiresBlocks,
     overlay_pipeline: wgpu::RenderPipeline,
     /// The name tags of the frame, drawn in the world pass.
     nametags: NametagRenderer,
@@ -382,6 +387,9 @@ pub struct Renderer {
     camera_bind_group: wgpu::BindGroup,
     entity_renderer: EntityRenderer,
     outline: OutlineRenderer,
+    /// The blur of the game behind a menu, and whether a menu asks for it.
+    scene_blur: SceneBlur,
+    background_blur: bool,
     entity_batches: BatchBuffer,
     /// The glowing layers of the entities, drawn after them.
     additive_batches: BatchBuffer,
@@ -644,6 +652,27 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // The large textures: a second array and the map to it.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let overlay_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -668,12 +697,14 @@ impl Renderer {
             ],
         });
 
+        let hires = HiresBlocks::none(&device, &queue);
         let terrain_bind_group = create_terrain_bind_group(
             &device,
             &terrain_layout,
             &camera_buffer,
             &block_sampler,
             &block_view,
+            &hires,
         );
         let local_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("local camera uniform"),
@@ -687,6 +718,7 @@ impl Renderer {
             &local_camera_buffer,
             &block_sampler,
             &block_view,
+            &hires,
         );
         let chunk_bind_group = create_terrain_bind_group(
             &device,
@@ -694,6 +726,7 @@ impl Renderer {
             &camera_buffer,
             &mip_sampler,
             &block_view,
+            &hires,
         );
         let overlay_bind_group =
             create_font_bind_group(&device, &overlay_layout, &font_sampler, &font_view);
@@ -873,6 +906,7 @@ impl Renderer {
             None
         };
         let depth_view = create_depth(&device, width, height);
+        let scene_blur = SceneBlur::new(&device, &queue, (width, height), format);
 
         let icon_atlas = IconAtlas::new(&device, &queue, format);
         let icon_pipeline = create_terrain_pipeline(
@@ -888,6 +922,7 @@ impl Renderer {
             icon_atlas.camera_buffer(),
             &block_sampler,
             &block_view,
+            &hires,
         );
         let icon_entity_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("icon entity camera bind group"),
@@ -906,6 +941,7 @@ impl Renderer {
             &hand_camera_buffer,
             &block_sampler,
             &block_view,
+            &hires,
         );
         let icon_gui_bind_group = create_font_bind_group(
             &device,
@@ -976,6 +1012,7 @@ impl Renderer {
             environment: RenderEnvironment::default(),
             block_sampler,
             procedural_blocks: block_view,
+            hires,
             official_blocks: None,
             overlay_pipeline,
             nametags,
@@ -1010,6 +1047,8 @@ impl Renderer {
             camera_bind_group,
             entity_renderer,
             outline,
+            scene_blur,
+            background_blur: false,
             entity_batches: BatchBuffer::default(),
             additive_batches: BatchBuffer::default(),
             glint_batches: BatchBuffer::default(),
@@ -1164,6 +1203,16 @@ impl Renderer {
     pub fn set_selection_outline(&mut self, boxes: &[OutlineBox]) {
         self.outline
             .set_boxes(&self.queue, boxes, (self.width, self.height));
+    }
+
+    /// Blurs the game behind the HUD and the UI (the mods menu) by `strength`,
+    /// `0.0` (sharp) to `1.0` (fully blurred); a menu raises it over its
+    /// opening to fade the blur in. The window calls this every frame; a frame
+    /// with any blur costs two extra full-screen copies and four
+    /// half-resolution passes, a sharp one costs nothing.
+    pub fn set_background_blur(&mut self, strength: f32) {
+        self.background_blur = strength > 0.0;
+        self.scene_blur.set_strength(&self.queue, strength);
     }
 
     /// Draws one frame with the M3 HUD overlay only.
@@ -1655,28 +1704,9 @@ impl Renderer {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
-        self.terrain_bind_group = create_terrain_bind_group(
-            &self.device,
-            &self.terrain_layout,
-            &self.camera_buffer,
-            &self.block_sampler,
-            &view,
-        );
-        self.local_terrain_bind_group = create_terrain_bind_group(
-            &self.device,
-            &self.terrain_layout,
-            &self.local_camera_buffer,
-            &self.block_sampler,
-            &view,
-        );
-        self.chunk_bind_group = create_terrain_bind_group(
-            &self.device,
-            &self.terrain_layout,
-            &self.camera_buffer,
-            &self.mip_sampler,
-            &view,
-        );
-        self.rebind_icons(&view);
+        // The large textures of the previous array belong to it.
+        self.hires = HiresBlocks::none(&self.device, &self.queue);
+        self.rebind_block_groups(&view);
         self.cutout = cutout_layers(pixels, width as usize * height as usize * 4);
         self.cutout_epoch += 1;
         self.official_blocks = Some((texture, width, height));
@@ -1711,10 +1741,7 @@ impl Renderer {
         if levels == 0 {
             return;
         }
-        let chains: Vec<Vec<Vec<u8>>> = pixels
-            .chunks_exact(layer_bytes)
-            .map(|layer| mipmap::generate_chain(layer, width, height, levels))
-            .collect();
+        let chains = mipmap::generate_chains(pixels, layer_bytes, (width, height), levels);
         for level in 1..=levels {
             let joined: Vec<u8> = chains
                 .iter()
@@ -1840,29 +1867,96 @@ impl Renderer {
         self.official_blocks = None;
         self.cutout.clone_from(&self.procedural_cutout);
         self.cutout_epoch += 1;
+        self.hires = HiresBlocks::none(&self.device, &self.queue);
+        let view = self.procedural_blocks.clone();
+        self.rebind_block_groups(&view);
+    }
+
+    /// Binds the block array `view` and the current large textures to every
+    /// pass that samples them: the chunks, the local entities and items, and
+    /// the icon and hand cameras.
+    fn rebind_block_groups(&mut self, view: &wgpu::TextureView) {
         self.terrain_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
             &self.camera_buffer,
             &self.block_sampler,
-            &self.procedural_blocks,
+            view,
+            &self.hires,
         );
         self.local_terrain_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
             &self.local_camera_buffer,
             &self.block_sampler,
-            &self.procedural_blocks,
+            view,
+            &self.hires,
         );
         self.chunk_bind_group = create_terrain_bind_group(
             &self.device,
             &self.terrain_layout,
             &self.camera_buffer,
             &self.mip_sampler,
-            &self.procedural_blocks,
+            view,
+            &self.hires,
         );
-        let view = self.procedural_blocks.clone();
-        self.rebind_icons(&view);
+        self.rebind_icons(view);
+    }
+
+    /// Keeps the textures of the official array that are larger than its
+    /// layers at their own size, in a second array (see `hires_blocks.rs`).
+    ///
+    /// `layers` are `(layer of the block array, RGBA8 pixels)` pairs, each
+    /// `edge` squared; the block array keeps a shrunk copy of each, which the
+    /// shader replaces by the large one. Call it after
+    /// [`Renderer::set_block_atlas`], which clears the previous large
+    /// textures. Nothing happens without an official array, with no layers, or
+    /// with more block layers than the shader's map covers.
+    ///
+    /// # Errors
+    /// [`BlockAtlasError`] when the layers do not fit the device or their
+    /// pixel count does not match; the block array stays as it was.
+    pub fn set_hires_blocks(
+        &mut self,
+        edge: u32,
+        layers: &[(u32, &[u8])],
+    ) -> Result<(), BlockAtlasError> {
+        let Some((blocks, _, _)) = &self.official_blocks else {
+            return Ok(());
+        };
+        if layers.is_empty() || blocks.depth_or_array_layers() > hires_blocks::MAX_MAPPED_LAYERS {
+            return Ok(());
+        }
+        let view = blocks.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("block texture array view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let count = u32::try_from(layers.len()).unwrap_or(u32::MAX);
+        let pixels: Vec<u8> = layers
+            .iter()
+            .flat_map(|(_, one)| one.iter().copied())
+            .collect();
+        let limits = self.device.limits();
+        block_atlas::validate(
+            edge,
+            edge,
+            count,
+            pixels.len(),
+            limits.max_texture_dimension_2d,
+            limits.max_texture_array_layers,
+        )?;
+        let levels = mipmap::level_count(edge, edge, self.mipmap_levels);
+        let texture = hires_blocks::create_array(&self.device, (edge, edge), count, levels);
+        self.upload_block_layers(&texture, (edge, edge), &pixels);
+        let pairs: Vec<(u32, u32)> = layers
+            .iter()
+            .zip(0..)
+            .map(|((layer, _), here)| (*layer, here))
+            .collect();
+        self.hires = HiresBlocks::with_map(&self.device, &self.queue, &texture, &pairs);
+        self.rebind_block_groups(&view);
+        Ok(())
     }
 
     /// Points the icon camera at a replaced block array and forgets the
@@ -1874,6 +1968,7 @@ impl Renderer {
             self.icon_atlas.camera_buffer(),
             &self.block_sampler,
             block_view,
+            &self.hires,
         );
         self.hand_item_bind_group = create_terrain_bind_group(
             &self.device,
@@ -1881,6 +1976,7 @@ impl Renderer {
             &self.hand_camera_buffer,
             &self.block_sampler,
             block_view,
+            &self.hires,
         );
         self.icon_atlas.invalidate();
     }
@@ -2005,6 +2101,8 @@ impl Renderer {
             }
         }
         self.depth_view = create_depth(&self.device, width, height);
+        self.scene_blur
+            .resize(&self.device, &self.queue, (width, height));
         self.ui_pass.resize(width, height);
         if self.offscreen.is_some() {
             self.offscreen = Some(create_offscreen(&self.device, width, height));
@@ -2395,8 +2493,15 @@ impl Renderer {
         self.panorama.prepare(encoder);
         // The reference clears to the fog colour; the dome fades into it.
         let clear = sky_state.fog.color;
+        // With a menu that blurs the game, the world goes to a texture first.
+        let blur = self.background_blur;
+        let world_view = if blur {
+            self.scene_blur.scene_view()
+        } else {
+            view
+        };
         let color_attachment = Some(wgpu::RenderPassColorAttachment {
-            view,
+            view: world_view,
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
@@ -2488,6 +2593,15 @@ impl Renderer {
             .draw_world(&mut pass, &self.local_terrain_bind_group);
         self.stamp(&mut pass, 3);
 
+        // `renderWorldPass` draws the selection box right after the entities,
+        // before the particles, the rain and the translucent layer: they hide
+        // it and water and glass tint it. With the eyes in water it comes
+        // after the translucent layer instead.
+        let eyes_in_water = self.screen_overlays.underwater.is_some();
+        if !eyes_in_water {
+            self.outline.draw(&mut pass, &self.camera_bind_group);
+        }
+
         // The clouds hide behind terrain and hide the water behind them, as in
         // `renderWorldPass`: before the translucent layer from below.
         self.clouds.draw_below(&mut pass);
@@ -2498,7 +2612,7 @@ impl Renderer {
             .draw(&mut pass, &self.local_terrain_bind_group);
         self.weather.draw(&mut pass, &self.local_camera_bind_group);
 
-        // Transparent terrain: water/glass/leaves, farthest chunk first, with
+        // Transparent terrain: water/glass, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
         pass.set_pipeline(&self.terrain_transparent_pipeline);
@@ -2533,7 +2647,10 @@ impl Renderer {
             draw_gpu_pass(&mut pass, cracks);
         }
 
-        self.outline.draw(&mut pass, &self.camera_bind_group);
+        // Under water the box comes after the translucent layer instead.
+        if eyes_in_water {
+            self.outline.draw(&mut pass, &self.camera_bind_group);
+        }
         self.stamp(&mut pass, 4);
 
         // The hand: camera-space vertices under a squeezed depth range.
@@ -2551,6 +2668,37 @@ impl Renderer {
         // `renderOverlays` follows the hand; the GUI's vignette, pumpkin and
         // portal come before the hotbar.
         self.screen.draw(&mut pass, &self.terrain_bind_group);
+
+        if blur {
+            // The world is done: smooth it, lay it over the screen, and draw
+            // the HUD and the menu sharp on top.
+            drop(pass);
+            self.scene_blur.blur(encoder);
+            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("blurred pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.scene_blur.blit(&mut pass);
+        }
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
@@ -3030,8 +3178,8 @@ fn sort_transparent_farthest_first(chunks: &mut [ChunkDraw]) {
     });
 }
 
-/// Binds the camera uniform, one block texture-array view and the block
-/// sampler.
+/// Binds the camera uniform, one block texture-array view, the block sampler
+/// and the second array of large textures with its layer map.
 ///
 /// Shared by [`Renderer::create`] (procedural fallback array) and
 /// [`Renderer::set_block_atlas`] (installed array), so replacing the terrain
@@ -3042,6 +3190,7 @@ fn create_terrain_bind_group(
     camera: &wgpu::Buffer,
     sampler: &wgpu::Sampler,
     view: &wgpu::TextureView,
+    hires: &HiresBlocks,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("terrain bind group"),
@@ -3058,6 +3207,14 @@ fn create_terrain_bind_group(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(hires.view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: hires.map().as_entire_binding(),
             },
         ],
     })

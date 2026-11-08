@@ -27,8 +27,43 @@ pub struct Animation {
     death_time: u8,
     swing: ArmSwing,
     fuse: Fuse,
+    squid: Squid,
     /// The bed the entity sleeps in, if any.
     pub bed: Option<BedPose>,
+}
+
+/// The swimming animation of a squid (MCP `EntitySquid.onLivingUpdate`, the
+/// part a client runs: the server picks the pace and restarts the cycle with
+/// `Entity Status` 19).
+///
+/// shortcut: the squid is always taken to be in water; a squid on land would
+/// flop with `|sin(rotation)|` and lie down, which needs the world.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct Squid {
+    /// Progress of the swim cycle, `0..=2π` (MCP `squidRotation`).
+    rotation: f32,
+    /// Cycle speed per tick (MCP `rotationVelocity`), `0` until the first tick.
+    rotation_velocity: f32,
+    tentacle: f32,
+    previous_tentacle: f32,
+    pitch: f32,
+    previous_pitch: f32,
+    yaw: f32,
+    previous_yaw: f32,
+    /// How hard the squid is thrusting, `0..=1` (MCP `field_70871_bB`).
+    thrust: f32,
+}
+
+/// How a squid is drawn: its tentacle angle in radians, and the pitch and yaw
+/// of its body in degrees.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SquidPose {
+    /// MCP `tentacleAngle`.
+    pub tentacle: f32,
+    /// MCP `squidPitch`.
+    pub pitch: f32,
+    /// MCP `squidYaw`.
+    pub yaw: f32,
 }
 
 /// Ticks a creeper fuse takes (MCP `EntityCreeper.fuseTime`).
@@ -150,6 +185,51 @@ impl Animation {
         let fuse = &mut self.fuse;
         fuse.previous_ticks = fuse.ticks;
         fuse.ticks = fuse.ticks.saturating_add(state).clamp(0, FUSE_TICKS);
+    }
+
+    /// Advances a squid one tick, `velocity` being its motion
+    /// (MCP `EntitySquid.onLivingUpdate`, in water). `seed` picks the pace of
+    /// the cycle, which the server rolls at random (`1 / (rand + 1) * 0.2`).
+    pub fn tick_squid(&mut self, velocity: Vec3, seed: i32) {
+        use std::f32::consts::{PI, TAU};
+        let squid = &mut self.squid;
+        if squid.rotation_velocity == 0.0 {
+            squid.rotation_velocity = 0.2 / (1.0 + seed.rem_euclid(100) as f32 / 100.0);
+        }
+        squid.previous_tentacle = squid.tentacle;
+        squid.previous_pitch = squid.pitch;
+        squid.previous_yaw = squid.yaw;
+        // A client waits at the end of the cycle for the server's status 19.
+        squid.rotation = (squid.rotation + squid.rotation_velocity).min(TAU);
+        if squid.rotation < PI {
+            let f = squid.rotation / PI;
+            squid.tentacle = (f * f * PI).sin() * PI * 0.25;
+            squid.thrust = if f > 0.75 { 1.0 } else { squid.thrust * 0.8 };
+        } else {
+            squid.tentacle = 0.0;
+            squid.thrust *= 0.99;
+        }
+        let horizontal = velocity.x.hypot(velocity.z);
+        squid.yaw += PI * squid.thrust * 1.5;
+        squid.pitch += (-horizontal.atan2(velocity.y).to_degrees() - squid.pitch) * 0.1;
+    }
+
+    /// Restarts the swim cycle of a squid (`Entity Status` 19).
+    pub fn restart_squid_cycle(&mut self) {
+        self.squid.rotation = 0.0;
+    }
+
+    /// The pose of a squid `alpha` of the way into the tick
+    /// (MCP `RenderSquid.rotateCorpse` and `handleRotationFloat`).
+    #[must_use]
+    pub fn squid_at(&self, alpha: f32) -> SquidPose {
+        let squid = &self.squid;
+        let lerp = |from: f32, to: f32| from + (to - from) * alpha;
+        SquidPose {
+            tentacle: lerp(squid.previous_tentacle, squid.tentacle),
+            pitch: lerp(squid.previous_pitch, squid.pitch),
+            yaw: lerp(squid.previous_yaw, squid.yaw),
+        }
     }
 
     /// The creeper flash `alpha` of the way into the tick, `0..=1`
@@ -333,6 +413,35 @@ mod tests {
         let mut animation = Animation::default();
         animation.tick_fuse(1);
         assert!((animation.fuse_flash_at(0.5) - 0.5 / 28.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_squid_pulses_its_tentacles_then_waits_for_the_server_to_restart_the_cycle() {
+        let mut animation = Animation::default();
+        let mut peak = 0.0_f32;
+        for _ in 0..100 {
+            animation.tick_squid(Vec3::ZERO, 0);
+            peak = peak.max(animation.squid_at(1.0).tentacle);
+        }
+        // `sin(f² π) · π / 4` reaches about 0.78 in the first half-cycle.
+        assert!(peak > 0.7, "{peak}");
+        assert_eq!(animation.squid_at(1.0).tentacle, 0.0, "idle at 2π");
+        animation.restart_squid_cycle();
+        animation.tick_squid(Vec3::ZERO, 0);
+        assert!(animation.squid_at(1.0).tentacle > 0.0);
+    }
+
+    #[test]
+    fn a_squid_leans_into_its_motion_and_hangs_when_still() {
+        let mut animation = Animation::default();
+        for _ in 0..80 {
+            animation.tick_squid(Vec3::new(0.2, 0.0, 0.0), 0);
+        }
+        assert!((animation.squid_at(1.0).pitch + 90.0).abs() < 1.0);
+        for _ in 0..80 {
+            animation.tick_squid(Vec3::ZERO, 0);
+        }
+        assert!(animation.squid_at(1.0).pitch.abs() < 1.0);
     }
 
     #[test]

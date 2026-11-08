@@ -89,7 +89,7 @@ pub mod sound_assets;
 mod zip;
 
 pub use animation::TextureAnimation;
-pub use atlas::BlockAtlas;
+pub use atlas::{BlockAtlas, HiresLayer};
 pub use client_resources::{ClientResources, GlintTexture, ACHIEVEMENT_TILES};
 pub use colormap::{BiomeColormaps, Colormap};
 pub use dial::{DialKind, DialSprite};

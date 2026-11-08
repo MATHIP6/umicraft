@@ -73,6 +73,7 @@ pub(super) fn network_config(
         skin_parts: options.skin.parts_mask(),
         handshake_host: args.handshake_host.clone().filter(|_| is_cli_server),
         decline_server_packs: pack_mode == ResourcePackMode::Disabled,
+        account_skin: true,
     }
 }
 

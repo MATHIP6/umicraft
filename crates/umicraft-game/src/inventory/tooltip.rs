@@ -724,6 +724,57 @@ mod tests {
     }
 
     #[test]
+    fn all_twenty_seven_spawn_eggs_are_named_after_their_own_mob() {
+        // `EntityList.entityEggs` of the reference, in id order: the entity id
+        // and its `EntityList.getStringFromID` name, which the language file
+        // turns into the name of the mob (`entity.<name>.name`).
+        const EGGS: [(i16, &str); 27] = [
+            (50, "Creeper"),
+            (51, "Skeleton"),
+            (52, "Spider"),
+            (54, "Zombie"),
+            (55, "Slime"),
+            (56, "Ghast"),
+            (57, "PigZombie"),
+            (58, "Enderman"),
+            (59, "CaveSpider"),
+            (60, "Silverfish"),
+            (61, "Blaze"),
+            (62, "LavaSlime"),
+            (65, "Bat"),
+            (66, "Witch"),
+            (67, "Endermite"),
+            (68, "Guardian"),
+            (90, "Pig"),
+            (91, "Sheep"),
+            (92, "Cow"),
+            (93, "Chicken"),
+            (94, "Squid"),
+            (95, "Wolf"),
+            (96, "MushroomCow"),
+            (98, "Ozelot"),
+            (100, "EntityHorse"),
+            (101, "Rabbit"),
+            (120, "Villager"),
+        ];
+        let mut names = std::collections::HashSet::new();
+        for (damage, entity) in EGGS {
+            let lines = tooltip(&stack(383, damage, None));
+            assert_eq!(
+                lines[0].text,
+                TooltipText::Concat(vec![
+                    key("item.monsterPlacer.name"),
+                    TooltipText::literal(" "),
+                    key(&format!("entity.{entity}.name")),
+                ]),
+                "egg {damage}"
+            );
+            names.insert(entity);
+        }
+        assert_eq!(names.len(), 27, "every egg has a different name");
+    }
+
+    #[test]
     fn unknown_item_has_a_literal_common_name() {
         let lines = tooltip(&stack(30_000, 0, None));
         assert_eq!(lines.len(), 1);

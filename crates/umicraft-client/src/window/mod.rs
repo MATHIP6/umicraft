@@ -82,8 +82,10 @@ use crate::world_view::WorldView;
 mod binding_input;
 mod chat_control;
 mod creative_window;
+mod hotbar_scroll;
 mod inventory_control;
 mod menu_screens;
+mod mods_menu;
 mod options_control;
 mod server_pack;
 mod server_pack_control;
@@ -436,6 +438,20 @@ impl App {
             }
             return;
         }
+        // The screenshot key works on every screen, the options aside (a key
+        // being rebound there must reach the page): in the reference tick it
+        // sits outside the key handling of the screens.
+        if event.state == ElementState::Pressed
+            && !event.repeat
+            && self.screen() != Screen::Options
+            && matches!(self.options.keys.get(Action::Screenshot), Binding::Key(key) if key == code)
+        {
+            self.screenshot_requested = true;
+            return;
+        }
+        if self.take_mods_shortcut(&event, code) {
+            return;
+        }
         match self.screen() {
             Screen::Debug | Screen::PackPrompt => {
                 self.ui_input.key(code, event.state, event.text.as_deref());
@@ -467,6 +483,10 @@ impl App {
             }
             Screen::Options => {
                 self.handle_options_key(event);
+                return;
+            }
+            Screen::Mods => {
+                self.handle_mods_key(&event);
                 return;
             }
             Screen::Title
@@ -1007,7 +1027,8 @@ impl App {
                 | Screen::Connecting
                 | Screen::Disconnected
                 | Screen::Stats
-                | Screen::Achievements => {
+                | Screen::Achievements
+                | Screen::Mods => {
                     let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
                     let inventory_key = self.options.keys.get(Action::Inventory).label(&self.lang);
                     let context = MenuContext {
@@ -1194,6 +1215,9 @@ impl App {
                 renderer.write_block_layer(layer, pixels);
             });
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
+        // The mods menu blurs the game behind it to keep the focus on itself.
+        let blur = mods_menu::background_blur(self.screen, &self.menu);
+        renderer.set_background_blur(blur);
         renderer.set_nametags(&self.nametags, (width, height));
         if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
         {
@@ -1629,6 +1653,9 @@ impl ApplicationHandler for App {
                         0
                     };
                     self.scroll_chat(rows);
+                } else {
+                    // In a running game the wheel scrolls the hotbar.
+                    self.scroll_hotbar(delta);
                 }
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
@@ -1638,11 +1665,29 @@ impl ApplicationHandler for App {
                     self.chat_input.insert(&text);
                 }
             }
+            // Coming back to a game with no screen open takes the mouse again,
+            // so the player moves at once. The loss of the focus let it go;
+            // an open screen (inventory, menu, death screen) keeps the pointer
+            // free as before.
+            WindowEvent::Focused(true) => {
+                if self.session.is_some()
+                    && self.screen() == Screen::None
+                    && !self.death_screen_visible()
+                {
+                    self.capture_mouse(true);
+                }
+            }
             WindowEvent::Focused(false) => {
                 self.keys.clear();
                 self.buttons.clear();
                 self.capture_mouse(false);
                 self.ui_input.clear();
+                // A fullscreen window that loses the focus goes to the taskbar,
+                // as in the reference. Left alone, the taskbar comes back over
+                // it and shows the game through a see-through taskbar.
+                if let Some(window) = self.window.as_ref().filter(|w| w.fullscreen().is_some()) {
+                    window.set_minimized(true);
+                }
             }
             WindowEvent::RedrawRequested => self.redraw(event_loop),
             _ => {}

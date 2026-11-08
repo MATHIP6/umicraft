@@ -4,8 +4,8 @@
 //!
 //! Original design (ADR-0056): the logo and the wordmark sit just above the
 //! vertical centre and the two buttons just below it. Everything is centred
-//! on `width / 2`, so the screen
-//! keeps its balance from the smallest window to a wide monitor.
+//! on `width / 2`, so the screen keeps its balance from the smallest window to
+//! a wide monitor. The quit cross sits alone in the top right corner.
 
 use crate::geom::Rect;
 use crate::menus::common::Gui;
@@ -22,8 +22,13 @@ const WORDMARK_GAP: f32 = 18.0;
 const BUTTON_WIDTH: f32 = 160.0;
 /// Height of one main button.
 const BUTTON_HEIGHT: f32 = 22.0;
-/// Vertical gap between the two main buttons.
+/// Vertical gap between the main buttons.
 const BUTTON_GAP: f32 = 6.0;
+/// Edge of the square quit button: a quarter of the logo cube, so the two
+/// keep their proportion at every GUI scale.
+const QUIT_SIZE: f32 = LOGO_SIZE * 0.25;
+/// Distance of the quit button from the top and right edges: half its edge.
+const QUIT_MARGIN: f32 = QUIT_SIZE * 0.5;
 
 /// The rectangles of the modern title screen, in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -36,6 +41,8 @@ pub struct ModernTitleLayout {
     pub play: Rect,
     /// The Options button.
     pub options: Rect,
+    /// The cross in the top right corner that quits the game.
+    pub quit: Rect,
 }
 
 /// Computes the modern layout for `viewport`.
@@ -57,6 +64,12 @@ pub fn modern_title_layout(viewport: Rect) -> ModernTitleLayout {
         wordmark: gui.rect(0.0, wordmark_top, gui.width, WORDMARK_HEIGHT),
         play: button(play_top),
         options: button(play_top + BUTTON_HEIGHT + BUTTON_GAP),
+        quit: gui.rect(
+            gui.width - QUIT_MARGIN - QUIT_SIZE,
+            QUIT_MARGIN,
+            QUIT_SIZE,
+            QUIT_SIZE,
+        ),
     }
 }
 
@@ -88,6 +101,24 @@ mod tests {
         assert!(bottom(layout.wordmark) <= layout.play.y);
         assert!(bottom(layout.play) <= layout.options.y);
         assert!(bottom(layout.options) <= VIEWPORT.y + VIEWPORT.height);
+    }
+
+    #[test]
+    fn the_quit_cross_sits_in_the_top_right_corner_clear_of_the_block() {
+        let layout = modern_title_layout(VIEWPORT);
+        let right = VIEWPORT.x + VIEWPORT.width;
+        assert!(layout.quit.x + layout.quit.width < right && layout.quit.y > VIEWPORT.y);
+        assert!(
+            (layout.quit.width - layout.quit.height).abs() < 1e-3,
+            "square"
+        );
+        assert!(layout.quit.x >= layout.play.x + layout.play.width);
+    }
+
+    #[test]
+    fn the_quit_cross_is_a_quarter_of_the_logo_cube() {
+        let layout = modern_title_layout(VIEWPORT);
+        assert!((layout.quit.width * 4.0 - layout.logo.width).abs() < 1e-2);
     }
 
     #[test]
