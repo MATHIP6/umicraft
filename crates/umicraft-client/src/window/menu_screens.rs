@@ -12,9 +12,9 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::game_menu::GameMenuAction;
 use umicraft_ui::menus::{draw_toast, TitleStyle, Toast};
 use umicraft_ui::{FontAtlas, Ui};
-use winit::event::{ElementState, KeyEvent};
+use winit::event::KeyEvent;
 use winit::event_loop::ActiveEventLoop;
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::PhysicalKey;
 
 use super::{upload_gui_atlas, App};
 use crate::achievements_view::{toast_content, AchievementsContext};
@@ -42,30 +42,6 @@ impl App {
     /// classic one while no brand font is bound.
     pub(super) fn title_style(&self) -> TitleStyle {
         shown_title_style(self.options.menu.style(), self.brand_atlas.is_some())
-    }
-
-    /// Opens the mods menu over the game, or closes it when it is open.
-    pub(super) fn toggle_mods_menu(&mut self) {
-        let next = if self.screen == Screen::Mods {
-            Screen::None
-        } else {
-            Screen::Mods
-        };
-        self.set_screen(next);
-    }
-
-    /// Hands a key to the mods menu: Escape closes it, the rest goes to the UI.
-    pub(super) fn handle_mods_key(&mut self, event: &KeyEvent) {
-        let PhysicalKey::Code(code) = event.physical_key else {
-            return;
-        };
-        if code == KeyCode::Escape {
-            if event.state == ElementState::Pressed && !event.repeat {
-                self.set_screen(Screen::None);
-            }
-            return;
-        }
-        self.ui_input.key(code, event.state, event.text.as_deref());
     }
 
     pub(super) fn advance_menus(&mut self, elapsed: Duration) {

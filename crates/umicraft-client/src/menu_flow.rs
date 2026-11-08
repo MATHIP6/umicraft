@@ -21,9 +21,9 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
     AchievementsData, AchievementsOutcome, AchievementsScreen, ConfirmOutcome, ConfirmScreen,
     ConnectStage, ConnectingOutcome, ConnectingScreen, DisconnectedOutcome, DisconnectedScreen,
-    ModsOutcome, ModsScreen, PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome,
-    ServerEditScreen, ServerListOutcome, ServerListScreen, ServerRow, StatsData, StatsOutcome,
-    StatsScreen, TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
+    ModsScreen, PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome, ServerEditScreen,
+    ServerListOutcome, ServerListScreen, ServerRow, StatsData, StatsOutcome, StatsScreen,
+    TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
 };
 use umicraft_ui::{FontAtlas, Ui};
 
@@ -275,27 +275,6 @@ impl MenuFlow {
         MenuFrame { command, panorama }
     }
 
-    /// How blurred the game behind the mods menu is, `0.0` to `1.0`: it fades
-    /// in while the menu opens.
-    #[must_use]
-    pub fn mods_blur(&self) -> f32 {
-        self.mods.blur_strength(self.partial_tick())
-    }
-
-    /// The mods menu over the game. Its Mods button leads nowhere yet.
-    fn show_mods(
-        &mut self,
-        ui: &mut Ui,
-        lang: &Lang,
-        context: &MenuContext<'_>,
-    ) -> Option<MenuCommand> {
-        let partial_tick = self.partial_tick();
-        match self.mods.show(ui, context.brand_font, lang, partial_tick)? {
-            ModsOutcome::Close => Some(MenuCommand::GoTo(Screen::None)),
-            ModsOutcome::OpenMods => None,
-        }
-    }
-
     fn show_title(
         &mut self,
         ui: &mut Ui,
@@ -525,5 +504,6 @@ fn valid_address(text: &str) -> bool {
 
 mod edit;
 mod icons;
+mod mods;
 #[cfg(test)]
 mod tests;

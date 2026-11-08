@@ -84,6 +84,7 @@ mod chat_control;
 mod creative_window;
 mod inventory_control;
 mod menu_screens;
+mod mods_menu;
 mod options_control;
 mod server_pack;
 mod server_pack_control;
@@ -447,18 +448,7 @@ impl App {
             self.screenshot_requested = true;
             return;
         }
-        // The right Shift key opens the mods menu over a game and closes it
-        // again; the left one stays the sneak key. It is taken before the key
-        // bindings so it triggers no action bound to it, and only where it
-        // means something: elsewhere it stays a plain modifier.
-        if code == KeyCode::ShiftRight
-            && self.session.is_some()
-            && !self.death_screen_visible()
-            && matches!(self.screen(), Screen::None | Screen::Mods)
-        {
-            if event.state == ElementState::Pressed && !event.repeat {
-                self.toggle_mods_menu();
-            }
+        if self.take_mods_shortcut(&event, code) {
             return;
         }
         match self.screen() {
@@ -1225,11 +1215,7 @@ impl App {
             });
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
         // The mods menu blurs the game behind it to keep the focus on itself.
-        let blur = if self.screen == Screen::Mods {
-            self.menu.mods_blur()
-        } else {
-            0.0
-        };
+        let blur = mods_menu::background_blur(self.screen, &self.menu);
         renderer.set_background_blur(blur);
         renderer.set_nametags(&self.nametags, (width, height));
         if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
