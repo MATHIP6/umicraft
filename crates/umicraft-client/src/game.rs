@@ -470,15 +470,12 @@ impl Session {
         let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(network::COMMAND_CAPACITY);
         let stop = Arc::new(AtomicBool::new(false));
         let counters = Arc::new(SessionCounters::default());
-        let own_name = config.name.clone();
+        let own_name = config.login_name().to_owned();
         // The skin of the account, premium or not: a premium session names its
         // profile, an offline account only has a name to look up.
         let account_skin = config.account_skin.then(|| {
-            let (name, uuid) = match &config.session {
-                Some(session) => (session.username.as_str(), Some(session.uuid.as_str())),
-                None => (config.name.as_str(), None),
-            };
-            AccountSkinFetcher::spawn(name, uuid)
+            let uuid = config.session.as_ref().map(|session| session.uuid.as_str());
+            AccountSkinFetcher::spawn(config.login_name(), uuid)
         });
 
         let network = network::spawn(
@@ -923,8 +920,17 @@ impl Game {
             vitals: self.hud_view.views().vitals.clone(),
             bar: self.hud_view.views().bar,
             held_name: self.hud_view.views().held_name.clone(),
+            ping_ms: self.local_ping_ms(),
             ..HudState::default()
         }
+    }
+
+    /// The latency in the local player's own tab list entry, which is how the
+    /// server reports it (MCP `NetworkPlayerInfo.getResponseTime`). A negative
+    /// value is not a measure.
+    fn local_ping_ms(&self) -> Option<u32> {
+        let entry = self.player_list.by_name(&self.own_name)?;
+        u32::try_from(entry.ping).ok()
     }
 }
 
@@ -4382,6 +4388,31 @@ mod tests {
             game.body.profile.as_ref().map(|p| p.name.to_string()),
             Some("Me".to_owned())
         );
+    }
+
+    #[test]
+    fn the_hud_carries_the_ping_of_the_local_tab_list_entry() {
+        use umicraft_protocol::packets::play::clientbound::player_list_item::AddPlayerEntry;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.own_name = "Me".to_owned();
+        assert_eq!(game.hud().ping_ms, None, "not listed yet");
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let entry = |uuid: u8, name: &str, ping: i32| AddPlayerEntry {
+            uuid: u128::from_be_bytes([uuid; 16]),
+            name: name.to_owned(),
+            properties: Vec::new(),
+            game_mode: 0,
+            ping,
+            display_name: None,
+        };
+        let event = PlayEvent::PlayerListItem(PlayerListItem::AddPlayer(vec![
+            entry(1, "Other", 250),
+            entry(2, "Me", 42),
+        ]));
+        handle_net(&mut game, event, &mut queue, &frames);
+        assert_eq!(game.hud().ping_ms, Some(42), "the own entry, not another");
     }
 
     #[test]

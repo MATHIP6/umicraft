@@ -152,6 +152,13 @@ impl PlayerList {
         self.entries.iter().find(|entry| entry.uuid == *uuid)
     }
 
+    /// The entry of the player called `name`; the client finds its own entry
+    /// this way, as the server does not say which one it is.
+    #[must_use]
+    pub fn by_name(&self, name: &str) -> Option<&PlayerEntry> {
+        self.entries.iter().find(|entry| entry.name == name)
+    }
+
     fn entry_mut(&mut self, uuid: &Uuid) -> Option<&mut PlayerEntry> {
         self.entries.iter_mut().find(|entry| entry.uuid == *uuid)
     }
