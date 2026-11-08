@@ -25,7 +25,8 @@ use std::sync::Arc;
 use bytemuck::{Pod, Zeroable};
 use glam::{DVec3, Vec3};
 use umicraft_mesh::item::ItemMesh;
-use umicraft_mesh::{Mesh, Vertex, TEXTURE_LAYERS};
+use umicraft_mesh::visibility::Connectivity;
+use umicraft_mesh::{Mesh, Vertex, VertexSpan, TEXTURE_LAYERS};
 use umicraft_ui::menus::{PanoramaTextures, PanoramaView};
 use umicraft_ui::{DrawCommand, DrawList, FontAtlas};
 use umicraft_world::ChunkPos;
@@ -37,7 +38,10 @@ use crate::block_atlas::{self, BlockAtlasError};
 use crate::border::{BorderRenderer, BorderView};
 use crate::camera::{Camera, Frustum};
 use crate::capture;
-use crate::chunk_pass::{create_chunk_pass, cutout_layers, ChunkPass, QuadIndices};
+use crate::cave_graph::CaveGraph;
+use crate::chunk_pass::{
+    create_chunk_pass, cutout_layers, ChunkPass, Group, QuadIndices, SECTIONS,
+};
 use crate::clouds::{CloudMode, CloudRenderer};
 use crate::dynamic_blocks::MovingBlocksPass;
 use crate::entity_pass::{EntityRenderer, EntityVertex};
@@ -165,6 +169,9 @@ pub(crate) struct GpuMeshPass {
 struct GpuMesh {
     opaque: Option<ChunkPass>,
     transparent: Option<ChunkPass>,
+    /// Which faces of each section see each other, for cave culling; all open
+    /// for a mesh that came without sections.
+    connectivity: [Connectivity; SECTIONS],
 }
 
 /// One chunk queued for a sorted pass: opaque ones go near to far (less
@@ -173,6 +180,9 @@ struct GpuMesh {
 struct ChunkDraw {
     pos: ChunkPos,
     distance_sq: f32,
+    /// The sections to draw (bit `s` = section `s`): in the frustum and not
+    /// hidden by the cave graph.
+    sections: u16,
 }
 
 /// RGBA8 pixels returned by [`Renderer::read_pixels`].
@@ -232,6 +242,12 @@ pub struct Renderer {
     procedural_cutout: Vec<bool>,
     /// Reused by `upload_mesh` to put the solid quads first.
     chunk_scratch: Vec<Vertex>,
+    /// Cave culling (F2-3d): the sections the camera can see through the
+    /// connectivity of the others.
+    cave_graph: CaveGraph,
+    cave_culling: bool,
+    /// Bumped whenever a chunk mesh is added, replaced or removed.
+    chunks_version: u64,
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
     terrain_transparent_pipeline: wgpu::RenderPipeline,
@@ -920,6 +936,9 @@ impl Renderer {
             ),
             cutout: cutout_layers(&block_data, (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize),
             cutout_epoch: 0,
+            cave_graph: CaveGraph::default(),
+            cave_culling: true,
+            chunks_version: 0,
             chunk_scratch: Vec::new(),
             terrain_transparent_pipeline,
             crack_pipeline,
@@ -1360,13 +1379,29 @@ impl Renderer {
         let reach = i32::from(self.environment.view_distance);
         self.visible_opaque.clear();
         self.transparent_order.clear();
-        for (pos, mesh) in &self.chunks {
+        let chunks = &self.chunks;
+        if self.cave_culling {
+            self.cave_graph
+                .update((eye.x, eye.y, eye.z), reach, self.chunks_version, |pos| {
+                    chunks.get(&pos).map(|mesh| &mesh.connectivity)
+                });
+        }
+        let cave = self.cave_culling.then_some(&self.cave_graph);
+        for (pos, mesh) in chunks {
             if !chunk_is_visible(*pos, eye_chunk, reach, &frustum, origin) {
+                continue;
+            }
+            let mut sections = sections_in_frustum(*pos, &frustum, origin);
+            if let Some(cave) = cave {
+                sections &= cave.mask(*pos);
+            }
+            if sections == 0 {
                 continue;
             }
             let draw = ChunkDraw {
                 pos: *pos,
                 distance_sq: squared_distance_to_chunk(*pos, eye),
+                sections,
             };
             if mesh.opaque.is_some() {
                 self.visible_opaque.push(draw);
@@ -1845,14 +1880,28 @@ impl Renderer {
     /// sorted transparent pass. A half with no faces gets no buffer.
     pub fn upload_mesh(&mut self, pos: ChunkPos, mesh: &Mesh) {
         umicraft_core::profile_scope!("upload_mesh");
+        self.chunks_version += 1;
         if mesh.is_empty() {
             self.chunks.remove(&pos);
             return;
         }
+        // The spans of each pass, when the mesher produced them.
+        let has_sections = mesh.sections.len() == SECTIONS;
+        let opaque_spans: [VertexSpan; SECTIONS] = std::array::from_fn(|i| {
+            mesh.sections
+                .get(i)
+                .map_or_else(Default::default, |s| s.opaque)
+        });
+        let transparent_spans: [VertexSpan; SECTIONS] = std::array::from_fn(|i| {
+            mesh.sections
+                .get(i)
+                .map_or_else(Default::default, |s| s.transparent)
+        });
         let opaque = create_chunk_pass(
             &self.device,
             "chunk opaque",
             &mesh.vertices,
+            has_sections.then_some(&opaque_spans[..]),
             Some((&self.cutout, self.cutout_epoch)),
             &mut self.chunk_scratch,
         );
@@ -1860,6 +1909,7 @@ impl Renderer {
             &self.device,
             "chunk transparent",
             &mesh.transparent_vertices,
+            has_sections.then_some(&transparent_spans[..]),
             None,
             &mut self.chunk_scratch,
         );
@@ -1877,9 +1927,15 @@ impl Renderer {
             .max()
             .unwrap_or(0);
         self.quad_indices.ensure(&self.device, most_quads);
+        let connectivity = std::array::from_fn(|i| {
+            mesh.sections
+                .get(i)
+                .map_or(Connectivity::OPEN, |section| section.connectivity)
+        });
         let mesh = GpuMesh {
             opaque,
             transparent,
+            connectivity,
         };
         if let Entry::Occupied(mut entry) = self.chunks.entry(pos) {
             *entry.get_mut() = mesh;
@@ -1890,12 +1946,20 @@ impl Renderer {
 
     /// Removes the GPU mesh for one chunk column.
     pub fn remove_chunk(&mut self, pos: ChunkPos) {
+        self.chunks_version += 1;
         self.chunks.remove(&pos);
     }
 
     /// Removes every uploaded chunk mesh (e.g. after a dimension change).
     pub fn clear_meshes(&mut self) {
+        self.chunks_version += 1;
         self.chunks.clear();
+    }
+
+    /// Turns the cave culling of the terrain sections on or off (on by
+    /// default). Off draws every section in the frustum.
+    pub fn set_cave_culling(&mut self, enabled: bool) {
+        self.cave_culling = enabled;
     }
 
     /// The GPU adapter the renderer runs on, for the F3 screen.
@@ -2532,8 +2596,10 @@ impl Renderer {
             else {
                 continue;
             };
-            pass.set_vertex_buffer(0, transparent.vertex_buffer.slice(..));
-            pass.draw_indexed(transparent.all_indices(), 0, 0..1);
+            transparent.visible_runs(draw.sections, Group::Solid, |indices| {
+                pass.set_vertex_buffer(0, transparent.vertex_buffer.slice(..));
+                pass.draw_indexed(indices, 0, 0..1);
+            });
         }
         // Drawn after the chunks' blended faces: a handful of quads, so no
         // sorting against them.
@@ -2644,17 +2710,19 @@ impl Renderer {
             else {
                 continue;
             };
-            let indices = match (opaque.epoch == self.cutout_epoch, solid) {
-                (true, true) => opaque.solid_indices(),
-                (true, false) => opaque.cutout_indices(),
-                (false, true) => 0..0,
-                (false, false) => opaque.all_indices(),
+            let mut run = |indices: std::ops::Range<u32>| {
+                pass.set_vertex_buffer(0, opaque.vertex_buffer.slice(..));
+                pass.draw_indexed(indices, 0, 0..1);
             };
-            if indices.is_empty() {
-                continue;
+            match (opaque.epoch == self.cutout_epoch, solid) {
+                (true, true) => opaque.visible_runs(draw.sections, Group::Solid, &mut run),
+                (true, false) => opaque.visible_runs(draw.sections, Group::Cutout, &mut run),
+                (false, true) => {}
+                (false, false) => {
+                    opaque.visible_runs(draw.sections, Group::Solid, &mut run);
+                    opaque.visible_runs(draw.sections, Group::Cutout, &mut run);
+                }
             }
-            pass.set_vertex_buffer(0, opaque.vertex_buffer.slice(..));
-            pass.draw_indexed(indices, 0, 0..1);
         }
     }
 
@@ -3015,6 +3083,16 @@ fn chunk_is_visible(
     frustum.intersects_aabb(min, min + Vec3::new(16.0, 256.0, 16.0))
 }
 
+/// The sections of column `pos` whose 16³ box touches the frustum (bit `s` =
+/// section `s`). Boxes are relative to the render `origin`.
+fn sections_in_frustum(pos: ChunkPos, frustum: &Frustum, origin: DVec3) -> u16 {
+    let base = DVec3::new(f64::from(pos.x) * 16.0, 0.0, f64::from(pos.z) * 16.0) - origin;
+    (0..SECTIONS).fold(0_u16, |mask, section| {
+        let min = (base + DVec3::new(0.0, section as f64 * 16.0, 0.0)).as_vec3();
+        mask | u16::from(frustum.intersects_aabb(min, min + Vec3::splat(16.0))) << section
+    })
+}
+
 /// Squared camera-to-chunk-centre distance; avoids a square root per chunk.
 fn squared_distance_to_chunk(pos: ChunkPos, eye: DVec3) -> f32 {
     chunk_centre(pos).distance_squared(eye) as f32
@@ -3207,14 +3285,17 @@ mod tests {
             ChunkDraw {
                 pos: ChunkPos::new(0, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(0, 0), camera),
+                sections: 1,
             },
             ChunkDraw {
                 pos: ChunkPos::new(2, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(2, 0), camera),
+                sections: 1,
             },
             ChunkDraw {
                 pos: ChunkPos::new(1, 0),
                 distance_sq: squared_distance_to_chunk(ChunkPos::new(1, 0), camera),
+                sections: 1,
             },
         ];
         sort_transparent_farthest_first(&mut chunks);
@@ -3240,6 +3321,7 @@ mod tests {
         .map(|pos| ChunkDraw {
             pos,
             distance_sq: squared_distance_to_chunk(pos, camera),
+            sections: 1,
         });
         // Every chunk centre is exactly 16 blocks from the camera centre.
         assert!(chunks

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use umicraft_world::{
     is_slab, light_emission, uses_neighbor_brightness, BlockPos, BlockState, ChunkColumn, ChunkPos,
-    LightLevel, World,
+    LightLevel, Section, World,
 };
 
 /// Read access to block states and light by world coordinate.
@@ -72,6 +72,14 @@ pub trait BlockSource {
     fn biome(&self, _x: i32, _z: i32) -> Option<u8> {
         None
     }
+
+    /// Whether section `section` (`0..16`, 16 blocks tall) of column `pos`
+    /// holds only air, so the mesher can skip it without reading a block.
+    ///
+    /// `false` is always correct; sources that know better answer `true`.
+    fn section_is_empty(&self, _pos: ChunkPos, _section: usize) -> bool {
+        false
+    }
 }
 
 impl BlockSource for World {
@@ -89,6 +97,11 @@ impl BlockSource for World {
     fn biome(&self, x: i32, z: i32) -> Option<u8> {
         World::biome(self, BlockPos::new(x, 0, z))
     }
+
+    fn section_is_empty(&self, pos: ChunkPos, section: usize) -> bool {
+        self.chunk(pos)
+            .is_some_and(|column| column.section(section).is_none_or(Section::is_empty))
+    }
 }
 
 impl<T: BlockSource + ?Sized> BlockSource for &T {
@@ -102,6 +115,10 @@ impl<T: BlockSource + ?Sized> BlockSource for &T {
 
     fn biome(&self, x: i32, z: i32) -> Option<u8> {
         (**self).biome(x, z)
+    }
+
+    fn section_is_empty(&self, pos: ChunkPos, section: usize) -> bool {
+        (**self).section_is_empty(pos, section)
     }
 }
 
@@ -201,6 +218,16 @@ impl BlockSource for ChunkSnapshot {
         self.chunks[(dz * 3 + dx) as usize]
             .as_ref()
             .map(|column| column.biomes()[((z & 15) << 4 | (x & 15)) as usize])
+    }
+
+    fn section_is_empty(&self, pos: ChunkPos, section: usize) -> bool {
+        let (dx, dz) = (pos.x - self.origin.x, pos.z - self.origin.z);
+        if !(0..3).contains(&dx) || !(0..3).contains(&dz) {
+            return false;
+        }
+        self.chunks[(dz * 3 + dx) as usize]
+            .as_ref()
+            .is_some_and(|column| column.section(section).is_none_or(Section::is_empty))
     }
 }
 

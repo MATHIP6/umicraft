@@ -39,7 +39,7 @@ use umicraft_world::{light_emission, BlockState, ChunkPos};
 use crate::fluid::{self, FluidLayers};
 
 use crate::actual_state;
-use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, occludes};
+use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, mesh_sections, occludes};
 use crate::lighting::{quad_light, Lighting};
 use crate::settings::{base_variant, MeshSettings};
 use crate::{tint, BlockEntityKind, BlockEntityRef, BlockSource, Mesh, Vertex};
@@ -99,69 +99,50 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
     context: &ModelMeshContext,
     settings: MeshSettings,
 ) -> Mesh {
-    let mut mesh = Mesh::default();
-    let base_x = pos.x * 16;
-    let base_z = pos.z * 16;
-
-    for y in 0..256i32 {
-        for z in 0..16i32 {
-            for x in 0..16i32 {
-                let wx = base_x + x;
-                let wz = base_z + z;
-                let state = source.block(wx, y, wz);
-                // Air is the overwhelming majority of a column: checking it
-                // before the model lookup keeps the hot path cheap.
-                if state.is_air() {
-                    continue;
-                }
-                let position = [wx, y, wz];
-                if let Some(kind) = BlockEntityKind::of(state) {
-                    mesh.block_entities
-                        .push(BlockEntityRef::scan(source, position, state));
-                    if kind.replaces_model() {
-                        continue;
-                    }
-                }
-                if let Some(liquid) = Liquid::of(state) {
-                    let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
-                        tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
-                    });
-                    let layers = fluid_layers(liquid, &context.atlas);
-                    fluid::emit_fluid(&mut mesh, source, position, liquid, layers, tint);
-                    continue;
-                }
-                let model = actual_state::model_for(&context.models, &source, position, state)
-                    .or_else(|| context.models.model(state));
-                let variant = model
-                    .and_then(|model| pick_variant(model, position, settings.block_alternatives));
-                let lighting = if light_emission(state) == 0 {
-                    settings.lighting
-                } else {
-                    Lighting::Flat
-                };
-                if let Some(variant) = variant {
-                    let placement = Placement::in_world(position).lit(lighting);
-                    emit_model_quads(&mut mesh, source, context, state, variant, placement);
-                } else if state.is_renderable() {
-                    let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
-                        tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
-                    });
-                    // No model and not a liquid: the checker, never a
-                    // procedural layer index (ADR-0012).
-                    let missing = context.atlas.missing_layer();
-                    emit_legacy_faces_with(
-                        &mut mesh,
-                        source,
-                        [wx, y, wz],
-                        (state, lighting),
-                        tint,
-                        |_| missing,
-                    );
-                }
+    mesh_sections(pos, source, |mesh, position @ [wx, y, wz]| {
+        let state = source.block(wx, y, wz);
+        // Air is the overwhelming majority of a column: checking it before
+        // the model lookup keeps the hot path cheap.
+        if state.is_air() {
+            return;
+        }
+        if let Some(kind) = BlockEntityKind::of(state) {
+            mesh.block_entities
+                .push(BlockEntityRef::scan(source, position, state));
+            if kind.replaces_model() {
+                return;
             }
         }
-    }
-    mesh
+        if let Some(liquid) = Liquid::of(state) {
+            let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
+                tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
+            });
+            let layers = fluid_layers(liquid, &context.atlas);
+            fluid::emit_fluid(mesh, source, position, liquid, layers, tint);
+            return;
+        }
+        let model = actual_state::model_for(&context.models, &source, position, state)
+            .or_else(|| context.models.model(state));
+        let variant =
+            model.and_then(|model| pick_variant(model, position, settings.block_alternatives));
+        let lighting = if light_emission(state) == 0 {
+            settings.lighting
+        } else {
+            Lighting::Flat
+        };
+        if let Some(variant) = variant {
+            let placement = Placement::in_world(position).lit(lighting);
+            emit_model_quads(mesh, source, context, state, variant, placement);
+        } else if state.is_renderable() {
+            let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
+                tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
+            });
+            // No model and not a liquid: the checker, never a procedural
+            // layer index (ADR-0012).
+            let missing = context.atlas.missing_layer();
+            emit_legacy_faces_with(mesh, source, position, (state, lighting), tint, |_| missing);
+        }
+    })
 }
 
 /// The still and flowing layers of a liquid in the atlas

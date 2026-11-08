@@ -126,6 +126,7 @@ options:
   --bench-origin N    centre of --bench-scene on both axes, in blocks (default: 0;
                       try 1000000 to test precision far from the origin)
   --bench-frames N    measured frames of --bench-scene (default: 600)
+  --bench-no-cave-culling  draw --bench-scene without cave culling (to compare)
   --entity-demo       mesh and report the M8 acceptance entities (Steve, Alex,
                       Zombie, Cow, Item); no server or GPU unless --screenshot is given
   --mob NAME          render a single mob by name (e.g. creeper, zombie, cow, or 'list')
@@ -244,6 +245,8 @@ pub struct Args {
     pub bench_origin: i32,
     /// Measured frames of the benchmark scene.
     pub bench_frames: u32,
+    /// Whether the benchmark scene draws without cave culling (F2-3d).
+    pub bench_no_cave_culling: bool,
     /// Whether the server-less M8 entity acceptance run is requested.
     pub entity_demo: bool,
     /// Specific mob name to view or screenshot in entity demo (e.g. "creeper", "cow").
@@ -337,6 +340,7 @@ impl Args {
         let mut bench_scene = false;
         let mut bench_origin = 0_i32;
         let mut bench_frames = 600_u32;
+        let mut bench_no_cave_culling = false;
         let mut entity_demo = false;
         let mut mob = None;
         let mut dump_mobs = None;
@@ -434,6 +438,10 @@ impl Args {
                 "--bench-origin" => {
                     bench_origin = parse_number(words.get(index + 1), "--bench-origin")?;
                     index += 2;
+                }
+                "--bench-no-cave-culling" => {
+                    bench_no_cave_culling = true;
+                    index += 1;
                 }
                 "--bench-frames" => {
                     bench_frames = parse_number(words.get(index + 1), "--bench-frames")?;
@@ -586,6 +594,7 @@ impl Args {
             bench_scene,
             bench_origin,
             bench_frames,
+            bench_no_cave_culling,
             entity_demo,
             mob,
             dump_mobs,

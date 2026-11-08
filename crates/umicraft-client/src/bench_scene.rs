@@ -340,6 +340,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let reach = i32::from(args.view_distance);
     let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
     let installed = TerrainTextures::load().install(&mut renderer);
+    renderer.set_cave_culling(!args.bench_no_cave_culling);
     renderer.set_environment(RenderEnvironment::new(
         0,
         args.time,

@@ -8,6 +8,7 @@ use umicraft_world::{BlockKind, BlockState, ChunkPos};
 
 use crate::face::{Face, FaceDef, ALL_FACES, FACE_DEFS};
 use crate::lighting::{quad_light, Lighting};
+use crate::visibility::Connectivity;
 use crate::{fluid, tint, BlockSource, Mesh, Vertex};
 
 /// Builds the mesh for one chunk column with the legacy procedural cubes.
@@ -28,31 +29,48 @@ pub fn mesh_chunk_lit<S: BlockSource + ?Sized>(
     source: &S,
     lighting: Lighting,
 ) -> Mesh {
-    let mut mesh = Mesh::default();
-    let base_x = pos.x * 16;
-    let base_z = pos.z * 16;
+    mesh_sections(pos, source, |mesh, [wx, y, wz]| {
+        let state = source.block(wx, y, wz);
+        if !state.is_renderable() {
+            return;
+        }
+        if let Some(liquid) = Liquid::of(state) {
+            let layer = texture_layer(state, Face::Up);
+            let layers = fluid::FluidLayers {
+                still: layer,
+                flow: layer,
+            };
+            fluid::emit_fluid(mesh, source, [wx, y, wz], liquid, layers, tint::WHITE);
+            return;
+        }
+        emit_legacy_faces(mesh, source, wx, y, wz, state, lighting);
+    })
+}
 
-    for y in 0..256i32 {
-        for z in 0..16i32 {
-            for x in 0..16i32 {
-                let wx = base_x + x;
-                let wz = base_z + z;
-                let state = source.block(wx, y, wz);
-                if !state.is_renderable() {
-                    continue;
+/// Runs `emit` on every cell of the column `pos`, section by section from the
+/// bottom, and returns the mesh with its [`SectionSpan`]s.
+///
+/// The order of the cells (y, then z, then x) is the one the mesher always
+/// had; a section that holds only air is skipped without reading a block.
+pub(crate) fn mesh_sections<S: BlockSource + ?Sized>(
+    pos: ChunkPos,
+    source: &S,
+    mut emit: impl FnMut(&mut Mesh, [i32; 3]),
+) -> Mesh {
+    let mut mesh = Mesh::default();
+    for section in 0..16_usize {
+        let start = mesh.section_start();
+        if !source.section_is_empty(pos, section) {
+            let (base_x, base_y, base_z) = (pos.x * 16, section as i32 * 16, pos.z * 16);
+            for y in base_y..base_y + 16 {
+                for z in base_z..base_z + 16 {
+                    for x in base_x..base_x + 16 {
+                        emit(&mut mesh, [x, y, z]);
+                    }
                 }
-                if let Some(liquid) = Liquid::of(state) {
-                    let layer = texture_layer(state, Face::Up);
-                    let layers = fluid::FluidLayers {
-                        still: layer,
-                        flow: layer,
-                    };
-                    fluid::emit_fluid(&mut mesh, source, [wx, y, wz], liquid, layers, tint::WHITE);
-                    continue;
-                }
-                emit_legacy_faces(&mut mesh, source, wx, y, wz, state, lighting);
             }
         }
+        mesh.finish_section(start, Connectivity::of_section(source, pos, section));
     }
     mesh
 }

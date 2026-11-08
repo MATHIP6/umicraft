@@ -17,6 +17,7 @@ mod block_atlas;
 mod border;
 mod camera;
 mod capture;
+mod cave_graph;
 mod chunk_pass;
 mod clouds;
 mod dynamic_blocks;

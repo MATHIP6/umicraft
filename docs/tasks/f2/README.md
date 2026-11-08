@@ -120,10 +120,10 @@ Optimisation steps also get a criterion benchmark or a scene measurement in
 
 | Step | Content |
 |---|---|
-| F2-3a | Mesh per 16³ section. Skip absent and all-air sections. An edit re-meshes the touched section, plus a neighbour section only when the block is on its border. |
-| F2-3b | Per-section frustum culling with a 16³ box. |
+| F2-3a (**done**, ADR-0062: spans per section in the column job; section jobs not done) | Mesh per 16³ section. Skip absent and all-air sections. An edit re-meshes the touched section, plus a neighbour section only when the block is on its border. |
+| F2-3b (**done**) | Per-section frustum culling with a 16³ box. |
 | F2-3c | Packed vertex of about 16 B, relative to the section origin, which goes to the shader per draw. Removes absolute f32 positions for good. |
-| F2-3d | Cave culling: a per-section visibility graph of which faces connect through non-opaque cells, then a flood fill from the camera section each time the camera changes section (behaviour of vanilla 1.8 `VisGraph`; the implementation is original). |
+| F2-3d (**done**) | Cave culling: a per-section visibility graph of which faces connect through non-opaque cells, then a flood fill from the camera section each time the camera changes section (behaviour of vanilla 1.8 `VisGraph`; the implementation is original). |
 
 ### Phase 4 — Mesh queue and uploads (C2–C8)
 
