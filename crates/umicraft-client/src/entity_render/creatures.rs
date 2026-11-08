@@ -53,7 +53,8 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         }
         EntityKind::Squid => {
             let mut model = SquidModel::new();
-            model.set_angles(swing);
+            model.set_angles(ent.squid.tentacle);
+            model.set_pose(ent.squid.pitch, ent.squid.yaw);
             one(TextureSlot::Squid, model.emit_mesh())
         }
         EntityKind::Bat => {

@@ -8,7 +8,7 @@ use glam::{DVec3, Vec3};
 use umicraft_world::LightLevel;
 
 use super::angle::lerp_degrees;
-use super::anim::{Animation, BedPose};
+use super::anim::{Animation, BedPose, SquidPose};
 use super::cape::{cape_angles, CapeAngles};
 use super::flags::EntityFlags;
 use super::flight::{DragonFlight, DragonPose};
@@ -182,6 +182,7 @@ impl EntityFrameData {
             local: self.local,
             ghost_visible: self.ghost_visible,
             squish: self.squish,
+            squid: self.animation.squid_at(a),
             horse: self.horse.map(|horse| horse.pose(a)),
             ridden: self.ridden,
             block_lights: self.block_lights.clone(),
@@ -271,6 +272,8 @@ pub struct EntityRenderSnapshot {
     /// How much a slime or magma cube is squashed (`0` at rest, positive when
     /// stretched, negative when it lands).
     pub squish: f32,
+    /// The tentacle angle and the body turn of a squid.
+    pub squid: SquidPose,
     /// How far a horse grazes, rears and opens its mouth.
     pub horse: Option<HorsePose>,
     /// Whether another entity sits on this one: a ridden horse shows its reins.
@@ -337,6 +340,7 @@ impl EntityRenderSnapshot {
             leash: None,
             flight: None,
             squish: 0.0,
+            squid: Default::default(),
             horse: None,
             ridden: false,
             block_lights: Arc::default(),

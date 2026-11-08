@@ -31,7 +31,7 @@ pub mod shadow;
 pub mod snapshot;
 pub mod store;
 
-pub use anim::{Animation, BedPose};
+pub use anim::{Animation, BedPose, SquidPose};
 pub use body_yaw::BodyYaw;
 pub use boss::{
     BossInfo, BossTracker, DRAGON_MAX_HEALTH, DRAGON_NAME_KEY, WITHER_MAX_HEALTH, WITHER_NAME_KEY,
