@@ -14,8 +14,10 @@ use crate::options::{Action, Binding};
 use crate::screenshot_file;
 
 impl App {
-    /// Whether the binding of `action` is held. A key also counts through its
-    /// left/right twin, so either Shift, Control or Alt triggers a modifier.
+    /// Whether the binding of `action` is held. Shift and Control are told
+    /// apart: only the key that is bound counts, so the left Shift sneaks and
+    /// the right one is free (it opens the mods menu). Alt still counts
+    /// through its twin.
     pub(super) fn held(&self, action: Action) -> bool {
         match self.options.keys.get(action) {
             Binding::Key(key) => {
@@ -121,13 +123,10 @@ impl App {
 }
 
 /// The key on the other side of the keyboard that counts as the same
-/// modifier: holding either Shift, Control or Alt triggers the binding.
+/// modifier: holding either Alt triggers the binding. Shift and Control have
+/// no twin: the left and the right key are two different keys.
 fn modifier_twin(key: KeyCode) -> Option<KeyCode> {
     match key {
-        KeyCode::ShiftLeft => Some(KeyCode::ShiftRight),
-        KeyCode::ShiftRight => Some(KeyCode::ShiftLeft),
-        KeyCode::ControlLeft => Some(KeyCode::ControlRight),
-        KeyCode::ControlRight => Some(KeyCode::ControlLeft),
         KeyCode::AltLeft => Some(KeyCode::AltRight),
         KeyCode::AltRight => Some(KeyCode::AltLeft),
         _ => None,
@@ -139,9 +138,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_modifier_is_held_through_its_twin() {
-        assert_eq!(modifier_twin(KeyCode::ShiftLeft), Some(KeyCode::ShiftRight));
+    fn alt_is_held_through_its_twin() {
+        assert_eq!(modifier_twin(KeyCode::AltLeft), Some(KeyCode::AltRight));
         assert_eq!(modifier_twin(KeyCode::AltRight), Some(KeyCode::AltLeft));
         assert_eq!(modifier_twin(KeyCode::KeyW), None);
+    }
+
+    #[test]
+    fn the_left_and_right_shift_and_control_are_different_keys() {
+        for key in [
+            KeyCode::ShiftLeft,
+            KeyCode::ShiftRight,
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+        ] {
+            assert_eq!(modifier_twin(key), None, "{key:?}");
+        }
     }
 }

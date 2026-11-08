@@ -436,6 +436,20 @@ impl App {
             }
             return;
         }
+        // The right Shift key opens the mods menu over a game and closes it
+        // again; the left one stays the sneak key. It is taken before the key
+        // bindings so it triggers no action bound to it, and only where it
+        // means something: elsewhere it stays a plain modifier.
+        if code == KeyCode::ShiftRight
+            && self.session.is_some()
+            && !self.death_screen_visible()
+            && matches!(self.screen(), Screen::None | Screen::Mods)
+        {
+            if event.state == ElementState::Pressed && !event.repeat {
+                self.toggle_mods_menu();
+            }
+            return;
+        }
         match self.screen() {
             Screen::Debug | Screen::PackPrompt => {
                 self.ui_input.key(code, event.state, event.text.as_deref());
@@ -467,6 +481,10 @@ impl App {
             }
             Screen::Options => {
                 self.handle_options_key(event);
+                return;
+            }
+            Screen::Mods => {
+                self.handle_mods_key(&event);
                 return;
             }
             Screen::Title
@@ -1007,7 +1025,8 @@ impl App {
                 | Screen::Connecting
                 | Screen::Disconnected
                 | Screen::Stats
-                | Screen::Achievements => {
+                | Screen::Achievements
+                | Screen::Mods => {
                     let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
                     let inventory_key = self.options.keys.get(Action::Inventory).label(&self.lang);
                     let context = MenuContext {
@@ -1194,6 +1213,13 @@ impl App {
                 renderer.write_block_layer(layer, pixels);
             });
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
+        // The mods menu blurs the game behind it to keep the focus on itself.
+        let blur = if self.screen == Screen::Mods {
+            self.menu.mods_blur()
+        } else {
+            0.0
+        };
+        renderer.set_background_blur(blur);
         renderer.set_nametags(&self.nametags, (width, height));
         if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
         {
@@ -1638,11 +1664,29 @@ impl ApplicationHandler for App {
                     self.chat_input.insert(&text);
                 }
             }
+            // Coming back to a game with no screen open takes the mouse again,
+            // so the player moves at once. The loss of the focus let it go;
+            // an open screen (inventory, menu, death screen) keeps the pointer
+            // free as before.
+            WindowEvent::Focused(true) => {
+                if self.session.is_some()
+                    && self.screen() == Screen::None
+                    && !self.death_screen_visible()
+                {
+                    self.capture_mouse(true);
+                }
+            }
             WindowEvent::Focused(false) => {
                 self.keys.clear();
                 self.buttons.clear();
                 self.capture_mouse(false);
                 self.ui_input.clear();
+                // A fullscreen window that loses the focus goes to the taskbar,
+                // as in the reference. Left alone, the taskbar comes back over
+                // it and shows the game through a see-through taskbar.
+                if let Some(window) = self.window.as_ref().filter(|w| w.fullscreen().is_some()) {
+                    window.set_minimized(true);
+                }
             }
             WindowEvent::RedrawRequested => self.redraw(event_loop),
             _ => {}

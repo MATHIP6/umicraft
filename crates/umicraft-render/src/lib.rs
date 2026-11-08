@@ -40,6 +40,7 @@ mod overlays;
 mod panorama;
 mod particles;
 mod renderer;
+mod scene_blur;
 mod sky;
 mod texture;
 mod ui_pass;

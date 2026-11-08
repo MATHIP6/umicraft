@@ -21,9 +21,9 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
     AchievementsData, AchievementsOutcome, AchievementsScreen, ConfirmOutcome, ConfirmScreen,
     ConnectStage, ConnectingOutcome, ConnectingScreen, DisconnectedOutcome, DisconnectedScreen,
-    PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome, ServerEditScreen,
-    ServerListOutcome, ServerListScreen, ServerRow, StatsData, StatsOutcome, StatsScreen,
-    TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
+    ModsOutcome, ModsScreen, PanoramaTextures, PanoramaView, RowStatus, ServerEditOutcome,
+    ServerEditScreen, ServerListOutcome, ServerListScreen, ServerRow, StatsData, StatsOutcome,
+    StatsScreen, TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
 };
 use umicraft_ui::{FontAtlas, Ui};
 
@@ -124,6 +124,7 @@ pub struct MenuFlow {
     stats_data: Option<(u64, StatsData)>,
     achievements: AchievementsScreen,
     achievements_data: Option<(u64, AchievementsData)>,
+    mods: ModsScreen,
     book: ServerBook,
     pinger: Option<Pinger>,
     rows: Vec<ServerRow>,
@@ -151,6 +152,7 @@ impl MenuFlow {
             stats_data: None,
             achievements: AchievementsScreen::new(),
             achievements_data: None,
+            mods: ModsScreen::new(),
             book,
             pinger,
             rows: Vec::new(),
@@ -188,6 +190,8 @@ impl MenuFlow {
                 self.achievements = AchievementsScreen::new();
                 self.achievements_data = None;
             }
+            // A new menu each time: its opening animation plays again.
+            Screen::Mods => self.mods = ModsScreen::new(),
             _ => {}
         }
     }
@@ -205,6 +209,12 @@ impl MenuFlow {
         self.disconnected = Some(DisconnectedScreen::new(end.title_key(), &end.reason(lang)));
     }
 
+    /// Tells the title screen whether the window has the focus, so its opening
+    /// animation starts when the player is there to see it.
+    pub fn set_window_focused(&mut self, focused: bool) {
+        self.title.set_focused(focused);
+    }
+
     /// Advances the animations and the double-click timer by `elapsed`.
     pub fn advance(&mut self, elapsed: Duration) {
         /// A stalled frame must not replay seconds of animation.
@@ -217,6 +227,7 @@ impl MenuFlow {
             self.list.tick();
             self.stats.tick();
             self.achievements.tick();
+            self.mods.tick();
             if let Some(edit) = self.edit.as_mut() {
                 edit.tick();
             }
@@ -258,9 +269,31 @@ impl MenuFlow {
             Screen::Disconnected => self.show_disconnected(ui, atlas, lang),
             Screen::Stats => self.show_stats(ui, atlas, lang, context),
             Screen::Achievements => self.show_achievements(ui, atlas, lang, context),
+            Screen::Mods => self.show_mods(ui, lang, context),
             _ => None,
         };
         MenuFrame { command, panorama }
+    }
+
+    /// How blurred the game behind the mods menu is, `0.0` to `1.0`: it fades
+    /// in while the menu opens.
+    #[must_use]
+    pub fn mods_blur(&self) -> f32 {
+        self.mods.blur_strength(self.partial_tick())
+    }
+
+    /// The mods menu over the game. Its Mods button leads nowhere yet.
+    fn show_mods(
+        &mut self,
+        ui: &mut Ui,
+        lang: &Lang,
+        context: &MenuContext<'_>,
+    ) -> Option<MenuCommand> {
+        let partial_tick = self.partial_tick();
+        match self.mods.show(ui, context.brand_font, lang, partial_tick)? {
+            ModsOutcome::Close => Some(MenuCommand::GoTo(Screen::None)),
+            ModsOutcome::OpenMods => None,
+        }
     }
 
     fn show_title(

@@ -55,6 +55,7 @@ use crate::overlay::{Overlay, OverlayVertex};
 use crate::overlays::{Pictures, ScreenOverlays, ScreenRenderer};
 use crate::panorama::PanoramaRenderer;
 use crate::particles::{ParticleRenderer, ParticleSprite};
+use crate::scene_blur::SceneBlur;
 use crate::sky::{SkyImage, SkyRenderer, SkyState, SkyTextures};
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
 use crate::ui_pass::{self, FontAtlasError, UiBatchKind, UiPass};
@@ -382,6 +383,9 @@ pub struct Renderer {
     camera_bind_group: wgpu::BindGroup,
     entity_renderer: EntityRenderer,
     outline: OutlineRenderer,
+    /// The blur of the game behind a menu, and whether a menu asks for it.
+    scene_blur: SceneBlur,
+    background_blur: bool,
     entity_batches: BatchBuffer,
     /// The glowing layers of the entities, drawn after them.
     additive_batches: BatchBuffer,
@@ -873,6 +877,7 @@ impl Renderer {
             None
         };
         let depth_view = create_depth(&device, width, height);
+        let scene_blur = SceneBlur::new(&device, &queue, (width, height), format);
 
         let icon_atlas = IconAtlas::new(&device, &queue, format);
         let icon_pipeline = create_terrain_pipeline(
@@ -1010,6 +1015,8 @@ impl Renderer {
             camera_bind_group,
             entity_renderer,
             outline,
+            scene_blur,
+            background_blur: false,
             entity_batches: BatchBuffer::default(),
             additive_batches: BatchBuffer::default(),
             glint_batches: BatchBuffer::default(),
@@ -1164,6 +1171,16 @@ impl Renderer {
     pub fn set_selection_outline(&mut self, boxes: &[OutlineBox]) {
         self.outline
             .set_boxes(&self.queue, boxes, (self.width, self.height));
+    }
+
+    /// Blurs the game behind the HUD and the UI (the mods menu) by `strength`,
+    /// `0.0` (sharp) to `1.0` (fully blurred); a menu raises it over its
+    /// opening to fade the blur in. The window calls this every frame; a frame
+    /// with any blur costs two extra full-screen copies and four
+    /// half-resolution passes, a sharp one costs nothing.
+    pub fn set_background_blur(&mut self, strength: f32) {
+        self.background_blur = strength > 0.0;
+        self.scene_blur.set_strength(&self.queue, strength);
     }
 
     /// Draws one frame with the M3 HUD overlay only.
@@ -2005,6 +2022,8 @@ impl Renderer {
             }
         }
         self.depth_view = create_depth(&self.device, width, height);
+        self.scene_blur
+            .resize(&self.device, &self.queue, (width, height));
         self.ui_pass.resize(width, height);
         if self.offscreen.is_some() {
             self.offscreen = Some(create_offscreen(&self.device, width, height));
@@ -2395,8 +2414,15 @@ impl Renderer {
         self.panorama.prepare(encoder);
         // The reference clears to the fog colour; the dome fades into it.
         let clear = sky_state.fog.color;
+        // With a menu that blurs the game, the world goes to a texture first.
+        let blur = self.background_blur;
+        let world_view = if blur {
+            self.scene_blur.scene_view()
+        } else {
+            view
+        };
         let color_attachment = Some(wgpu::RenderPassColorAttachment {
-            view,
+            view: world_view,
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
@@ -2488,6 +2514,15 @@ impl Renderer {
             .draw_world(&mut pass, &self.local_terrain_bind_group);
         self.stamp(&mut pass, 3);
 
+        // `renderWorldPass` draws the selection box right after the entities,
+        // before the particles, the rain and the translucent layer: they hide
+        // it and water and glass tint it. With the eyes in water it comes
+        // after the translucent layer instead.
+        let eyes_in_water = self.screen_overlays.underwater.is_some();
+        if !eyes_in_water {
+            self.outline.draw(&mut pass, &self.camera_bind_group);
+        }
+
         // The clouds hide behind terrain and hide the water behind them, as in
         // `renderWorldPass`: before the translucent layer from below.
         self.clouds.draw_below(&mut pass);
@@ -2498,7 +2533,7 @@ impl Renderer {
             .draw(&mut pass, &self.local_terrain_bind_group);
         self.weather.draw(&mut pass, &self.local_camera_bind_group);
 
-        // Transparent terrain: water/glass/leaves, farthest chunk first, with
+        // Transparent terrain: water/glass, farthest chunk first, with
         // depth testing but no depth writes so blended faces do not occlude
         // each other by submission order.
         pass.set_pipeline(&self.terrain_transparent_pipeline);
@@ -2533,7 +2568,10 @@ impl Renderer {
             draw_gpu_pass(&mut pass, cracks);
         }
 
-        self.outline.draw(&mut pass, &self.camera_bind_group);
+        // Under water the box comes after the translucent layer instead.
+        if eyes_in_water {
+            self.outline.draw(&mut pass, &self.camera_bind_group);
+        }
         self.stamp(&mut pass, 4);
 
         // The hand: camera-space vertices under a squeezed depth range.
@@ -2551,6 +2589,37 @@ impl Renderer {
         // `renderOverlays` follows the hand; the GUI's vignette, pumpkin and
         // portal come before the hotbar.
         self.screen.draw(&mut pass, &self.terrain_bind_group);
+
+        if blur {
+            // The world is done: smooth it, lay it over the screen, and draw
+            // the HUD and the menu sharp on top.
+            drop(pass);
+            self.scene_blur.blur(encoder);
+            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("blurred pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.scene_blur.blit(&mut pass);
+        }
 
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));

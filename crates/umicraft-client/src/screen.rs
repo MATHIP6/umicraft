@@ -56,6 +56,8 @@ pub enum Screen {
     Stats,
     /// The achievements, opened from the game menu.
     Achievements,
+    /// The mods menu, opened over a game with the right Shift key.
+    Mods,
 }
 
 impl Screen {
@@ -74,6 +76,7 @@ impl Screen {
                 | Self::Debug
                 | Self::Stats
                 | Self::Achievements
+                | Self::Mods
         ) || self.is_menu()
     }
 
@@ -119,7 +122,8 @@ impl Screen {
             | Self::GameMenu
             | Self::PackPrompt
             | Self::Sign
-            | Self::Book => Self::None,
+            | Self::Book
+            | Self::Mods => Self::None,
             Self::Options => options_origin,
             Self::Debug => Self::Debug,
             Self::Title => Self::Title,
@@ -166,6 +170,7 @@ mod tests {
             Screen::Disconnected,
             Screen::Stats,
             Screen::Achievements,
+            Screen::Mods,
         ] {
             assert!(screen.blocks_game_input(), "{screen:?} must own the input");
         }
@@ -201,6 +206,13 @@ mod tests {
             Screen::GameMenu
         );
         assert_eq!(Screen::Debug.after_escape(Screen::GameMenu), Screen::Debug);
+    }
+
+    #[test]
+    fn the_mods_menu_opens_over_the_game_and_escape_closes_it() {
+        assert!(Screen::Mods.uses_ui());
+        assert!(!Screen::Mods.is_menu(), "it opens over a game");
+        assert_eq!(Screen::Mods.after_escape(Screen::GameMenu), Screen::None);
     }
 
     #[test]
