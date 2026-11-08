@@ -335,13 +335,15 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
   P1/P2 drawn left of the window, `GuiInventory.drawActivePotionEffects`).
 - **Creative inventory gaps:** tab-name line in the Search tooltip, Shift +
   double click, middle-button drag, double click outside the Inventory tab,
-  search by variant name (needs per-metadata names in `tooltip.rs`), banner
-  patterns.
+  banner patterns. Search by variant name is done (2026-11-07, see the
+  language entry below).
 - **Survival gaps:** Shift + double click (collect every matching slot), pick
   block key over a slot, touchscreen mode, empty-cursor outside click (mode 4).
-- **Language file loader** for tooltips and screen titles (English table
-  today, `tooltip_draw::resolve`); `tooltip.rs` uses `item.<name>.name` keys
-  without per-metadata names.
+- **Language keys of item names (done 2026-11-07):** the loader itself
+  existed (P10); the item names used registry keys that the vanilla `.lang`
+  does not contain. `items::unlocalized_name` now gives the 1.8 keys with the
+  per-damage sub-name, and a spawn egg appends its entity. Left: potion
+  effect names, the skull owner name, the banner base colour from NBT.
 - **Fidelity to verify against vanilla screenshots:** tooltip colours (fixed
   for the tooltip only, see the sRGB entry of `docs/backlog.md`), the gradient
   border, GUI block lighting and glass icons (fixed, unverified), creative

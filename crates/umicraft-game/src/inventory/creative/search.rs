@@ -56,7 +56,7 @@ fn matches(stack: &ItemStack, query: &str, resolve: &dyn Fn(&TooltipText) -> Str
 ///     TooltipText::Literal(text) => text.clone(),
 ///     TooltipText::Concat(_) => String::new(),
 /// };
-/// let found = search_items("diamond_sword", &resolve);
+/// let found = search_items("swordDiamond", &resolve);
 /// assert!(found.iter().any(|stack| stack.item_id == 276));
 /// ```
 #[must_use]
@@ -100,13 +100,20 @@ mod tests {
 
     #[test]
     fn search_matches_by_name_case_insensitively() {
-        let found = search_items("DIAMOND_SWORD", &resolve);
+        let found = search_items("SWORDDIAMOND", &resolve);
         assert!(found.iter().any(|s| s.item_id == 276));
         assert!(found.iter().all(|s| {
             tooltip(s)
                 .iter()
-                .any(|l| resolve(&l.text).to_lowercase().contains("diamond_sword"))
+                .any(|l| resolve(&l.text).to_lowercase().contains("sworddiamond"))
         }));
+    }
+
+    #[test]
+    fn variants_are_found_by_their_own_name() {
+        let found = search_items("cloth.red.name", &resolve);
+        assert!(found.iter().any(|s| (s.item_id, s.damage) == (35, 14)));
+        assert!(found.iter().all(|s| s.item_id == 35 && s.damage == 14));
     }
 
     #[test]

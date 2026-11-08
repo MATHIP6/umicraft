@@ -197,7 +197,8 @@ mod tests {
     #[test]
     fn show_item_is_the_item_tooltip_and_a_broken_item_is_invalid() {
         let rows = item_rows(r#"{id:"minecraft:diamond_sword",Damage:0s}"#, false);
-        assert_eq!(rows[0].text, "Diamond Sword");
+        // No language file in the test: the legacy key reads as its words.
+        assert_eq!(rows[0].text, "Sword Diamond");
         assert_eq!(item_rows("garbage", false), vec![row("Invalid Item!", RED)]);
     }
 
