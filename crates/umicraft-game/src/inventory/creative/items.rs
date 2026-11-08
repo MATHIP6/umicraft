@@ -14,6 +14,8 @@ use umicraft_protocol::packets::play::ItemStack;
 use super::entry::Entry;
 use super::table::{BOOK_ENCHANTMENTS, SEARCH_ENTRIES, TAB_ENTRIES};
 use super::tabs::CreativeTab;
+use crate::inventory::tooltip::stored_enchantments;
+use crate::nbt::Nbt;
 
 struct Catalog {
     tabs: [Vec<ItemStack>; 12],
@@ -69,6 +71,51 @@ pub fn tab_items(tab: CreativeTab) -> &'static [ItemStack] {
     }
 }
 
+/// The item id of the enchanted book.
+const ENCHANTED_BOOK: i16 = 403;
+
+/// The enchantment of a book holding exactly one, `None` for anything else
+/// (the `map.size() == 1` test of `GuiContainerCreative.renderToolTip`).
+fn single_enchantment(stack: &ItemStack) -> Option<i16> {
+    if stack.item_id != ENCHANTED_BOOK {
+        return None;
+    }
+    let root = stack
+        .nbt
+        .as_deref()
+        .and_then(|bytes| Nbt::parse(bytes).ok());
+    match stored_enchantments(root.as_ref()).as_slice() {
+        [only] => Some(only.id),
+        _ => None,
+    }
+}
+
+/// The tab that lists `stack`, the one the search tooltip names
+/// (`Item.getCreativeTab`). An enchanted book has no tab of its own: it gets
+/// the first tab that lists a book of the same enchantment, at any level (the
+/// tabs list only one level, the search lists them all). `None` for an item
+/// no tab lists.
+///
+/// ```
+/// use umicraft_game::inventory::creative::{owning_tab, tab_items, CreativeTab};
+///
+/// let stone = &tab_items(CreativeTab::BuildingBlocks)[0];
+/// assert_eq!(owning_tab(stone), Some(CreativeTab::BuildingBlocks));
+/// ```
+#[must_use]
+pub fn owning_tab(stack: &ItemStack) -> Option<CreativeTab> {
+    let book = single_enchantment(stack);
+    CreativeTab::ALL
+        .into_iter()
+        .filter(|tab| !matches!(tab, CreativeTab::Search | CreativeTab::Inventory))
+        .find(|tab| {
+            tab_items(*tab).iter().any(|listed| match book {
+                Some(id) => single_enchantment(listed) == Some(id),
+                None => listed == stack,
+            })
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +125,31 @@ mod tests {
             .iter()
             .map(|s| (s.item_id, s.damage))
             .collect()
+    }
+
+    #[test]
+    fn every_search_stack_has_an_owning_tab() {
+        let orphans = tab_items(CreativeTab::Search)
+            .iter()
+            .filter(|stack| owning_tab(stack).is_none())
+            .count();
+        assert_eq!(orphans, 0);
+    }
+
+    #[test]
+    fn owning_tab_follows_the_item_class() {
+        let owner = |id, damage| {
+            owning_tab(&ItemStack {
+                item_id: id,
+                stack_size: 1,
+                damage,
+                nbt: None,
+            })
+        };
+        assert_eq!(owner(35, 14), Some(CreativeTab::BuildingBlocks));
+        assert_eq!(owner(276, 0), Some(CreativeTab::Combat));
+        assert_eq!(owner(322, 0), Some(CreativeTab::Food));
+        assert_eq!(owner(9999, 0), None);
     }
 
     #[test]

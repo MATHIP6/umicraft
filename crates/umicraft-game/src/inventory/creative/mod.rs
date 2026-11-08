@@ -49,7 +49,7 @@ mod target;
 
 pub use action::{CreativeAction, DROP_SLOT};
 pub use click::MouseButton;
-pub use items::tab_items;
+pub use items::{owning_tab, tab_items};
 pub use search::search_items;
 pub use state::{CreativeScreen, Resolver};
 pub use tabs::CreativeTab;

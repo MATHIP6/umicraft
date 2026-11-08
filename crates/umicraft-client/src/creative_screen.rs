@@ -15,8 +15,7 @@
 //!
 //! Not drawn: the player model of the inventory tab (`drawEntityOnScreen` at
 //! 43, 45 needs the 3D player render, the area stays empty), the search box
-//! caret and the tab name line vanilla adds to item tooltips on the search
-//! tab.
+//! caret.
 
 use umicraft_assets::{GuiAtlas, GuiRegion};
 use umicraft_game::inventory::creative::scroll::{
@@ -25,7 +24,7 @@ use umicraft_game::inventory::creative::scroll::{
 use umicraft_game::inventory::creative::tabs::{
     TAB_HEIGHT, TAB_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
 };
-use umicraft_game::inventory::creative::{visible_slots, CreativeSlot, CreativeTab};
+use umicraft_game::inventory::creative::{owning_tab, visible_slots, CreativeSlot, CreativeTab};
 use umicraft_game::inventory::tooltip::{tooltip, TooltipColor, TooltipLine, TooltipText};
 use umicraft_game::inventory::{WindowView, HOTBAR_START};
 use umicraft_protocol::packets::play::ItemStack;
@@ -314,8 +313,24 @@ fn hover_lines(scene: &CreativeScene<'_>, point: (i32, i32)) -> Vec<TooltipLine>
     }
     umicraft_game::inventory::creative::slot_at(scene.creative.tab, point.0, point.1)
         .and_then(|slot| stack_in(scene, slot))
-        .map(tooltip)
+        .map(|stack| item_lines(scene.creative.tab, stack))
         .unwrap_or_default()
+}
+
+/// The tooltip of a hovered item. On the search tab vanilla inserts the name
+/// of the item's creative tab after the item name
+/// (`GuiContainerCreative.renderToolTip`), in blue; the bold style of that
+/// line is not drawn, the tooltip font has no bold.
+fn item_lines(tab: CreativeTab, stack: &ItemStack) -> Vec<TooltipLine> {
+    let mut lines = tooltip(stack);
+    if tab == CreativeTab::Search {
+        if let Some(owner) = owning_tab(stack) {
+            let mut line = key_line(&owner.translation_key());
+            line.color = TooltipColor::Blue;
+            lines.insert(1.min(lines.len()), line);
+        }
+    }
+    lines
 }
 
 /// Draws the creative inventory as a modal overlay: the window, its slots,
@@ -390,6 +405,21 @@ mod tests {
             damage: 0,
             nbt: None,
         }
+    }
+
+    #[test]
+    fn the_search_tab_names_the_items_creative_tab_after_its_name() {
+        let sword = stack(276);
+        let plain = item_lines(CreativeTab::Combat, &sword);
+        let search = item_lines(CreativeTab::Search, &sword);
+        assert_eq!(search.len(), plain.len() + 1);
+        assert_eq!(search[0], plain[0]);
+        assert_eq!(search[2..], plain[1..]);
+        assert_eq!(search[1].color, TooltipColor::Blue);
+        assert_eq!(
+            search[1].text,
+            key_line(&CreativeTab::Combat.translation_key()).text
+        );
     }
 
     fn view(tab: CreativeTab) -> CreativeView {

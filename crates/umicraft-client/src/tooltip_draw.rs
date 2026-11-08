@@ -120,7 +120,7 @@ mod tests {
             Some(
                 "enchantment.damage.all=Edge\nenchantment.level.3=III\n\
                  attribute.modifier.plus.0=+%d %s\nitem.durability=Wear: %s / %s\n\
-                 itemGroup.misc=Stuff\ninventory.binSlot=Bin\n",
+                 itemGroup.misc=Stuff\ninventory.binSlot=Bin\nitem.swordDiamond.name=Blade\n",
             ),
         )
     }
@@ -172,7 +172,7 @@ mod tests {
             .iter()
             .map(|l| resolve_in(&lang(), &l.text))
             .collect();
-        assert_eq!(lines[0], "Diamond Sword");
+        assert_eq!(lines[0], "Blade");
     }
 
     #[test]
