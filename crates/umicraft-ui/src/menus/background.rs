@@ -52,6 +52,15 @@ pub struct MenuArt {
     /// `textures/misc/unknown_server.png` (64x64): the icon of a server
     /// without a favicon.
     pub unknown_server: Option<SpriteSheet>,
+    /// `textures/misc/unknown_pack.png` (64x64): the icon of a resource pack
+    /// without a `pack.png`.
+    pub unknown_pack: Option<SpriteSheet>,
+    /// The `pack.png` of the client jar: the icon of the built-in "Default"
+    /// resource pack.
+    pub default_pack: Option<SpriteSheet>,
+    /// `textures/gui/resource_packs.png` (256x256): the move arrows drawn over
+    /// the icon of a hovered resource pack.
+    pub pack_arrows: Option<SpriteSheet>,
     /// `textures/gui/server_selection.png` (256x256): the arrows of a hovered
     /// server row.
     pub server_selection: Option<SpriteSheet>,

@@ -102,6 +102,9 @@ pub struct OptionsScreen {
     catalog: Catalog,
     /// The selected packs of the resource packs page, highest priority first.
     pack_draft: Vec<String>,
+    /// The `pack.png` sprite of each pack of the catalog, in catalog order;
+    /// `None` until the window put the icons into the GUI atlas.
+    pack_icons: Vec<Option<umicraft_ui::SpriteSheet>>,
     /// Scroll offsets of the available and selected pack lists.
     pack_scroll: [f32; 2],
     /// The drags of the scrollbars of the two pack lists.
@@ -132,6 +135,7 @@ impl OptionsScreen {
             sliders: HashMap::new(),
             catalog: Catalog::default(),
             pack_draft: Vec::new(),
+            pack_icons: Vec::new(),
             pack_scroll: [0.0; 2],
             pack_bars: Default::default(),
             rects: HashMap::new(),
@@ -150,6 +154,8 @@ impl OptionsScreen {
     /// shows up.
     pub fn set_catalog(&mut self, catalog: Catalog) {
         self.catalog = catalog;
+        // The icons belonged to the previous packs.
+        self.pack_icons.clear();
     }
 
     /// Opens `page` from the hub, preparing the state it needs.

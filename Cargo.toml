@@ -29,6 +29,7 @@ aes = "0.8"
 bytemuck = { version = "1", features = ["derive"] }
 flate2 = "1.0"
 fontdue = "0.9"
+jpeg-decoder = { version = "0.3", default-features = false }
 num-bigint = "0.5"
 png = "0.18"
 proptest = "1"

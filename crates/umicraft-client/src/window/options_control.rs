@@ -98,10 +98,28 @@ impl App {
         self.options_screen
             .set_over_world(self.options_origin == Screen::GameMenu);
         self.options_screen.set_catalog(Catalog::discover());
+        self.sync_pack_icons();
         if page != Page::Main {
             self.options_screen.open_page(page, &self.options);
         }
         self.set_screen(Screen::Options);
+    }
+
+    /// Puts the `pack.png` of the listed resource packs into the GUI atlas
+    /// and points the packs page at them. The atlas keeps one set of runtime
+    /// images, so the favicons of the server list are put back on its next
+    /// visit.
+    fn sync_pack_icons(&mut self) {
+        let (Some(atlas), Some(renderer)) = (self.gui_atlas.as_ref(), self.renderer.as_mut())
+        else {
+            return;
+        };
+        let grown =
+            crate::official::grow_atlas(Some(atlas), &self.options_screen.pack_icon_images());
+        upload_gui_atlas(renderer, Some(&grown));
+        self.options_screen.assign_pack_icon_sheets(&grown);
+        self.gui_atlas = Some(grown);
+        self.server_icons_revision = u64::MAX;
     }
 
     /// Rebuilds the language handle after the language page picked another.
@@ -164,8 +182,11 @@ impl App {
             return;
         };
         let installed = terrain.install(renderer);
-        let gui_atlas = crate::official::grow_atlas(installed.gui_atlas(), &[]);
+        // The packs page can be opened again without a new catalog: keep its icons.
+        let icons = self.options_screen.pack_icon_images();
+        let gui_atlas = crate::official::grow_atlas(installed.gui_atlas(), &icons);
         upload_gui_atlas(renderer, Some(&gui_atlas));
+        self.options_screen.assign_pack_icon_sheets(&gui_atlas);
         upload_glint_texture(renderer, installed.glint_texture());
         upload_sky_textures(renderer);
         self.gui_atlas = Some(gui_atlas);
