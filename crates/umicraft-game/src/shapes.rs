@@ -214,8 +214,9 @@ impl Aabb {
 
 /// The maximum number of collision boxes a single block state contributes.
 ///
-/// Stairs and fences need two boxes; nothing in 1.8 needs more.
-pub const MAX_BOXES: usize = 2;
+/// Fences need two boxes, a stair at an inner corner three; nothing in 1.8
+/// needs more.
+pub const MAX_BOXES: usize = 3;
 
 /// The collision geometry of a block state, relative to the block origin.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -269,7 +270,7 @@ impl BlockShape {
     #[must_use]
     pub fn pair(first: Aabb, second: Aabb) -> Self {
         Self {
-            boxes: [first, second],
+            boxes: [first, second, second],
             count: 2,
         }
     }
@@ -476,7 +477,7 @@ pub fn shape_of<S: BlockSource + ?Sized>(
         // The chest blocks have no `getCollisionBoundingBox` of their own, so
         // the collision is their bounds, which are the selection bounds.
         Kind::Chest => selection_shape(state, world, pos),
-        Kind::Stairs => stair_shape(state),
+        Kind::Stairs => stair_shape(state, world, pos),
         Kind::Fence => fence_shape(world, pos),
     }
 }
@@ -594,55 +595,116 @@ fn pane_span(negative: bool, positive: bool, any_connection: bool) -> Option<(f6
     }
 }
 
-/// The two collision boxes of a stair block.
+impl StairFacing {
+    /// The facing of a stair from its metadata (MCP `BlockStairs.getStateFromMeta`).
+    fn from_metadata(metadata: u8) -> Self {
+        match metadata & 3 {
+            0 => Self::East,
+            1 => Self::West,
+            2 => Self::South,
+            _ => Self::North,
+        }
+    }
+
+    /// The `(x, z)` step towards this facing.
+    const fn delta(self) -> (i32, i32) {
+        match self {
+            Self::West => (-1, 0),
+            Self::East => (1, 0),
+            Self::North => (0, -1),
+            Self::South => (0, 1),
+        }
+    }
+}
+
+/// The facing and the half (`true` for the top) of the stair at a position,
+/// `None` for any other block.
+fn stair_at<S: BlockSource + ?Sized>(
+    world: &S,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> Option<(StairFacing, bool)> {
+    let state = world.block(x, y, z);
+    matches!(classify(state.id(), state.metadata()), Kind::Stairs).then(|| {
+        (
+            StairFacing::from_metadata(state.metadata()),
+            state.metadata() & 4 != 0,
+        )
+    })
+}
+
+/// The one to three collision boxes of a stair block.
 ///
-/// MCP `BlockStairs.getStateFromMeta` (line 726) maps the metadata to a
-/// facing and a half; `setBaseCollisionBounds` (line 80) gives the lower (or
-/// upper) half of the cube and `func_176306_h` (line 292) the step.
-fn stair_shape(state: BlockState) -> BlockShape {
-    let meta = state.metadata();
-    let top = meta & 4 != 0;
-    let facing = match meta & 3 {
-        0 => StairFacing::East,
-        1 => StairFacing::West,
-        2 => StairFacing::South,
-        _ => StairFacing::North,
-    };
-
-    let base = if top {
-        Aabb::new(DVec3::new(0.0, 0.5, 0.0), DVec3::new(1.0, 1.0, 1.0))
+/// MCP `BlockStairs.addCollisionBoxesToList` (line 533): the base half
+/// (`setBaseCollisionBounds`), then the step (`func_176306_h`), which shrinks
+/// to a quarter when the stair ahead is turned sideways (outer corner), and
+/// when it does not, a quarter behind it (`func_176304_i`) when the stair
+/// behind is turned sideways (inner corner). Both look at the stair of the
+/// same half only, and ignore a corner that a stair like this one already
+/// fills (`isSameStair`).
+fn stair_shape<S: BlockSource + ?Sized>(state: BlockState, world: &S, pos: BlockPos) -> BlockShape {
+    let me = (
+        StairFacing::from_metadata(state.metadata()),
+        state.metadata() & 4 != 0,
+    );
+    let (facing, top) = me;
+    let (fx, fz) = facing.delta();
+    let (base_y, step_y) = if top {
+        ((0.5, 1.0), (0.0, 0.5))
     } else {
-        Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.5, 1.0))
+        ((0.0, 0.5), (0.5, 1.0))
     };
 
-    let step = match (facing, top) {
-        (StairFacing::East, false) => {
-            Aabb::new(DVec3::new(0.5, 0.5, 0.0), DVec3::new(1.0, 1.0, 1.0))
+    let at = |dx: i32, dz: i32| stair_at(world, pos.x + dx, pos.y, pos.z + dz);
+    let same = |dx: i32, dz: i32| at(dx, dz) == Some(me);
+    // The facing of the stair beside, when it is of the same half and turned
+    // sideways to this one.
+    let turned = |dx: i32, dz: i32| {
+        at(dx, dz)
+            .filter(|&(other, half)| {
+                let (ox, oz) = other.delta();
+                half == top && ox * fx + oz * fz == 0
+            })
+            .map(|(other, _)| other.delta())
+    };
+    // The box over the half of the block that `toward` points to, narrowed to
+    // the half that `side` points to.
+    let region = |toward: (i32, i32), side: Option<(i32, i32)>, (y0, y1): (f64, f64)| {
+        let mut min = DVec3::new(0.0, y0, 0.0);
+        let mut max = DVec3::new(1.0, y1, 1.0);
+        for (dx, dz) in std::iter::once(toward).chain(side) {
+            if dx > 0 {
+                min.x = 0.5;
+            } else if dx < 0 {
+                max.x = 0.5;
+            }
+            if dz > 0 {
+                min.z = 0.5;
+            } else if dz < 0 {
+                max.z = 0.5;
+            }
         }
-        (StairFacing::West, false) => {
-            Aabb::new(DVec3::new(0.0, 0.5, 0.0), DVec3::new(0.5, 1.0, 1.0))
-        }
-        (StairFacing::South, false) => {
-            Aabb::new(DVec3::new(0.0, 0.5, 0.5), DVec3::new(1.0, 1.0, 1.0))
-        }
-        (StairFacing::North, false) => {
-            Aabb::new(DVec3::new(0.0, 0.5, 0.0), DVec3::new(1.0, 1.0, 0.5))
-        }
-        (StairFacing::East, true) => {
-            Aabb::new(DVec3::new(0.5, 0.0, 0.0), DVec3::new(1.0, 0.5, 1.0))
-        }
-        (StairFacing::West, true) => {
-            Aabb::new(DVec3::new(0.0, 0.0, 0.0), DVec3::new(0.5, 0.5, 1.0))
-        }
-        (StairFacing::South, true) => {
-            Aabb::new(DVec3::new(0.0, 0.0, 0.5), DVec3::new(1.0, 0.5, 1.0))
-        }
-        (StairFacing::North, true) => {
-            Aabb::new(DVec3::new(0.0, 0.0, 0.0), DVec3::new(1.0, 0.5, 0.5))
-        }
+        Aabb::new(min, max)
     };
 
-    BlockShape::pair(base, step)
+    let base = region((0, 0), None, base_y);
+    let outer = turned(fx, fz).filter(|&(gx, gz)| !same(-gx, -gz));
+    let step = region((fx, fz), outer, step_y);
+    let inner = if outer.is_none() {
+        turned(-fx, -fz)
+            .filter(|&(gx, gz)| !same(gx, gz))
+            .map(|side| region((-fx, -fz), Some(side), step_y))
+    } else {
+        None
+    };
+    match inner {
+        Some(corner) => BlockShape {
+            boxes: [base, step, corner],
+            count: 3,
+        },
+        None => BlockShape::pair(base, step),
+    }
 }
 
 /// The collision boxes of a fence, wall or fence gate.
@@ -802,6 +864,60 @@ mod tests {
         assert_eq!(stairs.boxes()[1].min.y, 0.5);
         assert_eq!(stairs.boxes()[1].min.x, 0.5);
         assert_eq!(stairs.boxes()[1].max.x, 1.0);
+    }
+
+    /// Builds a world of oak stairs `(x, z, metadata)` at y = 0 and returns the
+    /// boxes of the first one as `(min, max)` corners.
+    fn stair_boxes(stairs: &[(i32, i32, u8)]) -> Vec<([f64; 3], [f64; 3])> {
+        let mut world = TestBlocks::default();
+        for &(x, z, metadata) in stairs {
+            world
+                .blocks
+                .insert((x, 0, z), BlockState::new(53, metadata));
+        }
+        let (x, z, metadata) = stairs[0];
+        shape_of(
+            BlockState::new(53, metadata),
+            &world,
+            BlockPos::new(x, 0, z),
+        )
+        .boxes()
+        .iter()
+        .map(|b| (b.min.to_array(), b.max.to_array()))
+        .collect()
+    }
+
+    #[test]
+    fn a_stair_beside_a_sideways_stair_ahead_is_an_outer_corner() {
+        // East stair with a north stair ahead (x = 1) and nothing south of it:
+        // the step shrinks to its north quarter.
+        let boxes = stair_boxes(&[(0, 0, 0), (1, 0, 3)]);
+        assert_eq!(boxes.len(), 2);
+        assert_eq!(boxes[1], ([0.5, 0.5, 0.0], [1.0, 1.0, 0.5]));
+        // A stair like this one to the south makes it a straight run again.
+        let boxes = stair_boxes(&[(0, 0, 0), (1, 0, 3), (0, 1, 0)]);
+        assert_eq!(boxes[1], ([0.5, 0.5, 0.0], [1.0, 1.0, 1.0]));
+    }
+
+    #[test]
+    fn a_stair_with_a_sideways_stair_behind_is_an_inner_corner() {
+        // East stair with a south stair behind it (x = -1): a third box fills
+        // the south quarter of the back half.
+        let boxes = stair_boxes(&[(0, 0, 0), (-1, 0, 2)]);
+        assert_eq!(boxes.len(), 3);
+        assert_eq!(boxes[1], ([0.5, 0.5, 0.0], [1.0, 1.0, 1.0]));
+        assert_eq!(boxes[2], ([0.0, 0.5, 0.5], [0.5, 1.0, 1.0]));
+    }
+
+    #[test]
+    fn upside_down_stairs_mirror_the_corners_and_ignore_the_other_half() {
+        // Top half (metadata 4): base on top, step below.
+        let boxes = stair_boxes(&[(0, 0, 4), (-1, 0, 6)]);
+        assert_eq!(boxes.len(), 3);
+        assert_eq!(boxes[0], ([0.0, 0.5, 0.0], [1.0, 1.0, 1.0]));
+        assert_eq!(boxes[2], ([0.0, 0.0, 0.5], [0.5, 0.5, 1.0]));
+        // A neighbour of the other half does not make a corner.
+        assert_eq!(stair_boxes(&[(0, 0, 4), (-1, 0, 2)]).len(), 2);
     }
 
     #[test]
