@@ -84,6 +84,8 @@ pub enum CreativeEvent {
     },
     /// A double click on a slot.
     DoubleClick(CreativeSlot),
+    /// A double click on a slot with Shift held.
+    ShiftDoubleClick(CreativeSlot),
     /// A mouse wheel step, positive when scrolling up.
     Wheel(i32),
     /// A left press on the scrollbar track.
@@ -305,7 +307,11 @@ impl CreativeInput {
         let press = press?;
         if let Some(slot) = self.double_click_slot(&press, point, button, context) {
             self.last_click = None;
-            return Some(CreativeEvent::DoubleClick(slot));
+            return Some(if self.shift {
+                CreativeEvent::ShiftDoubleClick(slot)
+            } else {
+                CreativeEvent::DoubleClick(slot)
+            });
         }
         // Another button ended the drag: cancel it (`dragSplittingButton`).
         if (press.drag.is_some() && press.button != button) || press.ignore_release {
@@ -375,10 +381,9 @@ impl CreativeInput {
         })
     }
 
-    /// The slot to collect onto, if the release completes a double click.
-    ///
-    /// Vanilla also shift-clicks every matching slot when Shift is held; that
-    /// needs the slot contents, so with Shift the release is a normal one.
+    /// The slot of a double click, if the release completes one. With Shift
+    /// held the cursor is empty during the shift-clicks, so it does not matter
+    /// whether it holds an item.
     fn double_click_slot(
         &self,
         press: &Press,
@@ -387,7 +392,7 @@ impl CreativeInput {
         context: Context,
     ) -> Option<CreativeSlot> {
         let completes =
-            press.double && button == MouseButton::Left && context.cursor_has_item && !self.shift;
+            press.double && button == MouseButton::Left && (context.cursor_has_item || self.shift);
         slot_at(context.tab, point.0, point.1).filter(|_| completes)
     }
 
@@ -480,6 +485,38 @@ mod tests {
         assert_eq!(
             input.button_released(LEFT, HOLDING),
             click(Some(hotbar), LEFT)
+        );
+    }
+
+    #[test]
+    fn crossing_slots_with_the_middle_button_makes_a_middle_drag() {
+        let mut input = CreativeInput::new();
+        let (a, b) = (CreativeSlot::Hotbar(0), CreativeSlot::Hotbar(1));
+        input.pointer_moved(centre(a), HOLDING);
+        input.button_pressed(MouseButton::Middle, HOLDING, Instant::now());
+        input.pointer_moved(centre(a), HOLDING);
+        input.pointer_moved(centre(b), HOLDING);
+        let event = input.button_released(MouseButton::Middle, HOLDING);
+        assert!(matches!(
+            event,
+            Some(CreativeEvent::Drag { button: MouseButton::Middle, ref slots, .. })
+                if *slots == [a, b]
+        ));
+    }
+
+    #[test]
+    fn a_shift_double_click_does_not_need_a_cursor_item() {
+        let mut input = CreativeInput::new();
+        input.set_modifiers(true, false);
+        let slot = CreativeSlot::Hotbar(0);
+        let now = Instant::now();
+        input.pointer_moved(centre(slot), ITEMS);
+        input.button_pressed(MouseButton::Left, ITEMS, now);
+        input.button_released(MouseButton::Left, ITEMS);
+        input.button_pressed(MouseButton::Left, ITEMS, now + Duration::from_millis(100));
+        assert_eq!(
+            input.button_released(MouseButton::Left, ITEMS),
+            Some(CreativeEvent::ShiftDoubleClick(slot))
         );
     }
 

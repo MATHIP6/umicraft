@@ -24,14 +24,15 @@
 //!
 //! * Item names use the vanilla 1.8 keys: the legacy unlocalised name plus the
 //!   per-damage sub-name (`item.swordDiamond.name`, `tile.cloth.red.name`,
-//!   see [`items::unlocalized_name`]). A spawn egg appends its entity. Potion
-//!   names (effect prefix and postfix) and the skull owner name are not built.
+//!   see [`items::unlocalized_name`]); [`name`] covers the items that build
+//!   their own name (potion, banner, player head, spawn egg).
 //! * Only sword, pickaxe, axe and shovel attack damage is produced (hoes and
 //!   shears have no attribute modifier in 1.8). A stack-level
 //!   `AttributeModifiers` NBT list that replaces the item's own modifiers is
 //!   ignored.
 //! * `CanDestroy` / `CanPlaceOn`, books, maps (apart from the
-//!   ` #<damage>` name suffix), fireworks and banners add no lines.
+//!   ` #<damage>` name suffix) and fireworks add no lines. Banners list their
+//!   pattern layers ([`banner`]).
 //! * Potion lines come from [`potion`]. The "When Applied" attribute lines
 //!   keep the order of the effects; the reference iterates a hash multimap.
 //! * The stack NBT is parsed twice (once here, once by [`ItemDisplay`]); a
@@ -43,15 +44,13 @@ use crate::item_nbt::{Enchantment, ItemDisplay};
 use crate::items::{self, ItemKind, Tier, ToolKind};
 use crate::nbt::Nbt;
 
+mod banner;
+mod name;
 mod potion;
 pub use potion::has_effects as potion_has_effects;
 
 /// Registry name of the golden apple (`ItemAppleGold`).
 const GOLDEN_APPLE: &str = "golden_apple";
-/// Registry name of the spawn egg, whose name ends with the spawned entity.
-const SPAWN_EGG: &str = "spawn_egg";
-/// Registry name of the filled map, whose name gets a ` #<damage>` suffix.
-const FILLED_MAP: &str = "filled_map";
 /// Registry name of the enchanted book (`ItemEnchantedBook`).
 const ENCHANTED_BOOK: &str = "enchanted_book";
 /// Registry name of the potion (`ItemPotion`).
@@ -311,10 +310,11 @@ fn base_tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
         .unwrap_or(0);
     let def = items::lookup(i32::from(stack.item_id));
 
-    let mut lines = vec![name_line(
+    let mut lines = vec![name::name_line(
         stack,
         def,
         &display,
+        root.as_ref(),
         rarity(stack, def, root.as_ref()),
     )];
     if hide & HIDE_ADDITIONAL == 0 {
@@ -378,47 +378,6 @@ fn rarity(stack: &ItemStack, def: Option<&items::ItemDef>, root: Option<&Nbt>) -
     }
 }
 
-/// Line 0: the custom name in italic, else the translated item name
-/// (`ItemStack.getDisplayName` and the filled-map ` #damage` suffix).
-fn name_line(
-    stack: &ItemStack,
-    def: Option<&items::ItemDef>,
-    display: &ItemDisplay,
-    rarity: Rarity,
-) -> TooltipLine {
-    let colour = rarity.color();
-    if let Some(custom) = &display.custom_name {
-        return TooltipLine::italic(TooltipText::literal(custom.as_str()), colour);
-    }
-    let Some(def) = def else {
-        let fallback = format!("Unknown item {}", stack.item_id);
-        return TooltipLine::plain(TooltipText::Literal(fallback), colour);
-    };
-    let name = TooltipText::key(format!(
-        "{}.name",
-        items::unlocalized_name(def, stack.damage)
-    ));
-    let text = if def.name == FILLED_MAP {
-        let suffix = TooltipText::literal(format!(" #{}", stack.damage));
-        TooltipText::Concat(vec![name, suffix])
-    } else if def.name == SPAWN_EGG {
-        spawn_egg_name(name, stack.damage)
-    } else {
-        name
-    };
-    TooltipLine::plain(text, colour)
-}
-
-/// `ItemMonsterPlacer.getItemStackDisplayName`: the egg name, a space and the
-/// name of the entity it spawns (nothing more for an unknown entity id).
-fn spawn_egg_name(egg: TooltipText, damage: i16) -> TooltipText {
-    let Some(entity) = items::spawn_egg_entity(damage) else {
-        return egg;
-    };
-    let entity = TooltipText::key(format!("entity.{entity}.name"));
-    TooltipText::Concat(vec![egg, TooltipText::literal(" "), entity])
-}
-
 /// The lines `Item.addInformation` adds in 1.8: the record title, the
 /// stored enchantments of an enchanted book and the effects of a potion.
 fn additional_lines(
@@ -429,6 +388,9 @@ fn additional_lines(
     let Some(def) = def else { return Vec::new() };
     if def.name == POTION {
         return potion::lines(damage, root);
+    }
+    if def.name == banner::BANNER {
+        return banner::lines(root);
     }
     if let Some(record) = def.name.strip_prefix("record_") {
         let key = format!("item.record.{record}.desc");
@@ -706,6 +668,37 @@ mod tests {
     fn subtypes_use_their_per_damage_key() {
         let lines = tooltip(&stack(35, 14, None));
         assert_eq!(lines[0].text, key("tile.cloth.red.name"));
+    }
+
+    #[test]
+    fn potions_are_named_after_their_effect_or_brewing_prefix() {
+        let swiftness = tooltip(&stack(373, 8194, None));
+        assert_eq!(
+            swiftness[0].text,
+            TooltipText::Concat(vec![key("potion.moveSpeed.postfix")])
+        );
+        let water = tooltip(&stack(373, 0, None));
+        assert_eq!(water[0].text, key("item.emptyPotion.name"));
+    }
+
+    #[test]
+    fn a_player_head_is_named_after_its_owner() {
+        // {SkullOwner: "Notch"}
+        let mut tag = vec![10, 0, 0, 8, 0, 10];
+        tag.extend(b"SkullOwner");
+        tag.extend([0, 5]);
+        tag.extend(b"Notch");
+        tag.push(0);
+        let lines = tooltip(&stack(397, 3, Some(tag)));
+        assert_eq!(
+            lines[0].text,
+            TooltipText::Translation {
+                key: "item.skull.player.name".into(),
+                args: vec![TooltipText::literal("Notch")],
+            }
+        );
+        let zombie = tooltip(&stack(397, 2, None));
+        assert_eq!(zombie[0].text, key("item.skull.zombie.name"));
     }
 
     #[test]

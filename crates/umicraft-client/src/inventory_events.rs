@@ -10,6 +10,7 @@ use std::sync::mpsc::SyncSender;
 
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::inventory::click::{drag_sequence, ClickRequest};
+use umicraft_game::inventory::ClickCommand;
 
 use super::{publish_inventory, sync_armor, CommandQueue, Game, RenderEvent};
 use crate::inventory_input::InventoryAction;
@@ -28,25 +29,38 @@ pub(super) fn apply_inventory_action(
     frames: &SyncSender<RenderEvent>,
 ) {
     let creative = game.gamemode == GameMode::Creative;
-    for request in requests(game, action) {
-        let command = game.windows.click(request, creative);
-        queue.push(ClientCommand::ClickWindow {
-            window_id: command.window_id,
-            slot: command.slot,
-            button: command.button,
-            action_number: command.action_number,
-            mode: command.mode,
-            clicked_item: command.clicked_item,
+    if let InventoryAction::ShiftDoubleClick(slot) = action {
+        // Each click depends on what the previous ones left in the window, so
+        // the window decides the requests as it goes.
+        game.windows.shift_double_click(slot, |windows, request| {
+            queue_click(queue, windows.click(request, creative));
         });
+    } else {
+        for request in requests(game, action) {
+            queue_click(queue, game.windows.click(request, creative));
+        }
     }
     sync_armor(game);
     publish_inventory(game, frames);
+}
+
+/// Queues the `Click Window` packet of a predicted click.
+fn queue_click(queue: &mut CommandQueue, command: ClickCommand) {
+    queue.push(ClientCommand::ClickWindow {
+        window_id: command.window_id,
+        slot: command.slot,
+        button: command.button,
+        action_number: command.action_number,
+        mode: command.mode,
+        clicked_item: command.clicked_item,
+    });
 }
 
 /// The `Click Window` requests an action stands for, in send order.
 fn requests(game: &mut Game, action: InventoryAction) -> Vec<ClickRequest> {
     match action {
         InventoryAction::Click(request) => vec![request],
+        InventoryAction::ShiftDoubleClick(_) => Vec::new(),
         InventoryAction::Drag {
             slots,
             button,
@@ -116,6 +130,26 @@ mod tests {
             }]
         );
         assert_eq!(game.windows.cursor(), Some(&stack(1, 6)));
+    }
+
+    #[test]
+    fn a_shift_double_click_sends_one_shift_click_per_matching_slot() {
+        let mut game = game_with_chest();
+        // Window slots 27 and 28 are inventory slots 9 and 10.
+        game.windows.inventory_mut().set_slot(9, Some(stack(2, 4)));
+        game.windows.inventory_mut().set_slot(10, Some(stack(2, 8)));
+        game.windows.inventory_mut().set_slot(11, Some(stack(3, 1)));
+        game.windows.remember_shift_reference(27);
+        let commands = run(&mut game, InventoryAction::ShiftDoubleClick(28));
+        let sent: Vec<(i16, i8)> = commands
+            .iter()
+            .filter_map(|c| match c {
+                ClientCommand::ClickWindow { slot, mode, .. } => Some((*slot, *mode)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent, vec![(27, 1), (28, 1)]);
+        assert_eq!(game.windows.inventory().slot(11), Some(&stack(3, 1)));
     }
 
     #[test]

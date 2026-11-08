@@ -22,7 +22,7 @@ use super::action::{slot_changes, CreativeAction};
 use super::state::CreativeScreen;
 use super::target::CreativeSlot;
 use crate::inventory::click::{drag_sequence, ClickRequest, DragButton};
-use crate::inventory::stack::{count, max_stack, with_count};
+use crate::inventory::stack::{count, max_stack, same_item, with_count};
 use crate::inventory::{WindowManager, PLAYER_SLOT_COUNT};
 
 /// A mouse button.
@@ -75,6 +75,9 @@ impl CreativeScreen {
     ) -> Vec<CreativeAction> {
         self.restart_search_on_key = true;
         let shift = shift && target.is_some();
+        if shift && window.cursor().is_none() {
+            remember_shift_reference(window, target);
+        }
         match target {
             None if !self.tab.shows_player_inventory() => outside_drop(window, button),
             Some(CreativeSlot::Trash) if shift => clear_inventory(window),
@@ -124,8 +127,11 @@ impl CreativeScreen {
     }
 
     /// Handles a double click on `target`, which collects matching stacks
-    /// onto the cursor. Only the hotbar slots of the inventory tab take part
-    /// (`ContainerCreative.canMergeSlot` is limited to the lowest row).
+    /// onto the cursor. Only the lowest row can be double-clicked
+    /// (`ContainerCreative.canMergeSlot` accepts slots below y = 90): the
+    /// hotbar slots of the inventory tab (which gather from the whole player
+    /// window) and the hotbar of an item tab (which gathers from the hotbar
+    /// alone, the only player slots that tab holds).
     pub fn double_click(
         &mut self,
         window: &mut WindowManager,
@@ -135,6 +141,38 @@ impl CreativeScreen {
         match target {
             CreativeSlot::Player(slot) if self.tab.shows_player_inventory() && slot >= 36 => {
                 apply(window, ClickRequest::double(slot as i16), None)
+            }
+            CreativeSlot::Hotbar(index) if !self.tab.shows_player_inventory() => {
+                CreativeSlot::Hotbar(index)
+                    .window_slot()
+                    .map_or_else(Vec::new, |slot| collect_from_hotbar(window, slot))
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Handles Shift + double click on `target` (`GuiContainer.mouseReleased`):
+    /// every slot of the clicked slot's inventory that holds the stack the
+    /// last shift-click started on gets a shift-click of its own. In the
+    /// inventory tab that is the normal player-window transfer; in an item tab
+    /// a shift-click deletes a hotbar stack, and the item grid has nothing to
+    /// do (its shift-click only refills the cursor).
+    pub fn shift_double_click(
+        &mut self,
+        window: &mut WindowManager,
+        target: CreativeSlot,
+    ) -> Vec<CreativeAction> {
+        self.restart_search_on_key = true;
+        match target {
+            CreativeSlot::Player(slot) if self.tab.shows_player_inventory() && slot >= 36 => {
+                let before = window.inventory().all_slots();
+                window.shift_double_click(slot as i16, |window, request| {
+                    window.click_local(request, true);
+                });
+                slot_changes(&before, &window.inventory().all_slots(), None)
+            }
+            CreativeSlot::Hotbar(_) if !self.tab.shows_player_inventory() => {
+                delete_matching_hotbar_stacks(window)
             }
             _ => Vec::new(),
         }
@@ -196,6 +234,74 @@ impl CreativeScreen {
         window.set_cursor(next);
         Vec::new()
     }
+}
+
+/// Records the stack a shift-click starts on for a later Shift + double click
+/// (`shiftClickedSlot`). Only slots of the player window have one: the item
+/// grid's copies are never moved.
+fn remember_shift_reference(window: &mut WindowManager, target: Option<CreativeSlot>) {
+    let slot = target
+        .and_then(CreativeSlot::window_slot)
+        .and_then(|slot| i16::try_from(slot).ok());
+    if let Some(slot) = slot {
+        window.remember_shift_reference(slot);
+    }
+}
+
+/// Mode 6 in an item tab: gathers the stacks equal to the cursor stack from
+/// the hotbar onto the cursor (`Container.slotClick` over `ContainerCreative`,
+/// whose only mergeable slots are the hotbar). Like vanilla it needs a cursor
+/// stack and an empty clicked slot; partial stacks go first, then full ones.
+fn collect_from_hotbar(window: &mut WindowManager, clicked: usize) -> Vec<CreativeAction> {
+    let Some(mut held) = window.cursor().cloned() else {
+        return Vec::new();
+    };
+    if window.inventory().slot(clicked).is_some() {
+        return Vec::new();
+    }
+    let before = window.inventory().all_slots();
+    let hotbar = crate::inventory::HOTBAR_START..PLAYER_SLOT_COUNT;
+    for pass in 0..2 {
+        for slot in hotbar.clone() {
+            if count(&held) >= max_stack(&held) {
+                break;
+            }
+            let Some(there) = window.inventory().slot(slot).cloned() else {
+                continue;
+            };
+            let partial_only = pass == 0 && count(&there) == max_stack(&there);
+            if partial_only || !same_item(&there, &held) {
+                continue;
+            }
+            let moved = (max_stack(&held) - count(&held)).min(count(&there));
+            held = with_count(&held, count(&held) + moved);
+            let left = count(&there) - moved;
+            let rest = (left > 0).then(|| with_count(&there, left));
+            window.inventory_mut().set_slot(slot, rest);
+        }
+    }
+    window.set_cursor(Some(held));
+    slot_changes(&before, &window.inventory().all_slots(), None)
+}
+
+/// Shift + double click in an item tab: deletes every hotbar stack equal to
+/// the one the last shift-click started on.
+fn delete_matching_hotbar_stacks(window: &mut WindowManager) -> Vec<CreativeAction> {
+    let Some(reference) = window.shift_reference().cloned() else {
+        return Vec::new();
+    };
+    let mut actions = Vec::new();
+    for slot in crate::inventory::HOTBAR_START..PLAYER_SLOT_COUNT {
+        if window
+            .inventory()
+            .slot(slot)
+            .is_some_and(|there| same_item(there, &reference))
+        {
+            window.inventory_mut().set_slot(slot, None);
+            actions.push(CreativeAction::set_slot(slot, None));
+        }
+    }
+    actions
 }
 
 /// Left grows the cursor stack by one (shift: to the limit), right shrinks it

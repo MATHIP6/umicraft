@@ -333,17 +333,19 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
   tab (offscreen portrait block of the icon atlas, ADR-0025 addendum).
 - **Active effects list** in the inventory (needs the `Entity Effect` state of
   P1/P2 drawn left of the window, `GuiInventory.drawActivePotionEffects`).
-- **Creative inventory gaps:** Shift +
-  double click, middle-button drag, double click outside the Inventory tab,
-  banner patterns. Search by variant name and the tab-name line of the Search
-  tooltip are done (2026-11-07; the line is blue but not bold).
-- **Survival gaps:** Shift + double click (collect every matching slot), pick
+- **Creative inventory gaps (2026-11-08):** none left in the code. Search by
+  variant name, the tab-name line of the Search tooltip (blue, not bold),
+  double click and Shift + double click in every tab, and the middle-button
+  drag are done. The lists hold plain banners, as in 1.8; patterned banners
+  from a server show their layers in the tooltip.
+- **Survival gaps:** pick
   block key over a slot, touchscreen mode, empty-cursor outside click (mode 4).
 - **Language keys of item names (done 2026-11-07):** the loader itself
   existed (P10); the item names used registry keys that the vanilla `.lang`
   does not contain. `items::unlocalized_name` now gives the 1.8 keys with the
-  per-damage sub-name, and a spawn egg appends its entity. Left: potion
-  effect names, the skull owner name, the banner base colour from NBT.
+  per-damage sub-name, and a spawn egg appends its entity; potion names, the
+  player head owner and the banner base colour and pattern layers follow the
+  reference too.
 - **Fidelity to verify against vanilla screenshots:** tooltip colours (fixed
   for the tooltip only, see the sRGB entry of `docs/backlog.md`), the gradient
   border, GUI block lighting and glass icons (fixed, unverified), creative

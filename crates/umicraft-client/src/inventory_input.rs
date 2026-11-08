@@ -75,6 +75,9 @@ pub struct Context {
 pub enum InventoryAction {
     /// One `Click Window`.
     Click(ClickRequest),
+    /// Shift + double click on a slot: the window shift-clicks every slot of
+    /// that inventory holding the stack the press started on.
+    ShiftDoubleClick(i16),
     /// A finished drag split over `slots`, in the order they were crossed.
     Drag {
         /// The window slots the pointer crossed while the button was down.
@@ -274,11 +277,10 @@ impl InventoryInput {
         Some(InventoryAction::Click(request))
     }
 
-    /// The collect click of a double click, if the release completes one.
-    ///
-    /// Vanilla also shift-clicks every matching slot of the inventory when
-    /// Shift is held; that needs the slot contents, so with Shift the release
-    /// is handled as a normal one.
+    /// The action of a double click, if the release completes one: the
+    /// collect click, or with Shift held the shift-click of every matching
+    /// slot (the cursor stays empty during a shift-click, so it does not
+    /// matter then).
     fn double_click(
         &mut self,
         layout: &ScreenLayout,
@@ -289,11 +291,14 @@ impl InventoryInput {
     ) -> Option<InventoryAction> {
         let completes = press.is_some_and(|p| p.double)
             && button == Button::Left
-            && context.cursor_has_item
-            && !self.shift;
+            && (context.cursor_has_item || self.shift);
         let slot = slot_id(layout.slot_at(point)?).filter(|_| completes)?;
         self.last_click = None;
-        Some(InventoryAction::Click(ClickRequest::double(slot)))
+        Some(if self.shift {
+            InventoryAction::ShiftDoubleClick(slot)
+        } else {
+            InventoryAction::Click(ClickRequest::double(slot))
+        })
     }
 
     /// The click a button makes on `target` (a slot or [`OUTSIDE_SLOT`]).
@@ -485,6 +490,26 @@ mod tests {
         assert_eq!(
             input.button_released(&layout, Button::Left, HOLDING),
             click(ClickRequest::double(10))
+        );
+    }
+
+    #[test]
+    fn a_shift_double_click_asks_for_every_matching_slot_with_an_empty_cursor() {
+        let (layout, now) = (layout(), Instant::now());
+        let mut input = InventoryInput::new();
+        input.set_modifiers(true, false);
+        at(&mut input, &layout, 10, EMPTY);
+        input.button_pressed(&layout, Button::Left, EMPTY, now);
+        input.button_released(&layout, Button::Left, EMPTY);
+        let later = now + Duration::from_millis(200);
+        // The second press still shift-clicks, as in vanilla.
+        assert_eq!(
+            input.button_pressed(&layout, Button::Left, EMPTY, later),
+            click(ClickRequest::shift(10, 0))
+        );
+        assert_eq!(
+            input.button_released(&layout, Button::Left, EMPTY),
+            Some(InventoryAction::ShiftDoubleClick(10))
         );
     }
 

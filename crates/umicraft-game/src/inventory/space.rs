@@ -82,6 +82,39 @@ impl<'a> ClickSpace<'a> {
         matches!(self.target(index), Some(SlotTarget::Player(_)))
     }
 
+    /// Whether two slots belong to the same inventory object
+    /// (`slot.inventory == other.inventory`): the player inventory, the
+    /// container's own inventory, or a crafting grid or result, which each
+    /// have an inventory of their own in the reference.
+    #[must_use]
+    pub fn same_inventory(&self, a: usize, b: usize) -> bool {
+        self.inventory_id(a) == self.inventory_id(b)
+    }
+
+    /// An identifier of the inventory a slot belongs to; the crafting result
+    /// and its grid (the `grid_len` slots after it) are told apart by the
+    /// result's index.
+    fn inventory_id(&self, index: usize) -> (u8, usize) {
+        const PLAYER: u8 = 0;
+        const RESULT: u8 = 1;
+        const GRID: u8 = 2;
+        const CONTAINER: u8 = 3;
+        if matches!(self.kind(index), SlotKind::CraftingResult { .. }) {
+            return (RESULT, index);
+        }
+        let grid_of = (0..index).rev().find(|&before| {
+            matches!(
+                self.kind(before),
+                SlotKind::CraftingResult { grid_len } if index - before <= usize::from(grid_len)
+            )
+        });
+        match grid_of {
+            Some(result) => (GRID, result),
+            None if self.is_player_slot(index) => (PLAYER, 0),
+            None => (CONTAINER, 0),
+        }
+    }
+
     /// The stack in a slot.
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&ItemStack> {

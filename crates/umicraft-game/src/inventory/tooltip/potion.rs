@@ -132,6 +132,88 @@ fn potion_type(id: u8) -> Option<&'static PotionType> {
     POTIONS.iter().find(|potion| potion.id == id)
 }
 
+/// `ItemPotion` damage bit of a splash potion.
+const SPLASH_BIT: i16 = 16384;
+/// The registry key of the potion item, whose name follows a prefix.
+const POTION_NAME_KEY: &str = "item.potion.name";
+
+/// `PotionHelper.potionPrefixes` without the `potion.prefix.` part, indexed by
+/// bits 5 to 1 of the damage value.
+const PREFIXES: [&str; 32] = [
+    "mundane",
+    "uninteresting",
+    "bland",
+    "clear",
+    "milky",
+    "diffuse",
+    "artless",
+    "thin",
+    "awkward",
+    "flat",
+    "bulky",
+    "bungling",
+    "buttered",
+    "smooth",
+    "suave",
+    "debonair",
+    "thick",
+    "elegant",
+    "fancy",
+    "charming",
+    "dashing",
+    "refined",
+    "cordial",
+    "sparkling",
+    "potent",
+    "foul",
+    "odorless",
+    "rank",
+    "harsh",
+    "acrid",
+    "gross",
+    "stinky",
+];
+
+/// `PotionHelper.getPotionPrefixIndex`: bits 5, 4, 3, 2, 1 as one number.
+fn prefix_index(damage: i16) -> usize {
+    usize::from(((damage >> 1) & 0b1_1111) as u8)
+}
+
+/// The display name of a potion (`ItemPotion.getItemStackDisplayName`),
+/// `None` for the water bottle, which the generic item name covers.
+///
+/// A potion with effects is named after the first one
+/// (`potion.<effect>.postfix`, "Potion of Swiftness"), led by "Splash" when
+/// thrown; one without (awkward, mundane, thick...) is its brewing prefix and
+/// "Potion", with no splash prefix, like the reference.
+pub(super) fn display_name(damage: i16, root: Option<&Nbt>) -> Option<TooltipText> {
+    if damage == WATER_BOTTLE {
+        return None;
+    }
+    let first = effects(damage, root)
+        .first()
+        .and_then(|effect| potion_type(effect.id));
+    let mut parts = Vec::new();
+    match first {
+        Some(potion) => {
+            if damage & SPLASH_BIT != 0 {
+                parts.push(TooltipText::key("potion.prefix.grenade"));
+                parts.push(TooltipText::literal(" "));
+            }
+            parts.push(TooltipText::key(format!("{}.postfix", potion.name)));
+        }
+        None => {
+            parts.push(TooltipText::key(format!(
+                "potion.prefix.{}",
+                PREFIXES[prefix_index(damage)]
+            )));
+            parts.push(TooltipText::literal(" "));
+            parts.push(TooltipText::key(POTION_NAME_KEY));
+        }
+    }
+    Some(TooltipText::Concat(parts))
+}
+
 /// The lines a potion with this `damage` and tag adds under its name.
 pub(super) fn lines(damage: i16, root: Option<&Nbt>) -> Vec<TooltipLine> {
     if damage == WATER_BOTTLE {
@@ -304,6 +386,62 @@ mod tests {
 
     fn name_with(parts: Vec<TooltipText>) -> TooltipText {
         TooltipText::Concat(parts)
+    }
+
+    fn key(text: &str) -> TooltipText {
+        TooltipText::key(text)
+    }
+
+    #[test]
+    fn a_potion_with_effects_is_named_after_the_first() {
+        // 8194: drinkable, Swiftness (bits 0 and 1 are the brewing bits).
+        let name = display_name(8194, None).expect("a potion name");
+        assert_eq!(name, name_with(vec![key("potion.moveSpeed.postfix")]));
+    }
+
+    #[test]
+    fn a_splash_potion_starts_with_the_splash_prefix() {
+        let name = display_name(16386, None).expect("a potion name");
+        assert_eq!(
+            name,
+            name_with(vec![
+                key("potion.prefix.grenade"),
+                TooltipText::literal(" "),
+                key("potion.moveSpeed.postfix"),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_splash_potion_without_effects_has_no_splash_prefix() {
+        let name = display_name(16384 | 16, None).expect("a potion name");
+        assert_eq!(
+            name,
+            name_with(vec![
+                key("potion.prefix.awkward"),
+                TooltipText::literal(" "),
+                key("item.potion.name"),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_potion_without_effects_uses_its_brewing_prefix() {
+        // 16: awkward (bit 4 gives index 8).
+        let name = display_name(16, None).expect("a potion name");
+        assert_eq!(
+            name,
+            name_with(vec![
+                key("potion.prefix.awkward"),
+                TooltipText::literal(" "),
+                key("item.potion.name"),
+            ])
+        );
+    }
+
+    #[test]
+    fn the_water_bottle_keeps_the_generic_name() {
+        assert_eq!(display_name(0, None), None);
     }
 
     #[test]

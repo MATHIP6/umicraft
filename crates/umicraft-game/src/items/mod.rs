@@ -28,6 +28,7 @@ mod table;
 pub mod tint;
 
 pub use kind::{ArmorMaterial, ArmorSlot, FoodValues, ItemKind, Tier, ToolKind};
+pub(crate) use names::dye_colour;
 pub use names::{spawn_egg_entity, unlocalized_name};
 pub use potion_color::liquid_color as potion_liquid_color;
 pub(crate) use potion_variants::{effects as potion_effects, Effect as PotionEffect};

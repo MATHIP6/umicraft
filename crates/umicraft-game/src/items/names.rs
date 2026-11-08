@@ -116,7 +116,7 @@ fn entry(names: &[&'static str], index: i16) -> &'static str {
 
 /// The dye colour of a dye or banner damage value (`EnumDyeColor.byDyeDamage`):
 /// dye damage counts from black, block metadata from white.
-fn dye_colour(damage: i16) -> &'static str {
+pub(crate) fn dye_colour(damage: i16) -> &'static str {
     let damage = usize::try_from(damage)
         .ok()
         .filter(|d| *d < COLOURS.len())

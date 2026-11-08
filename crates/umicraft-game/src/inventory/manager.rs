@@ -5,7 +5,7 @@
 use umicraft_protocol::packets::play::ItemStack;
 
 use super::armor;
-use super::click::{drag_targets, slot_click, ClickRequest, DragState};
+use super::click::{drag_targets, slot_click, ClickMode, ClickRequest, DragState};
 use super::kind::{
     resolve_container_slot, SlotTarget, WindowKind, HOTBAR_LEN, HOTBAR_START, MAIN_INV_LEN,
     PLAYER_SLOT_COUNT,
@@ -14,7 +14,7 @@ use super::payload::{Trade, TradeList};
 use super::player::{main_index_to_slot, PlayerInventory};
 use super::slot::{container_window_kinds, player_window_kinds, SlotKind};
 use super::space::ClickSpace;
-use super::stack::{from_wire, to_wire};
+use super::stack::{from_wire, same_item, to_wire};
 use super::transactions::{Confirmation, Snapshot, Transactions};
 use super::view::{ContainerView, WindowView};
 
@@ -70,6 +70,7 @@ pub struct WindowManager {
     transactions: Transactions,
     action_counter: i16,
     selected_slot: u8,
+    shift_reference: Option<ItemStack>,
 }
 
 impl WindowManager {
@@ -268,7 +269,57 @@ impl WindowManager {
     }
 
     fn apply_click(&mut self, request: ClickRequest, creative: bool) -> Option<ItemStack> {
+        if request.mode == ClickMode::Shift && self.cursor.is_none() {
+            self.remember_shift_reference(request.slot);
+        }
         self.with_space(|space, cursor, drag| slot_click(space, cursor, drag, request, creative))
+    }
+
+    /// Remembers the stack a shift-click starts on (`shiftClickedSlot`), the
+    /// reference of a later [`shift_double_click`](Self::shift_double_click).
+    /// A click outside the window or on an empty slot leaves none.
+    pub fn remember_shift_reference(&mut self, slot: i16) {
+        let reference = usize::try_from(slot)
+            .ok()
+            .and_then(|index| self.with_space(|space, _, _| space.get(index).cloned()));
+        self.shift_reference = reference;
+    }
+
+    /// The stack the last shift-click started on (`shiftClickedSlot`).
+    #[must_use]
+    pub fn shift_reference(&self) -> Option<&ItemStack> {
+        self.shift_reference.as_ref()
+    }
+
+    /// Shift + double click (`GuiContainer.mouseReleased`): shift-clicks every
+    /// slot of the clicked slot's inventory that holds the stack the last
+    /// shift-click started on.
+    ///
+    /// Slots are tested one after the other against the window as the
+    /// previous clicks left it, like the reference loop, and `click` performs
+    /// each shift-click (a packet-sending [`click`](Self::click) or a local
+    /// one).
+    pub fn shift_double_click(
+        &mut self,
+        slot: i16,
+        mut click: impl FnMut(&mut Self, ClickRequest),
+    ) {
+        let (Some(reference), Ok(clicked)) = (self.shift_reference.clone(), usize::try_from(slot))
+        else {
+            return;
+        };
+        let count = self.with_space(|space, _, _| space.len());
+        for index in 0..count {
+            let matches = self.with_space(|space, _, _| {
+                space.same_inventory(clicked, index)
+                    && space
+                        .get(index)
+                        .is_some_and(|there| same_item(there, &reference))
+            });
+            if matches {
+                click(self, ClickRequest::shift(index as i16, 0));
+            }
+        }
     }
 
     /// The slots of a drag split over `slots` that can take the cursor
@@ -495,6 +546,60 @@ mod tests {
         assert_eq!(wm.cursor(), Some(&stack(1, 2)));
         wm.apply_set_slot(-1, -1, ItemStack::EMPTY);
         assert_eq!(wm.cursor(), None);
+    }
+
+    fn shift_double(wm: &mut WindowManager, slot: i16) {
+        wm.shift_double_click(slot, |wm, request| {
+            wm.click_local(request, false);
+        });
+    }
+
+    fn chest_with_inventory(stacks: &[(usize, ItemStack)]) -> WindowManager {
+        let mut wm = WindowManager::new();
+        wm.open_window(2, WindowKind::Chest, "Chest".to_string(), 27);
+        for (slot, item) in stacks {
+            wm.inventory_mut().set_slot(*slot, Some(item.clone()));
+        }
+        wm
+    }
+
+    #[test]
+    fn shift_double_click_moves_every_stack_equal_to_the_shift_clicked_one() {
+        // Inventory slots 9, 10, 11 and 12 are window slots 27 to 30.
+        let mut wm = chest_with_inventory(&[
+            (9, stack(1, 10)),
+            (10, stack(1, 20)),
+            (11, stack(2, 5)),
+            (12, stack(1, 3)),
+        ]);
+        wm.click_local(ClickRequest::shift(27, 0), false);
+        shift_double(&mut wm, 28);
+        let chest = &wm.container().expect("chest").container_slots;
+        assert_eq!(chest[0], Some(stack(1, 33)));
+        assert_eq!(wm.inventory().slot(11), Some(&stack(2, 5)));
+        assert!(wm.inventory().slot(10).is_none() && wm.inventory().slot(12).is_none());
+    }
+
+    #[test]
+    fn shift_double_click_stays_inside_the_clicked_inventory() {
+        // A stack in the chest is not touched by a double click on the
+        // inventory, nor is the other way round.
+        let mut wm = chest_with_inventory(&[(9, stack(1, 10))]);
+        wm.apply_set_slot(2, 0, stack(1, 7));
+        wm.remember_shift_reference(27);
+        shift_double(&mut wm, 27);
+        let chest = &wm.container().expect("chest").container_slots;
+        assert_eq!(chest[0], Some(stack(1, 17)));
+        assert!(wm.inventory().slot(9).is_none());
+    }
+
+    #[test]
+    fn shift_double_click_without_a_reference_does_nothing() {
+        let mut wm = WindowManager::new();
+        wm.inventory_mut().set_slot(9, Some(stack(1, 10)));
+        wm.click_local(ClickRequest::shift(20, 0), false);
+        shift_double(&mut wm, 9);
+        assert_eq!(wm.inventory().slot(9), Some(&stack(1, 10)));
     }
 
     #[test]

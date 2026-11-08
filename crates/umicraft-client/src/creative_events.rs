@@ -77,6 +77,9 @@ fn dispatch(game: &mut Game, event: CreativeEvent) -> Vec<CreativeAction> {
             return fallback.map_or_else(Vec::new, |click| click_slot(game, click));
         }
         CreativeEvent::DoubleClick(slot) => return creative.double_click(windows, slot),
+        CreativeEvent::ShiftDoubleClick(slot) => {
+            return creative.shift_double_click(windows, slot);
+        }
         CreativeEvent::Wheel(delta) => creative.wheel(delta),
         CreativeEvent::ScrollPress((x, y)) => {
             creative.press_scrollbar(x, y);
