@@ -792,10 +792,12 @@ impl Game {
     ///
     /// MCP `EntityRenderer.isDrawBlockOutline` hides the outline for a
     /// spectator unless a container is targeted (not modelled: spectators
-    /// never get an outline), and `RenderGlobal.drawSelectionBox` draws the
-    /// block's selected bounding box, offset to its position.
+    /// never get an outline) and, without `allowEdit` (adventure), unless the
+    /// held item's `CanDestroy`/`CanPlaceOn` lists the block (item NBT is not
+    /// read yet: adventure never gets an outline). `RenderGlobal.drawSelectionBox`
+    /// draws the block's selected bounding box, offset to its position.
     fn selection_outline(&self) -> Vec<OutlineBox> {
-        if self.gamemode == GameMode::Spectator {
+        if matches!(self.gamemode, GameMode::Spectator | GameMode::Adventure) {
             return Vec::new();
         }
         let (Some(hit), Some(world)) = (self.target(), self.world.as_ref()) else {
@@ -5231,6 +5233,15 @@ mod tests {
         assert!(game.selection_outline().is_empty());
         game.pitch = std::f32::consts::FRAC_PI_2;
         game.gamemode = GameMode::Spectator;
+        assert!(game.selection_outline().is_empty());
+    }
+
+    #[test]
+    fn an_adventure_player_gets_no_selection_outline() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        assert!(!game.selection_outline().is_empty());
+        game.gamemode = GameMode::Adventure;
         assert!(game.selection_outline().is_empty());
     }
 

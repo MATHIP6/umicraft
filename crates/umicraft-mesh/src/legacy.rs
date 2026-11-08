@@ -184,10 +184,14 @@ pub(crate) fn occludes(neighbour: BlockState, current: BlockState) -> bool {
 
 /// True when faces of `state` belong to the blended (second) pass.
 ///
-/// ADR-0008 §2 routes `Transparent` and `Liquid` states there so water, glass
-/// and leaves share one pass; plants stay in the opaque cutout pass.
+/// ADR-0008 §2 routes `Transparent` and `Liquid` states there so water and
+/// glass share one pass; plants stay in the opaque cutout pass, and so do the
+/// leaves (ids 18 and 161): fancy leaves are `CUTOUT_MIPPED` in the reference,
+/// so they write depth and hide what lies behind them, like the selection
+/// outline's far edges.
 pub(crate) fn is_transparent_pass(state: BlockState) -> bool {
-    matches!(state.kind(), BlockKind::Transparent | BlockKind::Liquid)
+    !matches!(state.id(), 18 | 161)
+        && matches!(state.kind(), BlockKind::Transparent | BlockKind::Liquid)
 }
 
 /// What a legacy face is drawn with besides its geometry.
@@ -253,7 +257,11 @@ mod tests {
         assert!(!is_transparent_pass(BlockState::new(1, 0)), "stone");
         assert!(is_transparent_pass(BlockState::new(8, 0)), "water");
         assert!(is_transparent_pass(BlockState::new(20, 0)), "glass");
-        assert!(is_transparent_pass(BlockState::new(18, 0)), "leaves");
+        assert!(!is_transparent_pass(BlockState::new(18, 0)), "leaves");
+        assert!(
+            !is_transparent_pass(BlockState::new(161, 0)),
+            "acacia leaves"
+        );
         // Plants are cutout geometry, not blended.
         assert!(!is_transparent_pass(BlockState::new(31, 0)), "tall grass");
     }

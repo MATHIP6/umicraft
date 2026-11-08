@@ -1166,11 +1166,10 @@ scene blocks      : stone, dirt, oak stairs
         let mesh = scene.mesh(&context);
 
         // Leaves and vines fall back to the legacy cube in the synthetic
-        // context and must still take the foliage colour.
+        // context and must still take the foliage colour (the leaves are
+        // cutout, so they sit in the opaque pass).
         assert!(
-            mesh.transparent_vertices
-                .iter()
-                .any(|vertex| vertex.tint == 0x59_AE_30),
+            mesh.vertices.iter().any(|vertex| vertex.tint == 0x59_AE_30),
             "the leaf canopy must be tinted with the foliage colour"
         );
         // Plains water has no override and must stay white.

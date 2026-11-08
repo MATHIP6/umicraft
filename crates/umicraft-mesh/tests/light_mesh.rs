@@ -194,36 +194,40 @@ fn transparent_states_use_the_second_pass() {
         ([0, 0, 0], BlockState::new(1, 0)),   // stone: opaque
         ([4, 0, 0], BlockState::new(9, 0)),   // water: liquid
         ([8, 0, 0], BlockState::new(20, 0)),  // glass: transparent
-        ([12, 0, 0], BlockState::new(18, 0)), // leaves: transparent
+        ([12, 0, 0], BlockState::new(18, 0)), // leaves: cutout, opaque pass
     ]);
     let mesh = mesh_chunk(ChunkPos::new(0, 0), &scene);
 
     // Glass and leaves are six faces each; a lone water block is eleven:
     // the surface and its underside, the bottom, and four sides drawn from
-    // both sides (MCP `BlockFluidRenderer.renderFluid`).
-    assert_eq!(mesh.opaque_face_count(), 6);
-    assert_eq!(mesh.transparent_face_count(), 23);
+    // both sides (MCP `BlockFluidRenderer.renderFluid`). The leaves are
+    // `CUTOUT_MIPPED`, so they join the stone in the opaque pass.
+    assert_eq!(mesh.opaque_face_count(), 12);
+    assert_eq!(mesh.transparent_face_count(), 17);
     assert_eq!(mesh.face_count(), 29, "the counts cover both passes");
     assert_eq!(mesh.triangle_count(), 58);
-    assert_eq!(mesh.vertices.len(), 24);
-    assert_eq!(mesh.indices.len(), 36);
-    assert_eq!(mesh.transparent_vertices.len(), 92);
-    assert_eq!(mesh.transparent_indices.len(), 138);
+    assert_eq!(mesh.vertices.len(), 48);
+    assert_eq!(mesh.indices.len(), 72);
+    assert_eq!(mesh.transparent_vertices.len(), 68);
+    assert_eq!(mesh.transparent_indices.len(), 102);
 
     // The two index streams are independent: each starts at zero and every
     // index stays inside its own vertex buffer.
     let mut opaque = mesh.indices.clone();
     opaque.sort_unstable();
     opaque.dedup();
-    assert_eq!(opaque, (0..24).collect::<Vec<u32>>());
+    assert_eq!(opaque, (0..48).collect::<Vec<u32>>());
     let mut transparent = mesh.transparent_indices.clone();
     transparent.sort_unstable();
     transparent.dedup();
-    assert_eq!(transparent, (0..92).collect::<Vec<u32>>());
+    assert_eq!(transparent, (0..68).collect::<Vec<u32>>());
 
     // The stone uses the procedural stone layer (3), the fluids and the
-    // see-through cubes their own layers; none leaked into the opaque pass.
-    assert!(mesh.vertices.iter().all(|vertex| vertex.layer == 3));
+    // see-through cubes their own layers; only the stone and the leaves (the
+    // last 24 vertices) are in the opaque pass.
+    let (stone, leaves) = mesh.vertices.split_at(24);
+    assert!(stone.iter().all(|vertex| vertex.layer == 3));
+    assert!(leaves.iter().all(|vertex| vertex.layer != 3));
 }
 
 #[test]

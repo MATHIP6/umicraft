@@ -9,7 +9,7 @@
 //!
 //! Vanilla sets `glLineWidth(2.0)`, but wgpu only draws one-pixel lines. Each
 //! edge is therefore one instance of a quad that the vertex shader widens in
-//! screen space to [`line_width_px`] pixels.
+//! screen space to [`LINE_WIDTH_PX`] pixels.
 
 use crate::renderer::DEPTH_FORMAT;
 
@@ -30,15 +30,9 @@ const BUFFER_BYTES: u64 = (MAX_BOXES * VERTICES_PER_BOX * std::mem::size_of::<[f
 /// The vertices of the quad that draws one edge.
 const QUAD_VERTICES: u32 = 6;
 
-/// The line width in pixels for a target `height` pixels high.
-///
-/// Vanilla draws 2 px lines at any size, which look hair-thin on a large
-/// window; the width grows by one pixel for every 360 pixels of height
-/// (3 px at 1080p), never below vanilla's 2 px.
-#[must_use]
-pub fn line_width_px(height: u32) -> f32 {
-    (1 + height / 360).max(2) as f32
-}
+/// The line width in pixels: vanilla draws 2 px lines at any window size
+/// (MCP `RenderGlobal.drawSelectionBox`: `glLineWidth(2.0F)`).
+pub const LINE_WIDTH_PX: f32 = 2.0;
 
 /// An axis-aligned box in world space, as plain data for the renderer.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -202,12 +196,7 @@ impl OutlineRenderer {
             queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&vertices));
         }
         self.edge_count = (vertices.len() / 2) as u32;
-        let screen = [
-            viewport.0 as f32,
-            viewport.1 as f32,
-            line_width_px(viewport.1),
-            0.0,
-        ];
+        let screen = [viewport.0 as f32, viewport.1 as f32, LINE_WIDTH_PX, 0.0];
         queue.write_buffer(&self.screen, 0, bytemuck::cast_slice(&screen));
     }
 
@@ -252,10 +241,8 @@ mod tests {
     }
 
     #[test]
-    fn the_line_is_never_thinner_than_vanilla_and_grows_with_the_window() {
-        assert_eq!(line_width_px(240), 2.0);
-        assert_eq!(line_width_px(720), 3.0);
-        assert_eq!(line_width_px(1080), 4.0);
+    fn the_line_is_two_pixels_wide_like_vanilla() {
+        assert_eq!(LINE_WIDTH_PX, 2.0);
     }
 
     #[test]
