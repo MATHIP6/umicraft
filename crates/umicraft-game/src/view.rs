@@ -13,8 +13,8 @@ use glam::{DVec3, Mat4, Vec3};
 
 use crate::hand::HandPose;
 use crate::physics::Player;
-use crate::raycast::{look_direction, raycast};
-use crate::shapes::BlockSource;
+use crate::raycast::{look_direction, raycast_where};
+use crate::shapes::{shape_of, BlockSource};
 
 /// The distance of the third-person camera behind the eyes, in blocks
 /// (MCP `EntityRenderer.thirdPersonDistance`, line 123).
@@ -139,7 +139,12 @@ fn clear_distance<S: BlockSource + ?Sized>(eye: DVec3, direction: DVec3, world: 
             f64::from((corner >> 2 & 1) * 2 - 1),
         ) * CAMERA_MARGIN;
         let target = direction * THIRD_PERSON_DISTANCE;
-        if let Some(hit) = raycast(eye + offset, target, THIRD_PERSON_DISTANCE, world) {
+        // Deliberately not vanilla: 1.8 also stops at the bounds of plants
+        // (`World.rayTraceBlocks` takes blocks without collision), which pulls
+        // the camera in through tall grass and flowers.
+        let solid = |state, pos| !shape_of(state, world, pos).is_empty();
+        if let Some(hit) = raycast_where(eye + offset, target, THIRD_PERSON_DISTANCE, world, solid)
+        {
             distance = distance.min(hit.position.distance(eye));
         }
     }
