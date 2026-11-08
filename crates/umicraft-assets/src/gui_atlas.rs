@@ -25,6 +25,38 @@ pub struct GuiRegion {
     pub pixel_width: u32,
     /// Original pixel height of this texture.
     pub pixel_height: u32,
+    /// Width of the coordinate space the game addresses this texture in.
+    ///
+    /// The reference divides every `drawTexturedModalRect` coordinate by 256
+    /// (`Gui.java:140`, `0.00390625F`) whatever the size of the PNG, so a
+    /// 512 or 1024 px resource pack scales by itself. See
+    /// [`coordinate_space`].
+    pub space_width: u32,
+    /// Height of the coordinate space, see [`GuiRegion::space_width`].
+    pub space_height: u32,
+}
+
+/// The size of the coordinate space of the GUI texture `name`, whose PNG is
+/// `width` x `height` pixels.
+///
+/// The reference addresses the sheets of `textures/gui/` (widgets, icons, the
+/// container backgrounds...) in a 256 x 256 space and `stats_icons.png` in a
+/// 128 x 128 one (`GuiStats` uses `0.0078125F`). The textures that are drawn
+/// whole or tiled (the menu background, `misc/` icons, the map tiles) have no
+/// such space and keep their own size.
+#[must_use]
+pub fn coordinate_space(name: &str, width: u32, height: u32) -> (u32, u32) {
+    match name {
+        "container/stats_icons" => (128, 128),
+        "options_background" => (width, height),
+        _ if name.starts_with("misc/")
+            || name.starts_with("blocks/")
+            || name.starts_with(DYNAMIC_PREFIX) =>
+        {
+            (width, height)
+        }
+        _ => (256, 256),
+    }
 }
 
 impl GuiRegion {
@@ -34,16 +66,18 @@ impl GuiRegion {
         [self.u_min, self.v_min, self.u_max, self.v_max]
     }
 
-    /// Returns the UV rect for a sub-region defined in original pixel coords.
+    /// Returns the UV rect for a sub-region defined in the coordinate space
+    /// of the texture ([`GuiRegion::space_width`]).
     ///
-    /// `x`, `y`, `w`, `h` are in the texture's own pixel space. This is used
-    /// to sample individual slot sprites or sub-regions of a GUI background.
+    /// `x`, `y`, `w`, `h` are the vanilla coordinates, whatever the
+    /// resolution of the PNG. This is used to sample individual slot sprites
+    /// or sub-regions of a GUI background.
     #[must_use]
     pub fn sub_region(&self, x: u32, y: u32, w: u32, h: u32) -> [f32; 4] {
         let u_span = self.u_max - self.u_min;
         let v_span = self.v_max - self.v_min;
-        let pw = self.pixel_width as f32;
-        let ph = self.pixel_height as f32;
+        let pw = self.space_width as f32;
+        let ph = self.space_height as f32;
         [
             self.u_min + x as f32 / pw * u_span,
             self.v_min + y as f32 / ph * v_span,
@@ -173,6 +207,8 @@ impl GuiAtlas {
                     v_max: (top + image.height) as f32 / height as f32,
                     pixel_width: image.width,
                     pixel_height: image.height,
+                    space_width: image.width,
+                    space_height: image.height,
                 },
             );
         }
@@ -305,6 +341,7 @@ pub(crate) fn pack_gui_atlas(mut images: Vec<GuiImage>) -> GuiAtlas {
 
         let aw = atlas_width as f32;
         let ah = atlas_height as f32;
+        let (space_width, space_height) = coordinate_space(&image.name, image.width, image.height);
         regions.insert(
             image.name.clone(),
             GuiRegion {
@@ -314,6 +351,8 @@ pub(crate) fn pack_gui_atlas(mut images: Vec<GuiImage>) -> GuiAtlas {
                 v_max: (placement.y + image.height) as f32 / ah,
                 pixel_width: image.width,
                 pixel_height: image.height,
+                space_width,
+                space_height,
             },
         );
     }
@@ -392,12 +431,142 @@ mod tests {
             v_max: 0.5,
             pixel_width: 256,
             pixel_height: 256,
+            space_width: 256,
+            space_height: 256,
         };
         let sub = region.sub_region(128, 128, 128, 128);
         assert!((sub[0] - 0.25).abs() < 1e-5);
         assert!((sub[1] - 0.25).abs() < 1e-5);
         assert!((sub[2] - 0.5).abs() < 1e-5);
         assert!((sub[3] - 0.5).abs() < 1e-5);
+    }
+
+    /// The UV of the vanilla sprite `(x, y, w, h)` of `name`, relative to its
+    /// own region, in a pack whose PNG is `side` x `side` pixels.
+    fn relative_uv(name: &str, side: u32, sprite: (u32, u32, u32, u32)) -> [f32; 4] {
+        let atlas = pack_gui_atlas(vec![test_image(name, side, side)]);
+        let region = atlas.region(name).expect("region");
+        let uv = region.sub_region(sprite.0, sprite.1, sprite.2, sprite.3);
+        let (du, dv) = (region.u_max - region.u_min, region.v_max - region.v_min);
+        [
+            (uv[0] - region.u_min) / du,
+            (uv[1] - region.v_min) / dv,
+            (uv[2] - region.u_min) / du,
+            (uv[3] - region.v_min) / dv,
+        ]
+    }
+
+    /// The hearts of an HD pack were read at the wrong place and size: the
+    /// coordinates were divided by the size of the PNG, not by 256 as in
+    /// `Gui.drawTexturedModalRect`.
+    #[test]
+    fn a_heart_is_the_same_part_of_icons_at_every_resolution() {
+        // The full heart of `GuiIngame.renderPlayerStats`: (52, 0), 9 x 9.
+        let reference = relative_uv("icons", 256, (52, 0, 9, 9));
+        assert!((reference[0] - 52.0 / 256.0).abs() < 1e-6);
+        assert!((reference[2] - 61.0 / 256.0).abs() < 1e-6);
+        for side in [64, 128, 512, 1024, 2048] {
+            let uv = relative_uv("icons", side, (52, 0, 9, 9));
+            for (got, want) in uv.iter().zip(reference) {
+                assert!(
+                    (got - want).abs() < 1e-6,
+                    "{side}px: {uv:?} vs {reference:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_256_sheet_scales_with_its_resolution() {
+        for name in [
+            "widgets",
+            "icons",
+            "container/inventory",
+            "container/generic_54",
+            "container/creative_inventory/tab_items",
+            "container/enchanting_table",
+            "container/anvil",
+            "container/beacon",
+            "container/brewing_stand",
+            "container/furnace",
+            "container/hopper",
+            "book",
+            "server_selection",
+            "resource_packs",
+            "spectator_widgets",
+            "title/minecraft",
+            "achievement/achievement_background",
+        ] {
+            let hd = pack_gui_atlas(vec![test_image(name, 1024, 1024)]);
+            let region = hd.region(name).expect("region");
+            assert_eq!(
+                (region.space_width, region.space_height),
+                (256, 256),
+                "{name}"
+            );
+            assert_eq!(
+                (region.pixel_width, region.pixel_height),
+                (1024, 1024),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_statistics_icons_use_their_own_128_space() {
+        let sd = relative_uv("container/stats_icons", 128, (18, 0, 18, 18));
+        let hd = relative_uv("container/stats_icons", 512, (18, 0, 18, 18));
+        assert!((sd[0] - 18.0 / 128.0).abs() < 1e-6);
+        for (a, b) in sd.iter().zip(hd) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn tiled_and_whole_textures_keep_their_own_size() {
+        for (name, side) in [
+            ("options_background", 16),
+            ("misc/unknown_server", 64),
+            ("misc/unknown_pack", 128),
+            ("misc/default_pack", 128),
+            ("blocks/stone", 32),
+        ] {
+            let atlas = pack_gui_atlas(vec![test_image(name, side, side)]);
+            let region = atlas.region(name).expect("region");
+            assert_eq!(
+                (region.space_width, region.space_height),
+                (side, side),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_images_keep_their_own_size_and_the_jar_keeps_its_space() {
+        let base = pack_gui_atlas(vec![test_image("icons", 512, 512)]);
+        let grown = base.with_dynamic(&[dynamic("umicraft/logo", 359, 1)]);
+        let logo = grown.region("dynamic/umicraft/logo").expect("logo");
+        assert_eq!((logo.space_width, logo.space_height), (359, 359));
+        let icons = grown.region("icons").expect("icons");
+        assert_eq!((icons.space_width, icons.space_height), (256, 256));
+        // The renormalised region still maps a heart to the same texels.
+        let uv = icons.sub_region(52, 0, 9, 9);
+        let texels = (uv[0] - icons.u_min) / (icons.u_max - icons.u_min) * 512.0;
+        assert!((texels - 104.0).abs() < 1e-3, "{texels}");
+    }
+
+    /// A pack may ship a sheet that is not square; the reference still divides
+    /// by 256 on both axes, so does the atlas.
+    #[test]
+    fn a_non_square_sheet_still_uses_the_256_space() {
+        let atlas = pack_gui_atlas(vec![GuiImage {
+            name: "icons".to_string(),
+            width: 512,
+            height: 256,
+            pixels: vec![255; 512 * 256 * 4],
+        }]);
+        let region = atlas.region("icons").expect("icons");
+        assert_eq!((region.space_width, region.space_height), (256, 256));
     }
 
     fn dynamic(name: &str, side: u32, value: u8) -> DynamicImage {

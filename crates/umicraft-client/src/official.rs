@@ -127,14 +127,18 @@ pub(crate) fn grow_atlas(
 }
 
 /// The sprite sheet of an atlas region.
+///
+/// Its size is the coordinate space of the vanilla code (256 for `icons.png`),
+/// not the size of the PNG, so a resource pack of any resolution is read at
+/// the same sprites.
 pub(crate) fn sprite(region: &umicraft_assets::GuiRegion) -> SpriteSheet {
     SpriteSheet {
         u_min: region.u_min,
         v_min: region.v_min,
         u_max: region.u_max,
         v_max: region.v_max,
-        width: region.pixel_width,
-        height: region.pixel_height,
+        width: region.space_width,
+        height: region.space_height,
     }
 }
 
@@ -202,4 +206,49 @@ fn client_jar_path(
                 .display()
                 .to_string(),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use umicraft_assets::GuiRegion;
+
+    /// An `icons.png` region of an atlas of `side` px, alone in it.
+    fn icons(side: u32) -> GuiRegion {
+        GuiRegion {
+            u_min: 0.0,
+            v_min: 0.0,
+            u_max: 1.0,
+            v_max: 1.0,
+            pixel_width: side,
+            pixel_height: side,
+            space_width: 256,
+            space_height: 256,
+        }
+    }
+
+    /// The hearts of the HUD read the same part of `icons.png` in a 512 or a
+    /// 1024 px resource pack as in the 256 px one.
+    #[test]
+    fn the_hud_sprites_do_not_depend_on_the_resolution_of_the_pack() {
+        let reference = sprite(&icons(256)).sub(52, 0, 9, 9);
+        for side in [512, 1024] {
+            assert_eq!(sprite(&icons(side)).sub(52, 0, 9, 9), reference, "{side}px");
+        }
+        assert_eq!(reference[0], 52.0 / 256.0);
+        assert_eq!(reference[3], 9.0 / 256.0);
+    }
+
+    #[test]
+    fn a_sheet_without_a_vanilla_space_keeps_its_pixels() {
+        let region = GuiRegion {
+            pixel_width: 64,
+            pixel_height: 64,
+            space_width: 64,
+            space_height: 64,
+            ..icons(64)
+        };
+        let sheet = sprite(&region);
+        assert_eq!((sheet.width, sheet.height), (64, 64));
+    }
 }
