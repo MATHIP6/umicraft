@@ -6,7 +6,9 @@
 //! The HUD is split by responsibility:
 //!
 //! - [`state`]: [`HudState`] and the view structs the client fills each frame;
-//! - [`gui`]: the sprite-based renderer into the UI [`DrawList`].
+//! - [`gui`]: the sprite-based renderer into the UI [`DrawList`];
+//! - the panels of the built-in mod widgets (ADR-0065) are drawn by
+//!   `umicraft_ui::mod_widget`, from positions the client already resolved.
 //!
 //! The flat-colour `Overlay` HUD of earlier milestones was deleted in P9-h
 //! (ADR-0036): without the GUI atlas the same renderer draws the parts that
@@ -37,3 +39,4 @@ pub use overlay_views::{
 pub use state::{
     ChatInputView, ChatLineView, ChatRunView, ChatStyle, DebugF3View, HudState, HOTBAR_SLOTS,
 };
+pub use umicraft_ui::mod_widget::{measure as measure_mod_widget, ModLine, ModWidgetView};

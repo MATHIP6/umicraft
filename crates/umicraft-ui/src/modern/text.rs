@@ -51,3 +51,24 @@ pub fn draw_text(
     let top = y - brand.line_height(style.scale) * 0.5;
     ui.draw().text([left, top], text, style);
 }
+
+/// Ellipsis added to text that does not fit.
+const ELLIPSIS: &str = "...";
+
+/// `text`, shortened with an ellipsis when it is wider than `max_px` at
+/// `size_px`. Text that fits is returned as it is.
+#[must_use]
+pub fn fit_text(brand: &FontAtlas, text: &str, size_px: f32, max_px: f32) -> String {
+    if measure_text(brand, text, size_px) <= max_px {
+        return text.to_owned();
+    }
+    let mut kept: String = text.to_owned();
+    while !kept.is_empty() {
+        kept.pop();
+        let candidate = format!("{}{ELLIPSIS}", kept.trim_end());
+        if measure_text(brand, &candidate, size_px) <= max_px {
+            return candidate;
+        }
+    }
+    String::new()
+}

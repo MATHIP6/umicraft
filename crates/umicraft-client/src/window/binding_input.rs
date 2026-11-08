@@ -111,6 +111,15 @@ impl App {
         )));
     }
 
+    /// Tells the built-in mods about a left or right click (for a CPS counter).
+    fn count_click(&mut self, button: MouseButton) {
+        match button {
+            MouseButton::Left => self.mods.note_click(true),
+            MouseButton::Right => self.mods.note_click(false),
+            _ => {}
+        }
+    }
+
     /// Handles a mouse button while the game owns the mouse. A click with the
     /// mouse free grabs it (as `Minecraft.runTick` does) and does nothing
     /// else; otherwise the button is tracked and its actions run.
@@ -122,6 +131,7 @@ impl App {
             ElementState::Pressed if !self.mouse_captured => self.capture_mouse(true),
             ElementState::Pressed => {
                 self.buttons.insert(index);
+                self.count_click(button);
                 self.press_binding(Binding::Mouse(index));
             }
             ElementState::Released => {

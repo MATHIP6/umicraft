@@ -44,6 +44,7 @@ use tab_list::draw_tab_list;
 use titles::draw_title;
 
 use super::HudState;
+use umicraft_ui::mod_widget::draw_mod_widgets;
 
 /// The sprite sheets extracted from the GUI atlas for HUD rendering.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -92,6 +93,7 @@ pub fn draw_hud_gui(
 
     draw_chat(list, state, gw, gh, sf, font);
     draw_social_overlays(list, state, (gw, gh), sf, (font, sheets.icons.as_ref()));
+    draw_mod_widgets(list, &state.mod_widgets, sf, font);
 }
 
 /// Draws the sidebar, title, action bar and, while the key is held, the tab

@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The opening animation of the mods menu: when each part comes in.
-//!
-//! Only the logo, the dark sheet and the blur of the game behind move; every
-//! text and button is there from the first frame, so the menu is usable at
-//! once.
+//! The opening animation of the mods menu: the dark sheet and the blur of the
+//! game behind fade in and the logo of the landing grows. Every text, button
+//! and the panel are there from the first frame, so the menu is usable at once.
 
 use crate::menus::title::modern::Stage;
 
 /// Ticks the opening animation lasts (0.6 s at 20 TPS): the end of its last
-/// stage. Only the logo, the dark sheet and the blur move; every text and
-/// button is there from the first frame.
+/// stage.
 pub(super) const OPEN_TICKS: u8 = 12;
 /// The dark sheet comes in.
 pub(super) const SHEET: Stage = Stage::new(0.0, 8.0);

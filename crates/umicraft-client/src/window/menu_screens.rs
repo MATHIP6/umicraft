@@ -75,6 +75,7 @@ impl App {
             MenuCommand::GoTo(Screen::ServerList) if self.screen == Screen::Connecting => {
                 self.disconnect();
             }
+            MenuCommand::Mods(change) => self.apply_mods_change(&change),
             MenuCommand::GoTo(screen) => self.set_screen(screen),
         }
     }

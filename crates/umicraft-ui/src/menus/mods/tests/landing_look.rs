@@ -1,82 +1,18 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Tests of the mods menu.
+//! Tests of what the landing page draws: the opening animation, the Mods
+//! button, the wordmark and the logo.
 
+use super::button::mods_button;
+use super::landing_layout::landing_layout;
+use super::style::BACKDROP;
 use super::*;
 use crate::draw::{DrawCommand, FontFace, SpriteSheet};
-use crate::geom::Rect;
-use crate::menus::common::testing::{click_at, frame, VIEWPORT};
+use crate::menus::common::testing::VIEWPORT;
 use crate::menus::title::WORDMARK;
 use crate::menus::{BrandArt, MenuArt};
 
-fn show(screen: &mut ModsScreen, input: crate::input::UiInput) -> Option<ModsOutcome> {
-    let atlas = FontAtlas::fallback();
-    frame(input, |ui| screen.show(ui, &atlas, &Lang::builtin(), 0.0))
-}
-
-#[test]
-fn the_group_is_centred_on_the_screen() {
-    let layout = mods_layout(VIEWPORT);
-    let half_unit = Gui::new(VIEWPORT).scale * 0.5;
-    let centre = VIEWPORT.x + VIEWPORT.width * 0.5;
-    for rect in [layout.logo, layout.mods] {
-        assert!(
-            (rect.x + rect.width * 0.5 - centre).abs() <= half_unit,
-            "{rect:?}"
-        );
-    }
-    let middle = VIEWPORT.y + VIEWPORT.height * 0.5;
-    assert!(layout.logo.y < middle && layout.hint[1] > middle);
-}
-
-#[test]
-fn the_parts_stack_from_the_logo_down_to_the_hint() {
-    let layout = mods_layout(VIEWPORT);
-    let bottom = |rect: Rect| rect.y + rect.height;
-    assert!(bottom(layout.logo) <= layout.wordmark.y);
-    assert!(bottom(layout.wordmark) <= layout.mods.y);
-    assert!(bottom(layout.mods) <= layout.hint[1]);
-}
-
-#[test]
-fn the_menu_is_small() {
-    // The group is much smaller than the screen and its button is smaller
-    // than a title-screen button (160 x 22 units).
-    let layout = mods_layout(VIEWPORT);
-    let group = layout.hint[1] - layout.logo.y;
-    assert!(group < VIEWPORT.height * 0.5, "{group}");
-    assert!(layout.mods.width < 160.0 * Gui::new(VIEWPORT).scale);
-}
-
-#[test]
-fn the_cross_is_in_the_top_right_corner_of_the_screen() {
-    let layout = mods_layout(VIEWPORT);
-    assert!(layout.close.x > VIEWPORT.x + VIEWPORT.width * 0.5);
-    assert!(layout.close.y < VIEWPORT.y + VIEWPORT.height * 0.2);
-}
-
-#[test]
-fn the_two_buttons_report_their_outcome() {
-    let layout = mods_layout(VIEWPORT);
-    let mut screen = ModsScreen::new();
-    assert_eq!(
-        show(&mut screen, click_at(layout.mods)),
-        Some(ModsOutcome::OpenMods)
-    );
-    assert_eq!(
-        show(&mut screen, click_at(layout.close)),
-        Some(ModsOutcome::Close)
-    );
-}
-
-#[test]
-fn a_click_beside_the_buttons_does_nothing() {
-    let layout = mods_layout(VIEWPORT);
-    let mut screen = ModsScreen::new();
-    let away = Rect::new(VIEWPORT.x + 10.0, VIEWPORT.y + 10.0, 8.0, 8.0);
-    assert_eq!(show(&mut screen, click_at(away)), None);
-    let _ = layout;
-}
+use animation::{LOGO_START_SCALE, OPEN_TICKS};
 
 /// A menu whose opening animation is over.
 fn opened() -> ModsScreen {
@@ -91,7 +27,13 @@ fn drawn_by(mut screen: ModsScreen, art: MenuArt) -> Vec<DrawCommand> {
     let atlas = FontAtlas::fallback();
     frame(crate::input::UiInput::default(), |ui| {
         ui.set_menu_art(art);
-        screen.show(ui, &atlas, &Lang::builtin(), 0.0);
+        screen.show(
+            ui,
+            (&atlas, &atlas),
+            &Lang::builtin(),
+            &view(),
+            (&no_snap, 0.0),
+        );
         ui.draw().commands().to_vec()
     })
 }
@@ -113,7 +55,7 @@ fn sheet_alpha(commands: &[DrawCommand]) -> Option<f32> {
 /// The letters of the name: single brand glyphs above the Mods button (the
 /// label of the button is spelled in glyphs too).
 fn name_letters(commands: &[DrawCommand]) -> usize {
-    let button_top = mods_layout(VIEWPORT).mods.y;
+    let button_top = landing_layout(VIEWPORT).mods.y;
     commands
         .iter()
         .filter(|command| {
@@ -208,23 +150,25 @@ fn the_logo_grows_into_its_box_while_it_opens() {
 
 #[test]
 fn nothing_but_a_light_sheet_is_drawn_behind_the_buttons() {
-    // No panel: no rounded shape is wider than the Mods button.
+    // No panel: no rounded shape is wider than the Mods button, but the small
+    // reset bar at the bottom of the screen.
+    let bar_top = landing_layout(VIEWPORT).hint[1] + VIEWPORT.height * 0.2;
     let widest = drawn(MenuArt::default())
         .iter()
         .filter_map(|command| match command {
-            DrawCommand::RoundedRect { rect, .. } => Some(rect.width),
+            DrawCommand::RoundedRect { rect, .. } if rect.y < bar_top => Some(rect.width),
             _ => None,
         })
         .fold(0.0_f32, f32::max);
     assert!(
-        widest <= mods_layout(VIEWPORT).mods.width + 1e-3,
+        widest <= landing_layout(VIEWPORT).mods.width + 1e-3,
         "{widest}"
     );
 }
 
 #[test]
 fn the_mods_button_is_a_card_with_a_rim_an_icon_and_tracked_capitals() {
-    let layout = mods_layout(VIEWPORT);
+    let layout = landing_layout(VIEWPORT);
     let commands = drawn(MenuArt::default());
     let inside = |rect: &Rect| {
         rect.x >= layout.mods.x - 1e-3
@@ -251,7 +195,7 @@ fn the_mods_button_is_a_card_with_a_rim_an_icon_and_tracked_capitals() {
 
 #[test]
 fn the_rim_lights_up_under_the_pointer() {
-    let layout = mods_layout(VIEWPORT);
+    let layout = landing_layout(VIEWPORT);
     let rim_of = |fade: f32| {
         let atlas = FontAtlas::fallback();
         frame(crate::input::UiInput::default(), |ui| {
@@ -300,7 +244,7 @@ fn the_logo_is_drawn_inside_its_box_when_the_sprite_exists() {
         },
         ..MenuArt::default()
     };
-    let area = mods_layout(VIEWPORT).logo;
+    let area = landing_layout(VIEWPORT).logo;
     let images: Vec<Rect> = drawn(art)
         .into_iter()
         .filter_map(|command| match command {

@@ -1,72 +1,117 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The mods menu, opened with the right Shift key.
+//! The mods menu, opened with the right Shift key (ADR-0065).
 //!
-//! Laid out like the Lunar Client menu and kept small: over the blurred game,
-//! with no panel, the logo, the "UMICRAFT" wordmark under it and one **Mods**
-//! button, with a muted hint below. A close cross sits in the top right corner
-//! of the screen, as on the title screen. The renderer blurs the game behind
-//! it; this screen only adds a light dark sheet. The button only reports
-//! [`ModsOutcome::OpenMods`] for now; the mods themselves do not exist yet,
-//! this is the interface.
+//! It is a small state machine of pages over the blurred game:
+//!
+//! 1. the **landing** page: the logo, the "UMICRAFT" wordmark, one **Mods**
+//!    button and a muted hint, with a close cross in the top right corner of
+//!    the screen (laid out like the Lunar Client menu);
+//! 2. the **list**: a panel with a search box, one tab per category and a grid
+//!    of cards, each with an on/off switch and a button that opens
+//! 3. the **settings** page of that mod, generated from its [`SettingView`]s.
+//!
+//! Escape and the cross of the panel step back one page; Escape on the landing
+//! page is the window's, which closes the menu. On every page the widgets of the
+//! enabled HUD mods are drawn over the dark sheet and can be dragged with the
+//! mouse anywhere but on a button or on the open panel (see [`hud_layer`]).
+//!
+//! The screen owns only what the player is doing (page, query, tab, scroll);
+//! the mods themselves come in as a [`ModsView`] each frame and every change
+//! leaves as a [`ModsOutcome`] for the client to apply, so this crate never
+//! depends on the mods crate.
 
 mod animation;
 mod button;
+mod card;
+mod color;
+mod hud_layer;
+mod landing;
+mod landing_layout;
 mod layout;
+mod list;
+mod pages;
+mod search;
+mod settings_panel;
 mod style;
 #[cfg(test)]
 mod tests;
+mod view;
 
+pub use hud_layer::{HudEditorOutcome, HudEditorView, HudWidgetView, Snap};
+pub use landing_layout::{landing_layout, LandingLayout};
 pub use layout::{mods_layout, ModsLayout};
-
-use layout::WORDMARK_SCALE;
+pub use view::{ModCardView, ModValue, ModsOutcome, ModsView, SettingControl, SettingView};
 
 use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
-use crate::menus::common::Gui;
-use crate::menus::title::modern::wordmark::{draw_logo, draw_wordmark};
-use crate::menus::title::modern::{lowered, scaled};
+use crate::geom::Rect;
+use crate::menus::common::escape_pressed;
 use crate::modern::theme::with_opacity;
-use crate::modern::{draw_text, theme, Align, HoverFade, ModernButton};
+use crate::modern::{HoverFade, SliderDrag};
 use crate::text::FontAtlas;
 
-use animation::{BLUR, LOGO, LOGO_RISE, LOGO_START_SCALE, OPEN_TICKS, SHEET};
-use button::mods_button;
-use style::{BACKDROP, CLOSE_CROSS};
+use animation::{BLUR, OPEN_TICKS, SHEET};
+use hud_layer::{HudLayer, HudZones};
+use style::BACKDROP;
 
-/// What the player did on the mods menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModsOutcome {
-    /// The close cross was clicked.
-    Close,
-    /// The Mods button was clicked.
-    OpenMods,
+/// Ticks per half period of the caret blink of the search box.
+const BLINK_TICKS: u32 = 10;
+
+/// The page of the menu the player is on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum Page {
+    /// The logo, the Mods button and the cross.
+    #[default]
+    Landing,
+    /// The panel with the search box, the tabs and the cards.
+    List,
+    /// The settings of the mod with this id.
+    Settings(String),
 }
 
-/// The mods menu state: the hover fades of its two buttons and how far the
-/// opening animation has come. The flow makes a new one each time the menu
-/// opens, so the animation plays again.
+/// The mods menu state. The flow makes a new one each time the menu opens, so
+/// the opening animation plays again, the search starts empty and the landing
+/// page is shown.
 #[derive(Debug, Clone, Default)]
 pub struct ModsScreen {
+    page: Page,
+    /// Hover fades of the Mods button and the cross of the landing page.
     fades: [HoverFade; 2],
     hovered: [bool; 2],
     /// Ticks since the menu opened, up to [`OPEN_TICKS`].
     ticks: u8,
+    blink: u32,
+    query: String,
+    /// `ALL_TAB`, or the index of the selected category plus one.
+    tab: usize,
+    scroll: f32,
+    /// Scroll offset of the settings page, in GUI units.
+    settings_scroll: f32,
+    drag: SliderDrag,
+    hud: HudLayer,
 }
 
 impl ModsScreen {
-    /// Creates the menu with both buttons at rest.
+    /// Creates the menu on its landing page.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Whether Escape steps back inside the menu (from the settings to the
+    /// list, from the list to the landing page) instead of closing it, so the
+    /// window asks before it takes the key.
+    #[must_use]
+    pub fn can_go_back(&self) -> bool {
+        self.page != Page::Landing
+    }
+
     /// Ticks since the menu opened, `partial_tick` of the way into the current
     /// one; it stands still once the animation is over.
     fn elapsed(&self, partial_tick: f32) -> f32 {
-        let running = self.ticks < OPEN_TICKS;
-        let partial = if running {
+        let partial = if self.ticks < OPEN_TICKS {
             partial_tick.clamp(0.0, 1.0)
         } else {
             0.0
@@ -81,75 +126,75 @@ impl ModsScreen {
         BLUR.at(self.elapsed(partial_tick))
     }
 
-    /// Advances the opening animation and the hover fades by one game tick.
+    /// Advances the opening animation, the hover fades and the caret blink by
+    /// one game tick.
     pub fn tick(&mut self) {
         self.ticks = (self.ticks + 1).min(OPEN_TICKS);
+        self.blink = self.blink.wrapping_add(1);
         for (fade, hovered) in self.fades.iter_mut().zip(self.hovered) {
             fade.tick(hovered);
         }
     }
 
-    /// Draws one frame and returns what the player clicked. `brand` is the
-    /// brand atlas and `partial_tick` how far the tick has come.
+    /// One page back: settings to the list, the list to the landing page.
+    fn go_back(&mut self) {
+        self.page = match self.page {
+            Page::Settings(_) => Page::List,
+            Page::List | Page::Landing => Page::Landing,
+        };
+        self.settings_scroll = 0.0;
+        self.drag = SliderDrag::default();
+    }
+
+    /// Draws one frame of the menu over `view` and returns what the player
+    /// did. `fonts` are the font of the HUD (the widgets are drawn with it) and
+    /// the brand font of the menus; `snap` snaps a dragged widget;
+    /// `partial_tick` is how far the tick has come.
     pub fn show(
         &mut self,
         ui: &mut Ui,
-        brand: &FontAtlas,
+        fonts: (&FontAtlas, &FontAtlas),
         lang: &Lang,
-        partial_tick: f32,
+        view: &ModsView,
+        (snap, partial_tick): (Snap<'_>, f32),
     ) -> Option<ModsOutcome> {
         let viewport = ui.viewport();
-        let gui = Gui::new(viewport);
-        let layout = mods_layout(viewport);
-
-        let elapsed = self.elapsed(partial_tick);
-        let logo_in = LOGO.at(elapsed);
-
-        let sheet = with_opacity(BACKDROP, SHEET.at(elapsed));
+        let brand = fonts.1;
+        // A mod that vanished leaves its settings page for the list.
+        if matches!(self.page, Page::Settings(_)) && self.open_card(view).is_none() {
+            self.page = Page::List;
+        }
+        // Read before the pages run, so one press steps back one page only.
+        let escape = self.can_go_back() && escape_pressed(ui);
+        let sheet = with_opacity(BACKDROP, SHEET.at(self.elapsed(partial_tick)));
         ui.draw().rect(viewport, sheet);
-        let logo_box = lowered(layout.logo, LOGO_RISE, gui.scale, logo_in);
-        let logo_box = scaled(
-            logo_box,
-            LOGO_START_SCALE + (1.0 - LOGO_START_SCALE) * logo_in,
-        );
-        let logo = ui.menu_art().brand.logo;
-        draw_logo(ui, logo, logo_box, logo_in);
-        let name_scale = gui.scale * WORDMARK_SCALE;
-        draw_wordmark(ui, brand, layout.wordmark, name_scale, 1.0);
-        let hint = lang.tr("umicraft.mods.hint");
-        let hint_size = theme::TEXT_SIZE_SMALL * gui.scale;
-        draw_text(
-            ui,
-            brand,
-            hint,
-            (layout.hint[0], layout.hint[1]),
-            (hint_size, theme::TEXT_MUTED, Align::Center),
-        );
+
+        let landing = landing_layout(viewport);
+        let on_landing = self.page == Page::Landing;
+        let landing_blocked = [landing.mods, landing.close];
+        let panel_blocked = [mods_layout(viewport).panel];
+        let blocked: &[Rect] = if on_landing {
+            &landing_blocked
+        } else {
+            &panel_blocked
+        };
+        let zones = HudZones {
+            snap,
+            blocked,
+            bar: on_landing,
+        };
+        let hud = self.hud.show(ui, fonts, lang, &view.hud, zones);
 
         ui.push_id("mods_menu");
-        let levels = self.fades.map(|fade| fade.level(partial_tick));
-        let mods_id = ui.id("mods");
-        let close = ModernButton::new(ui.id("close"), layout.close, CLOSE_CROSS);
-        let label = lang.tr("umicraft.mods.button");
-        let responses = [
-            mods_button(
-                ui,
-                brand,
-                (mods_id, layout.mods),
-                (gui.scale, levels[0]),
-                label,
-            ),
-            close.show(ui, brand, gui.scale, levels[1]),
-        ];
-        ui.pop_id();
-
-        self.hovered = responses.map(|response| response.hovered);
-        if responses[0].clicked {
-            Some(ModsOutcome::OpenMods)
-        } else if responses[1].clicked {
-            Some(ModsOutcome::Close)
+        let page = if on_landing {
+            self.landing_page(ui, brand, lang, view, (&landing, partial_tick))
         } else {
-            None
+            self.panel_page(ui, brand, lang, view)
+        };
+        ui.pop_id();
+        if escape {
+            self.go_back();
         }
+        page.or(hud.map(ModsOutcome::Hud))
     }
 }

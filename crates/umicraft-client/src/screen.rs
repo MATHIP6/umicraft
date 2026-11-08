@@ -56,7 +56,8 @@ pub enum Screen {
     Stats,
     /// The achievements, opened from the game menu.
     Achievements,
-    /// The mods menu, opened over a game with the right Shift key.
+    /// The mods menu, opened over a game with the right Shift key. The HUD
+    /// widgets are moved on it too.
     Mods,
 }
 

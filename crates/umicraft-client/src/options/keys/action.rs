@@ -49,6 +49,8 @@ pub enum Action {
     TogglePerspective,
     /// Toggle fullscreen.
     Fullscreen,
+    /// Open or close the mods menu (Umicraft's own, ADR-0065).
+    Mods,
     /// Select hotbar slot 1.
     Hotbar1,
     /// Select hotbar slot 2.
@@ -71,7 +73,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in the order of `GameSettings.keyBindings`.
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::Attack,
         Self::Use,
         Self::Forward,
@@ -90,6 +92,7 @@ impl Action {
         Self::Screenshot,
         Self::TogglePerspective,
         Self::Fullscreen,
+        Self::Mods,
         Self::Hotbar1,
         Self::Hotbar2,
         Self::Hotbar3,
@@ -123,6 +126,7 @@ impl Action {
             Self::Screenshot => "screenshot",
             Self::TogglePerspective => "perspective",
             Self::Fullscreen => "fullscreen",
+            Self::Mods => "mods",
             Self::Hotbar1 => "hotbar1",
             Self::Hotbar2 => "hotbar2",
             Self::Hotbar3 => "hotbar3",
@@ -157,6 +161,7 @@ impl Action {
             Self::Screenshot => "key.screenshot",
             Self::TogglePerspective => "key.togglePerspective",
             Self::Fullscreen => "key.fullscreen",
+            Self::Mods => "umicraft.key.mods",
             Self::Hotbar1 => "key.hotbar.1",
             Self::Hotbar2 => "key.hotbar.2",
             Self::Hotbar3 => "key.hotbar.3",
@@ -191,6 +196,7 @@ impl Action {
             Self::Screenshot => "key.categories.misc",
             Self::TogglePerspective => "key.categories.misc",
             Self::Fullscreen => "key.categories.misc",
+            Self::Mods => "key.categories.misc",
             Self::Hotbar1 => "key.categories.inventory",
             Self::Hotbar2 => "key.categories.inventory",
             Self::Hotbar3 => "key.categories.inventory",
@@ -205,7 +211,7 @@ impl Action {
 
     /// The default binding (`GameSettings`: mouse buttons 1 to 3 for attack,
     /// use and pick, W A S D, space, left shift, left control, Q, E, T, `/`,
-    /// Tab, F2, F5, F11 and the digits).
+    /// Tab, F2, F5, F11 and the digits; right shift for the Umicraft mods menu).
     #[must_use]
     pub const fn default_binding(self) -> Binding {
         match self {
@@ -227,6 +233,7 @@ impl Action {
             Self::Screenshot => Binding::Key(KeyCode::F2),
             Self::TogglePerspective => Binding::Key(KeyCode::F5),
             Self::Fullscreen => Binding::Key(KeyCode::F11),
+            Self::Mods => Binding::Key(KeyCode::ShiftRight),
             Self::Hotbar1 => Binding::Key(KeyCode::Digit1),
             Self::Hotbar2 => Binding::Key(KeyCode::Digit2),
             Self::Hotbar3 => Binding::Key(KeyCode::Digit3),
