@@ -178,13 +178,23 @@ fn worker_loop(
     }
 }
 
-/// Suggested worker count: all but one core, capped at four to leave the render
-/// and network threads room.
+/// The number of mesh workers for the `mesh_threads` option: `0` is automatic,
+/// all cores but one (the render thread keeps one; the network and game threads
+/// mostly sleep) and at least one; any other value is used as given.
+#[must_use]
+pub fn worker_count(setting: u8) -> usize {
+    if setting > 0 {
+        return usize::from(setting);
+    }
+    std::thread::available_parallelism()
+        .map(|count| count.get().saturating_sub(1).max(1))
+        .unwrap_or(1)
+}
+
+/// [`worker_count`] with the automatic choice.
 #[must_use]
 pub fn default_worker_count() -> usize {
-    std::thread::available_parallelism()
-        .map(|count| count.get().saturating_sub(1).clamp(1, 4))
-        .unwrap_or(1)
+    worker_count(0)
 }
 
 #[cfg(test)]
@@ -225,5 +235,12 @@ mod tests {
     #[test]
     fn default_worker_count_is_positive() {
         assert!(default_worker_count() >= 1);
+    }
+
+    #[test]
+    fn the_setting_overrides_the_automatic_count() {
+        assert_eq!(worker_count(3), 3);
+        assert_eq!(worker_count(1), 1);
+        assert_eq!(worker_count(0), default_worker_count());
     }
 }

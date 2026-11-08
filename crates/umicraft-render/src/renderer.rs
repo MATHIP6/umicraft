@@ -19,7 +19,6 @@
 use crate::lightmap::{self, LightmapParams, TorchFlicker};
 use crate::nametag::{Nametag, NametagRenderer};
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
@@ -29,7 +28,7 @@ use umicraft_mesh::visibility::Connectivity;
 use umicraft_mesh::{Mesh, Vertex, VertexSpan, TEXTURE_LAYERS};
 use umicraft_ui::menus::{PanoramaTextures, PanoramaView};
 use umicraft_ui::{DrawCommand, DrawList, FontAtlas};
-use umicraft_world::ChunkPos;
+use umicraft_world::{ChunkMap, ChunkPos};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
@@ -371,7 +370,7 @@ pub struct Renderer {
     overlay_buffer: wgpu::Buffer,
     overlay_capacity: u64,
     offscreen: Option<OffscreenTarget>,
-    chunks: HashMap<ChunkPos, GpuMesh>,
+    chunks: ChunkMap<GpuMesh>,
     camera_bind_group: wgpu::BindGroup,
     entity_renderer: EntityRenderer,
     outline: OutlineRenderer,
@@ -998,7 +997,7 @@ impl Renderer {
             overlay_buffer,
             overlay_capacity: OVERLAY_MIN_BYTES,
             offscreen,
-            chunks: HashMap::new(),
+            chunks: ChunkMap::default(),
             camera_bind_group,
             entity_renderer,
             outline,

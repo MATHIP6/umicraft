@@ -1,6 +1,6 @@
 # F2 — Performance pass: audit and plan
 
-Status: **phases 0 to 3 done** (F2-2c deferred, F2-3c measured and not kept); phases 4–5 planned. Decision: `docs/decisions/0058-f2-performance-plan.md`.
+Status: **phases 0 to 4 done** (F2-2c deferred, F2-3c not kept, F2-4c and 4f not done after measuring); phase 5 planned. Decision: `docs/decisions/0058-f2-performance-plan.md`.
 Roadmap entry: `ROADMAP.md` §6 (F2).
 
 The owner started F2 ahead of P13 (2026-11-07) for two reasons:
@@ -129,12 +129,12 @@ Optimisation steps also get a criterion benchmark or a scene measurement in
 
 | Step | Content |
 |---|---|
-| F2-4a | Priority dispatch: nearest first, and sections in the frustum before the others. Replace the linear `waiting` scans with a map and a heap. |
-| F2-4b | Per-frame upload budget (bytes or ms). The rest waits for the next frame. |
-| F2-4c | A GPU buffer arena (sub-allocated vertex pages) instead of a buffer per mesh. Later, `multi_draw_indexed_indirect` when the adapter has the feature, with a fallback. |
-| F2-4d | Worker count `available_parallelism - 1`, capped by a setting instead of 4. Mesh vectors recycled through the result channel. Fluid layers resolved once per job. |
-| F2-4e | `FxHashMap`/`FxHashSet` for `ChunkPos` keys (licence check in `deny.toml`). |
-| F2-4f | Avoid the `Arc::make_mut` column clone. Snapshot only what the mesher needs, or copy-on-write per section. |
+| F2-4a (**done**, ADR-0063) | Priority dispatch: nearest first, and sections in the frustum before the others. Replace the linear `waiting` scans with a map and a heap. |
+| F2-4b (**done**) | Per-frame upload budget (bytes or ms). The rest waits for the next frame. |
+| F2-4c (**not done**: upload is 0.3 ms per chunk, see ADR-0063) | A GPU buffer arena (sub-allocated vertex pages) instead of a buffer per mesh. Later, `multi_draw_indexed_indirect` when the adapter has the feature, with a fallback. |
+| F2-4d (**done**: workers and liquid layers; recycling not done) | Worker count `available_parallelism - 1`, capped by a setting instead of 4. Mesh vectors recycled through the result channel. Fluid layers resolved once per job. |
+| F2-4e (**done**, own hasher) | `FxHashMap`/`FxHashSet` for `ChunkPos` keys (licence check in `deny.toml`). |
+| F2-4f (**not done**: the copy costs 2.7 µs) | Avoid the `Arc::make_mut` column clone. Snapshot only what the mesher needs, or copy-on-write per section. |
 
 ### Phase 5 — Per-frame CPU (D1–D6)
 

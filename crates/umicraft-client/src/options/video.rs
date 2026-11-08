@@ -33,6 +33,9 @@ pub const MIPMAP_LEVELS: std::ops::RangeInclusive<u8> = 0..=4;
 /// (`GameSettings.func_181147_e`).
 pub const MIN_CLOUD_DISTANCE: u8 = 4;
 
+/// The most mesh threads the options accept.
+pub const MAX_MESH_THREADS: u8 = 32;
+
 /// The video options.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -73,6 +76,10 @@ pub struct VideoOptions {
     pub block_alternatives: bool,
     /// `GameSettings.field_181151_V` ("Entity Shadows").
     pub entity_shadows: bool,
+    /// Threads that mesh the chunks: `0` picks all cores but one (at least one),
+    /// anything else is used as given, up to [`MAX_MESH_THREADS`]. Only in
+    /// `options.toml`, there is no menu entry.
+    pub mesh_threads: u8,
 }
 
 /// Reads the cloud setting as a number, or as the boolean of the files that
@@ -120,6 +127,7 @@ impl VideoOptions {
             .render_distance
             .clamp(*RENDER_DISTANCE.start(), *RENDER_DISTANCE.end());
         self.max_fps = self.max_fps.clamp(*MAX_FPS.start(), *MAX_FPS.end());
+        self.mesh_threads = self.mesh_threads.min(MAX_MESH_THREADS);
         self.particles = self.particles.min(MAX_PARTICLE_SETTING);
         self.clouds = self.clouds.min(MAX_CLOUD_SETTING);
         self.smooth_lighting = self.smooth_lighting.min(MAX_SMOOTH_LIGHTING);
@@ -158,6 +166,7 @@ impl Default for VideoOptions {
             fullscreen: false,
             block_alternatives: true,
             entity_shadows: true,
+            mesh_threads: 0,
         }
     }
 }

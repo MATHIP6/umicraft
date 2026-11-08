@@ -99,6 +99,10 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
     context: &ModelMeshContext,
     settings: MeshSettings,
 ) -> Mesh {
+    // The atlas layers of the two liquids, looked up once per job instead of
+    // once per liquid cell (F2-4d).
+    let water = fluid_layers(Liquid::Water, &context.atlas);
+    let lava = fluid_layers(Liquid::Lava, &context.atlas);
     mesh_sections(pos, source, |mesh, position @ [wx, y, wz]| {
         let state = source.block(wx, y, wz);
         // Air is the overwhelming majority of a column: checking it before
@@ -117,7 +121,10 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
             let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
                 tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
             });
-            let layers = fluid_layers(liquid, &context.atlas);
+            let layers = match liquid {
+                Liquid::Water => water,
+                Liquid::Lava => lava,
+            };
             fluid::emit_fluid(mesh, source, position, liquid, layers, tint);
             return;
         }

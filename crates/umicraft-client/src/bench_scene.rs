@@ -34,6 +34,8 @@ use crate::terrain_textures::{TerrainMesher, TerrainTextures};
 
 /// Frames drawn before the measurement starts (pipeline and driver warm-up).
 const WARMUP_FRAMES: u32 = 30;
+/// Frames of `--bench-stream` left out of the statistics (pipeline compilation).
+const STREAM_WARMUP: usize = 5;
 /// Sea level of the generated world.
 const SEA_LEVEL: i32 = 62;
 /// Plains biome id (grass and leaf tint).
@@ -327,12 +329,144 @@ struct SceneFacts {
     faces: usize,
 }
 
+/// Loads the scene as a burst of chunks through the real [`WorldView`] (job
+/// queue, mesh workers, uploads) while drawing frames, and reports how the
+/// frames fare and how fast the chunks near the camera appear (F2-4).
+///
+/// The chunks are sent in column order (x, then z), a bad order for a camera in
+/// the middle, so a nearest-first queue shows.
+fn run_stream(args: &Args) -> Result<(), ClientError> {
+    use std::sync::mpsc::sync_channel;
+
+    use crate::game::{ChunkEvent, RenderEvent};
+    use crate::mesher::worker_count;
+    use crate::world_view::WorldView;
+
+    let origin = ChunkPos::new(
+        args.bench_origin.div_euclid(16),
+        args.bench_origin.div_euclid(16),
+    );
+    let reach = i32::from(args.view_distance);
+    let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
+    let installed = TerrainTextures::load().install(&mut renderer);
+    renderer.set_environment(RenderEnvironment::new(
+        0,
+        args.time,
+        0.0,
+        args.view_distance,
+    ));
+    let mut world_view = WorldView::new(&installed, worker_count(args.bench_workers))?;
+    let columns = generate_world(origin, reach);
+    let mut positions: Vec<ChunkPos> = columns
+        .keys()
+        .copied()
+        .filter(|pos| {
+            (-reach..=reach).contains(&(pos.x - origin.x))
+                && (-reach..=reach).contains(&(pos.z - origin.z))
+        })
+        .collect();
+    positions.sort_unstable_by_key(|pos| (pos.x, pos.z));
+    let (frames_tx, frames_rx) = sync_channel::<RenderEvent>(1);
+    let (chunks_tx, chunks_rx) = sync_channel::<ChunkEvent>(positions.len().max(1));
+    for pos in &positions {
+        let neighbours = (-1..=1)
+            .flat_map(|dz| (-1..=1).map(move |dx| ChunkPos::new(pos.x + dx, pos.z + dz)))
+            .filter_map(|neighbour| columns.get(&neighbour));
+        let snapshot = ChunkSnapshot::from_columns(*pos, neighbours.map(Arc::clone));
+        chunks_tx
+            .send(ChunkEvent {
+                pos: *pos,
+                snapshot,
+            })
+            .map_err(|_| ClientError::Worker("chunk channel closed".into()))?;
+    }
+    drop(frames_tx);
+
+    let origin_block = DVec3::new(
+        f64::from(origin.x * 16) + 8.0,
+        0.0,
+        f64::from(origin.z * 16) + 8.0,
+    );
+    let mut camera = Camera::default();
+    camera.set_aspect(args.width, args.height);
+    camera.set_eye(origin_block + DVec3::new(0.0, f64::from(CAMERA_HEIGHT), 0.0));
+    camera.pitch = -0.4;
+    let overlay = Overlay::new(args.width, args.height);
+    let near: Vec<ChunkPos> = positions
+        .iter()
+        .copied()
+        .filter(|pos| (pos.x - origin.x).abs() <= 1 && (pos.z - origin.z).abs() <= 1)
+        .collect();
+
+    let start = Instant::now();
+    let mut frame_ms = Vec::new();
+    let mut sync_ms = Vec::new();
+    let mut near_ms = None;
+    let mut total_ms = None;
+    for frame in 0..100_000_u32 {
+        let begin = Instant::now();
+        camera.yaw = frame as f32 * 0.02;
+        world_view.focus_on(&camera);
+        let sync_start = Instant::now();
+        world_view.sync(&frames_rx, &chunks_rx, &mut renderer);
+        sync_ms.push(sync_start.elapsed().as_secs_f32() * 1000.0);
+        renderer.render(&camera, &overlay)?;
+        renderer.wait_idle();
+        frame_ms.push(begin.elapsed().as_secs_f32() * 1000.0);
+        let elapsed = start.elapsed().as_secs_f32() * 1000.0;
+        if near_ms.is_none() && near.iter().all(|pos| world_view.is_meshed(*pos)) {
+            near_ms = Some(elapsed);
+        }
+        if world_view.chunk_count() >= positions.len() {
+            total_ms = Some(elapsed);
+            break;
+        }
+    }
+    let mut text = format!(
+        "bench stream: {} chunks, {} workers\n",
+        positions.len(),
+        worker_count(args.bench_workers)
+    );
+    // The first frames compile pipelines and start the workers: leave them out.
+    let steady = frame_ms.get(STREAM_WARMUP..).unwrap_or(&[]);
+    if let Some(stats) = FrameStats::of(steady) {
+        let _ = writeln!(
+            text,
+            "frames while loading: {}  mean {:.2} ms  p95 {:.2}  p99 {:.2}  max {:.2}",
+            steady.len(),
+            stats.mean,
+            stats.p95,
+            stats.p99,
+            stats.max
+        );
+    }
+    if let Some(sync) = FrameStats::of(sync_ms.get(STREAM_WARMUP..).unwrap_or(&[])) {
+        let _ = writeln!(
+            text,
+            "sync (collect, upload, dispatch) per frame: mean {:.2} ms  p99 {:.2}  max {:.2}",
+            sync.mean, sync.p99, sync.max
+        );
+    }
+    let show = |value: Option<f32>| value.map_or("never".to_string(), |ms| format!("{ms:.0} ms"));
+    let _ = writeln!(
+        text,
+        "nearest 9 chunks shown after {}, all after {}",
+        show(near_ms),
+        show(total_ms)
+    );
+    print!("{text}");
+    Ok(())
+}
+
 /// Runs the benchmark scene and prints its report.
 ///
 /// # Errors
 /// Renderer creation, texture installation or a draw failure; with
 /// `--screenshot PATH`, also a readback or PNG error.
 pub fn run(args: &Args) -> Result<(), ClientError> {
+    if args.bench_stream {
+        return run_stream(args);
+    }
     let origin = ChunkPos::new(
         args.bench_origin.div_euclid(16),
         args.bench_origin.div_euclid(16),

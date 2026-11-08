@@ -13,10 +13,11 @@
 //! to the cells whose light actually changes (at most 15 blocks away, or the
 //! length of a freshly opened or closed sky shaft).
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 use crate::block::BlockState;
 use crate::chunk::WORLD_HEIGHT;
+use crate::chunk_map::ChunkSet;
 use crate::pos::{BlockPos, ChunkPos};
 use crate::world::World;
 
@@ -118,7 +119,7 @@ impl World {
         let mut editor = LightEditor {
             has_sky: self.has_sky_light(),
             world: self,
-            touched: HashSet::new(),
+            touched: ChunkSet::default(),
         };
         editor.relight(pos);
         let mut touched: Vec<ChunkPos> = editor.touched.into_iter().collect();
@@ -132,7 +133,7 @@ struct LightEditor<'a> {
     world: &'a mut World,
     /// The dimension has sky light, so elided sections are full of it.
     has_sky: bool,
-    touched: HashSet<ChunkPos>,
+    touched: ChunkSet,
 }
 
 impl LightEditor<'_> {

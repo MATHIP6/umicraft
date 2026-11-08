@@ -5,7 +5,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use umicraft_world::{BlockPos, ChunkColumn, ChunkPayload, ChunkPos, World};
+use umicraft_world::{BlockPos, BlockState, ChunkColumn, ChunkPayload, ChunkPos, World};
 
 const FLAT_SECTION: &[u8] = include_bytes!("../tests/fixtures/flat-chunk-section.bin");
 
@@ -54,6 +54,45 @@ fn apply_bulk_10(criterion: &mut Criterion) {
     });
 }
 
+/// A world with one stone column eight sections tall, as a mesh job would hold.
+fn stone_world() -> World {
+    let mut world = flat_world(1);
+    for y in 0..128 {
+        for z in 0..16 {
+            for x in 0..16 {
+                world.set_block(BlockPos::new(x, y, z), BlockState::new(1, 0));
+            }
+        }
+    }
+    world
+}
+
+/// F2-4f: an edit while a mesh job still holds the column copies it
+/// (`Arc::make_mut`); the same edit without a holder does not.
+fn edit_with_a_job_in_flight(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("world/set_block");
+    let pos = ChunkPos::new(0, 0);
+    let mut world = stone_world();
+    let mut toggle = false;
+    group.bench_function("unshared_column", |bencher| {
+        bencher.iter(|| {
+            toggle = !toggle;
+            let state = BlockState::new(if toggle { 4 } else { 1 }, 0);
+            black_box(world.set_block(BlockPos::new(3, 70, 3), state))
+        });
+    });
+    group.bench_function("column_held_by_a_snapshot", |bencher| {
+        bencher.iter(|| {
+            toggle = !toggle;
+            let state = BlockState::new(if toggle { 4 } else { 1 }, 0);
+            let snapshot = world.chunk_shared(pos);
+            let changed = world.set_block(BlockPos::new(3, 70, 3), state);
+            black_box((changed, snapshot))
+        });
+    });
+    group.finish();
+}
+
 fn block_access_100k(criterion: &mut Criterion) {
     let world = flat_world(10);
     criterion.bench_function("world/block_get_100k", |bencher| {
@@ -74,6 +113,7 @@ criterion_group!(
     benches,
     decode_flat_section,
     apply_bulk_10,
-    block_access_100k
+    block_access_100k,
+    edit_with_a_job_in_flight
 );
 criterion_main!(benches);

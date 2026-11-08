@@ -127,6 +127,9 @@ options:
                       try 1000000 to test precision far from the origin)
   --bench-frames N    measured frames of --bench-scene (default: 600)
   --bench-no-cave-culling  draw --bench-scene without cave culling (to compare)
+  --bench-workers N   mesh workers of --bench-stream (default 0: automatic)
+  --bench-stream      with --bench-scene: load the world as one burst of chunks
+                      through the real mesh pool and report the frames meanwhile
   --entity-demo       mesh and report the M8 acceptance entities (Steve, Alex,
                       Zombie, Cow, Item); no server or GPU unless --screenshot is given
   --mob NAME          render a single mob by name (e.g. creeper, zombie, cow, or 'list')
@@ -247,6 +250,11 @@ pub struct Args {
     pub bench_frames: u32,
     /// Whether the benchmark scene draws without cave culling (F2-3d).
     pub bench_no_cave_culling: bool,
+    /// Whether the benchmark loads its world as a burst of chunks through the
+    /// real meshing pipeline and measures the frames meanwhile (F2-4).
+    pub bench_stream: bool,
+    /// Mesh workers of `--bench-stream`; `0` is automatic.
+    pub bench_workers: u8,
     /// Whether the server-less M8 entity acceptance run is requested.
     pub entity_demo: bool,
     /// Specific mob name to view or screenshot in entity demo (e.g. "creeper", "cow").
@@ -341,6 +349,8 @@ impl Args {
         let mut bench_origin = 0_i32;
         let mut bench_frames = 600_u32;
         let mut bench_no_cave_culling = false;
+        let mut bench_stream = false;
+        let mut bench_workers = 0_u8;
         let mut entity_demo = false;
         let mut mob = None;
         let mut dump_mobs = None;
@@ -438,6 +448,14 @@ impl Args {
                 "--bench-origin" => {
                     bench_origin = parse_number(words.get(index + 1), "--bench-origin")?;
                     index += 2;
+                }
+                "--bench-workers" => {
+                    bench_workers = parse_number(words.get(index + 1), "--bench-workers")?;
+                    index += 2;
+                }
+                "--bench-stream" => {
+                    bench_stream = true;
+                    index += 1;
                 }
                 "--bench-no-cave-culling" => {
                     bench_no_cave_culling = true;
@@ -595,6 +613,8 @@ impl Args {
             bench_origin,
             bench_frames,
             bench_no_cave_culling,
+            bench_stream,
+            bench_workers,
             entity_demo,
             mob,
             dump_mobs,

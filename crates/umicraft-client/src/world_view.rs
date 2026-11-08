@@ -9,7 +9,6 @@
 //! is removed, a world reset drops every mesh of the old world (including the
 //! ones still being meshed), and each chunk's faces are counted once.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,13 +26,21 @@ use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::sound::cue::SoundCue;
 use umicraft_game::RenderState;
-use umicraft_mesh::{BlockEntityRef, ChunkSnapshot, Mesh, Vertex};
+use umicraft_mesh::{BlockEntityRef, Mesh, Vertex};
 use umicraft_render::{
     BorderView, Camera, FogContext, FogMedium, HudState, OutlineBox, PrecipitationField,
     RenderEnvironment, Renderer, ScreenOverlays,
 };
 use umicraft_ui::menus::ConnectStage;
-use umicraft_world::{ChunkPos, LightLevel};
+use umicraft_world::{ChunkMap, ChunkPos, LightLevel};
+
+/// Mesh jobs kept in flight per worker: enough to keep the worker busy, few
+/// enough that a newly important chunk is picked soon.
+const JOBS_PER_WORKER: usize = 2;
+/// The vertex bytes the render thread uploads per frame at most (one chunk at
+/// least): a burst of finished meshes is spread over frames instead of making
+/// one long frame (F2-4b).
+const UPLOAD_BUDGET_BYTES: usize = 1 << 20;
 
 use crate::achievements_view::newly_unlocked;
 use crate::block_entity_render::push_pot_plants;
@@ -45,6 +52,7 @@ use crate::fog_context::FogLight;
 use crate::game::{
     camera_angles, ChunkEvent, Frame, GameStatus, LookSlot, RenderEvent, TextScreenRequest, TICK,
 };
+use crate::mesh_queue::MeshQueue;
 use crate::mesher::{MeshPool, MeshResult};
 use crate::moving_blocks_draw::mesh_moving_blocks;
 use crate::overlay_state::OverlayInputs;
@@ -79,15 +87,19 @@ pub struct WorldView {
     /// Incremented by every world reset; jobs carry it so a mesh of the
     /// replaced world is dropped when it comes back.
     generation: u64,
-    /// Snapshots waiting for a free mesh worker, at most one per chunk.
-    waiting: Vec<(ChunkPos, ChunkSnapshot)>,
-    /// Chunks with a job in flight for the current generation.
-    pending: HashSet<ChunkPos>,
+    /// The chunks waiting for a free mesh worker, nearest first, and the ones
+    /// with a job in flight for the current generation.
+    queue: MeshQueue,
+    /// The vertex bytes [`WorldView::collect`] uploads per call, at most.
+    upload_budget: usize,
+    /// A fixed limit of jobs in flight, for tests; `None` derives it from the
+    /// workers.
+    max_in_flight: Option<usize>,
     /// Faces of every chunk whose current mesh is not empty.
-    faces: HashMap<ChunkPos, usize>,
+    faces: ChunkMap<usize>,
     /// The chests and signs of every chunk, which a tile-entity renderer
     /// draws (P7c).
-    block_entities: HashMap<ChunkPos, Vec<BlockEntityRef>>,
+    block_entities: ChunkMap<Vec<BlockEntityRef>>,
     hud: HudState,
     window_view: WindowView,
     /// The newest creative screen snapshot, once one was published.
@@ -162,10 +174,11 @@ impl WorldView {
             view: View::default(),
             pool: MeshPool::new(worker_count, terrain)?,
             generation: 0,
-            waiting: Vec::new(),
-            pending: HashSet::new(),
-            faces: HashMap::new(),
-            block_entities: HashMap::new(),
+            queue: MeshQueue::default(),
+            upload_budget: UPLOAD_BUDGET_BYTES,
+            max_in_flight: None,
+            faces: ChunkMap::default(),
+            block_entities: ChunkMap::default(),
             hud: HudState::default(),
             window_view: empty_window_view(),
             creative: None,
@@ -214,7 +227,7 @@ impl WorldView {
         // After the frames, so a look newer than the tick they carry wins.
         self.view.take_look();
         while let Ok(ChunkEvent { pos, snapshot }) = chunks.try_recv() {
-            self.queue(pos, snapshot);
+            self.queue.queue(pos, snapshot);
         }
         // Collect before dispatching: a job submitted by this call comes back
         // in a later one, after any reset this call applied.
@@ -423,6 +436,12 @@ impl WorldView {
     #[must_use]
     pub fn chunk_count(&self) -> usize {
         self.faces.len()
+    }
+
+    /// Whether chunk `pos` has a mesh with faces.
+    #[must_use]
+    pub fn is_meshed(&self, pos: ChunkPos) -> bool {
+        self.faces.contains_key(&pos)
     }
 
     /// The faces of every current chunk mesh.
@@ -663,34 +682,31 @@ impl WorldView {
     /// Forgets the replaced world, including the jobs still in flight.
     fn reset(&mut self, target: &mut impl MeshTarget) {
         self.generation += 1;
-        self.waiting.clear();
-        self.pending.clear();
+        self.queue.clear();
         self.faces.clear();
         self.block_entities.clear();
         self.entities = Arc::from([]);
         target.clear_meshes();
     }
 
-    /// Queues a snapshot; a newer snapshot of a waiting chunk replaces it.
-    fn queue(&mut self, pos: ChunkPos, snapshot: ChunkSnapshot) {
-        match self.waiting.iter_mut().find(|(waiting, _)| *waiting == pos) {
-            Some(entry) => entry.1 = snapshot,
-            None => self.waiting.push((pos, snapshot)),
-        }
-    }
-
     fn collect(&mut self, target: &mut impl MeshTarget) {
-        while let Some(MeshResult {
-            pos,
-            generation,
-            mesh,
-        }) = self.pool.try_recv()
-        {
+        let mut uploaded = 0_usize;
+        // The budget is checked before taking a result, so one mesh always
+        // goes through and the rest wait in the channel for the next frame.
+        while uploaded < self.upload_budget {
+            let Some(MeshResult {
+                pos,
+                generation,
+                mesh,
+            }) = self.pool.try_recv()
+            else {
+                break;
+            };
             if generation != self.generation {
                 // A mesh of the world a reset replaced: never drawn.
                 continue;
             }
-            self.pending.remove(&pos);
+            self.queue.finished(pos);
             if mesh.is_empty() {
                 self.faces.remove(&pos);
             } else {
@@ -701,32 +717,39 @@ impl WorldView {
             } else {
                 self.block_entities.insert(pos, mesh.block_entities.clone());
             }
+            uploaded += (mesh.vertices.len() + mesh.transparent_vertices.len())
+                * std::mem::size_of::<Vertex>();
             target.upload_mesh(pos, &mesh);
         }
     }
 
-    /// Hands waiting chunks to the workers; a chunk already being meshed
-    /// waits for its result first, so meshes arrive in snapshot order.
+    /// Hands the waiting chunks to the workers, nearest first, keeping only a
+    /// couple of jobs per worker in flight so that the order can still change
+    /// when the player moves (F2-4a).
     fn dispatch(&mut self) {
-        let mut index = 0;
-        while index < self.waiting.len() {
-            let pos = self.waiting[index].0;
-            if self.pending.contains(&pos) {
-                index += 1;
-                continue;
-            }
-            let (_, snapshot) = self.waiting.remove(index);
-            match self.pool.submit(pos, self.generation, snapshot) {
-                Ok(()) => {
-                    self.pending.insert(pos);
-                }
-                Err(snapshot) => {
-                    // The job queue is full: retry on a later call.
-                    self.waiting.insert(index, (pos, snapshot));
-                    break;
-                }
+        let in_flight = self
+            .max_in_flight
+            .unwrap_or(self.pool.worker_count() * JOBS_PER_WORKER);
+        while let Some((pos, snapshot)) = self.queue.next(in_flight) {
+            if let Err(snapshot) = self.pool.submit(pos, self.generation, snapshot) {
+                // The job queue is full or the workers are gone: retry later.
+                self.queue.give_back(pos, snapshot);
+                break;
             }
         }
+    }
+
+    /// Limits the jobs in flight to `limit` whatever the worker count.
+    #[cfg(test)]
+    fn queue_limit_for_tests(&mut self, limit: usize) {
+        self.max_in_flight = Some(limit);
+    }
+
+    /// Tells the mesh queue where the player is and where they look, so the
+    /// chunks around and ahead of them are meshed first. Call it every frame
+    /// with the camera.
+    pub fn focus_on(&mut self, camera: &Camera) {
+        self.queue.focus_on(camera.eye(), camera.yaw);
     }
 }
 
@@ -897,8 +920,11 @@ impl View {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::mpsc::{self, SyncSender};
     use std::time::Duration;
+
+    use umicraft_mesh::ChunkSnapshot;
 
     use umicraft_world::{BlockPos, BlockState, ChunkPayload, World};
 
@@ -1003,6 +1029,54 @@ mod tests {
         harness.sync_until(|h| h.target.uploaded.get(&ORIGIN) == Some(&12));
         assert_eq!(harness.world_view.face_count(), 12);
         assert_eq!(harness.world_view.chunk_count(), 1);
+    }
+
+    /// F2-4b: a burst of finished meshes is spread over several syncs when it
+    /// exceeds the upload budget, and none is lost.
+    #[test]
+    fn a_small_upload_budget_spreads_a_burst_over_frames() {
+        let mut harness = Harness::new();
+        harness.world_view.upload_budget = 1;
+        let chunks = [ORIGIN, ChunkPos::new(1, 0), ChunkPos::new(2, 0)];
+        for pos in chunks {
+            harness.send_chunk(pos, &[BlockPos::new(pos.x * 16 + 1, 1, 1)]);
+        }
+        // Let every job finish before the first collection can take more than
+        // its budget.
+        harness.sync();
+        std::thread::sleep(Duration::from_millis(200));
+        let mut per_sync = Vec::new();
+        for _ in 0..40 {
+            let before = harness.target.uploads;
+            harness.sync();
+            per_sync.push(harness.target.uploads - before);
+            if harness.target.uploads == 3 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(harness.target.uploads, 3, "every mesh arrives");
+        assert!(
+            per_sync.iter().all(|&count| count <= 1),
+            "one mesh per sync at most: {per_sync:?}"
+        );
+    }
+
+    #[test]
+    fn the_nearest_chunk_is_meshed_before_a_far_one_sent_first() {
+        let mut harness = Harness::new();
+        let far = ChunkPos::new(12, 0);
+        let near = ChunkPos::new(0, 0);
+        harness.send_chunk(far, &[BlockPos::new(12 * 16 + 1, 1, 1)]);
+        harness.send_chunk(near, &[BlockPos::new(1, 1, 1)]);
+        let mut camera = Camera::default();
+        camera.set_eye(glam::DVec3::new(8.0, 70.0, 8.0));
+        harness.world_view.focus_on(&camera);
+        // One job in flight at a time: the order is the dispatch order.
+        harness.world_view.queue_limit_for_tests(1);
+        harness.sync_until(|h| h.target.uploads >= 1);
+        assert!(harness.target.uploaded.contains_key(&near));
+        assert!(!harness.target.uploaded.contains_key(&far));
     }
 
     #[test]

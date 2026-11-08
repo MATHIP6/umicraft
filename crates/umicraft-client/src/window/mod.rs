@@ -63,7 +63,7 @@ use crate::entity_icons::EntityIcons;
 use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
-use crate::mesher::default_worker_count;
+use crate::mesher::worker_count;
 use crate::options::{self, Action, Binding, Options};
 use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
@@ -767,6 +767,7 @@ impl App {
         };
         world.sync(session.frames(), session.chunks(), renderer);
         world.update_camera(&mut self.camera, now, self.options.video.view_bobbing);
+        world.focus_on(&self.camera);
         self.audio.play_cues(&world.take_sounds());
         self.audio
             .set_listener(listener_of(self.camera.position(), self.camera.yaw));
@@ -1527,7 +1528,7 @@ impl ApplicationHandler for App {
         self.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());
         self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
-        match WorldView::new(&terrain, default_worker_count()) {
+        match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
             Ok(world) => self.world = Some(world),
             Err(error) => {
                 self.exit_error = Some(error.to_string());

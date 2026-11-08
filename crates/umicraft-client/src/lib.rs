@@ -59,6 +59,7 @@ pub mod launch_session;
 pub mod map_render;
 mod menu_flow;
 mod menu_rows;
+mod mesh_queue;
 pub mod mesh_settings;
 pub mod mesher;
 pub mod model_resources;
