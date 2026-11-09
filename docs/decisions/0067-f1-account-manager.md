@@ -35,6 +35,6 @@ Azure application yet.
 - Prism's CMake file says its key is for builds that accept Microsoft's terms of
   use, and to change it when rebranding; it grants no explicit permission to other
   apps. Microsoft may revoke it, and Umicraft's use is therefore **not a release
-  option**: a own Azure app (with Minecraft API approval, https://aka.ms/mce-reviewappid)
+  option**: an own Azure app (with Minecraft API approval, https://aka.ms/mce-reviewappid)
   must replace it before any public release. Tracked in ROADMAP F1.
 - Sources: see `docs/sources.md` (F1 rows).
