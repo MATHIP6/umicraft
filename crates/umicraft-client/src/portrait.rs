@@ -11,6 +11,7 @@
 
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::EntityRenderSnapshot;
+use umicraft_mesh::item::ItemMesh;
 use umicraft_ui::Rect;
 use umicraft_world::LightLevel;
 
@@ -109,6 +110,21 @@ impl Placement {
             * Mat4::from_scale(Vec3::new(self.scale, -self.scale, self.scale))
             * Mat4::from_rotation_x(tilt.to_radians());
         Mat4::from_scale(Vec3::splat(16.0 / BLOCK)) * fit
+    }
+}
+
+/// Carries the item geometry of the body (the item in its hand), placed on the
+/// model at the origin, into the icon box with the `matrix` of the model. The
+/// icon pipeline does not cull, so the mirror of the matrix needs no new winding.
+pub(crate) fn carry(items: &mut ItemMesh, matrix: Mat4) {
+    for vertex in &mut items.vertices {
+        vertex.position = matrix
+            .transform_point3(Vec3::from(vertex.position))
+            .to_array();
+        vertex.normal = matrix
+            .transform_vector3(Vec3::from(vertex.normal))
+            .normalize_or_zero()
+            .to_array();
     }
 }
 

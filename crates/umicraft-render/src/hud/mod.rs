@@ -39,4 +39,6 @@ pub use overlay_views::{
 pub use state::{
     ChatInputView, ChatLineView, ChatRunView, ChatStyle, DebugF3View, HudState, HOTBAR_SLOTS,
 };
-pub use umicraft_ui::mod_widget::{measure as measure_mod_widget, ModLine, ModWidgetView};
+pub use umicraft_ui::mod_widget::{
+    measure as measure_mod_widget, ModLine, ModWidgetView, ShadowStyle, WidgetStyle,
+};

@@ -8,6 +8,7 @@
 //! skin is ready the player wears the default skin of their UUID.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use umicraft_assets::cache::AssetCache;
 use umicraft_assets::profile_textures::{check_cape_image, skin_from_image, TextureFetcher};
@@ -46,7 +47,34 @@ enum State {
 pub(super) struct SkinSet {
     fetcher: TextureFetcher,
     states: HashMap<String, State>,
+    /// The face of every skin that is ready, for the heads of the tab list: bare,
+    /// and with the hat layer over it.
+    faces: HashMap<String, [Arc<[u8]>; 2]>,
     next_index: u32,
+}
+
+/// The 8x8 face of a 64x64 RGBA `skin`, 256 bytes, with the hat layer over it
+/// when `hat` is set (`GuiPlayerTabOverlay`: texels (8, 8) and (40, 8)).
+pub(super) fn head_face(skin: &[u8], hat: bool) -> Option<Arc<[u8]>> {
+    const SIDE: usize = 64;
+    if skin.len() != SIDE * SIDE * 4 {
+        return None;
+    }
+    let at = |x: usize, y: usize| &skin[(y * SIDE + x) * 4..][..4];
+    let mut face = Vec::with_capacity(8 * 8 * 4);
+    for y in 0..8 {
+        for x in 0..8 {
+            let (base, hat_pixel) = (at(8 + x, 8 + y), at(40 + x, 8 + y));
+            let cover = if hat { u32::from(hat_pixel[3]) } else { 0 };
+            for channel in 0..3 {
+                let mixed = u32::from(hat_pixel[channel]) * cover
+                    + u32::from(base[channel]) * (255 - cover);
+                face.push((mixed / 255) as u8);
+            }
+            face.push(255);
+        }
+    }
+    Some(face.into())
 }
 
 impl SkinSet {
@@ -58,8 +86,17 @@ impl SkinSet {
         Self {
             fetcher: TextureFetcher::spawn(cache),
             states: HashMap::new(),
+            faces: HashMap::new(),
             next_index: 0,
         }
+    }
+
+    /// The face of the skin at `url`, asking for the download on the first call.
+    pub(super) fn face(&mut self, url: &str, hat: bool) -> Option<Arc<[u8]>> {
+        self.lookup(url, SkinKind::Skin);
+        self.faces
+            .get(url)
+            .map(|faces| faces[usize::from(hat)].clone())
     }
 
     /// The index of the texture at `url`, asking for it on the first call.
@@ -106,6 +143,13 @@ impl SkinSet {
                 Some((rgba, width, height)) => {
                     let index = self.next_index;
                     self.next_index += 1;
+                    if kind == SkinKind::Skin {
+                        if let (Some(bare), Some(hatted)) =
+                            (head_face(&rgba, false), head_face(&rgba, true))
+                        {
+                            self.faces.insert(fetched.url.clone(), [bare, hatted]);
+                        }
+                    }
                     let slot = match kind {
                         SkinKind::Skin => TextureSlot::Skin(index),
                         SkinKind::Cape => TextureSlot::Cape(index),
@@ -128,4 +172,40 @@ pub(super) enum SkinKind {
     Skin,
     /// The cape.
     Cape,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 64x64 skin with a red face, a transparent hat and one opaque blue hat
+    /// pixel at the top-left of the hat layer.
+    fn skin() -> Vec<u8> {
+        let mut skin = vec![0; 64 * 64 * 4];
+        let mut set = |x: usize, y: usize, rgba: [u8; 4]| {
+            skin[(y * 64 + x) * 4..][..4].copy_from_slice(&rgba);
+        };
+        for y in 8..16 {
+            for x in 8..16 {
+                set(x, y, [200, 0, 0, 255]);
+            }
+        }
+        set(40, 8, [0, 0, 255, 255]);
+        skin
+    }
+
+    #[test]
+    fn the_face_is_the_front_of_the_head_with_the_hat_over_it() {
+        let face = head_face(&skin(), true).expect("a 64x64 skin");
+        assert_eq!(face.len(), 256);
+        assert_eq!(&face[..4], &[0, 0, 255, 255], "the hat covers the corner");
+        assert_eq!(&face[4..8], &[200, 0, 0, 255], "the face shows elsewhere");
+        let bare = head_face(&skin(), false).expect("a 64x64 skin");
+        assert_eq!(&bare[..4], &[200, 0, 0, 255], "no hat, no cover");
+    }
+
+    #[test]
+    fn an_image_that_is_not_a_skin_has_no_face() {
+        assert!(head_face(&[0; 16], true).is_none());
+    }
 }

@@ -6,6 +6,12 @@ use super::*;
 use crate::menus::common::testing::click_at;
 
 #[test]
+fn the_settings_page_says_what_the_mod_does() {
+    let names = texts(&mut on_settings_page(), &view());
+    assert!(has_text(&names, "About FPS"), "{names:?}");
+}
+
+#[test]
 fn the_gear_opens_the_settings_page_and_back_returns_to_the_list() {
     let mut screen = on_settings_page();
     let page = texts(&mut screen, &view());

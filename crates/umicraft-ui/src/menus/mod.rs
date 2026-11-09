@@ -40,9 +40,8 @@ pub use confirm::{confirm_layout, ConfirmLayout, ConfirmOutcome, ConfirmScreen};
 pub use connecting::{connecting_cancel_rect, ConnectStage, ConnectingOutcome, ConnectingScreen};
 pub use disconnected::{DisconnectedOutcome, DisconnectedScreen};
 pub use mods::{
-    landing_layout, mods_layout, HudEditorOutcome, HudEditorView, HudWidgetView, LandingLayout,
-    ModCardView, ModValue, ModsLayout, ModsOutcome, ModsScreen, ModsView, SettingControl,
-    SettingView, Snap,
+    mods_layout, HudEditorOutcome, HudEditorView, HudWidgetView, ModCardView, ModValue, ModsLayout,
+    ModsOutcome, ModsScreen, ModsView, SettingControl, SettingView, Snap,
 };
 pub use pack_mode::ResourcePackMode;
 pub use panorama::{

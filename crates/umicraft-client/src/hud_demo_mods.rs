@@ -2,8 +2,8 @@
 
 //! The scene of the `mods` and `mods_list` views of the UI demo (ADR-0065): the
 //! built-in mods with FPS, coordinates and CPS on and spread over the screen, so
-//! the capture shows the HUD widgets around the landing page and around the
-//! open panel.
+//! the capture shows the HUD widgets around the open panel. `mods_list` is the
+//! same scene under its former name.
 
 use umicraft_builtin_mods::{mods, Anchor, HudPlacement, ModContext, ModRegistry};
 use umicraft_core::lang::Lang;

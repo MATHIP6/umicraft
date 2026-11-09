@@ -4,8 +4,8 @@
 //!
 //! The reference prints the JVM heap (`Runtime.totalMemory`/`maxMemory`).
 //! A native client has no heap ceiling, so this reports the resident set of
-//! the process against the physical memory of the machine. Only Linux is
-//! read (`/proc`); elsewhere both numbers are zero and the line shows 0 %.
+//! the process against the physical memory of the machine. Linux reads `/proc`;
+//! elsewhere only the resident set is known (`memory-stats`) and the maximum is zero.
 
 /// Resident and total memory in bytes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -19,6 +19,15 @@ pub struct MemoryUse {
 /// Reads the current memory use; zeros when the platform has no `/proc`.
 #[must_use]
 pub fn read() -> MemoryUse {
+    // Windows and macOS: the working set of the process, from `memory-stats`. The
+    // physical memory of the machine is not read there, so the maximum is zero.
+    #[cfg(not(target_os = "linux"))]
+    if let Some(stats) = memory_stats::memory_stats() {
+        return MemoryUse {
+            used: stats.physical_mem as u64,
+            max: 0,
+        };
+    }
     let used = std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|text| kilobytes(&text, "VmRSS:"));

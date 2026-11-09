@@ -286,6 +286,15 @@ pub fn is_sword(item_id: i16) -> bool {
     tool(item_id).is_some_and(|tool| tool.kind == ToolKind::Sword)
 }
 
+/// The item id of a potion (MCP `Items.potionitem`), drunk or thrown.
+const POTION: i16 = 373;
+
+/// Whether an item is a potion.
+#[must_use]
+pub fn is_potion(item_id: i16) -> bool {
+    item_id == POTION
+}
+
 /// Whether a block is air for the digging rules (MCP `Material.air`).
 #[must_use]
 pub fn is_air(block: u16) -> bool {

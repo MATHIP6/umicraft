@@ -12,7 +12,8 @@ use crate::mod_widget::draw_mod_widgets;
 use crate::text::FontAtlas;
 
 use super::drag::{hit_widget, Drag};
-use super::frame::{draw_frame, draw_label, FrameKind};
+use super::frame::{draw_frame, draw_label, frame_rect, FrameKind};
+use super::gear::{draw_gear, gear_rect};
 use super::guides::draw_guides;
 use super::shield::Shield;
 use super::toolbar;
@@ -61,7 +62,7 @@ impl HudLayer {
             None => ui
                 .pointer()
                 .filter(|p| !shield.covers(*p))
-                .and_then(|p| hit_widget(rects, gui.to_gui(p))),
+                .and_then(|p| hit_widget(rects, gui.to_gui(p), view.screen)),
         };
         for (index, widget) in view.widgets.iter().enumerate() {
             let selected = self.selected.as_deref() == Some(widget.id.as_str());
@@ -76,10 +77,30 @@ impl HudLayer {
                 .dragged()
                 .filter(|d| d.id == widget.id)
                 .map_or(rects[index], |d| d.live);
-            draw_frame(ui, gui, rect, kind);
+            draw_frame(ui, gui, frame_rect(rect, view.screen), kind);
         }
         if let Some(drag) = &self.drag {
             draw_guides(ui, gui, &drag.guides, view.screen);
+        }
+    }
+
+    /// Draws the gear of each widget that shows one.
+    pub(super) fn draw_gears(
+        &self,
+        ui: &mut Ui,
+        brand: &FontAtlas,
+        gui: &Gui,
+        (view, rects): (&HudEditorView, &[Rect]),
+        shield: &Shield<'_>,
+    ) {
+        let pointer = ui
+            .pointer()
+            .filter(|p| !shield.covers(*p))
+            .map(|p| gui.to_gui(p));
+        for index in self.gear_targets(pointer, (view, rects)) {
+            let rect = gear_rect(rects[index], view.screen);
+            let hovered = pointer.is_some_and(|p| rect.contains(p));
+            draw_gear(ui, brand, gui, rect, hovered);
         }
     }
 

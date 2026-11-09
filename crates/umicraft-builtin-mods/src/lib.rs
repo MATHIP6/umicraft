@@ -29,7 +29,9 @@ pub mod traits;
 
 pub use config::{ModConfig, ModsConfig};
 pub use context::ModContext;
-pub use hud::{Anchor, HudContent, HudLine, HudPlacement, HudRect, MAX_SCALE, MIN_SCALE};
+pub use hud::{
+    Anchor, HudContent, HudLine, HudPlacement, HudRect, HudStyle, Shadow, MAX_SCALE, MIN_SCALE,
+};
 pub use id::{ModCategory, ModId};
 pub use meta::ModMeta;
 pub use registry::{HudWidget, ModRegistry, ModView, RegistryError};

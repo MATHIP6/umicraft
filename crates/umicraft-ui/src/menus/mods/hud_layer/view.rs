@@ -62,6 +62,12 @@ pub enum HudEditorOutcome {
         /// The size of the screen in GUI units.
         screen: [f32; 2],
     },
+    /// The gear of a widget was clicked: the menu opens the settings of its mod.
+    /// The menu handles it itself; it never reaches the client.
+    OpenSettings {
+        /// The id of the mod.
+        id: String,
+    },
     /// The selected widget goes back to its default place and size.
     Reset {
         /// The id of the mod.

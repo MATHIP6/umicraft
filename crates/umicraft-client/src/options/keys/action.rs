@@ -51,6 +51,8 @@ pub enum Action {
     Fullscreen,
     /// Open or close the mods menu (Umicraft's own, ADR-0065).
     Mods,
+    /// Zoom while held (the Zoom mod).
+    Zoom,
     /// Select hotbar slot 1.
     Hotbar1,
     /// Select hotbar slot 2.
@@ -73,7 +75,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in the order of `GameSettings.keyBindings`.
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::Attack,
         Self::Use,
         Self::Forward,
@@ -93,6 +95,7 @@ impl Action {
         Self::TogglePerspective,
         Self::Fullscreen,
         Self::Mods,
+        Self::Zoom,
         Self::Hotbar1,
         Self::Hotbar2,
         Self::Hotbar3,
@@ -127,6 +130,7 @@ impl Action {
             Self::TogglePerspective => "perspective",
             Self::Fullscreen => "fullscreen",
             Self::Mods => "mods",
+            Self::Zoom => "zoom",
             Self::Hotbar1 => "hotbar1",
             Self::Hotbar2 => "hotbar2",
             Self::Hotbar3 => "hotbar3",
@@ -162,6 +166,7 @@ impl Action {
             Self::TogglePerspective => "key.togglePerspective",
             Self::Fullscreen => "key.fullscreen",
             Self::Mods => "umicraft.key.mods",
+            Self::Zoom => "umicraft.key.zoom",
             Self::Hotbar1 => "key.hotbar.1",
             Self::Hotbar2 => "key.hotbar.2",
             Self::Hotbar3 => "key.hotbar.3",
@@ -197,6 +202,7 @@ impl Action {
             Self::TogglePerspective => "key.categories.misc",
             Self::Fullscreen => "key.categories.misc",
             Self::Mods => "key.categories.misc",
+            Self::Zoom => "key.categories.misc",
             Self::Hotbar1 => "key.categories.inventory",
             Self::Hotbar2 => "key.categories.inventory",
             Self::Hotbar3 => "key.categories.inventory",
@@ -234,6 +240,7 @@ impl Action {
             Self::TogglePerspective => Binding::Key(KeyCode::F5),
             Self::Fullscreen => Binding::Key(KeyCode::F11),
             Self::Mods => Binding::Key(KeyCode::ShiftRight),
+            Self::Zoom => Binding::Key(KeyCode::KeyC),
             Self::Hotbar1 => Binding::Key(KeyCode::Digit1),
             Self::Hotbar2 => Binding::Key(KeyCode::Digit2),
             Self::Hotbar3 => Binding::Key(KeyCode::Digit3),

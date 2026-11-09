@@ -4,9 +4,28 @@
 //! (ADR-0065): measures each one, resolves its placement on the screen and hands
 //! over a [`ModWidgetView`].
 
-use umicraft_builtin_mods::HudWidget;
-use umicraft_render::{gui_scale, measure_mod_widget, ModLine, ModWidgetView};
+use umicraft_builtin_mods::{HudStyle, HudWidget, Shadow};
+use umicraft_render::{
+    gui_scale, measure_mod_widget, ModLine, ModWidgetView, ShadowStyle, WidgetStyle,
+};
 use umicraft_ui::FontAtlas;
+
+/// The look the renderer draws for the style a mod chose.
+fn widget_style(style: &HudStyle) -> WidgetStyle {
+    let channel = |value: u32, shift: u32| ((value >> shift) & 0xFF) as f32 / 255.0;
+    WidgetStyle {
+        background: style
+            .background
+            .map(|(rgb, opacity)| [channel(rgb, 16), channel(rgb, 8), channel(rgb, 0), opacity]),
+        radius: style.radius,
+        padding: style.padding,
+        shadow: match style.shadow {
+            Shadow::Vanilla => ShadowStyle::Vanilla,
+            Shadow::Color(rgb) => ShadowStyle::Color(rgb),
+            Shadow::Off => ShadowStyle::Off,
+        },
+    }
+}
 
 /// The views of `widgets` on a window of `display` pixels.
 ///
@@ -30,13 +49,15 @@ pub fn mod_widget_views<'a>(
                 .iter()
                 .map(|line| ModLine::new(line.text.as_str(), line.color))
                 .collect();
+            let style = widget_style(&widget.content.style);
             // Measured at scale 1: `HudPlacement::rect` applies the widget scale.
-            let size = measure_mod_widget(font, &lines, 1.0);
+            let size = measure_mod_widget(font, &lines, 1.0, &style);
             let rect = widget.placement.rect(size, screen);
             ModWidgetView {
                 lines,
                 position: [rect.x, rect.y],
                 scale: widget.placement.scale,
+                style,
             }
         })
         .collect()
@@ -77,8 +98,31 @@ mod tests {
         };
         let view = &views(placement)[0];
         let gui = f32::from(u16::try_from(gui_scale(800, 600)).unwrap_or(1));
-        let (w, h) = measure_mod_widget(&FontAtlas::fallback(), &view.lines, view.scale);
+        let (w, h) =
+            measure_mod_widget(&FontAtlas::fallback(), &view.lines, view.scale, &view.style);
         assert!((view.position[0] + w - 800.0 / gui).abs() < 0.01);
         assert!((view.position[1] + h - 600.0 / gui).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_options_of_the_mod_reach_the_view() {
+        use umicraft_builtin_mods::SettingValue;
+
+        let mut registry = ModRegistry::new(mods::all()).expect("distinct ids");
+        for (key, value) in [
+            ("background_color", SettingValue::Text("#ff0000".into())),
+            ("background_opacity", SettingValue::Number(0.5)),
+            ("padding", SettingValue::Number(4.0)),
+            ("shadow", SettingValue::Text("off".into())),
+        ] {
+            registry
+                .set_setting("fps", key, &value)
+                .expect("fps option");
+        }
+        registry.update(&ModContext::default());
+        let view = &mod_widget_views(registry.hud_widgets(), &FontAtlas::fallback(), (800, 600))[0];
+        assert_eq!(view.style.background, Some([1.0, 0.0, 0.0, 0.5]));
+        assert_eq!(view.style.padding, 4.0);
+        assert_eq!(view.style.shadow, ShadowStyle::Off);
     }
 }

@@ -190,6 +190,7 @@ impl App {
         upload_glint_texture(renderer, installed.glint_texture());
         upload_sky_textures(renderer);
         self.gui_atlas = Some(gui_atlas);
+        self.hud_cache.invalidate();
         self.server_icons_revision = u64::MAX;
         self.items = installed.items();
         self.dials = DialAnimator::new(installed.dials());

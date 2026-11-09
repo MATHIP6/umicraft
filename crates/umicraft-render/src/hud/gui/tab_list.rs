@@ -6,9 +6,10 @@
 //! draws the bands, the header and footer (wrapped to `width - 50`), the
 //! heads, the names, the score column and the ping bars.
 //!
-//! Gap with the reference: the head is a flat square, light brown with a
-//! skin and the Steve or Alex colour without. The GUI draw list cannot
-//! sample a skin texture yet; the column width and position are exact.
+//! The head is the 8x8 face of the skin, drawn as one rectangle per run of
+//! equal pixels (the GUI draw list cannot sample a skin texture). Until the skin
+//! is downloaded, and for a player without one, it is a flat square: light brown
+//! with a skin and the Steve or Alex colour without.
 
 use umicraft_ui::{DrawList, FontAtlas, Rect, SpriteSheet};
 
@@ -186,7 +187,10 @@ fn draw_entry(
     pen.rect(list, [x, y, x + layout.column_width, y + 8], ROW_BAND);
     let mut name_x = x;
     if tab.show_heads {
-        pen.rect(list, [x, y, x + 8, y + 8], head_color(entry));
+        match entry.face.as_deref() {
+            Some(face) => draw_face(list, pen, face, [x, y]),
+            None => pen.rect(list, [x, y, x + 8, y + 8], head_color(entry)),
+        }
         name_x += HEAD_WIDTH;
     }
     if entry.spectator {
@@ -215,6 +219,32 @@ fn draw_entry(
             8.0 * pen.sf,
         );
         list.image(src, dst, [1.0; 4]);
+    }
+}
+
+/// The 8x8 `face` (RGBA, row by row) at `[x, y]`, one rectangle per run of
+/// equal pixels in a row; transparent pixels are skipped.
+fn draw_face(list: &mut DrawList, pen: &Pen, face: &[u8], [x, y]: [i32; 2]) {
+    if face.len() != 8 * 8 * 4 {
+        return;
+    }
+    let pixel = |column: usize, row: usize| &face[(row * 8 + column) * 4..][..4];
+    for row in 0..8 {
+        let mut start = 0;
+        while start < 8 {
+            let colour = pixel(start, row);
+            let mut end = start + 1;
+            while end < 8 && pixel(end, row) == colour {
+                end += 1;
+            }
+            if colour[3] > 0 {
+                let [r, g, b, a] = [colour[0], colour[1], colour[2], colour[3]].map(f32::from);
+                let (left, top) = (x + start as i32, y + row as i32);
+                let rect = [left, top, x + end as i32, top + 1];
+                pen.rect(list, rect, [r / 255.0, g / 255.0, b / 255.0, a / 255.0]);
+            }
+            start = end;
+        }
     }
 }
 
@@ -286,6 +316,8 @@ mod tests {
             score,
             uuid: 1,
             has_skin: false,
+            skin_url: None,
+            face: None,
         }
     }
 
@@ -417,5 +449,42 @@ mod tests {
                 "{expected} in {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_face_replaces_the_flat_square_of_the_head() {
+        let mut with_face = entry("Steve", None, false);
+        // A face of two colours: the left half red, the right half blue.
+        let face: Vec<u8> = (0..64)
+            .flat_map(|i| {
+                if i % 8 < 4 {
+                    [255, 0, 0, 255]
+                } else {
+                    [0, 0, 255, 255]
+                }
+            })
+            .collect();
+        with_face.face = Some(face.into());
+        let mut tab = view(vec![with_face.clone()]);
+        tab.show_heads = true;
+        let colours = |tab: &TabListView| {
+            draw(tab)
+                .commands()
+                .iter()
+                .filter_map(|command| match command {
+                    DrawCommand::Rect { color, .. }
+                        if *color == [1.0, 0.0, 0.0, 1.0] || *color == [0.0, 0.0, 1.0, 1.0] =>
+                    {
+                        Some(*color)
+                    }
+                    _ => None,
+                })
+                .count()
+        };
+        // Eight rows, two runs each.
+        assert_eq!(colours(&tab), 16);
+        with_face.face = None;
+        tab.entries = vec![with_face];
+        assert_eq!(colours(&tab), 0, "the flat square is brown");
     }
 }

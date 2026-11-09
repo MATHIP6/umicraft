@@ -3,6 +3,7 @@
 //! Tests of the HUD layer: the mouse, the wheel, the bar and the blocked zones. The pure
 //! drag logic is in `logic`.
 
+mod gear;
 mod logic;
 mod wheel_and_bar;
 
@@ -31,6 +32,7 @@ fn widget(id: &str, position: [f32; 2], scale: f32) -> HudWidgetView {
             lines: vec![ModLine::new("60 FPS", 0xFFFFFF)],
             position,
             scale,
+            style: Default::default(),
         },
     }
 }

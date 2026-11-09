@@ -9,9 +9,23 @@
 //! base, the frame (spec of the ADR: "per frame, not per tick").
 
 use umicraft_builtin_mods::{mods, HudWidget, ModContext, ModInput, ModRegistry, ModsConfig};
+use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
 
 use crate::input::InputState;
 use crate::options::ModsOptions;
+use crate::zoom::ZoomSettings;
+
+/// The id of the Motion Blur mod, whose settings the renderer is given.
+const MOTION_BLUR_ID: &str = "motion_blur";
+
+/// The id of the Fullbright mod, whose switch the renderer is given.
+const FULLBRIGHT_ID: &str = "fullbright";
+
+/// The id of the Zoom mod, whose settings the window is given.
+const ZOOM_ID: &str = "zoom";
+
+/// The id of the No Hurt Cam mod.
+const NO_HURT_CAM_ID: &str = "no_hurt_cam";
 
 /// Height of the eye above the feet of a standing player, in blocks (MCP
 /// `EntityPlayer.getEyeHeight`), to turn the camera into the feet position.
@@ -109,6 +123,66 @@ impl ModsRuntime {
         state.sprint = input.sprint;
     }
 
+    /// Whether a mod changed what it keeps between runs (toggle sprint went on or
+    /// off) since the last call: the options are worth saving now.
+    pub fn take_state_changed(&mut self) -> bool {
+        self.registry.take_state_changed()
+    }
+
+    /// The motion blur the renderer is to draw: `None` while the Motion Blur mod
+    /// is off, else its version and strength. Read every frame, so a change in
+    /// the menu applies at once.
+    #[must_use]
+    pub fn motion_blur(&self) -> Option<MotionBlurSettings> {
+        let blur = self
+            .registry
+            .mods()
+            .find(|view| view.meta.id.as_str() == MOTION_BLUR_ID)?;
+        if !blur.enabled {
+            return None;
+        }
+        let version = match blur.settings.text("version") {
+            "v1" => MotionBlurVersion::V1,
+            "v2" => MotionBlurVersion::V2,
+            _ => MotionBlurVersion::V3,
+        };
+        Some(MotionBlurSettings {
+            version,
+            strength: blur.settings.number("strength"),
+        })
+    }
+
+    /// The Zoom mod settings while it is on, `None` while it is off.
+    #[must_use]
+    pub fn zoom(&self) -> Option<ZoomSettings> {
+        let zoom = self
+            .registry
+            .mods()
+            .find(|view| view.meta.id.as_str() == ZOOM_ID)?;
+        zoom.enabled.then(|| ZoomSettings {
+            factor: zoom.settings.number("factor"),
+            smooth: zoom.settings.bool("smooth"),
+            scroll: zoom.settings.bool("scroll"),
+            slow_mouse: zoom.settings.bool("slow_mouse"),
+        })
+    }
+
+    /// Whether the No Hurt Cam mod is on: a hit does not tilt the view.
+    #[must_use]
+    pub fn no_hurt_cam(&self) -> bool {
+        self.registry
+            .mods()
+            .any(|view| view.meta.id.as_str() == NO_HURT_CAM_ID && view.enabled)
+    }
+
+    /// Whether the Fullbright mod is on: the world is lit at full strength.
+    #[must_use]
+    pub fn fullbright(&self) -> bool {
+        self.registry
+            .mods()
+            .any(|view| view.meta.id.as_str() == FULLBRIGHT_ID && view.enabled)
+    }
+
     /// The registry, for the mods menu to list the mods.
     #[must_use]
     pub fn registry(&self) -> &ModRegistry {
@@ -195,6 +269,114 @@ mod tests {
         let before = state;
         runtime.apply_to_state(&mut state);
         assert_eq!(state, before);
+    }
+
+    #[test]
+    fn the_motion_blur_is_off_until_the_mod_is_switched_on() {
+        let mut runtime = ModsRuntime::new(&ModsOptions::default());
+        assert_eq!(runtime.motion_blur(), None);
+        runtime
+            .registry_mut()
+            .set_enabled("motion_blur", true)
+            .expect("the mod exists");
+        assert_eq!(
+            runtime.motion_blur(),
+            Some(MotionBlurSettings {
+                version: MotionBlurVersion::V3,
+                strength: 0.5,
+            }),
+            "the best version at half strength"
+        );
+        runtime
+            .registry_mut()
+            .set_enabled("motion_blur", false)
+            .expect("the mod exists");
+        assert_eq!(runtime.motion_blur(), None);
+    }
+
+    #[test]
+    fn no_hurt_cam_is_off_until_the_mod_is_switched_on() {
+        let mut runtime = ModsRuntime::new(&ModsOptions::default());
+        assert!(!runtime.no_hurt_cam());
+        runtime
+            .registry_mut()
+            .set_enabled("no_hurt_cam", true)
+            .expect("the mod exists");
+        assert!(runtime.no_hurt_cam());
+    }
+
+    #[test]
+    fn fullbright_is_off_until_the_mod_is_switched_on() {
+        let mut runtime = ModsRuntime::new(&ModsOptions::default());
+        assert!(!runtime.fullbright());
+        runtime
+            .registry_mut()
+            .set_enabled("fullbright", true)
+            .expect("the mod exists");
+        assert!(runtime.fullbright());
+        runtime
+            .registry_mut()
+            .set_enabled("fullbright", false)
+            .expect("the mod exists");
+        assert!(!runtime.fullbright());
+    }
+
+    #[test]
+    fn the_motion_blur_follows_its_settings() {
+        use umicraft_builtin_mods::SettingValue;
+        let mut runtime = ModsRuntime::new(&ModsOptions::default());
+        let registry = runtime.registry_mut();
+        registry
+            .set_enabled("motion_blur", true)
+            .expect("the mod exists");
+        for (key, expected) in [
+            ("v1", MotionBlurVersion::V1),
+            ("v2", MotionBlurVersion::V2),
+            ("v3", MotionBlurVersion::V3),
+        ] {
+            runtime
+                .registry_mut()
+                .set_setting("motion_blur", "version", &SettingValue::Text(key.into()))
+                .expect("the setting exists");
+            assert_eq!(runtime.motion_blur().map(|s| s.version), Some(expected));
+        }
+        runtime
+            .registry_mut()
+            .set_setting("motion_blur", "strength", &SettingValue::Number(0.8))
+            .expect("the setting exists");
+        assert_eq!(runtime.motion_blur().map(|s| s.strength), Some(0.8));
+    }
+
+    #[test]
+    fn a_toggled_sprint_survives_a_restart() {
+        let mut runtime = ModsRuntime::new(&ModsOptions::default());
+        runtime
+            .registry_mut()
+            .set_enabled("toggle_sprint", true)
+            .expect("the mod exists");
+        assert!(!runtime.take_state_changed(), "nothing pressed yet");
+        let walk = |runtime: &mut ModsRuntime, sprint: bool| {
+            let mut state = InputState {
+                forward: 1.0,
+                sprint,
+                ..InputState::default()
+            };
+            runtime.apply_to_state(&mut state);
+            state.sprint
+        };
+        assert!(walk(&mut runtime, true), "one press switches sprint on");
+        assert!(runtime.take_state_changed(), "and it is worth saving");
+        assert!(!runtime.take_state_changed(), "once");
+
+        // The options go through a file and a new run reads them back.
+        let text = toml::to_string(&runtime.config()).expect("serializes");
+        let saved: ModsOptions = toml::from_str(&text).expect("parses");
+        let mut restarted = ModsRuntime::new(&saved);
+        assert!(
+            walk(&mut restarted, false),
+            "sprint is still on, with no press"
+        );
+        assert!(!restarted.take_state_changed(), "loading is not a change");
     }
 
     /// Regression: the first toggle sprint only worked when the key was pressed

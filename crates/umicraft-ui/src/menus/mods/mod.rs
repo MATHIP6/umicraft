@@ -2,19 +2,14 @@
 
 //! The mods menu, opened with the right Shift key (ADR-0065).
 //!
-//! It is a small state machine of pages over the blurred game:
+//! It opens on the **list**: a panel with a search box, one tab per category
+//! and a row per mod, each with an on/off switch and a button that opens the
+//! **settings** page of that mod, generated from its [`SettingView`]s.
 //!
-//! 1. the **landing** page: the logo, the "UMICRAFT" wordmark, one **Mods**
-//!    button and a muted hint, with a close cross in the top right corner of
-//!    the screen (laid out like the Lunar Client menu);
-//! 2. the **list**: a panel with a search box, one tab per category and a grid
-//!    of cards, each with an on/off switch and a button that opens
-//! 3. the **settings** page of that mod, generated from its [`SettingView`]s.
-//!
-//! Escape and the cross of the panel step back one page; Escape on the landing
-//! page is the window's, which closes the menu. On every page the widgets of the
-//! enabled HUD mods are drawn over the dark sheet and can be dragged with the
-//! mouse anywhere but on a button or on the open panel (see [`hud_layer`]).
+//! Escape steps back from the settings to the list; on the list, and with the
+//! cross of the panel, it is the menu that closes. The widgets of the enabled
+//! HUD mods are drawn over the dark sheet on both pages and can be dragged with
+//! the mouse anywhere but on a button or on the open panel (see [`hud_layer`]).
 //!
 //! The screen owns only what the player is doing (page, query, tab, scroll);
 //! the mods themselves come in as a [`ModsView`] each frame and every change
@@ -26,11 +21,11 @@ mod button;
 mod card;
 mod color;
 mod hud_layer;
-mod landing;
-mod landing_layout;
 mod layout;
 mod list;
+mod motion;
 mod pages;
+mod scrollbar;
 mod search;
 mod settings_panel;
 mod style;
@@ -39,7 +34,6 @@ mod tests;
 mod view;
 
 pub use hud_layer::{HudEditorOutcome, HudEditorView, HudWidgetView, Snap};
-pub use landing_layout::{landing_layout, LandingLayout};
 pub use layout::{mods_layout, ModsLayout};
 pub use view::{ModCardView, ModValue, ModsOutcome, ModsView, SettingControl, SettingView};
 
@@ -49,11 +43,13 @@ use crate::context::Ui;
 use crate::geom::Rect;
 use crate::menus::common::escape_pressed;
 use crate::modern::theme::with_opacity;
-use crate::modern::{HoverFade, SliderDrag};
+use crate::modern::SliderDrag;
 use crate::text::FontAtlas;
 
 use animation::{BLUR, OPEN_TICKS, SHEET};
 use hud_layer::{HudLayer, HudZones};
+use motion::Motion;
+use scrollbar::BarGrab;
 use style::BACKDROP;
 
 /// Ticks per half period of the caret blink of the search box.
@@ -62,24 +58,19 @@ const BLINK_TICKS: u32 = 10;
 /// The page of the menu the player is on.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 enum Page {
-    /// The logo, the Mods button and the cross.
-    #[default]
-    Landing,
     /// The panel with the search box, the tabs and the cards.
+    #[default]
     List,
     /// The settings of the mod with this id.
     Settings(String),
 }
 
 /// The mods menu state. The flow makes a new one each time the menu opens, so
-/// the opening animation plays again, the search starts empty and the landing
-/// page is shown.
+/// the opening animation plays again, the search starts empty and the list is
+/// shown.
 #[derive(Debug, Clone, Default)]
 pub struct ModsScreen {
     page: Page,
-    /// Hover fades of the Mods button and the cross of the landing page.
-    fades: [HoverFade; 2],
-    hovered: [bool; 2],
     /// Ticks since the menu opened, up to [`OPEN_TICKS`].
     ticks: u8,
     blink: u32,
@@ -90,22 +81,37 @@ pub struct ModsScreen {
     /// Scroll offset of the settings page, in GUI units.
     settings_scroll: f32,
     drag: SliderDrag,
+    /// The drag of the thumb of the scrollbar of the page.
+    bar: BarGrab,
     hud: HudLayer,
+    /// The knobs of the switches, the hover of the rows and the entrance of
+    /// the pages.
+    motion: Motion,
+    /// The page whose entrance has been started.
+    entered: Page,
 }
 
 impl ModsScreen {
-    /// Creates the menu on its landing page.
+    /// Creates the menu on its list, the page coming in.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        let mut screen = Self::default();
+        screen.motion.restart();
+        screen
     }
 
     /// Whether Escape steps back inside the menu (from the settings to the
-    /// list, from the list to the landing page) instead of closing it, so the
-    /// window asks before it takes the key.
+    /// list) instead of closing it, so the window asks before it takes the key.
     #[must_use]
     pub fn can_go_back(&self) -> bool {
-        self.page != Page::Landing
+        matches!(self.page, Page::Settings(_))
+    }
+
+    /// Ends the entrance of the page at once: the panel is fully there and the
+    /// rows are in place. A capture of a single frame needs it, the game does
+    /// not.
+    pub fn settle(&mut self) {
+        self.motion.skip_entrance();
     }
 
     /// Ticks since the menu opened, `partial_tick` of the way into the current
@@ -126,24 +132,23 @@ impl ModsScreen {
         BLUR.at(self.elapsed(partial_tick))
     }
 
-    /// Advances the opening animation, the hover fades and the caret blink by
-    /// one game tick.
+    /// Advances the opening animation, the motion of the widgets and the caret
+    /// blink by one game tick.
     pub fn tick(&mut self) {
         self.ticks = (self.ticks + 1).min(OPEN_TICKS);
         self.blink = self.blink.wrapping_add(1);
-        for (fade, hovered) in self.fades.iter_mut().zip(self.hovered) {
-            fade.tick(hovered);
-        }
+        self.motion.tick();
     }
 
-    /// One page back: settings to the list, the list to the landing page.
+    /// One page back: the settings to the list.
     fn go_back(&mut self) {
-        self.page = match self.page {
-            Page::Settings(_) => Page::List,
-            Page::List | Page::Landing => Page::Landing,
-        };
+        if matches!(self.page, Page::Settings(_)) {
+            self.page = Page::List;
+        }
         self.settings_scroll = 0.0;
+        self.motion.settle("settings_scroll");
         self.drag = SliderDrag::default();
+        self.bar = BarGrab::default();
     }
 
     /// Draws one frame of the menu over `view` and returns what the player
@@ -160,6 +165,7 @@ impl ModsScreen {
     ) -> Option<ModsOutcome> {
         let viewport = ui.viewport();
         let brand = fonts.1;
+        self.motion.set_partial(partial_tick);
         // A mod that vanished leaves its settings page for the list.
         if matches!(self.page, Page::Settings(_)) && self.open_card(view).is_none() {
             self.page = Page::List;
@@ -169,32 +175,42 @@ impl ModsScreen {
         let sheet = with_opacity(BACKDROP, SHEET.at(self.elapsed(partial_tick)));
         ui.draw().rect(viewport, sheet);
 
-        let landing = landing_layout(viewport);
-        let on_landing = self.page == Page::Landing;
-        let landing_blocked = [landing.mods, landing.close];
-        let panel_blocked = [mods_layout(viewport).panel];
-        let blocked: &[Rect] = if on_landing {
-            &landing_blocked
-        } else {
-            &panel_blocked
-        };
+        let blocked: [Rect; 1] = [mods_layout(viewport).panel];
         let zones = HudZones {
             snap,
-            blocked,
-            bar: on_landing,
+            blocked: &blocked,
+            bar: true,
         };
         let hud = self.hud.show(ui, fonts, lang, &view.hud, zones);
+        // The gear of a widget opens the settings of its mod; the client never sees it.
+        let opened = match &hud {
+            Some(HudEditorOutcome::OpenSettings { id }) => Some(id.clone()),
+            _ => None,
+        };
 
         ui.push_id("mods_menu");
-        let page = if on_landing {
-            self.landing_page(ui, brand, lang, view, (&landing, partial_tick))
-        } else {
-            self.panel_page(ui, brand, lang, view)
-        };
+        // The panel fades in as a page comes in.
+        ui.draw().set_opacity(self.motion.panel_opacity());
+        let page = self.panel_page(ui, brand, lang, view);
+        ui.draw().set_opacity(1.0);
         ui.pop_id();
         if escape {
             self.go_back();
         }
-        page.or(hud.map(ModsOutcome::Hud))
+        if let Some(id) = opened {
+            self.page = Page::Settings(id);
+            self.settings_scroll = 0.0;
+            self.motion.settle("settings_scroll");
+            self.drag = SliderDrag::default();
+            self.bar = BarGrab::default();
+        }
+        // A new page plays its entrance, from the next frame.
+        if self.entered != self.page {
+            self.entered = self.page.clone();
+            self.motion.restart();
+        }
+        page.or(hud
+            .filter(|outcome| !matches!(outcome, HudEditorOutcome::OpenSettings { .. }))
+            .map(ModsOutcome::Hud))
     }
 }

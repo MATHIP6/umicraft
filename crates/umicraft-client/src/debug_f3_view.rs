@@ -10,6 +10,7 @@
 use umicraft_game::debug_f3::{DebugF3Input, DebugF3Lines};
 use umicraft_render::{AdapterSummary, Camera, DebugF3View, GpuTimings, Renderer, GROUP_NAMES};
 
+use crate::cpu_split::CpuReading;
 use crate::debug_world::DebugWorld;
 use crate::process_memory::MemoryUse;
 
@@ -80,6 +81,8 @@ pub struct F3Frame<'a> {
     pub memory: MemoryUse,
     /// The GPU time per group of draws.
     pub gpu: GpuReading,
+    /// The CPU time per stage of the frame.
+    pub cpu: Option<CpuReading>,
 }
 
 /// What only the window knows when F3 is drawn.
@@ -87,6 +90,8 @@ pub struct F3Frame<'a> {
 pub struct Live<'a> {
     /// The smoothed frames per second.
     pub fps: f32,
+    /// The CPU time per stage of the frame.
+    pub cpu: Option<CpuReading>,
     /// The video options (render distance, graphics, frame cap).
     pub video: &'a VideoOptions,
     /// The window size in pixels.
@@ -116,6 +121,7 @@ pub fn build_live(
         adapter: renderer.map_or(&no_adapter, Renderer::adapter),
         memory: crate::process_memory::read(),
         gpu: GpuReading::of(renderer),
+        cpu: live.cpu,
     })
 }
 
@@ -164,6 +170,7 @@ pub fn build(frame: &F3Frame<'_>) -> DebugF3View {
     let lines = DebugF3Lines::build(&input);
     let mut right = lines.right;
     right.push(frame.gpu.line());
+    right.push(CpuReading::line(frame.cpu));
     DebugF3View {
         left: lines.left,
         right,
@@ -194,6 +201,7 @@ mod tests {
                 max: 1024 * 1024 * 1024,
             },
             gpu: GpuReading::Unsupported,
+            cpu: None,
         }
     }
 

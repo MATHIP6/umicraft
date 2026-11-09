@@ -23,9 +23,9 @@ M3, M4 and M5 are independent once M1 is frozen. See ADR-0065 for the design.
   while it is open.
 - New `modern` widgets: `toggle`, `modern_slider` (`SliderRange`), `tabs`, `search_field`,
   `fit_text`.
-- `ModsScreen` is a page machine: landing (the original menu, restored), list, settings. The Mods
-  button opens the list; the panel cross and Escape step back; `--hud-demo --hud-view mods` renders
-  the landing and `mods_list` the list.
+- `ModsScreen` is a page machine: list (the root) and settings. The panel cross closes the menu and
+  Escape steps back from the settings; `--hud-demo --hud-view mods` and `mods_list` render the list
+  (the landing page of the first versions was removed, see ADR-0065).
 - Fixed after review: Escape steps back a page (`ModsScreen::can_go_back`,
   the window forwards the key to the UI while a page is open), the search placeholder no longer sits
   under the caret, and a settings page taller than the panel scrolls with the wheel (same step and

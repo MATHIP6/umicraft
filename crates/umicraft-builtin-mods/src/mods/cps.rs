@@ -3,7 +3,8 @@
 
 use std::fmt::Write;
 
-use super::WHITE;
+use super::hud_style::hud_settings;
+use super::parse_color;
 use crate::context::ModContext;
 use crate::hud::{Anchor, HudContent, HudPlacement};
 use crate::id::{ModCategory, ModId};
@@ -19,14 +20,21 @@ static META: ModMeta = ModMeta {
     default_enabled: false,
 };
 
-const SETTINGS: &[SettingDef] = &[SettingDef {
-    key: "mode",
-    label_key: "umicraft.mods.cps.mode",
-    kind: SettingKind::Choice {
-        options: &["left", "right", "both"],
-        default: 2,
+const SETTINGS: &[SettingDef] = hud_settings![
+    SettingDef {
+        key: "mode",
+        label_key: "umicraft.mods.cps.mode",
+        kind: SettingKind::Choice {
+            options: &["left", "right", "both"],
+            default: 2,
+        },
     },
-}];
+    SettingDef {
+        key: "color",
+        label_key: "umicraft.mods.cps.color",
+        kind: SettingKind::Color { default: "#ffffff" },
+    },
+];
 
 /// Length of the sliding window.
 const WINDOW_MS: u64 = 1000;
@@ -116,7 +124,7 @@ impl BuiltinMod for Cps {
     }
 
     fn draw(&self, _ctx: &ModContext, settings: &ModSettings, out: &mut HudContent) {
-        let line = out.line(WHITE);
+        let line = out.line(parse_color(settings.text("color")));
         // Writing into a `String` cannot fail.
         let _ = match settings.text("mode") {
             "left" => write!(line, "{} CPS", self.left.total),

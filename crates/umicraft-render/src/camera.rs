@@ -6,8 +6,8 @@ use glam::{DVec3, Mat4, Vec3, Vec4};
 
 /// Vertical field of view in radians (70°).
 const DEFAULT_FOV: f32 = 70.0_f32 * std::f32::consts::PI / 180.0;
-const NEAR: f32 = 0.1;
-const FAR: f32 = 512.0;
+pub(crate) const NEAR: f32 = 0.1;
+pub(crate) const FAR: f32 = 512.0;
 /// The near plane of the hand projection (MCP `EntityRenderer.java:1236`).
 const HAND_NEAR: f32 = 0.05;
 /// The field of view of the hand: fixed, whatever the "FOV" option says
@@ -163,6 +163,13 @@ impl Camera {
         if (1.0..=170.0).contains(&degrees) {
             self.fov_y = degrees.to_radians();
         }
+    }
+
+    /// The vertical field of view the projection uses, in radians: the base one
+    /// times the factor of sprinting or flying.
+    #[must_use]
+    pub(crate) fn effective_fov(&self) -> f32 {
+        self.fov_y * self.fov_modifier
     }
 
     /// The vertical field of view, in degrees.

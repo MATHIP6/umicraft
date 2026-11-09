@@ -10,7 +10,9 @@
 
 use glam::Vec3;
 use umicraft_mesh::{Mesh, Vertex, VertexLight};
-use umicraft_render::{Camera, Nametag, Overlay, RenderEnvironment, Renderer};
+use umicraft_render::{
+    Camera, MotionBlurSettings, MotionBlurVersion, Nametag, Overlay, RenderEnvironment, Renderer,
+};
 use umicraft_ui::{DrawList, Rect};
 use umicraft_world::ChunkPos;
 
@@ -94,4 +96,59 @@ fn the_always_part_of_a_tag_shows_through_terrain() {
 #[ignore = "requires a GPU adapter"]
 fn the_wall_covers_the_middle_of_the_frame() {
     assert!(!is_red(-3.0, DrawList::new(), DrawList::new()));
+}
+
+/// The frame after the camera turned through `yaws` with the motion blur `version`
+/// on and a tag behind the wall whose `always` part is a red box.
+fn turned_with_blur(version: MotionBlurVersion, yaws: &[f32]) -> Vec<u8> {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    renderer.upload_mesh(ChunkPos::new(0, -1), &wall());
+    renderer.set_motion_blur(Some(MotionBlurSettings {
+        version,
+        strength: 1.0,
+    }));
+    renderer.set_environment(RenderEnvironment::new(0, 6_000, 0.0, 8));
+    let mut pixels = Vec::new();
+    for &yaw in yaws {
+        let mut camera = Camera::new(Vec3::new(8.0, 80.0, 0.0), yaw, 0.0);
+        camera.set_aspect(WIDTH, HEIGHT);
+        let clip = camera.view_projection() * Vec3::new(8.0, 80.0, -10.0).extend(1.0);
+        let tag = Nametag {
+            always: red_box(),
+            tested: DrawList::new(),
+            depth: clip.z / clip.w,
+        };
+        renderer.set_nametags(&[tag], (WIDTH, HEIGHT));
+        renderer
+            .render(&camera, &Overlay::new(WIDTH, HEIGHT))
+            .expect("render");
+        pixels = renderer.read_pixels().expect("read back the frame").rgba;
+    }
+    pixels
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_tag_behind_a_wall_is_not_blurred_by_the_motion_blur() {
+    let at = |pixels: &[u8], x: u32, y: u32| {
+        let index = ((y * WIDTH + x) * 4) as usize;
+        let p = &pixels[index..index + 3];
+        p[0] > 200 && p[1] < 60 && p[2] < 60
+    };
+    for version in [
+        MotionBlurVersion::V1,
+        MotionBlurVersion::V2,
+        MotionBlurVersion::V3,
+    ] {
+        let pixels = turned_with_blur(version, &[0.0, 0.03, 0.06, 0.09]);
+        let y = 48;
+        assert!(
+            at(&pixels, 54, y) && at(&pixels, 73, y),
+            "{version:?}: the box edges"
+        );
+        assert!(
+            !at(&pixels, 52, y) && !at(&pixels, 75, y),
+            "{version:?}: nothing smears out of the box"
+        );
+    }
 }

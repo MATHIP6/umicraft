@@ -29,6 +29,17 @@ pub struct HoverFade {
 }
 
 impl HoverFade {
+    /// A fade standing still at `level`, `0.0` to `1.0`: a widget that appears
+    /// already on does not animate to it.
+    #[must_use]
+    pub fn settled(level: f32) -> Self {
+        let level = level.clamp(0.0, 1.0);
+        Self {
+            previous: level,
+            current: level,
+        }
+    }
+
     /// Advances one tick towards hovered (`1.0`) or resting (`0.0`).
     pub fn tick(&mut self, hovered: bool) {
         self.previous = self.current;

@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Tests of the mods menu: the helpers and the layout of the panel pages. The
-//! landing page is in `landing`, the list in `list`, the settings page in
-//! `settings`, the page flow in `flow` and the HUD layer inside the menu in `hud`.
+//! list is in `list`, the settings page in `settings`, the page flow in `flow`
+//! and the HUD layer inside the menu in `hud`.
 
 mod flow;
 mod hud;
-mod landing;
-mod landing_look;
 mod list;
 mod settings;
 
@@ -85,13 +83,16 @@ fn no_snap(rect: Rect, _screen: [f32; 2]) -> Rect {
 fn on_list() -> ModsScreen {
     ModsScreen {
         page: Page::List,
+        entered: Page::List,
         ..ModsScreen::default()
     }
 }
 
+/// One frame of the menu. A page that comes in is over at once, so a test can
+/// click where the layout says; the tests of the entrance draw their own frames.
 fn show_view(screen: &mut ModsScreen, view: &ModsView, input: UiInput) -> Option<ModsOutcome> {
     let atlas = FontAtlas::fallback();
-    frame(input, |ui| {
+    let outcome = frame(input, |ui| {
         screen.show(
             ui,
             (&atlas, &atlas),
@@ -99,7 +100,9 @@ fn show_view(screen: &mut ModsScreen, view: &ModsView, input: UiInput) -> Option
             view,
             (&no_snap, 0.0),
         )
-    })
+    });
+    screen.motion.skip_entrance();
+    outcome
 }
 
 fn show(screen: &mut ModsScreen, input: UiInput) -> Option<ModsOutcome> {

@@ -20,15 +20,21 @@ impl MenuFlow {
         self.mods.blur_strength(self.partial_tick())
     }
 
-    /// Whether Escape steps back inside the mods menu (settings to list, list
-    /// to landing page) instead of closing it.
+    /// Ends the entrance animation of the mods menu page at once, for the
+    /// single-frame captures of `--hud-demo`.
+    pub fn settle_mods(&mut self) {
+        self.mods.settle();
+    }
+
+    /// Whether Escape steps back inside the mods menu (settings to list)
+    /// instead of closing it.
     #[must_use]
     pub fn mods_can_go_back(&self) -> bool {
         self.mods.can_go_back()
     }
 
     /// The mods menu over the game. Changes (a mod switched, a setting, a HUD
-    /// widget moved) leave as a command; the cross of the landing page closes
+    /// widget moved) leave as a command; the cross of the panel closes
     /// the menu.
     pub(super) fn show_mods(
         &mut self,
@@ -51,8 +57,7 @@ impl MenuFlow {
 #[cfg(test)]
 mod tests {
     use umicraft_ui::menus::{
-        landing_layout, mods_layout, HudEditorOutcome, HudEditorView, HudWidgetView, ModsView,
-        TitleStyle,
+        mods_layout, HudEditorOutcome, HudEditorView, HudWidgetView, ModsView, TitleStyle,
     };
     use umicraft_ui::mod_widget::{ModLine, ModWidgetView};
     use umicraft_ui::{InputEvent, PointerButton, Rect};
@@ -75,8 +80,9 @@ mod tests {
                     name: "FPS".into(),
                     widget: ModWidgetView {
                         lines: vec![ModLine::new("60 FPS", 0xFFFFFF)],
-                        position: [100.0, 100.0],
+                        position: [10.0, 100.0],
                         scale: 1.0,
+                        style: Default::default(),
                     },
                 }],
                 screen: [427.0, 240.0],
@@ -113,30 +119,23 @@ mod tests {
     }
 
     #[test]
-    fn the_cross_of_the_landing_closes_the_menu() {
+    fn the_cross_of_the_panel_closes_the_menu() {
         let (mut flow, _) = flow_with("mods-close", &[]);
-        let cross = middle(landing_layout(VIEWPORT).close);
+        let cross = middle(mods_layout(VIEWPORT).close);
         let command = frame(&mut flow, click(cross), &ModsView::default());
         assert_eq!(command, Some(MenuCommand::GoTo(Screen::None)));
     }
 
     #[test]
-    fn the_mods_button_opens_the_list_and_the_menu_can_go_back() {
-        let (mut flow, _) = flow_with("mods-list", &[]);
-        assert!(!flow.mods_can_go_back());
-        let button = middle(landing_layout(VIEWPORT).mods);
-        assert_eq!(frame(&mut flow, click(button), &ModsView::default()), None);
-        assert!(flow.mods_can_go_back());
-        // The cross of the panel is not the menu's close.
-        let cross = middle(mods_layout(VIEWPORT).close);
-        assert_eq!(frame(&mut flow, click(cross), &ModsView::default()), None);
+    fn the_menu_opens_on_the_list_where_escape_closes_it() {
+        let (flow, _) = flow_with("mods-list", &[]);
         assert!(!flow.mods_can_go_back());
     }
 
     #[test]
-    fn dropping_a_widget_on_the_landing_becomes_a_change_to_apply() {
+    fn dropping_a_widget_becomes_a_change_to_apply() {
         let (mut flow, _) = flow_with("mods-drop", &[]);
-        let widget_at = [(100.0 + 8.0) * 3.0, (100.0 + 5.0) * 3.0];
+        let widget_at = [(10.0 + 8.0) * 3.0, (100.0 + 5.0) * 3.0];
         let to = [widget_at[0] + 90.0, widget_at[1] + 60.0];
         let events = vec![
             InputEvent::PointerMoved {
@@ -160,6 +159,6 @@ mod tests {
             panic!("expected a placement, got {command:?}");
         };
         assert_eq!(id, "fps");
-        assert_eq!((rect.x, rect.y), (130.0, 120.0));
+        assert_eq!((rect.x, rect.y), (40.0, 120.0));
     }
 }

@@ -123,6 +123,8 @@ pub fn apply(
                 HudPlacement::from_rect(to_hud_rect(*rect), (screen[0], screen[1]), *scale);
             registry.set_placement(id, placement)?;
         }
+        // The menu opens the settings page itself; there is nothing to apply.
+        HudEditorOutcome::OpenSettings { .. } => return Ok(false),
         HudEditorOutcome::Reset { id } => registry.reset_placement(id)?,
         HudEditorOutcome::ResetAll => {
             let ids: Vec<String> = registry

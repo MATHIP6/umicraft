@@ -347,6 +347,7 @@ impl UiPass {
         atlas: &FontAtlas,
         icon_uv: &dyn Fn(u64) -> Option<[f32; 4]>,
     ) {
+        umicraft_core::profile_scope!("ui_pass rebuild");
         self.clear();
         // Taken so that the brand atlas can be lent to `push_text` while the
         // pass itself is borrowed mutably; put back below.

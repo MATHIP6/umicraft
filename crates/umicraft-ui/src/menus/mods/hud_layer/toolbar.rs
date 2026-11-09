@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The small bar at the bottom of the landing page: reset the selected widget
+//! The small bar at the bottom of the mods menu: reset the selected widget
 //! and reset all of them.
 
 use umicraft_core::lang::Lang;

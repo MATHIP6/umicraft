@@ -124,7 +124,8 @@ fn memory_line_pads_like_percent_space_2d() {
         memory_line(5 * 1024 * 1024, 1024 * 1024 * 1024),
         "Mem:  0% 005/1024MB"
     );
-    assert_eq!(memory_line(1, 0), "Mem:  0% 000/000MB");
+    // No machine memory known: the process alone.
+    assert_eq!(memory_line(1, 0), "Mem: 0MB");
     assert_eq!(
         memory_line(1024 * 1024 * 1024, 1024 * 1024 * 1024),
         "Mem:  100% 1024/1024MB"
@@ -166,4 +167,13 @@ fn angles_wrap_into_half_open_range() {
     assert_eq!(wrap_angle_180(180.0), -180.0);
     assert_eq!(wrap_angle_180(-540.0), -180.0);
     assert_eq!(wrap_angle_180(10.0), 10.0);
+}
+
+#[test]
+fn a_machine_whose_memory_is_unknown_shows_the_process_only() {
+    assert_eq!(super::memory_line(338 * 1024 * 1024, 0), "Mem: 338MB");
+    assert_eq!(
+        super::memory_line(300 * 1024 * 1024, 1024 * 1024 * 1024),
+        "Mem:  29% 300/1024MB"
+    );
 }
