@@ -48,6 +48,8 @@ pub enum Screen {
     ServerEdit,
     /// The "really delete this server" question.
     ConfirmDelete,
+    /// The account chooser, opened from the server list (ROADMAP F1).
+    Accounts,
     /// The session is starting; no world is shown yet.
     Connecting,
     /// The session ended; the reason is shown with a way back to the list.
@@ -92,6 +94,7 @@ impl Screen {
                 | Self::ServerList
                 | Self::ServerEdit
                 | Self::ConfirmDelete
+                | Self::Accounts
                 | Self::Connecting
                 | Self::Disconnected
         )
@@ -129,9 +132,11 @@ impl Screen {
             Self::Debug => Self::Debug,
             Self::Title => Self::Title,
             Self::ServerList => Self::Title,
-            Self::ServerEdit | Self::ConfirmDelete | Self::Connecting | Self::Disconnected => {
-                Self::ServerList
-            }
+            Self::ServerEdit
+            | Self::ConfirmDelete
+            | Self::Accounts
+            | Self::Connecting
+            | Self::Disconnected => Self::ServerList,
             Self::Stats | Self::Achievements => Self::GameMenu,
         }
     }

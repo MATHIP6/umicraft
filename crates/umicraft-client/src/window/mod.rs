@@ -37,6 +37,7 @@ use winit::window::{CursorGrabMode, Window};
 use self::chat_control::CHAT_WHEEL_ROWS;
 use self::menu_screens::VERSION_LINE;
 use self::session_control::lifecycle_step;
+use crate::accounts::AccountsFlow;
 use crate::anvil_field::AnvilField;
 use crate::args::Args;
 use crate::audio_bridge::listener::listener_of;
@@ -536,6 +537,7 @@ impl App {
             | Screen::ServerList
             | Screen::ServerEdit
             | Screen::ConfirmDelete
+            | Screen::Accounts
             | Screen::Connecting
             | Screen::Disconnected
             | Screen::Stats
@@ -1128,6 +1130,7 @@ impl App {
                 | Screen::ServerList
                 | Screen::ServerEdit
                 | Screen::ConfirmDelete
+                | Screen::Accounts
                 | Screen::Connecting
                 | Screen::Disconnected
                 | Screen::Stats
@@ -1897,6 +1900,7 @@ fn new_menu(last_server: String) -> MenuFlow {
         last_server,
         seed,
     );
+    menu.set_accounts(AccountsFlow::open_default());
     let lines = crate::splash::load_lines();
     if let Some(splash) = crate::splash::choose(&lines, crate::splash::today(), seed) {
         menu.set_splash(splash);

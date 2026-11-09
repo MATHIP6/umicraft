@@ -15,6 +15,7 @@
 //! [`block_demo`] proves the M5 model/atlas path without a server, and
 //! [`ui_font`] loads the user's 1.8 font or the built-in fallback.
 
+mod accounts;
 mod achievements_view;
 mod anvil_field;
 pub mod args;
