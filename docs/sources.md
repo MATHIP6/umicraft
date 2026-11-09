@@ -408,3 +408,4 @@ observations that motivated them.
 
 | 2026-11-09 | F1 Microsoft login | docs:https://minecraft.wiki/w/Microsoft_authentication, docs:https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code, Prism Launcher `launcher/minecraft/auth/steps/MSADeviceCodeStep.cpp` | Endpoints, bodies, XSTS XErr codes, client id and scope |
 | 2026-11-09 | F1 offline UUID | mcp:src/minecraft/net/minecraft/entity/player/EntityPlayer.java:2375 | `nameUUIDFromBytes("OfflinePlayer:"+name)` |
+| 2026-11-09 | Clipboard on Wayland | observed: arboard 3 with and without `wayland-data-control`, checked with `wl-paste` on a Wayland session | X11-only backend left `wl-paste` on the old content; with the feature it read the copied text |

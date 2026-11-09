@@ -7,6 +7,9 @@
 //! has to stay alive to serve a paste. A clipboard that cannot be opened (no
 //! display, a locked clipboard) reads as empty and ignores writes, like the
 //! reference, which returns an empty string on any failure.
+//!
+//! On Wayland the data-control backend is needed for other applications to see
+//! a copy: the X11 backend alone only reaches X11 clients.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -35,5 +38,24 @@ pub fn write(text: &str) {
                 tracing::debug!(%error, "the clipboard refused the text");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    /// Regression test: on Wayland, a copy must reach `wl-paste` (the X11 backend
+    /// alone left it on the old content). Needs a Wayland session and `wl-paste`,
+    /// so it only runs on request: `cargo test -p umicraft-client -- --ignored wayland`.
+    #[test]
+    #[ignore = "needs a Wayland session and wl-paste"]
+    fn wayland_applications_see_a_copy() {
+        super::write("umicraft-wayland-check");
+        let pasted = Command::new("wl-paste")
+            .arg("--no-newline")
+            .output()
+            .expect("wl-paste must be installed for this test");
+        assert_eq!(pasted.stdout, b"umicraft-wayland-check");
     }
 }
