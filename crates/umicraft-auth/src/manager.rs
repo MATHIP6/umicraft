@@ -19,7 +19,7 @@ use crate::{
 ///
 /// Every change is saved at once, so the file never lags behind the menu.
 pub struct AccountManager<V: SecretVault> {
-    path: PathBuf,
+    path: Option<PathBuf>,
     store: AccountStore,
     vault: V,
 }
@@ -36,7 +36,21 @@ impl<V: SecretVault> AccountManager<V> {
     /// [`AuthError::Storage`] when the file exists but cannot be read.
     pub fn open(path: PathBuf, vault: V) -> Result<Self, AuthError> {
         let store = AccountStore::load(&path)?;
-        Ok(Self { path, store, vault })
+        Ok(Self {
+            path: Some(path),
+            store,
+            vault,
+        })
+    }
+
+    /// A manager that saves nothing to disk: tests, and a client without a
+    /// data folder.
+    pub fn in_memory(vault: V) -> Self {
+        Self {
+            path: None,
+            store: AccountStore::default(),
+            vault,
+        }
     }
 
     /// The saved accounts, in menu order.
@@ -118,21 +132,18 @@ impl<V: SecretVault> AccountManager<V> {
         self.save()
     }
 
-    /// The session to join a server with.
+    /// The refresh token to renew `uuid`'s session with.
     ///
     /// An offline account has none (`Ok(None)`: the client connects as an
-    /// unauthenticated player, as today). A Microsoft account is renewed from
-    /// its refresh token, and the new refresh token replaces the old one.
+    /// unauthenticated player). The caller runs [`renew_session`] with the
+    /// token, off the thread that owns the manager, then hands the result to
+    /// [`AccountManager::store_refresh_token`].
     ///
     /// # Errors
-    /// [`AuthError::UnknownAccount`]; [`AuthError::LoginExpired`] when the
-    /// refresh token is missing or refused (the player must sign in again);
-    /// otherwise the errors of the Microsoft chain.
-    pub async fn session_for<T: HttpTransport>(
-        &self,
-        uuid: &str,
-        transport: &T,
-    ) -> Result<Option<Session>, AuthError> {
+    /// [`AuthError::UnknownAccount`]; [`AuthError::LoginExpired`] when a
+    /// Microsoft account has no refresh token left (the player must sign in
+    /// again); [`AuthError::Storage`] when the vault fails.
+    pub fn refresh_token(&self, uuid: &str) -> Result<Option<Secret>, AuthError> {
         let account = self
             .store
             .accounts()
@@ -142,24 +153,55 @@ impl<V: SecretVault> AccountManager<V> {
         if account.kind == AccountKind::Offline {
             return Ok(None);
         }
-        let refresh = self
-            .vault
-            .get(&refresh_key(uuid))?
-            .ok_or(AuthError::LoginExpired)?;
-        let login = refresh_login(transport, &refresh).await?;
         self.vault
-            .set(&refresh_key(&login.uuid), &login.refresh_token)?;
-        let session = Session::new(
-            &login.username,
-            &login.uuid,
-            Secret::new(login.minecraft_token.expose()),
-        )?;
-        Ok(Some(session))
+            .get(&refresh_key(uuid))?
+            .map(Some)
+            .ok_or(AuthError::LoginExpired)
+    }
+
+    /// Keeps the refresh token a renewal returned: Microsoft rotates it, and
+    /// the old one stops working.
+    ///
+    /// # Errors
+    /// [`AuthError::Storage`] when the vault fails.
+    pub fn store_refresh_token(&self, uuid: &str, token: &Secret) -> Result<(), AuthError> {
+        self.vault.set(&refresh_key(uuid), token)
     }
 
     fn save(&self) -> Result<(), AuthError> {
-        self.store.save(&self.path)
+        self.path
+            .as_deref()
+            .map_or(Ok(()), |path| self.store.save(path))
     }
+}
+
+/// A renewed Minecraft session and the refresh token that replaces the old one.
+pub struct RenewedSession {
+    /// The session to join a server with.
+    pub session: Session,
+    /// The new refresh token, for [`AccountManager::store_refresh_token`].
+    pub refresh_token: Secret,
+}
+
+/// Signs in again from a refresh token: Microsoft, Xbox, Minecraft, profile.
+///
+/// # Errors
+/// [`AuthError::LoginExpired`] when Microsoft refuses the token, otherwise
+/// the errors of the Microsoft chain.
+pub async fn renew_session<T: HttpTransport>(
+    transport: &T,
+    refresh: &Secret,
+) -> Result<RenewedSession, AuthError> {
+    let login = refresh_login(transport, refresh).await?;
+    let session = Session::new(
+        &login.username,
+        &login.uuid,
+        Secret::new(login.minecraft_token.expose()),
+    )?;
+    Ok(RenewedSession {
+        session,
+        refresh_token: login.refresh_token,
+    })
 }
 
 #[cfg(test)]
@@ -196,6 +238,13 @@ mod tests {
     const MC: &str = r#"{"access_token":"mc-new","expires_in":86400}"#;
     const ENT: &str = r#"{"items":[{"name":"game_minecraft"}]}"#;
     const PROFILE: &str = r#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch"}"#;
+
+    #[test]
+    fn an_in_memory_manager_writes_no_file() {
+        let mut m = AccountManager::in_memory(MemoryVault::default());
+        m.add_offline("Pixel").unwrap();
+        assert_eq!(m.accounts().len(), 1);
+    }
 
     #[test]
     fn changes_are_saved_and_reloaded() {
@@ -235,18 +284,16 @@ mod tests {
         assert!(m.vault.get(&refresh_key(&uuid)).unwrap().is_none());
     }
 
-    #[tokio::test]
-    async fn an_offline_account_has_no_session() {
+    #[test]
+    fn an_offline_account_has_no_refresh_token() {
         let (mut m, _) = manager();
         m.add_offline("Pixel").unwrap();
         let uuid = m.accounts()[0].uuid.clone();
-        let t = FakeTransport::new(vec![]);
-        assert!(m.session_for(&uuid, &t).await.unwrap().is_none());
-        assert_eq!(t.count(), 0);
+        assert!(m.refresh_token(&uuid).unwrap().is_none());
     }
 
     #[tokio::test]
-    async fn a_microsoft_session_renews_and_rotates_the_refresh_token() {
+    async fn a_renewed_session_carries_the_rotated_refresh_token() {
         let (mut m, _) = manager();
         m.add_microsoft(&login()).unwrap();
         let uuid = m.accounts()[0].uuid.clone();
@@ -258,20 +305,23 @@ mod tests {
             (200, ENT),
             (200, PROFILE),
         ]);
-        let session = m.session_for(&uuid, &t).await.unwrap().unwrap();
-        assert_eq!(session.access_token.expose(), "mc-new");
+        let refresh = m.refresh_token(&uuid).unwrap().unwrap();
+        assert_eq!(refresh.expose(), "r1");
+        let renewed = renew_session(&t, &refresh).await.unwrap();
+        assert_eq!(renewed.session.access_token.expose(), "mc-new");
+        m.store_refresh_token(&uuid, &renewed.refresh_token)
+            .unwrap();
         let stored = m.vault.get(&refresh_key(&uuid)).unwrap().unwrap();
         assert_eq!(stored.expose(), "r2");
     }
 
-    #[tokio::test]
-    async fn a_missing_refresh_token_asks_for_a_new_login() {
+    #[test]
+    fn a_missing_refresh_token_asks_for_a_new_login() {
         let (mut m, _) = manager();
         m.add_microsoft(&login()).unwrap();
         let uuid = m.accounts()[0].uuid.clone();
         m.vault.remove(&refresh_key(&uuid)).unwrap();
-        let t = FakeTransport::new(vec![]);
-        let error = m.session_for(&uuid, &t).await.err().unwrap();
+        let error = m.refresh_token(&uuid).err().unwrap();
         assert!(matches!(error, AuthError::LoginExpired));
     }
 }

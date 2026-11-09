@@ -27,6 +27,20 @@ pub trait SecretVault: Send + Sync {
     fn remove(&self, key: &str) -> Result<(), AuthError>;
 }
 
+impl SecretVault for Box<dyn SecretVault> {
+    fn get(&self, key: &str) -> Result<Option<Secret>, AuthError> {
+        (**self).get(key)
+    }
+
+    fn set(&self, key: &str, value: &Secret) -> Result<(), AuthError> {
+        (**self).set(key, value)
+    }
+
+    fn remove(&self, key: &str) -> Result<(), AuthError> {
+        (**self).remove(key)
+    }
+}
+
 /// A vault that lives in memory only: tests, and machines without a keychain.
 #[derive(Default)]
 pub struct MemoryVault(Mutex<HashMap<String, Secret>>);

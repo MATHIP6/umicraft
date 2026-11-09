@@ -30,7 +30,7 @@ pub use error::AuthError;
 pub use join::{HttpSessionServer, SessionServer};
 pub use keyring_vault::KeyringVault;
 pub use launch::{session_from_launch, strip_session_args};
-pub use manager::AccountManager;
+pub use manager::{renew_session, AccountManager, RenewedSession};
 pub use microsoft::{
     device_code::{poll_token, request_device_code, Sleeper, TokioSleeper},
     login::{full_login, login_from_msa_token, refresh_login},
