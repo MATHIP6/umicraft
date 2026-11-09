@@ -9,6 +9,7 @@
 //! account is chosen, so a click on a server never waits for it.
 
 mod actions;
+mod browser;
 mod worker;
 
 use std::path::PathBuf;

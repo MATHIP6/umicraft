@@ -119,3 +119,6 @@ umicraft.accounts.device.title=Sign in with Microsoft
 umicraft.accounts.device.open=Open this page in your browser:
 umicraft.accounts.device.enter=Then enter this code:
 umicraft.accounts.device.waiting=Waiting for you to sign in...
+umicraft.accounts.device.button.open=Open link
+umicraft.accounts.device.button.copy_link=Copy link
+umicraft.accounts.device.button.copy_code=Copy code

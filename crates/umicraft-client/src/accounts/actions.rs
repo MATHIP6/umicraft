@@ -37,6 +37,8 @@ impl AccountsFlow {
             }
             AccountsOutcome::Refresh => self.renew_selected(),
             AccountsOutcome::CancelLogin => self.cancel_login(),
+            AccountsOutcome::OpenUrl(url) => super::browser::open(&url),
+            AccountsOutcome::CopyText(text) => crate::clipboard::write(&text),
         }
         None
     }

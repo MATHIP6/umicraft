@@ -118,3 +118,41 @@ fn the_device_code_dialog_shows_the_code_and_cancels_the_login() {
         Some(AccountsOutcome::Cancel)
     );
 }
+
+#[test]
+fn the_device_code_dialog_opens_and_copies_the_link_and_the_code() {
+    let mut screen = AccountsScreen::new(rows(), Some(0));
+    screen.set_device_code(Some(DeviceCodePrompt {
+        user_code: "AB12CD".into(),
+        url: "https://example.test/link".into(),
+    }));
+    let layout = device_code_dialog::device_layout(VIEWPORT);
+    assert_eq!(
+        run(&mut screen, click_at(layout.open)),
+        Some(AccountsOutcome::OpenUrl("https://example.test/link".into()))
+    );
+    assert_eq!(
+        run(&mut screen, click_at(layout.copy_link)),
+        Some(AccountsOutcome::CopyText(
+            "https://example.test/link".into()
+        ))
+    );
+    assert_eq!(
+        run(&mut screen, click_at(layout.copy_code)),
+        Some(AccountsOutcome::CopyText("AB12CD".into()))
+    );
+}
+
+#[test]
+fn the_device_code_buttons_do_not_overlap_each_other_or_cancel() {
+    let layout = device_code_dialog::device_layout(VIEWPORT);
+    let cancel = crate::menus::connecting::connecting_cancel_rect(VIEWPORT);
+    let rects = [layout.open, layout.copy_link, layout.copy_code, cancel];
+    for (i, a) in rects.iter().enumerate() {
+        for b in &rects[i + 1..] {
+            let apart =
+                a.right() <= b.x || b.right() <= a.x || a.bottom() <= b.y || b.bottom() <= a.y;
+            assert!(apart, "{a:?} overlaps {b:?}");
+        }
+    }
+}

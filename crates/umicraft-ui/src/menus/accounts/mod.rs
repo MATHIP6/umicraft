@@ -74,6 +74,11 @@ pub enum AccountsOutcome {
     Cancel,
     /// Stop the Microsoft login in progress (the dialog's Cancel or Escape).
     CancelLogin,
+    /// Open this address in the player's browser (the sign-in page). The
+    /// caller decides whether it is safe to open.
+    OpenUrl(String),
+    /// Put this text on the clipboard (the sign-in page or the code).
+    CopyText(String),
 }
 
 /// What a dialog answered: an outcome, or a plain close.

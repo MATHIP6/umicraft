@@ -119,3 +119,6 @@ umicraft.accounts.device.title=Connexion avec Microsoft
 umicraft.accounts.device.open=Ouvrez cette page dans votre navigateur :
 umicraft.accounts.device.enter=Puis saisissez ce code :
 umicraft.accounts.device.waiting=En attente de votre connexion...
+umicraft.accounts.device.button.open=Ouvrir le lien
+umicraft.accounts.device.button.copy_link=Copier le lien
+umicraft.accounts.device.button.copy_code=Copier le code
