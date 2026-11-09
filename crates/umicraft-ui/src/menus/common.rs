@@ -419,6 +419,22 @@ umicraft.server.unreachable=Can't connect to server.
         umicraft_core::lang::Lang::builtin().with_client_layer(Some(SERVER_TEXTS), None)
     }
 
+    /// The Umicraft texts the account screens' tests assert on (the real
+    /// ones are in `client-pack/umicraft/lang`); keys not listed show as
+    /// themselves, which is what the builtin table does.
+    const ACCOUNT_TEXTS: &str = "\
+umicraft.accounts.button=Account: %s
+umicraft.accounts.badge.offline=[Free]
+umicraft.accounts.badge.microsoft=[Microsoft]
+umicraft.accounts.error=Error: %s
+umicraft.accounts.delete.message='%s' will be removed.
+";
+
+    /// The built-in language plus [`ACCOUNT_TEXTS`] as the Umicraft layer.
+    pub(crate) fn lang_with_account_texts() -> umicraft_core::lang::Lang {
+        umicraft_core::lang::Lang::builtin().with_client_layer(Some(ACCOUNT_TEXTS), None)
+    }
+
     /// The viewport of the tests: GUI scale 3, 427x240 GUI units.
     pub(crate) const VIEWPORT: Rect = Rect {
         x: 0.0,
