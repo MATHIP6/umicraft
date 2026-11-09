@@ -27,4 +27,13 @@ pub enum AuthError {
     /// The request could not be sent or the connection failed.
     #[error("session server request failed: {0}")]
     Transport(String),
+    /// The account file or the secret vault could not be read or written.
+    #[error("account storage failed: {0}")]
+    Storage(String),
+    /// An account with this UUID is already in the store.
+    #[error("this account already exists")]
+    DuplicateAccount,
+    /// No account has this UUID.
+    #[error("unknown account")]
+    UnknownAccount,
 }
