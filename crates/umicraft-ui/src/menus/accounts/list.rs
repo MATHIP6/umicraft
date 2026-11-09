@@ -10,6 +10,7 @@ use crate::input::Key;
 use crate::menus::background::{draw_list_background, draw_list_overlay, draw_menu_background};
 use crate::menus::common::{
     draw_scrollbar, escape_pressed, key_pressed, wheel_scrolled, Gui, TextPlacement, DIM_GRAY,
+    WHITE,
 };
 use crate::menus::confirm::ConfirmScreen;
 use crate::text::FontAtlas;
@@ -97,7 +98,29 @@ impl AccountsScreen {
         None
     }
 
+    /// Tells the player the list is empty, and how to fill it.
+    fn draw_empty(ui: &mut Ui, (gui, atlas, lang): (&Gui, &FontAtlas, &Lang)) {
+        let y = LIST_TOP + 50.0;
+        let place = |at: [f32; 2], color| TextPlacement::centered(at, color);
+        gui.text(
+            ui,
+            atlas,
+            lang.tr("umicraft.accounts.empty"),
+            place([gui.cx(), y], WHITE),
+        );
+        gui.text(
+            ui,
+            atlas,
+            lang.tr("umicraft.accounts.empty.hint"),
+            place([gui.cx(), y + 12.0], DIM_GRAY),
+        );
+    }
+
     fn draw_rows(&self, ui: &mut Ui, context: (&Gui, &FontAtlas, &Lang)) {
+        if self.rows.is_empty() {
+            Self::draw_empty(ui, context);
+            return;
+        }
         let viewport = ui.viewport();
         let list = accounts_layout(viewport).list;
         let hovered = ui

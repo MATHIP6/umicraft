@@ -39,6 +39,15 @@ pub enum Identity {
     NotReady,
 }
 
+impl Identity {
+    /// Whether the player has no account to join with, so joining from the
+    /// menu must first send them to the account chooser.
+    #[must_use]
+    pub fn is_unchosen(&self) -> bool {
+        matches!(self, Self::Default)
+    }
+}
+
 /// The state of the selected Microsoft account's session.
 enum SessionState {
     /// Nothing to renew (no account, or an offline one).

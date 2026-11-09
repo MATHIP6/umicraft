@@ -427,6 +427,8 @@ umicraft.accounts.button=Account: %s
 umicraft.accounts.badge.offline=[Free]
 umicraft.accounts.badge.microsoft=[Microsoft]
 umicraft.accounts.error=Error: %s
+umicraft.accounts.empty=You have no account.
+umicraft.accounts.empty.hint=Click Add account to create one.
 umicraft.accounts.delete.message='%s' will be removed.
 ";
 

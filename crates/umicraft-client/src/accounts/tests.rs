@@ -31,6 +31,16 @@ fn without_accounts_the_client_keeps_its_default_name() {
 }
 
 #[test]
+fn only_the_default_identity_sends_the_player_to_the_chooser() {
+    let mut flow = AccountsFlow::in_memory();
+    assert!(flow.identity().is_unchosen());
+    flow.apply_outcome(AccountsOutcome::AddOffline("Pixel".into()));
+    assert!(!flow.identity().is_unchosen());
+    flow.apply_outcome(AccountsOutcome::Delete(0));
+    assert!(flow.identity().is_unchosen());
+}
+
+#[test]
 fn an_added_offline_account_becomes_the_identity() {
     let mut flow = AccountsFlow::in_memory();
     flow.apply_outcome(AccountsOutcome::AddOffline("Pixel".into()));

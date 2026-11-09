@@ -218,3 +218,22 @@ fn replacing_the_rows_drops_a_selection_that_is_gone() {
     assert_eq!(screen.selected(), None);
     assert_eq!(AccountsScreen::new(rows(), Some(9)).selected(), None);
 }
+
+#[test]
+fn an_empty_list_says_there_is_no_account_and_how_to_add_one() {
+    let mut screen = AccountsScreen::new(Vec::new(), None);
+    let shown = texts(&mut screen);
+    assert!(
+        shown.iter().any(|t| t == "You have no account."),
+        "{shown:?}"
+    );
+    assert!(shown.iter().any(|t| t.contains("Add account")), "{shown:?}");
+}
+
+#[test]
+fn the_empty_message_goes_away_once_there_are_accounts() {
+    let mut screen = AccountsScreen::new(rows(), None);
+    assert!(!texts(&mut screen)
+        .iter()
+        .any(|t| t == "You have no account."));
+}
