@@ -46,11 +46,13 @@ pub enum Icon {
     Lightbulb,
     /// Binoculars: zoom.
     Binoculars,
+    /// A camera turned a little (see `TURNS` in `gen_icons.py`): no hurt cam.
+    Camera,
 }
 
 impl Icon {
     /// Every icon, in the order of their bitmaps and characters.
-    pub const ALL: [Icon; 13] = [
+    pub const ALL: [Icon; 14] = [
         Icon::Grid,
         Icon::Sliders,
         Icon::Search,
@@ -64,6 +66,7 @@ impl Icon {
         Icon::Gear,
         Icon::Lightbulb,
         Icon::Binoculars,
+        Icon::Camera,
     ];
 
     fn index(self) -> usize {

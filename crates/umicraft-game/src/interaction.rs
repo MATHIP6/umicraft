@@ -326,6 +326,15 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
         self.output.packets.push(Outgoing::Swing);
     }
 
+    /// Whether the held item only swings at a block: a sword or a potion. The arm
+    /// swings, but no dig starts, so no crack, no chips, no hit sound and no break
+    /// show for a block that is not going to break.
+    fn swings_only(&self) -> bool {
+        self.tick.digger.held.is_some_and(|stack| {
+            digging::is_sword(stack.item_id) || digging::is_potion(stack.item_id)
+        })
+    }
+
     /// MCP `Minecraft.clickMouse`.
     fn click(&mut self) {
         if let Some(entity) = self.tick.entity {
@@ -334,6 +343,7 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
         }
         self.swing();
         match self.tick.target {
+            Some(_) if self.swings_only() => {}
             Some(hit) if self.block_id(hit.block) != 0 => {
                 self.click_block(&hit);
             }
@@ -352,7 +362,11 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
         }
         match self.tick.target {
             Some(hit) if self.tick.held && self.block_id(hit.block) != 0 => {
-                if self.damage_block(&hit) {
+                if self.swings_only() {
+                    // A dig left over from another item stops; the arm keeps swinging.
+                    self.reset();
+                    self.swing();
+                } else if self.damage_block(&hit) {
                     self.swing();
                 }
             }
@@ -1026,5 +1040,58 @@ mod tests {
         let placed = interaction.place_block(GameMode::Spectator, &stone(), None, ItemStack::EMPTY);
         assert!(placed.is_some());
         assert_eq!(interaction.acknowledge_block(BlockPos::new(3, 5, 5)), None);
+    }
+
+    fn holding(item_id: i16, mode: GameMode) -> (Interaction, Vec<AttackOutput>) {
+        let world = One(BlockPos::new(3, 4, 5), STONE);
+        let item = ItemStack {
+            item_id,
+            stack_size: 1,
+            damage: 0,
+            nbt: None,
+        };
+        let mut interaction = Interaction::new();
+        let outputs = (0..6)
+            .map(|index| {
+                interaction.attack(&AttackTick {
+                    entity: None,
+                    mode,
+                    pressed: index == 0,
+                    held: true,
+                    target: Some(stone()),
+                    world: &world,
+                    digger: Digger {
+                        held: Some(&item),
+                        on_ground: true,
+                        ..Digger::default()
+                    },
+                })
+            })
+            .collect();
+        (interaction, outputs)
+    }
+
+    #[test]
+    fn a_sword_or_a_potion_only_swings_at_a_block_in_every_mode() {
+        for item in [276, 373] {
+            for mode in [GameMode::Survival, GameMode::Creative] {
+                let (interaction, outputs) = holding(item, mode);
+                for output in &outputs {
+                    assert!(dig_status(output).is_empty(), "item {item} in {mode:?}");
+                    assert!(output.broken.is_empty());
+                    assert!(output.sounds.is_empty(), "no hit sound");
+                    assert!(output.progress.is_none(), "no cracks");
+                    assert!(output.packets.contains(&Outgoing::Swing), "the arm swings");
+                }
+                assert_eq!(interaction.digging_block(), None, "no dig, so no chips");
+            }
+        }
+    }
+
+    #[test]
+    fn a_pickaxe_still_digs() {
+        let (interaction, outputs) = holding(257, GameMode::Survival);
+        assert_eq!(dig_status(&outputs[0]), [DiggingStatus::StartDestroyBlock]);
+        assert_eq!(interaction.digging_block(), Some(BlockPos::new(3, 4, 5)));
     }
 }

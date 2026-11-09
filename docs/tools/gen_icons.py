@@ -21,7 +21,12 @@ SIDE = 48
 SUPERSAMPLE = 8
 GRID = 256.0
 # The order of `Icon::ALL`.
-ORDER = ["grid", "sliders", "search", "close", "gauge", "target", "cursor", "signal", "run", "blur", "gear", "lightbulb", "binoculars"]
+ORDER = ["grid", "sliders", "search", "close", "gauge", "target", "cursor", "signal", "run", "blur", "gear", "lightbulb", "binoculars", "camera"]
+
+# Icons drawn turned, in degrees clockwise about the centre of the grid, and shrunk by
+# `TURNED_FIT` so a turned corner stays off the edge of the bitmap.
+TURNS = {"camera": 12.0}
+TURNED_FIT = 0.95
 
 TOKEN = re.compile(r"([MmLlHhVvCcSsQqAaZz])|(-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)")
 
@@ -173,6 +178,17 @@ def subpaths(d):
     return result
 
 
+def turned(points, degrees, grid):
+    """`points` turned clockwise by `degrees` about the centre of the grid."""
+    c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    middle = grid / 2
+    out = []
+    for x, y in points:
+        dx, dy = (x - middle) * TURNED_FIT, (y - middle) * TURNED_FIT
+        out.append((middle + dx * c - dy * s, middle + dx * s + dy * c))
+    return out
+
+
 def rasterize_stroked(d, grid, width):
     """A path drawn as a line of `width` with round caps and joins."""
     size = SIDE * SUPERSAMPLE
@@ -189,7 +205,7 @@ def rasterize_stroked(d, grid, width):
     return ink.resize((SIDE, SIDE), Image.BOX)
 
 
-def rasterize(svg):
+def rasterize(svg, turn=0.0):
     d = re.search(r'\sd="([^"]+)"', svg).group(1)
     box = re.search(r'viewBox="[-\d.]+ [-\d.]+ ([\d.]+) [\d.]+"', svg)
     grid = float(box.group(1)) if box else GRID
@@ -203,6 +219,8 @@ def rasterize(svg):
         if len(polygon) < 3:
             continue
         layer = Image.new("1", (size, size), 0)
+        if turn:
+            polygon = turned(polygon, turn, grid)
         ImageDraw.Draw(layer).polygon([(x * scale, y * scale) for x, y in polygon], fill=1)
         # Even-odd: a path inside another cuts a hole, as in the Phosphor sources.
         ink = ImageChops.logical_xor(ink, layer)
@@ -213,7 +231,7 @@ def main():
     out = bytearray()
     for name in ORDER:
         svg = (ROOT / "assets" / "icons" / f"{name}.svg").read_text(encoding="utf-8")
-        out += rasterize(svg).tobytes()
+        out += rasterize(svg, TURNS.get(name, 0.0)).tobytes()
     (ROOT / "assets" / "icons.r8").write_bytes(out)
     print(f"{len(ORDER)} icons, {len(out)} bytes")
 

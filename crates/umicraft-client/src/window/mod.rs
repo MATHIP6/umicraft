@@ -846,7 +846,11 @@ impl App {
         world.update_camera(
             &mut self.camera,
             now,
-            (video.view_bobbing, video.dynamic_fov),
+            (
+                video.view_bobbing,
+                video.dynamic_fov,
+                !self.mods.no_hurt_cam(),
+            ),
         );
         world.focus_on(&self.camera);
         self.audio.play_cues(&world.take_sounds());

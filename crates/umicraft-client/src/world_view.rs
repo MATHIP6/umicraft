@@ -244,12 +244,13 @@ impl WorldView {
     /// `view_bobbing` is the "View Bobbing" option: off, the camera and the
     /// hand keep still while walking (`EntityRenderer.setupCameraTransform`).
     /// `dynamic_fov` is the "Dynamic FOV" option: off, the field of view stays
-    /// what it is set to, whatever the player does.
+    /// what it is set to, whatever the player does. `hurt_cam` is whether a hit
+    /// tilts the view; the No Hurt Cam mod turns it off.
     pub fn update_camera(
         &self,
         camera: &mut Camera,
         now: Instant,
-        (view_bobbing, dynamic_fov): (bool, bool),
+        (view_bobbing, dynamic_fov, hurt_cam): (bool, bool, bool),
     ) {
         let Some(state) = self.view.sample(now) else {
             return;
@@ -259,7 +260,11 @@ impl WorldView {
         camera.yaw = yaw;
         camera.pitch = pitch;
         // The hurt roll stays with the option off, the bobbing does not.
-        let bob = state.effects.camera_matrix(view_bobbing);
+        let mut effects = state.effects;
+        if !hurt_cam {
+            effects.hurt_roll_degrees = 0.0;
+        }
+        let bob = effects.camera_matrix(view_bobbing);
         let fov_modifier = if dynamic_fov {
             state.effects.fov_modifier
         } else {
@@ -1376,7 +1381,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, halfway, (true, true));
+            .update_camera(&mut camera, halfway, (true, true, true));
         assert!(
             (camera.position().x - 1.0).abs() < 1e-4,
             "{}",
@@ -1450,7 +1455,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, later + TICK / 2, (true, true));
+            .update_camera(&mut camera, later + TICK / 2, (true, true, true));
         // Halfway between the eyes of the two ticks the view knows, not 3.
         assert!(
             (camera.position().x - 1.0).abs() < 1e-4,
@@ -1481,7 +1486,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, later + TICK / 2, (true, true));
+            .update_camera(&mut camera, later + TICK / 2, (true, true, true));
         // `orientCamera`: eye at (1, 0, 0) plus the orbit of the newest angles.
         // Blending the two camera positions would give (3, 0, -2) and drag the
         // camera behind the turn.
@@ -1515,7 +1520,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, later + TICK / 2, (true, true));
+            .update_camera(&mut camera, later + TICK / 2, (true, true, true));
         assert!(
             (camera.position().z - (0.5 - 2.5)).abs() < 1e-4,
             "{}",
@@ -1539,12 +1544,45 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, tick, (true, true));
+            .update_camera(&mut camera, tick, (true, true, true));
         assert_ne!(camera.view_bob(), glam::Mat4::IDENTITY, "bobbing on");
         harness
             .world_view
-            .update_camera(&mut camera, tick, (false, true));
+            .update_camera(&mut camera, tick, (false, true, true));
         assert_eq!(camera.view_bob(), glam::Mat4::IDENTITY, "bobbing off");
+    }
+
+    #[test]
+    fn the_no_hurt_cam_mod_leaves_the_roll_out_and_keeps_the_sway() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let mut hurt = frame(glam::Vec3::ZERO, tick, 0);
+        hurt.state.effects.hurt_roll_degrees = 9.0;
+        hurt.state.effects.bob = umicraft_game::view::ViewBob::new(0.4, 0.1, 0.0);
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(hurt))
+            .expect("frame queue");
+        harness.sync();
+
+        let mut camera = Camera::default();
+        harness
+            .world_view
+            .update_camera(&mut camera, tick, (false, true, false));
+        assert_eq!(camera.view_bob(), glam::Mat4::IDENTITY, "no roll, no sway");
+        harness
+            .world_view
+            .update_camera(&mut camera, tick, (true, true, false));
+        let swayed = camera.view_bob();
+        harness
+            .world_view
+            .update_camera(&mut camera, tick, (true, true, true));
+        assert_ne!(
+            swayed,
+            camera.view_bob(),
+            "the roll comes back with the mod off"
+        );
     }
 
     /// Regression: the roll of a hurt player went with the bobbing, so the camera
@@ -1566,7 +1604,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, tick, (false, true));
+            .update_camera(&mut camera, tick, (false, true, true));
         assert_eq!(
             camera.view_bob(),
             glam::Mat4::from_rotation_z(9.0_f32.to_radians()),
@@ -1574,7 +1612,7 @@ mod tests {
         );
         harness
             .world_view
-            .update_camera(&mut camera, tick, (true, true));
+            .update_camera(&mut camera, tick, (true, true, true));
         assert_ne!(
             camera.view_bob(),
             glam::Mat4::from_rotation_z(9.0_f32.to_radians()),
@@ -1631,11 +1669,11 @@ mod tests {
         let mut dynamic = Camera::default();
         harness
             .world_view
-            .update_camera(&mut dynamic, tick, (true, true));
+            .update_camera(&mut dynamic, tick, (true, true, true));
         let mut fixed = Camera::default();
         harness
             .world_view
-            .update_camera(&mut fixed, tick, (true, false));
+            .update_camera(&mut fixed, tick, (true, false, true));
         // The same camera with no widening at all.
         let mut plain = fixed;
         plain.set_view_effects(1.0, fixed.view_bob());
@@ -1669,7 +1707,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, tick + TICK * 2, (true, true));
+            .update_camera(&mut camera, tick + TICK * 2, (true, true, true));
         assert_eq!(camera.position(), start);
         assert_eq!(
             harness
@@ -1692,7 +1730,7 @@ mod tests {
         let halfway = later + TICK / 2;
         harness
             .world_view
-            .update_camera(&mut camera, halfway, (true, true));
+            .update_camera(&mut camera, halfway, (true, true, true));
         assert!((camera.position().x - 1.0).abs() < 1e-3);
         let environment = harness.world_view.environment(halfway, 12);
         assert!((environment.partial_tick - 0.5).abs() < 1e-3);

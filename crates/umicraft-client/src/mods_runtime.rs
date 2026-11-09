@@ -24,6 +24,9 @@ const FULLBRIGHT_ID: &str = "fullbright";
 /// The id of the Zoom mod, whose settings the window is given.
 const ZOOM_ID: &str = "zoom";
 
+/// The id of the No Hurt Cam mod.
+const NO_HURT_CAM_ID: &str = "no_hurt_cam";
+
 /// Height of the eye above the feet of a standing player, in blocks (MCP
 /// `EntityPlayer.getEyeHeight`), to turn the camera into the feet position.
 const EYE_HEIGHT: f64 = 1.62;
@@ -164,6 +167,14 @@ impl ModsRuntime {
         })
     }
 
+    /// Whether the No Hurt Cam mod is on: a hit does not tilt the view.
+    #[must_use]
+    pub fn no_hurt_cam(&self) -> bool {
+        self.registry
+            .mods()
+            .any(|view| view.meta.id.as_str() == NO_HURT_CAM_ID && view.enabled)
+    }
+
     /// Whether the Fullbright mod is on: the world is lit at full strength.
     #[must_use]
     pub fn fullbright(&self) -> bool {
@@ -281,6 +292,17 @@ mod tests {
             .set_enabled("motion_blur", false)
             .expect("the mod exists");
         assert_eq!(runtime.motion_blur(), None);
+    }
+
+    #[test]
+    fn no_hurt_cam_is_off_until_the_mod_is_switched_on() {
+        let mut runtime = ModsRuntime::new(&ModsOptions::default());
+        assert!(!runtime.no_hurt_cam());
+        runtime
+            .registry_mut()
+            .set_enabled("no_hurt_cam", true)
+            .expect("the mod exists");
+        assert!(runtime.no_hurt_cam());
     }
 
     #[test]

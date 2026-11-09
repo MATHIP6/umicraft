@@ -126,6 +126,12 @@ feature must not grow them.
   `smooth` it jumps. While the key is held the wheel changes the factor (x1.15 a notch, 1.2
   to 30) instead of scrolling the hotbar; the mouse speed follows the field of view. The hand
   keeps its own field of view.
+- **No Hurt Cam.** A visual mod with no setting (`no_hurt_cam`, off by default). The window
+  passes `!no_hurt_cam` to `WorldView::update_camera`, which then leaves the hurt roll out of
+  the view matrix; the bobbing is not touched. The death roll goes with it, since the game
+  thread folds both into one angle. Its icon is the Phosphor camera turned (12 degrees)
+  clockwise: `gen_icons.py` turns an icon listed in `TURNS` about the centre of the grid and
+  shrinks it a little (`TURNED_FIT`) so a corner stays off the bitmap edge.
 - **Known limits.** `keystrokes` and the toggle-sprint indicator need WASD state in
   `ModContext`/`ModInput` and a `hud()` that sees the settings. The directions of
   `coordinates` are not localized (the mods do not see the language). `ping_ms` is

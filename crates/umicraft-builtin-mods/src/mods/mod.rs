@@ -13,6 +13,7 @@ mod cps;
 mod fps;
 mod fullbright;
 mod motion_blur;
+mod no_hurt_cam;
 mod ping;
 mod toggle_sprint;
 mod zoom;
@@ -33,6 +34,7 @@ pub fn all() -> Vec<Box<dyn BuiltinMod>> {
         Box::new(motion_blur::MotionBlur),
         Box::new(fullbright::Fullbright),
         Box::new(zoom::Zoom),
+        Box::new(no_hurt_cam::NoHurtCam),
         Box::new(toggle_sprint::ToggleSprint::default()),
     ]
 }

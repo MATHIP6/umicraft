@@ -88,3 +88,5 @@ umicraft.mods.zoom.factor=Zoom factor
 umicraft.mods.zoom.smooth=Smooth zoom
 umicraft.mods.zoom.scroll=Wheel changes the zoom
 umicraft.mods.zoom.slow_mouse=Slower mouse when zoomed
+umicraft.mods.no_hurt_cam.name=No Hurt Cam
+umicraft.mods.no_hurt_cam.desc=The view no longer tilts when you take damage.

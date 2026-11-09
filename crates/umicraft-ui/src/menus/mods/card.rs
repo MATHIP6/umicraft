@@ -49,6 +49,7 @@ fn mod_icon(id: &str) -> Icon {
         "motion_blur" => Icon::Blur,
         "fullbright" => Icon::Lightbulb,
         "zoom" => Icon::Binoculars,
+        "no_hurt_cam" => Icon::Camera,
         _ => Icon::Grid,
     }
 }
