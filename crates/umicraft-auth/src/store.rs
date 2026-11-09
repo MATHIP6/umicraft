@@ -71,6 +71,30 @@ impl AccountStore {
         Ok(())
     }
 
+    /// Replaces the account `old_uuid` by `account`, keeping its place in the
+    /// list and its selection (renaming an offline account changes its UUID).
+    ///
+    /// # Errors
+    /// [`AuthError::UnknownAccount`] when `old_uuid` is not saved, or
+    /// [`AuthError::DuplicateAccount`] when `account` would clash with another one.
+    pub fn replace(&mut self, old_uuid: &str, account: Account) -> Result<(), AuthError> {
+        let index = self
+            .accounts
+            .iter()
+            .position(|a| a.uuid == old_uuid)
+            .ok_or(AuthError::UnknownAccount)?;
+        let clashes =
+            account.uuid != old_uuid && self.accounts.iter().any(|a| a.uuid == account.uuid);
+        if clashes {
+            return Err(AuthError::DuplicateAccount);
+        }
+        if self.selected.as_deref() == Some(old_uuid) {
+            self.selected = Some(account.uuid.clone());
+        }
+        self.accounts[index] = account;
+        Ok(())
+    }
+
     /// Selects the account with `uuid`.
     ///
     /// # Errors
@@ -130,6 +154,21 @@ mod tests {
         store.remove(&a).unwrap();
         assert_eq!(store.selected().unwrap().username, "B");
         assert!(matches!(store.remove(&a), Err(AuthError::UnknownAccount)));
+    }
+
+    #[test]
+    fn replace_keeps_position_and_selection() {
+        let mut store = store_with(&["A", "B"]);
+        let a = store.selected().unwrap().uuid.clone();
+        store.replace(&a, offline_account("C").unwrap()).unwrap();
+        assert_eq!(store.accounts()[0].username, "C");
+        assert_eq!(store.selected().unwrap().username, "C");
+        let clash = offline_account("B").unwrap();
+        let c = store.accounts()[0].uuid.clone();
+        assert!(matches!(
+            store.replace(&c, clash),
+            Err(AuthError::DuplicateAccount)
+        ));
     }
 
     #[test]
