@@ -7,7 +7,8 @@
 //! below the top (see [`super::server_row`]); two button rows at
 //! `height - 52` (Join 100, Direct Connect 100, Add 100) and `height - 28`
 //! (Edit 70, Delete 70, Refresh 70, Cancel 75). The scrollbar sits at
-//! `cx + 154`. Difference: the LAN scan entries are not shown (vanilla's "Scanning for games on your local network" row).
+//! `cx + 154`. The account button sits at the top right (`width - 126, 6`,
+//! 120x20), a Umicraft addition. Difference: the LAN scan entries are not shown (vanilla's "Scanning for games on your local network" row).
 //!
 //! Double click: vanilla compares wall-clock times (250 ms); the screen
 //! counts [`ServerListScreen::tick`] calls, so two clicks on one row within
@@ -27,8 +28,10 @@ use super::common::{
     draw_scrollbar, escape_pressed, key_pressed, wheel_scrolled, Gui, ScrollbarDrag,
 };
 use super::row_draw::{draw_tips, RowContext, RowFlags};
+mod layout;
 pub use super::server_row::{latency_level, RowStatus, ServerRow};
 use super::server_row::{zone_at, RowZone, ENTRY_HEIGHT, ENTRY_LEFT, ENTRY_WIDTH, SLOT_HEIGHT};
+pub use layout::{server_list_layout, ServerListLayout};
 
 /// The ticks within which a second click on a row joins (250 ms).
 const DOUBLE_CLICK_TICKS: u32 = 5;
@@ -46,6 +49,8 @@ pub enum ServerListOutcome {
     DirectConnect,
     /// Open the Add Server screen.
     Add,
+    /// Open the account chooser (the button at the top right).
+    OpenAccounts,
     /// Edit row `i`.
     Edit(usize),
     /// Ask to delete row `i` (the caller shows the confirmation).
@@ -60,52 +65,15 @@ pub enum ServerListOutcome {
     MoveDown(usize),
 }
 
-/// The rectangles of the server list screen, in physical pixels.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ServerListLayout {
-    /// The scrolling list area.
-    pub list: Rect,
-    /// Join Server.
-    pub join: Rect,
-    /// Direct Connect.
-    pub direct: Rect,
-    /// Add Server.
-    pub add: Rect,
-    /// Edit.
-    pub edit: Rect,
-    /// Delete.
-    pub delete: Rect,
-    /// Refresh.
-    pub refresh: Rect,
-    /// Cancel.
-    pub cancel: Rect,
-}
-
-/// Computes the vanilla layout for `viewport`.
-#[must_use]
-pub fn server_list_layout(viewport: Rect) -> ServerListLayout {
-    let gui = Gui::new(viewport);
-    let (cx, h) = (gui.cx(), gui.height);
-    ServerListLayout {
-        list: gui.rect(0.0, LIST_TOP, gui.width, h - 64.0 - LIST_TOP),
-        join: gui.rect(cx - 154.0, h - 52.0, 100.0, 20.0),
-        direct: gui.rect(cx - 50.0, h - 52.0, 100.0, 20.0),
-        add: gui.rect(cx + 54.0, h - 52.0, 100.0, 20.0),
-        edit: gui.rect(cx - 154.0, h - 28.0, 70.0, 20.0),
-        delete: gui.rect(cx - 74.0, h - 28.0, 70.0, 20.0),
-        refresh: gui.rect(cx + 4.0, h - 28.0, 70.0, 20.0),
-        cancel: gui.rect(cx + 80.0, h - 28.0, 75.0, 20.0),
-    }
-}
-
 /// The selection, scroll and click history of the list.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ServerListScreen {
     offset: f32,
     selected: Option<usize>,
     ticks: u32,
     last_click: Option<(usize, u32)>,
     bar: ScrollbarDrag,
+    active_account: Option<String>,
 }
 
 impl ServerListScreen {
@@ -129,6 +97,12 @@ impl ServerListScreen {
     /// Selects a row (for example the one just added).
     pub fn set_selected(&mut self, selected: Option<usize>) {
         self.selected = selected;
+    }
+
+    /// Sets the name shown on the account button, or `None` when no account
+    /// is active.
+    pub fn set_active_account(&mut self, name: Option<String>) {
+        self.active_account = name;
     }
 
     /// The scroll offset in GUI units.
@@ -313,6 +287,14 @@ impl ServerListScreen {
         draw_tips(ui, atlas, gui, &tips);
     }
 
+    /// The text of the account button: the active name, or a plain label.
+    fn account_label(&self, lang: &Lang) -> String {
+        match &self.active_account {
+            Some(name) => lang.tr_args("umicraft.accounts.button", &[name]),
+            None => lang.tr("umicraft.accounts.button.none").to_string(),
+        }
+    }
+
     fn buttons(
         &self,
         ui: &mut Ui,
@@ -329,6 +311,9 @@ impl ServerListScreen {
             gui.button(ui, id, rect, atlas, lang.tr(key), enabled)
         };
         let join = press(ui, "join", layout.join, "selectServer.select", has);
+        let accounts_id = ui.id("accounts");
+        let label = self.account_label(lang);
+        let accounts = gui.button(ui, accounts_id, layout.accounts, atlas, &label, true);
         let direct = press(ui, "direct", layout.direct, "selectServer.direct", true);
         let add = press(ui, "add", layout.add, "selectServer.add", true);
         let edit = press(ui, "edit", layout.edit, "selectServer.edit", has);
@@ -340,6 +325,7 @@ impl ServerListScreen {
             (join, ServerListOutcome::Join(index)),
             (direct, ServerListOutcome::DirectConnect),
             (add, ServerListOutcome::Add),
+            (accounts, ServerListOutcome::OpenAccounts),
             (edit, ServerListOutcome::Edit(index)),
             (delete, ServerListOutcome::Delete(index)),
             (refresh, ServerListOutcome::Refresh),
