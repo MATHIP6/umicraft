@@ -51,6 +51,7 @@ use crate::gpu_timer::{self, GpuTimer, GpuTimings};
 use crate::hires_blocks::{self, HiresBlocks};
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, IconProvider, WorldGlint};
 use crate::mipmap;
+use crate::motion_blur::{MotionBlur, MotionBlurSettings};
 use crate::outline::{OutlineBox, OutlineRenderer};
 use crate::overlay::{Overlay, OverlayVertex};
 use crate::overlays::{Pictures, ScreenOverlays, ScreenRenderer};
@@ -257,6 +258,9 @@ pub struct Renderer {
     cave_culling: bool,
     /// Bumped whenever a chunk mesh is added, replaced or removed.
     chunks_version: u64,
+    /// What the visible lists were last built from: the view, the loaded meshes and
+    /// the options, so a frame where none changed keeps them (perf 2, D1).
+    visible_key: Option<(glam::Mat4, glam::DVec3, u64, i32, bool)>,
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
     terrain_transparent_pipeline: wgpu::RenderPipeline,
@@ -389,7 +393,11 @@ pub struct Renderer {
     outline: OutlineRenderer,
     /// The blur of the game behind a menu, and whether a menu asks for it.
     scene_blur: SceneBlur,
+    /// The motion blur of the world (the Motion Blur mod).
+    motion_blur: MotionBlur,
     background_blur: bool,
+    /// Every light level is full: the Fullbright mod.
+    fullbright: bool,
     entity_batches: BatchBuffer,
     /// The glowing layers of the entities, drawn after them.
     additive_batches: BatchBuffer,
@@ -984,6 +992,7 @@ impl Renderer {
             cave_graph: CaveGraph::default(),
             cave_culling: true,
             chunks_version: 0,
+            visible_key: None,
             chunk_scratch: Vec::new(),
             terrain_transparent_pipeline,
             crack_pipeline,
@@ -1049,7 +1058,9 @@ impl Renderer {
             entity_renderer,
             outline,
             scene_blur,
+            motion_blur: MotionBlur::new(format),
             background_blur: false,
+            fullbright: false,
             entity_batches: BatchBuffer::default(),
             additive_batches: BatchBuffer::default(),
             glint_batches: BatchBuffer::default(),
@@ -1206,6 +1217,38 @@ impl Renderer {
             .set_boxes(&self.queue, boxes, (self.width, self.height));
     }
 
+    /// Switches the motion blur of the world on (`Some`) or off (`None`), or
+    /// changes its version and strength (the Motion Blur mod). The window calls
+    /// this every frame; the same settings cost nothing. While the camera stands
+    /// still, while the blur is off and while a menu blurs the game, a frame costs
+    /// nothing extra.
+    pub fn set_motion_blur(&mut self, settings: Option<MotionBlurSettings>) {
+        self.motion_blur.set_settings(&self.device, settings);
+    }
+
+    /// Tells the motion blur where the eye of the player is while the camera shows
+    /// the player from outside (the third person), or `None` in the first person.
+    /// The body of the player moves with the camera, not with the world, so a
+    /// capsule around it is left unblurred. The window calls this every frame.
+    pub fn set_motion_blur_body(&mut self, eye: Option<glam::DVec3>) {
+        self.motion_blur.set_body(eye);
+    }
+
+    /// Lights the world at full strength whatever the light levels (the Fullbright
+    /// mod): every entry of the lightmap is white. The shade of the faces and the
+    /// ambient occlusion stay, so the world still has volume. The window calls this
+    /// every frame.
+    pub fn set_fullbright(&mut self, on: bool) {
+        self.fullbright = on;
+    }
+
+    /// Tells the motion blur whether the hand in front of the camera moves this
+    /// frame (a swing, an item being raised): the hand is blurred, and a still
+    /// camera is blurred too while it moves. The window calls this every frame.
+    pub fn set_motion_blur_hand_moving(&mut self, moving: bool) {
+        self.motion_blur.set_hand_moving(moving);
+    }
+
     /// Blurs the game behind the HUD and the UI (the mods menu) by `strength`,
     /// `0.0` (sharp) to `1.0` (fully blurred); a menu raises it over its
     /// opening to fade the blur in. The window calls this every frame; a frame
@@ -1311,7 +1354,11 @@ impl Renderer {
     /// [`Renderer::render_entity_icon`] icon, but the box fills the whole
     /// [`crate::PORTRAIT_SIZE`] square, so the caller scales the model to fit.
     /// The pipeline is the icon one: the two GUI lights at full light.
-    pub fn render_portrait(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+    pub fn render_portrait(
+        &mut self,
+        batches: &[(&[EntityVertex], &wgpu::BindGroup)],
+        items: &ItemMesh,
+    ) {
         let buffers: Vec<(wgpu::Buffer, u32, &wgpu::BindGroup)> = batches
             .iter()
             .filter(|(vertices, _)| !vertices.is_empty())
@@ -1326,7 +1373,16 @@ impl Renderer {
                 (buffer, vertices.len() as u32, texture)
             })
             .collect();
+        // The item in the hand, already in the icon box, drawn with the pipeline
+        // of the item icons (same camera, no culling).
+        let held = create_gpu_mesh_pass(
+            &self.device,
+            "portrait item",
+            &items.vertices,
+            &items.indices,
+        );
         let (entities, camera) = (&self.entity_renderer, &self.icon_entity_bind_group);
+        let (icon_pipeline, icon_group) = (&self.icon_pipeline, &self.icon_bind_group);
         self.icon_atlas
             .render_portrait(&self.device, &self.queue, |pass| {
                 entities.render_icon(
@@ -1334,6 +1390,11 @@ impl Renderer {
                     camera,
                     buffers.iter().map(|(b, n, t)| (b.slice(..), *n, *t)),
                 );
+                if let Some(held) = &held {
+                    pass.set_pipeline(icon_pipeline);
+                    pass.set_bind_group(0, icon_group, &[]);
+                    draw_gpu_pass(pass, held);
+                }
             });
     }
 
@@ -1417,6 +1478,15 @@ impl Renderer {
         );
         self.upload_overlay(overlay);
         self.prepare_visible_chunks(camera);
+        // The motion blur of this frame, unless a menu already blurs the game.
+        self.motion_blur.prepare(
+            &self.device,
+            &self.queue,
+            camera,
+            (self.scene_blur.scene_view(), &self.depth_view),
+            (self.width, self.height),
+            !self.background_blur,
+        );
         if self.surface.is_some() {
             self.render_window(overlay, &sky_state)
         } else {
@@ -1436,10 +1506,23 @@ impl Renderer {
         // Boxes are made relative to the render origin in f64, so the frustum
         // planes and the boxes stay precise far from the world origin (A5).
         let origin = camera.render_origin();
-        let frustum = Frustum::from_view_projection(camera.view_projection_from(origin));
+        let view_projection = camera.view_projection_from(origin);
         let eye = camera.eye();
-        let eye_chunk = ChunkPos::new((eye.x / 16.0).floor() as i32, (eye.z / 16.0).floor() as i32);
         let reach = i32::from(self.environment.view_distance);
+        let key = (
+            view_projection,
+            eye,
+            self.chunks_version,
+            reach,
+            self.cave_culling,
+        );
+        // A still camera over unchanged chunks has the lists it had.
+        if self.visible_key == Some(key) {
+            return;
+        }
+        self.visible_key = Some(key);
+        let frustum = Frustum::from_view_projection(view_projection);
+        let eye_chunk = ChunkPos::new((eye.x / 16.0).floor() as i32, (eye.z / 16.0).floor() as i32);
         self.visible_opaque.clear();
         self.transparent_order.clear();
         let chunks = &self.chunks;
@@ -2104,6 +2187,7 @@ impl Renderer {
         self.depth_view = create_depth(&self.device, width, height);
         self.scene_blur
             .resize(&self.device, &self.queue, (width, height));
+        self.motion_blur.invalidate();
         self.ui_pass.resize(width, height);
         if self.offscreen.is_some() {
             self.offscreen = Some(create_offscreen(&self.device, width, height));
@@ -2318,11 +2402,15 @@ impl Renderer {
             _pad: 0.0,
             origin: origin.as_vec3().to_array(),
             _pad_origin: 0.0,
-            lightmap: lightmap::colors(&LightmapParams::of(
-                &self.environment,
-                sky.sun_brightness,
-                flicker,
-            )),
+            lightmap: if self.fullbright {
+                lightmap::unlit()
+            } else {
+                lightmap::colors(&LightmapParams::of(
+                    &self.environment,
+                    sky.sun_brightness,
+                    flicker,
+                ))
+            },
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -2381,6 +2469,7 @@ impl Renderer {
         overlay: &Overlay,
         sky_state: &SkyState,
     ) -> Result<(), RenderError> {
+        umicraft_core::profile_scope!("render_window");
         let frame = {
             let surface = self
                 .surface
@@ -2457,6 +2546,20 @@ impl Renderer {
         }
     }
 
+    /// The first-person hand and the item in it: camera-space vertices under a
+    /// squeezed depth range, so the hand always wins the depth test.
+    fn draw_hand(&self, pass: &mut wgpu::RenderPass<'_>) {
+        if !self.hand.is_empty() {
+            self.entity_renderer
+                .render(pass, &self.hand_camera_bind_group, self.hand.iter());
+        }
+
+        pass.set_pipeline(&self.terrain_pipeline);
+        pass.set_bind_group(0, &self.hand_item_bind_group, &[]);
+        self.hand_items.draw(pass);
+        self.world_glint.draw_hand(pass, &self.hand_item_bind_group);
+    }
+
     fn stamp(&self, pass: &mut wgpu::RenderPass<'_>, index: u32) {
         if let Some(timer) = &self.gpu_timer {
             timer.stamp(pass, index);
@@ -2496,7 +2599,10 @@ impl Renderer {
         let clear = sky_state.fog.color;
         // With a menu that blurs the game, the world goes to a texture first.
         let blur = self.background_blur;
-        let world_view = if blur {
+        // With a motion blur, the world goes to the texture too, and the hand and
+        // the HUD are drawn over the blurred picture, sharp.
+        let motion = self.motion_blur.is_active();
+        let world_view = if blur || motion {
             self.scene_blur.scene_view()
         } else {
             view
@@ -2583,8 +2689,12 @@ impl Renderer {
 
         // `renderEntities` draws the labels with the entities, before the
         // particles and the translucent terrain.
-        self.nametags
-            .draw(&mut pass, &self.overlay_pipeline, &self.ui_bind_group);
+        // With the motion blur they come after it instead: the blur moves a pixel
+        // by the depth under it, and a tag seen through a wall has the wall's.
+        if !motion {
+            self.nametags
+                .draw(&mut pass, &self.overlay_pipeline, &self.ui_bind_group);
+        }
 
         // Dropped items share the terrain pipeline and its texture array.
         pass.set_pipeline(&self.terrain_pipeline);
@@ -2654,17 +2764,46 @@ impl Renderer {
         }
         self.stamp(&mut pass, 4);
 
-        // The hand: camera-space vertices under a squeezed depth range.
-        if !self.hand.is_empty() {
-            self.entity_renderer
-                .render(&mut pass, &self.hand_camera_bind_group, self.hand.iter());
+        if motion {
+            // The hand goes into the picture that is blurred: it trails when it
+            // moves. The overlays and the HUD come after, sharp.
+            self.draw_hand(&mut pass);
+            // The world is done: blur it, lay it over the screen, and draw the
+            // overlays and the HUD sharp on top. The depth buffer is kept.
+            drop(pass);
+            self.motion_blur.run(encoder);
+            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("motion blur composite pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.motion_blur.blit(&mut pass);
+            // Sharp, and still tested against the depth buffer of the world.
+            self.nametags
+                .draw(&mut pass, &self.overlay_pipeline, &self.ui_bind_group);
         }
 
-        pass.set_pipeline(&self.terrain_pipeline);
-        pass.set_bind_group(0, &self.hand_item_bind_group, &[]);
-        self.hand_items.draw(&mut pass);
-        self.world_glint
-            .draw_hand(&mut pass, &self.hand_item_bind_group);
+        if !motion {
+            self.draw_hand(&mut pass);
+        }
 
         // `renderOverlays` follows the hand; the GUI's vignette, pumpkin and
         // portal come before the hotbar.
@@ -2871,7 +3010,8 @@ fn create_depth(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: DEPTH_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        // Sampled by the motion blur, which works out the motion from the depth.
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
     texture.create_view(&wgpu::TextureViewDescriptor::default())

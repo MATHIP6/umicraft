@@ -8,6 +8,8 @@
 mod content;
 mod placement;
 pub mod snap;
+mod style;
 
 pub use content::{HudContent, HudLine};
 pub use placement::{Anchor, HudPlacement, HudRect, MAX_SCALE, MIN_SCALE};
+pub use style::{HudStyle, Shadow};

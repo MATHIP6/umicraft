@@ -9,13 +9,21 @@ use crate::geom::Rect;
 use crate::input::{InputEvent, Key};
 use crate::text::FontAtlas;
 
-use super::text::{draw_text, fit_text, measure_text, Align};
-use super::theme::{RADIUS, SURFACE, TEXT, TEXT_MUTED, TEXT_SIZE_BODY};
+use crate::icons::Icon;
+
+use super::text::{draw_icon, draw_text, fit_text, measure_text, Align};
+use super::theme::{RADIUS, TEXT, TEXT_MUTED};
 
 /// The most characters a query can have.
 pub const MAX_CHARS: usize = 32;
 /// Space between the border and the text, in GUI units.
 const INSET: f32 = 4.0;
+/// Size of the typed text, in GUI units.
+const TEXT_SIZE: f32 = 5.8;
+/// Edge of the magnifier, in GUI units.
+const ICON_SIZE: f32 = 7.5;
+/// Space between the magnifier and the text, in GUI units.
+const ICON_GAP: f32 = 3.0;
 /// Space between the caret and the placeholder, in GUI units: the caret sits at
 /// the start of the text, so the placeholder starts right of it instead of
 /// under it.
@@ -53,10 +61,20 @@ pub fn search_field(
     (scale, caret_on): (f32, bool),
 ) -> bool {
     let changed = edit(text, &ui.input().events);
-    ui.draw().rounded_rect(rect, RADIUS * scale, SURFACE);
-    let size = TEXT_SIZE_BODY * scale;
-    let left = rect.x + INSET * scale;
-    let at = (left, rect.y + rect.height * 0.5);
+    ui.draw()
+        .rounded_rect(rect, RADIUS * scale, [1.0, 1.0, 1.0, 0.05]);
+    let size = TEXT_SIZE * scale;
+    let middle = rect.y + rect.height * 0.5;
+    let icon = (rect.x + (INSET + ICON_SIZE * 0.5) * scale, middle);
+    draw_icon(
+        ui,
+        brand,
+        Icon::Search,
+        icon,
+        (ICON_SIZE * scale, TEXT_MUTED),
+    );
+    let left = rect.x + (INSET + ICON_SIZE + ICON_GAP) * scale;
+    let at = (left, middle);
     if text.is_empty() {
         let beside_caret = (at.0 + PLACEHOLDER_GAP * scale, at.1);
         draw_text(
@@ -67,7 +85,8 @@ pub fn search_field(
             (size, TEXT_MUTED, Align::Left),
         );
     } else {
-        let shown = fit_text(brand, text, size, rect.width - 2.0 * INSET * scale);
+        let room = rect.right() - INSET * scale - left;
+        let shown = fit_text(brand, text, size, room);
         draw_text(ui, brand, &shown, at, (size, TEXT, Align::Left));
     }
     if caret_on {
@@ -107,7 +126,7 @@ mod tests {
         search_field(&mut ui, &brand, rect, (&mut text, "Search"), (2.0, true));
         let commands = ui.draw().commands();
         let placeholder_x = commands.iter().find_map(|c| match c {
-            DrawCommand::Text { position, .. } => Some(position[0]),
+            DrawCommand::Text { position, text, .. } if text == "Search" => Some(position[0]),
             _ => None,
         });
         let caret = commands.iter().rev().find_map(|c| match c {

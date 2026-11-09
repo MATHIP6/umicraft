@@ -178,17 +178,28 @@ fn worker_loop(
     }
 }
 
+/// The most mesh workers the automatic choice starts. More of them load the world a
+/// little sooner and, on a machine of 16 threads, compete with the render thread
+/// in a burst of chunks (perf 2, E3).
+pub const MAX_AUTOMATIC_WORKERS: usize = 8;
+
 /// The number of mesh workers for the `mesh_threads` option: `0` is automatic,
 /// all cores but one (the render thread keeps one; the network and game threads
-/// mostly sleep) and at least one; any other value is used as given.
+/// mostly sleep) and at least one, at most [`MAX_AUTOMATIC_WORKERS`]; any other
+/// value is used as given.
 #[must_use]
 pub fn worker_count(setting: u8) -> usize {
     if setting > 0 {
         return usize::from(setting);
     }
     std::thread::available_parallelism()
-        .map(|count| count.get().saturating_sub(1).max(1))
+        .map(|count| automatic_workers(count.get()))
         .unwrap_or(1)
+}
+
+/// The automatic worker count for a machine of `cores` threads.
+fn automatic_workers(cores: usize) -> usize {
+    cores.saturating_sub(1).clamp(1, MAX_AUTOMATIC_WORKERS)
 }
 
 /// [`worker_count`] with the automatic choice.
@@ -230,6 +241,16 @@ mod tests {
             results,
             vec![(ChunkPos::new(0, 0), 7), (ChunkPos::new(1, 0), 8)]
         );
+    }
+
+    #[test]
+    fn the_automatic_count_leaves_a_core_and_stops_at_eight() {
+        assert_eq!(automatic_workers(1), 1);
+        assert_eq!(automatic_workers(2), 1);
+        assert_eq!(automatic_workers(4), 3);
+        assert_eq!(automatic_workers(8), 7);
+        assert_eq!(automatic_workers(16), MAX_AUTOMATIC_WORKERS);
+        assert_eq!(automatic_workers(64), MAX_AUTOMATIC_WORKERS);
     }
 
     #[test]

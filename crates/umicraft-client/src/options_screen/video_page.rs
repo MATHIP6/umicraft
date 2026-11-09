@@ -23,7 +23,7 @@ const FPS_UNIT: &str = " fps";
 /// The list is the vanilla one without the two entries that have no meaning
 /// here: "3D Anaglyph" (not offered, ADR-0043) and "Use VBOs", which vanilla
 /// itself hides when the driver has no vertex buffer objects (wgpu has no
-/// such switch).
+/// such switch), and with "Dynamic FOV" at the end, which is Umicraft's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VideoEntry {
     Graphics,
@@ -40,10 +40,11 @@ enum VideoEntry {
     Mipmaps,
     BlockAlternatives,
     EntityShadows,
+    DynamicFov,
 }
 
 /// The entries in the order of `GuiVideoSettings.videoOptions`, two per row.
-const VIDEO_ENTRIES: [VideoEntry; 14] = [
+const VIDEO_ENTRIES: [VideoEntry; 15] = [
     VideoEntry::Graphics,
     VideoEntry::RenderDistance,
     VideoEntry::SmoothLighting,
@@ -58,6 +59,7 @@ const VIDEO_ENTRIES: [VideoEntry; 14] = [
     VideoEntry::Mipmaps,
     VideoEntry::BlockAlternatives,
     VideoEntry::EntityShadows,
+    VideoEntry::DynamicFov,
 ];
 
 /// The language keys of the three values of an option that cycles
@@ -254,7 +256,8 @@ impl OptionsScreen {
             | VideoEntry::Fullscreen
             | VideoEntry::Vsync
             | VideoEntry::BlockAlternatives
-            | VideoEntry::EntityShadows => {}
+            | VideoEntry::EntityShadows
+            | VideoEntry::DynamicFov => {}
         }
     }
 
@@ -320,6 +323,7 @@ fn on_off_option(video: &mut VideoOptions, entry: VideoEntry) -> Option<(&'stati
             ("options.blockAlternatives", &mut video.block_alternatives)
         }
         VideoEntry::EntityShadows => ("options.entityShadows", &mut video.entity_shadows),
+        VideoEntry::DynamicFov => ("umicraft.options.dynamicFov", &mut video.dynamic_fov),
         _ => return None,
     })
 }

@@ -41,27 +41,47 @@ struct ChatRow {
     alpha: f32,
 }
 
-/// The wrapped rows of the whole log, oldest first, at most [`MAX_ROWS`].
+/// The wrapped rows of the log, oldest first, at most [`MAX_ROWS`].
 ///
 /// `GuiNewChat.setChatLine` wraps every message to `floor(chatWidth /
 /// chatScale)` with the proportional font and drops the oldest rows beyond
-/// 100.
-fn chat_rows(state: &HudState, font: &FontAtlas) -> Vec<ChatRow> {
+/// 100. With `wanted` the newest messages are wrapped until that many rows are
+/// there and the older ones are left alone: a closed chat shows ten rows, and
+/// wrapping the whole history for them cost 160 us a frame (perf 2, B1). The
+/// rows returned are the newest ones, so the slice a window shows is the same.
+fn chat_rows(state: &HudState, font: &FontAtlas, wanted: Option<usize>) -> Vec<ChatRow> {
     let opacity = state.chat_style.opacity * 0.9 + 0.1;
     let max_width = (state.chat_style.width_px() as f32 / state.chat_style.scale).floor();
     let advance = |character: char| font.advance(character, 1.0);
+    let wanted = wanted.map_or(usize::MAX, |wanted| wanted.min(MAX_ROWS));
+    // Newest first, so the walk can stop; reversed at the end.
     let mut rows: Vec<ChatRow> = Vec::new();
-    for line in &state.chat {
+    for line in state.chat.iter().rev() {
+        if rows.len() >= wanted {
+            break;
+        }
         let age = age_ticks(line.received, state.now);
         let alpha = line_alpha(age, state.chat_open) * opacity;
+        let wrapped = wrap::wrap(&line.runs, max_width, &advance);
         rows.extend(
-            wrap::wrap(&line.runs, max_width, &advance)
+            wrapped
                 .into_iter()
+                .rev()
                 .map(|pieces| ChatRow { pieces, alpha }),
         );
     }
+    rows.reverse();
     rows.drain(..rows.len().saturating_sub(MAX_ROWS));
     rows
+}
+
+/// How many rows the window of `state` can show when it is closed: the rows the
+/// closed chat needs, and no more.
+fn rows_needed(state: &HudState) -> Option<usize> {
+    if state.chat_open {
+        return None;
+    }
+    Some((state.chat_style.height_unfocused_px() / 9).max(0) as usize)
 }
 
 /// The slice of rows the chat shows (`first..end`) and how far it is
@@ -97,7 +117,7 @@ pub fn chat_run_at(
     if !state.chat_open {
         return None;
     }
-    let rows = chat_rows(state, font);
+    let rows = chat_rows(state, font, None);
     let (_, _, scroll) = visible_window(state, rows.len());
     let style = state.chat_style;
     let geometry = ChatGeometry {
@@ -146,7 +166,7 @@ fn draw_chat_log(list: &mut DrawList, state: &HudState, gh: f32, sf: f32, font: 
     // The band is `l + 4` wide (the text itself wraps at the floor of `l`).
     let chat_width = band.ceil() + 4.0;
 
-    let rows = chat_rows(state, font);
+    let rows = chat_rows(state, font, rows_needed(state));
     let (first, end, scroll) = visible_window(state, rows.len());
     let visible = &rows[first..end];
 
@@ -298,7 +318,7 @@ mod tests {
         let font = FontAtlas::fallback();
         let long = "word ".repeat(80);
         let state = state_with(vec![line(&long), line("")]);
-        let rows = chat_rows(&state, &font);
+        let rows = chat_rows(&state, &font, None);
         assert!(rows.len() > 2);
         assert!(rows.last().is_some_and(|row| row.pieces.is_empty()));
     }
@@ -307,7 +327,7 @@ mod tests {
     fn the_log_keeps_only_the_newest_hundred_wrapped_rows() {
         let font = FontAtlas::fallback();
         let lines = (0..150).map(|n| line(&format!("message {n}"))).collect();
-        let rows = chat_rows(&state_with(lines), &font);
+        let rows = chat_rows(&state_with(lines), &font, None);
         assert_eq!(rows.len(), MAX_ROWS);
         assert_eq!(rows[MAX_ROWS - 1].pieces[0].text, "message 149");
     }
@@ -349,5 +369,40 @@ mod tests {
         // A byte slice at the character index 1 would panic inside "\u{e9}".
         draw_chat(&mut list, &state, 320.0, 180.0, 2.0, &font);
         assert!(!list.is_empty());
+    }
+
+    #[test]
+    fn a_closed_chat_wraps_only_the_newest_messages_and_shows_the_same_rows() {
+        let font = FontAtlas::fallback();
+        let lines: Vec<ChatLineView> = (0..60)
+            .map(|n| line(&format!("message number {n}")))
+            .collect();
+        let state = HudState {
+            chat_open: false,
+            ..state_with(lines)
+        };
+        let everything = chat_rows(&state, &font, None);
+        let tail = chat_rows(&state, &font, rows_needed(&state));
+        assert!(
+            tail.len() < everything.len(),
+            "the old history is left alone"
+        );
+        let (first, end, _) = visible_window(&state, tail.len());
+        let (all_first, all_end, _) = visible_window(&state, everything.len());
+        let shown = |rows: &[ChatRow], from: usize, to: usize| -> Vec<String> {
+            rows[from..to]
+                .iter()
+                .map(|row| {
+                    row.pieces
+                        .iter()
+                        .map(|piece| piece.text.as_str())
+                        .collect::<String>()
+                })
+                .collect()
+        };
+        assert_eq!(
+            shown(&tail, first, end),
+            shown(&everything, all_first, all_end)
+        );
     }
 }

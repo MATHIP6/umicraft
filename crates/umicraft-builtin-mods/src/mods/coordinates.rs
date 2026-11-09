@@ -3,7 +3,8 @@
 
 use std::fmt::Write;
 
-use super::WHITE;
+use super::hud_style::hud_settings;
+use super::parse_color;
 use crate::context::ModContext;
 use crate::hud::{Anchor, HudContent, HudPlacement};
 use crate::id::{ModCategory, ModId};
@@ -19,7 +20,7 @@ static META: ModMeta = ModMeta {
     default_enabled: false,
 };
 
-const SETTINGS: &[SettingDef] = &[
+const SETTINGS: &[SettingDef] = hud_settings![
     SettingDef {
         key: "decimals",
         label_key: "umicraft.mods.coordinates.decimals",
@@ -29,6 +30,11 @@ const SETTINGS: &[SettingDef] = &[
         key: "direction",
         label_key: "umicraft.mods.coordinates.direction",
         kind: SettingKind::Toggle { default: true },
+    },
+    SettingDef {
+        key: "color",
+        label_key: "umicraft.mods.coordinates.color",
+        kind: SettingKind::Color { default: "#ffffff" },
     },
 ];
 
@@ -65,18 +71,19 @@ impl BuiltinMod for Coordinates {
 
     fn draw(&self, ctx: &ModContext, settings: &ModSettings, out: &mut HudContent) {
         let decimals = settings.bool("decimals");
+        let color = parse_color(settings.text("color"));
         for (axis, value) in ["X", "Y", "Z"].into_iter().zip(ctx.position) {
             // Writing into a `String` cannot fail.
             let _ = if decimals {
-                write!(out.line(WHITE), "{axis}: {value:.1}")
+                write!(out.line(color), "{axis}: {value:.1}")
             } else {
                 // The block the player stands in, as the F3 screen shows it: the
                 // floor, so -7.5 is block -8 and not -7.
-                write!(out.line(WHITE), "{axis}: {}", value.floor())
+                write!(out.line(color), "{axis}: {}", value.floor())
             };
         }
         if settings.bool("direction") {
-            let _ = write!(out.line(WHITE), "{}", cardinal(ctx.yaw));
+            let _ = write!(out.line(color), "{}", cardinal(ctx.yaw));
         }
     }
 }

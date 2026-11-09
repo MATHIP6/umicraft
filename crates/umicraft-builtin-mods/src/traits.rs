@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The trait every built-in mod implements.
 
+use std::collections::BTreeMap;
+
 use crate::context::ModContext;
 use crate::hud::{HudContent, HudPlacement};
 use crate::meta::ModMeta;
-use crate::settings::{ModSettings, SettingDef};
+use crate::settings::{ModSettings, SettingDef, SettingValue};
 
 /// What a HUD mod needs to be placed the first time.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -55,4 +57,21 @@ pub trait BuiltinMod: Send {
 
     /// Rewrites the movement input, e.g. to keep sprinting after one press.
     fn modify_input(&mut self, _input: &mut ModInput, _settings: &ModSettings) {}
+
+    /// What the mod keeps between two runs of the client, apart from its
+    /// settings, as the registry saves it. Nothing by default.
+    fn state(&self) -> BTreeMap<String, SettingValue> {
+        BTreeMap::new()
+    }
+
+    /// Takes back what [`state`](Self::state) saved. Keys it does not know are
+    /// ignored and a missing one leaves the mod as it starts.
+    fn load_state(&mut self, _saved: &BTreeMap<String, SettingValue>) {}
+
+    /// Whether [`state`](Self::state) changed since the last call, so the client
+    /// can save it at once instead of waiting for the menu: `true` once per
+    /// change.
+    fn take_state_changed(&mut self) -> bool {
+        false
+    }
 }

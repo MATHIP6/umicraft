@@ -21,6 +21,7 @@ mod arrows;
 mod banner_cache;
 mod bolt;
 mod creatures;
+mod cull;
 mod dragon_beam;
 mod dragon_death;
 #[cfg(test)]
@@ -56,6 +57,7 @@ use umicraft_model::entity::{ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
 pub(crate) use animals::WITCH_SCALE;
+pub use cull::CullView;
 pub use hand::hand_vertices;
 pub(crate) use mobs::posed_humanoid_mob;
 pub(crate) use player::posed_player;
@@ -71,7 +73,14 @@ pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(snapshots, &skins::NoSkins, (0.0, 0.0), false, Vec3::ZERO).solid
+    mesh_entities_with(
+        snapshots,
+        &skins::NoSkins,
+        (0.0, 0.0),
+        false,
+        (Vec3::ZERO, None),
+    )
+    .solid
 }
 
 /// The meshes of a frame: the lit entities, and the glowing layers that are
@@ -93,7 +102,7 @@ fn mesh_entities_with(
     skins: &dyn skins::SkinLookup,
     (view_yaw, view_pitch): (f32, f32),
     viewer_is_spectator: bool,
-    camera: Vec3,
+    (camera, view): (Vec3, Option<CullView>),
 ) -> MeshedEntities {
     let mut solid: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut additive: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
@@ -102,6 +111,11 @@ fn mesh_entities_with(
     let mut shadows: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
+        // What the player cannot see is not meshed; `snapshots` stays whole for the
+        // entities that read another one (a bobber, a leash, a crystal beam).
+        if view.is_some_and(|view| cull::out_of_view(ent, view)) {
+            continue;
+        }
         let matrix = transform::model_matrix(ent);
         let light = entity_light(ent);
         for layer in mobs::build_entity_layers_for(ent, skins, viewer_is_spectator) {

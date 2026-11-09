@@ -230,6 +230,9 @@ pub struct DrawList {
     commands: Vec<DrawCommand>,
     /// Effective clip rectangles, each already intersected with its parent.
     clips: Vec<Rect>,
+    /// How see-through everything appended from now on is, `0.0` (the default)
+    /// being not at all; see [`Self::set_opacity`].
+    transparency: f32,
 }
 
 impl DrawList {
@@ -243,6 +246,31 @@ impl DrawList {
     pub fn clear(&mut self) {
         self.commands.clear();
         self.clips.clear();
+        self.transparency = 0.0;
+    }
+
+    /// Appends a copy of every command of `other`, which must be a complete frame
+    /// part: its clips balanced, its opacity already applied to its colours. A
+    /// cached part of a frame (the HUD) is laid into the frame with it.
+    pub fn extend_from(&mut self, other: &Self) {
+        self.commands.extend(other.commands.iter().cloned());
+    }
+
+    /// Multiplies the alpha of everything appended from now on by `opacity`
+    /// (`0.0..=1.0`), until the next call: a page fades in with it, a row at a
+    /// time. `1.0` draws as usual and a frame starts there.
+    pub fn set_opacity(&mut self, opacity: f32) {
+        self.transparency = 1.0 - opacity.clamp(0.0, 1.0);
+    }
+
+    /// `color` with the current opacity applied.
+    fn faded(&self, color: Color) -> Color {
+        [
+            color[0],
+            color[1],
+            color[2],
+            color[3] * (1.0 - self.transparency),
+        ]
     }
 
     /// True when the frame would draw nothing.
@@ -290,11 +318,13 @@ impl DrawList {
 
     /// Appends a solid rectangle.
     pub fn rect(&mut self, rect: Rect, color: Color) {
+        let color = self.faded(color);
         self.commands.push(DrawCommand::Rect { rect, color });
     }
 
     /// Appends a rectangle with corners rounded by `radius` pixels.
     pub fn rounded_rect(&mut self, rect: Rect, radius: f32, color: Color) {
+        let color = self.faded(color);
         self.commands.push(DrawCommand::RoundedRect {
             rect,
             radius,
@@ -304,12 +334,14 @@ impl DrawList {
 
     /// Appends a rectangle shaded from `top` to `bottom`.
     pub fn vertical_gradient(&mut self, rect: Rect, top: Color, bottom: Color) {
+        let (top, bottom) = (self.faded(top), self.faded(bottom));
         self.commands
             .push(DrawCommand::VerticalGradient { rect, top, bottom });
     }
 
     /// Appends a text run.
-    pub fn text(&mut self, position: [f32; 2], text: impl Into<String>, style: TextStyle) {
+    pub fn text(&mut self, position: [f32; 2], text: impl Into<String>, mut style: TextStyle) {
+        style.color = self.faded(style.color);
         self.commands.push(DrawCommand::Text {
             position,
             text: text.into(),
@@ -322,6 +354,7 @@ impl DrawList {
     /// `src` is `[u_min, v_min, u_max, v_max]` in normalised atlas
     /// coordinates. `color` tints the texel (`[1.0; 4]` = unmodified).
     pub fn image(&mut self, src: [f32; 4], dst: Rect, color: Color) {
+        let color = self.faded(color);
         self.commands.push(DrawCommand::Image { src, dst, color });
     }
 

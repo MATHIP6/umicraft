@@ -7,6 +7,8 @@
 //! display names and the chat styles reach the renderer intact. The client
 //! fills them from the `umicraft-game` HUD frames (`hud::*`).
 
+use std::sync::Arc;
+
 use crate::hud::ChatRunView;
 
 /// The text of a list of runs without its styles.
@@ -87,6 +89,11 @@ pub struct TabEntryView {
     pub uuid: u128,
     /// Whether the server sent a skin for the head.
     pub has_skin: bool,
+    /// Where that skin is downloaded from, so the client can look its face up.
+    pub skin_url: Option<Arc<str>>,
+    /// The face of the skin once it is downloaded: 8x8 RGBA pixels (256 bytes),
+    /// row by row, with the hat layer already over it.
+    pub face: Option<Arc<[u8]>>,
 }
 
 /// The tab list in display order, with its header and footer.

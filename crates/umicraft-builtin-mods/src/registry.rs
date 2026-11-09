@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::config::{ModConfig, ModsConfig};
 use crate::context::ModContext;
-use crate::hud::{HudContent, HudPlacement};
+use crate::hud::{HudContent, HudPlacement, HudStyle};
 use crate::id::ModId;
 use crate::meta::ModMeta;
 use crate::settings::{ModSettings, SettingValue, SettingsError};
@@ -180,6 +180,7 @@ impl ModRegistry {
             if entry.is_hud() {
                 entry.content.clear();
                 entry.module.draw(ctx, &entry.settings, &mut entry.content);
+                entry.content.style = HudStyle::from_settings(&entry.settings);
             }
         }
     }
@@ -203,6 +204,16 @@ impl ModRegistry {
         }
     }
 
+    /// Whether a mod changed what it keeps between runs since the last call, so
+    /// that the options are worth saving now.
+    pub fn take_state_changed(&mut self) -> bool {
+        let mut changed = false;
+        for entry in &mut self.entries {
+            changed |= entry.module.take_state_changed();
+        }
+        changed
+    }
+
     /// Applies saved state over the defaults. Invalid values are repaired; tables of
     /// unknown mods are kept for [`config`](Self::config).
     pub fn apply_config(&mut self, config: &ModsConfig) {
@@ -218,6 +229,7 @@ impl ModRegistry {
                         entry.enabled = enabled;
                     }
                     entry.settings.load(&saved.settings);
+                    entry.module.load_state(&saved.state);
                     if let (Some(placement), true) = (saved.placement, entry.is_hud()) {
                         entry.placement = placement.sanitized();
                     }
@@ -240,6 +252,7 @@ impl ModRegistry {
                     enabled: Some(entry.enabled),
                     settings: entry.settings.to_map(),
                     placement: entry.is_hud().then_some(entry.placement),
+                    state: entry.module.state(),
                 },
             );
         }

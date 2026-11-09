@@ -18,8 +18,8 @@ use umicraft_game::chat::{ChatInput, SentHistory};
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
-    chat_run_at, draw_hud_gui, gui_scale, Camera, ChatInputView, HudState, NoIcons, Overlay,
-    RenderEnvironment, Renderer, ScreenOverlays, SkyState,
+    chat_run_at, gui_scale, Camera, ChatInputView, HudState, NoIcons, Overlay, RenderEnvironment,
+    Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::menus::{ConnectStage, PanoramaTextures};
@@ -59,8 +59,10 @@ use crate::text_screens::TextScreens;
 
 use crate::achievements_view::java_string_hash;
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
+use crate::cpu_split::{CpuSplit, Stage};
 use crate::entity_icons::EntityIcons;
 use crate::fps_meter::FpsMeter;
+use crate::hud_cache::HudCache;
 use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
@@ -70,7 +72,7 @@ use crate::options::{self, Action, Binding, Options};
 use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
 use crate::panorama_faces::load_panorama_faces;
-use crate::portrait::{turned_towards, Spot};
+use crate::portrait::{carry, turned_towards, Spot};
 use crate::screen::Screen;
 use crate::servers::{Pinger, ServerBook};
 use crate::sky_textures::{load_border_texture, load_sky_textures};
@@ -79,6 +81,7 @@ use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
+use umicraft_mesh::item::ItemMesh;
 
 mod binding_input;
 mod chat_control;
@@ -101,6 +104,22 @@ const CLI_DEFAULT_VIEW_DISTANCE: u8 = 8;
 /// How long the chat caret stays on, then off, in milliseconds (6 ticks).
 const CARET_BLINK_MS: u128 = 300;
 const FRAME_HISTORY: usize = 120;
+/// The frame rate of a window that has lost the focus (or is minimized): the game
+/// goes on, but it stops competing with the program in front for the GPU, the
+/// CPU and the battery.
+const BACKGROUND_FPS: u32 = 30;
+
+/// The frame-rate cap in force: the option, and at most [`BACKGROUND_FPS`] without
+/// the focus.
+fn frame_cap(max_fps: u32, focused: bool) -> u32 {
+    if focused {
+        max_fps
+    } else {
+        max_fps.min(BACKGROUND_FPS)
+    }
+}
+/// The `HAT` bit of the skin parts (`EnumPlayerModelParts.HAT`).
+const HAT_PART: u8 = 0x40;
 
 /// Runs the windowed client until the user closes the window.
 ///
@@ -137,6 +156,17 @@ struct App {
     args: Args,
     /// The name tags of the frame, drawn by the renderer in the world pass.
     nametags: Vec<umicraft_render::Nametag>,
+    /// The pose of the hand in the last frame, to tell the motion blur when it moves.
+    last_hand: Option<umicraft_game::hand::HandPose>,
+    /// Where the CPU time of a frame goes, for F3.
+    cpu: CpuSplit,
+    /// Whether the window has the focus; without it the frame rate is capped low.
+    focused: bool,
+    /// The built HUD, kept while it does not change.
+    hud_cache: HudCache,
+    /// The entities of this frame, interpolated once: the tab list, the name tags and
+    /// the scene all read them (perf 2, B4).
+    frame_entities: Vec<umicraft_game::entity::EntityRenderSnapshot>,
     /// The particle quads of the frame, rebuilt in place.
     particle_sprites: Vec<umicraft_render::ParticleSprite>,
     /// The user's options: video, mouse, chat and the key bindings.
@@ -365,6 +395,11 @@ impl App {
             ctrl_held: false,
             shift_held: false,
             nametags: Vec::new(),
+            last_hand: None,
+            cpu: CpuSplit::default(),
+            focused: true,
+            hud_cache: HudCache::default(),
+            frame_entities: Vec::new(),
             particle_sprites: Vec::new(),
             pointer: (0.0, 0.0),
             chat_hover: None,
@@ -751,6 +786,11 @@ impl App {
         }
         let mut state = self.key_state();
         self.mods.apply_to_state(&mut state);
+        if self.mods.take_state_changed() {
+            // Toggle sprint went on or off: keep it for the next run.
+            self.options.mods = self.mods.config();
+            self.save_options();
+        }
         let changed = state != self.last_input
             || self.look != (0.0, 0.0)
             || self.select_slot.is_some()
@@ -798,7 +838,12 @@ impl App {
             return;
         };
         world.sync(session.frames(), session.chunks(), renderer);
-        world.update_camera(&mut self.camera, now, self.options.video.view_bobbing);
+        let video = &self.options.video;
+        world.update_camera(
+            &mut self.camera,
+            now,
+            (video.view_bobbing, video.dynamic_fov),
+        );
         world.focus_on(&self.camera);
         self.audio.play_cues(&world.take_sounds());
         self.audio
@@ -858,6 +903,7 @@ impl App {
     /// caller recycles the returned output after the renderer consumed the
     /// draw list.
     fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
+        umicraft_core::profile_scope!("build_ui_frame");
         self.portrait = None;
         self.nametags.clear();
         // Only the title screen sets it again below; every other frame,
@@ -894,6 +940,34 @@ impl App {
                 .map(|world| world.hud().clone())
                 .unwrap_or_default();
             self.options.chat.apply(&mut game_hud);
+            // The faces of the skins are only looked up while the tab list shows.
+            // As in `GuiPlayerTabOverlay`, the hat layer is drawn only for a player
+            // that is in the world and wears it.
+            if self.screen() == Screen::None && self.held(Action::PlayerList) {
+                if let (Some(tab), Some(textures), Some(world)) = (
+                    game_hud.tab_list.as_mut(),
+                    self.entity_textures.as_ref(),
+                    self.world.as_ref(),
+                ) {
+                    // The local player is always in the world for the reference, but
+                    // the entity list leaves it out in the first person.
+                    let local = world.local_body();
+                    let hats: std::collections::HashSet<u128> = self
+                        .frame_entities
+                        .iter()
+                        .chain(local.as_ref())
+                        .filter(|entity| entity.flags.skin_parts & HAT_PART != 0)
+                        .filter_map(|entity| entity.uuid.map(u128::from_be_bytes))
+                        .collect();
+                    for entry in &mut tab.entries {
+                        let hat = hats.contains(&entry.uuid);
+                        entry.face = entry
+                            .skin_url
+                            .as_deref()
+                            .and_then(|url| textures.face(url, hat));
+                    }
+                }
+            }
             let chatting = self.screen == Screen::Chat;
             let debug_f3 = self.show_f3.then(|| {
                 crate::debug_f3_view::build_live(
@@ -901,6 +975,7 @@ impl App {
                     self.world.as_ref(),
                     &crate::debug_f3_view::Live {
                         fps: self.fps,
+                        cpu: self.cpu.reading(),
                         video: &self.options.video,
                         display: (width, height),
                         camera: &self.camera,
@@ -921,17 +996,24 @@ impl App {
                     caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
                         .is_multiple_of(2),
                 }),
-                now: Some(Instant::now()),
+                // The clock of the cached HUD stands still for a tick, so an unchanged
+                // HUD compares equal and is not built again (perf 2, B2).
+                now: Some(self.hud_cache.clock(Instant::now())),
                 show_tab_list: self.screen() == Screen::None && self.held(Action::PlayerList),
-                mod_widgets: mods_menu::hud_widgets(
-                    self.screen(),
-                    &self.mods,
-                    atlas,
-                    (width, height),
-                ),
+                // The mod widgets change with the frame (the fps, the position):
+                // they are drawn after the cached HUD, in the same place of the order.
+                mod_widgets: Vec::new(),
                 ..game_hud
             };
-            draw_hud_gui(self.ui.draw(), &hud, (width, height), atlas, &sheets);
+            self.hud_cache
+                .draw(self.ui.draw(), &hud, (width, height), (atlas, &sheets));
+            let widgets = mods_menu::hud_widgets(self.screen(), &self.mods, atlas, (width, height));
+            umicraft_ui::mod_widget::draw_mod_widgets(
+                self.ui.draw(),
+                &widgets,
+                gui_scale(width, height) as f32,
+                atlas,
+            );
             self.chat_hover = chatting
                 .then(|| chat_run_at(&hud, (width, height), atlas, self.pointer))
                 .flatten();
@@ -952,12 +1034,15 @@ impl App {
                 &rows,
             );
         }
-        if let Some(world) = self.world.as_ref().filter(|_| in_game) {
-            if !matches!(screen, Screen::Inventory | Screen::Creative) {
-                let entities = world.entities(Instant::now(), self.camera.render_origin());
-                let tags = place_tags(&entities, &self.camera, width as f32, height as f32);
-                self.nametags = draw_tags(atlas, &tags);
-            }
+        if self.world.is_some() && in_game {
+            // The world keeps drawing behind an inventory screen, name tags included.
+            let tags = place_tags(
+                &self.frame_entities,
+                &self.camera,
+                width as f32,
+                height as f32,
+            );
+            self.nametags = draw_tags(atlas, &tags);
         }
 
         if self.death_screen_visible() {
@@ -1130,6 +1215,7 @@ impl App {
         umicraft_core::profiling::new_frame();
         umicraft_core::profile_scope!("redraw");
         let now = Instant::now();
+        self.cpu.start(now);
         let elapsed = (now - self.last_frame).as_secs_f32();
         self.last_frame = now;
         let frame_ms = elapsed * 1000.0;
@@ -1148,6 +1234,10 @@ impl App {
         self.camera.set_fov_degrees(self.options.video.fov);
         self.advance_menus(Duration::from_secs_f32(elapsed));
         self.sync_world(now);
+        // The camera is where it stays for this frame: the entities are made once.
+        self.frame_entities = self.world.as_ref().map_or_else(Vec::new, |world| {
+            world.entities(now, self.camera.render_origin())
+        });
         self.update_server_pack();
         self.update_music(now);
         self.process_completions();
@@ -1175,7 +1265,9 @@ impl App {
         // The dials first, so the icon keys of this frame name the frames the
         // block array shows.
         self.advance_dials(Duration::from_secs_f32(elapsed), environment);
+        self.cpu.lap(Stage::World);
         let ui_frame = self.build_ui_frame(width, height);
+        self.cpu.lap(Stage::Hud);
         if let Some(action) = self.menu_action.take() {
             self.apply_game_menu_action(action);
         }
@@ -1236,6 +1328,15 @@ impl App {
         // The mods menu blurs the game behind it to keep the focus on itself.
         let blur = mods_menu::background_blur(self.screen, &self.menu);
         renderer.set_background_blur(blur);
+        // The Motion Blur mod: the settings cost nothing while they are the same.
+        renderer.set_motion_blur(self.mods.motion_blur());
+        renderer.set_fullbright(self.mods.fullbright());
+        // The body of the player is part of the picture in the third person.
+        renderer.set_motion_blur_body(
+            self.world
+                .as_ref()
+                .and_then(|world| world.third_person_body(now)),
+        );
         renderer.set_nametags(&self.nametags, (width, height));
         if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
         {
@@ -1246,6 +1347,8 @@ impl App {
             renderer.set_moving_blocks(&world.moving_blocks_mesh(environment.partial_tick));
         }
 
+        // No world, no hand: set again below when there is one.
+        renderer.set_motion_blur_hand_moving(false);
         if let (Some(entity_textures), Some(world)) =
             (self.entity_textures.as_ref(), self.world.as_ref())
         {
@@ -1258,12 +1361,18 @@ impl App {
                 render_origin.y as i32,
                 render_origin.z as i32,
             ];
-            let entities = world.entities(now, render_origin);
+            let entities = &self.frame_entities;
             let hand = world.hand_pose(now);
+            // The motion blur follows the hand too: a swing blurs it, a still hand not.
+            renderer.set_motion_blur_hand_moving(
+                hand.visible && self.last_hand.is_some_and(|last| last != hand),
+            );
+            self.last_hand = hand.visible.then_some(hand);
             let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
             entity_textures.set_camera_position(self.camera.relative_eye());
+            entity_textures.set_cull_view(self.camera.relative_eye(), self.camera.forward());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
                     == umicraft_game::gamemode::GameMode::Spectator,
@@ -1272,7 +1381,7 @@ impl App {
                 .filter(|_| hand.visible)
                 .and_then(|stack| map_id_of(stack.item_id, stack.damage));
             let framed = self.map_textures.as_mut().map_or_else(Vec::new, |maps| {
-                maps.frame_batches(&entities, world.maps(), renderer)
+                maps.frame_batches(entities, world.maps(), renderer)
             });
             let mut block_entities = mesh_block_entities(
                 world.block_entities(),
@@ -1290,7 +1399,7 @@ impl App {
             );
             let mut hand_item = None;
             if let Some(items) = self.items.as_deref() {
-                entity_items::push(&mut block_entities, &entities, items, entity_textures);
+                entity_items::push(&mut block_entities, entities, items, entity_textures);
                 hand_item = held_stack(world)
                     .filter(|_| hand.visible)
                     .and_then(|stack| {
@@ -1305,7 +1414,7 @@ impl App {
                     });
             }
             entity_textures.set_block_entities(block_entities);
-            entity_textures.mesh_and_upload_with(&entities, &framed, renderer);
+            entity_textures.mesh_and_upload_with(entities, &framed, renderer);
             match (held_map, self.map_textures.as_mut()) {
                 (Some(map_id), Some(maps)) => {
                     let bob = self.camera.view_bob();
@@ -1336,7 +1445,7 @@ impl App {
             if let Some(items) = self.items.as_deref() {
                 self.world_items
                     .set_view(self.camera.yaw, self.camera.pitch);
-                let dropped = self.world_items.build(&entities, items);
+                let dropped = self.world_items.build(entities, items);
                 renderer.set_world_items(&dropped.items);
                 renderer.set_world_glint(&dropped.glint);
                 self.hand_layers.clear();
@@ -1363,11 +1472,19 @@ impl App {
             self.world.as_ref().and_then(|world| world.local_body()),
         ) {
             let mouse = spot.mouse_offset(self.pointer);
-            textures.render_portrait(
-                &turned_towards(body, mouse),
-                spot.placement.matrix(mouse),
-                renderer,
-            );
+            let posed = turned_towards(body, mouse);
+            let matrix = spot.placement.matrix(mouse);
+            // The item in the hand lives in the item layers, not in the entity mesh.
+            let mut held = ItemMesh::default();
+            if let Some(items) = self.items.as_deref() {
+                held.clone_from(
+                    &WorldItems::default()
+                        .build(std::slice::from_ref(&posed), items)
+                        .items,
+                );
+                carry(&mut held, matrix);
+            }
+            textures.render_portrait(&posed, matrix, &held, renderer);
         }
         if let (Some(frame), Some(items), Some(textures)) = (
             ui_frame.as_ref(),
@@ -1380,6 +1497,7 @@ impl App {
         if std::mem::take(&mut self.screenshot_requested) {
             renderer.request_capture();
         }
+        self.cpu.lap(Stage::Scene);
         let rendered = match (ui_frame.as_ref(), self.items.as_deref()) {
             (Some(frame), Some(items)) => renderer.render_with_ui(
                 &self.camera,
@@ -1392,6 +1510,8 @@ impl App {
             }
             (None, _) => renderer.render(&self.camera, &self.overlay),
         };
+        self.cpu.lap(Stage::Render);
+        self.cpu.finish();
         let captured = renderer.take_capture();
         if let Some(frame) = ui_frame {
             self.ui.recycle_output(frame);
@@ -1407,8 +1527,9 @@ impl App {
         // The frame-rate cap. The target moves on by one exact budget per frame,
         // so the wake-up delay of a sleep is not lost on every frame; the last
         // millisecond is spun because a sleep overshoots by about that much.
-        if self.options.video.max_fps < options::UNLIMITED_FPS {
-            let budget = Duration::from_secs_f32(1.0 / self.options.video.max_fps as f32);
+        let cap = frame_cap(self.options.video.max_fps, self.focused);
+        if cap < options::UNLIMITED_FPS {
+            let budget = Duration::from_secs_f32(1.0 / cap as f32);
             self.next_frame += budget;
             let arrived = Instant::now();
             if self.next_frame < arrived {
@@ -1552,7 +1673,10 @@ impl ApplicationHandler for App {
         // Upload the atlas once, before the first UI frame. A rejected atlas
         // falls back to the built-in font; only a rejected fallback is fatal.
         match ui_font::install(&mut renderer, &self.font.atlas) {
-            Ok(installed) => self.ui_atlas = Some(installed.atlas),
+            Ok(installed) => {
+                self.ui_atlas = Some(installed.atlas);
+                self.hud_cache.invalidate();
+            }
             Err(error) => {
                 self.exit_error = Some(ClientError::FontAtlas(error).to_string());
                 event_loop.exit();
@@ -1688,6 +1812,7 @@ impl ApplicationHandler for App {
             // an open screen (inventory, menu, death screen) keeps the pointer
             // free as before.
             WindowEvent::Focused(true) => {
+                self.focused = true;
                 if self.session.is_some()
                     && self.screen() == Screen::None
                     && !self.death_screen_visible()
@@ -1696,6 +1821,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Focused(false) => {
+                self.focused = false;
                 self.keys.clear();
                 self.buttons.clear();
                 self.capture_mouse(false);
@@ -1764,6 +1890,17 @@ fn new_menu(last_server: String) -> MenuFlow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_without_the_focus_is_capped_low_and_one_with_it_is_not() {
+        assert_eq!(
+            frame_cap(options::UNLIMITED_FPS, true),
+            options::UNLIMITED_FPS
+        );
+        assert_eq!(frame_cap(144, true), 144);
+        assert_eq!(frame_cap(options::UNLIMITED_FPS, false), BACKGROUND_FPS);
+        assert_eq!(frame_cap(20, false), 20, "an option already lower stays");
+    }
 
     #[test]
     fn a_fresh_f2_press_is_the_only_toggle() {

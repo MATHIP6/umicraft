@@ -126,8 +126,8 @@ impl App {
         }
     }
 
-    /// Hands a key to the mods menu. Escape closes it from the landing page; on
-    /// the list and the settings pages it goes to the UI, which steps back.
+    /// Hands a key to the mods menu. Escape closes it from the list; on the
+    /// settings page it goes to the UI, which steps back to the list.
     pub(super) fn handle_mods_key(&mut self, event: &KeyEvent) {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;

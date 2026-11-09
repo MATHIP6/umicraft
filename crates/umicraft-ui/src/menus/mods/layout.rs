@@ -8,31 +8,37 @@ use crate::geom::Rect;
 use crate::menus::common::Gui;
 
 /// Width of the panel, in GUI units, when the screen is wide enough.
-const PANEL_WIDTH: f32 = 320.0;
+const PANEL_WIDTH: f32 = 340.0;
 /// Height of the panel when the screen is tall enough.
-const PANEL_HEIGHT: f32 = 200.0;
+const PANEL_HEIGHT: f32 = 190.0;
+/// How far the panel is lifted above the middle of the screen, in GUI units.
+const BAR_ROOM: f32 = 8.0;
 /// Space kept free between the panel and the screen edge.
 const SCREEN_MARGIN: f32 = 8.0;
 /// Space between the panel edge and its content.
-const PAD: f32 = 8.0;
+const PAD: f32 = 10.0;
 /// Space between two rows or two neighbouring widgets.
 pub(super) const GAP: f32 = 4.0;
 /// Height of the title band.
-const HEADER_HEIGHT: f32 = 12.0;
+const HEADER_HEIGHT: f32 = 10.0;
 /// Edge of the square close cross.
-const CLOSE_SIZE: f32 = 12.0;
+const CLOSE_SIZE: f32 = 10.0;
 /// Height of the search row.
-const ROW_HEIGHT: f32 = 14.0;
+const ROW_HEIGHT: f32 = 13.0;
 /// Width of the "back" button of the settings page.
 const BACK_WIDTH: f32 = 54.0;
 /// Height of the tab row.
-const TABS_HEIGHT: f32 = 12.0;
+const TABS_HEIGHT: f32 = 10.0;
 /// Height of the hint line at the bottom.
 const HINT_HEIGHT: f32 = 8.0;
 /// Height of a mod card.
-pub(super) const CARD_HEIGHT: f32 = 34.0;
-/// Panel width above which the cards go in two columns.
-const TWO_COLUMNS_FROM: f32 = 240.0;
+pub(super) const CARD_HEIGHT: f32 = 54.0;
+/// Space between two rows of cards.
+const LIST_GAP: f32 = 4.0;
+/// List width, in GUI units, from which the cards go in three columns, and in
+/// two; below, in one.
+const THREE_COLUMNS_FROM: f32 = 280.0;
+const TWO_COLUMNS_FROM: f32 = 180.0;
 
 /// The rectangles of the panel pages (list and settings), in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -66,7 +72,8 @@ pub fn mods_layout(viewport: Rect) -> ModsLayout {
     let width = PANEL_WIDTH.min(gui.width - 2.0 * SCREEN_MARGIN);
     let height = PANEL_HEIGHT.min(gui.height - 2.0 * SCREEN_MARGIN);
     let left = ((gui.width - width) * 0.5).floor();
-    let top = ((gui.height - height) * 0.5).floor();
+    // Higher than the middle: the reset bar of the HUD widgets sits under it.
+    let top = (((gui.height - height) * 0.5 - BAR_ROOM).max(SCREEN_MARGIN)).floor();
     let inner = width - 2.0 * PAD;
     let (x, header_y) = (left + PAD, top + PAD);
     let row_y = header_y + HEADER_HEIGHT + GAP;
@@ -99,7 +106,9 @@ pub fn mods_layout(viewport: Rect) -> ModsLayout {
 /// How many columns of cards fit in an area `width_units` wide.
 #[must_use]
 pub(super) fn columns(width_units: f32) -> usize {
-    if width_units >= TWO_COLUMNS_FROM {
+    if width_units >= THREE_COLUMNS_FROM {
+        3
+    } else if width_units >= TWO_COLUMNS_FROM {
         2
     } else {
         1
@@ -113,7 +122,7 @@ pub(super) fn content_height(count: usize, columns: usize) -> f32 {
     if rows == 0 {
         0.0
     } else {
-        rows as f32 * (CARD_HEIGHT + GAP) - GAP
+        rows as f32 * (CARD_HEIGHT + LIST_GAP) - LIST_GAP
     }
 }
 
@@ -132,7 +141,7 @@ pub(super) fn card_rect(
     let (row, column) = (index / columns, index % columns);
     Rect::new(
         list.x + column as f32 * (width + gap),
-        list.y + (row as f32 * (CARD_HEIGHT + GAP) - offset) * scale,
+        list.y + (row as f32 * (CARD_HEIGHT + LIST_GAP) - offset) * scale,
         width,
         CARD_HEIGHT * scale,
     )

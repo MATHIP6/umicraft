@@ -7,14 +7,12 @@ use crate::geom::Rect;
 use crate::text::FontAtlas;
 
 use super::text::{draw_text, measure_text, Align};
-use super::theme::{
-    mix, with_opacity, ACCENT, RADIUS, SURFACE, SURFACE_HOVER, TEXT, TEXT_MUTED, TEXT_SIZE_SMALL,
-};
+use super::theme::{mix, with_opacity, TEXT, TEXT_MUTED, TEXT_SIZE_SMALL};
 
 /// Space on each side of a label, in GUI units.
-const PADDING: f32 = 5.0;
+const PADDING: f32 = 3.0;
 /// Space between two tabs, in GUI units.
-const GAP: f32 = 2.0;
+const GAP: f32 = 5.0;
 
 /// The rectangles of tabs of the given `widths` laid side by side from the
 /// left of `area`, all as high as `area`. `gap` separates them.
@@ -44,7 +42,7 @@ pub fn tabs(
     brand: &FontAtlas,
     area: Rect,
     labels: &[&str],
-    selected: usize,
+    (selected, position): (usize, f32),
     scale: f32,
 ) -> Option<usize> {
     let size = TEXT_SIZE_SMALL * scale;
@@ -58,17 +56,12 @@ pub fn tabs(
     for (index, (rect, label)) in rects.iter().zip(labels).enumerate() {
         let id = ui.id(&index.to_string());
         let response = ui.response(id, *rect);
-        let fill = if index == selected {
-            with_opacity(ACCENT, 0.45)
+        let hover = f32::from(u8::from(response.hovered));
+        let color = if index == selected {
+            TEXT
         } else {
-            mix(
-                SURFACE,
-                SURFACE_HOVER,
-                f32::from(u8::from(response.hovered)),
-            )
+            mix(with_opacity(TEXT_MUTED, 0.85), TEXT, hover)
         };
-        ui.draw().rounded_rect(*rect, RADIUS * scale, fill);
-        let color = if index == selected { TEXT } else { TEXT_MUTED };
         let middle = (rect.x + rect.width * 0.5, rect.y + rect.height * 0.5);
         draw_text(ui, brand, label, middle, (size, color, Align::Center));
         if response.clicked {
@@ -77,5 +70,21 @@ pub fn tabs(
         }
     }
     ui.pop_id();
+    // The line under the selected tab is a one-pixel rule that the caller moves
+    // from tab to tab: `position` is a tab number that may be between two.
+    if let Some(last) = rects.len().checked_sub(1) {
+        let at = position.clamp(0.0, last as f32);
+        let (from, to) = (at.floor() as usize, (at.floor() as usize + 1).min(last));
+        let blend = at - at.floor();
+        let lerp = |a: f32, b: f32| a + (b - a) * blend;
+        let thickness = scale.max(1.0);
+        let line = Rect::new(
+            lerp(rects[from].x, rects[to].x) + PADDING * scale,
+            area.bottom() - thickness,
+            lerp(rects[from].width, rects[to].width) - 2.0 * PADDING * scale,
+            thickness,
+        );
+        ui.draw().rect(line, with_opacity(TEXT, 0.85));
+    }
     clicked
 }

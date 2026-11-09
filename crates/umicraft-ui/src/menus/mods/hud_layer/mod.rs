@@ -15,6 +15,7 @@
 
 mod drag;
 mod frame;
+mod gear;
 mod guides;
 mod paint;
 mod shield;
@@ -24,6 +25,12 @@ mod toolbar;
 mod view;
 
 pub use view::{HudEditorOutcome, HudEditorView, HudWidgetView, Snap};
+
+/// The gear of the widget whose text covers `rect`, for the tests of the menu.
+#[cfg(test)]
+pub(super) fn gear_rect_for_tests(rect: crate::geom::Rect) -> crate::geom::Rect {
+    gear::gear_rect(rect, [427.0, 240.0])
+}
 
 use umicraft_core::lang::Lang;
 
@@ -35,6 +42,8 @@ use crate::mod_widget::{measure, ModWidgetView};
 use crate::text::FontAtlas;
 
 use drag::{hit_widget, on_handle, wheel_resize, Bounds, Drag, Grab};
+use frame::frame_rect;
+use gear::gear_rect;
 use shield::Shield;
 use toolbar::ToolbarAction;
 
@@ -92,6 +101,7 @@ impl HudLayer {
 
         self.draw_widgets(ui, &gui, font, view);
         self.draw_overlay(ui, &gui, (view, &rects), &shield);
+        self.draw_gears(ui, brand, &gui, (view, &rects), &shield);
         if !zones.bar {
             return placed;
         }
@@ -129,7 +139,12 @@ impl HudLayer {
                     position,
                     button: PointerButton::Left,
                 } if !shield.covers(*position) => {
-                    self.press(gui.to_gui(*position), (view, rects));
+                    let point = gui.to_gui(*position);
+                    if let Some(id) = self.gear_at(point, (view, rects)) {
+                        placed = Some(HudEditorOutcome::OpenSettings { id });
+                    } else {
+                        self.press(point, (view, rects));
+                    }
                 }
                 InputEvent::PointerReleased {
                     button: PointerButton::Left,
@@ -145,15 +160,45 @@ impl HudLayer {
         placed
     }
 
+    /// The widgets that show a gear with the pointer at `point`: the one the
+    /// pointer is over and the selected one. Nothing while a
+    /// widget is dragged.
+    pub(super) fn gear_targets(
+        &self,
+        point: Option<[f32; 2]>,
+        (view, rects): (&HudEditorView, &[Rect]),
+    ) -> Vec<usize> {
+        let mut targets = Vec::new();
+        if self.drag.is_some() {
+            return targets;
+        }
+        let under = point.and_then(|p| hit_widget(rects, p, view.screen));
+        targets.extend(under);
+        if let Some(selected) = self.selected_index(view) {
+            if !targets.contains(&selected) {
+                targets.push(selected);
+            }
+        }
+        targets
+    }
+
+    /// The id of the mod whose gear is at `point`, if one is shown there.
+    fn gear_at(&self, point: [f32; 2], (view, rects): (&HudEditorView, &[Rect])) -> Option<String> {
+        self.gear_targets(Some(point), (view, rects))
+            .into_iter()
+            .find(|&index| gear_rect(rects[index], view.screen).contains(point))
+            .map(|index| view.widgets[index].id.clone())
+    }
+
     /// A press at `point`: selects the widget under it and starts dragging it
     /// by its body or, on the corner handle, resizing it.
     fn press(&mut self, point: [f32; 2], (view, rects): (&HudEditorView, &[Rect])) {
-        let Some(index) = hit_widget(rects, point) else {
+        let Some(index) = hit_widget(rects, point, view.screen) else {
             self.selected = None;
             return;
         };
         let (rect, widget) = (rects[index], &view.widgets[index]);
-        let grab = if on_handle(rect, point) {
+        let grab = if on_handle(frame_rect(rect, view.screen), point) {
             Grab::Resize(point[0] - rect.right())
         } else {
             Grab::Move([point[0] - rect.x, point[1] - rect.y])
@@ -191,7 +236,7 @@ impl HudLayer {
     ) -> Option<HudEditorOutcome> {
         let pointer = ui.pointer().filter(|p| !shield.covers(*p))?;
         let point = gui.to_gui(pointer);
-        let index = hit_widget(rects, point)?;
+        let index = hit_widget(rects, point, view.screen)?;
         let widget = &view.widgets[index];
         self.selected = Some(widget.id.clone());
         let (rect, scale) = wheel_resize((rects[index], widget.widget.scale), notches, bounds)?;
@@ -218,6 +263,6 @@ impl HudLayer {
 
 /// The rectangle a widget covers, in GUI units.
 fn widget_rect(font: &FontAtlas, widget: &ModWidgetView) -> Rect {
-    let (width, height) = measure(font, &widget.lines, widget.scale);
+    let (width, height) = measure(font, &widget.lines, widget.scale, &widget.style);
     Rect::new(widget.position[0], widget.position[1], width, height)
 }

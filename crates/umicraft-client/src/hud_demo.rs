@@ -28,8 +28,7 @@ use umicraft_render::{
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
 use umicraft_ui::menus::{
-    landing_layout, stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView,
-    StatsTab, TitleStyle,
+    stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab, TitleStyle,
 };
 use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use winit::keyboard::KeyCode;
@@ -385,14 +384,8 @@ fn menu_scene(
         let output = ui.end_frame();
         ui.recycle_output(output);
     }
-    if view == "mods_list" {
-        // One frame with a click on the Mods button, as the player would.
-        let button = landing_layout(viewport).mods;
-        ui.begin_frame(viewport, click(button));
-        flow.show(screen, &mut ui, atlas, &lang, &context);
-        let output = ui.end_frame();
-        ui.recycle_output(output);
-    }
+    // The capture is one frame: the page is already in.
+    flow.settle_mods();
     ui.begin_frame(viewport, UiInput::default());
     let frame = flow.show(screen, &mut ui, atlas, &lang, &context);
     let output = ui.end_frame();

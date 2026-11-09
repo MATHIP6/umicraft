@@ -28,6 +28,7 @@
 use fontdue::{Font, FontSettings};
 use thiserror::Error;
 
+use crate::icons::{self, Icon};
 use crate::text::{FontAtlas, Glyph};
 
 /// The size, in pixels per em, at which the brand face is rasterized. Large
@@ -116,10 +117,11 @@ pub fn rasterize(ttf: &[u8], pixel_size: f32) -> Result<FontAtlas, BrandFontErro
     let baseline = metrics.ascent.ceil() as i32;
     let cell_height = (baseline + (-metrics.descent).ceil() as i32).max(1) as u32;
 
-    let cells: Vec<Cell> = covered_characters()
+    let mut cells: Vec<Cell> = covered_characters()
         .filter(|&c| c == ' ' || font.lookup_glyph_index(c) != 0)
         .map(|c| render_cell(&font, c, pixel_size, baseline, cell_height))
         .collect();
+    cells.extend(Icon::ALL.map(|icon| icon_cell(icon, pixel_size, cell_height)));
 
     let (placements, white, height) = pack(&cells)?;
     let mut pixels = vec![0u8; ATLAS_WIDTH as usize * height as usize];
@@ -177,6 +179,29 @@ fn render_cell(font: &Font, character: char, size: f32, baseline: i32, height: u
         character,
         advance,
         width,
+        height,
+        coverage,
+    }
+}
+
+/// The cell of `icon`: a square as wide as the em, centred on the line so that
+/// drawing it like a letter puts it on the middle of the line.
+fn icon_cell(icon: Icon, pixel_size: f32, height: u32) -> Cell {
+    let side = pixel_size.round().max(1.0) as u32;
+    let ink = icons::rasterize(icon, side);
+    let top = height.saturating_sub(side) / 2;
+    let mut coverage = vec![0u8; (side * height) as usize];
+    for (row, source) in ink.chunks_exact(side as usize).enumerate() {
+        let y = top as usize + row;
+        if y < height as usize {
+            let start = y * side as usize;
+            coverage[start..start + source.len()].copy_from_slice(source);
+        }
+    }
+    Cell {
+        character: icon.character(),
+        advance: side,
+        width: side,
         height,
         coverage,
     }
@@ -314,6 +339,23 @@ mod tests {
             .filter(|&(x, y)| atlas.pixels[y * atlas.width as usize + x] > 200)
             .count();
         assert!(inked > 100);
+    }
+
+    #[test]
+    fn every_icon_is_a_glyph_with_ink_as_wide_as_the_em() {
+        let atlas = atlas();
+        for icon in Icon::ALL {
+            let glyph = atlas
+                .glyph(icon.character())
+                .expect("the icon is in the atlas");
+            assert_eq!(glyph.advance, BRAND_PIXEL_SIZE);
+            let [x0, y0, x1, y1] = texels(&atlas, glyph.uv_min, glyph.uv_max);
+            let inked = (y0..y1)
+                .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+                .filter(|&(x, y)| atlas.pixels[y * atlas.width as usize + x] > 200)
+                .count();
+            assert!(inked > 60, "{icon:?} has no ink in the atlas");
+        }
     }
 
     #[test]

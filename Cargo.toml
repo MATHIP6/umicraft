@@ -65,3 +65,11 @@ unsafe_code = "deny"
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 chunks_exact_to_as_chunks = "allow"
+
+# The build to hand out: `cargo build --profile dist`. Fat LTO with one codegen unit
+# makes the CPU-bound scene about 6 to 8 % faster (docs/perf-log.md, 2026-11-09) and
+# takes about 4 minutes cold, so day-to-day builds keep the plain `release` profile.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1

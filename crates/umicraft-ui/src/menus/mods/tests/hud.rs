@@ -17,6 +17,7 @@ fn widget(id: &str, position: [f32; 2]) -> HudWidgetView {
             lines: vec![ModLine::new("60 FPS", 0xFFFFFF)],
             position,
             scale: 1.0,
+            style: Default::default(),
         },
     }
 }
@@ -57,9 +58,10 @@ fn drag_from(screen: &mut ModsScreen, view: &ModsView, from: [f32; 2]) -> Option
     show_view(screen, view, UiInput::new(events))
 }
 
-/// The pixel at the middle of the widget at `position` (it is wider than 8 units).
+/// A pixel inside the widget at `position`, up and right of its gear (it is wider
+/// than 20 units).
 fn inside(position: [f32; 2]) -> [f32; 2] {
-    [(position[0] + 8.0) * SCALE, (position[1] + 5.0) * SCALE]
+    [(position[0] + 20.0) * SCALE, (position[1] + 3.0) * SCALE]
 }
 
 /// Whether the outcome moved a widget (a button released under the pointer
@@ -73,32 +75,11 @@ fn gui_position(rect: Rect) -> [f32; 2] {
 }
 
 #[test]
-fn a_widget_dragged_on_the_landing_page_is_placed() {
-    let view = view_with(vec![widget("fps", [20.0, 20.0])]);
-    let outcome = drag_from(&mut ModsScreen::new(), &view, inside([20.0, 20.0]));
-    let Some(ModsOutcome::Hud(HudEditorOutcome::Placed { id, rect, .. })) = outcome else {
-        panic!("expected a placement, got {outcome:?}");
-    };
-    assert_eq!(id, "fps");
-    assert_eq!(rect.x, 30.0);
-    assert!((rect.y - (20.0 + 20.0 / SCALE)).abs() < 1e-3, "{}", rect.y);
-}
-
-#[test]
-fn a_drag_that_starts_on_the_mods_button_places_nothing() {
-    let button = landing_layout(VIEWPORT).mods;
-    let view = view_with(vec![widget("fps", gui_position(button))]);
-    let from = [button.x + 4.0, button.y + 4.0];
-    let outcome = drag_from(&mut ModsScreen::new(), &view, from);
-    assert!(!placed(&outcome), "{outcome:?}");
-}
-
-#[test]
 fn a_drag_that_starts_on_the_cross_places_nothing() {
-    let cross = landing_layout(VIEWPORT).close;
+    let cross = mods_layout(VIEWPORT).close;
     let view = view_with(vec![widget("fps", gui_position(cross))]);
     let from = [cross.x + 2.0, cross.y + 2.0];
-    let outcome = drag_from(&mut ModsScreen::new(), &view, from);
+    let outcome = drag_from(&mut on_list(), &view, from);
     assert!(!placed(&outcome), "{outcome:?}");
 }
 
@@ -117,28 +98,63 @@ fn a_widget_beside_the_open_panel_is_still_movable() {
     assert!(inside(position)[0] < panel.x);
     let view = view_with(vec![widget("fps", position)]);
     let outcome = drag_from(&mut on_list(), &view, inside(position));
-    assert!(matches!(
-        outcome,
-        Some(ModsOutcome::Hud(HudEditorOutcome::Placed { .. }))
-    ));
+    let Some(ModsOutcome::Hud(HudEditorOutcome::Placed { id, rect, .. })) = outcome else {
+        panic!("expected a placement, got {outcome:?}");
+    };
+    assert_eq!(id, "fps");
+    assert_eq!(rect.x, 12.0);
+    assert!((rect.y - (2.0 + 20.0 / SCALE)).abs() < 1e-3, "{}", rect.y);
 }
 
 #[test]
-fn the_reset_bar_is_only_on_the_landing_page() {
+fn the_reset_bar_is_under_the_panel() {
     let view = view_with(vec![widget("fps", [20.0, 20.0])]);
-    let landing = texts(&mut ModsScreen::new(), &view);
-    assert!(has_text(&landing, "umicraft.mods.editor.reset_all"));
     let list = texts(&mut on_list(), &view);
-    assert!(!has_text(&list, "umicraft.mods.editor.reset_all"));
+    assert!(has_text(&list, "umicraft.mods.editor.reset_all"));
 }
 
 #[test]
-fn the_landing_says_how_to_move_widgets_or_that_none_is_on() {
+fn the_panel_says_how_to_move_widgets_only_when_there_is_one() {
     let with = texts(
-        &mut ModsScreen::new(),
+        &mut on_list(),
         &view_with(vec![widget("fps", [20.0, 20.0])]),
     );
     assert!(has_text(&with, "umicraft.mods.editor.hint"), "{with:?}");
-    let none = texts(&mut ModsScreen::new(), &view());
-    assert!(has_text(&none, "umicraft.mods.editor.empty"), "{none:?}");
+    let none = texts(&mut on_list(), &view());
+    assert!(!has_text(&none, "umicraft.mods.editor.hint"), "{none:?}");
+}
+
+#[test]
+fn the_gear_of_a_widget_opens_the_settings_of_its_mod() {
+    // The widget stands left of the panel; its mod is the first card.
+    let position = [2.0, 40.0];
+    let view = view_with(vec![widget("fps", position)]);
+    let mut screen = on_list();
+    // The pointer over the widget makes the gear appear.
+    show_view(
+        &mut screen,
+        &view,
+        UiInput::new(vec![moved(inside(position))]),
+    );
+    let font = FontAtlas::fallback();
+    let (width, height) = crate::mod_widget::measure(
+        &font,
+        &view.hud.widgets[0].widget.lines,
+        1.0,
+        &Default::default(),
+    );
+    // In the strip under the text, at the left.
+    let text = Rect::new(position[0], position[1], width, height);
+    let gear = crate::menus::mods::hud_layer::gear_rect_for_tests(text);
+    let at = [
+        (gear.x + gear.width * 0.5) * SCALE,
+        (gear.y + gear.height * 0.5) * SCALE,
+    ];
+    let outcome = show_view(
+        &mut screen,
+        &view,
+        UiInput::new(vec![moved(at), pressed(at), released(at)]),
+    );
+    assert_eq!(outcome, None, "the menu keeps this one for itself");
+    assert_eq!(screen.page, Page::Settings("fps".into()));
 }

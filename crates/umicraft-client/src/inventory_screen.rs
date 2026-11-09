@@ -16,6 +16,7 @@ use umicraft_render::PORTRAIT_KEY;
 use umicraft_ui::screens::{
     Hotspot, Label, ScreenKind, ScreenLayout, ScreenState, Sheet, SpriteRect, TRADE_OFFER_ITEMS,
 };
+use umicraft_ui::styled_text::{draw_styled, styled_width, StyledRun};
 use umicraft_ui::widgets::slot;
 use umicraft_ui::{draw_item, FontAtlas, Rect, TextStyle, Ui};
 
@@ -147,6 +148,135 @@ fn draw_labels(ui: &mut Ui, atlas: &FontAtlas, layout: &ScreenLayout, labels: &[
     }
 }
 
+/// Colour of the captions (`4210752`, `0x404040`).
+const CAPTION: u32 = 0x40_40_40;
+
+/// Where the text of a caption comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptionText {
+    /// The title the server sent with the window.
+    Window,
+    /// A language key.
+    Key(&'static str),
+}
+
+/// Where a caption starts horizontally, in GUI pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CaptionX {
+    Left(f32),
+    /// Centred on the screen (`xSize / 2 - width / 2`).
+    Centre,
+}
+
+/// One line of the foreground layer of a container screen
+/// (`drawGuiContainerForegroundLayer`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Caption {
+    text: CaptionText,
+    x: CaptionX,
+    y: f32,
+}
+
+/// The captions of a screen of `y_size` GUI pixels: its title, and the
+/// `container.inventory` line above the player part. The `GuiChest`, `GuiHopper`,
+/// `GuiScreenHorseInventory` and `GuiEnchantment` titles sit at the left, the
+/// furnace, dispenser, brewing stand and villager ones are centred; the crafting
+/// table, the anvil and the player screen print a fixed text.
+fn captions(kind: ScreenKind, y_size: f32) -> Vec<Caption> {
+    let inventory = Caption {
+        text: CaptionText::Key("container.inventory"),
+        x: CaptionX::Left(8.0),
+        y: y_size - 96.0 + 2.0,
+    };
+    let at = |text, x, y| Caption { text, x, y };
+    let window = CaptionText::Window;
+    match kind {
+        ScreenKind::Player => vec![at(
+            CaptionText::Key("container.crafting"),
+            CaptionX::Left(86.0),
+            16.0,
+        )],
+        ScreenKind::CraftingTable => vec![
+            at(
+                CaptionText::Key("container.crafting"),
+                CaptionX::Left(28.0),
+                6.0,
+            ),
+            inventory,
+        ],
+        ScreenKind::Chest { .. } | ScreenKind::Hopper | ScreenKind::Horse { .. } => {
+            vec![at(window, CaptionX::Left(8.0), 6.0), inventory]
+        }
+        ScreenKind::Furnace
+        | ScreenKind::Dispenser
+        | ScreenKind::BrewingStand
+        | ScreenKind::Villager => vec![at(window, CaptionX::Centre, 6.0), inventory],
+        ScreenKind::EnchantingTable => vec![at(window, CaptionX::Left(12.0), 5.0), inventory],
+        ScreenKind::Anvil => vec![at(
+            CaptionText::Key("container.repair"),
+            CaptionX::Left(60.0),
+            6.0,
+        )],
+        _ => Vec::new(),
+    }
+}
+
+/// The runs of a caption: the title of the window without its JSON styles but
+/// with the `§` codes in its text (`getUnformattedText`), or the language text.
+fn caption_runs(text: CaptionText, container: Option<&ContainerView>) -> Vec<StyledRun> {
+    let lang = crate::language::current();
+    let runs = match text {
+        CaptionText::Window => {
+            let Some(container) = container else {
+                return Vec::new();
+            };
+            let plain = umicraft_game::chat::unformatted_text(&container.title, lang.table());
+            umicraft_game::chat::local(&plain)
+        }
+        CaptionText::Key(key) => umicraft_game::chat::local(lang.tr(key)),
+    };
+    runs.iter()
+        .map(|run| StyledRun {
+            text: run.text.clone(),
+            color: rgb(run.style.color.map_or(CAPTION, |color| {
+                let [r, g, b] = color.rgb();
+                u32::from_be_bytes([0, r, g, b])
+            })),
+            bold: run.style.bold,
+            italic: run.style.italic,
+            underlined: run.style.underlined,
+            strikethrough: run.style.strikethrough,
+            obfuscated: run.style.obfuscated,
+        })
+        .collect()
+}
+
+/// Draws the titles of the screen, without a shadow like the reference.
+fn draw_captions(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    layout: &ScreenLayout,
+    (kind, container): (ScreenKind, Option<&ContainerView>),
+) {
+    let scale = layout.scale as f32;
+    let y_size = layout.background.height / scale;
+    for caption in captions(kind, y_size) {
+        let runs = caption_runs(caption.text, container);
+        if runs.is_empty() {
+            continue;
+        }
+        let x = match caption.x {
+            CaptionX::Left(x) => x * scale,
+            CaptionX::Centre => (layout.background.width - styled_width(atlas, &runs, scale)) / 2.0,
+        };
+        let at = [
+            layout.background.x + x,
+            layout.background.y + caption.y * scale,
+        ];
+        draw_styled(ui.draw(), atlas, at, &runs, scale, false, 0);
+    }
+}
+
 /// Draws the anvil name text and its caret.
 fn draw_name_field(
     ui: &mut Ui,
@@ -238,6 +368,7 @@ pub(crate) fn draw_inventory_overlay(
         None => ui.draw().rect(layout.background, FALLBACK_BACKGROUND),
     }
     draw_labels(ui, atlas, &layout, &dynamic.labels);
+    draw_captions(ui, atlas, &layout, (kind, view.container.as_ref()));
     if let Some(field) = &facts.anvil {
         draw_name_field(ui, atlas, &layout, field, facts.caret_visible);
     }
@@ -367,6 +498,49 @@ pub(crate) fn draw_cursor_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chest_prints_its_title_and_the_inventory_line() {
+        // `GuiChest`: the title at (8, 6), the inventory at `ySize - 96 + 2`.
+        let lines = captions(ScreenKind::Chest { rows: 3 }, 168.0);
+        assert_eq!(
+            lines,
+            vec![
+                Caption {
+                    text: CaptionText::Window,
+                    x: CaptionX::Left(8.0),
+                    y: 6.0
+                },
+                Caption {
+                    text: CaptionText::Key("container.inventory"),
+                    x: CaptionX::Left(8.0),
+                    y: 74.0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn the_furnace_title_is_centred_and_the_player_screen_has_only_crafting() {
+        assert_eq!(captions(ScreenKind::Furnace, 166.0)[0].x, CaptionX::Centre);
+        let player = captions(ScreenKind::Player, 166.0);
+        assert_eq!(player.len(), 1);
+        assert_eq!(player[0].text, CaptionText::Key("container.crafting"));
+        assert_eq!((player[0].x, player[0].y), (CaptionX::Left(86.0), 16.0));
+    }
+
+    #[test]
+    fn the_window_title_keeps_its_section_codes_and_the_default_colour() {
+        let mut view = container(WindowKind::Chest, 27);
+        view.title = r#"{"text":"§5Menu"}"#.to_owned();
+        let runs = caption_runs(CaptionText::Window, Some(&view));
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "Menu");
+        assert_ne!(runs[0].color, rgb(CAPTION), "the code coloured it");
+        view.title = r#"{"text":"Chest"}"#.to_owned();
+        let plain = caption_runs(CaptionText::Window, Some(&view));
+        assert_eq!(plain[0].color, rgb(CAPTION));
+    }
 
     fn container(kind: WindowKind, slots: usize) -> ContainerView {
         ContainerView {

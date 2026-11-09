@@ -21,12 +21,45 @@ use crate::text::FontAtlas;
 
 /// The row pitch, `FontRenderer.FONT_HEIGHT`.
 const LINE_HEIGHT: f32 = 9.0;
-/// The margin between the panel edge and the text, in GUI units.
-const PADDING: f32 = 2.0;
-/// The corner radius of the panel, in GUI units.
-const RADIUS: f32 = 2.0;
 /// The panel colour: black at about 35 % opacity, like the chat band.
 const PANEL: Color = [0.0, 0.0, 0.0, 0.35];
+
+/// The shadow of the text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShadowStyle {
+    /// A quarter of the brightness of the text, `drawStringWithShadow`.
+    #[default]
+    Vanilla,
+    /// One colour, `0xRRGGBB`.
+    Color(u32),
+    /// No shadow.
+    Off,
+}
+
+/// How a widget looks around its text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WidgetStyle {
+    /// The panel behind the lines (straight-alpha RGBA), or `None` for none.
+    pub background: Option<Color>,
+    /// The corner radius of the panel, in GUI units.
+    pub radius: f32,
+    /// The margin between the panel edge and the text, in GUI units.
+    pub padding: f32,
+    /// The shadow of the text.
+    pub shadow: ShadowStyle,
+}
+
+impl Default for WidgetStyle {
+    /// A black panel at 35 % with 2 units of margin and corner, vanilla shadow.
+    fn default() -> Self {
+        Self {
+            background: Some(PANEL),
+            radius: 2.0,
+            padding: 2.0,
+            shadow: ShadowStyle::Vanilla,
+        }
+    }
+}
 
 /// One line of a mod widget.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +90,8 @@ pub struct ModWidgetView {
     pub position: [f32; 2],
     /// The widget scale, `1.0` for the vanilla size.
     pub scale: f32,
+    /// The look of the panel and of the text shadow.
+    pub style: WidgetStyle,
 }
 
 /// The size of the panel for `lines` at `scale`, in GUI units.
@@ -65,7 +100,7 @@ pub struct ModWidgetView {
 /// resolve a rectangle against the screen; pass `1.0` for the unscaled size.
 /// An empty list measures `(0.0, 0.0)`.
 #[must_use]
-pub fn measure(font: &FontAtlas, lines: &[ModLine], scale: f32) -> (f32, f32) {
+pub fn measure(font: &FontAtlas, lines: &[ModLine], scale: f32, style: &WidgetStyle) -> (f32, f32) {
     if lines.is_empty() {
         return (0.0, 0.0);
     }
@@ -73,8 +108,8 @@ pub fn measure(font: &FontAtlas, lines: &[ModLine], scale: f32) -> (f32, f32) {
         .iter()
         .map(|line| font.measure(&line.text, 1.0))
         .fold(0.0_f32, f32::max);
-    let width = widest + 2.0 * PADDING;
-    let height = LINE_HEIGHT * lines.len() as f32 + 2.0 * PADDING - 1.0;
+    let width = widest + 2.0 * style.padding;
+    let height = LINE_HEIGHT * lines.len() as f32 + 2.0 * style.padding - 1.0;
     (width * scale, height * scale)
 }
 
@@ -91,24 +126,36 @@ fn draw_widget(list: &mut DrawList, widget: &ModWidgetView, sf: f32, font: &Font
     if widget.lines.is_empty() || widget.scale <= 0.0 {
         return;
     }
-    let (width, height) = measure(font, &widget.lines, widget.scale);
+    let style = &widget.style;
+    let (width, height) = measure(font, &widget.lines, widget.scale, style);
     let [x, y] = widget.position;
-    list.rounded_rect(
-        Rect::new(x * sf, y * sf, width * sf, height * sf),
-        RADIUS * widget.scale * sf,
-        PANEL,
-    );
+    if let Some(background) = style.background.filter(|colour| colour[3] > 0.0) {
+        let panel = Rect::new(x * sf, y * sf, width * sf, height * sf);
+        let radius = style.radius * widget.scale * sf;
+        if radius > 0.0 {
+            list.rounded_rect(panel, radius, background);
+        } else {
+            list.rect(panel, background);
+        }
+    }
     let unit = widget.scale * sf;
-    let left = (x + PADDING * widget.scale) * sf;
-    let top = (y + PADDING * widget.scale) * sf;
+    let left = (x + style.padding * widget.scale) * sf;
+    let top = (y + style.padding * widget.scale) * sf;
     for (row, line) in widget.lines.iter().enumerate() {
         let at = [left, top + LINE_HEIGHT * row as f32 * unit];
         let ink = rgb(line.color);
-        list.text(
-            [at[0] + unit, at[1] + unit],
-            &line.text,
-            TextStyle::new(unit, shadow_of(ink)),
-        );
+        let shadow = match style.shadow {
+            ShadowStyle::Vanilla => Some(shadow_of(ink)),
+            ShadowStyle::Color(colour) => Some(rgb(colour)),
+            ShadowStyle::Off => None,
+        };
+        if let Some(shadow) = shadow {
+            list.text(
+                [at[0] + unit, at[1] + unit],
+                &line.text,
+                TextStyle::new(unit, shadow),
+            );
+        }
         list.text(at, &line.text, TextStyle::new(unit, ink));
     }
 }
@@ -138,13 +185,17 @@ mod tests {
             ],
             position: [10.0, 20.0],
             scale,
+            style: WidgetStyle::default(),
         }
     }
 
     #[test]
     fn empty_widgets_measure_zero_and_draw_nothing() {
         let font = FontAtlas::fallback();
-        assert_eq!(measure(&font, &[], 2.0), (0.0, 0.0));
+        assert_eq!(
+            measure(&font, &[], 2.0, &WidgetStyle::default()),
+            (0.0, 0.0)
+        );
         let mut list = DrawList::new();
         let empty = ModWidgetView {
             lines: Vec::new(),
@@ -158,10 +209,11 @@ mod tests {
     fn size_follows_the_widest_line_and_the_row_count() {
         let font = FontAtlas::fallback();
         let w = widget(1.0);
-        let (width, height) = measure(&font, &w.lines, 1.0);
-        assert_eq!(width, font.measure("FPS: 60", 1.0) + 2.0 * PADDING);
-        assert_eq!(height, 2.0 * LINE_HEIGHT + 2.0 * PADDING - 1.0);
-        let (sw, sh) = measure(&font, &w.lines, 1.5);
+        let style = WidgetStyle::default();
+        let (width, height) = measure(&font, &w.lines, 1.0, &style);
+        assert_eq!(width, font.measure("FPS: 60", 1.0) + 2.0 * style.padding);
+        assert_eq!(height, 2.0 * LINE_HEIGHT + 2.0 * style.padding - 1.0);
+        let (sw, sh) = measure(&font, &w.lines, 1.5, &style);
         assert_eq!((sw, sh), (width * 1.5, height * 1.5));
     }
 
@@ -172,7 +224,7 @@ mod tests {
         draw_mod_widgets(&mut list, &[widget(2.0)], 3.0, &font);
         let commands = list.commands();
         assert_eq!(commands.len(), 1 + 2 * 2);
-        let (width, height) = measure(&font, &widget(2.0).lines, 2.0);
+        let (width, height) = measure(&font, &widget(2.0).lines, 2.0, &WidgetStyle::default());
         match &commands[0] {
             DrawCommand::RoundedRect { rect, .. } => {
                 assert_eq!(*rect, Rect::new(30.0, 60.0, width * 3.0, height * 3.0));
@@ -207,5 +259,50 @@ mod tests {
             panic!("expected the second line");
         };
         assert_eq!(second[1] - text[1], LINE_HEIGHT * 6.0);
+    }
+
+    #[test]
+    fn the_padding_changes_the_size_and_where_the_text_starts() {
+        let font = FontAtlas::fallback();
+        let mut w = widget(1.0);
+        w.style.padding = 5.0;
+        let (width, _) = measure(&font, &w.lines, 1.0, &w.style);
+        assert_eq!(width, font.measure("FPS: 60", 1.0) + 10.0);
+        let mut list = DrawList::new();
+        draw_mod_widgets(&mut list, &[w], 1.0, &font);
+        let DrawCommand::Text { position, .. } = &list.commands()[2] else {
+            panic!("expected the text");
+        };
+        assert_eq!(position[0], 10.0 + 5.0);
+    }
+
+    #[test]
+    fn no_background_draws_no_panel_and_no_shadow_draws_no_copy() {
+        let font = FontAtlas::fallback();
+        let mut w = widget(1.0);
+        w.style.background = None;
+        w.style.shadow = ShadowStyle::Off;
+        let mut list = DrawList::new();
+        draw_mod_widgets(&mut list, &[w], 1.0, &font);
+        assert_eq!(list.commands().len(), 2, "one text per line");
+        assert!(list
+            .commands()
+            .iter()
+            .all(|command| matches!(command, DrawCommand::Text { .. })));
+    }
+
+    #[test]
+    fn a_custom_shadow_has_its_own_colour_and_no_radius_gives_square_corners() {
+        let font = FontAtlas::fallback();
+        let mut w = widget(1.0);
+        w.style.shadow = ShadowStyle::Color(0x00_00FF);
+        w.style.radius = 0.0;
+        let mut list = DrawList::new();
+        draw_mod_widgets(&mut list, &[w], 1.0, &font);
+        assert!(matches!(list.commands()[0], DrawCommand::Rect { .. }));
+        let DrawCommand::Text { style, .. } = &list.commands()[1] else {
+            panic!("expected the shadow");
+        };
+        assert_eq!(style.color, [0.0, 0.0, 1.0, 1.0]);
     }
 }

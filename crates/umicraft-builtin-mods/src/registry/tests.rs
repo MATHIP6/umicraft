@@ -211,6 +211,7 @@ fn a_corrupt_saved_value_does_not_break_the_registry() {
                 scale: f32::NAN,
                 ..HudPlacement::default()
             }),
+            state: Default::default(),
         },
     );
     r.apply_config(&saved);

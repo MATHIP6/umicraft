@@ -4,6 +4,7 @@
 
 use crate::context::Ui;
 use crate::draw::{Color, FontFace, TextStyle};
+use crate::icons::Icon;
 use crate::text::FontAtlas;
 
 use super::theme::BRAND_PIXEL_SIZE;
@@ -50,6 +51,21 @@ pub fn draw_text(
     };
     let top = y - brand.line_height(style.scale) * 0.5;
     ui.draw().text([left, top], text, style);
+}
+
+/// Draws `icon` centred on `at`, `size_px` physical pixels wide, tinted with
+/// `color`. The icons live in the brand atlas, so this is a one-letter text
+/// run.
+pub fn draw_icon(
+    ui: &mut Ui,
+    brand: &FontAtlas,
+    icon: Icon,
+    at: (f32, f32),
+    (size_px, color): (f32, Color),
+) {
+    let mut buffer = [0u8; 4];
+    let glyph = icon.character().encode_utf8(&mut buffer);
+    draw_text(ui, brand, glyph, at, (size_px, color, Align::Center));
 }
 
 /// Ellipsis added to text that does not fit.

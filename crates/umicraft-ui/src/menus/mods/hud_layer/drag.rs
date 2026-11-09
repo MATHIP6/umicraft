@@ -6,12 +6,13 @@
 
 use crate::geom::Rect;
 
+use super::frame::frame_rect;
 use super::guides::{guides_for, Guide};
 use super::view::Snap;
 
-/// What one notch of the wheel or one step of the corner handle changes the
-/// scale by.
-pub(super) const SCALE_STEP: f32 = 0.1;
+/// What one notch of the wheel changes the scale by. The corner handle has no
+/// step: the scale follows the pointer to any value.
+pub(super) const SCALE_STEP: f32 = 0.05;
 /// Edge of the corner handle that resizes a widget, in GUI units.
 pub(super) const HANDLE: f32 = 4.0;
 /// How far outside its square the handle still catches the pointer.
@@ -28,7 +29,8 @@ pub(super) struct Bounds<'a> {
     pub snap: Snap<'a>,
 }
 
-/// The corner handle of a widget, drawn inside its bottom-right corner.
+/// The corner handle of a widget, drawn inside the bottom-right corner of its
+/// frame.
 pub(super) fn handle_rect(rect: Rect) -> Rect {
     Rect::new(
         rect.right() - HANDLE.min(rect.width),
@@ -49,15 +51,16 @@ pub(super) fn on_handle(rect: Rect, point: [f32; 2]) -> bool {
 
 /// The topmost widget under `point`: the last of `rects` that contains it or
 /// its handle.
-pub(super) fn hit_widget(rects: &[Rect], point: [f32; 2]) -> Option<usize> {
-    rects
-        .iter()
-        .rposition(|rect| rect.contains(point) || on_handle(*rect, point))
+pub(super) fn hit_widget(rects: &[Rect], point: [f32; 2], screen: [f32; 2]) -> Option<usize> {
+    rects.iter().rposition(|rect| {
+        let frame = frame_rect(*rect, screen);
+        frame.contains(point) || on_handle(frame, point)
+    })
 }
 
-/// `scale` rounded to a multiple of [`SCALE_STEP`] and kept in `range`.
-pub(super) fn round_scale(scale: f32, range: (f32, f32)) -> f32 {
-    ((scale / SCALE_STEP).round() * SCALE_STEP).clamp(range.0, range.1)
+/// `scale` kept in `range`, whatever its value.
+pub(super) fn clamp_scale(scale: f32, range: (f32, f32)) -> f32 {
+    scale.clamp(range.0, range.1)
 }
 
 /// `rect` moved back inside the screen; one that is larger than the screen
@@ -95,7 +98,7 @@ pub(super) fn wheel_resize(
     notches: f32,
     bounds: &Bounds<'_>,
 ) -> Option<(Rect, f32)> {
-    let next = round_scale(scale - notches * SCALE_STEP, bounds.scale_range);
+    let next = clamp_scale(scale - notches * SCALE_STEP, bounds.scale_range);
     ((next - scale).abs() > f32::EPSILON)
         .then(|| (rescaled(rect, (scale, next), bounds.screen), next))
 }
@@ -151,7 +154,7 @@ impl Drag {
             Grab::Resize(held) => {
                 let unit_width = start.width / start_scale;
                 let width = point[0] - held - start.x;
-                let scale = round_scale(width / unit_width, bounds.scale_range);
+                let scale = clamp_scale(width / unit_width, bounds.scale_range);
                 self.live = rescaled(start, (start_scale, scale), bounds.screen);
                 self.scale = scale;
             }

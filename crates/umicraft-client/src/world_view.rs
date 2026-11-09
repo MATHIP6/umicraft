@@ -42,6 +42,11 @@ const JOBS_PER_WORKER: usize = 2;
 /// one long frame (F2-4b).
 const UPLOAD_BUDGET_BYTES: usize = 1 << 20;
 
+/// How far, in blocks, the camera has to be from the eye of the player to count
+/// as the third person: the first person has it on the eye, the third person an
+/// orbit of up to four blocks, which a wall shortens.
+const THIRD_PERSON_MIN_ORBIT: f64 = 0.05;
+
 use crate::achievements_view::newly_unlocked;
 use crate::block_entity_render::push_pot_plants;
 use crate::connection_end::ConnectionEnd;
@@ -238,7 +243,14 @@ impl WorldView {
     /// Points `camera` at the player, interpolated for `now` (GAM-8).
     /// `view_bobbing` is the "View Bobbing" option: off, the camera and the
     /// hand keep still while walking (`EntityRenderer.setupCameraTransform`).
-    pub fn update_camera(&self, camera: &mut Camera, now: Instant, view_bobbing: bool) {
+    /// `dynamic_fov` is the "Dynamic FOV" option: off, the field of view stays
+    /// what it is set to, whatever the player does.
+    pub fn update_camera(
+        &self,
+        camera: &mut Camera,
+        now: Instant,
+        (view_bobbing, dynamic_fov): (bool, bool),
+    ) {
         let Some(state) = self.view.sample(now) else {
             return;
         };
@@ -246,12 +258,23 @@ impl WorldView {
         let (yaw, pitch) = camera_angles(&state);
         camera.yaw = yaw;
         camera.pitch = pitch;
-        let bob = if view_bobbing {
-            state.effects.bob.matrix()
+        // The hurt roll stays with the option off, the bobbing does not.
+        let bob = state.effects.camera_matrix(view_bobbing);
+        let fov_modifier = if dynamic_fov {
+            state.effects.fov_modifier
         } else {
-            glam::Mat4::IDENTITY
+            1.0
         };
-        camera.set_view_effects(state.effects.fov_modifier, bob);
+        camera.set_view_effects(fov_modifier, bob);
+    }
+
+    /// The eye of the local player while the camera shows the player from
+    /// outside (the third person), `None` in the first person and with no frame.
+    /// The camera is the orbit, so it differs from the eye by the orbit distance.
+    #[must_use]
+    pub fn third_person_body(&self, now: Instant) -> Option<glam::DVec3> {
+        let state = self.view.sample(now)?;
+        (state.position.distance(state.eye) > THIRD_PERSON_MIN_ORBIT).then_some(state.eye)
     }
 
     /// The pose of the first-person hand for `now`.
@@ -1351,7 +1374,9 @@ mod tests {
 
         let halfway = later + TICK / 2;
         let mut camera = Camera::default();
-        harness.world_view.update_camera(&mut camera, halfway, true);
+        harness
+            .world_view
+            .update_camera(&mut camera, halfway, (true, true));
         assert!(
             (camera.position().x - 1.0).abs() < 1e-4,
             "{}",
@@ -1425,7 +1450,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, later + TICK / 2, true);
+            .update_camera(&mut camera, later + TICK / 2, (true, true));
         // Halfway between the eyes of the two ticks the view knows, not 3.
         assert!(
             (camera.position().x - 1.0).abs() < 1e-4,
@@ -1456,7 +1481,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, later + TICK / 2, true);
+            .update_camera(&mut camera, later + TICK / 2, (true, true));
         // `orientCamera`: eye at (1, 0, 0) plus the orbit of the newest angles.
         // Blending the two camera positions would give (3, 0, -2) and drag the
         // camera behind the turn.
@@ -1490,7 +1515,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, later + TICK / 2, true);
+            .update_camera(&mut camera, later + TICK / 2, (true, true));
         assert!(
             (camera.position().z - (0.5 - 2.5)).abs() < 1e-4,
             "{}",
@@ -1512,10 +1537,120 @@ mod tests {
         harness.sync();
 
         let mut camera = Camera::default();
-        harness.world_view.update_camera(&mut camera, tick, true);
+        harness
+            .world_view
+            .update_camera(&mut camera, tick, (true, true));
         assert_ne!(camera.view_bob(), glam::Mat4::IDENTITY, "bobbing on");
-        harness.world_view.update_camera(&mut camera, tick, false);
+        harness
+            .world_view
+            .update_camera(&mut camera, tick, (false, true));
         assert_eq!(camera.view_bob(), glam::Mat4::IDENTITY, "bobbing off");
+    }
+
+    /// Regression: the roll of a hurt player went with the bobbing, so the camera
+    /// stopped shaking when "View Bobbing" was off; vanilla keeps it.
+    #[test]
+    fn the_hurt_roll_stays_when_view_bobbing_is_off() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let mut hurt = frame(glam::Vec3::ZERO, tick, 0);
+        hurt.state.effects.hurt_roll_degrees = 9.0;
+        hurt.state.effects.bob = umicraft_game::view::ViewBob::new(0.4, 0.1, 0.0);
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(hurt))
+            .expect("frame queue");
+        harness.sync();
+
+        let mut camera = Camera::default();
+        harness
+            .world_view
+            .update_camera(&mut camera, tick, (false, true));
+        assert_eq!(
+            camera.view_bob(),
+            glam::Mat4::from_rotation_z(9.0_f32.to_radians()),
+            "off: the roll without the sway"
+        );
+        harness
+            .world_view
+            .update_camera(&mut camera, tick, (true, true));
+        assert_ne!(
+            camera.view_bob(),
+            glam::Mat4::from_rotation_z(9.0_f32.to_radians()),
+            "on: the sway comes with it"
+        );
+    }
+
+    #[test]
+    fn the_body_is_only_reported_in_the_third_person() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let mut first = frame(glam::Vec3::ZERO, tick, 0);
+        first.state.eye = first.state.position;
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(first))
+            .expect("frame queue");
+        harness.sync();
+        assert_eq!(
+            harness.world_view.third_person_body(tick),
+            None,
+            "the camera is on the eye in the first person"
+        );
+
+        let mut third = frame(glam::Vec3::ZERO, tick + TICK, 1);
+        third.state.eye = third.state.position + glam::DVec3::new(0.0, 0.0, 4.0);
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(third))
+            .expect("frame queue");
+        harness.sync();
+        let eye = harness
+            .world_view
+            .third_person_body(tick + TICK * 2)
+            .expect("the camera orbits the player");
+        assert!((eye.z - 4.0).abs() < 1e-6, "{eye}");
+    }
+
+    #[test]
+    fn the_dynamic_fov_option_gates_the_widening_of_the_view() {
+        let mut harness = Harness::new();
+        let tick = Instant::now();
+        let mut sprinting = frame(glam::Vec3::ZERO, tick, 0);
+        sprinting.state.effects.fov_modifier = 1.3;
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(sprinting))
+            .expect("frame queue");
+        harness.sync();
+
+        let mut dynamic = Camera::default();
+        harness
+            .world_view
+            .update_camera(&mut dynamic, tick, (true, true));
+        let mut fixed = Camera::default();
+        harness
+            .world_view
+            .update_camera(&mut fixed, tick, (true, false));
+        // The same camera with no widening at all.
+        let mut plain = fixed;
+        plain.set_view_effects(1.0, fixed.view_bob());
+
+        let origin = glam::DVec3::ZERO;
+        assert_ne!(
+            dynamic.view_projection_from(origin),
+            plain.view_projection_from(origin),
+            "on, sprinting widens the view"
+        );
+        assert_eq!(
+            fixed.view_projection_from(origin),
+            plain.view_projection_from(origin),
+            "off, the view stays as set"
+        );
     }
 
     #[test]
@@ -1534,7 +1669,7 @@ mod tests {
         let mut camera = Camera::default();
         harness
             .world_view
-            .update_camera(&mut camera, tick + TICK * 2, true);
+            .update_camera(&mut camera, tick + TICK * 2, (true, true));
         assert_eq!(camera.position(), start);
         assert_eq!(
             harness
@@ -1555,7 +1690,9 @@ mod tests {
         assert_eq!(harness.world_view.frame_count(), 2);
 
         let halfway = later + TICK / 2;
-        harness.world_view.update_camera(&mut camera, halfway, true);
+        harness
+            .world_view
+            .update_camera(&mut camera, halfway, (true, true));
         assert!((camera.position().x - 1.0).abs() < 1e-3);
         let environment = harness.world_view.environment(halfway, 12);
         assert!((environment.partial_tick - 0.5).abs() < 1e-3);

@@ -3,12 +3,13 @@
 
 use std::fmt::Write;
 
-use super::WHITE;
+use super::hud_style::hud_settings;
+use super::parse_color;
 use crate::context::ModContext;
 use crate::hud::{Anchor, HudContent, HudPlacement};
 use crate::id::{ModCategory, ModId};
 use crate::meta::ModMeta;
-use crate::settings::ModSettings;
+use crate::settings::{ModSettings, SettingDef, SettingKind};
 use crate::traits::{BuiltinMod, HudSpec};
 
 static META: ModMeta = ModMeta {
@@ -19,6 +20,12 @@ static META: ModMeta = ModMeta {
     default_enabled: false,
 };
 
+const SETTINGS: &[SettingDef] = hud_settings![SettingDef {
+    key: "color",
+    label_key: "umicraft.mods.ping.color",
+    kind: SettingKind::Color { default: "#ffffff" },
+}];
+
 /// The ping mod.
 pub(super) struct Ping;
 
@@ -27,16 +34,20 @@ impl BuiltinMod for Ping {
         &META
     }
 
+    fn settings(&self) -> &'static [SettingDef] {
+        SETTINGS
+    }
+
     fn hud(&self) -> Option<HudSpec> {
         Some(HudSpec {
             default_placement: HudPlacement::at(Anchor::TopLeft, 4.0, 28.0),
         })
     }
 
-    fn draw(&self, ctx: &ModContext, _settings: &ModSettings, out: &mut HudContent) {
+    fn draw(&self, ctx: &ModContext, settings: &ModSettings, out: &mut HudContent) {
         if let Some(ping) = ctx.ping_ms {
             // Writing into a `String` cannot fail.
-            let _ = write!(out.line(WHITE), "{ping} ms");
+            let _ = write!(out.line(parse_color(settings.text("color"))), "{ping} ms");
         }
     }
 }
@@ -51,7 +62,7 @@ mod tests {
             ping_ms,
             ..ModContext::default()
         };
-        drawn_texts(&Ping, &ctx, &ModSettings::defaults(&[]))
+        drawn_texts(&Ping, &ctx, &ModSettings::defaults(SETTINGS))
     }
 
     #[test]
@@ -65,7 +76,27 @@ mod tests {
     }
 
     #[test]
-    fn has_no_settings() {
-        assert!(Ping.settings().is_empty());
+    fn has_a_color_and_the_shared_hud_options() {
+        let keys: Vec<_> = Ping.settings().iter().map(|def| def.key).collect();
+        assert_eq!(keys.len(), 1 + crate::mods::hud_style::KEYS.len());
+        assert!(keys.contains(&"color"));
+    }
+
+    #[test]
+    fn uses_the_chosen_color() {
+        let mut settings = ModSettings::defaults(SETTINGS);
+        settings
+            .set(
+                "color",
+                &crate::settings::SettingValue::Text("#00ff00".into()),
+            )
+            .expect("known key");
+        let ctx = ModContext {
+            ping_ms: Some(7),
+            ..ModContext::default()
+        };
+        let mut out = HudContent::default();
+        Ping.draw(&ctx, &settings, &mut out);
+        assert_eq!(out.lines()[0].color, 0x00_ff00);
     }
 }

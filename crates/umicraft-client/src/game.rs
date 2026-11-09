@@ -630,6 +630,10 @@ struct Game {
     input: crate::input::InputState,
     /// The health points.
     health: f32,
+    /// Whether a health update has come since the player was created: the first
+    /// one only sets the health, a later drop hurts (MCP
+    /// `EntityPlayerSP.hasValidHealth`).
+    health_known: bool,
     /// The food points.
     food: f32,
     /// The armour points.
@@ -738,6 +742,7 @@ impl Game {
             pitch: 0.0,
             input: crate::input::InputState::default(),
             health: 20.0,
+            health_known: false,
             food: 20.0,
             armor: 0.0,
             experience: 0.0,
@@ -1883,6 +1888,12 @@ fn apply_net_event(
             }
         }
         PlayEvent::UpdateHealth(packet) => {
+            // MCP `EntityPlayerSP.setPlayerSPHealth`: a drop of health hurts, so
+            // the camera shakes even where the server sent no `Entity Status 2`.
+            if game.health_known && packet.health < game.health {
+                game.body.animation.hurt();
+            }
+            game.health_known = true;
             game.health = packet.health;
             game.food = packet.food as f32;
             game.hud_dirty = true;
@@ -1901,6 +1912,8 @@ fn apply_net_event(
             // nothing yet (MCP `handleRespawn` creates a new player entity,
             // whose sprint and sneak states start off).
             game.vehicle = None;
+            // A new player entity: its first health update only sets the health.
+            game.health_known = false;
             game.overlays.reset();
             game.server_view = ServerView::default();
             // The server keeps the chunks of the dimension, so only a change
@@ -4163,6 +4176,26 @@ mod tests {
     }
 
     #[test]
+    fn a_drop_of_health_shakes_the_camera_even_without_an_entity_status() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, health_update(20.0), &mut queue, &frames);
+        assert_eq!(
+            game.body.animation.hurt_time(),
+            0,
+            "the first update only sets the health"
+        );
+        handle_net(&mut game, health_update(14.0), &mut queue, &frames);
+        assert_eq!(game.body.animation.hurt_time(), 10, "a drop hurts");
+
+        let mut healed = game_on_floor_with(BlockState::AIR);
+        handle_net(&mut healed, health_update(10.0), &mut queue, &frames);
+        handle_net(&mut healed, health_update(20.0), &mut queue, &frames);
+        assert_eq!(healed.body.animation.hurt_time(), 0, "healing does not");
+    }
+
+    #[test]
     fn the_dead_view_rolls_and_narrows() {
         let mut game = game_on_floor_with(BlockState::AIR);
         let mut queue = CommandQueue::default();
@@ -4179,7 +4212,7 @@ mod tests {
             }
         }
         let frame = last.expect("a frame");
-        assert!(frame.state.effects.bob.roll_degrees > 3.0);
+        assert!(frame.state.effects.hurt_roll_degrees > 3.0);
         assert!(frame.state.effects.fov_modifier < 1.0);
     }
 

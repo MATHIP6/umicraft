@@ -6,9 +6,13 @@
 //! one per setting) in the client pack's `en_US.lang` and `fr_FR.lang`; the test at
 //! the bottom of this file fails if one is missing.
 
+pub(crate) mod hud_style;
+
 mod coordinates;
 mod cps;
 mod fps;
+mod fullbright;
+mod motion_blur;
 mod ping;
 mod toggle_sprint;
 
@@ -25,13 +29,15 @@ pub fn all() -> Vec<Box<dyn BuiltinMod>> {
         Box::new(coordinates::Coordinates),
         Box::new(cps::Cps::default()),
         Box::new(ping::Ping),
+        Box::new(motion_blur::MotionBlur),
+        Box::new(fullbright::Fullbright),
         Box::new(toggle_sprint::ToggleSprint::default()),
     ]
 }
 
 /// Reads a `#rrggbb` color setting as `0xRRGGBB`. The settings are sanitized, so the
 /// fallback to white only guards a mod reading a key that is not a color.
-fn parse_color(hex: &str) -> u32 {
+pub(crate) fn parse_color(hex: &str) -> u32 {
     hex.strip_prefix('#')
         .and_then(|digits| u32::from_str_radix(digits, 16).ok())
         .unwrap_or(WHITE)
@@ -115,7 +121,13 @@ mod tests {
                 format!("umicraft.mods.{id}.desc")
             );
             for def in module.settings() {
-                assert_eq!(def.label_key, format!("umicraft.mods.{id}.{}", def.key));
+                let own = format!("umicraft.mods.{id}.{}", def.key);
+                let shared = format!("umicraft.mods.hud.{}", def.key);
+                assert!(
+                    def.label_key == own || def.label_key == shared,
+                    "{} is neither {own} nor {shared}",
+                    def.label_key
+                );
             }
         }
     }

@@ -34,6 +34,7 @@ pub mod hud_hearts;
 mod items;
 mod lightmap;
 mod mipmap;
+mod motion_blur;
 mod nametag;
 mod outline;
 mod overlay;
@@ -57,7 +58,10 @@ pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
 pub use gpu_timer::{GpuTimings, GROUP_NAMES};
-pub use hud::{chat_run_at, draw_hud_gui, measure_mod_widget, HudSheets, ModLine, ModWidgetView};
+pub use hud::{
+    chat_run_at, draw_hud_gui, measure_mod_widget, HudSheets, ModLine, ModWidgetView, ShadowStyle,
+    WidgetStyle,
+};
 pub use hud::{
     plain_text, ActionBarView, BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle,
     DebugF3View, HudState, SidebarLineView, SidebarView, TabEntryView, TabListView, TabValueStyle,
@@ -67,6 +71,7 @@ pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{
     IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE, PORTRAIT_KEY, PORTRAIT_SIZE,
 };
+pub use motion_blur::{MotionBlurSettings, MotionBlurVersion};
 pub use nametag::Nametag;
 pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};

@@ -20,6 +20,10 @@ pub struct ModConfig {
     pub settings: BTreeMap<String, SettingValue>,
     /// Where the widget is, for a HUD mod the player moved.
     pub placement: Option<HudPlacement>,
+    /// What the mod itself keeps between two runs, apart from its settings: the
+    /// switch of toggle sprint, say. Keys are the mod's own and append-only.
+    #[serde(deserialize_with = "lenient_settings")]
+    pub state: BTreeMap<String, SettingValue>,
 }
 
 /// The saved state of all mods, by mod id.
@@ -66,6 +70,7 @@ mod tests {
                 enabled: Some(true),
                 settings: BTreeMap::from([("shadow".to_owned(), SettingValue::Bool(true))]),
                 placement: Some(HudPlacement::at(Anchor::TopRight, -4.0, 4.0)),
+                state: BTreeMap::from([("toggled".to_owned(), SettingValue::Bool(true))]),
             },
         );
         let text = toml::to_string(&config).expect("serializes");
@@ -91,6 +96,17 @@ mod tests {
         let settings = &config.0["fps"].settings;
         assert!(!settings.contains_key("bad"));
         assert_eq!(settings["good"], SettingValue::Bool(true));
+    }
+
+    #[test]
+    fn a_file_without_state_reads_with_an_empty_one() {
+        let config: ModsConfig = toml::from_str(
+            "[fps]
+enabled = true
+",
+        )
+        .expect("parses");
+        assert!(config.0["fps"].state.is_empty());
     }
 
     #[test]

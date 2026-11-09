@@ -66,6 +66,12 @@ pub struct VideoOptions {
     pub gamma: f32,
     /// `GameSettings.viewBobbing`.
     pub view_bobbing: bool,
+    /// Whether the field of view follows the player: wider while sprinting,
+    /// flying or under a speed effect, narrower while drawing a bow
+    /// (`EntityRenderer.getFOVModifier` times `AbstractClientPlayer.getFovModifier`).
+    /// Off, it stays at the `fov` option. Not in vanilla 1.8, which always
+    /// does it.
+    pub dynamic_fov: bool,
     /// `GameSettings.mipmapLevels`, `0..=4`.
     pub mipmap_levels: u8,
     /// `GameSettings.enableVsync`.
@@ -161,6 +167,7 @@ impl Default for VideoOptions {
             gui_scale: 0,
             gamma: 0.0,
             view_bobbing: true,
+            dynamic_fov: true,
             mipmap_levels: *MIPMAP_LEVELS.end(),
             vsync: true,
             fullscreen: false,
@@ -183,6 +190,7 @@ mod tests {
         assert_eq!(video.gui_scale, 0);
         assert_eq!(video.gamma, 0.0);
         assert!(video.view_bobbing && video.vsync && !video.fullscreen);
+        assert!(video.dynamic_fov, "vanilla always widens the view");
         assert_eq!(video.mipmap_levels, 4);
         assert!(video.block_alternatives && video.entity_shadows);
     }

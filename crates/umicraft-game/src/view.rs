@@ -208,8 +208,11 @@ impl ViewBob {
 pub struct ViewEffects {
     /// The factor applied to the field of view (`1.0` is the base FOV).
     pub fov_modifier: f32,
-    /// The view bobbing.
+    /// The view bobbing, which the "View Bobbing" option switches off.
     pub bob: ViewBob,
+    /// The roll of a player who is hurt or dead, in degrees. It is not part of
+    /// the bobbing: vanilla applies `hurtCameraEffect` whatever the option.
+    pub hurt_roll_degrees: f32,
     /// The first-person hand.
     pub hand: HandPose,
 }
@@ -219,6 +222,7 @@ impl Default for ViewEffects {
         Self {
             fov_modifier: 1.0,
             bob: ViewBob::default(),
+            hurt_roll_degrees: 0.0,
             hand: HandPose::default(),
         }
     }
@@ -237,7 +241,22 @@ impl ViewEffects {
                 mix(player.prev_camera_sway, player.camera_sway),
                 mix(player.prev_camera_tilt, player.camera_tilt),
             ),
+            hurt_roll_degrees: 0.0,
             hand: HandPose::default(),
+        }
+    }
+
+    /// The transform the camera space gets after the view rotation: the hurt
+    /// roll, then the bobbing when `view_bobbing` is on
+    /// (`EntityRenderer.setupCameraTransform` calls `hurtCameraEffect`, then
+    /// `setupViewBobbing` only if the option is on).
+    #[must_use]
+    pub fn camera_matrix(&self, view_bobbing: bool) -> Mat4 {
+        let hurt = Mat4::from_rotation_z(self.hurt_roll_degrees.to_radians());
+        if view_bobbing {
+            hurt * self.bob.matrix()
+        } else {
+            hurt
         }
     }
 
@@ -248,7 +267,7 @@ impl ViewEffects {
     /// field of view by `(1 - 500 / (t + 500)) * 2 + 1`.
     #[must_use]
     pub fn with_death(mut self, death_ticks: f32) -> Self {
-        self.bob.roll_degrees += 40.0 - 8000.0 / (death_ticks + 200.0);
+        self.hurt_roll_degrees += 40.0 - 8000.0 / (death_ticks + 200.0);
         self.fov_modifier /= (1.0 - 500.0 / (death_ticks + 500.0)) * 2.0 + 1.0;
         self
     }
@@ -257,7 +276,7 @@ impl ViewEffects {
     /// (`combat::hurt_roll`, MCP `EntityRenderer.hurtCameraEffect`).
     #[must_use]
     pub fn with_hurt(mut self, roll_degrees: f32) -> Self {
-        self.bob.roll_degrees += roll_degrees;
+        self.hurt_roll_degrees += roll_degrees;
         self
     }
 
@@ -267,6 +286,8 @@ impl ViewEffects {
         Self {
             fov_modifier: self.fov_modifier + (other.fov_modifier - self.fov_modifier) * alpha,
             bob: self.bob.lerp(other.bob, alpha),
+            hurt_roll_degrees: self.hurt_roll_degrees
+                + (other.hurt_roll_degrees - self.hurt_roll_degrees) * alpha,
             hand: self.hand.lerp(other.hand, alpha),
         }
     }
@@ -441,11 +462,11 @@ mod tests {
         let start = ViewEffects::default().with_death(0.0);
         let end = ViewEffects::default().with_death(20.0);
         // 40 - 8000 / 200 = 0 degrees at the moment of death.
-        assert!(start.bob.roll_degrees.abs() < 1e-4);
+        assert!(start.hurt_roll_degrees.abs() < 1e-4);
         assert!((start.fov_modifier - 1.0).abs() < 1e-6);
         // Then the view rolls on and the field of view closes in.
-        assert!((end.bob.roll_degrees - (40.0 - 8000.0 / 220.0)).abs() < 1e-4);
-        assert!(end.bob.roll_degrees > 3.0);
+        assert!((end.hurt_roll_degrees - (40.0 - 8000.0 / 220.0)).abs() < 1e-4);
+        assert!(end.hurt_roll_degrees > 3.0);
         assert!(end.fov_modifier < 1.0 && end.fov_modifier > 0.9);
     }
 
@@ -455,10 +476,28 @@ mod tests {
         let b = ViewEffects {
             fov_modifier: 1.2,
             bob: ViewBob::new(0.3, 0.1, 0.0),
+            hurt_roll_degrees: 8.0,
             hand: HandPose::default(),
         };
         assert!((a.lerp(b, 0.5).fov_modifier - 1.1).abs() < 1e-6);
+        assert!((a.lerp(b, 0.5).hurt_roll_degrees - 4.0).abs() < 1e-6);
         assert_eq!(a.lerp(b, 1.0), b);
+    }
+
+    /// Regression: the hurt roll was part of the bobbing, so it vanished with the
+    /// "View Bobbing" option off, which vanilla does not do.
+    #[test]
+    fn the_hurt_roll_does_not_depend_on_the_view_bobbing_option() {
+        let hurt = ViewEffects {
+            bob: ViewBob::new(0.4, 0.1, 0.0),
+            ..ViewEffects::default().with_hurt(10.0)
+        };
+        let still = ViewEffects::default().with_hurt(10.0);
+        let rolled = Mat4::from_rotation_z(10.0_f32.to_radians());
+        assert_eq!(hurt.camera_matrix(false), rolled, "off: the roll alone");
+        assert_ne!(hurt.camera_matrix(true), rolled, "on: the bobbing is added");
+        assert_eq!(still.camera_matrix(true), rolled, "no bobbing to add");
+        assert_eq!(ViewEffects::default().camera_matrix(false), Mat4::IDENTITY);
     }
 
     #[test]

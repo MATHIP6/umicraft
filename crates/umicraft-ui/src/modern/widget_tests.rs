@@ -46,13 +46,27 @@ fn the_knob_sits_at_the_end_of_the_track_that_matches_the_state() {
 }
 
 #[test]
+fn the_knob_glides_between_the_two_ends() {
+    let track = Rect::new(10.0, 20.0, 48.0, 24.0);
+    let (off, half, on) = (
+        knob_at(track, 0.0),
+        knob_at(track, 0.5),
+        knob_at(track, 1.0),
+    );
+    assert_eq!(off, knob_rect(track, false));
+    assert_eq!(on, knob_rect(track, true));
+    assert!((half.x - (off.x + on.x) * 0.5).abs() < 1e-4);
+    assert_eq!(knob_at(track, 7.0), on, "the position is clamped");
+}
+
+#[test]
 fn a_click_on_the_track_asks_for_the_other_state() {
     let track = Rect::new(100.0, 100.0, 48.0, 24.0);
     let inside = [track.x + 5.0, track.y + 5.0];
     let asked = |on: bool, events| {
         frame(events, |ui| {
             let id = ui.id("t");
-            toggle(ui, id, track, on, 0.0)
+            toggle(ui, id, track, on, (0.0, f32::from(u8::from(on)), 0.0))
         })
     };
     assert_eq!(asked(false, press(inside)), Some(true));
@@ -132,11 +146,11 @@ fn a_click_on_a_tab_selects_it() {
         press([area.x + first + 6.0 + 8.0, area.y + 10.0])
     };
     let clicked = frame(click_on_second, |ui| {
-        tabs(ui, &brand, area, &labels, 0, 3.0)
+        tabs(ui, &brand, area, &labels, (0, 0.0), 3.0)
     });
     assert_eq!(clicked, Some(1));
     assert_eq!(
-        frame(vec![], |ui| tabs(ui, &brand, area, &labels, 0, 3.0)),
+        frame(vec![], |ui| tabs(ui, &brand, area, &labels, (0, 0.0), 3.0)),
         None
     );
 }

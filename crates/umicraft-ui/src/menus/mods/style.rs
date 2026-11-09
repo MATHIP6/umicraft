@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The look of the mods menu: colours, text sizes and the helpers every part
-//! draws with. Where things go is in [`layout`](super::layout) and
-//! [`landing_layout`](super::landing_layout).
+//! draws with. Where things go is in [`layout`](super::layout).
 
 use crate::context::Ui;
 use crate::draw::Color;
 use crate::geom::Rect;
-use crate::modern::theme::{self, mix};
+use crate::modern::theme::mix;
 use crate::modern::{draw_text, Align};
 use crate::text::FontAtlas;
 
@@ -15,21 +14,20 @@ use crate::text::FontAtlas;
 /// worlds.
 pub(super) const BACKDROP: Color = [0.0, 0.0, 0.0, 0.25];
 /// The panel behind everything: darker than a button so the cards stand out.
-pub(super) const PANEL: Color = [0.05, 0.06, 0.08, 0.86];
-/// Thickness of the thin rim of the Mods button, in GUI units.
-pub(super) const RIM_WIDTH: f32 = 0.5;
-/// The rim at rest: a faint white line.
-pub(super) const RIM: Color = [1.0, 1.0, 1.0, 0.14];
-/// The rim when the pointer is over the button: the accent colour.
-pub(super) const RIM_HOVER: Color = [0.36, 0.55, 1.0, 0.70];
-/// Edge of the module grid icon, in GUI units: two squares and a gap.
-pub(super) const ICON_SIZE: f32 = 7.0;
-/// Space between the icon and the label.
-pub(super) const ICON_GAP: f32 = 5.0;
-/// Space between the capitals of the label, as a share of their size.
-pub(super) const LABEL_TRACKING: f32 = 0.25;
-/// The label of the close button, as on the title screen.
-pub(super) const CLOSE_CROSS: &str = "\u{d7}";
+pub(super) const PANEL: Color = [0.085, 0.09, 0.10, 0.8];
+/// The one-pixel line around the panel.
+pub(super) const PANEL_RIM: Color = [1.0, 1.0, 1.0, 0.07];
+/// Size of a mod name and of the title of a page, in GUI units.
+pub(super) const NAME_SIZE: f32 = 6.0;
+/// A row at rest: nothing, it is the panel.
+pub(super) const CARD: Color = [1.0, 1.0, 1.0, 0.0];
+/// A row under the pointer.
+pub(super) const CARD_HOVER: Color = [1.0, 1.0, 1.0, 0.05];
+/// A mod card at rest, under the pointer, and the tint a mod that is on adds: a
+/// dark inset in the panel, not a light veil over it.
+pub(super) const TILE: Color = [0.03, 0.035, 0.045, 0.55];
+pub(super) const TILE_HOVER: Color = [0.075, 0.08, 0.095, 0.68];
+pub(super) const TILE_ON: Color = [0.36, 0.55, 1.0, 0.07];
 
 /// What every part needs to draw: the brand atlas and the pixels per GUI unit.
 #[derive(Debug, Clone, Copy)]
@@ -60,7 +58,28 @@ pub(super) fn hover_level(ui: &Ui, rect: Rect) -> f32 {
     f32::from(u8::from(ui.is_hovered(rect)))
 }
 
+/// The fill of a mod card: lifted under the pointer and tinted while the mod is
+/// on. `hover` and `on` are levels, `0.0` to `1.0`.
+pub(super) fn tile_fill(hover: f32, on: f32) -> Color {
+    let base = mix(TILE, TILE_HOVER, hover);
+    let tint = TILE_ON[3] * on.clamp(0.0, 1.0);
+    // The accent is laid over the base: the alphas add up, the colour follows
+    // the share each one holds.
+    let alpha = base[3] + tint * (1.0 - base[3]);
+    let share = if alpha > 0.0 {
+        tint * (1.0 - base[3]) / alpha
+    } else {
+        0.0
+    };
+    [
+        base[0] + (TILE_ON[0] - base[0]) * share,
+        base[1] + (TILE_ON[1] - base[1]) * share,
+        base[2] + (TILE_ON[2] - base[2]) * share,
+        alpha,
+    ]
+}
+
 /// The fill of a card or a row at the given hover level.
 pub(super) fn card_fill(hover: f32) -> Color {
-    mix(theme::SURFACE, theme::SURFACE_HOVER, hover)
+    mix(CARD, CARD_HOVER, hover)
 }

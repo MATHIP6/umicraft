@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The text a HUD mod shows, in buffers that are reused from frame to frame.
 
+use super::HudStyle;
+
 /// One line of a widget.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HudLine {
@@ -14,10 +16,12 @@ pub struct HudLine {
 ///
 /// `clear` keeps the strings allocated, so after the first frames a mod writes
 /// its lines without touching the allocator (`write!` into [`line`](Self::line)).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct HudContent {
     lines: Vec<HudLine>,
     used: usize,
+    /// The look of the widget, set by the registry from the shared options.
+    pub style: HudStyle,
 }
 
 impl HudContent {

@@ -71,6 +71,7 @@ pub fn draw_hud_gui(
     font: &FontAtlas,
     sheets: &HudSheets,
 ) {
+    umicraft_core::profile_scope!("draw_hud_gui");
     let s = gui_scale(viewport.0, viewport.1);
     let sf = s as f32;
     let gw = viewport.0 as f32 / sf;

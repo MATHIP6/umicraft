@@ -2,6 +2,7 @@
 
 Status: **phases 0 to 5 done**; steps not done or not kept after measuring: F2-2c, F2-3c, F2-4c, F2-4f, F2-5d, block entities of F2-5c, the sky write of F2-5e. Decision: `docs/decisions/0058-f2-performance-plan.md`.
 Roadmap entry: `ROADMAP.md` §6 (F2).
+Follow-up on a CPU-bound machine (HUD, entities, build profile, settings): `docs/tasks/perf2/README.md`.
 
 The owner started F2 ahead of P13 (2026-11-07) for two reasons:
 

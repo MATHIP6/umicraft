@@ -11,6 +11,7 @@ use crate::modern::{modern_slider, toggle, Align, ModernButton, SliderDrag, Slid
 use crate::modern::{TOGGLE_HEIGHT, TOGGLE_WIDTH};
 
 use super::color::{parse_hex, same_color, PRESETS};
+use super::motion::Motion;
 use super::style::{card_fill, hover_level, Paint};
 use super::view::{ModValue, SettingControl, SettingView};
 
@@ -105,7 +106,9 @@ pub(super) fn settings_panel(
     area: Rect,
     settings: &[SettingView],
     (drag, offset): (&mut SliderDrag, f32),
+    scope: (&str, &mut Motion),
 ) -> Option<(String, ModValue)> {
+    let (mod_id, motion) = scope;
     let mut changed = None;
     let top = Rect {
         y: area.y - offset * paint.scale,
@@ -113,19 +116,25 @@ pub(super) fn settings_panel(
     };
     ui.push_clip(area);
     for (index, setting) in settings.iter().enumerate() {
-        let row = row_rect(top, paint.scale, index);
+        let mut row = row_rect(top, paint.scale, index);
+        // The rows come in one after the other, rising into place.
+        let (opacity, rise) = motion.row(index);
+        row.y += rise * paint.scale;
         if row.bottom() < area.y || row.y > area.bottom() {
             continue;
         }
+        ui.draw().set_opacity(opacity);
         ui.draw()
             .rounded_rect(row, theme::RADIUS * paint.scale, card_fill(0.0));
         ui.push_id(&setting.key);
-        let value = control(ui, paint, row, setting, drag);
+        let key = format!("set/{mod_id}/{}", setting.key);
+        let value = control(ui, paint, row, setting, (drag, (&key, &mut *motion)));
         ui.pop_id();
         if let Some(value) = value {
             changed = Some((setting.key.clone(), value));
         }
     }
+    ui.draw().set_opacity(motion.panel_opacity());
     ui.pop_clip();
     changed
 }
@@ -136,7 +145,7 @@ fn control(
     paint: Paint<'_>,
     row: Rect,
     setting: &SettingView,
-    drag: &mut SliderDrag,
+    (drag, (motion_key, motion)): (&mut SliderDrag, (&str, &mut Motion)),
 ) -> Option<ModValue> {
     let scale = paint.scale;
     let left = row.x + PAD * scale;
@@ -148,7 +157,8 @@ fn control(
             paint.text(ui, &setting.label, (left, middle), label);
             let track = toggle_track(row, scale);
             let hover = hover_level(ui, track);
-            toggle(ui, id, track, *on, hover).map(ModValue::Bool)
+            let (progress, speed) = motion.level(motion_key, *on);
+            toggle(ui, id, track, *on, (hover, progress, speed)).map(ModValue::Bool)
         }
         SettingControl::Slider {
             min,

@@ -14,15 +14,15 @@ fn the_wheel_over_a_widget_changes_its_scale_by_a_step() {
     else {
         panic!("expected a placement");
     };
-    assert!((scale - 1.1).abs() < 1e-4, "{scale}");
+    assert!((scale - 1.05).abs() < 1e-4, "{scale}");
     assert_eq!((rect.x, rect.y), (start.x, start.y));
-    assert!((rect.width - start.width * 1.1).abs() < 1e-3);
+    assert!((rect.width - start.width * 1.05).abs() < 1e-3);
     let Some(HudEditorOutcome::Placed { scale, .. }) =
         show(&mut HudLayer::default(), &view, wheel(1.0))
     else {
         panic!("expected a placement");
     };
-    assert!((scale - 0.9).abs() < 1e-4);
+    assert!((scale - 0.95).abs() < 1e-4);
     let away = UiInput::new(vec![moved([5.0, 5.0]), InputEvent::Wheel { delta: 1.0 }]);
     assert_eq!(show(&mut HudLayer::default(), &view, away), None);
 }
@@ -31,7 +31,8 @@ fn the_wheel_over_a_widget_changes_its_scale_by_a_step() {
 fn the_corner_handle_resizes_and_reports_on_release() {
     let view = view();
     let start = rect_of(&view, 0);
-    let corner = [start.right() - 1.0, start.bottom() - 1.0];
+    let frame = frame_rect(start, SCREEN);
+    let corner = [frame.right() - 1.0, frame.bottom() - 1.0];
     let mut screen = HudLayer::default();
     let to = [corner[0] + start.width, corner[1]];
     show(

@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use crate::chat::run_views;
+use umicraft_assets::profile_textures::parse_textures_property;
 use umicraft_core::lang::Lang;
 use umicraft_game::entity::{BossTracker, EntityStore};
 use umicraft_game::hud::boss_bar::BossBar;
@@ -68,6 +69,13 @@ pub(crate) fn tab_list_view(
                 score: row.score,
                 uuid: row.uuid,
                 has_skin: row.textures.is_some(),
+                skin_url: row
+                    .textures
+                    .as_deref()
+                    .and_then(|value| parse_textures_property(value).ok())
+                    .and_then(|textures| textures.skin)
+                    .map(Into::into),
+                face: None,
             })
             .collect(),
         value_style: frame.value_style.map(|style| match style {

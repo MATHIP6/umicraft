@@ -3,6 +3,7 @@
 
 use std::fmt::Write;
 
+use super::hud_style::hud_settings;
 use super::parse_color;
 use crate::context::ModContext;
 use crate::hud::{Anchor, HudContent, HudPlacement};
@@ -19,7 +20,7 @@ static META: ModMeta = ModMeta {
     default_enabled: true,
 };
 
-const SETTINGS: &[SettingDef] = &[
+const SETTINGS: &[SettingDef] = hud_settings![
     SettingDef {
         key: "frame_time",
         label_key: "umicraft.mods.fps.frame_time",
@@ -115,5 +116,6 @@ mod tests {
     #[test]
     fn reads_only_schema_keys() {
         assert_reads_only_schema_keys(&Fps, &["frame_time", "color"]);
+        assert_reads_only_schema_keys(&Fps, &crate::mods::hud_style::KEYS);
     }
 }

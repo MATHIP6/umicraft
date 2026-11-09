@@ -15,6 +15,7 @@ use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::skin::decode_png_bytes;
 use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_game::hand::HandPose;
+use umicraft_mesh::item::ItemMesh;
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, EntityVertex, Renderer};
 use umicraft_ui::FontAtlas;
@@ -93,6 +94,8 @@ pub struct EntityTextures {
     shadows_enabled: Cell<bool>,
     /// Where the camera is, for the distance at which a shadow fades.
     camera: Cell<glam::Vec3>,
+    /// What the player sees, to leave out the entities that are not in view.
+    cull_view: Cell<Option<super::cull::CullView>>,
     /// The chests of the frame, meshed by the block-entity renderer and drawn
     /// with the entities (P7c). Taken by the next upload.
     block_entities: RefCell<BlockEntityMeshes>,
@@ -119,6 +122,7 @@ impl EntityTextures {
             jar,
             skins: RefCell::new(SkinSet::new()),
             banners: RefCell::default(),
+            cull_view: Cell::new(None),
             view_yaw: Cell::new(0.0),
             view_pitch: Cell::new(0.0),
             viewer_is_spectator: Cell::new(false),
@@ -165,6 +169,13 @@ impl EntityTextures {
     /// that the experience orbs face.
     pub fn set_view_pitch(&self, pitch: f32) {
         self.view_pitch.set(pitch);
+    }
+
+    /// Sets where the player is and looks (the space of the entity snapshots), to
+    /// leave out the entities that are out of view.
+    pub fn set_cull_view(&self, eye: glam::Vec3, forward: glam::Vec3) {
+        self.cull_view
+            .set(Some(super::cull::CullView { eye, forward }));
     }
 
     /// Sets the position of the camera, which decides how far a shadow is
@@ -292,6 +303,7 @@ impl EntityTextures {
         extra: &[MapBatch],
         renderer: &mut Renderer,
     ) {
+        umicraft_core::profile_scope!("mesh_entities");
         self.skins
             .borrow_mut()
             .collect(renderer, &mut self.textures.borrow_mut());
@@ -300,7 +312,7 @@ impl EntityTextures {
             self,
             (self.view_yaw.get(), self.view_pitch.get()),
             self.viewer_is_spectator.get(),
-            self.camera.get(),
+            (self.camera.get(), self.cull_view.get()),
         );
         let block_entities = self.block_entities.take();
         for (slot, vertices) in block_entities.solid {
@@ -378,13 +390,22 @@ impl EntityTextures {
         renderer.upload_shadow_entities(&shadows);
     }
 
+    /// The face of the skin at `url` for a tab list head, once it is downloaded,
+    /// with the hat layer when `hat` is set; the first call starts the download.
+    pub(crate) fn face(&self, url: &str, hat: bool) -> Option<std::sync::Arc<[u8]>> {
+        self.skins.borrow_mut().face(url, hat)
+    }
+
     /// Draws `body` into the portrait of the icon atlas, `placement` carrying
     /// the model at the world origin into the icon box (`GuiInventory`'s
-    /// player model). Only the lit layers are drawn: no shadow, no glint.
+    /// player model). Only the lit layers are drawn: no shadow, no glint. `held`
+    /// is the item geometry of the body (the item in the hand, a helmet block),
+    /// already carried by `placement`.
     pub(crate) fn render_portrait(
         &self,
         body: &EntityRenderSnapshot,
         placement: Mat4,
+        held: &ItemMesh,
         renderer: &mut Renderer,
     ) {
         self.skins
@@ -395,7 +416,7 @@ impl EntityTextures {
             self,
             (0.0, 0.0),
             false,
-            Vec3::ZERO,
+            (Vec3::ZERO, None),
         );
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
@@ -421,7 +442,7 @@ impl EntityTextures {
                     .map(|texture| (vertices.as_slice(), texture.bind_group()))
             })
             .collect();
-        renderer.render_portrait(&batches);
+        renderer.render_portrait(&batches, held);
     }
 
     /// Creates the texture of every horse coat in `slots` that is not there yet.
