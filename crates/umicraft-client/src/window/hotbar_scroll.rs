@@ -11,6 +11,7 @@
 use winit::event::MouseScrollDelta;
 
 use super::App;
+use crate::options::Action;
 use crate::screen::Screen;
 
 /// Slots of the hotbar.
@@ -36,6 +37,27 @@ pub(super) fn scrolled_slot(current: u8, delta: MouseScrollDelta) -> Option<u8> 
 }
 
 impl App {
+    /// Whether the zoom key is held in a running game: the mouse is captured and no
+    /// screen is open.
+    pub(super) fn zoom_held(&self) -> bool {
+        self.session.is_some()
+            && self.screen == Screen::None
+            && !self.death_screen_visible()
+            && self.mouse_captured
+            && self.held(Action::Zoom)
+    }
+
+    /// Gives the wheel to the Zoom mod while its key is held. Returns whether it took
+    /// it, so the hotbar does not scroll as well.
+    pub(super) fn scroll_zoom(&mut self, delta: MouseScrollDelta) -> bool {
+        let notches = match delta {
+            MouseScrollDelta::LineDelta(_, y) => y,
+            MouseScrollDelta::PixelDelta(position) => position.y as f32 / PIXELS_PER_NOTCH,
+        };
+        let held = self.zoom_held();
+        self.zoom.wheel(notches, held, self.mods.zoom().as_ref())
+    }
+
     /// Scrolls the hotbar when the wheel turns in a game that has the mouse:
     /// no screen is open and the pointer is captured. Returns whether it did.
     pub(super) fn scroll_hotbar(&mut self, delta: MouseScrollDelta) -> bool {

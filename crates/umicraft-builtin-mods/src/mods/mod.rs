@@ -15,6 +15,7 @@ mod fullbright;
 mod motion_blur;
 mod ping;
 mod toggle_sprint;
+mod zoom;
 
 use crate::traits::BuiltinMod;
 
@@ -31,6 +32,7 @@ pub fn all() -> Vec<Box<dyn BuiltinMod>> {
         Box::new(ping::Ping),
         Box::new(motion_blur::MotionBlur),
         Box::new(fullbright::Fullbright),
+        Box::new(zoom::Zoom),
         Box::new(toggle_sprint::ToggleSprint::default()),
     ]
 }

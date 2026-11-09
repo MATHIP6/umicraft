@@ -13,12 +13,16 @@ use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
 
 use crate::input::InputState;
 use crate::options::ModsOptions;
+use crate::zoom::ZoomSettings;
 
 /// The id of the Motion Blur mod, whose settings the renderer is given.
 const MOTION_BLUR_ID: &str = "motion_blur";
 
 /// The id of the Fullbright mod, whose switch the renderer is given.
 const FULLBRIGHT_ID: &str = "fullbright";
+
+/// The id of the Zoom mod, whose settings the window is given.
+const ZOOM_ID: &str = "zoom";
 
 /// Height of the eye above the feet of a standing player, in blocks (MCP
 /// `EntityPlayer.getEyeHeight`), to turn the camera into the feet position.
@@ -142,6 +146,21 @@ impl ModsRuntime {
         Some(MotionBlurSettings {
             version,
             strength: blur.settings.number("strength"),
+        })
+    }
+
+    /// The Zoom mod settings while it is on, `None` while it is off.
+    #[must_use]
+    pub fn zoom(&self) -> Option<ZoomSettings> {
+        let zoom = self
+            .registry
+            .mods()
+            .find(|view| view.meta.id.as_str() == ZOOM_ID)?;
+        zoom.enabled.then(|| ZoomSettings {
+            factor: zoom.settings.number("factor"),
+            smooth: zoom.settings.bool("smooth"),
+            scroll: zoom.settings.bool("scroll"),
+            slow_mouse: zoom.settings.bool("slow_mouse"),
         })
     }
 

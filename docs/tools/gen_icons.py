@@ -21,7 +21,7 @@ SIDE = 48
 SUPERSAMPLE = 8
 GRID = 256.0
 # The order of `Icon::ALL`.
-ORDER = ["grid", "sliders", "search", "close", "gauge", "target", "cursor", "signal", "run", "blur", "gear", "lightbulb"]
+ORDER = ["grid", "sliders", "search", "close", "gauge", "target", "cursor", "signal", "run", "blur", "gear", "lightbulb", "binoculars"]
 
 TOKEN = re.compile(r"([MmLlHhVvCcSsQqAaZz])|(-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)")
 

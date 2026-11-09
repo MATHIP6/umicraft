@@ -81,6 +81,7 @@ use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
+use crate::zoom::Zoom;
 use umicraft_mesh::item::ItemMesh;
 
 mod binding_input;
@@ -160,6 +161,8 @@ struct App {
     last_hand: Option<umicraft_game::hand::HandPose>,
     /// Where the CPU time of a frame goes, for F3.
     cpu: CpuSplit,
+    /// The zoom of the Zoom mod.
+    zoom: Zoom,
     /// Whether the window has the focus; without it the frame rate is capped low.
     focused: bool,
     /// The built HUD, kept while it does not change.
@@ -397,6 +400,7 @@ impl App {
             nametags: Vec::new(),
             last_hand: None,
             cpu: CpuSplit::default(),
+            zoom: Zoom::default(),
             focused: true,
             hud_cache: HudCache::default(),
             frame_entities: Vec::new(),
@@ -1231,7 +1235,11 @@ impl App {
             self.frame_times.remove(0);
         }
 
-        self.camera.set_fov_degrees(self.options.video.fov);
+        // The Zoom mod narrows the field of view, with a glide in and out.
+        let zooming = self.zoom_held();
+        let zoom_scale = self.zoom.step(elapsed, zooming, self.mods.zoom().as_ref());
+        self.camera
+            .set_fov_degrees(self.options.video.fov * zoom_scale);
         self.advance_menus(Duration::from_secs_f32(elapsed));
         self.sync_world(now);
         // The camera is where it stays for this frame: the entities are made once.
@@ -1796,8 +1804,11 @@ impl ApplicationHandler for App {
                     };
                     self.scroll_chat(rows);
                 } else {
-                    // In a running game the wheel scrolls the hotbar.
-                    self.scroll_hotbar(delta);
+                    // With the zoom key held the wheel changes the zoom; else, in a
+                    // running game, it scrolls the hotbar.
+                    if !self.scroll_zoom(delta) {
+                        self.scroll_hotbar(delta);
+                    }
                 }
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
@@ -1851,7 +1862,9 @@ impl ApplicationHandler for App {
             {
                 // A positive delta moves the mouse to the right and down; the
                 // game logic turns right and looks down with it.
-                let speed = MOUSE_SENSITIVITY * self.options.controls.look_factor();
+                let speed = MOUSE_SENSITIVITY
+                    * self.options.controls.look_factor()
+                    * self.zoom.look_factor(self.mods.zoom().as_ref());
                 let vertical = if self.options.controls.invert_mouse {
                     -1.0
                 } else {

@@ -108,5 +108,6 @@ pub mod ui_input;
 pub mod weather_view;
 pub mod window;
 pub mod world_view;
+pub mod zoom;
 
 pub use error::ClientError;

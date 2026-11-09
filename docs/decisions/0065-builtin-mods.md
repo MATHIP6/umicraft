@@ -117,6 +117,15 @@ feature must not grow them.
   to it (`Motion::glide`: a critically damped spring, no overshoot, settled in about a quarter
   of a second), except while the thumb is held, when it follows at once. A settings page
   starts at the top without gliding from the previous mod's offset.
+- **Zoom.** A visual mod (`zoom`, off by default) with four settings: factor (1.5 to 10, default 4),
+  smooth, wheel changes the zoom, slower mouse. Its key is a real key binding, `Action::Zoom`
+  (C by default, in the controls screen). The window holds the key (only in a running game
+  with the mouse captured and no screen) and multiplies the field of view by `Zoom::step`
+  (`zoom.rs`): the logarithm of the multiplier glides to its target with an exponential that
+  does not depend on the frame rate (about a quarter of a second, no overshoot); without
+  `smooth` it jumps. While the key is held the wheel changes the factor (x1.15 a notch, 1.2
+  to 30) instead of scrolling the hotbar; the mouse speed follows the field of view. The hand
+  keeps its own field of view.
 - **Known limits.** `keystrokes` and the toggle-sprint indicator need WASD state in
   `ModContext`/`ModInput` and a `hud()` that sees the settings. The directions of
   `coordinates` are not localized (the mods do not see the language). `ping_ms` is

@@ -48,6 +48,7 @@ fn mod_icon(id: &str) -> Icon {
         "toggle_sprint" => Icon::Run,
         "motion_blur" => Icon::Blur,
         "fullbright" => Icon::Lightbulb,
+        "zoom" => Icon::Binoculars,
         _ => Icon::Grid,
     }
 }

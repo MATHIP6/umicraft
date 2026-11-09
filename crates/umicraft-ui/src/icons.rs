@@ -44,11 +44,13 @@ pub enum Icon {
     Gear,
     /// A light bulb: full brightness.
     Lightbulb,
+    /// Binoculars: zoom.
+    Binoculars,
 }
 
 impl Icon {
     /// Every icon, in the order of their bitmaps and characters.
-    pub const ALL: [Icon; 12] = [
+    pub const ALL: [Icon; 13] = [
         Icon::Grid,
         Icon::Sliders,
         Icon::Search,
@@ -61,6 +63,7 @@ impl Icon {
         Icon::Blur,
         Icon::Gear,
         Icon::Lightbulb,
+        Icon::Binoculars,
     ];
 
     fn index(self) -> usize {
