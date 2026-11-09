@@ -37,6 +37,7 @@ pub async fn login_from_msa_token<T: HttpTransport>(
     Ok(MicrosoftLogin {
         username: session.username,
         uuid: session.uuid,
+        skin_url: profile.skin_url,
         minecraft_token: minecraft.access_token,
         minecraft_expires_in_secs: minecraft.expires_in_secs,
         refresh_token: tokens.refresh_token,

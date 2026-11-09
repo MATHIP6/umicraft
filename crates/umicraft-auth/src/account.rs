@@ -23,4 +23,8 @@ pub struct Account {
     /// Profile UUID, 32 lowercase hex digits. It is also the account's key in
     /// the store and in the vault.
     pub uuid: String,
+    /// Address of the player's skin image (Microsoft accounts); `None` shows
+    /// the default skin of the UUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skin_url: Option<String>,
 }

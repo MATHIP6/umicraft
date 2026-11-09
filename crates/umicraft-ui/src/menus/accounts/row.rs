@@ -2,9 +2,10 @@
 
 //! The view model and the drawing of one account row.
 //!
-//! Heads: skins are client assets the UI crate cannot load, so a flat
-//! skin-tone square marks the head slot until the client supplies a texture;
-//! the slot keeps the row aligned either way.
+//! Heads: the client supplies the 8x8 face of each player's skin (the UI crate
+//! cannot load skins); without one a flat square keeps the slot aligned.
+
+use std::sync::Arc;
 
 use umicraft_core::lang::Lang;
 
@@ -13,14 +14,13 @@ use crate::draw::Color;
 use crate::menus::common::{Gui, TextPlacement, DIM_GRAY, WHITE};
 use crate::text::FontAtlas;
 
+use super::face::draw_face;
 use super::layout::{ROW_HEIGHT, ROW_WIDTH};
 
 /// The green of the offline badge (`§a`).
 const OFFLINE_COLOR: Color = [0.333, 1.0, 0.333, 1.0];
 /// The yellow of the Microsoft badge (`§e`).
 const MICROSOFT_COLOR: Color = [1.0, 1.0, 0.333, 1.0];
-/// The placeholder head fill.
-const HEAD_FILL: Color = [0.72, 0.52, 0.40, 1.0];
 /// A row under the pointer.
 const HOVER_SHADE: Color = [1.0, 1.0, 1.0, 0.08];
 
@@ -60,6 +60,9 @@ pub struct AccountRow {
     pub username: String,
     /// The account kind.
     pub badge: AccountBadge,
+    /// The 8x8 RGBA face of the player's skin (256 bytes), or
+    /// `None` for a flat placeholder while it is not known.
+    pub face: Option<Arc<[u8]>>,
 }
 
 /// The decorations of a row.
@@ -91,8 +94,7 @@ pub(super) fn draw_row(
         let shade = gui.rect(x, y, ROW_WIDTH, ROW_HEIGHT);
         ui.draw().rect(shade, HOVER_SHADE);
     }
-    ui.draw()
-        .rect(gui.rect(x, y, ROW_HEIGHT, ROW_HEIGHT), HEAD_FILL);
+    draw_face(ui, gui, row.face.as_deref(), [x, y], ROW_HEIGHT);
     let text_x = x + ROW_HEIGHT + 3.0;
     let name = TextPlacement::left([text_x, y + 5.0], WHITE);
     gui.text(ui, atlas, &row.username, name);

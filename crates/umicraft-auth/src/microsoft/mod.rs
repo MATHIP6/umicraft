@@ -89,6 +89,8 @@ pub struct MicrosoftLogin {
     pub username: String,
     /// Profile UUID, 32 lowercase hex digits.
     pub uuid: String,
+    /// Address of the active skin image, if the player has one.
+    pub skin_url: Option<String>,
     /// Minecraft access token.
     pub minecraft_token: Secret,
     /// Seconds the Minecraft token stays valid.

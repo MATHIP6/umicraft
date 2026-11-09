@@ -32,6 +32,8 @@ pub struct Profile {
     pub id: String,
     /// Player name.
     pub name: String,
+    /// Address of the active skin image, if the player has one.
+    pub skin_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -119,11 +121,24 @@ pub async fn fetch_profile<T: HttpTransport>(
             struct Answer {
                 id: String,
                 name: String,
+                #[serde(default)]
+                skins: Vec<Skin>,
+            }
+            #[derive(Deserialize)]
+            struct Skin {
+                state: String,
+                url: String,
             }
             let answer: Answer = parse_body("profile", &response)?;
+            let skin_url = answer
+                .skins
+                .into_iter()
+                .find(|skin| skin.state == "ACTIVE")
+                .map(|skin| skin.url);
             Ok(Profile {
                 id: answer.id,
                 name: answer.name,
+                skin_url,
             })
         }
         404 => Err(AuthError::NoMinecraftProfile),
@@ -189,6 +204,36 @@ mod tests {
             let t = FakeTransport::new(vec![(200, body)]);
             let err = check_entitlements(&t, &token()).await.err().unwrap();
             assert!(matches!(err, AuthError::NoMinecraftLicence), "{body}");
+        }
+    }
+
+    async fn profile_of(body: &str) -> Profile {
+        let t = FakeTransport::new(vec![(200, body)]);
+        fetch_profile(&t, &token()).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_active_skin_is_the_profile_skin() {
+        let profile = profile_of(
+            r#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch","skins":[
+                {"id":"1","state":"INACTIVE","url":"http://textures.minecraft.net/texture/old"},
+                {"id":"2","state":"ACTIVE","url":"http://textures.minecraft.net/texture/new","variant":"SLIM"}]}"#,
+        )
+        .await;
+        assert_eq!(
+            profile.skin_url.as_deref(),
+            Some("http://textures.minecraft.net/texture/new")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_profile_without_an_active_skin_has_no_skin_url() {
+        for body in [
+            r#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch","skins":[]}"#,
+            r#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch"}"#,
+            r#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch","skins":[{"state":"INACTIVE","url":"u"}]}"#,
+        ] {
+            assert_eq!(profile_of(body).await.skin_url, None, "{body}");
         }
     }
 

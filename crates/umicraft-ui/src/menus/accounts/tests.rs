@@ -19,6 +19,7 @@ pub(super) fn rows() -> Vec<AccountRow> {
             } else {
                 AccountBadge::Offline
             },
+            face: None,
         })
         .collect()
 }

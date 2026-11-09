@@ -85,6 +85,7 @@ impl<V: SecretVault> AccountManager<V> {
             kind: AccountKind::Microsoft,
             username: login.username.clone(),
             uuid: login.uuid.clone(),
+            skin_url: login.skin_url.clone(),
         };
         match self.store.add(account.clone()) {
             Ok(()) => {}
@@ -159,6 +160,26 @@ impl<V: SecretVault> AccountManager<V> {
             .ok_or(AuthError::LoginExpired)
     }
 
+    /// Records the skin a renewal found, or its absence.
+    ///
+    /// # Errors
+    /// [`AuthError::UnknownAccount`] or [`AuthError::Storage`].
+    pub fn set_skin_url(&mut self, uuid: &str, skin_url: Option<String>) -> Result<(), AuthError> {
+        let mut account = self
+            .store
+            .accounts()
+            .iter()
+            .find(|a| a.uuid == uuid)
+            .cloned()
+            .ok_or(AuthError::UnknownAccount)?;
+        if account.skin_url == skin_url {
+            return Ok(());
+        }
+        account.skin_url = skin_url;
+        self.store.replace(uuid, account)?;
+        self.save()
+    }
+
     /// Keeps the refresh token a renewal returned: Microsoft rotates it, and
     /// the old one stops working.
     ///
@@ -181,6 +202,8 @@ pub struct RenewedSession {
     pub session: Session,
     /// The new refresh token, for [`AccountManager::store_refresh_token`].
     pub refresh_token: Secret,
+    /// The player's active skin now, for [`AccountManager::set_skin_url`].
+    pub skin_url: Option<String>,
 }
 
 /// Signs in again from a refresh token: Microsoft, Xbox, Minecraft, profile.
@@ -201,6 +224,7 @@ pub async fn renew_session<T: HttpTransport>(
     Ok(RenewedSession {
         session,
         refresh_token: login.refresh_token,
+        skin_url: login.skin_url,
     })
 }
 
@@ -227,6 +251,7 @@ mod tests {
         MicrosoftLogin {
             username: "Notch".into(),
             uuid: "069a79f444e94726a5befca90e38aaf5".into(),
+            skin_url: Some("http://textures.minecraft.net/texture/one".into()),
             minecraft_token: Secret::new("mc"),
             minecraft_expires_in_secs: 86400,
             refresh_token: Secret::new("r1"),
@@ -254,6 +279,28 @@ mod tests {
         let reopened = AccountManager::open(path, MemoryVault::default()).unwrap();
         assert_eq!(reopened.accounts(), m.accounts());
         assert_eq!(reopened.selected().unwrap().username, "Pixel");
+    }
+
+    #[test]
+    fn the_skin_url_is_saved_and_can_change() {
+        let (mut m, path) = manager();
+        m.add_microsoft(&login()).unwrap();
+        let uuid = m.accounts()[0].uuid.clone();
+        assert_eq!(
+            m.accounts()[0].skin_url.as_deref(),
+            Some("http://textures.minecraft.net/texture/one")
+        );
+        m.set_skin_url(
+            &uuid,
+            Some("http://textures.minecraft.net/texture/two".into()),
+        )
+        .unwrap();
+        let reopened = AccountManager::open(path, MemoryVault::default()).unwrap();
+        assert_eq!(
+            reopened.accounts()[0].skin_url.as_deref(),
+            Some("http://textures.minecraft.net/texture/two")
+        );
+        assert!(m.set_skin_url("nobody", None).is_err());
     }
 
     #[test]

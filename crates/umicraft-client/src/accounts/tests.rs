@@ -13,6 +13,7 @@ fn login() -> MicrosoftLogin {
     MicrosoftLogin {
         username: "Notch".into(),
         uuid: UUID.into(),
+        skin_url: None,
         minecraft_token: Secret::new("mc"),
         minecraft_expires_in_secs: 86_400,
         refresh_token: Secret::new("r1"),
@@ -93,6 +94,7 @@ fn a_microsoft_account_is_not_ready_until_its_session_is_renewed() {
         Ok(RenewedSession {
             session,
             refresh_token: Secret::new("r2"),
+            skin_url: None,
         }),
     );
     assert!(matches!(flow.identity(), Identity::Online(s) if s.access_token.expose() == "fresh"));

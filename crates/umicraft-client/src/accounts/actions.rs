@@ -118,9 +118,13 @@ impl AccountsFlow {
         match result.and_then(|renewed| {
             self.manager
                 .store_refresh_token(uuid, &renewed.refresh_token)?;
+            self.manager.set_skin_url(uuid, renewed.skin_url)?;
             Ok(renewed.session)
         }) {
-            Ok(session) => self.session = SessionState::Ready(session),
+            Ok(session) => {
+                self.session = SessionState::Ready(session);
+                self.sync_screen();
+            }
             Err(error) => {
                 self.session = SessionState::Failed;
                 self.fail(&error);

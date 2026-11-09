@@ -18,6 +18,7 @@ mod device_code_dialog;
 #[cfg(test)]
 mod dialog_tests;
 mod edit_dialog;
+mod face;
 mod layout;
 mod list;
 mod name_field;

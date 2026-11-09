@@ -10,6 +10,7 @@
 
 mod actions;
 mod browser;
+mod heads;
 mod worker;
 
 use std::path::PathBuf;
@@ -25,6 +26,7 @@ use umicraft_ui::menus::{AccountBadge, AccountRow, AccountsScreen, DeviceCodePro
 use umicraft_ui::{FontAtlas, Ui};
 
 use crate::screen::Screen;
+use heads::Heads;
 use worker::Event;
 
 /// Who the next connection is made as.
@@ -61,6 +63,7 @@ enum SessionState {
 /// The account manager with its screen and jobs.
 pub struct AccountsFlow {
     manager: AccountManager<Box<dyn SecretVault>>,
+    heads: Heads,
     screen: AccountsScreen,
     session: SessionState,
     /// The account `session` belongs to.
@@ -84,20 +87,21 @@ impl AccountsFlow {
             }
         };
         let path = umicraft_assets::cache::data_dir().map(|dir| dir.join("accounts.toml"));
-        Self::with_manager(open_manager(path, vault))
+        Self::with_manager(open_manager(path, vault), Heads::with_downloads())
     }
 
     /// A flow that keeps its accounts in memory: tests and demos.
     #[must_use]
     pub fn in_memory() -> Self {
         let vault: Box<dyn SecretVault> = Box::new(MemoryVault::default());
-        Self::with_manager(AccountManager::in_memory(vault))
+        Self::with_manager(AccountManager::in_memory(vault), Heads::without_downloads())
     }
 
-    fn with_manager(manager: AccountManager<Box<dyn SecretVault>>) -> Self {
+    fn with_manager(manager: AccountManager<Box<dyn SecretVault>>, heads: Heads) -> Self {
         let (sender, events) = channel();
         let mut flow = Self {
             manager,
+            heads,
             screen: AccountsScreen::new(Vec::new(), None),
             session: SessionState::Idle,
             session_uuid: None,
@@ -146,6 +150,9 @@ impl AccountsFlow {
         while let Ok(event) = self.events.try_recv() {
             self.apply_event(event);
         }
+        if self.heads.poll() {
+            self.sync_screen();
+        }
     }
 
     /// Draws the chooser and applies what the player did. Returns the screen to
@@ -163,6 +170,7 @@ impl AccountsFlow {
 
     /// Rebuilds the screen's rows and selection from the manager.
     fn sync_screen(&mut self) {
+        let heads = &mut self.heads;
         let rows = self
             .manager
             .accounts()
@@ -173,6 +181,7 @@ impl AccountsFlow {
                     AccountKind::Offline => AccountBadge::Offline,
                     AccountKind::Microsoft => AccountBadge::Microsoft,
                 },
+                face: heads.face_for(account),
             })
             .collect();
         self.screen.set_rows(rows);

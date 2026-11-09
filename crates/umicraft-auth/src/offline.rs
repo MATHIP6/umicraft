@@ -34,6 +34,7 @@ pub fn offline_account(username: &str) -> Result<Account, AuthError> {
         kind: AccountKind::Offline,
         username: username.to_owned(),
         uuid,
+        skin_url: None,
     })
 }
 

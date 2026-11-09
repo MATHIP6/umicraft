@@ -29,9 +29,12 @@ Design: ADR-0067 (architecture), ADR-0068 (chooser screen).
 4. Delete an account: its refresh token leaves the keychain.
 5. Run with `RUST_LOG=trace` and search the output for the token: no match.
 
+## Heads
+
+Offline accounts show Steve or Alex by UUID (`SkinModel::default_for_uuid`, MCP `DefaultPlayerSkin.isSlimSkin`), read from the player's own assets with a procedural stand-in. A Microsoft account shows its active skin (profile `skins[]`, saved as `skin_url` in `accounts.toml`, downloaded by the texture worker with its disk cache), and the default skin until it arrives.
+
 ## Open
 
-- Heads are a flat placeholder (no skin fetch yet).
 - Errors from the auth crate are shown in English.
 - No `--hud-view accounts` demo.
 - Client id: stopgap, see ADR-0067.
