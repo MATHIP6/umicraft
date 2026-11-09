@@ -13,8 +13,11 @@
 pub mod account;
 pub mod error;
 pub mod join;
+pub mod keyring_vault;
 pub mod launch;
+pub mod microsoft;
 pub mod offline;
+pub mod reqwest_transport;
 pub mod secret;
 pub mod session;
 pub mod store;
@@ -24,8 +27,15 @@ pub mod vault;
 pub use account::{Account, AccountKind};
 pub use error::AuthError;
 pub use join::{HttpSessionServer, SessionServer};
+pub use keyring_vault::KeyringVault;
 pub use launch::{session_from_launch, strip_session_args};
+pub use microsoft::{
+    device_code::{poll_token, request_device_code, Sleeper, TokioSleeper},
+    login::{full_login, login_from_msa_token, refresh_login},
+    DeviceCode, MicrosoftLogin, MsaTokens,
+};
 pub use offline::{offline_account, offline_uuid};
+pub use reqwest_transport::ReqwestTransport;
 pub use secret::Secret;
 pub use session::Session;
 pub use store::AccountStore;
