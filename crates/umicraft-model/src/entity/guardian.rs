@@ -140,7 +140,12 @@ impl GuardianModel {
     }
 
     /// Sets spine pulsing and tail swimming animation angles.
-    pub fn set_angles(&mut self, anim_time: f32) {
+    ///
+    /// `age` is the ticks lived plus the partial tick (MCP `ageInTicks`). The
+    /// spines pulse as in MCP `ModelGuardian.setRotationAngles` with the
+    /// spikes out; the tail sway stands in for the guardian's own tail timer,
+    /// which the client does not track yet.
+    pub fn set_angles(&mut self, age: f32) {
         let rot_x = [
             1.75, 0.25, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 1.25, 0.75, 0.0, 0.0,
         ];
@@ -165,12 +170,12 @@ impl GuardianModel {
             self.spines[i].rotation[0] = pi * rot_x[i];
             self.spines[i].rotation[1] = pi * rot_y[i];
             self.spines[i].rotation[2] = pi * rot_z[i];
-            let pulse = 1.0 + (anim_time * 1.5 + i as f32).cos() * 0.05;
+            let pulse = 1.0 + (age * 1.5 + i as f32).cos() * 0.01;
             self.spines[i].pivot = [off_x[i] * pulse, 12.0 + off_y[i] * pulse, off_z[i] * pulse];
         }
 
         // Tail swim waggle
-        let swim = (anim_time * 2.0).sin() * 0.2;
+        let swim = (age * 2.0).sin() * 0.2;
         self.tail[0].rotation[1] = swim;
         self.tail[1].rotation[1] = swim * 1.2;
         self.tail[2].rotation[1] = swim * 1.5;

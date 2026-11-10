@@ -106,13 +106,20 @@ impl BatModel {
         }
     }
 
-    /// Sets the wing flapping animation angles and forward body tilt.
-    pub fn set_angles(&mut self, anim_time: f32) {
-        // In flight, body is pitched forward ~45 degrees so chest faces down/forward and tail trails behind (MCP ModelBat.java:103)
-        self.body.rotation[0] = -FRAC_PI_4 - (anim_time * 0.1).cos() * 0.15;
+    /// Flaps the wings, tilts the body and turns the head of a flying bat
+    /// (MCP `ModelBat.setRotationAngles`, the not-hanging branch).
+    ///
+    /// `age` is the ticks lived plus the partial tick (MCP `ageInTicks`): a
+    /// bat flaps with time, not with walking. The head angles are in degrees.
+    pub fn set_angles(&mut self, age: f32, head_yaw: f32, head_pitch: f32) {
+        // Flipping y turns the sense of x rotations around (as in `pose.rs`).
+        self.head.rotation[0] = -head_pitch.to_radians();
+        self.head.rotation[1] = head_yaw.to_radians();
 
-        // Use sin(anim_time) so at anim_time = 0.0 both wings are spread wide open
-        let flap = (anim_time * 1.3).sin() * std::f32::consts::PI * 0.25;
+        // The body leans forward 45 degrees and rocks slowly.
+        self.body.rotation[0] = -FRAC_PI_4 - (age * 0.1).cos() * 0.15;
+
+        let flap = (age * 1.3).cos() * std::f32::consts::PI * 0.25;
         self.right_wing.rotation[1] = flap;
         self.left_wing.rotation[1] = -flap;
         self.outer_right_wing.rotation[1] = flap * 0.5;
@@ -146,5 +153,38 @@ impl BatModel {
 impl Default for BatModel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_wings_flap_with_age_alone() {
+        // Regression: the wings were driven by the limb swing, which stays
+        // still while a bat flies, so they never flapped.
+        let mut early = BatModel::new();
+        early.set_angles(0.0, 0.0, 0.0);
+        let mut later = BatModel::new();
+        later.set_angles(1.0, 0.0, 0.0);
+        assert_ne!(early.right_wing.rotation, later.right_wing.rotation);
+    }
+
+    #[test]
+    fn the_wings_start_at_the_mcp_phase() {
+        // MCP `ModelBat`: the right wing turns by `cos(age * 1.3) * PI / 4`.
+        let mut model = BatModel::new();
+        model.set_angles(0.0, 0.0, 0.0);
+        assert!((model.right_wing.rotation[1] - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
+        assert!((model.outer_left_wing.rotation[1] + std::f32::consts::FRAC_PI_8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_head_follows_the_look() {
+        let mut model = BatModel::new();
+        model.set_angles(0.0, 45.0, 20.0);
+        assert!((model.head.rotation[1] - 45.0_f32.to_radians()).abs() < 1e-6);
+        assert!((model.head.rotation[0] + 20.0_f32.to_radians()).abs() < 1e-6);
     }
 }

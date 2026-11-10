@@ -133,18 +133,28 @@ impl WitherModel {
         }
     }
 
-    /// Sets head rotations and hover spine undulation.
-    pub fn set_angles(&mut self, anim_time: f32, head_yaw: f32, head_pitch: f32) {
+    /// Turns the heads and breathes the spine (MCP
+    /// `ModelWither.setRotationAngles`).
+    ///
+    /// `age` is the ticks lived plus the partial tick (MCP `ageInTicks`); the
+    /// head angles are in degrees.
+    pub fn set_angles(&mut self, age: f32, head_yaw: f32, head_pitch: f32) {
         let yaw_rad = head_yaw.to_radians();
         let pitch_rad = head_pitch.to_radians();
-        self.center_head.rotation[1] = yaw_rad;
-        self.center_head.rotation[0] = -pitch_rad;
+        // MCP `ModelWither.setLivingAnimations` turns each side head toward its
+        // own target; the client does not track those yet, so they look where
+        // the centre head looks.
+        for head in [
+            &mut self.center_head,
+            &mut self.right_head,
+            &mut self.left_head,
+        ] {
+            head.rotation[1] = yaw_rad;
+            head.rotation[0] = -pitch_rad;
+        }
 
-        // Side heads look around slightly
-        let sway = (anim_time * 0.1).cos();
-        self.right_head.rotation[1] = yaw_rad + (anim_time * 0.5).sin() * 0.2;
-        self.left_head.rotation[1] = yaw_rad + (anim_time * 0.5 + 1.0).sin() * 0.2;
-
+        // The spine and tail breathe slowly with time.
+        let sway = (age * 0.1).cos();
         let spine_angle = (0.065 + 0.05 * sway) * std::f32::consts::PI;
         self.spine.rotation[0] = -spine_angle;
         self.tail.pivot = [

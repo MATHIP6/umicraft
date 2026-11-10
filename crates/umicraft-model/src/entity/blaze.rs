@@ -2,6 +2,8 @@
 
 //! Blaze box model matching MCP 1.8 `ModelBlaze.java`.
 
+use std::f32::consts::PI;
+
 use glam::{Mat4, Vec3};
 
 use super::{ModelBox, ModelPart, ModelVertex};
@@ -21,7 +23,9 @@ impl BlazeModel {
     pub fn new() -> Self {
         let tex = [64.0, 32.0];
 
-        let head = ModelPart::new([0.0, 18.0, 0.0]).with_box(ModelBox::new(
+        // MCP pivots are y-down from the top of the legs; here y is up from
+        // the feet, so an MCP `y` becomes `24 - y` and boxes hang below.
+        let head = ModelPart::new([0.0, 24.0, 0.0]).with_box(ModelBox::new(
             [-4.0, -4.0, -4.0],
             [8.0, 8.0, 8.0],
             [0.0, 0.0],
@@ -31,7 +35,7 @@ impl BlazeModel {
 
         let sticks = std::array::from_fn(|_| {
             ModelPart::new([0.0, 0.0, 0.0]).with_box(ModelBox::new(
-                [-1.0, -8.0, -1.0],
+                [0.0, -8.0, 0.0],
                 [2.0, 8.0, 2.0],
                 [0.0, 16.0],
                 tex,
@@ -42,35 +46,30 @@ impl BlazeModel {
         Self { head, sticks }
     }
 
-    /// Sets the rotation and orbiting positions for all 12 sticks.
-    pub fn set_angles(&mut self, anim_time: f32, head_yaw: f32, head_pitch: f32) {
-        self.head.rotation[1] = head_yaw;
-        self.head.rotation[0] = head_pitch;
+    /// Turns the head and moves the 12 rods along their orbits
+    /// (MCP `ModelBlaze.setRotationAngles`).
+    ///
+    /// `age` is the ticks lived plus the partial tick (MCP `ageInTicks`): a
+    /// blaze hovers, so its rods turn with time, not with walking. The head
+    /// angles are in degrees.
+    pub fn set_angles(&mut self, age: f32, head_yaw: f32, head_pitch: f32) {
+        self.head.rotation[1] = head_yaw.to_radians();
+        // Flipping y turns the sense of x rotations around (as in `pose.rs`).
+        self.head.rotation[0] = -head_pitch.to_radians();
 
-        // Tier 1: sticks 0..4 (radius 9.0)
-        let mut angle1 = anim_time * std::f32::consts::PI * -0.1;
-        for (i, stick) in self.sticks[0..4].iter_mut().enumerate() {
-            let y_off = ((i * 2) as f32 + anim_time * 0.25).cos();
-            stick.pivot = [angle1.cos() * 9.0, 20.0 + y_off, angle1.sin() * 9.0];
-            angle1 += 1.0;
-        }
-
-        // Tier 2: sticks 4..8 (radius 7.0)
-        let mut angle2 = (std::f32::consts::PI / 4.0) + anim_time * std::f32::consts::PI * 0.03;
-        for (i, stick) in self.sticks[4..8].iter_mut().enumerate() {
-            let y_off = (((i + 4) * 2) as f32 + anim_time * 0.25).cos();
-            stick.pivot = [angle2.cos() * 7.0, 16.0 + y_off, angle2.sin() * 7.0];
-            angle2 += 1.0;
-        }
-
-        // Tier 3: sticks 8..12 (radius 5.0)
-        let mut angle3 = 0.471_238_94 + anim_time * std::f32::consts::PI * -0.05;
-        for (i, stick) in self.sticks[8..12].iter_mut().enumerate() {
-            let k = (i + 8) as f32;
-            let y_off = (k * 1.5 + anim_time * 0.5).cos();
-            stick.pivot = [angle3.cos() * 5.0, 7.0 + y_off, angle3.sin() * 5.0];
-            angle3 += 1.0;
-        }
+        let (top, rest) = self.sticks.split_at_mut(4);
+        let (middle, bottom) = rest.split_at_mut(4);
+        // Each tier turns at its own speed; each rod bobs with its index `k`
+        // (`0..12` over the three tiers) so the rods drift out of phase.
+        orbit(top, 0, 9.0, age * PI * -0.1, |k| {
+            -2.0 + (((k * 2) as f32 + age) * 0.25).cos()
+        });
+        orbit(middle, 4, 7.0, PI / 4.0 + age * PI * 0.03, |k| {
+            2.0 + (((k * 2) as f32 + age) * 0.25).cos()
+        });
+        orbit(bottom, 8, 5.0, 0.471_238_94 + age * PI * -0.05, |k| {
+            11.0 + ((k as f32 * 1.5 + age) * 0.5).cos()
+        });
     }
 
     /// Emits the blaze mesh vertices transformed into world units.
@@ -89,8 +88,69 @@ impl BlazeModel {
     }
 }
 
+/// Places a tier of rods evenly (one radian apart) on a circle of `radius`
+/// from angle `start`, each at the MCP height `mcp_y(k)` of rod `k`, `first`
+/// being the index of the first rod of the tier.
+fn orbit(
+    sticks: &mut [ModelPart],
+    first: usize,
+    radius: f32,
+    start: f32,
+    mcp_y: impl Fn(usize) -> f32,
+) {
+    for (i, stick) in sticks.iter_mut().enumerate() {
+        let angle = start + i as f32;
+        let k = first + i;
+        stick.pivot = [angle.cos() * radius, 24.0 - mcp_y(k), angle.sin() * radius];
+    }
+}
+
 impl Default for BlazeModel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_rods_orbit_with_age_alone() {
+        // Regression: the rods were driven by the limb swing, which stays
+        // still while a blaze hovers, so they never moved.
+        let mut early = BlazeModel::new();
+        early.set_angles(0.0, 0.0, 0.0);
+        let mut later = BlazeModel::new();
+        later.set_angles(5.0, 0.0, 0.0);
+        for (a, b) in early.sticks.iter().zip(&later.sticks) {
+            assert_ne!(a.pivot, b.pivot);
+        }
+    }
+
+    #[test]
+    fn the_rods_sit_at_the_mcp_heights() {
+        // MCP `ModelBlaze`: at age 0 rod `k` of the top tier is at
+        // `-2 + cos(k * 2 * 0.25)`, which is `24 - y` here.
+        let mut model = BlazeModel::new();
+        model.set_angles(0.0, 0.0, 0.0);
+        let expected = [
+            24.0 - (-2.0 + 0.0_f32.cos()),
+            24.0 - (2.0 + (8.0_f32 * 0.25).cos()),
+            24.0 - (11.0 + (8.0_f32 * 1.5 * 0.5).cos()),
+        ];
+        for (stick, y) in [0, 4, 8].into_iter().zip(expected) {
+            assert!((model.sticks[stick].pivot[1] - y).abs() < 1e-5);
+        }
+        let radius = model.sticks[0].pivot[0].hypot(model.sticks[0].pivot[2]);
+        assert!((radius - 9.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_head_turns_by_degrees() {
+        let mut model = BlazeModel::new();
+        model.set_angles(0.0, 90.0, -30.0);
+        assert!((model.head.rotation[1] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        assert!((model.head.rotation[0] - 30.0_f32.to_radians()).abs() < 1e-5);
     }
 }

@@ -49,10 +49,13 @@ impl EndermiteModel {
         Self { body_parts }
     }
 
-    /// Sets the writhing animation angles.
-    pub fn set_angles(&mut self, anim_time: f32) {
+    /// Sets the writhing animation angles (MCP `ModelEnderMite.setRotationAngles`).
+    ///
+    /// `age` is the ticks lived plus the partial tick (MCP `ageInTicks`): the
+    /// body writhes with time, even while the mob stands still.
+    pub fn set_angles(&mut self, age: f32) {
         for (i, part) in self.body_parts.iter_mut().enumerate() {
-            let offset = anim_time * 0.9 + (i as f32) * 0.15 * std::f32::consts::PI;
+            let offset = age * 0.9 + (i as f32) * 0.15 * std::f32::consts::PI;
             let weight = (1 + (i as i32 - 2).abs()) as f32;
             part.rotation[1] = offset.cos() * std::f32::consts::PI * 0.01 * weight;
             part.pivot[0] = offset.sin() * std::f32::consts::PI * 0.1 * (i as i32 - 2).abs() as f32;

@@ -34,6 +34,7 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
         amount,
         head_yaw,
         head_pitch,
+        ..
     } = pose;
     let baby = ent.meta.baby;
     // A model with proper baby proportions.
@@ -311,6 +312,7 @@ mod tests {
             amount: ent.limb_swing_amount,
             head_yaw: 0.0,
             head_pitch: 0.0,
+            age: ent.age,
         };
         let layers = |ent: &EntityRenderSnapshot| horse_layers(ent, pose(ent));
         let calm = horse_at(1, 0.0, 0);
