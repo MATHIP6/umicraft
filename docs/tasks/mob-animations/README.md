@@ -1,6 +1,6 @@
 # Mob animations and mob particles: audit and plan
 
-Status: **phases A, B, C and P done** (bar `MobAppearance` and `ItemCrack`) (branch `feat/mob-animations`). Audited against MCP 1.8
+Status: **phases A, B, C and P done** (bar `MobAppearance`, projectile impacts and broken tools) (branch `feat/mob-animations`). Audited against MCP 1.8
 (`client/model/Model*.java`, `client/renderer/entity/Render*.java`, `entity/`) on
 2026-11-09. Line numbers are the ones at `eba357d`.
 
@@ -81,9 +81,13 @@ from the `Entity Status` arm (`spawn_status_particles`).
 - P4 (done): slime landing (new `Slime` fragment on the atlas of the blocks,
   `Texture::Item`), rabbit hop dust (status 1), wolf shake spray (status 8)
   and the guardian's bubbles (with C7).
+- P5 (done): `ItemCrack` and `Snowball` factories (`Texture::Item`, resolved
+  through the item models' particle texture), the flakes of a splash potion
+  (2002) and an ender eye (2003), and the crumbs of an eating player, local
+  or remote.
 - Still to do: the elder guardian's `MobAppearance` (a whole elder guardian
-  model drawn in front of the camera: a render pass of its own) and
-  `ItemCrack` (needs an item id to picture lookup in the client).
+  model drawn in front of the camera: a render pass of its own), the impact
+  particles of a thrown egg or snowball, and the flakes of a broken tool.
 - Not a bug: the enderman teleport trail comes from the server-side
   `teleportTo`, so a 1.8 client in multiplayer never sees it.
 - Related but not particles: the client-side sounds of the blaze (`fire.fire`,

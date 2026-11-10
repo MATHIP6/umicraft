@@ -1320,6 +1320,7 @@ impl App {
                 &mut self.particle_sprites,
                 environment.partial_tick,
                 self.camera.render_origin(),
+                self.items.as_deref(),
             );
             renderer.set_particles(&self.particle_sprites);
         }

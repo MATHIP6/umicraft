@@ -20,9 +20,13 @@ use crate::combat::hitbox::body_size;
 use crate::entity::meta::Variant;
 use crate::entity::mob_state::wither_head_positions;
 use crate::entity::{EntityKind, EntityRecord, MobState};
+use crate::item_use::{use_action, UseAction};
 use crate::particles::ambient::{running_dust, RunningBody};
+use crate::particles::{is_bite_tick, Eater};
+use crate::physics::EYE_HEIGHT;
 use crate::raycast::look_direction;
 use crate::shapes::BlockSource;
+use umicraft_protocol::packets::play::ItemStack;
 
 /// Health at or below which a wither is armoured: half of its 300
 /// (`EntityWither.isArmored`).
@@ -205,6 +209,9 @@ impl ParticleEngine {
         }
         if entity.kind.is_living() {
             self.potion_swirl(entity, &body, filter);
+        }
+        if entity.kind == EntityKind::Player {
+            self.eating_crumbs(entity, filter);
         }
     }
 
@@ -441,6 +448,43 @@ impl ParticleEngine {
             );
             self.emit(landing, position, DVec3::ZERO, filter);
         }
+    }
+
+    /// `EntityPlayer.updateItemUse` for a player another client sees eating:
+    /// a bite of crumbs every fourth tick in the last quarter of the meal. The
+    /// count of the reference (`32` at the start) is rebuilt from the ticks
+    /// the use flag has been set (the flag shows one tick after the start).
+    fn eating_crumbs(&mut self, entity: &EntityRecord, filter: &SpawnFilter) {
+        let (Some(held), true) = (entity.held.as_ref(), entity.use_ticks > 0) else {
+            return;
+        };
+        let stack = ItemStack {
+            item_id: held.item_id,
+            stack_size: 1,
+            damage: held.damage,
+            nbt: None,
+        };
+        if use_action(&stack) != Some(UseAction::Eat) {
+            return;
+        }
+        let count = (UseAction::Eat.max_duration() + 1).saturating_sub(entity.use_ticks);
+        if !is_bite_tick(count) {
+            return;
+        }
+        // `EntityPlayer.getEyeHeight`: 1.62, lowered by 0.08 when sneaking.
+        let eye = EYE_HEIGHT
+            - if entity.flags.is_sneaking() {
+                0.08
+            } else {
+                0.0
+            };
+        let eater = Eater {
+            eyes: entity.position + DVec3::new(0.0, eye, 0.0),
+            yaw: entity.yaw,
+            pitch: entity.pitch,
+        };
+        let (id, damage) = (held.item_id.unsigned_abs(), held.damage.unsigned_abs());
+        self.spawn_crumbs(&eater, id, damage, filter);
     }
 
     /// `EntityLivingBase.updatePotionEffects` on the client: a swirl in the
@@ -724,6 +768,38 @@ mod tests {
         assert!(sprayed[..8].iter().all(|&n| n == 0), "{sprayed:?}");
         assert!(sprayed[8..].iter().any(|&n| n >= 6), "{sprayed:?}");
         assert_eq!(*sprayed.last().unwrap(), 0, "over by 1.4 + 0.4");
+    }
+
+    #[test]
+    fn a_player_eating_throws_crumbs_every_fourth_tick_near_the_end() {
+        // Regression: no player showed crumbs while eating.
+        let mut player = mob(EntityKind::Player);
+        let bread = |id| crate::entity::EntityItem {
+            item_id: id,
+            damage: 0,
+            count: 1,
+            nbt: None,
+        };
+        player.held = Some(bread(297));
+        let crumbs: Vec<usize> = (0..=32)
+            .map(|ticks| {
+                player.use_ticks = ticks;
+                after_tick(&player)
+            })
+            .collect();
+        // Bites at 9, 13, 17, 21, 25 and 29 ticks into the meal (24 to 4 left).
+        let bites: Vec<usize> = crumbs
+            .iter()
+            .enumerate()
+            .filter(|&(_, &count)| count == 5)
+            .map(|(ticks, _)| ticks)
+            .collect();
+        assert_eq!(bites, [9, 13, 17, 21, 25, 29]);
+        assert_eq!(crumbs.iter().sum::<usize>(), 30);
+        // A sword is held up, not eaten.
+        player.held = Some(bread(267));
+        player.use_ticks = 9;
+        assert_eq!(after_tick(&player), 0);
     }
 
     #[test]

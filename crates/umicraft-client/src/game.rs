@@ -54,7 +54,7 @@ use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::item_use::{drop_item, DoorToggle, ItemUse, UseAction, UseTick};
 use umicraft_game::movement::movement_stats;
-use umicraft_game::particles::{EffectContext, SpawnFilter};
+use umicraft_game::particles::{is_bite_tick, Eater, EffectContext, SpawnFilter};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::piston::{motion, MovingBlocks};
@@ -2488,6 +2488,34 @@ fn spawn_mob_particles(game: &mut Game) {
     }
 }
 
+/// The crumbs of the local player's own meal (MCP
+/// `EntityPlayer.updateItemUse`): the stored entities make theirs in
+/// `spawn_mob_particles`, but the local body is not stored, so its use state
+/// comes from `item_use`.
+fn spawn_local_crumbs(game: &mut Game) {
+    let Some(view) = game.item_use.view() else {
+        return;
+    };
+    if view.action != UseAction::Eat || !is_bite_tick(view.count as u32) {
+        return;
+    }
+    let (Some(filter), Some(state), Some(food)) = (
+        particle_filter(game),
+        game.state.as_ref(),
+        game.windows.selected_item(),
+    ) else {
+        return;
+    };
+    let eater = Eater {
+        eyes: state.player().eye_position(),
+        yaw: game.yaw.to_degrees(),
+        pitch: game.pitch.to_degrees(),
+    };
+    let id = food.item_id.unsigned_abs();
+    let damage = food.damage.unsigned_abs();
+    game.particles.spawn_crumbs(&eater, id, damage, &filter);
+}
+
 /// The particles of an `Entity Status` for another entity (MCP
 /// `handleStatusUpdate`): hearts, smoke, the witch's magic, the spawner puff.
 fn spawn_status_particles(game: &mut Game, id: EntityId, status: i8) {
@@ -3291,6 +3319,7 @@ fn tick(
         game.entities.tick_objects(world);
     }
     spawn_mob_particles(game);
+    spawn_local_crumbs(game);
     if let Some(world) = game.world.as_ref() {
         game.particles.tick(world);
     }
@@ -5213,6 +5242,30 @@ mod tests {
         assert_eq!(using.count, 32.0);
         game.item_use.finish();
         assert_eq!(frame(&game).state.effects.hand.item_use, None);
+    }
+
+    #[test]
+    fn the_local_player_eating_throws_crumbs_on_the_bite_ticks() {
+        // Regression: the local player's own meal showed no crumbs.
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 10.0;
+        game.windows.apply_set_slot(0, 36, wire_item(297, 0));
+        game.input.use_item = true;
+        let mut queue = CommandQueue::default();
+        click_use(&mut game, &mut queue);
+        let mut bites = Vec::new();
+        for _ in 0..40 {
+            let Some(view) = game.item_use.view() else {
+                break;
+            };
+            let before = game.particles.len();
+            spawn_local_crumbs(&mut game);
+            if game.particles.len() > before {
+                bites.push(view.count as u32);
+            }
+            run_use(&mut game, &mut queue);
+        }
+        assert_eq!(bites, [24, 20, 16, 12, 8, 4]);
     }
 
     #[test]

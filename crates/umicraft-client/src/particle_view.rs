@@ -53,11 +53,11 @@ pub fn block_sprite(context: &ModelMeshContext, state: BlockState) -> Option<Blo
 }
 
 /// Where the pictures of the particles are: `blocks` finds the picture of a
-/// block, `items` the atlas layer of an item picture by its key.
+/// block, `items` the atlas layer of an item's particle picture.
 pub struct Pictures<B, I> {
     /// The picture of a block for its fragments.
     pub blocks: B,
-    /// The atlas layer of an item picture (`items/slimeball`).
+    /// The atlas layer of the particle picture of an item (`id`, `damage`).
     pub items: I,
 }
 
@@ -113,7 +113,10 @@ pub fn sprite(
     draw: &ParticleDraw,
     partial_ticks: f32,
     origin: DVec3,
-    pictures: &Pictures<impl Fn(BlockState) -> Option<BlockSprite>, impl Fn(&str) -> Option<u32>>,
+    pictures: &Pictures<
+        impl Fn(BlockState) -> Option<BlockSprite>,
+        impl Fn(u16, u16) -> Option<u32>,
+    >,
 ) -> Option<ParticleSprite> {
     let particle = &draw.particle;
     let (uv_min, uv_max, atlas_layer, tint) = match particle.texture {
@@ -135,10 +138,10 @@ pub fn sprite(
                 block.tint,
             )
         }
-        Texture::Item { key } => {
+        Texture::Item { id, damage } => {
             // Like a fragment, an item piece shows a quarter of its picture
             // (`EntityBreakingFX.renderParticle`), untinted.
-            let layer = (pictures.items)(key)?;
+            let layer = (pictures.items)(id, damage)?;
             let u0 = particle.jitter_u / 4.0;
             let v0 = particle.jitter_v / 4.0;
             ([u0, v0], [u0 + 0.25, v0 + 0.25], Some(layer), [1.0; 3])
@@ -179,7 +182,10 @@ pub fn sprites_into(
     draws: &[ParticleDraw],
     partial_ticks: f32,
     origin: DVec3,
-    pictures: &Pictures<impl Fn(BlockState) -> Option<BlockSprite>, impl Fn(&str) -> Option<u32>>,
+    pictures: &Pictures<
+        impl Fn(BlockState) -> Option<BlockSprite>,
+        impl Fn(u16, u16) -> Option<u32>,
+    >,
 ) {
     out.clear();
     out.extend(
@@ -198,11 +204,11 @@ mod tests {
         None
     }
 
-    fn no_item(_: &str) -> Option<u32> {
+    fn no_item(_: u16, _: u16) -> Option<u32> {
         None
     }
 
-    type NoPictures = Pictures<fn(BlockState) -> Option<BlockSprite>, fn(&str) -> Option<u32>>;
+    type NoPictures = Pictures<fn(BlockState) -> Option<BlockSprite>, fn(u16, u16) -> Option<u32>>;
 
     fn no_pictures() -> NoPictures {
         Pictures {
@@ -287,9 +293,7 @@ mod tests {
     fn an_item_piece_samples_a_quarter_of_its_picture_untinted() {
         // A slime landing throws pieces of the slime ball.
         let mut particle = flame();
-        particle.texture = Texture::Item {
-            key: "items/slimeball",
-        };
+        particle.texture = Texture::Item { id: 341, damage: 0 };
         particle.jitter_u = 2.0;
         particle.jitter_v = 1.0;
         let draw = ParticleDraw {
@@ -299,7 +303,7 @@ mod tests {
         };
         let pictures = Pictures {
             blocks: no_block,
-            items: |key: &str| (key == "items/slimeball").then_some(311),
+            items: |id, damage| (id == 341 && damage == 0).then_some(311),
         };
         let piece = sprite(&draw, 0.0, DVec3::ZERO, &pictures).expect("an item piece");
         assert_eq!(piece.atlas_layer, Some(311));

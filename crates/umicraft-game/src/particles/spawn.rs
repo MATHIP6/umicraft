@@ -6,7 +6,7 @@
 use glam::DVec3;
 use umicraft_protocol::packets::play::clientbound::Particle as ParticlePacket;
 
-use super::behaviours::{create, digging};
+use super::behaviours::{breaking, create, digging};
 use super::engine::ParticleEngine;
 use super::kind::ParticleKind;
 use super::particle::Particle;
@@ -146,6 +146,24 @@ impl ParticleEngine {
                     digging::fragment
                 };
                 Some(make(state, [1.0; 3], position, velocity, self.rng()))
+            }
+            ParticleKind::ItemCrack => {
+                // `EffectRenderer`: `Item.getItemById(arguments[0])` and the
+                // damage in `arguments[1]` when there is one; air has no picture.
+                let id = u16::try_from(*arguments.first()?)
+                    .ok()
+                    .filter(|&id| id != 0)?;
+                let damage = arguments
+                    .get(1)
+                    .and_then(|&damage| u16::try_from(damage).ok())
+                    .unwrap_or(0);
+                Some(breaking::item_crack(
+                    position,
+                    velocity,
+                    id,
+                    damage,
+                    self.rng(),
+                ))
             }
             _ => create(kind, position, velocity, self.rng()),
         }
@@ -346,15 +364,40 @@ mod tests {
     }
 
     #[test]
-    fn item_cracks_have_no_factory_yet() {
+    fn an_item_crack_packet_makes_a_piece_of_the_item() {
         let mut engine = ParticleEngine::new(1);
         let mut crack = packet(1);
         crack.particle_id = ParticleKind::ItemCrack.id();
-        crack.arguments = vec![1, 0];
         let near = DVec3::new(10.0, 64.0, 10.0);
-        assert_eq!(
-            engine.spawn_from_packet(&crack, &filter(near, ParticleSetting::All)),
-            0
-        );
+        // Bread, then a splash potion with its damage value.
+        for (arguments, id, damage) in [(vec![297], 297, 0), (vec![373, 16_384], 373, 16_384)] {
+            crack.arguments = arguments;
+            assert_eq!(
+                engine.spawn_from_packet(&crack, &filter(near, ParticleSetting::All)),
+                1
+            );
+            let piece = engine
+                .particles(crate::particles::Layer::Terrain, false)
+                .last();
+            assert_eq!(
+                piece.map(|piece| piece.texture),
+                Some(crate::particles::Texture::Item { id, damage })
+            );
+        }
+    }
+
+    #[test]
+    fn an_item_crack_of_air_or_without_an_item_makes_nothing() {
+        let mut engine = ParticleEngine::new(1);
+        let mut crack = packet(1);
+        crack.particle_id = ParticleKind::ItemCrack.id();
+        let near = DVec3::new(10.0, 64.0, 10.0);
+        for arguments in [vec![0], Vec::new(), vec![-1]] {
+            crack.arguments = arguments;
+            assert_eq!(
+                engine.spawn_from_packet(&crack, &filter(near, ParticleSetting::All)),
+                0
+            );
+        }
     }
 }

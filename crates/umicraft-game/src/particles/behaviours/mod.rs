@@ -7,7 +7,6 @@
 //! dispatches on, so a tick allocates nothing and needs no trait object.
 
 mod aura;
-mod breaking;
 mod cloud;
 mod common;
 mod crit;
@@ -34,6 +33,7 @@ use crate::shapes::BlockSource;
 use glam::DVec3;
 use umicraft_world::fluid::Liquid;
 
+pub(super) mod breaking;
 pub(super) mod digging;
 mod drip;
 mod explode;
@@ -274,6 +274,7 @@ pub fn create(
         K::Cloud => Some(cloud::create(position, speed, rng)),
         K::SnowShovel => Some(snow_shovel::create(position, speed, rng)),
         K::Slime => Some(breaking::slime(position, rng)),
+        K::Snowball => Some(breaking::snowball(position, rng)),
         K::Bubble => Some(underwater::bubble(position, speed, rng)),
         K::Suspended => Some(underwater::suspended(position, speed, rng)),
         K::Wake => Some(underwater::wake(position, speed, rng)),
