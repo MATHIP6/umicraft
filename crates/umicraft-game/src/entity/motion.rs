@@ -8,6 +8,7 @@ use glam::DVec3;
 use super::angle::wrap_degrees;
 use super::kind::EntityKind;
 use super::meta::Variant;
+use super::mob_state::MobTick;
 use super::record::EntityRecord;
 
 /// Ticks over which a movement or teleport packet is applied
@@ -81,6 +82,11 @@ impl EntityRecord {
             self.horse
                 .tick(horse.eating(), horse.rearing(), horse.mouth_open());
         }
+        let begging = matches!(&self.meta.variant, Variant::Wolf(wolf) if wolf.begging);
+        self.mob.tick(MobTick {
+            on_ground: self.on_ground,
+            begging,
+        });
         if self.kind == EntityKind::Dragon {
             let alive = self.health.is_none_or(|health| health > 0.0);
             self.flight.get_or_insert_with(Default::default).tick(

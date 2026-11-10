@@ -3,11 +3,12 @@
 //! Animals and villagers: the ground mobs that have babies and coats.
 
 use umicraft_game::entity::meta::{HorseMeta, Variant};
-use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
+use umicraft_game::entity::{EntityKind, EntityRenderSnapshot, GolemArms, MobPose};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{
-    ChickenModel, EndermanModel, HorseLook, HorseModel, IronGolemModel, OcelotModel, OcelotPose,
-    QuadrupedModel, RabbitModel, SheepModel, SpiderModel, TextureSlot, VillagerModel, WolfModel,
+    ChickenModel, EndermanModel, GolemAction, HorseLook, HorseModel, IronGolemModel, OcelotModel,
+    OcelotPose, QuadrupedModel, RabbitModel, SheepModel, SpiderModel, TextureSlot, VillagerModel,
+    WolfModel,
 };
 
 use super::glow::{glowing, Glow};
@@ -38,11 +39,18 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
         ..
     } = pose;
     let baby = ent.meta.baby;
-    // A model with proper baby proportions.
+    // A model with proper baby proportions, posed by the common inputs or by
+    // the block given as `|model| { ... }`.
     macro_rules! ageable {
-        ($model:expr, $slot:expr) => {{
-            let mut model = $model;
-            model.set_angles(swing, amount, head_yaw, head_pitch);
+        ($model:expr, $slot:expr) => {
+            ageable!($model, $slot, |model| {
+                model.set_angles(swing, amount, head_yaw, head_pitch);
+            })
+        };
+        ($model:expr, $slot:expr, |$posed:ident| $pose:block) => {{
+            let mut $posed = $model;
+            $pose
+            let model = $posed;
             let mesh = if baby {
                 model.emit_child_mesh()
             } else {
@@ -91,7 +99,12 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
             }
             layers
         }
-        EntityKind::Chicken => ageable!(ChickenModel::new(), TextureSlot::Chicken),
+        EntityKind::Chicken => ageable!(ChickenModel::new(), TextureSlot::Chicken, |model| {
+            model.set_angles(swing, amount, head_yaw, head_pitch);
+            if let MobPose::Chicken { flap } = ent.mob {
+                model.set_wings(flap);
+            }
+        }),
         EntityKind::Sheep => sheep_layers(ent, pose),
         EntityKind::Wolf => wolf_layers(ent, pose),
         EntityKind::Ocelot => {
@@ -120,7 +133,13 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
                 }
                 _ => TextureSlot::Rabbit,
             };
-            ageable!(RabbitModel::new(), slot)
+            let hop = match ent.mob {
+                MobPose::Rabbit { hop } => hop,
+                _ => 0.0,
+            };
+            ageable!(RabbitModel::new(), slot, |model| {
+                model.set_angles(hop, head_yaw, head_pitch);
+            })
         }
         EntityKind::Villager => {
             let slot = match ent.meta.variant {
@@ -172,7 +191,14 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
                 model.emit_mesh(),
             )
         }
-        EntityKind::IronGolem => walker!(IronGolemModel::new(), TextureSlot::IronGolem, 1.0, 1.0),
+        EntityKind::IronGolem => {
+            let mut model = IronGolemModel::new();
+            model.set_angles(swing, amount, head_yaw, head_pitch);
+            if let MobPose::IronGolem(arms) = ent.mob {
+                model.set_action(golem_action(arms));
+            }
+            one(TextureSlot::IronGolem, model.emit_mesh())
+        }
         _ => return None,
     })
 }
@@ -190,10 +216,22 @@ pub(super) fn with_eyes(
     ]
 }
 
+/// What the golem's arms do, in the terms of its model.
+fn golem_action(arms: GolemArms) -> GolemAction {
+    match arms {
+        GolemArms::Walking => GolemAction::Walking,
+        GolemArms::Attacking(ticks) => GolemAction::Attacking(ticks),
+        GolemArms::HoldingRose(ticks) => GolemAction::HoldingRose(f32::from(ticks)),
+    }
+}
+
 /// The sheep: its body, and its wool in the dye colour unless shorn.
 fn sheep_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Vec<EntityLayer> {
     let mut model = SheepModel::new();
     model.set_angles(pose.swing, pose.amount, pose.head_yaw, pose.head_pitch);
+    if let MobPose::Sheep(graze) = ent.mob {
+        model.set_graze(graze.lowered, graze.angle);
+    }
     let (body, wool) = if ent.meta.baby {
         (model.emit_child_body_mesh(), model.emit_child_wool_mesh())
     } else {
@@ -216,7 +254,10 @@ fn wolf_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Vec<EntityLayer> {
     let mut model = WolfModel::new();
     if let Variant::Wolf(wolf) = &ent.meta.variant {
         let health = wolf.tamed.then_some(f32::from(wolf.health));
-        model.set_state(wolf.sitting, wolf.angry, wolf.begging, health);
+        model.set_state(wolf.sitting, wolf.angry, health);
+    }
+    if let MobPose::Wolf { shake, interest } = ent.mob {
+        model.set_motion(interest, shake);
     }
     model.set_angles(pose.swing, pose.amount, pose.head_yaw, pose.head_pitch);
     let mesh = |model: &WolfModel| {

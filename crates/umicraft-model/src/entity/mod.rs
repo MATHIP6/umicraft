@@ -55,7 +55,7 @@ pub use ghast::{GhastModel, RENDER_SCALE as GHAST_SCALE};
 pub use guardian::GuardianModel;
 pub use horse::{HorseLook, HorseModel};
 pub use humanoid::HumanoidModel;
-pub use iron_golem::{triangle_wave, IronGolemModel};
+pub use iron_golem::{triangle_wave, GolemAction, IronGolemModel};
 pub use ocelot::{OcelotModel, OcelotPose};
 pub use pose::{ArmPose, HumanoidPose};
 pub use quadruped::QuadrupedModel;

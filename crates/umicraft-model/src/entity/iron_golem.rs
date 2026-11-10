@@ -6,6 +6,20 @@ use glam::{Mat4, Vec3};
 
 use super::{ModelBox, ModelPart, ModelVertex};
 
+/// What an iron golem's arms do besides swinging with its stride
+/// (`ModelIronGolem.setLivingAnimations`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum GolemAction {
+    /// The arms swing with the stride.
+    #[default]
+    Walking,
+    /// Both arms swing down on a target: the swing's ticks left minus the
+    /// partial tick, `10` to `0`.
+    Attacking(f32),
+    /// The right arm holds out a poppy, with this many ticks left.
+    HoldingRose(f32),
+}
+
 /// Iron Golem model (128×128 texture sheet).
 #[derive(Debug, Clone)]
 pub struct IronGolemModel {
@@ -134,6 +148,24 @@ impl IronGolemModel {
         self.left_arm.rotation[0] = -(-0.2 * limb_swing_amount - stride);
     }
 
+    /// Raises the arms for a swing or a poppy; call after
+    /// [`Self::set_angles`], whose walking arms it replaces. The vanilla x
+    /// angles are negated for the flipped y.
+    pub fn set_action(&mut self, action: GolemAction) {
+        match action {
+            GolemAction::Walking => {}
+            GolemAction::Attacking(ticks) => {
+                let arm = -2.0 + 1.5 * triangle_wave(ticks, 10.0);
+                self.right_arm.rotation[0] = -arm;
+                self.left_arm.rotation[0] = -arm;
+            }
+            GolemAction::HoldingRose(ticks) => {
+                self.right_arm.rotation[0] = -(-0.8 + 0.025 * triangle_wave(ticks, 70.0));
+                self.left_arm.rotation[0] = 0.0;
+            }
+        }
+    }
+
     /// Emits all mesh vertices.
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
@@ -193,6 +225,33 @@ mod tests {
         assert!((golem.right_arm.rotation[0] + 1.3).abs() < 1e-6);
         assert!((golem.left_leg.rotation[0] - 1.5).abs() < 1e-6);
         assert!((golem.left_arm.rotation[0] - 1.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_swinging_golem_raises_both_arms_overhead() {
+        let mut golem = IronGolemModel::new();
+        golem.set_angles(0.0, 0.0, 0.0, 0.0);
+        golem.set_action(GolemAction::Attacking(10.0));
+        // MCP: -2 + 1.5 * tri(10, 10) = -0.5, negated here.
+        assert!((golem.right_arm.rotation[0] - 0.5).abs() < 1e-6);
+        golem.set_action(GolemAction::Attacking(5.0));
+        assert!(
+            (golem.left_arm.rotation[0] - 3.5).abs() < 1e-6,
+            "overhead halfway"
+        );
+    }
+
+    #[test]
+    fn a_golem_holds_out_a_poppy_with_its_right_arm() {
+        let mut golem = IronGolemModel::new();
+        golem.set_angles(1.0, 1.0, 0.0, 0.0);
+        golem.set_action(GolemAction::HoldingRose(400.0));
+        assert!(
+            golem.right_arm.rotation[0] > 0.7,
+            "{}",
+            golem.right_arm.rotation[0]
+        );
+        assert_eq!(golem.left_arm.rotation[0], 0.0);
     }
 
     #[test]

@@ -459,6 +459,7 @@ fn make_snapshot(
         squish: 0.0,
         squid: Default::default(),
         horse: None,
+        mob: umicraft_game::entity::MobPose::None,
         ridden: false,
         block_lights: std::sync::Arc::default(),
         rod_tip: None,

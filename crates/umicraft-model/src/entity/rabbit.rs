@@ -169,32 +169,33 @@ impl RabbitModel {
         }
     }
 
-    /// Sets the look angles (degrees) and the resting pose of the limbs
-    /// (MCP `ModelRabbit.setRotationAngles` with the hop progress at 0).
+    /// Turns the head (degrees) and bends the legs through a hop (MCP
+    /// `ModelRabbit.setRotationAngles`).
     ///
-    /// The vanilla hop animation follows the jump progress of the rabbit,
-    /// which the client does not track yet, so the limbs do not swing.
-    pub fn set_angles(
-        &mut self,
-        _limb_angle: f32,
-        _limb_distance: f32,
-        head_yaw: f32,
-        head_pitch: f32,
-    ) {
-        // The vanilla y axis points down, so a pitch rotates the other way.
+    /// `hop` is how far through its hop the rabbit is, `0..=1`
+    /// (`EntityRabbit.func_175521_o`); at `0` the limbs rest folded. The
+    /// vanilla x angles are negated for the flipped y.
+    pub fn set_angles(&mut self, hop: f32, head_yaw: f32, head_pitch: f32) {
         let yaw = head_yaw.to_radians();
         let pitch = -head_pitch.to_radians();
         self.head.rotation = [pitch, yaw, 0.0];
         self.right_ear.rotation = [pitch, yaw - EAR_SPREAD, 0.0];
         self.left_ear.rotation = [pitch, yaw + EAR_SPREAD, 0.0];
 
-        // Thighs -21 degrees and arms -11 degrees in the vanilla frame.
-        let thigh = 21.0_f32.to_radians();
-        let arm = 11.0_f32.to_radians();
-        self.left_thigh.rotation[0] = thigh;
-        self.right_thigh.rotation[0] = thigh;
-        self.left_arm.rotation[0] = arm;
-        self.right_arm.rotation[0] = arm;
+        // The legs kick out and the arms reach forward at the top of the hop.
+        let kick = (hop * std::f32::consts::PI).sin();
+        let thigh = -(kick * 50.0 - 21.0).to_radians();
+        let foot = -(kick * 50.0).to_radians();
+        let arm = -(kick * -40.0 - 11.0).to_radians();
+        for part in [&mut self.left_thigh, &mut self.right_thigh] {
+            part.rotation[0] = thigh;
+        }
+        for part in [&mut self.left_foot, &mut self.right_foot] {
+            part.rotation[0] = foot;
+        }
+        for part in [&mut self.left_arm, &mut self.right_arm] {
+            part.rotation[0] = arm;
+        }
     }
 
     /// Emits a kit: the head and ears at full size, the rest halved.
@@ -252,7 +253,7 @@ mod tests {
     #[test]
     fn the_head_turns_by_the_yaw_in_degrees_and_the_ears_follow_it() {
         let mut model = RabbitModel::new();
-        model.set_angles(0.0, 0.0, 90.0, 30.0);
+        model.set_angles(0.0, 90.0, 30.0);
         assert!((model.head.rotation[1] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
         assert!((model.head.rotation[0] + 30.0_f32.to_radians()).abs() < 1e-5);
         for ear in [&model.left_ear, &model.right_ear] {
@@ -268,9 +269,21 @@ mod tests {
     #[test]
     fn a_looking_straight_rabbit_has_the_vanilla_rest_pose() {
         let mut model = RabbitModel::new();
-        model.set_angles(3.0, 1.0, 0.0, 0.0);
+        model.set_angles(0.0, 0.0, 0.0);
         assert_eq!(model.head.rotation, [0.0, 0.0, 0.0]);
         assert!((model.left_thigh.rotation[0] - 21.0_f32.to_radians()).abs() < 1e-5);
         assert!((model.left_arm.rotation[0] - 11.0_f32.to_radians()).abs() < 1e-5);
+        assert_eq!(model.left_foot.rotation[0], 0.0);
+    }
+
+    #[test]
+    fn a_hopping_rabbit_kicks_its_legs_out() {
+        // Regression: the limbs stayed folded, so rabbits never hopped.
+        let mut model = RabbitModel::new();
+        model.set_angles(0.5, 0.0, 0.0);
+        // MCP at the top of the hop: thighs 29 degrees, feet 50, arms -51.
+        assert!((model.right_thigh.rotation[0] + 29.0_f32.to_radians()).abs() < 1e-5);
+        assert!((model.right_foot.rotation[0] + 50.0_f32.to_radians()).abs() < 1e-5);
+        assert!((model.right_arm.rotation[0] - 51.0_f32.to_radians()).abs() < 1e-5);
     }
 }

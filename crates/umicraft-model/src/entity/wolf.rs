@@ -18,8 +18,11 @@ use super::{ModelBox, ModelPart, ModelVertex};
 const WILD_TAIL: f32 = PI / 5.0;
 /// Tail angle of an angry wolf.
 const ANGRY_TAIL: f32 = 1.539_380_4;
-/// Head tilt of a begging wolf (`getInterestedAngle` at full interest).
-const BEGGING_TILT: f32 = 0.15 * PI;
+/// How far back along the body each part lags in a shake, in units of
+/// `timeWolfIsShaking` (`ModelWolf.setLivingAnimations`).
+const MANE_SHAKE_LAG: f32 = -0.08;
+const BODY_SHAKE_LAG: f32 = -0.16;
+const TAIL_SHAKE_LAG: f32 = -0.2;
 
 /// Wolf model (64×32 texture sheet) with head, ears, snout, mane, body, 4 legs and tail.
 #[derive(Debug, Clone)]
@@ -42,8 +45,11 @@ pub struct WolfModel {
     pub tail: ModelPart,
     sitting: bool,
     angry: bool,
-    begging: bool,
     tail_angle: f32,
+    /// The begging tilt of the head, radians.
+    interest: f32,
+    /// `timeWolfIsShaking`, `None` when the wolf does not shake.
+    shake: Option<f32>,
 }
 
 /// A vanilla box as a box of this crate (the y axis flipped).
@@ -108,24 +114,18 @@ impl WolfModel {
             tail,
             sitting: false,
             angry: false,
-            begging: false,
+            interest: 0.0,
+            shake: None,
             tail_angle: WILD_TAIL,
         }
     }
 
-    /// Sets what the metadata says: sitting, angry, begging, and for a tamed
+    /// Sets what the metadata says: sitting, angry, and for a tamed
     /// wolf its health (the tail hangs lower as it drops; `None` for a wild
     /// wolf). Call before [`Self::set_angles`].
-    pub fn set_state(
-        &mut self,
-        sitting: bool,
-        angry: bool,
-        begging: bool,
-        tamed_health: Option<f32>,
-    ) {
+    pub fn set_state(&mut self, sitting: bool, angry: bool, tamed_health: Option<f32>) {
         self.sitting = sitting;
         self.angry = angry;
-        self.begging = begging;
         // MCP `EntityWolf.getTailRotation`.
         self.tail_angle = if angry {
             ANGRY_TAIL
@@ -134,6 +134,26 @@ impl WolfModel {
         } else {
             WILD_TAIL
         };
+    }
+
+    /// Sets the begging tilt of the head in radians
+    /// (`EntityWolf.getInterestedAngle`) and the time into a shake
+    /// (`timeWolfIsShaking`, `None` when it does not shake). Call before
+    /// [`Self::set_angles`].
+    pub fn set_motion(&mut self, interest: f32, shake: Option<f32>) {
+        self.interest = interest;
+        self.shake = shake;
+    }
+
+    /// The roll of a part in a shake `lag` behind the head
+    /// (`EntityWolf.getShakeAngle`): it shivers eleven times, strongest in
+    /// the middle.
+    fn shake_roll(&self, lag: f32) -> f32 {
+        let Some(time) = self.shake else {
+            return 0.0;
+        };
+        let f = ((time + lag) / 1.8).clamp(0.0, 1.0);
+        (f * PI).sin() * (f * PI * 11.0).sin() * 0.15 * PI
     }
 
     /// Sets walking animation angles (MCP `ModelWolf.setLivingAnimations` and
@@ -177,9 +197,12 @@ impl WolfModel {
             self.leg3.rotation[0] = -swing_back;
             self.leg4.rotation[0] = -swing;
         }
-        // The vanilla roll of the head is a begging tilt (the shake is not
-        // tracked), negated with the y axis.
-        self.head.rotation[2] = if self.begging { -BEGGING_TILT } else { 0.0 };
+        // The begging tilt and the shake roll the parts; vanilla z rolls are
+        // negated with the y axis.
+        self.head.rotation[2] = -(self.interest + self.shake_roll(0.0));
+        self.mane.rotation[2] = -self.shake_roll(MANE_SHAKE_LAG);
+        self.body.rotation[2] = -self.shake_roll(BODY_SHAKE_LAG);
+        self.tail.rotation[2] = -self.shake_roll(TAIL_SHAKE_LAG);
         self.head.rotation[0] = -head_pitch.to_radians();
         self.head.rotation[1] = head_yaw.to_radians();
         self.tail.rotation[0] = -self.tail_angle;
@@ -237,7 +260,7 @@ mod tests {
         let mut standing = WolfModel::new();
         standing.set_angles(0.0, 0.0, 0.0, 0.0);
         let mut sitting = WolfModel::new();
-        sitting.set_state(true, false, false, None);
+        sitting.set_state(true, false, None);
         sitting.set_angles(0.0, 0.0, 0.0, 0.0);
         assert!(sitting.body.pivot[1] < standing.body.pivot[1]);
         assert_ne!(sitting.leg1.rotation[0], standing.leg1.rotation[0]);
@@ -253,10 +276,10 @@ mod tests {
         assert_eq!(walking.leg2.rotation[0], walking.leg3.rotation[0]);
         assert_ne!(walking.leg1.rotation[0], walking.leg2.rotation[0]);
         let mut moving = WolfModel::new();
-        moving.set_state(true, false, false, None);
+        moving.set_state(true, false, None);
         moving.set_angles(1.0, 1.0, 0.0, 0.0);
         let mut still = WolfModel::new();
-        still.set_state(true, false, false, None);
+        still.set_state(true, false, None);
         still.set_angles(0.0, 0.0, 0.0, 0.0);
         assert_eq!(moving.leg1.rotation, still.leg1.rotation);
     }
@@ -265,7 +288,7 @@ mod tests {
     fn the_tail_follows_the_mood_and_the_health() {
         let tail = |angry, health: Option<f32>| {
             let mut wolf = WolfModel::new();
-            wolf.set_state(false, angry, false, health);
+            wolf.set_state(false, angry, health);
             wolf.set_angles(0.0, 0.0, 0.0, 0.0);
             -wolf.tail.rotation[0]
         };
@@ -281,8 +304,22 @@ mod tests {
     #[test]
     fn a_begging_wolf_tilts_its_head() {
         let mut wolf = WolfModel::new();
-        wolf.set_state(false, false, true, None);
+        wolf.set_motion(0.15 * PI, None);
         wolf.set_angles(0.0, 0.0, 0.0, 0.0);
-        assert_ne!(wolf.head.rotation[2], 0.0);
+        assert!((wolf.head.rotation[2] + 0.15 * PI).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_shaking_wolf_shivers_from_head_to_tail() {
+        // Regression: status 8 was ignored, so a wet wolf never shook.
+        let mut wolf = WolfModel::new();
+        wolf.set_motion(0.0, Some(0.05));
+        wolf.set_angles(0.0, 0.0, 0.0, 0.0);
+        assert_ne!(wolf.head.rotation[2], 0.0, "the head starts");
+        assert_eq!(wolf.tail.rotation[2], 0.0, "the tail lags behind");
+        wolf.set_motion(0.0, Some(0.9 + 1.0 / 22.0 * 1.8));
+        wolf.set_angles(0.0, 0.0, 0.0, 0.0);
+        assert_ne!(wolf.tail.rotation[2], 0.0);
+        assert_ne!(wolf.body.rotation[2], 0.0);
     }
 }

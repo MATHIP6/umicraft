@@ -18,6 +18,7 @@ use super::kind::{EntityId, EntityKind};
 use super::leash::{LeashAnchor, LeashFrame};
 use super::limbs::LimbSwing;
 use super::meta::EntityMeta;
+use super::mob_state::{MobPose, MobState};
 use super::profile::PlayerProfile;
 use super::shadow::ShadowBlock;
 
@@ -96,6 +97,8 @@ pub struct EntityFrameData {
     pub squish: f32,
     /// The grazing, rearing and mouth of a horse.
     pub horse: Option<HorseState>,
+    /// The timers of a hop, a swing, a shake or a grazing.
+    pub mob: MobState,
     /// Whether another entity sits on this one.
     pub ridden: bool,
     /// The light in front of each block of a painting, column by column (the
@@ -184,6 +187,7 @@ impl EntityFrameData {
             squish: self.squish,
             squid: self.animation.squid_at(a),
             horse: self.horse.map(|horse| horse.pose(a)),
+            mob: self.mob.pose(a),
             ridden: self.ridden,
             block_lights: self.block_lights.clone(),
             rod_tip: self.rod_tip.map(|tip| (tip - origin).as_vec3()),
@@ -276,6 +280,8 @@ pub struct EntityRenderSnapshot {
     pub squid: SquidPose,
     /// How far a horse grazes, rears and opens its mouth.
     pub horse: Option<HorsePose>,
+    /// What a hop, a swing, a shake or a grazing does to the model.
+    pub mob: MobPose,
     /// Whether another entity sits on this one: a ridden horse shows its reins.
     pub ridden: bool,
     /// The light in front of each block of a painting, column by column; empty
@@ -342,6 +348,7 @@ impl EntityRenderSnapshot {
             squish: 0.0,
             squid: Default::default(),
             horse: None,
+            mob: MobPose::None,
             ridden: false,
             block_lights: Arc::default(),
             rod_tip: None,

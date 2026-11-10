@@ -119,7 +119,7 @@ impl ChickenModel {
         }
     }
 
-    /// Sets animation angles for walking and head look.
+    /// Sets the head look (degrees) and the walking legs.
     pub fn set_angles(
         &mut self,
         limb_swing: f32,
@@ -141,11 +141,16 @@ impl ChickenModel {
         let leg_angle = (limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount;
         self.right_leg.rotation[0] = -leg_angle;
         self.left_leg.rotation[0] = leg_angle;
+    }
 
-        // Flapping wings
-        let wing_angle = (limb_swing * 0.6662).cos() * 0.4 * limb_swing_amount;
-        self.right_wing.rotation[2] = wing_angle;
-        self.left_wing.rotation[2] = -wing_angle;
+    /// Spreads the wings by `flap`, the value of
+    /// `RenderChicken.handleRotationFloat` (`(sin(wingRotation) + 1) *
+    /// destPos`): folded on the ground, beating in the air (MCP
+    /// `ModelChicken.setRotationAngles`; the z roll is negated for the
+    /// flipped y).
+    pub fn set_wings(&mut self, flap: f32) {
+        self.right_wing.rotation[2] = -flap;
+        self.left_wing.rotation[2] = flap;
     }
 
     /// Emits a chick: the head at full size, the rest halved.
@@ -178,5 +183,21 @@ impl ChickenModel {
         self.right_wing.emit(root, &mut out);
         self.left_wing.emit(root, &mut out);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_wings_follow_the_flap_not_the_stride() {
+        // Regression: the wings swung with the legs and never beat in the air.
+        let mut chicken = ChickenModel::new();
+        chicken.set_angles(1.0, 1.0, 0.0, 0.0);
+        assert_eq!(chicken.right_wing.rotation[2], 0.0);
+        chicken.set_wings(1.5);
+        assert_eq!(chicken.right_wing.rotation[2], -1.5);
+        assert_eq!(chicken.left_wing.rotation[2], 1.5);
     }
 }

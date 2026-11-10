@@ -525,12 +525,17 @@ impl EntityStore {
     }
 
     /// Applies an `Entity Status` that animates: `2` hurts (and makes the
-    /// legs jolt, MCP `handleStatusUpdate`), `3` kills. Other codes are not
-    /// animations and are ignored.
+    /// legs jolt, MCP `handleStatusUpdate`), `3` kills, and the timers of
+    /// [`super::MobState::status`] (a hop, a golem's swing or poppy, a wolf's
+    /// shake, a sheep's grazing). Other codes are not animations and are
+    /// ignored.
     pub fn status(&mut self, id: EntityId, status: i8) {
         let Some(entity) = self.entities.get_mut(&id) else {
             return;
         };
+        if entity.mob.status(status) {
+            return;
+        }
         match status {
             2 => {
                 entity.limbs.amount = HURT_LIMB_AMOUNT;
@@ -1227,6 +1232,33 @@ mod tests {
         assert_eq!(deaths.len(), 1);
         assert!((deaths[0].height - 1.95).abs() < 1e-6, "{:?}", deaths[0]);
         assert_eq!(store.drain_deaths().count(), 0);
+    }
+
+    #[test]
+    fn a_status_starts_a_mob_timer_that_reaches_the_snapshot() {
+        // Regression: statuses 1, 4, 8, 10 and 11 were dropped, so rabbits
+        // never hopped, golems never swung, wolves never shook and sheep
+        // never grazed.
+        let mut store = EntityStore::new();
+        let id = EntityId(31);
+        store.spawn_mob(
+            id,
+            101,
+            DVec3::new(0.0, 64.0, 0.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        store.status(id, 1);
+        store.tick();
+        let snapshot = &store.snapshots(0.5)[0];
+        assert!(
+            matches!(snapshot.mob, super::super::MobPose::Rabbit { hop } if hop > 0.0),
+            "{:?}",
+            snapshot.mob
+        );
     }
 
     #[test]
