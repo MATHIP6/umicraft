@@ -13,6 +13,7 @@ use umicraft_model::entity::{
 use super::glow::{glowing, Glow};
 use super::mobs::{one, EntityLayer, Pose};
 use super::mushrooms::mushroom_vertices;
+use super::pose::humanoid_pose;
 use super::variants;
 
 /// Scale of a villager (MCP `RenderVillager.preRenderCallback`); a child
@@ -164,7 +165,7 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
                 model.is_carrying = enderman.carried & 0x0FFF != 0;
                 model.is_attacking = enderman.screaming;
             }
-            model.set_angles(swing, amount, head_yaw, head_pitch);
+            model.set_pose(&humanoid_pose(ent, false));
             with_eyes(
                 TextureSlot::Enderman,
                 TextureSlot::EndermanEyes,

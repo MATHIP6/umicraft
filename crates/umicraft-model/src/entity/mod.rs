@@ -913,7 +913,14 @@ mod tests {
             ("villager", pitch_of!(VillagerModel::villager())),
             ("wolf", pitch_of!(WolfModel::new())),
             ("spider", pitch_of!(SpiderModel::new())),
-            ("enderman", pitch_of!(EndermanModel::new())),
+            ("enderman", {
+                let mut enderman = EndermanModel::new();
+                enderman.set_pose(&HumanoidPose {
+                    head_pitch: 30.0,
+                    ..HumanoidPose::default()
+                });
+                enderman.head.rotation[0]
+            }),
             ("iron golem", pitch_of!(IronGolemModel::new())),
             ("ocelot", pitch_of!(OcelotModel::new())),
         ];
