@@ -127,7 +127,8 @@ impl ChickenModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        let pitch_rad = head_pitch.to_radians();
+        // Flipping y turns the sense of x rotations around (as in `pose.rs`).
+        let pitch_rad = -head_pitch.to_radians();
         let yaw_rad = head_yaw.to_radians();
 
         self.head.rotation[0] = pitch_rad;

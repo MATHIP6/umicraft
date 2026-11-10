@@ -185,7 +185,8 @@ impl SheepModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        let pitch_rad = head_pitch.to_radians();
+        // Flipping y turns the sense of x rotations around (as in `pose.rs`).
+        let pitch_rad = -head_pitch.to_radians();
         let yaw_rad = head_yaw.to_radians();
 
         self.head.rotation[0] = pitch_rad;
@@ -193,8 +194,9 @@ impl SheepModel {
         self.wool_head.rotation[0] = pitch_rad;
         self.wool_head.rotation[1] = yaw_rad;
 
-        let angle1 = (limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount;
-        let angle2 = (limb_swing * 0.6662 + PI).cos() * 1.4 * limb_swing_amount;
+        // MCP `ModelQuadruped` legs, x rotations negated like the head.
+        let angle1 = -(limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount;
+        let angle2 = -(limb_swing * 0.6662 + PI).cos() * 1.4 * limb_swing_amount;
 
         self.leg1.rotation[0] = angle1;
         self.leg2.rotation[0] = angle2;

@@ -887,4 +887,52 @@ mod tests {
         assert!(!SilverfishModel::new().emit_mesh().is_empty());
         assert!(!WitherModel::new().emit_mesh().is_empty());
     }
+
+    #[test]
+    fn every_mob_tilts_its_head_down_when_it_looks_down() {
+        // Regression: several models kept the MCP sign of the head pitch,
+        // but flipping y turns x rotations around (`pose.rs` negates them
+        // for the biped), so a pig, cow, sheep, chicken, creeper or snowman
+        // looking down raised its head.
+        macro_rules! pitch_of {
+            ($model:expr) => {{
+                let mut model = $model;
+                model.set_angles(0.0, 0.0, 0.0, 30.0);
+                model.head.rotation[0]
+            }};
+        }
+        let mut snowman = SnowmanModel::new();
+        snowman.set_angles(0.0, 30.0);
+        let pitches = [
+            ("cow", pitch_of!(QuadrupedModel::cow())),
+            ("pig", pitch_of!(QuadrupedModel::pig())),
+            ("sheep", pitch_of!(SheepModel::new())),
+            ("chicken", pitch_of!(ChickenModel::new())),
+            ("creeper", pitch_of!(CreeperModel::new())),
+            ("snowman", snowman.head.rotation[0]),
+            ("villager", pitch_of!(VillagerModel::villager())),
+            ("wolf", pitch_of!(WolfModel::new())),
+            ("spider", pitch_of!(SpiderModel::new())),
+            ("enderman", pitch_of!(EndermanModel::new())),
+            ("iron golem", pitch_of!(IronGolemModel::new())),
+            ("ocelot", pitch_of!(OcelotModel::new())),
+        ];
+        for (name, pitch) in pitches {
+            assert!(
+                (pitch + 30.0_f32.to_radians()).abs() < 1e-5,
+                "{name}: {pitch}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sheep_steps_like_the_other_quadrupeds() {
+        // Regression: the sheep legs swung opposite to the pig and cow.
+        let mut sheep = SheepModel::new();
+        sheep.set_angles(1.0, 1.0, 0.0, 0.0);
+        let mut cow = QuadrupedModel::cow();
+        cow.set_angles(1.0, 1.0, 0.0, 0.0);
+        assert!((sheep.leg1.rotation[0] - cow.leg1.rotation[0]).abs() < 1e-6);
+        assert!((sheep.leg2.rotation[0] - cow.leg2.rotation[0]).abs() < 1e-6);
+    }
 }

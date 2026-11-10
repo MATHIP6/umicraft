@@ -89,7 +89,8 @@ impl SnowmanModel {
 
     /// Sets look rotation angles.
     pub fn set_angles(&mut self, head_yaw: f32, head_pitch: f32) {
-        self.head.rotation[0] = head_pitch.to_radians();
+        // Flipping y turns the sense of x rotations around (as in `pose.rs`).
+        self.head.rotation[0] = -head_pitch.to_radians();
         self.head.rotation[1] = head_yaw.to_radians();
         self.body.rotation[1] = head_yaw.to_radians() * 0.25;
     }
