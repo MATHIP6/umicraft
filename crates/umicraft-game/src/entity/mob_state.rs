@@ -64,6 +64,37 @@ pub enum MobState {
     Chicken(ChickenWings),
     /// Where a wither's side heads look.
     Wither(WitherHeads),
+    /// A guardian's tail, spikes and pupil.
+    Guardian(GuardianSwim),
+}
+
+/// A guardian's swimming (`EntityGuardian.onLivingUpdate`, the client part):
+/// the tail's phase and speed, how far the spikes are out, and where the
+/// pupil looks.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuardianSwim {
+    tail: f32,
+    prev_tail: f32,
+    tail_speed: f32,
+    spikes: f32,
+    prev_spikes: f32,
+    /// Whether it was in water at its last tick.
+    pub in_water: bool,
+    /// Where the pupil sits, vanilla `(x, y)` pixels.
+    pub eye: [f32; 2],
+    /// Source of the random flapping of the spikes on land.
+    seed: u32,
+}
+
+/// What a guardian's model reads at one sub-tick fraction.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct GuardianPose {
+    /// The phase of the tail's swing (`func_175471_a`).
+    pub tail: f32,
+    /// How far the spikes are out, `0..=1` (`func_175469_o`).
+    pub extension: f32,
+    /// Where the pupil sits, vanilla `(x, y)` pixels.
+    pub eye: [f32; 2],
 }
 
 /// The look of a wither's two side heads in degrees: yaw `field_82221_e`
@@ -143,6 +174,8 @@ pub enum MobPose {
     },
     /// Where a wither's side heads look.
     Wither(WitherHeads),
+    /// A guardian's tail, spikes and pupil.
+    Guardian(GuardianPose),
 }
 
 /// What an iron golem's arms do.
@@ -170,7 +203,8 @@ pub struct SheepGraze {
 impl MobState {
     /// The state a newly spawned mob of `kind` starts with.
     #[must_use]
-    pub fn for_kind(kind: super::EntityKind) -> Self {
+    /// `seed` makes the random draws of two mobs differ (the entity id).
+    pub fn for_kind(kind: super::EntityKind, seed: u32) -> Self {
         use super::EntityKind as K;
         match kind {
             K::Rabbit => Self::Rabbit {
@@ -182,6 +216,7 @@ impl MobState {
             K::Sheep => Self::Sheep { timer: 0 },
             K::Chicken => Self::Chicken(ChickenWings::default()),
             K::Wither => Self::Wither(WitherHeads::default()),
+            K::Guardian => Self::Guardian(GuardianSwim::new(seed)),
             _ => Self::None,
         }
     }
@@ -213,8 +248,9 @@ impl MobState {
     /// Advances one tick (the client part of each `onLivingUpdate`).
     pub fn tick(&mut self, tick: MobTick) {
         match self {
-            // The wither's heads need the other entities: the store turns them.
-            Self::None | Self::Wither(_) => {}
+            // The wither's heads need the other entities and the guardian
+            // needs the water: the store updates them.
+            Self::None | Self::Wither(_) | Self::Guardian(_) => {}
             Self::Rabbit { ticks, duration } => {
                 if ticks != duration {
                     *ticks += 1;
@@ -265,6 +301,7 @@ impl MobState {
                 flap: wings.flap(alpha),
             },
             Self::Wither(heads) => MobPose::Wither(heads),
+            Self::Guardian(swim) => MobPose::Guardian(swim.pose(alpha)),
         }
     }
 }
@@ -284,6 +321,96 @@ pub fn wither_head_positions(feet: DVec3, body_yaw: f32) -> [DVec3; 3] {
         )
     };
     [feet + DVec3::new(0.0, 3.0, 0.0), side(0.0), side(1.0)]
+}
+
+impl GuardianSwim {
+    /// A guardian at rest, spikes in; `seed` makes the flapping of two
+    /// stranded guardians differ.
+    #[must_use]
+    pub const fn new(seed: u32) -> Self {
+        Self {
+            tail: 0.0,
+            prev_tail: 0.0,
+            tail_speed: 0.0,
+            spikes: 0.0,
+            prev_spikes: 0.0,
+            in_water: false,
+            eye: [0.0; 2],
+            seed: seed.wrapping_mul(0x9E37_79B9) | 1,
+        }
+    }
+
+    /// One tick (`EntityGuardian.onLivingUpdate` on the client): on land the
+    /// tail thrashes and the spikes flap at random; in water the tail beats
+    /// fast and the spikes slide in while it swims, and the tail slows and
+    /// the spikes come out while it hovers.
+    pub fn tick(&mut self, in_water: bool, moving: bool) {
+        self.in_water = in_water;
+        self.prev_tail = self.tail;
+        if !in_water {
+            self.tail_speed = 2.0;
+        } else if moving {
+            self.tail_speed = if self.tail_speed < 0.5 {
+                4.0
+            } else {
+                self.tail_speed + (0.5 - self.tail_speed) * 0.1
+            };
+        } else {
+            self.tail_speed += (0.125 - self.tail_speed) * 0.2;
+        }
+        self.tail += self.tail_speed;
+        self.prev_spikes = self.spikes;
+        if !in_water {
+            self.spikes = self.next_unit();
+        } else if moving {
+            self.spikes += (0.0 - self.spikes) * 0.25;
+        } else {
+            self.spikes += (1.0 - self.spikes) * 0.06;
+        }
+    }
+
+    /// The values at the sub-tick fraction `alpha`.
+    fn pose(&self, alpha: f32) -> GuardianPose {
+        GuardianPose {
+            tail: self.prev_tail + (self.tail - self.prev_tail) * alpha,
+            extension: self.prev_spikes + (self.spikes - self.prev_spikes) * alpha,
+            eye: self.eye,
+        }
+    }
+
+    /// `rand.nextFloat()` of a small xorshift generator.
+    fn next_unit(&mut self) -> f32 {
+        self.seed ^= self.seed << 13;
+        self.seed ^= self.seed >> 17;
+        self.seed ^= self.seed << 5;
+        (self.seed >> 8) as f32 / (1u32 << 24) as f32
+    }
+
+    /// Moves the pupil towards `watched` (MCP `ModelGuardian
+    /// .setRotationAngles`): up when it is above the eyes, and to the side
+    /// it lies on, relative to where the guardian looks.
+    pub fn look_at(&mut self, eyes: DVec3, look_yaw: f32, look_pitch: f32, watched: DVec3) {
+        let up = if watched.y - eyes.y > 0.0 { 0.0 } else { 1.0 };
+        let look = crate::raycast::look_direction(look_yaw.to_radians(), look_pitch.to_radians());
+        let look = DVec3::new(look.x, 0.0, look.z);
+        let away = DVec3::new(eyes.x - watched.x, 0.0, eyes.z - watched.z);
+        let away = if away.length() < 1.0e-4 {
+            DVec3::ZERO
+        } else {
+            away.normalize()
+        };
+        // `Vec3.rotateYaw(PI / 2)`.
+        let side = DVec3::new(away.z, 0.0, -away.x);
+        let d = look.dot(side) as f32;
+        let sign = if d > 0.0 {
+            1.0
+        } else if d < 0.0 {
+            -1.0
+        } else {
+            0.0
+        };
+        self.eye = [d.abs().sqrt() * 2.0 * sign, up];
+    }
 }
 
 impl WitherHeads {
@@ -392,7 +519,7 @@ mod tests {
 
     #[test]
     fn a_rabbit_hops_over_ten_ticks_after_status_one() {
-        let mut rabbit = MobState::for_kind(EntityKind::Rabbit);
+        let mut rabbit = MobState::for_kind(EntityKind::Rabbit, 0);
         assert_eq!(rabbit.pose(0.5), MobPose::Rabbit { hop: 0.0 });
         assert!(rabbit.status(1));
         assert_eq!(rabbit.pose(0.5), MobPose::Rabbit { hop: 0.05 });
@@ -406,7 +533,7 @@ mod tests {
 
     #[test]
     fn a_golem_swings_then_holds_a_poppy() {
-        let mut golem = MobState::for_kind(EntityKind::IronGolem);
+        let mut golem = MobState::for_kind(EntityKind::IronGolem, 0);
         assert_eq!(golem.pose(0.0), MobPose::IronGolem(GolemArms::Walking));
         golem.status(11);
         golem.status(4);
@@ -426,7 +553,7 @@ mod tests {
 
     #[test]
     fn a_wolf_shakes_for_two_seconds_after_status_eight() {
-        let mut wolf = MobState::for_kind(EntityKind::Wolf);
+        let mut wolf = MobState::for_kind(EntityKind::Wolf, 0);
         assert!(matches!(wolf.pose(0.0), MobPose::Wolf { shake: None, .. }));
         wolf.status(8);
         ticked(&mut wolf, 10);
@@ -441,7 +568,7 @@ mod tests {
 
     #[test]
     fn a_begging_wolf_tilts_its_head_gradually() {
-        let mut wolf = MobState::for_kind(EntityKind::Wolf);
+        let mut wolf = MobState::for_kind(EntityKind::Wolf, 0);
         let tilt = |wolf: &MobState| match wolf.pose(1.0) {
             MobPose::Wolf { interest, .. } => interest,
             _ => f32::NAN,
@@ -464,7 +591,7 @@ mod tests {
 
     #[test]
     fn a_sheep_lowers_its_head_nibbles_and_looks_up() {
-        let mut sheep = MobState::for_kind(EntityKind::Sheep);
+        let mut sheep = MobState::for_kind(EntityKind::Sheep, 0);
         assert_eq!(sheep.pose(0.0), MobPose::Sheep(SheepGraze::default()));
         sheep.status(10);
         // Timer 40 at the start: the head is still up.
@@ -484,7 +611,7 @@ mod tests {
 
     #[test]
     fn a_chicken_spreads_its_wings_in_the_air_and_folds_them_on_the_ground() {
-        let mut chicken = MobState::for_kind(EntityKind::Chicken);
+        let mut chicken = MobState::for_kind(EntityKind::Chicken, 0);
         let flap = |chicken: &MobState| match chicken.pose(1.0) {
             MobPose::Chicken { flap } => flap,
             _ => f32::NAN,
@@ -527,10 +654,48 @@ mod tests {
     }
 
     #[test]
+    fn a_swimming_guardian_draws_its_spikes_in_and_beats_its_tail() {
+        let mut swim = GuardianSwim::new(3);
+        for _ in 0..60 {
+            swim.tick(true, false);
+        }
+        let hovering = swim.pose(1.0);
+        assert!(hovering.extension > 0.9, "{hovering:?}");
+        for _ in 0..20 {
+            swim.tick(true, true);
+        }
+        let swimming = swim.pose(1.0);
+        assert!(swimming.extension < 0.01, "{swimming:?}");
+        assert!(swimming.tail > hovering.tail + 10.0, "the tail beats fast");
+        // Stranded, the spikes flap at random within 0..1.
+        for _ in 0..20 {
+            swim.tick(false, false);
+            assert!((0.0..1.0).contains(&swim.spikes));
+        }
+    }
+
+    #[test]
+    fn a_guardian_looks_up_and_to_the_side_of_what_it_watches() {
+        let mut swim = GuardianSwim::new(1);
+        let eyes = DVec3::ZERO;
+        // Facing +z (yaw 0); the target is ahead and to its left (+x), above.
+        swim.look_at(eyes, 0.0, 0.0, DVec3::new(3.0, 1.0, 5.0));
+        assert_eq!(swim.eye[1], 0.0, "above: the pupil goes up");
+        let side = swim.eye[0];
+        swim.look_at(eyes, 0.0, 0.0, DVec3::new(-3.0, -1.0, 5.0));
+        assert_eq!(swim.eye[1], 1.0);
+        assert!(
+            side * swim.eye[0] < 0.0,
+            "the other side: {side} {:?}",
+            swim.eye
+        );
+    }
+
+    #[test]
     fn other_statuses_and_kinds_are_left_alone() {
-        let mut zombie = MobState::for_kind(EntityKind::Zombie);
+        let mut zombie = MobState::for_kind(EntityKind::Zombie, 0);
         assert!(!zombie.status(4));
-        let mut rabbit = MobState::for_kind(EntityKind::Rabbit);
+        let mut rabbit = MobState::for_kind(EntityKind::Rabbit, 0);
         assert!(!rabbit.status(4));
     }
 }

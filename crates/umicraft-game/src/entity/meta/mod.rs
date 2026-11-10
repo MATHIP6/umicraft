@@ -94,6 +94,16 @@ pub enum Variant {
         /// (`EntityWither.getWatchedTargetId(1)` and `(2)`).
         targets: [i32; 2],
     },
+    /// Guardian flags (entry 16) and the entity it beams at (entry 17).
+    Guardian {
+        /// It swims along (`func_175472_n`, flag 2): spikes in, tail fast.
+        moving: bool,
+        /// An elder guardian (flag 4): bigger, with its own texture.
+        elder: bool,
+        /// The entity it watches and beams at, `0` for none
+        /// (`EntityGuardian.getTargetedEntity`).
+        target: i32,
+    },
     /// Ghast charging a fireball (entry 16).
     Ghast {
         /// True while the ghast attacks: its face shows the shooting texture.
@@ -149,6 +159,7 @@ impl EntityMeta {
             EntityKind::Enderman => monsters::apply_enderman(&mut variant, metadata),
             EntityKind::Ghast => monsters::apply_ghast(&mut variant, metadata),
             EntityKind::Wither => monsters::apply_wither(&mut variant, metadata),
+            EntityKind::Guardian => monsters::apply_guardian(&mut variant, metadata),
             EntityKind::WitherSkull => monsters::apply_wither_skull(&mut variant, metadata),
             EntityKind::Boat | EntityKind::Minecart => {
                 monsters::apply_vehicle(&mut variant, metadata)

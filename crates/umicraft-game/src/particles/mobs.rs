@@ -19,7 +19,8 @@ use super::spawn::{SpawnFilter, SpawnRequest};
 use crate::combat::hitbox::body_size;
 use crate::entity::meta::Variant;
 use crate::entity::mob_state::wither_head_positions;
-use crate::entity::{EntityKind, EntityRecord};
+use crate::entity::{EntityKind, EntityRecord, MobState};
+use crate::raycast::look_direction;
 use crate::shapes::BlockSource;
 
 /// Health at or below which a wither is armoured: half of its 300
@@ -194,6 +195,7 @@ impl ParticleEngine {
             }
             EntityKind::Wither => self.wither_breath(entity, &body, filter),
             EntityKind::IronGolem => self.golem_dust(entity, &body, world, filter),
+            EntityKind::Guardian => self.guardian_wake(entity, &body, filter),
             EntityKind::MagmaCube if entity.squish.just_landed() => {
                 self.magma_landing(entity, &body, filter);
             }
@@ -345,6 +347,21 @@ impl ParticleEngine {
             },
             filter,
         );
+    }
+
+    /// `EntityGuardian.onLivingUpdate`: a guardian swimming along leaves two
+    /// bubbles a tick, a block and a half behind where it looks.
+    fn guardian_wake(&mut self, entity: &EntityRecord, body: &MobBody, filter: &SpawnFilter) {
+        let moving = matches!(entity.meta.variant, Variant::Guardian { moving: true, .. });
+        let in_water = matches!(entity.mob, MobState::Guardian(swim) if swim.in_water);
+        if !moving || !in_water {
+            return;
+        }
+        let behind = look_direction(entity.head_yaw.to_radians(), entity.pitch.to_radians()) * 1.5;
+        for _ in 0..2 {
+            let position = body.inside(self.rng()) - behind;
+            self.emit(ParticleKind::Bubble, position, DVec3::ZERO, filter);
+        }
     }
 
     /// `EntitySlime.onUpdate` for a magma cube that just landed: `8 * size`
@@ -547,6 +564,21 @@ mod tests {
         assert!((20..=70).contains(&engine.len()), "{}", engine.len());
         golem.velocity = glam::Vec3::ZERO;
         assert_eq!(after_tick(&golem), 0);
+    }
+
+    #[test]
+    fn a_guardian_swimming_in_water_leaves_bubbles_behind() {
+        let mut guardian = mob(EntityKind::Guardian);
+        guardian.meta.variant = Variant::Guardian {
+            moving: true,
+            elder: false,
+            target: 0,
+        };
+        assert_eq!(after_tick(&guardian), 0, "not in water yet");
+        if let MobState::Guardian(swim) = &mut guardian.mob {
+            swim.tick(true, true);
+        }
+        assert_eq!(after_tick(&guardian), 2);
     }
 
     #[test]

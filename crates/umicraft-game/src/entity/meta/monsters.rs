@@ -21,6 +21,9 @@ const ZOMBIE_CONVERTING: u8 = 14;
 /// Enderman entries: carried block state, screaming.
 const GHAST_ATTACKING: u8 = 16;
 const WITHER_INVULNERABLE: u8 = 20;
+/// Entries of the guardian's flags and target (`EntityGuardian.entityInit`).
+const GUARDIAN_FLAGS: u8 = 16;
+const GUARDIAN_TARGET: u8 = 17;
 /// Entries of the targets of the wither's side heads (`EntityWither.entityInit`:
 /// 17 is the centre head's, 18 and 19 the side heads').
 const WITHER_SIDE_TARGETS: [u8; 2] = [18, 19];
@@ -150,6 +153,31 @@ pub(super) fn apply_wither_skull(variant: &mut Variant, metadata: &Metadata) {
     }
 }
 
+/// MCP `EntityGuardian.isSyncedFlagSet`: entry 16 is an int of flags (2
+/// moving, 4 elder), entry 17 the id of the target.
+pub(super) fn apply_guardian(variant: &mut Variant, metadata: &Metadata) {
+    let (mut moving, mut elder, mut target) = match variant {
+        Variant::Guardian {
+            moving,
+            elder,
+            target,
+        } => (*moving, *elder, *target),
+        _ => (false, false, 0),
+    };
+    if let Some(flags) = metadata.get_int(GUARDIAN_FLAGS) {
+        moving = flags & 2 != 0;
+        elder = flags & 4 != 0;
+    }
+    if let Some(id) = metadata.get_int(GUARDIAN_TARGET) {
+        target = id;
+    }
+    *variant = Variant::Guardian {
+        moving,
+        elder,
+        target,
+    };
+}
+
 pub(super) fn apply_ghast(variant: &mut Variant, metadata: &Metadata) {
     if let Some(attacking) = metadata.get_byte(GHAST_ATTACKING) {
         *variant = Variant::Ghast {
@@ -230,6 +258,32 @@ mod tests {
     use super::super::EntityMeta;
     use super::*;
     use crate::entity::kind::EntityKind;
+
+    #[test]
+    fn a_guardian_swims_is_elder_and_watches_by_entries_16_and_17() {
+        let mut state = EntityMeta::default();
+        state.apply(
+            EntityKind::Guardian,
+            &meta(vec![int(16, 2 | 4), int(17, 42)]),
+        );
+        assert_eq!(
+            state.variant,
+            Variant::Guardian {
+                moving: true,
+                elder: true,
+                target: 42
+            }
+        );
+        state.apply(EntityKind::Guardian, &meta(vec![int(16, 0)]));
+        assert!(matches!(
+            state.variant,
+            Variant::Guardian {
+                moving: false,
+                target: 42,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn a_slime_has_a_size() {

@@ -8,9 +8,9 @@ use umicraft_game::entity::mob_state::WitherHeads;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot, MobPose};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{
-    BatModel, BlazeModel, CreeperModel, DragonModel, EndermiteModel, GhastModel, GuardianModel,
-    ModelVertex, SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot, WitherModel,
-    GHAST_SCALE,
+    BatModel, BlazeModel, CreeperModel, DragonModel, EndermiteModel, GhastModel, GuardianLook,
+    GuardianModel, ModelVertex, SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot,
+    WitherModel, GHAST_SCALE,
 };
 
 use super::animals::with_eyes;
@@ -124,9 +124,23 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             )
         }
         EntityKind::Guardian => {
-            let mut model = GuardianModel::new();
-            model.set_angles(age);
-            one(TextureSlot::Guardian, model.emit_mesh())
+            let elder = matches!(ent.meta.variant, Variant::Guardian { elder: true, .. });
+            let (mut model, slot) = if elder {
+                (GuardianModel::elder(), TextureSlot::GuardianElder)
+            } else {
+                (GuardianModel::new(), TextureSlot::Guardian)
+            };
+            let swim = match ent.mob {
+                MobPose::Guardian(swim) => swim,
+                _ => Default::default(),
+            };
+            let look = GuardianLook {
+                tail: swim.tail,
+                extension: swim.extension,
+                eye: swim.eye,
+            };
+            model.set_angles(age, head_yaw, head_pitch, look);
+            one(slot, model.emit_mesh())
         }
         EntityKind::Silverfish => {
             let mut model = SilverfishModel::new();

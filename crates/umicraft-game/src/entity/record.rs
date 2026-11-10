@@ -261,7 +261,7 @@ impl EntityRecord {
             flight: None,
             squish: Default::default(),
             horse: HorseState::new(u64::from(id.0.unsigned_abs())),
-            mob: MobState::for_kind(kind),
+            mob: MobState::for_kind(kind, id.0.unsigned_abs()),
             local: false,
             ghost_visible: false,
             age_ticks: 0,

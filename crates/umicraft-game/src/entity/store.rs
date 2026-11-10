@@ -634,6 +634,7 @@ impl EntityStore {
             }
         }
         self.track_wither_heads();
+        self.track_guardian_eyes();
         for entity in self.entities.values_mut() {
             if let Some(flight) = entity.collecting.as_mut() {
                 flight.ticks += 1;
@@ -683,6 +684,38 @@ impl EntityStore {
         }
     }
 
+    /// Turns each guardian's pupil towards what it beams at, or the local
+    /// player (MCP `ModelGuardian.setRotationAngles` watches the target, else
+    /// the camera's entity).
+    fn track_guardian_eyes(&mut self) {
+        let viewer = self.viewer.and_then(|(id, _)| self.eyes_of(id.0));
+        let guardians: Vec<(EntityId, DVec3)> = self
+            .entities
+            .values()
+            .filter_map(|guardian| match guardian.meta.variant {
+                Variant::Guardian { target, .. } => {
+                    let watched = self.eyes_of(target).or(viewer)?;
+                    Some((guardian.id, watched))
+                }
+                _ => None,
+            })
+            .collect();
+        for (id, watched) in guardians {
+            let Some(guardian) = self.entities.get_mut(&id) else {
+                continue;
+            };
+            // `EntityGuardian.getEyeHeight`: half its height.
+            let Some((_, height)) = crate::combat::hitbox::body_size(guardian) else {
+                continue;
+            };
+            let eyes = guardian.position + DVec3::new(0.0, height * 0.5, 0.0);
+            let (yaw, pitch) = (guardian.head_yaw, guardian.pitch);
+            if let MobState::Guardian(swim) = &mut guardian.mob {
+                swim.look_at(eyes, yaw, pitch, watched);
+            }
+        }
+    }
+
     /// Tells the store where the local player stands before a tick: its body
     /// lives outside the store, yet a wither may watch it.
     pub fn set_viewer(&mut self, id: EntityId, feet: DVec3) {
@@ -714,7 +747,8 @@ impl EntityStore {
     }
 
     /// Advances the objects the client simulates (dropped items, falling
-    /// blocks, arrows, projectiles) by one tick, with the collisions of `world`.
+    /// blocks, arrows, projectiles) and the guardians' swimming, which needs
+    /// the water, by one tick, with the collisions of `world`.
     /// Call it right after [`Self::tick`].
     pub fn tick_objects<S: crate::shapes::BlockSource + ?Sized>(&mut self, world: &S) {
         for entity in self.entities.values_mut() {
@@ -723,6 +757,7 @@ impl EntityStore {
             if entity.collecting.is_none() && entity.vehicle.is_none() {
                 super::objects::step(entity, world);
             }
+            swim_guardian(entity, world);
         }
         // `EntityLightningBolt.onUpdate`: the bolt flashes one to three times
         // and dies; the number of ticks it takes is random, so it is spread
@@ -767,6 +802,28 @@ impl EntityStore {
             frame.ridden = rided.contains(&frame.id);
         }
         frames
+    }
+}
+
+/// One tick of a guardian's tail and spikes, which depend on the water it is
+/// in. The reference tests its box shrunk by 0.4 vertically
+/// (`Entity.isInWater`); the block at the middle of its height stands in.
+fn swim_guardian<S: crate::shapes::BlockSource + ?Sized>(entity: &mut EntityRecord, world: &S) {
+    let Variant::Guardian { moving, .. } = entity.meta.variant else {
+        return;
+    };
+    let Some((_, height)) = crate::combat::hitbox::body_size(entity) else {
+        return;
+    };
+    let middle = entity.position + DVec3::new(0.0, height * 0.5, 0.0);
+    let block = world.block(
+        middle.x.floor() as i32,
+        middle.y.floor() as i32,
+        middle.z.floor() as i32,
+    );
+    let in_water = umicraft_world::fluid::Liquid::Water.contains(block);
+    if let MobState::Guardian(swim) = &mut entity.mob {
+        swim.tick(in_water, moving);
     }
 }
 

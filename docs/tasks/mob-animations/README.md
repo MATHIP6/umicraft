@@ -1,6 +1,6 @@
 # Mob animations and mob particles: audit and plan
 
-Status: **phases A and B done, phase P mostly done** (branch `feat/mob-animations`). Audited against MCP 1.8
+Status: **phases A, B and C done, phase P mostly done** (branch `feat/mob-animations`). Audited against MCP 1.8
 (`client/model/Model*.java`, `client/renderer/entity/Render*.java`, `entity/`) on
 2026-11-09. Line numbers are the ones at `eba357d`.
 
