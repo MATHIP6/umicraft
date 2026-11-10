@@ -269,6 +269,17 @@ impl MobState {
         }
     }
 
+    /// `timeWolfIsShaking` of a wolf that shakes, as of the last tick (the
+    /// reference spawns its water drops from it), `None` for any other mob
+    /// or a wolf that does not shake.
+    #[must_use]
+    pub fn shake_time(&self) -> Option<f32> {
+        match self {
+            Self::Wolf(wolf) if wolf.shaking => Some(wolf.time),
+            _ => None,
+        }
+    }
+
     /// What the model reads at the sub-tick fraction `alpha`.
     #[must_use]
     pub fn pose(&self, alpha: f32) -> MobPose {

@@ -128,7 +128,7 @@ mod tests {
             assert!((0.1..=0.3).contains(&droplet.motion.y));
             assert!((19..=22).contains(&match droplet.texture {
                 Texture::Cell { index } => index,
-                Texture::Sprite { .. } | Texture::Block { .. } => 0,
+                Texture::Sprite { .. } | Texture::Block { .. } | Texture::Item { .. } => 0,
             }));
             assert_eq!(droplet.size, 0.01);
             assert_eq!(droplet.gravity, 0.06);

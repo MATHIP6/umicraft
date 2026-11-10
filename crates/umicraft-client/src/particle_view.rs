@@ -52,6 +52,15 @@ pub fn block_sprite(context: &ModelMeshContext, state: BlockState) -> Option<Blo
     Some(BlockSprite { layer, tint })
 }
 
+/// Where the pictures of the particles are: `blocks` finds the picture of a
+/// block, `items` the atlas layer of an item picture by its key.
+pub struct Pictures<B, I> {
+    /// The picture of a block for its fragments.
+    pub blocks: B,
+    /// The atlas layer of an item picture (`items/slimeball`).
+    pub items: I,
+}
+
 /// A particle of the newest tick with the light at its position.
 #[derive(Debug, Clone)]
 pub struct ParticleDraw {
@@ -104,7 +113,7 @@ pub fn sprite(
     draw: &ParticleDraw,
     partial_ticks: f32,
     origin: DVec3,
-    blocks: &impl Fn(BlockState) -> Option<BlockSprite>,
+    pictures: &Pictures<impl Fn(BlockState) -> Option<BlockSprite>, impl Fn(&str) -> Option<u32>>,
 ) -> Option<ParticleSprite> {
     let particle = &draw.particle;
     let (uv_min, uv_max, atlas_layer, tint) = match particle.texture {
@@ -114,7 +123,7 @@ pub fn sprite(
             ([u0, v0], [u0 + CELL_SPAN, v0 + CELL_SPAN], None, [1.0; 3])
         }
         Texture::Block { state } => {
-            let block = blocks(state)?;
+            let block = (pictures.blocks)(state)?;
             // A fragment shows a quarter of the sprite, picked by its jitter
             // (`EntityDiggingFX.renderParticle`).
             let u0 = particle.jitter_u / 4.0;
@@ -125,6 +134,14 @@ pub fn sprite(
                 Some(block.layer),
                 block.tint,
             )
+        }
+        Texture::Item { key } => {
+            // Like a fragment, an item piece shows a quarter of its picture
+            // (`EntityBreakingFX.renderParticle`), untinted.
+            let layer = (pictures.items)(key)?;
+            let u0 = particle.jitter_u / 4.0;
+            let v0 = particle.jitter_v / 4.0;
+            ([u0, v0], [u0 + 0.25, v0 + 0.25], Some(layer), [1.0; 3])
         }
         Texture::Sprite { .. } => return None,
     };
@@ -162,13 +179,13 @@ pub fn sprites_into(
     draws: &[ParticleDraw],
     partial_ticks: f32,
     origin: DVec3,
-    blocks: &impl Fn(BlockState) -> Option<BlockSprite>,
+    pictures: &Pictures<impl Fn(BlockState) -> Option<BlockSprite>, impl Fn(&str) -> Option<u32>>,
 ) {
     out.clear();
     out.extend(
         draws
             .iter()
-            .filter_map(|draw| sprite(draw, partial_ticks, origin, blocks)),
+            .filter_map(|draw| sprite(draw, partial_ticks, origin, pictures)),
     );
 }
 
@@ -177,8 +194,21 @@ mod tests {
     use super::*;
     use umicraft_game::particles::{create, ParticleKind};
 
-    fn no_blocks(_: BlockState) -> Option<BlockSprite> {
+    fn no_block(_: BlockState) -> Option<BlockSprite> {
         None
+    }
+
+    fn no_item(_: &str) -> Option<u32> {
+        None
+    }
+
+    type NoPictures = Pictures<fn(BlockState) -> Option<BlockSprite>, fn(&str) -> Option<u32>>;
+
+    fn no_pictures() -> NoPictures {
+        Pictures {
+            blocks: no_block,
+            items: no_item,
+        }
     }
 
     fn flame() -> Particle {
@@ -214,7 +244,7 @@ mod tests {
             }
         };
         let centre = |draw: &ParticleDraw| {
-            sprite(draw, 0.0, origin, &no_blocks)
+            sprite(draw, 0.0, origin, &no_pictures())
                 .expect("a sheet cell")
                 .center
         };
@@ -233,7 +263,7 @@ mod tests {
             block_light: 3,
             sky_light: 15,
         };
-        let sprite = sprite(&draw, 0.5, DVec3::ZERO, &no_blocks).expect("a sheet cell");
+        let sprite = sprite(&draw, 0.5, DVec3::ZERO, &no_pictures()).expect("a sheet cell");
         assert_eq!(sprite.uv_min, [3.0 / 16.0, 2.0 / 16.0]);
         assert!(sprite.atlas_layer.is_none() && !sprite.flat);
         assert!(sprite.half_size > 0.0);
@@ -250,7 +280,34 @@ mod tests {
             block_light: 0,
             sky_light: 15,
         };
-        assert!(sprite(&draw, 0.0, DVec3::ZERO, &no_blocks).is_none());
+        assert!(sprite(&draw, 0.0, DVec3::ZERO, &no_pictures()).is_none());
+    }
+
+    #[test]
+    fn an_item_piece_samples_a_quarter_of_its_picture_untinted() {
+        // A slime landing throws pieces of the slime ball.
+        let mut particle = flame();
+        particle.texture = Texture::Item {
+            key: "items/slimeball",
+        };
+        particle.jitter_u = 2.0;
+        particle.jitter_v = 1.0;
+        let draw = ParticleDraw {
+            particle,
+            block_light: 0,
+            sky_light: 15,
+        };
+        let pictures = Pictures {
+            blocks: no_block,
+            items: |key: &str| (key == "items/slimeball").then_some(311),
+        };
+        let piece = sprite(&draw, 0.0, DVec3::ZERO, &pictures).expect("an item piece");
+        assert_eq!(piece.atlas_layer, Some(311));
+        assert_eq!(piece.uv_min, [0.5, 0.25]);
+        assert_eq!(piece.uv_max, [0.75, 0.5]);
+        assert_eq!(piece.color[..3], [1.0; 3]);
+        // An atlas without the picture draws nothing.
+        assert!(sprite(&draw, 0.0, DVec3::ZERO, &no_pictures()).is_none());
     }
 
     #[test]
@@ -266,13 +323,16 @@ mod tests {
             block_light: 0,
             sky_light: 15,
         };
-        let blocks = |_: BlockState| {
-            Some(BlockSprite {
-                layer: 9,
-                tint: [0.5, 1.0, 0.0],
-            })
+        let pictures = Pictures {
+            blocks: |_: BlockState| {
+                Some(BlockSprite {
+                    layer: 9,
+                    tint: [0.5, 1.0, 0.0],
+                })
+            },
+            items: no_item,
         };
-        let sprite = sprite(&draw, 0.0, DVec3::ZERO, &blocks).expect("a block sprite");
+        let sprite = sprite(&draw, 0.0, DVec3::ZERO, &pictures).expect("a block sprite");
         assert_eq!(sprite.atlas_layer, Some(9));
         assert_eq!(sprite.uv_min, [0.5, 0.25]);
         assert_eq!(sprite.uv_max, [0.75, 0.5]);

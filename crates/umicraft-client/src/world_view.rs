@@ -327,7 +327,10 @@ impl WorldView {
             &self.view.particles,
             partial_ticks,
             origin,
-            &|state| crate::particle_view::block_sprite(context?, state),
+            &crate::particle_view::Pictures {
+                blocks: |state| crate::particle_view::block_sprite(context?, state),
+                items: |key: &str| context?.atlas.layer(key),
+            },
         );
     }
 

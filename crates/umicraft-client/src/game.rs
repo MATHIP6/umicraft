@@ -2491,11 +2491,12 @@ fn spawn_mob_particles(game: &mut Game) {
 /// The particles of an `Entity Status` for another entity (MCP
 /// `handleStatusUpdate`): hearts, smoke, the witch's magic, the spawner puff.
 fn spawn_status_particles(game: &mut Game, id: EntityId, status: i8) {
-    let Some(filter) = particle_filter(game) else {
+    let (Some(filter), Some(world)) = (particle_filter(game), game.world.as_ref()) else {
         return;
     };
     if let Some(entity) = game.entities.entities().get(&id) {
-        game.particles.spawn_mob_status(entity, status, &filter);
+        game.particles
+            .spawn_mob_status(entity, status, world, &filter);
     }
 }
 

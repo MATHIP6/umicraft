@@ -102,6 +102,13 @@ pub enum Texture {
         /// The block the particle was torn from.
         state: umicraft_world::BlockState,
     },
+    /// A picture of the atlas that holds the items (`EntityBreakingFX`),
+    /// named by its key, e.g. `items/slimeball`. It is sampled through the
+    /// jitter window like a block fragment.
+    Item {
+        /// The atlas key of the item picture.
+        key: &'static str,
+    },
     /// A sprite named by its path (a picture beside `particles.png`).
     Sprite {
         /// The atlas path, e.g. `blocks/stone`.

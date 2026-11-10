@@ -20,6 +20,7 @@ use crate::combat::hitbox::body_size;
 use crate::entity::meta::Variant;
 use crate::entity::mob_state::wither_head_positions;
 use crate::entity::{EntityKind, EntityRecord, MobState};
+use crate::particles::ambient::{running_dust, RunningBody};
 use crate::raycast::look_direction;
 use crate::shapes::BlockSource;
 
@@ -196,8 +197,9 @@ impl ParticleEngine {
             EntityKind::Wither => self.wither_breath(entity, &body, filter),
             EntityKind::IronGolem => self.golem_dust(entity, &body, world, filter),
             EntityKind::Guardian => self.guardian_wake(entity, &body, filter),
-            EntityKind::MagmaCube if entity.squish.just_landed() => {
-                self.magma_landing(entity, &body, filter);
+            EntityKind::Wolf => self.wolf_spray(entity, &body, filter),
+            EntityKind::Slime | EntityKind::MagmaCube if entity.squish.just_landed() => {
+                self.slime_landing(entity, &body, filter);
             }
             _ => {}
         }
@@ -206,14 +208,22 @@ impl ParticleEngine {
         }
     }
 
-    /// Creates the particles of an `Entity Status`: the spawner puff (20),
-    /// the witch's magic (15), the hearts of an animal in love (18), of a
-    /// villager (12, 13, 14) and of a taming (6, 7).
-    pub fn spawn_mob_status(&mut self, entity: &EntityRecord, status: i8, filter: &SpawnFilter) {
+    /// Creates the particles of an `Entity Status`: the dust of a rabbit's hop
+    /// (1), the spawner puff (20), the witch's magic (15), the hearts of an
+    /// animal in love (18), of a villager (12, 13, 14) and of a taming (6, 7).
+    pub fn spawn_mob_status<S: BlockSource + ?Sized>(
+        &mut self,
+        entity: &EntityRecord,
+        status: i8,
+        world: &S,
+        filter: &SpawnFilter,
+    ) {
         let Some(body) = MobBody::of(entity) else {
             return;
         };
-        if status == 20 && entity.kind.is_living() {
+        if status == 1 && entity.kind == EntityKind::Rabbit {
+            self.rabbit_hop_dust(entity, &body, world, filter);
+        } else if status == 20 && entity.kind.is_living() {
             self.spawner_puff(&body, filter);
         } else if status == 15 && entity.kind == EntityKind::Witch {
             self.witch_magic(&body, filter);
@@ -233,6 +243,48 @@ impl ParticleEngine {
             let velocity = drift(self.rng());
             let position = body.around(self.rng(), 0.0);
             self.emit(ParticleKind::Explode, position, velocity, filter);
+        }
+    }
+
+    /// `EntityRabbit.handleStatusUpdate(1)`: a hop kicks up the block under
+    /// the rabbit, as a sprinting entity does (`Entity.createRunningParticles`).
+    fn rabbit_hop_dust<S: BlockSource + ?Sized>(
+        &mut self,
+        entity: &EntityRecord,
+        body: &MobBody,
+        world: &S,
+        filter: &SpawnFilter,
+    ) {
+        let running = RunningBody {
+            position: body.feet,
+            width: body.width,
+            motion: entity.velocity.as_dvec3(),
+        };
+        let mut argument = [0];
+        if let Some(request) = running_dust(world, &running, &mut argument, self.rng()) {
+            self.spawn(&request, filter);
+        }
+    }
+
+    /// `EntityWolf.onUpdate`: a shaking wolf sprays water drops from 0.4 into
+    /// the shake, up to 7 a tick, 0.8 above its feet and with its own motion.
+    fn wolf_spray(&mut self, entity: &EntityRecord, body: &MobBody, filter: &SpawnFilter) {
+        let Some(time) = entity.mob.shake_time().filter(|&time| time > 0.4) else {
+            return;
+        };
+        let drops = ((time - 0.4) * std::f32::consts::PI).sin() * 7.0;
+        for _ in 0..drops as u32 {
+            let rng = self.rng();
+            let across = |draw: f32| f64::from((draw * 2.0 - 1.0) * body.width as f32 * 0.5);
+            let x = across(rng.next_float());
+            let z = across(rng.next_float());
+            let position = body.feet + DVec3::new(x, 0.8, z);
+            self.emit(
+                ParticleKind::Splash,
+                position,
+                entity.velocity.as_dvec3(),
+                filter,
+            );
         }
     }
 
@@ -364,13 +416,19 @@ impl ParticleEngine {
         }
     }
 
-    /// `EntitySlime.onUpdate` for a magma cube that just landed: `8 * size`
-    /// flames on a ring around its feet. (A slime throws slime-ball
-    /// fragments, which the engine cannot build yet.)
-    fn magma_landing(&mut self, entity: &EntityRecord, body: &MobBody, filter: &SpawnFilter) {
+    /// `EntitySlime.onUpdate` for a slime that just landed: `8 * size`
+    /// particles on a ring around its feet, pieces of slime ball for a slime
+    /// (`EntitySlime.getParticleType`) and flames for a magma cube
+    /// (`EntityMagmaCube.getParticleType`).
+    fn slime_landing(&mut self, entity: &EntityRecord, body: &MobBody, filter: &SpawnFilter) {
         let size = match entity.meta.variant {
             Variant::Slime(size) => f32::from(size),
             _ => 1.0,
+        };
+        let landing = if entity.kind == EntityKind::Slime {
+            ParticleKind::Slime
+        } else {
+            ParticleKind::Flame
         };
         for _ in 0..(8.0 * size) as u32 {
             let rng = self.rng();
@@ -381,7 +439,7 @@ impl ParticleEngine {
                 body.feet.y,
                 body.feet.z + f64::from(angle.cos() * size * 0.5 * reach),
             );
-            self.emit(ParticleKind::Flame, position, DVec3::ZERO, filter);
+            self.emit(landing, position, DVec3::ZERO, filter);
         }
     }
 
@@ -447,7 +505,7 @@ impl ParticleEngine {
 mod tests {
     use super::*;
     use crate::entity::EntityId;
-    use crate::particles::ParticleSetting;
+    use crate::particles::{Layer, ParticleSetting, Texture};
     use umicraft_world::BlockState;
 
     /// A world of stone below y = 64.
@@ -482,7 +540,7 @@ mod tests {
 
     fn after_status(entity: &EntityRecord, status: i8) -> usize {
         let mut engine = ParticleEngine::new(7);
-        engine.spawn_mob_status(entity, status, &filter());
+        engine.spawn_mob_status(entity, status, &Ground, &filter());
         engine.len()
     }
 
@@ -582,6 +640,22 @@ mod tests {
     }
 
     #[test]
+    fn a_slime_throws_pieces_of_slime_ball_when_it_lands() {
+        // Regression: the slime had no landing particles (no `Slime` factory).
+        let mut slime = mob(EntityKind::Slime);
+        slime.meta.variant = Variant::Slime(1);
+        slime.squish.tick(false);
+        slime.squish.tick(true);
+        let mut engine = ParticleEngine::new(7);
+        engine.spawn_mob_tick(&slime, &Ground, &filter());
+        assert_eq!(engine.len(), 8);
+        let pieces = engine.particles(Layer::Terrain, false);
+        assert!(pieces
+            .iter()
+            .all(|p| matches!(p.texture, Texture::Item { .. })));
+    }
+
+    #[test]
     fn a_magma_cube_throws_flames_when_it_lands() {
         let mut cube = mob(EntityKind::MagmaCube);
         cube.meta.variant = Variant::Slime(2);
@@ -617,6 +691,39 @@ mod tests {
         assert_eq!(after_status(&mob(EntityKind::Skeleton), 20), 20);
         let witch = after_status(&mob(EntityKind::Witch), 15);
         assert!((10..=44).contains(&witch), "{witch}");
+    }
+
+    #[test]
+    fn a_hopping_rabbit_kicks_up_the_ground_under_it() {
+        // Regression: status 1 only started the hop, with no dust.
+        let rabbit = mob(EntityKind::Rabbit);
+        assert_eq!(after_status(&rabbit, 1), 1);
+        let mut engine = ParticleEngine::new(7);
+        let floating = mob(EntityKind::Rabbit);
+        struct Air;
+        impl BlockSource for Air {
+            fn block(&self, _: i32, _: i32, _: i32) -> BlockState {
+                BlockState::AIR
+            }
+        }
+        engine.spawn_mob_status(&floating, 1, &Air, &filter());
+        assert!(engine.is_empty(), "nothing to kick up over air");
+    }
+
+    #[test]
+    fn a_shaking_wolf_sprays_water_after_the_first_fifth_of_its_shake() {
+        let mut wolf = mob(EntityKind::Wolf);
+        wolf.mob.status(8);
+        let mut sprayed = Vec::new();
+        for _ in 0..40 {
+            wolf.mob.tick(crate::entity::MobTick::default());
+            sprayed.push(after_tick(&wolf));
+        }
+        // `timeWolfIsShaking` passes 0.4 on the ninth tick; the spray swells
+        // to 7 drops about 0.9 units in and fades by 1.4.
+        assert!(sprayed[..8].iter().all(|&n| n == 0), "{sprayed:?}");
+        assert!(sprayed[8..].iter().any(|&n| n >= 6), "{sprayed:?}");
+        assert_eq!(*sprayed.last().unwrap(), 0, "over by 1.4 + 0.4");
     }
 
     #[test]
