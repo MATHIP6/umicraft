@@ -41,6 +41,9 @@ pub struct EntityStore {
     entities: BTreeMap<EntityId, EntityRecord>,
     /// The bodies whose death fall ended in the last tick, for their puff.
     deaths: Vec<MobBody>,
+    /// The local player, whose body is not stored here, and its feet: what
+    /// a mob that watches it looks at.
+    viewer: Option<(EntityId, DVec3)>,
 }
 
 impl EntityStore {
@@ -50,6 +53,7 @@ impl EntityStore {
         Self {
             entities: BTreeMap::new(),
             deaths: Vec::new(),
+            viewer: None,
         }
     }
 
@@ -679,11 +683,20 @@ impl EntityStore {
         }
     }
 
+    /// Tells the store where the local player stands before a tick: its body
+    /// lives outside the store, yet a wither may watch it.
+    pub fn set_viewer(&mut self, id: EntityId, feet: DVec3) {
+        self.viewer = Some((id, feet));
+    }
+
     /// Where the eyes of the entity `id` are (MCP `posY + getEyeHeight()`:
     /// 1.62 for a player, 0.85 of the height otherwise), if it is tracked.
     fn eyes_of(&self, id: i32) -> Option<DVec3> {
         if id <= 0 {
             return None;
+        }
+        if let Some((_, feet)) = self.viewer.filter(|(viewer, _)| viewer.0 == id) {
+            return Some(feet + DVec3::new(0.0, EYE_HEIGHT, 0.0));
         }
         let entity = self.entities.get(&EntityId(id))?;
         let eye = if entity.kind == EntityKind::Player {
@@ -1336,6 +1349,16 @@ mod tests {
         assert_ne!(first.pitch[0], 0.0, "it looks down at the zombie");
         assert!(settled.pitch[0] > 0.0, "{settled:?}");
         assert_eq!(settled.pitch[1], 0.0, "the other head has no target");
+        // The local player is not stored, but the store is told where it is.
+        if let Some(record) = store.entities.get_mut(&wither) {
+            record.meta.variant = Variant::Wither {
+                invulnerable: 0,
+                targets: [0, 99],
+            };
+        }
+        store.set_viewer(EntityId(99), DVec3::new(0.0, 90.0, -20.0));
+        store.tick();
+        assert!(heads(&store).pitch[1] < 0.0, "it looks up at the player");
     }
 
     #[test]

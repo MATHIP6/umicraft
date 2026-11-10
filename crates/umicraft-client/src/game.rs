@@ -3280,6 +3280,11 @@ fn tick(
     report_flight(game, was_flying, queue);
     follow_body(game);
     tick_overlays(game);
+    if let Some(state) = game.state.as_ref() {
+        // A mob may watch the local player, whose body is not in the store.
+        game.entities
+            .set_viewer(EntityId(game.entity_id), state.position());
+    }
     game.entities.tick();
     if let Some(world) = game.world.as_ref() {
         game.entities.tick_objects(world);
