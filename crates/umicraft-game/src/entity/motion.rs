@@ -111,19 +111,29 @@ pub struct Squish {
     /// What is drawn.
     pub factor: f32,
     was_on_ground: bool,
+    /// Whether the last tick was the one the entity touched the ground.
+    landed: bool,
 }
 
 impl Squish {
     /// One tick, after the entity has moved.
     pub fn tick(&mut self, on_ground: bool) {
         self.factor += (self.amount - self.factor) * 0.5;
-        if on_ground && !self.was_on_ground {
+        self.landed = on_ground && !self.was_on_ground;
+        if self.landed {
             self.amount = -0.5;
         } else if !on_ground && self.was_on_ground {
             self.amount = 1.0;
         }
         self.was_on_ground = on_ground;
         self.amount *= 0.6;
+    }
+
+    /// Whether the last [`Self::tick`] was the one the entity landed on (MCP
+    /// `onGround && !wasOnGround`), when a slime splashes.
+    #[must_use]
+    pub const fn just_landed(&self) -> bool {
+        self.landed
     }
 }
 

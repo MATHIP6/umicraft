@@ -2227,6 +2227,7 @@ fn apply_net_event(
                     state.on_local_player_status(status.status);
                 }
             }
+            spawn_status_particles(game, EntityId(status.entity_id), status.status);
             game.entities
                 .status(EntityId(status.entity_id), status.status);
         }
@@ -2467,6 +2468,34 @@ fn spawn_ambient_particles(game: &mut Game) {
     );
     if let Some(state) = game.state.as_mut() {
         state.queue_sound_cues(rain);
+    }
+}
+
+/// Creates the particles the mobs give off by themselves this tick (blaze
+/// smoke, enderman sparks, potion swirls...) and the puffs of the bodies whose
+/// death fall ended. Run after the entities moved and before the particles
+/// tick, as `Minecraft.runTick` updates the world before the effect renderer.
+fn spawn_mob_particles(game: &mut Game) {
+    let (Some(filter), Some(world)) = (particle_filter(game), game.world.as_ref()) else {
+        game.entities.drain_deaths().for_each(drop);
+        return;
+    };
+    for entity in game.entities.entities().values() {
+        game.particles.spawn_mob_tick(entity, world, &filter);
+    }
+    for body in game.entities.drain_deaths() {
+        game.particles.spawn_death_puff(&body, &filter);
+    }
+}
+
+/// The particles of an `Entity Status` for another entity (MCP
+/// `handleStatusUpdate`): hearts, smoke, the witch's magic, the spawner puff.
+fn spawn_status_particles(game: &mut Game, id: EntityId, status: i8) {
+    let Some(filter) = particle_filter(game) else {
+        return;
+    };
+    if let Some(entity) = game.entities.entities().get(&id) {
+        game.particles.spawn_mob_status(entity, status, &filter);
     }
 }
 
@@ -3254,6 +3283,9 @@ fn tick(
     game.entities.tick();
     if let Some(world) = game.world.as_ref() {
         game.entities.tick_objects(world);
+    }
+    spawn_mob_particles(game);
+    if let Some(world) = game.world.as_ref() {
         game.particles.tick(world);
     }
     combat::tick_emitters(game);
@@ -5196,6 +5228,38 @@ mod tests {
         );
         handle_net(&mut game, status, &mut queue, &frames);
         assert!(!game.item_use.is_using());
+    }
+
+    fn game_with_mob(mob_type: u8) -> Game {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entities.spawn_mob(
+            EntityId(7),
+            mob_type,
+            DVec3::new(2.5, 64.0, 2.5),
+            0.0,
+            0.0,
+            0.0,
+            glam::Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        game
+    }
+
+    #[test]
+    fn a_blaze_near_the_player_smokes_every_tick() {
+        // Regression: no mob gave off its own particles.
+        let mut game = game_with_mob(61);
+        spawn_mob_particles(&mut game);
+        assert_eq!(game.particles.len(), 2);
+    }
+
+    #[test]
+    fn an_animal_in_love_shows_hearts() {
+        let mut game = game_with_mob(92);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, hurt_status(7, 18), &mut queue, &frames);
+        assert_eq!(game.particles.len(), 7);
     }
 
     fn hurt_status(entity_id: i32, status: i8) -> PlayEvent {

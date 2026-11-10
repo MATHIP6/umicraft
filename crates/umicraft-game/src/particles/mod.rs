@@ -12,6 +12,7 @@
 //! | `block_effects` | the fragments of a broken or hit block |
 //! | `effect` | the particles of `playAuxSFX` (`Effect` packet) |
 //! | `explosion` | the particles of an `Explosion` packet |
+//! | `mobs` | the particles mobs give off by themselves (smoke, sparks, hearts) |
 //! | `spawn` | [`ParticleSetting`], the range filter and the `Particle` packet |
 //! | `engine` | [`ParticleEngine`], the buckets, the 4000 cap and the tick |
 //!
@@ -26,6 +27,7 @@ mod effect;
 mod engine;
 mod explosion;
 mod kind;
+mod mobs;
 mod particle;
 mod spawn;
 
@@ -33,5 +35,6 @@ pub use behaviours::{create, firework_spark, Behaviour, SparkStyle, TickContext}
 pub use effect::EffectContext;
 pub use engine::{ParticleEngine, MAX_PER_BUCKET};
 pub use kind::ParticleKind;
+pub use mobs::MobBody;
 pub use particle::{Layer, Lighting, Particle, Texture};
 pub use spawn::{ParticleSetting, SpawnFilter, SpawnRequest};

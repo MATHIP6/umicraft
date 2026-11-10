@@ -10,6 +10,7 @@ use std::sync::Arc;
 use glam::{DVec3, Vec3};
 use umicraft_protocol::packets::play::Metadata;
 
+use crate::particles::MobBody;
 use crate::physics::EYE_HEIGHT;
 use crate::view::ViewEffects;
 use crate::RenderState;
@@ -38,6 +39,8 @@ const HURT_LIMB_AMOUNT: f32 = 1.5;
 #[derive(Debug, Clone, Default)]
 pub struct EntityStore {
     entities: BTreeMap<EntityId, EntityRecord>,
+    /// The bodies whose death fall ended in the last tick, for their puff.
+    deaths: Vec<MobBody>,
 }
 
 impl EntityStore {
@@ -46,6 +49,7 @@ impl EntityStore {
     pub fn new() -> Self {
         Self {
             entities: BTreeMap::new(),
+            deaths: Vec::new(),
         }
     }
 
@@ -633,8 +637,22 @@ impl EntityStore {
                 .collecting
                 .is_none_or(|flight| flight.ticks < super::record::Collecting::TICKS)
         });
+        // `EntityLivingBase.onDeathUpdate`: at the end of its fall the body
+        // goes up in a puff and is removed.
+        self.deaths.extend(
+            self.entities
+                .values()
+                .filter(|entity| entity.animation.is_finished())
+                .filter_map(MobBody::of),
+        );
         self.entities
             .retain(|_, entity| !entity.animation.is_finished());
+    }
+
+    /// Takes the bodies whose death fall ended since the last call: each
+    /// goes up in a puff of smoke (`ParticleEngine::spawn_death_puff`).
+    pub fn drain_deaths(&mut self) -> std::vec::Drain<'_, MobBody> {
+        self.deaths.drain(..)
     }
 
     /// Advances the objects the client simulates (dropped items, falling
@@ -1193,6 +1211,22 @@ mod tests {
             store.tick();
         }
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn a_body_whose_fall_ends_is_handed_out_once_for_its_puff() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.status(id, 3);
+        for _ in 0..19 {
+            store.tick();
+        }
+        assert_eq!(store.drain_deaths().count(), 0, "still falling");
+        store.tick();
+        let deaths: Vec<_> = store.drain_deaths().collect();
+        assert_eq!(deaths.len(), 1);
+        assert!((deaths[0].height - 1.95).abs() < 1e-6, "{:?}", deaths[0]);
+        assert_eq!(store.drain_deaths().count(), 0);
     }
 
     #[test]

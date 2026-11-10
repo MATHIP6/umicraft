@@ -1,6 +1,6 @@
 # Mob animations and mob particles: audit and plan
 
-Status: **phase A done** (branch `feat/mob-animations`). Audited against MCP 1.8
+Status: **phase A done, phase P mostly done** (branch `feat/mob-animations`). Audited against MCP 1.8
 (`client/model/Model*.java`, `client/renderer/entity/Render*.java`, `entity/`) on
 2026-11-09. Line numbers are the ones at `eba357d`.
 
@@ -63,26 +63,29 @@ which today handles only 2, 3, 9 and 19.
 
 ## Phase P: client-side mob particles
 
-None are implemented. The engine (`umicraft-game/src/particles`) already has
-almost every type. Hook points: a per-tick `entity_particles(game)` pass next
-to `spawn_ambient_particles` (`umicraft-client/src/game.rs`), and the
-`PlayEvent::EntityStatus` arm for the status-driven effects.
+Done in `umicraft_game::particles::mobs`. The client calls it once per tick
+(`spawn_mob_particles`, between the entity tick and the particle tick), and
+from the `Entity Status` arm (`spawn_status_particles`).
 
-- P1 Every tick: blaze (2 large smoke), enderman and endermite (2 portal),
-  wither (smoke per head, spell when armoured or spawning), iron golem
-  (block crack under its feet while walking), guardian (bubbles while
-  swimming, and along its beam).
-- P2 Statuses: 20 spawner (20 explode), 18 animal in love (7 hearts), 12/13/14
-  villager, 6/7 taming (wolf, ocelot, horse), 15 witch (witch magic), 1 rabbit
-  (running particles), 8 wolf (water splash while shaking, with C3).
-- P3 Death poof: 20 explode when `deathTime` reaches 20 (`onDeathUpdate`).
-- P4 Potion swirls: `potion_color` is parsed, plus the ambient flag
-  (metadata 8).
-- P5 Slime and magma cube landing: needs a `Slime` factory (missing) and the
-  `wasOnGround` state.
-- P6 Dragon: large and huge explosions while it dies.
-- Missing factories: `Slime`, `ItemCrack`, `MobAppearance` (the elder guardian
-  appearing, game state 10).
+- P1 Every tick (done): blaze (2 large smoke), enderman and endermite (2
+  portal), wither (smoke per head, spell when armoured or spawning), iron
+  golem (block crack under its feet while it moves), magma cube landing
+  (flames), potion swirls (`potion_color`, ambient flag), dying dragon (large
+  explosions, plus huge ones from tick 180 to 200).
+- P2 Statuses (done): 20 spawner puff, 18 animal in love, 12/13/14 villager,
+  6/7 taming (wolf, ocelot, horse), 15 witch.
+- P3 Death puff (done): `EntityStore::drain_deaths` hands out each body when
+  its fall ends.
+- P4 Left to do:
+  - slime landing: needs a `Slime` factory (slime-ball fragments, like `ItemCrack`);
+  - guardian bubbles: needs C7;
+  - rabbit running dust (status 1): with C1;
+  - wolf water splash (status 8): with C3;
+  - elder guardian `MobAppearance`: no factory yet.
+- Not a bug: the enderman teleport trail comes from the server-side
+  `teleportTo`, so a 1.8 client in multiplayer never sees it.
+- Related but not particles: the client-side sounds of the blaze (`fire.fire`,
+  1 tick in 24) and of the dragon's wings.
 
 ## Phase D: outside this task
 
