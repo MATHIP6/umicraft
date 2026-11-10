@@ -2,11 +2,14 @@
 
 //! Bat box model matching MCP 1.8 `ModelBat.java`.
 
-use std::f32::consts::FRAC_PI_4;
+use std::f32::consts::{FRAC_PI_4, PI};
 
 use glam::{Mat4, Vec3};
 
 use super::{ModelBox, ModelPart, ModelVertex};
+
+/// Height of the head and body pivots (vanilla `0`, y flipped about 24).
+const ROOT_Y: f32 = 24.0;
 
 /// Bat model (64×64 texture sheet) with flapping inner and outer wings.
 #[derive(Debug, Clone)]
@@ -32,7 +35,7 @@ impl BatModel {
         let tex = [64.0, 64.0];
 
         // Head with ears (MCP ModelBat: head at [0, 0, 0], box [-3, -3, -3, 6, 6, 6], ears [-4, -6, -2, 3, 4, 1] and [1, -6, -2, 3, 4, 1])
-        let head = ModelPart::new([0.0, 24.0, 0.0])
+        let head = ModelPart::new([0.0, ROOT_Y, 0.0])
             .with_box(ModelBox::new(
                 [-3.0, -3.0, -3.0],
                 [6.0, 6.0, 6.0],
@@ -52,7 +55,7 @@ impl BatModel {
             );
 
         // Body and tail membrane (MCP ModelBat: body at [0, 0, 0], box [-3, 4, -3, 6, 12, 6] and [-5, 16, 0, 10, 6, 1])
-        let body = ModelPart::new([0.0, 24.0, 0.0])
+        let body = ModelPart::new([0.0, ROOT_Y, 0.0])
             .with_box(ModelBox::new(
                 [-3.0, -16.0, -3.0],
                 [6.0, 12.0, 6.0],
@@ -106,24 +109,52 @@ impl BatModel {
         }
     }
 
-    /// Flaps the wings, tilts the body and turns the head of a flying bat
-    /// (MCP `ModelBat.setRotationAngles`, the not-hanging branch).
+    /// Poses a flying bat, or one hanging upside down from a ceiling (MCP
+    /// `ModelBat.setRotationAngles`).
     ///
     /// `age` is the ticks lived plus the partial tick (MCP `ageInTicks`): a
-    /// bat flaps with time, not with walking. The head angles are in degrees.
-    pub fn set_angles(&mut self, age: f32, head_yaw: f32, head_pitch: f32) {
-        // Flipping y turns the sense of x rotations around (as in `pose.rs`).
+    /// flying bat flaps with time, not with walking. The head angles are in
+    /// degrees. Vanilla x and z angles are negated for the flipped y.
+    pub fn set_angles(&mut self, age: f32, head_yaw: f32, head_pitch: f32, hanging: bool) {
         self.head.rotation[0] = -head_pitch.to_radians();
+        if hanging {
+            self.hang(head_yaw);
+        } else {
+            self.fly(age, head_yaw);
+        }
+    }
+
+    /// The flying branch: the body leans forward 45 degrees and rocks
+    /// slowly, the wings beat.
+    fn fly(&mut self, age: f32, head_yaw: f32) {
         self.head.rotation[1] = head_yaw.to_radians();
+        self.head.rotation[2] = 0.0;
+        self.head.pivot = [0.0, ROOT_Y, 0.0];
+        self.right_wing.pivot = [0.0; 3];
+        self.left_wing.pivot = [0.0; 3];
+        self.body.rotation = [-FRAC_PI_4 - (age * 0.1).cos() * 0.15, 0.0, 0.0];
 
-        // The body leans forward 45 degrees and rocks slowly.
-        self.body.rotation[0] = -FRAC_PI_4 - (age * 0.1).cos() * 0.15;
-
-        let flap = (age * 1.3).cos() * std::f32::consts::PI * 0.25;
+        let flap = (age * 1.3).cos() * PI * 0.25;
         self.right_wing.rotation[1] = flap;
         self.left_wing.rotation[1] = -flap;
         self.outer_right_wing.rotation[1] = flap * 0.5;
         self.outer_left_wing.rotation[1] = -flap * 0.5;
+    }
+
+    /// The hanging branch: the bat is turned upside down with its wings
+    /// wrapped around its body, and its head looks the other way.
+    fn hang(&mut self, head_yaw: f32) {
+        self.head.rotation[1] = PI - head_yaw.to_radians();
+        self.head.rotation[2] = -PI;
+        self.head.pivot = [0.0, ROOT_Y + 2.0, 0.0];
+        self.right_wing.pivot = [-3.0, 0.0, 3.0];
+        self.left_wing.pivot = [3.0, 0.0, 3.0];
+        self.body.rotation = [-PI, 0.0, 0.0];
+        let wrap = PI * 2.0 / 5.0;
+        self.right_wing.rotation = [0.157_079_64, -wrap, 0.0];
+        self.left_wing.rotation = [0.157_079_64, wrap, 0.0];
+        self.outer_right_wing.rotation[1] = -1.727_876_1;
+        self.outer_left_wing.rotation[1] = 1.727_876_1;
     }
 
     /// Emits the bat mesh vertices transformed into world units (with MCP RenderBat 0.35x scale).
@@ -165,9 +196,9 @@ mod tests {
         // Regression: the wings were driven by the limb swing, which stays
         // still while a bat flies, so they never flapped.
         let mut early = BatModel::new();
-        early.set_angles(0.0, 0.0, 0.0);
+        early.set_angles(0.0, 0.0, 0.0, false);
         let mut later = BatModel::new();
-        later.set_angles(1.0, 0.0, 0.0);
+        later.set_angles(1.0, 0.0, 0.0, false);
         assert_ne!(early.right_wing.rotation, later.right_wing.rotation);
     }
 
@@ -175,7 +206,7 @@ mod tests {
     fn the_wings_start_at_the_mcp_phase() {
         // MCP `ModelBat`: the right wing turns by `cos(age * 1.3) * PI / 4`.
         let mut model = BatModel::new();
-        model.set_angles(0.0, 0.0, 0.0);
+        model.set_angles(0.0, 0.0, 0.0, false);
         assert!((model.right_wing.rotation[1] - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
         assert!((model.outer_left_wing.rotation[1] + std::f32::consts::FRAC_PI_8).abs() < 1e-6);
     }
@@ -183,8 +214,22 @@ mod tests {
     #[test]
     fn the_head_follows_the_look() {
         let mut model = BatModel::new();
-        model.set_angles(0.0, 45.0, 20.0);
+        model.set_angles(0.0, 45.0, 20.0, false);
         assert!((model.head.rotation[1] - 45.0_f32.to_radians()).abs() < 1e-6);
         assert!((model.head.rotation[0] + 20.0_f32.to_radians()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_hanging_bat_is_upside_down_with_its_wings_folded() {
+        let mut bat = BatModel::new();
+        bat.set_angles(3.0, 30.0, 0.0, true);
+        assert!((bat.body.rotation[0].abs() - PI).abs() < 1e-6);
+        assert!((bat.head.rotation[1] - (PI - 30.0_f32.to_radians())).abs() < 1e-6);
+        assert_eq!(bat.right_wing.pivot, [-3.0, 0.0, 3.0]);
+        // Back in flight, the pose is the flying one again.
+        bat.set_angles(3.0, 30.0, 0.0, false);
+        assert_eq!(bat.head.rotation[2], 0.0);
+        assert_eq!(bat.right_wing.pivot, [0.0; 3]);
+        assert_eq!(bat.head.pivot[1], ROOT_Y);
     }
 }

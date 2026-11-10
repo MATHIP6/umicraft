@@ -60,7 +60,8 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         }
         EntityKind::Bat => {
             let mut model = BatModel::new();
-            model.set_angles(age, head_yaw, head_pitch);
+            let hanging = matches!(ent.meta.variant, Variant::Bat { hanging: true });
+            model.set_angles(age, head_yaw, head_pitch, hanging);
             one(TextureSlot::Bat, model.emit_mesh())
         }
         EntityKind::Blaze => {

@@ -72,6 +72,11 @@ pub enum Variant {
     Ocelot(OcelotMeta),
     /// Rabbit coat.
     Rabbit(RabbitMeta),
+    /// Bat roosting flag (entry 16, bit 0).
+    Bat {
+        /// True while the bat hangs upside down from a ceiling.
+        hanging: bool,
+    },
     /// Pig saddle (entry 16).
     Pig {
         /// True when the pig wears a saddle.
@@ -126,6 +131,7 @@ impl EntityMeta {
             EntityKind::Ocelot => animals::apply_ocelot(&mut variant, metadata),
             EntityKind::Rabbit => animals::apply_rabbit(&mut variant, metadata),
             EntityKind::Pig => animals::apply_pig(&mut variant, metadata),
+            EntityKind::Bat => animals::apply_bat(&mut variant, metadata),
             EntityKind::Horse => horse::apply(&mut variant, metadata),
             EntityKind::Slime | EntityKind::MagmaCube => {
                 monsters::apply_slime(&mut variant, metadata);

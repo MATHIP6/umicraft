@@ -119,13 +119,15 @@ fn orientation(entity: &EntityRenderSnapshot) -> Mat4 {
         * golem_roll(entity)
 }
 
-/// A flying bat bobs with time (`RenderBat.rotateCorpse`). A hanging bat
-/// would sit 0.1 lower instead, but its hanging flag is not tracked yet.
+/// A flying bat bobs with time; a hanging one sits 0.1 lower
+/// (`RenderBat.rotateCorpse`).
 fn bat_bob(entity: &EntityRenderSnapshot) -> Mat4 {
-    if entity.kind != EntityKind::Bat {
-        return Mat4::IDENTITY;
-    }
-    Mat4::from_translation(Vec3::new(0.0, (entity.age * 0.3).cos() * BAT_BOB, 0.0))
+    let lift = match entity.meta.variant {
+        _ if entity.kind != EntityKind::Bat => return Mat4::IDENTITY,
+        Variant::Bat { hanging: true } => -BAT_BOB,
+        _ => (entity.age * 0.3).cos() * BAT_BOB,
+    };
+    Mat4::from_translation(Vec3::new(0.0, lift, 0.0))
 }
 
 /// A walking iron golem rocks from side to side with its stride
@@ -301,6 +303,13 @@ mod tests {
         let low = feet(&bat);
         assert!((low.y - 63.9).abs() < 1e-4, "{low}");
         assert_eq!(feet(&snapshot(EntityKind::Zombie)).y, 64.0);
+        bat.meta.variant = Variant::Bat { hanging: true };
+        assert!(
+            (feet(&bat).y - 63.9).abs() < 1e-4,
+            "a hanging bat sits lower"
+        );
+        bat.age = 0.0;
+        assert!((feet(&bat).y - 63.9).abs() < 1e-4, "and does not bob");
     }
 
     #[test]
