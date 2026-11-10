@@ -67,7 +67,7 @@ pub use slime::SlimeModel;
 pub use snowman::SnowmanModel;
 pub use spider::SpiderModel;
 pub use squid::SquidModel;
-pub use villager::VillagerModel;
+pub use villager::{witch_nose_angles, VillagerModel};
 pub use wither::WitherModel;
 pub use wolf::WolfModel;
 

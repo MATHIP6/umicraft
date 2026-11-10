@@ -43,7 +43,9 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             one(TextureSlot::Slime, vertices)
         }
         EntityKind::MagmaCube => {
-            let mut vertices = SlimeModel::magma_cube(1.0).emit_inner_mesh();
+            let mut model = SlimeModel::magma_cube(1.0);
+            model.set_squish(ent.squish);
+            let mut vertices = model.emit_inner_mesh();
             squash(&mut vertices, ent);
             one(TextureSlot::MagmaCube, vertices)
         }

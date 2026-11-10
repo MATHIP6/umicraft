@@ -153,12 +153,11 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
                 VILLAGER_SCALE * 0.5
             )
         }
-        EntityKind::Witch => walker!(
-            VillagerModel::witch(),
-            TextureSlot::Witch,
-            WITCH_SCALE,
-            WITCH_SCALE
-        ),
+        EntityKind::Witch => {
+            let mut witch = VillagerModel::witch();
+            witch.set_witch_nose(ent.age.floor() as u32, ent.id.0, ent.held.is_some());
+            walker!(witch, TextureSlot::Witch, WITCH_SCALE, WITCH_SCALE)
+        }
         EntityKind::Horse => horse_layers(ent, pose),
         EntityKind::Spider => {
             let mut model = SpiderModel::new();
