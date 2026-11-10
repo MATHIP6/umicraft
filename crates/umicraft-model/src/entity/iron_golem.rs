@@ -150,9 +150,17 @@ impl IronGolemModel {
 }
 
 /// A triangle wave of `period` between -1 and 1: 1 at multiples of the
-/// period, -1 halfway (MCP `ModelIronGolem.func_78172_a`). Like Java's `%`,
-/// Rust's keeps the sign of `x`.
-fn triangle_wave(x: f32, period: f32) -> f32 {
+/// period, -1 halfway (MCP `ModelIronGolem.func_78172_a`, also the walking
+/// roll of `RenderIronGolem.rotateCorpse`). Like Java's `%`, Rust's keeps the
+/// sign of `x`.
+///
+/// ```
+/// use umicraft_model::entity::triangle_wave;
+/// assert_eq!(triangle_wave(0.0, 13.0), 1.0);
+/// assert_eq!(triangle_wave(6.5, 13.0), -1.0);
+/// ```
+#[must_use]
+pub fn triangle_wave(x: f32, period: f32) -> f32 {
     ((x % period - period * 0.5).abs() - period * 0.25) / (period * 0.25)
 }
 

@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Where and how a model stands in the world: its orientation, the death
-//! fall, the bed, the player scale and the crouch.
+//! fall, the bed, the player scale and the crouch, and the per-mob touches of
+//! the `Render*` classes (a bat's bob, a golem's roll, a curing zombie's
+//! shake, a screaming enderman's jitter, a tamed cat's size).
+
+use std::f32::consts::PI;
 
 use glam::{Mat4, Vec3};
+use umicraft_core::java_random::JavaRandom;
+use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
+use umicraft_model::entity::triangle_wave;
 
 /// Scale of the player model (MCP `RenderPlayer.preRenderCallback`).
 const PLAYER_SCALE: f32 = 0.9375;
@@ -20,6 +27,16 @@ const DEATH_FALL_DEGREES: f32 = 90.0;
 /// of its square root (MCP `RendererLivingEntity.rotateCorpse`).
 const DEATH_FALL_TICKS: f32 = 20.0;
 const DEATH_FALL_SPEED: f32 = 1.6;
+/// Scale of a tamed ocelot (MCP `RenderOcelot.preRenderCallback`).
+const TAMED_CAT_SCALE: f32 = 0.8;
+/// How far a flying bat bobs up and down, in blocks (`RenderBat.rotateCorpse`).
+const BAT_BOB: f32 = 0.1;
+/// The widest walking roll of an iron golem, in degrees
+/// (`RenderIronGolem.rotateCorpse`).
+const GOLEM_ROLL_DEGREES: f32 = 6.5;
+/// The deviation of the sideways jitter of a screaming enderman, in blocks
+/// (`RenderEnderman.doRender`).
+const SCREAM_JITTER: f32 = 0.02;
 
 /// The matrix that carries the vertices of a model of `entity` to the world:
 /// [`body_matrix`] and the mirror every vanilla model gets.
@@ -54,7 +71,11 @@ pub(crate) fn x_mirror() -> Mat4 {
 #[must_use]
 pub(crate) fn body_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
     let is_player = entity.kind == EntityKind::Player;
-    let mut matrix = Mat4::from_translation(entity.position) * orientation(entity);
+    let mut matrix =
+        Mat4::from_translation(entity.position + scream_jitter(entity)) * orientation(entity);
+    if is_tamed_cat(entity) {
+        matrix *= Mat4::from_scale(Vec3::splat(TAMED_CAT_SCALE));
+    }
     if is_player {
         matrix *= Mat4::from_scale(Vec3::splat(PLAYER_SCALE));
         if entity.flags.is_sneaking() {
@@ -91,7 +112,66 @@ fn orientation(entity: &EntityRenderSnapshot) -> Mat4 {
             * Mat4::from_rotation_x((climb * 10.0).to_radians())
             * Mat4::from_translation(Vec3::Z);
     }
-    Mat4::from_rotation_y((180.0 - entity.body_yaw).to_radians()) * death_fall(entity.death_time)
+    let yaw = entity.body_yaw + curing_shake(entity);
+    bat_bob(entity)
+        * Mat4::from_rotation_y((180.0 - yaw).to_radians())
+        * death_fall(entity.death_time)
+        * golem_roll(entity)
+}
+
+/// A flying bat bobs with time (`RenderBat.rotateCorpse`). A hanging bat
+/// would sit 0.1 lower instead, but its hanging flag is not tracked yet.
+fn bat_bob(entity: &EntityRenderSnapshot) -> Mat4 {
+    if entity.kind != EntityKind::Bat {
+        return Mat4::IDENTITY;
+    }
+    Mat4::from_translation(Vec3::new(0.0, (entity.age * 0.3).cos() * BAT_BOB, 0.0))
+}
+
+/// A walking iron golem rocks from side to side with its stride
+/// (`RenderIronGolem.rotateCorpse`). The interpolated limb swing of the
+/// snapshot is the reference's `limbSwing - limbSwingAmount * (1 - partial)`.
+fn golem_roll(entity: &EntityRenderSnapshot) -> Mat4 {
+    if entity.kind != EntityKind::IronGolem || entity.limb_swing_amount < 0.01 {
+        return Mat4::IDENTITY;
+    }
+    let roll = GOLEM_ROLL_DEGREES * triangle_wave(entity.limb_swing + 6.0, 13.0);
+    Mat4::from_rotation_z(roll.to_radians())
+}
+
+/// The shake of a zombie villager being cured, added to its body yaw
+/// (`RenderZombie.rotateCorpse`): the reference adds `cos(ticks * 3.25) *
+/// PI * 0.25` to an angle in degrees, so it shivers by under a degree.
+fn curing_shake(entity: &EntityRenderSnapshot) -> f32 {
+    match &entity.meta.variant {
+        Variant::Zombie(zombie) if zombie.converting => {
+            (entity.age.floor() * 3.25).cos() * PI * 0.25
+        }
+        _ => 0.0,
+    }
+}
+
+/// The sideways jitter of a screaming enderman, a gaussian of 0.02 on x and z
+/// drawn anew every frame (`RenderEnderman.doRender`). The draw is seeded by
+/// the entity and the frame time, so it changes every frame without a shared
+/// random source on the render thread.
+fn scream_jitter(entity: &EntityRenderSnapshot) -> Vec3 {
+    let screaming =
+        matches!(&entity.meta.variant, Variant::Enderman(enderman) if enderman.screaming);
+    if !screaming {
+        return Vec3::ZERO;
+    }
+    let seed = (u64::from(entity.id.0 as u32) << 32) | u64::from(entity.age.to_bits());
+    let mut rng = JavaRandom::new(seed);
+    let x = rng.next_gaussian() as f32 * SCREAM_JITTER;
+    let z = rng.next_gaussian() as f32 * SCREAM_JITTER;
+    Vec3::new(x, 0.0, z)
+}
+
+/// Whether `entity` is a tamed ocelot, drawn at 0.8 of its size
+/// (`RenderOcelot.preRenderCallback`).
+fn is_tamed_cat(entity: &EntityRenderSnapshot) -> bool {
+    matches!(&entity.meta.variant, Variant::Ocelot(ocelot) if ocelot.tamed)
 }
 
 /// The roll of a dying entity onto its side: fast at first, then slowing
@@ -205,5 +285,78 @@ mod tests {
         entity.bed = Some(umicraft_game::entity::BedPose::from_facing(0));
         let head = model_matrix(&entity).transform_point3(Vec3::Y) - entity.position;
         assert!(head.y.abs() < 0.1, "head is level with the feet: {head}");
+    }
+
+    /// Where the feet of the model end up.
+    fn feet(entity: &EntityRenderSnapshot) -> Vec3 {
+        model_matrix(entity).transform_point3(Vec3::ZERO)
+    }
+
+    #[test]
+    fn a_flying_bat_bobs_with_time() {
+        let mut bat = snapshot(EntityKind::Bat);
+        let high = feet(&bat);
+        assert!((high.y - 64.1).abs() < 1e-4, "{high}");
+        bat.age = PI / 0.3;
+        let low = feet(&bat);
+        assert!((low.y - 63.9).abs() < 1e-4, "{low}");
+        assert_eq!(feet(&snapshot(EntityKind::Zombie)).y, 64.0);
+    }
+
+    #[test]
+    fn a_walking_golem_rocks_sideways() {
+        let mut golem = snapshot(EntityKind::IronGolem);
+        let up = |entity: &EntityRenderSnapshot| model_matrix(entity).transform_vector3(Vec3::Y);
+        assert!(
+            (up(&golem) - Vec3::Y).length() < 1e-6,
+            "a still golem stands straight"
+        );
+        golem.limb_swing_amount = 1.0;
+        let tilt = up(&golem).angle_between(Vec3::Y).to_degrees();
+        // `6.5 * tri(0 + 6, 13)`: 6.5 * (0.5 - 3.25) / 3.25.
+        assert!((tilt - 5.5).abs() < 0.01, "{tilt}");
+    }
+
+    #[test]
+    fn a_curing_zombie_villager_shivers() {
+        let mut zombie = snapshot(EntityKind::Zombie);
+        let calm = front(&zombie);
+        zombie.meta.variant = Variant::Zombie(umicraft_game::entity::meta::ZombieMeta {
+            child: None,
+            villager: true,
+            converting: true,
+        });
+        let turn = front(&zombie).angle_between(calm).to_degrees();
+        assert!((turn - PI * 0.25).abs() < 1e-3, "{turn}");
+    }
+
+    #[test]
+    fn a_screaming_enderman_jitters_a_little() {
+        let mut enderman = snapshot(EntityKind::Enderman);
+        assert_eq!(feet(&enderman), Vec3::new(10.0, 64.0, 20.0));
+        enderman.meta.variant = Variant::Enderman(umicraft_game::entity::meta::EndermanMeta {
+            screaming: true,
+            ..Default::default()
+        });
+        let shaken = feet(&enderman);
+        enderman.age = 0.5;
+        let other = feet(&enderman);
+        assert_ne!(shaken, other, "a new draw every frame");
+        for position in [shaken, other] {
+            let offset = position - Vec3::new(10.0, 64.0, 20.0);
+            assert!(offset.y == 0.0 && offset.length() < 0.2, "{offset}");
+        }
+    }
+
+    #[test]
+    fn a_tamed_cat_is_smaller() {
+        let mut cat = snapshot(EntityKind::Ocelot);
+        let wild = model_matrix(&cat).transform_vector3(Vec3::Y).length();
+        cat.meta.variant = Variant::Ocelot(umicraft_game::entity::meta::OcelotMeta {
+            tamed: true,
+            ..Default::default()
+        });
+        let tamed = model_matrix(&cat).transform_vector3(Vec3::Y).length();
+        assert!((tamed - wild * 0.8).abs() < 1e-6, "{wild} {tamed}");
     }
 }

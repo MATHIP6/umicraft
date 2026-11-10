@@ -1,6 +1,6 @@
 # Mob animations and mob particles: audit and plan
 
-Status: **phase A done, phase P mostly done** (branch `feat/mob-animations`). Audited against MCP 1.8
+Status: **phases A and B done, phase P mostly done** (branch `feat/mob-animations`). Audited against MCP 1.8
 (`client/model/Model*.java`, `client/renderer/entity/Render*.java`, `entity/`) on
 2026-11-09. Line numbers are the ones at `eba357d`.
 
@@ -22,7 +22,9 @@ Status: **phase A done, phase P mostly done** (branch `feat/mob-animations`). Au
 | A2 | `e5eb1e0` | The head pitch sign was wrong for cow, pig, mooshroom, sheep, chicken, creeper and snowman, and the sheep legs were inverted. The iron golem now walks on a triangle wave. |
 | A3 | `629e4be` | Enderman posed from the biped angles: idle sway, attack swing, carrying arms forward (they pointed backward). |
 
-## Phase B: render transforms (small, no new state)
+## Phase B: render transforms (done)
+
+All in `entity_render/transform.rs`; the hanging bat waits for C6.
 
 - B1 Bat: bob `cos(age * 0.3) * 0.1` in flight (`RenderBat.rotateCorpse`).
 - B2 Iron golem: walking roll `6.5 * tri(limbSwing - amount * (1 - pt) + 6, 13)`
