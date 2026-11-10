@@ -310,6 +310,14 @@ impl WorldView {
         Arc::clone(&self.view.weather.precipitation)
     }
 
+    /// How far through its life the elder guardian apparition is at
+    /// `partial_ticks` into the tick (`0..=1`), `None` while there is none
+    /// (MCP `MobAppearance.renderParticle`: `(age + partial) / maxAge`).
+    #[must_use]
+    pub fn mob_appearance(&self, partial_ticks: f32) -> Option<f32> {
+        crate::particle_view::mob_appearance(&self.view.particles, partial_ticks)
+    }
+
     /// The quads of the newest frame's particles at `partial_ticks` into the
     /// tick, for `Renderer::set_particles`. Block fragments find their sprite
     /// in the bound terrain, the pieces of an item in `items`; the procedural

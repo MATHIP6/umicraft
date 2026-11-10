@@ -16,6 +16,7 @@
 //! 3. Add the kind to the matching family builder in [`mobs`].
 
 mod animals;
+mod appearance;
 mod armor;
 mod arrows;
 mod banner_cache;

@@ -54,7 +54,9 @@ use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::item_use::{drop_item, DoorToggle, ItemUse, UseAction, UseTick};
 use umicraft_game::movement::movement_stats;
-use umicraft_game::particles::{is_bite_tick, Eater, EffectContext, SpawnFilter};
+use umicraft_game::particles::{
+    is_bite_tick, Eater, EffectContext, ParticleKind, SpawnFilter, SpawnRequest,
+};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::piston::{motion, MovingBlocks};
@@ -68,7 +70,7 @@ use umicraft_game::server::maps::MapStore;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
 use umicraft_game::shapes::Aabb;
-use umicraft_game::sound::cue::SoundCue;
+use umicraft_game::sound::cue::{CueCategory, SoundCue};
 use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::view::{camera_pose, Perspective};
@@ -2324,6 +2326,8 @@ fn apply_net_event(
             game.server.apply_game_state(&packet);
             if packet.reason == GAMEMODE_REASON {
                 set_gamemode(game, GameMode::from_state_value(packet.value));
+            } else if packet.reason == ELDER_GUARDIAN_CURSE_REASON {
+                haunt(game);
             }
         }
         PlayEvent::BlockAction(packet) => {
@@ -2337,6 +2341,39 @@ fn apply_net_event(
             apply_trade_list(game, &packet.data, frames);
         }
         other => apply_server_state(&mut game.server, &other),
+    }
+}
+
+/// The `Change Game State` reason of the elder guardian curse (MCP
+/// `NetHandlerPlayClient.handleChangeGameState`: reason 10).
+const ELDER_GUARDIAN_CURSE_REASON: u8 = 10;
+
+/// The curse of an elder guardian: its apparition swings in front of the
+/// player and the curse sounds (MCP `handleChangeGameState`, reason 10).
+fn haunt(game: &mut Game) {
+    let Some(feet) = game.state.as_ref().map(GameState::position) else {
+        return;
+    };
+    if let Some(filter) = particle_filter(game) {
+        game.particles.spawn(
+            &SpawnRequest {
+                kind: ParticleKind::MobAppearance,
+                arguments: &[],
+                ignore_range: true,
+                position: feet,
+                velocity: DVec3::ZERO,
+            },
+            &filter,
+        );
+    }
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues([SoundCue {
+            name: std::borrow::Cow::Borrowed("mob.guardian.curse"),
+            pos: [feet.x, feet.y, feet.z],
+            volume: 1.0,
+            pitch: 1.0,
+            category: CueCategory::Hostile,
+        }]);
     }
 }
 
@@ -3774,6 +3811,36 @@ mod tests {
             &mut queue,
         );
         assert_eq!(queue.ordered.len(), 1);
+    }
+
+    #[test]
+    fn the_elder_guardian_curse_haunts_the_player() {
+        // Regression: game state 10 did nothing, so no elder guardian showed.
+        use umicraft_game::particles::Behaviour;
+        use umicraft_protocol::packets::play::clientbound::ChangeGameState;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let change = |reason, value| PlayEvent::ChangeGameState(ChangeGameState { reason, value });
+        // Rain is not a curse.
+        handle_net(&mut game, change(1, 0.0), &mut queue, &frames);
+        assert!(game.particles.is_empty());
+        handle_net(&mut game, change(10, 0.0), &mut queue, &frames);
+        let apparition = game
+            .particles
+            .particles(umicraft_game::particles::Layer::Lit, false)
+            .iter()
+            .chain(
+                game.particles
+                    .particles(umicraft_game::particles::Layer::Lit, true),
+            )
+            .find(|particle| particle.behaviour == Behaviour::MobAppearance)
+            .expect("the apparition");
+        assert_eq!(apparition.position, DVec3::new(0.5, 64.0, 0.5));
+        let cues = game.state.as_mut().expect("placed").drain_sound_cues();
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].name, "mob.guardian.curse");
     }
 
     #[test]

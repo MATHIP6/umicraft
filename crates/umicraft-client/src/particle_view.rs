@@ -174,6 +174,18 @@ pub fn sprite(
     })
 }
 
+/// How far through its life the elder guardian apparition is among `draws`,
+/// `0..=1` (MCP `MobAppearance.renderParticle`: `(age + partial) / maxAge`);
+/// `None` while there is none.
+#[must_use]
+pub fn mob_appearance(draws: &[ParticleDraw], partial_ticks: f32) -> Option<f32> {
+    let particle = draws
+        .iter()
+        .map(|draw| &draw.particle)
+        .find(|particle| particle.behaviour == Behaviour::MobAppearance)?;
+    Some(((particle.age as f32 + partial_ticks) / particle.max_age as f32).min(1.0))
+}
+
 /// Fills `out` with the quads of every particle that can be drawn, for
 /// `Renderer::set_particles`. `out` keeps its capacity from frame to frame
 /// (F2-5c), so a steady scene allocates nothing here.
@@ -287,6 +299,26 @@ mod tests {
             sky_light: 15,
         };
         assert!(sprite(&draw, 0.0, DVec3::ZERO, &no_pictures()).is_none());
+    }
+
+    #[test]
+    fn the_apparition_reports_how_far_through_its_thirty_ticks_it_is() {
+        let draw = |behaviour| {
+            let mut particle = flame();
+            particle.behaviour = behaviour;
+            particle.max_age = 30;
+            particle.age = 12;
+            ParticleDraw {
+                particle,
+                block_light: 0,
+                sky_light: 15,
+            }
+        };
+        assert_eq!(mob_appearance(&[draw(Behaviour::Plain)], 0.0), None);
+        let haunting = [draw(Behaviour::Plain), draw(Behaviour::MobAppearance)];
+        assert_eq!(mob_appearance(&haunting, 0.0), Some(0.4));
+        assert_eq!(mob_appearance(&haunting, 3.0), Some(0.5));
+        assert_eq!(mob_appearance(&haunting, 99.0), Some(1.0));
     }
 
     #[test]

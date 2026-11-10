@@ -6,6 +6,7 @@
 //! constructor and an `update`; [`Behaviour`] is the closed set the engine
 //! dispatches on, so a tick allocates nothing and needs no trait object.
 
+mod appearance;
 mod aura;
 mod cloud;
 mod common;
@@ -41,6 +42,7 @@ mod rain;
 mod shared;
 mod underwater;
 
+pub use appearance::MOB_APPEARANCE_TEXTURE;
 pub use explode::{
     large_explode_quad, LargeExplodeQuad, LARGE_EXPLODE_FRAME_SPAN, LARGE_EXPLODE_TEXTURE,
 };
@@ -148,6 +150,9 @@ pub enum Behaviour {
     },
     /// `EntityFirework.SparkFX`: a firework spark.
     Spark(SparkStyle),
+    /// `MobAppearance`: the elder guardian curse, a 30-tick clock the client
+    /// draws a guardian model from; it makes no quad of its own.
+    MobAppearance,
 }
 
 impl Behaviour {
@@ -159,7 +164,7 @@ impl Behaviour {
         context: &mut TickContext<'_, S>,
     ) {
         match self {
-            Self::Plain => particle.tick(context.world),
+            Self::Plain | Self::MobAppearance => particle.tick(context.world),
             Self::Flame { .. } => flame::update(particle, context),
             Self::Smoke { .. } => smoke::update(particle, context),
             Self::Lava { .. } => lava::update(particle, context),
@@ -208,7 +213,7 @@ impl Behaviour {
             Self::Crit | Self::Heart | Self::Note | Self::Cloud | Self::SnowShovel => {
                 particle.scale * common::growth(particle, partial_ticks)
             }
-            Self::HugeExplosion { .. } => 0.0,
+            Self::HugeExplosion { .. } | Self::MobAppearance => 0.0,
             Self::Spark(style) => firework::render_scale(style, particle),
             _ => particle.scale,
         }
@@ -220,7 +225,7 @@ impl Behaviour {
     pub fn render_alpha(self, particle: &Particle, partial_ticks: f32) -> f32 {
         match self {
             Self::Footstep => footstep::alpha(particle, partial_ticks),
-            Self::HugeExplosion { .. } => 0.0,
+            Self::HugeExplosion { .. } | Self::MobAppearance => 0.0,
             _ => particle.alpha,
         }
     }
@@ -274,6 +279,7 @@ pub fn create(
         K::Cloud => Some(cloud::create(position, speed, rng)),
         K::SnowShovel => Some(snow_shovel::create(position, speed, rng)),
         K::Slime => Some(breaking::slime(position, rng)),
+        K::MobAppearance => Some(appearance::create(position, rng)),
         K::Snowball => Some(breaking::snowball(position, rng)),
         K::Bubble => Some(underwater::bubble(position, speed, rng)),
         K::Suspended => Some(underwater::suspended(position, speed, rng)),

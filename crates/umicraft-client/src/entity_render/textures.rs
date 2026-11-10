@@ -94,6 +94,9 @@ pub struct EntityTextures {
     shadows_enabled: Cell<bool>,
     /// Where the camera is, for the distance at which a shadow fades.
     camera: Cell<glam::Vec3>,
+    /// How far through its 30 ticks the elder guardian that haunts the screen
+    /// is, `None` when it does not.
+    appearance: Cell<Option<f32>>,
     /// What the player sees, to leave out the entities that are not in view.
     cull_view: Cell<Option<super::cull::CullView>>,
     /// The chests of the frame, meshed by the block-entity renderer and drawn
@@ -128,6 +131,7 @@ impl EntityTextures {
             viewer_is_spectator: Cell::new(false),
             shadows_enabled: Cell::new(true),
             camera: Cell::new(glam::Vec3::ZERO),
+            appearance: Cell::new(None),
             block_entities: RefCell::default(),
         }
     }
@@ -182,6 +186,12 @@ impl EntityTextures {
     /// still drawn.
     pub fn set_camera_position(&self, position: glam::Vec3) {
         self.camera.set(position);
+    }
+
+    /// Sets how far through its life the elder guardian that haunts the screen
+    /// is (`0..=1`, MCP `MobAppearance`), or `None` for none.
+    pub fn set_mob_appearance(&self, progress: Option<f32>) {
+        self.appearance.set(progress);
     }
 
     /// Hands over the tile-entity vertices of this frame, which the next
@@ -314,6 +324,17 @@ impl EntityTextures {
             self.viewer_is_spectator.get(),
             (self.camera.get(), self.cull_view.get()),
         );
+        if let Some(progress) = self.appearance.get() {
+            let haunting = super::appearance::elder_guardian(
+                self,
+                self.camera.get(),
+                (self.view_yaw.get(), self.view_pitch.get()),
+                progress,
+            );
+            for (slot, vertices) in haunting {
+                meshed.ghost.entry(slot).or_default().extend(vertices);
+            }
+        }
         let block_entities = self.block_entities.take();
         for (slot, vertices) in block_entities.solid {
             meshed.solid.entry(slot).or_default().extend(vertices);

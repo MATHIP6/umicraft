@@ -25,7 +25,10 @@ pub struct EntityVertex {
     pub uv: [f32; 2],
     /// Packed block and sky light nibbles (bits 0..=7); bit 8 tints the
     /// vertex red for the hurt flash, bits 9..=12 are the white flash level
-    /// of a fusing creeper, bit 13 enables the dye tint of bits 14..=17.
+    /// of a fusing creeper, bit 13 enables the dye tint of bits 14..=17,
+    /// bits 19..=26 are the opacity of a ghost layer in 255ths (`0` is the
+    /// spectator's 15 %; an experience orb uses them for its colour phase,
+    /// and never draws as a ghost), bits 27..=31 the alpha cutoff.
     pub light: u32,
 }
 

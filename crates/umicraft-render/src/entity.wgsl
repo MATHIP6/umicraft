@@ -44,6 +44,8 @@ struct VertexOut {
     @location(5) @interpolate(flat) flash: f32,
     @location(6) @interpolate(flat) dye: vec3<f32>,
     @location(7) @interpolate(flat) cutoff: f32,
+    // The opacity of a ghost, from bits 19..=26 (0 keeps the spectator's 15 %).
+    @location(8) @interpolate(flat) opacity: f32,
 };
 
 // Dye colours of the sheep wool and the wolf collar, by metadata value
@@ -97,6 +99,11 @@ fn entity_vertex(in: VertexIn) -> VertexOut {
     // Bits 27..=31: texels with an alpha under `n / 31` are dropped (the
     // dragon dissolving, MCP `RenderDragon.renderModel` `alphaFunc`).
     out.cutoff = f32(in.light >> 27u) / 31.0;
+    // Bits 19..=26 are also the opacity, in 255ths, of a ghost layer (the
+    // elder guardian that haunts the screen, MCP `MobAppearance`). The orb
+    // below uses the same bits for its colour phase, but an orb is never a
+    // ghost.
+    out.opacity = f32((in.light >> 19u) & 255u) / 255.0;
     // Bit 18: experience orb, whose colour cycles with the phase of bits
     // 19..=26, in 256 steps of a turn (MCP `RenderXPOrb`: red
     // `(sin p + 1) / 2`, green 1, blue `(sin (p + 4.1887903) + 1) / 10`).
@@ -172,14 +179,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 // An invisible entity seen by a spectator: its model is drawn at 15 % opacity
 // (MCP `RendererLivingEntity.renderModel`: colour alpha 0.15, alpha test above
-// 1/255).
+// 1/255), or at the opacity its vertices carry.
 @fragment
 fn fs_ghost(in: VertexOut) -> @location(0) vec4<f32> {
     let tex = textureSample(entity_texture, entity_sampler, in.uv);
     if (tex.a < 0.003921569) {
         discard;
     }
-    return vec4<f32>(lit_colour(in, tex), tex.a * 0.15);
+    let opacity = select(0.15, in.opacity, in.opacity > 0.0);
+    return vec4<f32>(lit_colour(in, tex), tex.a * opacity);
 }
 
 // Glowing layers (MCP `blendFunc(1, 1)`): the spider, enderman and dragon eyes,
