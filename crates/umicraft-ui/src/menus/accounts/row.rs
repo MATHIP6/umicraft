@@ -12,6 +12,7 @@ use umicraft_core::lang::Lang;
 use crate::context::Ui;
 use crate::draw::Color;
 use crate::menus::common::{Gui, TextPlacement, DIM_GRAY, WHITE};
+use crate::menus::hover_arrows::{draw_hover_arrows, HoverArrows};
 use crate::text::FontAtlas;
 
 use super::face::draw_face;
@@ -21,8 +22,6 @@ use super::layout::{ROW_HEIGHT, ROW_WIDTH};
 const OFFLINE_COLOR: Color = [0.333, 1.0, 0.333, 1.0];
 /// The yellow of the Microsoft badge (`§e`).
 const MICROSOFT_COLOR: Color = [1.0, 1.0, 0.333, 1.0];
-/// A row under the pointer.
-const HOVER_SHADE: Color = [1.0, 1.0, 1.0, 0.08];
 
 /// The kind of an account, shown as a coloured badge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,8 +69,8 @@ pub struct AccountRow {
 pub(super) struct RowFlags {
     /// The row is the selected one (outline box).
     pub selected: bool,
-    /// The pointer is over the row.
-    pub hovered: bool,
+    /// The arrows to show over the head while the pointer is on the row.
+    pub hover: Option<HoverArrows>,
 }
 
 /// Draws `row` with its top-left corner at GUI `at`.
@@ -90,11 +89,10 @@ pub(super) fn draw_row(
         let inner = gui.rect(x - 1.0, y - 1.0, ROW_WIDTH + 2.0, ROW_HEIGHT + 2.0);
         ui.draw().rect(inner, [0.0, 0.0, 0.0, 1.0]);
     }
-    if flags.hovered {
-        let shade = gui.rect(x, y, ROW_WIDTH, ROW_HEIGHT);
-        ui.draw().rect(shade, HOVER_SHADE);
-    }
     draw_face(ui, gui, row.face.as_deref(), [x, y], ROW_HEIGHT);
+    if let Some(arrows) = flags.hover {
+        draw_hover_arrows(ui, (gui, atlas), at, arrows);
+    }
     let text_x = x + ROW_HEIGHT + 3.0;
     let name = TextPlacement::left([text_x, y + 5.0], WHITE);
     gui.text(ui, atlas, &row.username, name);

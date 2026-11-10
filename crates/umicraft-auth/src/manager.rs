@@ -114,6 +114,24 @@ impl<V: SecretVault> AccountManager<V> {
         self.save()
     }
 
+    /// Moves an account one place up in the menu.
+    ///
+    /// # Errors
+    /// [`AuthError::UnknownAccount`] or [`AuthError::Storage`].
+    pub fn move_up(&mut self, uuid: &str) -> Result<(), AuthError> {
+        self.store.move_up(uuid)?;
+        self.save()
+    }
+
+    /// Moves an account one place down in the menu.
+    ///
+    /// # Errors
+    /// [`AuthError::UnknownAccount`] or [`AuthError::Storage`].
+    pub fn move_down(&mut self, uuid: &str) -> Result<(), AuthError> {
+        self.store.move_down(uuid)?;
+        self.save()
+    }
+
     /// Chooses the account for the next connection.
     ///
     /// # Errors
@@ -301,6 +319,23 @@ mod tests {
             Some("http://textures.minecraft.net/texture/two")
         );
         assert!(m.set_skin_url("nobody", None).is_err());
+    }
+
+    #[test]
+    fn the_order_is_saved() {
+        let (mut m, path) = manager();
+        m.add_offline("A").unwrap();
+        m.add_offline("B").unwrap();
+        let a = m.accounts()[0].uuid.clone();
+        m.move_down(&a).unwrap();
+        let reopened = AccountManager::open(path, MemoryVault::default()).unwrap();
+        let order: Vec<_> = reopened
+            .accounts()
+            .iter()
+            .map(|a| a.username.as_str())
+            .collect();
+        assert_eq!(order, ["B", "A"]);
+        assert_eq!(reopened.selected().unwrap().username, "A");
     }
 
     #[test]

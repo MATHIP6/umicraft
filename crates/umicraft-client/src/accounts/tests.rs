@@ -32,6 +32,30 @@ fn without_accounts_the_client_keeps_its_default_name() {
 }
 
 #[test]
+fn moving_an_account_reorders_the_list_and_keeps_the_active_one() {
+    let mut flow = AccountsFlow::in_memory();
+    for name in ["A", "B", "C"] {
+        flow.apply_outcome(AccountsOutcome::AddOffline(name.into()));
+    }
+    let order = |flow: &AccountsFlow| -> Vec<String> {
+        flow.manager
+            .accounts()
+            .iter()
+            .map(|a| a.username.clone())
+            .collect()
+    };
+    flow.apply_outcome(AccountsOutcome::MoveUp(2));
+    assert_eq!(order(&flow), ["A", "C", "B"]);
+    flow.apply_outcome(AccountsOutcome::MoveDown(0));
+    assert_eq!(order(&flow), ["C", "A", "B"]);
+    assert_eq!(
+        flow.active_name().as_deref(),
+        Some("A"),
+        "the active account is unchanged"
+    );
+}
+
+#[test]
 fn only_the_default_identity_sends_the_player_to_the_chooser() {
     let mut flow = AccountsFlow::in_memory();
     assert!(flow.identity().is_unchosen());

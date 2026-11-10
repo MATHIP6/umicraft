@@ -13,6 +13,8 @@ use crate::menus::common::{
     WHITE,
 };
 use crate::menus::confirm::ConfirmScreen;
+use crate::menus::hover_arrows::HoverArrows;
+use crate::menus::server_row::{zone_at, RowZone};
 use crate::text::FontAtlas;
 use crate::widgets::util::last_primary_press;
 
@@ -65,11 +67,34 @@ impl AccountsScreen {
             .or_else(|| escape_pressed(ui).then_some(AccountsOutcome::Cancel))
     }
 
-    /// Selects the row at `point` and plays it on a quick second click.
+    /// Selects the row at `point`. Its head has the play and move arrows of the
+    /// server list; elsewhere a quick second click plays it.
     fn click_row(&mut self, viewport: Rect, point: [f32; 2]) -> Option<AccountsOutcome> {
-        let index =
-            account_row_at(viewport, point, self.offset).filter(|&i| i < self.rows.len())?;
+        let count = self.rows.len();
+        let index = account_row_at(viewport, point, self.offset).filter(|&i| i < count)?;
+        let gui = Gui::new(viewport);
+        let (pointer, corner) = (gui.to_gui(point), {
+            let row = account_row_rect(viewport, index, self.offset);
+            gui.to_gui([row.x, row.y])
+        });
+        let rel = [pointer[0] - corner[0], pointer[1] - corner[1]];
         self.selected = Some(index);
+        match zone_at(rel, index > 0, index + 1 < count) {
+            RowZone::Play => (!self.busy).then_some(AccountsOutcome::Play(index)),
+            RowZone::Up => {
+                self.selected = Some(index - 1);
+                Some(AccountsOutcome::MoveUp(index))
+            }
+            RowZone::Down => {
+                self.selected = Some(index + 1);
+                Some(AccountsOutcome::MoveDown(index))
+            }
+            RowZone::Body => self.double_click(index),
+        }
+    }
+
+    /// Records a click on a row body; a quick second one plays the row.
+    fn double_click(&mut self, index: usize) -> Option<AccountsOutcome> {
         let double = self.last_click.is_some_and(|(row, tick)| {
             row == index && self.ticks.wrapping_sub(tick) <= DOUBLE_CLICK_TICKS
         });
@@ -77,10 +102,36 @@ impl AccountsScreen {
         (double && !self.busy).then_some(AccountsOutcome::Play(index))
     }
 
+    /// Shift+Up and Shift+Down move the selected account one place; at either
+    /// end nothing moves.
+    fn shifted_arrows(&mut self, ui: &Ui, view: f32) -> Option<AccountsOutcome> {
+        let index = self.selected?;
+        let down = key_pressed(ui, Key::ArrowDown);
+        if !down && !key_pressed(ui, Key::ArrowUp) {
+            return None;
+        }
+        let target = if down {
+            (index + 1 < self.rows.len()).then_some(index + 1)
+        } else {
+            index.checked_sub(1)
+        }?;
+        self.selected = Some(target);
+        self.offset = offset_to_show(target, self.offset, view);
+        Some(if down {
+            AccountsOutcome::MoveDown(index)
+        } else {
+            AccountsOutcome::MoveUp(index)
+        })
+    }
+
     /// Up and Down move the selection (Down selects the first row from
-    /// nothing) and scroll it into view; Enter plays the selected row.
+    /// nothing) and scroll it into view; with Shift they move the selected
+    /// account itself, as in the server list. Enter plays the selected row.
     fn keyboard(&mut self, ui: &Ui, view: f32) -> Option<AccountsOutcome> {
         let count = self.rows.len();
+        if ui.input().modifiers.shift {
+            return self.shifted_arrows(ui, view);
+        }
         let target = if key_pressed(ui, Key::ArrowDown) {
             self.selected.map_or(0, |i| i + 1)
         } else if key_pressed(ui, Key::ArrowUp) {
@@ -123,10 +174,9 @@ impl AccountsScreen {
         }
         let viewport = ui.viewport();
         let list = accounts_layout(viewport).list;
-        let hovered = ui
-            .pointer()
-            .filter(|&p| list.contains(p))
-            .and_then(|p| account_row_at(viewport, p, self.offset));
+        let pointer = ui.pointer().filter(|&p| list.contains(p));
+        let hovered = pointer.and_then(|p| account_row_at(viewport, p, self.offset));
+        let count = self.rows.len();
         ui.push_clip(list);
         for (index, row) in self.rows.iter().enumerate() {
             let rect = account_row_rect(viewport, index, self.offset);
@@ -134,9 +184,17 @@ impl AccountsScreen {
                 continue;
             }
             let at = context.0.to_gui([rect.x, rect.y]);
+            let hover = pointer.filter(|_| hovered == Some(index)).map(|p| {
+                let pointer = context.0.to_gui(p);
+                HoverArrows {
+                    can_up: index > 0,
+                    can_down: index + 1 < count,
+                    rel: [pointer[0] - at[0], pointer[1] - at[1]],
+                }
+            });
             let flags = RowFlags {
                 selected: self.selected == Some(index),
-                hovered: hovered == Some(index),
+                hover,
             };
             draw_row(ui, context, row, at, flags);
         }

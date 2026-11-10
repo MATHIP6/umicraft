@@ -69,6 +69,12 @@ pub enum AccountsOutcome {
     },
     /// Delete account `i` (already confirmed by the player).
     Delete(usize),
+    /// Move account `i` one place up (its up arrow, or Shift+Up); the
+    /// selection follows to `i - 1`.
+    MoveUp(usize),
+    /// Move account `i` one place down (its down arrow, or Shift+Down); the
+    /// selection follows to `i + 1`.
+    MoveDown(usize),
     /// Refresh the sessions.
     Refresh,
     /// Leave the screen (Cancel or Escape).

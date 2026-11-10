@@ -238,3 +238,106 @@ fn the_empty_message_goes_away_once_there_are_accounts() {
         .iter()
         .any(|t| t == "You have no account."));
 }
+
+/// The pixel at `(dx, dy)` GUI units from the top-left corner of row `index`.
+fn on_row(index: usize, dx: f32, dy: f32) -> [f32; 2] {
+    let rect = account_row_rect(VIEWPORT, index, 0.0);
+    [rect.x + dx * 3.0, rect.y + dy * 3.0]
+}
+
+fn shifted(code: Key) -> UiInput {
+    UiInput {
+        modifiers: crate::input::Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+        ..key(code)
+    }
+}
+
+#[test]
+fn the_head_arrows_play_and_move_like_the_server_list() {
+    let mut screen = AccountsScreen::new(rows(), None);
+    assert_eq!(
+        run(&mut screen, click_point(on_row(1, 24.0, 10.0))),
+        Some(AccountsOutcome::Play(1)),
+        "the play arrow"
+    );
+    assert_eq!(
+        run(&mut screen, click_point(on_row(1, 5.0, 5.0))),
+        Some(AccountsOutcome::MoveUp(1))
+    );
+    assert_eq!(screen.selected(), Some(0), "the selection follows the row");
+    assert_eq!(
+        run(&mut screen, click_point(on_row(1, 5.0, 25.0))),
+        Some(AccountsOutcome::MoveDown(1))
+    );
+    assert_eq!(screen.selected(), Some(2));
+}
+
+#[test]
+fn the_first_row_has_no_up_arrow_and_the_last_no_down_arrow() {
+    let mut screen = AccountsScreen::new(rows(), None);
+    assert_eq!(run(&mut screen, click_point(on_row(0, 5.0, 5.0))), None);
+    assert_eq!(screen.selected(), Some(0), "that zone only selects the row");
+    assert_eq!(run(&mut screen, click_point(on_row(2, 5.0, 25.0))), None);
+    assert_eq!(screen.selected(), Some(2));
+}
+
+#[test]
+fn a_busy_screen_does_not_play_from_the_arrow() {
+    let mut screen = AccountsScreen::new(rows(), None);
+    screen.set_busy(true);
+    assert_eq!(run(&mut screen, click_point(on_row(1, 24.0, 10.0))), None);
+}
+
+#[test]
+fn shift_arrows_move_the_account_and_the_selection_follows() {
+    let mut screen = AccountsScreen::new(rows(), Some(1));
+    assert_eq!(
+        run(&mut screen, shifted(Key::ArrowUp)),
+        Some(AccountsOutcome::MoveUp(1))
+    );
+    assert_eq!(screen.selected(), Some(0));
+    assert_eq!(run(&mut screen, shifted(Key::ArrowUp)), None);
+    assert_eq!(screen.selected(), Some(0), "the first row cannot move up");
+    assert_eq!(
+        run(&mut screen, shifted(Key::ArrowDown)),
+        Some(AccountsOutcome::MoveDown(0))
+    );
+    assert_eq!(screen.selected(), Some(1));
+}
+
+#[test]
+fn a_hovered_row_draws_the_arrows_over_its_head() {
+    // The glyphs stand in for the arrow sheet, and each is drawn with a shadow.
+    let arrows = |pointer: Option<[f32; 2]>| {
+        let mut screen = AccountsScreen::new(rows(), None);
+        let input = UiInput::new(
+            pointer
+                .map(|position| crate::input::InputEvent::PointerMoved { position })
+                .into_iter()
+                .collect(),
+        );
+        frame(input, |ui| {
+            screen.show(ui, &FontAtlas::fallback(), &lang_with_account_texts());
+            let glyphs: std::collections::BTreeSet<&str> = ui
+                .draw()
+                .commands()
+                .iter()
+                .filter_map(|c| match c {
+                    DrawCommand::Text { text, .. } if matches!(text.as_str(), ">" | "^" | "v") => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
+            glyphs.len()
+        })
+    };
+    assert_eq!(arrows(None), 0);
+    // The middle row shows play, up and down.
+    assert_eq!(arrows(Some(on_row(1, 5.0, 5.0))), 3);
+    // The first row has no up arrow.
+    assert_eq!(arrows(Some(on_row(0, 5.0, 5.0))), 2);
+}

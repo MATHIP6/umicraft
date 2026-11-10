@@ -18,6 +18,7 @@ mod common;
 pub mod confirm;
 pub mod connecting;
 pub mod disconnected;
+mod hover_arrows;
 pub mod mods;
 pub mod pack_mode;
 pub mod panorama;

@@ -35,6 +35,18 @@ impl AccountsFlow {
                     .and_then(|uuid| self.manager.remove(&uuid));
                 self.after_change(removed);
             }
+            AccountsOutcome::MoveUp(index) => {
+                let moved = self
+                    .uuid_at(index)
+                    .and_then(|uuid| self.manager.move_up(&uuid));
+                self.after_change(moved);
+            }
+            AccountsOutcome::MoveDown(index) => {
+                let moved = self
+                    .uuid_at(index)
+                    .and_then(|uuid| self.manager.move_down(&uuid));
+                self.after_change(moved);
+            }
             AccountsOutcome::Refresh => self.renew_selected(),
             AccountsOutcome::CancelLogin => self.cancel_login(),
             AccountsOutcome::OpenUrl(url) => super::browser::open(&url),

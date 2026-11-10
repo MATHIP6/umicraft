@@ -95,6 +95,38 @@ impl AccountStore {
         Ok(())
     }
 
+    /// Moves the account one place up; the first one stays where it is. The
+    /// selected account stays selected (it is kept by UUID).
+    ///
+    /// # Errors
+    /// [`AuthError::UnknownAccount`] when there is none.
+    pub fn move_up(&mut self, uuid: &str) -> Result<(), AuthError> {
+        let index = self.index_of(uuid)?;
+        if index > 0 {
+            self.accounts.swap(index, index - 1);
+        }
+        Ok(())
+    }
+
+    /// Moves the account one place down; the last one stays where it is.
+    ///
+    /// # Errors
+    /// [`AuthError::UnknownAccount`] when there is none.
+    pub fn move_down(&mut self, uuid: &str) -> Result<(), AuthError> {
+        let index = self.index_of(uuid)?;
+        if index + 1 < self.accounts.len() {
+            self.accounts.swap(index, index + 1);
+        }
+        Ok(())
+    }
+
+    fn index_of(&self, uuid: &str) -> Result<usize, AuthError> {
+        self.accounts
+            .iter()
+            .position(|a| a.uuid == uuid)
+            .ok_or(AuthError::UnknownAccount)
+    }
+
     /// Selects the account with `uuid`.
     ///
     /// # Errors
@@ -169,6 +201,44 @@ mod tests {
             store.replace(&c, clash),
             Err(AuthError::DuplicateAccount)
         ));
+    }
+
+    fn names(store: &AccountStore) -> Vec<&str> {
+        store
+            .accounts()
+            .iter()
+            .map(|a| a.username.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn accounts_move_one_place_and_stop_at_the_ends() {
+        let mut store = store_with(&["A", "B", "C"]);
+        let uuid = |store: &AccountStore, i: usize| store.accounts()[i].uuid.clone();
+        let (a, c) = (uuid(&store, 0), uuid(&store, 2));
+        store.move_down(&a).unwrap();
+        assert_eq!(names(&store), ["B", "A", "C"]);
+        store.move_up(&a).unwrap();
+        assert_eq!(names(&store), ["A", "B", "C"]);
+        store.move_up(&a).unwrap();
+        store.move_down(&c).unwrap();
+        assert_eq!(names(&store), ["A", "B", "C"], "the ends do not wrap");
+        assert!(matches!(
+            store.move_up("nope"),
+            Err(AuthError::UnknownAccount)
+        ));
+        assert!(matches!(
+            store.move_down("nope"),
+            Err(AuthError::UnknownAccount)
+        ));
+    }
+
+    #[test]
+    fn moving_an_account_keeps_the_selection() {
+        let mut store = store_with(&["A", "B"]);
+        let a = store.selected().unwrap().uuid.clone();
+        store.move_down(&a).unwrap();
+        assert_eq!(store.selected().unwrap().username, "A");
     }
 
     #[test]
