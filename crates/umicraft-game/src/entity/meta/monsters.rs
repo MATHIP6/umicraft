@@ -21,6 +21,9 @@ const ZOMBIE_CONVERTING: u8 = 14;
 /// Enderman entries: carried block state, screaming.
 const GHAST_ATTACKING: u8 = 16;
 const WITHER_INVULNERABLE: u8 = 20;
+/// Entries of the targets of the wither's side heads (`EntityWither.entityInit`:
+/// 17 is the centre head's, 18 and 19 the side heads').
+const WITHER_SIDE_TARGETS: [u8; 2] = [18, 19];
 const ENDERMAN_CARRIED: u8 = 16;
 const ENDERMAN_SCREAMING: u8 = 18;
 /// Villager entry: profession.
@@ -68,9 +71,25 @@ pub struct EndermanMeta {
 }
 
 pub(super) fn apply_wither(variant: &mut Variant, metadata: &Metadata) {
-    if let Some(invulnerable) = metadata.get_int(WITHER_INVULNERABLE) {
-        *variant = Variant::Wither { invulnerable };
+    let (mut invulnerable, mut targets) = match variant {
+        Variant::Wither {
+            invulnerable,
+            targets,
+        } => (*invulnerable, *targets),
+        _ => (0, [0; 2]),
+    };
+    if let Some(ticks) = metadata.get_int(WITHER_INVULNERABLE) {
+        invulnerable = ticks;
     }
+    for (head, entry) in targets.iter_mut().zip(WITHER_SIDE_TARGETS) {
+        if let Some(id) = metadata.get_int(entry) {
+            *head = id;
+        }
+    }
+    *variant = Variant::Wither {
+        invulnerable,
+        targets,
+    };
 }
 
 /// Entries of the shake of a boat or a minecart (`EntityBoat.entityInit`,

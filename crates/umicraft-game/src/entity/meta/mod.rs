@@ -84,10 +84,15 @@ pub enum Variant {
     },
     /// Enderman carried block and scream.
     Enderman(EndermanMeta),
-    /// Wither spawn countdown (entry 20), the ticks of invulnerability left.
+    /// Wither spawn countdown (entry 20) and the targets of its side heads
+    /// (entries 18 and 19).
     Wither {
-        /// `0` for a wither that is not being spawned.
+        /// The ticks of invulnerability left, `0` for a wither that is not
+        /// being spawned.
         invulnerable: i32,
+        /// The entity each side head watches, `0` for none
+        /// (`EntityWither.getWatchedTargetId(1)` and `(2)`).
+        targets: [i32; 2],
     },
     /// Ghast charging a fireball (entry 16).
     Ghast {

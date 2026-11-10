@@ -17,7 +17,7 @@ use crate::RenderState;
 
 use super::{
     BedPose, BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
-    EntityRenderSnapshot, PlayerProfile, Variant,
+    EntityRenderSnapshot, MobState, PlayerProfile, Variant,
 };
 
 /// Data watcher entry of the entity flags (MCP `Entity.entityInit`).
@@ -629,6 +629,7 @@ impl EntityStore {
                 rider.position = feet;
             }
         }
+        self.track_wither_heads();
         for entity in self.entities.values_mut() {
             if let Some(flight) = entity.collecting.as_mut() {
                 flight.ticks += 1;
@@ -652,6 +653,45 @@ impl EntityStore {
         );
         self.entities
             .retain(|_, entity| !entity.animation.is_finished());
+    }
+
+    /// Turns the side heads of each wither towards the entities they watch
+    /// (`EntityWither.onLivingUpdate`). Only a tick with a wither in range
+    /// looks anything up.
+    fn track_wither_heads(&mut self) {
+        let withers: Vec<(EntityId, [Option<DVec3>; 2])> = self
+            .entities
+            .values()
+            .filter_map(|wither| match wither.meta.variant {
+                Variant::Wither { targets, .. } => {
+                    Some((wither.id, targets.map(|target| self.eyes_of(target))))
+                }
+                _ => None,
+            })
+            .collect();
+        for (id, targets) in withers {
+            if let Some(wither) = self.entities.get_mut(&id) {
+                let (feet, body_yaw) = (wither.position, wither.body_yaw.offset);
+                if let MobState::Wither(heads) = &mut wither.mob {
+                    heads.track(feet, body_yaw, targets);
+                }
+            }
+        }
+    }
+
+    /// Where the eyes of the entity `id` are (MCP `posY + getEyeHeight()`:
+    /// 1.62 for a player, 0.85 of the height otherwise), if it is tracked.
+    fn eyes_of(&self, id: i32) -> Option<DVec3> {
+        if id <= 0 {
+            return None;
+        }
+        let entity = self.entities.get(&EntityId(id))?;
+        let eye = if entity.kind == EntityKind::Player {
+            EYE_HEIGHT
+        } else {
+            crate::combat::hitbox::body_size(entity)?.1 * 0.85
+        };
+        Some(entity.position + DVec3::new(0.0, eye, 0.0))
     }
 
     /// Takes the bodies whose death fall ended since the last call: each
@@ -1259,6 +1299,43 @@ mod tests {
             "{:?}",
             snapshot.mob
         );
+    }
+
+    #[test]
+    fn a_wither_turns_a_side_head_towards_the_entity_it_watches() {
+        // Regression: the side heads only copied the centre head.
+        let mut store = EntityStore::new();
+        let target = zombie(&mut store);
+        let wither = EntityId(40);
+        store.spawn_mob(
+            wither,
+            64,
+            DVec3::new(0.0, 64.0, -20.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        if let Some(record) = store.entities.get_mut(&wither) {
+            record.meta.variant = Variant::Wither {
+                invulnerable: 0,
+                targets: [target.0, 0],
+            };
+        }
+        let heads = |store: &EntityStore| match store.entities[&wither].mob {
+            MobState::Wither(heads) => heads,
+            _ => super::super::mob_state::WitherHeads::default(),
+        };
+        store.tick();
+        let first = heads(&store);
+        for _ in 0..20 {
+            store.tick();
+        }
+        let settled = heads(&store);
+        assert_ne!(first.pitch[0], 0.0, "it looks down at the zombie");
+        assert!(settled.pitch[0] > 0.0, "{settled:?}");
+        assert_eq!(settled.pitch[1], 0.0, "the other head has no target");
     }
 
     #[test]

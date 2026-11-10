@@ -4,7 +4,8 @@
 //! golems, bosses).
 
 use umicraft_game::entity::meta::Variant;
-use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
+use umicraft_game::entity::mob_state::WitherHeads;
+use umicraft_game::entity::{EntityKind, EntityRenderSnapshot, MobPose};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{
     BatModel, BlazeModel, CreeperModel, DragonModel, EndermiteModel, GhastModel, GuardianModel,
@@ -133,10 +134,17 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             one(TextureSlot::Silverfish, model.emit_mesh())
         }
         EntityKind::Wither => {
+            let side_heads = match ent.mob {
+                MobPose::Wither(heads) => heads,
+                _ => WitherHeads::default(),
+            };
+            // The side heads turn relative to the torso.
+            let side_yaw = side_heads.yaw.map(|yaw| yaw - ent.body_yaw);
             let mut model = WitherModel::new();
             model.set_angles(age, head_yaw, head_pitch);
+            model.set_side_heads(side_yaw, side_heads.pitch);
             let invulnerable = match ent.meta.variant {
-                Variant::Wither { invulnerable } => invulnerable,
+                Variant::Wither { invulnerable, .. } => invulnerable,
                 _ => 0,
             };
             let scale = wither_scale(invulnerable);
@@ -148,6 +156,7 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             if ent.meta.living.health <= WITHER_ARMORED_HEALTH {
                 let mut aura = WitherModel::aura();
                 aura.set_angles(age, head_yaw, head_pitch);
+                aura.set_side_heads(side_yaw, side_heads.pitch);
                 let mut aura_mesh = aura.emit_mesh();
                 scale_mesh(&mut aura_mesh, scale);
                 layers.push(glowing(

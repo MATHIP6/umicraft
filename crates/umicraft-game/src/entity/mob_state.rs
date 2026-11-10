@@ -9,6 +9,8 @@
 //! tick, as the reference's `onLivingUpdate` does, and the model reads them
 //! through [`MobPose`] at the sub-tick fraction of the frame.
 
+use glam::DVec3;
+
 /// Ticks of a hop started by status 1 (`EntityRabbit.handleStatusUpdate`).
 const RABBIT_HOP_TICKS: u8 = 10;
 /// Ticks of a golem's swing started by status 4 (`EntityIronGolem`).
@@ -60,6 +62,20 @@ pub enum MobState {
     },
     /// A chicken's wings (`EntityChicken` wing fields).
     Chicken(ChickenWings),
+    /// Where a wither's side heads look.
+    Wither(WitherHeads),
+}
+
+/// The look of a wither's two side heads in degrees: yaw `field_82221_e`
+/// and pitch `field_82220_d` of `EntityWither`. The store turns them towards
+/// their targets each tick ([`WitherHeads::track`]); the model reads them
+/// as they are, as `ModelWither.setLivingAnimations` does.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct WitherHeads {
+    /// The world yaw of each side head.
+    pub yaw: [f32; 2],
+    /// The pitch of each side head.
+    pub pitch: [f32; 2],
 }
 
 /// A wolf's shake (`timeWolfIsShaking`) and begging course
@@ -125,6 +141,8 @@ pub enum MobPose {
         /// `(sin(wingRotation) + 1) * destPos`.
         flap: f32,
     },
+    /// Where a wither's side heads look.
+    Wither(WitherHeads),
 }
 
 /// What an iron golem's arms do.
@@ -163,6 +181,7 @@ impl MobState {
             K::Wolf => Self::Wolf(WolfShake::default()),
             K::Sheep => Self::Sheep { timer: 0 },
             K::Chicken => Self::Chicken(ChickenWings::default()),
+            K::Wither => Self::Wither(WitherHeads::default()),
             _ => Self::None,
         }
     }
@@ -194,7 +213,8 @@ impl MobState {
     /// Advances one tick (the client part of each `onLivingUpdate`).
     pub fn tick(&mut self, tick: MobTick) {
         match self {
-            Self::None => {}
+            // The wither's heads need the other entities: the store turns them.
+            Self::None | Self::Wither(_) => {}
             Self::Rabbit { ticks, duration } => {
                 if ticks != duration {
                     *ticks += 1;
@@ -244,8 +264,53 @@ impl MobState {
             Self::Chicken(wings) => MobPose::Chicken {
                 flap: wings.flap(alpha),
             },
+            Self::Wither(heads) => MobPose::Wither(heads),
         }
     }
+}
+
+/// The three heads of a wither standing at `feet` with its torso turned to
+/// `body_yaw` degrees: the centre one 3 blocks up, the side ones 2.2 up and
+/// 1.3 to either side (`EntityWither.func_82214_u`, `func_82208_v`,
+/// `func_82213_w`).
+#[must_use]
+pub fn wither_head_positions(feet: DVec3, body_yaw: f32) -> [DVec3; 3] {
+    let side = |head: f32| {
+        let angle = (body_yaw + 180.0 * head) / 180.0 * std::f32::consts::PI;
+        feet + DVec3::new(
+            f64::from(angle.cos()) * 1.3,
+            2.2,
+            f64::from(angle.sin()) * 1.3,
+        )
+    };
+    [feet + DVec3::new(0.0, 3.0, 0.0), side(0.0), side(1.0)]
+}
+
+impl WitherHeads {
+    /// `EntityWither.onLivingUpdate`, the part the client runs: each side
+    /// head turns towards the eyes of its target, by at most 10 degrees of
+    /// yaw and 40 of pitch a tick, or back to the torso without one.
+    pub fn track(&mut self, feet: DVec3, body_yaw: f32, targets: [Option<DVec3>; 2]) {
+        let [_, first, second] = wither_head_positions(feet, body_yaw);
+        for (head, (from, target)) in [first, second].into_iter().zip(targets).enumerate() {
+            let Some(eyes) = target else {
+                self.yaw[head] = approach(self.yaw[head], body_yaw, 10.0);
+                continue;
+            };
+            let to = eyes - from;
+            let flat = to.x.hypot(to.z);
+            let yaw = (to.z.atan2(to.x).to_degrees() as f32) - 90.0;
+            let pitch = -(to.y.atan2(flat).to_degrees() as f32);
+            self.pitch[head] = approach(self.pitch[head], pitch, 40.0);
+            self.yaw[head] = approach(self.yaw[head], yaw, 10.0);
+        }
+    }
+}
+
+/// `EntityWither.func_82204_b`: `from` turned towards `to` by at most `step`
+/// degrees, the short way round.
+fn approach(from: f32, to: f32, step: f32) -> f32 {
+    from + super::angle::wrap_degrees(to - from).clamp(-step, step)
 }
 
 impl WolfShake {
@@ -440,6 +505,25 @@ mod tests {
             chicken.tick(ground);
         }
         assert_eq!(flap(&chicken), 0.0);
+    }
+
+    #[test]
+    fn a_wither_head_turns_towards_its_target_ten_degrees_a_tick() {
+        let mut heads = WitherHeads::default();
+        let feet = DVec3::ZERO;
+        // A target straight along +z of the first side head, at its height.
+        let [_, first, _] = wither_head_positions(feet, 0.0);
+        let target = first + DVec3::new(0.0, 0.0, 10.0);
+        heads.track(feet, 0.0, [Some(target), None]);
+        // `atan2(10, 0) - 90` is 0: already facing it.
+        assert!(heads.yaw[0].abs() < 1e-4, "{:?}", heads.yaw);
+        let behind = first + DVec3::new(0.0, 0.0, -10.0);
+        heads.track(feet, 0.0, [Some(behind), None]);
+        assert!((heads.yaw[0].abs() - 10.0).abs() < 1e-4, "{:?}", heads.yaw);
+        // Without a target the head comes back to the torso.
+        heads.yaw[1] = 30.0;
+        heads.track(feet, 0.0, [None, None]);
+        assert!((heads.yaw[1] - 20.0).abs() < 1e-4);
     }
 
     #[test]

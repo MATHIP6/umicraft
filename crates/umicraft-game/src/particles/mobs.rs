@@ -18,6 +18,7 @@ use super::kind::ParticleKind;
 use super::spawn::{SpawnFilter, SpawnRequest};
 use crate::combat::hitbox::body_size;
 use crate::entity::meta::Variant;
+use crate::entity::mob_state::wither_head_positions;
 use crate::entity::{EntityKind, EntityRecord};
 use crate::shapes::BlockSource;
 
@@ -99,21 +100,6 @@ fn portal(rng: &mut JavaRandom, body: &MobBody, sink: f64) -> (DVec3, DVec3) {
         (rng.next_double() - 0.5) * 2.0,
     );
     (position, velocity)
-}
-
-/// The three heads of a wither: the centre one 3 blocks up, the side ones
-/// 2.2 up and 1.3 to each side of the torso (`EntityWither.func_82214_u`,
-/// `func_82208_v`, `func_82213_w`).
-fn wither_heads(feet: DVec3, body_yaw: f32) -> [DVec3; 3] {
-    let side = |head: f32| {
-        let angle = (body_yaw + 180.0 * head) / 180.0 * std::f32::consts::PI;
-        feet + DVec3::new(
-            f64::from(angle.cos()) * 1.3,
-            2.2,
-            f64::from(angle.sin()) * 1.3,
-        )
-    };
-    [feet + DVec3::new(0.0, 3.0, 0.0), side(0.0), side(1.0)]
 }
 
 /// A point within a gaussian of 0.3 of a wither head.
@@ -283,7 +269,7 @@ impl ParticleEngine {
     fn wither_breath(&mut self, entity: &EntityRecord, body: &MobBody, filter: &SpawnFilter) {
         let armored = entity.meta.living.health <= WITHER_ARMORED_HEALTH;
         let armour_tint = DVec3::new(0.699_999_988_079_071, 0.699_999_988_079_071, 0.5);
-        for head in wither_heads(body.feet, entity.body_yaw.offset) {
+        for head in wither_head_positions(body.feet, entity.body_yaw.offset) {
             let position = near_head(self.rng(), head);
             self.emit(ParticleKind::Smoke, position, DVec3::ZERO, filter);
             if armored && self.rng().next_int(4) == 0 {
@@ -292,7 +278,7 @@ impl ParticleEngine {
             }
         }
         let spawning =
-            matches!(entity.meta.variant, Variant::Wither { invulnerable } if invulnerable > 0);
+            matches!(entity.meta.variant, Variant::Wither { invulnerable, .. } if invulnerable > 0);
         if spawning {
             let tint = DVec3::new(
                 0.699_999_988_079_071,
@@ -529,7 +515,7 @@ mod tests {
         wither.meta.living.health = 300.0;
         assert_eq!(after_tick(&wither), 3);
         // The side heads sit 1.3 to either side of the centre one.
-        let [centre, left, right] = wither_heads(DVec3::ZERO, 0.0);
+        let [centre, left, right] = wither_head_positions(DVec3::ZERO, 0.0);
         assert_eq!(centre, DVec3::new(0.0, 3.0, 0.0));
         assert!((left - DVec3::new(1.3, 2.2, 0.0)).length() < 1e-6, "{left}");
         assert!(
@@ -542,7 +528,10 @@ mod tests {
     fn a_spawning_wither_glows_with_spells() {
         let mut wither = mob(EntityKind::Wither);
         wither.meta.living.health = 300.0;
-        wither.meta.variant = Variant::Wither { invulnerable: 200 };
+        wither.meta.variant = Variant::Wither {
+            invulnerable: 200,
+            targets: [0; 2],
+        };
         assert_eq!(after_tick(&wither), 6);
     }
 
