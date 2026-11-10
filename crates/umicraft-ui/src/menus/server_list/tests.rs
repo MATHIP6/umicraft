@@ -288,3 +288,41 @@ fn every_status_draws_and_the_latency_icon_has_a_tooltip() {
     });
     assert!(shown);
 }
+
+#[test]
+fn the_account_button_is_at_the_top_right_and_opens_the_accounts() {
+    let layout = server_list_layout(VIEWPORT);
+    // scale 3, width 427: x = 301, y = 6
+    assert_eq!(layout.accounts, Rect::new(301.0 * 3.0, 18.0, 360.0, 60.0));
+    let mut screen = ServerListScreen::new();
+    assert_eq!(
+        run(&mut screen, click_at(layout.accounts), &[]),
+        Some(ServerListOutcome::OpenAccounts)
+    );
+}
+
+#[test]
+fn the_account_button_shows_the_active_name() {
+    let labels = |screen: &mut ServerListScreen| {
+        frame(UiInput::default(), |ui| {
+            screen.show(ui, &FontAtlas::fallback(), &Lang::builtin(), &[]);
+            ui.draw()
+                .commands()
+                .iter()
+                .filter_map(|c| match c {
+                    DrawCommand::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    let mut screen = ServerListScreen::new();
+    assert!(labels(&mut screen)
+        .iter()
+        .any(|t| t == "umicraft.accounts.button.none"));
+    screen.set_active_account(Some("Steve".into()));
+    // The built-in table has no Umicraft keys, so the key itself is the format.
+    assert!(labels(&mut screen)
+        .iter()
+        .any(|t| t == "umicraft.accounts.button"));
+}

@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::accounts::{AccountsFlow, Identity};
 use crate::achievements_view::{self, AchievementsContext};
 use crate::connection_end::ConnectionEnd;
 use umicraft_core::lang::Lang;
@@ -131,6 +132,7 @@ pub struct MenuFlow {
     achievements: AchievementsScreen,
     achievements_data: Option<(u64, AchievementsData)>,
     mods: ModsScreen,
+    accounts: AccountsFlow,
     book: ServerBook,
     pinger: Option<Pinger>,
     rows: Vec<ServerRow>,
@@ -159,6 +161,7 @@ impl MenuFlow {
             achievements: AchievementsScreen::new(),
             achievements_data: None,
             mods: ModsScreen::new(),
+            accounts: AccountsFlow::in_memory(),
             book,
             pinger,
             rows: Vec::new(),
@@ -170,6 +173,23 @@ impl MenuFlow {
         };
         flow.rebuild_rows();
         flow
+    }
+
+    /// Replaces the in-memory accounts by the saved ones.
+    pub fn set_accounts(&mut self, accounts: AccountsFlow) {
+        self.accounts = accounts;
+    }
+
+    /// Who the next connection is made as (ROADMAP F1).
+    #[must_use]
+    pub fn identity(&self) -> Identity {
+        self.accounts.identity()
+    }
+
+    /// Opens the account chooser to tell why the chosen Microsoft account
+    /// cannot join yet.
+    pub fn explain_accounts_not_ready(&mut self) {
+        self.accounts.explain_not_ready();
     }
 
     /// Replaces the title screen's splash line.
@@ -234,6 +254,7 @@ impl MenuFlow {
             self.stats.tick();
             self.achievements.tick();
             self.mods.tick();
+            self.accounts.tick();
             if let Some(edit) = self.edit.as_mut() {
                 edit.tick();
             }
@@ -249,6 +270,7 @@ impl MenuFlow {
 
     /// Takes the ping results that arrived since the last frame.
     pub fn poll(&mut self) {
+        self.accounts.poll();
         while let Some(result) = self.pinger.as_ref().and_then(Pinger::poll) {
             self.apply_result(result);
         }
@@ -271,6 +293,7 @@ impl MenuFlow {
             Screen::ServerList => self.show_list(ui, atlas, lang),
             Screen::ServerEdit => self.show_edit(ui, atlas, lang),
             Screen::ConfirmDelete => self.show_confirm(ui, atlas, lang),
+            Screen::Accounts => self.accounts.show(ui, atlas, lang).map(MenuCommand::GoTo),
             Screen::Connecting => Self::show_connecting(ui, atlas, lang, context),
             Screen::Disconnected => self.show_disconnected(ui, atlas, lang),
             Screen::Stats => self.show_stats(ui, atlas, lang, context),
@@ -309,6 +332,7 @@ impl MenuFlow {
     }
 
     fn show_list(&mut self, ui: &mut Ui, atlas: &FontAtlas, lang: &Lang) -> Option<MenuCommand> {
+        self.list.set_active_account(self.accounts.active_name());
         let outcome = self.list.show(ui, atlas, lang, &self.rows)?;
         match outcome {
             ServerListOutcome::Join(index) => self.join(index),
@@ -327,6 +351,7 @@ impl MenuFlow {
                 self.refresh_pings();
                 None
             }
+            ServerListOutcome::OpenAccounts => Some(MenuCommand::GoTo(Screen::Accounts)),
             ServerListOutcome::Cancel => Some(MenuCommand::GoTo(Screen::Title)),
             ServerListOutcome::MoveUp(index) => {
                 let moved = self.book.move_up(index);

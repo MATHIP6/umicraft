@@ -19,15 +19,14 @@ use crate::styled_text::styled_width;
 use crate::text::FontAtlas;
 use crate::widgets::tooltip::{tooltip, TooltipRow};
 
-use super::common::{Gui, TextPlacement, DIM_GRAY, LINE_HEIGHT, WHITE};
+use super::common::{Gui, DIM_GRAY, LINE_HEIGHT, WHITE};
+use super::hover_arrows::{draw_hover_arrows, HoverArrows};
 use super::server_row::{latency_level, RowStatus, ServerRow, ENTRY_HEIGHT, ENTRY_WIDTH};
 
 const BAR_ON: Color = [0.33, 0.9, 0.33, 1.0];
 const BAR_OFF: Color = [0.25, 0.25, 0.25, 1.0];
 const RED: Color = [0.667, 0.0, 0.0, 1.0];
 const ICON_FILL: Color = [0.13, 0.13, 0.17, 1.0];
-/// `Gui.drawRect(x, y, x + 32, y + 32, -1601138544)` = `0xA0909090`.
-const HOVER_SHADE: Color = [0.565, 0.565, 0.565, 0.627];
 /// The cell of `icons.png` that is the red X (`l = 5`).
 const NO_CONNECTION_LEVEL: u8 = 5;
 
@@ -211,32 +210,12 @@ impl RowContext<'_> {
     /// The hover shade and the arrows of `server_selection.png`; `rel` is
     /// the pointer relative to the row's corner.
     fn draw_arrows(&self, ui: &mut Ui, at: [f32; 2], flags: RowFlags, rel: [f32; 2]) {
-        let gui = self.gui;
-        let rect = gui.rect(at[0], at[1], 32.0, 32.0);
-        ui.draw().rect(rect, HOVER_SHADE);
-        let join_hot = rel[0] < 32.0 && rel[0] > 16.0;
-        let up_hot = rel[0] < 16.0 && rel[1] < 16.0;
-        let down_hot = rel[0] < 16.0 && rel[1] > 16.0;
-        let cells = [
-            (true, 0, join_hot, ">", [21.0, 12.0]),
-            (flags.can_up, 96, up_hot, "^", [5.0, 3.0]),
-            (flags.can_down, 64, down_hot, "v", [5.0, 21.0]),
-        ];
-        let sheet = ui.menu_art().server_selection;
-        for (_, u, hot, glyph, offset) in cells.into_iter().filter(|cell| cell.0) {
-            match sheet {
-                Some(sheet) => {
-                    let v = if hot { 32 } else { 0 };
-                    ui.draw().image(sheet.sub(u, v, 32, 32), rect, [1.0; 4]);
-                }
-                None => gui.text(
-                    ui,
-                    self.atlas,
-                    glyph,
-                    TextPlacement::left([at[0] + offset[0], at[1] + offset[1]], WHITE),
-                ),
-            }
-        }
+        let arrows = HoverArrows {
+            can_up: flags.can_up,
+            can_down: flags.can_down,
+            rel,
+        };
+        draw_hover_arrows(ui, (self.gui, self.atlas), at, arrows);
     }
 
     /// The text of the hover box over the latency icon (`s1`).

@@ -17,6 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+webbrowser = "1.2"
 tracing.workspace = true
 tracing-subscriber.workspace = true
 umicraft-assets.workspace = true
@@ -32,7 +33,9 @@ umicraft-protocol.workspace = true
 umicraft-render.workspace = true
 umicraft-ui.workspace = true
 umicraft-world.workspace = true
-arboard = { version = "3", default-features = false }
+# `wayland-data-control`: without it Linux only gets the X11 backend, and a copy made on
+# Wayland is not seen by Wayland-native applications (docs/sources.md, 2026-11-09).
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 wgpu = "30.0.1"
 winit = "0.30.8"
 memory-stats = "1.2.0"

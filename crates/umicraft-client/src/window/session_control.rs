@@ -11,6 +11,7 @@
 //! visibility.
 
 use super::App;
+use crate::accounts::Identity;
 use crate::args::Args;
 use crate::connection_end::{ConnectionEnd, EndPhase};
 use crate::game::{GameEvent, Session};
@@ -51,7 +52,20 @@ pub(super) fn lifecycle_step(
     }
 }
 
-/// The network settings of a session to `address`.
+/// The login of a session: the player's name and, for a Microsoft account, its
+/// session. The launcher flags of the command line win over the saved accounts.
+fn login_of(args: &Args, identity: Identity) -> (String, Option<umicraft_auth::Session>) {
+    if args.session.is_some() {
+        return (args.name.clone(), args.session.clone());
+    }
+    match identity {
+        Identity::Offline(name) => (name, None),
+        Identity::Online(session) => (args.name.clone(), Some(session)),
+        Identity::Default | Identity::NotReady => (args.name.clone(), None),
+    }
+}
+
+/// The network settings of a session to `address`, joining as `identity`.
 ///
 /// The handshake host override of the command line only applies to the server
 /// named there (it exists to record a session on a public server).
@@ -60,13 +74,15 @@ pub(super) fn network_config(
     options: &Options,
     address: &ServerAddress,
     pack_mode: ResourcePackMode,
+    identity: Identity,
 ) -> NetworkConfig {
+    let (name, session) = login_of(args, identity);
     let is_cli_server = args.server() == Some((address.host.as_str(), address.port));
     NetworkConfig {
         host: address.host.clone(),
         port: address.port,
-        name: args.name.clone(),
-        session: args.session.clone(),
+        name,
+        session,
         view_distance: options.video.render_distance,
         chat_mode: options.chat.visibility.wire(),
         chat_colors: options.chat.colors,
@@ -110,9 +126,15 @@ impl App {
     /// shows. A thread that cannot start ends in the disconnected screen
     /// with the error as its reason.
     pub(super) fn connect(&mut self, address: &ServerAddress) {
+        let identity = self.menu.identity();
+        if matches!(identity, Identity::NotReady) && self.args.session.is_none() {
+            self.menu.explain_accounts_not_ready();
+            self.set_screen(Screen::Accounts);
+            return;
+        }
         self.stop_session();
         let pack_mode = self.menu.pack_mode_for(address);
-        let config = network_config(&self.args, &self.options, address, pack_mode);
+        let config = network_config(&self.args, &self.options, address, pack_mode, identity);
         match Session::start(config) {
             Ok(session) => {
                 self.server_pack.set_mode(pack_mode);
@@ -257,6 +279,7 @@ mod tests {
             &options,
             &address("play.example.net", 25570),
             ResourcePackMode::Prompt,
+            Identity::Default,
         );
         assert_eq!(config.host, "play.example.net");
         assert_eq!(config.port, 25570);
@@ -275,6 +298,7 @@ mod tests {
             &options,
             &address("10.0.0.1", 25565),
             ResourcePackMode::Prompt,
+            Identity::Default,
         );
         assert_eq!(cli.handshake_host.as_deref(), Some("play.example.net"));
         let other = network_config(
@@ -282,6 +306,7 @@ mod tests {
             &options,
             &address("10.0.0.2", 25565),
             ResourcePackMode::Prompt,
+            Identity::Default,
         );
         assert_eq!(other.handshake_host, None);
     }
@@ -289,10 +314,51 @@ mod tests {
     #[test]
     fn only_a_disabled_pack_mode_declines_offers_at_the_network_layer() {
         let (args, options) = (args(&[]), Options::default());
-        let declines =
-            |mode| network_config(&args, &options, &address("h", 1), mode).decline_server_packs;
+        let declines = |mode| {
+            network_config(&args, &options, &address("h", 1), mode, Identity::Default)
+                .decline_server_packs
+        };
         assert!(declines(ResourcePackMode::Disabled));
         assert!(!declines(ResourcePackMode::Prompt));
         assert!(!declines(ResourcePackMode::Enabled));
+    }
+
+    fn login_for(extra: &[&str], identity: Identity) -> (String, Option<umicraft_auth::Session>) {
+        login_of(&args(extra), identity)
+    }
+
+    fn online_session() -> umicraft_auth::Session {
+        umicraft_auth::Session::new(
+            "Notch",
+            "069a79f444e94726a5befca90e38aaf5",
+            umicraft_auth::Secret::new("token"),
+        )
+        .expect("a valid session")
+    }
+
+    #[test]
+    fn an_offline_account_joins_under_its_own_name_without_a_session() {
+        let (name, session) = login_for(&["--name", "Cli"], Identity::Offline("Pixel".into()));
+        assert_eq!(name, "Pixel");
+        assert!(session.is_none());
+    }
+
+    #[test]
+    fn a_microsoft_account_joins_with_its_session() {
+        let (_, session) = login_for(&[], Identity::Online(online_session()));
+        assert_eq!(session.expect("a session").username, "Notch");
+    }
+
+    #[test]
+    fn the_launcher_flags_win_over_the_saved_accounts() {
+        let mut args = args(&[]);
+        args.session = umicraft_auth::Session::new(
+            "Launcher",
+            "069a79f4-44e9-4726-a5be-fca90e38aaf5",
+            umicraft_auth::Secret::new("tok"),
+        )
+        .ok();
+        let (_, session) = login_of(&args, Identity::Offline("Pixel".into()));
+        assert_eq!(session.expect("the launcher session").username, "Launcher");
     }
 }

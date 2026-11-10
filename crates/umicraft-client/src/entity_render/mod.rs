@@ -61,6 +61,7 @@ pub use cull::CullView;
 pub use hand::hand_vertices;
 pub(crate) use mobs::posed_humanoid_mob;
 pub(crate) use player::posed_player;
+pub(crate) use skins::head_face;
 #[cfg(test)]
 pub(crate) use skins::NoSkins;
 pub(crate) use skins::SkinLookup;

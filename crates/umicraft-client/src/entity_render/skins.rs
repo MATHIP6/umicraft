@@ -55,7 +55,7 @@ pub(super) struct SkinSet {
 
 /// The 8x8 face of a 64x64 RGBA `skin`, 256 bytes, with the hat layer over it
 /// when `hat` is set (`GuiPlayerTabOverlay`: texels (8, 8) and (40, 8)).
-pub(super) fn head_face(skin: &[u8], hat: bool) -> Option<Arc<[u8]>> {
+pub(crate) fn head_face(skin: &[u8], hat: bool) -> Option<Arc<[u8]>> {
     const SIDE: usize = 64;
     if skin.len() != SIDE * SIDE * 4 {
         return None;

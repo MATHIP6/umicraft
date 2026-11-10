@@ -62,6 +62,13 @@ impl App {
         event_loop: &ActiveEventLoop,
     ) {
         match command {
+            // Joining needs an account: with none saved (and no launcher
+            // session), the chooser opens first and says there is none.
+            MenuCommand::Connect(_)
+                if self.args.session.is_none() && self.menu.identity().is_unchosen() =>
+            {
+                self.set_screen(Screen::Accounts);
+            }
             MenuCommand::Connect(address) => {
                 self.remember_last_server();
                 self.connect(&address);
