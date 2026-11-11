@@ -455,6 +455,7 @@ fn make_snapshot(
         fishing: false,
         riding: false,
         leash: None,
+        beam: None,
         flight: None,
         squish: 0.0,
         squid: Default::default(),

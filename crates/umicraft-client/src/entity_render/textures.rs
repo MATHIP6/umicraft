@@ -112,8 +112,9 @@ impl EntityTextures {
         let mut textures = HashMap::new();
         for spec in texture_specs() {
             let (rgba, w, h) = load_or_fallback(jar.as_ref(), spec.jar_path, spec.fallback);
-            // The glowing layers scroll their coordinates past the edge.
-            let texture = if spec.slot.is_additive() {
+            // The glowing layers and the guardian beam scroll their
+            // coordinates past the edge.
+            let texture = if spec.slot.repeats() {
                 renderer.create_repeating_entity_texture(&rgba, w, h)
             } else {
                 renderer.create_entity_texture(&rgba, w, h)
@@ -356,6 +357,7 @@ impl EntityTextures {
         renderer.upload_glint_entities(&glint);
         let ghost = bound_batches(&meshed.ghost, &textures);
         renderer.upload_ghost_entities(&ghost);
+        renderer.upload_tinted_entities(&bound_batches(&meshed.tinted, &textures));
         let apparition = apparition
             .as_ref()
             .map_or_else(Vec::new, |meshes| bound_batches(meshes, &textures));

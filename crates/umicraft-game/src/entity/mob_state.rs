@@ -84,7 +84,19 @@ pub struct GuardianSwim {
     pub eye: [f32; 2],
     /// Source of the random flapping of the spikes on land.
     seed: u32,
+    /// The entity it beams at, `0` for none (metadata entry 17).
+    aimed_at: i32,
+    /// Ticks the beam has charged (`field_175479_bo`), at most
+    /// `charge_ticks`.
+    charged: u16,
+    /// Ticks the beam takes to charge (`func_175464_ck`).
+    charge_ticks: u16,
 }
+
+/// Ticks a guardian's beam takes to charge, and an elder's
+/// (`EntityGuardian.func_175464_ck`).
+const GUARDIAN_CHARGE_TICKS: u16 = 80;
+const ELDER_CHARGE_TICKS: u16 = 60;
 
 /// What a guardian's model reads at one sub-tick fraction.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -95,6 +107,9 @@ pub struct GuardianPose {
     pub extension: f32,
     /// Where the pupil sits, vanilla `(x, y)` pixels.
     pub eye: [f32; 2],
+    /// How far the beam has charged (`func_175477_p`): `0` when it starts,
+    /// `1` once fully charged (slightly over within the last tick).
+    pub charge: f32,
 }
 
 /// The look of a wither's two side heads in degrees: yaw `field_82221_e`
@@ -348,6 +363,9 @@ impl GuardianSwim {
             in_water: false,
             eye: [0.0; 2],
             seed: seed.wrapping_mul(0x9E37_79B9) | 1,
+            aimed_at: 0,
+            charged: 0,
+            charge_ticks: GUARDIAN_CHARGE_TICKS,
         }
     }
 
@@ -380,12 +398,39 @@ impl GuardianSwim {
         }
     }
 
+    /// One tick of the beam at `target` (metadata entry 17, `0` for none):
+    /// a new target restarts the charge (`onDataWatcherUpdate(17)`), which
+    /// then grows a tick at a time up to 60 ticks for an elder and 80
+    /// otherwise (`onLivingUpdate`).
+    pub fn aim(&mut self, target: i32, elder: bool) {
+        if target != self.aimed_at {
+            self.aimed_at = target;
+            self.charged = 0;
+        }
+        self.charge_ticks = if elder {
+            ELDER_CHARGE_TICKS
+        } else {
+            GUARDIAN_CHARGE_TICKS
+        };
+        if target != 0 && self.charged < self.charge_ticks {
+            self.charged += 1;
+        }
+    }
+
+    /// How far the beam has charged at the sub-tick fraction `alpha`
+    /// (`func_175477_p`, which adds the fraction even when fully charged).
+    #[must_use]
+    pub fn charge(&self, alpha: f32) -> f32 {
+        (f32::from(self.charged) + alpha) / f32::from(self.charge_ticks)
+    }
+
     /// The values at the sub-tick fraction `alpha`.
     fn pose(&self, alpha: f32) -> GuardianPose {
         GuardianPose {
             tail: self.prev_tail + (self.tail - self.prev_tail) * alpha,
             extension: self.prev_spikes + (self.spikes - self.prev_spikes) * alpha,
             eye: self.eye,
+            charge: self.charge(alpha),
         }
     }
 
@@ -683,6 +728,27 @@ mod tests {
             swim.tick(false, false);
             assert!((0.0..1.0).contains(&swim.spikes));
         }
+    }
+
+    #[test]
+    fn a_guardian_beam_charges_and_restarts_on_a_new_target() {
+        let mut swim = GuardianSwim::new(1);
+        swim.aim(0, false);
+        assert_eq!(swim.charged, 0, "no target, no charge");
+        for _ in 0..100 {
+            swim.aim(7, false);
+        }
+        assert_eq!(swim.charged, 80, "a guardian charges for 80 ticks");
+        assert!((swim.pose(0.0).charge - 1.0).abs() < 1e-6);
+        swim.aim(8, true);
+        assert_eq!(swim.charged, 1, "a new target restarts the charge");
+        assert!((swim.pose(0.5).charge - 1.5 / 60.0).abs() < 1e-6);
+        for _ in 0..100 {
+            swim.aim(8, true);
+        }
+        assert_eq!(swim.charged, 60, "an elder charges for 60 ticks");
+        swim.aim(0, true);
+        assert_eq!(swim.charged, 0, "losing the target resets it");
     }
 
     #[test]

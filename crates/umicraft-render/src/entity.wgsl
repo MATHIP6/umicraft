@@ -233,6 +233,19 @@ fn fs_additive(in: AdditiveOut) -> @location(0) vec4<f32> {
     return vec4<f32>(rgb * (1.0 - fog_at(in.world_position)), 1.0);
 }
 
+// The guardian beam (MCP `RenderGuardian.doRender`): unlit and not blended
+// (`disableLighting`, `disableBlend`), alpha tested as the models are, its
+// colour the tint of `vs_additive`.
+@fragment
+fn fs_tinted(in: AdditiveOut) -> @location(0) vec4<f32> {
+    let tex = textureSample(entity_texture, entity_sampler, in.uv);
+    if (tex.a < 0.1) {
+        discard;
+    }
+    let rgb = tex.rgb * in.tint;
+    return vec4<f32>(mix(rgb, camera.fog_color, fog_at(in.world_position)), 1.0);
+}
+
 // The shadow under an entity (MCP `Render.renderShadow`): a texture of black
 // fading to nothing, whose opacity is computed per vertex by the client and
 // packed in the low byte of `light`.

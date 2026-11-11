@@ -35,6 +35,7 @@ use umicraft_game::combat::{hurt_roll, ClickViewer, HitStar};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
+use umicraft_game::entity::guardian_beam::{aim_guardians, BeamTarget};
 use umicraft_game::entity::leash::{leash_entities, LeashFrame};
 use umicraft_game::entity::light::{eye_light, light_entities};
 use umicraft_game::entity::nametag::mob_tag;
@@ -1418,6 +1419,17 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         hanging: false,
     };
     leash_entities(&mut entities, Some((EntityId(game.entity_id), me)));
+    // The guardians beam at the local player too, from the feet of the two
+    // last ticks (the view is the orbit camera in the third person).
+    let me = game.state.as_ref().map(|state| {
+        let target = BeamTarget::of_feet(
+            state.previous_position(),
+            state.player().position,
+            umicraft_game::physics::PLAYER_HEIGHT,
+        );
+        (EntityId(game.entity_id), target)
+    });
+    aim_guardians(&mut entities, me);
     let hand_light = game.world.as_ref().map_or(LightLevel::FULL_SKY, |world| {
         rail_entities(world, &mut entities);
         light_entities(world, &mut entities);
@@ -2519,6 +2531,9 @@ fn spawn_mob_particles(game: &mut Game) {
     };
     for entity in game.entities.entities().values() {
         game.particles.spawn_mob_tick(entity, world, &filter);
+        if let Some(end) = game.entities.beam_end(entity) {
+            game.particles.spawn_beam_bubbles(entity, end, &filter);
+        }
     }
     for body in game.entities.drain_deaths() {
         game.particles.spawn_death_puff(&body, &filter);

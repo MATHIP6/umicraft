@@ -213,6 +213,7 @@ impl EntityRecord {
             flight_alive: self.health.is_none_or(|health| health > 0.0),
             leash_holder: self.leash,
             leash: None,
+            beam: None,
             age_ticks: self.age_ticks,
             frame_direction: self.frame_direction,
             frame_rotation: self.frame_rotation,

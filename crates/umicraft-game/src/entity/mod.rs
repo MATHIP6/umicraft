@@ -13,6 +13,7 @@ pub mod boss;
 pub mod cape;
 pub mod flags;
 pub mod flight;
+pub mod guardian_beam;
 pub mod horse_state;
 pub mod item;
 pub mod kind;

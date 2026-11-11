@@ -550,6 +550,9 @@ pub enum TextureSlot {
     DragonBeam,
     /// The beam of a beacon (`entity/beacon_beam.png`), which scrolls up.
     BeaconBeam,
+    /// The beam of a guardian (`entity/guardian_beam.png`), which scrolls
+    /// along it and is drawn opaque in the tinted pipeline.
+    GuardianBeam,
     /// The sky layer of an end portal (`environment/end_sky.png`).
     EndSky,
     /// The swirl layers of an end portal (`entity/end_portal.png`).
@@ -727,6 +730,13 @@ impl TextureSlot {
                 | Self::EndSky
                 | Self::EndPortal
         )
+    }
+
+    /// Whether the texture repeats past its edge: the glowing layers and the
+    /// guardian beam, whose coordinates scroll (`GL_REPEAT`).
+    #[must_use]
+    pub const fn repeats(self) -> bool {
+        self.is_additive() || matches!(self, Self::GuardianBeam)
     }
 
     /// Whether this is an armour texture, which stays visible on an invisible

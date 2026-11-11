@@ -407,6 +407,8 @@ pub struct Renderer {
     ghost_batches: BatchBuffer,
     /// The elder guardian apparition, drawn translucent with depth.
     apparition_batches: BatchBuffer,
+    /// The guardian beams, opaque and coloured by their tint.
+    tinted_batches: BatchBuffer,
     /// The shadows under the entities.
     shadow_batches: BatchBuffer,
 }
@@ -1068,6 +1070,7 @@ impl Renderer {
             glint_batches: BatchBuffer::default(),
             ghost_batches: BatchBuffer::default(),
             apparition_batches: BatchBuffer::default(),
+            tinted_batches: BatchBuffer::default(),
             shadow_batches: BatchBuffer::default(),
         })
     }
@@ -2261,6 +2264,12 @@ impl Renderer {
         self.ghost_batches.set(&self.device, &self.queue, batches);
     }
 
+    /// Uploads the guardian beams: opaque, unlit vertices whose light word
+    /// is their red, green and blue.
+    pub fn upload_tinted_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.tinted_batches.set(&self.device, &self.queue, batches);
+    }
+
     /// Uploads the elder guardian apparition (its model, translucent by the
     /// opacity bits of its vertices, writing depth).
     pub fn upload_apparition_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
@@ -2303,6 +2312,7 @@ impl Renderer {
         self.glint_batches.clear();
         self.ghost_batches.clear();
         self.apparition_batches.clear();
+        self.tinted_batches.clear();
         self.shadow_batches.clear();
     }
 
@@ -2676,6 +2686,13 @@ impl Renderer {
             let batches = self.entity_batches.iter();
             self.entity_renderer
                 .render(&mut pass, &self.local_camera_bind_group, batches);
+        }
+
+        // The guardian beams, opaque like the entities they join.
+        if !self.tinted_batches.is_empty() {
+            let batches = self.tinted_batches.iter();
+            self.entity_renderer
+                .render_tinted(&mut pass, &self.local_camera_bind_group, batches);
         }
 
         // The invisible entities a spectator sees, over the opaque ones.

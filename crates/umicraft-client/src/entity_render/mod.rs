@@ -30,6 +30,7 @@ mod far_origin_tests;
 mod fire;
 pub(crate) mod fishing;
 mod glow;
+mod guardian_beam;
 mod hand;
 mod horse_coat;
 mod mobs;
@@ -94,6 +95,8 @@ struct MeshedEntities {
     glint: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The invisible entities a spectator sees, drawn translucent.
     ghost: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The guardian beams, opaque and coloured by their tint.
+    tinted: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The shadows under the entities.
     shadows: HashMap<TextureSlot, Vec<EntityVertex>>,
 }
@@ -110,9 +113,13 @@ fn mesh_entities_with(
     let mut additive: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut glint: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut ghost: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut tinted: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut shadows: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
+        // A beam can be in view while its guardian is not
+        // (`RenderGuardian.shouldRender`).
+        guardian_beam::add_beam(&mut tinted, ent);
         // What the player cannot see is not meshed; `snapshots` stays whole for the
         // entities that read another one (a bobber, a leash, a crystal beam).
         if view.is_some_and(|view| cull::out_of_view(ent, view)) {
@@ -174,6 +181,7 @@ fn mesh_entities_with(
         additive,
         glint,
         ghost,
+        tinted,
         shadows,
     }
 }
@@ -353,6 +361,7 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                beam: None,
                 flight: None,
                 squish: 0.0,
                 squid: Default::default(),
@@ -400,6 +409,7 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                beam: None,
                 flight: None,
                 squish: 0.0,
                 squid: Default::default(),
@@ -447,6 +457,7 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                beam: None,
                 flight: None,
                 squish: 0.0,
                 squid: Default::default(),
@@ -495,6 +506,7 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                beam: None,
                 flight: None,
                 squish: 0.0,
                 squid: Default::default(),

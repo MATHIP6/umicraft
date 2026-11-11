@@ -12,6 +12,7 @@ use super::anim::{Animation, BedPose, SquidPose};
 use super::cape::{cape_angles, CapeAngles};
 use super::flags::EntityFlags;
 use super::flight::{DragonFlight, DragonPose};
+use super::guardian_beam::BeamTarget;
 use super::horse_state::{HorsePose, HorseState};
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
@@ -117,6 +118,9 @@ pub struct EntityFrameData {
     pub leash_holder: Option<EntityId>,
     /// Where the holder is, found by [`super::leash::leash_entities`].
     pub leash: Option<LeashFrame>,
+    /// What a guardian beams at, found by
+    /// [`super::guardian_beam::aim_guardians`].
+    pub beam: Option<BeamTarget>,
     /// Ticks lived at the current simulation tick.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -182,6 +186,7 @@ impl EntityFrameData {
             fishing: self.fishing,
             riding: self.riding,
             leash: self.leash.map(|holder| holder.at(a, origin)),
+            beam: self.beam.map(|target| target.at(a, origin)),
             local: self.local,
             ghost_visible: self.ghost_visible,
             squish: self.squish,
@@ -271,6 +276,8 @@ pub struct EntityRenderSnapshot {
     pub riding: bool,
     /// The holder of the leash of the entity, if it is leashed.
     pub leash: Option<LeashAnchor>,
+    /// The middle of what a guardian beams at, relative to [`Self::origin`].
+    pub beam: Option<Vec3>,
     /// The flight pose of an ender dragon: its wing phase and the path it flew.
     pub flight: Option<DragonPose>,
     /// How much a slime or magma cube is squashed (`0` at rest, positive when
@@ -344,6 +351,7 @@ impl EntityRenderSnapshot {
             fishing: false,
             riding: false,
             leash: None,
+            beam: None,
             flight: None,
             squish: 0.0,
             squid: Default::default(),

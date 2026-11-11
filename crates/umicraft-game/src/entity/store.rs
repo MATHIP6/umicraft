@@ -740,6 +740,29 @@ impl EntityStore {
         Some(entity.position + DVec3::new(0.0, eye, 0.0))
     }
 
+    /// Where the beam of `guardian` ends this tick: the middle of the height
+    /// of the living entity it beams at, the local player included
+    /// (`getTargetedEntity`, `posY + height * 0.5`). `None` without a
+    /// target, or with one that is not tracked.
+    #[must_use]
+    pub fn beam_end(&self, guardian: &EntityRecord) -> Option<DVec3> {
+        let Variant::Guardian { target, .. } = guardian.meta.variant else {
+            return None;
+        };
+        if target == 0 {
+            return None;
+        }
+        if let Some((_, feet)) = self.viewer.filter(|(viewer, _)| viewer.0 == target) {
+            return Some(feet + DVec3::Y * (crate::physics::PLAYER_HEIGHT * 0.5));
+        }
+        let entity = self.entities.get(&EntityId(target))?;
+        if !entity.kind.is_living() {
+            return None;
+        }
+        let (_, height) = crate::combat::hitbox::body_size(entity)?;
+        Some(entity.position + DVec3::Y * (height * 0.5))
+    }
+
     /// Takes the bodies whose death fall ended since the last call: each
     /// goes up in a puff of smoke (`ParticleEngine::spawn_death_puff`).
     pub fn drain_deaths(&mut self) -> std::vec::Drain<'_, MobBody> {
@@ -806,10 +829,15 @@ impl EntityStore {
 }
 
 /// One tick of a guardian's tail and spikes, which depend on the water it is
-/// in. The reference tests its box shrunk by 0.4 vertically
+/// in, and of the charge of its beam. The reference tests its box shrunk by 0.4 vertically
 /// (`Entity.isInWater`); the block at the middle of its height stands in.
 fn swim_guardian<S: crate::shapes::BlockSource + ?Sized>(entity: &mut EntityRecord, world: &S) {
-    let Variant::Guardian { moving, .. } = entity.meta.variant else {
+    let Variant::Guardian {
+        moving,
+        elder,
+        target,
+    } = entity.meta.variant
+    else {
         return;
     };
     let Some((_, height)) = crate::combat::hitbox::body_size(entity) else {
@@ -824,6 +852,7 @@ fn swim_guardian<S: crate::shapes::BlockSource + ?Sized>(entity: &mut EntityReco
     let in_water = umicraft_world::fluid::Liquid::Water.contains(block);
     if let MobState::Guardian(swim) = &mut entity.mob {
         swim.tick(in_water, moving);
+        swim.aim(target, elder);
     }
 }
 

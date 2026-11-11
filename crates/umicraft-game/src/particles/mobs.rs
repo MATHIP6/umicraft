@@ -423,6 +423,39 @@ impl ParticleEngine {
         }
     }
 
+    /// `EntityGuardian.onLivingUpdate`: bubbles strung along the beam of a
+    /// guardian to `end`, the middle of its target, closer together as the
+    /// beam charges. Call it once per tick for each guardian with a target
+    /// ([`crate::entity::EntityStore::beam_end`]).
+    pub fn spawn_beam_bubbles(
+        &mut self,
+        guardian: &EntityRecord,
+        end: DVec3,
+        filter: &SpawnFilter,
+    ) {
+        let (MobState::Guardian(swim), Some(body)) = (guardian.mob, MobBody::of(guardian)) else {
+            return;
+        };
+        // `getEyeHeight`: half its height.
+        let eyes = body.feet + DVec3::Y * (body.height * 0.5);
+        let charge = f64::from(swim.charge(0.0));
+        let to_end = end - eyes;
+        let distance = to_end.length();
+        let direction = to_end.normalize_or_zero();
+        let mut along = self.rng().next_double();
+        // The step is taken before each bubble, so the last one can fall a
+        // little past the target, as in the reference.
+        while along < distance {
+            along += 1.8 - charge + self.rng().next_double() * (1.7 - charge);
+            self.emit(
+                ParticleKind::Bubble,
+                eyes + direction * along,
+                DVec3::ZERO,
+                filter,
+            );
+        }
+    }
+
     /// `EntitySlime.onUpdate` for a slime that just landed: `8 * size`
     /// particles on a ring around its feet, pieces of slime ball for a slime
     /// (`EntitySlime.getParticleType`) and flames for a magma cube
@@ -681,6 +714,42 @@ mod tests {
             swim.tick(true, true);
         }
         assert_eq!(after_tick(&guardian), 2);
+    }
+
+    #[test]
+    fn a_charging_beam_is_strung_with_bubbles_up_to_its_target() {
+        let mut guardian = mob(EntityKind::Guardian);
+        guardian.meta.variant = Variant::Guardian {
+            moving: false,
+            elder: false,
+            target: 2,
+        };
+        let eyes = guardian.position + DVec3::Y * (f64::from(0.85_f32) * 0.5);
+        let end = eyes + DVec3::new(10.0, 0.0, 0.0);
+        let mut engine = ParticleEngine::new(7);
+        engine.spawn_beam_bubbles(&guardian, end, &filter());
+        // A step of 1.8 to 3.5 blocks at the start of the charge: 3 to 6.
+        let start = engine.len();
+        assert!((3..=6).contains(&start), "{start}");
+        let bubbles = engine.particles(Layer::Misc, false);
+        assert_eq!(bubbles.len(), start);
+        for bubble in bubbles {
+            let offset = bubble.position - eyes;
+            assert!(
+                offset.y.abs() < 1e-9 && offset.z.abs() < 1e-9,
+                "on the beam"
+            );
+            assert!(offset.x > 0.0 && offset.x < 13.5, "{offset}");
+        }
+        // Fully charged the step is 0.8 to 1.5 blocks: more bubbles.
+        if let MobState::Guardian(swim) = &mut guardian.mob {
+            for _ in 0..80 {
+                swim.aim(2, false);
+            }
+        }
+        let mut engine = ParticleEngine::new(7);
+        engine.spawn_beam_bubbles(&guardian, end, &filter());
+        assert!(engine.len() > start + 2, "{} vs {start}", engine.len());
     }
 
     #[test]

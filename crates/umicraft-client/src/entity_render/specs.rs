@@ -192,6 +192,13 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (vec![0; 4], 1, 1),
         },
         TextureSpec {
+            slot: TextureSlot::GuardianBeam,
+            jar_path: "assets/minecraft/textures/entity/guardian_beam.png",
+            // An original stand-in: plain white, so the beam shows as its
+            // colour alone.
+            fallback: || (vec![255; 4], 1, 1),
+        },
+        TextureSpec {
             slot: TextureSlot::EndSky,
             jar_path: "assets/minecraft/textures/environment/end_sky.png",
             fallback: || (vec![0; 4], 1, 1),

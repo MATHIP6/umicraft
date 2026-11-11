@@ -92,6 +92,11 @@ from the `Entity Status` arm (`spawn_status_particles`).
   showed its back (drawn without depth in the spectator's ghost pipeline; it
   now has an apparition pipeline that writes depth). Still to do: hang it on
   the player, not the orbit camera, in the third person.
+- P7 (done 2026-11-11): the guardian beam (`RenderGuardian.doRender`): the
+  charge timer (60 ticks elder, 80 otherwise, restarted by a new target), the
+  target resolved like a leash holder (the local player included), the beam
+  mesh in a new tinted pipeline (ADR-0070), the bubbles along it, and the
+  elder guardian's 1.9975 box.
 - Still to do: the impact particles of a thrown egg or snowball, and the
   flakes of a broken tool.
 - Not a bug: the enderman teleport trail comes from the server-side

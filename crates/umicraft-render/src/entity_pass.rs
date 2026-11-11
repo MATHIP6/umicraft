@@ -180,6 +180,8 @@ pub struct EntityRenderer {
     /// The translucent pipeline of the elder guardian apparition, which
     /// writes depth unlike the spectator's ghosts.
     apparition_pipeline: wgpu::RenderPipeline,
+    /// The opaque, unlit pipeline of the guardian beam, coloured by a tint.
+    tinted_pipeline: wgpu::RenderPipeline,
     /// The pipeline of the shadows under the entities.
     shadow_pipeline: wgpu::RenderPipeline,
     /// The pipeline of item icons, lit by the fixed GUI lights.
@@ -261,6 +263,7 @@ impl EntityRenderer {
         let ghost_pipeline = build_pipeline(device, &pipeline_layout, &shader, format, GHOST);
         let apparition_pipeline =
             build_pipeline(device, &pipeline_layout, &shader, format, APPARITION);
+        let tinted_pipeline = build_pipeline(device, &pipeline_layout, &shader, format, TINTED);
         let shadow_pipeline = build_pipeline(
             device,
             &pipeline_layout,
@@ -332,6 +335,7 @@ impl EntityRenderer {
             glint_pipeline,
             ghost_pipeline,
             apparition_pipeline,
+            tinted_pipeline,
             shadow_pipeline,
             icon_pipeline,
             texture_layout,
@@ -400,6 +404,17 @@ impl EntityRenderer {
         batches: impl IntoIterator<Item = (wgpu::BufferSlice<'a>, u32, &'a wgpu::BindGroup)>,
     ) {
         self.draw_batches(pass, &self.ghost_pipeline, camera_bind_group, batches);
+    }
+
+    /// Renders the guardian beams: opaque and unlit, each vertex coloured by
+    /// the tint in its light word, writing depth.
+    pub fn render_tinted<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        camera_bind_group: &'a wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (wgpu::BufferSlice<'a>, u32, &'a wgpu::BindGroup)>,
+    ) {
+        self.draw_batches(pass, &self.tinted_pipeline, camera_bind_group, batches);
     }
 
     /// Renders the elder guardian apparition: translucent like the ghosts,
@@ -539,6 +554,17 @@ const APPARITION: PipelineKind = PipelineKind {
     label: "entity apparition pipeline",
     depth_write: true,
     ..GHOST
+};
+
+/// The guardian beam: the tint of the glowing layers, but opaque and writing
+/// depth (`RenderGuardian.doRender`: `disableBlend`, `depthMask(true)`).
+const TINTED: PipelineKind = PipelineKind {
+    label: "entity tinted pipeline",
+    vertex: "vs_additive",
+    fragment: "fs_tinted",
+    blend: wgpu::BlendState::REPLACE,
+    depth_write: true,
+    depth_compare: wgpu::CompareFunction::LessEqual,
 };
 
 // Regression, checked when compiling: the apparition was drawn in the ghost
