@@ -324,17 +324,14 @@ impl EntityTextures {
             self.viewer_is_spectator.get(),
             (self.camera.get(), self.cull_view.get()),
         );
-        if let Some(progress) = self.appearance.get() {
-            let haunting = super::appearance::elder_guardian(
+        let apparition = self.appearance.get().map(|progress| {
+            super::appearance::elder_guardian(
                 self,
                 self.camera.get(),
                 (self.view_yaw.get(), self.view_pitch.get()),
                 progress,
-            );
-            for (slot, vertices) in haunting {
-                meshed.ghost.entry(slot).or_default().extend(vertices);
-            }
-        }
+            )
+        });
         let block_entities = self.block_entities.take();
         for (slot, vertices) in block_entities.solid {
             meshed.solid.entry(slot).or_default().extend(vertices);
@@ -350,64 +347,23 @@ impl EntityTextures {
         );
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
-        let mut solid: Vec<_> = meshed
-            .solid
-            .iter()
-            .filter(|(_, verts)| !verts.is_empty())
-            .filter_map(|(slot, verts)| {
-                textures
-                    .get(slot)
-                    .map(|tex| (verts.as_slice(), tex.bind_group()))
-            })
-            .collect();
+        let mut solid = bound_batches(&meshed.solid, &textures);
         solid.extend(extra.iter().map(|b| (b.vertices.as_slice(), &b.bind_group)));
         renderer.upload_entities(&solid);
-        let additive: Vec<_> = meshed
-            .additive
-            .iter()
-            .filter(|(_, verts)| !verts.is_empty())
-            .filter_map(|(slot, verts)| {
-                textures
-                    .get(slot)
-                    .map(|tex| (verts.as_slice(), tex.bind_group()))
-            })
-            .collect();
+        let additive = bound_batches(&meshed.additive, &textures);
         renderer.upload_additive_entities(&additive);
-        let glint: Vec<_> = meshed
-            .glint
-            .iter()
-            .filter(|(_, verts)| !verts.is_empty())
-            .filter_map(|(slot, verts)| {
-                textures
-                    .get(slot)
-                    .map(|tex| (verts.as_slice(), tex.bind_group()))
-            })
-            .collect();
+        let glint = bound_batches(&meshed.glint, &textures);
         renderer.upload_glint_entities(&glint);
-        let ghost: Vec<_> = meshed
-            .ghost
-            .iter()
-            .filter(|(_, verts)| !verts.is_empty())
-            .filter_map(|(slot, verts)| {
-                textures
-                    .get(slot)
-                    .map(|tex| (verts.as_slice(), tex.bind_group()))
-            })
-            .collect();
+        let ghost = bound_batches(&meshed.ghost, &textures);
         renderer.upload_ghost_entities(&ghost);
+        let apparition = apparition
+            .as_ref()
+            .map_or_else(Vec::new, |meshes| bound_batches(meshes, &textures));
+        renderer.upload_apparition_entities(&apparition);
         if !self.shadows_enabled.get() {
             meshed.shadows.clear();
         }
-        let shadows: Vec<_> = meshed
-            .shadows
-            .iter()
-            .filter(|(_, verts)| !verts.is_empty())
-            .filter_map(|(slot, verts)| {
-                textures
-                    .get(slot)
-                    .map(|tex| (verts.as_slice(), tex.bind_group()))
-            })
-            .collect();
+        let shadows = bound_batches(&meshed.shadows, &textures);
         renderer.upload_shadow_entities(&shadows);
     }
 
@@ -489,6 +445,23 @@ impl EntityTextures {
             self.textures.borrow_mut().insert(*slot, texture);
         }
     }
+}
+
+/// The batches of `meshes` that have vertices, each with the bind group of
+/// its texture; a slot whose texture is not loaded is left out.
+fn bound_batches<'a>(
+    meshes: &'a HashMap<TextureSlot, Vec<EntityVertex>>,
+    textures: &'a HashMap<TextureSlot, EntityTexture>,
+) -> Vec<(&'a [EntityVertex], &'a wgpu::BindGroup)> {
+    meshes
+        .iter()
+        .filter(|(_, verts)| !verts.is_empty())
+        .filter_map(|(slot, verts)| {
+            textures
+                .get(slot)
+                .map(|tex| (verts.as_slice(), tex.bind_group()))
+        })
+        .collect()
 }
 
 /// The texture of the first-person arm, whether its model is slim and the

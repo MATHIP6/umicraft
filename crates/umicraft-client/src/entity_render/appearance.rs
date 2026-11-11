@@ -5,7 +5,10 @@
 //!
 //! The particle is only a clock; this draws the elder guardian model from it:
 //! it swings from above the player's head down to their feet over its 30
-//! ticks, at 5 % opacity at both ends and 55 % in the middle.
+//! ticks, at 5 % opacity at both ends and 55 % in the middle. It is drawn in
+//! a pipeline of its own that writes depth, as the reference does: the ghost
+//! pipeline of the spectator does not, which showed the back of the model
+//! through its face.
 
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -13,15 +16,18 @@ use std::f32::consts::PI;
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityId, EntityKind, EntityRenderSnapshot};
+use umicraft_game::physics::EYE_HEIGHT;
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::EntityVertex;
 
 use super::skins::SkinLookup;
 use super::{mobs, transform, transform_vertex, FULL_LIGHT};
 
-/// Height of the point it swings about, above the camera (`translate(0, 1.8,
-/// 0)`).
-const PIVOT_HEIGHT: f32 = 1.8;
+/// Height of the point it swings about, above the eye (`translate(0, 1.8,
+/// 0)`). The reference translates from the player's feet, not the eye:
+/// `EntityRenderer.orientCamera` ends with `translate(0, -eyeHeight, 0)`, so
+/// the particle pass draws relative to the feet (MCP `EntityRenderer.java:736`).
+const PIVOT_ABOVE_EYE: f32 = 1.8 - EYE_HEIGHT as f32;
 /// Where the model sits from that point (`translate(0, -0.4, -1.5)`).
 const MODEL_OFFSET: Vec3 = Vec3::new(0.0, -0.4, -1.5);
 /// The scale it is drawn at (`MobAppearance.java:57`).
@@ -44,13 +50,15 @@ fn opacity_bits(progress: f32) -> u32 {
 /// The matrix that puts the model in the world: it hangs on the camera, turns
 /// with its look and swings down as `progress` runs (MCP
 /// `MobAppearance.renderParticle`). `yaw` and `pitch` are the camera's, in
-/// radians and its convention (zero yaw looks north).
+/// radians and its convention (zero yaw looks north, a positive pitch looks
+/// up).
 fn placement(camera: Vec3, yaw: f32, pitch: f32, progress: f32) -> Mat4 {
-    // The reference's own yaw is clockwise from south.
+    // The reference's own yaw is clockwise from south, and its pitch is
+    // positive looking down (`game::camera_angles` negates it).
     let look_yaw = (yaw - PI).to_degrees();
-    let look_pitch = pitch.to_degrees();
+    let look_pitch = -pitch.to_degrees();
     Mat4::from_translation(camera)
-        * Mat4::from_translation(Vec3::new(0.0, PIVOT_HEIGHT, 0.0))
+        * Mat4::from_translation(Vec3::new(0.0, PIVOT_ABOVE_EYE, 0.0))
         * Mat4::from_rotation_y((180.0 - look_yaw).to_radians())
         * Mat4::from_rotation_x((SWING_START - SWING_SWEEP * progress - look_pitch).to_radians())
         * Mat4::from_translation(MODEL_OFFSET)
@@ -58,7 +66,7 @@ fn placement(camera: Vec3, yaw: f32, pitch: f32, progress: f32) -> Mat4 {
 }
 
 /// The vertices of the elder guardian at `progress` of its apparition, by
-/// texture, to be drawn as a ghost layer. `camera` is the eye in the space of
+/// texture, to be drawn translucent with depth (`render_apparition`). `camera` is the eye in the space of
 /// the entity vertices.
 #[must_use]
 pub(super) fn elder_guardian(
@@ -112,7 +120,8 @@ mod tests {
             .expect("the elder texture");
         assert!(!vertices.is_empty());
         // At 0.4 the swing is level: the guardian is a block and a half
-        // ahead (south, +z) and above the eyes.
+        // ahead (south, +z), at the height of the eyes. Regression: it was
+        // pivoted 1.8 above the eye instead of the feet and hung over the view.
         let centre = vertices
             .iter()
             .map(|vertex| Vec3::from(vertex.position))
@@ -120,7 +129,23 @@ mod tests {
             / vertices.len() as f32;
         let offset = centre - camera;
         assert!((offset.z - 1.5).abs() < 0.5, "{offset}");
-        assert!(offset.x.abs() < 0.5 && offset.y > 1.0, "{offset}");
+        assert!(offset.x.abs() < 0.5 && offset.y.abs() < 0.5, "{offset}");
+    }
+
+    #[test]
+    fn it_stays_ahead_of_a_camera_that_looks_down() {
+        // Regression: the camera pitch (positive up) was used as the
+        // reference's (positive down), so looking down put it behind the head.
+        let camera = Vec3::ZERO;
+        let meshes = elder_guardian(&NoSkins, camera, (PI, -1.4), 0.4);
+        let vertices = &meshes[&TextureSlot::GuardianElder];
+        let centre = vertices
+            .iter()
+            .map(|vertex| Vec3::from(vertex.position))
+            .sum::<Vec3>()
+            / vertices.len() as f32;
+        assert!(centre.y < -1.0, "{centre}");
+        assert!(centre.z.abs() < 0.6, "{centre}");
     }
 
     #[test]

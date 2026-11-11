@@ -177,6 +177,9 @@ pub struct EntityRenderer {
     glint_pipeline: wgpu::RenderPipeline,
     /// The translucent pipeline of invisible entities seen by a spectator.
     ghost_pipeline: wgpu::RenderPipeline,
+    /// The translucent pipeline of the elder guardian apparition, which
+    /// writes depth unlike the spectator's ghosts.
+    apparition_pipeline: wgpu::RenderPipeline,
     /// The pipeline of the shadows under the entities.
     shadow_pipeline: wgpu::RenderPipeline,
     /// The pipeline of item icons, lit by the fixed GUI lights.
@@ -255,20 +258,9 @@ impl EntityRenderer {
                 depth_compare: wgpu::CompareFunction::LessEqual,
             },
         );
-        let ghost_pipeline = build_pipeline(
-            device,
-            &pipeline_layout,
-            &shader,
-            format,
-            PipelineKind {
-                label: "entity ghost pipeline",
-                vertex: "vs_main",
-                fragment: "fs_ghost",
-                blend: wgpu::BlendState::ALPHA_BLENDING,
-                depth_write: false,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-            },
-        );
+        let ghost_pipeline = build_pipeline(device, &pipeline_layout, &shader, format, GHOST);
+        let apparition_pipeline =
+            build_pipeline(device, &pipeline_layout, &shader, format, APPARITION);
         let shadow_pipeline = build_pipeline(
             device,
             &pipeline_layout,
@@ -339,6 +331,7 @@ impl EntityRenderer {
             additive_pipeline,
             glint_pipeline,
             ghost_pipeline,
+            apparition_pipeline,
             shadow_pipeline,
             icon_pipeline,
             texture_layout,
@@ -407,6 +400,17 @@ impl EntityRenderer {
         batches: impl IntoIterator<Item = (wgpu::BufferSlice<'a>, u32, &'a wgpu::BindGroup)>,
     ) {
         self.draw_batches(pass, &self.ghost_pipeline, camera_bind_group, batches);
+    }
+
+    /// Renders the elder guardian apparition: translucent like the ghosts,
+    /// but writing depth so that its nearest faces hide the far ones.
+    pub fn render_apparition<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        camera_bind_group: &'a wgpu::BindGroup,
+        batches: impl IntoIterator<Item = (wgpu::BufferSlice<'a>, u32, &'a wgpu::BindGroup)>,
+    ) {
+        self.draw_batches(pass, &self.apparition_pipeline, camera_bind_group, batches);
     }
 
     /// Renders the enchantment glint: added like the other glowing layers, but
@@ -516,6 +520,30 @@ struct PipelineKind {
     depth_write: bool,
     depth_compare: wgpu::CompareFunction,
 }
+
+/// The invisible entities a spectator sees: see-through, so no depth
+/// (`RendererLivingEntity.renderModel`: `depthMask(false)`).
+const GHOST: PipelineKind = PipelineKind {
+    label: "entity ghost pipeline",
+    vertex: "vs_main",
+    fragment: "fs_ghost",
+    blend: wgpu::BlendState::ALPHA_BLENDING,
+    depth_write: false,
+    depth_compare: wgpu::CompareFunction::LessEqual,
+};
+
+/// The elder guardian apparition: translucent like [`GHOST`], but
+/// `MobAppearance.renderParticle` draws with `depthMask(true)`, so its nearest
+/// faces hide the far ones and its face shows rather than its back.
+const APPARITION: PipelineKind = PipelineKind {
+    label: "entity apparition pipeline",
+    depth_write: true,
+    ..GHOST
+};
+
+// Regression, checked when compiling: the apparition was drawn in the ghost
+// pipeline, without depth, and its back showed through its face.
+const _: () = assert!(APPARITION.depth_write && !GHOST.depth_write);
 
 fn build_pipeline(
     device: &wgpu::Device,

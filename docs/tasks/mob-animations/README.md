@@ -86,8 +86,12 @@ from the `Entity Status` arm (`spawn_status_particles`).
   (2002) and an ender eye (2003), and the crumbs of an eating player, local
   or remote.
 - P6 (done): the elder guardian's `MobAppearance` (game state 10): a 30-tick
-  particle clock, the elder guardian model drawn from it as a ghost layer with
-  its own opacity, and the curse sound.
+  particle clock, the elder guardian model drawn from it translucent with its
+  own opacity, and the curse sound. Fixed 2026-11-11: it hung 1.6 blocks too
+  high (pivot from the eye, not the feet), followed the pitch backwards, and
+  showed its back (drawn without depth in the spectator's ghost pipeline; it
+  now has an apparition pipeline that writes depth). Still to do: hang it on
+  the player, not the orbit camera, in the third person.
 - Still to do: the impact particles of a thrown egg or snowball, and the
   flakes of a broken tool.
 - Not a bug: the enderman teleport trail comes from the server-side
