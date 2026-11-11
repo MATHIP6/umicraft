@@ -16,6 +16,7 @@
 //! 3. Add the kind to the matching family builder in [`mobs`].
 
 mod animals;
+mod appearance;
 mod armor;
 mod arrows;
 mod banner_cache;
@@ -356,6 +357,7 @@ mod tests {
                 squish: 0.0,
                 squid: Default::default(),
                 horse: None,
+                mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
                 rod_tip: None,
@@ -402,6 +404,7 @@ mod tests {
                 squish: 0.0,
                 squid: Default::default(),
                 horse: None,
+                mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
                 rod_tip: None,
@@ -448,6 +451,7 @@ mod tests {
                 squish: 0.0,
                 squid: Default::default(),
                 horse: None,
+                mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
                 rod_tip: None,
@@ -495,6 +499,7 @@ mod tests {
                 squish: 0.0,
                 squid: Default::default(),
                 horse: None,
+                mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
                 rod_tip: None,

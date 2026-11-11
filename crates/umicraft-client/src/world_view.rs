@@ -310,16 +310,25 @@ impl WorldView {
         Arc::clone(&self.view.weather.precipitation)
     }
 
+    /// How far through its life the elder guardian apparition is at
+    /// `partial_ticks` into the tick (`0..=1`), `None` while there is none
+    /// (MCP `MobAppearance.renderParticle`: `(age + partial) / maxAge`).
+    #[must_use]
+    pub fn mob_appearance(&self, partial_ticks: f32) -> Option<f32> {
+        crate::particle_view::mob_appearance(&self.view.particles, partial_ticks)
+    }
+
     /// The quads of the newest frame's particles at `partial_ticks` into the
     /// tick, for `Renderer::set_particles`. Block fragments find their sprite
-    /// in the bound terrain; the procedural terrain has none, so they are
-    /// left out. The centres are relative to `origin`, the render origin of the
-    /// camera (F2-1b).
+    /// in the bound terrain, the pieces of an item in `items`; the procedural
+    /// terrain has neither, so they are left out. The centres are relative to
+    /// `origin`, the render origin of the camera (F2-1b).
     pub fn particle_sprites_into(
         &self,
         out: &mut Vec<umicraft_render::ParticleSprite>,
         partial_ticks: f32,
         origin: glam::DVec3,
+        items: Option<&crate::item_icons::ItemResources>,
     ) {
         let context = self.mesher.model_context();
         crate::particle_view::sprites_into(
@@ -327,7 +336,10 @@ impl WorldView {
             &self.view.particles,
             partial_ticks,
             origin,
-            &|state| crate::particle_view::block_sprite(context?, state),
+            &crate::particle_view::Pictures {
+                blocks: |state| crate::particle_view::block_sprite(context?, state),
+                items: |id, damage| items?.particle_layer(id, damage),
+            },
         );
     }
 

@@ -393,6 +393,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             fallback: || (procedural_guardian_texture(), 64, 64),
         },
         TextureSpec {
+            slot: TextureSlot::GuardianElder,
+            jar_path: "assets/minecraft/textures/entity/guardian_elder.png",
+            fallback: || (procedural_guardian_texture(), 64, 64),
+        },
+        TextureSpec {
             slot: TextureSlot::Horse,
             jar_path: "assets/minecraft/textures/entity/horse/horse_white.png",
             fallback: || (procedural_horse_texture(), 128, 128),

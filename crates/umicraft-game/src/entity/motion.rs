@@ -8,6 +8,7 @@ use glam::DVec3;
 use super::angle::wrap_degrees;
 use super::kind::EntityKind;
 use super::meta::Variant;
+use super::mob_state::MobTick;
 use super::record::EntityRecord;
 
 /// Ticks over which a movement or teleport packet is applied
@@ -81,6 +82,11 @@ impl EntityRecord {
             self.horse
                 .tick(horse.eating(), horse.rearing(), horse.mouth_open());
         }
+        let begging = matches!(&self.meta.variant, Variant::Wolf(wolf) if wolf.begging);
+        self.mob.tick(MobTick {
+            on_ground: self.on_ground,
+            begging,
+        });
         if self.kind == EntityKind::Dragon {
             let alive = self.health.is_none_or(|health| health > 0.0);
             self.flight.get_or_insert_with(Default::default).tick(
@@ -111,19 +117,29 @@ pub struct Squish {
     /// What is drawn.
     pub factor: f32,
     was_on_ground: bool,
+    /// Whether the last tick was the one the entity touched the ground.
+    landed: bool,
 }
 
 impl Squish {
     /// One tick, after the entity has moved.
     pub fn tick(&mut self, on_ground: bool) {
         self.factor += (self.amount - self.factor) * 0.5;
-        if on_ground && !self.was_on_ground {
+        self.landed = on_ground && !self.was_on_ground;
+        if self.landed {
             self.amount = -0.5;
         } else if !on_ground && self.was_on_ground {
             self.amount = 1.0;
         }
         self.was_on_ground = on_ground;
         self.amount *= 0.6;
+    }
+
+    /// Whether the last [`Self::tick`] was the one the entity landed on (MCP
+    /// `onGround && !wasOnGround`), when a slime splashes.
+    #[must_use]
+    pub const fn just_landed(&self) -> bool {
+        self.landed
     }
 }
 

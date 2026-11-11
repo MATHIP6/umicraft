@@ -52,10 +52,10 @@ pub use dragon::{DragonModel, FlightFrame};
 pub use enderman::EndermanModel;
 pub use endermite::EndermiteModel;
 pub use ghast::{GhastModel, RENDER_SCALE as GHAST_SCALE};
-pub use guardian::GuardianModel;
+pub use guardian::{GuardianLook, GuardianModel};
 pub use horse::{HorseLook, HorseModel};
 pub use humanoid::HumanoidModel;
-pub use iron_golem::IronGolemModel;
+pub use iron_golem::{triangle_wave, GolemAction, IronGolemModel};
 pub use ocelot::{OcelotModel, OcelotPose};
 pub use pose::{ArmPose, HumanoidPose};
 pub use quadruped::QuadrupedModel;
@@ -67,7 +67,7 @@ pub use slime::SlimeModel;
 pub use snowman::SnowmanModel;
 pub use spider::SpiderModel;
 pub use squid::SquidModel;
-pub use villager::VillagerModel;
+pub use villager::{witch_nose_angles, VillagerModel};
 pub use wither::WitherModel;
 pub use wolf::WolfModel;
 
@@ -621,6 +621,8 @@ pub enum TextureSlot {
     Ghast,
     /// Guardian texture.
     Guardian,
+    /// Elder guardian texture.
+    GuardianElder,
     /// Horse texture.
     Horse,
     /// Ocelot texture.
@@ -886,5 +888,60 @@ mod tests {
         assert!(!RabbitModel::new().emit_mesh().is_empty());
         assert!(!SilverfishModel::new().emit_mesh().is_empty());
         assert!(!WitherModel::new().emit_mesh().is_empty());
+    }
+
+    #[test]
+    fn every_mob_tilts_its_head_down_when_it_looks_down() {
+        // Regression: several models kept the MCP sign of the head pitch,
+        // but flipping y turns x rotations around (`pose.rs` negates them
+        // for the biped), so a pig, cow, sheep, chicken, creeper or snowman
+        // looking down raised its head.
+        macro_rules! pitch_of {
+            ($model:expr) => {{
+                let mut model = $model;
+                model.set_angles(0.0, 0.0, 0.0, 30.0);
+                model.head.rotation[0]
+            }};
+        }
+        let mut snowman = SnowmanModel::new();
+        snowman.set_angles(0.0, 30.0);
+        let pitches = [
+            ("cow", pitch_of!(QuadrupedModel::cow())),
+            ("pig", pitch_of!(QuadrupedModel::pig())),
+            ("sheep", pitch_of!(SheepModel::new())),
+            ("chicken", pitch_of!(ChickenModel::new())),
+            ("creeper", pitch_of!(CreeperModel::new())),
+            ("snowman", snowman.head.rotation[0]),
+            ("villager", pitch_of!(VillagerModel::villager())),
+            ("wolf", pitch_of!(WolfModel::new())),
+            ("spider", pitch_of!(SpiderModel::new())),
+            ("enderman", {
+                let mut enderman = EndermanModel::new();
+                enderman.set_pose(&HumanoidPose {
+                    head_pitch: 30.0,
+                    ..HumanoidPose::default()
+                });
+                enderman.head.rotation[0]
+            }),
+            ("iron golem", pitch_of!(IronGolemModel::new())),
+            ("ocelot", pitch_of!(OcelotModel::new())),
+        ];
+        for (name, pitch) in pitches {
+            assert!(
+                (pitch + 30.0_f32.to_radians()).abs() < 1e-5,
+                "{name}: {pitch}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sheep_steps_like_the_other_quadrupeds() {
+        // Regression: the sheep legs swung opposite to the pig and cow.
+        let mut sheep = SheepModel::new();
+        sheep.set_angles(1.0, 1.0, 0.0, 0.0);
+        let mut cow = QuadrupedModel::cow();
+        cow.set_angles(1.0, 1.0, 0.0, 0.0);
+        assert!((sheep.leg1.rotation[0] - cow.leg1.rotation[0]).abs() < 1e-6);
+        assert!((sheep.leg2.rotation[0] - cow.leg2.rotation[0]).abs() < 1e-6);
     }
 }

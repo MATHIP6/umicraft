@@ -17,6 +17,7 @@ use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::limbs::LimbSwing;
 use super::meta::EntityMeta;
+use super::mob_state::MobState;
 use super::profile::PlayerProfile;
 use super::snapshot::EntityFrameData;
 
@@ -100,6 +101,9 @@ pub struct EntityRecord {
     pub flight: Option<DragonFlight>,
     /// How far a horse grazes, rears and opens its mouth.
     pub horse: HorseState,
+    /// The timers of a hop, a swing, a shake or a grazing, and a chicken's
+    /// wings.
+    pub mob: MobState,
     /// The squish of a slime or magma cube (MCP `EntitySlime.squishFactor`).
     pub squish: super::motion::Squish,
     /// Whether this is the body of the local player (MCP `EntityPlayerSP`).
@@ -200,6 +204,7 @@ impl EntityRecord {
             flight: self.flight.clone(),
             squish: self.squish.factor,
             horse: (self.kind == EntityKind::Horse).then_some(self.horse),
+            mob: self.mob,
             ridden: false,
             block_lights: Arc::default(),
             rod_tip: None,
@@ -256,6 +261,7 @@ impl EntityRecord {
             flight: None,
             squish: Default::default(),
             horse: HorseState::new(u64::from(id.0.unsigned_abs())),
+            mob: MobState::for_kind(kind, id.0.unsigned_abs()),
             local: false,
             ghost_visible: false,
             age_ticks: 0,

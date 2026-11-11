@@ -12,6 +12,8 @@
 //! | `block_effects` | the fragments of a broken or hit block |
 //! | `effect` | the particles of `playAuxSFX` (`Effect` packet) |
 //! | `explosion` | the particles of an `Explosion` packet |
+//! | `crumbs` | the crumbs of an eating player |
+//! | `mobs` | the particles mobs give off by themselves (smoke, sparks, hearts) |
 //! | `spawn` | [`ParticleSetting`], the range filter and the `Particle` packet |
 //! | `engine` | [`ParticleEngine`], the buckets, the 4000 cap and the tick |
 //!
@@ -22,16 +24,20 @@
 pub mod ambient;
 pub mod behaviours;
 mod block_effects;
+mod crumbs;
 mod effect;
 mod engine;
 mod explosion;
 mod kind;
+mod mobs;
 mod particle;
 mod spawn;
 
 pub use behaviours::{create, firework_spark, Behaviour, SparkStyle, TickContext};
+pub use crumbs::{is_bite_tick, Eater};
 pub use effect::EffectContext;
 pub use engine::{ParticleEngine, MAX_PER_BUCKET};
 pub use kind::ParticleKind;
+pub use mobs::MobBody;
 pub use particle::{Layer, Lighting, Particle, Texture};
 pub use spawn::{ParticleSetting, SpawnFilter, SpawnRequest};

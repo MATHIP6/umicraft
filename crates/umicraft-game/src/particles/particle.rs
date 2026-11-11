@@ -102,6 +102,16 @@ pub enum Texture {
         /// The block the particle was torn from.
         state: umicraft_world::BlockState,
     },
+    /// The particle picture of an item (`EntityBreakingFX`:
+    /// `ItemModelMesher.getParticleIcon`), which the client finds in the atlas
+    /// that holds the items. It is sampled through the jitter window like a
+    /// block fragment.
+    Item {
+        /// The item id.
+        id: u16,
+        /// Its damage value (the metadata of items with subtypes).
+        damage: u16,
+    },
     /// A sprite named by its path (a picture beside `particles.png`).
     Sprite {
         /// The atlas path, e.g. `blocks/stone`.

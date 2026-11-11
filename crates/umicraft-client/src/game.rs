@@ -54,7 +54,9 @@ use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::item_use::{drop_item, DoorToggle, ItemUse, UseAction, UseTick};
 use umicraft_game::movement::movement_stats;
-use umicraft_game::particles::{EffectContext, SpawnFilter};
+use umicraft_game::particles::{
+    is_bite_tick, Eater, EffectContext, ParticleKind, SpawnFilter, SpawnRequest,
+};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::piston::{motion, MovingBlocks};
@@ -68,7 +70,7 @@ use umicraft_game::server::maps::MapStore;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
 use umicraft_game::shapes::Aabb;
-use umicraft_game::sound::cue::SoundCue;
+use umicraft_game::sound::cue::{CueCategory, SoundCue};
 use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::view::{camera_pose, Perspective};
@@ -2227,6 +2229,7 @@ fn apply_net_event(
                     state.on_local_player_status(status.status);
                 }
             }
+            spawn_status_particles(game, EntityId(status.entity_id), status.status);
             game.entities
                 .status(EntityId(status.entity_id), status.status);
         }
@@ -2323,6 +2326,8 @@ fn apply_net_event(
             game.server.apply_game_state(&packet);
             if packet.reason == GAMEMODE_REASON {
                 set_gamemode(game, GameMode::from_state_value(packet.value));
+            } else if packet.reason == ELDER_GUARDIAN_CURSE_REASON {
+                haunt(game);
             }
         }
         PlayEvent::BlockAction(packet) => {
@@ -2336,6 +2341,39 @@ fn apply_net_event(
             apply_trade_list(game, &packet.data, frames);
         }
         other => apply_server_state(&mut game.server, &other),
+    }
+}
+
+/// The `Change Game State` reason of the elder guardian curse (MCP
+/// `NetHandlerPlayClient.handleChangeGameState`: reason 10).
+const ELDER_GUARDIAN_CURSE_REASON: u8 = 10;
+
+/// The curse of an elder guardian: its apparition swings in front of the
+/// player and the curse sounds (MCP `handleChangeGameState`, reason 10).
+fn haunt(game: &mut Game) {
+    let Some(feet) = game.state.as_ref().map(GameState::position) else {
+        return;
+    };
+    if let Some(filter) = particle_filter(game) {
+        game.particles.spawn(
+            &SpawnRequest {
+                kind: ParticleKind::MobAppearance,
+                arguments: &[],
+                ignore_range: true,
+                position: feet,
+                velocity: DVec3::ZERO,
+            },
+            &filter,
+        );
+    }
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues([SoundCue {
+            name: std::borrow::Cow::Borrowed("mob.guardian.curse"),
+            pos: [feet.x, feet.y, feet.z],
+            volume: 1.0,
+            pitch: 1.0,
+            category: CueCategory::Hostile,
+        }]);
     }
 }
 
@@ -2467,6 +2505,63 @@ fn spawn_ambient_particles(game: &mut Game) {
     );
     if let Some(state) = game.state.as_mut() {
         state.queue_sound_cues(rain);
+    }
+}
+
+/// Creates the particles the mobs give off by themselves this tick (blaze
+/// smoke, enderman sparks, potion swirls...) and the puffs of the bodies whose
+/// death fall ended. Run after the entities moved and before the particles
+/// tick, as `Minecraft.runTick` updates the world before the effect renderer.
+fn spawn_mob_particles(game: &mut Game) {
+    let (Some(filter), Some(world)) = (particle_filter(game), game.world.as_ref()) else {
+        game.entities.drain_deaths().for_each(drop);
+        return;
+    };
+    for entity in game.entities.entities().values() {
+        game.particles.spawn_mob_tick(entity, world, &filter);
+    }
+    for body in game.entities.drain_deaths() {
+        game.particles.spawn_death_puff(&body, &filter);
+    }
+}
+
+/// The crumbs of the local player's own meal (MCP
+/// `EntityPlayer.updateItemUse`): the stored entities make theirs in
+/// `spawn_mob_particles`, but the local body is not stored, so its use state
+/// comes from `item_use`.
+fn spawn_local_crumbs(game: &mut Game) {
+    let Some(view) = game.item_use.view() else {
+        return;
+    };
+    if view.action != UseAction::Eat || !is_bite_tick(view.count as u32) {
+        return;
+    }
+    let (Some(filter), Some(state), Some(food)) = (
+        particle_filter(game),
+        game.state.as_ref(),
+        game.windows.selected_item(),
+    ) else {
+        return;
+    };
+    let eater = Eater {
+        eyes: state.player().eye_position(),
+        yaw: game.yaw.to_degrees(),
+        pitch: game.pitch.to_degrees(),
+    };
+    let id = food.item_id.unsigned_abs();
+    let damage = food.damage.unsigned_abs();
+    game.particles.spawn_crumbs(&eater, id, damage, &filter);
+}
+
+/// The particles of an `Entity Status` for another entity (MCP
+/// `handleStatusUpdate`): hearts, smoke, the witch's magic, the spawner puff.
+fn spawn_status_particles(game: &mut Game, id: EntityId, status: i8) {
+    let (Some(filter), Some(world)) = (particle_filter(game), game.world.as_ref()) else {
+        return;
+    };
+    if let Some(entity) = game.entities.entities().get(&id) {
+        game.particles
+            .spawn_mob_status(entity, status, world, &filter);
     }
 }
 
@@ -3251,9 +3346,18 @@ fn tick(
     report_flight(game, was_flying, queue);
     follow_body(game);
     tick_overlays(game);
+    if let Some(state) = game.state.as_ref() {
+        // A mob may watch the local player, whose body is not in the store.
+        game.entities
+            .set_viewer(EntityId(game.entity_id), state.position());
+    }
     game.entities.tick();
     if let Some(world) = game.world.as_ref() {
         game.entities.tick_objects(world);
+    }
+    spawn_mob_particles(game);
+    spawn_local_crumbs(game);
+    if let Some(world) = game.world.as_ref() {
         game.particles.tick(world);
     }
     combat::tick_emitters(game);
@@ -3707,6 +3811,36 @@ mod tests {
             &mut queue,
         );
         assert_eq!(queue.ordered.len(), 1);
+    }
+
+    #[test]
+    fn the_elder_guardian_curse_haunts_the_player() {
+        // Regression: game state 10 did nothing, so no elder guardian showed.
+        use umicraft_game::particles::Behaviour;
+        use umicraft_protocol::packets::play::clientbound::ChangeGameState;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let change = |reason, value| PlayEvent::ChangeGameState(ChangeGameState { reason, value });
+        // Rain is not a curse.
+        handle_net(&mut game, change(1, 0.0), &mut queue, &frames);
+        assert!(game.particles.is_empty());
+        handle_net(&mut game, change(10, 0.0), &mut queue, &frames);
+        let apparition = game
+            .particles
+            .particles(umicraft_game::particles::Layer::Lit, false)
+            .iter()
+            .chain(
+                game.particles
+                    .particles(umicraft_game::particles::Layer::Lit, true),
+            )
+            .find(|particle| particle.behaviour == Behaviour::MobAppearance)
+            .expect("the apparition");
+        assert_eq!(apparition.position, DVec3::new(0.5, 64.0, 0.5));
+        let cues = game.state.as_mut().expect("placed").drain_sound_cues();
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].name, "mob.guardian.curse");
     }
 
     #[test]
@@ -5178,6 +5312,30 @@ mod tests {
     }
 
     #[test]
+    fn the_local_player_eating_throws_crumbs_on_the_bite_ticks() {
+        // Regression: the local player's own meal showed no crumbs.
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 10.0;
+        game.windows.apply_set_slot(0, 36, wire_item(297, 0));
+        game.input.use_item = true;
+        let mut queue = CommandQueue::default();
+        click_use(&mut game, &mut queue);
+        let mut bites = Vec::new();
+        for _ in 0..40 {
+            let Some(view) = game.item_use.view() else {
+                break;
+            };
+            let before = game.particles.len();
+            spawn_local_crumbs(&mut game);
+            if game.particles.len() > before {
+                bites.push(view.count as u32);
+            }
+            run_use(&mut game, &mut queue);
+        }
+        assert_eq!(bites, [24, 20, 16, 12, 8, 4]);
+    }
+
+    #[test]
     fn the_server_finishing_the_meal_ends_the_use() {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.food = 10.0;
@@ -5196,6 +5354,38 @@ mod tests {
         );
         handle_net(&mut game, status, &mut queue, &frames);
         assert!(!game.item_use.is_using());
+    }
+
+    fn game_with_mob(mob_type: u8) -> Game {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entities.spawn_mob(
+            EntityId(7),
+            mob_type,
+            DVec3::new(2.5, 64.0, 2.5),
+            0.0,
+            0.0,
+            0.0,
+            glam::Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        game
+    }
+
+    #[test]
+    fn a_blaze_near_the_player_smokes_every_tick() {
+        // Regression: no mob gave off its own particles.
+        let mut game = game_with_mob(61);
+        spawn_mob_particles(&mut game);
+        assert_eq!(game.particles.len(), 2);
+    }
+
+    #[test]
+    fn an_animal_in_love_shows_hearts() {
+        let mut game = game_with_mob(92);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, hurt_status(7, 18), &mut queue, &frames);
+        assert_eq!(game.particles.len(), 7);
     }
 
     fn hurt_status(entity_id: i32, status: i8) -> PlayEvent {

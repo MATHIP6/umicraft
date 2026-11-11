@@ -1320,6 +1320,7 @@ impl App {
                 &mut self.particle_sprites,
                 environment.partial_tick,
                 self.camera.render_origin(),
+                self.items.as_deref(),
             );
             renderer.set_particles(&self.particle_sprites);
         }
@@ -1386,6 +1387,7 @@ impl App {
             let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
+            entity_textures.set_mob_appearance(world.mob_appearance(environment.partial_tick));
             entity_textures.set_camera_position(self.camera.relative_eye());
             entity_textures.set_cull_view(self.camera.relative_eye(), self.camera.forward());
             entity_textures.set_viewer_spectator(

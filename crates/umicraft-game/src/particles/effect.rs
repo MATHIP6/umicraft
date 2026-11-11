@@ -23,6 +23,11 @@ const ENDER_RING_STEP: f64 = 0.157_079_632_679_489_66;
 const ENDER_RING_RADIUS: f64 = 5.0;
 /// Particles of a thrown potion, MCP line 2297.
 const SPLASH_SPARKS: u32 = 100;
+/// Flakes of the item thrown by a potion or an ender eye breaking.
+const ITEM_FLAKES: u32 = 8;
+/// The ids of `Items.potionitem` and `Items.ender_eye`.
+const POTION_ITEM: u16 = 373;
+const ENDER_EYE_ITEM: u16 = 381;
 /// Smoke puffs per side of a smoke effect (case 2000), MCP line 2257.
 const SMOKE_PUFFS: u32 = 10;
 /// Particles of a spawner, MCP line 2341.
@@ -66,9 +71,7 @@ impl ParticleEngine {
     /// potion splash, 2003 ender eye, 2004 spawner flames, 2005 bone meal.
     /// Other ids make nothing.
     ///
-    /// Not drawn yet: the `iconcrack` flakes of the potion (2002) and the
-    /// ender eye (2003), as the engine has no item particle factory; the rest
-    /// of those effects is complete. `filter` applies like for any particle.
+    /// `filter` applies like for any particle.
     pub fn spawn_effect(
         &mut self,
         effect_id: i32,
@@ -79,8 +82,16 @@ impl ParticleEngine {
     ) {
         match effect_id {
             2000 => self.smoke_jets(pos, data, filter),
-            2002 => self.potion_splash(pos, context, filter),
-            2003 => self.ender_eye_ring(pos, filter),
+            2002 => {
+                let at = DVec3::new(pos.x.into(), pos.y.into(), pos.z.into());
+                self.item_flakes(at, POTION_ITEM, data, filter);
+                self.potion_splash(pos, context, filter);
+            }
+            2003 => {
+                let at = DVec3::new(f64::from(pos.x) + 0.5, pos.y.into(), f64::from(pos.z) + 0.5);
+                self.item_flakes(at, ENDER_EYE_ITEM, 0, filter);
+                self.ender_eye_ring(pos, filter);
+            }
             2004 => self.spawner_flames(pos, filter),
             2005 => self.bonemeal(pos, data, context.block_max_y, filter),
             _ => {}
@@ -103,6 +114,28 @@ impl ParticleEngine {
             velocity,
         };
         self.spawn(&request, filter)
+    }
+
+    /// Eight flakes of item `id` thrown out of `at` (cases 2002 and 2003): a
+    /// Gaussian of 0.15 sideways and up to 0.2 up.
+    fn item_flakes(&mut self, at: DVec3, id: u16, damage: i32, filter: &SpawnFilter) {
+        let arguments = [i32::from(id), damage];
+        for _ in 0..ITEM_FLAKES {
+            let rng = self.rng();
+            let velocity = DVec3::new(
+                rng.next_gaussian() * 0.15,
+                rng.next_double() * 0.2,
+                rng.next_gaussian() * 0.15,
+            );
+            let request = SpawnRequest {
+                kind: ParticleKind::ItemCrack,
+                arguments: &arguments,
+                ignore_range: false,
+                position: at,
+                velocity,
+            };
+            self.spawn(&request, filter);
+        }
     }
 
     /// Case 2000: ten puffs from a face of a dispenser; `data` packs the
@@ -233,7 +266,7 @@ impl ParticleEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::particles::{Layer, ParticleSetting};
+    use crate::particles::{Layer, ParticleSetting, Texture};
 
     fn near() -> SpawnFilter {
         SpawnFilter {
@@ -291,9 +324,29 @@ mod tests {
     }
 
     #[test]
-    fn the_ender_eye_makes_two_rings_of_portals() {
-        // 40 steps of pi / 20 around the circle, two speeds each.
-        assert_eq!(effect(2003, 0, EffectContext::default()).len(), 80);
+    fn the_ender_eye_makes_two_rings_of_portals_and_eight_flakes() {
+        // 40 steps of pi / 20 around the circle, two speeds each, and the
+        // flakes of the eye.
+        let engine = effect(2003, 0, EffectContext::default());
+        assert_eq!(engine.len(), 88);
+        let flakes = engine.particles(Layer::Terrain, false);
+        assert_eq!(flakes.len(), 8);
+        assert!(flakes
+            .iter()
+            .all(|flake| flake.texture == Texture::Item { id: 381, damage: 0 }));
+    }
+
+    #[test]
+    fn a_splash_also_throws_eight_flakes_of_the_potion() {
+        // Regression: the flakes of the bottle were left out.
+        let engine = effect(2002, 16_421, EffectContext::default());
+        let flakes = engine.particles(Layer::Terrain, false);
+        assert_eq!(flakes.len(), 8);
+        assert!(flakes.iter().all(|flake| flake.texture
+            == Texture::Item {
+                id: 373,
+                damage: 16_421
+            }));
     }
 
     #[test]

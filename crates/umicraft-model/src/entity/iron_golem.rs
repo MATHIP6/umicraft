@@ -6,6 +6,20 @@ use glam::{Mat4, Vec3};
 
 use super::{ModelBox, ModelPart, ModelVertex};
 
+/// What an iron golem's arms do besides swinging with its stride
+/// (`ModelIronGolem.setLivingAnimations`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum GolemAction {
+    /// The arms swing with the stride.
+    #[default]
+    Walking,
+    /// Both arms swing down on a target: the swing's ticks left minus the
+    /// partial tick, `10` to `0`.
+    Attacking(f32),
+    /// The right arm holds out a poppy, with this many ticks left.
+    HoldingRose(f32),
+}
+
 /// Iron Golem model (128×128 texture sheet).
 #[derive(Debug, Clone)]
 pub struct IronGolemModel {
@@ -111,7 +125,9 @@ impl IronGolemModel {
         }
     }
 
-    /// Sets walking animation angles.
+    /// Turns the head (degrees) and swings the limbs while walking (MCP
+    /// `ModelIronGolem.setRotationAngles` and the walking branch of
+    /// `setLivingAnimations`).
     pub fn set_angles(
         &mut self,
         limb_swing: f32,
@@ -122,13 +138,32 @@ impl IronGolemModel {
         self.head.rotation[0] = -head_pitch.to_radians();
         self.head.rotation[1] = head_yaw.to_radians();
 
-        let leg_angle = (limb_swing * 0.6662).cos() * 1.0 * limb_swing_amount;
-        self.right_leg.rotation[0] = -leg_angle;
-        self.left_leg.rotation[0] = leg_angle;
+        // The golem swings each arm with the leg on the same side, on a
+        // triangle wave of period 13 (MCP `ModelIronGolem`); x rotations are
+        // negated for the flipped y.
+        let stride = 1.5 * triangle_wave(limb_swing, 13.0) * limb_swing_amount;
+        self.right_leg.rotation[0] = -stride;
+        self.left_leg.rotation[0] = stride;
+        self.right_arm.rotation[0] = -(-0.2 * limb_swing_amount + stride);
+        self.left_arm.rotation[0] = -(-0.2 * limb_swing_amount - stride);
+    }
 
-        let arm_angle = (limb_swing * 0.6662).cos() * 1.0 * limb_swing_amount;
-        self.right_arm.rotation[0] = arm_angle;
-        self.left_arm.rotation[0] = -arm_angle;
+    /// Raises the arms for a swing or a poppy; call after
+    /// [`Self::set_angles`], whose walking arms it replaces. The vanilla x
+    /// angles are negated for the flipped y.
+    pub fn set_action(&mut self, action: GolemAction) {
+        match action {
+            GolemAction::Walking => {}
+            GolemAction::Attacking(ticks) => {
+                let arm = -2.0 + 1.5 * triangle_wave(ticks, 10.0);
+                self.right_arm.rotation[0] = -arm;
+                self.left_arm.rotation[0] = -arm;
+            }
+            GolemAction::HoldingRose(ticks) => {
+                self.right_arm.rotation[0] = -(-0.8 + 0.025 * triangle_wave(ticks, 70.0));
+                self.left_arm.rotation[0] = 0.0;
+            }
+        }
     }
 
     /// Emits all mesh vertices.
@@ -146,8 +181,84 @@ impl IronGolemModel {
     }
 }
 
+/// A triangle wave of `period` between -1 and 1: 1 at multiples of the
+/// period, -1 halfway (MCP `ModelIronGolem.func_78172_a`, also the walking
+/// roll of `RenderIronGolem.rotateCorpse`). Like Java's `%`, Rust's keeps the
+/// sign of `x`.
+///
+/// ```
+/// use umicraft_model::entity::triangle_wave;
+/// assert_eq!(triangle_wave(0.0, 13.0), 1.0);
+/// assert_eq!(triangle_wave(6.5, 13.0), -1.0);
+/// ```
+#[must_use]
+pub fn triangle_wave(x: f32, period: f32) -> f32 {
+    ((x % period - period * 0.5).abs() - period * 0.25) / (period * 0.25)
+}
+
 impl Default for IronGolemModel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_triangle_wave_peaks_at_the_period_and_dips_halfway() {
+        assert!((triangle_wave(0.0, 13.0) - 1.0).abs() < 1e-6);
+        assert!((triangle_wave(6.5, 13.0) + 1.0).abs() < 1e-6);
+        assert!(triangle_wave(3.25, 13.0).abs() < 1e-6);
+        assert!((triangle_wave(13.0, 13.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_walking_golem_swings_each_arm_with_its_leg() {
+        // Regression: the limbs followed the biped cosine (period 2pi/0.6662,
+        // arms against legs) instead of the golem's triangle wave.
+        let mut golem = IronGolemModel::new();
+        golem.set_angles(0.0, 1.0, 0.0, 0.0);
+        // MCP: right leg 1.5, right arm -0.2 + 1.5, both negated here.
+        assert!((golem.right_leg.rotation[0] + 1.5).abs() < 1e-6);
+        assert!((golem.right_arm.rotation[0] + 1.3).abs() < 1e-6);
+        assert!((golem.left_leg.rotation[0] - 1.5).abs() < 1e-6);
+        assert!((golem.left_arm.rotation[0] - 1.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_swinging_golem_raises_both_arms_overhead() {
+        let mut golem = IronGolemModel::new();
+        golem.set_angles(0.0, 0.0, 0.0, 0.0);
+        golem.set_action(GolemAction::Attacking(10.0));
+        // MCP: -2 + 1.5 * tri(10, 10) = -0.5, negated here.
+        assert!((golem.right_arm.rotation[0] - 0.5).abs() < 1e-6);
+        golem.set_action(GolemAction::Attacking(5.0));
+        assert!(
+            (golem.left_arm.rotation[0] - 3.5).abs() < 1e-6,
+            "overhead halfway"
+        );
+    }
+
+    #[test]
+    fn a_golem_holds_out_a_poppy_with_its_right_arm() {
+        let mut golem = IronGolemModel::new();
+        golem.set_angles(1.0, 1.0, 0.0, 0.0);
+        golem.set_action(GolemAction::HoldingRose(400.0));
+        assert!(
+            golem.right_arm.rotation[0] > 0.7,
+            "{}",
+            golem.right_arm.rotation[0]
+        );
+        assert_eq!(golem.left_arm.rotation[0], 0.0);
+    }
+
+    #[test]
+    fn a_still_golem_lets_its_arms_hang() {
+        let mut golem = IronGolemModel::new();
+        golem.set_angles(4.0, 0.0, 0.0, 0.0);
+        assert_eq!(golem.right_arm.rotation[0], 0.0);
+        assert_eq!(golem.left_leg.rotation[0], 0.0);
     }
 }

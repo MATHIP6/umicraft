@@ -55,16 +55,16 @@ pub struct HumanoidPose {
 }
 
 /// Vanilla rotations of the six parts, `[x, y, z]` in radians.
-struct Angles {
-    head: [f32; 2],
-    body: [f32; 2],
-    right_arm: [f32; 3],
-    left_arm: [f32; 3],
-    right_leg: [f32; 3],
-    left_leg: [f32; 3],
+pub(super) struct Angles {
+    pub(super) head: [f32; 2],
+    pub(super) body: [f32; 2],
+    pub(super) right_arm: [f32; 3],
+    pub(super) left_arm: [f32; 3],
+    pub(super) right_leg: [f32; 3],
+    pub(super) left_leg: [f32; 3],
     /// Pivot offsets of the arms, `(x, z)`.
-    right_arm_point: (f32, f32),
-    left_arm_point: (f32, f32),
+    pub(super) right_arm_point: (f32, f32),
+    pub(super) left_arm_point: (f32, f32),
 }
 
 impl HumanoidModel {
@@ -96,11 +96,13 @@ impl HumanoidModel {
 }
 
 /// Sets a part's rotation from vanilla angles.
-fn apply(part: &mut ModelPart, vanilla: [f32; 3]) {
+pub(super) fn apply(part: &mut ModelPart, vanilla: [f32; 3]) {
     part.rotation = [-vanilla[0], vanilla[1], -vanilla[2]];
 }
 
-fn vanilla_angles(pose: &HumanoidPose) -> Angles {
+/// The vanilla angles of a biped in `pose` (MCP `ModelBiped` and
+/// `ModelZombie.setRotationAngles`), before the y mirroring of [`apply`].
+pub(super) fn vanilla_angles(pose: &HumanoidPose) -> Angles {
     let swing = pose.limb_swing;
     let amount = pose.limb_swing_amount;
     let head_y = pose.head_yaw.to_radians();

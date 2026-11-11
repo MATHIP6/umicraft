@@ -10,13 +10,14 @@ use std::sync::Arc;
 use glam::{DVec3, Vec3};
 use umicraft_protocol::packets::play::Metadata;
 
+use crate::particles::MobBody;
 use crate::physics::EYE_HEIGHT;
 use crate::view::ViewEffects;
 use crate::RenderState;
 
 use super::{
     BedPose, BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
-    EntityRenderSnapshot, PlayerProfile, Variant,
+    EntityRenderSnapshot, MobState, PlayerProfile, Variant,
 };
 
 /// Data watcher entry of the entity flags (MCP `Entity.entityInit`).
@@ -38,6 +39,11 @@ const HURT_LIMB_AMOUNT: f32 = 1.5;
 #[derive(Debug, Clone, Default)]
 pub struct EntityStore {
     entities: BTreeMap<EntityId, EntityRecord>,
+    /// The bodies whose death fall ended in the last tick, for their puff.
+    deaths: Vec<MobBody>,
+    /// The local player, whose body is not stored here, and its feet: what
+    /// a mob that watches it looks at.
+    viewer: Option<(EntityId, DVec3)>,
 }
 
 impl EntityStore {
@@ -46,6 +52,8 @@ impl EntityStore {
     pub fn new() -> Self {
         Self {
             entities: BTreeMap::new(),
+            deaths: Vec::new(),
+            viewer: None,
         }
     }
 
@@ -521,12 +529,17 @@ impl EntityStore {
     }
 
     /// Applies an `Entity Status` that animates: `2` hurts (and makes the
-    /// legs jolt, MCP `handleStatusUpdate`), `3` kills. Other codes are not
-    /// animations and are ignored.
+    /// legs jolt, MCP `handleStatusUpdate`), `3` kills, and the timers of
+    /// [`super::MobState::status`] (a hop, a golem's swing or poppy, a wolf's
+    /// shake, a sheep's grazing). Other codes are not animations and are
+    /// ignored.
     pub fn status(&mut self, id: EntityId, status: i8) {
         let Some(entity) = self.entities.get_mut(&id) else {
             return;
         };
+        if entity.mob.status(status) {
+            return;
+        }
         match status {
             2 => {
                 entity.limbs.amount = HURT_LIMB_AMOUNT;
@@ -620,6 +633,8 @@ impl EntityStore {
                 rider.position = feet;
             }
         }
+        self.track_wither_heads();
+        self.track_guardian_eyes();
         for entity in self.entities.values_mut() {
             if let Some(flight) = entity.collecting.as_mut() {
                 flight.ticks += 1;
@@ -633,12 +648,107 @@ impl EntityStore {
                 .collecting
                 .is_none_or(|flight| flight.ticks < super::record::Collecting::TICKS)
         });
+        // `EntityLivingBase.onDeathUpdate`: at the end of its fall the body
+        // goes up in a puff and is removed.
+        self.deaths.extend(
+            self.entities
+                .values()
+                .filter(|entity| entity.animation.is_finished())
+                .filter_map(MobBody::of),
+        );
         self.entities
             .retain(|_, entity| !entity.animation.is_finished());
     }
 
+    /// Turns the side heads of each wither towards the entities they watch
+    /// (`EntityWither.onLivingUpdate`). Only a tick with a wither in range
+    /// looks anything up.
+    fn track_wither_heads(&mut self) {
+        let withers: Vec<(EntityId, [Option<DVec3>; 2])> = self
+            .entities
+            .values()
+            .filter_map(|wither| match wither.meta.variant {
+                Variant::Wither { targets, .. } => {
+                    Some((wither.id, targets.map(|target| self.eyes_of(target))))
+                }
+                _ => None,
+            })
+            .collect();
+        for (id, targets) in withers {
+            if let Some(wither) = self.entities.get_mut(&id) {
+                let (feet, body_yaw) = (wither.position, wither.body_yaw.offset);
+                if let MobState::Wither(heads) = &mut wither.mob {
+                    heads.track(feet, body_yaw, targets);
+                }
+            }
+        }
+    }
+
+    /// Turns each guardian's pupil towards what it beams at, or the local
+    /// player (MCP `ModelGuardian.setRotationAngles` watches the target, else
+    /// the camera's entity).
+    fn track_guardian_eyes(&mut self) {
+        let viewer = self.viewer.and_then(|(id, _)| self.eyes_of(id.0));
+        let guardians: Vec<(EntityId, DVec3)> = self
+            .entities
+            .values()
+            .filter_map(|guardian| match guardian.meta.variant {
+                Variant::Guardian { target, .. } => {
+                    let watched = self.eyes_of(target).or(viewer)?;
+                    Some((guardian.id, watched))
+                }
+                _ => None,
+            })
+            .collect();
+        for (id, watched) in guardians {
+            let Some(guardian) = self.entities.get_mut(&id) else {
+                continue;
+            };
+            // `EntityGuardian.getEyeHeight`: half its height.
+            let Some((_, height)) = crate::combat::hitbox::body_size(guardian) else {
+                continue;
+            };
+            let eyes = guardian.position + DVec3::new(0.0, height * 0.5, 0.0);
+            let (yaw, pitch) = (guardian.head_yaw, guardian.pitch);
+            if let MobState::Guardian(swim) = &mut guardian.mob {
+                swim.look_at(eyes, yaw, pitch, watched);
+            }
+        }
+    }
+
+    /// Tells the store where the local player stands before a tick: its body
+    /// lives outside the store, yet a wither may watch it.
+    pub fn set_viewer(&mut self, id: EntityId, feet: DVec3) {
+        self.viewer = Some((id, feet));
+    }
+
+    /// Where the eyes of the entity `id` are (MCP `posY + getEyeHeight()`:
+    /// 1.62 for a player, 0.85 of the height otherwise), if it is tracked.
+    fn eyes_of(&self, id: i32) -> Option<DVec3> {
+        if id <= 0 {
+            return None;
+        }
+        if let Some((_, feet)) = self.viewer.filter(|(viewer, _)| viewer.0 == id) {
+            return Some(feet + DVec3::new(0.0, EYE_HEIGHT, 0.0));
+        }
+        let entity = self.entities.get(&EntityId(id))?;
+        let eye = if entity.kind == EntityKind::Player {
+            EYE_HEIGHT
+        } else {
+            crate::combat::hitbox::body_size(entity)?.1 * 0.85
+        };
+        Some(entity.position + DVec3::new(0.0, eye, 0.0))
+    }
+
+    /// Takes the bodies whose death fall ended since the last call: each
+    /// goes up in a puff of smoke (`ParticleEngine::spawn_death_puff`).
+    pub fn drain_deaths(&mut self) -> std::vec::Drain<'_, MobBody> {
+        self.deaths.drain(..)
+    }
+
     /// Advances the objects the client simulates (dropped items, falling
-    /// blocks, arrows, projectiles) by one tick, with the collisions of `world`.
+    /// blocks, arrows, projectiles) and the guardians' swimming, which needs
+    /// the water, by one tick, with the collisions of `world`.
     /// Call it right after [`Self::tick`].
     pub fn tick_objects<S: crate::shapes::BlockSource + ?Sized>(&mut self, world: &S) {
         for entity in self.entities.values_mut() {
@@ -647,6 +757,7 @@ impl EntityStore {
             if entity.collecting.is_none() && entity.vehicle.is_none() {
                 super::objects::step(entity, world);
             }
+            swim_guardian(entity, world);
         }
         // `EntityLightningBolt.onUpdate`: the bolt flashes one to three times
         // and dies; the number of ticks it takes is random, so it is spread
@@ -691,6 +802,28 @@ impl EntityStore {
             frame.ridden = rided.contains(&frame.id);
         }
         frames
+    }
+}
+
+/// One tick of a guardian's tail and spikes, which depend on the water it is
+/// in. The reference tests its box shrunk by 0.4 vertically
+/// (`Entity.isInWater`); the block at the middle of its height stands in.
+fn swim_guardian<S: crate::shapes::BlockSource + ?Sized>(entity: &mut EntityRecord, world: &S) {
+    let Variant::Guardian { moving, .. } = entity.meta.variant else {
+        return;
+    };
+    let Some((_, height)) = crate::combat::hitbox::body_size(entity) else {
+        return;
+    };
+    let middle = entity.position + DVec3::new(0.0, height * 0.5, 0.0);
+    let block = world.block(
+        middle.x.floor() as i32,
+        middle.y.floor() as i32,
+        middle.z.floor() as i32,
+    );
+    let in_water = umicraft_world::fluid::Liquid::Water.contains(block);
+    if let MobState::Guardian(swim) = &mut entity.mob {
+        swim.tick(in_water, moving);
     }
 }
 
@@ -1193,6 +1326,96 @@ mod tests {
             store.tick();
         }
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn a_body_whose_fall_ends_is_handed_out_once_for_its_puff() {
+        let mut store = EntityStore::new();
+        let id = zombie(&mut store);
+        store.status(id, 3);
+        for _ in 0..19 {
+            store.tick();
+        }
+        assert_eq!(store.drain_deaths().count(), 0, "still falling");
+        store.tick();
+        let deaths: Vec<_> = store.drain_deaths().collect();
+        assert_eq!(deaths.len(), 1);
+        assert!((deaths[0].height - 1.95).abs() < 1e-6, "{:?}", deaths[0]);
+        assert_eq!(store.drain_deaths().count(), 0);
+    }
+
+    #[test]
+    fn a_status_starts_a_mob_timer_that_reaches_the_snapshot() {
+        // Regression: statuses 1, 4, 8, 10 and 11 were dropped, so rabbits
+        // never hopped, golems never swung, wolves never shook and sheep
+        // never grazed.
+        let mut store = EntityStore::new();
+        let id = EntityId(31);
+        store.spawn_mob(
+            id,
+            101,
+            DVec3::new(0.0, 64.0, 0.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        store.status(id, 1);
+        store.tick();
+        let snapshot = &store.snapshots(0.5)[0];
+        assert!(
+            matches!(snapshot.mob, super::super::MobPose::Rabbit { hop } if hop > 0.0),
+            "{:?}",
+            snapshot.mob
+        );
+    }
+
+    #[test]
+    fn a_wither_turns_a_side_head_towards_the_entity_it_watches() {
+        // Regression: the side heads only copied the centre head.
+        let mut store = EntityStore::new();
+        let target = zombie(&mut store);
+        let wither = EntityId(40);
+        store.spawn_mob(
+            wither,
+            64,
+            DVec3::new(0.0, 64.0, -20.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        if let Some(record) = store.entities.get_mut(&wither) {
+            record.meta.variant = Variant::Wither {
+                invulnerable: 0,
+                targets: [target.0, 0],
+            };
+        }
+        let heads = |store: &EntityStore| match store.entities[&wither].mob {
+            MobState::Wither(heads) => heads,
+            _ => super::super::mob_state::WitherHeads::default(),
+        };
+        store.tick();
+        let first = heads(&store);
+        for _ in 0..20 {
+            store.tick();
+        }
+        let settled = heads(&store);
+        assert_ne!(first.pitch[0], 0.0, "it looks down at the zombie");
+        assert!(settled.pitch[0] > 0.0, "{settled:?}");
+        assert_eq!(settled.pitch[1], 0.0, "the other head has no target");
+        // The local player is not stored, but the store is told where it is.
+        if let Some(record) = store.entities.get_mut(&wither) {
+            record.meta.variant = Variant::Wither {
+                invulnerable: 0,
+                targets: [0, 99],
+            };
+        }
+        store.set_viewer(EntityId(99), DVec3::new(0.0, 90.0, -20.0));
+        store.tick();
+        assert!(heads(&store).pitch[1] < 0.0, "it looks up at the player");
     }
 
     #[test]

@@ -43,6 +43,12 @@ pub struct ItemModel {
     /// Whether the GUI draws it as a lit 3D object (blocks) instead of a flat
     /// sprite (`ModelBlock.gui3d`, false for `builtin/generated`).
     pub gui_3d: bool,
+    /// The atlas key of the picture a particle of the item shows
+    /// (`ItemModelMesher.getParticleIcon`): the model's `particle` texture,
+    /// else the first layer of a generated sprite
+    /// (`ItemModelGenerator.makeItemModel`). `None` for a model with
+    /// neither, such as one drawn by an entity renderer.
+    pub particle: Option<String>,
 }
 
 impl ItemModel {
@@ -112,10 +118,18 @@ impl ItemModelSet {
             self.texture_keys
                 .extend(quads.iter().map(|quad| quad.texture.clone()));
         }
+        let particle = ["particle", "layer0"]
+            .into_iter()
+            .find_map(|name| merged.textures.get(name))
+            .map(|value| {
+                crate::model::document::resolve_texture_value(&merged.textures, value, &key)
+            })
+            .transpose()?;
         Ok(ItemModel {
             geometry,
             display: merged.display.clone(),
             gui_3d: own_gui_3d && merged.builtin != Some(Builtin::Generated),
+            particle,
         })
     }
 
