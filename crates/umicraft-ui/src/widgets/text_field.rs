@@ -38,14 +38,16 @@
 //!   selects, a double click selects a word, a triple click the whole line,
 //!   Shift+click extends the selection, and Control+Z undoes while Control+Y
 //!   (or Control+Shift+Z) redoes. A run of typed characters, or of
-//!   single-character deletions, is one undo step; see `text_history`.
+//!   single-character deletions, is one undo step; see [`umicraft_core::text_edit::History`].
 //!
 //! Text events while Control or Meta is held are ignored, so a shortcut never
 //! inserts its letter; AltGr (Control and Alt together) still types.
 
 use std::time::Instant;
 
-use umicraft_core::text_edit::{word_boundary, Selection};
+use umicraft_core::text_edit::{
+    word_boundary, ClickSeries, EditKind, History, Selection, Snapshot,
+};
 
 use crate::context::{Ui, UiResponse};
 use crate::draw::{Color, TextStyle};
@@ -55,8 +57,6 @@ use crate::input::{InputEvent, Key, PointerButton};
 use crate::text::FontAtlas;
 
 use super::style;
-use super::text_clicks::ClickSeries;
-use super::text_history::{EditKind, History, Snapshot};
 use super::util;
 
 /// Border width, in GUI units (`drawRect(x - 1, ...)`).

@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Undo and redo for the text field (Control+Z, Control+Y).
+//! Undo and redo for the text inputs (Control+Z, Control+Y).
 //!
 //! Vanilla `GuiTextField` has no undo; this is a Umicraft addition. A run of
 //! typed characters, or of deletions, is one step, so Control+Z removes a
 //! word's worth of typing rather than a single letter. Moving the caret, a
 //! paste or an edit of another kind ends the run.
 
-use umicraft_core::text_edit::Selection;
+use super::Selection;
 
 /// Most steps kept; the oldest is dropped beyond it.
 const MAX_STEPS: usize = 100;
 
 /// What an edit did, which decides whether it joins the previous step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum EditKind {
+pub enum EditKind {
     /// Characters typed at the caret.
     Typing,
     /// Backspace or Delete of single characters.
@@ -26,8 +26,10 @@ pub(super) enum EditKind {
 
 /// The text and caret at one moment.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Snapshot {
+pub struct Snapshot {
+    /// The text.
     pub text: String,
+    /// The caret and the selection.
     pub selection: Selection,
 }
 
@@ -43,7 +45,7 @@ impl Snapshot {
 
 /// The undo and redo stacks of one field.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(super) struct History {
+pub struct History {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     last: Option<EditKind>,

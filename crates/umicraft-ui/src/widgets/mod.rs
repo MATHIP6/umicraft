@@ -21,8 +21,6 @@
 //! not change what the widgets mean.
 
 pub(crate) mod style;
-pub(crate) mod text_clicks;
-pub(crate) mod text_history;
 pub(crate) mod util;
 
 pub mod button;

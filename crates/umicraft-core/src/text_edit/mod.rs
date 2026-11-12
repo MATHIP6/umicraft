@@ -10,6 +10,12 @@
 //! The module owns no text: callers keep their own buffer and pass its length
 //! (or its characters) where a bound is needed.
 
+pub mod clicks;
+pub mod history;
+
+pub use clicks::ClickSeries;
+pub use history::{EditKind, History, Snapshot};
+
 /// A caret and the fixed end of the selection it extends.
 ///
 /// `anchor == caret` means nothing is selected. The caret is the end that

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Counts quick successive clicks on a text field: one places the caret, two
+//! Counts quick successive clicks on a text input: one places the caret, two
 //! select a word, three select the whole line.
 //!
 //! Vanilla `GuiTextField` has neither; this is a Umicraft addition. The count
@@ -15,7 +15,7 @@ const MAX_CLICKS: u8 = 3;
 
 /// The last click of a field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ClickSeries {
+pub struct ClickSeries {
     last: Option<(Instant, usize, u8)>,
 }
 
