@@ -80,7 +80,7 @@ use crate::sky_textures::{load_border_texture, load_sky_textures};
 use crate::terrain_textures::TerrainTextures;
 use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
-use crate::ui_input::UiInputTranslator;
+use crate::ui_input::{shortcut_code, UiInputTranslator};
 use crate::world_view::WorldView;
 use crate::zoom::Zoom;
 use umicraft_mesh::item::ItemMesh;
@@ -461,6 +461,20 @@ impl App {
         self.camera.set_aspect(width, height);
     }
 
+    /// The key of `event` as a text field reads it: with Control held, the
+    /// shortcut letters follow the layout (Control+A on an AZERTY keyboard is
+    /// not the key at the QWERTY `A`). Gameplay keys keep their position.
+    pub(super) fn text_key_code(&self, event: &KeyEvent) -> Option<KeyCode> {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return None;
+        };
+        Some(if self.ctrl_held {
+            shortcut_code(event, code)
+        } else {
+            code
+        })
+    }
+
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
@@ -630,7 +644,7 @@ impl App {
 
     /// Handles a key press while the game menu is open.
     fn handle_menu_key(&mut self, event: KeyEvent) {
-        let PhysicalKey::Code(code) = event.physical_key else {
+        let Some(code) = self.text_key_code(&event) else {
             return;
         };
         if code == KeyCode::Escape {
@@ -1003,6 +1017,7 @@ impl App {
                 chat_input: chatting.then(|| ChatInputView {
                     text: self.chat_input.text(),
                     caret: self.chat_input.caret(),
+                    selection: self.chat_input.selection(),
                     caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
                         .is_multiple_of(2),
                 }),

@@ -14,7 +14,6 @@ use umicraft_ui::menus::{draw_toast, TitleStyle, Toast};
 use umicraft_ui::{FontAtlas, Ui};
 use winit::event::KeyEvent;
 use winit::event_loop::ActiveEventLoop;
-use winit::keyboard::PhysicalKey;
 
 use super::{upload_gui_atlas, App};
 use crate::achievements_view::{toast_content, AchievementsContext};
@@ -32,7 +31,7 @@ impl App {
     /// Hands a key to the UI of a menu screen; the screens read Escape and
     /// Enter themselves.
     pub(super) fn handle_menu_screen_key(&mut self, event: &KeyEvent) {
-        if let PhysicalKey::Code(code) = event.physical_key {
+        if let Some(code) = self.text_key_code(event) {
             self.ui_input.key(code, event.state, event.text.as_deref());
         }
     }

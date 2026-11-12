@@ -19,8 +19,9 @@
 
 use umicraft_ui::{InputEvent, Key, Modifiers, PointerButton, UiInput};
 use winit::dpi::PhysicalPosition;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta};
-use winit::keyboard::{KeyCode, ModifiersState};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
+use winit::keyboard::{Key as LogicalKey, KeyCode, ModifiersState};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 
 /// Approximate number of pixels in one wheel line for pixel-precision
 /// touchpads, used to keep the list scrolling at a familiar speed.
@@ -54,6 +55,24 @@ pub fn ui_key(code: KeyCode) -> Option<Key> {
         KeyCode::KeyV => Some(Key::V),
         KeyCode::KeyX => Some(Key::X),
         _ => None,
+    }
+}
+
+/// The key a Control shortcut means on the user's keyboard layout.
+///
+/// Keys are matched by position (`KeyCode`), but a shortcut such as Control+A
+/// is named by its letter: on an AZERTY keyboard that letter sits where a
+/// QWERTY one has `Q`. When the layout's letter is one of the text shortcuts
+/// (A, C, V, X) its code replaces the physical one; any other key keeps its
+/// position, so movement and bindings are unaffected.
+#[must_use]
+pub fn shortcut_code(event: &KeyEvent, physical: KeyCode) -> KeyCode {
+    match event.key_without_modifiers().as_ref() {
+        LogicalKey::Character("a") => KeyCode::KeyA,
+        LogicalKey::Character("c") => KeyCode::KeyC,
+        LogicalKey::Character("v") => KeyCode::KeyV,
+        LogicalKey::Character("x") => KeyCode::KeyX,
+        _ => physical,
     }
 }
 

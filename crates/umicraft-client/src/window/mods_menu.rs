@@ -10,7 +10,7 @@
 use std::time::Instant;
 
 use winit::event::{ElementState, KeyEvent};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::KeyCode;
 
 use umicraft_core::lang::Lang;
 use umicraft_render::ModWidgetView;
@@ -129,7 +129,7 @@ impl App {
     /// Hands a key to the mods menu. Escape closes it from the list; on the
     /// settings page it goes to the UI, which steps back to the list.
     pub(super) fn handle_mods_key(&mut self, event: &KeyEvent) {
-        let PhysicalKey::Code(code) = event.physical_key else {
+        let Some(code) = self.text_key_code(event) else {
             return;
         };
         if code == KeyCode::Escape {

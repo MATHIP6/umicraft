@@ -17,6 +17,9 @@ use crate::hud::{ChatRunView, HudState};
 
 /// The wrapped rows `GuiNewChat` keeps (`field_146253_i` is cut at 100).
 const MAX_ROWS: usize = 100;
+/// The highlight behind the selected text of the input line, the blue
+/// `GuiTextField.drawCursorVertical` inverts the text against.
+const SELECTION: Color = [0.0, 0.0, 1.0, 0.85];
 
 impl Piece for ChatRunView {
     fn text(&self) -> &str {
@@ -216,6 +219,21 @@ pub(super) fn draw_chat(
 
         // `GuiTextField`: 0xE0E0E0 with a shadow, at (4, h - 12).
         let text = &input.text;
+        if let Some((start, end)) = input.selection {
+            let x = |index: usize| {
+                let before: String = text.chars().take(index).collect();
+                4.0 + font.measure(&before, 1.0)
+            };
+            list.rect(
+                Rect::new(
+                    x(start) * sf,
+                    (gh - 13.0) * sf,
+                    (x(end) - x(start)) * sf,
+                    10.0 * sf,
+                ),
+                SELECTION,
+            );
+        }
         let ink: Color = [0.878, 0.878, 0.878, 1.0];
         list.text(
             [(4.0 + 1.0) * sf, (gh - 12.0 + 1.0) * sf],
@@ -362,6 +380,7 @@ mod tests {
             chat_input: Some(ChatInputView {
                 text: "\u{e9}\u{e9}x".to_string(),
                 caret: 1,
+                selection: None,
                 caret_visible: true,
             }),
             ..HudState::default()
@@ -369,6 +388,26 @@ mod tests {
         // A byte slice at the character index 1 would panic inside "\u{e9}".
         draw_chat(&mut list, &state, 320.0, 180.0, 2.0, &font);
         assert!(!list.is_empty());
+    }
+
+    #[test]
+    fn a_selection_adds_one_highlight_and_counts_characters() {
+        let font = FontAtlas::fallback();
+        let commands = |selection| {
+            let mut list = DrawList::new();
+            let state = HudState {
+                chat_input: Some(ChatInputView {
+                    text: "\u{e9}\u{e9}x".to_string(),
+                    caret: 1,
+                    selection,
+                    caret_visible: false,
+                }),
+                ..HudState::default()
+            };
+            draw_chat(&mut list, &state, 320.0, 180.0, 2.0, &font);
+            list.len()
+        };
+        assert_eq!(commands(Some((1, 3))), commands(None) + 1);
     }
 
     #[test]

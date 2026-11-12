@@ -582,6 +582,7 @@ fn build(
                 hud.chat_input = Some(ChatInputView {
                     text: input.text(),
                     caret: input.caret(),
+                    selection: input.selection(),
                     caret_visible: true,
                 });
                 lines.push(("chat input", input.text()));

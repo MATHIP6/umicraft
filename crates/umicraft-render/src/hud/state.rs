@@ -194,6 +194,8 @@ pub struct ChatInputView {
     pub text: String,
     /// The caret as a character index.
     pub caret: usize,
+    /// The selected character range, start before end, if any.
+    pub selection: Option<(usize, usize)>,
     /// Whether the caret is in the visible half of its blink.
     pub caret_visible: bool,
 }
