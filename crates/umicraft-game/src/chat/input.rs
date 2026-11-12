@@ -10,7 +10,11 @@
 //! I/O-free: the window feeds it keys, owns the clipboard and sends the
 //! requests it returns.
 
-use umicraft_core::text_edit::{word_boundary, Selection};
+use std::time::Instant;
+
+use umicraft_core::text_edit::{
+    word_boundary, ClickSeries, EditKind, History, Selection, Snapshot,
+};
 
 use super::commands::MAX_LEN;
 use super::complete::{common_prefix, Completion};
@@ -31,12 +35,26 @@ pub enum TabOutcome {
     },
 }
 
+/// The undo kind of a deletion: single characters join into one step, a word
+/// or a selection is a step of its own.
+fn delete_kind(selected: bool, word: bool) -> EditKind {
+    if selected || word {
+        EditKind::Other
+    } else {
+        EditKind::Deleting
+    }
+}
+
 /// The chat input line.
 #[derive(Debug, Clone)]
 pub struct ChatInput {
     text: Vec<char>,
     selection: Selection,
     completion: Completion,
+    history: History,
+    clicks: ClickSeries,
+    /// The primary button went down on the line and is still held.
+    dragging: bool,
 }
 
 impl ChatInput {
@@ -48,6 +66,9 @@ impl ChatInput {
             text: Vec::new(),
             selection: Selection::default(),
             completion: Completion::default(),
+            history: History::default(),
+            clicks: ClickSeries::default(),
+            dragging: false,
         };
         input.write(initial);
         input
@@ -132,8 +153,59 @@ impl ChatInput {
     /// Types text at the caret, replacing the selection (`writeText`).
     pub fn insert(&mut self, text: &str) {
         self.interrupt();
+        let kind = if self.selection.has_selection() {
+            EditKind::Other
+        } else {
+            EditKind::Typing
+        };
+        self.record(kind);
         self.remove_selection();
         self.write(text);
+    }
+
+    /// Pastes `text` at the caret: an undo step of its own.
+    pub fn paste(&mut self, text: &str) {
+        self.interrupt();
+        self.record(EditKind::Other);
+        self.remove_selection();
+        self.write(text);
+    }
+
+    /// Notes the line before an edit of `kind` for the undo.
+    fn record(&mut self, kind: EditKind) {
+        let before = self.snapshot();
+        self.history.record(kind, || before);
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            text: self.text(),
+            selection: self.selection,
+        }
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) {
+        self.text = snapshot.text.chars().collect();
+        self.selection = snapshot.selection;
+        self.selection.clamp(self.text.len());
+    }
+
+    /// Undoes the last editing step (Control+Z).
+    pub fn undo(&mut self) {
+        self.interrupt();
+        let current = self.snapshot();
+        if let Some(previous) = self.history.undo(current) {
+            self.restore(previous);
+        }
+    }
+
+    /// Redoes the last undone step (Control+Y).
+    pub fn redo(&mut self) {
+        self.interrupt();
+        let current = self.snapshot();
+        if let Some(next) = self.history.redo(current) {
+            self.restore(next);
+        }
     }
 
     /// Selects the whole line, the caret at the start.
@@ -146,6 +218,9 @@ impl ChatInput {
     pub fn cut(&mut self) -> String {
         self.interrupt();
         let cut = self.selected_text();
+        if self.selection.has_selection() {
+            self.record(EditKind::Other);
+        }
         self.remove_selection();
         cut
     }
@@ -155,6 +230,7 @@ impl ChatInput {
         self.interrupt();
         self.text.clear();
         self.selection = Selection::default();
+        self.history.clear();
         self.write(text);
     }
 
@@ -168,6 +244,9 @@ impl ChatInput {
     /// word before it.
     pub fn backspace(&mut self, word: bool) {
         self.interrupt();
+        if self.selection.has_selection() || self.caret() > 0 {
+            self.record(delete_kind(self.selection.has_selection(), word));
+        }
         if self.remove_selection() || self.caret() == 0 {
             return;
         }
@@ -183,6 +262,9 @@ impl ChatInput {
     /// after it.
     pub fn delete(&mut self, word: bool) {
         self.interrupt();
+        if self.selection.has_selection() || self.caret() < self.text.len() {
+            self.record(delete_kind(self.selection.has_selection(), word));
+        }
         if self.remove_selection() || self.caret() >= self.text.len() {
             return;
         }
@@ -198,7 +280,58 @@ impl ChatInput {
     /// instead of dropping it.
     fn move_caret(&mut self, target: usize, extend: bool) {
         self.interrupt();
+        self.history.break_run();
         self.selection.move_to(target, self.text.len(), extend);
+    }
+
+    /// A primary press at the character boundary `index`: Shift extends the
+    /// selection; otherwise a click places the caret, a double click selects
+    /// the word and a triple click the line.
+    pub fn press(&mut self, index: usize, shift: bool, now: Instant) {
+        self.interrupt();
+        self.history.break_run();
+        let rank = self.clicks.register(now, index);
+        let len = self.text.len();
+        if shift {
+            self.selection.extend_to(index, len);
+        } else {
+            match rank {
+                1 => self.selection.collapse(index, len),
+                2 => self.select_word_at(index),
+                _ => self.selection.select_all(len),
+            }
+        }
+        self.dragging = !shift && rank == 1;
+    }
+
+    /// The pointer moved to the boundary `index` with the button held: the
+    /// selection follows it. Does nothing when no press started on the line.
+    pub fn drag_to(&mut self, index: usize) {
+        if self.dragging {
+            self.selection.extend_to(index, self.text.len());
+        }
+    }
+
+    /// The primary button went up: the drag ends.
+    pub fn release(&mut self) {
+        self.dragging = false;
+    }
+
+    /// Selects the word around `at`; on spaces only the caret moves.
+    fn select_word_at(&mut self, at: usize) {
+        let len = self.text.len();
+        let at = at.min(len);
+        let probe = if self.text.get(at).is_some_and(|c| *c != ' ') {
+            at
+        } else if at > 0 && self.text[at - 1] != ' ' {
+            at - 1
+        } else {
+            self.selection.collapse(at, len);
+            return;
+        };
+        let start = word_boundary(&self.text, probe + 1, false, false);
+        let end = word_boundary(&self.text, probe, true, false);
+        self.selection.select_range(start, end);
     }
 
     /// Moves the caret one character or one word left.
@@ -583,5 +716,83 @@ mod tests {
         input.tab();
         input.on_completions(&names(&["a-very-long-name"]));
         assert!(input.len() <= MAX_LEN);
+    }
+
+    #[test]
+    fn undo_and_redo_step_through_typing_runs_and_deletions() {
+        let mut input = ChatInput::new("");
+        input.insert("a");
+        input.insert("b");
+        input.left(false, false);
+        input.insert("X");
+        assert_eq!(input.text(), "aXb");
+        input.undo();
+        assert_eq!(input.text(), "ab", "the caret move ended the first run");
+        input.undo();
+        assert_eq!(input.text(), "");
+        input.redo();
+        assert_eq!(input.text(), "ab");
+        input.end(false);
+        input.backspace(false);
+        input.backspace(false);
+        assert_eq!(input.text(), "");
+        input.undo();
+        assert_eq!(input.text(), "ab", "two backspaces are one step");
+    }
+
+    #[test]
+    fn pasting_and_cutting_are_steps_of_their_own() {
+        let mut input = typed("abc");
+        input.paste("def");
+        input.select_all();
+        assert_eq!(input.cut(), "abcdef");
+        input.undo();
+        assert_eq!(input.text(), "abcdef");
+        assert_eq!(input.selection(), Some((0, 6)), "the selection comes back");
+        input.undo();
+        assert_eq!(input.text(), "abc");
+    }
+
+    #[test]
+    fn a_new_edit_after_an_undo_drops_the_redo() {
+        let mut input = typed("ab");
+        input.undo();
+        input.insert("c");
+        input.redo();
+        assert_eq!(input.text(), "c");
+    }
+
+    #[test]
+    fn pasting_filters_like_typing() {
+        let mut input = typed("a");
+        input.paste("b\nc");
+        assert_eq!(input.text(), "abc");
+    }
+
+    #[test]
+    fn clicks_place_the_caret_then_select_a_word_then_the_line() {
+        let start = Instant::now();
+        let mut input = typed("one two three");
+        input.press(5, false, start);
+        assert_eq!((input.caret(), input.selection()), (5, None));
+        input.release();
+        input.press(5, false, start);
+        assert_eq!(input.selected_text(), "two");
+        input.press(5, false, start);
+        assert_eq!(input.selected_text(), "one two three");
+    }
+
+    #[test]
+    fn dragging_extends_until_the_release_and_shift_click_extends() {
+        let start = Instant::now();
+        let mut input = typed("abcdef");
+        input.press(1, false, start);
+        input.drag_to(4);
+        assert_eq!(input.selected_text(), "bcd");
+        input.release();
+        input.drag_to(6);
+        assert_eq!(input.selected_text(), "bcd", "no drag after the release");
+        input.press(6, true, start);
+        assert_eq!(input.selected_text(), "bcdef");
     }
 }
