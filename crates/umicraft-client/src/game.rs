@@ -2566,6 +2566,11 @@ fn spawn_local_crumbs(game: &mut Game) {
     let id = food.item_id.unsigned_abs();
     let damage = food.damage.unsigned_abs();
     game.particles.spawn_crumbs(&eater, id, damage, &filter);
+    // The server relays the bite sound to the other players only.
+    let cue = game.particles.bite_cue(state.position());
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues([cue]);
+    }
 }
 
 /// The particles of an `Entity Status` for another entity (MCP
@@ -5348,6 +5353,28 @@ mod tests {
             run_use(&mut game, &mut queue);
         }
         assert_eq!(bites, [24, 20, 16, 12, 8, 4]);
+    }
+
+    #[test]
+    fn the_local_player_eating_bites_out_loud() {
+        // Regression: the local player's own meal made no sound.
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 10.0;
+        game.windows.apply_set_slot(0, 36, wire_item(297, 0));
+        game.input.use_item = true;
+        let mut queue = CommandQueue::default();
+        click_use(&mut game, &mut queue);
+        let mut bites = 0;
+        for _ in 0..40 {
+            if game.item_use.view().is_none() {
+                break;
+            }
+            spawn_local_crumbs(&mut game);
+            let cues = game.state.as_mut().unwrap().drain_sound_cues();
+            bites += cues.iter().filter(|c| c.name == "random.eat").count();
+            run_use(&mut game, &mut queue);
+        }
+        assert_eq!(bites, 6);
     }
 
     #[test]

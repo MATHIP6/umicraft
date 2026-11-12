@@ -7,6 +7,10 @@
 //! The server never sends them: `World.spawnParticle` does nothing there, and
 //! each client makes them for every player it sees eating, the local one
 //! included.
+//!
+//! The bite sound (`random.eat`) is played by the same method. The server
+//! relays it to the *other* players only (`playSoundToNearExcept`), so the
+//! local player must make their own, see [`ParticleEngine::bite_cue`].
 
 use glam::DVec3;
 use umicraft_core::java_random::JavaRandom;
@@ -14,6 +18,7 @@ use umicraft_core::java_random::JavaRandom;
 use super::engine::ParticleEngine;
 use super::kind::ParticleKind;
 use super::spawn::{SpawnFilter, SpawnRequest};
+use crate::sound::cue::{CueCategory, SoundCue};
 
 /// Crumbs of a bite (`updateItemUse(item, 5)`).
 const CRUMBS: u32 = 5;
@@ -96,6 +101,21 @@ impl ParticleEngine {
             );
         }
     }
+
+    /// The `random.eat` cue of one bite at `at` (MCP `updateItemUse`): the
+    /// volume is `0.5` or `1.0` and the pitch wobbles around `1.0` by `0.2`.
+    pub fn bite_cue(&mut self, at: DVec3) -> SoundCue {
+        let rng = self.rng();
+        let volume = 0.5 + 0.5 * rng.next_int(2) as f32;
+        let pitch = (rng.next_float() - rng.next_float()) * 0.2 + 1.0;
+        SoundCue {
+            name: "random.eat".into(),
+            pos: at.to_array(),
+            volume,
+            pitch,
+            category: CueCategory::Players,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -127,6 +147,19 @@ mod tests {
             assert!((offset.z - 0.6).abs() < 1e-9, "{offset}");
             assert!((-0.9..=-0.3).contains(&offset.y), "{offset}");
             assert!(velocity.y > 0.14 && velocity.y < 0.26, "{velocity}");
+        }
+    }
+
+    #[test]
+    fn a_bite_sounds_like_the_reference() {
+        // Regression: the local player's own meal made no sound.
+        let mut engine = ParticleEngine::new(3);
+        for _ in 0..50 {
+            let cue = engine.bite_cue(DVec3::new(1.0, 2.0, 3.0));
+            assert_eq!(cue.name, "random.eat");
+            assert_eq!(cue.pos, [1.0, 2.0, 3.0]);
+            assert!(cue.volume == 0.5 || cue.volume == 1.0, "{}", cue.volume);
+            assert!((0.8..=1.2).contains(&cue.pitch), "{}", cue.pitch);
         }
     }
 
