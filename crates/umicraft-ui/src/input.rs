@@ -60,6 +60,10 @@ pub enum Key {
     V,
     /// The X key: with Control, cut the selection of a text field.
     X,
+    /// The Y key: with Control, redo in a text field.
+    Y,
+    /// The Z key: with Control, undo in a text field (with Shift, redo).
+    Z,
 }
 
 /// The modifier keys held during an event.

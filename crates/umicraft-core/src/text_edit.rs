@@ -81,6 +81,12 @@ impl Selection {
         self.caret = 0;
     }
 
+    /// Selects `start..end`, the caret at the end (a double click on a word).
+    pub fn select_range(&mut self, start: usize, end: usize) {
+        self.anchor = start;
+        self.caret = end;
+    }
+
     /// Selects from the caret back to `anchor`, used to delete one unit
     /// without a selection (`GuiTextField.deleteFromCursor`).
     pub fn anchor_at(&mut self, anchor: usize) {
@@ -152,6 +158,14 @@ mod tests {
         assert!(selection.move_to(4, 8, false), "dropping it is a change");
         assert!(!selection.has_selection());
         assert!(!selection.move_to(4, 8, false), "nothing moved");
+    }
+
+    #[test]
+    fn a_range_selection_puts_the_caret_at_its_end() {
+        let mut selection = Selection::default();
+        selection.select_range(2, 5);
+        assert_eq!(selection.range(), (2, 5));
+        assert_eq!(selection.caret(), 5);
     }
 
     #[test]

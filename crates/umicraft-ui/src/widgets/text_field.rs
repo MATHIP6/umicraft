@@ -34,9 +34,16 @@
 //!   cuts it and [`InputEvent::Paste`] (Control+V) replaces it with the
 //!   clipboard text, as `GuiTextField.textboxKeyTyped` does. A word ends at a
 //!   space.
+//! - Umicraft additions (vanilla has none): dragging with the primary button
+//!   selects, a double click selects a word, a triple click the whole line,
+//!   Shift+click extends the selection, and Control+Z undoes while Control+Y
+//!   (or Control+Shift+Z) redoes. A run of typed characters, or of
+//!   single-character deletions, is one undo step; see `text_history`.
 //!
 //! Text events while Control or Meta is held are ignored, so a shortcut never
 //! inserts its letter; AltGr (Control and Alt together) still types.
+
+use std::time::Instant;
 
 use umicraft_core::text_edit::{word_boundary, Selection};
 
@@ -44,10 +51,12 @@ use crate::context::{Ui, UiResponse};
 use crate::draw::{Color, TextStyle};
 use crate::geom::{Insets, Rect};
 use crate::id::WidgetId;
-use crate::input::{InputEvent, Key};
+use crate::input::{InputEvent, Key, PointerButton};
 use crate::text::FontAtlas;
 
 use super::style;
+use super::text_clicks::ClickSeries;
+use super::text_history::{EditKind, History, Snapshot};
 use super::util;
 
 /// Border width, in GUI units (`drawRect(x - 1, ...)`).
@@ -74,6 +83,11 @@ pub struct TextFieldState {
     scroll: f32,
     blink: u32,
     disabled: bool,
+    history: History,
+    clicks: ClickSeries,
+    /// The primary button went down in the field and is still held: the
+    /// pointer drags the caret and extends the selection.
+    dragging: bool,
 }
 
 impl TextFieldState {
@@ -93,9 +107,7 @@ impl TextFieldState {
         Self {
             text,
             selection: Selection::at(caret),
-            scroll: 0.0,
-            blink: 0,
-            disabled: false,
+            ..Self::default()
         }
     }
 
@@ -139,6 +151,7 @@ impl TextFieldState {
         self.selection
             .collapse(self.selection.caret(), self.char_count());
         self.scroll = 0.0;
+        self.history.clear();
     }
 
     /// The caret as a `char` index in `0..=char_count`.
@@ -217,17 +230,37 @@ impl TextFieldState {
             .map_or(self.text.len(), |(index, _)| index)
     }
 
+    /// Types `typed` at the caret, replacing the selection; typing over a
+    /// selection is a step of its own for the undo.
+    fn insert(&mut self, typed: &str) -> bool {
+        let kind = if self.has_selection() {
+            EditKind::Other
+        } else {
+            EditKind::Typing
+        };
+        self.insert_as(typed, kind)
+    }
+
     /// Replaces the selection (or nothing, at the caret) with the non-control
-    /// characters of `typed` (`GuiTextField.writeText`).
+    /// characters of `typed` (`GuiTextField.writeText`), as an edit of `kind`
+    /// for the undo history.
     ///
     /// Returns true when the text changed.
-    fn insert(&mut self, typed: &str) -> bool {
+    fn insert_as(&mut self, typed: &str, kind: EditKind) -> bool {
+        self.replace(self.selection(), typed, kind)
+    }
+
+    /// Replaces the `char` range `(start, end)` with the non-control
+    /// characters of `typed`, as an edit of `kind`. Returns true when the
+    /// text changed.
+    fn replace(&mut self, (start, end): (usize, usize), typed: &str, kind: EditKind) -> bool {
         let mut filtered = String::with_capacity(typed.len());
         filtered.extend(typed.chars().filter(|character| !character.is_control()));
-        let (start, end) = self.selection();
         if filtered.is_empty() && start == end {
             return false;
         }
+        let (text, selection) = (&self.text, self.selection);
+        self.history.record(kind, || Snapshot::of(text, selection));
         let (from, to) = (self.byte_index(start), self.byte_index(end));
         self.text.replace_range(from..to, &filtered);
         let caret = start + filtered.chars().count();
@@ -235,19 +268,88 @@ impl TextFieldState {
         true
     }
 
+    /// The text and selection, for the undo history.
+    fn snapshot(&self) -> Snapshot {
+        Snapshot::of(&self.text, self.selection)
+    }
+
+    /// Puts back a snapshot of the history.
+    fn restore(&mut self, snapshot: Snapshot) -> bool {
+        self.text = snapshot.text;
+        self.selection = snapshot.selection;
+        self.selection.clamp(self.char_count());
+        true
+    }
+
+    /// Undoes the last editing step (Control+Z). Returns whether there was
+    /// one.
+    fn undo(&mut self) -> bool {
+        let current = self.snapshot();
+        self.history
+            .undo(current)
+            .is_some_and(|previous| self.restore(previous))
+    }
+
+    /// Redoes the last undone step (Control+Y). Returns whether there was
+    /// one.
+    fn redo(&mut self) -> bool {
+        let current = self.snapshot();
+        self.history
+            .redo(current)
+            .is_some_and(|next| self.restore(next))
+    }
+
+    /// Selects the word at `at`, or just places the caret there when it is on
+    /// spaces (a double click).
+    fn select_word_at(&mut self, at: usize) {
+        let chars: Vec<char> = self.text.chars().collect();
+        let at = at.min(chars.len());
+        let probe = if chars.get(at).is_some_and(|c| *c != ' ') {
+            at
+        } else if at > 0 && chars[at - 1] != ' ' {
+            at - 1
+        } else {
+            self.selection.collapse(at, chars.len());
+            return;
+        };
+        let start = word_boundary(&chars, probe + 1, false, false);
+        let end = word_boundary(&chars, probe, true, false);
+        self.selection.select_range(start, end);
+    }
+
+    /// Handles a primary press that landed at `caret`: Shift extends the
+    /// selection; otherwise the rank of the click in its series chooses
+    /// between a caret, a word and the whole line. Returns whether the caret
+    /// or the selection changed.
+    fn press(&mut self, caret: usize, shift: bool, now: Instant) -> bool {
+        self.history.break_run();
+        let before = self.selection;
+        let rank = self.clicks.register(now, caret);
+        if shift {
+            self.selection.extend_to(caret, self.char_count());
+        } else {
+            match rank {
+                1 => self.selection.collapse(caret, self.char_count()),
+                2 => self.select_word_at(caret),
+                _ => self.select_all(),
+            }
+        }
+        self.dragging = !shift && rank == 1;
+        self.selection != before
+    }
+
     /// Removes the selection, or the character before the caret.
     ///
     /// Returns true when the text changed.
     fn backspace(&mut self) -> bool {
         if self.has_selection() {
-            return self.insert("");
+            return self.insert_as("", EditKind::Other);
         }
         let caret = self.caret();
         if caret == 0 {
             return false;
         }
-        self.selection.anchor_at(caret - 1);
-        self.insert("")
+        self.replace((caret - 1, caret), "", EditKind::Deleting)
     }
 
     /// Removes the selection, or the character after the caret.
@@ -255,28 +357,29 @@ impl TextFieldState {
     /// Returns true when the text changed.
     fn delete(&mut self) -> bool {
         if self.has_selection() {
-            return self.insert("");
+            return self.insert_as("", EditKind::Other);
         }
         let caret = self.caret();
         if caret >= self.char_count() {
             return false;
         }
-        self.selection.anchor_at(caret + 1);
-        self.insert("")
+        self.replace((caret, caret + 1), "", EditKind::Deleting)
     }
 
     /// Removes the selection, or the word before or after the caret
     /// (`GuiTextField.deleteWords`).
     fn delete_word(&mut self, forward: bool) -> bool {
-        if !self.has_selection() {
-            self.selection
-                .anchor_at(self.word_from(self.caret(), forward));
+        if self.has_selection() {
+            return self.insert_as("", EditKind::Other);
         }
-        self.insert("")
+        let caret = self.caret();
+        let other = self.word_from(caret, forward);
+        self.replace((caret.min(other), caret.max(other)), "", EditKind::Other)
     }
 
     /// Moves the caret to `caret`, clamped, and reports whether it moved.
     fn move_caret(&mut self, caret: usize, extend: bool) -> bool {
+        self.history.break_run();
         self.selection.move_to(caret, self.char_count(), extend)
     }
 }
@@ -359,10 +462,15 @@ pub fn text_field_scaled(
         if let Some(position) = util::last_primary_press(ui) {
             let local_x = position[0] - inner.x + state.scroll;
             let caret = atlas.x_to_char_index(&state.text, local_x, scale);
-            let extend = ui.input().modifiers.shift;
-            changed |= state.move_caret(caret, extend);
+            let shift = ui.input().modifiers.shift;
+            changed |= state.press(caret, shift, Instant::now());
         }
     }
+
+    // A drag ends with the focus, or when the button goes down somewhere else
+    // (the release may never reach the field).
+    let pressed_elsewhere = !response.clicked && util::last_primary_press(ui).is_some();
+    state.dragging &= response.focused && !pressed_elsewhere;
 
     if response.focused && !state.disabled {
         let modifiers = ui.input().modifiers;
@@ -376,7 +484,19 @@ pub fn text_field_scaled(
                 // Text events may be IME or paste and can carry several
                 // characters.
                 InputEvent::Text(text) if !shortcut => changed |= state.insert(text),
-                InputEvent::Paste(text) => changed |= state.insert(text),
+                InputEvent::Paste(text) => changed |= state.insert_as(text, EditKind::Other),
+                InputEvent::KeyPressed(Key::Z) if combo => changed |= state.undo(),
+                InputEvent::KeyPressed(Key::Y) if combo => changed |= state.redo(),
+                InputEvent::KeyPressed(Key::Z) if shortcut => changed |= state.redo(),
+                InputEvent::PointerReleased {
+                    button: PointerButton::Left,
+                    ..
+                } => state.dragging = false,
+                InputEvent::PointerMoved { position } if state.dragging => {
+                    let local_x = position[0] - inner.x + state.scroll;
+                    let caret = atlas.x_to_char_index(&state.text, local_x, scale);
+                    changed |= state.selection.move_to(caret, state.char_count(), true);
+                }
                 InputEvent::KeyPressed(Key::A) if combo => {
                     state.select_all();
                     changed = true;
@@ -386,7 +506,7 @@ pub fn text_field_scaled(
                 }
                 InputEvent::KeyPressed(Key::X) if combo => {
                     copied = Some(state.selected_text());
-                    changed |= state.insert("");
+                    changed |= state.insert_as("", EditKind::Other);
                 }
                 InputEvent::KeyPressed(Key::Backspace) if shortcut => {
                     changed |= state.delete_word(false);

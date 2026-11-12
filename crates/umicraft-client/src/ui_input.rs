@@ -54,6 +54,8 @@ pub fn ui_key(code: KeyCode) -> Option<Key> {
         KeyCode::KeyC => Some(Key::C),
         KeyCode::KeyV => Some(Key::V),
         KeyCode::KeyX => Some(Key::X),
+        KeyCode::KeyY => Some(Key::Y),
+        KeyCode::KeyZ => Some(Key::Z),
         _ => None,
     }
 }
@@ -63,7 +65,7 @@ pub fn ui_key(code: KeyCode) -> Option<Key> {
 /// Keys are matched by position (`KeyCode`), but a shortcut such as Control+A
 /// is named by its letter: on an AZERTY keyboard that letter sits where a
 /// QWERTY one has `Q`. When the layout's letter is one of the text shortcuts
-/// (A, C, V, X) its code replaces the physical one; any other key keeps its
+/// (A, C, V, X, Y, Z) its code replaces the physical one; any other key keeps its
 /// position, so movement and bindings are unaffected.
 #[must_use]
 pub fn shortcut_code(event: &KeyEvent, physical: KeyCode) -> KeyCode {
@@ -72,6 +74,8 @@ pub fn shortcut_code(event: &KeyEvent, physical: KeyCode) -> KeyCode {
         LogicalKey::Character("c") => KeyCode::KeyC,
         LogicalKey::Character("v") => KeyCode::KeyV,
         LogicalKey::Character("x") => KeyCode::KeyX,
+        LogicalKey::Character("y") => KeyCode::KeyY,
+        LogicalKey::Character("z") => KeyCode::KeyZ,
         _ => physical,
     }
 }
@@ -257,6 +261,8 @@ mod tests {
         assert_eq!(ui_key(KeyCode::KeyC), Some(Key::C));
         assert_eq!(ui_key(KeyCode::KeyV), Some(Key::V));
         assert_eq!(ui_key(KeyCode::KeyX), Some(Key::X));
+        assert_eq!(ui_key(KeyCode::KeyY), Some(Key::Y));
+        assert_eq!(ui_key(KeyCode::KeyZ), Some(Key::Z));
         assert_eq!(ui_key(KeyCode::KeyB), None);
     }
 
