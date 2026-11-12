@@ -23,6 +23,26 @@ own copy of the word-movement rule (`getNthWordFromPos`). `umicraft-ui` and
   Copying an empty selection does not touch the clipboard.
 - `left`, `right`, `home` and `end` take an `extend` flag (Shift).
 
+## Update: mouse, multi-click and undo (same day)
+
+Umicraft additions beyond vanilla, shared by both inputs through
+`umicraft_core::text_edit`:
+
+- `ClickSeries` counts clicks on the same character boundary within 500 ms:
+  one places the caret, two select a word, three the line. Dragging extends
+  the selection until the button goes up or the focus leaves the field;
+  Shift+click extends from the caret.
+- `History` keeps up to 100 undo steps. A run of typed characters, or of
+  single-character deletions, is one step; a paste, a cut, a word deletion or
+  typing over a selection is a step of its own; moving the caret ends a run.
+  Control+Z undoes, Control+Y and Control+Shift+Z redo. `set_text` clears it.
+- The chat line is hit-tested by `umicraft_render::chat_input_hit`, which uses
+  the layout `draw_chat` draws; a drag keeps following the pointer after it
+  leaves the line.
+- Control shortcuts follow the layout's letter (`ui_input::shortcut_code`):
+  on an AZERTY keyboard Control+A is the key at the QWERTY `Q` position.
+  Gameplay keys keep matching by position.
+
 ## Consequences
 
 One implementation of the selection rules, covered by the core unit tests.
