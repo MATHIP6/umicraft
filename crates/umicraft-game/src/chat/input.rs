@@ -5,8 +5,12 @@
 //!
 //! The behaviour follows MCP `GuiChat` (`keyTyped`, `getSentHistory`,
 //! `autocompletePlayerNames`, `onAutocompleteResponse`) and `GuiTextField`
-//! (`writeText`, `func_146197_a` word movement, `deleteFromCursor`). The type
-//! is I/O-free: the window feeds it keys and sends the requests it returns.
+//! (`writeText`, `func_146197_a` word movement, `deleteFromCursor`, the
+//! selection kept as `cursorPosition` and `selectionEnd`). The type is
+//! I/O-free: the window feeds it keys, owns the clipboard and sends the
+//! requests it returns.
+
+use umicraft_core::text_edit::{word_boundary, Selection};
 
 use super::commands::MAX_LEN;
 use super::complete::{common_prefix, Completion};
@@ -31,7 +35,7 @@ pub enum TabOutcome {
 #[derive(Debug, Clone)]
 pub struct ChatInput {
     text: Vec<char>,
-    caret: usize,
+    selection: Selection,
     completion: Completion,
 }
 
@@ -42,7 +46,7 @@ impl ChatInput {
     pub fn new(initial: &str) -> Self {
         let mut input = Self {
             text: Vec::new(),
-            caret: 0,
+            selection: Selection::default(),
             completion: Completion::default(),
         };
         input.write(initial);
@@ -58,7 +62,23 @@ impl ChatInput {
     /// The caret as a character index, `0..=len`.
     #[must_use]
     pub fn caret(&self) -> usize {
-        self.caret
+        self.selection.caret()
+    }
+
+    /// The selected `char` range, start before end, or `None` when nothing is
+    /// selected.
+    #[must_use]
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        self.selection
+            .has_selection()
+            .then(|| self.selection.range())
+    }
+
+    /// The selected text, empty when nothing is selected.
+    #[must_use]
+    pub fn selected_text(&self) -> String {
+        let (start, end) = self.selection.range();
+        self.text[start..end].iter().collect()
     }
 
     /// The number of characters.
@@ -88,106 +108,127 @@ impl ChatInput {
             if character < ' ' || character == '\u{7f}' || character == '\u{a7}' {
                 continue;
             }
-            self.text.insert(self.caret, character);
-            self.caret += 1;
+            let caret = self.caret();
+            self.text.insert(caret, character);
+            self.selection.collapse(caret + 1, self.text.len());
         }
     }
 
-    /// Types text at the caret.
+    /// Removes the selected text and puts the caret where it was. Returns
+    /// whether something was removed.
+    fn remove_selection(&mut self) -> bool {
+        let (start, end) = self.selection.range();
+        self.text.drain(start..end);
+        self.selection.collapse(start, self.text.len());
+        start != end
+    }
+
+    /// Removes `start..end` and puts the caret at `start`.
+    fn remove_range(&mut self, start: usize, end: usize) {
+        self.text.drain(start..end);
+        self.selection.collapse(start, self.text.len());
+    }
+
+    /// Types text at the caret, replacing the selection (`writeText`).
     pub fn insert(&mut self, text: &str) {
         self.interrupt();
+        self.remove_selection();
         self.write(text);
+    }
+
+    /// Selects the whole line, the caret at the start.
+    pub fn select_all(&mut self) {
+        self.interrupt();
+        self.selection.select_all(self.text.len());
+    }
+
+    /// Removes the selection and returns it, for Control+X.
+    pub fn cut(&mut self) -> String {
+        self.interrupt();
+        let cut = self.selected_text();
+        self.remove_selection();
+        cut
     }
 
     /// Replaces the whole line and puts the caret at its end.
     pub fn set_text(&mut self, text: &str) {
         self.interrupt();
         self.text.clear();
-        self.caret = 0;
+        self.selection = Selection::default();
         self.write(text);
     }
 
-    /// The caret position `delta` words away (`func_146197_a`): a word move
-    /// skips the spaces next to the caret, then the word.
-    fn word_boundary(&self, backwards: bool, from: usize, skip_spaces: bool) -> usize {
-        let mut position = from;
-        if backwards {
-            while skip_spaces && position > 0 && self.text[position - 1] == ' ' {
-                position -= 1;
-            }
-            while position > 0 && self.text[position - 1] != ' ' {
-                position -= 1;
-            }
-        } else {
-            while position < self.text.len() && self.text[position] != ' ' {
-                position += 1;
-            }
-            while skip_spaces && position < self.text.len() && self.text[position] == ' ' {
-                position += 1;
-            }
-        }
-        position
+    /// The caret position one word away (`func_146197_a`): a word move skips
+    /// the spaces next to the caret, then the word.
+    fn word_boundary(&self, backwards: bool, skip_spaces: bool) -> usize {
+        word_boundary(&self.text, self.caret(), !backwards, skip_spaces)
     }
 
-    /// Deletes the character before the caret, or the word before it.
+    /// Deletes the selection, else the character before the caret, or the
+    /// word before it.
     pub fn backspace(&mut self, word: bool) {
         self.interrupt();
-        if self.caret == 0 {
+        if self.remove_selection() || self.caret() == 0 {
             return;
         }
         let start = if word {
-            self.word_boundary(true, self.caret, true)
+            self.word_boundary(true, true)
         } else {
-            self.caret - 1
+            self.caret() - 1
         };
-        self.text.drain(start..self.caret);
-        self.caret = start;
+        self.remove_range(start, self.caret());
     }
 
-    /// Deletes the character after the caret, or the word after it.
+    /// Deletes the selection, else the character after the caret, or the word
+    /// after it.
     pub fn delete(&mut self, word: bool) {
         self.interrupt();
-        if self.caret >= self.text.len() {
+        if self.remove_selection() || self.caret() >= self.text.len() {
             return;
         }
         let end = if word {
-            self.word_boundary(false, self.caret, true)
+            self.word_boundary(false, true)
         } else {
-            self.caret + 1
+            self.caret() + 1
         };
-        self.text.drain(self.caret..end);
+        self.remove_range(self.caret(), end);
+    }
+
+    /// Moves the caret to `target`; `extend` (Shift) grows the selection
+    /// instead of dropping it.
+    fn move_caret(&mut self, target: usize, extend: bool) {
+        self.interrupt();
+        self.selection.move_to(target, self.text.len(), extend);
     }
 
     /// Moves the caret one character or one word left.
-    pub fn left(&mut self, word: bool) {
-        self.interrupt();
-        self.caret = if word {
-            self.word_boundary(true, self.caret, true)
+    pub fn left(&mut self, word: bool, extend: bool) {
+        let target = if word {
+            self.word_boundary(true, true)
         } else {
-            self.caret.saturating_sub(1)
+            self.caret().saturating_sub(1)
         };
+        self.move_caret(target, extend);
     }
 
     /// Moves the caret one character or one word right.
-    pub fn right(&mut self, word: bool) {
-        self.interrupt();
-        self.caret = if word {
-            self.word_boundary(false, self.caret, true)
+    pub fn right(&mut self, word: bool, extend: bool) {
+        let target = if word {
+            self.word_boundary(false, true)
         } else {
-            (self.caret + 1).min(self.text.len())
+            self.caret() + 1
         };
+        self.move_caret(target, extend);
     }
 
     /// Moves the caret to the start of the line.
-    pub fn home(&mut self) {
-        self.interrupt();
-        self.caret = 0;
+    pub fn home(&mut self, extend: bool) {
+        self.move_caret(0, extend);
     }
 
     /// Moves the caret to the end of the line.
-    pub fn end(&mut self) {
-        self.interrupt();
-        self.caret = self.text.len();
+    pub fn end(&mut self, extend: bool) {
+        self.move_caret(self.text.len(), extend);
     }
 
     /// Shows the previous sent message (the up key).
@@ -209,7 +250,7 @@ impl ChatInput {
 
     /// The start of the word before the caret (`func_146197_a(-1, …, false)`).
     fn word_start(&self) -> usize {
-        self.word_boundary(true, self.caret, false)
+        self.word_boundary(true, false)
     }
 
     /// Presses Tab: asks the server for completions, or cycles through the
@@ -222,19 +263,17 @@ impl ChatInput {
             };
         }
         self.completion.clear_matches();
-        if self.caret == 0 {
+        if self.caret() == 0 {
             return TabOutcome::Nothing;
         }
         self.completion.waiting = true;
-        TabOutcome::Request(self.text[..self.caret].iter().collect())
+        TabOutcome::Request(self.text[..self.caret()].iter().collect())
     }
 
     /// Replaces the word before the caret with the next match and returns the
     /// list to print when there are several.
     fn write_next_match(&mut self) -> Option<String> {
-        let start = self.word_start();
-        self.text.drain(start..self.caret);
-        self.caret = start;
+        self.remove_range(self.word_start(), self.caret());
         let (name, listing) = self.completion.next_match();
         if let Some(name) = name {
             self.write(&name);
@@ -256,12 +295,10 @@ impl ChatInput {
             .filter(|candidate| !candidate.is_empty())
             .cloned()
             .collect();
-        let word: String = self.text[self.word_start()..self.caret].iter().collect();
+        let word: String = self.text[self.word_start()..self.caret()].iter().collect();
         let prefix = common_prefix(matches);
         if !prefix.is_empty() && !word.eq_ignore_ascii_case(&prefix) {
-            let start = self.word_start();
-            self.text.drain(start..self.caret);
-            self.caret = start;
+            self.remove_range(self.word_start(), self.caret());
             self.write(&prefix);
             None
         } else if !self.completion.matches.is_empty() {
@@ -290,7 +327,7 @@ mod tests {
     #[test]
     fn typing_inserts_at_the_caret() {
         let mut input = typed("helo");
-        input.left(false);
+        input.left(false, false);
         input.insert("l");
         assert_eq!(input.text(), "hello");
         assert_eq!(input.caret(), 4);
@@ -322,15 +359,15 @@ mod tests {
         assert_eq!(input.text(), "one two thre");
         input.backspace(true);
         assert_eq!(input.text(), "one two ");
-        input.home();
+        input.home(false);
         input.delete(false);
         assert_eq!(input.text(), "ne two ");
         input.delete(true);
         assert_eq!(input.text(), "two ");
         // At the edges nothing happens and nothing panics.
-        input.home();
+        input.home(false);
         input.backspace(false);
-        input.end();
+        input.end(false);
         input.delete(false);
         assert_eq!(input.text(), "two ");
     }
@@ -338,18 +375,97 @@ mod tests {
     #[test]
     fn the_caret_moves_by_characters_words_and_to_the_edges() {
         let mut input = typed("ab cd ef");
-        input.left(true);
+        input.left(true, false);
         assert_eq!(input.caret(), 6);
-        input.left(true);
+        input.left(true, false);
         assert_eq!(input.caret(), 3);
-        input.right(true);
+        input.right(true, false);
         assert_eq!(input.caret(), 6);
-        input.home();
-        input.left(false);
+        input.home(false);
+        input.left(false, false);
         assert_eq!(input.caret(), 0);
-        input.end();
-        input.right(false);
+        input.end(false);
+        input.right(false, false);
         assert_eq!(input.caret(), 8);
+    }
+
+    #[test]
+    fn shift_movement_selects_by_character_word_and_to_the_edges() {
+        let mut input = typed("ab cd ef");
+        input.left(false, true);
+        assert_eq!(input.selection(), Some((7, 8)));
+        input.left(true, true);
+        assert_eq!(input.selected_text(), "ef");
+        input.home(true);
+        assert_eq!(input.selected_text(), "ab cd ef");
+        input.right(true, true);
+        assert_eq!(
+            input.selected_text(),
+            "cd ef",
+            "the anchor stays at the end"
+        );
+        input.end(false);
+        assert_eq!(input.selection(), None, "a plain move drops the selection");
+        assert_eq!(input.caret(), 8);
+    }
+
+    #[test]
+    fn select_all_covers_the_whole_line() {
+        let mut input = typed("hello");
+        input.select_all();
+        assert_eq!(input.selected_text(), "hello");
+        assert_eq!(input.caret(), 0);
+    }
+
+    #[test]
+    fn typing_or_pasting_replaces_the_selection() {
+        let mut input = typed("hello world");
+        input.left(true, true);
+        input.insert("there");
+        assert_eq!(input.text(), "hello there");
+        assert_eq!(input.selection(), None);
+        input.select_all();
+        input.insert("bye");
+        assert_eq!(input.text(), "bye");
+        assert_eq!(input.caret(), 3);
+    }
+
+    #[test]
+    fn backspace_and_delete_remove_the_selection_not_a_character() {
+        let mut input = typed("one two three");
+        input.left(true, true);
+        input.backspace(false);
+        assert_eq!(input.text(), "one two ");
+        input.left(true, true);
+        input.delete(true);
+        assert_eq!(input.text(), "one ");
+    }
+
+    #[test]
+    fn cut_returns_and_removes_the_selection() {
+        let mut input = typed("abc def");
+        input.left(true, true);
+        assert_eq!(input.cut(), "def");
+        assert_eq!(input.text(), "abc ");
+        assert_eq!(input.cut(), "", "nothing selected, nothing cut");
+        assert_eq!(input.text(), "abc ");
+    }
+
+    #[test]
+    fn replacing_a_selection_still_respects_the_length_limit() {
+        let mut input = typed(&"a".repeat(MAX_LEN));
+        input.select_all();
+        input.insert(&"b".repeat(MAX_LEN + 20));
+        assert_eq!(input.len(), MAX_LEN);
+        assert!(input.text().chars().all(|c| c == 'b'));
+    }
+
+    #[test]
+    fn selections_count_characters_not_bytes() {
+        let mut input = typed("\u{e9}t\u{e9}");
+        input.left(false, true);
+        input.left(false, true);
+        assert_eq!(input.selected_text(), "t\u{e9}");
     }
 
     #[test]
@@ -379,8 +495,8 @@ mod tests {
     fn tab_asks_the_server_with_the_text_before_the_caret() {
         let mut input = typed("/tp St");
         assert_eq!(input.tab(), TabOutcome::Request("/tp St".to_string()));
-        input.left(false);
-        input.left(false);
+        input.left(false, false);
+        input.left(false, false);
         assert_eq!(input.tab(), TabOutcome::Request("/tp ".to_string()));
     }
 
