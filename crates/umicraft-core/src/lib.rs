@@ -35,6 +35,7 @@ pub mod module;
 pub mod profiling;
 pub mod scheduler;
 pub mod service;
+pub mod text_edit;
 
 pub use config::ConfigStore;
 pub use error::{CoreError, CoreResult};
