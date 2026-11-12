@@ -106,6 +106,36 @@ fn visible_window(state: &HudState, total: usize) -> (usize, usize, usize) {
     (end.saturating_sub(limit), end, scroll)
 }
 
+/// Where the pointer is on the chat input line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputHit {
+    /// The character boundary nearest to the pointer's x.
+    pub index: usize,
+    /// Whether the pointer is over the line itself; a drag that left it still
+    /// has an index.
+    pub inside: bool,
+}
+
+/// The place of `pointer` (physical pixels from the top-left) on the input
+/// line holding `text`, laid out as [`draw_chat`] does: the bar spans
+/// `(2, h - 14)` to `(w - 2, h - 2)` in GUI units and the text starts 4 units
+/// from the left.
+#[must_use]
+pub fn chat_input_hit(
+    text: &str,
+    viewport: (u32, u32),
+    font: &FontAtlas,
+    pointer: (f32, f32),
+) -> InputHit {
+    let sf = gui_scale(viewport.0, viewport.1) as f32;
+    let (gw, gh) = (viewport.0 as f32 / sf, viewport.1 as f32 / sf);
+    let (x, y) = (pointer.0 / sf, pointer.1 / sf);
+    InputHit {
+        index: font.x_to_char_index(text, x - 4.0, 1.0),
+        inside: (2.0..gw - 2.0).contains(&x) && (gh - 14.0..gh - 2.0).contains(&y),
+    }
+}
+
 /// The run of the open chat under `pointer` (`GuiNewChat.getChatComponent`).
 ///
 /// `pointer` is in physical pixels from the top-left of a `viewport` window.
@@ -443,5 +473,23 @@ mod tests {
             shown(&tail, first, end),
             shown(&everything, all_first, all_end)
         );
+    }
+
+    #[test]
+    fn the_input_hit_maps_the_pointer_to_a_character_boundary() {
+        let font = FontAtlas::fallback();
+        // Scale 2 at 640x480: the bar is y 452..476 in pixels, text at x 8.
+        let x = (4.0 + font.measure("ab", 1.0)) * 2.0 + 0.5;
+        let hit = chat_input_hit("abcd", (640, 480), &font, (x, 460.0));
+        assert_eq!(
+            hit,
+            InputHit {
+                index: 2,
+                inside: true
+            }
+        );
+        let hit = chat_input_hit("abcd", (640, 480), &font, (x, 100.0));
+        assert!(!hit.inside, "a drag above the line still has an index");
+        assert_eq!(hit.index, 2);
     }
 }

@@ -69,7 +69,7 @@ impl App {
             }
         }
     }
-    /// Control+A, +C, +X and +V on the chat line (`GuiScreen.isKeyComboCtrl*`).
+    /// Control+A, +C, +X, +V, +Z and +Y on the chat line (`GuiScreen.isKeyComboCtrl*`).
     /// Returns whether `code` was one of them; the clipboard is the system's.
     fn chat_shortcut(&mut self, code: KeyCode) -> bool {
         match code {
@@ -78,9 +78,12 @@ impl App {
             KeyCode::KeyX => copy_to_clipboard(&self.chat_input.cut()),
             KeyCode::KeyV => {
                 if let Some(text) = clipboard::read() {
-                    self.chat_input.insert(&text);
+                    self.chat_input.paste(&text);
                 }
             }
+            KeyCode::KeyZ if self.shift_held => self.chat_input.redo(),
+            KeyCode::KeyZ => self.chat_input.undo(),
+            KeyCode::KeyY => self.chat_input.redo(),
             _ => return false,
         }
         true
@@ -114,6 +117,18 @@ impl App {
                     self.send_event(GameEvent::LocalChat(listing));
                 }
             }
+        }
+    }
+    /// A left press in the open chat: on the input line it places the caret
+    /// or selects (click, double click, triple click, Shift+click); elsewhere
+    /// it acts on the chat run under the pointer.
+    pub(super) fn chat_press(&mut self) {
+        match self.chat_line {
+            Some(hit) if hit.inside => {
+                self.chat_input
+                    .press(hit.index, self.shift_held, Instant::now());
+            }
+            _ => self.chat_click(),
         }
     }
     /// Acts on a left click in the open chat: `run_command` sends,

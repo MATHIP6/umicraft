@@ -18,8 +18,8 @@ use umicraft_game::chat::{ChatInput, SentHistory};
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
-    chat_run_at, gui_scale, Camera, ChatInputView, HudState, NoIcons, Overlay, RenderEnvironment,
-    Renderer, ScreenOverlays, SkyState,
+    chat_input_hit, chat_run_at, gui_scale, Camera, ChatInputView, HudState, InputHit, NoIcons,
+    Overlay, RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::menus::{ConnectStage, PanoramaTextures};
@@ -247,6 +247,8 @@ struct App {
     pointer: (f32, f32),
     /// The chat run under the pointer in the last frame (click and hover).
     chat_hover: Option<umicraft_render::ChatRunView>,
+    /// Where the pointer is on the chat input line, as of the last frame.
+    chat_line: Option<InputHit>,
     /// The pick block binding went down since the last input update.
     pick_block: bool,
     /// The drop key was pressed since the last input update.
@@ -408,6 +410,7 @@ impl App {
             particle_sprites: Vec::new(),
             pointer: (0.0, 0.0),
             chat_hover: None,
+            chat_line: None,
             pick_block: false,
             drop_item: None,
             toggle_perspective: false,
@@ -1042,6 +1045,18 @@ impl App {
             self.chat_hover = chatting
                 .then(|| chat_run_at(&hud, (width, height), atlas, self.pointer))
                 .flatten();
+            self.chat_line = chatting.then(|| {
+                chat_input_hit(
+                    &self.chat_input.text(),
+                    (width, height),
+                    atlas,
+                    self.pointer,
+                )
+            });
+            if let Some(hit) = self.chat_line {
+                // The selection follows the pointer while the button is held.
+                self.chat_input.drag_to(hit.index);
+            }
             let rows = self
                 .chat_hover
                 .as_ref()
@@ -1798,11 +1813,11 @@ impl ApplicationHandler for App {
                     self.inventory_button(state, button);
                     self.creative_button(state, button);
                 } else if screen.blocks_game_input() {
-                    if screen == Screen::Chat
-                        && button == MouseButton::Left
-                        && state == ElementState::Pressed
-                    {
-                        self.chat_click();
+                    if screen == Screen::Chat && button == MouseButton::Left {
+                        match state {
+                            ElementState::Pressed => self.chat_press(),
+                            ElementState::Released => self.chat_input.release(),
+                        }
                     }
                 } else {
                     self.handle_game_mouse(state, button);
