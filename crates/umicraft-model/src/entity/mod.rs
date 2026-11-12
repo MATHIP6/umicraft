@@ -798,6 +798,68 @@ mod tests {
     }
 
     #[test]
+    fn the_cow_udder_hangs_under_the_belly_towards_the_rear() {
+        // Regression: the udder was drawn on the back of the cow.
+        let cow = QuadrupedModel::cow();
+        let transform = cow
+            .body
+            .transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)));
+        let bounds = |shape: &ModelBox| {
+            let mut mesh = Vec::new();
+            shape.emit_triangles(transform, &mut mesh);
+            let axis = |i: usize| {
+                let values = mesh.iter().map(|v| v.position[i]);
+                (
+                    values.clone().fold(f32::INFINITY, f32::min),
+                    values.fold(f32::NEG_INFINITY, f32::max),
+                )
+            };
+            (axis(1), axis(2))
+        };
+        let ((body_bottom, body_top), (body_front, body_rear)) = bounds(&cow.body.boxes[0]);
+        let ((udder_bottom, udder_top), (udder_front, udder_rear)) = bounds(&cow.body.boxes[1]);
+        assert!(
+            (udder_top - body_bottom).abs() < 1e-4,
+            "{udder_top} {body_bottom}"
+        );
+        assert!(udder_bottom < body_bottom && udder_top < body_top);
+        // MCP: the body spans z -8..10 and the udder z 4..10, in pixels.
+        assert!((body_front + 0.5).abs() < 1e-4 && (body_rear - 10.0 / 16.0).abs() < 1e-4);
+        assert!((udder_front - 0.25).abs() < 1e-4 && (udder_rear - 10.0 / 16.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn pig_and_sheep_bodies_span_the_mcp_extents() {
+        // Regression: the bodies kept the MCP boxes in a y-up frame, which
+        // swapped their front and rear faces.
+        let extents = |body: &ModelPart| {
+            let mut mesh = Vec::new();
+            body.emit(Mat4::from_scale(Vec3::splat(1.0 / 16.0)), &mut mesh);
+            let axis = |i: usize| {
+                let values = mesh.iter().map(|v| v.position[i] * 16.0);
+                (
+                    values.clone().fold(f32::INFINITY, f32::min),
+                    values.fold(f32::NEG_INFINITY, f32::max),
+                )
+            };
+            (axis(1), axis(2))
+        };
+        let close =
+            |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3;
+        // MCP y 5 + (-7..1) and z 2 + (-10..6), mirrored to y up.
+        let (y, z) = extents(&QuadrupedModel::pig().body);
+        assert!(
+            close(y, (6.0, 14.0)) && close(z, (-8.0, 8.0)),
+            "{y:?} {z:?}"
+        );
+        let (y, z) = extents(&SheepModel::new().body);
+        assert!(
+            close(y, (12.0, 18.0)) && close(z, (-8.0, 8.0)),
+            "{y:?} {z:?}"
+        );
+    }
+
+    #[test]
     fn pig_legs_reach_ground() {
         let model = QuadrupedModel::pig();
         let mesh = model.emit_mesh();

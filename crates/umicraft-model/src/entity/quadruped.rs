@@ -54,10 +54,13 @@ impl QuadrupedModel {
                 0.0,
             ));
 
-        // Body: pivot at [0, 5, 2] in MCP (Y=15 in Umicraft) with rotation +PI/2
-        let mut body = ModelPart::new([0.0, 15.0, 2.0])
+        // Body (MCP pivot [0, 5, 2], rotated +PI/2 about x). In this y-up frame
+        // the pivot is at 24 - 5 = 19, the rotation is negated and the local y
+        // of the boxes is mirrored (`pose.rs` convention); copying the MCP boxes
+        // verbatim put the udder on the back instead of under the belly.
+        let mut body = ModelPart::new([0.0, 19.0, 2.0])
             .with_box(ModelBox::new(
-                [-6.0, -10.0, -7.0],
+                [-6.0, -8.0, -7.0],
                 [12.0, 18.0, 10.0],
                 [18.0, 4.0],
                 tex,
@@ -65,13 +68,13 @@ impl QuadrupedModel {
             ))
             // Udder (MCP ModelCow: addBox(-2, 2, -8, 4, 6, 1))
             .with_box(ModelBox::new(
-                [-2.0, 2.0, -8.0],
+                [-2.0, -8.0, -8.0],
                 [4.0, 6.0, 1.0],
                 [52.0, 0.0],
                 tex,
                 0.0,
             ));
-        body.rotation[0] = PI / 2.0;
+        body.rotation[0] = -PI / 2.0;
 
         let leg1 = ModelPart::new([-4.0, 12.0, 7.0]).with_box(ModelBox::new(
             [-2.0, -12.0, -2.0],
@@ -145,14 +148,16 @@ impl QuadrupedModel {
                 grow,
             ));
 
-        let mut body = ModelPart::new([0.0, 7.0, 2.0]).with_box(ModelBox::new(
-            [-5.0, -10.0, -7.0],
+        // MCP pivot y is 17 - 6 = 11 (rotated +PI/2); see `cow` for the y-up
+        // conversion: pivot 24 - 11, negated rotation, mirrored local y.
+        let mut body = ModelPart::new([0.0, 13.0, 2.0]).with_box(ModelBox::new(
+            [-5.0, -6.0, -7.0],
             [10.0, 16.0, 8.0],
             [28.0, 8.0],
             tex,
             grow,
         ));
-        body.rotation[0] = PI / 2.0;
+        body.rotation[0] = -PI / 2.0;
 
         let leg1 = ModelPart::new([-3.0, 6.0, 7.0]).with_box(ModelBox::new(
             [-2.0, -6.0, -2.0],

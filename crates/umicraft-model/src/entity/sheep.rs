@@ -75,16 +75,17 @@ impl SheepModel {
         ));
 
         // MCP: addBox(-4, -10, -7, 8, 16, 6), pivot (0, 5, 2)
-        // Rotated PI/2: local Y→world Z, local Z→world Y. Pivot formula:
-        // pivot_umi_Y = 24 - pivot_mcp_Y + Z_min + Z_max = 24 - 5 + (-7) + (-1) = 11
-        let mut body = ModelPart::new([0.0, 11.0, 2.0]).with_box(ModelBox::new(
-            [-4.0, -10.0, -7.0],
+        // Rotated PI/2 about x in MCP's y-down frame. In this y-up frame the
+        // pivot is 24 - 5, the rotation is negated and the local y of the box
+        // is mirrored (-10..6 becomes -6..10), as for the cow.
+        let mut body = ModelPart::new([0.0, 19.0, 2.0]).with_box(ModelBox::new(
+            [-4.0, -6.0, -7.0],
             [8.0, 16.0, 6.0],
             [28.0, 8.0],
             tex,
             0.0,
         ));
-        body.rotation[0] = PI / 2.0;
+        body.rotation[0] = -PI / 2.0;
 
         // Legs: ModelQuadruped(12), pivot (±3, 12, ±7/±-5)
         let leg1 = ModelPart::new([-3.0, 12.0, 7.0]).with_box(ModelBox::new(
@@ -127,14 +128,14 @@ impl SheepModel {
         ));
 
         // MCP: addBox(-4, -10, -7, 8, 16, 6, 1.75), pivot (0, 5, 2)
-        let mut wool_body = ModelPart::new([0.0, 11.0, 2.0]).with_box(ModelBox::new(
-            [-4.0, -10.0, -7.0],
+        let mut wool_body = ModelPart::new([0.0, 19.0, 2.0]).with_box(ModelBox::new(
+            [-4.0, -6.0, -7.0],
             [8.0, 16.0, 6.0],
             [28.0, 8.0],
             tex,
             1.75,
         ));
-        wool_body.rotation[0] = PI / 2.0;
+        wool_body.rotation[0] = -PI / 2.0;
 
         // MCP: addBox(-2, 0, -2, 4, 6, 4, 0.5), pivot (±3, 12, ±7/±-5)
         let wool_leg1 = ModelPart::new([-3.0, 12.0, 7.0]).with_box(ModelBox::new(
