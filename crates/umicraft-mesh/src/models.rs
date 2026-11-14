@@ -118,9 +118,7 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
             }
         }
         if let Some(liquid) = Liquid::of(state) {
-            let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
-                tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
-            });
+            let tint = tint::state_tint(source, state, wx, wz, context.tints.as_deref());
             let layers = match liquid {
                 Liquid::Water => water,
                 Liquid::Lava => lava,
@@ -141,9 +139,7 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
             let placement = Placement::in_world(position).lit(lighting);
             emit_model_quads(mesh, source, context, state, variant, placement);
         } else if state.is_renderable() {
-            let tint = context.tints.as_deref().map_or(tint::WHITE, |tints| {
-                tint::biome_tint(source, tint::tint_class(state), wx, wz, tints)
-            });
+            let tint = tint::state_tint(source, state, wx, wz, context.tints.as_deref());
             // No model and not a liquid: the checker, never a procedural
             // layer index (ADR-0012).
             let missing = context.atlas.missing_layer();
@@ -335,9 +331,7 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
         let layer = context.atlas.layer(&quad.texture).unwrap_or(0);
         let tint = if quad.tint.is_some() {
             *block_tint.get_or_insert_with(|| {
-                context.tints.as_deref().map_or(tint::WHITE, |tints| {
-                    tint::biome_tint(source, tint::tint_class(state), x, z, tints)
-                })
+                tint::state_tint(source, state, x, z, context.tints.as_deref())
             })
         } else {
             tint::WHITE

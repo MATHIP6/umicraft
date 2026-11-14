@@ -148,8 +148,11 @@ grass noise split is collapsed to `0x6A7039`; the 1.8 altitude term in
   side base uncoloured while the overlay is green.
 - The class comes from the block state:
   grass block 2; tall grass 31 (meta 0 dead bush excluded); double plant 175
-  (meta 2/3 grass/fern only) → `Grass`; leaves 18 and vines 106 → `Foliage`;
-  water 8/9 → `Water`; everything else untinted. Lily pad 111 is out of scope:
+  (meta 2/3 grass/fern only) → `Grass`; leaves 18 (oak, jungle) and 161 (acacia, dark oak) and vines 106 → `Foliage`;
+  sugar cane 83 → `Grass`; water 8/9 → `Water`; everything else untinted.
+  Biome-independent colours go through `tint::state_tint`: redstone wire by
+  power, spruce/birch leaves (18, meta 1/2) at fixed greens, and the
+  pumpkin/melon stems (104/105) by age. Lily pad 111 is out of scope:
   1.8.8 ships no `models/block/lily_pad.json` and draws it with a special
   renderer, so the mesher has no correct geometry to tint.
 - The colour is the average of the 3×3 biome colours around the block column,
@@ -185,7 +188,7 @@ channel is needed. Block changes cannot change a biome.
   registration), `BiomeGenForest.java`, `BiomeGenSwamp.java`,
   `BiomeGenMesa.java`, `BiomeGenMutated.java`, `BiomeColorHelper.java`.
 - `mcp: .../block/BlockGrass.java`, `BlockLeaves.java`, `BlockTallGrass.java`,
-  `BlockDoublePlant.java`, `BlockVine.java`, `BlockLiquid.java` (tint classes).
+  `BlockDoublePlant.java`, `BlockVine.java`, `BlockLiquid.java` (tint classes), `BlockRedstoneWire.java` (power colour, not biome-based: `tint::state_tint`).
   `BlockLilyPad.java` was consulted but is not implemented: 1.8.8 has no lily
   pad block model and renders it with a special renderer.
 - The 1.8.8 jar (runtime evidence): all `leaves_*` and grass textures are

@@ -9,7 +9,7 @@
 
 use glam::DVec3;
 use umicraft_game::particles::{Behaviour, Layer, Particle, ParticleEngine, Texture};
-use umicraft_mesh::tint::tint_class;
+use umicraft_mesh::tint::{fixed_color, tint_class};
 use umicraft_mesh::ModelMeshContext;
 use umicraft_render::ParticleSprite;
 use umicraft_world::{BlockPos, BlockState, World};
@@ -43,12 +43,12 @@ pub fn block_sprite(context: &ModelMeshContext, state: BlockState) -> Option<Blo
     let model = context.models.model(state)?;
     let key = model.variants.first()?.model.particle.as_deref()?;
     let layer = context.atlas.layer(key)?;
-    let tint = match (&context.tints, state.id()) {
-        (Some(tints), id) if id != GRASS_BLOCK => tints
-            .color(tint_class(state), TINT_BIOME)
-            .map(|channel| f32::from(channel) / 255.0),
-        _ => [1.0; 3],
+    let rgb = match (fixed_color(state), &context.tints, state.id()) {
+        (Some(fixed), _, _) => fixed,
+        (None, Some(tints), id) if id != GRASS_BLOCK => tints.color(tint_class(state), TINT_BIOME),
+        _ => [0xFF; 3],
     };
+    let tint = rgb.map(|channel| f32::from(channel) / 255.0);
     Some(BlockSprite { layer, tint })
 }
 
