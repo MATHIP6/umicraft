@@ -488,7 +488,7 @@ mod tests {
         assert_eq!(tint(18, 1), 0x0061_9961);
         assert_eq!(tint(18, 2 | 8), 0x0080_A755);
         assert_eq!(tint(18, 0), WHITE);
-        assert_eq!(tint(104, 0), 0x00_00FF_00);
+        assert_eq!(tint(104, 0), 0x0000_FF00);
         assert_eq!(tint(105, 7), 0x00E0_C71C);
     }
 
