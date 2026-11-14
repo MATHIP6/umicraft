@@ -59,7 +59,7 @@ pub(super) fn push(
         tints: &tints,
     };
     let glint = resources.glints(stack.item_id, stack.damage, stack.nbt.as_deref());
-    layers.push(quads, &pose, &style, glint);
+    layers.push_world_lit(quads, &pose, &style, glint);
 }
 
 /// The stack the layer draws: a player with a bobber out holds a plain rod

@@ -41,7 +41,8 @@ pub(super) fn push(
         tints: &tints,
     };
     let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
-    layers.push(quads, &pose, &style, glint);
+    // `LayerCustomHead` draws the block through `RenderItem`: item lights.
+    layers.push_world_lit(quads, &pose, &style, glint);
 }
 
 /// The block on the head of `entity` and the frame it hangs in.

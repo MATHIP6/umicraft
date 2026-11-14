@@ -113,6 +113,36 @@ impl ItemLayers {
             self.glint.push_quads(quads, pose, style);
         }
     }
+
+    /// [`Self::push`] with the items lit by the standard item lights, which
+    /// `light_frame` fixes (see `ItemMesh::push_quads_lit`); the glint is
+    /// the same geometry and takes no light.
+    fn push_lit(
+        &mut self,
+        quads: &[ModelQuad],
+        (pose, light_frame): (&Mat4, &Mat4),
+        style: &ItemStyle<'_>,
+        glint: bool,
+    ) {
+        self.items.push_quads_lit(quads, pose, light_frame, style);
+        if glint {
+            self.glint.push_quads(quads, pose, style);
+        }
+    }
+
+    /// [`Self::push_lit`] for an item placed in the world: the reference
+    /// sets the item lights with the camera transform before it draws the
+    /// entities (`EntityRenderer.renderWorldPass`), so they are fixed in the
+    /// world and the light frame is the identity.
+    fn push_world_lit(
+        &mut self,
+        quads: &[ModelQuad],
+        pose: &Mat4,
+        style: &ItemStyle<'_>,
+        glint: bool,
+    ) {
+        self.push_lit(quads, (pose, &Mat4::IDENTITY), style, glint);
+    }
 }
 
 fn push_dropped_item(
@@ -127,13 +157,13 @@ fn push_dropped_item(
     let tints = resources.tints(item.item_id, item.damage, item.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
-        // Items are not lit by face in the world.
+        // The item lights replace the face shade of the world.
         light: world_light(entity.light, false),
         tints: &tints,
     };
     let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
     for pose in copy_poses(entity, item.count, model) {
-        layers.push(quads, &pose, &style, glint);
+        layers.push_world_lit(quads, &pose, &style, glint);
     }
 }
 
@@ -192,11 +222,11 @@ fn push_item_frame(
     let tints = resources.tints(item.item_id, item.damage, item.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
-        light: world_light(entity.light, model.gui_3d),
+        light: world_light(entity.light, false),
         tints: &tints,
     };
     let glint = resources.glints(item.item_id, item.damage, item.nbt.as_deref());
-    layers.push(quads, &pose, &style, glint);
+    layers.push_world_lit(quads, &pose, &style, glint);
 }
 
 /// The world matrix of the item in a frame (`RenderItemFrame.func_82402_b`).
@@ -235,16 +265,23 @@ pub fn push_held_item(
     let tints = resources.tints(item_id, damage, nbt);
     let style = ItemStyle {
         atlas: resources.atlas(),
-        // Lit by the world at the eye; lit blocks keep their face shade.
-        light: world_light(light, model.gui_3d),
+        // Lit by the world at the eye, and by the item lights below.
+        light: world_light(light, false),
         tints: &tints,
     };
     let pose = bob * hand.item_matrix() * held_pose(model, DisplayContext::FirstPerson);
-    layers.push(quads, &pose, &style, resources.glints(item_id, damage, nbt));
+    // Blocks and flat items alike take the standard item lights (MCP
+    // `ItemRenderer.rotateArroundXAndY`; `RenderItem.renderQuad` replaces the
+    // face shade baked in the quads), which sit in the bobbed frame: the bob
+    // is taken back out before the light frame.
+    let light_frame = hand.light_frame() * bob.inverse();
+    let glint = resources.glints(item_id, damage, nbt);
+    layers.push_lit(quads, (&pose, &light_frame), &style, glint);
 }
 
 /// The model of the item in the first-person hand: the bow shows its
-/// drawing model while it is drawn (MCP `RenderItem.renderItemModelForEntity`).
+/// drawing model while it is drawn, the rod its cast model while the bobber
+/// is out (MCP `RenderItem.renderItemModelForEntity`).
 fn held_model<'a>(
     resources: &'a ItemResources,
     item_id: i16,
@@ -405,6 +442,41 @@ mod tests {
         );
         layers.clear();
         assert!(layers.items.is_empty() && layers.glint.is_empty());
+    }
+
+    #[test]
+    fn items_in_the_world_are_lit_by_the_world_fixed_item_lights() {
+        let atlas = umicraft_model::AtlasLayout::from_keys(["items/apple"]);
+        let style = ItemStyle {
+            atlas: &atlas,
+            light: VertexLight::new(0, 15, 15, false),
+            tints: &[],
+        };
+        let quad = ModelQuad {
+            positions: [[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            normal: [0.0, 0.0, 1.0],
+            uvs: [[0.0; 2]; 4],
+            texture: "items/apple".to_string(),
+            cullface: None,
+            shade: false,
+            tint: None,
+        };
+        let brightness = |pose: Mat4| {
+            let mut layers = ItemLayers::default();
+            layers.push_world_lit(std::slice::from_ref(&quad), &pose, &style, true);
+            assert_eq!(
+                layers.glint.vertices.len(),
+                4,
+                "the glint keeps the geometry"
+            );
+            (layers.items.vertices[0].tint & 0xFF) as f32 / 255.0
+        };
+        // Upright, the sprite is a side face; laid flat face up it is fully lit.
+        let upright = brightness(Mat4::IDENTITY);
+        let expected = umicraft_mesh::item::item_light_factor(glam::Vec3::Z);
+        assert!((upright - expected).abs() < 0.01, "{upright}");
+        let flat = brightness(Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2));
+        assert_eq!(flat, 1.0);
     }
 
     #[test]
