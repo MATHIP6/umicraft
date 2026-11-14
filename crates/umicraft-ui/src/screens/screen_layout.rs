@@ -5,10 +5,11 @@
 use crate::geom::Rect;
 
 use super::decoration::{Decoration, SpriteRect};
+use super::effect_list::shifted_gui_left;
 use super::interaction::Hotspot;
 #[cfg(test)]
 use super::interaction::ScreenState;
-use super::scale::gui_scale;
+use super::scale::{gui_scale, gui_scale_option, ScaledResolution};
 use super::{ScreenKind, ScreenSpec};
 
 /// Item area edge, in unscaled pixels.
@@ -36,12 +37,38 @@ impl ScreenLayout {
     /// is centred (`guiLeft = (width - xSize) / 2`).
     #[must_use]
     pub fn new(viewport: Rect, kind: ScreenKind) -> Self {
+        Self::placed(viewport, kind, |width| {
+            ((viewport.width - width) * 0.5).floor()
+        })
+    }
+
+    /// Places `kind` in `viewport` moved right for the potion effect list,
+    /// as `InventoryEffectRenderer.updateActivePotionEffects` does while the
+    /// player has an effect (see [`shifted_gui_left`]); the top stays centred.
+    #[must_use]
+    pub fn beside_effects(viewport: Rect, kind: ScreenKind) -> Self {
+        let scaled = ScaledResolution::new(
+            viewport.width as u32,
+            viewport.height as u32,
+            gui_scale_option(),
+        );
+        let x_size = i32::try_from(kind.spec().size.0).unwrap_or(i32::MAX);
+        let scaled_width = i32::try_from(scaled.scaled_width).unwrap_or(i32::MAX);
+        let left = shifted_gui_left(scaled_width, x_size);
+        Self::placed(viewport, kind, |_| {
+            (left * scaled.scale_factor as i32) as f32
+        })
+    }
+
+    /// Places `kind` with its left edge `left(width)` physical pixels into
+    /// `viewport`, `width` being the scaled width of the screen.
+    fn placed(viewport: Rect, kind: ScreenKind, left: impl Fn(f32) -> f32) -> Self {
         let spec = kind.spec();
         let scale = gui_scale(viewport.width as u32, viewport.height as u32);
         let s = scale as f32;
         let (w, h) = (spec.size.0 as f32 * s, spec.size.1 as f32 * s);
         let background = Rect::new(
-            viewport.x + ((viewport.width - w) * 0.5).floor(),
+            viewport.x + left(w),
             viewport.y + ((viewport.height - h) * 0.5).floor(),
             w,
             h,
@@ -147,6 +174,21 @@ mod tests {
 
     fn viewport() -> Rect {
         Rect::new(0.0, 0.0, 1280.0, 720.0)
+    }
+
+    #[test]
+    fn beside_the_effect_list_the_screen_moves_right_with_its_slots() {
+        let centred = ScreenLayout::new(viewport(), ScreenKind::Player);
+        let moved = ScreenLayout::beside_effects(viewport(), ScreenKind::Player);
+        // 1280x720 is 427 GUI pixels wide at scale 3: guiLeft 185.
+        assert_eq!(moved.background.x, 185.0 * 3.0);
+        assert_eq!(moved.background.y, centred.background.y);
+        let shift = moved.background.x - centred.background.x;
+        assert_eq!(moved.slots[0].1.x - centred.slots[0].1.x, shift);
+        assert_eq!(
+            moved.slot_at((moved.slots[0].1.x + 1.0, moved.slots[0].1.y + 1.0)),
+            Some(0)
+        );
     }
 
     #[test]

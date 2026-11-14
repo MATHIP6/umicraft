@@ -31,10 +31,20 @@ pub struct ActiveEffect {
     pub max_duration: bool,
 }
 
+/// The bucket count a new `java.util.HashMap` starts with.
+const INITIAL_BUCKETS: usize = 16;
+
 /// The effects of the local player, keyed by potion id.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Effects {
     active: BTreeMap<u8, ActiveEffect>,
+    /// The potion ids in the order they were added; an effect that is
+    /// combined keeps its place. Read by [`Self::listed`].
+    added: Vec<u8>,
+    /// The bucket count of the `HashMap` the reference keeps the effects in
+    /// (`EntityLivingBase.activePotionsMap`); `0` until the first effect. It
+    /// doubles past three quarters full and never shrinks.
+    buckets: usize,
 }
 
 impl Effects {
@@ -56,13 +66,25 @@ impl Effects {
             Some(current) => combine(current, incoming),
             None => {
                 self.active.insert(incoming.effect_id, incoming);
+                self.added.push(incoming.effect_id);
+                self.grow();
             }
+        }
+    }
+
+    /// `HashMap.resize`: twice the buckets once more than three quarters
+    /// are used.
+    fn grow(&mut self) {
+        self.buckets = self.buckets.max(INITIAL_BUCKETS);
+        while self.active.len() > self.buckets * 3 / 4 {
+            self.buckets *= 2;
         }
     }
 
     /// Removes the effect with this potion id, if active.
     pub fn remove(&mut self, effect_id: u8) {
         self.active.remove(&effect_id);
+        self.added.retain(|&id| id != effect_id);
     }
 
     /// Advances every effect by one tick (`PotionEffect.onUpdate`).
@@ -77,9 +99,10 @@ impl Effects {
         }
     }
 
-    /// Forgets every effect.
+    /// Forgets every effect, as the new player of a respawn starts with a
+    /// new map.
     pub fn clear(&mut self) {
-        self.active.clear();
+        *self = Self::default();
     }
 
     /// The effect with this potion id, if active.
@@ -90,6 +113,26 @@ impl Effects {
     /// The active effects in potion id order.
     pub fn iter(&self) -> impl Iterator<Item = &ActiveEffect> {
         self.active.values()
+    }
+
+    /// The active effects in the order the reference iterates its
+    /// `HashMap<Integer, PotionEffect>`, which is the order of the effect list
+    /// of the inventory (`InventoryEffectRenderer.drawActivePotionEffects`).
+    ///
+    /// The hash of an `Integer` is its value, so an effect sits in bucket
+    /// `id % buckets`; the buckets are walked in order and a bucket keeps its
+    /// effects in the order they were added. With 16 buckets night vision
+    /// (16) comes first and hunger (17) right after speed (1).
+    pub fn listed(&self) -> Vec<&ActiveEffect> {
+        let mask = self.buckets.max(INITIAL_BUCKETS) - 1;
+        let mut listed: Vec<(usize, &ActiveEffect)> = self
+            .added
+            .iter()
+            .enumerate()
+            .filter_map(|(order, id)| Some((order, self.active.get(id)?)))
+            .collect();
+        listed.sort_by_key(|&(order, effect)| (usize::from(effect.effect_id) & mask, order));
+        listed.into_iter().map(|(_, effect)| effect).collect()
     }
 
     /// The number of active effects.
@@ -103,15 +146,14 @@ impl Effects {
     }
 }
 
-/// `PotionEffect.combine`.
+/// `PotionEffect.combine`. It does not copy `isPotionDurationMax`: an effect
+/// keeps the flag it was added with.
 fn combine(current: &mut ActiveEffect, incoming: ActiveEffect) {
     if incoming.amplifier > current.amplifier {
         current.amplifier = incoming.amplifier;
         current.duration = incoming.duration;
-        current.max_duration = incoming.max_duration;
     } else if incoming.amplifier == current.amplifier && current.duration < incoming.duration {
         current.duration = incoming.duration;
-        current.max_duration = incoming.max_duration;
     }
     current.show_particles = incoming.show_particles;
 }
@@ -167,6 +209,57 @@ mod tests {
         let mut effects = Effects::default();
         effects.apply(&packet(1, 0, 32767));
         assert!(effects.get(1).unwrap().max_duration);
+    }
+
+    #[test]
+    fn a_combined_effect_keeps_its_max_duration_flag() {
+        let mut effects = Effects::default();
+        effects.apply(&packet(1, 0, 600));
+        effects.apply(&packet(1, 1, 32767));
+        let effect = effects.get(1).unwrap();
+        assert_eq!((effect.amplifier, effect.duration), (1, 32767));
+        assert!(!effect.max_duration, "the flag of the first packet stays");
+    }
+
+    fn listed_ids(effects: &Effects) -> Vec<u8> {
+        effects.listed().iter().map(|e| e.effect_id).collect()
+    }
+
+    #[test]
+    fn the_list_follows_the_buckets_of_the_reference_hash_map() {
+        let mut effects = Effects::default();
+        for id in [1, 16, 17, 5, 3] {
+            effects.apply(&packet(id, 0, 600));
+        }
+        // Bucket 0 holds 16; bucket 1 holds 1 then 17, in the order added.
+        assert_eq!(listed_ids(&effects), [16, 1, 17, 3, 5]);
+        // Added again after a removal, 1 goes behind 17 in its bucket.
+        effects.remove(1);
+        effects.apply(&packet(1, 0, 600));
+        assert_eq!(listed_ids(&effects), [16, 17, 1, 3, 5]);
+        // Combining does not move an effect.
+        effects.apply(&packet(17, 2, 600));
+        assert_eq!(listed_ids(&effects), [16, 17, 1, 3, 5]);
+    }
+
+    #[test]
+    fn past_twelve_effects_the_map_grows_and_stays_grown() {
+        let mut effects = Effects::default();
+        for id in 1..=13 {
+            effects.apply(&packet(id, 0, 600));
+        }
+        effects.apply(&packet(16, 0, 600));
+        // 32 buckets: every id has its own, in id order.
+        assert_eq!(listed_ids(&effects)[..2], [1, 2]);
+        assert_eq!(*listed_ids(&effects).last().unwrap(), 16);
+        for id in 2..=13 {
+            effects.remove(id);
+        }
+        assert_eq!(listed_ids(&effects), [1, 16], "the map does not shrink");
+        effects.clear();
+        effects.apply(&packet(1, 0, 600));
+        effects.apply(&packet(16, 0, 600));
+        assert_eq!(listed_ids(&effects), [16, 1], "a new player has a new map");
     }
 
     #[test]

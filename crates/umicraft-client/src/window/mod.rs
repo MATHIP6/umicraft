@@ -1119,8 +1119,10 @@ impl App {
                             // Vanilla toggles every 6 ticks (cursorCounter / 6 % 2).
                             caret_visible: (self.started.elapsed().as_millis() / 300)
                                 .is_multiple_of(2),
+                            effects: &world.hud().effects,
                         };
-                        let layout = CreativeLayout::new(width, height);
+                        let layout =
+                            CreativeLayout::for_effects(width, height, !scene.effects.is_empty());
                         self.portrait =
                             draw_creative_overlay(&mut self.ui, atlas, viewport, &layout, &scene);
                     }

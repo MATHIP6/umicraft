@@ -8,6 +8,7 @@
 //! never touches the game state.
 
 use umicraft_assets::GuiAtlas;
+use umicraft_game::inventory::effect_list::EffectLine;
 use umicraft_game::inventory::{
     resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
 };
@@ -21,6 +22,7 @@ use umicraft_ui::widgets::slot;
 use umicraft_ui::{draw_item, FontAtlas, Rect, TextStyle, Ui};
 
 use crate::anvil_field::FieldView;
+use crate::effect_list_draw::draw_effect_list;
 use crate::inventory_input::Context;
 use crate::item_icons::{slot_item, ItemView};
 use crate::portrait::{self, Spot};
@@ -66,13 +68,30 @@ pub fn screen_kind(container: Option<&ContainerView>) -> ScreenKind {
     }
 }
 
+/// Places the screen of `kind`. Only the player inventory makes room for
+/// the effect list (`GuiInventory` extends `InventoryEffectRenderer`, the
+/// container screens do not).
+fn screen_layout(viewport: Rect, kind: ScreenKind, has_effects: bool) -> ScreenLayout {
+    if has_effects && kind == ScreenKind::Player {
+        ScreenLayout::beside_effects(viewport, kind)
+    } else {
+        ScreenLayout::new(viewport, kind)
+    }
+}
+
 /// The creative game mode id of `Change Game State`.
 pub(crate) const CREATIVE_GAMEMODE: u8 = 1;
 
 /// The layout of the open screen in `viewport` and what the input layer needs
-/// to know about the window (`gamemode` is the wire id of the game mode).
-pub fn screen_input(viewport: Rect, view: &WindowView, gamemode: u8) -> (ScreenLayout, Context) {
-    let layout = ScreenLayout::new(viewport, screen_kind(view.container.as_ref()));
+/// to know about the window (`gamemode` is the wire id of the game mode,
+/// `has_effects` whether the player has a potion effect).
+pub fn screen_input(
+    viewport: Rect,
+    view: &WindowView,
+    gamemode: u8,
+    has_effects: bool,
+) -> (ScreenLayout, Context) {
+    let layout = screen_layout(viewport, screen_kind(view.container.as_ref()), has_effects);
     let context = Context {
         cursor_has_item: view.cursor.is_some(),
         creative: gamemode == CREATIVE_GAMEMODE,
@@ -94,6 +113,8 @@ pub(crate) struct ScreenFacts {
     pub anvil: Option<FieldView>,
     /// Whether the caret of the name field is in its visible half-period.
     pub caret_visible: bool,
+    /// The potion effects listed beside the player inventory.
+    pub effects: Vec<EffectLine>,
 }
 
 /// Left edge, top edge and caret height of the anvil name text, in GUI pixels
@@ -346,7 +367,7 @@ pub(crate) fn draw_inventory_overlay(
     let drag = facts.drag.as_ref();
     ui.draw().rect(viewport, DIMMING);
     let kind = screen_kind(view.container.as_ref());
-    let layout = ScreenLayout::new(viewport, kind);
+    let layout = screen_layout(viewport, kind, !facts.effects.is_empty());
     let region = gui_atlas.and_then(|atlas| atlas.region(layout.spec.texture));
     let hover = ui.pointer().and_then(|[x, y]| layout.hotspot_at((x, y)));
     let dynamic = kind.dynamic(&screen_state(view, facts, hover));
@@ -404,6 +425,12 @@ pub(crate) fn draw_inventory_overlay(
     if view.cursor.is_none() {
         let hovered = hovered_stack(ui, &layout, view, own_len).or(offer);
         draw_hovered_tooltip(ui, atlas, viewport, &layout, hovered);
+    }
+    // `InventoryEffectRenderer.drawScreen` draws the list after the rest of
+    // the screen, the held stack and the tooltip included.
+    if kind == ScreenKind::Player {
+        let window = (layout.background.x, layout.background.y);
+        draw_effect_list(ui, (window, layout.scale), gui_atlas, &facts.effects);
     }
     spot
 }

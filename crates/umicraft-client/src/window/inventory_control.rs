@@ -73,6 +73,10 @@ impl App {
                 .is_some_and(|world| world.status().gamemode == 1),
             anvil: name.map(|(_, view)| view),
             caret_visible: (self.started.elapsed().as_millis() / CARET_BLINK_MS).is_multiple_of(2),
+            effects: self
+                .world
+                .as_ref()
+                .map_or_else(Vec::new, |world| world.hud().effects.clone()),
         }
     }
     /// The facts of the open inventory screen; the default when none is open.
@@ -147,6 +151,7 @@ impl App {
             viewport,
             world.window_view(),
             world.status().gamemode,
+            !world.hud().effects.is_empty(),
         ))
     }
     /// The stacks a drag split in progress will leave in the slots.

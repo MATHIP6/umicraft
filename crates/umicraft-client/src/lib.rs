@@ -37,6 +37,7 @@ pub mod creative_view;
 mod debug_f3_view;
 pub mod debug_world;
 pub mod dials;
+mod effect_list_draw;
 pub mod entity_demo;
 mod entity_icons;
 pub mod entity_render;

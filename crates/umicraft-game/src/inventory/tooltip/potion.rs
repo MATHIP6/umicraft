@@ -132,6 +132,12 @@ fn potion_type(id: u8) -> Option<&'static PotionType> {
     POTIONS.iter().find(|potion| potion.id == id)
 }
 
+/// `Potion.getName()` of the potion `id`: the language key of the effect, or
+/// `None` for an id `Potion.potionTypes` leaves empty.
+pub(crate) fn effect_name_key(id: u8) -> Option<&'static str> {
+    potion_type(id).map(|potion| potion.name)
+}
+
 /// `ItemPotion` damage bit of a splash potion.
 const SPLASH_BIT: i16 = 16384;
 /// The registry key of the potion item, whose name follows a prefix.
@@ -303,7 +309,7 @@ fn effect_line(effect: &PotionEffect) -> Option<TooltipLine> {
 }
 
 /// `StringUtils.ticksToElapsedTime`: `m:ss`.
-fn elapsed_time(ticks: i32) -> String {
+pub(crate) fn elapsed_time(ticks: i32) -> String {
     let seconds = ticks / TICKS_PER_SECOND;
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }

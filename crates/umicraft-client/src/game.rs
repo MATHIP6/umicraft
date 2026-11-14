@@ -931,6 +931,7 @@ impl Game {
             vitals: self.hud_view.views().vitals.clone(),
             bar: self.hud_view.views().bar,
             held_name: self.hud_view.views().held_name.clone(),
+            effects: self.hud_view.views().effects.clone(),
             ping_ms: self.local_ping_ms(),
             ..HudState::default()
         }

@@ -17,6 +17,7 @@
 pub mod armor;
 pub mod click;
 pub mod creative;
+pub mod effect_list;
 pub mod kind;
 mod manager;
 pub mod payload;

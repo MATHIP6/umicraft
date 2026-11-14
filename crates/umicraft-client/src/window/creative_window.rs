@@ -48,7 +48,15 @@ impl App {
     /// The layout of the creative window in the current display.
     fn creative_layout(&self) -> Option<CreativeLayout> {
         let size = self.window.as_ref()?.inner_size();
-        Some(CreativeLayout::new(size.width, size.height))
+        let has_effects = self
+            .world
+            .as_ref()
+            .is_some_and(|world| !world.hud().effects.is_empty());
+        Some(CreativeLayout::for_effects(
+            size.width,
+            size.height,
+            has_effects,
+        ))
     }
 
     /// What the input machine needs to know, once the game thread published
