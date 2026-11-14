@@ -105,9 +105,11 @@ pub struct EntityFrameData {
     /// The light in front of each block of a painting, column by column (the
     /// game thread samples it; empty for anything else).
     pub block_lights: Arc<[LightLevel]>,
-    /// Where the line of this bobber ties to the rod when the angler is the
-    /// local player in first person; set by the game thread.
-    pub rod_tip: Option<DVec3>,
+    /// Whether the line of this bobber ties to the rod in the first-person
+    /// hand (the angler is the local player, seen from their own eyes); set by
+    /// the game thread. The render thread places that end from the live
+    /// camera, which moves between two ticks.
+    pub tied_to_hand: bool,
     /// Whether this is the body of the local player.
     pub local: bool,
     /// Whether the viewer sees the invisible body as a ghost by team.
@@ -195,7 +197,7 @@ impl EntityFrameData {
             mob: self.mob.pose(a),
             ridden: self.ridden,
             block_lights: self.block_lights.clone(),
-            rod_tip: self.rod_tip.map(|tip| (tip - origin).as_vec3()),
+            tied_to_hand: self.tied_to_hand,
             flight: self
                 .flight
                 .as_ref()
@@ -294,9 +296,9 @@ pub struct EntityRenderSnapshot {
     /// The light in front of each block of a painting, column by column; empty
     /// when the whole entity takes `light`.
     pub block_lights: Arc<[LightLevel]>,
-    /// Where the line of this bobber ties to the rod (first person only),
-    /// relative to [`Self::origin`].
-    pub rod_tip: Option<Vec3>,
+    /// Whether the line of this bobber ties to the rod in the first-person
+    /// hand, placed from the camera at render time.
+    pub tied_to_hand: bool,
     /// Whether this is the body of the local player: it is not lowered further
     /// when crouching (`RenderPlayer.doRender`).
     pub local: bool,
@@ -359,7 +361,7 @@ impl EntityRenderSnapshot {
             mob: MobPose::None,
             ridden: false,
             block_lights: Arc::default(),
-            rod_tip: None,
+            tied_to_hand: false,
             local: false,
             ghost_visible: false,
             age: 0.0,
@@ -405,11 +407,9 @@ mod tests {
     #[test]
     fn the_origin_is_carried_and_subtracted_from_every_position() {
         let origin = DVec3::new(1_000_000.0, 60.0, 1_000_000.0);
-        let mut frame = walker(1_000_001.0, 1_000_002.0);
-        frame.rod_tip = Some(DVec3::new(1_000_003.5, 65.0, 1_000_000.5));
+        let frame = walker(1_000_001.0, 1_000_002.0);
         let snapshot = frame.interpolate(1.0, origin);
         assert_eq!(snapshot.origin, origin);
         assert_eq!(snapshot.position, Vec3::new(2.0, 4.0, 0.25));
-        assert_eq!(snapshot.rod_tip, Some(Vec3::new(3.5, 5.0, 0.5)));
     }
 }

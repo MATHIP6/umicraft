@@ -463,7 +463,7 @@ fn make_snapshot(
         mob: umicraft_game::entity::MobPose::None,
         ridden: false,
         block_lights: std::sync::Arc::default(),
-        rod_tip: None,
+        tied_to_hand: false,
         local: false,
         ghost_visible: false,
         flags: EntityFlags::new(0, 0x7F),

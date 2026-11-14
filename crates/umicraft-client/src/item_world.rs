@@ -15,7 +15,7 @@
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::{EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_game::hand::{bow_model_name, HandPose};
-use umicraft_game::item_use::UseAction;
+use umicraft_game::item_use::{UseAction, FISHING_ROD};
 use umicraft_game::items;
 use umicraft_mesh::item::{ItemMesh, ItemStyle};
 use umicraft_mesh::VertexLight;
@@ -145,6 +145,8 @@ fn world_light(light: LightLevel, shaded: bool) -> VertexLight {
 
 /// The bow item id.
 const BOW: i16 = 261;
+/// The model of a rod with a bobber out (`ItemModelMesher` name).
+const FISHING_ROD_CAST: &str = "fishing_rod_cast";
 /// The item id of a filled map, which has its own frame model.
 const FILLED_MAP: i16 = 358;
 
@@ -249,15 +251,23 @@ fn held_model<'a>(
     damage: i16,
     hand: &HandPose,
 ) -> Option<(&'a ItemModel, &'a [ModelQuad])> {
-    let drawn = hand
-        .item_use
-        .filter(|view| view.action == UseAction::Bow && item_id == BOW)
-        .and_then(|view| bow_model_name(view.ticks_used))
-        .and_then(|name| resources.models().model_by_name(name));
-    match drawn {
+    let special =
+        hand_model_name(item_id, hand).and_then(|name| resources.models().model_by_name(name));
+    match special {
         Some(model) => quads_of(model),
         None => sprite_model(resources, item_id, damage),
     }
+}
+
+/// The name of the model that replaces the one of `item_id` in the
+/// first-person hand, if any.
+fn hand_model_name(item_id: i16, hand: &HandPose) -> Option<&'static str> {
+    if item_id == FISHING_ROD && hand.fishing {
+        return Some(FISHING_ROD_CAST);
+    }
+    hand.item_use
+        .filter(|view| view.action == UseAction::Bow && item_id == BOW)
+        .and_then(|view| bow_model_name(view.ticks_used))
 }
 
 /// The model and quads of an item that is drawn from a sprite or blocks.
@@ -348,6 +358,22 @@ fn hover_phase(entity_id: i32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rod_in_the_hand_shows_its_cast_model_while_the_bobber_is_out() {
+        let idle = HandPose::default();
+        let fishing = HandPose {
+            fishing: true,
+            ..idle
+        };
+        assert_eq!(hand_model_name(FISHING_ROD, &idle), None);
+        assert_eq!(
+            hand_model_name(FISHING_ROD, &fishing),
+            Some(FISHING_ROD_CAST)
+        );
+        // Only the rod itself turns into the cast model.
+        assert_eq!(hand_model_name(280, &fishing), None);
+    }
 
     #[test]
     fn only_enchanted_items_reach_the_glint_layer() {
@@ -484,7 +510,7 @@ mod render_tests {
             mob: umicraft_game::entity::MobPose::None,
             ridden: false,
             block_lights: std::sync::Arc::default(),
-            rod_tip: None,
+            tied_to_hand: false,
             local: false,
             ghost_visible: false,
             flags: EntityFlags::default(),
@@ -675,7 +701,7 @@ mod player_render_tests {
             mob: umicraft_game::entity::MobPose::None,
             ridden: false,
             block_lights: std::sync::Arc::default(),
-            rod_tip: None,
+            tied_to_hand: false,
             local: false,
             ghost_visible: false,
             flags: EntityFlags::new(if sneaking { 0x02 } else { 0 }, 0),
@@ -883,7 +909,7 @@ mod glint_render_tests {
             mob: umicraft_game::entity::MobPose::None,
             ridden: false,
             block_lights: std::sync::Arc::default(),
-            rod_tip: None,
+            tied_to_hand: false,
             local: false,
             ghost_visible: false,
             flags: EntityFlags::default(),

@@ -76,14 +76,22 @@ pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(
-        snapshots,
-        &skins::NoSkins,
-        (0.0, 0.0),
-        false,
-        (Vec3::ZERO, None),
-    )
-    .solid
+    mesh_entities_with(snapshots, &skins::NoSkins, Eye::default(), false, None).solid
+}
+
+/// The camera of the frame: where it is and where it looks (radians, in the
+/// convention of `umicraft_render::Camera`), which the sprites face and the
+/// first-person rod hangs from.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Eye {
+    /// The position, in the space of the snapshots.
+    pub(super) position: Vec3,
+    /// The yaw.
+    pub(super) yaw: f32,
+    /// The pitch.
+    pub(super) pitch: f32,
+    /// The swing progress of the first-person arm (`HandPose::swing`).
+    pub(super) hand_swing: f32,
 }
 
 /// The meshes of a frame: the lit entities, and the glowing layers that are
@@ -105,10 +113,11 @@ struct MeshedEntities {
 fn mesh_entities_with(
     snapshots: &[EntityRenderSnapshot],
     skins: &dyn skins::SkinLookup,
-    (view_yaw, view_pitch): (f32, f32),
+    eye: Eye,
     viewer_is_spectator: bool,
-    (camera, view): (Vec3, Option<CullView>),
+    view: Option<CullView>,
 ) -> MeshedEntities {
+    let (camera, view_yaw, view_pitch) = (eye.position, eye.yaw, eye.pitch);
     let mut solid: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut additive: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut glint: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
@@ -167,11 +176,6 @@ fn mesh_entities_with(
         tnt_flash::add_flash(&mut additive, ent);
         rope::add_leash(&mut solid, ent);
         dragon_beam::add_beam(&mut solid, ent, snapshots);
-        let eye = fishing::Eye {
-            position: camera,
-            yaw: view_yaw,
-            pitch: view_pitch,
-        };
         fishing::add_bobber(&mut solid, ent, snapshots, light, eye);
         shadow::add_shadow(&mut shadows, ent, camera);
     }
@@ -369,7 +373,7 @@ mod tests {
                 mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
-                rod_tip: None,
+                tied_to_hand: false,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::new(0, 0x7F),
@@ -417,7 +421,7 @@ mod tests {
                 mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
-                rod_tip: None,
+                tied_to_hand: false,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),
@@ -465,7 +469,7 @@ mod tests {
                 mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
-                rod_tip: None,
+                tied_to_hand: false,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),
@@ -514,7 +518,7 @@ mod tests {
                 mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
-                rod_tip: None,
+                tied_to_hand: false,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),

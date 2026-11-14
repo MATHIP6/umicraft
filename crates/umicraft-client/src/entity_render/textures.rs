@@ -94,6 +94,9 @@ pub struct EntityTextures {
     shadows_enabled: Cell<bool>,
     /// Where the camera is, for the distance at which a shadow fades.
     camera: Cell<glam::Vec3>,
+    /// The swing progress of the first-person arm, which the line of the
+    /// local player's bobber follows.
+    hand_swing: Cell<f32>,
     /// How far through its 30 ticks the elder guardian that haunts the screen
     /// is, `None` when it does not.
     appearance: Cell<Option<f32>>,
@@ -132,6 +135,7 @@ impl EntityTextures {
             viewer_is_spectator: Cell::new(false),
             shadows_enabled: Cell::new(true),
             camera: Cell::new(glam::Vec3::ZERO),
+            hand_swing: Cell::new(0.0),
             appearance: Cell::new(None),
             block_entities: RefCell::default(),
         }
@@ -187,6 +191,12 @@ impl EntityTextures {
     /// still drawn.
     pub fn set_camera_position(&self, position: glam::Vec3) {
         self.camera.set(position);
+    }
+
+    /// Sets the swing progress of the first-person arm (`HandPose::swing`),
+    /// where the line of the local player's bobber ties in first person.
+    pub fn set_hand_swing(&self, swing: f32) {
+        self.hand_swing.set(swing);
     }
 
     /// Sets how far through its life the elder guardian that haunts the screen
@@ -318,12 +328,18 @@ impl EntityTextures {
         self.skins
             .borrow_mut()
             .collect(renderer, &mut self.textures.borrow_mut());
+        let eye = super::Eye {
+            position: self.camera.get(),
+            yaw: self.view_yaw.get(),
+            pitch: self.view_pitch.get(),
+            hand_swing: self.hand_swing.get(),
+        };
         let mut meshed = mesh_entities_with(
             snapshots,
             self,
-            (self.view_yaw.get(), self.view_pitch.get()),
+            eye,
             self.viewer_is_spectator.get(),
-            (self.camera.get(), self.cull_view.get()),
+            self.cull_view.get(),
         );
         let apparition = self.appearance.get().map(|progress| {
             super::appearance::elder_guardian(
@@ -393,9 +409,9 @@ impl EntityTextures {
         let meshed = mesh_entities_with(
             std::slice::from_ref(body),
             self,
-            (0.0, 0.0),
+            super::Eye::default(),
             false,
-            (Vec3::ZERO, None),
+            None,
         );
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();

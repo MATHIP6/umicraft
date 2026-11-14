@@ -195,6 +195,9 @@ pub struct HandPose {
     pub view_pitch: f32,
     /// The item being used (eaten, drunk, blocked with, drawn), if any.
     pub item_use: Option<ItemUseView>,
+    /// Whether the player has a bobber out: a held rod shows its cast model
+    /// (MCP `RenderItem.renderItemModelForEntity`, `fishEntity != null`).
+    pub fishing: bool,
 }
 
 /// An angle in degrees brought to `-180..180`.
@@ -247,6 +250,7 @@ impl HandPose {
                 }),
                 (_, newer) => newer,
             },
+            fishing: other.fishing,
         }
     }
 

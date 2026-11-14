@@ -13,6 +13,7 @@ use std::borrow::Cow;
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::{EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_game::hand::bow_model_name;
+use umicraft_game::item_use::FISHING_ROD;
 use umicraft_game::items::{self, ItemKind, ToolKind};
 use umicraft_mesh::item::ItemStyle;
 use umicraft_model::display::DisplayContext;
@@ -21,14 +22,10 @@ use umicraft_model::item::pose::held_pose;
 use umicraft_model::item::ItemModel;
 use umicraft_model::ModelQuad;
 
-use super::{quads_of, sprite_model, world_light, ItemLayers, BOW};
+use super::{quads_of, sprite_model, world_light, ItemLayers, BOW, FISHING_ROD_CAST};
 use crate::entity_render::{body_matrix, posed_humanoid_mob, posed_player, x_mirror, WITCH_SCALE};
 use crate::item_icons::ItemResources;
 
-/// The fishing rod item id.
-const FISHING_ROD: i16 = 346;
-/// The model of a rod with a bobber out (`ItemModelMesher` name).
-const FISHING_ROD_CAST: &str = "fishing_rod_cast";
 /// The carrot on a stick item id, the other item that turns around in a hand.
 const CARROT_ON_A_STICK: i16 = 398;
 /// Stick, bone and blaze rod: the plain items `Item.setFull3D` marks.

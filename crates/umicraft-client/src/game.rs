@@ -24,7 +24,6 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::entity_render::fishing::first_person_tip;
 use crate::pack_offer::ServerPackRequest;
 use crate::social_view;
 use glam::{DVec3, Vec3};
@@ -1327,6 +1326,7 @@ fn player_view(game: &Game) -> Option<(RenderState, bool)> {
         visible: hand_visible,
         shows_arm: game.hand.pose().shows_arm && hand_visible,
         item_use: game.item_use.view(),
+        fishing: game.body.bobber.is_some(),
         ..game.hand.pose()
     };
     Some((view, followed.is_none()))
@@ -1385,21 +1385,12 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         entities.push(game.body.frame_data());
     }
     // The line of the bobber of the local player ties to their rod, which is
-    // not among the frames from the first person.
+    // not among the frames from the first person: the render thread places
+    // that end from the camera of the frame.
     if first_person && !game.perspective.shows_player() {
-        let body = game.body.frame_data();
-        let feet = view.position - DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
-        let tip = feet
-            + first_person_tip(
-                game.yaw.to_degrees(),
-                game.pitch.to_degrees(),
-                game.body.animation.swing_progress_at(1.0),
-                body.flags.is_sneaking(),
-            )
-            .as_dvec3();
         for bobber in &mut entities {
             if bobber.kind == EntityKind::FishHook && bobber.object_data == game.entity_id {
-                bobber.rod_tip = Some(tip);
+                bobber.tied_to_hand = true;
             }
         }
     }
@@ -1747,6 +1738,7 @@ fn apply_net_event(
             game.world = Some(World::new(info.dimension));
             game.dirty.clear();
             game.entities.clear();
+            game.body.bobber = None;
             game.entity_id = info.entity_id;
             game.hardcore = info.gamemode & 8 != 0;
             game.absorption = 0.0;
@@ -1939,6 +1931,8 @@ fn apply_net_event(
                 .as_ref()
                 .is_none_or(|world| world.dimension() != dimension);
             game.server.on_respawn(changed);
+            // `handleRespawn` makes a new player, without a bobber.
+            game.body.bobber = None;
             if changed {
                 // `handleRespawn` builds the new world with the type of the
                 // packet; a same-dimension respawn keeps the old one.
@@ -2093,6 +2087,7 @@ fn apply_net_event(
                 vel,
                 o.data,
             );
+            hook_local_angler(game, EntityId(o.entity_id), o.object_type, o.data);
         }
         // MCP `handleCollectItem`: the collected entity flies to the collector
         // in three ticks and leaves the world. The pop is not played.
@@ -2136,6 +2131,13 @@ fn apply_net_event(
         }
         PlayEvent::DestroyEntities(d) => {
             game.entities.destroy(&d.entity_ids);
+            if game
+                .body
+                .bobber
+                .is_some_and(|bobber| d.entity_ids.contains(&bobber.0))
+            {
+                game.body.bobber = None;
+            }
         }
         PlayEvent::EntityRelativeMove(m) => {
             let delta = DVec3::new(
@@ -3109,6 +3111,18 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         let effects = swing_effects(game);
         game.hand.swing(effects);
         game.body.animation.swing_item();
+    }
+}
+
+/// Registers the bobber `id` on the local player when they cast it (MCP
+/// `NetHandlerPlayClient.handleSpawnObject`: the angler of a new bobber gets
+/// it as `fishEntity`, the local player included). The entity store does not
+/// hold the local player, so it cannot do it: without this the rod of the
+/// local player never shows its cast model.
+fn hook_local_angler(game: &mut Game, id: EntityId, object_type: u8, angler: i32) {
+    if EntityKind::from_object_type(object_type) == EntityKind::FishHook && angler == game.entity_id
+    {
+        game.body.bobber = Some(id);
     }
 }
 
@@ -4469,6 +4483,38 @@ mod tests {
         let snapshot = &game.entities.snapshots(0.0)[0];
         let item = snapshot.item.as_ref().expect("stack");
         assert_eq!((item.item_id, item.count), (264, 1));
+    }
+
+    #[test]
+    fn a_bobber_of_the_local_player_casts_their_rod_until_it_is_destroyed() {
+        use umicraft_protocol::packets::play::clientbound::DestroyEntities;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let own = game.entity_id;
+        // Someone else's bobber does not cast the rod of the local player.
+        handle_net(
+            &mut game,
+            spawn_object_event(40, 90, own + 1),
+            &mut queue,
+            &frames,
+        );
+        assert!(!player_view(&game).expect("view").0.effects.hand.fishing);
+        handle_net(
+            &mut game,
+            spawn_object_event(41, 90, own),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.body.bobber, Some(EntityId(41)));
+        assert!(player_view(&game).expect("view").0.effects.hand.fishing);
+        assert!(game.body.frame_data().fishing, "the third person rod too");
+        let destroy = PlayEvent::DestroyEntities(DestroyEntities {
+            entity_ids: vec![41],
+        });
+        handle_net(&mut game, destroy, &mut queue, &frames);
+        assert_eq!(game.body.bobber, None);
     }
 
     #[test]

@@ -1421,6 +1421,7 @@ impl App {
             entity_textures.set_view_pitch(self.camera.pitch);
             entity_textures.set_mob_appearance(world.mob_appearance(environment.partial_tick));
             entity_textures.set_camera_position(self.camera.relative_eye());
+            entity_textures.set_hand_swing(hand.swing);
             entity_textures.set_cull_view(self.camera.relative_eye(), self.camera.forward());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)

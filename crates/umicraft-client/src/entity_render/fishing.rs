@@ -15,19 +15,12 @@ use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::EntityVertex;
 
+use super::Eye;
+
 /// Width of the ribbon of the line, in blocks.
 const LINE_WIDTH: f32 = 0.012;
 /// Segments of the line.
 const SEGMENTS: usize = 16;
-
-/// The camera of the frame: where it is and where it looks (radians, in the
-/// convention of `umicraft_render::Camera`).
-#[derive(Debug, Clone, Copy)]
-pub(super) struct Eye {
-    pub(super) position: Vec3,
-    pub(super) yaw: f32,
-    pub(super) pitch: f32,
-}
 
 /// The tip of the rod of `angler` seen from outside (`RenderFish.doRender`,
 /// the branch of the other players and of the third person view), and the
@@ -46,10 +39,14 @@ fn rod_tip(angler: &EntityRenderSnapshot) -> (Vec3, f32) {
 }
 
 /// The tip of the rod of the local player seen from their own eyes
-/// (`RenderFish.doRender`, first person), as an offset from the feet: the
-/// angles in degrees, `swing` the progress of the swing of the arm. The caller
-/// adds it to the feet in f64 (F2-1b).
-pub(crate) fn first_person_tip(yaw: f32, pitch: f32, swing: f32, sneaking: bool) -> Vec3 {
+/// (`RenderFish.doRender`, first person), as an offset from the eyes: the
+/// angles in degrees in the convention of the reference, `swing` the progress
+/// of the swing of the arm.
+///
+/// The reference adds the offset to the feet and the eye height to the drop
+/// of the line, which puts the tip at the eyes plus the offset, sneaking or
+/// not.
+fn hand_offset(yaw: f32, pitch: f32, swing: f32) -> Vec3 {
     let f8 = (swing.sqrt() * PI).sin();
     let rotate_pitch = |v: Vec3, angle: f32| {
         let (sin, cos) = angle.sin_cos();
@@ -63,10 +60,18 @@ pub(crate) fn first_person_tip(yaw: f32, pitch: f32, swing: f32, sneaking: bool)
     hand = rotate_pitch(hand, -pitch.to_radians());
     hand = rotate_yaw(hand, -yaw.to_radians());
     hand = rotate_yaw(hand, f8 * 0.5);
-    hand = rotate_pitch(hand, -f8 * 0.7);
-    // The eye height is added to the drop of the line in the reference.
-    let eye = if sneaking { 1.54 } else { 1.62 };
-    hand + Vec3::Y * eye
+    rotate_pitch(hand, -f8 * 0.7)
+}
+
+/// The tip of the rod in the first-person hand: the camera of the frame plus
+/// [`hand_offset`], so the line follows the view between two ticks the way
+/// the reference reads the interpolated angles of the angler.
+fn first_person_tip(eye: Eye) -> Vec3 {
+    // `Camera` yaw is the reference yaw turned by half a turn and its pitch is
+    // negated (the same conversion as the leash of the local player).
+    let yaw = (eye.yaw - PI).to_degrees();
+    let pitch = (-eye.pitch).to_degrees();
+    eye.position + hand_offset(yaw, pitch, eye.hand_swing)
 }
 
 /// The points of the line from the bobber at `hook` to the tip of the rod.
@@ -125,9 +130,9 @@ pub(super) fn add_bobber(
         .extend([quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
 
     // The local player in first person is not among the snapshots: the game
-    // thread ships the tip of their rod with the bobber.
-    let (tip, drop) = if let Some(tip) = ent.rod_tip {
-        (tip, 0.0)
+    // thread marks their bobber and the line ties to the camera.
+    let (tip, drop) = if ent.tied_to_hand {
+        (first_person_tip(eye), 0.0)
     } else if let Some(angler) = snapshots.iter().find(|other| other.id.0 == ent.object_data) {
         rod_tip(angler)
     } else {
@@ -160,6 +165,7 @@ mod tests {
             position: Vec3::new(0.0, 66.0, -10.0),
             yaw: PI,
             pitch: 0.0,
+            hand_swing: 0.0,
         }
     }
 
@@ -214,34 +220,61 @@ mod tests {
     #[test]
     fn the_first_person_rod_tip_is_at_the_right_hand_in_front_of_the_eyes() {
         // Looking south (yaw 0), level: the hand is 0.36 to the right (west
-        // of a south facing player is +x), 0.35 ahead, at eye height.
-        let tip = first_person_tip(0.0, 0.0, 0.0, false);
+        // of a south facing player is -x), 0.35 ahead, 0.03 above the eyes.
+        let offset = hand_offset(0.0, 0.0, 0.0);
         assert!(
-            (tip - Vec3::new(-0.36, 1.65, 0.35)).length() < 1e-5,
-            "{tip}"
+            (offset - Vec3::new(-0.36, 0.03, 0.35)).length() < 1e-5,
+            "{offset}"
         );
-        // Sneaking lowers it by 0.08, and the swing moves it forward.
-        let low = first_person_tip(0.0, 0.0, 0.0, true);
-        assert!((tip.y - low.y - 0.08).abs() < 1e-5);
-        let swung = first_person_tip(0.0, 0.0, 0.5, false);
-        assert!(swung.distance(tip) > 0.1);
+        // The swing moves it.
+        assert!(hand_offset(0.0, 0.0, 0.5).distance(offset) > 0.1);
+        // Facing east (yaw -90), the hand is south of the eyes and ahead east.
+        let east = hand_offset(-90.0, 0.0, 0.0);
+        assert!(
+            (east - Vec3::new(0.35, 0.03, 0.36)).length() < 1e-5,
+            "{east}"
+        );
     }
 
     #[test]
-    fn a_bobber_of_the_local_player_ties_its_line_to_the_shipped_tip() {
+    fn the_first_person_tip_follows_the_camera_of_the_frame() {
+        // The `Camera` angles of a view facing south, level: yaw PI, pitch 0.
+        let at = |position: Vec3, yaw: f32| {
+            first_person_tip(Eye {
+                position,
+                yaw,
+                pitch: 0.0,
+                hand_swing: 0.0,
+            })
+        };
+        let south = at(Vec3::new(0.0, 65.62, 0.0), PI);
+        assert!(
+            (south - Vec3::new(-0.36, 65.65, 0.35)).length() < 1e-5,
+            "{south}"
+        );
+        // A camera moved and turned between two ticks moves the tip with it.
+        let moved = at(Vec3::new(1.0, 65.62, 0.0), PI);
+        assert!((moved - south - Vec3::X).length() < 1e-5);
+        let turned = at(Vec3::new(0.0, 65.62, 0.0), PI / 2.0);
+        assert!(turned.distance(south) > 0.3);
+    }
+
+    #[test]
+    fn a_bobber_of_the_local_player_ties_its_line_to_the_hand_of_the_camera() {
         let mut bobber = EntityRenderSnapshot::new(
             umicraft_game::entity::EntityId(9),
             EntityKind::FishHook,
             Vec3::new(0.0, 64.0, 5.0),
         );
-        bobber.rod_tip = Some(Vec3::new(0.0, 65.0, 0.0));
+        bobber.tied_to_hand = true;
         let mut batches = HashMap::new();
         add_bobber(&mut batches, &bobber, &[], 0, eye());
         let line = &batches[&TextureSlot::FishLine];
         assert_eq!(line.len(), SEGMENTS * 6);
+        let tip = first_person_tip(eye());
         let nearest = line
             .iter()
-            .map(|v| Vec3::from(v.position).distance(Vec3::new(0.0, 65.0, 0.0)))
+            .map(|v| Vec3::from(v.position).distance(tip))
             .fold(f32::MAX, f32::min);
         assert!(nearest < 0.02, "{nearest}");
     }

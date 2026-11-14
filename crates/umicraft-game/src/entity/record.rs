@@ -207,7 +207,7 @@ impl EntityRecord {
             mob: self.mob,
             ridden: false,
             block_lights: Arc::default(),
-            rod_tip: None,
+            tied_to_hand: false,
             local: self.local,
             ghost_visible: self.ghost_visible,
             flight_alive: self.health.is_none_or(|health| health > 0.0),
