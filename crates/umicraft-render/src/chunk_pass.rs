@@ -73,6 +73,21 @@ impl ChunkPass {
     /// buffer are merged into one run. A pass without spans is drawn whole
     /// whenever the mask is not empty.
     pub(crate) fn visible_runs(&self, mask: u16, group: Group, mut draw: impl FnMut(Range<u32>)) {
+        match group {
+            Group::Solid if self.solid_quads == 0 => return,
+            Group::Cutout if self.solid_quads == self.quads => return,
+            _ => {}
+        }
+        if mask == 0xFFFF {
+            let range = match group {
+                Group::Solid => self.solid_indices(),
+                Group::Cutout => self.cutout_indices(),
+            };
+            if !range.is_empty() {
+                draw(range);
+            }
+            return;
+        }
         let Some(sections) = &self.sections else {
             if mask != 0 {
                 let range = match group {
@@ -341,6 +356,11 @@ impl QuadIndices {
     /// Binds the buffer for the draws that follow.
     pub(crate) fn bind(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_index_buffer(self.buffer.slice(..), wgpu::IndexFormat::Uint32);
+    }
+
+    /// Size of the shared quad index buffer in bytes.
+    pub(crate) fn byte_size(&self) -> u64 {
+        self.buffer.size()
     }
 }
 

@@ -26,6 +26,7 @@
 //! core.start().unwrap();
 //! ```
 
+pub mod boot_log;
 pub mod config;
 pub mod error;
 pub mod events;
@@ -35,6 +36,7 @@ pub mod module;
 pub mod profiling;
 pub mod scheduler;
 pub mod service;
+pub mod sync;
 
 pub use config::ConfigStore;
 pub use error::{CoreError, CoreResult};
@@ -42,3 +44,4 @@ pub use events::{Event, EventBus, EventCx};
 pub use module::{Core, Module, ModuleCtx, ModuleId, ModuleRegistry};
 pub use scheduler::{PostTick, PreTick, Scheduler};
 pub use service::{ServiceInfo, ServiceRegistry};
+pub use sync::CachePadded;

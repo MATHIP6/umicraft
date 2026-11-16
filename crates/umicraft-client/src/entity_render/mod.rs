@@ -74,42 +74,100 @@ pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(
+    let mut out = HashMap::new();
+    mesh_entities_into(snapshots, &mut out);
+    out
+}
+
+/// Meshes entity snapshots into a caller-provided [`HashMap`] batch pool,
+/// clearing existing vertex vectors while retaining their allocated capacities
+/// to avoid per-frame heap reallocations.
+pub fn mesh_entities_into(
+    snapshots: &[EntityRenderSnapshot],
+    out: &mut HashMap<TextureSlot, Vec<EntityVertex>>,
+) {
+    let mut meshed = MeshedEntities {
+        solid: std::mem::take(out),
+        ..MeshedEntities::default()
+    };
+    mesh_entities_with_into(
         snapshots,
         &skins::NoSkins,
         (0.0, 0.0),
         false,
         (Vec3::ZERO, None),
-    )
-    .solid
+        &mut meshed,
+    );
+    *out = meshed.solid;
 }
 
 /// The meshes of a frame: the lit entities, and the glowing layers that are
 /// added over them.
-struct MeshedEntities {
-    solid: HashMap<TextureSlot, Vec<EntityVertex>>,
-    additive: HashMap<TextureSlot, Vec<EntityVertex>>,
+#[derive(Default)]
+pub(crate) struct MeshedEntities {
+    pub(crate) solid: HashMap<TextureSlot, Vec<EntityVertex>>,
+    pub(crate) additive: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The glint of armour, drawn only where the armour is.
-    glint: HashMap<TextureSlot, Vec<EntityVertex>>,
+    pub(crate) glint: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The invisible entities a spectator sees, drawn translucent.
-    ghost: HashMap<TextureSlot, Vec<EntityVertex>>,
+    pub(crate) ghost: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The shadows under the entities.
-    shadows: HashMap<TextureSlot, Vec<EntityVertex>>,
+    pub(crate) shadows: HashMap<TextureSlot, Vec<EntityVertex>>,
+}
+
+impl MeshedEntities {
+    /// Clears all vertex lists while preserving every [`HashMap`] bucket and
+    /// inner [`Vec`] capacity for the next frame.
+    pub(crate) fn clear(&mut self) {
+        for v in self.solid.values_mut() {
+            v.clear();
+        }
+        for v in self.additive.values_mut() {
+            v.clear();
+        }
+        for v in self.glint.values_mut() {
+            v.clear();
+        }
+        for v in self.ghost.values_mut() {
+            v.clear();
+        }
+        for v in self.shadows.values_mut() {
+            v.clear();
+        }
+    }
 }
 
 /// [`mesh_entities`] with the downloaded skins and capes of players.
-fn mesh_entities_with(
+pub(super) fn mesh_entities_with(
     snapshots: &[EntityRenderSnapshot],
     skins: &dyn skins::SkinLookup,
     (view_yaw, view_pitch): (f32, f32),
     viewer_is_spectator: bool,
     (camera, view): (Vec3, Option<CullView>),
 ) -> MeshedEntities {
-    let mut solid: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
-    let mut additive: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
-    let mut glint: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
-    let mut ghost: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
-    let mut shadows: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut out = MeshedEntities::default();
+    mesh_entities_with_into(
+        snapshots,
+        skins,
+        (view_yaw, view_pitch),
+        viewer_is_spectator,
+        (camera, view),
+        &mut out,
+    );
+    out
+}
+
+/// Meshes entities into a reusable [`MeshedEntities`] buffer pool, retaining
+/// `HashMap` and `Vec<EntityVertex>` capacities across frames.
+pub(crate) fn mesh_entities_with_into(
+    snapshots: &[EntityRenderSnapshot],
+    skins: &dyn skins::SkinLookup,
+    (view_yaw, view_pitch): (f32, f32),
+    viewer_is_spectator: bool,
+    (camera, view): (Vec3, Option<CullView>),
+    out: &mut MeshedEntities,
+) {
+    out.clear();
 
     for ent in snapshots {
         // What the player cannot see is not meshed; `snapshots` stays whole for the
@@ -118,62 +176,56 @@ fn mesh_entities_with(
             continue;
         }
         let matrix = transform::model_matrix(ent);
+        let xform = MatrixTransform::new(matrix);
         let light = entity_light(ent);
         for layer in mobs::build_entity_layers_for(ent, skins, viewer_is_spectator) {
             if let Some(glow) = layer.glow {
                 let word = glow.light_word();
                 let target = if glow.equal_depth {
-                    &mut glint
+                    &mut out.glint
                 } else {
-                    &mut additive
+                    &mut out.additive
                 };
-                target
-                    .entry(layer.slot)
-                    .or_default()
-                    .extend(layer.vertices.into_iter().map(|mut vertex| {
-                        vertex.uv = glow.uv.apply(vertex.uv);
-                        transform_vertex(vertex, &matrix, word)
-                    }));
+                let dest = target.entry(layer.slot).or_default();
+                dest.reserve(layer.vertices.len());
+                dest.extend(layer.vertices.into_iter().map(|mut vertex| {
+                    vertex.uv = glow.uv.apply(vertex.uv);
+                    xform.transform(vertex, word)
+                }));
                 continue;
             }
             let light = light | dye_bits(layer.dye) | (u32::from(layer.cutoff) << CUTOFF_SHIFT);
             let target = if layer.translucent {
-                &mut ghost
+                &mut out.ghost
             } else {
-                &mut solid
+                &mut out.solid
             };
-            target.entry(layer.slot).or_default().extend(
+            let dest = target.entry(layer.slot).or_default();
+            dest.reserve(layer.vertices.len());
+            dest.extend(
                 layer
                     .vertices
                     .into_iter()
-                    .map(|vertex| transform_vertex(vertex, &matrix, light)),
+                    .map(|vertex| xform.transform(vertex, light)),
             );
         }
-        fire::add_fire(&mut solid, ent, view_yaw);
-        arrows::add_flying_arrow(&mut solid, ent, light);
-        vehicles::add_vehicle(&mut solid, ent, light);
-        xp::add_xp_orb(&mut solid, ent, light, view_yaw, view_pitch);
-        paintings::add_painting(&mut solid, ent, light);
-        small_models::add_small_model(&mut solid, ent, light);
-        bolt::add_lightning(&mut additive, ent);
-        tnt_flash::add_flash(&mut additive, ent);
-        rope::add_leash(&mut solid, ent);
-        dragon_beam::add_beam(&mut solid, ent, snapshots);
+        fire::add_fire(&mut out.solid, ent, view_yaw);
+        arrows::add_flying_arrow(&mut out.solid, ent, light);
+        vehicles::add_vehicle(&mut out.solid, ent, light);
+        xp::add_xp_orb(&mut out.solid, ent, light, view_yaw, view_pitch);
+        paintings::add_painting(&mut out.solid, ent, light);
+        small_models::add_small_model(&mut out.solid, ent, light);
+        bolt::add_lightning(&mut out.additive, ent);
+        tnt_flash::add_flash(&mut out.additive, ent);
+        rope::add_leash(&mut out.solid, ent);
+        dragon_beam::add_beam(&mut out.solid, ent, snapshots);
         let eye = fishing::Eye {
             position: camera,
             yaw: view_yaw,
             pitch: view_pitch,
         };
-        fishing::add_bobber(&mut solid, ent, snapshots, light, eye);
-        shadow::add_shadow(&mut shadows, ent, camera);
-    }
-
-    MeshedEntities {
-        solid,
-        additive,
-        glint,
-        ghost,
-        shadows,
+        fishing::add_bobber(&mut out.solid, ent, snapshots, light, eye);
+        shadow::add_shadow(&mut out.shadows, ent, camera);
     }
 }
 
@@ -230,15 +282,47 @@ fn dye_bits(dye: Option<u8>) -> u32 {
     dye.map_or(0, |color| DYE_BIT | (u32::from(color & 15) << DYE_SHIFT))
 }
 
-fn transform_vertex(mv: ModelVertex, matrix: &Mat4, light: u32) -> EntityVertex {
-    EntityVertex {
-        position: matrix.transform_point3(Vec3::from(mv.position)).to_array(),
-        normal: matrix
-            .transform_vector3(Vec3::from(mv.normal))
-            .normalize_or_zero()
-            .to_array(),
-        uv: mv.uv,
-        light,
+struct MatrixTransform {
+    matrix: Mat4,
+    inv_normal_scale: Option<f32>,
+}
+
+impl MatrixTransform {
+    fn new(matrix: Mat4) -> Self {
+        let sx2 = matrix.x_axis.truncate().length_squared();
+        let sy2 = matrix.y_axis.truncate().length_squared();
+        let sz2 = matrix.z_axis.truncate().length_squared();
+        let inv_normal_scale = if (sx2 - sy2).abs() < 1e-4 && (sx2 - sz2).abs() < 1e-4 && sx2 > 1e-6 {
+            Some(1.0 / sx2.sqrt())
+        } else {
+            None
+        };
+        Self {
+            matrix,
+            inv_normal_scale,
+        }
+    }
+
+    #[inline(always)]
+    fn transform(&self, mv: ModelVertex, light: u32) -> EntityVertex {
+        let position = self
+            .matrix
+            .transform_point3(Vec3::from(mv.position))
+            .to_array();
+        let normal = match self.inv_normal_scale {
+            Some(inv_scale) => (self.matrix.transform_vector3(Vec3::from(mv.normal)) * inv_scale).to_array(),
+            None => self
+                .matrix
+                .transform_vector3(Vec3::from(mv.normal))
+                .normalize_or_zero()
+                .to_array(),
+        };
+        EntityVertex {
+            position,
+            normal,
+            uv: mv.uv,
+            light,
+        }
     }
 }
 

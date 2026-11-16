@@ -303,6 +303,8 @@ fn is_menu_view(view: &str) -> bool {
             | "achievements"
             | "mods"
             | "mods_list"
+            | "hud-editor"
+            | "hud-editor-list"
     )
 }
 
@@ -339,7 +341,7 @@ fn menu_scene(
         "disconnected" => Screen::Disconnected,
         "stats" | "stats-blocks" | "stats-items" => Screen::Stats,
         "achievements" => Screen::Achievements,
-        "mods" | "mods_list" => Screen::Mods,
+        "mods" | "mods_list" | "hud-editor" | "hud-editor-list" => Screen::Mods,
         _ => Screen::ServerList,
     };
     let lang = crate::language::load(Lang::DEFAULT_CODE);
@@ -383,6 +385,11 @@ fn menu_scene(
         flow.show(screen, &mut ui, atlas, &lang, &context);
         let output = ui.end_frame();
         ui.recycle_output(output);
+    }
+    match view {
+        "hud-editor" => flow.open_hud_editor(Some("cps")),
+        "hud-editor-list" => flow.open_hud_editor(None),
+        _ => {}
     }
     // The capture is one frame: the page is already in.
     flow.settle_mods();
@@ -461,7 +468,8 @@ fn build(
             }
         }
         "title" | "title-modern" | "servers" | "server-edit" | "connecting" | "disconnected"
-        | "stats" | "stats-blocks" | "stats-items" | "achievements" | "mods" | "mods_list" => {
+        | "stats" | "stats-blocks" | "stats-items" | "achievements" | "mods" | "mods_list"
+        | "hud-editor" | "hud-editor-list" => {
             let items = ItemView::new(None, DialFrames::default());
             let scene = (None, None, items);
             let fonts = (atlas, None);
@@ -629,7 +637,11 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let brand = ui_font::install_brand(&mut renderer);
     if let Some(atlas) = gui_atlas.as_ref() {
         if !atlas.is_empty() {
-            renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels());
+            if let Err(error) =
+                renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels())
+            {
+                tracing::error!(%error, "GUI texture atlas rejected");
+            }
         }
     }
     let source = if installed.used_fallback {
@@ -813,7 +825,9 @@ mod tests {
         let installed = ui_font::install(&mut renderer, &font.atlas).expect("font");
         if let Some(atlas) = gui_atlas.as_ref() {
             if !atlas.is_empty() {
-                renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels());
+                renderer
+                    .set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels())
+                    .expect("gui atlas");
             }
         }
         let demo = build(view, (640, 360), &installed.atlas, (&sheets, art));

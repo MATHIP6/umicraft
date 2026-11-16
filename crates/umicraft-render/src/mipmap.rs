@@ -104,6 +104,42 @@ pub(crate) fn generate_chains(
     })
 }
 
+/// The mip level buffers `1..=levels` of all layers combined into contiguous layer-major RGBA8 buffers.
+///
+/// Returns a `Vec<Vec<u8>>` where the $i$-th element (for level $i+1$) is the exact byte slice
+/// ready for GPU upload with `write_texture`. Pre-allocates each level's buffer once and uses
+/// bulk slices instead of byte-by-byte iterator flat-maps.
+#[must_use]
+pub(crate) fn generate_level_buffers(
+    pixels: &[u8],
+    layer_bytes: usize,
+    (width, height): (u32, u32),
+    levels: u32,
+) -> Vec<Vec<u8>> {
+    let layers: Vec<&[u8]> = pixels.chunks_exact(layer_bytes).collect();
+    let actual_levels = level_count(width, height, levels);
+    if layers.is_empty() || actual_levels == 0 {
+        return Vec::new();
+    }
+
+    let chains = generate_chains(pixels, layer_bytes, (width, height), actual_levels);
+    let mut level_buffers = Vec::with_capacity(actual_levels as usize);
+    for level_idx in 0..actual_levels as usize {
+        let level = (level_idx + 1) as u32;
+        let half_w = (width >> level).max(1) as usize;
+        let half_h = (height >> level).max(1) as usize;
+        let layer_mip_bytes = half_w * half_h * 4;
+        let total_bytes = layer_mip_bytes * layers.len();
+
+        let mut level_buf = Vec::with_capacity(total_bytes);
+        for chain in &chains {
+            level_buf.extend_from_slice(&chain[level_idx]);
+        }
+        level_buffers.push(level_buf);
+    }
+    level_buffers
+}
+
 /// The reference's `flag`: a texel with alpha 0 among the first `checked`.
 fn has_see_through_texel(base: &[u8], checked: usize) -> bool {
     base.chunks_exact(4)

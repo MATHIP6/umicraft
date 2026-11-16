@@ -6,7 +6,7 @@
 //! thousands of times larger than a footstep. Sounds are `Arc`-shared, so
 //! evicting one never cuts a voice that still plays it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::decode::DecodedSound;
 
@@ -20,6 +20,7 @@ pub struct SoundCache {
     used: usize,
     tick: u64,
     entries: HashMap<String, (u64, DecodedSound)>,
+    lru_order: BTreeSet<(u64, String)>,
 }
 
 impl Default for SoundCache {
@@ -37,6 +38,7 @@ impl SoundCache {
             used: 0,
             tick: 0,
             entries: HashMap::new(),
+            lru_order: BTreeSet::new(),
         }
     }
 
@@ -45,7 +47,9 @@ impl SoundCache {
         self.tick += 1;
         let tick = self.tick;
         let (last_used, sound) = self.entries.get_mut(key)?;
+        self.lru_order.remove(&(*last_used, key.to_string()));
         *last_used = tick;
+        self.lru_order.insert((tick, key.to_string()));
         Some(sound.clone())
     }
 
@@ -56,8 +60,9 @@ impl SoundCache {
         if size > self.capacity {
             return;
         }
-        if let Some((_, old)) = self.entries.remove(&key) {
+        if let Some((old_tick, old)) = self.entries.remove(&key) {
             self.used -= old.byte_size();
+            self.lru_order.remove(&(old_tick, key.clone()));
         }
         while self.used + size > self.capacity {
             if !self.evict_oldest() {
@@ -66,6 +71,7 @@ impl SoundCache {
         }
         self.tick += 1;
         self.used += size;
+        self.lru_order.insert((self.tick, key.clone()));
         self.entries.insert(key, (self.tick, sound));
     }
 
@@ -88,12 +94,7 @@ impl SoundCache {
     }
 
     fn evict_oldest(&mut self) -> bool {
-        let Some(oldest) = self
-            .entries
-            .iter()
-            .min_by_key(|(_, (used, _))| *used)
-            .map(|(key, _)| key.clone())
-        else {
+        let Some((_, oldest)) = self.lru_order.pop_first() else {
             return false;
         };
         if let Some((_, sound)) = self.entries.remove(&oldest) {

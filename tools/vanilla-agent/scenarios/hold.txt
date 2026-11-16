@@ -1,0 +1,5 @@
+# Scenario hold (phase E.8): no input for 30 seconds. Used to observe teleport handling
+# (server commands tp/kill are sent from the console), not movement.
+settle 40
+exit_after 20
+phase hold 600 -

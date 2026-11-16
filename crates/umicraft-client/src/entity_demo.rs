@@ -414,7 +414,7 @@ fn face_the_camera(snapshot: &mut EntityRenderSnapshot, yaw_deg: f32) {
     snapshot.head_yaw = yaw;
 }
 
-fn make_snapshot(
+pub(crate) fn make_snapshot(
     id: i32,
     kind: EntityKind,
     pos: Vec3,

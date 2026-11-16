@@ -396,12 +396,19 @@ impl ItemUse {
             }
             let item = held.cloned().unwrap_or(ItemStack::EMPTY);
             let places = held.is_some_and(is_block_item) && tick.mode.can_place();
-            // The placement is skipped when the player stands in the way, but a
-            // click the block consumes (a door) still goes to the server and
-            // still swings the arm.
-            let packet = interaction
-                .place_block(tick.mode, &hit, tick.player.as_ref(), item.clone())
-                .or_else(|| activated.then(|| Interaction::activate_block(&hit, item)));
+            // MCP `PlayerControllerMP.onPlayerRightClick`:
+            // 1. If the block is activated, send the block placement packet and swing.
+            // 2. Else if holding an ItemBlock and mode can place, check `canPlaceBlockOnSide`:
+            //    if blocked by player collision, skip the block placement (falls through to sendUseItem).
+            // 3. Otherwise (non-block item or empty hand on non-activatable block),
+            //    always send the block placement packet (without setting expected placement).
+            let packet = if activated {
+                Some(Interaction::activate_block(&hit, item))
+            } else if places {
+                interaction.place_block(tick.mode, &hit, tick.player.as_ref(), item)
+            } else {
+                Some(Interaction::activate_block(&hit, item))
+            };
             if let Some(packet) = packet {
                 output.packets.push(packet);
                 if activated || places {

@@ -32,10 +32,22 @@ pub fn mesh_moving_blocks(
     context: &ModelMeshContext,
 ) -> Mesh {
     let mut mesh = Mesh::default();
-    for block in blocks.blocks() {
-        push_block(&mut mesh, block, partial_tick, context);
-    }
+    mesh_moving_blocks_into(blocks, partial_tick, context, &mut mesh);
     mesh
+}
+
+/// Meshes every block in flight at `partial_tick` into `out`, clearing
+/// existing vertices/indices while retaining their allocated capacities.
+pub fn mesh_moving_blocks_into(
+    blocks: &MovingBlocks,
+    partial_tick: f32,
+    context: &ModelMeshContext,
+    out: &mut Mesh,
+) {
+    out.clear();
+    for block in blocks.blocks() {
+        push_block(out, block, partial_tick, context);
+    }
 }
 
 fn push_block(mesh: &mut Mesh, block: &MovingBlock, partial_tick: f32, context: &ModelMeshContext) {

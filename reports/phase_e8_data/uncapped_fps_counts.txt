@@ -1,0 +1,4 @@
+fps120: frames 411 S08 8 C06 8 dur 46314ms death@[5412] maxS08/s 7 at s0 median gap 0ms
+   S08 times: [118, 321, 639, 639, 639] ... last [6367]
+fps260: frames 7283 S08 3472 C06 3472 dur 11519ms death@[4800] maxS08/s 798 at s10 median gap 1ms
+   S08 times: [22, 768, 6818, 6819, 6823] ... last [11473]

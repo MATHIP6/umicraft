@@ -53,6 +53,7 @@ impl App {
         self.break_block = false;
         self.place_block = false;
         self.pick_block = false;
+        self.hotbar_keys = [0; 9];
     }
 
     /// Runs the actions bound to a key or button that was just pressed.
@@ -81,34 +82,49 @@ impl App {
             Action::Fullscreen => self.options.video.fullscreen = !self.options.video.fullscreen,
             other => {
                 if let Some(slot) = other.hotbar_slot() {
-                    self.select_slot = Some(slot);
+                    // One press more for that key (`KeyBinding.onTick`); the
+                    // game picks the slot, as `runTick` does.
+                    let presses = &mut self.hotbar_keys[usize::from(slot)];
+                    *presses = presses.saturating_add(1);
                 }
             }
         }
     }
 
-    /// Writes a captured frame to the `screenshots` folder and says so in the
-    /// log (the reference prints "Saved screenshot as ..." in the chat).
+    /// Writes a captured frame to the `screenshots` folder on a background
+    /// worker thread so PNG encoding and disk I/O never stall the render loop,
+    /// then reports the outcome in the log and in the in-game chat.
     pub(super) fn save_screenshot(&self, captured: Result<umicraft_render::Image, RenderError>) {
         let folder =
             umicraft_assets::cache::data_dir().map(|dir| dir.join(screenshot_file::FOLDER));
-        let saved = match (captured, folder) {
-            (Ok(image), Some(folder)) => {
-                screenshot_file::save(&folder, &image.rgba, image.width, image.height)
-                    .map_err(|error| error.to_string())
-            }
-            (Err(error), _) => Err(error.to_string()),
-            (_, None) => Err("no data folder".to_string()),
-        };
-        match &saved {
-            Ok(path) => tracing::info!(path = %path.display(), "saved screenshot"),
-            Err(error) => tracing::warn!(%error, "could not save the screenshot"),
+        let lang = std::sync::Arc::clone(&self.lang);
+        let events = self.session.as_ref().map(|session| session.events().clone());
+        let spawned = std::thread::Builder::new()
+            .name("umicraft-screenshot".to_string())
+            .spawn(move || {
+                let saved = match (captured, folder) {
+                    (Ok(image), Some(folder)) => {
+                        screenshot_file::save(&folder, &image.rgba, image.width, image.height)
+                            .map_err(|error| error.to_string())
+                    }
+                    (Err(error), _) => Err(error.to_string()),
+                    (_, None) => Err("no data folder".to_string()),
+                };
+                match &saved {
+                    Ok(path) => tracing::info!(path = %path.display(), "saved screenshot"),
+                    Err(error) => tracing::warn!(%error, "could not save the screenshot"),
+                }
+                // `Minecraft.runTick` prints the result in the chat. Without a game
+                // there is no chat to print in: the log above is all there is.
+                if let Some(events) = events {
+                    let _ = events.try_send(GameEvent::LocalChat(screenshot_chat_line(
+                        &lang, &saved,
+                    )));
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(%error, "could not spawn screenshot worker");
         }
-        // `Minecraft.runTick` prints the result in the chat. Without a game
-        // there is no chat to print in: the log above is all there is.
-        self.send_event(GameEvent::LocalChat(screenshot_chat_line(
-            &self.lang, &saved,
-        )));
     }
 
     /// Tells the built-in mods about a left or right click (for a CPS counter).
@@ -133,9 +149,13 @@ impl App {
                 self.buttons.insert(index);
                 self.count_click(button);
                 self.press_binding(Binding::Mouse(index));
+                self.last_input_time = std::time::Instant::now();
+                self.publish_input();
             }
             ElementState::Released => {
                 self.buttons.remove(&index);
+                self.last_input_time = std::time::Instant::now();
+                self.publish_input();
             }
         }
     }

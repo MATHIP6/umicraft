@@ -747,7 +747,17 @@ fn swim<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64,
         strider *= 0.5;
     }
     if strider > 0.0 {
-        let move_speed = (player.movement_speed * player.speed_multiplier) as f32;
+        // MCP `EntityLivingBase.java:1709` reads `getAIMoveSpeed()`, which
+        // `EntityPlayer.java:1814` overrides to read the attribute live, with the
+        // sprint modifier applied this tick (bytecode `pr.g`: `invokevirtual
+        // bI()F`, `wn.bI()`); the cached `speed_multiplier` would give it one
+        // tick late (phases E.3 to E.5).
+        let move_speed = (player.movement_speed
+            * if player.sprinting {
+                1.0 + SPRINT_SPEED_BONUS
+            } else {
+                1.0
+            }) as f32;
         friction += (DEPTH_STRIDER_FRICTION - friction) * strider / 3.0;
         acceleration += (move_speed - acceleration) * strider / 3.0;
     }
@@ -810,9 +820,18 @@ fn travel_on_land<S: BlockSource + ?Sized>(
         // control and doubles while sprinting.
         f64::from(player.fly_speed) * if player.sprinting { 2.0 } else { 1.0 }
     } else if player.on_ground {
-        // MCP `EntityLivingBase.java:1606-1612`.
+        // MCP `EntityLivingBase.java:1606-1612` reads `getAIMoveSpeed()`, which
+        // `EntityPlayer.java:1814` overrides to read the movement-speed
+        // attribute live: the sprint modifier `EntityPlayerSP` applied this tick
+        // (before the move) is already in it. The cached `speed_multiplier` is
+        // refreshed after the move and would give the sprint one tick late
+        // (phase E.3, bytecode `wn.bI()`).
         player.movement_speed
-            * player.speed_multiplier
+            * if player.sprinting {
+                1.0 + SPRINT_SPEED_BONUS
+            } else {
+                1.0
+            }
             * (MOVE_SPEED_NUMERATOR / (friction * friction * friction))
     } else {
         // MCP `EntityLivingBase.java:1613-1616`.
@@ -1054,6 +1073,107 @@ mod tests {
             "expected {expected}, got {speed}"
         );
         assert!(player.sprinting);
+    }
+
+    /// A player standing still on the stone floor, settled on the ground.
+    fn settled_on_stone() -> (TestBlocks, Player) {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+        for _ in 0..5 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+        }
+        assert!(player.on_ground && !player.sprinting);
+        (world, player)
+    }
+
+    /// Phase E.3/E.4: the first sprint tick on the ground already has the
+    /// sprint factor. Vanilla `EntityPlayer.getAIMoveSpeed()` reads the
+    /// attribute live, with the modifier `setSprinting` applied this tick. The
+    /// reference run of scenario `e1` (vanilla 1.8.9) gives `mz = 0.06956039…`
+    /// after the first sprint tick, and the old cached factor gave `0.053508`.
+    #[test]
+    fn the_first_sprint_tick_on_the_ground_uses_the_sprint_factor() {
+        let (world, mut player) = settled_on_stone();
+        let mut intent = InputIntent::walking(0.0);
+        intent.sprint = true;
+        step(&mut player, &intent, &world);
+        assert!(player.sprinting);
+        let sprint_factor = 1.0 + SPRINT_SPEED_BONUS;
+        let expected = INPUT_DAMPING
+            * WALK_SPEED
+            * sprint_factor
+            * (MOVE_SPEED_NUMERATOR / stone_friction().powi(3))
+            * stone_friction();
+        assert!(
+            (player.velocity.z - expected).abs() < 1e-12,
+            "expected {expected}, got {}",
+            player.velocity.z
+        );
+        // The vanilla 1.8.9 value of the reference run (float arithmetic).
+        assert!((player.velocity.z - 0.069_560_4).abs() < 1e-6, "{}", player.velocity.z);
+        // The old result, one tick late, is gone.
+        assert!((player.velocity.z - 0.053_508).abs() > 0.01);
+    }
+
+    /// The air control keeps its one-tick delay: `jumpMovementFactor` is set
+    /// after the move (`EntityPlayer.onLivingUpdate`), so the first sprint tick
+    /// in the air uses 0.02 and the next one 0.026. The reference run shows
+    /// exactly this (probe column `jump_movement_factor`).
+    #[test]
+    fn the_air_control_of_a_sprint_still_lags_by_one_tick() {
+        let world = flat_world();
+        // Far above the floor: no landing in two ticks.
+        let mut player = Player::new(DVec3::new(0.5, 30.0, 0.5));
+        let mut intent = InputIntent::walking(0.0);
+        intent.sprint = true;
+
+        step(&mut player, &intent, &world);
+        assert!(player.sprinting && !player.on_ground);
+        let first = INPUT_DAMPING * AIR_CONTROL * GROUND_FRICTION;
+        assert!(
+            (player.velocity.z - first).abs() < 1e-12,
+            "first air tick uses 0.02: expected {first}, got {}",
+            player.velocity.z
+        );
+
+        step(&mut player, &intent, &world);
+        // The motion is damped after the acceleration is added.
+        let second =
+            (first + INPUT_DAMPING * AIR_CONTROL * (1.0 + SPRINT_SPEED_BONUS)) * GROUND_FRICTION;
+        assert!(
+            (player.velocity.z - second).abs() < 1e-12,
+            "second air tick uses 0.026: expected {second}, got {}",
+            player.velocity.z
+        );
+    }
+
+    /// The tick on which the sprint ends, with W still held, already loses the
+    /// bonus on the ground: the attribute is read live after `setSprinting(false)`.
+    /// The sprint is ended here by the hunger rule (`EntityPlayerSP.java:799-815`),
+    /// the one deterministic way a held W stops a sprint in this model.
+    #[test]
+    fn the_tick_a_sprint_ends_on_the_ground_loses_the_bonus_at_once() {
+        let (world, mut player) = settled_on_stone();
+        let mut intent = InputIntent::walking(0.0);
+        intent.sprint = true;
+        for _ in 0..30 {
+            step(&mut player, &intent, &world);
+        }
+        assert!(player.sprinting);
+        let before = player.velocity.z;
+
+        player.well_fed = false;
+        step(&mut player, &intent, &world);
+        assert!(!player.sprinting, "the hunger rule ends the sprint this tick");
+        let plain_acceleration =
+            INPUT_DAMPING * WALK_SPEED * (MOVE_SPEED_NUMERATOR / stone_friction().powi(3));
+        // The motion is damped after the acceleration is added.
+        let expected = (before + plain_acceleration) * stone_friction();
+        assert!(
+            (player.velocity.z - expected).abs() < 1e-12,
+            "expected {expected} (no bonus), got {}",
+            player.velocity.z
+        );
     }
 
     #[test]
@@ -1708,6 +1828,289 @@ mod tests {
         assert!((two - 0.1 * 0.4 * 0.4 * friction).abs() < 1e-12, "{two}");
     }
 
+    #[test]
+    fn player_landing_on_soul_sand_rests_at_seven_eighths_and_slows_down() {
+        let world = floor_of(BlockState::new(88, 0));
+        let mut player = Player::new(DVec3::new(0.5, 11.5, 0.5));
+        // Fall until landing
+        for _ in 0..10 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+            if player.on_ground {
+                break;
+            }
+        }
+        assert!(player.on_ground, "player must land on soul sand");
+        assert!(
+            (player.position.y - 10.875).abs() < 1e-6,
+            "player rests at Y=10.875, got {}",
+            player.position.y
+        );
+
+        // Now move: slowdown 0.4 must be applied
+        player.velocity.z = 0.1;
+        step(&mut player, &InputIntent::still(0.0), &world);
+        let friction = DEFAULT_SLIPPERINESS * GROUND_FRICTION;
+        assert!(
+            (player.velocity.z - 0.1 * 0.4 * friction).abs() < 1e-12,
+            "velocity was {}",
+            player.velocity.z
+        );
+    }
+
+    #[test]
+    fn player_lateral_collisions_with_open_trapdoors_all_facings() {
+        // Floor at y=0
+        let floor = |blocks: &mut Vec<(i32, i32, i32, BlockState)>| {
+            for x in -2..=2 {
+                for z in -2..=2 {
+                    blocks.push((x, 0, z, BlockState::new(1, 0)));
+                }
+            }
+        };
+
+        // Meta 4: North facing open trapdoor at (0, 1, 0), wall at z in [0.8125, 1.0]
+        {
+            let mut blocks = Vec::new();
+            floor(&mut blocks);
+            blocks.push((0, 1, 0, BlockState::new(96, 4)));
+            let world = TestBlocks::with(&blocks);
+            let mut player = Player::new(DVec3::new(0.5, 1.0, 2.0));
+            player.on_ground = true;
+            for _ in 0..20 {
+                player.velocity.z = -0.2;
+                step(&mut player, &InputIntent::still(0.0), &world);
+            }
+            assert!(
+                player.position.z >= 1.29,
+                "North trapdoor (meta 4) must block from +Z: got {}",
+                player.position.z
+            );
+        }
+
+        // Meta 5: South facing open trapdoor at (0, 1, 0), wall at z in [0.0, 0.1875]
+        {
+            let mut blocks = Vec::new();
+            floor(&mut blocks);
+            blocks.push((0, 1, 0, BlockState::new(96, 5)));
+            let world = TestBlocks::with(&blocks);
+            let mut player = Player::new(DVec3::new(0.5, 1.0, -1.0));
+            player.on_ground = true;
+            for _ in 0..20 {
+                player.velocity.z = 0.2;
+                step(&mut player, &InputIntent::still(0.0), &world);
+            }
+            assert!(
+                player.position.z <= -0.29,
+                "South trapdoor (meta 5) must block from -Z: got {}",
+                player.position.z
+            );
+        }
+
+        // Meta 6: West facing open trapdoor at (0, 1, 0), wall at x in [0.8125, 1.0]
+        {
+            let mut blocks = Vec::new();
+            floor(&mut blocks);
+            blocks.push((0, 1, 0, BlockState::new(96, 6)));
+            let world = TestBlocks::with(&blocks);
+            let mut player = Player::new(DVec3::new(2.0, 1.0, 0.5));
+            player.on_ground = true;
+            for _ in 0..20 {
+                player.velocity.x = -0.2;
+                step(&mut player, &InputIntent::still(0.0), &world);
+            }
+            assert!(
+                player.position.x >= 1.29,
+                "West trapdoor (meta 6) must block from +X: got {}",
+                player.position.x
+            );
+        }
+
+        // Meta 7: East facing open trapdoor at (0, 1, 0), wall at x in [0.0, 0.1875]
+        {
+            let mut blocks = Vec::new();
+            floor(&mut blocks);
+            blocks.push((0, 1, 0, BlockState::new(96, 7)));
+            let world = TestBlocks::with(&blocks);
+            let mut player = Player::new(DVec3::new(-1.0, 1.0, 0.5));
+            player.on_ground = true;
+            for _ in 0..20 {
+                player.velocity.x = 0.2;
+                step(&mut player, &InputIntent::still(0.0), &world);
+            }
+            assert!(
+                player.position.x <= -0.29,
+                "East trapdoor (meta 7) must block from -X: got {}",
+                player.position.x
+            );
+        }
+    }
+
+    #[test]
+    fn player_vertical_collisions_with_closed_trapdoors() {
+        // Meta 0: bottom closed trapdoor at (0, 0, 0), y in [0.0, 0.1875]
+        {
+            let world = TestBlocks::with(&[(0, 0, 0, BlockState::new(96, 0))]);
+            let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+            for _ in 0..10 {
+                step(&mut player, &InputIntent::still(0.0), &world);
+                if player.on_ground {
+                    break;
+                }
+            }
+            assert!(player.on_ground);
+            assert!(
+                (player.position.y - 0.1875).abs() < 1e-6,
+                "player lands on bottom trapdoor at y=0.1875, got {}",
+                player.position.y
+            );
+        }
+
+        // Meta 8: top closed trapdoor at (0, 0, 0), y in [0.8125, 1.0]
+        {
+            let world = TestBlocks::with(&[(0, 0, 0, BlockState::new(96, 8))]);
+            let mut player = Player::new(DVec3::new(0.5, 2.0, 0.5));
+            for _ in 0..15 {
+                step(&mut player, &InputIntent::still(0.0), &world);
+                if player.on_ground {
+                    break;
+                }
+            }
+            assert!(player.on_ground);
+            assert!(
+                (player.position.y - 1.0).abs() < 1e-6,
+                "player lands on top trapdoor at y=1.0, got {}",
+                player.position.y
+            );
+        }
+
+        // Jumping into ceiling trapdoor: top trapdoor at (0, 2, 0), y in [2.8125, 3.0]
+        {
+            let world = TestBlocks::with(&[
+                (0, 0, 0, BlockState::new(1, 0)),
+                (0, 2, 0, BlockState::new(96, 8)),
+            ]);
+            let mut player = Player::new(DVec3::new(0.5, 1.0, 0.5));
+            player.on_ground = true;
+            // Jump with upward velocity
+            let mut intent = InputIntent::still(0.0);
+            intent.jump = true;
+            for _ in 0..10 {
+                step(&mut player, &intent, &world);
+                // Player head (y + 1.8) cannot exceed 2.8125 => y <= 1.0125
+                assert!(
+                    player.position.y <= 1.0125 + 1e-6,
+                    "player head must hit bottom of ceiling trapdoor at 2.8125, got y={}",
+                    player.position.y
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn player_entering_cauldron_cannot_walk_out() {
+        let world = TestBlocks::with(&[(0, 0, 0, BlockState::new(118, 0))]);
+        let mut player = Player::new(DVec3::new(0.5, 1.5, 0.5));
+        // Fall into cauldron
+        for _ in 0..15 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+            if player.on_ground {
+                break;
+            }
+        }
+        assert!(player.on_ground, "player lands in cauldron");
+        assert!(
+            (player.position.y - 0.3125).abs() < 1e-6,
+            "player rests on cauldron floor at y=0.3125, got {}",
+            player.position.y
+        );
+
+        // Try walking in +X direction: wall height is 1.0 - 0.3125 = 0.6875 > STEP_HEIGHT (0.6)
+        // Walking alone cannot step over 0.6875 wall
+        for _ in 0..20 {
+            player.velocity.x = 0.2;
+            step(&mut player, &InputIntent::still(0.0), &world);
+        }
+        // Player radius is 0.3, wall is at x=0.875..1.0, player is blocked at x <= 0.875 - 0.3 = 0.575
+        assert!(
+            player.position.x <= 0.575 + 1e-6,
+            "player cannot walk out of cauldron without jumping, got x={}",
+            player.position.x
+        );
+        assert!(
+            (player.position.y - 0.3125).abs() < 1e-6,
+            "player remains on cauldron floor, got y={}",
+            player.position.y
+        );
+    }
+
+    #[test]
+    fn player_in_hopper_can_step_out_and_collides_with_exterior() {
+        let mut blocks = Vec::new();
+        // Stone floor at y = 10
+        for x in -5..=5 {
+            blocks.push((x, 10, 0, BlockState::new(1, 0)));
+        }
+        // Hopper at (0, 11, 0) sitting on the floor
+        blocks.push((0, 11, 0, BlockState::new(154, 0)));
+        // Adjacent raised blocks at (1..=5, 11, 0) flush with hopper top
+        for x in 1..=5 {
+            blocks.push((x, 11, 0, BlockState::new(1, 0)));
+        }
+        let world = TestBlocks::with(&blocks);
+
+        // 1. Player lands inside hopper basin: floor is at y = 11.0 + 0.625 = 11.625
+        let mut player = Player::new(DVec3::new(0.5, 12.5, 0.5));
+        for _ in 0..15 {
+            step(&mut player, &InputIntent::still(0.0), &world);
+            if player.on_ground {
+                break;
+            }
+        }
+        assert!(player.on_ground, "player lands in hopper");
+        assert!(
+            (player.position.y - 11.625).abs() < 1e-6,
+            "player rests on hopper floor at y=11.625, got {}",
+            player.position.y
+        );
+
+        // Hopper wall height is 12.0 - 11.625 = 0.375 <= STEP_HEIGHT (0.6).
+        // Walking in +X direction steps up over the wall and onto the adjacent blocks at y=12.0
+        for _ in 0..20 {
+            player.velocity.x = 0.2;
+            step(&mut player, &InputIntent::still(0.0), &world);
+        }
+        assert!(
+            player.position.x > 1.0,
+            "player can step out of hopper over 0.375 wall: got x={}",
+            player.position.x
+        );
+        assert!(
+            (player.position.y - 12.0).abs() < 1e-6,
+            "player stepped onto the top of the adjacent block at y=12.0: got y={}",
+            player.position.y
+        );
+
+        // 2. Exterior collision: player outside walking on floor at y=10 (feet at y=11.0) into hopper
+        let mut player_outside = Player::new(DVec3::new(-2.0, 11.0, 0.5));
+        player_outside.on_ground = true;
+        for _ in 0..20 {
+            player_outside.velocity.x = 0.2;
+            step(&mut player_outside, &InputIntent::still(0.0), &world);
+        }
+        // Hopper west wall is at x=0.0..0.125, player radius is 0.3 => player stopped at x <= -0.3
+        // Wall height is 1.0 > 0.6, so player cannot step up.
+        assert!(
+            player_outside.position.x <= -0.29,
+            "hopper exterior (1.0 high) blocks player walking from outside, got x={}",
+            player_outside.position.x
+        );
+        assert!(
+            (player_outside.position.y - 11.0).abs() < 1e-6,
+            "player remains on floor at y=11.0, got y={}",
+            player_outside.position.y
+        );
+    }
+
     /// MCP `BlockWeb.onEntityCollidedWithBlock` and `Entity.moveEntity`
     /// (line 602): the move after touching a cobweb is scaled by
     /// `(0.25, 0.05, 0.25)` and the motion is cleared.
@@ -1902,6 +2305,64 @@ mod tests {
         );
         // A level above 3 counts as 3.
         assert!((distance(7) - three).abs() < 1e-12);
+    }
+
+    /// A Depth Strider III player at the bottom of the pool, walking, settled
+    /// (phase E.6, scenario `e3` of the reference run).
+    fn settled_wader() -> (TestBlocks, Player) {
+        let world = pool(WATER);
+        let mut player = Player::new(DVec3::new(0.5, 11.0, 0.5));
+        player.depth_strider = 3;
+        let walk = InputIntent::walking(0.0);
+        for _ in 0..60 {
+            step(&mut player, &walk, &world);
+        }
+        assert!(player.in_water && player.on_ground && !player.sprinting);
+        (world, player)
+    }
+
+    /// Phase E.6: the first sprint tick in water with Depth Strider III already
+    /// has the sprint factor. Reference run (vanilla 1.8.9, `e3`): `mz` goes
+    /// from 0.117859 (walking) to 0.133911468 on the first sprint tick; the
+    /// cached factor gave 0.117859 again.
+    #[test]
+    fn the_first_sprint_tick_in_water_with_depth_strider_uses_the_sprint_factor() {
+        let (world, mut player) = settled_wader();
+        let walking = player.velocity.z;
+        assert!((walking - 0.117_859).abs() < 1e-6, "{walking}");
+        let mut intent = InputIntent::walking(0.0);
+        intent.sprint = true;
+        step(&mut player, &intent, &world);
+        assert!(player.sprinting && player.in_water && player.on_ground);
+
+        // Float arithmetic of `EntityLivingBase.moveEntityWithHeading`:
+        // friction 0.8 -> 0.54600006, acceleration 0.02 -> `getAIMoveSpeed()`.
+        let friction = f64::from(0.546_000_06_f32);
+        let live_speed = f64::from((WALK_SPEED * (1.0 + SPRINT_SPEED_BONUS)) as f32);
+        // The motion is damped after the acceleration is added.
+        let expected = (walking + INPUT_DAMPING * live_speed) * friction;
+        assert!(
+            (player.velocity.z - expected).abs() < 1e-9,
+            "expected {expected}, got {}",
+            player.velocity.z
+        );
+        assert!((player.velocity.z - 0.133_911_468).abs() < 1e-6, "{}", player.velocity.z);
+        assert!((player.velocity.z - walking).abs() > 0.01, "the old, late result");
+    }
+
+    /// Walking in water with Depth Strider III keeps its behaviour: the
+    /// acceleration is the plain movement speed (reference `swim_walk`).
+    #[test]
+    fn walking_in_water_with_depth_strider_is_unchanged_by_the_sprint_fix() {
+        let (world, mut player) = settled_wader();
+        let before = player.velocity.z;
+        step(&mut player, &InputIntent::walking(0.0), &world);
+        assert!((player.velocity.z - before).abs() < 1e-6, "still at its steady speed");
+        // Steady state: acceleration * friction / (1 - friction), float constants.
+        let friction = f64::from(0.546_000_06_f32);
+        let acceleration = INPUT_DAMPING * f64::from(WALK_SPEED as f32);
+        let steady = acceleration * friction / (1.0 - friction);
+        assert!((player.velocity.z - steady).abs() < 1e-6, "{} vs {steady}", player.velocity.z);
     }
 
     /// A flying creative player is not slowed by the water branch

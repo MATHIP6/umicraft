@@ -31,8 +31,15 @@ pub struct Connection {
     write_cipher: Option<AesCfb8Stream>,
     /// Decrypted bytes not yet peeled into a complete frame.
     pending: Vec<u8>,
-    /// Reusable socket read scratch (peeked decrypt target).
+    /// Sliding window cursor into `pending`. Bytes in `0..cursor` have already
+    /// been peeled into frames and do not need to be shifted until compaction.
+    cursor: usize,
+    /// Reusable socket read scratch (peeked decrypt target, 64 KiB).
     recv_buf: Vec<u8>,
+    /// Reusable scratch buffer for encoding packet bodies.
+    write_body_buf: Vec<u8>,
+    /// Reusable scratch buffer for framed/encrypted write payloads.
+    write_frame_buf: Vec<u8>,
 }
 
 impl Connection {
@@ -79,8 +86,11 @@ impl Connection {
             framing: Framing::Raw,
             read_cipher: None,
             write_cipher: None,
-            pending: Vec::new(),
-            recv_buf: vec![0u8; 8192],
+            pending: Vec::with_capacity(65536),
+            cursor: 0,
+            recv_buf: vec![0u8; 65536],
+            write_body_buf: Vec::with_capacity(512),
+            write_frame_buf: Vec::with_capacity(1024),
         }
     }
 
@@ -124,7 +134,7 @@ impl Connection {
     }
 
     /// Sends one packet: builds id + body, applies the framing/encryption
-    /// layers, and flushes to the socket.
+    /// layers, and flushes to the socket using reusable write scratch buffers.
     ///
     /// # Errors
     /// [`NetError`] on encode or transport failure.
@@ -132,15 +142,74 @@ impl Connection {
         &mut self,
         packet: &PKT,
     ) -> Result<(), NetError> {
-        let mut body = Vec::with_capacity(64);
-        body.push(packet.packet_id());
-        EncodablePacket::encode_body(packet, &mut body)?;
-        let mut framed = Vec::with_capacity(body.len() + 10);
-        self.framing.write_frame(&mut framed, &body)?;
+        self.write_body_buf.clear();
+        self.write_frame_buf.clear();
+        self.write_body_buf.push(packet.packet_id());
+        EncodablePacket::encode_body(packet, &mut self.write_body_buf)?;
+        self.framing.write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
         if let Some(cipher) = self.write_cipher.as_mut() {
-            cipher.encrypt(&mut framed);
+            cipher.encrypt(&mut self.write_frame_buf);
         }
-        self.write_half.write_all(&framed).await?;
+        self.write_half.write_all(&self.write_frame_buf).await?;
+        Ok(())
+    }
+
+    /// Sends multiple packets in a single encrypted batch flush.
+    ///
+    /// Encodes each packet into a contiguous write buffer and sends them
+    /// via a single socket write syscall, avoiding per-packet TCP framing overhead.
+    ///
+    /// # Errors
+    /// [`NetError`] on encode or transport failure.
+    pub async fn write_packets<PKT: EncodablePacket>(
+        &mut self,
+        packets: &[PKT],
+    ) -> Result<(), NetError> {
+        if packets.is_empty() {
+            return Ok(());
+        }
+        if packets.len() == 1 {
+            return self.write_packet(&packets[0]).await;
+        }
+        self.write_frame_buf.clear();
+        for packet in packets {
+            self.write_body_buf.clear();
+            self.write_body_buf.push(packet.packet_id());
+            EncodablePacket::encode_body(packet, &mut self.write_body_buf)?;
+            self.framing.write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
+        }
+        if let Some(cipher) = self.write_cipher.as_mut() {
+            cipher.encrypt(&mut self.write_frame_buf);
+        }
+        self.write_half.write_all(&self.write_frame_buf).await?;
+        Ok(())
+    }
+
+    /// Sends multiple packet references in a single encrypted batch flush.
+    ///
+    /// # Errors
+    /// [`NetError`] on encode or transport failure.
+    pub async fn write_packet_refs<PKT: EncodablePacket>(
+        &mut self,
+        packets: &[&PKT],
+    ) -> Result<(), NetError> {
+        if packets.is_empty() {
+            return Ok(());
+        }
+        if packets.len() == 1 {
+            return self.write_packet(packets[0]).await;
+        }
+        self.write_frame_buf.clear();
+        for packet in packets {
+            self.write_body_buf.clear();
+            self.write_body_buf.push(packet.packet_id());
+            EncodablePacket::encode_body(*packet, &mut self.write_body_buf)?;
+            self.framing.write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
+        }
+        if let Some(cipher) = self.write_cipher.as_mut() {
+            cipher.encrypt(&mut self.write_frame_buf);
+        }
+        self.write_half.write_all(&self.write_frame_buf).await?;
         Ok(())
     }
 
@@ -148,26 +217,36 @@ impl Connection {
     /// caller for a per-state decision (the play state tolerates unknowable
     /// packet spam from real servers).
     ///
+    /// Uses an $O(1)$ cursor sliding window over `pending` to eliminate repeated
+    /// quadratic buffer shifting when multiple packets arrive in a single TCP read.
+    ///
     /// # Errors
     /// [`NetError::ConnectionClosed`] on EOF, [`NetError::Protocol`] on
     /// malformed frames, [`NetError::Io`] on socket failure.
     pub async fn read_packet(&mut self) -> Result<(u8, Vec<u8>), NetError> {
-        let packet = self.read_framed_packet().await?;
-        // `take_framed_packet` rejects zero-length packets, so the id exists.
-        let id = packet[0];
-        Ok((id, packet[1..].to_vec()))
-    }
-
-    async fn read_framed_packet(&mut self) -> Result<Vec<u8>, NetError> {
         loop {
-            let previous_pending = self.pending.len();
-            let peeled = take_framed_packet(&mut self.pending, self.framing).map_err(|err| {
-                tracing::warn!(pending_len = previous_pending, framing = ?self.framing, %err, "frame split failed");
+            let pending_slice = &self.pending[self.cursor..];
+            let peeled = take_packet_slice(pending_slice, self.framing).map_err(|err| {
+                tracing::warn!(pending_len = pending_slice.len(), framing = ?self.framing, %err, "frame split failed");
                 err
             })?;
-            if let Some(packet) = peeled {
-                return Ok(packet);
+            if let Some(peeled) = peeled {
+                self.cursor += peeled.bytes_consumed;
+                if self.cursor == self.pending.len() {
+                    self.pending.clear();
+                    self.cursor = 0;
+                }
+                return Ok((peeled.packet_id, peeled.body));
             }
+
+            // Compact pending buffer only before reading more socket data.
+            if self.cursor > 0 {
+                let remaining = self.pending.len() - self.cursor;
+                self.pending.copy_within(self.cursor.., 0);
+                self.pending.truncate(remaining);
+                self.cursor = 0;
+            }
+
             let n = self.read_half.read(self.recv_buf.as_mut_slice()).await?;
             if n == 0 {
                 return Err(NetError::ConnectionClosed);
@@ -181,12 +260,50 @@ impl Connection {
     }
 }
 
+/// A parsed packet from the connection pending buffer.
+struct PeeledPacket {
+    bytes_consumed: usize,
+    packet_id: u8,
+    body: Vec<u8>,
+}
+
+/// Peels one complete packet `(id, body)` from `slice`, returning bytes consumed and the packet.
+fn take_packet_slice(
+    slice: &[u8],
+    framing: Framing,
+) -> Result<Option<PeeledPacket>, ProtocolError> {
+    let mut consumed = 0usize;
+    let Some(raw_len) = take_var_u32(slice, &mut consumed)? else {
+        return Ok(None);
+    };
+    let packet_len = raw_len as usize;
+    if packet_len > MAX_PACKET_LEN {
+        return Err(ProtocolError::PacketTooLarge {
+            size: packet_len,
+            limit: MAX_PACKET_LEN,
+        });
+    }
+    if packet_len == 0 {
+        return Err(ProtocolError::Invariant("zero-length packet".to_string()));
+    }
+    let total = consumed + packet_len;
+    if slice.len() < total {
+        return Ok(None);
+    }
+    let frame = &slice[consumed..total];
+    let (packet_id, body) = framing.unwrap_packet(frame)?;
+    Ok(Some(PeeledPacket {
+        bytes_consumed: total,
+        packet_id,
+        body,
+    }))
+}
+
 /// Peels one complete framed packet (uncompressed) off `pending`, preferring
 /// `Ok(None)` when the buffer holds an incomplete frame.
 ///
-/// # Errors
-/// [`ProtocolError`] on genuinely malformed declarations (too large, zero
-/// length, broken compression content).
+/// Kept for backward compatibility with framing unit tests.
+#[cfg(test)]
 fn take_framed_packet(
     pending: &mut Vec<u8>,
     framing: Framing,
@@ -210,9 +327,9 @@ fn take_framed_packet(
     if pending.len() < total {
         return Ok(None);
     }
-    let packet = pending[consumed..total].to_vec();
+    let packet = framing.unwrap_body(&pending[consumed..total])?;
     pending.drain(..total);
-    Ok(Some(framing.unwrap_body(&packet)?))
+    Ok(Some(packet))
 }
 
 #[cfg(test)]

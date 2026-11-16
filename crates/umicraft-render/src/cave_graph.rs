@@ -56,6 +56,9 @@ pub(crate) struct CaveGraph {
     /// once per face; indexed like [`CaveGraph::cell`].
     entered: Vec<u8>,
     queue: VecDeque<(usize, usize)>,
+    /// Reusable per-column connectivity snapshot buffer so [`CaveGraph::fill`]
+    /// never allocates on the heap after the initial warmup.
+    known: Vec<Option<[Connectivity; SECTIONS]>>,
 }
 
 impl CaveGraph {
@@ -117,19 +120,18 @@ impl CaveGraph {
         self.entered.clear();
         self.entered.resize(columns * SECTIONS, 0);
         self.queue.clear();
-        // One lookup per chunk, not per section.
-        let known: Vec<Option<&[Connectivity; SECTIONS]>> = (0..self.side * self.side)
-            .map(|index| {
-                let (dx, dz) = (index % self.side, index / self.side);
-                connectivity(ChunkPos::new(self.corner.0 + dx, self.corner.1 + dz))
-            })
-            .collect();
+        // One lookup per chunk, not per section, reusing the retained buffer.
+        self.known.clear();
+        self.known.extend((0..self.side * self.side).map(|index| {
+            let (dx, dz) = (index % self.side, index / self.side);
+            connectivity(ChunkPos::new(self.corner.0 + dx, self.corner.1 + dz)).copied()
+        }));
         let first = self.cell(reach, start.1, reach);
         self.queue.push_back((first, START));
         while let Some((index, entry)) = self.queue.pop_front() {
             let (column, sy) = (index / SECTIONS, (index % SECTIONS) as i32);
             let (dx, dz) = ((column as i32) % self.side, (column as i32) / self.side);
-            let here = known[column].map(|all| all[sy as usize]);
+            let here = self.known[column].map(|all| all[sy as usize]);
             if here.is_some() {
                 self.visible[column] |= 1 << sy;
             }

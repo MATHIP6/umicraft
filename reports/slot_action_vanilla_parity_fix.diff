@@ -1,0 +1,470 @@
+Phase 3 (slot change, drop, pick-block): edits made by this phase to
+crates/umicraft-client/src/game.rs. The file also holds other uncommitted
+changes (yours, and phases 1 to 2.1); only this phase's hunks are listed.
+
+--- production code ---------------------------------------------------------
+@@ use
+-use umicraft_game::item_use::{drop_item, DoorToggle, ItemUse, UseAction, UseTick};
++use umicraft_game::item_use::{drop_item, DoorToggle, DropKind, ItemUse, UseAction, UseTick};
+@@ struct Game
+     /// The selected hotbar slot.
+     selected_slot: u8,
++    /// The slot as the last keyboard stage of a tick left it (MCP
++    /// `inventory.currentItem` between two ticks).
++    applied_slot: u8,
++    /// The slot the server was last told (MCP
++    /// `PlayerControllerMP.currentPlayerItem`).
++    synced_slot: u8,
++    /// The drop key presses since the last tick, oldest first.
++    pending_drops: Vec<DropKind>,
++    /// The pick-block presses since the last tick.
++    pending_picks: u32,
+@@ Game::new
+             selected_slot: 0,
++            applied_slot: 0,
++            synced_slot: 0,
++            pending_drops: Vec::new(),
++            pending_picks: 0,
+@@ PlayEvent::HeldItemChange (server chose the slot)
+                 game.selected_slot = slot as u8;
++                // The server chose it: it is not announced back (as before).
++                game.applied_slot = slot as u8;
++                game.synced_slot = slot as u8;
+@@ fn handle_input
+-/// Handles one input update.
+-fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) {
++/// Handles one input update.
++///
++/// The hotbar, drop and pick-block keys only record the request here; their
++/// packets leave in the tick, where MCP `Minecraft.runTick` handles the keys
++/// (`queue` is kept for the callers).
++fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut CommandQueue) {
+@@ fn handle_input (hotbar)
+     if let Some(slot) = update.select_slot {
+-        select_slot(game, slot, queue);
++        select_slot(game, slot);
+     }
+@@ fn handle_input (pick, drop)
+     if update.pick_block {
+-        pick_block(game, queue);
++        game.pending_picks = game.pending_picks.saturating_add(1);
+     }
+-    if let Some(outgoing) = update
+-        .drop_item
+-        .and_then(|kind| drop_item(game.gamemode, kind))
+-    {
+-        queue.push(command_of(outgoing));
+-    }
++    if let Some(kind) = update.drop_item {
++        game.pending_drops.push(kind);
++    }
+@@ fn pick_block (end)
+     if let Some(slot) = pick.select {
+-        select_slot(game, slot, queue);
++        select_slot(game, slot);
+     }
+ }
++
++/// The pick-block presses of the tick (MCP `Minecraft.runTick`, after the
++/// attack and the use). While an item is in use the presses are read and
++/// dropped.
++fn run_pick_blocks(game: &mut Game, queue: &mut CommandQueue) {
++    let presses = std::mem::take(&mut game.pending_picks);
++    if game.item_use.is_using() {
++        return;
++    }
++    for _ in 0..presses {
++        pick_block(game, queue);
++    }
++    // `setCurrentItem` changes the slot at once; the server hears of it at
++    // the next sync.
++    game.applied_slot = game.selected_slot;
++}
+@@ fn select_slot and the two sync helpers
+-/// Selects a hotbar slot and tells the server
+-/// (MCP `PlayerControllerMP.syncCurrentPlayItem`).
+-fn select_slot(game: &mut Game, slot: u8, queue: &mut CommandQueue) {
++/// Selects a hotbar slot. Only the player's view changes; the server is told
++/// by [`sync_held_item`] in a tick, once, whatever the number of presses.
++fn select_slot(game: &mut Game, slot: u8) {
+     if slot < 9 && slot != game.selected_slot {
+         game.selected_slot = slot;
+         game.windows.set_selected_slot(slot);
+         game.hud_dirty = true;
+-        queue.push(ClientCommand::HeldItemChange {
+-            slot: i16::from(slot),
+-        });
+     }
+ }
++
++/// Tells the server the slot when it differs from the last one told (MCP
++/// `PlayerControllerMP.syncCurrentPlayItem`, called by `updateController` at
++/// the start of a tick).
++fn sync_held_item(game: &mut Game, queue: &mut CommandQueue) {
++    if game.applied_slot != game.synced_slot {
++        game.synced_slot = game.applied_slot;
++        queue.push(ClientCommand::HeldItemChange {
++            slot: i16::from(game.synced_slot),
++        });
++    }
++}
++
++/// The same sync, for the controller calls of a click: it goes ahead of the
++/// first packet queued since `since` that is not the swing, which `clickMouse`
++/// sends before it calls the controller. A click that queued only a swing did
++/// not reach the controller and syncs nothing.
++fn sync_held_item_before_click(game: &mut Game, queue: &mut CommandQueue, since: usize) {
++    if game.applied_slot == game.synced_slot {
++        return;
++    }
++    let first = (since..queue.ordered.len())
++        .find(|&at| !matches!(queue.ordered[at], ClientCommand::Swing));
++    if let Some(at) = first {
++        game.synced_slot = game.applied_slot;
++        queue.ordered.insert(
++            at,
++            ClientCommand::HeldItemChange {
++                slot: i16::from(game.synced_slot),
++            },
++        );
++    }
++}
+@@ fn tick
+     apply_perspective_presses(game);
+-    run_attack(game, queue);
+-    run_use(game, queue);
++    // MCP `Minecraft.runTick`: `updateController` syncs the slot, the hotbar
++    // keys then select the next one, the drop key sends its packets, then
++    // come the clicks (each syncing the slot before its controller packet)
++    // and the pick-block.
++    sync_held_item(game, queue);
++    game.applied_slot = game.selected_slot;
++    for kind in std::mem::take(&mut game.pending_drops) {
++        if let Some(outgoing) = drop_item(game.gamemode, kind) {
++            queue.push(command_of(outgoing));
++        }
++    }
++    let since = queue.ordered.len();
++    run_attack(game, queue);
++    sync_held_item_before_click(game, queue, since);
++    let since = queue.ordered.len();
++    run_use(game, queue);
++    sync_held_item_before_click(game, queue, since);
++    run_pick_blocks(game, queue);
+
+--- test code: existing tests changed -------------------------------------------
+the_selected_slot_is_announced_once, q_and_ctrl_q_send_the_drop_packets,
+the_middle_button_selects_the_hotbar_slot_of_the_block: rewritten to press the
+key, check that nothing leaves at the event, then run ticks and check the packets.
+Phase 2.1 loop harness (LoopHarness): spam_slots/slot()/slots_of replaced by
+spam_chats()/chats_of() (+ slots_of kept), because slot presses between ticks now
+make one packet and can no longer fill the queue; the loop tests assert the
+chat lines instead, and test 1 also asserts the slot pressed while congested
+leaves once ([3]).
+
+--- test code: new block (extracted from the file) ------------------------------
++    // Slot change, drop and pick-block: recorded by the input, sent by the tick.
++
++    fn press_slot(game: &mut Game, queue: &mut CommandQueue, slot: u8) {
++        let update = InputUpdate {
++            select_slot: Some(slot),
++            ..InputUpdate::default()
++        };
++        handle_input(game, update, queue);
++    }
++
++    fn press_drop(game: &mut Game, queue: &mut CommandQueue, kind: DropKind) {
++        let update = InputUpdate {
++            drop_item: Some(kind),
++            ..InputUpdate::default()
++        };
++        handle_input(game, update, queue);
++    }
++
++    fn press_pick(game: &mut Game, queue: &mut CommandQueue) {
++        let update = InputUpdate {
++            pick_block: true,
++            ..InputUpdate::default()
++        };
++        handle_input(game, update, queue);
++    }
++
++    fn slots_in(queue: &CommandQueue) -> Vec<i16> {
++        queue
++            .ordered
++            .iter()
++            .filter_map(|command| match command {
++                ClientCommand::HeldItemChange { slot } => Some(*slot),
++                _ => None,
++            })
++            .collect()
++    }
++
++    /// The queue as a list of short names, oldest first.
++    fn tags(queue: &CommandQueue) -> Vec<String> {
++        queue
++            .ordered
++            .iter()
++            .map(|command| match command {
++                ClientCommand::HeldItemChange { slot } => format!("slot{slot}"),
++                ClientCommand::PlayerDigging {
++                    status: DiggingStatus::DropItem,
++                    ..
++                } => "drop".to_string(),
++                ClientCommand::PlayerDigging {
++                    status: DiggingStatus::DropAllItems,
++                    ..
++                } => "dropall".to_string(),
++                ClientCommand::PlayerDigging { .. } => "dig".to_string(),
++                ClientCommand::CreativeSlot { .. } => "creative".to_string(),
++                ClientCommand::Swing => "swing".to_string(),
++                ClientCommand::UseEntity { .. } => "attack".to_string(),
++                ClientCommand::PlayerBlockPlacement { .. } | ClientCommand::UseItem { .. } => {
++                    "use".to_string()
++                }
++                other if is_movement(other) => "move".to_string(),
++                _ => "other".to_string(),
++            })
++            .collect()
++    }
++
++    /// Whether `wanted` appears in `tags` in that order (other tags between).
++    fn in_order(tags: &[String], wanted: &[&str]) -> bool {
++        let mut at = 0;
++        for tag in tags {
++            if at < wanted.len() && tag == wanted[at] {
++                at += 1;
++            }
++        }
++        at == wanted.len()
++    }
++
++    #[test]
++    fn a_slot_press_leaves_in_the_tick_after_the_keys_stage_before_its_movement() {
++        let mut game = placed_game();
++        let mut queue = CommandQueue::default();
++        press_slot(&mut game, &mut queue, 2);
++        assert!(queue.ordered.is_empty(), "nothing leaves at the event");
++        // `runTick`: the key selects the slot, no controller call follows.
++        run_ticks(&mut game, &mut queue, 1);
++        assert_eq!(tags(&queue), ["move"]);
++        queue.ordered.clear();
++        // The next `updateController` announces it, ahead of the movement.
++        run_ticks(&mut game, &mut queue, 1);
++        assert_eq!(tags(&queue), ["slot2", "move"]);
++        queue.ordered.clear();
++        run_ticks(&mut game, &mut queue, 2);
++        assert_eq!(tags(&queue), ["move", "move"], "announced once");
++    }
++
++    #[test]
++    fn several_presses_between_two_ticks_make_one_packet_with_the_last_slot() {
++        let mut game = placed_game();
++        let mut queue = CommandQueue::default();
++        for slot in [1, 2, 3] {
++            press_slot(&mut game, &mut queue, slot);
++        }
++        run_ticks(&mut game, &mut queue, 3);
++        assert_eq!(slots_in(&queue), [3]);
++        // Back to the slot the server already knows: nothing at all.
++        queue.ordered.clear();
++        press_slot(&mut game, &mut queue, 4);
++        press_slot(&mut game, &mut queue, 3);
++        run_ticks(&mut game, &mut queue, 3);
++        assert!(slots_in(&queue).is_empty());
++    }
++
++    #[test]
++    fn a_drop_leaves_in_its_tick_before_the_movement_and_without_a_slot_sync() {
++        let mut game = placed_game();
++        let mut queue = CommandQueue::default();
++        press_drop(&mut game, &mut queue, DropKind::One);
++        assert!(queue.ordered.is_empty());
++        run_ticks(&mut game, &mut queue, 1);
++        assert_eq!(tags(&queue), ["drop", "move"]);
++        queue.ordered.clear();
++        // A slot and a drop pressed together: the drop is sent first, the
++        // slot at the next tick (the drop does not sync).
++        press_slot(&mut game, &mut queue, 2);
++        press_drop(&mut game, &mut queue, DropKind::One);
++        run_ticks(&mut game, &mut queue, 1);
++        assert_eq!(tags(&queue), ["drop", "move"]);
++        queue.ordered.clear();
++        run_ticks(&mut game, &mut queue, 1);
++        assert_eq!(tags(&queue), ["slot2", "move"]);
++    }
++
++    #[test]
++    fn every_drop_press_is_a_packet() {
++        let mut game = placed_game();
++        let mut queue = CommandQueue::default();
++        press_drop(&mut game, &mut queue, DropKind::One);
++        press_drop(&mut game, &mut queue, DropKind::Stack);
++        press_drop(&mut game, &mut queue, DropKind::One);
++        run_ticks(&mut game, &mut queue, 2);
++        assert_eq!(tags(&queue), ["drop", "dropall", "drop", "move", "move"]);
++    }
++
++    #[test]
++    fn a_survival_pick_leaves_no_packet_in_its_tick_and_the_slot_in_the_next() {
++        let mut game = game_on_floor_with(BlockState::AIR);
++        game.playing = true;
++        game.pitch = std::f32::consts::FRAC_PI_2;
++        game.windows.apply_set_slot(0, 38, wire_item(2, 0));
++        let mut queue = CommandQueue::default();
++        press_pick(&mut game, &mut queue);
++        assert!(queue.ordered.is_empty());
++        run_ticks(&mut game, &mut queue, 1);
++        assert_eq!(tags(&queue), ["move"]);
++        queue.ordered.clear();
++        run_ticks(&mut game, &mut queue, 1);
++        assert_eq!(tags(&queue), ["slot2", "move"]);
++    }
++
++    #[test]
++    fn a_creative_pick_sends_the_slot_packet_in_its_tick_and_the_sync_in_the_next() {
++        let mut game = game_on_floor_with(BlockState::AIR);
++        game.playing = true;
++        game.gamemode = GameMode::Creative;
++        game.pitch = std::f32::consts::FRAC_PI_2;
++        game.windows.apply_set_slot(0, 36, wire_item(1, 0));
++        let mut queue = CommandQueue::default();
++        press_pick(&mut game, &mut queue);
++        run_ticks(&mut game, &mut queue, 1);
++        // `sendSlotPacket` does not sync the slot first.
++        assert_eq!(tags(&queue), ["creative", "move"]);
++        let chosen = i16::from(game.selected_slot);
++        assert_ne!(chosen, 0, "the free slot was selected");
++        queue.ordered.clear();
++        run_ticks(&mut game, &mut queue, 1);
++        assert_eq!(tags(&queue), [format!("slot{chosen}"), "move".to_string()]);
++    }
++
++    #[test]
++    fn a_slot_before_an_attack_is_announced_between_the_swing_and_the_attack_packet() {
++        let mut game = placed_game();
++        game.entity_id = 1;
++        game.pitch = 1.0;
++        let mut queue = CommandQueue::default();
++        press_slot(&mut game, &mut queue, 2);
++        game.input.attack = true;
++        game.attack_pressed = true;
++        run_ticks(&mut game, &mut queue, 1);
++        let seen = tags(&queue);
++        // `clickMouse`: swing, then the controller syncs and sends.
++        assert!(in_order(&seen, &["swing", "slot2", "dig", "move"]), "{seen:?}");
++        assert_eq!(slots_in(&queue), [2], "once");
++    }
++
++    #[test]
++    fn a_slot_before_a_use_is_announced_before_the_use_packet() {
++        let mut game = placed_game();
++        game.entity_id = 1;
++        game.pitch = 1.0;
++        game.windows.apply_set_slot(0, 38, wire_item(1, 0));
++        let mut queue = CommandQueue::default();
++        press_slot(&mut game, &mut queue, 2);
++        game.use_pressed = true;
++        run_ticks(&mut game, &mut queue, 1);
++        let seen = tags(&queue);
++        assert!(in_order(&seen, &["slot2", "use", "move"]), "{seen:?}");
++        assert_eq!(slots_in(&queue), [2], "once");
++    }
++
++    #[test]
++    fn the_actions_of_one_tick_keep_the_run_tick_order() {
++        let mut game = placed_game();
++        game.entity_id = 1;
++        game.pitch = 1.0;
++        let mut queue = CommandQueue::default();
++        press_slot(&mut game, &mut queue, 2);
++        press_drop(&mut game, &mut queue, DropKind::One);
++        press_pick(&mut game, &mut queue);
++        game.input.attack = true;
++        game.attack_pressed = true;
++        run_ticks(&mut game, &mut queue, 1);
++        let seen = tags(&queue);
++        // keys (drop), then the click (swing, sync, controller), then the
++        // movement of the tick.
++        assert!(
++            in_order(&seen, &["drop", "swing", "slot2", "dig", "move"]),
++            "{seen:?}"
++        );
++    }
++
++    #[test]
++    fn a_movement_and_a_slot_of_different_ticks_keep_the_order_of_the_ticks() {
++        let mut game = walking_game();
++        let mut queue = CommandQueue::default();
++        run_ticks(&mut game, &mut queue, 1);
++        press_slot(&mut game, &mut queue, 5);
++        run_ticks(&mut game, &mut queue, 2);
++        // tick 1 move, tick 2 move (the key stage), tick 3: slot then move.
++        assert_eq!(tags(&queue), ["move", "move", "slot5", "move"]);
++    }
++
++    #[test]
++    fn a_slot_chosen_by_the_server_is_not_announced_back() {
++        let mut game = placed_game();
++        let mut queue = CommandQueue::default();
++        let (frames, _received) = mpsc::sync_channel(16);
++        handle_net(&mut game, PlayEvent::HeldItemChange(5), &mut queue, &frames);
++        run_ticks(&mut game, &mut queue, 3);
++        assert_eq!(game.selected_slot, 5);
++        assert!(slots_in(&queue).is_empty());
++    }
++
++    #[test]
++    fn actions_pressed_while_congested_leave_once_after_the_resume() {
++        let mut harness = LoopHarness::start(network::COMMAND_CAPACITY);
++        harness.join_world();
++        harness.wait_for_ticks(12);
++        let sent = harness.spam_chats(CONGESTING);
++        std::thread::sleep(std::time::Duration::from_millis(300));
++        harness.ticks();
++        // Three slot presses and a drop while the simulation waits.
++        for slot in [4, 5, 6] {
++            harness
++                .inputs
++                .send(InputUpdate {
++                    select_slot: Some(slot),
++                    ..InputUpdate::default()
++                })
++                .expect("the loop runs");
++        }
++        harness
++            .inputs
++            .send(InputUpdate {
++                drop_item: Some(DropKind::One),
++                ..InputUpdate::default()
++            })
++            .expect("the loop runs");
++        std::thread::sleep(std::time::Duration::from_millis(300));
++        assert_eq!(harness.ticks(), 0, "still congested");
++
++        let stream = harness.read_for(std::time::Duration::from_millis(1500));
++        let after = harness.finish();
++        let stream: Vec<PlayServerbound> = stream.into_iter().chain(after).collect();
++        assert_eq!(chats_of(&stream), sent, "the queue kept its order");
++        assert_eq!(slots_in_stream(&stream), [6], "three presses, one packet");
++        let drops: Vec<usize> = stream
++            .iter()
++            .enumerate()
++            .filter(|(_, p)| {
++                matches!(p, PlayServerbound::PlayerDigging(d) if d.status == DiggingStatus::DropItem)
++            })
++            .map(|(i, _)| i)
++            .collect();
++        assert_eq!(drops.len(), 1, "the drop leaves once");
++        let slot = stream
++            .iter()
++            .position(|p| matches!(p, PlayServerbound::HeldItemChange(_)))
++            .expect("the slot packet");
++        assert!(drops[0] < slot, "the drop of the key stage, then the sync");
++        assert_fall_has_no_gap(&falling_ys(&stream));
++    }
++
++    fn slots_in_stream(packets: &[PlayServerbound]) -> Vec<i16> {
++        slots_of(packets)
++    }
++

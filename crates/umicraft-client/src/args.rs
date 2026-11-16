@@ -105,7 +105,9 @@ options:
   --play-secs N       duration of the headless session (default: 60)
   --script NAME       headless script: default (walk, break, place), idle, or
                       movement (the 60 s parity-harness script), or combat (the
-                      60 s combat script: strikes, a use, a jump strike)
+                      60 s combat script: strikes, a use, a jump strike), or e1 (the
+                      tick-driven E.2 parity scenario; needs --state-log)
+  --state-log FILE    write the per-tick player state CSV of the e1 script
   --handshake-host H  address sent in the handshake instead of <host> (to record a
                       session with umicraft-packet-logger on a public server)
   --chat MESSAGE      chat line the headless session sends when it is placed
@@ -138,15 +140,17 @@ options:
   --setup-assets      download and verify official 1.8.8 assets then exit
   --no-audio          start without the sound engine (no device, no thread)
   --audio-probe       play a few sound events on the system device and exit
+  --profile           enable runtime profiling and per-frame allocation tracking at start
   --time N            world time in ticks (signed; default: 6000 noon)
   --demo-view NAME    acceptance camera: overview, day, night, cave, transparency,
                       back, closeup, walk-cycle, mobs (default: overview)
+  --backend NAME      graphics backend: dx12, vulkan, or all (default: all)
   --width N           framebuffer width (default: 1280)
   --height N          framebuffer height (default: 720)
   --help, -h          print this help";
 
 /// The scenes of `--hud-demo`.
-pub const HUD_VIEWS: [&str; 24] = [
+pub const HUD_VIEWS: [&str; 26] = [
     "overview",
     "tab",
     "chat",
@@ -171,10 +175,12 @@ pub const HUD_VIEWS: [&str; 24] = [
     "achievements",
     "mods",
     "mods_list",
+    "hud-editor",
+    "hud-editor-list",
 ];
 
 /// The scripted sessions the headless mode knows.
-pub const SCRIPTS: [&str; 4] = ["default", "idle", "movement", "combat"];
+pub const SCRIPTS: [&str; 8] = ["default", "idle", "movement", "combat", "e1", "e2", "e3", "e4"];
 
 /// The top-level mode selected by the parsed arguments.
 ///
@@ -229,6 +235,8 @@ pub struct Args {
     pub play: Duration,
     /// The scripted session of the headless mode.
     pub script: String,
+    /// Where the `e1` script writes its per-tick state log (phase E.2).
+    pub state_log: Option<PathBuf>,
     /// A chat line the headless session sends once the player is placed.
     pub chat: Option<String>,
     /// The address written in the `Handshake`, when it differs from `host`
@@ -246,6 +254,9 @@ pub struct Args {
     pub block_demo: bool,
     /// Whether the reproducible benchmark scene is requested (F2-0c).
     pub bench_scene: bool,
+    /// Specific benchmark scenario for competitive performance testing:
+    /// "empty", "chunks8", "chunks16", "chunks24", "entities50", "entities100", "entities200", "pvp", "particles", "mixed".
+    pub bench_scenario: Option<String>,
     /// X and Z, in blocks, of the centre of the benchmark scene.
     pub bench_origin: i32,
     /// Measured frames of the benchmark scene.
@@ -269,12 +280,16 @@ pub struct Args {
     pub no_audio: bool,
     /// Whether the audio probe was requested (`--audio-probe`).
     pub audio_probe: bool,
+    /// Whether runtime profiling and allocation tracking start enabled (`--profile`).
+    pub profile: bool,
     /// Active resource pack paths, layered in argument order.
     pub resource_packs: Vec<PathBuf>,
     /// World time in ticks (signed; default: 6000 noon). Only used by `--block-demo`.
     pub time: i64,
     /// Acceptance camera view for `--block-demo`.
     pub demo_view: DemoView,
+    /// Explicitly requested graphics backend ("dx12", "vulkan", "all").
+    pub backend: Option<String>,
     /// Framebuffer width.
     pub width: u32,
     /// Framebuffer height.
@@ -341,6 +356,7 @@ impl Args {
         let mut play_secs = 60.0_f64;
         let mut script = "default".to_string();
         let mut chat = None;
+        let mut state_log = None;
         let mut handshake_host = None;
         let mut ui_demo = false;
         let mut hud_demo = false;
@@ -348,6 +364,7 @@ impl Args {
         let mut hud_view = HUD_VIEWS[0].to_string();
         let mut block_demo = false;
         let mut bench_scene = false;
+        let mut bench_scenario = None;
         let mut bench_origin = 0_i32;
         let mut bench_frames = 600_u32;
         let mut bench_no_cave_culling = false;
@@ -359,9 +376,11 @@ impl Args {
         let mut setup_assets = false;
         let mut no_audio = false;
         let mut audio_probe = false;
+        let mut profile = false;
         let mut resource_packs = Vec::new();
         let mut time = 6000_i64;
         let mut demo_view = DemoView::Overview;
+        let mut backend = None;
         let mut width = 1280_u32;
         let mut height = 720_u32;
 
@@ -411,6 +430,10 @@ impl Args {
                     handshake_host = Some(words.get(index + 1).ok_or_else(help)?.clone());
                     index += 2;
                 }
+                "--state-log" => {
+                    state_log = Some(PathBuf::from(words.get(index + 1).ok_or_else(help)?));
+                    index += 2;
+                }
                 "--chat" => {
                     let value = words.get(index + 1).ok_or_else(help)?;
                     chat = Some(value.clone());
@@ -446,6 +469,12 @@ impl Args {
                 "--bench-scene" => {
                     bench_scene = true;
                     index += 1;
+                }
+                "--bench-scenario" => {
+                    let value = words.get(index + 1).ok_or_else(help)?;
+                    bench_scenario = Some(value.clone());
+                    bench_scene = true;
+                    index += 2;
                 }
                 "--bench-origin" => {
                     bench_origin = parse_number(words.get(index + 1), "--bench-origin")?;
@@ -499,6 +528,10 @@ impl Args {
                     audio_probe = true;
                     index += 1;
                 }
+                "--profile" => {
+                    profile = true;
+                    index += 1;
+                }
                 "--resource-pack" => {
                     let value = words.get(index + 1).ok_or_else(help)?;
                     if value.is_empty() {
@@ -522,6 +555,21 @@ impl Args {
                 }
                 "--height" => {
                     height = parse_number(words.get(index + 1), "--height")?;
+                    index += 2;
+                }
+                "--backend" => {
+                    let value = words.get(index + 1).ok_or_else(help)?;
+                    let lower = value.to_ascii_lowercase();
+                    match lower.as_str() {
+                        "dx12" | "directx12" | "vulkan" | "vk" | "all" | "auto" => {
+                            backend = Some(lower);
+                        }
+                        other => {
+                            return Err(format!(
+                                "--backend must be one of 'dx12', 'vulkan', 'all'; got {other:?}\n{USAGE}"
+                            ));
+                        }
+                    }
                     index += 2;
                 }
                 other if host.is_none() => {
@@ -604,6 +652,7 @@ impl Args {
             headless,
             play: Duration::from_secs_f64(play_secs),
             script,
+            state_log,
             chat,
             handshake_host,
             ui_demo,
@@ -612,6 +661,7 @@ impl Args {
             synthetic_panorama,
             block_demo,
             bench_scene,
+            bench_scenario,
             bench_origin,
             bench_frames,
             bench_no_cave_culling,
@@ -623,9 +673,13 @@ impl Args {
             setup_assets,
             no_audio,
             audio_probe,
+            profile,
             resource_packs,
             time,
             demo_view,
+            backend: backend
+                .or_else(|| std::env::var("UMICRAFT_BACKEND").ok())
+                .or_else(|| std::env::var("WGPU_BACKEND").ok()),
             width,
             height,
         })
@@ -1042,5 +1096,14 @@ mod tests {
         );
         assert!(Args::parse(&words(&["--bench-scene", "--bench-frames", "0"])).is_err());
         assert!(Args::parse(&words(&["--bench-scene", "--bench-origin", "30000000"])).is_err());
+    }
+
+    #[test]
+    fn profile_flag_parses_and_defaults_to_false() {
+        let off = Args::parse(&words(&[])).expect("default");
+        assert!(!off.profile);
+        let on = Args::parse(&words(&["--profile"])).expect("profile");
+        assert!(on.profile);
+        assert_eq!(on.mode(), Mode::Windowed);
     }
 }

@@ -224,7 +224,13 @@ impl QuadrupedModel {
     /// Emits all vertices.
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
-        let mut out = Vec::new();
+        let box_count = self.head.boxes.len()
+            + self.body.boxes.len()
+            + self.leg1.boxes.len()
+            + self.leg2.boxes.len()
+            + self.leg3.boxes.len()
+            + self.leg4.boxes.len();
+        let mut out = Vec::with_capacity(box_count * 36);
         let root = Mat4::from_scale(Vec3::splat(1.0 / 16.0));
         self.head.emit(root, &mut out);
         self.body.emit(root, &mut out);

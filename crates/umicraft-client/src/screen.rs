@@ -42,6 +42,8 @@ pub enum Screen {
     Debug,
     /// The title screen the client starts on when no server is given.
     Title,
+    /// The loading / splash screen shown while heavy assets load asynchronously.
+    Loading,
     /// The multiplayer server list.
     ServerList,
     /// The add, edit or direct-connect form of the server list.
@@ -97,6 +99,7 @@ impl Screen {
                 | Self::Accounts
                 | Self::Connecting
                 | Self::Disconnected
+                | Self::Loading
         )
     }
 
@@ -130,6 +133,7 @@ impl Screen {
             | Self::Mods => Self::None,
             Self::Options => options_origin,
             Self::Debug => Self::Debug,
+            Self::Loading => Self::Loading,
             Self::Title => Self::Title,
             Self::ServerList => Self::Title,
             Self::ServerEdit
@@ -177,6 +181,7 @@ mod tests {
             Screen::Stats,
             Screen::Achievements,
             Screen::Mods,
+            Screen::Loading,
         ] {
             assert!(screen.blocks_game_input(), "{screen:?} must own the input");
         }
@@ -239,6 +244,7 @@ mod tests {
             Screen::Disconnected,
             Screen::Stats,
             Screen::Achievements,
+            Screen::Loading,
         ] {
             assert!(screen.uses_ui(), "{screen:?} is drawn by the UI");
         }

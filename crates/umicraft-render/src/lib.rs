@@ -27,6 +27,7 @@ mod environment;
 mod error;
 mod fog;
 mod font;
+pub mod frame_pacing;
 mod gpu_timer;
 mod hires_blocks;
 pub mod hud;
@@ -57,7 +58,8 @@ pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
 pub use environment::RenderEnvironment;
 pub use error::RenderError;
 pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
-pub use gpu_timer::{GpuTimings, GROUP_NAMES};
+pub use frame_pacing::{FramePacingStats, FramePacingTracker, SurfaceInfo};
+pub use gpu_timer::{DrawCallStats, GpuTimings, VramStats, GROUP_NAMES};
 pub use hud::{
     chat_run_at, draw_hud_gui, measure_mod_widget, HudSheets, ModLine, ModWidgetView, ShadowStyle,
     WidgetStyle,

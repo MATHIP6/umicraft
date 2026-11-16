@@ -79,10 +79,12 @@ pub struct BlockModel {
 }
 
 /// The complete baked model set for the 1.8 block registry.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockModelSet {
     /// Baked models keyed by wire state.
     models: HashMap<BlockState, Arc<BlockModel>>,
+    /// Direct $O(1)$ array lookup table for wire states `0..4096`.
+    models_by_wire: Box<[Option<Arc<BlockModel>>; 4096]>,
     /// Baked models keyed by blockstate document and canonical variant key.
     keyed: HashMap<(String, String), Arc<BlockModel>>,
     texture_keys: BTreeSet<String>,
@@ -90,6 +92,21 @@ pub struct BlockModelSet {
     source_model_count: usize,
     fallback_count: usize,
     model_count: usize,
+}
+
+impl Default for BlockModelSet {
+    fn default() -> Self {
+        Self {
+            models: HashMap::new(),
+            models_by_wire: Box::new(std::array::from_fn(|_| None)),
+            keyed: HashMap::new(),
+            texture_keys: BTreeSet::new(),
+            blockstate_count: 0,
+            source_model_count: 0,
+            fallback_count: 0,
+            model_count: 0,
+        }
+    }
 }
 
 impl BlockModelSet {
@@ -172,8 +189,17 @@ impl BlockModelSet {
         // ones a metadata value maps to.
         bake_all_variants(&mut builder, &mut cache, definitions)?;
 
+        let mut models_by_wire = Box::new(std::array::from_fn(|_| None));
+        for (state, model) in &models {
+            let wire = state.wire() as usize;
+            if wire < 4096 {
+                models_by_wire[wire] = Some(Arc::clone(model));
+            }
+        }
+
         Ok(Self {
             models,
+            models_by_wire,
             keyed: cache.block_models,
             texture_keys: cache.texture_keys,
             blockstate_count: builder.blockstates.len(),
@@ -184,9 +210,15 @@ impl BlockModelSet {
     }
 
     /// Baked variants for a wire block state.
+    #[inline]
     #[must_use]
     pub fn model(&self, state: BlockState) -> Option<&BlockModel> {
-        self.models.get(&state).map(Arc::as_ref)
+        let wire = state.wire() as usize;
+        if wire < 4096 {
+            self.models_by_wire[wire].as_deref()
+        } else {
+            self.models.get(&state).map(Arc::as_ref)
+        }
     }
 
     /// Baked variants for a blockstate document and a variant key such as

@@ -8,7 +8,7 @@
 //! |---|---|---|
 //! | window id | u8 | |
 //! | inventory type | String(32) | e.g. `"minecraft:chest"`, `"EntityHorse"` |
-//! | window title | String(256) | JSON chat component |
+//! | window title | String(32767) | JSON chat component (`readChatComponent`) |
 //! | slot count | u8 | |
 //! | entity id | i32 | present only when `inventory_type == "EntityHorse"` |
 
@@ -17,7 +17,7 @@ use std::io::{Read, Write};
 use crate::error::ProtocolError;
 use crate::packets::codec::{read_i32, read_u8};
 use crate::packets::EncodablePacket;
-use crate::types::{read_string, read_string_capped, write_string, write_string_capped};
+use crate::types::{read_string, write_string, MAX_JSON_CHARS};
 
 /// `Open Window` (0x2D, clientbound, play).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl OpenWindow {
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
         let window_id = read_u8(reader)?;
         let window_type = read_string(reader, 32)?;
-        let title = read_string_capped(reader)?;
+        let title = read_string(reader, MAX_JSON_CHARS)?;
         let slot_count = read_u8(reader)?;
         let entity_id = if window_type == "EntityHorse" {
             Some(read_i32(reader)?)
@@ -71,7 +71,7 @@ impl EncodablePacket for OpenWindow {
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
         writer.write_all(&[self.window_id])?;
         write_string(writer, &self.window_type, 32)?;
-        write_string_capped(writer, &self.title)?;
+        write_string(writer, &self.title, MAX_JSON_CHARS)?;
         writer.write_all(&[self.slot_count])?;
         if self.window_type == "EntityHorse" {
             if let Some(eid) = self.entity_id {
@@ -112,6 +112,22 @@ mod tests {
             title: r#"{"text":"Horse"}"#.to_string(),
             slot_count: 2,
             entity_id: Some(42),
+        };
+        assert_eq!(round_trip(&packet), packet);
+    }
+
+    #[test]
+    fn large_custom_window_title_round_trips() {
+        let large_title = format!(
+            r#"{{"text":"","extra":[{{"text":"Custom Shop Menu ","color":"gold","bold":true}},{{"text":"{}"}}]}}"#,
+            "Item Details ".repeat(50)
+        );
+        let packet = OpenWindow {
+            window_id: 3,
+            window_type: "minecraft:chest".to_string(),
+            title: large_title,
+            slot_count: 54,
+            entity_id: None,
         };
         assert_eq!(round_trip(&packet), packet);
     }

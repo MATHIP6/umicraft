@@ -13,6 +13,8 @@ use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{CapeModel, HumanoidModel, ModelVertex, TextureSlot};
 
+use umicraft_game::entity::wrap_degrees;
+
 use super::animals::animal_layers;
 use super::armor::armor_layers;
 use super::arrows::arrow_layers;
@@ -38,7 +40,7 @@ impl Pose {
         Self {
             swing: ent.limb_swing,
             amount: ent.limb_swing_amount,
-            head_yaw: ent.head_yaw - ent.body_yaw,
+            head_yaw: wrap_degrees(ent.head_yaw - ent.body_yaw),
             head_pitch: ent.pitch,
         }
     }

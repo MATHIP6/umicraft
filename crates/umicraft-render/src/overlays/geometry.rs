@@ -121,6 +121,9 @@ impl Batch {
     pub(super) fn rebuild(&mut self, overlays: &ScreenOverlays, hand_projection: Mat4) {
         self.vertices.clear();
         self.draws.clear();
+        if overlays.is_empty() {
+            return;
+        }
         if let Some(layer) = overlays.in_wall {
             self.in_wall(hand_projection, layer);
         }

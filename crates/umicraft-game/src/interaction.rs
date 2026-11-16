@@ -524,10 +524,16 @@ pub fn face_offset(face: Facing) -> BlockPos {
     }
 }
 
-/// The click offset in sixteenths of a block, clamped to `0..=15`.
+/// The click offset in sixteenths of a block, reproducing Minecraft Java 1.8.9:
+/// `(float)(hitVec.coord - (double)hitPos.coord)` followed by `buf.writeByte((int)(facingCoord * 16.0F))`.
+///
+/// In Java, the float difference is multiplied by 16.0F, cast to int (truncating
+/// towards zero, JLS §5.1.3), and written to the network buffer via `writeByte`
+/// which writes the lower 8 bits (Netty ByteBuf semantics).
 #[must_use]
 pub fn cursor(offset: f64) -> u8 {
-    (offset * 16.0).floor().clamp(0.0, 15.0) as u8
+    let facing = offset as f32;
+    ((facing * 16.0_f32) as i32) as u8
 }
 
 /// The wire face of a ray-cast face.
@@ -565,10 +571,27 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_is_clamped_to_a_block() {
-        assert_eq!(cursor(-0.5), 0);
-        assert_eq!(cursor(0.5), 8);
-        assert_eq!(cursor(1.0), 15);
+    fn the_cursor_matches_vanilla_conversion() {
+        // Minecraft Java 1.8.9 reference:
+        // float f = (float)(hitVec.coord - (double)hitPos.coord);
+        // buf.writeByte((int)(f * 16.0F));
+        //
+        // 9 mandatory differential test coordinates:
+        assert_eq!(cursor(0.0), 0); // 0.0 * 16 = 0 -> byte 0
+        assert_eq!(cursor(0.0625), 1); // 0.0625 * 16 = 1.0 -> byte 1
+        assert_eq!(cursor(0.5), 8); // 0.5 * 16 = 8.0 -> byte 8
+        assert_eq!(cursor(0.9375), 15); // 0.9375 * 16 = 15.0 -> byte 15
+        assert_eq!(cursor(1.0), 16); // 1.0 * 16 = 16.0 -> byte 16 (vanilla sends 16, not 15!)
+        assert_eq!(cursor(-0.0625), 255); // -0.0625 * 16 = -1.0 -> (int)-1 -> (byte)-1 -> 255 (0xFF)
+        assert_eq!(cursor(-0.5), 248); // -0.5 * 16 = -8.0 -> (int)-8 -> (byte)-8 -> 248 (0xF8)
+        assert_eq!(cursor(1.0625), 17); // 1.0625 * 16 = 17.0 -> byte 17
+        assert_eq!(cursor(1.5), 24); // 1.5 * 16 = 24.0 -> byte 24
+
+        // Truncation towards zero for values between -0.0625 and 0.0:
+        assert_eq!(cursor(-0.01), 0); // -0.01 * 16 = -0.16 -> (int)-0.16 = 0 -> byte 0
+        assert_eq!(cursor(0.01), 0); // 0.01 * 16 = 0.16 -> (int)0.16 = 0 -> byte 0
+        assert_eq!(cursor(-0.0624), 0); // -0.0624 * 16 = -0.9984 -> (int) = 0 -> byte 0
+        assert_eq!(cursor(0.0624), 0); // 0.0624 * 16 = 0.9984 -> (int) = 0 -> byte 0
     }
 
     #[test]
@@ -1011,7 +1034,7 @@ mod tests {
                 block: BlockPos::new(3, 4, 5),
                 face: Facing::Up,
                 item: ItemStack::EMPTY,
-                cursor: [8, 15, 4],
+                cursor: [8, 16, 4],
             })
         );
         assert_eq!(

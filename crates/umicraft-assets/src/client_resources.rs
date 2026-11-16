@@ -376,7 +376,40 @@ impl ClientResources {
             }
         }
 
-        Self::build_internal(files, raw_colormaps, raw_gui, raw_glint)
+        Self::build_internal(files, raw_colormaps, raw_gui, raw_glint, None)
+    }
+
+    /// Puts the model or blockstate document `path` back to the one of
+    /// `base`, removing it when `base` has none. Returns whether it changed.
+    ///
+    /// For the caller that bakes the models: a document of a pack that does
+    /// not bake gives way to the one underneath. The atlas does not depend
+    /// on these documents and stays as built.
+    pub fn restore_document(&mut self, base: &Self, path: &str) -> bool {
+        if !is_json_resource(path) || self.files.get(path) == base.files.get(path) {
+            return false;
+        }
+        match base.files.get(path) {
+            Some(bytes) => self.files.insert(path.to_string(), bytes.clone()),
+            None => self.files.remove(path),
+        };
+        true
+    }
+
+    /// [`Self::restore_document`] for every model and blockstate document;
+    /// returns how many changed.
+    pub fn restore_documents(&mut self, base: &Self) -> usize {
+        let paths: Vec<String> = self
+            .files
+            .keys()
+            .chain(base.files.keys())
+            .filter(|path| is_json_resource(path))
+            .cloned()
+            .collect();
+        paths
+            .iter()
+            .filter(|path| self.restore_document(base, path))
+            .count()
     }
 
     /// Builds a new [`ClientResources`] instance by layering resource packs
@@ -414,41 +447,81 @@ impl ClientResources {
                 }
             }
         }
-        Self::build_internal(files, raw_colormaps, raw_gui, raw_glint)
+        Self::build_internal(files, raw_colormaps, raw_gui, raw_glint, Some(self))
     }
 
     /// Internal builder that constructs a complete [`ClientResources`].
+    ///
+    /// Without `base` (the client jar itself) an image that does not decode
+    /// is an error. With `base` (resource packs layered over it) such an
+    /// image is logged and gives way to the one of `base`, as the reference
+    /// keeps loading when one texture of a pack is broken
+    /// (`TextureMap.loadTextureAtlas` catches the error of each sprite).
     fn build_internal(
-        files: BTreeMap<String, Vec<u8>>,
-        raw_colormaps: BTreeMap<String, Vec<u8>>,
-        raw_gui: BTreeMap<String, Vec<u8>>,
-        raw_glint: Option<Vec<u8>>,
+        mut files: BTreeMap<String, Vec<u8>>,
+        mut raw_colormaps: BTreeMap<String, Vec<u8>>,
+        mut raw_gui: BTreeMap<String, Vec<u8>>,
+        mut raw_glint: Option<Vec<u8>>,
+        base: Option<&Self>,
     ) -> AssetsResult<Self> {
-        let mut textures = Vec::new();
-        for (path, bytes) in &files {
-            if let Some(key) = texture_key(path) {
-                let image = DecodedPng::decode(path, bytes)?;
-                textures.push(TextureLayer {
-                    key,
-                    path: path.clone(),
-                    image,
-                });
+        let texture_paths: Vec<String> = files
+            .keys()
+            .filter(|path| texture_key(path).is_some())
+            .cloned()
+            .collect();
+        let decoded = decode_all(texture_paths.iter().map(|path| (path, &files[path])));
+        let mut textures = Vec::with_capacity(texture_paths.len());
+        for (path, result) in texture_paths.into_iter().zip(decoded) {
+            let image = match result {
+                Ok(image) => image,
+                Err(error) => {
+                    match restore(&mut files, base.map(|base| &base.files), &path, error)? {
+                        Some(image) => image,
+                        None => continue,
+                    }
+                }
+            };
+            if let Some(key) = texture_key(&path) {
+                textures.push(TextureLayer { key, path, image });
             }
         }
 
         let mut decoded_colormaps = BTreeMap::new();
-        for (path, bytes) in &raw_colormaps {
-            decoded_colormaps.insert(path.clone(), DecodedPng::decode(path, bytes)?);
+        for path in raw_colormaps.keys().cloned().collect::<Vec<_>>() {
+            // The size is checked here too, so a colormap of the wrong size
+            // costs itself and not the whole load.
+            let checked = DecodedPng::decode(&path, &raw_colormaps[&path]).and_then(|png| {
+                Colormap::from_rgba8(&path, png.width, png.height, &png.pixels)?;
+                Ok(png)
+            });
+            let png = match checked {
+                Ok(png) => Some(png),
+                Err(error) => {
+                    let under = base.map(|base| &base.raw_colormaps);
+                    restore(&mut raw_colormaps, under, &path, error)?
+                }
+            };
+            if let Some(png) = png {
+                decoded_colormaps.insert(path, png);
+            }
         }
 
-        let mut gui_images = decode_gui_textures(&raw_gui)?;
+        let mut gui_images = decode_gui_textures(&mut raw_gui, base.map(|base| &base.raw_gui))?;
         gui_images.extend(decode_tile_textures(&files)?);
         let atlas = build_atlas(textures, &files)?;
         let colormaps = decode_colormaps(&mut decoded_colormaps)?;
         let gui_atlas = pack_gui_atlas(gui_images);
-        let glint = raw_glint
+        let mut glint = raw_glint
             .as_deref()
-            .map(|bytes| DecodedPng::decode(GLINT_PATH, bytes))
+            .map(|bytes| DecodedPng::decode(GLINT_PATH, bytes));
+        if let (Some(Err(error)), Some(base)) = (&glint, base) {
+            tracing::warn!(path = GLINT_PATH, %error, "ignoring an invalid pack image");
+            raw_glint.clone_from(&base.raw_glint);
+            glint = raw_glint
+                .as_deref()
+                .map(|bytes| DecodedPng::decode(GLINT_PATH, bytes));
+        }
+        let glint = glint
             .transpose()?
             .map(|png| GlintTexture {
                 width: png.width,
@@ -535,7 +608,7 @@ impl GuiAtlas {
                 tiles.insert(path, bytes);
             }
         }
-        let mut gui_images = decode_gui_textures(&raw_gui)?;
+        let mut gui_images = decode_gui_textures(&mut raw_gui, None)?;
         gui_images.extend(decode_tile_textures(&tiles)?);
         Ok(pack_gui_atlas(gui_images))
     }
@@ -681,22 +754,100 @@ fn decode_tile_textures(files: &BTreeMap<String, Vec<u8>>) -> AssetsResult<Vec<G
     Ok(images)
 }
 
-/// Decodes all GUI PNGs into images ready for atlas packing.
-fn decode_gui_textures(raw: &BTreeMap<String, Vec<u8>>) -> AssetsResult<Vec<GuiImage>> {
-    let mut images = Vec::with_capacity(raw.len());
-    for (path, bytes) in raw {
-        let Some(name) = gui_texture_name(path) else {
-            continue;
+/// Decodes all GUI PNGs into images ready for atlas packing. One that does
+/// not decode gives way to the one of `base`, see [`restore`].
+fn decode_gui_textures(
+    raw: &mut BTreeMap<String, Vec<u8>>,
+    base: Option<&BTreeMap<String, Vec<u8>>>,
+) -> AssetsResult<Vec<GuiImage>> {
+    let paths: Vec<String> = raw
+        .keys()
+        .filter(|path| gui_texture_name(path).is_some())
+        .cloned()
+        .collect();
+    let decoded = decode_all(paths.iter().map(|path| (path, &raw[path])));
+    let mut images = Vec::with_capacity(paths.len());
+    for (path, result) in paths.into_iter().zip(decoded) {
+        let decoded = match result {
+            Ok(decoded) => decoded,
+            Err(error) => match restore(raw, base, &path, error)? {
+                Some(decoded) => decoded,
+                None => continue,
+            },
         };
-        let decoded = DecodedPng::decode(path, bytes)?;
-        images.push(GuiImage {
-            name,
-            width: decoded.width,
-            height: decoded.height,
-            pixels: decoded.pixels,
-        });
+        if let Some(name) = gui_texture_name(&path) {
+            images.push(GuiImage {
+                name,
+                width: decoded.width,
+                height: decoded.height,
+                pixels: decoded.pixels,
+            });
+        }
     }
     Ok(images)
+}
+
+/// Decodes every `(path, bytes)` image on all cores, in input order. A
+/// decoder that panics is an error of its images, not of the caller.
+fn decode_all<'a>(
+    items: impl Iterator<Item = (&'a String, &'a Vec<u8>)>,
+) -> Vec<AssetsResult<DecodedPng>> {
+    let items: Vec<(&String, &Vec<u8>)> = items.collect();
+    let decode = |chunk: &[(&String, &Vec<u8>)]| -> Vec<AssetsResult<DecodedPng>> {
+        chunk
+            .iter()
+            .map(|(path, bytes)| DecodedPng::decode(path, bytes))
+            .collect()
+    };
+    let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    if threads <= 1 || items.len() < 8 {
+        return decode(&items);
+    }
+    let per_thread = items.len().div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items
+            .chunks(per_thread)
+            .map(|chunk| (chunk, scope.spawn(move || decode(chunk))))
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|(chunk, handle)| {
+                handle.join().unwrap_or_else(|_| {
+                    chunk
+                        .iter()
+                        .map(|(path, _)| Err(image_error(path, "the PNG decoder panicked")))
+                        .collect()
+                })
+            })
+            .collect()
+    })
+}
+
+/// What to do with the image `path` of `files` that failed with `error`.
+///
+/// Without `base` the error stands. With it, the image of a pack gives way
+/// to the one of `base` (decoded and returned), or is dropped when `base` has
+/// none (`None`); either way a warning names the file.
+fn restore(
+    files: &mut BTreeMap<String, Vec<u8>>,
+    base: Option<&BTreeMap<String, Vec<u8>>>,
+    path: &str,
+    error: crate::AssetsError,
+) -> AssetsResult<Option<DecodedPng>> {
+    let Some(base) = base else {
+        return Err(error);
+    };
+    tracing::warn!(path, %error, "ignoring an invalid pack image");
+    match base.get(path).filter(|bytes| files.get(path) != Some(*bytes)) {
+        Some(bytes) => {
+            files.insert(path.to_string(), bytes.clone());
+            DecodedPng::decode(path, bytes).map(Some)
+        }
+        None => {
+            files.remove(path);
+            Ok(None)
+        }
+    }
 }
 
 /// Builds the deterministic atlas from decoded textures.
@@ -973,6 +1124,7 @@ mod tests {
             BTreeMap::new(),
             BTreeMap::new(),
             Some(bytes),
+            None,
         )
         .expect("build");
         let glint = resources.glint_texture().expect("glint");
@@ -983,6 +1135,7 @@ mod tests {
             BTreeMap::new(),
             BTreeMap::new(),
             BTreeMap::new(),
+            None,
             None,
         )
         .expect("build");
@@ -996,6 +1149,7 @@ mod tests {
             BTreeMap::new(),
             BTreeMap::new(),
             Some(vec![1, 2, 3]),
+            None,
         );
         assert!(matches!(result, Err(AssetsError::Image { .. })));
     }

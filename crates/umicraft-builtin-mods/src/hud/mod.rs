@@ -7,9 +7,11 @@
 
 mod content;
 mod placement;
+mod preset;
 pub mod snap;
 mod style;
 
 pub use content::{HudContent, HudLine};
 pub use placement::{Anchor, HudPlacement, HudRect, MAX_SCALE, MIN_SCALE};
+pub use preset::HudPreset;
 pub use style::{HudStyle, Shadow};

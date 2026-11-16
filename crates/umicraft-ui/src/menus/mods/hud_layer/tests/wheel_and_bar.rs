@@ -129,6 +129,7 @@ fn the_widget_is_drawn_where_it_is_dropped_in_the_frame_of_the_drop() {
             snap: &snap,
             blocked: &[],
             bar: true,
+            grid: None,
         };
         screen.show(ui, (&font, &font), &Lang::builtin(), &view, zones);
         ui.draw().commands().iter().find_map(|c| match c {

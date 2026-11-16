@@ -25,6 +25,8 @@
 //!   tick (parity harness, ROADMAP.md P0).
 //! - [`tick_diff`] — per-tick comparison of a vanilla and a Umicraft trace
 //!   (`umicraft-trace-diff`).
+//! - [`state_log`] — internal player-state logs (vanilla agent and Umicraft)
+//!   and their phase-aligned, strict-by-default comparison (phase E.2).
 //! - [`trajectory`] — per-tick reported positions and their comparison
 //!   (`umicraft-trajectory-diff`, `umicraft-movement-probe --trajectory`).
 
@@ -34,6 +36,7 @@ pub mod fake_server;
 pub mod fake_session;
 pub mod replay;
 pub mod screenshot;
+pub mod state_log;
 pub mod tick_diff;
 pub mod trace;
 pub mod trajectory;

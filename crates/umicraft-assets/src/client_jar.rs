@@ -20,6 +20,9 @@ use crate::manifest::ClientJarDescriptor;
 use crate::objects::Downloader;
 use crate::zip::ZipArchive;
 
+type PrefixEntry = (String, Vec<u8>);
+type PrefixChunk = Vec<PrefixEntry>;
+
 /// A verified client jar on disk.
 #[derive(Debug, Clone)]
 pub struct ClientJar {
@@ -146,19 +149,48 @@ impl ClientJar {
     /// malformed.
     pub fn read_prefixes(&self, prefixes: &[&str]) -> AssetsResult<Vec<(String, Vec<u8>)>> {
         let archive = self.archive()?;
-        let mut names = archive.names();
-        names.sort_unstable();
-        names.retain(|name| prefixes.iter().any(|prefix| name.starts_with(prefix)));
+        let mut matching: Vec<&crate::zip::ZipEntry> = archive
+            .entries()
+            .iter()
+            .filter(|entry| prefixes.iter().any(|prefix| entry.name.starts_with(prefix)))
+            .collect();
+        matching.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
-        let mut entries = Vec::with_capacity(names.len());
-        for name in names {
-            let entry = archive.entry(&name).ok_or_else(|| AssetsError::Zip {
-                what: name.clone(),
-                reason: "the entry vanished from the open archive".to_string(),
+        let threads = std::thread::available_parallelism().map_or(1, usize::from);
+        if threads > 1 && matching.len() >= 16 {
+            let per_thread = matching.len().div_ceil(threads).max(1);
+            let archive_ref = &archive;
+            let chunks = std::thread::scope(|scope| -> AssetsResult<Vec<PrefixChunk>> {
+                let handles: Vec<_> = matching
+                    .chunks(per_thread)
+                    .map(|chunk| {
+                        scope.spawn(move || -> AssetsResult<PrefixChunk> {
+                            let mut list = Vec::with_capacity(chunk.len());
+                            for entry in chunk {
+                                list.push((entry.name.clone(), archive_ref.read(entry)?));
+                            }
+                            Ok(list)
+                        })
+                    })
+                    .collect();
+                let mut results = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    results.push(handle.join().unwrap()?);
+                }
+                Ok(results)
             })?;
-            entries.push((name, archive.read(entry)?));
+            let mut entries = Vec::with_capacity(matching.len());
+            for chunk in chunks {
+                entries.extend(chunk);
+            }
+            Ok(entries)
+        } else {
+            let mut entries = Vec::with_capacity(matching.len());
+            for entry in matching {
+                entries.push((entry.name.clone(), archive.read(entry)?));
+            }
+            Ok(entries)
         }
-        Ok(entries)
     }
 
     /// Parses the jar as a zip container.

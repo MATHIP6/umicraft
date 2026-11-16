@@ -22,7 +22,7 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{
     AchievementsData, AchievementsOutcome, AchievementsScreen, ConfirmOutcome, ConfirmScreen,
     ConnectStage, ConnectingOutcome, ConnectingScreen, DisconnectedOutcome, DisconnectedScreen,
-    ModsOutcome, ModsScreen, ModsView, PanoramaTextures, PanoramaView, RowStatus,
+    LoadingScreen, ModsOutcome, ModsScreen, ModsView, PanoramaTextures, PanoramaView, RowStatus,
     ServerEditOutcome, ServerEditScreen, ServerListOutcome, ServerListScreen, ServerRow, StatsData,
     StatsOutcome, StatsScreen, TitleInfo, TitleOutcome, TitleScreen, TitleStyle,
 };
@@ -290,6 +290,10 @@ impl MenuFlow {
         let mut panorama = None;
         let command = match screen {
             Screen::Title => self.show_title(ui, atlas, lang, context, &mut panorama),
+            Screen::Loading => {
+                LoadingScreen::new().show(ui, atlas, lang);
+                None
+            }
             Screen::ServerList => self.show_list(ui, atlas, lang),
             Screen::ServerEdit => self.show_edit(ui, atlas, lang),
             Screen::ConfirmDelete => self.show_confirm(ui, atlas, lang),

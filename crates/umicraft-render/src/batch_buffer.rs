@@ -93,6 +93,16 @@ impl BatchBuffer {
         self.batches.is_empty()
     }
 
+    /// Number of texture batches queued for this frame.
+    pub(crate) fn batch_count(&self) -> u32 {
+        self.batches.len() as u32
+    }
+
+    /// Allocated GPU buffer capacity in bytes.
+    pub(crate) fn capacity_bytes(&self) -> u64 {
+        self.capacity
+    }
+
     /// The batches as the entity passes draw them: the slice of the buffer, the
     /// vertex count and the texture.
     pub(crate) fn iter(

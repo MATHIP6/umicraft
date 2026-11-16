@@ -18,9 +18,9 @@
 //! fit into the queue stays in the dirty set and is derived again later.
 
 use std::collections::{BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -52,7 +52,7 @@ use umicraft_game::input::RawInput;
 use umicraft_game::interaction::{AttackTick, BlockAck, Interaction, Outgoing, PositionAck};
 use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
-use umicraft_game::item_use::{drop_item, DoorToggle, ItemUse, UseAction, UseTick};
+use umicraft_game::item_use::{drop_item, DoorToggle, DropKind, ItemUse, UseAction, UseTick};
 use umicraft_game::movement::movement_stats;
 use umicraft_game::particles::{EffectContext, SpawnFilter};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
@@ -126,6 +126,9 @@ pub const TICK: Duration = Duration::from_millis(50);
 /// blocks and the TCP backpressure slows the server down.
 const INBOX_CAPACITY: usize = 256;
 
+/// Bounded queue for dedicated client input updates.
+const INPUT_CAPACITY: usize = 512;
+
 /// The barrier item (id 166), whose holder in creative sees barrier blocks.
 const BARRIER_ITEM: i16 = 166;
 
@@ -186,7 +189,8 @@ const VELOCITY_UNITS: f64 = 8000.0;
 const STATUS_PERIOD: u64 = 20;
 
 /// The largest pitch the view may reach, in radians.
-const MAX_PITCH: f32 = 89.0_f32.to_radians();
+/// Vanilla Minecraft Java 1.8.9 clamps pitch to [-90.0F, 90.0F] in `Entity.setAngles`.
+const MAX_PITCH: f32 = 90.0_f32.to_radians();
 
 /// The camera angles of a player state, in radians.
 ///
@@ -267,6 +271,8 @@ pub enum GameEvent {
 /// One simulation frame published to the render thread.
 #[derive(Debug, Clone)]
 pub struct Frame {
+    /// Active camera perspective for this frame.
+    pub perspective: Perspective,
     /// The player state after the tick.
     pub state: RenderState,
     /// The instant of the tick that produced the state.
@@ -371,13 +377,132 @@ pub struct Look {
     pub body_pitch: f32,
 }
 
+/// Lock-free single-producer, single-consumer seqlock slot for the newest [`Look`].
+///
+/// The game thread writes the latest mouse-look angles via [`AtomicLookSlot::store`]
+/// without taking a lock, and the render thread consumes the newest unread look via
+/// [`AtomicLookSlot::take`]. When no mouse movement happened since the last frame,
+/// [`AtomicLookSlot::take`] completes with two atomic loads on a 64-byte aligned
+/// cache line without dirtying it.
+#[derive(Debug, Default)]
+#[repr(align(64))]
+pub struct AtomicLookSlot {
+    /// Even when quiescent (`2, 4, 6, ...`), odd while the writer updates fields.
+    seq: AtomicU64,
+    /// Sequence number of the last look consumed by `take()`.
+    read_seq: AtomicU64,
+    pos_x: AtomicU64,
+    pos_y: AtomicU64,
+    pos_z: AtomicU64,
+    eye_x: AtomicU64,
+    eye_y: AtomicU64,
+    eye_z: AtomicU64,
+    orbit_x: AtomicU32,
+    orbit_y: AtomicU32,
+    orbit_z: AtomicU32,
+    yaw: AtomicU32,
+    pitch: AtomicU32,
+    body_pitch: AtomicU32,
+    on_ground: AtomicBool,
+}
+
+impl AtomicLookSlot {
+    /// Publishes `look` as the newest mouse look, overwriting any unread one.
+    pub fn store(&self, look: Look) {
+        let s1 = self.seq.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        self.pos_x
+            .store(look.view.position.x.to_bits(), Ordering::Relaxed);
+        self.pos_y
+            .store(look.view.position.y.to_bits(), Ordering::Relaxed);
+        self.pos_z
+            .store(look.view.position.z.to_bits(), Ordering::Relaxed);
+        self.eye_x
+            .store(look.view.eye.x.to_bits(), Ordering::Relaxed);
+        self.eye_y
+            .store(look.view.eye.y.to_bits(), Ordering::Relaxed);
+        self.eye_z
+            .store(look.view.eye.z.to_bits(), Ordering::Relaxed);
+        self.orbit_x
+            .store(look.view.orbit_start.x.to_bits(), Ordering::Relaxed);
+        self.orbit_y
+            .store(look.view.orbit_start.y.to_bits(), Ordering::Relaxed);
+        self.orbit_z
+            .store(look.view.orbit_start.z.to_bits(), Ordering::Relaxed);
+        self.yaw.store(look.view.yaw.to_bits(), Ordering::Relaxed);
+        self.pitch
+            .store(look.view.pitch.to_bits(), Ordering::Relaxed);
+        self.body_pitch
+            .store(look.body_pitch.to_bits(), Ordering::Relaxed);
+        self.on_ground
+            .store(look.view.on_ground, Ordering::Relaxed);
+        self.seq.store(s1.wrapping_add(1), Ordering::Release);
+    }
+
+    /// Consumes the newest [`Look`] if one was stored since the last `take`.
+    #[must_use]
+    pub fn take(&self) -> Option<Look> {
+        let last_read = self.read_seq.load(Ordering::Relaxed);
+        let first_seq = self.seq.load(Ordering::Acquire);
+        if first_seq == last_read {
+            return None;
+        }
+        loop {
+            let s1 = self.seq.load(Ordering::Acquire);
+            if s1 & 1 != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
+            if s1 == last_read {
+                return None;
+            }
+            let position = DVec3::new(
+                f64::from_bits(self.pos_x.load(Ordering::Relaxed)),
+                f64::from_bits(self.pos_y.load(Ordering::Relaxed)),
+                f64::from_bits(self.pos_z.load(Ordering::Relaxed)),
+            );
+            let eye = DVec3::new(
+                f64::from_bits(self.eye_x.load(Ordering::Relaxed)),
+                f64::from_bits(self.eye_y.load(Ordering::Relaxed)),
+                f64::from_bits(self.eye_z.load(Ordering::Relaxed)),
+            );
+            let orbit_start = Vec3::new(
+                f32::from_bits(self.orbit_x.load(Ordering::Relaxed)),
+                f32::from_bits(self.orbit_y.load(Ordering::Relaxed)),
+                f32::from_bits(self.orbit_z.load(Ordering::Relaxed)),
+            );
+            let yaw = f32::from_bits(self.yaw.load(Ordering::Relaxed));
+            let pitch = f32::from_bits(self.pitch.load(Ordering::Relaxed));
+            let body_pitch = f32::from_bits(self.body_pitch.load(Ordering::Relaxed));
+            let on_ground = self.on_ground.load(Ordering::Relaxed);
+            std::sync::atomic::fence(Ordering::Acquire);
+            let s2 = self.seq.load(Ordering::Relaxed);
+            if s1 == s2 {
+                self.read_seq.store(s1, Ordering::Release);
+                return Some(Look {
+                    view: RenderState {
+                        position,
+                        eye,
+                        orbit_start,
+                        yaw,
+                        pitch,
+                        on_ground,
+                        effects: umicraft_game::view::ViewEffects::default(),
+                    },
+                    body_pitch,
+                });
+            }
+            std::hint::spin_loop();
+        }
+    }
+}
+
 /// The newest [`Look`], shared by the game thread and the render thread.
 ///
 /// A mouse look overwrites it instead of queueing an event: the mouse sends
 /// hundreds of looks a second, and as events they filled the frame queue until
 /// the tick frames, which carry the body of the player and the entities, were
 /// dropped.
-pub type LookSlot = Arc<Mutex<Option<Look>>>;
+pub type LookSlot = Arc<AtomicLookSlot>;
 
 /// A message the game thread sends to the render thread.
 #[derive(Debug)]
@@ -407,6 +532,17 @@ pub enum RenderEvent {
     Stats(Vec<(String, i32)>),
     /// The connection attempt reached a new stage.
     Connect(ConnectStage),
+    /// The local player teleported or was set back by the server (packet 0x08);
+    /// the render thread immediately snaps both `current` and `previous` states
+    /// without interpolation gliding.
+    Teleport {
+        /// Absolute target eye position in world space.
+        position: glam::DVec3,
+        /// Yaw facing angle in radians.
+        yaw: f32,
+        /// Pitch looking angle in radians.
+        pitch: f32,
+    },
     /// The world was replaced; the render thread drops its meshes.
     Reset,
     /// The session ended.
@@ -432,19 +568,21 @@ pub enum TextScreenRequest {
     },
 }
 
-/// A chunk whose geometry changed.
+/// A chunk whose geometry changed or that was unloaded.
 #[derive(Debug)]
 pub struct ChunkEvent {
     /// The chunk column.
     pub pos: ChunkPos,
-    /// The immutable snapshot the mesher needs.
-    pub snapshot: ChunkSnapshot,
+    /// The immutable snapshot the mesher needs, or `None` if the column was unloaded.
+    pub snapshot: Option<ChunkSnapshot>,
 }
 
 /// The handles of a running client session.
 pub struct Session {
+    /// Dedicated bounded sender for player input updates.
+    inputs: crossbeam_channel::Sender<InputUpdate>,
     /// The sender for the events the front end produces.
-    events: SyncSender<GameEvent>,
+    events: crossbeam_channel::Sender<GameEvent>,
     /// The frames of the game thread.
     frames: Receiver<RenderEvent>,
     /// The chunk snapshots of the game thread.
@@ -453,9 +591,25 @@ pub struct Session {
     stop: Arc<AtomicBool>,
     /// The live statistics of the play session.
     counters: Arc<SessionCounters>,
+    /// Duration of the last displayed frame in microseconds; the game thread
+    /// takes network events once per frame, like `Minecraft.runGameLoop`
+    /// (phase E.9). Zero turns the pacing off.
+    frame_micros: Arc<AtomicU32>,
     network: Option<JoinHandle<()>>,
     game: Option<JoinHandle<()>>,
 }
+
+/// The frame duration assumed until the window reports one (60 frames per
+/// second): the headless client has no display loop.
+const DEFAULT_FRAME_MICROS: u32 = 16_667;
+
+/// The shortest frame the pacing honours (1 000 frames per second): a display
+/// loop faster than this would not leave the server's packet limit anyway.
+const MIN_FRAME_MICROS: u32 = 1_000;
+
+/// The longest frame duration the pacing follows, so a stalled window does
+/// not hold the network events back for seconds.
+const MAX_FRAME_MICROS: u32 = 100_000;
 
 impl Session {
     /// Starts the network thread and the game thread.
@@ -464,7 +618,8 @@ impl Session {
     /// [`ClientError::Network`] or [`ClientError::Worker`] when a thread
     /// cannot be spawned.
     pub fn start(config: NetworkConfig) -> Result<Self, ClientError> {
-        let (events_tx, events_rx) = mpsc::sync_channel(INBOX_CAPACITY);
+        let (inputs_tx, inputs_rx) = crossbeam_channel::bounded(INPUT_CAPACITY);
+        let (events_tx, events_rx) = crossbeam_channel::bounded(INBOX_CAPACITY);
         let (frames_tx, frames_rx) = mpsc::sync_channel(FRAME_CAPACITY);
         let (chunks_tx, chunks_rx) = mpsc::sync_channel(CHUNK_CAPACITY);
         let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(network::COMMAND_CAPACITY);
@@ -484,25 +639,40 @@ impl Session {
             commands_rx,
             Arc::clone(&counters),
         )?;
+        let frame_micros = Arc::new(AtomicU32::new(DEFAULT_FRAME_MICROS));
         let game = spawn_game_thread(
-            events_rx,
-            frames_tx,
-            chunks_tx,
-            commands_tx,
+            GameChannels {
+                inputs: inputs_rx,
+                events: events_rx,
+                frames: frames_tx,
+                chunks: chunks_tx,
+                commands: commands_tx,
+                frame_micros: Arc::clone(&frame_micros),
+            },
             Arc::clone(&stop),
             own_name,
             account_skin,
         )?;
 
         Ok(Self {
+            inputs: inputs_tx,
             events: events_tx,
             frames: frames_rx,
             chunks: chunks_rx,
             stop,
             counters,
+            frame_micros,
             network: Some(network),
             game: Some(game),
         })
+    }
+
+    /// Reports the duration of the frame the window just displayed. The game
+    /// thread takes network events at most once per such period (phase E.9).
+    pub fn note_frame(&self, duration: std::time::Duration) {
+        let micros = u32::try_from(duration.as_micros()).unwrap_or(u32::MAX);
+        self.frame_micros
+            .store(micros.clamp(MIN_FRAME_MICROS, MAX_FRAME_MICROS), Ordering::Relaxed);
     }
 
     /// The number of serverbound packets the socket thread wrote.
@@ -515,13 +685,20 @@ impl Session {
         self.counters.packets_sent()
     }
 
+    /// Sends an input update to the game thread on the dedicated high-priority input channel.
+    ///
+    /// This channel never competes with network packets, guaranteeing zero-latency delivery.
+    pub fn send_input(&self, update: InputUpdate) -> bool {
+        self.inputs.try_send(update).is_ok()
+    }
+
     /// The sender for the events the front end produces.
     ///
     /// The front end uses it to send the input updates; the send never
     /// blocks, a full inbox means the game thread is behind and the input is
     /// repeated on the next update.
     #[must_use]
-    pub fn events(&self) -> &SyncSender<GameEvent> {
+    pub fn events(&self) -> &crossbeam_channel::Sender<GameEvent> {
         &self.events
     }
 
@@ -552,29 +729,27 @@ impl Drop for Session {
     }
 }
 
-/// Starts the game thread.
-fn spawn_game_thread(
-    events: Receiver<GameEvent>,
+/// The communication channels of the game thread.
+struct GameChannels {
+    inputs: crossbeam_channel::Receiver<InputUpdate>,
+    events: crossbeam_channel::Receiver<GameEvent>,
     frames: SyncSender<RenderEvent>,
     chunks: SyncSender<ChunkEvent>,
     commands: CommandSender<PlayServerbound>,
+    /// See [`Session::note_frame`]; zero means "take events at once".
+    frame_micros: Arc<AtomicU32>,
+}
+
+/// Starts the game thread.
+fn spawn_game_thread(
+    channels: GameChannels,
     stop: Arc<AtomicBool>,
     own_name: String,
     account_skin: Option<AccountSkinFetcher>,
 ) -> Result<JoinHandle<()>, ClientError> {
     std::thread::Builder::new()
         .name("umicraft-game".to_string())
-        .spawn(move || {
-            run(
-                events,
-                frames,
-                chunks,
-                commands,
-                stop,
-                own_name,
-                account_skin,
-            )
-        })
+        .spawn(move || run(channels, stop, own_name, account_skin))
         .map_err(|error| ClientError::Worker(format!("spawn game thread: {error}")))
 }
 
@@ -649,6 +824,19 @@ struct Game {
     death_time: u32,
     /// The selected hotbar slot.
     selected_slot: u8,
+    /// The slot as the last keyboard stage of a tick left it (MCP
+    /// `inventory.currentItem` between two ticks).
+    applied_slot: u8,
+    /// The slot the server was last told (MCP
+    /// `PlayerControllerMP.currentPlayerItem`).
+    synced_slot: u8,
+    /// The presses of each digit key not taken by a tick yet (MCP
+    /// `KeyBinding.pressTime`).
+    hotbar_presses: [u8; 9],
+    /// The drop key presses since the last tick, oldest first.
+    pending_drops: Vec<DropKind>,
+    /// The pick-block presses since the last tick.
+    pending_picks: u32,
     /// The chat messages, oldest first.
     chat: VecDeque<ChatLineView>,
     /// The chat visibility the server was told (`ClientSettings` byte).
@@ -699,6 +887,9 @@ struct Game {
     /// The player's own name; it picks the team sidebar of the scoreboard and
     /// the team rules of name tags.
     own_name: String,
+    /// The tick-driven parity scenario and its state log (phase E.2);
+    /// `None` outside `--script e1`.
+    e1: Option<crate::e1::E1Run>,
     /// The tab list of the server.
     player_list: PlayerList,
     /// The scoreboard of the current world.
@@ -715,6 +906,32 @@ struct Game {
     creative: CreativeScreen,
     /// The session state kept for later consumers (ADR-0020 section 3).
     server: ServerState,
+    /// Execution time of the previous 20 Hz simulation tick, in microseconds.
+    last_tick_micros: u32,
+    /// Maximum tick execution time observed, in microseconds.
+    max_tick_micros: u32,
+    /// Delay of the latest tick from its scheduled instant, in microseconds.
+    last_tick_delay_us: u32,
+    /// Maximum tick delay observed, in microseconds.
+    max_tick_delay_us: u32,
+    /// Cumulative catch-up simulation ticks executed.
+    catch_up_ticks_total: u64,
+    /// Measured simulation TPS.
+    real_tps: f32,
+    /// Last instant TPS was recalculated.
+    last_tps_instant: Instant,
+    /// Tick count at last TPS recalculation.
+    last_tps_ticks: u64,
+    /// Current number of unread events in the network inbox.
+    net_queue_len: usize,
+    /// Cumulative microseconds spent handling network events since the last tick.
+    net_micros_accum: u32,
+    /// Microseconds spent handling network events in the previous tick window.
+    last_net_micros: u32,
+    /// Execution time of the most recent input handling pass, in microseconds.
+    last_input_processing_us: u32,
+    /// Queuing latency of the most recent input update, in microseconds.
+    last_input_queue_latency_us: u32,
 }
 
 impl Game {
@@ -750,6 +967,11 @@ impl Game {
             score: 0,
             death_time: 0,
             selected_slot: 0,
+            applied_slot: 0,
+            synced_slot: 0,
+            hotbar_presses: [0; 9],
+            pending_drops: Vec::new(),
+            pending_picks: 0,
             chat: VecDeque::new(),
             chat_mode: 0,
             completions_serial: 0,
@@ -774,6 +996,7 @@ impl Game {
             entities: EntityStore::new(),
             windows: WindowManager::new(),
             own_name: String::new(),
+            e1: None,
             player_list: PlayerList::new(),
             scoreboard: Scoreboard::new(),
             title: TitleState::new(),
@@ -782,6 +1005,19 @@ impl Game {
             completions: Vec::new(),
             creative: CreativeScreen::new(),
             server: ServerState::new(),
+            last_tick_micros: 0,
+            max_tick_micros: 0,
+            last_tick_delay_us: 0,
+            max_tick_delay_us: 0,
+            catch_up_ticks_total: 0,
+            real_tps: 20.0,
+            last_tps_instant: Instant::now(),
+            last_tps_ticks: 0,
+            net_queue_len: 0,
+            net_micros_accum: 0,
+            last_net_micros: 0,
+            last_input_processing_us: 0,
+            last_input_queue_latency_us: 0,
         }
     }
 
@@ -1002,41 +1238,67 @@ fn push_chat(game: &mut Game, line: ChatLineView) {
 
 /// The commands that could not be handed to the network thread yet.
 ///
-/// The input packet and the position report are *coalesced*: only the newest
-/// one of each matters, and a backlog of them would burst on the socket.
-/// The 1.8 server counts the packets of a player and kicks above 500 in
-/// seven seconds (PandaSpigot), so a burst of a few hundred position
-/// reports would end the session.
+/// Every command keeps its place: the movement packet of each tick, the
+/// clicks and the actions leave in the order they were queued, like the
+/// netty queue of the vanilla client (MCP `NetworkManager.sendPacket`). The
+/// vanilla client sends one movement packet per tick, so nothing is
+/// coalesced or replaced.
+///
+/// The queue cannot grow without bound: while it holds [`PENDING_LIMIT`]
+/// commands (the socket does not take them), [`CommandQueue::congested`]
+/// is true and the game loop does not start a new tick. No packet is
+/// dropped; the simulation waits for the connection instead.
 #[derive(Default)]
 struct CommandQueue {
-    /// The commands that keep their order (the acknowledgement of a
-    /// placement, the dig, the placement, the chat).
+    /// The commands in the order they were queued.
     ordered: VecDeque<ClientCommand>,
-    /// The newest input packet.
-    input: Option<ClientCommand>,
-    /// The newest position report.
-    position: Option<ClientCommand>,
     sender: Option<CommandSender<PlayServerbound>>,
+}
+
+/// The commands the queue holds before the game loop stops ticking. The
+/// channel to the socket takes 64, so the queue only fills when the socket
+/// does not drain; at 20 ticks a second this is several seconds of ticks.
+const PENDING_LIMIT: usize = 128;
+
+/// Whether the command is the movement report of a tick.
+fn is_movement(command: &ClientCommand) -> bool {
+    matches!(
+        command,
+        ClientCommand::Input { .. }
+            | ClientCommand::Player { .. }
+            | ClientCommand::PlayerPosition { .. }
+            | ClientCommand::PlayerLook { .. }
+            | ClientCommand::PositionLook { .. }
+    )
 }
 
 impl CommandQueue {
     /// Queues a command; the socket thread picks it up.
     fn push(&mut self, command: ClientCommand) {
-        match command {
-            ClientCommand::Input { .. } => self.input = Some(command),
-            ClientCommand::Player { .. }
-            | ClientCommand::PlayerPosition { .. }
-            | ClientCommand::PlayerLook { .. }
-            | ClientCommand::PositionLook { .. } => self.position = Some(command),
-            other => self.ordered.push_back(other),
-        }
+        self.ordered.push_back(command);
     }
 
-    /// Retries the queued commands.
+    /// Queues a command ahead of the movement report that ends the tick,
+    /// looking back no further than `since` (the length of the queue when
+    /// the tick began its report).
+    fn push_before_movement(&mut self, command: ClientCommand, since: usize) {
+        let mut at = self.ordered.len();
+        while at > since && is_movement(&self.ordered[at - 1]) {
+            at -= 1;
+        }
+        self.ordered.insert(at, command);
+    }
+
+    /// Whether the socket is so far behind that no new tick may start.
+    fn congested(&self) -> bool {
+        self.ordered.len() >= PENDING_LIMIT
+    }
+
+    /// Retries the queued commands, oldest first.
     ///
     /// A command is converted into its wire packet only once the channel
-    /// reserved a slot for it, so a full channel keeps the command (and its
-    /// coalescing slot) for the next tick.
+    /// reserved a slot for it, so a full channel keeps the command and
+    /// every one behind it for the next flush.
     fn flush(&mut self) {
         let Some(sender) = self.sender.as_ref() else {
             return;
@@ -1046,12 +1308,6 @@ impl CommandQueue {
                 self.ordered.push_front(command);
                 break;
             }
-        }
-        if let Some(command) = self.position.take() {
-            self.position = try_send(sender, command).err();
-        }
-        if let Some(command) = self.input.take() {
-            self.input = try_send(sender, command).err();
         }
     }
 }
@@ -1076,24 +1332,32 @@ fn try_send(
 
 /// The game thread loop.
 fn run(
-    events: Receiver<GameEvent>,
-    frames: SyncSender<RenderEvent>,
-    chunks: SyncSender<ChunkEvent>,
-    commands: CommandSender<PlayServerbound>,
+    channels: GameChannels,
     stop: Arc<AtomicBool>,
     own_name: String,
     account_skin: Option<AccountSkinFetcher>,
 ) {
+    let GameChannels {
+        inputs,
+        events,
+        frames,
+        chunks,
+        commands,
+        frame_micros,
+    } = channels;
+    // Phase E.9: the next instant the network events are taken (see below).
+    let mut next_drain = Instant::now();
+    // Events that arrived while the frame slot was closed.
+    let mut deferred: VecDeque<GameEvent> = VecDeque::new();
     let mut game = Game::new();
     game.own_name = own_name;
+    game.e1 = crate::e1::take();
     game.account_skin = account_skin;
     // The first event of the queue, which is still empty: the render thread
     // reads the mouse look from this slot, never from the queue.
     let _ = frames.try_send(RenderEvent::LookSlot(Arc::clone(&game.look)));
     let mut queue = CommandQueue {
         ordered: VecDeque::new(),
-        input: None,
-        position: None,
         sender: Some(commands),
     };
     let mut next_tick = Instant::now();
@@ -1103,11 +1367,52 @@ fn run(
         if stop.load(Ordering::Relaxed) {
             break;
         }
-        // Drain everything that is pending before looking at the clock.
-        while let Ok(event) = events.try_recv() {
-            if handle_event(&mut game, event, &mut queue, &frames) {
-                ended = game.end.take();
-                break;
+
+        // 1. Drain high-priority inputs first: user actions never wait for network packets.
+        while let Ok(update) = inputs.try_recv() {
+            let queue_latency = Instant::now().saturating_duration_since(update.created_at);
+            game.last_input_queue_latency_us =
+                queue_latency.as_micros().min(u128::from(u32::MAX)) as u32;
+            let start = Instant::now();
+            let before = (game.yaw, game.pitch);
+            handle_input(&mut game, update, &mut queue);
+            let elapsed = start.elapsed();
+            game.last_input_processing_us =
+                elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
+            if (game.yaw, game.pitch) != before {
+                publish_look(&game);
+            }
+        }
+
+        // 2. Drain incoming network events BEFORE ticking, matching vanilla Minecraft's
+        // `scheduledExecutables` section in `Minecraft.runGameLoop()` (which drains
+        // `scheduledTasks` before running `runTick()`).
+        // This ensures that server velocity (S12 knockback), position updates (S08),
+        // block changes (S23/S22), entity spawns/metadata, etc. take effect in the
+        // current simulation tick rather than lagging one tick behind.
+        const MAX_EVENTS_PER_PASS: usize = 256;
+        // Phase E.9: vanilla takes the network tasks once per iteration of
+        // `runGameLoop`, that is once per displayed frame, so a packet it answers
+        // (a teleport is answered at once, `handlePlayerPosLook`) cannot be
+        // answered faster than the frame rate. The window reports the frame
+        // duration; events wait for the next slot, and a slot takes every queued
+        // event (up to the pass limit), like the scheduled-task queue.
+        let period = Duration::from_micros(u64::from(frame_micros.load(Ordering::Relaxed)));
+        let pacing = !period.is_zero();
+        let mut events_processed = 0;
+        if !pacing || Instant::now() >= next_drain {
+            while events_processed < MAX_EVENTS_PER_PASS {
+                let Some(event) = deferred.pop_front().or_else(|| events.try_recv().ok()) else {
+                    break;
+                };
+                events_processed += 1;
+                if handle_event(&mut game, event, &mut queue, &frames) {
+                    ended = game.end.take();
+                    break;
+                }
+            }
+            if pacing && events_processed > 0 {
+                next_drain = Instant::now() + period;
             }
         }
         if ended.is_some() {
@@ -1115,26 +1420,98 @@ fn run(
         }
         queue.flush();
 
-        let now = Instant::now();
+        game.net_queue_len = events.len();
+
+        // 3. Process game ticking if a tick is already due, so network packet floods
+        // cannot starve the 20 TPS simulation loop.
+        let mut now = Instant::now();
         if now >= next_tick {
-            tick(&mut game, &mut queue, &frames, &chunks, next_tick);
-            next_tick += TICK;
+            const MAX_CATCH_UP_TICKS: u32 = 3;
+            let mut catches = 0;
+            // A congested queue stops the ticks (see `PENDING_LIMIT`); the
+            // clamp below then waits one tick length before trying again.
+            while now >= next_tick && catches < MAX_CATCH_UP_TICKS && !queue.congested() {
+                let delay = now.saturating_duration_since(next_tick);
+                let delay_us = delay.as_micros().min(u128::from(u32::MAX)) as u32;
+                if delay_us > game.max_tick_delay_us {
+                    game.max_tick_delay_us = delay_us;
+                }
+                game.last_tick_delay_us = delay_us;
+                if catches > 0 {
+                    game.catch_up_ticks_total += 1;
+                }
+                tick(&mut game, &mut queue, &frames, &chunks, next_tick);
+                next_tick += TICK;
+                catches += 1;
+            }
             if next_tick <= now {
-                // The thread fell behind; skip the missed ticks instead of
-                // running a burst of them.
+                // The thread fell too far behind (more than 3 ticks missed);
+                // clamp next_tick to prevent a spiral of death.
                 next_tick = now + TICK;
             }
+            queue.flush();
+        }
+
+        now = Instant::now();
+        if now >= next_tick {
+            continue;
+        }
+        if events_processed == MAX_EVENTS_PER_PASS && !events.is_empty() {
             continue;
         }
 
-        match events.recv_timeout(next_tick - now) {
-            Ok(event) => {
-                if handle_event(&mut game, event, &mut queue, &frames) {
-                    ended = game.end.take();
+        let timeout = next_tick.saturating_duration_since(now);
+        // Events are queued but the frame slot is not open yet: wait for the
+        // slot (or an input, or the tick) without taking them.
+        if pacing && (!events.is_empty() || !deferred.is_empty()) && now < next_drain {
+            let wait = timeout.min(next_drain.saturating_duration_since(now));
+            if let Ok(update) = inputs.recv_timeout(wait) {
+                let queue_latency = Instant::now().saturating_duration_since(update.created_at);
+                game.last_input_queue_latency_us =
+                    queue_latency.as_micros().min(u128::from(u32::MAX)) as u32;
+                let before = (game.yaw, game.pitch);
+                handle_input(&mut game, update, &mut queue);
+                if (game.yaw, game.pitch) != before {
+                    publish_look(&game);
                 }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            continue;
+        }
+        crossbeam_channel::select! {
+            recv(inputs) -> msg => {
+                if let Ok(update) = msg {
+                    let queue_latency = Instant::now().saturating_duration_since(update.created_at);
+                    game.last_input_queue_latency_us =
+                        queue_latency.as_micros().min(u128::from(u32::MAX)) as u32;
+                    let start = Instant::now();
+                    let before = (game.yaw, game.pitch);
+                    handle_input(&mut game, update, &mut queue);
+                    let elapsed = start.elapsed();
+                    game.last_input_processing_us =
+                        elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
+                    if (game.yaw, game.pitch) != before {
+                        publish_look(&game);
+                    }
+                }
+            }
+            recv(events) -> msg => {
+                match msg {
+                    Ok(event) if pacing && Instant::now() < next_drain => {
+                        // The slot is closed: this event waits for the next one.
+                        deferred.push_back(event);
+                    }
+                    Ok(event) => {
+                        if handle_event(&mut game, event, &mut queue, &frames) {
+                            ended = game.end.take();
+                        }
+                        if pacing {
+                            next_drain = Instant::now() + period;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            default(timeout) => {}
         }
     }
 
@@ -1174,7 +1551,10 @@ fn handle_event(
 ) -> bool {
     match event {
         GameEvent::Net(event) => {
+            let start = Instant::now();
             handle_net(game, event, queue, frames);
+            let elapsed = start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
+            game.net_micros_accum = game.net_micros_accum.saturating_add(elapsed);
             false
         }
         GameEvent::Disconnected(end) => {
@@ -1190,8 +1570,15 @@ fn handle_event(
             false
         }
         GameEvent::Input(update) => {
+            let queue_latency = Instant::now().saturating_duration_since(update.created_at);
+            game.last_input_queue_latency_us =
+                queue_latency.as_micros().min(u128::from(u32::MAX)) as u32;
+            let start = Instant::now();
             let before = (game.yaw, game.pitch);
             handle_input(game, update, queue);
+            let elapsed = start.elapsed();
+            game.last_input_processing_us =
+                elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
             if (game.yaw, game.pitch) != before {
                 // The view changed between two ticks: publish it right away,
                 // so the mouse look does not wait for the next tick.
@@ -1340,9 +1727,7 @@ fn publish_look(game: &Game) {
             view,
             body_pitch: game.pitch.to_degrees(),
         };
-        if let Ok(mut slot) = game.look.lock() {
-            *slot = Some(look);
-        }
+        game.look.store(look);
     }
 }
 
@@ -1424,6 +1809,7 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         eye_light(world, view.position)
     });
     let _ = frames.try_send(RenderEvent::Frame(Box::new(Frame {
+        perspective: game.perspective,
         state: view,
         tick_time,
         world_time: game.world_time,
@@ -1480,6 +1866,17 @@ fn debug_world(game: &Game) -> crate::debug_world::DebugWorld {
             // A client that has not seen the packet assumes normal.
             difficulty: game.server.difficulty().unwrap_or(2),
             world_time: game.world_time,
+            tick_micros: game.last_tick_micros,
+            net_event_micros: game.last_net_micros,
+            input_processing_micros: game.last_input_processing_us,
+            input_queue_latency_micros: game.last_input_queue_latency_us,
+            resyncs: game.status_data.resyncs.min(u64::from(u32::MAX)) as u32,
+            real_tps: game.real_tps,
+            tick_delay_us: game.last_tick_delay_us,
+            max_tick_delay_us: game.max_tick_delay_us,
+            catch_up_ticks: game.catch_up_ticks_total,
+            net_queue_depth: game.net_queue_len,
+            dirty_chunks: game.dirty.len(),
         },
     )
 }
@@ -1747,6 +2144,11 @@ fn apply_net_event(
             game.use_pressed = false;
             game.pending_book = None;
             game.windows = WindowManager::new();
+            // `handleJoinGame` makes a new `PlayerControllerMP`
+            // (`currentPlayerItem` 0) and the new player starts on slot 0.
+            game.selected_slot = 0;
+            game.applied_slot = 0;
+            game.synced_slot = 0;
             publish_inventory(game, frames);
             set_gamemode(game, GameMode::from_wire(info.gamemode));
             game.dimension = info.dimension;
@@ -1769,7 +2171,7 @@ fn apply_net_event(
         }
         PlayEvent::Placement(placement) => {
             let first = !game.status_data.placed;
-            apply_placement(game, &placement, queue);
+            apply_placement(game, &placement, queue, frames);
             if first {
                 // The window leaves the connecting screen on this flag, so it
                 // must not wait for the periodic status.
@@ -1901,6 +2303,10 @@ fn apply_net_event(
         PlayEvent::HeldItemChange(slot) => {
             if (0..9).contains(&slot) {
                 game.selected_slot = slot as u8;
+                // `handleHeldItemChange` only sets `currentItem`; the
+                // controller keeps `currentPlayerItem`, so the next sync
+                // tells the server this slot back, like the vanilla client.
+                game.applied_slot = slot as u8;
                 game.windows.set_selected_slot(slot as u8);
                 game.hud_dirty = true;
             }
@@ -1916,6 +2322,12 @@ fn apply_net_event(
             game.health_known = false;
             game.overlays.reset();
             game.server_view = ServerView::default();
+            // The new player has a new inventory on slot 0, but the
+            // controller is kept: `currentPlayerItem` stays, and the next
+            // sync tells the server the slot if it was not 0.
+            game.selected_slot = 0;
+            game.applied_slot = 0;
+            game.windows.set_selected_slot(0);
             // The server keeps the chunks of the dimension, so only a change
             // of the dimension replaces the world.
             let dimension = packet.dimension as i8;
@@ -1954,32 +2366,20 @@ fn apply_net_event(
             publish_status(game, frames);
         }
         PlayEvent::EntityTeleport(packet) => {
-            if packet.entity_id == game.entity_id {
-                let correction = ServerCorrection::new(
-                    f64::from(packet.x) / 32.0,
-                    f64::from(packet.y) / 32.0,
-                    f64::from(packet.z) / 32.0,
-                    f32::from(packet.yaw) * 360.0 / 256.0,
-                    f32::from(packet.pitch) * 360.0 / 256.0,
-                    packet.on_ground,
-                );
-                apply_correction(game, &correction, queue);
-            } else {
-                let pos = DVec3::new(
-                    f64::from(packet.x) / 32.0,
-                    f64::from(packet.y) / 32.0,
-                    f64::from(packet.z) / 32.0,
-                );
-                let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
-                let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
-                game.entities.teleport(
-                    EntityId(packet.entity_id),
-                    pos,
-                    yaw,
-                    pitch,
-                    packet.on_ground,
-                );
-            }
+            let pos = DVec3::new(
+                f64::from(packet.x) / 32.0,
+                f64::from(packet.y) / 32.0,
+                f64::from(packet.z) / 32.0,
+            );
+            let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
+            let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
+            game.entities.teleport(
+                EntityId(packet.entity_id),
+                pos,
+                yaw,
+                pitch,
+                packet.on_ground,
+            );
         }
         PlayEvent::EntityEquipment(packet) => {
             if packet.entity_id == game.entity_id {
@@ -2716,6 +3116,7 @@ fn apply_placement(
     game: &mut Game,
     placement: &umicraft_net::play::PlayerPlacement,
     queue: &mut CommandQueue,
+    frames: &SyncSender<RenderEvent>,
 ) {
     // Relative flags apply to where the player is now, not to the last
     // placement the session saw.
@@ -2766,6 +3167,17 @@ fn apply_placement(
         }
     }
 
+    // Immediately snap the local player body entity without triggering limb acceleration
+    game.body.teleport_to_exact(position, game.yaw.to_degrees(), game.pitch.to_degrees());
+
+    // Immediately notify render thread to snap camera view and prevent gliding
+    let eye = position + glam::DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
+    let _ = frames.try_send(RenderEvent::Teleport {
+        position: eye,
+        yaw: game.yaw,
+        pitch: game.pitch,
+    });
+
     // The server expects the acknowledgement of the placement.
     let ack = PositionAck {
         x: placement.x,
@@ -2780,10 +3192,16 @@ fn apply_placement(
     // GrimAC require it: a teleport that is not answered is flagged
     // (`BadPacketsN`), so a repeated position is acknowledged again.
     queue.push(command_of(Outgoing::AckPosition(ack)));
-    game.server_view.forget_position();
+    // Phase E.9: the position the view reported is NOT forgotten. Vanilla's
+    // `handlePlayerPosLook` leaves `lastReportedPos*` alone (bytecode `bcy.a(fi)`:
+    // it sets the position, answers, and nothing else), so a teleport to the
+    // position already reported does not make the next tick report it again. The
+    // forced report was one position-bearing packet per tick during a teleport
+    // loop, each of which made the server send one more teleport.
 }
 
 /// Applies an authoritative correction from the server.
+#[allow(dead_code)]
 fn apply_correction(game: &mut Game, correction: &ServerCorrection, queue: &mut CommandQueue) {
     if let Some(state) = game.state.as_mut() {
         if let Some(world) = game.world.as_ref() {
@@ -2804,13 +3222,34 @@ fn apply_correction(game: &mut Game, correction: &ServerCorrection, queue: &mut 
 }
 
 /// Handles one input update.
-fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) {
+///
+/// The hotbar, drop and pick-block keys only record the request here; their
+/// packets leave in the tick, where MCP `Minecraft.runTick` handles the keys
+/// (`queue` is kept for the callers).
+fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut CommandQueue) {
     game.input = update.state;
-    game.yaw = (game.yaw + update.look_yaw).rem_euclid(std::f32::consts::TAU);
+    // Continuous, never wrapped: MCP `Entity.setAngles` adds to `rotationYaw`
+    // and the packet carries it as is, so 359.9 turns into 360.2, not 0.2.
+    // The consumers of the yaw only use its sine and cosine or wrap the
+    // difference of two angles.
+    game.yaw += update.look_yaw;
     game.pitch = (game.pitch + update.look_pitch).clamp(-MAX_PITCH, MAX_PITCH);
 
+    // The wheel first, then the keys, as `runTick` does.
     if let Some(slot) = update.select_slot {
-        select_slot(game, slot, queue);
+        select_slot(game, slot);
+    }
+    if update.hotbar_keys != [0; 9] {
+        for (total, new) in game.hotbar_presses.iter_mut().zip(update.hotbar_keys) {
+            *total = total.saturating_add(new);
+        }
+        // The player sees the slot the keys will give at the tick.
+        if let Some(slot) = (0..9u8)
+            .rev()
+            .find(|&slot| game.hotbar_presses[usize::from(slot)] > 0)
+        {
+            select_slot(game, slot);
+        }
     }
 
     // The perspective changes with the next tick, with the frame that
@@ -2824,13 +3263,10 @@ fn handle_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) 
     game.attack_pressed |= update.break_block;
     game.use_pressed |= update.place_block;
     if update.pick_block {
-        pick_block(game, queue);
+        game.pending_picks = game.pending_picks.saturating_add(1);
     }
-    if let Some(outgoing) = update
-        .drop_item
-        .and_then(|kind| drop_item(game.gamemode, kind))
-    {
-        queue.push(command_of(outgoing));
+    if let Some(kind) = update.drop_item {
+        game.pending_drops.push(kind);
     }
 }
 
@@ -3052,8 +3488,24 @@ fn pick_block(game: &mut Game, queue: &mut CommandQueue) {
         }
     }
     if let Some(slot) = pick.select {
-        select_slot(game, slot, queue);
+        select_slot(game, slot);
     }
+}
+
+/// The pick-block presses of the tick (MCP `Minecraft.runTick`, after the
+/// attack and the use). While an item is in use the presses are read and
+/// dropped.
+fn run_pick_blocks(game: &mut Game, queue: &mut CommandQueue) {
+    let presses = std::mem::take(&mut game.pending_picks);
+    if game.item_use.is_using() {
+        return;
+    }
+    for _ in 0..presses {
+        pick_block(game, queue);
+    }
+    // `setCurrentItem` changes the slot at once; the server hears of it at
+    // the next sync.
+    game.applied_slot = game.selected_slot;
 }
 
 /// The slot of the player window that holds a main inventory index
@@ -3063,16 +3515,66 @@ fn window_slot(index: usize) -> i16 {
     slot as i16
 }
 
-/// Selects a hotbar slot and tells the server
-/// (MCP `PlayerControllerMP.syncCurrentPlayItem`).
-fn select_slot(game: &mut Game, slot: u8, queue: &mut CommandQueue) {
+/// Selects a hotbar slot. Only the player's view changes; the server is told
+/// by [`sync_held_item`] in a tick, once, whatever the number of presses.
+fn select_slot(game: &mut Game, slot: u8) {
     if slot < 9 && slot != game.selected_slot {
         game.selected_slot = slot;
         game.windows.set_selected_slot(slot);
         game.hud_dirty = true;
+    }
+}
+
+/// The hotbar keys of the tick (MCP `Minecraft.runTick`: `for l in 0..9 { if
+/// keyBindsHotbar[l].isPressed() { currentItem = l } }`). Each key gives up one
+/// press per tick, in the order of the keys, so with several keys down the
+/// highest wins whatever order they were pressed in; a key pressed twice
+/// selects again at the next tick. The wheel, handled before, only counts
+/// when no key was pressed.
+fn run_hotbar_keys(game: &mut Game) {
+    let mut keyed = None;
+    for (slot, presses) in game.hotbar_presses.iter_mut().enumerate() {
+        if *presses > 0 {
+            *presses -= 1;
+            keyed = Some(slot as u8);
+        }
+    }
+    if let Some(slot) = keyed {
+        select_slot(game, slot);
+    }
+    game.applied_slot = game.selected_slot;
+}
+
+/// Tells the server the slot when it differs from the last one told (MCP
+/// `PlayerControllerMP.syncCurrentPlayItem`, called by `updateController` at
+/// the start of a tick).
+fn sync_held_item(game: &mut Game, queue: &mut CommandQueue) {
+    if game.applied_slot != game.synced_slot {
+        game.synced_slot = game.applied_slot;
         queue.push(ClientCommand::HeldItemChange {
-            slot: i16::from(slot),
+            slot: i16::from(game.synced_slot),
         });
+    }
+}
+
+/// The same sync, for the controller calls of a click: it goes ahead of the
+/// first packet queued since `since` that is not the swing, which `clickMouse`
+/// sends before it calls the controller. A click that queued only a swing did
+/// not reach the controller and syncs nothing.
+fn sync_held_item_before_click(game: &mut Game, queue: &mut CommandQueue, since: usize) {
+    if game.applied_slot == game.synced_slot {
+        return;
+    }
+    let first = (since..queue.ordered.len())
+        .find(|&at| !matches!(queue.ordered[at], ClientCommand::Swing));
+    if let Some(at) = first {
+        game.synced_slot = game.applied_slot;
+        queue.ordered.insert(
+            at,
+            ClientCommand::HeldItemChange {
+                slot: i16::from(game.synced_slot),
+            },
+        );
     }
 }
 
@@ -3181,10 +3683,28 @@ fn tick(
     tick_time: Instant,
 ) {
     umicraft_core::profile_scope!("game tick");
+    let tick_start = Instant::now();
+    game.last_net_micros = std::mem::take(&mut game.net_micros_accum);
     game.status_data.ticks += 1;
     apply_perspective_presses(game);
+    // MCP `Minecraft.runTick`: `updateController` syncs the slot, the hotbar
+    // keys then select the next one, the drop key sends its packets, then
+    // come the clicks (each syncing the slot before its controller packet)
+    // and the pick-block.
+    sync_held_item(game, queue);
+    run_hotbar_keys(game);
+    for kind in std::mem::take(&mut game.pending_drops) {
+        if let Some(outgoing) = drop_item(game.gamemode, kind) {
+            queue.push(command_of(outgoing));
+        }
+    }
+    let since = queue.ordered.len();
     run_attack(game, queue);
+    sync_held_item_before_click(game, queue, since);
+    let since = queue.ordered.len();
     run_use(game, queue);
+    sync_held_item_before_click(game, queue, since);
+    run_pick_blocks(game, queue);
     publish_text_screens(game, frames);
     tick_hand(game);
 
@@ -3200,6 +3720,22 @@ fn tick(
     }
     if social_view::tick_boss_bar(&mut game.boss_bar, &game.entities) {
         game.hud_dirty = true;
+    }
+
+    // Phase E.2: the tick-driven scenario `e1` chooses the keys of the tick.
+    // It counts client ticks and only sets the input state.
+    let e1_keys = if game.world_ready() {
+        let on_ground = game.state.as_ref().is_some_and(|state| state.player().on_ground);
+        game.e1.as_mut().map(|run| run.before(on_ground))
+    } else {
+        None
+    };
+    if let Some(keys) = e1_keys {
+        game.input.forward = f32::from(i8::from(keys.w) - i8::from(keys.s));
+        game.input.strafe = f32::from(i8::from(keys.a) - i8::from(keys.d));
+        game.input.jump = keys.jump;
+        game.input.sneak = keys.sneak;
+        game.input.sprint = keys.sprint;
     }
 
     // The intent of the tick: the raw key state with the yaw and the pitch
@@ -3224,6 +3760,12 @@ fn tick(
     } else {
         intent
     };
+    // Phase E.9: `EntityLivingBase.onDeathUpdate` (bytecode `pr.aZ`) counts the
+    // dead ticks and, at 20, calls `setDead()`: the dead player entity then stops
+    // updating, so the client sends no movement packet any more (measured on the
+    // vanilla 1.8.9 client: exactly 20 movement packets after the death, then
+    // silence). Until the respawn replaces the player, the tick reports nothing.
+    let entity_removed = game.dead() && game.death_time >= DEATH_TICKS;
     game.death_time = if game.dead() {
         (game.death_time + 1).min(DEATH_TICKS)
     } else {
@@ -3248,6 +3790,11 @@ fn tick(
             }
         }
     }
+    if let (Some(run), Some(state)) = (game.e1.as_mut(), game.state.as_ref()) {
+        if ready && e1_keys.is_some() {
+            run.after(state.player());
+        }
+    }
     report_flight(game, was_flying, queue);
     follow_body(game);
     tick_overlays(game);
@@ -3266,17 +3813,25 @@ fn tick(
     // itself, like the vanilla client (`umicraft_game::physics`); it is
     // never lifted.
 
-    report_movement(game, &intent, queue);
+    let movement_start = queue.ordered.len();
+    if !entity_removed {
+        report_movement(game, &intent, queue);
+    }
     publish_chunks(game, chunks);
 
     publish_frame(game, frames, tick_time);
     publish_sounds(game, frames);
     tick_hud_view(game);
     if let Some(strength) = game.hud_view.take_jump() {
-        queue.ordered.push_back(ClientCommand::RidingJump {
-            entity_id: game.entity_id,
-            strength,
-        });
+        // Ahead of the movement report of this tick, where the queue used
+        // to drain it before the movement slot.
+        queue.push_before_movement(
+            ClientCommand::RidingJump {
+                entity_id: game.entity_id,
+                strength,
+            },
+            movement_start,
+        );
     }
     if game.hud_dirty {
         // The HUD is only published again when the last one was accepted, so
@@ -3289,7 +3844,20 @@ fn tick(
         }
     }
     if game.status_data.ticks.is_multiple_of(STATUS_PERIOD) {
+        let now = Instant::now();
+        let elapsed = now.duration_since(game.last_tps_instant).as_secs_f32();
+        if elapsed > 0.0 {
+            let ticks_delta = game.status_data.ticks.saturating_sub(game.last_tps_ticks);
+            game.real_tps = ticks_delta as f32 / elapsed;
+            game.last_tps_instant = now;
+            game.last_tps_ticks = game.status_data.ticks;
+        }
         publish_status(game, frames);
+    }
+    let tick_elapsed = tick_start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
+    game.last_tick_micros = tick_elapsed;
+    if tick_elapsed > game.max_tick_micros {
+        game.max_tick_micros = tick_elapsed;
     }
 }
 
@@ -3446,7 +4014,8 @@ fn movement_command(packet: TickPacket, entity_id: i32) -> ClientCommand {
     }
 }
 
-/// Sends the snapshots of the chunks whose geometry changed.
+/// Sends the snapshots of the chunks whose geometry changed, or eviction
+/// events for unloaded chunks.
 fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
     if game.dirty.is_empty() {
         return;
@@ -3455,25 +4024,20 @@ fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
         game.dirty.clear();
         return;
     };
-    let dirty: Vec<ChunkPos> = game.dirty.iter().copied().collect();
-    for pos in dirty {
-        if world.chunk(pos).is_none() {
-            game.dirty.remove(&pos);
-            continue;
+    let mut full = false;
+    game.dirty.retain(|&pos| {
+        if full {
+            return true;
         }
-        let snapshot = ChunkSnapshot::from_world(world, pos);
+        let snapshot = world.chunk(pos).map(|_| ChunkSnapshot::from_world(world, pos));
         match chunks.try_send(ChunkEvent { pos, snapshot }) {
-            Ok(()) => {
-                game.dirty.remove(&pos);
+            Ok(()) => false,
+            Err(mpsc::TrySendError::Full(_)) | Err(mpsc::TrySendError::Disconnected(_)) => {
+                full = true;
+                true
             }
-            Err(mpsc::TrySendError::Full(_)) => {
-                // The render thread is behind: the chunk stays dirty and the
-                // snapshot is derived again on a later tick.
-                break;
-            }
-            Err(mpsc::TrySendError::Disconnected(_)) => break,
         }
-    }
+    });
 }
 
 /// Publishes the inventory state to the render thread.
@@ -3565,7 +4129,7 @@ mod tests {
         game.world = Some(World::new(0));
         let mut queue = CommandQueue::default();
         report_movement(&mut game, &InputIntent::still(0.0), &mut queue);
-        assert!(queue.position.is_none() && queue.ordered.is_empty());
+        assert!(queue.ordered.is_empty());
     }
 
     #[test]
@@ -3577,10 +4141,13 @@ mod tests {
         assert_eq!(game.status_data.position_reports, 1);
         report_movement(&mut game, &still, &mut queue);
         // Regression: `Steer Vehicle` used to be sent on every tick on foot.
-        assert!(queue.input.is_none());
+        assert!(!queue
+            .ordered
+            .iter()
+            .any(|command| matches!(command, ClientCommand::Input { .. })));
         assert_eq!(
-            queue.position,
-            Some(ClientCommand::Player { on_ground: false })
+            queue.ordered.back(),
+            Some(&ClientCommand::Player { on_ground: false })
         );
     }
 
@@ -3591,10 +4158,12 @@ mod tests {
         let mut queue = CommandQueue::default();
         report_movement(&mut game, &InputIntent::still(0.0), &mut queue);
         assert!(matches!(
-            queue.position,
-            Some(ClientCommand::PlayerLook { .. })
+            commands(&queue)[..],
+            [
+                ClientCommand::PlayerLook { .. },
+                ClientCommand::Input { .. }
+            ]
         ));
-        assert!(matches!(queue.input, Some(ClientCommand::Input { .. })));
         assert_eq!(game.status_data.position_reports, 0);
     }
 
@@ -3667,6 +4236,136 @@ mod tests {
         assert_eq!(game.input.forward, 1.0);
     }
 
+    /// Turns by `degrees`, runs one tick and returns the yaw of the movement
+    /// packet that tick queued, decoded from the encoded wire bytes.
+    fn turn_and_read_wire_yaw(
+        game: &mut Game,
+        queue: &mut CommandQueue,
+        degrees: &[f32],
+    ) -> f32 {
+        use umicraft_protocol::EncodablePacket;
+        for step in degrees {
+            handle_input(
+                game,
+                InputUpdate {
+                    look_yaw: step.to_radians(),
+                    ..InputUpdate::default()
+                },
+                queue,
+            );
+        }
+        let (frames, _frames_rx) = mpsc::sync_channel(64);
+        let (chunks, _chunks_rx) = mpsc::sync_channel(64);
+        tick(game, queue, &frames, &chunks, Instant::now());
+        let yaw = match queue.ordered.drain(..).last() {
+            Some(
+                ClientCommand::PositionLook { yaw, .. } | ClientCommand::PlayerLook { yaw, .. },
+            ) => yaw,
+            other => panic!("the tick must report the look, got {other:?}"),
+        };
+        let mut body = Vec::new();
+        umicraft_protocol::packets::play::serverbound::PlayerLook {
+            yaw,
+            pitch: 0.0,
+            on_ground: true,
+        }
+        .encode_body(&mut body)
+        .expect("encode");
+        f32::from_be_bytes([body[0], body[1], body[2], body[3]])
+    }
+
+    fn game_facing(degrees: f32) -> (Game, CommandQueue) {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.playing = true;
+        game.yaw = degrees.to_radians();
+        (game, CommandQueue::default())
+    }
+
+    #[test]
+    fn the_wire_yaw_crosses_360_without_wrapping() {
+        let (mut game, mut queue) = game_facing(359.9);
+        let yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[0.3]);
+        assert!((yaw - 360.2).abs() < 1e-2, "{yaw}");
+        let (mut game, mut queue) = game_facing(359.0);
+        let yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[1.0]);
+        assert!((yaw - 360.0).abs() < 1e-2, "{yaw}");
+    }
+
+    #[test]
+    fn the_wire_yaw_goes_below_zero_without_wrapping() {
+        let (mut game, mut queue) = game_facing(0.0);
+        let yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[-0.2]);
+        assert!((yaw + 0.2).abs() < 1e-3, "{yaw}");
+        let yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[-720.0]);
+        assert!((yaw + 720.2).abs() < 1e-1, "{yaw}");
+    }
+
+    #[test]
+    fn several_turns_in_a_row_keep_adding_up() {
+        let (mut game, mut queue) = game_facing(0.0);
+        let mut total = 0.0;
+        for _ in 0..8 {
+            total += 100.0;
+            let yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[100.0]);
+            assert!((yaw - total).abs() < 1e-1, "{yaw} against {total}");
+        }
+        assert!(total > 720.0);
+    }
+
+    #[test]
+    fn rapid_mouse_movements_between_ticks_add_up() {
+        let (mut game, mut queue) = game_facing(350.0);
+        let burst = [7.3_f32; 50];
+        let yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &burst);
+        assert!((yaw - (350.0 + 365.0)).abs() < 1e-1, "{yaw}");
+    }
+
+    #[test]
+    fn consecutive_wire_yaws_never_jump_by_a_turn() {
+        // A slow turn through two full circles: every step stays the size of
+        // the mouse step, there is no -360 step at the crossing.
+        let (mut game, mut queue) = game_facing(0.0);
+        let mut previous = 0.0_f32;
+        for _ in 0..1440 {
+            let yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[0.5]);
+            assert!((yaw - previous - 0.5).abs() < 1e-1, "{previous} -> {yaw}");
+            previous = yaw;
+        }
+        assert!(previous > 719.0);
+        // And back, through zero into the negative.
+        for _ in 0..1440 {
+            let yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[-0.5]);
+            assert!((yaw - previous + 0.5).abs() < 1e-1, "{previous} -> {yaw}");
+            previous = yaw;
+        }
+    }
+
+    #[test]
+    fn a_continuous_yaw_looks_the_same_as_the_wrapped_one() {
+        // The raycast and the third person camera only use the angle, not
+        // its turn count.
+        let wrapped = look_direction(0.2, 0.3);
+        let turned = look_direction(0.2 + 3.0 * std::f32::consts::TAU, 0.3);
+        assert!((wrapped - turned).length() < 1e-3);
+        let behind = look_direction(0.2 - 2.0 * std::f32::consts::TAU, 0.3);
+        assert!((wrapped - behind).length() < 1e-3);
+    }
+
+    #[test]
+    fn the_local_body_and_the_head_follow_a_continuous_yaw() {
+        use umicraft_game::entity::angle::wrap_degrees;
+        let flags = EntityFlags::new(0, 0x7F);
+        let mut a = Game::new();
+        let mut b = Game::new();
+        for (yaw_a, yaw_b) in [(359.9, -0.1), (360.2, 0.2), (721.0, 1.0)] {
+            a.body.follow(DVec3::ZERO, yaw_a, 0.0, flags);
+            b.body.follow(DVec3::ZERO, yaw_b, 0.0, flags);
+            let (fa, fb) = (a.body.frame_data(), b.body.frame_data());
+            assert!(wrap_degrees(fa.head_yaw - fb.head_yaw).abs() < 1e-3);
+            assert!(wrap_degrees(fa.body_yaw - fb.body_yaw).abs() < 1e-3);
+        }
+    }
+
     #[test]
     fn the_pitch_is_clamped_to_the_vanilla_limit() {
         let mut game = Game::new();
@@ -3686,27 +4385,16 @@ mod tests {
 
     #[test]
     fn the_selected_slot_is_announced_once() {
-        let mut game = Game::new();
+        let mut game = placed_game();
         let mut queue = CommandQueue::default();
-        handle_input(
-            &mut game,
-            InputUpdate {
-                select_slot: Some(3),
-                ..InputUpdate::default()
-            },
-            &mut queue,
-        );
-        assert_eq!(game.selected_slot, 3);
-        assert_eq!(queue.ordered.len(), 1);
-        handle_input(
-            &mut game,
-            InputUpdate {
-                select_slot: Some(3),
-                ..InputUpdate::default()
-            },
-            &mut queue,
-        );
-        assert_eq!(queue.ordered.len(), 1);
+        press_slot(&mut game, &mut queue, 3);
+        assert_eq!(game.selected_slot, 3, "the player sees it at once");
+        press_slot(&mut game, &mut queue, 3);
+        assert!(queue.ordered.is_empty(), "nothing leaves between two ticks");
+        for _ in 0..4 {
+            run_ticks(&mut game, &mut queue, 1);
+        }
+        assert_eq!(slots_in(&queue), [3]);
     }
 
     #[test]
@@ -4018,6 +4706,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn f5_attack_and_block_selection_raycast_is_unaffected_by_perspective() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        let mut queue = CommandQueue::default();
+
+        // Player looks down at the floor block at (0, 63, 0)
+        game.pitch = std::f32::consts::FRAC_PI_2;
+
+        // FirstPerson: selection outline targets the floor stone block
+        let sel_fp = game.selection_outline();
+        assert_eq!(sel_fp.len(), 1);
+        assert_eq!(sel_fp[0].min, [0.0, 63.0, 0.0]);
+
+        // Switch to ThirdPersonBack
+        let toggle = InputUpdate {
+            toggle_perspective: true,
+            ..InputUpdate::default()
+        };
+        handle_input(&mut game, toggle, &mut queue);
+        apply_perspective_presses(&mut game);
+        assert_eq!(game.perspective, Perspective::ThirdPersonBack);
+        let sel_back = game.selection_outline();
+        assert_eq!(sel_back, sel_fp, "selection raycast must remain strictly from eye");
+
+        // Switch to ThirdPersonFront
+        handle_input(&mut game, toggle, &mut queue);
+        apply_perspective_presses(&mut game);
+        assert_eq!(game.perspective, Perspective::ThirdPersonFront);
+        let sel_front = game.selection_outline();
+        assert_eq!(sel_front, sel_fp, "front view camera must NOT invert raycast reach!");
+    }
+
+    #[test]
+    fn f5_does_not_affect_other_tracked_entities_or_players() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entity_id = 1;
+        let (frames, received) = mpsc::sync_channel(16);
+
+        // Add another player entity
+        let other_id = EntityId(2);
+        let other_pos = glam::DVec3::new(5.0, 64.0, 5.0);
+        game.entities.spawn_player(
+            other_id,
+            [0; 16],
+            other_pos,
+            45.0,
+            10.0,
+            None,
+            EntityFlags::default(),
+        );
+
+        // Cycle through all perspectives and verify other entity's data remains untouched
+        for p in [Perspective::FirstPerson, Perspective::ThirdPersonBack, Perspective::ThirdPersonFront] {
+            game.perspective = p;
+            publish_frame(&game, &frames, Instant::now());
+            let Ok(RenderEvent::Frame(frame)) = received.try_recv() else {
+                panic!("expected frame");
+            };
+            let other = frame.entities.iter().find(|e| e.id == other_id).expect("other entity");
+            assert_eq!(other.position, other_pos);
+            assert_eq!(other.yaw, 45.0);
+            assert_eq!(other.pitch, 10.0);
+        }
+    }
+
     /// Loads the 3x3 columns around the player: the simulation only runs once
     /// they are there.
     fn load_surrounding_columns(game: &mut Game) {
@@ -4173,6 +4927,39 @@ mod tests {
         handle_net(&mut game, health_update(20.0), &mut queue, &frames);
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
         assert_eq!(game.death_time, 0);
+    }
+
+    /// Phase E.9: a dead player entity stops updating after 20 dead ticks
+    /// (`onDeathUpdate`, `setDead`), so it sends exactly 20 movement packets
+    /// after the death and none until the respawn (vanilla 1.8.9 capture:
+    /// 20 packets, the last 1 049 ms after the death).
+    #[test]
+    fn a_dead_player_sends_twenty_movement_packets_then_none() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.playing = true;
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(256);
+        let (chunks, _chunk_received) = mpsc::sync_channel(256);
+        // Settle the player, then forget what the setup queued.
+        for _ in 0..3 {
+            tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        }
+        queue.ordered.clear();
+        handle_net(&mut game, health_update(0.0), &mut queue, &frames);
+        queue.ordered.clear();
+        let mut sent = Vec::new();
+        for _ in 0..40 {
+            tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+            sent.push(queue.ordered.iter().filter(|c| is_movement(c)).count());
+            queue.ordered.clear();
+        }
+        assert_eq!(sent[..20].iter().sum::<usize>(), 20, "one per dead tick: {sent:?}");
+        assert_eq!(sent[20..].iter().sum::<usize>(), 0, "then silence: {sent:?}");
+        // The respawn brings the packets back.
+        handle_net(&mut game, health_update(20.0), &mut queue, &frames);
+        queue.ordered.clear();
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        assert_eq!(queue.ordered.iter().filter(|c| is_movement(c)).count(), 1);
     }
 
     #[test]
@@ -4880,8 +5667,7 @@ mod tests {
         });
 
         queue.flush();
-        assert_eq!(queue.ordered.len(), 1, "the second chat waits");
-        assert!(queue.position.is_some(), "the report waits");
+        assert_eq!(queue.ordered.len(), 2, "the second chat and the report wait");
         let Ok(PlayServerbound::Chat(chat)) = receiver.try_recv() else {
             panic!("the first chat is sent as its wire packet");
         };
@@ -4892,14 +5678,14 @@ mod tests {
             panic!("the second chat follows in order");
         };
         assert_eq!(chat.message, "second");
-        assert!(queue.position.is_some(), "the channel is full again");
+        assert_eq!(queue.ordered.len(), 1, "the report waits behind the chat");
 
         queue.flush();
         assert!(matches!(
             receiver.try_recv(),
             Ok(PlayServerbound::PlayerPosition(_))
         ));
-        assert!(queue.ordered.is_empty() && queue.position.is_none());
+        assert!(queue.ordered.is_empty());
     }
 
     /// A grass floor (top at y = 64) with one block of `plant` standing on
@@ -5345,15 +6131,13 @@ mod tests {
 
     #[test]
     fn q_and_ctrl_q_send_the_drop_packets() {
-        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut game = placed_game();
         let mut queue = CommandQueue::default();
         for kind in [DropKind::One, DropKind::Stack] {
-            let update = InputUpdate {
-                drop_item: Some(kind),
-                ..InputUpdate::default()
-            };
-            handle_input(&mut game, update, &mut queue);
+            press_drop(&mut game, &mut queue, kind);
         }
+        assert!(queue.ordered.is_empty(), "the packets leave in the tick");
+        run_ticks(&mut game, &mut queue, 1);
         let statuses: Vec<_> = commands(&queue)
             .iter()
             .filter_map(|command| match command {
@@ -5366,13 +6150,14 @@ mod tests {
             vec![DiggingStatus::DropItem, DiggingStatus::DropAllItems]
         );
         game.gamemode = GameMode::Spectator;
-        let before = queue.ordered.len();
-        let update = InputUpdate {
-            drop_item: Some(DropKind::One),
-            ..InputUpdate::default()
-        };
-        handle_input(&mut game, update, &mut queue);
-        assert_eq!(queue.ordered.len(), before);
+        queue.ordered.clear();
+        press_drop(&mut game, &mut queue, DropKind::One);
+        run_ticks(&mut game, &mut queue, 1);
+        assert!(
+            !tags(&queue).iter().any(|tag| tag.starts_with("drop")),
+            "a spectator drops nothing: {:?}",
+            tags(&queue)
+        );
     }
 
     /// Looks straight down at the grass floor (id 2).
@@ -5381,12 +6166,14 @@ mod tests {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.pitch = std::f32::consts::FRAC_PI_2;
         game.windows.apply_set_slot(0, 38, wire_item(2, 0));
+        game.playing = true;
         let mut queue = CommandQueue::default();
-        pick_block(&mut game, &mut queue);
+        press_pick(&mut game, &mut queue);
+        run_ticks(&mut game, &mut queue, 1);
         assert_eq!(game.selected_slot, 2);
-        assert!(commands(&queue)
-            .iter()
-            .any(|command| matches!(command, ClientCommand::HeldItemChange { slot: 2 })));
+        assert!(slots_in(&queue).is_empty(), "the sync is for the next tick");
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(slots_in(&queue), [2]);
     }
 
     #[test]
@@ -5497,10 +6284,181 @@ mod tests {
         }
     }
 
+    // Movement packet scheduling: one report per tick, nothing replaced.
+
+    /// Runs `count` ticks without a flush and returns the feet Z after each.
+    fn run_ticks(game: &mut Game, queue: &mut CommandQueue, count: usize) -> Vec<f64> {
+        let (frames, _frames_rx) = mpsc::sync_channel(64);
+        let (chunks, _chunks_rx) = mpsc::sync_channel(64);
+        (0..count)
+            .map(|_| {
+                tick(game, queue, &frames, &chunks, Instant::now());
+                game.state.as_ref().expect("state").position().z
+            })
+            .collect()
+    }
+
+    /// A game that walks forward (+z) and has already reached its pace.
+    fn walking_game() -> Game {
+        let mut game = placed_game();
+        game.input.forward = 1.0;
+        run_ticks(&mut game, &mut CommandQueue::default(), 6);
+        game
+    }
+
+    fn movement_of(queue: &CommandQueue) -> Vec<&ClientCommand> {
+        queue.ordered.iter().filter(|c| is_movement(c)).collect()
+    }
+
+    fn reported_z(command: &ClientCommand) -> Option<f64> {
+        match command {
+            ClientCommand::PositionLook { z, .. } | ClientCommand::PlayerPosition { z, .. } => {
+                Some(*z)
+            }
+            _ => None,
+        }
+    }
+
+    fn index_of(queue: &CommandQueue, wanted: impl Fn(&ClientCommand) -> bool) -> usize {
+        queue
+            .ordered
+            .iter()
+            .position(wanted)
+            .expect("the command is queued")
+    }
+
+    fn movement_indices(queue: &CommandQueue) -> Vec<usize> {
+        (0..queue.ordered.len())
+            .filter(|&i| is_movement(&queue.ordered[i]))
+            .collect()
+    }
+
+    fn click_stack() -> WireItemStack {
+        wire_item(1, 0)
+    }
+
     #[test]
-    fn the_position_reports_are_coalesced() {
+    fn a_normal_tick_keeps_its_movement_packet() {
+        let mut game = placed_game();
         let mut queue = CommandQueue::default();
-        for step in 0..10 {
+        run_ticks(&mut game, &mut queue, 1);
+        assert!(matches!(
+            commands(&queue)[..],
+            [ClientCommand::PositionLook { .. }]
+        ));
+    }
+
+    #[test]
+    fn three_catch_up_ticks_before_a_flush_keep_three_movement_packets() {
+        let mut game = walking_game();
+        let mut queue = CommandQueue::default();
+        let feet = run_ticks(&mut game, &mut queue, 3);
+        let reports = movement_of(&queue);
+        assert_eq!(reports.len(), 3, "one movement packet per logical tick");
+        let reported: Vec<f64> = reports.iter().filter_map(|c| reported_z(c)).collect();
+        assert_eq!(reported, feet);
+    }
+
+    #[test]
+    fn no_intermediate_position_is_lost() {
+        let mut game = walking_game();
+        let mut queue = CommandQueue::default();
+        let feet = run_ticks(&mut game, &mut queue, 8);
+        let reported: Vec<f64> = movement_of(&queue)
+            .iter()
+            .filter_map(|c| reported_z(c))
+            .collect();
+        assert_eq!(reported, feet);
+        assert!(reported.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn a_movement_then_an_attack_leave_in_the_order_of_their_ticks() {
+        let mut game = walking_game();
+        game.entity_id = 1;
+        game.pitch = 1.0;
+        let mut queue = CommandQueue::default();
+        run_ticks(&mut game, &mut queue, 1);
+        game.input.attack = true;
+        game.attack_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        let moves = movement_indices(&queue);
+        let swing = index_of(&queue, |c| matches!(c, ClientCommand::Swing));
+        let dig = index_of(&queue, |c| matches!(c, ClientCommand::PlayerDigging { .. }));
+        assert_eq!(moves.len(), 2);
+        // The click of a tick leaves before the movement report of that
+        // tick (`runTick` clicks, then `onUpdateWalkingPlayer`), and after
+        // the report of the tick before.
+        assert!(moves[0] < swing && swing < moves[1]);
+        assert!(moves[0] < dig && dig < moves[1]);
+    }
+
+    #[test]
+    fn a_movement_then_a_use_leave_in_the_order_of_their_ticks() {
+        let mut game = walking_game();
+        game.entity_id = 1;
+        game.pitch = 1.0;
+        game.windows.apply_set_slot(0, 36, click_stack());
+        let mut queue = CommandQueue::default();
+        run_ticks(&mut game, &mut queue, 1);
+        game.use_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        let moves = movement_indices(&queue);
+        let used = index_of(&queue, |c| {
+            matches!(
+                c,
+                ClientCommand::Swing | ClientCommand::PlayerBlockPlacement { .. }
+            )
+        });
+        assert_eq!(moves.len(), 2);
+        assert!(moves[0] < used && used < moves[1]);
+    }
+
+    #[test]
+    fn interleaved_actions_keep_one_report_per_tick_and_their_own_tick() {
+        let mut game = walking_game();
+        game.entity_id = 1;
+        game.pitch = 1.0;
+        game.windows.apply_set_slot(0, 36, click_stack());
+        let mut queue = CommandQueue::default();
+        let mut ends = Vec::new();
+        run_ticks(&mut game, &mut queue, 1);
+        ends.push(queue.ordered.len());
+        game.input.attack = true;
+        game.attack_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        game.input.attack = false;
+        ends.push(queue.ordered.len());
+        game.use_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        ends.push(queue.ordered.len());
+        run_ticks(&mut game, &mut queue, 1);
+        ends.push(queue.ordered.len());
+        let mut start = 0;
+        let mut segments = Vec::new();
+        for end in ends {
+            segments.push(queue.ordered.iter().skip(start).take(end - start).collect::<Vec<_>>());
+            start = end;
+        }
+        for segment in &segments {
+            assert_eq!(
+                segment.iter().filter(|c| is_movement(c)).count(),
+                1,
+                "one report per tick: {segment:?}"
+            );
+            assert!(is_movement(segment.last().expect("a command")), "{segment:?}");
+        }
+        assert_eq!(segments[0].len(), 1, "a plain tick sends only its report");
+        assert!(segments[1]
+            .iter()
+            .any(|c| matches!(c, ClientCommand::PlayerDigging { .. })));
+        assert!(segments[2]
+            .iter()
+            .any(|c| matches!(c, ClientCommand::Swing | ClientCommand::PlayerBlockPlacement { .. })));
+    }
+
+    fn pushed_positions(queue: &mut CommandQueue, count: u32) {
+        for step in 0..count {
             queue.push(ClientCommand::PlayerPosition {
                 x: f64::from(step),
                 y: 0.0,
@@ -5508,18 +6466,109 @@ mod tests {
                 on_ground: true,
             });
         }
-        // Only the newest report is kept: a backlog of them would burst on
-        // the socket and the server would kick the client.
-        let Some(ClientCommand::PlayerPosition { x, .. }) = queue.position else {
-            panic!("the report must be a position packet");
-        };
-        assert_eq!(x, 9.0);
+    }
+
+    fn received_x(receiver: &mut tokio::sync::mpsc::Receiver<PlayServerbound>) -> Vec<f64> {
+        let mut xs = Vec::new();
+        while let Ok(packet) = receiver.try_recv() {
+            let PlayServerbound::PlayerPosition(position) = packet else {
+                panic!("only positions were queued, got {packet:?}");
+            };
+            xs.push(position.x);
+        }
+        xs
     }
 
     #[test]
-    fn the_input_packets_are_coalesced() {
+    fn a_full_channel_keeps_every_movement_packet_in_order() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(2);
+        let mut queue = CommandQueue {
+            sender: Some(sender),
+            ..CommandQueue::default()
+        };
+        pushed_positions(&mut queue, 5);
+        queue.flush();
+        assert_eq!(queue.ordered.len(), 3, "the three that did not fit wait");
+        let mut xs = received_x(&mut receiver);
+        while !queue.ordered.is_empty() {
+            queue.flush();
+            xs.extend(received_x(&mut receiver));
+        }
+        assert_eq!(xs, [0.0, 1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn a_flush_transmits_each_packet_once() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let mut queue = CommandQueue {
+            sender: Some(sender),
+            ..CommandQueue::default()
+        };
+        pushed_positions(&mut queue, 5);
+        queue.flush();
+        queue.flush();
+        assert!(queue.ordered.is_empty());
+        assert_eq!(received_x(&mut receiver), [0.0, 1.0, 2.0, 3.0, 4.0]);
+        assert!(receiver.try_recv().is_err(), "nothing is sent twice");
+    }
+
+    #[test]
+    fn the_backlog_is_bounded_by_pausing_the_ticks_and_never_by_dropping() {
         let mut queue = CommandQueue::default();
-        for step in 0..10 {
+        pushed_positions(&mut queue, (PENDING_LIMIT - 1) as u32);
+        assert!(!queue.congested());
+        pushed_positions(&mut queue, 1);
+        assert!(queue.congested(), "the loop starts no new tick now");
+        assert_eq!(queue.ordered.len(), PENDING_LIMIT, "nothing was dropped");
+    }
+
+    #[test]
+    fn what_the_server_view_reported_is_what_the_server_receives() {
+        let mut game = walking_game();
+        let mut queue = CommandQueue::default();
+        let feet = run_ticks(&mut game, &mut queue, 6);
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        queue.sender = Some(sender);
+        queue.flush();
+        let mut known = Vec::new();
+        while let Ok(packet) = receiver.try_recv() {
+            match packet {
+                PlayServerbound::PlayerPosition(p) => known.push(p.z),
+                PlayServerbound::PositionLook(p) => known.push(p.z),
+                other => panic!("a walking player sends positions, got {other:?}"),
+            }
+        }
+        // Each position the `ServerView` counted as reported reached the
+        // wire, so the server's last known position is the player's.
+        assert_eq!(known, feet);
+    }
+
+    #[test]
+    fn an_idle_player_adds_nothing_but_the_bare_player_packet() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        run_ticks(&mut game, &mut queue, 10);
+        assert_eq!(queue.ordered.len(), 10, "one packet per tick, no extras");
+        assert!(matches!(
+            queue.ordered[0],
+            ClientCommand::PositionLook { .. }
+        ));
+        assert!(queue
+            .ordered
+            .iter()
+            .skip(1)
+            .all(|c| matches!(c, ClientCommand::Player { .. })));
+    }
+
+    #[test]
+    fn the_input_packets_of_a_riding_player_are_kept_per_tick() {
+        let mut queue = CommandQueue::default();
+        for step in 0..3 {
+            queue.push(ClientCommand::PlayerLook {
+                yaw: 0.0,
+                pitch: 0.0,
+                on_ground: true,
+            });
             queue.push(ClientCommand::Input {
                 strafe: 0.0,
                 forward: step as f32,
@@ -5527,10 +6576,1063 @@ mod tests {
                 sneaking: false,
             });
         }
-        let Some(ClientCommand::Input { forward, .. }) = queue.input else {
-            panic!("the input must be kept");
+        assert_eq!(movement_of(&queue).len(), 6);
+    }
+
+    // Slot change, drop and pick-block: recorded by the input, sent by the tick.
+
+    fn press_slot(game: &mut Game, queue: &mut CommandQueue, slot: u8) {
+        let update = InputUpdate {
+            select_slot: Some(slot),
+            ..InputUpdate::default()
         };
-        assert_eq!(forward, 9.0);
+        handle_input(game, update, queue);
+    }
+
+    fn press_drop(game: &mut Game, queue: &mut CommandQueue, kind: DropKind) {
+        let update = InputUpdate {
+            drop_item: Some(kind),
+            ..InputUpdate::default()
+        };
+        handle_input(game, update, queue);
+    }
+
+    fn press_pick(game: &mut Game, queue: &mut CommandQueue) {
+        let update = InputUpdate {
+            pick_block: true,
+            ..InputUpdate::default()
+        };
+        handle_input(game, update, queue);
+    }
+
+    fn slots_in(queue: &CommandQueue) -> Vec<i16> {
+        queue
+            .ordered
+            .iter()
+            .filter_map(|command| match command {
+                ClientCommand::HeldItemChange { slot } => Some(*slot),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The queue as a list of short names, oldest first.
+    fn tags(queue: &CommandQueue) -> Vec<String> {
+        queue
+            .ordered
+            .iter()
+            .map(|command| match command {
+                ClientCommand::HeldItemChange { slot } => format!("slot{slot}"),
+                ClientCommand::PlayerDigging {
+                    status: DiggingStatus::DropItem,
+                    ..
+                } => "drop".to_string(),
+                ClientCommand::PlayerDigging {
+                    status: DiggingStatus::DropAllItems,
+                    ..
+                } => "dropall".to_string(),
+                ClientCommand::PlayerDigging { .. } => "dig".to_string(),
+                ClientCommand::CreativeSlot { .. } => "creative".to_string(),
+                ClientCommand::Swing => "swing".to_string(),
+                ClientCommand::UseEntity { action, .. } => match action {
+                    UseEntityAction::Attack => "attack",
+                    UseEntityAction::Interact => "interact",
+                    UseEntityAction::InteractAt { .. } => "interact_at",
+                }
+                .to_string(),
+                ClientCommand::PlayerBlockPlacement { .. } => "place".to_string(),
+                ClientCommand::UseItem { .. } => "use".to_string(),
+                other if is_movement(other) => "move".to_string(),
+                _ => "other".to_string(),
+            })
+            .collect()
+    }
+
+    /// Whether `wanted` appears in `tags` in that order (other tags between).
+    fn in_order(tags: &[String], wanted: &[&str]) -> bool {
+        let mut at = 0;
+        for tag in tags {
+            if at < wanted.len() && tag == wanted[at] {
+                at += 1;
+            }
+        }
+        at == wanted.len()
+    }
+
+    #[test]
+    fn a_slot_press_leaves_in_the_tick_after_the_keys_stage_before_its_movement() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        assert!(queue.ordered.is_empty(), "nothing leaves at the event");
+        // `runTick`: the key selects the slot, no controller call follows.
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["move"]);
+        queue.ordered.clear();
+        // The next `updateController` announces it, ahead of the movement.
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["slot2", "move"]);
+        queue.ordered.clear();
+        run_ticks(&mut game, &mut queue, 2);
+        assert_eq!(tags(&queue), ["move", "move"], "announced once");
+    }
+
+    #[test]
+    fn several_presses_between_two_ticks_make_one_packet_with_the_last_slot() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        for slot in [1, 2, 3] {
+            press_slot(&mut game, &mut queue, slot);
+        }
+        run_ticks(&mut game, &mut queue, 3);
+        assert_eq!(slots_in(&queue), [3]);
+        // Back to the slot the server already knows: nothing at all.
+        queue.ordered.clear();
+        press_slot(&mut game, &mut queue, 4);
+        press_slot(&mut game, &mut queue, 3);
+        run_ticks(&mut game, &mut queue, 3);
+        assert!(slots_in(&queue).is_empty());
+    }
+
+    #[test]
+    fn a_drop_leaves_in_its_tick_before_the_movement_and_without_a_slot_sync() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        press_drop(&mut game, &mut queue, DropKind::One);
+        assert!(queue.ordered.is_empty());
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["drop", "move"]);
+        queue.ordered.clear();
+        // A slot and a drop pressed together: the drop is sent first, the
+        // slot at the next tick (the drop does not sync).
+        press_slot(&mut game, &mut queue, 2);
+        press_drop(&mut game, &mut queue, DropKind::One);
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["drop", "move"]);
+        queue.ordered.clear();
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["slot2", "move"]);
+    }
+
+    #[test]
+    fn every_drop_press_is_a_packet() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        press_drop(&mut game, &mut queue, DropKind::One);
+        press_drop(&mut game, &mut queue, DropKind::Stack);
+        press_drop(&mut game, &mut queue, DropKind::One);
+        run_ticks(&mut game, &mut queue, 2);
+        assert_eq!(tags(&queue), ["drop", "dropall", "drop", "move", "move"]);
+    }
+
+    #[test]
+    fn a_survival_pick_leaves_no_packet_in_its_tick_and_the_slot_in_the_next() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.playing = true;
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        game.windows.apply_set_slot(0, 38, wire_item(2, 0));
+        let mut queue = CommandQueue::default();
+        press_pick(&mut game, &mut queue);
+        assert!(queue.ordered.is_empty());
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["move"]);
+        queue.ordered.clear();
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["slot2", "move"]);
+    }
+
+    #[test]
+    fn a_creative_pick_sends_the_slot_packet_in_its_tick_and_the_sync_in_the_next() {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.playing = true;
+        game.gamemode = GameMode::Creative;
+        game.pitch = std::f32::consts::FRAC_PI_2;
+        game.windows.apply_set_slot(0, 36, wire_item(1, 0));
+        let mut queue = CommandQueue::default();
+        press_pick(&mut game, &mut queue);
+        run_ticks(&mut game, &mut queue, 1);
+        // `sendSlotPacket` does not sync the slot first.
+        assert_eq!(tags(&queue), ["creative", "move"]);
+        let chosen = i16::from(game.selected_slot);
+        assert_ne!(chosen, 0, "the free slot was selected");
+        queue.ordered.clear();
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), [format!("slot{chosen}"), "move".to_string()]);
+    }
+
+    #[test]
+    fn a_slot_before_an_attack_is_announced_between_the_swing_and_the_attack_packet() {
+        let mut game = placed_game();
+        game.entity_id = 1;
+        game.pitch = 1.0;
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        game.input.attack = true;
+        game.attack_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        let seen = tags(&queue);
+        // `clickMouse`: swing, then the controller syncs and sends.
+        assert!(in_order(&seen, &["swing", "slot2", "dig", "move"]), "{seen:?}");
+        assert_eq!(slots_in(&queue), [2], "once");
+    }
+
+    #[test]
+    fn a_slot_before_a_use_is_announced_before_the_use_packet() {
+        let mut game = placed_game();
+        game.entity_id = 1;
+        game.pitch = 1.0;
+        game.windows.apply_set_slot(0, 38, wire_item(1, 0));
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        game.use_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        // `rightClickMouse` on a block: the controller syncs, sends the
+        // placement, and the swing comes after it.
+        assert_eq!(tags(&queue), ["slot2", "place", "swing", "move"]);
+    }
+
+    #[test]
+    fn the_actions_of_one_tick_keep_the_run_tick_order() {
+        let mut game = placed_game();
+        game.entity_id = 1;
+        game.pitch = 1.0;
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        press_drop(&mut game, &mut queue, DropKind::One);
+        press_pick(&mut game, &mut queue);
+        game.input.attack = true;
+        game.attack_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        let seen = tags(&queue);
+        // keys (drop), then the click (swing, sync, controller), then the
+        // movement of the tick.
+        assert!(
+            in_order(&seen, &["drop", "swing", "slot2", "dig", "move"]),
+            "{seen:?}"
+        );
+    }
+
+    #[test]
+    fn a_movement_and_a_slot_of_different_ticks_keep_the_order_of_the_ticks() {
+        let mut game = walking_game();
+        let mut queue = CommandQueue::default();
+        run_ticks(&mut game, &mut queue, 1);
+        press_slot(&mut game, &mut queue, 5);
+        run_ticks(&mut game, &mut queue, 2);
+        // tick 1 move, tick 2 move (the key stage), tick 3: slot then move.
+        assert_eq!(tags(&queue), ["move", "move", "slot5", "move"]);
+    }
+
+    #[test]
+    fn a_slot_chosen_by_the_server_is_announced_back_at_the_next_tick() {
+        // `handleHeldItemChange` sets `currentItem` only; `currentPlayerItem`
+        // keeps the old value, so `updateController` sends the slot back.
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(&mut game, PlayEvent::HeldItemChange(5), &mut queue, &frames);
+        assert!(queue.ordered.is_empty(), "nothing at the event");
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(game.selected_slot, 5);
+        assert_eq!(tags(&queue), ["slot5", "move"]);
+        queue.ordered.clear();
+        run_ticks(&mut game, &mut queue, 2);
+        assert!(slots_in(&queue).is_empty(), "once");
+    }
+
+    #[test]
+    fn a_server_slot_equal_to_the_known_one_sends_nothing() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(&mut game, PlayEvent::HeldItemChange(0), &mut queue, &frames);
+        run_ticks(&mut game, &mut queue, 3);
+        assert!(slots_in(&queue).is_empty());
+    }
+
+    #[test]
+    fn a_key_after_a_server_slot_is_announced_after_the_servers_slot() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(&mut game, PlayEvent::HeldItemChange(5), &mut queue, &frames);
+        press_key(&mut game, &mut queue, 3);
+        run_ticks(&mut game, &mut queue, 2);
+        // Tick 1: the sync sends the server's slot, then the key selects.
+        // Tick 2: the sync sends the key's slot.
+        assert_eq!(tags(&queue), ["slot5", "move", "slot2", "move"]);
+    }
+
+    // The digit keys: one press per key and tick, in the order of the keys.
+
+    fn press_key(game: &mut Game, queue: &mut CommandQueue, key: usize) {
+        let mut keys = [0u8; 9];
+        keys[key - 1] = 1;
+        let update = InputUpdate {
+            hotbar_keys: keys,
+            ..InputUpdate::default()
+        };
+        handle_input(game, update, queue);
+    }
+
+    #[test]
+    fn two_digit_keys_in_one_tick_give_the_higher_key_whatever_the_order() {
+        for order in [[3, 1], [1, 3]] {
+            let mut game = placed_game();
+            let mut queue = CommandQueue::default();
+            for key in order {
+                press_key(&mut game, &mut queue, key);
+            }
+            assert_eq!(game.selected_slot, 2, "the player sees the result at once");
+            run_ticks(&mut game, &mut queue, 3);
+            assert_eq!(slots_in(&queue), [2], "order {order:?}");
+        }
+    }
+
+    #[test]
+    fn three_or_more_keys_give_the_highest_key() {
+        for order in [[5, 2, 8], [8, 5, 2], [2, 8, 5], [9, 1, 4]] {
+            let mut game = placed_game();
+            let mut queue = CommandQueue::default();
+            for key in order {
+                press_key(&mut game, &mut queue, key);
+            }
+            run_ticks(&mut game, &mut queue, 3);
+            let highest = *order.iter().max().expect("keys") as i16 - 1;
+            assert_eq!(slots_in(&queue), [highest], "order {order:?}");
+        }
+    }
+
+    #[test]
+    fn keys_pressed_in_different_ticks_each_count_in_their_tick() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        press_key(&mut game, &mut queue, 6);
+        run_ticks(&mut game, &mut queue, 1);
+        press_key(&mut game, &mut queue, 2);
+        run_ticks(&mut game, &mut queue, 2);
+        // Tick 1 selects key 6; tick 2 syncs it and selects key 2; tick 3
+        // syncs key 2.
+        assert_eq!(tags(&queue), ["move", "slot5", "move", "slot1", "move"]);
+    }
+
+    #[test]
+    fn a_key_pressed_twice_selects_again_at_the_next_tick_over_the_wheel() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        press_key(&mut game, &mut queue, 2);
+        press_key(&mut game, &mut queue, 2);
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(game.selected_slot, 1);
+        // The wheel moves to slot 5 before the next tick; the key still has
+        // a press left, and the keys come after the wheel.
+        press_slot(&mut game, &mut queue, 5);
+        assert_eq!(game.selected_slot, 5);
+        run_ticks(&mut game, &mut queue, 2);
+        assert_eq!(game.selected_slot, 1);
+        assert_eq!(slots_in(&queue), [1], "slot 5 never reached the server");
+    }
+
+    #[test]
+    fn a_key_wins_over_the_wheel_in_the_same_tick_whatever_the_order() {
+        for key_first in [true, false] {
+            let mut game = placed_game();
+            let mut queue = CommandQueue::default();
+            if key_first {
+                press_key(&mut game, &mut queue, 3);
+                press_slot(&mut game, &mut queue, 5);
+            } else {
+                press_slot(&mut game, &mut queue, 5);
+                press_key(&mut game, &mut queue, 3);
+            }
+            run_ticks(&mut game, &mut queue, 3);
+            assert_eq!(slots_in(&queue), [2], "key first: {key_first}");
+        }
+    }
+
+    #[test]
+    fn two_updates_with_the_same_key_between_two_ticks_count_twice() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        press_key(&mut game, &mut queue, 4);
+        press_key(&mut game, &mut queue, 4);
+        press_key(&mut game, &mut queue, 1);
+        // Tick 1: keys 1 and 4 give up a press, the higher wins (slot 3);
+        // tick 2: key 4 has one press left (slot 3 again).
+        run_ticks(&mut game, &mut queue, 3);
+        assert_eq!(slots_in(&queue), [3]);
+    }
+
+    // JoinGame and Respawn.
+
+    #[test]
+    fn a_join_starts_both_sides_on_slot_zero() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        game.selected_slot = 5;
+        game.applied_slot = 5;
+        game.synced_slot = 5;
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(umicraft_net::play::JoinGameInfo {
+                entity_id: 1,
+                gamemode: 0,
+                dimension: 0,
+                difficulty: 0,
+                max_players: 20,
+                level_type: "default".to_string(),
+                reduced_debug_info: false,
+            }),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(
+            (game.selected_slot, game.applied_slot, game.synced_slot),
+            (0, 0, 0)
+        );
+        queue.ordered.clear();
+        run_ticks(&mut game, &mut queue, 3);
+        assert!(slots_in(&queue).is_empty(), "a new controller knows slot 0");
+    }
+
+    fn respawn_event() -> PlayEvent {
+        PlayEvent::Respawn(umicraft_protocol::packets::play::clientbound::Respawn {
+            dimension: 0,
+            difficulty: 0,
+            game_mode: 0,
+            world_type: "default".to_string(),
+        })
+    }
+
+    #[test]
+    fn a_respawn_goes_back_to_slot_zero_and_tells_the_server_once() {
+        // The new player has a new inventory (slot 0); the controller keeps
+        // `currentPlayerItem`, so the next sync announces slot 0.
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        press_key(&mut game, &mut queue, 6);
+        run_ticks(&mut game, &mut queue, 2);
+        assert_eq!(slots_in(&queue), [5]);
+        queue.ordered.clear();
+        handle_net(&mut game, respawn_event(), &mut queue, &frames);
+        assert_eq!(game.selected_slot, 0);
+        assert_eq!(game.windows.selected_slot(), 0);
+        assert!(queue.ordered.is_empty(), "nothing at the event");
+        place_after_respawn(&mut game, &mut queue, &frames);
+        run_ticks(&mut game, &mut queue, 3);
+        assert_eq!(slots_in(&queue), [0], "once, at the next sync");
+    }
+
+    /// The server places the new player, as it does after a respawn.
+    fn place_after_respawn(
+        game: &mut Game,
+        queue: &mut CommandQueue,
+        frames: &SyncSender<RenderEvent>,
+    ) {
+        let placement = umicraft_net::play::PlayerPlacement {
+            x: 0.5,
+            y: 64.0,
+            z: 0.5,
+            ..Default::default()
+        };
+        handle_net(game, PlayEvent::Placement(placement), queue, frames);
+        queue.ordered.clear();
+    }
+
+    #[test]
+    fn a_respawn_on_slot_zero_sends_nothing() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        handle_net(&mut game, respawn_event(), &mut queue, &frames);
+        place_after_respawn(&mut game, &mut queue, &frames);
+        run_ticks(&mut game, &mut queue, 3);
+        assert!(slots_in(&queue).is_empty());
+    }
+
+    // `rightClickMouse` / `clickMouse`: the whole packet sequence with a
+    // pending slot change.
+
+    #[test]
+    fn a_use_of_the_item_in_the_air_syncs_then_uses_without_a_swing() {
+        let mut game = placed_game();
+        game.entity_id = 1;
+        game.pitch = -1.0;
+        game.windows.apply_set_slot(0, 38, wire_item(297, 0));
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        game.use_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        // `sendUseItem`: sync, then the use; `rightClickMouse` swings only
+        // after a placement or an activation.
+        assert_eq!(tags(&queue), ["slot2", "use", "move"]);
+    }
+
+    #[test]
+    fn a_tool_on_a_block_syncs_then_places_then_uses_without_a_swing() {
+        let mut game = placed_game();
+        game.entity_id = 1;
+        game.pitch = 1.0;
+        game.windows.apply_set_slot(0, 38, wire_item(267, 0));
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        game.use_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        // The placement packet is sent, `onItemUse` fails, `sendUseItem`
+        // follows; nothing swings.
+        assert_eq!(tags(&queue), ["slot2", "place", "use", "move"]);
+    }
+
+    #[test]
+    fn a_click_on_a_mob_syncs_then_interacts_at_then_interacts_with_no_swing() {
+        let mut game = placed_game();
+        game.entity_id = 1;
+        spawn_ahead(&mut game, false);
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        game.use_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        // `func_178894_a` (sync, interact-at), `interactWithEntitySendPacket`
+        // (interact); the empty hand sends no use.
+        assert_eq!(tags(&queue), ["slot2", "interact_at", "interact", "move"]);
+    }
+
+    #[test]
+    fn an_attack_on_a_mob_swings_then_syncs_then_attacks() {
+        let mut game = placed_game();
+        game.entity_id = 1;
+        spawn_ahead(&mut game, false);
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        game.input.attack = true;
+        game.attack_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["swing", "slot2", "attack", "move"]);
+    }
+
+    #[test]
+    fn a_click_that_only_swings_does_not_sync_the_slot() {
+        let mut game = placed_game();
+        game.entity_id = 1;
+        game.pitch = -1.0;
+        let mut queue = CommandQueue::default();
+        press_slot(&mut game, &mut queue, 2);
+        game.input.attack = true;
+        game.attack_pressed = true;
+        run_ticks(&mut game, &mut queue, 1);
+        // `clickMouse` on air: `swingItem`, no controller call, no sync.
+        assert_eq!(tags(&queue), ["swing", "move"]);
+        queue.ordered.clear();
+        game.input.attack = false;
+        run_ticks(&mut game, &mut queue, 1);
+        assert_eq!(tags(&queue), ["slot2", "move"], "the next updateController");
+    }
+
+    #[test]
+    fn actions_pressed_while_congested_leave_once_after_the_resume() {
+        let mut harness = LoopHarness::start(network::COMMAND_CAPACITY);
+        harness.join_world();
+        harness.wait_for_ticks(12);
+        let sent = harness.spam_chats(CONGESTING);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        harness.ticks();
+        // Three slot presses and a drop while the simulation waits.
+        for slot in [4, 5, 6] {
+            harness
+                .inputs
+                .send(InputUpdate {
+                    select_slot: Some(slot),
+                    ..InputUpdate::default()
+                })
+                .expect("the loop runs");
+        }
+        harness
+            .inputs
+            .send(InputUpdate {
+                drop_item: Some(DropKind::One),
+                ..InputUpdate::default()
+            })
+            .expect("the loop runs");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(harness.ticks(), 0, "still congested");
+
+        let stream = harness.read_for(std::time::Duration::from_millis(1500));
+        let after = harness.finish();
+        let stream: Vec<PlayServerbound> = stream.into_iter().chain(after).collect();
+        assert_eq!(chats_of(&stream), sent, "the queue kept its order");
+        assert_eq!(slots_in_stream(&stream), [6], "three presses, one packet");
+        let drops: Vec<usize> = stream
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| {
+                matches!(p, PlayServerbound::PlayerDigging(d) if d.status == DiggingStatus::DropItem)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(drops.len(), 1, "the drop leaves once");
+        let slot = stream
+            .iter()
+            .position(|p| matches!(p, PlayServerbound::HeldItemChange(_)))
+            .expect("the slot packet");
+        assert!(drops[0] < slot, "the drop of the key stage, then the sync");
+        assert_fall_has_no_gap(&falling_ys(&stream));
+    }
+
+    fn slots_in_stream(packets: &[PlayServerbound]) -> Vec<i16> {
+        slots_of(packets)
+    }
+
+    // The congestion guard in the real game loop (`run`, on its own thread).
+
+    /// Slot changes that fill the channel to the socket thread and then the
+    /// queue up to its limit while nothing is read.
+    const CONGESTING: usize = network::COMMAND_CAPACITY + PENDING_LIMIT + 22;
+
+    /// The real game loop with channels the test holds. The commands channel
+    /// is only drained when the test reads it, which is how a
+    /// socket that does not take packets looks like to the game thread.
+    /// Every `RenderEvent::Frame` is one executed tick.
+    struct LoopHarness {
+        inputs: crossbeam_channel::Sender<InputUpdate>,
+        events: crossbeam_channel::Sender<GameEvent>,
+        frames: mpsc::Receiver<RenderEvent>,
+        _chunks: mpsc::Receiver<ChunkEvent>,
+        commands: tokio::sync::mpsc::Receiver<PlayServerbound>,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+        spam: u32,
+        /// Frame duration the game thread paces its events with (0 = off).
+        frame_micros: std::sync::Arc<AtomicU32>,
+    }
+
+    impl LoopHarness {
+        fn start(capacity: usize) -> Self {
+            let frame_micros = std::sync::Arc::new(AtomicU32::new(0));
+            let (inputs_tx, inputs) = crossbeam_channel::unbounded();
+            let (events_tx, events) = crossbeam_channel::unbounded();
+            let (frames_tx, frames) = mpsc::sync_channel(100_000);
+            let (chunks_tx, chunks) = mpsc::sync_channel(100_000);
+            let (commands_tx, commands) = tokio::sync::mpsc::channel(capacity);
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let channels = GameChannels {
+                inputs,
+                events,
+                frames: frames_tx,
+                chunks: chunks_tx,
+                commands: commands_tx,
+                frame_micros: std::sync::Arc::clone(&frame_micros),
+            };
+            let flag = std::sync::Arc::clone(&stop);
+            let thread = std::thread::spawn(move || run(channels, flag, "tester".to_string(), None));
+            Self {
+                inputs: inputs_tx,
+                events: events_tx,
+                frames,
+                _chunks: chunks,
+                commands,
+                stop,
+                thread: Some(thread),
+                spam: 0,
+                frame_micros,
+            }
+        }
+
+        /// Joins a world of empty air and places the player high above it,
+        /// so it falls (and reports a new position every tick) for a long time.
+        fn join_world(&self) {
+            let send = |event| self.events.send(GameEvent::Net(event)).expect("the loop runs");
+            send(PlayEvent::JoinGame(umicraft_net::play::JoinGameInfo {
+                entity_id: 1,
+                gamemode: 0,
+                dimension: 0,
+                difficulty: 0,
+                max_players: 20,
+                level_type: "flat".to_string(),
+                reduced_debug_info: false,
+            }));
+            send(PlayEvent::ChunkData(Box::new(ChunkData {
+                chunk_x: 0,
+                chunk_z: 0,
+                ground_up: true,
+                primary_bit_mask: 1,
+                data: vec![0u8; umicraft_world::chunk::payload_len(1, true, true)],
+            })));
+            send(PlayEvent::Placement(umicraft_net::play::PlayerPlacement {
+                x: 0.5,
+                y: 1000.0,
+                z: 0.5,
+                ..Default::default()
+            }));
+        }
+
+        /// The ticks executed since the last call.
+        fn ticks(&self) -> usize {
+            let mut count = 0;
+            while let Ok(event) = self.frames.try_recv() {
+                if matches!(event, RenderEvent::Frame(_)) {
+                    count += 1;
+                }
+            }
+            count
+        }
+
+        fn wait_for_ticks(&self, wanted: usize) -> usize {
+            let mut seen = 0;
+            let deadline = Instant::now() + std::time::Duration::from_secs(5);
+            while seen < wanted && Instant::now() < deadline {
+                seen += self.ticks();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(seen >= wanted, "only {seen} ticks ran");
+            seen
+        }
+
+        /// Chat lines, each one a command in the queue. (Slot changes cannot
+        /// fill it any more: the presses between two ticks make one packet.)
+        fn spam_chats(&mut self, count: usize) -> Vec<String> {
+            (0..count)
+                .map(|_| {
+                    let message = format!("m{}", self.spam);
+                    self.spam += 1;
+                    self.events
+                        .send(GameEvent::Chat(message.clone()))
+                        .expect("the loop runs");
+                    message
+                })
+                .collect()
+        }
+
+        /// Reads what reached the socket side until `window` has passed.
+        fn read_for(&mut self, window: std::time::Duration) -> Vec<PlayServerbound> {
+            let mut packets = Vec::new();
+            let end = Instant::now() + window;
+            while Instant::now() < end {
+                while let Ok(packet) = self.commands.try_recv() {
+                    packets.push(packet);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            packets
+        }
+
+        fn finish(&mut self) -> Vec<PlayServerbound> {
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.thread.take().expect("running").join().expect("the loop ends");
+            self.read_for(std::time::Duration::from_millis(20))
+        }
+    }
+
+    /// A server that answers every position confirmation with a new teleport
+    /// (what PandaSpigot did for a dead player in phase E.8): the number of
+    /// confirmations the client sends in `window`.
+    fn teleport_ping_pong(harness: &mut LoopHarness, window: std::time::Duration) -> usize {
+        let placement = || {
+            GameEvent::Net(PlayEvent::Placement(umicraft_net::play::PlayerPlacement {
+                x: 0.5,
+                y: 1000.0,
+                z: 0.5,
+                ..Default::default()
+            }))
+        };
+        let confirmed = |packet: &PlayServerbound| matches!(packet, PlayServerbound::PositionLook(_));
+        // Let the join settle and drop its confirmations, so exactly one
+        // teleport is in flight, as with a real server.
+        let settle = Instant::now() + std::time::Duration::from_millis(200);
+        while Instant::now() < settle {
+            while harness.commands.try_recv().is_ok() {}
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let end = Instant::now() + window;
+        let mut count = 0;
+        harness.events.send(placement()).expect("the loop runs");
+        while Instant::now() < end {
+            match harness.commands.try_recv() {
+                Ok(packet) if confirmed(&packet) => {
+                    count += 1;
+                    harness.events.send(placement()).expect("the loop runs");
+                }
+                Ok(_) => {}
+                Err(_) => std::thread::sleep(std::time::Duration::from_micros(50)),
+            }
+        }
+        count
+    }
+
+    /// Phase E.9, vanilla `runGameLoop`: network tasks are taken once per frame,
+    /// so an endless teleport / confirmation exchange runs at the frame rate,
+    /// never faster (at 50 frames per second, 20 ms: about 25 in half a second).
+    #[test]
+    fn a_teleport_loop_runs_at_the_frame_rate() {
+        let mut harness = LoopHarness::start(65_536);
+        harness.join_world();
+        harness.wait_for_ticks(3);
+        harness.frame_micros.store(20_000, Ordering::Relaxed);
+        let window = std::time::Duration::from_millis(500);
+        let count = teleport_ping_pong(&mut harness, window);
+        let _ = harness.finish();
+        assert!(
+            (15..=30).contains(&count),
+            "{count} confirmations in 500 ms at a 20 ms frame"
+        );
+    }
+
+    /// With the pacing off (value 0, the old behaviour) the same exchange runs
+    /// as fast as the threads allow: far more than a frame rate.
+    #[test]
+    fn without_frame_pacing_a_teleport_loop_is_not_bounded() {
+        let mut harness = LoopHarness::start(65_536);
+        harness.join_world();
+        harness.wait_for_ticks(3);
+        let count = teleport_ping_pong(&mut harness, std::time::Duration::from_millis(300));
+        let _ = harness.finish();
+        assert!(count > 200, "only {count} confirmations without pacing");
+    }
+
+    fn chats_of(packets: &[PlayServerbound]) -> Vec<String> {
+        packets
+            .iter()
+            .filter_map(|packet| match packet {
+                PlayServerbound::Chat(chat) => Some(chat.message.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn slots_of(packets: &[PlayServerbound]) -> Vec<i16> {
+        packets
+            .iter()
+            .filter_map(|packet| match packet {
+                PlayServerbound::HeldItemChange(change) => Some(change.slot),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The feet Y of the falling player in each position report, without the
+    /// acknowledgement of the placement (the exact Y of the placement).
+    fn falling_ys(packets: &[PlayServerbound]) -> Vec<f64> {
+        packets
+            .iter()
+            .filter_map(|packet| match packet {
+                PlayServerbound::PlayerPosition(p) => Some(p.y),
+                PlayServerbound::PositionLook(p) => Some(p.y),
+                _ => None,
+            })
+            .filter(|&y| y != 1000.0)
+            .collect()
+    }
+
+    /// A lost report of a falling player doubles one step; the steps of a
+    /// fall grow by less than 30 % after the first ten ticks.
+    fn assert_fall_has_no_gap(ys: &[f64]) {
+        assert!(ys.windows(2).all(|w| w[1] < w[0]), "reports out of order or twice");
+        let steps: Vec<f64> = ys.windows(2).map(|w| w[0] - w[1]).collect();
+        for (i, pair) in steps.windows(2).enumerate().skip(8) {
+            assert!(pair[1] / pair[0] < 1.3, "a report is missing near #{i}: {pair:?}");
+        }
+    }
+
+    #[test]
+    fn the_real_loop_stops_ticking_while_congested_and_resumes_when_the_network_drains() {
+        let mut harness = LoopHarness::start(network::COMMAND_CAPACITY);
+        harness.join_world();
+        let mut total_ticks = harness.wait_for_ticks(12);
+        // Congest the queue: more commands than the limit, nothing read.
+        let mut sent = harness.spam_chats(CONGESTING);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        total_ticks += harness.ticks();
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        assert_eq!(harness.ticks(), 0, "no tick starts while the queue is full");
+        // The player still acts while the simulation waits.
+        harness
+            .inputs
+            .send(InputUpdate {
+                look_yaw: 0.5,
+                select_slot: Some(3),
+                ..InputUpdate::default()
+            })
+            .expect("the loop runs");
+        harness
+            .events
+            .send(GameEvent::Chat("during".to_string()))
+            .expect("the loop runs");
+        sent.push("during".to_string());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(harness.ticks(), 0, "still congested");
+
+        // The network takes packets again.
+        let stream = harness.read_for(std::time::Duration::from_millis(1500));
+        let resumed = harness.ticks();
+        total_ticks += resumed;
+        assert!(
+            (10..=35).contains(&resumed),
+            "the game resumes at its pace, no catch-up burst: {resumed} ticks in 1.5 s"
+        );
+        let after = harness.finish();
+        let stream: Vec<PlayServerbound> = stream.into_iter().chain(after).collect();
+
+        // Nothing queued was dropped, duplicated or reordered.
+        assert_eq!(chats_of(&stream), sent);
+        assert_eq!(slots_of(&stream), [3], "the slot pressed while congested, once");
+        assert_fall_has_no_gap(&falling_ys(&stream));
+        // The turn made during the congestion reached the wire.
+        let turned = stream.iter().any(|packet| match packet {
+            PlayServerbound::PlayerLook(p) => (p.yaw - 28.6479).abs() < 0.01,
+            PlayServerbound::PositionLook(p) => (p.yaw - 28.6479).abs() < 0.01,
+            _ => false,
+        });
+        assert!(turned, "the mouse movement during the congestion was kept");
+        // Every executed tick sent its one report (the placement's
+        // acknowledgement is the only extra).
+        let reports = stream
+            .iter()
+            .filter(|p| {
+                matches!(
+                    p,
+                    PlayServerbound::Player(_)
+                        | PlayServerbound::PlayerPosition(_)
+                        | PlayServerbound::PlayerLook(_)
+                        | PlayServerbound::PositionLook(_)
+                )
+            })
+            .count();
+        assert_eq!(reports, total_ticks + 1, "{reports} reports for {total_ticks} ticks");
+    }
+
+    #[test]
+    fn several_congestions_and_recoveries_keep_the_order_and_lose_nothing() {
+        let mut harness = LoopHarness::start(network::COMMAND_CAPACITY);
+        harness.join_world();
+        harness.wait_for_ticks(12);
+        let mut sent = Vec::new();
+        let mut stream = Vec::new();
+        for cycle in 0..3 {
+            sent.extend(harness.spam_chats(CONGESTING));
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            harness.ticks();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            assert_eq!(harness.ticks(), 0, "cycle {cycle}: congested, no tick");
+            stream.extend(harness.read_for(std::time::Duration::from_millis(700)));
+            assert!(harness.ticks() >= 5, "cycle {cycle}: the game ticks again");
+        }
+        stream.extend(harness.finish());
+        assert_eq!(chats_of(&stream), sent, "FIFO through three cycles");
+        assert_fall_has_no_gap(&falling_ys(&stream));
+    }
+
+    #[test]
+    fn a_congested_loop_keeps_serving_events_and_stops_on_request() {
+        let mut harness = LoopHarness::start(network::COMMAND_CAPACITY);
+        harness.join_world();
+        harness.wait_for_ticks(5);
+        harness.spam_chats(CONGESTING);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        harness.ticks();
+        // A flood of events and inputs while the queue is full: the loop
+        // must still take them (no deadlock with the full channel).
+        for _ in 0..500 {
+            harness
+                .events
+                .send(GameEvent::Input(InputUpdate::default()))
+                .expect("the loop runs");
+            harness.inputs.send(InputUpdate::default()).expect("the loop runs");
+        }
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        while (harness.events.len() > 0 || harness.inputs.len() > 0) && Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(harness.events.len() + harness.inputs.len(), 0, "the loop took them");
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert_eq!(harness.ticks(), 0, "and it is still congested");
+        // Shutdown works while congested.
+        let started = Instant::now();
+        harness.finish();
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn without_congestion_every_tick_sends_exactly_one_report() {
+        let mut harness = LoopHarness::start(64);
+        harness.join_world();
+        let mut ticks = 0;
+        let mut stream = Vec::new();
+        let end = Instant::now() + std::time::Duration::from_millis(1500);
+        while Instant::now() < end {
+            ticks += harness.ticks();
+            stream.extend(harness.read_for(std::time::Duration::from_millis(20)));
+        }
+        ticks += harness.ticks();
+        stream.extend(harness.finish());
+        ticks += harness.ticks();
+        let reports = stream
+            .iter()
+            .filter(|p| {
+                matches!(
+                    p,
+                    PlayServerbound::Player(_)
+                        | PlayServerbound::PlayerPosition(_)
+                        | PlayServerbound::PlayerLook(_)
+                        | PlayServerbound::PositionLook(_)
+                )
+            })
+            .count();
+        assert!(ticks >= 20);
+        assert_eq!(reports, ticks + 1, "the placement's acknowledgement is the extra one");
+        assert_fall_has_no_gap(&falling_ys(&stream));
+    }
+
+    #[test]
+    fn a_full_queue_drains_through_a_small_channel_in_order() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+        let mut queue = CommandQueue {
+            sender: Some(sender),
+            ..CommandQueue::default()
+        };
+        pushed_positions(&mut queue, (PENDING_LIMIT * 2) as u32);
+        assert!(queue.congested());
+        let mut xs = Vec::new();
+        let mut rounds = 0;
+        while !queue.ordered.is_empty() {
+            queue.flush();
+            xs.extend(received_x(&mut receiver));
+            rounds += 1;
+            assert!(rounds < 1000, "the queue must empty");
+        }
+        assert!(!queue.congested());
+        assert_eq!(xs.len(), PENDING_LIMIT * 2);
+        assert!(xs.windows(2).all(|w| w[1] == w[0] + 1.0), "FIFO, no duplicate");
+    }
+
+    #[test]
+    fn a_riding_jump_leaves_ahead_of_the_report_of_its_tick_only() {
+        let jump = || ClientCommand::RidingJump {
+            entity_id: 1,
+            strength: 50,
+        };
+        let report = || ClientCommand::PlayerPosition {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            on_ground: true,
+        };
+        let action = ClientCommand::EntityAction {
+            entity_id: 1,
+            action: umicraft_protocol::packets::play::serverbound::EntityActionKind::StartSneaking,
+        };
+        // The report of an earlier tick stays ahead of the jump.
+        let mut queue = CommandQueue::default();
+        queue.push(report());
+        let since = queue.ordered.len();
+        queue.push_before_movement(jump(), since);
+        assert_eq!(queue.ordered, [report(), jump()]);
+        // The report of this tick comes after the jump and its actions.
+        let mut queue = CommandQueue::default();
+        queue.push(action.clone());
+        queue.push(report());
+        queue.push_before_movement(jump(), 0);
+        assert_eq!(queue.ordered, [action, jump(), report()]);
     }
 
     #[test]
@@ -6321,5 +8423,919 @@ mod tests {
             queue.ordered.front(),
             Some(ClientCommand::RequestStats)
         ));
+    }
+
+    // =========================================================================
+    // Phase B: Network Event Order & Parity Tests (12 Test Cases)
+    // =========================================================================
+
+    #[test]
+    fn test_event_order_1_s12_velocity_received_before_tick() {
+        let mut harness = LoopHarness::start(network::COMMAND_CAPACITY);
+        harness.join_world();
+        harness.wait_for_ticks(3);
+        // Send S12 knockback upwards (+0.5 blocks/tick) to the local player (id 1)
+        harness.events.send(GameEvent::Net(PlayEvent::EntityVelocity(
+            umicraft_protocol::packets::play::clientbound::EntityVelocity {
+                entity_id: 1,
+                velocity_x: 0,
+                velocity_y: 4000,
+                velocity_z: 0,
+            },
+        ))).expect("event sent");
+        // Wait for the next tick to execute
+        harness.wait_for_ticks(1);
+        let stream = harness.finish();
+        let ys = falling_ys(&stream);
+        assert!(ys.len() >= 2);
+        // In vanilla Java, velocity received before runTick() is applied in scheduledExecutables,
+        // so the very next tick moves upward instead of continuing downward acceleration.
+        let mut had_upward_or_reduced_fall = false;
+        for window in ys.windows(2) {
+            if window[1] >= window[0] - 0.05 {
+                had_upward_or_reduced_fall = true;
+                break;
+            }
+        }
+        assert!(had_upward_or_reduced_fall, "S12 velocity took effect immediately before tick: {ys:?}");
+    }
+
+    #[test]
+    fn test_event_order_2_s12_velocity_received_after_tick_start() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        // Execute tick 1 (gravity applies, velocity is negative/downward)
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        let vel_before = game.state.as_ref().unwrap().player().velocity;
+        assert!(vel_before.y <= 0.0);
+
+        // Receive S12 event between ticks
+        let entity_id = game.entity_id;
+        handle_net(&mut game, PlayEvent::EntityVelocity(
+            umicraft_protocol::packets::play::clientbound::EntityVelocity {
+                entity_id,
+                velocity_x: 0,
+                velocity_y: 8000, // 1.0 b/t
+                velocity_z: 0,
+            },
+        ), &mut queue, &frames);
+
+        // Execute tick 2: velocity must be incorporated into this tick's movement
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        let pos_after = game.state.as_ref().unwrap().position();
+        assert!(pos_after.y > 64.0, "tick 2 incorporated S12: y={}", pos_after.y);
+    }
+
+    #[test]
+    fn test_event_order_3_s08_pos_look_received_before_tick() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+
+        // S08 arrives before tick
+        handle_net(&mut game, PlayEvent::Placement(
+            umicraft_net::play::PlayerPlacement {
+                x: 100.0,
+                y: 150.0,
+                z: 200.0,
+                yaw: 45.0,
+                pitch: 10.0,
+                ..Default::default()
+            },
+        ), &mut queue, &frames);
+
+        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(100.0, 150.0, 200.0));
+        assert!(matches!(queue.ordered.front(), Some(ClientCommand::AckPosition { .. })));
+
+        // Tick simulates from the new position
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        let pos = game.state.as_ref().unwrap().position();
+        assert!((pos.x - 100.0).abs() < 1e-4);
+        assert!((pos.z - 200.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_event_order_4_multiple_s08_successive_in_same_pass() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+
+        for i in 1..=3 {
+            handle_net(&mut game, PlayEvent::Placement(
+                umicraft_net::play::PlayerPlacement {
+                    x: i as f64 * 10.0,
+                    y: 100.0,
+                    z: i as f64 * 10.0,
+                    ..Default::default()
+                },
+            ), &mut queue, &frames);
+        }
+
+        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(30.0, 100.0, 30.0));
+        let acks: Vec<f64> = queue.ordered.iter().filter_map(|cmd| match cmd {
+            ClientCommand::AckPosition { x, .. } => Some(*x),
+            _ => None,
+        }).collect();
+        assert_eq!(acks, vec![10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn test_event_order_5_s08_and_s12_in_same_batch() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+
+        handle_net(&mut game, PlayEvent::Placement(
+            umicraft_net::play::PlayerPlacement {
+                x: 10.0,
+                y: 100.0,
+                z: 10.0,
+                ..Default::default()
+            },
+        ), &mut queue, &frames);
+        let entity_id = game.entity_id;
+        handle_net(&mut game, PlayEvent::EntityVelocity(
+            umicraft_protocol::packets::play::clientbound::EntityVelocity {
+                entity_id,
+                velocity_x: 0,
+                velocity_y: 8000,
+                velocity_z: 0,
+            },
+        ), &mut queue, &frames);
+
+        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(10.0, 100.0, 10.0));
+        assert_eq!(game.state.as_ref().unwrap().player().velocity.y, 1.0);
+
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        assert!(game.state.as_ref().unwrap().position().y > 100.5);
+    }
+
+    #[test]
+    fn test_event_order_6_multiple_block_changes_before_tick() {
+        use umicraft_protocol::packets::play::clientbound::BlockChange;
+
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+
+        handle_net(&mut game, PlayEvent::BlockChange(
+            BlockChange::at(0, 65, 0, 1 << 4), // Stone
+        ), &mut queue, &frames);
+
+        assert_eq!(game.world.as_ref().unwrap().block(BlockPos::new(0, 65, 0)), BlockState::new(1, 0));
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        assert_eq!(game.world.as_ref().unwrap().block(BlockPos::new(0, 65, 0)), BlockState::new(1, 0));
+    }
+
+    #[test]
+    fn test_event_order_7_join_game_followed_by_state_packets() {
+        let mut game = Game::new();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+
+        handle_net(&mut game, PlayEvent::JoinGame(umicraft_net::play::JoinGameInfo {
+            entity_id: 42,
+            gamemode: 1,
+            dimension: 0,
+            difficulty: 1,
+            max_players: 10,
+            level_type: "flat".to_string(),
+            reduced_debug_info: false,
+        }), &mut queue, &frames);
+
+        assert_eq!(game.entity_id, 42);
+        assert_eq!(game.gamemode, GameMode::Creative);
+        assert!(game.world.is_some());
+        assert!(game.state.is_none());
+
+        handle_net(&mut game, PlayEvent::SpawnPosition(
+            umicraft_protocol::packets::play::clientbound::SpawnPosition { x: 0, y: 64, z: 0 }
+        ), &mut queue, &frames);
+        handle_net(&mut game, PlayEvent::Placement(
+            umicraft_net::play::PlayerPlacement {
+                x: 0.5,
+                y: 65.0,
+                z: 0.5,
+                ..Default::default()
+            }
+        ), &mut queue, &frames);
+
+        assert!(game.state.is_some());
+        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(0.5, 65.0, 0.5));
+    }
+
+    #[test]
+    fn test_event_order_8_respawn_followed_by_placement() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+
+        game.health = 0.0;
+        handle_net(&mut game, PlayEvent::Respawn(
+            umicraft_protocol::packets::play::clientbound::Respawn {
+                dimension: 0,
+                difficulty: 1,
+                game_mode: 0,
+                world_type: "default".to_string(),
+            }
+        ), &mut queue, &frames);
+
+        assert_eq!(game.health, 20.0);
+        assert!(game.state.is_none());
+
+        handle_net(&mut game, PlayEvent::Placement(
+            umicraft_net::play::PlayerPlacement {
+                x: 10.0,
+                y: 70.0,
+                z: 10.0,
+                ..Default::default()
+            }
+        ), &mut queue, &frames);
+
+        assert!(game.state.is_some());
+        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(10.0, 70.0, 10.0));
+    }
+
+    #[test]
+    fn test_event_order_9_dimension_change_with_pending_events() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+
+        handle_net(&mut game, PlayEvent::Respawn(
+            umicraft_protocol::packets::play::clientbound::Respawn {
+                dimension: -1,
+                difficulty: 1,
+                game_mode: 0,
+                world_type: "default".to_string(),
+            }
+        ), &mut queue, &frames);
+
+        assert_eq!(game.dimension, -1);
+        assert_eq!(game.world.as_ref().unwrap().dimension(), -1);
+        assert!(game.state.is_none());
+
+        handle_net(&mut game, PlayEvent::Placement(
+            umicraft_net::play::PlayerPlacement {
+                x: 5.0,
+                y: 80.0,
+                z: 5.0,
+                ..Default::default()
+            }
+        ), &mut queue, &frames);
+
+        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(5.0, 80.0, 5.0));
+    }
+
+    #[test]
+    fn test_event_order_10_multiple_catch_up_ticks() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+
+        for i in 0..3 {
+            tick(&mut game, &mut queue, &frames, &chunks, Instant::now() + Duration::from_millis(50 * i));
+        }
+
+        let movements = movement_of(&queue);
+        assert_eq!(movements.len(), 3, "3 catch-up ticks produce exactly 3 movement reports");
+    }
+
+    #[test]
+    fn test_event_order_11_heavy_network_load_burst() {
+        use umicraft_protocol::packets::play::clientbound::BlockChange;
+
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(1000);
+        let (chunks, _) = mpsc::sync_channel(1000);
+
+        for i in 0..150 {
+            handle_net(&mut game, PlayEvent::BlockChange(
+                BlockChange::at(i, 60, 0, 1 << 4),
+            ), &mut queue, &frames);
+        }
+
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        assert!(game.state.is_some());
+    }
+
+    #[test]
+    fn test_event_order_12_fifo_order_preserved() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+
+        for i in 0..5 {
+            handle_net(&mut game, PlayEvent::HeldItemChange(i as i8), &mut queue, &frames);
+            assert_eq!(game.selected_slot, i as u8, "slot updated in exact FIFO order");
+        }
+    }
+
+    // =========================================================================
+    // Phase C: Parité des rotations et des entrées utilisateur (Minecraft 1.8.9)
+    // =========================================================================
+
+    #[test]
+    fn test_rot_1_pitch_at_minus_90_degrees() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+
+        // Input pushing pitch to negative limit (looking up towards sky)
+        handle_input(
+            &mut game,
+            InputUpdate {
+                look_pitch: -10.0,
+                ..InputUpdate::default()
+            },
+            &mut queue,
+        );
+
+        assert_eq!(game.pitch, -MAX_PITCH);
+        assert!((game.pitch.to_degrees() - (-90.0)).abs() < 1e-4);
+
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        let movements = movement_of(&queue);
+        assert!(!movements.is_empty());
+        let last = movements.last().unwrap();
+        let wire_pitch = match last {
+            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => *pitch,
+            other => panic!("expected look report, got {other:?}"),
+        };
+        assert!((wire_pitch - (-90.0)).abs() < 1e-4, "wire pitch must be -90.0°, got {wire_pitch}");
+    }
+
+    #[test]
+    fn test_rot_2_pitch_at_plus_90_degrees() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+
+        // Input pushing pitch to positive limit (looking down towards feet)
+        handle_input(
+            &mut game,
+            InputUpdate {
+                look_pitch: 10.0,
+                ..InputUpdate::default()
+            },
+            &mut queue,
+        );
+
+        assert_eq!(game.pitch, MAX_PITCH);
+        assert!((game.pitch.to_degrees() - 90.0).abs() < 1e-4);
+
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        let movements = movement_of(&queue);
+        assert!(!movements.is_empty());
+        let last = movements.last().unwrap();
+        let wire_pitch = match last {
+            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => *pitch,
+            other => panic!("expected look report, got {other:?}"),
+        };
+        assert!((wire_pitch - 90.0).abs() < 1e-4, "wire pitch must be +90.0°, got {wire_pitch}");
+    }
+
+    #[test]
+    fn test_rot_3_pitch_clamp_beyond_limits() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+
+        // Attempting to exceed upper limit
+        handle_input(
+            &mut game,
+            InputUpdate {
+                look_pitch: 50.0,
+                ..InputUpdate::default()
+            },
+            &mut queue,
+        );
+        assert_eq!(game.pitch, 90.0_f32.to_radians());
+
+        // Attempting to exceed lower limit
+        handle_input(
+            &mut game,
+            InputUpdate {
+                look_pitch: -100.0,
+                ..InputUpdate::default()
+            },
+            &mut queue,
+        );
+        assert_eq!(game.pitch, -90.0_f32.to_radians());
+    }
+
+    #[test]
+    fn test_rot_4_mouse_delta_1_10_100_pixels() {
+        // At default sensitivity (0.5), look_factor = 1.0
+        // In vanilla Minecraft: delta * 1.0 * 0.15 degrees
+        let speed = crate::window::MOUSE_SENSITIVITY;
+
+        // 1 pixel
+        let delta_1_rad = 1.0_f32 * speed;
+        let delta_1_deg = delta_1_rad.to_degrees();
+        assert!((delta_1_deg - 0.15).abs() < 1e-6, "1px delta: expected 0.15°, got {delta_1_deg}");
+
+        // 10 pixels
+        let delta_10_rad = 10.0_f32 * speed;
+        let delta_10_deg = delta_10_rad.to_degrees();
+        assert!((delta_10_deg - 1.50).abs() < 1e-5, "10px delta: expected 1.50°, got {delta_10_deg}");
+
+        // 100 pixels
+        let delta_100_rad = 100.0_f32 * speed;
+        let delta_100_deg = delta_100_rad.to_degrees();
+        assert!((delta_100_deg - 15.00).abs() < 1e-4, "100px delta: expected 15.00°, got {delta_100_deg}");
+    }
+
+    #[test]
+    fn test_rot_5_sensitivity_scaling_levels() {
+        use crate::options::ControlOptions;
+
+        // Min sensitivity = 0.0
+        let ctrl_min = ControlOptions { mouse_sensitivity: 0.0, ..ControlOptions::default() };
+        let factor_min = ctrl_min.look_factor();
+        let rot_min_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_min).to_degrees();
+        let expected_min = 100.0 * 0.064 * 0.15; // 0.96°
+        assert!((rot_min_deg - expected_min).abs() < 1e-4, "min sens: got {rot_min_deg}, expected {expected_min}");
+
+        // Default sensitivity = 0.5
+        let ctrl_def = ControlOptions { mouse_sensitivity: 0.5, ..ControlOptions::default() };
+        let factor_def = ctrl_def.look_factor();
+        let rot_def_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_def).to_degrees();
+        let expected_def = 100.0 * 1.0 * 0.15; // 15.0°
+        assert!((rot_def_deg - expected_def).abs() < 1e-4, "default sens: got {rot_def_deg}, expected {expected_def}");
+
+        // Max sensitivity = 1.0
+        let ctrl_max = ControlOptions { mouse_sensitivity: 1.0, ..ControlOptions::default() };
+        let factor_max = ctrl_max.look_factor();
+        let rot_max_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_max).to_degrees();
+        let expected_max = 100.0 * 4.096 * 0.15; // 61.44°
+        assert!((rot_max_deg - expected_max).abs() < 1e-4, "max sens: got {rot_max_deg}, expected {expected_max}");
+    }
+
+    #[test]
+    fn test_rot_6_java_rust_rotation_comparison() {
+        use crate::options::ControlOptions;
+
+        let sensitivities = [0.0_f32, 0.2, 0.5, 0.8, 1.0];
+        let deltas = [1.0_f32, 5.0, 10.0, 25.0, 50.0, 100.0, -15.0, -80.0];
+
+        for &s in &sensitivities {
+            // Java 1.8.9 EntityRenderer.java formula:
+            let f = s * 0.6_f32 + 0.2_f32;
+            let f1 = f * f * f * 8.0_f32;
+
+            let ctrl = ControlOptions { mouse_sensitivity: s, ..ControlOptions::default() };
+            let rust_factor = ctrl.look_factor();
+
+            for &d in &deltas {
+                // Java setAngles:
+                let java_yaw_delta = (d as f64 * f1 as f64 * 0.15_f64) as f32;
+
+                // Rust window/mod.rs + game.rs:
+                let rust_speed = crate::window::MOUSE_SENSITIVITY * rust_factor;
+                let rust_yaw_delta_rad = d * rust_speed;
+                let rust_yaw_delta_deg = rust_yaw_delta_rad.to_degrees();
+
+                assert!(
+                    (java_yaw_delta - rust_yaw_delta_deg).abs() < 1e-4,
+                    "diff at sens={s}, delta={d}: java={java_yaw_delta}, rust={rust_yaw_delta_deg}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_rot_7_yaw_continuity_crossing_359_to_0() {
+        let (mut game, mut queue) = game_facing(359.0);
+        // Turning +2.0° crosses 360°
+        let wire_yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[2.0]);
+        // Must be continuous 361.0°, NEVER 1.0° (which would be a -360° jump)
+        assert!((wire_yaw - 361.0).abs() < 1e-2, "expected 361.0°, got {wire_yaw}");
+    }
+
+    #[test]
+    fn test_rot_8_yaw_continuity_crossing_0_to_359() {
+        let (mut game, mut queue) = game_facing(0.0);
+        // Turning -2.0° goes negative
+        let wire_yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[-2.0]);
+        // Must be continuous -2.0°, NEVER 358.0° (which would be a +360° jump)
+        assert!((wire_yaw - (-2.0)).abs() < 1e-2, "expected -2.0°, got {wire_yaw}");
+    }
+
+    #[test]
+    fn test_rot_9_c05_player_look_serialization() {
+        use umicraft_protocol::EncodablePacket;
+        use umicraft_protocol::packets::play::serverbound::PlayerLook;
+
+        let packet = PlayerLook {
+            yaw: 185.5,
+            pitch: -90.0,
+            on_ground: true,
+        };
+
+        let mut bytes = Vec::new();
+        packet.encode_body(&mut bytes).expect("encode");
+        assert_eq!(bytes.len(), 9, "C05 must be 9 bytes: 4 bytes yaw + 4 bytes pitch + 1 byte on_ground");
+
+        let decoded = PlayerLook::decode(&mut &bytes[..]).expect("decode");
+        assert_eq!(decoded.yaw, 185.5);
+        assert_eq!(decoded.pitch, -90.0);
+        assert!(decoded.on_ground);
+    }
+
+    #[test]
+    fn test_rot_10_c06_position_look_serialization() {
+        use umicraft_protocol::EncodablePacket;
+        use umicraft_protocol::packets::play::serverbound::PositionLook;
+
+        let packet = PositionLook {
+            x: 123.456,
+            y: 65.0,
+            z: -789.101,
+            yaw: 360.25,
+            pitch: 90.0,
+            on_ground: false,
+        };
+
+        let mut bytes = Vec::new();
+        packet.encode_body(&mut bytes).expect("encode");
+        assert_eq!(bytes.len(), 33, "C06 must be 33 bytes: 24 bytes (3*f64) + 8 bytes (2*f32) + 1 byte on_ground");
+
+        let decoded = PositionLook::decode(&mut &bytes[..]).expect("decode");
+        assert_eq!(decoded.x, 123.456);
+        assert_eq!(decoded.y, 65.0);
+        assert_eq!(decoded.z, -789.101);
+        assert_eq!(decoded.yaw, 360.25);
+        assert_eq!(decoded.pitch, 90.0);
+        assert!(!decoded.on_ground);
+    }
+
+    #[test]
+    fn test_rot_11_camera_rotation_and_wire_consistency() {
+        let mut game = placed_game();
+
+        // 1. Looking down at feet (+90°)
+        game.pitch = 90.0_f32.to_radians();
+        let wire_pitch = game.pitch.to_degrees();
+        assert!((wire_pitch - 90.0).abs() < 1e-4);
+
+        let render_state = RenderState {
+            position: DVec3::ZERO,
+            yaw: game.yaw,
+            pitch: game.pitch,
+            eye: DVec3::new(0.0, 1.62, 0.0),
+            orbit_start: Vec3::ZERO,
+            on_ground: true,
+            effects: umicraft_game::view::ViewEffects::default(),
+        };
+        let (cam_yaw, cam_pitch) = camera_angles(&render_state);
+        assert!((cam_pitch - (-90.0_f32.to_radians())).abs() < 1e-4, "camera pitch is flipped relative to game pitch");
+        assert!((cam_yaw - (game.yaw + std::f32::consts::PI)).abs() < 1e-4);
+
+        // 2. Looking up at sky (-90°)
+        game.pitch = -90.0_f32.to_radians();
+        let wire_pitch_up = game.pitch.to_degrees();
+        assert!((wire_pitch_up - (-90.0)).abs() < 1e-4);
+
+        let render_state_up = RenderState {
+            position: DVec3::ZERO,
+            yaw: game.yaw,
+            pitch: game.pitch,
+            eye: DVec3::new(0.0, 1.62, 0.0),
+            orbit_start: Vec3::ZERO,
+            on_ground: true,
+            effects: umicraft_game::view::ViewEffects::default(),
+        };
+        let (_, cam_pitch_up) = camera_angles(&render_state_up);
+        assert!((cam_pitch_up - (90.0_f32.to_radians())).abs() < 1e-4);
+    }
+
+    // =========================================================================
+    // Phase C.1: Validation du pipeline réel des rotations
+    // =========================================================================
+
+    fn drive_production_mouse_pipeline(
+        game: &mut Game,
+        queue: &mut CommandQueue,
+        controls: &crate::options::ControlOptions,
+        zoom_factor: f32,
+        deltas: &[(f64, f64)],
+    ) {
+        let mut look = (0.0_f32, 0.0_f32);
+        for &delta in deltas {
+            let (dyaw, dpitch) = crate::window::compute_mouse_look_delta(delta, controls, zoom_factor);
+            look.0 += dyaw;
+            look.1 += dpitch;
+        }
+        let update = InputUpdate {
+            look_yaw: look.0,
+            look_pitch: look.1,
+            ..InputUpdate::default()
+        };
+        handle_input(game, update, queue);
+    }
+
+    #[test]
+    fn test_pipeline_sensitivity_0_0_min() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 0.0,
+            ..crate::options::ControlOptions::default()
+        };
+
+        // 100px X, 50px Y at min sensitivity
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(100.0, 50.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements = movement_of(&queue);
+        assert!(!movements.is_empty());
+        let (yaw, pitch) = match movements.last().unwrap() {
+            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            other => panic!("expected look report, got {other:?}"),
+        };
+
+        let expected_yaw = 100.0 * 0.064 * 0.15; // 0.96°
+        let expected_pitch = 50.0 * 0.064 * 0.15; // 0.48°
+        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
+        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+    }
+
+    #[test]
+    fn test_pipeline_sensitivity_0_5_default() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 0.5,
+            ..crate::options::ControlOptions::default()
+        };
+
+        // 100px X, -50px Y at default sensitivity
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(100.0, -50.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements = movement_of(&queue);
+        assert!(!movements.is_empty());
+        let (yaw, pitch) = match movements.last().unwrap() {
+            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            other => panic!("expected look report, got {other:?}"),
+        };
+
+        let expected_yaw = 100.0 * 1.0 * 0.15; // 15.0°
+        let expected_pitch = -50.0 * 1.0 * 0.15; // -7.5°
+        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
+        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+    }
+
+    #[test]
+    fn test_pipeline_sensitivity_1_0_max() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 1.0,
+            ..crate::options::ControlOptions::default()
+        };
+
+        // -20px X, 30px Y at max sensitivity
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(-20.0, 30.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements = movement_of(&queue);
+        assert!(!movements.is_empty());
+        let (yaw, pitch) = match movements.last().unwrap() {
+            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            other => panic!("expected look report, got {other:?}"),
+        };
+
+        let expected_yaw = -20.0 * 4.096 * 0.15; // -12.288°
+        let expected_pitch = 30.0 * 4.096 * 0.15; // 18.432°
+        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
+        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+    }
+
+    #[test]
+    fn test_pipeline_positive_and_negative_deltas() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 0.5,
+            ..crate::options::ControlOptions::default()
+        };
+
+        // Two movements: (+50, +40) then (-80, -100) -> net (-30, -60)
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(50.0, 40.0), (-80.0, -100.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements = movement_of(&queue);
+        assert!(!movements.is_empty());
+        let (yaw, pitch) = match movements.last().unwrap() {
+            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            other => panic!("expected look report, got {other:?}"),
+        };
+
+        let expected_yaw = -30.0 * 0.15; // -4.5°
+        let expected_pitch = -60.0 * 0.15; // -9.0°
+        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
+        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+    }
+
+    #[test]
+    fn test_pipeline_multiple_successive_mouse_events_in_frame() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 0.5,
+            ..crate::options::ControlOptions::default()
+        };
+
+        // 5 successive events arriving in the same frame
+        let events = [
+            (10.0, 5.0),
+            (15.0, -2.0),
+            (20.0, 7.0),
+            (-5.0, -3.0),
+            (8.0, 4.0),
+        ]; // sum: x = 48.0, y = 11.0
+
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &events);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements = movement_of(&queue);
+        assert!(!movements.is_empty());
+        let (yaw, pitch) = match movements.last().unwrap() {
+            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            other => panic!("expected look report, got {other:?}"),
+        };
+
+        let expected_yaw = 48.0 * 0.15; // 7.2°
+        let expected_pitch = 11.0 * 0.15; // 1.65°
+        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
+        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+    }
+
+    #[test]
+    fn test_pipeline_pitch_vertical_limits_plus_minus_90() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 0.5,
+            ..crate::options::ControlOptions::default()
+        };
+
+        // 1. Pulling mouse way up -> should clamp to -90.0°
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(0.0, -5000.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements = movement_of(&queue);
+        let pitch_up = match movements.last().unwrap() {
+            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => *pitch,
+            other => panic!("expected look report, got {other:?}"),
+        };
+        assert!((pitch_up - (-90.0)).abs() < 1e-4, "expected -90.0°, got {pitch_up}");
+
+        // 2. Pushing mouse way down -> should clamp to +90.0°
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(0.0, 10000.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now() + Duration::from_millis(50));
+
+        let movements = movement_of(&queue);
+        let pitch_down = match movements.last().unwrap() {
+            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => *pitch,
+            other => panic!("expected look report, got {other:?}"),
+        };
+        assert!((pitch_down - 90.0).abs() < 1e-4, "expected +90.0°, got {pitch_down}");
+    }
+
+    #[test]
+    fn test_pipeline_yaw_exceeding_360_continuous() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 0.5,
+            ..crate::options::ControlOptions::default()
+        };
+
+        // 6 bursts of 500px to the right = 3000px
+        // 3000px * 0.15 = 450.0°
+        for _ in 0..6 {
+            drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(500.0, 0.0)]);
+        }
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements = movement_of(&queue);
+        let yaw = match movements.last().unwrap() {
+            ClientCommand::PositionLook { yaw, .. } | ClientCommand::PlayerLook { yaw, .. } => *yaw,
+            other => panic!("expected look report, got {other:?}"),
+        };
+        assert!((yaw - 450.0).abs() < 1e-2, "continuous yaw must be 450.0°, got {yaw}");
+    }
+
+    #[test]
+    fn test_pipeline_c05_c06_serialization_after_multiple_rotations() {
+        use umicraft_protocol::EncodablePacket;
+        use umicraft_protocol::packets::play::serverbound::{PlayerLook, PositionLook};
+
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 0.5,
+            ..crate::options::ControlOptions::default()
+        };
+
+        // 1. Initial tick with movement+rotation reports C06 PositionLook (33 bytes)
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(50.0, -30.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements1 = movement_of(&queue);
+        let (c06_pos, c06_yaw, c06_pitch) = match movements1.last().unwrap() {
+            ClientCommand::PositionLook { x, y, z, yaw, pitch, .. } => (DVec3::new(*x, *y, *z), *yaw, *pitch),
+            other => panic!("expected PositionLook (C06), got {other:?}"),
+        };
+        let mut c06_bytes = Vec::new();
+        PositionLook {
+            x: c06_pos.x,
+            y: c06_pos.y,
+            z: c06_pos.z,
+            yaw: c06_yaw,
+            pitch: c06_pitch,
+            on_ground: false,
+        }
+        .encode_body(&mut c06_bytes)
+        .expect("encode c06");
+        assert_eq!(c06_bytes.len(), 33, "C06 must be exactly 33 bytes");
+        let decoded_c06 = PositionLook::decode(&mut &c06_bytes[..]).expect("decode c06");
+        assert_eq!(decoded_c06.x, c06_pos.x);
+        assert_eq!(decoded_c06.y, c06_pos.y);
+        assert_eq!(decoded_c06.z, c06_pos.z);
+        assert_eq!(decoded_c06.yaw, c06_yaw);
+        assert_eq!(decoded_c06.pitch, c06_pitch);
+
+        queue.ordered.clear();
+
+        // 2. Subsequent tick with rotation alone reports C05 PlayerLook (9 bytes)
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(200.0, 100.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now() + Duration::from_millis(50));
+
+        let movements2 = movement_of(&queue);
+        let (c05_yaw, c05_pitch) = match movements2.last().unwrap() {
+            ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            other => panic!("expected PlayerLook (C05), got {other:?}"),
+        };
+        let mut c05_bytes = Vec::new();
+        PlayerLook { yaw: c05_yaw, pitch: c05_pitch, on_ground: false }
+            .encode_body(&mut c05_bytes)
+            .expect("encode c05");
+        assert_eq!(c05_bytes.len(), 9, "C05 must be exactly 9 bytes");
+        let decoded_c05 = PlayerLook::decode(&mut &c05_bytes[..]).expect("decode c05");
+        assert_eq!(decoded_c05.yaw, c05_yaw);
+        assert_eq!(decoded_c05.pitch, c05_pitch);
+    }
+
+    #[test]
+    fn test_pipeline_consistency_player_state_and_wire() {
+        let mut game = placed_game();
+        let mut queue = CommandQueue::default();
+        let (frames, _) = mpsc::sync_channel(64);
+        let (chunks, _) = mpsc::sync_channel(64);
+        let controls = crate::options::ControlOptions {
+            mouse_sensitivity: 0.5,
+            ..crate::options::ControlOptions::default()
+        };
+
+        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(123.0, -45.0)]);
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+
+        let movements = movement_of(&queue);
+        let (wire_yaw, wire_pitch) = match movements.last().unwrap() {
+            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            other => panic!("expected look report, got {other:?}"),
+        };
+
+        // Exactly matches game state degrees
+        assert_eq!(game.yaw.to_degrees(), wire_yaw);
+        assert_eq!(game.pitch.to_degrees(), wire_pitch);
     }
 }

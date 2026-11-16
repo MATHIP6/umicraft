@@ -29,6 +29,12 @@ impl LimbSwing {
         self.swing += self.amount;
     }
 
+    /// Resets the limb swing amplitude on teleport to prevent visual animation flutter.
+    pub fn reset(&mut self) {
+        self.amount = 0.0;
+        self.previous_amount = 0.0;
+    }
+
     /// The amplitude `alpha` of the way into the current tick.
     #[must_use]
     pub fn amount_at(&self, alpha: f32) -> f32 {

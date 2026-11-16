@@ -59,7 +59,12 @@ pub fn emit_child(
     bodies: &[&ModelPart],
     layout: ChildLayout,
 ) -> Vec<ModelVertex> {
-    let mut out = Vec::new();
+    let box_count: usize = heads
+        .iter()
+        .chain(bodies.iter())
+        .map(|part| part.boxes.len())
+        .sum();
+    let mut out = Vec::with_capacity(box_count * 36);
     let root = Mat4::from_scale(Vec3::splat(1.0 / 16.0));
     let head_parent = root * layout.head_matrix();
     for part in heads {

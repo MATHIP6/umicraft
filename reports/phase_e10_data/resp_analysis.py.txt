@@ -1,0 +1,18 @@
+import sys,struct
+sys.path.insert(0,sys.argv[1])
+from umcapt import *
+for d in sys.argv[2:]:
+    fr=load(d+'/umicraft.umcapt'); t0=fr[0][2]
+    dead=[f[2] for f in fr if f[1]==1 and f[3]==6 and struct.unpack('>f',f[4][:4])[0]==0.0]
+    if not dead: print(d,'no death'); continue
+    d0=dead[0]
+    c16=[f[2] for f in fr if f[1]==0 and f[3]==0x16]
+    s07=[f[2] for f in fr if f[1]==1 and f[3]==7]
+    alive=[f[2] for f in fr if f[1]==1 and f[3]==6 and f[2]>d0 and struct.unpack('>f',f[4][:4])[0]>0]
+    mv=[f[2]-d0 for f in fr if f[1]==0 and f[3] in (3,4,5)]
+    mvdead=[t for t in mv if t>0]
+    r=(s07[-1]-d0) if s07 else None
+    before=[t for t in mvdead if r is None or t<r]; after=[t for t in mvdead if r is not None and t>=r]
+    ch=[f[2]-d0 for f in fr if f[1]==1 and f[3] in (0x21,0x26) and r is not None and f[2]-d0>=r]
+    pm=sum(1 for f in fr if f[1]==1 and f[3]==8 and f[2]>d0)
+    print(d.split('/')[-1],'move_before_respawn',len(before),'last',before[-1] if before else None,'C16_at',[t-d0 for t in c16 if t>d0],'S07_at',[t-d0 for t in s07 if t>d0],'S06_alive_at',[t-d0 for t in alive][:2],'move_after_respawn',len(after),'first_after',after[0]-r if after else None,'chunk_pkts_after_respawn',len(ch),'S08_after_death',pm)

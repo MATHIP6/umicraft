@@ -31,6 +31,46 @@ pub struct HudEditorView {
     pub screen: [f32; 2],
     /// The smallest and the largest widget scale.
     pub scale_range: (f32, f32),
+    /// Every mod that has a widget, on or off, for the list of the HUD editor.
+    pub entries: Vec<HudEntryView>,
+    /// Whether there is a change to undo, and one to redo.
+    pub history: (bool, bool),
+    /// Whether a layout was saved, so the "Custom" preset has something to apply.
+    pub has_custom: bool,
+}
+
+/// One mod that has a HUD widget, as the list of the HUD editor shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HudEntryView {
+    /// The id of the mod.
+    pub id: String,
+    /// The translated name of the mod.
+    pub name: String,
+    /// Whether the mod is on, so its widget is drawn.
+    pub enabled: bool,
+    /// Whether the widget is locked in place.
+    pub locked: bool,
+}
+
+/// A ready-made layout of the HUD editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HudPresetKind {
+    /// Every widget where its mod puts it.
+    Default,
+    /// The widgets of a fight, out of the way.
+    Pvp,
+    /// The FPS counter alone.
+    Minimal,
+    /// The layout the player last saved.
+    Custom,
+}
+
+impl HudEditorView {
+    /// Whether the widget of the mod `id` is locked in place.
+    #[must_use]
+    pub fn is_locked(&self, id: &str) -> bool {
+        self.entries.iter().any(|entry| entry.id == id && entry.locked)
+    }
 }
 
 impl Default for HudEditorView {
@@ -39,6 +79,9 @@ impl Default for HudEditorView {
             widgets: Vec::new(),
             screen: [0.0; 2],
             scale_range: (1.0, 1.0),
+            entries: Vec::new(),
+            history: (false, false),
+            has_custom: false,
         }
     }
 }
@@ -75,4 +118,34 @@ pub enum HudEditorOutcome {
     },
     /// Every widget goes back to its default place and size.
     ResetAll,
+    /// A widget was resized from the panel of the HUD editor: like
+    /// [`Placed`](Self::Placed), but the frames of one slider drag are one
+    /// change to undo.
+    Scaled {
+        /// The id of the mod.
+        id: String,
+        /// The rectangle of the widget.
+        rect: Rect,
+        /// The new scale of the widget.
+        scale: f32,
+        /// The size of the screen in GUI units.
+        screen: [f32; 2],
+    },
+    /// A widget was locked in place, or unlocked.
+    Lock {
+        /// The id of the mod.
+        id: String,
+        /// The state asked for.
+        locked: bool,
+    },
+    /// A ready-made layout was chosen.
+    Preset(HudPresetKind),
+    /// The last change is taken back.
+    Undo,
+    /// The change last taken back is made again.
+    Redo,
+    /// The layout is kept, and becomes the "Custom" preset.
+    Save,
+    /// Everything changed since the menu opened is taken back.
+    Cancel,
 }

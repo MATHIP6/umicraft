@@ -18,7 +18,7 @@
 //! at runtime. No Mojang asset is embedded in this crate or copied into the
 //! repository/release.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use thiserror::Error;
 use umicraft_assets::{AssetsError, BlockAtlas, ClientResources};
@@ -28,6 +28,10 @@ use umicraft_model::{definitions, BlockModelSet, ModelError, ResourceSource};
 
 use crate::item_icons::ItemResources;
 use crate::official;
+
+/// Global cache of base client resources loaded from the official jar to avoid redundant 8 MB
+/// disk reads, SHA-1 re-hashing, and texture re-decoding across pack swaps and hot reloads.
+static BASE_RESOURCES_CACHE: RwLock<Option<ClientResources>> = RwLock::new(None);
 
 /// Virtual prefix of the block textures inside the client jar.
 const BLOCK_TEXTURES_PREFIX: &str = "assets/minecraft/textures/blocks/";
@@ -112,15 +116,42 @@ impl ModelResources {
         Self::load_with_packs(&[])
     }
 
+    /// Returns the cached base [`ClientResources`], reading and verifying the official jar
+    /// from disk on first access. Subsequent calls reuse the decoded base resources directly.
+    ///
+    /// # Errors
+    /// [`ModelResourcesError`] if the jar cannot be found or decoded.
+    pub fn get_or_load_base() -> Result<ClientResources, ModelResourcesError> {
+        if let Ok(guard) = BASE_RESOURCES_CACHE.read() {
+            if let Some(base) = guard.as_ref() {
+                return Ok(base.clone());
+            }
+        }
+        let jar = official::find_verified_jar().map_err(|_| ModelResourcesError::NoInstallation)?;
+        let base = ClientResources::load(&jar)?;
+        if let Ok(mut guard) = BASE_RESOURCES_CACHE.write() {
+            *guard = Some(base.clone());
+        }
+        Ok(base)
+    }
+
+    /// Clears the cached base resources, forcing the next resource load to re-read the jar from disk.
+    pub fn clear_base_cache() {
+        if let Ok(mut guard) = BASE_RESOURCES_CACHE.write() {
+            *guard = None;
+        }
+    }
+
     /// Loads the base resources and layers the requested resource packs over them.
+    ///
+    /// Reuses cached base resources when available, eliminating redundant jar I/O and base texture decoding.
     ///
     /// # Errors
     /// [`ModelResourcesError`] if loading or baking fails.
     pub fn load_with_packs(
         packs: &[umicraft_assets::ResourcePack],
     ) -> Result<Self, ModelResourcesError> {
-        let jar = official::find_verified_jar().map_err(|_| ModelResourcesError::NoInstallation)?;
-        let base = ClientResources::load(&jar)?;
+        let base = Self::get_or_load_base()?;
         Self::from_resources_and_packs(base, packs)
     }
 
@@ -152,12 +183,46 @@ impl ModelResources {
         base: ClientResources,
         packs: &[umicraft_assets::ResourcePack],
     ) -> Result<Self, ModelResourcesError> {
-        let resources = if packs.is_empty() {
-            base
+        let (mut resources, base) = if packs.is_empty() {
+            (base, None)
         } else {
-            base.apply_packs(packs)?
+            (base.apply_packs(packs)?, Some(base))
         };
-        let models = Arc::new(BlockModelSet::build(&resources, definitions())?);
+        // The reference bakes what it can and logs the rest (`ModelBakery`
+        // catches the error of each model). Here a document of a pack that
+        // does not bake gives way to the one of the jar, and when the error
+        // does not name a document of a pack, all of them do: a pack must
+        // never cost the whole set (the caller would fall back to the
+        // procedural textures).
+        let mut retries = 0;
+        let (models, items) = loop {
+            let error = match bake(&resources) {
+                Ok(baked) => break baked,
+                Err(error) => error,
+            };
+            let Some(base) = base.as_ref() else {
+                return Err(error.into());
+            };
+            let single = retries < MAX_DOCUMENT_RETRIES
+                && document_paths(&error)
+                    .iter()
+                    .any(|path| resources.restore_document(base, path));
+            retries += 1;
+            if single {
+                tracing::warn!(%error, "ignoring a pack model that does not bake");
+                continue;
+            }
+            let dropped = resources.restore_documents(base);
+            if dropped == 0 {
+                return Err(error.into());
+            }
+            tracing::warn!(
+                %error,
+                dropped,
+                "ignoring every model and blockstate of the resource packs"
+            );
+        };
+        let models = Arc::new(models);
         let tints = resources.colormaps().map(|maps| {
             Arc::new(BiomeTints::from_samplers(
                 |temperature, rainfall| maps.grass.sample(temperature, rainfall),
@@ -177,7 +242,7 @@ impl ModelResources {
             packs = packs.len(),
             "loaded 1.8 block models, atlas and resource packs"
         );
-        let items = Arc::new(ItemResources::load(&resources)?);
+        let items = Arc::new(items);
         Ok(Self {
             resources,
             models,
@@ -250,6 +315,35 @@ impl ModelResources {
             biome_tints: self.resources.colormaps().is_some(),
         }
     }
+}
+
+/// How many documents of a pack are put back one by one before all are.
+const MAX_DOCUMENT_RETRIES: usize = 16;
+
+/// Bakes the block and item models of `resources`.
+fn bake(resources: &ClientResources) -> Result<(BlockModelSet, ItemResources), ModelError> {
+    Ok((
+        BlockModelSet::build(resources, definitions())?,
+        ItemResources::load(resources)?,
+    ))
+}
+
+/// The resource paths `error` may be about: it carries either a path or a
+/// model key such as `block/stone`.
+fn document_paths(error: &ModelError) -> Vec<String> {
+    let name = match error {
+        ModelError::Resource { path, .. }
+        | ModelError::Json { path, .. }
+        | ModelError::Invalid { path, .. }
+        | ModelError::UnresolvedTexture { path, .. }
+        | ModelError::ParentCycle { path }
+        | ModelError::ParentDepth { path, .. } => path,
+    };
+    vec![
+        name.clone(),
+        format!("assets/minecraft/models/{name}.json"),
+        format!("assets/minecraft/models/block/{name}.json"),
+    ]
 }
 
 /// Counts the PNG and `.mcmeta` entries below `prefix`.

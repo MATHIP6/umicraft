@@ -222,6 +222,117 @@ fn or_dash(signature: &str) -> &str {
     }
 }
 
+/// Timing of the tick-ending movement packets of one trace (phase E.2).
+///
+/// The timestamps come from the logger proxy, in milliseconds, so they carry
+/// the jitter of the TCP path; they describe cadence, never physics.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Cadence {
+    /// Number of gaps measured (movement packets minus one).
+    pub intervals: usize,
+    /// Mean gap in milliseconds.
+    pub mean_ms: f64,
+    /// Standard deviation of the gap in milliseconds.
+    pub std_ms: f64,
+    /// Shortest gap.
+    pub min_ms: u64,
+    /// Longest gap.
+    pub max_ms: u64,
+}
+
+impl Cadence {
+    /// Measures the gaps between the movement packets of consecutive ticks.
+    #[must_use]
+    pub fn of(trace: &Trace) -> Self {
+        let stamps: Vec<u64> = trace
+            .ticks
+            .iter()
+            .filter_map(|tick| tick.packets.iter().rev().find(|p| p.is_movement()))
+            .map(|packet| packet.timestamp_ms)
+            .collect();
+        let gaps: Vec<u64> = stamps
+            .windows(2)
+            .map(|pair| pair[1].saturating_sub(pair[0]))
+            .collect();
+        if gaps.is_empty() {
+            return Self::default();
+        }
+        let n = gaps.len() as f64;
+        let mean = gaps.iter().sum::<u64>() as f64 / n;
+        let variance = gaps.iter().map(|g| (*g as f64 - mean).powi(2)).sum::<f64>() / n;
+        Self {
+            intervals: gaps.len(),
+            mean_ms: mean,
+            std_ms: variance.sqrt(),
+            min_ms: gaps.iter().copied().min().unwrap_or(0),
+            max_ms: gaps.iter().copied().max().unwrap_or(0),
+        }
+    }
+}
+
+/// One aligned tick whose packets have the same tokens but different bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BodyMismatch {
+    /// Aligned tick index.
+    pub index: usize,
+    /// The packet's token.
+    pub token: Token,
+    /// Reference body in hex.
+    pub reference: String,
+    /// Candidate body in hex.
+    pub candidate: String,
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Compares the **bytes** of the packets of aligned ticks whose signatures
+/// are equal (ticks with different signatures are already reported by
+/// [`TickDiff`]). Exact: there is no tolerance on bytes.
+#[must_use]
+pub fn body_mismatches(reference: &Trace, candidate: &Trace) -> Vec<BodyMismatch> {
+    let mut found = Vec::new();
+    for (index, (a, b)) in reference.ticks.iter().zip(&candidate.ticks).enumerate() {
+        if a.signature() != b.signature() {
+            continue;
+        }
+        for (x, y) in a.packets.iter().zip(&b.packets) {
+            if x.body != y.body {
+                found.push(BodyMismatch {
+                    index,
+                    token: x.token(),
+                    reference: hex(&x.body),
+                    candidate: hex(&y.body),
+                });
+            }
+        }
+    }
+    found
+}
+
+/// A report of the cadence of both traces and of the byte-level differences.
+#[must_use]
+pub fn render_extras(reference: &Trace, candidate: &Trace, show: usize) -> String {
+    let (a, b) = (Cadence::of(reference), Cadence::of(candidate));
+    let mut out = String::from("\n--- movement-packet cadence (logger timestamps, ms) ---\n");
+    let _ = writeln!(out, "            reference  candidate");
+    let _ = writeln!(out, "intervals   {:>9}  {:>9}", a.intervals, b.intervals);
+    let _ = writeln!(out, "mean        {:>9.2}  {:>9.2}", a.mean_ms, b.mean_ms);
+    let _ = writeln!(out, "std dev     {:>9.2}  {:>9.2}", a.std_ms, b.std_ms);
+    let _ = writeln!(out, "min / max   {:>4} /{:>4}  {:>4} /{:>4}", a.min_ms, a.max_ms, b.min_ms, b.max_ms);
+    let bodies = body_mismatches(reference, candidate);
+    let _ = writeln!(
+        out,
+        "\npacket bodies that differ in ticks with the same signature: {} (first {show} shown)",
+        bodies.len()
+    );
+    for m in bodies.iter().take(show) {
+        let _ = writeln!(out, "  tick {:>5} {:<22} {} | {}", m.index, m.token.to_string(), m.reference, m.candidate);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +392,45 @@ mod tests {
         assert_eq!(diff.mismatches.len(), 1);
         assert!(diff.mismatches[0].reference.is_empty());
         assert!(diff.same_shapes());
+    }
+
+    /// A trace whose single movement packet per tick has the given body and
+    /// timestamp.
+    fn timed(ticks: &[(u64, &[u8])]) -> Trace {
+        Trace {
+            ticks: ticks
+                .iter()
+                .map(|(at, body)| Tick {
+                    packets: vec![TracePacket {
+                        id: 0x04,
+                        timestamp_ms: *at,
+                        body: body.to_vec(),
+                    }],
+                })
+                .collect(),
+            ..Trace::default()
+        }
+    }
+
+    #[test]
+    fn a_body_difference_is_found_even_when_the_shapes_match() {
+        let a = timed(&[(0, &[1, 2]), (50, &[3, 4])]);
+        let b = timed(&[(0, &[1, 2]), (50, &[3, 5])]);
+        assert!(TickDiff::new(&a, &b).same_shapes());
+        let found = body_mismatches(&a, &b);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].index, 1);
+        assert_eq!((found[0].reference.as_str(), found[0].candidate.as_str()), ("0304", "0305"));
+        assert!(body_mismatches(&a, &a).is_empty());
+    }
+
+    #[test]
+    fn cadence_measures_the_gap_between_movement_packets() {
+        let cadence = Cadence::of(&timed(&[(0, &[]), (50, &[]), (100, &[]), (160, &[])]));
+        assert_eq!(cadence.intervals, 3);
+        assert_eq!((cadence.min_ms, cadence.max_ms), (50, 60));
+        assert!((cadence.mean_ms - 160.0 / 3.0).abs() < 1e-9);
+        assert_eq!(Cadence::of(&Trace::default()), Cadence::default());
     }
 
     #[test]

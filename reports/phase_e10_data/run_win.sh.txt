@@ -1,0 +1,31 @@
+#!/bin/sh
+# run_win.sh FPS N [MODE]: windowed Umicraft, max_fps=FPS, windowed (not fullscreen), MODE X3 by default
+E=/c/Users/cbynt/Desktop/umicraft-e2; R=/c/Users/cbynt/Desktop/umicraft; F=$1; N=$2; M=${3:-X3}
+OPT="$APPDATA/umicraft/options.toml"; BAK=$E/options.toml.user-backup
+J8="/c/Program Files/Eclipse Adoptium/jdk-8.0.512.9-hotspot/bin/java.exe"
+cd $E/server
+if netstat -ano | grep -q ":25599.*LISTENING"; then echo "server already running"; else
+  : > cmd.in
+  (tail -f cmd.in | env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS "$J8" -Xmx768M -jar pandaspigot-225.jar nogui > server.out 2>&1 &)
+  sleep 15; echo "gamerule doDaylightCycle false" >> cmd.in
+fi
+n=${4:-1}
+while [ $n -le $N ]; do
+  O=$E/runs15/fps$F-$M-$n; mkdir -p $O
+  python - "$BAK" "$OPT" "$F" <<'PY'
+import sys,re
+src=open(sys.argv[1],encoding='utf-8').read()
+src=re.sub(r'(?m)^fullscreen = .*$','fullscreen = false',src,count=1)
+src=re.sub(r'(?m)^max_fps = .*$','max_fps = %s'%sys.argv[3],src,count=1)
+open(sys.argv[2],'w',encoding='utf-8').write(src)
+PY
+  NAME=Wn$F$M$n
+  ($R/target/debug/umicraft-packet-logger 127.0.0.1:25600 127.0.0.1:25599 --out $O/umicraft.umcapt --connections 1 > $O/logger.out 2>&1 &)
+  (sh $E/xwatch.sh $NAME $M > $O/x.out 2>&1 &)
+  sleep 1
+  UU=$(python -c "import uuid;print(uuid.uuid4())")
+  UMICRAFT_E10_LOG=$O/e10.csv UMICRAFT_E10_EXIT_SECS=35 $R/target/debug/umicraft-client 127.0.0.1 25600 --username $NAME --uuid $UU --accessToken 0 > $O/run.out 2>&1
+  i=0; while [ $i -lt 300 ]; do grep -q recorded $O/logger.out 2>/dev/null && break; i=$((i+1)); sleep 0.2; done
+  cp "$BAK" "$OPT"
+  sleep 3; n=$((n+1))
+done

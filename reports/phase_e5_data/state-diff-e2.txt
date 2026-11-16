@@ -1,0 +1,13 @@
+--- state diff (reference = vanilla, internal player state) ---
+tolerance : STRICT (position 0 blocks/axis, motion 0 blocks/tick, rotation 0 deg)
+scenario ticks: reference 80, candidate 80
+
+phase                ticks     max|dx|     max|dy|     max|dz|     max|dm|   max|dyaw|  ground  spr  snk keys
+sprint                  40     0.000e0     0.000e0    1.955e-6    1.658e-8     0.000e0       0    0    0    0  DIFFERS
+sneak_w                 20     0.000e0     0.000e0    2.085e-6    5.685e-9     0.000e0       0    0    0    0  DIFFERS
+stop                    20     0.000e0     0.000e0    2.085e-6    2.473e-9     0.000e0       0    0    0    0  DIFFERS
+  sprint: first divergence (tick offset in phase): z@+0 my@+0 mz@+0
+  sneak_w: first divergence (tick offset in phase): z@+0 my@+0 mz@+0
+  stop: first divergence (tick offset in phase): z@+0 my@+0 mz@+0
+
+verdict: DIFFERENCES FOUND

@@ -89,7 +89,7 @@ pub struct ModelVertex {
 }
 
 /// A textured cuboid primitive with 6 faces (from MCP `ModelBox`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ModelBox {
     /// Minimum corner in model coordinates.
     pub origin: [f32; 3],
@@ -157,40 +157,40 @@ impl ModelBox {
         let u = self.uv[0];
         let v = self.uv[1];
 
-        let c000 = transform.transform_point3(Vec3::new(x0, y0, z0)).to_array();
-        let c100 = transform.transform_point3(Vec3::new(x1, y0, z0)).to_array();
-        let c110 = transform.transform_point3(Vec3::new(x1, y1, z0)).to_array();
-        let c010 = transform.transform_point3(Vec3::new(x0, y1, z0)).to_array();
-        let c001 = transform.transform_point3(Vec3::new(x0, y0, z1)).to_array();
-        let c101 = transform.transform_point3(Vec3::new(x1, y0, z1)).to_array();
-        let c111 = transform.transform_point3(Vec3::new(x1, y1, z1)).to_array();
-        let c011 = transform.transform_point3(Vec3::new(x0, y1, z1)).to_array();
+        out.reserve(if h == 0.0 { 6 } else { 36 });
+
+        let col0 = transform.x_axis.truncate();
+        let col1 = transform.y_axis.truncate();
+        let col2 = transform.z_axis.truncate();
+        let col3 = transform.w_axis.truncate();
+
+        let x0_vec = col0 * x0;
+        let x1_vec = col0 * x1;
+        let y0_vec = col1 * y0;
+        let y1_vec = col1 * y1;
+        let z0_vec = col2 * z0 + col3;
+        let z1_vec = col2 * z1 + col3;
+
+        let c000 = (x0_vec + y0_vec + z0_vec).to_array();
+        let c100 = (x1_vec + y0_vec + z0_vec).to_array();
+        let c110 = (x1_vec + y1_vec + z0_vec).to_array();
+        let c010 = (x0_vec + y1_vec + z0_vec).to_array();
+        let c001 = (x0_vec + y0_vec + z1_vec).to_array();
+        let c101 = (x1_vec + y0_vec + z1_vec).to_array();
+        let c111 = (x1_vec + y1_vec + z1_vec).to_array();
+        let c011 = (x0_vec + y1_vec + z1_vec).to_array();
 
         let x_sign = if self.mirror { -1.0 } else { 1.0 };
-        let n_down = transform
-            .transform_vector3(Vec3::new(0.0, -1.0, 0.0))
-            .normalize_or_zero()
-            .to_array();
-        let n_up = transform
-            .transform_vector3(Vec3::new(0.0, 1.0, 0.0))
-            .normalize_or_zero()
-            .to_array();
-        let n_north = transform
-            .transform_vector3(Vec3::new(0.0, 0.0, -1.0))
-            .normalize_or_zero()
-            .to_array();
-        let n_south = transform
-            .transform_vector3(Vec3::new(0.0, 0.0, 1.0))
-            .normalize_or_zero()
-            .to_array();
-        let n_west = transform
-            .transform_vector3(Vec3::new(-x_sign, 0.0, 0.0))
-            .normalize_or_zero()
-            .to_array();
-        let n_east = transform
-            .transform_vector3(Vec3::new(x_sign, 0.0, 0.0))
-            .normalize_or_zero()
-            .to_array();
+        let n_up_v = col1.normalize_or_zero();
+        let n_south_v = col2.normalize_or_zero();
+        let n_east_v = (col0 * x_sign).normalize_or_zero();
+
+        let n_up = n_up_v.to_array();
+        let n_down = (-n_up_v).to_array();
+        let n_south = n_south_v.to_array();
+        let n_north = (-n_south_v).to_array();
+        let n_east = n_east_v.to_array();
+        let n_west = (-n_east_v).to_array();
 
         // For 0-height flat plane boxes (such as ModelDragon wing membranes),
         // only emit the Up (+Y) sheet so top/bottom faces do not Z-fight when cull_mode is None.
@@ -412,6 +412,165 @@ pub fn emit_block_item_cube(half_size: f32, transform: Mat4, out: &mut Vec<Model
     emit_quad(out, [c101, c100, c110, c111], n_east, full_face_uvs);
 }
 
+/// Inline capacity of [`PartBoxes`], covering 99% of entity body parts
+/// (1–4 cuboids per part: inner + outer skin layers, cow horns, wolf/ocelot heads)
+/// without any heap allocation.
+const INLINE_PART_BOXES: usize = 4;
+
+/// Stack-first storage (`SmallVec<[ModelBox; 4]>`) for the cuboids of a [`ModelPart`].
+///
+/// Almost every entity [`ModelPart`] contains between 1 and 4 [`ModelBox`]es.
+/// Storing up to [`INLINE_PART_BOXES`] cuboids inline on the stack eliminates
+/// per-part heap allocations when constructing entity models on every frame,
+/// while transparently spilling to a heap [`Vec`] for rare parts with more
+/// than 4 cuboids (such as the 9-box magma cube body).
+#[derive(Debug, Clone)]
+pub enum PartBoxes {
+    /// Up to [`INLINE_PART_BOXES`] cuboids stored directly on the stack.
+    Inline {
+        /// Fixed-size inline storage buffer.
+        buf: [ModelBox; INLINE_PART_BOXES],
+        /// Number of initialized elements in `buf` (`0..=INLINE_PART_BOXES`).
+        len: u8,
+    },
+    /// Fallback heap vector when more than [`INLINE_PART_BOXES`] cuboids are added.
+    Heap(Vec<ModelBox>),
+}
+
+impl Default for PartBoxes {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PartBoxes {
+    const PLACEHOLDER: ModelBox = ModelBox::new([0.0; 3], [0.0; 3], [0.0; 2], [0.0; 2], 0.0);
+
+    /// Creates an empty inline cuboid list without heap allocation.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self::Inline {
+            buf: [Self::PLACEHOLDER; INLINE_PART_BOXES],
+            len: 0,
+        }
+    }
+
+    /// Returns the number of cuboids in this part.
+    #[must_use]
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Inline { len, .. } => *len as usize,
+            Self::Heap(v) => v.len(),
+        }
+    }
+
+    /// Returns `true` when this part contains no cuboids.
+    #[must_use]
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Appends a cuboid, staying on the stack up to [`INLINE_PART_BOXES`] elements.
+    #[inline]
+    pub fn push(&mut self, b: ModelBox) {
+        match self {
+            Self::Inline { buf, len } => {
+                let idx = *len as usize;
+                if idx < INLINE_PART_BOXES {
+                    buf[idx] = b;
+                    *len += 1;
+                } else {
+                    let mut v = Vec::with_capacity(INLINE_PART_BOXES * 2);
+                    v.extend_from_slice(buf);
+                    v.push(b);
+                    *self = Self::Heap(v);
+                }
+            }
+            Self::Heap(v) => v.push(b),
+        }
+    }
+
+    /// Removes all cuboids from this part.
+    #[inline]
+    pub fn clear(&mut self) {
+        match self {
+            Self::Inline { len, .. } => *len = 0,
+            Self::Heap(v) => v.clear(),
+        }
+    }
+
+    /// Shortens the cuboid list, keeping the first `new_len` cuboids.
+    #[inline]
+    pub fn truncate(&mut self, new_len: usize) {
+        match self {
+            Self::Inline { len, .. } => {
+                if new_len < *len as usize {
+                    *len = new_len as u8;
+                }
+            }
+            Self::Heap(v) => v.truncate(new_len),
+        }
+    }
+
+    /// Returns the cuboids as a slice.
+    #[must_use]
+    #[inline]
+    pub fn as_slice(&self) -> &[ModelBox] {
+        match self {
+            Self::Inline { buf, len } => &buf[..*len as usize],
+            Self::Heap(v) => v.as_slice(),
+        }
+    }
+
+    /// Returns the cuboids as a mutable slice.
+    #[must_use]
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [ModelBox] {
+        match self {
+            Self::Inline { buf, len } => &mut buf[..*len as usize],
+            Self::Heap(v) => v.as_mut_slice(),
+        }
+    }
+}
+
+impl std::ops::Deref for PartBoxes {
+    type Target = [ModelBox];
+
+    #[inline]
+    fn deref(&self) -> &[ModelBox] {
+        self.as_slice()
+    }
+}
+
+impl std::ops::DerefMut for PartBoxes {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut [ModelBox] {
+        self.as_mut_slice()
+    }
+}
+
+impl<'a> IntoIterator for &'a PartBoxes {
+    type Item = &'a ModelBox;
+    type IntoIter = std::slice::Iter<'a, ModelBox>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut PartBoxes {
+    type Item = &'a mut ModelBox;
+    type IntoIter = std::slice::IterMut<'a, ModelBox>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_mut_slice().iter_mut()
+    }
+}
+
 /// An articulated body part with pivot and local Euler angles.
 #[derive(Debug, Clone)]
 pub struct ModelPart {
@@ -419,8 +578,8 @@ pub struct ModelPart {
     pub pivot: [f32; 3],
     /// Pitch, yaw, roll in radians.
     pub rotation: [f32; 3],
-    /// Cuboids belonging to this part.
-    pub boxes: Vec<ModelBox>,
+    /// Cuboids belonging to this part (stored inline on the stack up to 4 boxes).
+    pub boxes: PartBoxes,
 }
 
 impl ModelPart {
@@ -430,7 +589,7 @@ impl ModelPart {
         Self {
             pivot,
             rotation: [0.0, 0.0, 0.0],
-            boxes: Vec::new(),
+            boxes: PartBoxes::new(),
         }
     }
 

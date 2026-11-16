@@ -6,7 +6,7 @@
 //! player, zombie, skeleton or zombie pigman. Skulls are not drawn yet.
 
 use glam::{Mat4, Vec3};
-use umicraft_game::entity::{EntityItem, EntityKind, EntityRenderSnapshot};
+use umicraft_game::entity::{wrap_degrees, EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_mesh::item::ItemStyle;
 use umicraft_model::display::DisplayContext;
 use umicraft_model::entity::{ArmorMaterial, ModelPart, SnowmanModel};
@@ -70,7 +70,7 @@ fn snowman_pumpkin() -> EntityItem {
 /// `LayerSnowmanHead`: the pumpkin sits 0.34375 above the head origin.
 fn snowman_frame(entity: &EntityRenderSnapshot) -> Mat4 {
     let mut model = SnowmanModel::new();
-    model.set_angles(entity.head_yaw - entity.body_yaw, entity.pitch);
+    model.set_angles(wrap_degrees(entity.head_yaw - entity.body_yaw), entity.pitch);
     body_matrix(entity)
         * x_mirror()
         * head_chain(&model.head)

@@ -45,6 +45,7 @@ fn view() -> HudEditorView {
         ],
         screen: SCREEN,
         scale_range: (0.5, 3.0),
+        ..HudEditorView::default()
     }
 }
 
@@ -73,6 +74,7 @@ fn show_blocking(
         snap: &snap,
         blocked,
         bar: true,
+        grid: None,
     };
     frame(input, |ui| {
         screen.show(ui, (&font, &font), &Lang::builtin(), view, zones)
@@ -108,6 +110,7 @@ fn texts(screen: &mut HudLayer, view: &HudEditorView) -> Vec<String> {
             snap: &snap,
             blocked: &[],
             bar: true,
+            grid: None,
         };
         screen.show(ui, (&font, &font), &Lang::builtin(), view, zones);
         ui.draw()

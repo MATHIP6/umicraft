@@ -90,7 +90,9 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let installed = ui_font::install(&mut renderer, &ui_font::load().atlas)?;
     let gui_atlas = crate::official::load_gui_atlas();
     if let Some(atlas) = gui_atlas.as_ref().filter(|atlas| !atlas.is_empty()) {
-        renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels());
+        if let Err(error) = renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels()) {
+            tracing::error!(%error, "GUI texture atlas rejected");
+        }
     }
     let sheets = crate::official::hud_sheets(gui_atlas.as_ref());
     let mut list = DrawList::new();

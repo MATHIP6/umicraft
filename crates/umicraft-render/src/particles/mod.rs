@@ -115,6 +115,9 @@ impl ParticleRenderer {
         sprites: &[ParticleSprite],
     ) {
         self.vertices.clear();
+        if sprites.is_empty() {
+            return;
+        }
         let (right, up) = screen_axes(camera.forward());
         for sprite in sprites.iter().take(MAX_SPRITES) {
             self.vertices.extend_from_slice(&quad(sprite, right, up));

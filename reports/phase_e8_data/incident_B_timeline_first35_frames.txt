@@ -1,0 +1,36 @@
+   0 +    0ms C->S C00 KA
+   1 +    0ms C->S C00 KA
+   2 +    5ms S->C S03
+   3 +    5ms S->C S02 Chat
+   4 +    6ms S->C S01 Join
+   5 +    6ms S->C S3F
+   6 +    6ms S->C S41
+   7 +    6ms S->C S05 Spawn
+   8 +    6ms S->C S39
+   9 +    6ms S->C S09
+  10 +    6ms S->C S37
+  11 +    6ms C->S C15
+  12 +    6ms C->S C17
+  13 +    7ms S->C S02 Chat
+  14 +    7ms S->C S38
+  15 +   12ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  16 +   12ms S->C S44
+  17 +   12ms S->C S03
+  18 +   13ms S->C S30
+  19 +   13ms S->C S2F
+  20 +   13ms S->C S2F
+  21 +   13ms C->S C06 (0.500,4.000,0.500) ground=0
+  22 +   13ms S->C S2F
+  23 +   15ms S->C S06 Health health=0.0 food=14
+  24 +   15ms S->C S1f
+  25 +  406ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  26 +  408ms C->S C06 (0.500,4.000,0.500) ground=0
+  27 + 1206ms S->C S03
+  28 + 1406ms S->C S2F
+  29 + 1406ms S->C S2F
+  30 + 1407ms S->C S2F
+  31 + 2054ms S->C S00 KA
+  32 + 2055ms C->S C00 KA
+  33 + 4108ms S->C S00 KA
+  34 + 4108ms C->S C00 KA
+COUNTS {'C00': 21, 'C06': 2, 'C15': 1, 'C17': 1, 'S00': 19, 'S01': 1, 'S02': 2, 'S03': 10, 'S05': 1, 'S06': 1, 'S08': 2, 'S09': 1, 'S1f': 1, 'S2f': 6, 'S30': 1, 'S37': 1, 'S38': 2, 'S39': 1, 'S3f': 1, 'S41': 1, 'S44': 1}

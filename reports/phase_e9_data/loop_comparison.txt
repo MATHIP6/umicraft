@@ -1,0 +1,10 @@
+vanilla 60 FPS X3 (E.8)            frames  50267 S08  24711 max S08/s    61 median gap   17 ms | movement pkts after death   20 last +1049 ms
+vanilla 260 FPS X3 (E.8 add.)      frames   7283 S08   3472 max S08/s   798 median gap    1 ms | movement pkts after death   20 last +1061 ms
+umicraft before, X3 (E.8)          frames   7111 S08   3363 max S08/s  3361 median gap    0 ms | movement pkts after death   44 last +2204 ms
+umicraft pacing only, X3           frames   7276 S08   3423 max S08/s  1388 median gap    0 ms | movement pkts after death  105 last +5249 ms
+umicraft pacing + no forget, X3    frames   7286 S08   3423 max S08/s  1676 median gap    0 ms | movement pkts after death  104 last +5205 ms
+umicraft E.9 final X3-1            frames   2115 S08    870 max S08/s    40 median gap   26 ms | movement pkts after death   20 last +1005 ms
+umicraft E.9 final X3-2            frames   2122 S08    872 max S08/s    39 median gap   26 ms | movement pkts after death   20 last +1003 ms
+umicraft E.9 final X2-1            frames    465 S08      4 max S08/s     2 median gap    - ms | movement pkts after death   20 last +1000 ms
+umicraft E.9 final X2-2            frames    466 S08      4 max S08/s     2 median gap    - ms | movement pkts after death   20 last +1014 ms
+umicraft E.9 final X1-1            frames    925 S08      4 max S08/s     2 median gap    - ms | movement pkts after death  n/a last +- ms

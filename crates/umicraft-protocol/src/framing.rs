@@ -12,15 +12,19 @@
 //! pre-1.13), matching vanilla's enabled-by-default `network-compression-threshold`
 //! of 256 in 1.8 server.properties.
 
+use std::cell::RefCell;
 use std::io::{Read, Write};
 
-use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
-use flate2::Compression;
+use flate2::{Compression, Decompress, FlushDecompress, Status};
 use tracing::debug;
 
 use crate::error::ProtocolError;
 use crate::varint::{read_var_u32, write_var_u32};
+
+thread_local! {
+    static THREAD_DECOMPRESSOR: RefCell<Decompress> = RefCell::new(Decompress::new(true));
+}
 
 /// Vanilla-sized cap on a single packet body (2^21 - 1). Enforced on both
 /// declared lengths so a hostile server cannot make us allocate gigabytes.
@@ -96,27 +100,95 @@ impl Framing {
                 } else {
                     let wire_len = inner.len();
                     let mut inflated = Vec::with_capacity(uncompressed_len);
-                    {
-                        let mut decoder = ZlibDecoder::new(&mut inner);
-                        match decoder.read_to_end(&mut inflated) {
-                            Ok(_) => {}
-                            Err(err) => {
-                                let consumed = wire_len - inner.len();
-                                return Err(ProtocolError::Invariant(format!(
-                                    "zlib inflate failed ({err}): claimed {uncompressed_len} bytes, \
-                                     wire had {wire_len}, consumed {consumed}, inflated {}",
-                                    inflated.len()
-                                )));
-                            }
-                        }
-                    }
-                    if inflated.len() == uncompressed_len {
-                        Ok(inflated)
-                    } else {
-                        Err(ProtocolError::Invariant(format!(
+                    let (res, consumed) = THREAD_DECOMPRESSOR.with(|cell| {
+                        let mut dec = cell.borrow_mut();
+                        dec.reset(true);
+                        let before_in = dec.total_in();
+                        let res = dec.decompress_vec(inner, &mut inflated, FlushDecompress::Finish);
+                        let consumed = (dec.total_in() - before_in) as usize;
+                        (res, consumed)
+                    });
+                    match res {
+                        Ok(Status::StreamEnd) | Ok(Status::Ok) if inflated.len() == uncompressed_len => Ok(inflated),
+                        Ok(_) => Err(ProtocolError::Invariant(format!(
                             "compressed packet claims {uncompressed_len} bytes but inflated to {}",
                             inflated.len()
-                        )))
+                        ))),
+                        Err(err) => Err(ProtocolError::Invariant(format!(
+                            "zlib inflate failed ({err:?}): claimed {uncompressed_len} bytes, \
+                             wire had {wire_len}, consumed {consumed}, inflated {}",
+                            inflated.len()
+                        ))),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Splits one fully-buffered framed packet into `(packet_id, body)`.
+    ///
+    /// Avoids intermediate frame vector allocations by directly extracting the
+    /// packet ID and returning the body vector in a single allocation.
+    ///
+    /// # Errors
+    /// [`ProtocolError::PacketTooLarge`] on oversized declarations,
+    /// [`ProtocolError::Zlib`] on corrupt compressed streams,
+    /// [`ProtocolError::Invariant`] on length mismatches or empty frames.
+    pub fn unwrap_packet(&self, frame: &[u8]) -> Result<(u8, Vec<u8>), ProtocolError> {
+        match self {
+            Framing::Raw => {
+                if frame.is_empty() {
+                    return Err(ProtocolError::Invariant("empty packet frame".to_string()));
+                }
+                let id = frame[0];
+                let body = frame[1..].to_vec();
+                Ok((id, body))
+            }
+            Framing::Compressed { .. } => {
+                let mut inner = frame;
+                let uncompressed_len = read_var_u32(&mut inner)? as usize;
+                if uncompressed_len > MAX_PACKET_LEN {
+                    return Err(ProtocolError::PacketTooLarge {
+                        size: uncompressed_len,
+                        limit: MAX_PACKET_LEN,
+                    });
+                }
+                if uncompressed_len == 0 {
+                    if inner.is_empty() {
+                        return Err(ProtocolError::Invariant("empty packet frame".to_string()));
+                    }
+                    let id = inner[0];
+                    let body = inner[1..].to_vec();
+                    Ok((id, body))
+                } else {
+                    if uncompressed_len == 0 {
+                        return Err(ProtocolError::Invariant("zero uncompressed length".to_string()));
+                    }
+                    let wire_len = inner.len();
+                    let mut inflated = Vec::with_capacity(uncompressed_len);
+                    let (res, consumed) = THREAD_DECOMPRESSOR.with(|cell| {
+                        let mut dec = cell.borrow_mut();
+                        dec.reset(true);
+                        let before_in = dec.total_in();
+                        let res = dec.decompress_vec(inner, &mut inflated, FlushDecompress::Finish);
+                        let consumed = (dec.total_in() - before_in) as usize;
+                        (res, consumed)
+                    });
+                    match res {
+                        Ok(Status::StreamEnd) | Ok(Status::Ok) if inflated.len() == uncompressed_len => {
+                            let id = inflated[0];
+                            inflated.drain(..1);
+                            Ok((id, inflated))
+                        }
+                        Ok(_) => Err(ProtocolError::Invariant(format!(
+                            "compressed packet claims {uncompressed_len} bytes but inflated to {}",
+                            inflated.len()
+                        ))),
+                        Err(err) => Err(ProtocolError::Invariant(format!(
+                            "zlib inflate failed ({err:?}): claimed {uncompressed_len} bytes, \
+                             wire had {wire_len}, consumed {consumed}, inflated {}",
+                            inflated.len()
+                        ))),
                     }
                 }
             }
@@ -145,13 +217,13 @@ impl Framing {
                     packet.extend_from_slice(body);
                     Self::write_raw(writer, &packet)
                 } else {
-                    let mut packet = Vec::with_capacity(body.len());
+                    let mut packet = Vec::with_capacity(body.len() + 32);
                     write_var_u32(&mut packet, body.len() as u32)?;
                     {
                         let mut encoder = ZlibEncoder::new(&mut packet, Compression::default());
                         encoder.write_all(body)?;
                         encoder.finish()?;
-                    } // encoder flushes into `packet` when dropped/finished.
+                    }
                     debug!(size = packet.len(), raw = body.len(), "compressed frame");
                     Self::write_raw(writer, &packet)
                 }
@@ -222,6 +294,35 @@ mod tests {
             .read_frame(&mut &frame[..])
             .unwrap_err();
         assert!(matches!(err, ProtocolError::PacketTooLarge { .. }));
+    }
+
+    #[test]
+    fn unwrap_packet_raw_and_compressed() {
+        let payload = b"\x07hello world payload";
+        let raw_frame = payload;
+        let (id, body) = Framing::Raw.unwrap_packet(raw_frame).unwrap();
+        assert_eq!(id, 0x07);
+        assert_eq!(body, b"hello world payload");
+
+        // Compressed under threshold
+        let framing_uncompressed = Framing::Compressed { threshold: 256 };
+        let mut buffer = Vec::new();
+        framing_uncompressed.write_frame(&mut buffer, payload).unwrap();
+        let mut reader = buffer.as_slice();
+        let _ = read_var_u32(&mut reader).unwrap();
+        let (id, body) = framing_uncompressed.unwrap_packet(reader).unwrap();
+        assert_eq!(id, 0x07);
+        assert_eq!(body, b"hello world payload");
+
+        // Compressed over threshold
+        let framing_compressed = Framing::Compressed { threshold: 4 };
+        let mut buffer = Vec::new();
+        framing_compressed.write_frame(&mut buffer, payload).unwrap();
+        let mut reader = buffer.as_slice();
+        let _ = read_var_u32(&mut reader).unwrap();
+        let (id, body) = framing_compressed.unwrap_packet(reader).unwrap();
+        assert_eq!(id, 0x07);
+        assert_eq!(body, b"hello world payload");
     }
 
     #[test]

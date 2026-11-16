@@ -42,6 +42,10 @@ pub enum ProtocolError {
     #[error("zlib stream error")]
     Zlib(#[from] flate2::DecompressError),
 
+    /// Zlib deflate failed.
+    #[error("zlib compression error")]
+    ZlibCompress(#[from] flate2::CompressError),
+
     /// A packet id was not recognized for its protocol state.
     #[error("unknown packet id {id:#04x} for {state:?} state")]
     UnknownPacket {

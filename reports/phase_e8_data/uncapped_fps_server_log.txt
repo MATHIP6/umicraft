@@ -1,0 +1,18 @@
+117:[03:12:36] [User Authenticator #1/INFO]: UUID of player Fp120 is e7ac6075-cf97-3e23-8d7c-3c8894bf5374
+118:[03:12:36] [Server thread/INFO]: Fp120 joined the game
+119:[03:12:36] [Server thread/INFO]: Fp120[/127.0.0.1:63692] logged in with entity id 21 at ([world]162.5, 4.0, -484.5)
+120:[03:12:36] [Server thread/INFO]: Teleported Fp120 to 0.5, 4.0, 0.5
+122:[03:12:41] [Server thread/INFO]: Fp120 fell out of the world
+123:[03:12:41] [Server thread/INFO]: Killed Fp120
+124:[03:12:42] [Server thread/INFO]: Teleported Fp120 to 10.5, 4.0, 0.5
+125:[03:13:23] [Server thread/INFO]: Fp120 lost connection: Disconnected
+126:[03:13:23] [Server thread/INFO]: Fp120 left the game
+127:[03:13:32] [User Authenticator #1/INFO]: UUID of player Fp260 is 7dd2453a-ddab-3bba-b682-efb8d7c60ab5
+128:[03:13:32] [Server thread/INFO]: Fp260 joined the game
+129:[03:13:32] [Server thread/INFO]: Fp260[/127.0.0.1:63781] logged in with entity id 22 at ([world]156.5, 4.0, -483.5)
+130:[03:13:33] [Server thread/INFO]: Teleported Fp260 to 0.5, 4.0, 0.5
+132:[03:13:37] [Server thread/INFO]: Fp260 fell out of the world
+133:[03:13:37] [Server thread/INFO]: Killed Fp260
+134:[03:13:39] [Server thread/INFO]: Teleported Fp260 to 10.5, 4.0, 0.5
+135:[03:13:44] [Server thread/INFO]: Fp260 lost connection: Sent too many packets.
+136:[03:13:44] [Server thread/INFO]: Fp260 left the game

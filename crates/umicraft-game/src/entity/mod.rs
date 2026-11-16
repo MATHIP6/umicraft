@@ -31,6 +31,7 @@ pub mod shadow;
 pub mod snapshot;
 pub mod store;
 
+pub use angle::{lerp_degrees, wrap_degrees};
 pub use anim::{Animation, BedPose, SquidPose};
 pub use body_yaw::BodyYaw;
 pub use boss::{

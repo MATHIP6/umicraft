@@ -13,15 +13,18 @@ use umicraft_client::{
     screenshot, setup_cli, ui_demo, window,
 };
 
+#[global_allocator]
+static ALLOCATOR: umicraft_core::profiling::CountingAllocator =
+    umicraft_core::profiling::CountingAllocator::new();
+
 fn main() -> ExitCode {
+    umicraft_core::boot_log::init();
+    umicraft_core::boot_log!("main_started");
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
         )
         .init();
-
-    // Kept alive for the whole run: dropping it stops the puffin stream.
-    let _profiler = umicraft_core::profiling::serve();
 
     let words: Vec<String> = std::env::args().skip(1).collect();
     if words.iter().any(|word| word == "--help" || word == "-h") {
@@ -37,6 +40,13 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+
+    if args.profile {
+        umicraft_core::profiling::set_enabled(true);
+    }
+
+    // Kept alive for the whole run: dropping it stops the puffin stream.
+    let _profiler = umicraft_core::profiling::serve();
 
     let result = match args.mode() {
         Mode::SetupAssets => setup_cli::run(),

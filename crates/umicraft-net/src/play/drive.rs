@@ -24,10 +24,12 @@ use crate::error::NetError;
 /// kicks above 500 packets in seven seconds), so the sent count belongs in the
 /// acceptance reports.
 #[derive(Debug, Default)]
+#[repr(align(64))]
 pub struct SessionCounters {
     received: AtomicU64,
     sent: AtomicU64,
     keepalives_answered: AtomicU64,
+    processing_nanos: AtomicU64,
 }
 
 impl SessionCounters {
@@ -47,6 +49,23 @@ impl SessionCounters {
     #[must_use]
     pub fn keepalives_answered(&self) -> u64 {
         self.keepalives_answered.load(Ordering::Relaxed)
+    }
+
+    /// Total CPU nanoseconds spent decoding and handling clientbound packets.
+    #[must_use]
+    pub fn processing_nanos(&self) -> u64 {
+        self.processing_nanos.load(Ordering::Relaxed)
+    }
+
+    /// Mean packet processing time in microseconds (`0.0` before the first packet).
+    #[must_use]
+    pub fn mean_packet_micros(&self) -> f32 {
+        let count = self.packets_received();
+        if count == 0 {
+            0.0
+        } else {
+            (self.processing_nanos() as f64 / (count as f64 * 1_000.0)) as f32
+        }
     }
 }
 
@@ -102,28 +121,46 @@ pub async fn drive(
         match incoming {
             Incoming::Command(None) => return Ok(SessionEnd::CommandsClosed),
             Incoming::Command(Some(command)) => {
-                connection.write_packet(&command).await?;
-                counters.sent.fetch_add(1, Ordering::Relaxed);
+                let mut batch = Vec::with_capacity(8);
+                batch.push(command);
+                while batch.len() < 16 {
+                    match commands.try_recv() {
+                        Ok(next) => batch.push(next),
+                        Err(_) => break,
+                    }
+                }
+                counters.sent.fetch_add(batch.len() as u64, Ordering::Relaxed);
+                connection.write_packets(&batch).await?;
             }
             Incoming::Packet(id, body) => {
+                let start = std::time::Instant::now();
                 counters.received.fetch_add(1, Ordering::Relaxed);
                 let reaction = session.handle(id, &body)?;
-                for reply in reaction.replies() {
-                    connection.write_packet(reply).await?;
-                    counters.sent.fetch_add(1, Ordering::Relaxed);
-                    if matches!(reply, PlayServerbound::KeepAlive(_)) {
-                        counters.keepalives_answered.fetch_add(1, Ordering::Relaxed);
+                let replies: Vec<_> = reaction.replies().collect();
+                if !replies.is_empty() {
+                    for reply in &replies {
+                        if matches!(reply, PlayServerbound::KeepAlive(_)) {
+                            counters.keepalives_answered.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
+                    counters.sent.fetch_add(replies.len() as u64, Ordering::Relaxed);
+                    connection.write_packet_refs(&replies).await?;
                 }
                 if let Some(threshold) = reaction.compression_threshold() {
                     connection.set_compression_threshold(threshold);
                 }
                 if let Some(reason) = reaction.kick_reason() {
+                    counters
+                        .processing_nanos
+                        .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
                     return Ok(SessionEnd::Kicked(reason.to_string()));
                 }
                 if let Some(event) = reaction.into_event() {
                     on_event(event);
                 }
+                counters
+                    .processing_nanos
+                    .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
         }
     }

@@ -9,7 +9,7 @@
 //! chunk snapshots arrive over the bounded channels of the game thread
 //! (ADR-0005, ADR-0013).
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use umicraft_core::lang::Lang;
@@ -32,7 +32,7 @@ use winit::event::{
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{CursorGrabMode, Window};
+use winit::window::{CursorGrabMode, Fullscreen, Window};
 
 use self::chat_control::CHAT_WHEEL_ROWS;
 use self::menu_screens::VERSION_LINE;
@@ -55,7 +55,7 @@ use crate::inventory_input::InventoryInput;
 use crate::language;
 use crate::map_render::{map_id_of, MapTextures};
 use crate::menu_flow::{MenuCommand, MenuContext, MenuFlow, MenuFrame};
-use crate::nametag_draw::{draw_tags, place_tags};
+use crate::nametag_draw::{draw_tags_into, place_tags_into, PlacedTag};
 use crate::text_screens::TextScreens;
 
 use crate::achievements_view::java_string_hash;
@@ -68,6 +68,7 @@ use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
 use crate::item_icons::{slot_item, IconSource, ItemResources, ItemView};
 use crate::item_world::{entity_items, push_held_item, ItemLayers, WorldItems};
 use crate::mesher::worker_count;
+use crate::metrics::{FrameMetricsWindow, InputLatencyMetrics};
 use crate::mods_runtime::ModsRuntime;
 use crate::options::{self, Action, Binding, Options};
 use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
@@ -99,7 +100,14 @@ mod session_control;
 
 /// The look speed at the default sensitivity, in radians per pixel; the
 /// sensitivity option scales it.
-const MOUSE_SENSITIVITY: f32 = 0.0022;
+///
+/// In Minecraft Java 1.8.9 (`EntityRenderer.java:1095-1098` and `Entity.java:383-384`):
+/// `f = sensitivity * 0.6 + 0.2`
+/// `f1 = f^3 * 8`
+/// `deltaYaw = deltaX * f1 * 0.15°`
+/// At default sensitivity (0.5), f1 = 1.0, and 1 pixel of mouse motion equals 0.15 degrees.
+/// Converted to radians: 0.15° = 0.15 * π / 180 rad.
+pub(crate) const MOUSE_SENSITIVITY: f32 = 0.15_f32.to_radians();
 /// The render distance `--view-distance` has when it is not given. Any other
 /// value on the command line overrides the saved option.
 const CLI_DEFAULT_VIEW_DISTANCE: u8 = 8;
@@ -130,6 +138,7 @@ const HAT_PART: u8 = 0x40;
 /// initialization failure. Runtime draw failures are surfaced the same way
 /// after the event loop returns.
 pub fn run(args: Args) -> Result<(), ClientError> {
+    umicraft_core::boot_log!("window_run_started");
     let options_path = options::default_path();
     let mut options = options_path
         .as_deref()
@@ -144,10 +153,14 @@ pub fn run(args: Args) -> Result<(), ClientError> {
     language::install(Arc::clone(&lang));
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Poll);
+    umicraft_core::boot_log!("event_loop_created");
     let mut app = App::new(args, options, options_path, lang)?;
+    umicraft_core::boot_log!("app_initialized");
+    umicraft_core::boot_log!("event_loop_run_app_starting");
     event_loop
         .run_app(&mut app)
         .map_err(|error| ClientError::Window(error.to_string()))?;
+    umicraft_core::boot_log!("event_loop_run_app_exited");
     if let Some(error) = app.exit_error {
         return Err(ClientError::Window(error));
     }
@@ -158,6 +171,10 @@ struct App {
     args: Args,
     /// The name tags of the frame, drawn by the renderer in the world pass.
     nametags: Vec<umicraft_render::Nametag>,
+    /// Reusable screen-placed tag buffer so `place_tags_into` does not allocate per frame.
+    placed_tags: Vec<PlacedTag>,
+    /// Reusable dynamic moving-blocks / flower-pot mesh buffer across frames.
+    moving_blocks_mesh: umicraft_mesh::Mesh,
     /// The pose of the hand in the last frame, to tell the motion blur when it moves.
     last_hand: Option<umicraft_game::hand::HandPose>,
     /// Where the CPU time of a frame goes, for F3.
@@ -168,6 +185,12 @@ struct App {
     focused: bool,
     /// The built HUD, kept while it does not change.
     hud_cache: HudCache,
+    /// Double-buffered HUD state on the render thread: synced from `WorldView`
+    /// only when `hud_revision` or `options.chat` changes, avoiding per-frame
+    /// heap clones of chat lines, tab list entries, and scoreboard rows.
+    frame_hud: HudState,
+    frame_hud_revision: u64,
+    frame_hud_chat: Option<options::ChatOptions>,
     /// The entities of this frame, interpolated once: the tab list, the name tags and
     /// the scene all read them (perf 2, B4).
     frame_entities: Vec<umicraft_game::entity::EntityRenderSnapshot>,
@@ -214,8 +237,11 @@ struct App {
     /// menu. Escape and Done go back there.
     options_origin: Screen,
     last_input: InputState,
+    last_input_time: Instant,
     look: (f32, f32),
     select_slot: Option<u8>,
+    /// The digit key presses not sent yet (MCP `KeyBinding.pressTime`).
+    hotbar_keys: [u8; 9],
     break_block: bool,
     /// The mouse buttons that are down, by `Binding::Mouse` index.
     buttons: HashSet<u8>,
@@ -278,8 +304,8 @@ struct App {
     inventory_input: InventoryInput,
     /// The font loaded at startup, before the renderer exists.
     font: LoadedFont,
-    /// The terrain textures loaded at start-up, until the renderer binds them.
-    terrain: Option<TerrainTextures>,
+    /// Background asset loader channel receiver.
+    asset_receiver: Option<std::sync::mpsc::Receiver<AsyncLoadedAssets>>,
     /// The atlas the renderer accepted; the UI metrics must match it.
     ui_atlas: Option<FontAtlas>,
     /// The brand atlas the renderer accepted; `None` keeps the classic
@@ -319,14 +345,24 @@ struct App {
     next_frame: Instant,
     /// Origin of the clock that scrolls the enchantment glint.
     started: Instant,
-    frame_times: Vec<f32>,
+    frame_times: VecDeque<f32>,
     frame_ms: f32,
     fps: f32,
     /// Refreshes `fps` once per second for the F3 screen.
     fps_meter: FpsMeter,
+    /// Rolling frametime percentiles, 1%/0.1% low FPS, and per-frame allocations.
+    metrics_window: FrameMetricsWindow,
+    /// Heap allocation snapshot taken at the start of the previous frame.
+    last_alloc_snapshot: umicraft_core::profiling::AllocSnapshot,
     /// The built-in mods (ADR-0065).
     mods: ModsRuntime,
     exit_error: Option<String>,
+}
+
+/// Decoded asset data delivered asynchronously by the background asset loader.
+struct AsyncLoadedAssets {
+    font: LoadedFont,
+    terrain: TerrainTextures,
 }
 
 impl App {
@@ -336,21 +372,37 @@ impl App {
         options_path: Option<std::path::PathBuf>,
         lang: Arc<Lang>,
     ) -> Result<Self, ClientError> {
-        // Assets are loaded once, before any worker or GPU resource exists.
-        // A missing/corrupt installation picks the procedural set.
-        let terrain = Some(TerrainTextures::load_with_packs(&pack_paths(
+        // Launch background thread to decode heavy assets without blocking the main event loop
+        let packs = pack_paths(
             &args.resource_packs,
             &options,
             packs_folder().as_deref(),
             None,
-        )));
-        let font = ui_font::load();
+        );
+        let (asset_tx, asset_rx) = std::sync::mpsc::channel();
+        let loader_thread = std::thread::Builder::new()
+            .name("AssetLoader".to_string())
+            .spawn(move || {
+                umicraft_core::boot_log!("async_asset_loader_start");
+                let font = ui_font::load();
+                umicraft_core::boot_log!("async_asset_loader_font_loaded");
+                let terrain = TerrainTextures::load_with_packs(&packs);
+                umicraft_core::boot_log!("async_asset_loader_terrain_loaded");
+                let _ = asset_tx.send(AsyncLoadedAssets { font, terrain });
+            });
+        if let Err(error) = loader_thread {
+            tracing::error!(%error, "Failed to spawn background asset loader thread");
+        }
+
+        let font = LoadedFont {
+            atlas: FontAtlas::fallback(),
+            source: crate::ui_font::FontSource::Fallback,
+        };
         let audio = if args.no_audio {
             AudioBridge::disabled()
         } else {
             AudioBridge::start(&options.sound)
         };
-        let args_has_server = args.server().is_some();
         let last_server = options.multiplayer.last_server.clone();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
@@ -358,11 +410,11 @@ impl App {
             saved_options: options.clone(),
             lang,
             mods: ModsRuntime::new(&options.mods),
+            video_applier: VideoApplier::new(options.video.fullscreen),
             options,
             options_path,
             options_screen: OptionsScreen::new(),
             options_outcome: OptionsOutcome::default(),
-            video_applier: VideoApplier::default(),
             audio,
             window: None,
             renderer: None,
@@ -377,20 +429,17 @@ impl App {
             menu: new_menu(last_server),
             options_origin: Screen::GameMenu,
             last_input: InputState::default(),
+            last_input_time: Instant::now(),
             look: (0.0, 0.0),
             select_slot: None,
+            hotbar_keys: [0; 9],
             break_block: false,
             buttons: HashSet::new(),
             death_started: None,
             respawn_requested: false,
             place_block: false,
-            // With a server on the command line the window connects at once
-            // (see `resumed`); otherwise it opens on the title screen.
-            screen: if args_has_server {
-                Screen::Connecting
-            } else {
-                Screen::Title
-            },
+            screen: Screen::Loading,
+            asset_receiver: Some(asset_rx),
             chat_input: ChatInput::new(""),
             sent_messages: SentHistory::new(),
             chat_scroll: 0,
@@ -399,11 +448,16 @@ impl App {
             ctrl_held: false,
             shift_held: false,
             nametags: Vec::new(),
+            placed_tags: Vec::new(),
+            moving_blocks_mesh: umicraft_mesh::Mesh::default(),
             last_hand: None,
             cpu: CpuSplit::default(),
             zoom: Zoom::default(),
             focused: true,
             hud_cache: HudCache::default(),
+            frame_hud: HudState::default(),
+            frame_hud_revision: 0,
+            frame_hud_chat: None,
             frame_entities: Vec::new(),
             particle_sprites: Vec::new(),
             pointer: (0.0, 0.0),
@@ -423,7 +477,6 @@ impl App {
             ui_input: UiInputTranslator::new(),
             inventory_input: InventoryInput::new(),
             font,
-            terrain,
             ui_atlas: None,
             brand_atlas: None,
             gui_atlas: None,
@@ -443,10 +496,12 @@ impl App {
             last_frame: Instant::now(),
             next_frame: Instant::now(),
             started: Instant::now(),
-            frame_times: Vec::with_capacity(FRAME_HISTORY),
+            frame_times: VecDeque::with_capacity(FRAME_HISTORY),
             frame_ms: 0.0,
             fps: 0.0,
             fps_meter: FpsMeter::new(Instant::now()),
+            metrics_window: FrameMetricsWindow::new(),
+            last_alloc_snapshot: umicraft_core::profiling::AllocSnapshot::now(),
             exit_error: None,
         })
     }
@@ -459,6 +514,93 @@ impl App {
         }
         self.overlay.resize(width, height);
         self.camera.set_aspect(width, height);
+    }
+
+    /// Checks if the background worker has finished decoding assets.
+    fn poll_asset_loading(&mut self) {
+        if self.renderer.is_none() {
+            return;
+        }
+        let Some(rx) = self.asset_receiver.as_ref() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(assets) => {
+                umicraft_core::boot_log!("assets_received_on_main_thread");
+                self.asset_receiver = None;
+                self.apply_loaded_assets(assets);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                tracing::warn!("Asset loader thread disconnected unexpectedly");
+                self.asset_receiver = None;
+                if self.screen == Screen::Loading {
+                    self.screen = Screen::Title;
+                }
+            }
+        }
+    }
+
+    /// Finalizes asset loading on the GPU and transitions from the loading screen.
+    fn apply_loaded_assets(&mut self, assets: AsyncLoadedAssets) {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        umicraft_core::boot_log!("applying_loaded_assets_start");
+
+        self.font = assets.font;
+        match ui_font::install(renderer, &self.font.atlas) {
+            Ok(installed) => {
+                self.ui_atlas = Some(installed.atlas);
+                self.hud_cache.invalidate();
+                umicraft_core::boot_log!("official_ui_font_installed");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to install official font atlas; keeping fallback");
+            }
+        }
+        self.brand_atlas = ui_font::install_brand(renderer);
+        umicraft_core::boot_log!("brand_atlas_installed");
+
+        renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
+        let terrain = assets.terrain.install(renderer);
+        umicraft_core::boot_log!("terrain_installed");
+
+        let gui_atlas = crate::official::grow_atlas(terrain.gui_atlas(), &[]);
+        upload_gui_atlas(renderer, Some(&gui_atlas));
+        upload_glint_texture(renderer, terrain.glint_texture());
+        upload_sky_textures(renderer);
+        self.panorama = upload_panorama(renderer);
+        self.gui_atlas = Some(gui_atlas);
+        self.server_icons_revision = u64::MAX;
+        self.items = terrain.items();
+        self.dials = DialAnimator::new(terrain.dials());
+        self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
+        umicraft_core::boot_log!("gui_and_sky_uploaded");
+
+        match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
+            Ok(world) => self.world = Some(world),
+            Err(error) => {
+                tracing::error!(%error, "WorldView::new failed");
+            }
+        }
+        umicraft_core::boot_log!("world_view_created");
+
+        self.entity_textures = Some(EntityTextures::load_with_font(
+            renderer,
+            self.ui_atlas.as_ref(),
+        ));
+        self.map_textures = Some(MapTextures::load(renderer));
+        umicraft_core::boot_log!("entity_and_map_textures_loaded");
+
+        if self.screen == Screen::Loading {
+            if self.args.server().is_some() {
+                self.connect_from_arguments();
+            } else {
+                self.screen = Screen::Title;
+            }
+        }
+        umicraft_core::boot_log!("apply_loaded_assets_completed");
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
@@ -534,6 +676,7 @@ impl App {
                 return;
             }
             Screen::Title
+            | Screen::Loading
             | Screen::ServerList
             | Screen::ServerEdit
             | Screen::ConfirmDelete
@@ -555,7 +698,23 @@ impl App {
                             self.set_screen(Screen::None.after_escape(self.options_origin))
                         }
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
-                        KeyCode::F3 => self.show_f3 = !self.show_f3,
+                        KeyCode::F3 => {
+                            self.show_f3 = !self.show_f3;
+                            if self.show_f3 {
+                                umicraft_core::profiling::set_alloc_tracking(true);
+                                self.last_alloc_snapshot =
+                                    umicraft_core::profiling::AllocSnapshot::now();
+                            } else if !umicraft_core::profiling::is_enabled() {
+                                umicraft_core::profiling::set_alloc_tracking(false);
+                            }
+                        }
+                        // F3 + P toggles the runtime profiler and allocation tracker.
+                        KeyCode::KeyP if self.keys.contains(&KeyCode::F3) => {
+                            let enabled = umicraft_core::profiling::toggle();
+                            if !enabled && self.show_f3 {
+                                umicraft_core::profiling::set_alloc_tracking(true);
+                            }
+                        }
                         // F3 + T reloads the resource packs, whatever the
                         // chat key is bound to.
                         KeyCode::KeyT if self.keys.contains(&KeyCode::F3) => {
@@ -565,9 +724,13 @@ impl App {
                     }
                 }
                 self.keys.insert(code);
+                self.last_input_time = Instant::now();
+                self.publish_input();
             }
             ElementState::Released => {
                 self.keys.remove(&code);
+                self.last_input_time = Instant::now();
+                self.publish_input();
             }
         }
     }
@@ -800,6 +963,7 @@ impl App {
         let changed = state != self.last_input
             || self.look != (0.0, 0.0)
             || self.select_slot.is_some()
+            || self.hotbar_keys != [0; 9]
             || self.break_block
             || self.place_block
             || self.pick_block
@@ -809,20 +973,32 @@ impl App {
             return;
         }
         let update = InputUpdate {
+            created_at: self.last_input_time,
             state,
             look_yaw: self.look.0,
             look_pitch: self.look.1,
             select_slot: self.select_slot,
+            hotbar_keys: self.hotbar_keys,
             break_block: self.break_block,
             place_block: self.place_block,
             pick_block: self.pick_block,
             drop_item: self.drop_item,
             toggle_perspective: self.toggle_perspective,
         };
-        if self.send_event(GameEvent::Input(update)) {
+        let sent = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.send_input(update));
+        if sent {
+            if self.look != (0.0, 0.0) {
+                if let Some(world) = self.world.as_mut() {
+                    world.apply_look_delta(self.look.0, self.look.1);
+                }
+            }
             self.last_input = state;
             self.look = (0.0, 0.0);
             self.select_slot = None;
+            self.hotbar_keys = [0; 9];
             self.break_block = false;
             self.place_block = false;
             self.pick_block = false;
@@ -899,7 +1075,7 @@ impl App {
                 height as f32 - graph_height - 10.0,
                 graph_width,
                 graph_height,
-                &self.frame_times,
+                self.frame_times.make_contiguous(),
             );
         }
     }
@@ -944,18 +1120,28 @@ impl App {
             .set_menu_art(crate::official::menu_art(self.gui_atlas.as_ref()));
 
         if in_game {
-            let mut game_hud = self
-                .world
-                .as_ref()
-                .map(|world| world.hud().clone())
-                .unwrap_or_default();
-            self.options.chat.apply(&mut game_hud);
+            let world_hud_rev = self.world.as_ref().map_or(0, WorldView::hud_revision);
+            if world_hud_rev != self.frame_hud_revision
+                || self.frame_hud_chat.as_ref() != Some(&self.options.chat)
+            {
+                if let Some(world) = self.world.as_ref() {
+                    self.frame_hud.clone_from(world.hud());
+                } else {
+                    self.frame_hud = HudState::default();
+                }
+                self.options.chat.apply(&mut self.frame_hud);
+                self.frame_hud_revision = world_hud_rev;
+                self.frame_hud_chat = Some(self.options.chat.clone());
+            }
+            let show_tab_list = self.screen == Screen::None
+                && !self.container_is_open()
+                && self.held(Action::PlayerList);
             // The faces of the skins are only looked up while the tab list shows.
             // As in `GuiPlayerTabOverlay`, the hat layer is drawn only for a player
             // that is in the world and wears it.
-            if self.screen() == Screen::None && self.held(Action::PlayerList) {
+            if show_tab_list {
                 if let (Some(tab), Some(textures), Some(world)) = (
-                    game_hud.tab_list.as_mut(),
+                    self.frame_hud.tab_list.as_mut(),
                     self.entity_textures.as_ref(),
                     self.world.as_ref(),
                 ) {
@@ -980,43 +1166,50 @@ impl App {
             }
             let chatting = self.screen == Screen::Chat;
             let debug_f3 = self.show_f3.then(|| {
+                let (mean_allocs, mean_bytes) = self.metrics_window.mean_allocs_per_frame();
                 crate::debug_f3_view::build_live(
                     self.renderer.as_ref(),
                     self.world.as_ref(),
                     &crate::debug_f3_view::Live {
                         fps: self.fps,
                         cpu: self.cpu.reading(),
+                        frame_dist: self.metrics_window.distribution(),
+                        mean_allocs_per_frame: mean_allocs as f64,
+                        mean_alloc_bytes_per_frame: mean_bytes as f64,
                         video: &self.options.video,
                         display: (width, height),
                         camera: &self.camera,
+                        input_latency: self.metrics_window.input_latency(),
                     },
                 )
             });
             let items = ItemView::new(self.items.as_deref(), self.dials.frames());
-            let hud = HudState {
-                hotbar_items: self.world.as_ref().map_or_else(Default::default, |world| {
+            self.frame_hud.hotbar_items =
+                self.world.as_ref().map_or_else(Default::default, |world| {
                     hotbar_slot_items(&world.window_view().player_slots, items)
-                }),
-                debug_f3,
-                chat_open: chatting,
-                chat_scroll: self.chat_scroll,
-                chat_input: chatting.then(|| ChatInputView {
-                    text: self.chat_input.text(),
-                    caret: self.chat_input.caret(),
-                    caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
-                        .is_multiple_of(2),
-                }),
-                // The clock of the cached HUD stands still for a tick, so an unchanged
-                // HUD compares equal and is not built again (perf 2, B2).
-                now: Some(self.hud_cache.clock(Instant::now())),
-                show_tab_list: self.screen() == Screen::None && self.held(Action::PlayerList),
-                // The mod widgets change with the frame (the fps, the position):
-                // they are drawn after the cached HUD, in the same place of the order.
-                mod_widgets: Vec::new(),
-                ..game_hud
-            };
-            self.hud_cache
-                .draw(self.ui.draw(), &hud, (width, height), (atlas, &sheets));
+                });
+            self.frame_hud.debug_f3 = debug_f3;
+            self.frame_hud.chat_open = chatting;
+            self.frame_hud.chat_scroll = self.chat_scroll;
+            self.frame_hud.chat_input = chatting.then(|| ChatInputView {
+                text: self.chat_input.text(),
+                caret: self.chat_input.caret(),
+                caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
+                    .is_multiple_of(2),
+            });
+            // The clock of the cached HUD stands still for a tick, so an unchanged
+            // HUD compares equal and is not built again (perf 2, B2).
+            self.frame_hud.now = Some(self.hud_cache.clock(Instant::now()));
+            self.frame_hud.show_tab_list = show_tab_list;
+            // The mod widgets change with the frame (the fps, the position):
+            // they are drawn after the cached HUD, in the same place of the order.
+            self.frame_hud.mod_widgets.clear();
+            self.hud_cache.draw(
+                self.ui.draw(),
+                &self.frame_hud,
+                (width, height),
+                (atlas, &sheets),
+            );
             let widgets = mods_menu::hud_widgets(self.screen(), &self.mods, atlas, (width, height));
             umicraft_ui::mod_widget::draw_mod_widgets(
                 self.ui.draw(),
@@ -1025,7 +1218,7 @@ impl App {
                 atlas,
             );
             self.chat_hover = chatting
-                .then(|| chat_run_at(&hud, (width, height), atlas, self.pointer))
+                .then(|| chat_run_at(&self.frame_hud, (width, height), atlas, self.pointer))
                 .flatten();
             let rows = self
                 .chat_hover
@@ -1046,13 +1239,14 @@ impl App {
         }
         if self.world.is_some() && in_game {
             // The world keeps drawing behind an inventory screen, name tags included.
-            let tags = place_tags(
+            place_tags_into(
                 &self.frame_entities,
                 &self.camera,
                 width as f32,
                 height as f32,
+                &mut self.placed_tags,
             );
-            self.nametags = draw_tags(atlas, &tags);
+            draw_tags_into(atlas, &self.placed_tags, &mut self.nametags);
         }
 
         if self.death_screen_visible() {
@@ -1127,6 +1321,7 @@ impl App {
                     text_done = done;
                 }
                 Screen::Title
+                | Screen::Loading
                 | Screen::ServerList
                 | Screen::ServerEdit
                 | Screen::ConfirmDelete
@@ -1223,12 +1418,21 @@ impl App {
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
+        let frame_num = umicraft_core::boot_log::frames_presented();
+        if frame_num < 10 {
+            umicraft_core::boot_log!("redraw_entry", "frame={frame_num}");
+        }
+        self.poll_asset_loading();
         umicraft_core::profiling::new_frame();
         umicraft_core::profile_scope!("redraw");
         let now = Instant::now();
         self.cpu.start(now);
         let elapsed = (now - self.last_frame).as_secs_f32();
         self.last_frame = now;
+        // Phase E.9: the game thread takes network events once per frame.
+        if let Some(session) = self.session.as_ref() {
+            session.note_frame(Duration::from_secs_f32(elapsed));
+        }
         let frame_ms = elapsed * 1000.0;
         self.frame_ms = if self.frame_ms == 0.0 {
             frame_ms
@@ -1236,10 +1440,16 @@ impl App {
             self.frame_ms * 0.9 + frame_ms * 0.1
         };
         self.fps = self.fps_meter.tick(now);
+        let alloc_now = umicraft_core::profiling::AllocSnapshot::now();
+        let alloc_delta = alloc_now.delta_since(self.last_alloc_snapshot);
+        self.last_alloc_snapshot = alloc_now;
+        self.metrics_window.push(now, frame_ms, alloc_delta);
         self.update_mods(now);
-        self.frame_times.push(frame_ms);
-        if self.frame_times.len() > FRAME_HISTORY {
-            self.frame_times.remove(0);
+        if self.show_overlay {
+            if self.frame_times.len() >= FRAME_HISTORY {
+                self.frame_times.pop_front();
+            }
+            self.frame_times.push_back(frame_ms);
         }
 
         // The Zoom mod narrows the field of view, with a glide in and out.
@@ -1248,23 +1458,25 @@ impl App {
         self.camera
             .set_fov_degrees(self.options.video.fov * zoom_scale);
         self.advance_menus(Duration::from_secs_f32(elapsed));
-        self.sync_world(now);
-        // The camera is where it stays for this frame: the entities are made once.
-        self.frame_entities = self.world.as_ref().map_or_else(Vec::new, |world| {
-            world.entities(now, self.camera.render_origin())
-        });
-        self.update_server_pack();
-        self.update_music(now);
-        self.process_completions();
-        self.update_death_screen(now);
-        self.update_container_cursor();
         self.publish_input();
+        self.sync_world(now);
         let mut environment = self
             .world
             .as_ref()
             .map(|world| world.environment(now, self.options.video.render_distance))
             .unwrap_or_default();
         environment.gamma = self.options.video.gamma;
+        // The camera is where it stays for this frame: the entities are made once.
+        if let Some(world) = self.world.as_ref() {
+            world.entities_into(now, self.camera.render_origin(), &mut self.frame_entities);
+        } else {
+            self.frame_entities.clear();
+        }
+        self.update_server_pack();
+        self.update_music(now);
+        self.process_completions();
+        self.update_death_screen(now);
+        self.update_container_cursor();
         self.build_overlay();
 
         if self.exit_error.is_some() {
@@ -1359,7 +1571,8 @@ impl App {
         }
 
         if let Some(world) = self.world.as_ref() {
-            renderer.set_moving_blocks(&world.moving_blocks_mesh(environment.partial_tick));
+            world.moving_blocks_mesh_into(environment.partial_tick, &mut self.moving_blocks_mesh);
+            renderer.set_moving_blocks(&self.moving_blocks_mesh);
         }
 
         // No world, no hand: set again below when there is one.
@@ -1398,20 +1611,24 @@ impl App {
             let framed = self.map_textures.as_mut().map_or_else(Vec::new, |maps| {
                 maps.frame_batches(entities, world.maps(), renderer)
             });
-            let mut block_entities = mesh_block_entities(
-                world.block_entities(),
-                &BlockEntityScene {
-                    lids: world.chest_lids(),
-                    signs: world.signs(),
-                    data: world.block_entity_data(),
-                    skins: entity_textures,
-                    seconds: (now - self.started).as_secs_f32(),
-                    font: self.ui_atlas.as_ref(),
-                    partial_tick: environment.partial_tick,
-                    camera: self.camera.relative_eye(),
-                    origin: render_origin_blocks,
-                },
-            );
+            let mut block_entities = if world.has_block_entities() {
+                mesh_block_entities(
+                    world.block_entities(),
+                    &BlockEntityScene {
+                        lids: world.chest_lids(),
+                        signs: world.signs(),
+                        data: world.block_entity_data(),
+                        skins: entity_textures,
+                        seconds: (now - self.started).as_secs_f32(),
+                        font: self.ui_atlas.as_ref(),
+                        partial_tick: environment.partial_tick,
+                        camera: self.camera.relative_eye(),
+                        origin: render_origin_blocks,
+                    },
+                )
+            } else {
+                crate::block_entity_render::BlockEntityMeshes::default()
+            };
             let mut hand_item = None;
             if let Some(items) = self.items.as_deref() {
                 entity_items::push(&mut block_entities, entities, items, entity_textures);
@@ -1527,6 +1744,22 @@ impl App {
         };
         self.cpu.lap(Stage::Render);
         self.cpu.finish();
+        let present_us = renderer.presentation_time_us();
+        let (proc_us, queue_us) = self.world.as_ref().map_or((0, 0), |w| {
+            let debug = w.debug_world();
+            (debug.input_processing_micros, debug.input_queue_latency_micros)
+        });
+        let input_to_frame_ms = (Instant::now()
+            .saturating_duration_since(self.last_input_time)
+            .as_secs_f32()
+            * 1000.0)
+            .min(999.0);
+        self.metrics_window.set_input_latency(InputLatencyMetrics {
+            input_processing_us: proc_us,
+            event_queue_latency_us: queue_us,
+            input_to_frame_ms,
+            presentation_time_ms: present_us as f32 / 1000.0,
+        });
         let captured = renderer.take_capture();
         if let Some(frame) = ui_frame {
             self.ui.recycle_output(frame);
@@ -1534,36 +1767,37 @@ impl App {
         if let Some(captured) = captured {
             self.save_screenshot(captured);
         }
+        if frame_num < 10 {
+            umicraft_core::boot_log!(
+                "redraw_render_finished",
+                "frame={frame_num}, is_err={}",
+                rendered.is_err()
+            );
+        }
         if let Err(error) = rendered {
+            umicraft_core::boot_log!("redraw_render_error", "{error}");
             self.exit_error = Some(error.to_string());
             event_loop.exit();
             return;
         }
-        // The frame-rate cap. The target moves on by one exact budget per frame,
-        // so the wake-up delay of a sleep is not lost on every frame; the last
-        // millisecond is spun because a sleep overshoots by about that much.
+        // The frame-rate cap. Calculate next frame deadline for non-blocking event-driven scheduling.
         let cap = frame_cap(self.options.video.max_fps, self.focused);
-        if cap < options::UNLIMITED_FPS {
+        if !self.options.video.vsync && cap < options::UNLIMITED_FPS {
             let budget = Duration::from_secs_f32(1.0 / cap as f32);
-            self.next_frame += budget;
             let arrived = Instant::now();
             if self.next_frame < arrived {
-                // Behind schedule (a slow frame, a changed cap): do not catch up.
-                self.next_frame = arrived;
+                self.next_frame = arrived + budget;
             } else {
-                let spin = Duration::from_millis(1);
-                if let Some(rest) = (self.next_frame - arrived).checked_sub(spin) {
-                    std::thread::sleep(rest);
-                }
-                while Instant::now() < self.next_frame {
-                    std::hint::spin_loop();
+                self.next_frame += budget;
+                if self.next_frame < arrived {
+                    self.next_frame = arrived;
                 }
             }
         } else {
             self.next_frame = Instant::now();
         }
-        if let Some(window) = &self.window {
-            window.request_redraw();
+        if frame_num < 10 {
+            umicraft_core::boot_log!("redraw_exit", "frame={frame_num}");
         }
     }
 }
@@ -1599,13 +1833,18 @@ fn is_debug_toggle(code: KeyCode, state: ElementState, repeat: bool) -> bool {
 fn upload_gui_atlas(renderer: &mut Renderer, gui_atlas: Option<&umicraft_assets::GuiAtlas>) {
     if let Some(atlas) = gui_atlas {
         if !atlas.is_empty() {
-            renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels());
-            tracing::info!(
-                regions = atlas.regions().len(),
-                "{}x{} GUI texture atlas uploaded",
-                atlas.width(),
-                atlas.height()
-            );
+            match renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels()) {
+                Ok(()) => tracing::info!(
+                    regions = atlas.regions().len(),
+                    "{}x{} GUI texture atlas uploaded",
+                    atlas.width(),
+                    atlas.height()
+                ),
+                Err(error) => tracing::error!(
+                    %error,
+                    "GUI texture atlas rejected; the previous GUI textures stay"
+                ),
+            }
         }
     }
 }
@@ -1651,13 +1890,36 @@ fn hotbar_slot_items(
     })
 }
 
+/// Computes the relative yaw and pitch deltas in radians from a raw mouse movement,
+/// applying the vanilla 1.8.9 sensitivity formula and mouse inversion.
+#[must_use]
+pub(crate) fn compute_mouse_look_delta(
+    delta: (f64, f64),
+    controls: &crate::options::ControlOptions,
+    zoom_look_factor: f32,
+) -> (f32, f32) {
+    let speed = MOUSE_SENSITIVITY * controls.look_factor() * zoom_look_factor;
+    let vertical = if controls.invert_mouse {
+        -1.0
+    } else {
+        1.0
+    };
+    (delta.0 as f32 * speed, delta.1 as f32 * speed * vertical)
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.renderer.is_some() {
             return;
         }
+        let fullscreen_mode = self
+            .options
+            .video
+            .fullscreen
+            .then_some(Fullscreen::Borderless(None));
         let attributes = Window::default_attributes()
             .with_title("Umicraft M3")
+            .with_fullscreen(fullscreen_mode)
             .with_inner_size(LogicalSize::new(
                 f64::from(self.args.width),
                 f64::from(self.args.height),
@@ -1665,72 +1927,84 @@ impl ApplicationHandler for App {
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => {
+                umicraft_core::boot_log!("create_window_failed", "{error}");
                 self.exit_error = Some(format!("create window: {error}"));
                 event_loop.exit();
                 return;
             }
         };
         let surface_size = window.inner_size();
+        umicraft_core::boot_log!(
+            "window_created",
+            "size={}x{}, id={:?}",
+            surface_size.width,
+            surface_size.height,
+            window.id()
+        );
         self.resize(surface_size.width, surface_size.height);
 
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
-                Box::new(event_loop.owned_display_handle()),
-            ));
+        let backends = match self.args.backend.as_deref() {
+            Some("dx12") | Some("directx12") => {
+                tracing::info!("Selected graphics backend explicitly: DirectX 12");
+                wgpu::Backends::DX12
+            }
+            Some("vulkan") | Some("vk") => {
+                tracing::info!("Selected graphics backend explicitly: Vulkan");
+                wgpu::Backends::VULKAN
+            }
+            Some(other) => {
+                tracing::warn!(backend = other, "Unknown backend selection; falling back to all backends");
+                wgpu::Backends::all()
+            }
+            None => {
+                tracing::info!("Graphics backend selection: auto (all backends enabled)");
+                wgpu::Backends::all()
+            }
+        };
+
+        let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(
+            Box::new(event_loop.owned_display_handle()),
+        );
+        descriptor.backends = backends;
+        let instance = wgpu::Instance::new(descriptor);
+        umicraft_core::boot_log!("renderer_new_windowed_starting", "backends={:?}", backends);
         let mut renderer = match Renderer::new_windowed(instance, window.clone()) {
             Ok(renderer) => renderer,
             Err(error) => {
+                umicraft_core::boot_log!("renderer_new_windowed_failed", "{error}");
                 self.exit_error = Some(error.to_string());
                 event_loop.exit();
                 return;
             }
         };
-        // Upload the atlas once, before the first UI frame. A rejected atlas
-        // falls back to the built-in font; only a rejected fallback is fatal.
+        umicraft_core::boot_log!("renderer_new_windowed_done");
+
+        // Upload the initial fallback atlas immediately so the first loading/UI frame can be presented
         match ui_font::install(&mut renderer, &self.font.atlas) {
             Ok(installed) => {
                 self.ui_atlas = Some(installed.atlas);
                 self.hud_cache.invalidate();
+                umicraft_core::boot_log!("ui_font_installed");
             }
             Err(error) => {
+                umicraft_core::boot_log!("ui_font_install_failed", "{error}");
                 self.exit_error = Some(ClientError::FontAtlas(error).to_string());
                 event_loop.exit();
                 return;
             }
         }
         self.brand_atlas = ui_font::install_brand(&mut renderer);
-        // The mesh workers only exist once the terrain textures are bound,
-        // so they never write layers of another array (ADR-0012).
-        let terrain = self.terrain.take().unwrap_or(TerrainTextures::Procedural);
-        renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
-        let terrain = terrain.install(&mut renderer);
-        let gui_atlas = crate::official::grow_atlas(terrain.gui_atlas(), &[]);
-        upload_gui_atlas(&mut renderer, Some(&gui_atlas));
-        upload_glint_texture(&mut renderer, terrain.glint_texture());
+        umicraft_core::boot_log!("brand_atlas_installed");
+
+        // Minimal procedural fallback setup & sky textures for instant responsive frame
+        renderer.use_procedural_blocks();
         upload_sky_textures(&mut renderer);
-        self.panorama = upload_panorama(&mut renderer);
-        self.gui_atlas = Some(gui_atlas);
-        self.server_icons_revision = u64::MAX;
-        self.items = terrain.items();
-        self.dials = DialAnimator::new(terrain.dials());
-        self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
-        match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
-            Ok(world) => self.world = Some(world),
-            Err(error) => {
-                self.exit_error = Some(error.to_string());
-                event_loop.exit();
-                return;
-            }
-        }
-        self.entity_textures = Some(EntityTextures::load_with_font(
-            &renderer,
-            self.ui_atlas.as_ref(),
-        ));
-        self.map_textures = Some(MapTextures::load(&renderer));
+        umicraft_core::boot_log!("minimal_fallback_resources_ready");
+
         self.renderer = Some(renderer);
         self.window = Some(window.clone());
-        self.connect_from_arguments();
         event_loop.listen_device_events(DeviceEvents::Always);
+        umicraft_core::boot_log!("resumed_completed_requesting_initial_redraw");
         window.request_redraw();
     }
 
@@ -1840,18 +2114,23 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(false) => {
                 self.focused = false;
+                // A fullscreen game left in the background would show through a
+                // transparent taskbar, so it goes to the taskbar instead.
+                if let Some(window) = self.window.as_ref().filter(|w| w.fullscreen().is_some()) {
+                    window.set_minimized(true);
+                }
                 self.keys.clear();
                 self.buttons.clear();
                 self.capture_mouse(false);
                 self.ui_input.clear();
-                // A fullscreen window that loses the focus goes to the taskbar,
-                // as in the reference. Left alone, the taskbar comes back over
-                // it and shows the game through a see-through taskbar.
-                if let Some(window) = self.window.as_ref().filter(|w| w.fullscreen().is_some()) {
-                    window.set_minimized(true);
-                }
             }
-            WindowEvent::RedrawRequested => self.redraw(event_loop),
+            WindowEvent::RedrawRequested => {
+                let frame_num = umicraft_core::boot_log::frames_presented();
+                if frame_num < 10 {
+                    umicraft_core::boot_log!("window_event_redraw_requested", "frame={frame_num}");
+                }
+                self.redraw(event_loop);
+            }
             _ => {}
         }
     }
@@ -1869,23 +2148,31 @@ impl ApplicationHandler for App {
             {
                 // A positive delta moves the mouse to the right and down; the
                 // game logic turns right and looks down with it.
-                let speed = MOUSE_SENSITIVITY
-                    * self.options.controls.look_factor()
-                    * self.zoom.look_factor(self.mods.zoom().as_ref());
-                let vertical = if self.options.controls.invert_mouse {
-                    -1.0
-                } else {
-                    1.0
-                };
-                self.look.0 += delta.0 as f32 * speed;
-                self.look.1 += delta.1 as f32 * speed * vertical;
+                let (dyaw, dpitch) = compute_mouse_look_delta(
+                    delta,
+                    &self.options.controls,
+                    self.zoom.look_factor(self.mods.zoom().as_ref()),
+                );
+                self.look.0 += dyaw;
+                self.look.1 += dpitch;
+                self.last_input_time = Instant::now();
             }
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
-            window.request_redraw();
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let frame_num = umicraft_core::boot_log::frames_presented();
+        if frame_num < 5 {
+            umicraft_core::boot_log!("about_to_wait_called", "frame={frame_num}");
+        }
+        let now = Instant::now();
+        if now + Duration::from_micros(500) >= self.next_frame {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            event_loop.set_control_flow(ControlFlow::Poll);
+        } else {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame));
         }
     }
 }

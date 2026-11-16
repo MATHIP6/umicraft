@@ -141,15 +141,17 @@ impl Aabb {
     /// `net/minecraft/util/AxisAlignedBB.java:127`).
     #[must_use]
     pub fn calculate_x_offset(&self, mover: &Aabb, offset_x: f64) -> f64 {
-        if mover.max.y > self.min.y
-            && mover.min.y < self.max.y
-            && mover.max.z > self.min.z
-            && mover.min.z < self.max.z
-        {
-            if offset_x > 0.0 && mover.max.x <= self.min.x {
-                let gap = self.min.x - mover.max.x;
-                if gap < offset_x {
-                    return gap;
+        let overlaps = (mover.max.y > self.min.y)
+            & (mover.min.y < self.max.y)
+            & (mover.max.z > self.min.z)
+            & (mover.min.z < self.max.z);
+        if overlaps {
+            if offset_x > 0.0 {
+                if mover.max.x <= self.min.x {
+                    let gap = self.min.x - mover.max.x;
+                    if gap < offset_x {
+                        return gap;
+                    }
                 }
             } else if offset_x < 0.0 && mover.min.x >= self.max.x {
                 let gap = self.max.x - mover.min.x;
@@ -166,15 +168,17 @@ impl Aabb {
     /// See [`Aabb::calculate_x_offset`] for the argument order.
     #[must_use]
     pub fn calculate_y_offset(&self, mover: &Aabb, offset_y: f64) -> f64 {
-        if mover.max.x > self.min.x
-            && mover.min.x < self.max.x
-            && mover.max.z > self.min.z
-            && mover.min.z < self.max.z
-        {
-            if offset_y > 0.0 && mover.max.y <= self.min.y {
-                let gap = self.min.y - mover.max.y;
-                if gap < offset_y {
-                    return gap;
+        let overlaps = (mover.max.x > self.min.x)
+            & (mover.min.x < self.max.x)
+            & (mover.max.z > self.min.z)
+            & (mover.min.z < self.max.z);
+        if overlaps {
+            if offset_y > 0.0 {
+                if mover.max.y <= self.min.y {
+                    let gap = self.min.y - mover.max.y;
+                    if gap < offset_y {
+                        return gap;
+                    }
                 }
             } else if offset_y < 0.0 && mover.min.y >= self.max.y {
                 let gap = self.max.y - mover.min.y;
@@ -191,15 +195,17 @@ impl Aabb {
     /// See [`Aabb::calculate_x_offset`] for the argument order.
     #[must_use]
     pub fn calculate_z_offset(&self, mover: &Aabb, offset_z: f64) -> f64 {
-        if mover.max.x > self.min.x
-            && mover.min.x < self.max.x
-            && mover.max.y > self.min.y
-            && mover.min.y < self.max.y
-        {
-            if offset_z > 0.0 && mover.max.z <= self.min.z {
-                let gap = self.min.z - mover.max.z;
-                if gap < offset_z {
-                    return gap;
+        let overlaps = (mover.max.x > self.min.x)
+            & (mover.min.x < self.max.x)
+            & (mover.max.y > self.min.y)
+            & (mover.min.y < self.max.y);
+        if overlaps {
+            if offset_z > 0.0 {
+                if mover.max.z <= self.min.z {
+                    let gap = self.min.z - mover.max.z;
+                    if gap < offset_z {
+                        return gap;
+                    }
                 }
             } else if offset_z < 0.0 && mover.min.z >= self.max.z {
                 let gap = self.max.z - mover.min.z;
@@ -214,9 +220,9 @@ impl Aabb {
 
 /// The maximum number of collision boxes a single block state contributes.
 ///
-/// Fences need two boxes, a stair at an inner corner three; nothing in 1.8
-/// needs more.
-pub const MAX_BOXES: usize = 3;
+/// Cauldrons and hoppers contribute 5 boxes (1 base + 4 walls); a stair at
+/// an inner corner three, fences two; nothing in 1.8 needs more.
+pub const MAX_BOXES: usize = 5;
 
 /// The collision geometry of a block state, relative to the block origin.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -269,9 +275,40 @@ impl BlockShape {
     /// Two collision boxes.
     #[must_use]
     pub fn pair(first: Aabb, second: Aabb) -> Self {
+        let mut boxes = [Aabb {
+            min: DVec3::ZERO,
+            max: DVec3::ZERO,
+        }; MAX_BOXES];
+        boxes[0] = first;
+        boxes[1] = second;
         Self {
-            boxes: [first, second, second],
+            boxes,
             count: 2,
+        }
+    }
+
+    /// Three collision boxes.
+    #[must_use]
+    pub fn triple(first: Aabb, second: Aabb, third: Aabb) -> Self {
+        let mut boxes = [Aabb {
+            min: DVec3::ZERO,
+            max: DVec3::ZERO,
+        }; MAX_BOXES];
+        boxes[0] = first;
+        boxes[1] = second;
+        boxes[2] = third;
+        Self {
+            boxes,
+            count: 3,
+        }
+    }
+
+    /// Five collision boxes (cauldron, hopper).
+    #[must_use]
+    pub fn five(b0: Aabb, b1: Aabb, b2: Aabb, b3: Aabb, b4: Aabb) -> Self {
+        Self {
+            boxes: [b0, b1, b2, b3, b4],
+            count: 5,
         }
     }
 
@@ -340,11 +377,15 @@ enum Kind {
     /// A door: a thin board that turns with its facing, hinge and open state,
     /// read from both halves (the same as its selection box).
     Door,
-    /// A block that collides with exactly its selection box: a ladder, a lily
-    /// pad, a cocoa pod or a flower pot.
+    /// A block that collides with exactly its selection box: a ladder, a trapdoor,
+    /// a lily pad, a cocoa pod or a flower pot.
     Bounds,
     /// The frame of the End portal: a base, and the eye of Ender when set.
     EndPortalFrame,
+    /// A cauldron: a base plus four perimeter walls (5 boxes).
+    Cauldron,
+    /// A hopper: a base plus four perimeter walls (5 boxes).
+    Hopper,
 }
 
 /// Classifies a 1.8 block id (and its metadata) into a collision kind.
@@ -365,8 +406,6 @@ fn classify(id: u16, metadata: u8) -> Kind {
         85 | 107 | 113 | 139 | 183..=192 => Kind::Fence,
         // Glass panes and iron bars.
         101 | 102 | 160 => Kind::Pane,
-        // Trap doors.
-        96 | 167 => Kind::Column(0.1875),
         // No collision box at all: `getCollisionBoundingBox` returns null in
         // `BlockBush` (the stems 104 and 105 included, with the saplings, the
         // flowers, the crops...), `BlockRailBase` (rails 27, 28, 66, 157),
@@ -379,11 +418,16 @@ fn classify(id: u16, metadata: u8) -> Kind {
         171 => Kind::Column(0.0625),
         // Daylight detectors.
         151 | 178 => Kind::Column(0.375),
-        // Cake, bed, enchanting table, brewing stand, cauldron and hopper.
+        // Cake, bed, enchanting table and brewing stand.
         92 => Kind::Column(0.5),
         26 => Kind::Column(0.5625),
-        116..=118 => Kind::Column(0.75),
-        154 => Kind::Column(0.625),
+        116 | 117 => Kind::Column(0.75),
+        // Cauldron (5 boxes: 0.3125 base + 4 walls).
+        118 => Kind::Cauldron,
+        // Hopper (5 boxes: 0.625 base + 4 walls).
+        154 => Kind::Hopper,
+        // Soul sand is 0.875 high (MCP `BlockSoulSand.java:23`).
+        88 => Kind::Column(0.875),
         29 | 33 => Kind::PistonBase,
         34 => Kind::PistonHead,
         144 => Kind::Skull,
@@ -394,10 +438,11 @@ fn classify(id: u16, metadata: u8) -> Kind {
         // Wooden, iron and the five other doors: `BlockDoor` collides with the
         // bounds of its state.
         64 | 71 | 193..=197 => Kind::Door,
-        // Ladders (`BlockLadder`), lily pads (`BlockLilyPad`), cocoa pods
-        // (`BlockCocoa`) and flower pots (`BlockFlowerPot`) collide with their
-        // bounds, which are their selection bounds.
-        65 | 111 | 127 | 140 => Kind::Bounds,
+        // Ladders (`BlockLadder`), trapdoors (`BlockTrapDoor`), lily pads
+        // (`BlockLilyPad`), cocoa pods (`BlockCocoa`) and flower pots
+        // (`BlockFlowerPot`) collide with their bounds, which are their selection
+        // bounds.
+        65 | 96 | 111 | 127 | 140 | 167 => Kind::Bounds,
         // The frame of the End portal.
         120 => Kind::EndPortalFrame,
         // Decorations and other blocks without a collision box.
@@ -479,7 +524,45 @@ pub fn shape_of<S: BlockSource + ?Sized>(
         Kind::Chest => selection_shape(state, world, pos),
         Kind::Stairs => stair_shape(state, world, pos),
         Kind::Fence => fence_shape(world, pos),
+        Kind::Cauldron => cauldron_shape(),
+        Kind::Hopper => hopper_shape(),
     }
+}
+
+/// The 5 collision boxes of a cauldron (MCP `net/minecraft/block/BlockCauldron.java:41-55`):
+/// one bottom plate 0.3125 high (5/16), plus four perimeter walls 1.0 high and 0.125 thick.
+fn cauldron_shape() -> BlockShape {
+    let f = 0.125;
+    BlockShape::five(
+        // Bottom: [0.0, 0.0, 0.0] -> [1.0, 0.3125, 1.0]
+        Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.3125, 1.0)),
+        // West wall: [0.0, 0.0, 0.0] -> [0.125, 1.0, 1.0]
+        Aabb::new(DVec3::ZERO, DVec3::new(f, 1.0, 1.0)),
+        // North wall: [0.0, 0.0, 0.0] -> [1.0, 1.0, 0.125]
+        Aabb::new(DVec3::ZERO, DVec3::new(1.0, 1.0, f)),
+        // East wall: [0.875, 0.0, 0.0] -> [1.0, 1.0, 1.0]
+        Aabb::new(DVec3::new(1.0 - f, 0.0, 0.0), DVec3::new(1.0, 1.0, 1.0)),
+        // South wall: [0.0, 0.0, 0.875] -> [1.0, 1.0, 1.0]
+        Aabb::new(DVec3::new(0.0, 0.0, 1.0 - f), DVec3::new(1.0, 1.0, 1.0)),
+    )
+}
+
+/// The 5 collision boxes of a hopper (MCP `net/minecraft/block/BlockHopper.java:56-70`):
+/// one base box 0.625 high (5/8), plus four perimeter walls 1.0 high and 0.125 thick.
+fn hopper_shape() -> BlockShape {
+    let f = 0.125;
+    BlockShape::five(
+        // Base / bottom: [0.0, 0.0, 0.0] -> [1.0, 0.625, 1.0]
+        Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.625, 1.0)),
+        // West wall: [0.0, 0.0, 0.0] -> [0.125, 1.0, 1.0]
+        Aabb::new(DVec3::ZERO, DVec3::new(f, 1.0, 1.0)),
+        // North wall: [0.0, 0.0, 0.0] -> [1.0, 1.0, 0.125]
+        Aabb::new(DVec3::ZERO, DVec3::new(1.0, 1.0, f)),
+        // East wall: [0.875, 0.0, 0.0] -> [1.0, 1.0, 1.0]
+        Aabb::new(DVec3::new(1.0 - f, 0.0, 0.0), DVec3::new(1.0, 1.0, 1.0)),
+        // South wall: [0.0, 0.0, 0.875] -> [1.0, 1.0, 1.0]
+        Aabb::new(DVec3::new(0.0, 0.0, 1.0 - f), DVec3::new(1.0, 1.0, 1.0)),
+    )
 }
 
 /// Whether a block is a *normal cube*: an opaque, full, non-powering block.
@@ -699,10 +782,7 @@ fn stair_shape<S: BlockSource + ?Sized>(state: BlockState, world: &S, pos: Block
         None
     };
     match inner {
-        Some(corner) => BlockShape {
-            boxes: [base, step, corner],
-            count: 3,
-        },
+        Some(corner) => BlockShape::triple(base, step, corner),
         None => BlockShape::pair(base, step),
     }
 }
@@ -1013,6 +1093,79 @@ mod tests {
             assert!(!collision.is_empty(), "block {id}:{metadata}");
             assert_eq!(collision, selection, "block {id}:{metadata}");
         }
+    }
+
+    #[test]
+    fn trapdoors_collide_with_all_six_configurations() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        // Wooden trapdoor (96) and iron trapdoor (167).
+        for id in [96, 167] {
+            // 1. Closed, bottom half (meta 0): 0.1875 high on the floor.
+            let closed_bottom = shape_of(BlockState::new(id, 0), &world, pos);
+            assert_eq!(closed_bottom.boxes().len(), 1);
+            assert_eq!(closed_bottom.boxes()[0], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.1875, 1.0)));
+
+            // 2. Closed, top half (meta 8): 0.1875 thick under the ceiling.
+            let closed_top = shape_of(BlockState::new(id, 8), &world, pos);
+            assert_eq!(closed_top.boxes().len(), 1);
+            assert_eq!(closed_top.boxes()[0], Aabb::new(DVec3::new(0.0, 0.8125, 0.0), DVec3::ONE));
+
+            // 3. Open, facing north (meta 4): wall on south side.
+            let open_north = shape_of(BlockState::new(id, 4), &world, pos);
+            assert_eq!(open_north.boxes().len(), 1);
+            assert_eq!(open_north.boxes()[0], Aabb::new(DVec3::new(0.0, 0.0, 0.8125), DVec3::ONE));
+
+            // 4. Open, facing south (meta 5): wall on north side.
+            let open_south = shape_of(BlockState::new(id, 5), &world, pos);
+            assert_eq!(open_south.boxes().len(), 1);
+            assert_eq!(open_south.boxes()[0], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 1.0, 0.1875)));
+
+            // 5. Open, facing west (meta 6): wall on east side.
+            let open_west = shape_of(BlockState::new(id, 6), &world, pos);
+            assert_eq!(open_west.boxes().len(), 1);
+            assert_eq!(open_west.boxes()[0], Aabb::new(DVec3::new(0.8125, 0.0, 0.0), DVec3::ONE));
+
+            // 6. Open, facing east (meta 7): wall on west side.
+            let open_east = shape_of(BlockState::new(id, 7), &world, pos);
+            assert_eq!(open_east.boxes().len(), 1);
+            assert_eq!(open_east.boxes()[0], Aabb::new(DVec3::ZERO, DVec3::new(0.1875, 1.0, 1.0)));
+        }
+    }
+
+    #[test]
+    fn soul_sand_collision_is_seven_eighths_high() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        let soul_sand = shape_of(BlockState::new(88, 0), &world, pos);
+        assert_eq!(soul_sand.boxes().len(), 1);
+        assert_eq!(soul_sand.boxes()[0], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.875, 1.0)));
+    }
+
+    #[test]
+    fn cauldrons_and_hoppers_have_five_boxes() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+
+        // Cauldron (id 118): base 0.3125 high + 4 walls 0.125 thick and 1.0 high.
+        let cauldron = shape_of(BlockState::new(118, 0), &world, pos);
+        assert_eq!(cauldron.boxes().len(), 5);
+        let cb = cauldron.boxes();
+        assert_eq!(cb[0], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.3125, 1.0)));
+        assert_eq!(cb[1], Aabb::new(DVec3::ZERO, DVec3::new(0.125, 1.0, 1.0))); // West wall
+        assert_eq!(cb[2], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 1.0, 0.125))); // North wall
+        assert_eq!(cb[3], Aabb::new(DVec3::new(0.875, 0.0, 0.0), DVec3::ONE)); // East wall
+        assert_eq!(cb[4], Aabb::new(DVec3::new(0.0, 0.0, 0.875), DVec3::ONE)); // South wall
+
+        // Hopper (id 154): base 0.625 high + 4 walls 0.125 thick and 1.0 high.
+        let hopper = shape_of(BlockState::new(154, 0), &world, pos);
+        assert_eq!(hopper.boxes().len(), 5);
+        let hb = hopper.boxes();
+        assert_eq!(hb[0], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.625, 1.0)));
+        assert_eq!(hb[1], Aabb::new(DVec3::ZERO, DVec3::new(0.125, 1.0, 1.0)));
+        assert_eq!(hb[2], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 1.0, 0.125)));
+        assert_eq!(hb[3], Aabb::new(DVec3::new(0.875, 0.0, 0.0), DVec3::ONE));
+        assert_eq!(hb[4], Aabb::new(DVec3::new(0.0, 0.0, 0.875), DVec3::ONE));
     }
 
     #[test]

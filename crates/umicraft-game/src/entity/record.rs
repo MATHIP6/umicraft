@@ -152,6 +152,28 @@ impl EntityRecord {
         self.animate();
     }
 
+    /// Snaps the entity immediately to the exact position and angles without
+    /// interpolating or triggering limb swing acceleration. Used when the local
+    /// player is teleported or reset by the server.
+    pub fn teleport_to_exact(&mut self, position: DVec3, yaw: f32, pitch: f32) {
+        self.position = position;
+        self.previous_position = position;
+        self.server_position = position;
+        self.target_position = position;
+        self.yaw = yaw;
+        self.previous_yaw = yaw;
+        self.target_yaw = yaw;
+        self.head_yaw = yaw;
+        self.previous_head_yaw = yaw;
+        self.pitch = pitch;
+        self.previous_pitch = pitch;
+        self.target_pitch = pitch;
+        self.body_yaw.reset_to(yaw);
+        self.cape.reset_to(position);
+        self.limbs.reset();
+        self.interpolation_steps = 0;
+    }
+
     /// Counts one tick of item use: the held item is in use while the use
     /// flag is set (MCP `EntityOtherPlayerMP.onUpdate` starts and ends the
     /// use from `isEating`), and the count starts over when it stops.
@@ -265,5 +287,34 @@ impl EntityRecord {
             health: None,
             interpolation_steps: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn teleport_to_exact_resets_position_without_limb_swing_explosion() {
+        let initial = DVec3::new(0.0, 64.0, 0.0);
+        let mut record = EntityRecord::new(EntityId(1), EntityKind::Player, initial, 0.0, 0.0);
+
+        // Simulate walking to develop limb swing
+        record.follow(DVec3::new(1.0, 64.0, 0.0), 0.0, 0.0, EntityFlags::default());
+        assert!(record.limbs.amount > 0.0);
+
+        // Server teleports player 20 blocks away
+        let target = DVec3::new(20.0, 64.0, 0.0);
+        record.teleport_to_exact(target, 90.0, 0.0);
+
+        assert_eq!(record.position, target);
+        assert_eq!(record.previous_position, target);
+        assert_eq!(record.limbs.amount, 0.0);
+        assert_eq!(record.cape.current, target);
+        assert_eq!(record.cape.previous, target);
+        assert_eq!(record.yaw, 90.0);
+        assert_eq!(record.previous_yaw, 90.0);
+        assert_eq!(record.head_yaw, 90.0);
+        assert_eq!(record.body_yaw.offset, 90.0);
     }
 }

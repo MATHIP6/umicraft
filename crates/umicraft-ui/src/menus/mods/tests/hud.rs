@@ -28,6 +28,7 @@ fn view_with(widgets: Vec<HudWidgetView>) -> ModsView {
             widgets,
             screen: SCREEN,
             scale_range: (0.5, 3.0),
+            ..HudEditorView::default()
         },
         ..view()
     }

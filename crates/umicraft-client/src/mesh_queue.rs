@@ -92,9 +92,15 @@ impl MeshQueue {
         self.waiting.entry(pos).or_insert(snapshot);
     }
 
-    /// The result of the job of `pos` came back.
-    pub(crate) fn finished(&mut self, pos: ChunkPos) {
+    /// Removes a chunk from the queue (e.g. when unloaded).
+    pub(crate) fn remove(&mut self, pos: ChunkPos) {
+        self.waiting.remove(&pos);
         self.pending.remove(&pos);
+    }
+
+    /// The result of the job of `pos` came back. Returns whether the job was still pending.
+    pub(crate) fn finished(&mut self, pos: ChunkPos) -> bool {
+        self.pending.remove(&pos)
     }
 
     /// Forgets everything (a world reset).

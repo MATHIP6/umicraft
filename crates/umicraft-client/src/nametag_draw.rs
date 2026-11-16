@@ -67,61 +67,85 @@ pub fn place_tags(
     width: f32,
     height: f32,
 ) -> Vec<PlacedTag> {
+    let mut out = Vec::new();
+    place_tags_into(entities, camera, width, height, &mut out);
+    out
+}
+
+/// Projects visible entity nametags into a reusable `out` buffer without
+/// allocating intermediate per-entity `Vec`s.
+pub fn place_tags_into(
+    entities: &[EntityRenderSnapshot],
+    camera: &Camera,
+    width: f32,
+    height: f32,
+    out: &mut Vec<PlacedTag>,
+) {
+    out.clear();
     let view_projection = camera.view_projection_from(camera.render_origin());
     let eye = camera.relative_eye();
     let forward = camera.forward();
     let up = camera.horizontal_right().cross(forward);
-    entities
-        .iter()
-        .filter_map(|entity| {
-            let text = entity.name_tag.as_ref()?;
-            let sneaking = entity.kind == EntityKind::Player && entity.flags.is_sneaking();
-            let range = if sneaking { SNEAK_TAG_RANGE } else { TAG_RANGE };
-            if entity.position.distance(eye) >= range {
-                return None;
+    for entity in entities {
+        let Some(text) = entity.name_tag.as_ref() else {
+            continue;
+        };
+        let sneaking = entity.kind == EntityKind::Player && entity.flags.is_sneaking();
+        let range = if sneaking { SNEAK_TAG_RANGE } else { TAG_RANGE };
+        if entity.position.distance(eye) >= range {
+            continue;
+        }
+        // `renderName` lowers the label of a child by half its height.
+        let (body, child) = hitbox(entity);
+        let lift = body + ABOVE_HEAD - if child { body / 2.0 } else { 0.0 };
+        let lift = if sneaking { lift - SNEAK_DROP } else { lift };
+        let anchor = entity.position + Vec3::Y * lift;
+        let Some([top_x, top_y, depth]) = project(view_projection, anchor, width, height) else {
+            continue;
+        };
+        let top = [top_x, top_y];
+        let Some(above) = project(
+            view_projection,
+            anchor + up * WORLD_PER_FONT_PIXEL,
+            width,
+            height,
+        ) else {
+            continue;
+        };
+        // A font pixel is as many screen pixels as `up` moves it.
+        let scale = (top[1] - above[1]).abs();
+        if scale <= 0.0 {
+            continue;
+        }
+        let placed = |text: Arc<str>, anchor: [f32; 2]| PlacedTag {
+            text,
+            anchor,
+            scale,
+            depth,
+            sneaking,
+        };
+        let near = f64::from(entity.position.distance_squared(eye)) < SCORE_LABEL_RANGE_SQ;
+        match text.split_once('\n') {
+            // `RenderPlayer.renderOffsetLivingLabel`: the score line sits
+            // where the tag would, and the name is lifted over it by
+            // 1.15 line heights. A crouching player's tag goes through
+            // `renderName`'s own branch, which has no score line, and the
+            // score needs the player within 10 blocks.
+            Some((name, _)) if sneaking || !near => {
+                out.push(placed(Arc::from(name), top));
             }
-            // `renderName` lowers the label of a child by half its height.
-            let (body, child) = hitbox(entity);
-            let lift = body + ABOVE_HEAD - if child { body / 2.0 } else { 0.0 };
-            let lift = if sneaking { lift - SNEAK_DROP } else { lift };
-            let anchor = entity.position + Vec3::Y * lift;
-            let [top_x, top_y, depth] = project(view_projection, anchor, width, height)?;
-            let top = [top_x, top_y];
-            let above = project(
-                view_projection,
-                anchor + up * WORLD_PER_FONT_PIXEL,
-                width,
-                height,
-            )?;
-            // A font pixel is as many screen pixels as `up` moves it.
-            let scale = (top[1] - above[1]).abs();
-            let placed = |text: Arc<str>, anchor: [f32; 2]| PlacedTag {
-                text,
-                anchor,
-                scale,
-                depth,
-                sneaking,
-            };
-            let near = f64::from(entity.position.distance_squared(eye)) < SCORE_LABEL_RANGE_SQ;
-            (scale > 0.0).then(|| match text.split_once('\n') {
-                // `RenderPlayer.renderOffsetLivingLabel`: the score line sits
-                // where the tag would, and the name is lifted over it by
-                // 1.15 line heights. A crouching player's tag goes through
-                // `renderName`'s own branch, which has no score line, and the
-                // score needs the player within 10 blocks.
-                Some((name, _)) if sneaking || !near => vec![placed(Arc::from(name), top)],
-                Some((name, score)) => vec![
-                    placed(Arc::from(score), top),
-                    placed(
-                        Arc::from(name),
-                        [top[0], top[1] - FONT_HEIGHT * 1.15 * scale],
-                    ),
-                ],
-                None => vec![placed(Arc::clone(text), top)],
-            })
-        })
-        .flatten()
-        .collect()
+            Some((name, score)) => {
+                out.push(placed(Arc::from(score), top));
+                out.push(placed(
+                    Arc::from(name),
+                    [top[0], top[1] - FONT_HEIGHT * 1.15 * scale],
+                ));
+            }
+            None => {
+                out.push(placed(Arc::clone(text), top));
+            }
+        }
+    }
 }
 
 /// The hitbox height under the tag and whether the entity counts as a child
@@ -163,46 +187,57 @@ fn project(view_projection: glam::Mat4, point: Vec3, width: f32, height: f32) ->
 /// box and the faint text only, both under the depth test.
 #[must_use]
 pub fn draw_tags(font: &FontAtlas, tags: &[PlacedTag]) -> Vec<Nametag> {
-    tags.iter()
-        .map(|tag| {
-            let runs = format_runs(&tag.text);
+    let mut out = Vec::with_capacity(tags.len());
+    draw_tags_into(font, tags, &mut out);
+    out
+}
+
+/// Draws `tags` into a reusable `out` buffer, retaining `Vec<Nametag>` capacity.
+pub fn draw_tags_into(font: &FontAtlas, tags: &[PlacedTag], out: &mut Vec<Nametag>) {
+    out.clear();
+    out.reserve(tags.len());
+    for tag in tags {
+        let runs = format_runs(&tag.text);
+        let width: f32 = if runs.len() == 1 {
+            font.measure(&runs[0].0, tag.scale)
+        } else {
             let plain: String = runs.iter().map(|(text, _)| text.as_str()).collect();
-            let width = font.measure(&plain, tag.scale);
-            let [cx, top] = tag.anchor;
-            let left = cx - width / 2.0;
-            let mut backdrop = DrawList::new();
-            backdrop.rect(
-                Rect::new(
-                    left - tag.scale,
-                    top - tag.scale,
-                    width + 2.0 * tag.scale,
-                    FONT_HEIGHT * tag.scale,
-                ),
-                BOX_COLOR,
-            );
-            let text = |alpha: f32, list: &mut DrawList| {
-                let mut x = left;
-                for (run, color) in &runs {
-                    let color = [color[0], color[1], color[2], alpha];
-                    list.text([x, top], run.clone(), TextStyle::new(tag.scale, color));
-                    x += font.measure(run, tag.scale);
-                }
-            };
-            text(FAINT_ALPHA, &mut backdrop);
-            let mut full = DrawList::new();
-            let (always, tested) = if tag.sneaking {
-                (DrawList::new(), backdrop)
-            } else {
-                text(1.0, &mut full);
-                (backdrop, full)
-            };
-            Nametag {
-                always,
-                tested,
-                depth: tag.depth,
+            font.measure(&plain, tag.scale)
+        };
+        let [cx, top] = tag.anchor;
+        let left = cx - width / 2.0;
+        let mut backdrop = DrawList::new();
+        backdrop.rect(
+            Rect::new(
+                left - tag.scale,
+                top - tag.scale,
+                width + 2.0 * tag.scale,
+                FONT_HEIGHT * tag.scale,
+            ),
+            BOX_COLOR,
+        );
+        let text = |alpha: f32, list: &mut DrawList| {
+            let mut x = left;
+            for (run, color) in &runs {
+                let color = [color[0], color[1], color[2], alpha];
+                list.text([x, top], run.clone(), TextStyle::new(tag.scale, color));
+                x += font.measure(run, tag.scale);
             }
-        })
-        .collect()
+        };
+        text(FAINT_ALPHA, &mut backdrop);
+        let mut full = DrawList::new();
+        let (always, tested) = if tag.sneaking {
+            (DrawList::new(), backdrop)
+        } else {
+            text(1.0, &mut full);
+            (backdrop, full)
+        };
+        out.push(Nametag {
+            always,
+            tested,
+            depth: tag.depth,
+        });
+    }
 }
 
 /// The colours of the formatting codes `0`-`f` (MCP `EnumChatFormatting`).

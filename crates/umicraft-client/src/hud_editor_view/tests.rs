@@ -137,3 +137,54 @@ fn the_snap_pulls_a_widget_near_the_edge_onto_it() {
     let far = Rect::new(100.0, 100.0, 50.0, 10.0);
     assert_eq!(snap(far, [400.0, 300.0]), far);
 }
+
+#[test]
+fn every_hud_mod_is_listed_on_or_off_with_its_lock() {
+    let mut registry = registry();
+    registry.set_locked("cps", true).expect("cps");
+    let view = view_of(&registry);
+    let listed: Vec<_> = view
+        .entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry.enabled, entry.locked))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("fps", true, false),
+            ("coordinates", false, false),
+            ("cps", false, true),
+            ("ping", false, false),
+        ],
+        "the four mods that have a widget, and no other"
+    );
+    assert!(view.is_locked("cps") && !view.is_locked("fps"));
+    assert!(!view.has_custom);
+    registry.save_custom();
+    assert!(view_of(&registry).has_custom);
+}
+
+#[test]
+fn the_widgets_keep_their_side_on_other_window_shapes() {
+    let mut registry = registry();
+    registry.update(&ModContext {
+        fps: 60,
+        ..ModContext::default()
+    });
+    let corner = HudPlacement::at(Anchor::BottomRight, -4.0, -4.0);
+    registry.set_placement("fps", corner).expect("fps");
+    for display in [(854, 480), (1280, 720), (1920, 1080), (2560, 1080), (640, 480)] {
+        let view = build(&registry, &lang(), &FontAtlas::fallback(), display);
+        let widget = &view.widgets[0].widget;
+        let size = umicraft_ui::mod_widget::measure(
+            &FontAtlas::fallback(),
+            &widget.lines,
+            widget.scale,
+            &widget.style,
+        );
+        let right = view.screen[0] - (widget.position[0] + size.0);
+        let bottom = view.screen[1] - (widget.position[1] + size.1);
+        assert!((right - 4.0).abs() < 0.01, "{display:?}: {right}");
+        assert!((bottom - 4.0).abs() < 0.01, "{display:?}: {bottom}");
+    }
+}

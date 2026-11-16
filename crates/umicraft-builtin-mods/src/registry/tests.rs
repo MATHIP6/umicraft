@@ -211,7 +211,7 @@ fn a_corrupt_saved_value_does_not_break_the_registry() {
                 scale: f32::NAN,
                 ..HudPlacement::default()
             }),
-            state: Default::default(),
+            ..ModConfig::default()
         },
     );
     r.apply_config(&saved);
@@ -219,4 +219,110 @@ fn a_corrupt_saved_value_does_not_break_the_registry() {
     assert!(!counter.settings.bool("big"));
     assert!(counter.enabled, "never chosen -> the default");
     assert!(counter.placement.is_some_and(|p| p.scale.is_finite()));
+}
+
+fn placement_of(r: &ModRegistry, id: &str) -> Option<HudPlacement> {
+    r.mods().find(|m| m.meta.id.as_str() == id)?.placement
+}
+
+fn enabled(r: &ModRegistry, id: &str) -> bool {
+    r.mods().any(|m| m.meta.id.as_str() == id && m.enabled)
+}
+
+/// The real mods, so the presets are checked against the widgets that exist.
+fn real() -> ModRegistry {
+    ModRegistry::new(crate::mods::all()).expect("the built-in mods")
+}
+
+#[test]
+fn a_preset_turns_widgets_on_and_off_and_places_them() {
+    let mut r = real();
+    r.apply_preset(HudPreset::Pvp);
+    assert!(enabled(&r, "fps") && enabled(&r, "cps") && enabled(&r, "ping"));
+    assert!(!enabled(&r, "coordinates"));
+    assert_eq!(
+        placement_of(&r, "cps").map(|p| p.anchor),
+        Some(Anchor::TopRight)
+    );
+    r.apply_preset(HudPreset::Minimal);
+    assert!(enabled(&r, "fps") && !enabled(&r, "cps") && !enabled(&r, "ping"));
+    // A preset leaves the mods without a widget alone.
+    let zoom_before = enabled(&r, "zoom");
+    r.apply_preset(HudPreset::Pvp);
+    assert_eq!(enabled(&r, "zoom"), zoom_before);
+}
+
+#[test]
+fn the_default_preset_is_the_layout_of_a_fresh_registry() {
+    let mut r = real();
+    r.apply_preset(HudPreset::Minimal);
+    r.apply_preset(HudPreset::Default);
+    let fresh = real();
+    for id in ["fps", "cps", "ping", "coordinates"] {
+        assert_eq!(placement_of(&r, id), placement_of(&fresh, id), "{id}");
+        assert_eq!(enabled(&r, id), enabled(&fresh, id), "{id}");
+    }
+}
+
+#[test]
+fn the_custom_preset_is_the_saved_layout_and_survives_a_restart() {
+    let mut r = real();
+    assert!(!r.has_custom());
+    // Nothing saved: the preset changes nothing.
+    let before = r.config();
+    r.apply_preset(HudPreset::Custom);
+    assert_eq!(r.config(), before);
+
+    let moved = HudPlacement::at(Anchor::BottomRight, -7.0, -9.0);
+    r.set_placement("fps", moved).expect("fps");
+    r.set_enabled("cps", true).expect("cps");
+    r.save_custom();
+    assert!(r.has_custom());
+    r.apply_preset(HudPreset::Minimal);
+    assert_ne!(placement_of(&r, "fps"), Some(moved));
+
+    // Through the saved file, as after a restart.
+    let text = toml::to_string(&r.config()).expect("serializes");
+    let mut restarted = real();
+    restarted.apply_config(&toml::from_str(&text).expect("parses"));
+    assert!(restarted.has_custom());
+    restarted.apply_preset(HudPreset::Custom);
+    assert_eq!(placement_of(&restarted, "fps"), Some(moved));
+    assert!(enabled(&restarted, "cps"));
+}
+
+#[test]
+fn a_locked_widget_keeps_its_place_through_presets_and_restarts() {
+    let mut r = real();
+    let here = HudPlacement::at(Anchor::Center, 3.0, 3.0);
+    r.set_placement("fps", here).expect("fps");
+    r.set_locked("fps", true).expect("fps");
+    r.apply_preset(HudPreset::Pvp);
+    r.apply_preset(HudPreset::Default);
+    assert_eq!(placement_of(&r, "fps"), Some(here));
+
+    let text = toml::to_string(&r.config()).expect("serializes");
+    let mut restarted = real();
+    restarted.apply_config(&toml::from_str(&text).expect("parses"));
+    assert!(restarted
+        .mods()
+        .any(|m| m.meta.id.as_str() == "fps" && m.locked));
+    assert!(r.set_locked("nope", true).is_err());
+}
+
+/// What undo relies on: a config taken earlier brings back the placement, the
+/// switch, the settings and the lock.
+#[test]
+fn a_restored_config_brings_back_every_part_of_the_layout() {
+    let mut r = real();
+    let before = r.config();
+    r.set_placement("fps", HudPlacement::at(Anchor::Center, 0.0, 0.0))
+        .expect("fps");
+    r.set_enabled("fps", false).expect("fps");
+    r.set_locked("fps", true).expect("fps");
+    r.set_setting("fps", "background", &SettingValue::Bool(false))
+        .expect("background");
+    assert_ne!(r.config(), before);
+    r.apply_config(&before);
+    assert_eq!(r.config(), before);
 }

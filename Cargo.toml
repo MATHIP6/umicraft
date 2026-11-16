@@ -28,6 +28,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 aes = "0.8"
 bytemuck = { version = "1", features = ["derive"] }
+crossbeam-channel = "0.5"
 flate2 = "1.0"
 fontdue = "0.9"
 jpeg-decoder = { version = "0.3", default-features = false }
@@ -66,10 +67,16 @@ unsafe_code = "deny"
 all = { level = "deny", priority = -1 }
 chunks_exact_to_as_chunks = "allow"
 
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
 # The build to hand out: `cargo build --profile dist`. Fat LTO with one codegen unit
 # makes the CPU-bound scene about 6 to 8 % faster (docs/perf-log.md, 2026-11-09) and
-# takes about 4 minutes cold, so day-to-day builds keep the plain `release` profile.
+# strips debug symbols for minimal distribution size.
 [profile.dist]
 inherits = "release"
 lto = "fat"
 codegen-units = 1
+strip = true

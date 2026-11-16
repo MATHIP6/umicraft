@@ -27,6 +27,14 @@ pub(super) struct Bounds<'a> {
     pub scale_range: (f32, f32),
     /// The snapping applied while a widget moves.
     pub snap: Snap<'a>,
+    /// The step of the grid a moved widget sticks to, in GUI units, if any.
+    pub grid: Option<f32>,
+}
+
+/// `rect` with its corner on the nearest point of a grid of `step` GUI units.
+pub(super) fn on_grid(rect: Rect, step: f32) -> Rect {
+    let round = |value: f32| (value / step).round() * step;
+    Rect::new(round(rect.x), round(rect.y), rect.width, rect.height)
 }
 
 /// The corner handle of a widget, drawn inside the bottom-right corner of its
@@ -65,7 +73,7 @@ pub(super) fn clamp_scale(scale: f32, range: (f32, f32)) -> f32 {
 
 /// `rect` moved back inside the screen; one that is larger than the screen
 /// sits at the origin, like `HudPlacement::rect` places it.
-pub(super) fn clamp_into(rect: Rect, screen: [f32; 2]) -> Rect {
+pub(in crate::menus::mods) fn clamp_into(rect: Rect, screen: [f32; 2]) -> Rect {
     let fit = |pos: f32, size: f32, total: f32| {
         if size >= total {
             0.0
@@ -83,7 +91,7 @@ pub(super) fn clamp_into(rect: Rect, screen: [f32; 2]) -> Rect {
 
 /// `rect` at scale `to` instead of `from`, its top-left corner staying put
 /// unless the screen edge pushes it back.
-fn rescaled(rect: Rect, (from, to): (f32, f32), screen: [f32; 2]) -> Rect {
+pub(in crate::menus::mods) fn rescaled(rect: Rect, (from, to): (f32, f32), screen: [f32; 2]) -> Rect {
     let factor = to / from;
     clamp_into(
         Rect::new(rect.x, rect.y, rect.width * factor, rect.height * factor),
@@ -147,6 +155,11 @@ impl Drag {
         match self.grab {
             Grab::Move([dx, dy]) => {
                 let raw = Rect::new(point[0] - dx, point[1] - dy, start.width, start.height);
+                // The grid first, so a screen edge or centre within reach still wins.
+                let raw = match bounds.grid {
+                    Some(step) if step > 0.0 => on_grid(raw, step),
+                    _ => raw,
+                };
                 let snapped = (bounds.snap)(clamp_into(raw, bounds.screen), bounds.screen);
                 self.live = clamp_into(snapped, bounds.screen);
                 self.guides = guides_for(self.live, bounds.screen);

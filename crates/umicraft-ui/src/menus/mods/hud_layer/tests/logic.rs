@@ -15,6 +15,7 @@ fn bounds() -> Bounds<'static> {
         screen: SCREEN,
         scale_range: (0.5, 3.0),
         snap: &snap,
+        grid: None,
     }
 }
 

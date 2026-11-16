@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! TEMPORARY (phase E.10): read-only measurement of the real window loop and of the
+//! game thread's network-event slots, and an automatic stop for unattended runs.
+//! Remove after the phase. Everything is inert unless `UMICRAFT_E10_LOG` is set.
+//!
+//! `UMICRAFT_E10_LOG=FILE` appends CSV lines `kind,unix_ms,a,b,c`:
+//! - `frame,t,dt_us,,`: one displayed frame (duration reported to the game thread);
+//! - `slot,t,gap_us,events,s08`: one slot of the game thread that took `events`
+//!   network events (`s08` of them position/look teleports), `gap_us` after the previous slot;
+//! - `event,t,kind,,`: one network event taken (`S08`, `S12`), for latency against the proxy capture.
+//!
+//! `UMICRAFT_E10_EXIT_SECS=N` makes the window loop exit N seconds after the first frame.
+
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+static FILE: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+static FIRST_FRAME: OnceLock<Instant> = OnceLock::new();
+static LAST_SLOT: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn file() -> Option<&'static Mutex<std::fs::File>> {
+    FILE.get_or_init(|| {
+        let path = std::env::var("UMICRAFT_E10_LOG").ok()?;
+        OpenOptions::new().create(true).append(true).open(path).ok().map(Mutex::new)
+    })
+    .as_ref()
+}
+
+fn unix_ms() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())
+}
+
+fn line(text: &str) {
+    if let Some(file) = file() {
+        if let Ok(mut file) = file.lock() {
+            let _ = writeln!(file, "{text}");
+        }
+    }
+}
+
+/// A displayed frame of `dt_us` microseconds.
+pub fn frame(dt_us: u128) {
+    FIRST_FRAME.get_or_init(Instant::now);
+    line(&format!("frame,{},{dt_us},,", unix_ms()));
+}
+
+/// A slot of the game thread that took `events` events, `s08` of them teleports.
+pub fn slot(events: usize, s08: usize) {
+    if file().is_none() || events == 0 {
+        return;
+    }
+    let now = Instant::now();
+    let gap = LAST_SLOT
+        .lock()
+        .ok()
+        .and_then(|mut last| last.replace(now))
+        .map_or(0, |previous| now.duration_since(previous).as_micros());
+    line(&format!("slot,{},{gap},{events},{s08}", unix_ms()));
+}
+
+/// One network event taken by the game thread.
+pub fn event(kind: &str) {
+    line(&format!("event,{},{kind},,", unix_ms()));
+}
+
+/// Whether the unattended run has lasted long enough.
+#[must_use]
+pub fn should_exit() -> bool {
+    static SECS: OnceLock<Option<u64>> = OnceLock::new();
+    let secs = SECS.get_or_init(|| std::env::var("UMICRAFT_E10_EXIT_SECS").ok()?.parse().ok());
+    match (secs, FIRST_FRAME.get()) {
+        (Some(secs), Some(first)) => first.elapsed().as_secs() >= *secs,
+        _ => false,
+    }
+}
+
+/// TEMPORARY: true once, `UMICRAFT_E10_RESPAWN_SECS` seconds after the player was first seen dead
+/// (stands for the click on the death screen; the click path itself is covered by a unit test).
+pub fn respawn_due(dead: bool) -> bool {
+    static DEAD_AT: Mutex<Option<Instant>> = Mutex::new(None);
+    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let Some(secs) = std::env::var("UMICRAFT_E10_RESPAWN_SECS").ok().and_then(|s| s.parse::<u64>().ok()) else {
+        return false;
+    };
+    if !dead || DONE.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
+    let Ok(mut at) = DEAD_AT.lock() else { return false };
+    let first = *at.get_or_insert_with(Instant::now);
+    if first.elapsed().as_secs() >= secs {
+        DONE.store(true, std::sync::atomic::Ordering::Relaxed);
+        line("event,0,RESPAWN_CLICK,,");
+        return true;
+    }
+    false
+}

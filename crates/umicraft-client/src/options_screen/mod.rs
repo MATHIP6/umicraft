@@ -107,6 +107,8 @@ pub struct OptionsScreen {
     pack_icons: Vec<Option<umicraft_ui::SpriteSheet>>,
     /// Scroll offsets of the available and selected pack lists.
     pack_scroll: [f32; 2],
+    /// The folder the available list shows (`""` is the packs folder itself).
+    pack_folder: String,
     /// The drags of the scrollbars of the two pack lists.
     pack_bars: [umicraft_ui::menus::ScrollbarDrag; 2],
     /// The rectangle of every widget in the last frame, by id.
@@ -137,6 +139,7 @@ impl OptionsScreen {
             pack_draft: Vec::new(),
             pack_icons: Vec::new(),
             pack_scroll: [0.0; 2],
+            pack_folder: String::new(),
             pack_bars: Default::default(),
             rects: HashMap::new(),
             over_world: false,

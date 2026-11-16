@@ -83,11 +83,13 @@ impl WeatherMesh {
     }
 
     /// Appends a quad, opening a new run when the picture changes.
+    #[inline(always)]
     fn push_quad(&mut self, kind: Precipitation, corners: [WeatherVertex; 4]) {
         let start = self.vertices.len() as u32;
-        for index in [0, 1, 2, 0, 2, 3] {
-            self.vertices.push(corners[index]);
-        }
+        self.vertices.extend_from_slice(&[
+            corners[0], corners[1], corners[2],
+            corners[0], corners[2], corners[3],
+        ]);
         let end = self.vertices.len() as u32;
         match self.runs.last_mut() {
             Some(run) if run.kind == kind => run.vertices.end = end,
@@ -115,21 +117,68 @@ pub(super) struct FrameInput {
     pub ticks: f64,
 }
 
+const COORD_STRIDE: usize = 32;
+const COORD_TABLE_LEN: usize = COORD_STRIDE * COORD_STRIDE;
+
+/// Precomputed direction table mirroring `EntityRenderer.rainXCoords` and
+/// `EntityRenderer.rainYCoords` (halved), covering the [-16..15] offset grid.
+struct RainCoordsTable {
+    table: [(f64, f64); COORD_TABLE_LEN],
+}
+
+impl RainCoordsTable {
+    const fn new() -> Self {
+        let mut table = [(0.0, 0.0); COORD_TABLE_LEN];
+        let mut i = 0;
+        while i < 32 {
+            let mut j = 0;
+            while j < 32 {
+                let f = (j as i32 - 16) as f64;
+                let f1 = (i as i32 - 16) as f64;
+                let sq = f * f + f1 * f1;
+                if sq > 0.0 {
+                    // Newton-Raphson square root in const fn
+                    let mut x = sq;
+                    let mut k = 0;
+                    while k < 12 {
+                        x = 0.5 * (x + sq / x);
+                        k += 1;
+                    }
+                    table[i * 32 + j] = (-f1 / x * 0.5, f / x * 0.5);
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        Self { table }
+    }
+}
+
+static RAIN_COORDS: RainCoordsTable = RainCoordsTable::new();
+
 /// The direction of the quad of the column at offset `dx`, `dz` from the
 /// viewer's column (`rainXCoords`, `rainYCoords`, already halved); `None` for
 /// the viewer's own column, where the reference divides zero by zero and
 /// draws nothing.
+#[inline(always)]
 fn quad_offset(dx: i32, dz: i32) -> Option<(f64, f64)> {
     if dx == 0 && dz == 0 {
         return None;
     }
-    let (fx, fz) = (dx as f32, dz as f32);
-    let length = (fx * fx + fz * fz).sqrt();
-    Some((f64::from(-fz / length) * 0.5, f64::from(fx / length) * 0.5))
+    let j = dx + 16;
+    let i = dz + 16;
+    if (0..32).contains(&j) && (0..32).contains(&i) {
+        Some(RAIN_COORDS.table[(i as usize) * 32 + (j as usize)])
+    } else {
+        let (fx, fz) = (dx as f64, dz as f64);
+        let length = (fx * fx + fz * fz).sqrt();
+        Some((-fz / length * 0.5, fx / length * 0.5))
+    }
 }
 
 /// `BiomeGenBase.getFloatTemperature` without its noise term: it falls by
 /// 0.05 per 30 blocks above y = 64.
+#[inline(always)]
 pub(super) fn temperature_at(base: f32, y: i32) -> f32 {
     if y > 64 {
         base - (y - 64) as f32 * 0.05 / 30.0
@@ -139,6 +188,7 @@ pub(super) fn temperature_at(base: f32, y: i32) -> f32 {
 }
 
 /// The per-column seed of the reference: Java `int` arithmetic, then widened.
+#[inline(always)]
 fn column_hash(x: i32, z: i32) -> (i32, i32) {
     let x_term = x
         .wrapping_mul(x)
@@ -149,6 +199,21 @@ fn column_hash(x: i32, z: i32) -> (i32, i32) {
         .wrapping_mul(418_711)
         .wrapping_add(z.wrapping_mul(13_761));
     (x_term, z_term)
+}
+
+/// Inlined zero-allocation Java LCG random speed calculation for rain:
+/// `3.0 + random.nextDouble()` with seed `(x_term ^ z_term)`.
+#[inline(always)]
+fn rain_speed(seed: u64) -> f64 {
+    const MULTIPLIER: u64 = 0x5DEECE66D;
+    const MASK: u64 = (1 << 48) - 1;
+    let s0 = (seed ^ MULTIPLIER) & MASK;
+    let s1 = (s0.wrapping_mul(MULTIPLIER).wrapping_add(0xB)) & MASK;
+    let s2 = (s1.wrapping_mul(MULTIPLIER).wrapping_add(0xB)) & MASK;
+    let high = s1 >> 22; // 26 bits
+    let low = s2 >> 21;  // 27 bits
+    let next_double = ((high << 27) + low) as f64 / 9007199254740992.0;
+    3.0 + next_double
 }
 
 /// Builds the quads of a frame into `mesh`, replacing its content.
@@ -162,6 +227,7 @@ pub(super) fn build(field: &PrecipitationField, input: &FrameInput, mesh: &mut W
     } else {
         FAST_RADIUS
     };
+    mesh.vertices.reserve(MAX_VERTICES);
     let (column_x, column_z) = (input.eye.x.floor() as i32, input.eye.z.floor() as i32);
     let eye_y = input.eye.y.floor() as i32;
     let count = input.ticks.floor() as i32;
@@ -181,7 +247,7 @@ pub(super) fn build(field: &PrecipitationField, input: &FrameInput, mesh: &mut W
                 bottom: (eye_y - radius).max(cell.height),
                 top: (eye_y + radius).max(cell.height),
                 offset,
-                distance: column_distance(input.eye, x, z, radius),
+                distance_sq: column_distance_sq(input.eye, x, z, radius),
                 origin: input.origin,
             };
             if column.bottom == column.top {
@@ -205,19 +271,23 @@ struct Column {
     /// `l2`: the upper end of the quad.
     top: i32,
     offset: (f64, f64),
-    /// Distance to the viewer in units of the radius (`f3`).
-    distance: f32,
+    /// Squared distance to the viewer in units of radius squared (`f3^2`).
+    /// Eliminates sqrt from the per-quad inner loop.
+    distance_sq: f32,
     /// The render origin of the vertices.
     origin: DVec3,
 }
 
-fn column_distance(eye: DVec3, x: i32, z: i32, radius: i32) -> f32 {
+#[inline(always)]
+fn column_distance_sq(eye: DVec3, x: i32, z: i32, radius: i32) -> f32 {
     let dx = f64::from(x as f32 + 0.5) - eye.x;
     let dz = f64::from(z as f32 + 0.5) - eye.z;
-    (dx * dx + dz * dz).sqrt() as f32 / radius as f32
+    let rad_sq = (radius * radius) as f64;
+    ((dx * dx + dz * dz) / rad_sq) as f32
 }
 
 /// The four corners of the quad: `(u, v)` pairs for the bottom and the top.
+#[inline(always)]
 fn corners(
     column: &Column,
     alpha: f32,
@@ -225,26 +295,39 @@ fn corners(
     uv: [(f64, f64); 4],
 ) -> [WeatherVertex; 4] {
     let (dx, dz) = column.offset;
-    let (cx, cz) = (f64::from(column.x) + 0.5, f64::from(column.z) + 0.5);
-    let (bottom, top) = (f64::from(column.bottom), f64::from(column.top));
-    let at = |x: f64, y: f64, z: f64, uv: (f64, f64)| WeatherVertex {
-        position: [
-            (x - column.origin.x) as f32,
-            (y - column.origin.y) as f32,
-            (z - column.origin.z) as f32,
-        ],
-        uv: [uv.0 as f32, uv.1 as f32],
-        alpha,
-        light,
-    };
+    let cx = (column.x as f64 + 0.5) - column.origin.x;
+    let cz = (column.z as f64 + 0.5) - column.origin.z;
+    let bottom = (column.bottom as f64) - column.origin.y;
+    let top = (column.top as f64) - column.origin.y;
     [
-        at(cx - dx, bottom, cz - dz, uv[0]),
-        at(cx + dx, bottom, cz + dz, uv[1]),
-        at(cx + dx, top, cz + dz, uv[2]),
-        at(cx - dx, top, cz - dz, uv[3]),
+        WeatherVertex {
+            position: [(cx - dx) as f32, bottom as f32, (cz - dz) as f32],
+            uv: [uv[0].0 as f32, uv[0].1 as f32],
+            alpha,
+            light,
+        },
+        WeatherVertex {
+            position: [(cx + dx) as f32, bottom as f32, (cz + dz) as f32],
+            uv: [uv[1].0 as f32, uv[1].1 as f32],
+            alpha,
+            light,
+        },
+        WeatherVertex {
+            position: [(cx + dx) as f32, top as f32, (cz + dz) as f32],
+            uv: [uv[2].0 as f32, uv[2].1 as f32],
+            alpha,
+            light,
+        },
+        WeatherVertex {
+            position: [(cx - dx) as f32, top as f32, (cz - dz) as f32],
+            uv: [uv[3].0 as f32, uv[3].1 as f32],
+            alpha,
+            light,
+        },
     ]
 }
 
+#[inline(always)]
 fn push_rain(
     mesh: &mut WeatherMesh,
     cell: &PrecipitationCell,
@@ -254,10 +337,10 @@ fn push_rain(
     partial: f32,
 ) {
     let (x_term, z_term) = column_hash(column.x, column.z);
-    let mut random = JavaRandom::new(i64::from(x_term ^ z_term) as u64);
+    let speed = rain_speed((x_term ^ z_term) as u64);
     let phase = f64::from(count.wrapping_add(x_term).wrapping_add(z_term) & 31);
-    let scroll = (phase + f64::from(partial)) / 32.0 * (3.0 + random.next_double());
-    let alpha = ((1.0 - column.distance * column.distance) * 0.5 + 0.5) * input.strength;
+    let scroll = (phase + f64::from(partial)) / 32.0 * speed;
+    let alpha = ((1.0 - column.distance_sq) * 0.5 + 0.5) * input.strength;
     let light = [f32::from(cell.sky_light), f32::from(cell.block_light)];
     let (low, high) = (
         f64::from(column.bottom) * 0.25,
@@ -272,6 +355,7 @@ fn push_rain(
     mesh.push_quad(Precipitation::Rain, corners(column, alpha, light, uv));
 }
 
+#[inline(always)]
 fn push_snow(
     mesh: &mut WeatherMesh,
     cell: &PrecipitationCell,
@@ -281,13 +365,13 @@ fn push_snow(
     wobble_clock: f32,
 ) {
     let (x_term, z_term) = column_hash(column.x, column.z);
-    let mut random = JavaRandom::new(i64::from(x_term ^ z_term) as u64);
+    let mut random = JavaRandom::new((x_term ^ z_term) as u64);
     let fall = f64::from((count & 511) as f32 + partial) / 512.0;
     let drift_u = random.next_double()
         + f64::from(wobble_clock) * 0.01 * f64::from(random.next_gaussian() as f32);
     let drift_v =
         random.next_double() + f64::from(wobble_clock * random.next_gaussian() as f32) * 0.001;
-    let alpha = ((1.0 - column.distance * column.distance) * 0.3 + 0.5) * input.strength;
+    let alpha = ((1.0 - column.distance_sq) * 0.3 + 0.5) * input.strength;
     // `(light * 3 + 0xF000F0) / 4` per channel: snow is lit towards full light.
     let light = [
         (f32::from(cell.sky_light) * 3.0 + 15.0) / 4.0,

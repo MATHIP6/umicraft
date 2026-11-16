@@ -11,11 +11,14 @@
 
 use umicraft_builtin_mods::hud::snap::snap_rect;
 use umicraft_builtin_mods::{
-    HudContent, HudPlacement, HudRect, HudWidget, ModRegistry, RegistryError, MAX_SCALE, MIN_SCALE,
+    HudContent, HudPlacement, HudPreset, HudRect, HudWidget, ModRegistry, RegistryError, MAX_SCALE,
+    MIN_SCALE,
 };
 use umicraft_core::lang::Lang;
 use umicraft_render::gui_scale;
-use umicraft_ui::menus::{HudEditorOutcome, HudEditorView, HudWidgetView};
+use umicraft_ui::menus::{
+    HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, HudWidgetView,
+};
 use umicraft_ui::{FontAtlas, Rect};
 
 use crate::mods_hud_view::mod_widget_views;
@@ -82,6 +85,19 @@ pub fn build(
             .collect(),
         screen: [display.0 as f32 / scale, display.1 as f32 / scale],
         scale_range: (MIN_SCALE, MAX_SCALE),
+        // Every mod that has a widget, on or off: the list of the HUD editor.
+        entries: registry
+            .mods()
+            .filter(|view| view.placement.is_some())
+            .map(|view| HudEntryView {
+                id: view.meta.id.as_str().to_owned(),
+                name: name_of(view.meta.id.as_str()),
+                enabled: view.enabled,
+                locked: view.locked,
+            })
+            .collect(),
+        has_custom: registry.has_custom(),
+        ..HudEditorView::default()
     }
 }
 
@@ -118,6 +134,12 @@ pub fn apply(
             rect,
             scale,
             screen,
+        }
+        | HudEditorOutcome::Scaled {
+            id,
+            rect,
+            scale,
+            screen,
         } => {
             let placement =
                 HudPlacement::from_rect(to_hud_rect(*rect), (screen[0], screen[1]), *scale);
@@ -129,12 +151,26 @@ pub fn apply(
         HudEditorOutcome::ResetAll => {
             let ids: Vec<String> = registry
                 .mods()
-                .filter(|view| view.placement.is_some())
+                .filter(|view| view.placement.is_some() && !view.locked)
                 .map(|view| view.meta.id.as_str().to_owned())
                 .collect();
             for id in ids {
                 registry.reset_placement(&id)?;
             }
+        }
+        HudEditorOutcome::Lock { id, locked } => registry.set_locked(id, *locked)?,
+        HudEditorOutcome::Preset(kind) => registry.apply_preset(match kind {
+            HudPresetKind::Default => HudPreset::Default,
+            HudPresetKind::Pvp => HudPreset::Pvp,
+            HudPresetKind::Minimal => HudPreset::Minimal,
+            HudPresetKind::Custom => HudPreset::Custom,
+        }),
+        // The layout is saved after every change; saving it by hand also keeps
+        // it as the "Custom" preset.
+        HudEditorOutcome::Save => registry.save_custom(),
+        // The history belongs to the runtime (`ModsRuntime::apply_change`).
+        HudEditorOutcome::Undo | HudEditorOutcome::Redo | HudEditorOutcome::Cancel => {
+            return Ok(false)
         }
     }
     Ok(true)

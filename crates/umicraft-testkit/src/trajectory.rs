@@ -138,6 +138,32 @@ impl Trajectory {
         Self { samples }
     }
 
+    /// The trajectory from the first tick whose horizontal position differs
+    /// from the previous one (the scenario's first move), so runs that started
+    /// a few ticks apart line up. Unchanged when the player never moves.
+    #[must_use]
+    pub fn from_first_motion(&self) -> Self {
+        self.from_nth_motion(1)
+    }
+
+    /// The trajectory from the `nth` (1-based) tick whose horizontal position
+    /// differs from the previous one. A server teleport before the scenario
+    /// is the first such change, so the scenario's first move is the second.
+    /// Unchanged when there are fewer than `nth` changes.
+    #[must_use]
+    pub fn from_nth_motion(&self, nth: usize) -> Self {
+        let start = self
+            .samples
+            .windows(2)
+            .enumerate()
+            .filter(|(_, pair)| pair[0].x != pair[1].x || pair[0].z != pair[1].z)
+            .nth(nth.saturating_sub(1))
+            .map_or(0, |(index, _)| index + 1);
+        Self {
+            samples: self.samples[start..].to_vec(),
+        }
+    }
+
     /// The trajectory with every position made relative to the first sample,
     /// for runs that did not start at the same spot.
     #[must_use]
@@ -442,6 +468,27 @@ mod tests {
         let diff = TrajectoryDiff::new(&trajectory, &trajectory, PROPOSED_TOLERANCE);
         assert!(diff.within_tolerance());
         assert_eq!(diff.max_error, 0.0);
+    }
+
+    #[test]
+    fn alignment_starts_at_the_nth_change_of_position() {
+        // Still, a teleport (change 1), still, then the first real move (change 2).
+        let trajectory = Trajectory {
+            samples: vec![
+                sample(0.0, true),
+                sample(0.0, true),
+                sample(9.0, true),
+                sample(9.0, true),
+                sample(9.5, true),
+                sample(10.0, true),
+            ],
+        };
+        assert_eq!(trajectory.from_first_motion().samples.len(), 4);
+        let second = trajectory.from_nth_motion(2);
+        assert_eq!(second.samples.len(), 2);
+        assert_eq!(second.samples[0].x, 9.5);
+        // Fewer changes than asked for: left whole rather than guessed.
+        assert_eq!(trajectory.from_nth_motion(9).samples.len(), 6);
     }
 
     #[test]
