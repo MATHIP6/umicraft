@@ -10,13 +10,17 @@
 //! "CAPE": {"url"}}}`; the server sends it in `Player List Item`. Vanilla
 //! only follows URLs on `minecraft.net` and `mojang.com`; so does this module.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Mutex;
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use serde::Deserialize;
+use tokio::sync::mpsc::{
+    channel as async_channel, Receiver as AsyncReceiver, Sender as AsyncSender,
+};
+use tokio::task::JoinSet;
 
 use crate::error::{image_error, AssetsError, AssetsResult};
 use crate::http::{Endpoints, HttpClient};
@@ -152,13 +156,18 @@ pub struct FetchedTexture {
     pub image: Result<(Vec<u8>, u32, u32), String>,
 }
 
+/// Bounded capacity of the texture request and result queues.
+const TEXTURE_QUEUE_CAPACITY: usize = 128;
+/// Maximum concurrent HTTP skin/cape downloads driven by the single worker runtime.
+const MAX_CONCURRENT_DOWNLOADS: usize = 6;
+
 /// Downloads textures on a worker thread, so the game and render threads
 /// never wait on the network. Finished downloads are collected with
 /// [`poll`](Self::poll). A cache directory, when given, keeps the PNGs by the
 /// hash in their URL so a skin is fetched once.
 #[derive(Debug)]
 pub struct TextureFetcher {
-    requests: Sender<String>,
+    requests: AsyncSender<String>,
     results: Receiver<FetchedTexture>,
     asked: Mutex<HashSet<String>>,
 }
@@ -167,11 +176,11 @@ impl TextureFetcher {
     /// Starts the worker.
     #[must_use]
     pub fn spawn(cache_dir: Option<PathBuf>) -> Self {
-        let (requests, request_queue) = mpsc::channel::<String>();
-        let (sender, results) = mpsc::channel();
+        let (requests, request_queue) = async_channel::<String>(TEXTURE_QUEUE_CAPACITY);
+        let (sender, results) = mpsc::sync_channel(TEXTURE_QUEUE_CAPACITY);
         thread::Builder::new()
             .name("texture-fetch".to_owned())
-            .spawn(move || worker(&request_queue, &sender, cache_dir.as_deref()))
+            .spawn(move || worker(request_queue, &sender, cache_dir))
             .ok();
         Self {
             requests,
@@ -185,11 +194,21 @@ impl TextureFetcher {
         let first = self
             .asked
             .lock()
-            .map(|mut asked| asked.insert(url.to_owned()))
+            .map(|mut asked| {
+                if asked.contains(url) {
+                    false
+                } else {
+                    asked.insert(url.to_owned());
+                    true
+                }
+            })
             .unwrap_or(false);
-        if first {
-            // A closed channel means the worker is gone: no skins, no crash.
-            self.requests.send(url.to_owned()).ok();
+        if first && self.requests.try_send(url.to_owned()).is_err() {
+            // If the bounded queue was temporarily full, forget the mark so a
+            // later frame retries the request instead of dropping it forever.
+            if let Ok(mut asked) = self.asked.lock() {
+                asked.remove(url);
+            }
         }
     }
 
@@ -200,9 +219,9 @@ impl TextureFetcher {
 }
 
 fn worker(
-    requests: &Receiver<String>,
-    results: &Sender<FetchedTexture>,
-    cache: Option<&std::path::Path>,
+    requests: AsyncReceiver<String>,
+    results: &SyncSender<FetchedTexture>,
+    cache: Option<PathBuf>,
 ) {
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -210,15 +229,53 @@ fn worker(
     else {
         return;
     };
-    let client = HttpClient::new(Endpoints::official()).ok();
-    while let Ok(url) = requests.recv() {
-        let image = runtime.block_on(load(&url, client.as_ref(), cache));
-        let finished = FetchedTexture {
-            url,
-            image: image.map_err(|error| error.to_string()),
-        };
-        if results.send(finished).is_err() {
+    runtime.block_on(drive_downloads(requests, results, cache));
+}
+
+async fn drive_downloads(
+    mut requests: AsyncReceiver<String>,
+    results: &SyncSender<FetchedTexture>,
+    cache: Option<PathBuf>,
+) {
+    let client = HttpClient::new(Endpoints::official()).ok().map(Arc::new);
+    let cache = cache.map(Arc::new);
+    let mut waiting: VecDeque<String> = VecDeque::new();
+    let mut in_flight: JoinSet<FetchedTexture> = JoinSet::new();
+    let mut open = true;
+
+    loop {
+        while in_flight.len() < MAX_CONCURRENT_DOWNLOADS {
+            let Some(url) = waiting.pop_front() else {
+                break;
+            };
+            let client = client.clone();
+            let cache = cache.clone();
+            in_flight.spawn(async move {
+                let image = load(&url, client.as_deref(), cache.as_deref().map(PathBuf::as_path))
+                    .await
+                    .map_err(|error| error.to_string());
+                FetchedTexture { url, image }
+            });
+        }
+
+        if !open && waiting.is_empty() && in_flight.is_empty() {
             return;
+        }
+
+        tokio::select! {
+            maybe_url = requests.recv(), if open => {
+                match maybe_url {
+                    Some(url) => waiting.push_back(url),
+                    None => open = false,
+                }
+            }
+            Some(joined) = in_flight.join_next(), if !in_flight.is_empty() => {
+                if let Ok(finished) = joined {
+                    if results.send(finished).is_err() {
+                        return;
+                    }
+                }
+            }
         }
     }
 }

@@ -52,6 +52,14 @@ impl BodyYaw {
         self.previous = self.offset;
     }
 
+    /// Resets the body yaw immediately to `yaw`, e.g. on teleport or server setback.
+    pub fn reset_to(&mut self, yaw: f32) {
+        self.offset = yaw;
+        self.previous = yaw;
+        self.head_reference = yaw;
+        self.idle_ticks = 0;
+    }
+
     /// Player algorithm. `moved` is the horizontal displacement this tick
     /// `(dx, dz)`, `yaw` the facing direction; `swinging` snaps the body to
     /// the facing direction while an arm swings.
@@ -67,9 +75,9 @@ impl BodyYaw {
         }
         self.offset += wrap_degrees(target - self.offset) * 0.3;
         let twist = wrap_degrees(yaw - self.offset).clamp(-MAX_HEAD_TWIST, MAX_HEAD_TWIST);
-        self.offset = yaw - twist;
+        self.offset = wrap_degrees(yaw - twist);
         if twist * twist > 2500.0 {
-            self.offset += twist * 0.2;
+            self.offset = wrap_degrees(self.offset + twist * 0.2);
         }
     }
 

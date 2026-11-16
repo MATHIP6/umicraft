@@ -80,12 +80,14 @@ fn scan(directory: &Path, prefix: &str, depth: usize, found: &mut Vec<Discovered
                 scan(&path, &name, depth + 1, found);
             }
         } else if is_zip_name(&file_name) {
-            if let Ok((metadata, icon)) = read_zip_header(&path) {
-                found.push(DiscoveredPack {
+            match read_zip_header(&path) {
+                Ok((metadata, icon)) => found.push(DiscoveredPack {
                     name,
                     metadata,
                     icon,
-                });
+                }),
+                // Not listed, but the log says which file and why.
+                Err(error) => tracing::warn!(pack = %name, %error, "unreadable resource pack"),
             }
         }
     }

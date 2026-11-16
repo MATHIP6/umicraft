@@ -219,7 +219,7 @@ impl SpiderModel {
     /// Emits all mesh vertices scaled to blocks (1/16 block per unit * self.scale).
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(11 * 36);
         let root = Mat4::from_scale(Vec3::splat(self.scale / 16.0));
         self.head.emit(root, &mut out);
         self.neck.emit(root, &mut out);

@@ -52,6 +52,16 @@ pub struct Mesh {
 }
 
 impl Mesh {
+    /// Clears all vertices, indices, block entities and section spans, retaining allocated capacities.
+    pub fn clear(&mut self) {
+        self.vertices.clear();
+        self.indices.clear();
+        self.transparent_vertices.clear();
+        self.transparent_indices.clear();
+        self.block_entities.clear();
+        self.sections.clear();
+    }
+
     /// True when neither pass has faces.
     #[must_use]
     pub fn is_empty(&self) -> bool {

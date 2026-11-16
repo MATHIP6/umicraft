@@ -1,0 +1,55 @@
+import sys,struct,statistics as st
+sys.path.insert(0,sys.argv[1])
+from umcapt import *
+def analyze(d):
+    frames=[];slots=[];ev=[]
+    for l in open(d+'/e10.csv'):
+        p=l.strip().split(',')
+        if p[0]=='frame': frames.append((int(p[1]),int(p[2])))
+        elif p[0]=='slot': slots.append((int(p[1]),int(p[2]),int(p[3]),int(p[4])))
+        elif p[0]=='event': ev.append((int(p[1]),p[2]))
+    fr=load(d+'/umicraft.umcapt'); t0=fr[0][2]
+    s08=[f[2] for f in fr if f[1]==1 and f[3]==8]
+    c06=[f[2] for f in fr if f[1]==0 and f[3]==6]
+    dead=[f[2] for f in fr if f[1]==1 and f[3]==6 and struct.unpack('>f',f[4][:4])[0]==0.0]
+    mv=[f[2] for f in fr if f[1]==0 and f[3] in (3,4,5) and dead and f[2]>dead[0]]
+    dts=sorted(x[1] for x in frames)
+    out={}
+    if dts:
+        out['frames']=len(frames); out['dur_s']=round((frames[-1][0]-frames[0][0])/1000,1)
+        out['fps_mean']=round(len(frames)/max(1e-9,(frames[-1][0]-frames[0][0])/1000),1)
+        out['dt_ms_med']=round(dts[len(dts)//2]/1000,2); out['dt_ms_p95']=round(dts[int(len(dts)*.95)]/1000,2); out['dt_ms_max']=round(dts[-1]/1000,1)
+    loop=[s for s in slots if s[3]>0]
+    out['slots']=len(slots); out['slots_with_S08']=len(loop)
+    gaps=sorted(s[1] for s in slots if s[1]>0)
+    out['slot_gap_ms_med']=round(gaps[len(gaps)//2]/1000,2) if gaps else None
+    out['S08']=len(s08); out['C06']=len(c06)
+    # S08 -> C06 latency (proxy clock): for each S08 the first C06 at or after it
+    import bisect
+    lat=[]
+    for t in s08:
+        i=bisect.bisect_left(c06,t)
+        if i<len(c06): lat.append(c06[i]-t)
+    lat.sort()
+    out['S08_to_C06_ms_med']=lat[len(lat)//2] if lat else None; out['S08_to_C06_ms_p95']=lat[int(len(lat)*.95)] if lat else None; out['max']=lat[-1] if lat else None
+    # proxy S08 arrival -> processing (e10 event S08 time)
+    s08ev=[t for t,k in ev if k=='S08']
+    pl=[]
+    j=0
+    for t in s08:
+        # nearest processed S08 event at or after t
+        i=bisect.bisect_left(s08ev,t)
+        if i<len(s08ev): pl.append(s08ev[i]-t)
+    pl.sort()
+    out['S08_arrival_to_processing_ms_med']=pl[len(pl)//2] if pl else None
+    out['S08_arrival_to_processing_ms_p95']=pl[int(len(pl)*.95)] if pl else None
+    out['move_pkts_after_death']=len(mv) if dead else None
+    out['move_last_ms']=(mv[-1]-dead[0]) if mv else None
+    c=Counter=None
+    from collections import Counter
+    sec=Counter((t-t0)//1000 for t in s08); out['maxS08_per_s']=max(sec.values()) if sec else 0
+    out['kicked']=('Sent too many' in open(d+'/run.out',errors='replace').read())
+    return out
+if __name__=='__main__':
+    for d in sys.argv[2:]:
+        print(d.split('/')[-1], analyze(d))

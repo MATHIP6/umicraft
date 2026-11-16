@@ -33,6 +33,12 @@ impl CapeChase {
         }
     }
 
+    /// Snaps the cape immediately to `position`, resetting lag on teleport.
+    pub fn reset_to(&mut self, position: DVec3) {
+        self.current = position;
+        self.previous = position;
+    }
+
     /// Advances one tick towards `position`; a gap beyond 10 blocks on an
     /// axis (a teleport) snaps that axis.
     pub fn update(&mut self, position: DVec3) {

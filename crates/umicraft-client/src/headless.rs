@@ -62,6 +62,16 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let (host, port) = args
         .server()
         .ok_or_else(|| ClientError::Network("--headless needs a host and port".to_string()))?;
+    // Phase E.2: the tick-driven scenario lives in the game thread; the log
+    // it writes is the internal state compared with the vanilla agent's.
+    if matches!(args.script.as_str(), "e1" | "e2" | "e3" | "e4") {
+        let path = args.state_log.as_ref().ok_or_else(|| {
+            ClientError::Network("--script e1 needs --state-log FILE".to_string())
+        })?;
+        let run = crate::e1::E1Run::open(path, &args.script)
+            .map_err(|error| ClientError::Network(format!("{}: {error}", path.display())))?;
+        crate::e1::install(run);
+    }
     let session = Session::start(NetworkConfig {
         host: host.to_string(),
         port,
@@ -88,7 +98,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         let now = Instant::now();
         if now >= next_input {
             let update = script.update(now);
-            let _ = session.events().try_send(GameEvent::Input(update));
+            let _ = session.send_input(update);
             next_input = now + TICK;
         }
         while let Ok(event) = session.frames().try_recv() {
@@ -135,6 +145,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 | RenderEvent::LookSlot(_)
                 | RenderEvent::Stats(_)
                 | RenderEvent::Connect(_)
+                | RenderEvent::Teleport { .. }
                 | RenderEvent::Reset => {}
             }
             if report.error.is_some() {
@@ -195,7 +206,8 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 /// The phases of the requested script.
 fn phases(name: &str) -> Vec<ScriptPhase> {
     match name {
-        "idle" => idle_script(),
+        // `e1` is driven by the game thread's ticks; the poller only idles.
+        "idle" | "e1" | "e2" | "e3" | "e4" => idle_script(),
         "movement" => movement_script(),
         "combat" => combat_script(),
         _ => default_script(),

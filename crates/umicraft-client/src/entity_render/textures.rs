@@ -24,11 +24,11 @@ use super::armor::armor_texture;
 use super::banner_cache::BannerCache;
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
-use super::mesh_entities_with;
 use super::mobs::skin_slot;
 use super::player::posed_player;
 use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
+use super::mesh_entities_with;
 use crate::map_render::{map_arm_vertices, MapBatch};
 
 /// Loads official textures from the jar if available, or falls back to procedural assets.
@@ -353,15 +353,6 @@ impl EntityTextures {
         for (slot, vertices) in block_entities.solid {
             meshed.solid.entry(slot).or_default().extend(vertices);
         }
-        for (slot, vertices) in block_entities.additive {
-            meshed.additive.entry(slot).or_default().extend(vertices);
-        }
-        self.banners.borrow_mut().ensure(
-            &block_entities.banners,
-            &mut self.textures.borrow_mut(),
-            self.jar.as_ref(),
-            renderer,
-        );
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
         let mut solid = bound_batches(&meshed.solid, &textures);

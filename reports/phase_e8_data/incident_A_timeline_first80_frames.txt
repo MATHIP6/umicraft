@@ -1,0 +1,81 @@
+   0 +    0ms C->S C00 KA
+   1 +    0ms C->S C00 KA
+   2 +   23ms S->C S03
+   3 +   24ms S->C S02 Chat
+   4 +   25ms S->C S01 Join
+   5 +   25ms S->C S3F
+   6 +   25ms S->C S41
+   7 +   25ms S->C S05 Spawn
+   8 +   25ms S->C S39
+   9 +   25ms C->S C15
+  10 +   25ms C->S C17
+  11 +   25ms S->C S09
+  12 +   25ms S->C S37
+  13 +   26ms S->C S02 Chat
+  14 +   26ms S->C S38
+  15 +   32ms S->C S08 PosLook (0.500,2.000,12.631) flags=0
+  16 +   32ms S->C S44
+  17 +   32ms S->C S03
+  18 +   32ms S->C S30
+  19 +   32ms S->C S2F
+  20 +   32ms S->C S2F
+  21 +   32ms C->S C06 (0.500,2.000,12.631) ground=0
+  22 +   32ms S->C S06 Health health=0.0 food=14
+  23 +   32ms S->C S1f
+  24 +   85ms S->C S1c
+  25 +   85ms S->C S20
+  26 +  131ms S->C S26 ChunkBulk
+  27 +  153ms C->S C06 (0.500,2.000,12.631) ground=0
+  28 +  177ms S->C S26 ChunkBulk
+  29 +  204ms C->S C03
+  30 +  223ms S->C S26 ChunkBulk
+  31 +  255ms C->S C03
+  32 +  285ms S->C S26 ChunkBulk
+  33 +  301ms C->S C03
+  34 +  331ms S->C S26 ChunkBulk
+  35 +  360ms C->S C03
+  36 +  408ms C->S C03
+  37 +  454ms C->S C03
+  38 +  513ms C->S C03
+  39 +  529ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  40 +  529ms C->S C06 (0.500,4.000,0.500) ground=0
+  41 +  529ms S->C S2F
+  42 +  530ms S->C S2F
+  43 +  561ms C->S C04 (0.500,4.000,0.500) ground=0
+  44 +  607ms C->S C03
+  45 +  653ms C->S C03
+  46 +  714ms C->S C03
+  47 +  760ms C->S C03
+  48 +  806ms C->S C03
+  49 +  853ms C->S C03
+  50 +  915ms C->S C03
+  51 +  960ms C->S C03
+  52 + 1007ms C->S C03
+  53 + 1054ms C->S C03
+  54 + 1115ms C->S C03
+  55 + 1162ms C->S C03
+  56 + 1207ms C->S C03
+  57 + 1253ms C->S C03
+  58 + 1314ms C->S C03
+  59 + 1360ms C->S C03
+  60 + 1408ms C->S C03
+  61 + 1408ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  62 + 1408ms C->S C06 (0.500,4.000,0.500) ground=0
+  63 + 1408ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  64 + 1408ms C->S C06 (0.500,4.000,0.500) ground=0
+  65 + 1408ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  66 + 1409ms C->S C06 (0.500,4.000,0.500) ground=0
+  67 + 1409ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  68 + 1409ms C->S C06 (0.500,4.000,0.500) ground=0
+  69 + 1409ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  70 + 1409ms C->S C06 (0.500,4.000,0.500) ground=0
+  71 + 1409ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  72 + 1409ms C->S C06 (0.500,4.000,0.500) ground=0
+  73 + 1410ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  74 + 1410ms C->S C06 (0.500,4.000,0.500) ground=0
+  75 + 1410ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  76 + 1410ms C->S C06 (0.500,4.000,0.500) ground=0
+  77 + 1410ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+  78 + 1410ms C->S C06 (0.500,4.000,0.500) ground=0
+  79 + 1410ms S->C S08 PosLook (0.500,4.000,0.500) flags=0
+COUNTS {'C00': 2, 'C03': 24, 'C04': 6, 'C06': 3471, 'C15': 1, 'C17': 1, 'S01': 1, 'S02': 2, 'S03': 2, 'S05': 1, 'S06': 1, 'S08': 3470, 'S09': 1, 'S1c': 1, 'S1f': 1, 'S20': 1, 'S26': 5, 'S2f': 4, 'S30': 1, 'S37': 1, 'S38': 1, 'S39': 1, 'S3f': 1, 'S40': 1, 'S41': 1, 'S44': 1}

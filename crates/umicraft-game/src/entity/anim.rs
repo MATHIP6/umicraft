@@ -274,6 +274,12 @@ impl Animation {
         }
         self.swing.previous_progress + delta * alpha
     }
+
+    /// Whether an arm swing is currently active (MCP `swingProgress > 0.0F`).
+    #[must_use]
+    pub fn is_swinging(&self) -> bool {
+        self.swing.in_progress || self.swing.progress > 0.0
+    }
 }
 
 #[cfg(test)]

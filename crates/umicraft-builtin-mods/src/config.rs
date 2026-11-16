@@ -24,6 +24,23 @@ pub struct ModConfig {
     /// switch of toggle sprint, say. Keys are the mod's own and append-only.
     #[serde(deserialize_with = "lenient_settings")]
     pub state: BTreeMap<String, SettingValue>,
+    /// Whether the HUD editor leaves the widget where it is: no drag, no
+    /// resize, and the presets and the reset of the layout skip it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+    /// The widget as the player last saved the layout in the HUD editor: the
+    /// "Custom" preset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom: Option<SavedWidget>,
+}
+
+/// One widget of a saved layout.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SavedWidget {
+    /// Whether its mod was on.
+    pub enabled: bool,
+    /// Where it was.
+    pub placement: HudPlacement,
 }
 
 /// The saved state of all mods, by mod id.
@@ -71,6 +88,11 @@ mod tests {
                 settings: BTreeMap::from([("shadow".to_owned(), SettingValue::Bool(true))]),
                 placement: Some(HudPlacement::at(Anchor::TopRight, -4.0, 4.0)),
                 state: BTreeMap::from([("toggled".to_owned(), SettingValue::Bool(true))]),
+                locked: true,
+                custom: Some(SavedWidget {
+                    enabled: false,
+                    placement: HudPlacement::at(Anchor::Center, 1.0, 2.0),
+                }),
             },
         );
         let text = toml::to_string(&config).expect("serializes");

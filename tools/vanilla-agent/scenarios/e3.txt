@@ -1,0 +1,9 @@
+# Scenario e3 (phase E.5): walk and sprint through water in Depth Strider III boots.
+# The server builds the pool (x -5..5, y 2..3, z 4..30) and gives the boots; both
+# clients start on the ground at (0.5, 4, 0.5) facing +Z. Same ticks as e1.rs.
+settle 40
+exit_after 40
+phase approach 15 W
+phase swim_walk 40 W
+phase swim_sprint 40 W SPRINT
+phase swim_stop 20 -

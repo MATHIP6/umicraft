@@ -8,7 +8,10 @@
 //! It counts the clicks between two frames because the mods have a single time
 //! base, the frame (spec of the ADR: "per frame, not per tick").
 
-use umicraft_builtin_mods::{mods, HudWidget, ModContext, ModInput, ModRegistry, ModsConfig};
+use umicraft_builtin_mods::{
+    mods, History, HudWidget, ModContext, ModInput, ModRegistry, ModsConfig, RegistryError,
+};
+use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
 
 use crate::input::InputState;
@@ -57,6 +60,10 @@ pub struct ModsRuntime {
     registry: ModRegistry,
     left_clicks: u32,
     right_clicks: u32,
+    /// The changes made since the mods menu opened, to undo and redo.
+    history: History,
+    /// The state when the mods menu opened, which "cancel" goes back to.
+    origin: Option<ModsConfig>,
 }
 
 impl ModsRuntime {
@@ -74,6 +81,8 @@ impl ModsRuntime {
             registry,
             left_clicks: 0,
             right_clicks: 0,
+            history: History::default(),
+            origin: None,
         };
         runtime.registry.apply_config(config);
         runtime
@@ -194,6 +203,51 @@ impl ModsRuntime {
         &mut self.registry
     }
 
+    /// Starts a session of the mods menu: the history is empty and "cancel"
+    /// goes back to the state of now.
+    pub fn begin_edit(&mut self) {
+        self.history = History::default();
+        self.origin = Some(self.registry.config());
+    }
+
+    /// Whether there is a change to undo, and one to redo.
+    #[must_use]
+    pub fn history_state(&self) -> (bool, bool) {
+        (self.history.can_undo(), self.history.can_redo())
+    }
+
+    /// Applies what the player did on the mods menu, HUD editor included, and
+    /// remembers the state before it so it can be undone. Returns whether the
+    /// saved state may have changed, so the caller writes it to disk.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError`] if the change names a mod or a setting that does not
+    /// exist.
+    pub fn apply_change(&mut self, change: &ModsOutcome) -> Result<bool, RegistryError> {
+        let restored = match change {
+            ModsOutcome::Hud(HudEditorOutcome::Undo) => self.history.undo(self.registry.config()),
+            ModsOutcome::Hud(HudEditorOutcome::Redo) => self.history.redo(self.registry.config()),
+            ModsOutcome::Hud(HudEditorOutcome::Cancel) => {
+                self.history = History::default();
+                self.origin.clone()
+            }
+            _ => {
+                let before = self.registry.config();
+                let changed = crate::mods_view::apply(&mut self.registry, change)?;
+                if changed {
+                    self.history.record(before, &history_tag(change));
+                }
+                return Ok(changed);
+            }
+        };
+        let Some(config) = restored else {
+            return Ok(false);
+        };
+        self.registry.apply_config(&config);
+        Ok(true)
+    }
+
     /// The state to save in `options.toml`.
     #[must_use]
     pub fn config(&self) -> ModsConfig {
@@ -214,6 +268,16 @@ impl ModsRuntime {
             right_clicks: self.right_clicks,
             ping_ms: frame.ping_ms,
         }
+    }
+}
+
+/// What a change is about, for the history to merge the frames of one slider
+/// drag into one step; empty for a change that is a step of its own.
+fn history_tag(change: &ModsOutcome) -> String {
+    match change {
+        ModsOutcome::Set { id, key, .. } => format!("{id}/{key}"),
+        ModsOutcome::Hud(HudEditorOutcome::Scaled { id, .. }) => format!("{id}/scale"),
+        _ => String::new(),
     }
 }
 
@@ -401,5 +465,170 @@ mod tests {
         assert!(!frame(0.0, false), "and released");
         assert!(frame(1.0, false), "walking forward now sprints");
         assert!(frame(1.0, false), "and keeps sprinting");
+    }
+
+    use umicraft_builtin_mods::{Anchor, HudPlacement};
+    use umicraft_ui::menus::{HudPresetKind, ModValue};
+    use umicraft_ui::Rect;
+
+    fn runtime() -> ModsRuntime {
+        let mut mods = ModsRuntime::new(&crate::options::ModsOptions::default());
+        mods.begin_edit();
+        mods
+    }
+
+    fn place(id: &str, x: f32) -> ModsOutcome {
+        ModsOutcome::Hud(HudEditorOutcome::Placed {
+            id: id.into(),
+            rect: Rect::new(x, 50.0, 40.0, 10.0),
+            scale: 1.0,
+            screen: [400.0, 300.0],
+        })
+    }
+
+    fn placement(mods: &ModsRuntime, id: &str) -> Option<HudPlacement> {
+        mods.registry()
+            .mods()
+            .find(|view| view.meta.id.as_str() == id)?
+            .placement
+    }
+
+    fn hud(outcome: HudEditorOutcome) -> ModsOutcome {
+        ModsOutcome::Hud(outcome)
+    }
+
+    #[test]
+    fn undo_and_redo_walk_the_changes_of_the_menu() {
+        let mut mods = runtime();
+        let start = placement(&mods, "fps");
+        assert_eq!(mods.history_state(), (false, false));
+        assert_eq!(mods.apply_change(&place("fps", 100.0)), Ok(true));
+        let first = placement(&mods, "fps");
+        assert_eq!(mods.apply_change(&place("fps", 200.0)), Ok(true));
+        let second = placement(&mods, "fps");
+        assert_ne!(first, second);
+        assert_eq!(mods.history_state(), (true, false));
+
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Undo)), Ok(true));
+        assert_eq!(placement(&mods, "fps"), first);
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Undo)), Ok(true));
+        assert_eq!(placement(&mods, "fps"), start);
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Undo)), Ok(false));
+        assert_eq!(mods.history_state(), (false, true));
+
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Redo)), Ok(true));
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Redo)), Ok(true));
+        assert_eq!(placement(&mods, "fps"), second);
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Redo)), Ok(false));
+    }
+
+    #[test]
+    fn undo_covers_the_switches_the_settings_the_lock_and_the_presets() {
+        let mut mods = runtime();
+        let before = mods.config();
+        let changes = [
+            ModsOutcome::Toggle {
+                id: "cps".into(),
+                enabled: true,
+            },
+            ModsOutcome::Set {
+                id: "fps".into(),
+                key: "background".into(),
+                value: ModValue::Bool(false),
+            },
+            hud(HudEditorOutcome::Lock {
+                id: "fps".into(),
+                locked: true,
+            }),
+            hud(HudEditorOutcome::Preset(HudPresetKind::Minimal)),
+        ];
+        for change in &changes {
+            assert_eq!(mods.apply_change(change), Ok(true), "{change:?}");
+        }
+        assert_ne!(mods.config(), before);
+        for _ in &changes {
+            assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Undo)), Ok(true));
+        }
+        assert_eq!(mods.config(), before);
+    }
+
+    #[test]
+    fn the_frames_of_one_slider_drag_are_one_step() {
+        let mut mods = runtime();
+        let before = mods.config();
+        for opacity in [0.4, 0.5, 0.6, 0.7] {
+            let change = ModsOutcome::Set {
+                id: "fps".into(),
+                key: "background_opacity".into(),
+                value: ModValue::Number(opacity),
+            };
+            assert_eq!(mods.apply_change(&change), Ok(true));
+        }
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Undo)), Ok(true));
+        assert_eq!(mods.config(), before, "one undo takes the whole drag back");
+    }
+
+    #[test]
+    fn cancel_goes_back_to_the_state_the_menu_opened_on() {
+        let mut mods = runtime();
+        let opened = mods.config();
+        for change in [
+            place("fps", 120.0),
+            hud(HudEditorOutcome::Preset(HudPresetKind::Pvp)),
+            hud(HudEditorOutcome::Save),
+        ] {
+            assert_eq!(mods.apply_change(&change), Ok(true));
+        }
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Cancel)), Ok(true));
+        assert_eq!(mods.config(), opened);
+        assert_eq!(mods.history_state(), (false, false));
+    }
+
+    #[test]
+    fn a_saved_layout_comes_back_after_a_restart_as_the_custom_preset() {
+        let mut mods = runtime();
+        assert_eq!(mods.apply_change(&place("fps", 300.0)), Ok(true));
+        let saved = placement(&mods, "fps");
+        assert_eq!(mods.apply_change(&hud(HudEditorOutcome::Save)), Ok(true));
+
+        // Through `options.toml`, as the window saves it after every change.
+        let text = toml::to_string(&mods.config()).expect("serializes");
+        let mut restarted = ModsRuntime::new(&toml::from_str(&text).expect("parses"));
+        assert_eq!(placement(&restarted, "fps"), saved, "the layout is kept");
+        restarted.begin_edit();
+        let minimal = hud(HudEditorOutcome::Preset(HudPresetKind::Minimal));
+        assert_eq!(restarted.apply_change(&minimal), Ok(true));
+        assert_ne!(placement(&restarted, "fps"), saved);
+        let custom = hud(HudEditorOutcome::Preset(HudPresetKind::Custom));
+        assert_eq!(restarted.apply_change(&custom), Ok(true));
+        assert_eq!(placement(&restarted, "fps"), saved);
+    }
+
+    #[test]
+    fn reset_all_and_the_presets_leave_a_locked_widget_where_it_is() {
+        let mut mods = runtime();
+        assert_eq!(mods.apply_change(&place("fps", 200.0)), Ok(true));
+        let here = placement(&mods, "fps");
+        assert_eq!(here.map(|p| p.anchor), Some(Anchor::TopCenter));
+        let lock = hud(HudEditorOutcome::Lock {
+            id: "fps".into(),
+            locked: true,
+        });
+        assert_eq!(mods.apply_change(&lock), Ok(true));
+        for change in [
+            hud(HudEditorOutcome::ResetAll),
+            hud(HudEditorOutcome::Preset(HudPresetKind::Pvp)),
+            hud(HudEditorOutcome::Preset(HudPresetKind::Default)),
+        ] {
+            assert_eq!(mods.apply_change(&change), Ok(true));
+            assert_eq!(placement(&mods, "fps"), here, "{change:?}");
+        }
+    }
+
+    #[test]
+    fn a_change_the_registry_refuses_leaves_no_step_to_undo() {
+        let mut mods = runtime();
+        assert!(mods.apply_change(&place("ghost", 10.0)).is_err());
+        assert_eq!(mods.history_state(), (false, false));
     }
 }

@@ -58,6 +58,51 @@ const ICON_TEXTURE: u32 = 64;
 const ICON_SHADE: Color = [0.565, 0.565, 0.565, 0.627];
 /// The `pack_format` of 1.8 packs (`ResourcePackRepository`).
 const PACK_FORMAT: u32 = 1;
+/// The two flat colours of a folder icon: the back panel with its tab, and the
+/// lighter front panel.
+const FOLDER_BACK: Color = [0.80, 0.58, 0.22, 1.0];
+const FOLDER_FRONT: Color = [0.95, 0.78, 0.40, 1.0];
+/// The arrow on the folder that leads back up.
+const FOLDER_ARROW: Color = [0.45, 0.30, 0.08, 1.0];
+
+/// A rounded rectangle of `(x, y, w, h)` GUI units: one rectangle for the
+/// middle and a narrower one per row of each rounded end.
+fn rounded(ui: &mut Ui, gui: Gui, (x, y, w, h): (f32, f32, f32, f32), radius: u8, color: Color) {
+    let r = f32::from(radius);
+    for row in 0..radius {
+        let dy = r - f32::from(row) - 0.5;
+        let inset = r - (r * r - dy * dy).sqrt().round();
+        let width = w - 2.0 * inset;
+        ui.draw()
+            .rect(gui.rect(x + inset, y + f32::from(row), width, 1.0), color);
+        ui.draw().rect(
+            gui.rect(x + inset, y + h - 1.0 - f32::from(row), width, 1.0),
+            color,
+        );
+    }
+    ui.draw().rect(gui.rect(x, y + r, w, h - 2.0 * r), color);
+}
+
+/// A flat folder in the 32x32 slot at `(x, y)`: the back panel with its tab on
+/// the left, and the lighter front panel over it. With `up`, an arrow on the
+/// front says it leads back to the parent folder.
+fn draw_folder(ui: &mut Ui, gui: Gui, (x, y): (f32, f32), up: bool) {
+    rounded(ui, gui, (x + 3.0, y + 5.0, 13.0, 8.0), 2, FOLDER_BACK);
+    rounded(ui, gui, (x + 3.0, y + 8.0, 26.0, 19.0), 2, FOLDER_BACK);
+    rounded(ui, gui, (x + 3.0, y + 12.0, 26.0, 15.0), 2, FOLDER_FRONT);
+    if up {
+        // A pointing-up arrow: a head of four growing rows over a stem.
+        for row in 0..4_u8 {
+            let width = 2.0 + 2.0 * f32::from(row);
+            let at = (x + 16.0 - width / 2.0, y + 15.0 + f32::from(row));
+            ui.draw()
+                .rect(gui.rect(at.0, at.1, width, 1.0), FOLDER_ARROW);
+        }
+        ui.draw()
+            .rect(gui.rect(x + 15.0, y + 19.0, 2.0, 4.0), FOLDER_ARROW);
+    }
+}
+
 /// The background of an incompatible pack (`0xFF770000`).
 const INCOMPATIBLE: Color = [0.467, 0.0, 0.0, 1.0];
 
@@ -80,6 +125,8 @@ enum Action {
     /// Clicked an incompatible pack in the available list: ask first.
     /// `newer` is whether it was made for a newer `pack_format`.
     Ask { name: String, newer: bool },
+    /// Opened a folder of the available list.
+    Open(String),
 }
 
 /// One entry to draw.
@@ -94,9 +141,73 @@ struct Row {
     format: Option<u32>,
     /// The `pack.png` region of the atlas, when the pack has an icon.
     icon: Option<SpriteSheet>,
+    /// For a folder entry of the available list: the folder a click opens
+    /// (`""` is the top of the packs folder).
+    folder: Option<String>,
+}
+
+/// The folders and the packs directly inside `folder` (`""` for the top),
+/// among `names`: the sub-folders as `(path, packs inside)` sorted by path,
+/// and the indices of the packs in `names` that sit right in it.
+fn folder_listing(names: &[&str], folder: &str) -> (Vec<(String, usize)>, Vec<usize>) {
+    let prefix = if folder.is_empty() {
+        String::new()
+    } else {
+        format!("{folder}/")
+    };
+    let mut folders: Vec<(String, usize)> = Vec::new();
+    let mut packs = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        let Some(rest) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        match rest.split_once('/') {
+            Some((dir, _)) => {
+                let path = format!("{prefix}{dir}");
+                match folders.iter_mut().find(|(known, _)| *known == path) {
+                    Some((_, count)) => *count += 1,
+                    None => folders.push((path, 1)),
+                }
+            }
+            None => packs.push(index),
+        }
+    }
+    folders.sort();
+    (folders, packs)
+}
+
+/// The folder that holds `folder` (`""` for the top).
+fn parent_folder(folder: &str) -> &str {
+    folder.rsplit_once('/').map_or("", |(parent, _)| parent)
+}
+
+/// The last part of a `/` path.
+fn leaf(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
 }
 
 impl Row {
+    /// A folder (or, with `up`, the way back out of the current one).
+    fn folder(path: &str, count: usize, up: bool, lang: &Lang) -> Self {
+        let (title, description) = if up {
+            (
+                "..".to_string(),
+                lang.tr("umicraft.resourcePack.parentFolder").to_string(),
+            )
+        } else {
+            (leaf(path).to_string(), format!("{path} ({count})"))
+        };
+        Self {
+            pack: None,
+            title,
+            description,
+            compatible: true,
+            format: None,
+            icon: None,
+            folder: Some(path.to_string()),
+        }
+    }
+
     fn of(pack: &DiscoveredPack, icon: Option<SpriteSheet>, lang: &Lang) -> Self {
         let (description, compatible, format) = match &pack.metadata {
             Some(metadata) => (
@@ -117,6 +228,7 @@ impl Row {
             compatible,
             format,
             icon,
+            folder: None,
         }
     }
 
@@ -130,6 +242,7 @@ impl Row {
             compatible: true,
             format: None,
             icon: None,
+            folder: None,
         }
     }
 }
@@ -248,6 +361,7 @@ impl OptionsScreen {
             .cloned()
             .collect();
         self.pack_scroll = [0.0; 2];
+        self.pack_folder.clear();
     }
 
     /// The names of the packs the draft selects, highest priority first.
@@ -277,13 +391,29 @@ impl OptionsScreen {
         }
         let (top, bottom) = (32.0, gui.height - 51.0);
         let cx = gui.cx();
-        let available: Vec<Row> = self
+        let free: Vec<&DiscoveredPack> = self
             .catalog
             .packs()
             .iter()
             .filter(|pack| !self.pack_draft.contains(&pack.name))
-            .map(|pack| Row::of(pack, self.icon_of(&pack.name), lang))
             .collect();
+        let names: Vec<&str> = free.iter().map(|pack| pack.name.as_str()).collect();
+        let (folders, direct) = folder_listing(&names, &self.pack_folder);
+        let mut available: Vec<Row> = Vec::new();
+        if !self.pack_folder.is_empty() {
+            available.push(Row::folder(parent_folder(&self.pack_folder), 0, true, lang));
+        }
+        available.extend(
+            folders
+                .iter()
+                .map(|(path, count)| Row::folder(path, *count, false, lang)),
+        );
+        available.extend(direct.into_iter().map(|index| {
+            let pack = free[index];
+            let mut row = Row::of(pack, self.icon_of(&pack.name), lang);
+            row.title = leaf(&pack.name).to_string();
+            row
+        }));
         let selected: Vec<Row> = self
             .pack_draft
             .iter()
@@ -370,6 +500,10 @@ impl OptionsScreen {
                     "gui.no",
                 );
                 self.pack_confirm = Some((name, screen));
+            }
+            Action::Open(folder) => {
+                self.pack_folder = folder;
+                self.pack_scroll[0] = 0.0;
             }
             Action::Move(name) => {
                 if let Some(index) = draft.iter().position(|item| *item == name) {
@@ -493,6 +627,37 @@ impl OptionsScreen {
         Self::centered_text(ui, atlas, gui, at, text, [1.0; 4]);
     }
 
+    /// A folder entry: a folder icon, its name and what it holds. A click
+    /// anywhere on it opens `target`.
+    fn folder_row(
+        &mut self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        gui: Gui,
+        (x, y): (f32, f32),
+        (row, target): (&Row, &str),
+        tag: &str,
+    ) -> Option<Action> {
+        let entry = gui.rect(x, y, LIST_W - 8.0, ROW);
+        let hovered = ui.pointer().is_some_and(|point| entry.contains(point));
+        draw_folder(ui, gui, (x, y), row.title == "..");
+        if hovered {
+            ui.draw().rect(gui.rect(x, y, ICON, ICON), ICON_SHADE);
+        }
+        let text_at = x + ICON + 3.0;
+        let title = ellipsize(atlas, &row.title, TEXT_W);
+        Self::legacy_at(ui, atlas, gui, (text_at, y + 1.0), (&title, [1.0; 4]));
+        if let Some(line) = wrap_legacy(atlas, &row.description, TEXT_W).first() {
+            Self::legacy_at(ui, atlas, gui, (text_at, y + 12.0), (line, GREY));
+        }
+        let id = format!("pack:folder:{tag}");
+        self.rects.insert(id.clone(), entry);
+        let widget = ui.id(&id);
+        ui.response(widget, entry)
+            .clicked
+            .then(|| Action::Open(target.to_string()))
+    }
+
     /// One entry: tinted when incompatible, the icon, the name and the
     /// description. Under the pointer the icon is shaded and shows the
     /// arrows of `resource_packs.png`; `moves` tells whether the pack can go
@@ -506,6 +671,9 @@ impl OptionsScreen {
         (row, column, (can_up, can_down)): (&Row, Column, (bool, bool)),
         tag: &str,
     ) -> Option<Action> {
+        if let Some(target) = &row.folder {
+            return self.folder_row(ui, atlas, gui, (x, y), (row, target), tag);
+        }
         if !row.compatible {
             ui.draw().rect(
                 gui.rect(x - 1.0, y - 1.0, LIST_W - 8.0, ROW + 2.0),
@@ -653,6 +821,23 @@ mod tests {
             assert_eq!((image.width, image.height), (ICON_TEXTURE, ICON_TEXTURE));
         }
         assert_eq!(&images[1].pixels[..4], &[9, 9, 9, 255]);
+    }
+
+    #[test]
+    fn packs_are_grouped_by_folder_like_in_a_file_explorer() {
+        let names = ["solo", "1.8/a", "1.8/FPS/b", "1.8/FPS/c", "1.8/Overlay/d"];
+        let (folders, packs) = folder_listing(&names, "");
+        assert_eq!(folders, vec![("1.8".to_string(), 4)]);
+        assert_eq!(packs, vec![0]);
+        let (folders, packs) = folder_listing(&names, "1.8");
+        assert_eq!(
+            folders,
+            vec![("1.8/FPS".to_string(), 2), ("1.8/Overlay".to_string(), 1)]
+        );
+        assert_eq!(packs, vec![1]);
+        assert_eq!(parent_folder("1.8/FPS"), "1.8");
+        assert_eq!(parent_folder("1.8"), "");
+        assert_eq!(leaf("1.8/FPS/b"), "b");
     }
 
     #[test]

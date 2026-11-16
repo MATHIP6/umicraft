@@ -1,0 +1,26 @@
+# Scenario e1 (phase E.2): walk, sprint, jump, sprint+jump, strafe, sneak.
+# Ticks of 50 ms. Keys are held for the whole phase; "-" releases everything.
+# The mouse never moves: yaw and pitch stay at the server placement (0, 0).
+# The same file drives the vanilla agent; crates/umicraft-client/src/e1.rs holds
+# the same table and a test keeps the two equal.
+settle 40
+exit_after 40
+phase walk 40 W
+phase stop1 40 -
+phase sprint 40 W SPRINT
+phase stop2 40 -
+phase jump1 1 JUMP
+phase jump1_air 19 -
+phase jump2 1 JUMP
+phase jump2_air 19 -
+phase jump3 1 JUMP
+phase jump3_air 19 -
+phase stop3 20 -
+phase sprint_jump 40 W SPRINT JUMP
+phase stop4 40 -
+phase strafe_left 40 A
+phase strafe_right 40 D
+phase stop5 20 -
+phase sneak_still 20 SNEAK
+phase sneak_walk 40 SNEAK W
+phase stop6 40 -

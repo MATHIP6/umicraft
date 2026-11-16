@@ -1,0 +1,49 @@
+--- serverbound tick diff (reference = vanilla) ---
+ticks       :      481      860
+keep-alives :       15       24
+
+packets per token        reference candidate
+  0x03                         221       582
+  0x04                         260       278
+  0x0B:start_sneak               1         1
+  0x0B:start_sprint              2         2
+  0x0B:stop_sneak                1         1
+  0x0B:stop_sprint               2         2
+
+tick shapes only in the reference:
+  (none)
+tick shapes only in the candidate:
+  (none)
+
+aligned ticks that differ: 379 (first 10 shown)
+  tick   481: -                                    | 0x03
+  tick   482: -                                    | 0x03
+  tick   483: -                                    | 0x03
+  tick   484: -                                    | 0x03
+  tick   485: -                                    | 0x03
+  tick   486: -                                    | 0x03
+  tick   487: -                                    | 0x04
+  tick   488: -                                    | 0x03
+  tick   489: -                                    | 0x03
+  tick   490: -                                    | 0x03
+
+verdict: SAME SHAPES
+
+--- movement-packet cadence (logger timestamps, ms) ---
+            reference  candidate
+intervals         480        859
+mean            50.35      49.99
+std dev          2.68       5.94
+min / max     33 /  68    37 /  64
+
+packet bodies that differ in ticks with the same signature: 266 (first 10 shown)
+  tick     0 0x0B:start_sprint      180300 | 190300
+  tick     0 0x04                   3fe000000000000040100000000000004022828017c1e95201 | 3fe0000000000000401000000000000040227372b8fc747d01
+  tick     1 0x04                   3fe000000000000040100000000000004022e75815647fb401 | 3fe000000000000040100000000000004022d012b327e90701
+  tick     2 0x04                   3fe0000000000000401000000000000040235fa22fbc898c01 | 3fe00000000000004010000000000000402343e003d0bd5601
+  tick     3 0x04                   3fe000000000000040100000000000004023e28a56c3a26001 | 3fe000000000000040100000000000004023c454eeb4cea401
+  tick     4 0x04                   3fe0000000000000401000000000000040246b3e8bedee1c01 | 3fe0000000000000401000000000000040244bb2ac4581c301
+  tick     5 0x04                   3fe000000000000040100000000000004024f71d0c6bfb0a01 | 3fe000000000000040100000000000004024d6d630d53b5001
+  tick     6 0x04                   3fe00000000000004010000000000000402584b5f89db06201 | 3fe000000000000040100000000000004025640905e2e36201
+  tick     7 0x04                   3fe0000000000000401000000000000040261340749d503601 | 3fe000000000000040100000000000004025f25bc4d7187001
+  tick     8 0x04                   3fe000000000000040100000000000004026a24ed5266f9001 | 3fe000000000000040100000000000004026814bb737436e01

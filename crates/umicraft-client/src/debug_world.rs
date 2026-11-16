@@ -30,10 +30,32 @@ pub struct DebugWorld {
     pub location: Option<DebugLocation>,
     /// The block under the crosshair.
     pub looking_at: Option<LookedAtBlock>,
+    /// Execution time of the previous 20 Hz simulation tick, in microseconds.
+    pub tick_micros: u32,
+    /// Cumulative CPU time spent handling network `PlayEvent`s during the tick window, in microseconds.
+    pub net_event_micros: u32,
+    /// Execution time spent executing input handlers on the game thread, in microseconds.
+    pub input_processing_micros: u32,
+    /// Time an input event spent waiting in the channel before being dequeued, in microseconds.
+    pub input_queue_latency_micros: u32,
+    /// Total count of server position setbacks/corrections (packet 0x08).
+    pub resyncs: u32,
+    /// Measured simulation TPS (target: 20.0).
+    pub real_tps: f32,
+    /// Delay of the latest tick from its scheduled instant, in microseconds.
+    pub tick_delay_us: u32,
+    /// Maximum tick delay observed, in microseconds.
+    pub max_tick_delay_us: u32,
+    /// Cumulative catch-up simulation ticks executed.
+    pub catch_up_ticks: u64,
+    /// Current number of unread events in the network inbox.
+    pub net_queue_depth: usize,
+    /// Current count of dirty chunk sections awaiting mesh snapshots.
+    pub dirty_chunks: usize,
 }
 
 /// The inputs of [`collect`] that are not in the world.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DebugInputs {
     /// Entities in the store.
     pub loaded_entities: usize,
@@ -47,6 +69,28 @@ pub struct DebugInputs {
     pub difficulty: u8,
     /// The time of day in ticks.
     pub world_time: i64,
+    /// Execution time of the previous 20 Hz simulation tick, in microseconds.
+    pub tick_micros: u32,
+    /// Cumulative CPU time spent handling network `PlayEvent`s during the tick window, in microseconds.
+    pub net_event_micros: u32,
+    /// Execution time spent executing input handlers on the game thread, in microseconds.
+    pub input_processing_micros: u32,
+    /// Time an input event spent waiting in the channel before being dequeued, in microseconds.
+    pub input_queue_latency_micros: u32,
+    /// Total count of server position setbacks/corrections.
+    pub resyncs: u32,
+    /// Measured simulation TPS.
+    pub real_tps: f32,
+    /// Delay of the latest tick from its scheduled instant, in microseconds.
+    pub tick_delay_us: u32,
+    /// Maximum tick delay observed, in microseconds.
+    pub max_tick_delay_us: u32,
+    /// Cumulative catch-up simulation ticks executed.
+    pub catch_up_ticks: u64,
+    /// Current number of unread events in the network inbox.
+    pub net_queue_depth: usize,
+    /// Current count of dirty chunk sections awaiting mesh snapshots.
+    pub dirty_chunks: usize,
 }
 
 /// Gathers the facts of one tick.
@@ -65,6 +109,17 @@ pub fn collect(world: &World, inputs: &DebugInputs) -> DebugWorld {
         feet: inputs.feet,
         location: location(world, feet, inputs),
         looking_at: inputs.target.map(|pos| looked_at(pos, world.block(pos))),
+        tick_micros: inputs.tick_micros,
+        net_event_micros: inputs.net_event_micros,
+        input_processing_micros: inputs.input_processing_micros,
+        input_queue_latency_micros: inputs.input_queue_latency_micros,
+        resyncs: inputs.resyncs,
+        real_tps: inputs.real_tps,
+        tick_delay_us: inputs.tick_delay_us,
+        max_tick_delay_us: inputs.max_tick_delay_us,
+        catch_up_ticks: inputs.catch_up_ticks,
+        net_queue_depth: inputs.net_queue_depth,
+        dirty_chunks: inputs.dirty_chunks,
     }
 }
 

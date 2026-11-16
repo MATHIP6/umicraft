@@ -97,7 +97,10 @@ impl EntityRecord {
             );
         }
         match self.kind {
-            EntityKind::Player => self.body_yaw.update_player(moved, self.yaw, false),
+            EntityKind::Player => {
+                let swinging = self.animation.is_swinging();
+                self.body_yaw.update_player(moved, self.yaw, swinging);
+            }
             kind if kind.is_living() => {
                 self.body_yaw
                     .update_mob(moved, self.yaw, &mut self.head_yaw);

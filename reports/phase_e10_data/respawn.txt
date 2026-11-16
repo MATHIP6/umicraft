@@ -1,0 +1,3 @@
+resp60-R-1 move_before_respawn 20 last 999 C16_at [4049] S07_at [4053, 4053] S06_alive_at [4053, 4070] move_after_respawn 242 first_after 96 chunk_pkts_after_respawn 46 S08_after_death 1
+resp60-R-2 move_before_respawn 20 last 1001 C16_at [4051] S07_at [4053, 4053] S06_alive_at [4053, 4071] move_after_respawn 239 first_after 150 chunk_pkts_after_respawn 90 S08_after_death 1
+resp144-R-1 move_before_respawn 20 last 1001 C16_at [4050] S07_at [4053, 4054] S06_alive_at [4054, 4061] move_after_respawn 240 first_after 96 chunk_pkts_after_respawn 17 S08_after_death 1

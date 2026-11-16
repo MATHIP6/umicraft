@@ -37,20 +37,28 @@ struct VertexIn {
 
 struct VertexOut {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) world_position: vec3<f32>,
-    @location(1) uv: vec2<f32>,
-    @location(2) alpha: f32,
-    @location(3) light: vec3<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) alpha: f32,
+    @location(2) light: vec3<f32>,
+    @location(3) fog_target: vec3<f32>,
+    @location(4) fog_amount: f32,
 };
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
-    out.clip_position = camera.view_proj * vec4<f32>(in.position - camera.origin, 1.0);
-    out.world_position = in.position - camera.origin;
+    let rel_pos = in.position - camera.origin;
+    out.clip_position = camera.view_proj * vec4<f32>(rel_pos, 1.0);
     out.uv = in.uv;
     out.alpha = in.alpha;
-    out.light = lightmap_sample(in.light.y, in.light.x);
+    let light = lightmap_sample(in.light.y, in.light.x);
+    out.light = light;
+    let fog_target = camera.fog_color * (0.15 + 0.85 * light);
+    out.fog_target = fog_target;
+    let span = max(camera.fog_end - camera.fog_start, 0.001);
+    let dist = distance(rel_pos, camera.camera_pos);
+    let factor = clamp((dist - camera.fog_start) / span, 0.0, 1.0);
+    out.fog_amount = factor * factor * (3.0 - 2.0 * factor);
     return out;
 }
 
@@ -63,12 +71,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
     let lit = texel.rgb * in.light;
-    let fog_target = camera.fog_color * (0.15 + 0.85 * in.light);
-    let span = max(camera.fog_end - camera.fog_start, 0.001);
-    let amount = smoothstep(
-        camera.fog_start,
-        camera.fog_start + span,
-        distance(in.world_position, camera.camera_pos),
-    );
-    return vec4<f32>(mix(lit, fog_target, amount), alpha);
+    let color = mix(lit, in.fog_target, in.fog_amount);
+    return vec4<f32>(color, alpha);
 }

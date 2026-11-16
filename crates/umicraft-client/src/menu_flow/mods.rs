@@ -26,6 +26,13 @@ impl MenuFlow {
         self.mods.settle();
     }
 
+    /// Opens the HUD editor of the mods menu, fully in, on the settings of the
+    /// widget of `selected` (or on the list of widgets), for the single-frame
+    /// captures of `--hud-demo`.
+    pub fn open_hud_editor(&mut self, selected: Option<&str>) {
+        self.mods.open_hud_editor(selected);
+    }
+
     /// Whether Escape steps back inside the mods menu (settings to list)
     /// instead of closing it.
     #[must_use]
@@ -87,6 +94,7 @@ mod tests {
                 }],
                 screen: [427.0, 240.0],
                 scale_range: (0.5, 3.0),
+                ..HudEditorView::default()
             },
             ..ModsView::default()
         }

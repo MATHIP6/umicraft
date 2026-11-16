@@ -60,16 +60,23 @@ impl InputState {
 ///
 /// The message is plain data: the game thread owns the player state and
 /// applies the update to it.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InputUpdate {
+    /// The instant this input update was created/sampled at the front end.
+    pub created_at: Instant,
     /// The new key state; it replaces the previous one.
     pub state: InputState,
     /// The yaw delta in radians; a positive delta turns the view to the right.
     pub look_yaw: f32,
     /// The pitch delta in radians; a positive delta looks down.
     pub look_pitch: f32,
-    /// The hotbar slot the player selected, if any.
+    /// The hotbar slot the player selected, if any (the mouse wheel, which
+    /// `Minecraft.runTick` handles before the keys).
     pub select_slot: Option<u8>,
+    /// The presses of each digit key since the last update (MCP
+    /// `KeyBinding.pressTime`): the game takes them one per key and tick, in
+    /// the order of the keys, not of the presses.
+    pub hotbar_keys: [u8; 9],
     /// Whether the player started breaking the targeted block.
     pub break_block: bool,
     /// Whether the use (right) button went down since the last update.
@@ -80,6 +87,24 @@ pub struct InputUpdate {
     pub drop_item: Option<DropKind>,
     /// Whether the player pressed the perspective key (`F5`).
     pub toggle_perspective: bool,
+}
+
+impl Default for InputUpdate {
+    fn default() -> Self {
+        Self {
+            created_at: Instant::now(),
+            state: InputState::default(),
+            look_yaw: 0.0,
+            look_pitch: 0.0,
+            select_slot: None,
+            hotbar_keys: [0; 9],
+            break_block: false,
+            place_block: false,
+            pick_block: false,
+            drop_item: None,
+            toggle_perspective: false,
+        }
+    }
 }
 
 /// The yaw the script turns per update, in radians.
@@ -227,6 +252,7 @@ impl Script {
         self.pitch = (self.pitch + delta).clamp(-1.5, 1.5);
 
         let mut update = InputUpdate {
+            created_at: now,
             look_pitch: delta,
             ..InputUpdate::default()
         };

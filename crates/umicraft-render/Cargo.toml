@@ -12,6 +12,7 @@ bytemuck.workspace = true
 glam = "0.34"
 pollster = "1"
 thiserror.workspace = true
+tracing.workspace = true
 umicraft-core.workspace = true
 umicraft-game.workspace = true
 umicraft-mesh.workspace = true

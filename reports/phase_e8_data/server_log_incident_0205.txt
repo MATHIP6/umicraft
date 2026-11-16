@@ -1,0 +1,41 @@
+[02:04:23] [Server thread/INFO]: E2Ref[/127.0.0.1:30588] logged in with entity id 21 at ([world]0.506878017855928, 4.0, 37.865820695553666)
+[02:04:24] [Server thread/INFO]: Teleported E2Ref to 0.5, 4.0, 0.5
+[02:04:24] [Server thread/INFO]: Cleared the inventory of E2Ref, removing 1 items
+[02:04:24] [Server thread/INFO]: 594 blocks filled
+[02:04:24] [Server thread/INFO]: 594 blocks filled
+[02:04:34] [Server thread/INFO]: E2Ref lost connection: Disconnected
+[02:04:34] [Server thread/INFO]: E2Ref left the game
+[02:04:39] [User Authenticator #1/INFO]: UUID of player E2Umi is 7f6c3e03-9b60-3d6a-8e89-62b418fcfec8
+[02:04:39] [Server thread/INFO]: E2Umi joined the game
+[02:04:39] [Server thread/INFO]: E2Umi[/127.0.0.1:30593] logged in with entity id 22 at ([world]0.506878012161466, 4.0, 37.86582174579354)
+[02:04:40] [Server thread/INFO]: Teleported E2Umi to 0.5, 4.0, 0.5
+[02:04:40] [Server thread/INFO]: Cleared the inventory of E2Umi, removing 1 items
+[02:04:40] [Server thread/INFO]: No blocks filled
+[02:04:41] [Server thread/INFO]: No blocks filled
+[02:05:18] [Server thread/INFO]: E2Umi drowned
+[02:05:19] [Server thread/INFO]: E2Umi lost connection: Disconnected
+[02:05:19] [Server thread/INFO]: E2Umi left the game
+[02:05:27] [User Authenticator #1/INFO]: UUID of player E2Ref is b6b9b24d-1fb0-329f-9db4-5076e73019b0
+[02:05:27] [Server thread/INFO]: E2Ref joined the game
+[02:05:27] [Server thread/INFO]: E2Ref[/127.0.0.1:33689] logged in with entity id 23 at ([world]0.5, 2.0, 12.630502929984296)
+[02:05:27] [Server thread/INFO]: Teleported E2Ref to 0.5, 4.0, 0.5
+[02:05:28] [Server thread/INFO]: Could not clear the inventory of E2Ref, no items to remove
+[02:05:28] [Server thread/INFO]: No blocks filled
+[02:05:28] [Server thread/INFO]: Replaced slot 100 with 1 * [Diamond Boots]
+[02:05:28] [Server thread/INFO]: No blocks filled
+[02:05:38] [Server thread/INFO]: E2Ref lost connection: Disconnected
+[02:05:38] [Server thread/INFO]: E2Ref left the game
+[02:05:42] [User Authenticator #1/INFO]: UUID of player E2Umi is 7f6c3e03-9b60-3d6a-8e89-62b418fcfec8
+[02:05:42] [Server thread/INFO]: E2Umi joined the game
+[02:05:42] [Server thread/INFO]: E2Umi[/127.0.0.1:33698] logged in with entity id 24 at ([world]0.5, 2.0, 12.630503223441977)
+[02:05:42] [Server thread/INFO]: Teleported E2Umi to 0.5, 4.0, 0.5
+[02:05:42] [Server thread/INFO]: Could not clear the inventory of E2Umi, no items to remove
+[02:05:42] [Server thread/INFO]: No blocks filled
+[02:05:42] [Server thread/INFO]: Replaced slot 100 with 1 * [Diamond Boots]
+[02:05:43] [Server thread/INFO]: No blocks filled
+[02:05:44] [Server thread/INFO]: E2Umi lost connection: Sent too many packets.
+[02:05:44] [Server thread/INFO]: E2Umi left the game
+[02:05:52] [User Authenticator #1/INFO]: UUID of player E2Ref is b6b9b24d-1fb0-329f-9db4-5076e73019b0
+[02:05:52] [Server thread/INFO]: E2Ref joined the game
+[02:05:52] [Server thread/INFO]: E2Ref[/127.0.0.1:33766] logged in with entity id 25 at ([world]0.5, 2.0, 18.199285018447355)
+[02:05:53] [Server thread/INFO]: Teleported E2Ref to 0.5, 4.0, 0.5

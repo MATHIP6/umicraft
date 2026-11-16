@@ -4,6 +4,7 @@
 //! list is in `list`, the settings page in `settings`, the page flow in `flow`
 //! and the HUD layer inside the menu in `hud`.
 
+mod editor;
 mod flow;
 mod hud;
 mod list;

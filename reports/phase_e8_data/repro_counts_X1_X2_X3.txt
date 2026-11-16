@@ -1,0 +1,12 @@
+X1 vanilla : frames  1014 S08     4 C06     4 C03  635 C04  47 chunks  34 health [(573, 20.0)] dur 34936ms
+      S08 at(ms): [132, 1235, 5278, 7278] last [7278]
+X1 umicraft: frames   917 S08     4 C06     5 C03  555 C04  41 chunks  34 health [(42, 20.0)] dur 29951ms
+      S08 at(ms): [41, 1089, 5139, 7139] last [7139]
+X2 vanilla : frames  1261 S08    10 C06    10 C03  611 C04  55 chunks  43 health [(392, 20.0), (6527, 0.0), (61526, 20.0)] dur 88554ms
+      S08 at(ms): [7, 404, 510, 510, 510, 510] last [61526]
+X2 umicraft: frames  7150 S08  3363 C06  3364 C03  144 C04  26 chunks  24 health [(41, 20.0), (6458, 0.0)] dur 8688ms
+      S08 at(ms): [40, 388, 5438, 8438, 8438, 8438] last [8662]
+X3 vanilla : frames 50267 S08 24711 C06 24710 C03  101 C04   6 chunks  33 health [(393, 20.0), (4854, 0.0)] dur 418888ms
+      S08 at(ms): [41, 839, 6887, 6902, 6919, 6935] last [418864]
+X3 umicraft: frames  7111 S08  3363 C06  3364 C03  131 C04  11 chunks  34 health [(23, 20.0), (5057, 0.0)] dur 7270ms
+      S08 at(ms): [22, 1019, 7019, 7019, 7019, 7019] last [7227]

@@ -13,10 +13,12 @@ Rules (restated):
 
 | Thread | Owns | Talks to |
 |---|---|---|
-| Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the sky/fog environment, the transparent draw order, the `WorldView` (camera interpolation, chunk queue, mesh pool), and the one-time official resource load | Game thread via bounded frame and chunk channels; mesh pool via bounded job/result channels |
-| **Game thread** | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) |
-| Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, `PlaySession` and the `drive` loop (ADR-0010), the keepalive answers | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
-| Mesh workers (1–4) | CPU meshing of immutable `ChunkSnapshot`s, with a shared immutable `ModelMeshContext` (models, atlas layout and the optional `BiomeTints` table) when the official resources loaded | Job receiver mutex (receive only) + bounded `sync_channel(512)` results |
+| Main/render thread (winit in windowed play) | Window, wgpu submission, the camera, the overlay, the UI frame and input translation, the sky/fog environment, the transparent draw order, the `WorldView` (camera interpolation, chunk queue, mesh pool, revision-tracked HUD double-buffer), and the one-time official resource load | Game thread via bounded frame and chunk channels + lock-free `AtomicLookSlot`; mesh pool via lock-free bounded MPMC job/result channels |
+| **Game thread** | `umicraft_world::World`, `umicraft_game::GameState`, the 20 Hz tick, the HUD state | Network thread and render thread via bounded channels (events in, frames and chunk snapshots out) and lock-free `AtomicLookSlot` |
+| Network thread (`umicraft-net`) | Tokio current-thread runtime, `Connection`, `PlaySession` and the `drive` loop (ADR-0010), the keepalive answers, 64B-aligned `SessionCounters` | Game thread via a bounded inbox of events; game thread via a bounded queue of serverbound commands |
+| Mesh workers (`1..=8`, `umicraft-mesh-N`) | CPU meshing of immutable `ChunkSnapshot`s, with a shared immutable `ModelMeshContext` (models, atlas layout and the optional `BiomeTints` table) when the official resources loaded | Lock-free `crossbeam_channel::bounded(512)` MPMC job and result queues + `CachePadded` atomic telemetry counters |
+| Audio threads (`umicraft-audio`, `umicraft-audio-decode`, cpal device) | Sound index, PCM cache, 20 Hz sound tick, Ogg Vorbis background music stream decoder, and lock-free realtime cpal mixer | Game and render threads via bounded `sync_channel(256)` (`try_send` drop-on-full) |
+| Background I/O workers (`texture-fetch`, `umicraft-ping`, `umicraft-pack`, `umicraft-screenshot`) | Concurrent HTTP skin/cape downloads (`JoinSet` cap 6), server list pings (`JoinSet` cap 5), verified server resource pack downloads, and offloaded PNG screenshot encoding | Render and game threads via bounded channels |
 
 The game thread is the only owner of the world: the render thread never
 mutates a chunk, and the collision solver never takes a lock (spec §5.3,
@@ -101,13 +103,32 @@ ADR-0005).
 
 ### Input boundary
 
-- The render thread (or the headless script) turns the keyboard and the
-  mouse into an `InputUpdate` and sends it into the bounded inbox of the
-  game thread with `try_send`. A full inbox means the game thread is
-  behind; the input is repeated on the next frame, and the look deltas are
-  accumulated until they are accepted, so no mouse movement is lost.
-- The game thread owns the view angles: the look deltas are applied to its
-  yaw and pitch, and the server corrections overwrite them.
+- The render thread (or the headless script) sends `InputUpdate` messages over
+  a dedicated lock-free `crossbeam_channel::bounded(512)` queue (`Session::inputs`)
+  completely decoupled from network events. This eliminates head-of-line blocking:
+  heavy packet floods (chunk streaming, entity bursts in PvP) never delay or drop
+  player inputs.
+- The game thread drains `inputs` with priority before network events. When waiting
+  between ticks, it uses `crossbeam_channel::select!` with an input receiver branch,
+  waking up in sub-microsecond time as soon as a key or mouse click arrives rather
+  than sleeping until the next 50 ms tick.
+- Physical mouse clicks and keyboard state changes call `publish_input()` immediately,
+  transmitting actions in sub-millisecond time rather than buffering them until the
+  next redraw.
+- The render thread applies raw mouse movement deltas directly to the active camera
+  via `WorldView::apply_look_delta` on the current frame. This eliminates the 1-frame
+  roundtrip latency formerly required for the game thread to echo angles back through
+  `AtomicLookSlot`, achieving true 0-frame mouse look latency for competitive PvP.
+- The game thread owns the authoritative view angles and simulation: the look deltas
+  are applied to its yaw and pitch, and server corrections overwrite them. Between two
+  20 Hz ticks, mouse look updates are published into a 64-byte aligned, lock-free
+  single-producer/single-consumer seqlock (`AtomicLookSlot`) and consumed by
+  `WorldView::sync` without taking any `Mutex`. When no mouse movement happened
+  since the previous frame, the render thread checks the sequence counter with
+  read-only atomic loads without dirtying the cache line.
+- Full input latency metrics (`InputLatencyMetrics`: input processing time, queue latency,
+  input-to-frame latency, swapchain presentation timing) are tracked in microseconds
+  and surfaced live on the F3 overlay.
 
 ### UI boundary (M4)
 
@@ -179,16 +200,14 @@ ADR-0005).
   before it leaves the game thread. Snapshot capture is the only game
   thread work; the 16×256×16 meshing scan, model-quad emission and texture
   layer assignment stay on workers.
-- Jobs use `sync_channel(512)` and are submitted with `try_send`. If the
-  queue is full, the chunk is put back on the render thread's waiting list
-  and retried on a later frame; the render thread never waits for a worker.
-- Results use `sync_channel(512)`. Workers may block briefly if the render
-  thread is behind, but the render thread only polls (`try_recv`). On pool
-  drop the job sender and result receiver are closed before joining, so a
-  worker blocked on a full result queue exits instead of deadlocking.
-- Workers share the job `Receiver` behind a `Mutex`, held only while
-  `recv()` waits for the next job. The meshing inner loop and the terrain
-  data are lock-free.
+- Jobs and results use lock-free MPMC bounded queues (`crossbeam_channel::bounded(512)`).
+  Jobs are submitted with `try_send`. If the queue is full, the chunk is put
+  back on the render thread's waiting list and retried on a later frame; the
+  render thread never waits for a worker.
+- Workers receive jobs directly from their cloned lock-free MPMC `Receiver`
+  without any `Mutex` contention. All per-pool telemetry counters (`PoolCounters`)
+  are wrapped in `umicraft_core::CachePadded` (`#[repr(align(64))]`) to prevent
+  false sharing across CPU cores.
 - Every job carries the `WorldView`'s world generation, which a `Reset`
   increments. A result of an older generation is discarded, so a mesh of a
   replaced world that was still being built is never drawn in the new one.

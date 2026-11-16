@@ -15,6 +15,7 @@ use crate::modern::{self, fit_text, measure_text, search_field, Align, ModernBut
 use crate::text::FontAtlas;
 
 use super::button::icon_button;
+use super::editor::chip;
 use super::layout::{mods_layout, ModsLayout};
 use super::list::{list, wheel_scrolled};
 use super::scrollbar::{draw_scroll_bar, scroll_input, BarGrab};
@@ -23,6 +24,9 @@ use super::settings_panel::{content_height, settings_panel};
 use super::style::{hover_level, Paint, NAME_SIZE, PANEL, PANEL_RIM};
 use super::view::{ModCardView, ModsOutcome, ModsView};
 use super::{card, ModsScreen, Page, BLINK_TICKS};
+
+/// Width of the button that opens the HUD editor, in GUI units.
+const EDIT_WIDTH: f32 = 46.0;
 
 impl ModsScreen {
     /// The mod whose settings page is open, if it still exists.
@@ -93,6 +97,21 @@ impl ModsScreen {
         let hint_at = (layout.hint[0], layout.hint[1]);
         paint.text(ui, lang.tr("umicraft.mods.hint"), hint_at, hint);
 
+        // The way into the HUD editor, left of the cross, while a mod has a
+        // widget to place.
+        let edit = Rect::new(
+            layout.close.x - (EDIT_WIDTH + 4.0) * paint.scale,
+            layout.header.y,
+            EDIT_WIDTH * paint.scale,
+            layout.header.height,
+        );
+        let on_list = self.open_card(view).is_none();
+        if on_list && !view.hud.entries.is_empty() {
+            let label = ("edit_hud", lang.tr("umicraft.mods.editor.open"));
+            if chip(ui, paint, edit, label, (true, true)) {
+                self.open_editor();
+            }
+        }
         let close_id = ui.id("close");
         let close_fade = hover_level(ui, layout.close);
         let close = icon_button(

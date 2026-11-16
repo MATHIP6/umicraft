@@ -176,9 +176,17 @@ impl BlockSource for ChunkSnapshot {
         if !(0..256).contains(&y) {
             return BlockState::AIR;
         }
-        let chunk = ChunkPos::new(x >> 4, z >> 4);
-        let dx = chunk.x - self.origin.x;
-        let dz = chunk.z - self.origin.z;
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let dx = chunk_x - self.origin.x;
+        let dz = chunk_z - self.origin.z;
+        if dx == 1 && dz == 1 {
+            return self.chunks[4]
+                .as_ref()
+                .map_or(BlockState::AIR, |column| {
+                    column.block((x & 15) as usize, y as usize, (z & 15) as usize)
+                });
+        }
         if !(0..3).contains(&dx) || !(0..3).contains(&dz) {
             return BlockState::AIR;
         }
@@ -194,9 +202,17 @@ impl BlockSource for ChunkSnapshot {
         if !(0..256).contains(&y) {
             return LightLevel::DARK;
         }
-        let chunk = ChunkPos::new(x >> 4, z >> 4);
-        let dx = chunk.x - self.origin.x;
-        let dz = chunk.z - self.origin.z;
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let dx = chunk_x - self.origin.x;
+        let dz = chunk_z - self.origin.z;
+        if dx == 1 && dz == 1 {
+            return self.chunks[4]
+                .as_ref()
+                .map_or(LightLevel::FULL_SKY, |column| {
+                    column.light((x & 15) as usize, y as usize, (z & 15) as usize)
+                });
+        }
         if !(0..3).contains(&dx) || !(0..3).contains(&dz) {
             return LightLevel::FULL_SKY;
         }

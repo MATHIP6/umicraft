@@ -25,6 +25,19 @@ pub struct ScreenOverlays {
     pub vignette: Option<[f32; 3]>,
 }
 
+impl ScreenOverlays {
+    /// Returns true when no overlay is shown.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.in_wall.is_none()
+            && self.underwater.is_none()
+            && self.fire.is_none()
+            && !self.pumpkin
+            && self.portal.is_none()
+            && self.vignette.is_none()
+    }
+}
+
 /// What the underwater picture needs: the light and where the player looks.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Underwater {

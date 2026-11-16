@@ -1,0 +1,45 @@
+--- state diff (reference = vanilla, internal player state) ---
+tolerance : STRICT (position 0 blocks/axis, motion 0 blocks/tick, rotation 0 deg)
+scenario ticks: reference 520, candidate 520
+
+phase                ticks     max|dx|     max|dy|     max|dz|     max|dm|   max|dyaw|  ground  spr  snk keys
+walk                    40     0.000e0     0.000e0    1.112e-6    8.881e-9     0.000e0       0    0    0    0  DIFFERS
+stop1                   40     0.000e0     0.000e0    1.113e-6    7.857e-9     0.000e0       0    0    0    0  DIFFERS
+sprint                  40     0.000e0     0.000e0    3.038e-6    1.658e-8     0.000e0       0    0    0    0  DIFFERS
+stop2                   40     0.000e0     0.000e0    3.047e-6    8.077e-9     0.000e0       0    0    0    0  DIFFERS
+jump1                    1     0.000e0    1.311e-8    3.017e-6    6.366e-9     0.000e0       0    0    0    0  DIFFERS
+jump1_air               19     0.000e0    6.696e-8    3.017e-6    2.997e-8     0.000e0       0    0    0    0  DIFFERS
+jump2                    1     0.000e0    1.311e-8    3.017e-6    6.366e-9     0.000e0       0    0    0    0  DIFFERS
+jump2_air               19     0.000e0    6.696e-8    3.017e-6    2.997e-8     0.000e0       0    0    0    0  DIFFERS
+jump3                    1     0.000e0    1.311e-8    3.017e-6    6.366e-9     0.000e0       0    0    0    0  DIFFERS
+jump3_air               19     0.000e0    6.696e-8    3.017e-6    2.997e-8     0.000e0       0    0    0    0  DIFFERS
+stop3                   20     0.000e0     0.000e0    3.017e-6    1.526e-9     0.000e0       0    0    0    0  DIFFERS
+sprint_jump             40     0.000e0    6.696e-8    3.054e-6    6.914e-8     0.000e0       0    0    0    0  DIFFERS
+stop4                   40     0.000e0    6.696e-8    1.400e-6    6.867e-8     0.000e0       0    0    0    0  DIFFERS
+strafe_left             40    1.112e-6     0.000e0    7.510e-7    8.881e-9     0.000e0       0    0    0    0  DIFFERS
+strafe_right            40    1.087e-6     0.000e0    7.510e-7    1.674e-8     0.000e0       0    0    0    0  DIFFERS
+stop5                   20    3.503e-8     0.000e0    7.510e-7    7.857e-9     0.000e0       0    0    0    0  DIFFERS
+sneak_still             20    5.694e-9     0.000e0    7.510e-7    1.526e-9     0.000e0       0    0    0    0  DIFFERS
+sneak_walk              40    5.694e-9     0.000e0    1.057e-6    2.392e-9     0.000e0       0    0    0    0  DIFFERS
+stop6                   40    5.694e-9     0.000e0    1.057e-6    2.473e-9     0.000e0       0    0    0    0  DIFFERS
+  walk: first divergence (tick offset in phase): z@+0 my@+0 mz@+0
+  stop1: first divergence (tick offset in phase): z@+0 my@+0 mz@+0
+  sprint: first divergence (tick offset in phase): z@+0 my@+0 mz@+0
+  stop2: first divergence (tick offset in phase): z@+0 my@+0 mz@+0
+  jump1: first divergence (tick offset in phase): y@+0 z@+0 my@+0
+  jump1_air: first divergence (tick offset in phase): y@+0 z@+0 my@+0
+  jump2: first divergence (tick offset in phase): y@+0 z@+0 my@+0
+  jump2_air: first divergence (tick offset in phase): y@+0 z@+0 my@+0
+  jump3: first divergence (tick offset in phase): y@+0 z@+0 my@+0
+  jump3_air: first divergence (tick offset in phase): y@+0 z@+0 my@+0
+  stop3: first divergence (tick offset in phase): z@+0 my@+0
+  sprint_jump: first divergence (tick offset in phase): y@+0 z@+0 my@+0 mz@+0
+  stop4: first divergence (tick offset in phase): y@+0 z@+0 my@+0 mz@+0
+  strafe_left: first divergence (tick offset in phase): x@+0 z@+0 mx@+0 my@+0
+  strafe_right: first divergence (tick offset in phase): x@+0 z@+0 mx@+0 my@+0
+  stop5: first divergence (tick offset in phase): x@+0 z@+0 mx@+0 my@+0
+  sneak_still: first divergence (tick offset in phase): x@+0 z@+0 my@+0
+  sneak_walk: first divergence (tick offset in phase): x@+0 z@+0 my@+0 mz@+0
+  stop6: first divergence (tick offset in phase): x@+0 z@+0 my@+0 mz@+0
+
+verdict: DIFFERENCES FOUND

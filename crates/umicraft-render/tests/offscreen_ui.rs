@@ -315,7 +315,9 @@ fn the_inverted_crosshair_skips_transparent_texels() {
     camera.set_aspect(WIDTH, HEIGHT);
     let hud = Overlay::new(WIDTH, HEIGHT);
     // Two texels: transparent white on the left, opaque white on the right.
-    renderer.set_gui_atlas(2, 1, &[255, 255, 255, 0, 255, 255, 255, 255]);
+    renderer
+        .set_gui_atlas(2, 1, &[255, 255, 255, 0, 255, 255, 255, 255])
+        .expect("gui atlas");
 
     renderer
         .render_with_ui(&camera, &hud, &DrawList::new(), &mut NoIcons)
@@ -340,4 +342,37 @@ fn the_inverted_crosshair_skips_transparent_texels() {
         (0..3).all(|c| u16::from(before[c]) + u16::from(after[c]) >= 250),
         "an opaque white texel inverts the scene: {before:?} -> {after:?}"
     );
+}
+
+/// The GUI atlas or the glint of a resource pack may be larger than the
+/// device takes. Creating such a texture is a wgpu validation error, which
+/// stops the process: both uploads must refuse it first.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_gui_atlas_or_glint_too_large_for_the_device_is_refused_before_the_gpu() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    let edge = renderer.max_texture_dimension() + 1;
+    let pixels = vec![0_u8; edge as usize * 4];
+    assert!(matches!(
+        renderer.set_gui_atlas(edge, 1, &pixels),
+        Err(BlockAtlasError::TooLarge { .. })
+    ));
+    assert_eq!(
+        renderer.set_gui_atlas(2, 2, &[0; 4]),
+        Err(BlockAtlasError::PixelCount {
+            width: 2,
+            height: 2,
+            layers: 1,
+            expected: 16,
+            actual: 4
+        })
+    );
+    renderer.set_glint_texture(edge, 1, &pixels);
+    renderer.wait_idle();
+    // The renderer still draws.
+    let mut camera = Camera::default();
+    camera.set_aspect(WIDTH, HEIGHT);
+    renderer
+        .render(&camera, &Overlay::new(WIDTH, HEIGHT))
+        .expect("render");
 }

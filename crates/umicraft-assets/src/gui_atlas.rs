@@ -274,7 +274,73 @@ pub(crate) struct GuiImage {
 /// Uses a simple shelf packing: images are sorted tallest-first and placed
 /// left to right in rows. The atlas width is the next power of two that fits
 /// the widest image.
-pub(crate) fn pack_gui_atlas(mut images: Vec<GuiImage>) -> GuiAtlas {
+pub(crate) fn pack_gui_atlas(images: Vec<GuiImage>) -> GuiAtlas {
+    pack_within(images, MAX_ATLAS_EDGE)
+}
+
+/// The largest edge of the packed atlas: every device wgpu runs on takes a
+/// texture of this size, so the GUI of any pack can be uploaded.
+const MAX_ATLAS_EDGE: u32 = 8192;
+
+/// Places `images` left to right in rows of an atlas `width` wide; returns
+/// the corner of each and the height used.
+fn shelf(images: &[GuiImage], width: u32) -> (Vec<(u32, u32)>, u32) {
+    let (mut x, mut y, mut row) = (0_u32, 0_u32, 0_u32);
+    let mut corners = Vec::with_capacity(images.len());
+    for image in images {
+        if x + image.width > width {
+            y += row;
+            (x, row) = (0, 0);
+        }
+        corners.push((x, y));
+        row = row.max(image.height);
+        x += image.width;
+    }
+    (corners, y + row)
+}
+
+/// Halves `image`: each new pixel averages a 2x2 block, colours weighted by
+/// alpha so a transparent texel does not darken its neighbours.
+fn halve(image: &mut GuiImage) {
+    let (width, height) = (image.width as usize, image.height as usize);
+    let (new_width, new_height) = ((width / 2).max(1), (height / 2).max(1));
+    let mut out = Vec::with_capacity(new_width * new_height * 4);
+    for y in 0..new_height {
+        for x in 0..new_width {
+            let (mut color, mut alpha, mut count) = ([0_u32; 3], 0_u32, 0_u32);
+            for source_y in y * 2..(y * 2 + 2).min(height) {
+                for source_x in x * 2..(x * 2 + 2).min(width) {
+                    let at = (source_y * width + source_x) * 4;
+                    let Some(texel) = image.pixels.get(at..at + 4) else {
+                        continue;
+                    };
+                    let a = u32::from(texel[3]);
+                    for (total, channel) in color.iter_mut().zip(texel) {
+                        *total += u32::from(*channel) * a;
+                    }
+                    alpha += a;
+                    count += 1;
+                }
+            }
+            if alpha == 0 {
+                out.extend_from_slice(&[0, 0, 0, 0]);
+            } else {
+                out.extend(color.map(|total| (total / alpha) as u8));
+                out.push((alpha / count.max(1)) as u8);
+            }
+        }
+    }
+    image.width = new_width as u32;
+    image.height = new_height as u32;
+    image.pixels = out;
+}
+
+/// [`pack_gui_atlas`] with the atlas edge limit as a parameter.
+///
+/// The atlas is about square. When the images do not fit `max_edge`, the
+/// largest are halved until they do: their regions still report the original
+/// size, so the layout of the screens does not change, only the sharpness.
+fn pack_within(mut images: Vec<GuiImage>, max_edge: u32) -> GuiAtlas {
     if images.is_empty() {
         return GuiAtlas {
             width: 1,
@@ -287,36 +353,49 @@ pub(crate) fn pack_gui_atlas(mut images: Vec<GuiImage>) -> GuiAtlas {
 
     images.sort_by(|a, b| b.height.cmp(&a.height).then(b.width.cmp(&a.width)));
 
-    let max_width = images.iter().map(|i| i.width).max().unwrap_or(1);
-    let atlas_width = max_width.next_power_of_two().max(256);
+    // What the regions report, whatever size is stored.
+    let sizes: Vec<(u32, u32)> = images.iter().map(|i| (i.width, i.height)).collect();
+
+    // First pass: compute positions. A width near the square root of the
+    // area keeps both edges small; one column of 256 pixel sheets used to
+    // reach the texture size limit of the GPU with the vanilla GUI alone.
+    let (atlas_width, placements, content_height) = loop {
+        let widest = images.iter().map(|i| i.width).max().unwrap_or(1);
+        let area: u64 = images
+            .iter()
+            .map(|i| u64::from(i.width) * u64::from(i.height))
+            .sum();
+        let mut width = widest
+            .max((area as f64).sqrt().ceil() as u32)
+            .next_power_of_two()
+            .max(256);
+        let (mut corners, mut height) = shelf(&images, width);
+        while height > max_edge && width < max_edge {
+            width *= 2;
+            (corners, height) = shelf(&images, width);
+        }
+        let largest = images
+            .iter()
+            .map(|i| i.width.max(i.height))
+            .max()
+            .unwrap_or(1);
+        if (width <= max_edge && height <= max_edge) || largest <= 1 {
+            break (width, corners, height);
+        }
+        tracing::warn!(
+            width,
+            height,
+            max_edge,
+            "the GUI textures do not fit one atlas; halving the largest"
+        );
+        for image in &mut images {
+            if image.width.max(image.height) * 2 > largest {
+                halve(image);
+            }
+        }
+    };
 
     let mut regions = BTreeMap::new();
-    let mut cursor_x: u32 = 0;
-    let mut cursor_y: u32 = 0;
-    let mut row_height: u32 = 0;
-
-    // First pass: compute positions.
-    struct Placement {
-        x: u32,
-        y: u32,
-    }
-    let mut placements = Vec::with_capacity(images.len());
-
-    for image in &images {
-        if cursor_x + image.width > atlas_width {
-            cursor_y += row_height;
-            cursor_x = 0;
-            row_height = 0;
-        }
-        placements.push(Placement {
-            x: cursor_x,
-            y: cursor_y,
-        });
-        row_height = row_height.max(image.height);
-        cursor_x += image.width;
-    }
-
-    let content_height = cursor_y + row_height;
     let atlas_height = content_height.next_power_of_two().max(1);
     let pixel_count = (atlas_width as usize)
         .checked_mul(atlas_height as usize)
@@ -325,11 +404,11 @@ pub(crate) fn pack_gui_atlas(mut images: Vec<GuiImage>) -> GuiAtlas {
     let mut pixels = vec![0_u8; pixel_count];
 
     // Second pass: blit and record regions.
-    for (image, placement) in images.iter().zip(&placements) {
+    for ((image, &(left, top)), &(width, height)) in images.iter().zip(&placements).zip(&sizes) {
         let dst_stride = atlas_width as usize * 4;
         let src_stride = image.width as usize * 4;
         for row in 0..image.height as usize {
-            let dst_offset = (placement.y as usize + row) * dst_stride + placement.x as usize * 4;
+            let dst_offset = (top as usize + row) * dst_stride + left as usize * 4;
             let src_offset = row * src_stride;
             if let (Some(dst), Some(src)) = (
                 pixels.get_mut(dst_offset..dst_offset + src_stride),
@@ -341,16 +420,16 @@ pub(crate) fn pack_gui_atlas(mut images: Vec<GuiImage>) -> GuiAtlas {
 
         let aw = atlas_width as f32;
         let ah = atlas_height as f32;
-        let (space_width, space_height) = coordinate_space(&image.name, image.width, image.height);
+        let (space_width, space_height) = coordinate_space(&image.name, width, height);
         regions.insert(
             image.name.clone(),
             GuiRegion {
-                u_min: placement.x as f32 / aw,
-                v_min: placement.y as f32 / ah,
-                u_max: (placement.x + image.width) as f32 / aw,
-                v_max: (placement.y + image.height) as f32 / ah,
-                pixel_width: image.width,
-                pixel_height: image.height,
+                u_min: left as f32 / aw,
+                v_min: top as f32 / ah,
+                u_max: (left + image.width) as f32 / aw,
+                v_max: (top + image.height) as f32 / ah,
+                pixel_width: width,
+                pixel_height: height,
                 space_width,
                 space_height,
             },
@@ -648,5 +727,40 @@ mod tests {
             .regions()
             .keys()
             .all(|name| !name.starts_with("dynamic/")));
+    }
+
+    /// The 1.8 jar has about 45 sheets of 256 pixels: one column of them was
+    /// 16384 pixels high, the texture size limit of DirectX 12.
+    #[test]
+    fn the_vanilla_sheets_pack_into_a_small_square() {
+        let images = (0..45)
+            .map(|index| test_image(&format!("sheet{index}"), 256, 256))
+            .collect();
+        let atlas = pack_gui_atlas(images);
+        assert_eq!(atlas.regions().len(), 45);
+        assert!(
+            atlas.width() <= 2048 && atlas.height() <= 2048,
+            "{}x{}",
+            atlas.width(),
+            atlas.height()
+        );
+    }
+
+    #[test]
+    fn images_that_do_not_fit_are_halved_and_report_their_own_size() {
+        // 16 sheets of 256 pixels need 1024 x 1024; only 512 x 512 is allowed.
+        let images = (0..16)
+            .map(|index| test_image(&format!("sheet{index}"), 256, 256))
+            .collect();
+        let atlas = pack_within(images, 512);
+        assert!(atlas.width() <= 512 && atlas.height() <= 512);
+        assert_eq!(atlas.regions().len(), 16);
+        let region = atlas.region("sheet0").expect("sheet0");
+        assert_eq!((region.pixel_width, region.pixel_height), (256, 256));
+        assert_eq!((region.space_width, region.space_height), (256, 256));
+        // Stored at half the size: 128 of the 512 pixels of the atlas.
+        assert!(((region.u_max - region.u_min) * atlas.width() as f32 - 128.0).abs() < 1e-3);
+        // The halved pixels are the average of what they cover.
+        assert!(atlas.pixels()[..4].iter().all(|channel| *channel == 255));
     }
 }

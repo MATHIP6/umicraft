@@ -20,6 +20,7 @@ mod animation;
 mod button;
 mod card;
 mod color;
+mod editor;
 mod hud_layer;
 mod layout;
 mod list;
@@ -33,7 +34,9 @@ mod style;
 mod tests;
 mod view;
 
-pub use hud_layer::{HudEditorOutcome, HudEditorView, HudWidgetView, Snap};
+pub use hud_layer::{
+    HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, HudWidgetView, Snap,
+};
 pub use layout::{mods_layout, ModsLayout};
 pub use view::{ModCardView, ModValue, ModsOutcome, ModsView, SettingControl, SettingView};
 
@@ -63,6 +66,8 @@ enum Page {
     List,
     /// The settings of the mod with this id.
     Settings(String),
+    /// The HUD editor: the widgets on the whole screen, one panel on a side.
+    HudEditor,
 }
 
 /// The mods menu state. The flow makes a new one each time the menu opens, so
@@ -84,6 +89,8 @@ pub struct ModsScreen {
     /// The drag of the thumb of the scrollbar of the page.
     bar: BarGrab,
     hud: HudLayer,
+    /// What the player is doing on the HUD editor.
+    editor: editor::EditorState,
     /// The knobs of the switches, the hover of the rows and the entrance of
     /// the pages.
     motion: Motion,
@@ -104,7 +111,7 @@ impl ModsScreen {
     /// list) instead of closing it, so the window asks before it takes the key.
     #[must_use]
     pub fn can_go_back(&self) -> bool {
-        matches!(self.page, Page::Settings(_))
+        matches!(self.page, Page::Settings(_) | Page::HudEditor)
     }
 
     /// Ends the entrance of the page at once: the panel is fully there and the
@@ -129,7 +136,8 @@ impl ModsScreen {
     /// fades the blur in with it.
     #[must_use]
     pub fn blur_strength(&self, partial_tick: f32) -> f32 {
-        BLUR.at(self.elapsed(partial_tick))
+        // The HUD editor shows the game as it is: the blur fades out with it.
+        BLUR.at(self.elapsed(partial_tick)) * (1.0 - self.editor_level(partial_tick))
     }
 
     /// Advances the opening animation, the motion of the widgets and the caret
@@ -138,6 +146,7 @@ impl ModsScreen {
         self.ticks = (self.ticks + 1).min(OPEN_TICKS);
         self.blink = self.blink.wrapping_add(1);
         self.motion.tick();
+        self.tick_editor();
     }
 
     /// One page back: the settings to the list.
@@ -166,6 +175,15 @@ impl ModsScreen {
         let viewport = ui.viewport();
         let brand = fonts.1;
         self.motion.set_partial(partial_tick);
+        if self.page == Page::HudEditor {
+            let outcome = self.editor_page(ui, fonts, lang, view, (snap, partial_tick));
+            // The page it leaves for plays its entrance.
+            if self.entered != self.page {
+                self.entered = self.page.clone();
+                self.motion.restart();
+            }
+            return outcome;
+        }
         // A mod that vanished leaves its settings page for the list.
         if matches!(self.page, Page::Settings(_)) && self.open_card(view).is_none() {
             self.page = Page::List;
@@ -180,6 +198,7 @@ impl ModsScreen {
             snap,
             blocked: &blocked,
             bar: true,
+            grid: None,
         };
         let hud = self.hud.show(ui, fonts, lang, &view.hud, zones);
         // The gear of a widget opens the settings of its mod; the client never sees it.

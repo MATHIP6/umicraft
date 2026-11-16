@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 base64 = "0.23"
+crossbeam-channel.workspace = true
 glam = "0.34"
 png.workspace = true
 jpeg-decoder.workspace = true
@@ -41,7 +42,12 @@ winit = "0.30.8"
 memory-stats = "1.2.0"
 
 [dev-dependencies]
+criterion = "0.8"
 toml.workspace = true
+
+[[bench]]
+name = "client_hotpaths"
+harness = false
 
 [[bin]]
 name = "umicraft-client"

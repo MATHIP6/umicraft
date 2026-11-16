@@ -1,0 +1,26 @@
+--- state diff (reference = vanilla, internal player state) ---
+tolerance : STRICT (position 0 blocks/axis, motion 0 blocks/tick, rotation 0 deg)
+scenario ticks: reference 520, candidate 520
+
+phase                ticks     max|dx|     max|dy|     max|dz|     max|dm|   max|dyaw|  ground  spr  snk keys
+walk                    40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+stop1                   40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+sprint                  40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+stop2                   40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+jump1                    1     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+jump1_air               19     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+jump2                    1     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+jump2_air               19     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+jump3                    1     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+jump3_air               19     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+stop3                   20     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+sprint_jump             40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+stop4                   40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+strafe_left             40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+strafe_right            40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+stop5                   20     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+sneak_still             20     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+sneak_walk              40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+stop6                   40     0.000e0     0.000e0     0.000e0     0.000e0     0.000e0       0    0    0    0  ok
+
+verdict: IDENTICAL WITHIN TOLERANCE

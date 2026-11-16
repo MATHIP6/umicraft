@@ -93,6 +93,9 @@ pub(crate) fn load_en_us_lang() -> Option<String> {
 ///
 /// Always `Some`: without a jar the atlas holds the brand art alone.
 pub(crate) fn load_gui_atlas() -> Option<umicraft_assets::GuiAtlas> {
+    if let Ok(base) = crate::model_resources::ModelResources::get_or_load_base() {
+        return Some(grow_atlas(Some(base.gui_atlas()), &[]));
+    }
     let jar_atlas = find_verified_jar()
         .ok()
         .and_then(|jar| umicraft_assets::GuiAtlas::from_jar(&jar).ok());

@@ -2,7 +2,6 @@
 
 //! The network thread body: runtime, connect, login, play.
 
-use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -29,7 +28,7 @@ use crate::game::GameEvent;
 /// [`ClientError::Network`] when the OS refuses to start the thread.
 pub fn spawn(
     config: NetworkConfig,
-    events: SyncSender<GameEvent>,
+    events: crossbeam_channel::Sender<GameEvent>,
     commands: CommandReceiver<PlayServerbound>,
     counters: Arc<SessionCounters>,
 ) -> Result<JoinHandle<()>, ClientError> {
@@ -42,7 +41,7 @@ pub fn spawn(
 
 fn run_thread(
     config: NetworkConfig,
-    events: SyncSender<GameEvent>,
+    events: crossbeam_channel::Sender<GameEvent>,
     commands: CommandReceiver<PlayServerbound>,
     counters: &SessionCounters,
 ) {
@@ -71,7 +70,7 @@ fn run_thread(
 /// itself ended the session by dropping the command sender.
 async fn run_session(
     config: &NetworkConfig,
-    events: &SyncSender<GameEvent>,
+    events: &crossbeam_channel::Sender<GameEvent>,
     mut commands: CommandReceiver<PlayServerbound>,
     counters: &SessionCounters,
 ) -> Option<ConnectionEnd> {

@@ -129,7 +129,7 @@ impl CreeperModel {
     /// Emits all vertices.
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(6 * 36);
         let root = Mat4::from_scale(Vec3::splat(1.0 / 16.0));
         self.head.emit(root, &mut out);
         self.body.emit(root, &mut out);

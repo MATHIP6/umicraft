@@ -399,17 +399,35 @@ impl HumanoidModel {
         )
     }
 
+    /// Appends the complete vertex mesh in blocks (1 unit = 1/16 block) into `out`.
+    pub fn emit_mesh_into(&self, out: &mut Vec<ModelVertex>) {
+        let box_count = self.head.boxes.len()
+            + self.body.boxes.len()
+            + self.right_arm.boxes.len()
+            + self.left_arm.boxes.len()
+            + self.right_leg.boxes.len()
+            + self.left_leg.boxes.len();
+        out.reserve(box_count * 36);
+        let root = Mat4::from_scale(Vec3::splat(1.0 / 16.0));
+        self.head.emit(root, out);
+        self.body.emit(root, out);
+        self.right_arm.emit(root, out);
+        self.left_arm.emit(root, out);
+        self.right_leg.emit(root, out);
+        self.left_leg.emit(root, out);
+    }
+
     /// Generates the complete vertex mesh in blocks (1 unit = 1/16 block).
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
-        let mut out = Vec::new();
-        let root = Mat4::from_scale(Vec3::splat(1.0 / 16.0));
-        self.head.emit(root, &mut out);
-        self.body.emit(root, &mut out);
-        self.right_arm.emit(root, &mut out);
-        self.left_arm.emit(root, &mut out);
-        self.right_leg.emit(root, &mut out);
-        self.left_leg.emit(root, &mut out);
+        let box_count = self.head.boxes.len()
+            + self.body.boxes.len()
+            + self.right_arm.boxes.len()
+            + self.left_arm.boxes.len()
+            + self.right_leg.boxes.len()
+            + self.left_leg.boxes.len();
+        let mut out = Vec::with_capacity(box_count * 36);
+        self.emit_mesh_into(&mut out);
         out
     }
 }

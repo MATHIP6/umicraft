@@ -17,7 +17,12 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+criterion = "0.8"
 proptest.workspace = true
+
+[[bench]]
+name = "protocol"
+harness = false
 
 [lints]
 workspace = true

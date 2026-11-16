@@ -1,0 +1,8 @@
+# Scenario e2 (phase E.5): a sprint ended by sneaking with W still held.
+# Sneaking scales the forward input to 0.3, below the 0.8 sprint threshold, so the
+# sprint ends on the first sneak tick. Same ticks as crates/umicraft-client/src/e1.rs.
+settle 40
+exit_after 40
+phase sprint 40 W SPRINT
+phase sneak_w 20 W SNEAK
+phase stop 20 -

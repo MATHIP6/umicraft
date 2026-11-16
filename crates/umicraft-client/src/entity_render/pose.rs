@@ -2,7 +2,7 @@
 
 //! The humanoid pose of an entity snapshot.
 
-use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
+use umicraft_game::entity::{wrap_degrees, EntityKind, EntityRenderSnapshot};
 use umicraft_game::item_use::{use_action, UseAction};
 use umicraft_model::entity::{ArmPose, HumanoidPose};
 use umicraft_protocol::packets::play::ItemStack;
@@ -16,7 +16,7 @@ pub(super) fn humanoid_pose(entity: &EntityRenderSnapshot, arms_forward: bool) -
         limb_swing: entity.limb_swing,
         limb_swing_amount: entity.limb_swing_amount,
         age: entity.age,
-        head_yaw: entity.head_yaw - entity.body_yaw,
+        head_yaw: wrap_degrees(entity.head_yaw - entity.body_yaw),
         head_pitch: entity.pitch,
         swing_progress: entity.swing_progress,
         sneaking: entity.kind == EntityKind::Player && entity.flags.is_sneaking(),
@@ -109,5 +109,13 @@ mod tests {
         entity.body_yaw = 30.0;
         entity.head_yaw = 50.0;
         assert_eq!(humanoid_pose(&entity, false).head_yaw, 20.0);
+    }
+
+    #[test]
+    fn the_head_turns_relative_to_the_body_across_zero_degrees() {
+        let mut entity = player(None, 0);
+        entity.body_yaw = 350.0;
+        entity.head_yaw = 10.0;
+        assert!((humanoid_pose(&entity, false).head_yaw - 20.0).abs() < 1e-4);
     }
 }

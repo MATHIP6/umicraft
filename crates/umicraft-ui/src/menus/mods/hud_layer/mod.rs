@@ -24,7 +24,9 @@ mod tests;
 mod toolbar;
 mod view;
 
-pub use view::{HudEditorOutcome, HudEditorView, HudWidgetView, Snap};
+pub use view::{
+    HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, HudWidgetView, Snap,
+};
 
 /// The gear of the widget whose text covers `rect`, for the tests of the menu.
 #[cfg(test)]
@@ -41,6 +43,7 @@ use crate::menus::common::Gui;
 use crate::mod_widget::{measure, ModWidgetView};
 use crate::text::FontAtlas;
 
+pub(in crate::menus::mods) use drag::{clamp_into, rescaled};
 use drag::{hit_widget, on_handle, wheel_resize, Bounds, Drag, Grab};
 use frame::frame_rect;
 use gear::gear_rect;
@@ -57,6 +60,8 @@ pub struct HudZones<'a> {
     pub blocked: &'a [Rect],
     /// Whether the reset bar is shown; it blocks the pointer too.
     pub bar: bool,
+    /// The step of the grid a moved widget sticks to, in GUI units, if any.
+    pub grid: Option<f32>,
 }
 
 /// The HUD layer state. The menu makes a new one each time it opens.
@@ -71,6 +76,21 @@ pub struct HudLayer {
 }
 
 impl HudLayer {
+    /// The id of the mod whose widget is selected.
+    pub(in crate::menus::mods) fn selected(&self) -> Option<&str> {
+        self.selected.as_deref()
+    }
+
+    /// Selects the widget of the mod `id`, or none.
+    pub(in crate::menus::mods) fn select(&mut self, id: Option<String>) {
+        self.selected = id;
+    }
+
+    /// Whether a widget is being dragged.
+    pub(in crate::menus::mods) fn is_dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
     /// Draws one frame of the layer over `view` and returns what the player
     /// did. `font` is the font of the HUD (the widgets are drawn with it),
     /// `brand` the font of the menus.
@@ -88,6 +108,7 @@ impl HudLayer {
             screen: view.screen,
             scale_range: view.scale_range,
             snap: zones.snap,
+            grid: zones.grid,
         };
         let bar = toolbar::layout(viewport);
         let shield = Shield::new(zones.blocked, zones.bar.then_some(bar.bar));
@@ -198,6 +219,11 @@ impl HudLayer {
             return;
         };
         let (rect, widget) = (rects[index], &view.widgets[index]);
+        self.selected = Some(widget.id.clone());
+        // A locked widget is selected, never moved.
+        if view.is_locked(&widget.id) {
+            return;
+        }
         let grab = if on_handle(frame_rect(rect, view.screen), point) {
             Grab::Resize(point[0] - rect.right())
         } else {
@@ -239,6 +265,9 @@ impl HudLayer {
         let index = hit_widget(rects, point, view.screen)?;
         let widget = &view.widgets[index];
         self.selected = Some(widget.id.clone());
+        if view.is_locked(&widget.id) {
+            return None;
+        }
         let (rect, scale) = wheel_resize((rects[index], widget.widget.scale), notches, bounds)?;
         Some(HudEditorOutcome::Placed {
             id: widget.id.clone(),
@@ -262,7 +291,7 @@ impl HudLayer {
 }
 
 /// The rectangle a widget covers, in GUI units.
-fn widget_rect(font: &FontAtlas, widget: &ModWidgetView) -> Rect {
+pub(in crate::menus::mods) fn widget_rect(font: &FontAtlas, widget: &ModWidgetView) -> Rect {
     let (width, height) = measure(font, &widget.lines, widget.scale, &widget.style);
     Rect::new(widget.position[0], widget.position[1], width, height)
 }

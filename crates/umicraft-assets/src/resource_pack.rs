@@ -38,6 +38,10 @@ const PACK_MCMETA: &str = "pack.mcmeta";
 /// Standard file name for resource pack preview icon.
 const PACK_PNG: &str = "pack.png";
 
+/// The most uncompressed bytes a zipped pack may hold. The reference has no
+/// such limit; the largest 512x packs stay well under it.
+const MAX_PACK_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// Metadata parsed from a resource pack's `pack.mcmeta` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackMetadata {
@@ -211,6 +215,7 @@ impl ResourcePack {
         let mut files = BTreeMap::new();
         let mut metadata = None;
         let mut icon = None;
+        let mut total = 0_u64;
 
         for entry in archive.entries() {
             let normalized = normalize_virtual_path(&entry.name);
@@ -224,8 +229,25 @@ impl ResourcePack {
             } else if normalized == PACK_PNG {
                 icon = archive.read(entry).ok();
             } else if normalized.starts_with(ASSETS_PREFIX) {
-                if let Ok(bytes) = archive.read(entry) {
-                    files.insert(normalized, bytes);
+                // Checked on the declared sizes, before anything is inflated:
+                // a small archive (a server pack) must not fill the memory.
+                total = total.saturating_add(entry.uncompressed_size);
+                if total > MAX_PACK_BYTES {
+                    return Err(AssetsError::Pack {
+                        name: id.to_string(),
+                        reason: format!(
+                            "the pack holds more than {} MiB of files",
+                            MAX_PACK_BYTES / (1024 * 1024)
+                        ),
+                    });
+                }
+                match archive.read(entry) {
+                    Ok(bytes) => {
+                        files.insert(normalized, bytes);
+                    }
+                    Err(error) => {
+                        tracing::warn!(pack = id, %error, "skipping an unreadable pack entry");
+                    }
                 }
             }
         }

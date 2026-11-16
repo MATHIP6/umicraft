@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
-use crate::config::{ModConfig, ModsConfig};
+use crate::config::{ModConfig, ModsConfig, SavedWidget};
 use crate::context::ModContext;
-use crate::hud::{HudContent, HudPlacement, HudStyle};
+use crate::hud::{HudContent, HudPlacement, HudPreset, HudStyle};
 use crate::id::ModId;
 use crate::meta::ModMeta;
 use crate::settings::{ModSettings, SettingValue, SettingsError};
@@ -34,6 +34,8 @@ struct Entry {
     settings: ModSettings,
     placement: HudPlacement,
     content: HudContent,
+    locked: bool,
+    custom: Option<SavedWidget>,
 }
 
 impl Entry {
@@ -50,7 +52,16 @@ impl Entry {
             settings,
             placement,
             content: HudContent::default(),
+            locked: false,
+            custom: None,
         }
+    }
+
+    fn default_placement(&self) -> HudPlacement {
+        self.module
+            .hud()
+            .map(|h| h.default_placement)
+            .unwrap_or_default()
     }
 
     fn is_hud(&self) -> bool {
@@ -69,6 +80,8 @@ pub struct ModView<'a> {
     pub settings: &'a ModSettings,
     /// Where the widget is, if the mod has one.
     pub placement: Option<HudPlacement>,
+    /// Whether the HUD editor leaves the widget where it is.
+    pub locked: bool,
 }
 
 /// A widget to draw this frame.
@@ -117,6 +130,7 @@ impl ModRegistry {
             enabled: e.enabled,
             settings: &e.settings,
             placement: e.is_hud().then_some(e.placement),
+            locked: e.locked,
         })
     }
 
@@ -165,12 +179,58 @@ impl ModRegistry {
     /// [`RegistryError::UnknownMod`] if no mod has this id.
     pub fn reset_placement(&mut self, id: &str) -> Result<(), RegistryError> {
         let entry = self.entry_mut(id)?;
-        entry.placement = entry
-            .module
-            .hud()
-            .map(|h| h.default_placement)
-            .unwrap_or_default();
+        entry.placement = entry.default_placement();
         Ok(())
+    }
+
+    /// Locks or unlocks a HUD widget: a locked one stays where it is in the
+    /// HUD editor, whatever the presets and the reset of the layout do.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::UnknownMod`] if no mod has this id.
+    pub fn set_locked(&mut self, id: &str, locked: bool) -> Result<(), RegistryError> {
+        self.entry_mut(id)?.locked = locked;
+        Ok(())
+    }
+
+    /// Lays the HUD widgets out as `preset` says: which are on and where they
+    /// are. A locked widget keeps its place; the "Custom" preset changes
+    /// nothing for a widget that was never saved.
+    pub fn apply_preset(&mut self, preset: HudPreset) {
+        for entry in self.entries.iter_mut().filter(|e| e.is_hud()) {
+            let meta = entry.module.meta();
+            let (enabled, placement) = match preset {
+                HudPreset::Default => (meta.default_enabled, entry.default_placement()),
+                HudPreset::Custom => match entry.custom {
+                    Some(saved) => (saved.enabled, saved.placement),
+                    None => continue,
+                },
+                HudPreset::Pvp | HudPreset::Minimal => preset
+                    .widget(meta.id.as_str())
+                    .unwrap_or((false, entry.default_placement())),
+            };
+            entry.enabled = enabled;
+            if !entry.locked {
+                entry.placement = placement.sanitized();
+            }
+        }
+    }
+
+    /// Keeps the layout of the HUD widgets as the "Custom" preset.
+    pub fn save_custom(&mut self) {
+        for entry in self.entries.iter_mut().filter(|e| e.is_hud()) {
+            entry.custom = Some(SavedWidget {
+                enabled: entry.enabled,
+                placement: entry.placement,
+            });
+        }
+    }
+
+    /// Whether a layout was saved as the "Custom" preset.
+    #[must_use]
+    pub fn has_custom(&self) -> bool {
+        self.entries.iter().any(|e| e.custom.is_some())
     }
 
     /// Runs one frame of every enabled mod and refreshes its widget text.
@@ -233,6 +293,13 @@ impl ModRegistry {
                     if let (Some(placement), true) = (saved.placement, entry.is_hud()) {
                         entry.placement = placement.sanitized();
                     }
+                    entry.locked = saved.locked && entry.is_hud();
+                    entry.custom = saved.custom.filter(|_| entry.is_hud()).map(|saved| {
+                        SavedWidget {
+                            placement: saved.placement.sanitized(),
+                            ..saved
+                        }
+                    });
                 }
                 None => {
                     self.unknown.insert(id.clone(), saved.clone());
@@ -253,6 +320,8 @@ impl ModRegistry {
                     settings: entry.settings.to_map(),
                     placement: entry.is_hud().then_some(entry.placement),
                     state: entry.module.state(),
+                    locked: entry.locked,
+                    custom: entry.custom,
                 },
             );
         }

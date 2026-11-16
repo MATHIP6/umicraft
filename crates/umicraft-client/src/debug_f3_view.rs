@@ -8,14 +8,19 @@
 //! [`DebugWorld`]; the GPU names from [`AdapterSummary`].
 
 use umicraft_game::debug_f3::{DebugF3Input, DebugF3Lines};
-use umicraft_render::{AdapterSummary, Camera, DebugF3View, GpuTimings, Renderer, GROUP_NAMES};
+use umicraft_render::{
+    AdapterSummary, Camera, DebugF3View, DrawCallStats, FramePacingStats, GpuTimings, Renderer,
+    SurfaceInfo, VramStats, GROUP_NAMES,
+};
 
 use crate::cpu_split::CpuReading;
 use crate::debug_world::DebugWorld;
+use crate::mesher::MeshPoolStats;
+use crate::metrics::{FrameDistribution, InputLatencyMetrics};
 use crate::process_memory::MemoryUse;
 
 use crate::options::{VideoOptions, UNLIMITED_FPS};
-use crate::world_view::WorldView;
+use crate::world_view::{SnapshotPacingStats, WorldView};
 
 /// What the renderer knows about the GPU time of a frame (F2-0b).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,6 +88,28 @@ pub struct F3Frame<'a> {
     pub gpu: GpuReading,
     /// The CPU time per stage of the frame.
     pub cpu: Option<CpuReading>,
+    /// Rolling frametime percentiles and 1%/0.1% low FPS.
+    pub frame_dist: Option<FrameDistribution>,
+    /// Draw call breakdown for the last rendered frame.
+    pub draw_calls: DrawCallStats,
+    /// Estimated GPU VRAM residency.
+    pub vram: VramStats,
+    /// Mean heap allocations per frame over the rolling window.
+    pub mean_allocs_per_frame: f64,
+    /// Mean heap bytes allocated per frame over the rolling window.
+    pub mean_alloc_bytes_per_frame: f64,
+    /// Mesh worker pool utilization and build latency.
+    pub mesh_pool: MeshPoolStats,
+    /// Whether runtime profiling (`--profile` / `F3+P`) is currently enabled.
+    pub profiling_enabled: bool,
+    /// Detailed latency metrics for the input subsystem.
+    pub input_latency: InputLatencyMetrics,
+    /// Surface and swapchain configuration.
+    pub surface_info: Option<&'a SurfaceInfo>,
+    /// Frame pacing and presentation interval metrics.
+    pub frame_pacing: FramePacingStats,
+    /// Snapshot publication pacing metrics.
+    pub snapshot_pacing: SnapshotPacingStats,
 }
 
 /// What only the window knows when F3 is drawn.
@@ -92,12 +119,20 @@ pub struct Live<'a> {
     pub fps: f32,
     /// The CPU time per stage of the frame.
     pub cpu: Option<CpuReading>,
+    /// Rolling frametime distribution.
+    pub frame_dist: Option<FrameDistribution>,
+    /// Mean heap allocations per frame.
+    pub mean_allocs_per_frame: f64,
+    /// Mean heap bytes allocated per frame.
+    pub mean_alloc_bytes_per_frame: f64,
     /// The video options (render distance, graphics, frame cap).
     pub video: &'a VideoOptions,
     /// The window size in pixels.
     pub display: (u32, u32),
     /// The renderer camera.
     pub camera: &'a Camera,
+    /// Detailed latency metrics for the input subsystem.
+    pub input_latency: InputLatencyMetrics,
 }
 
 /// Builds the F3 columns from the live renderer and world, falling back to
@@ -110,6 +145,7 @@ pub fn build_live(
 ) -> DebugF3View {
     let no_world = DebugWorld::default();
     let no_adapter = AdapterSummary::default();
+    let surface_info = renderer.and_then(Renderer::surface_info);
     build(&F3Frame {
         fps: live.fps,
         chunk_meshes: renderer.map_or(0, Renderer::mesh_count),
@@ -122,6 +158,17 @@ pub fn build_live(
         memory: crate::process_memory::read(),
         gpu: GpuReading::of(renderer),
         cpu: live.cpu,
+        frame_dist: live.frame_dist,
+        draw_calls: renderer.map_or_else(DrawCallStats::default, Renderer::draw_calls),
+        vram: renderer.map_or_else(VramStats::default, Renderer::vram_stats),
+        mean_allocs_per_frame: live.mean_allocs_per_frame,
+        mean_alloc_bytes_per_frame: live.mean_alloc_bytes_per_frame,
+        mesh_pool: world.map_or_else(MeshPoolStats::default, WorldView::mesh_pool_stats),
+        profiling_enabled: umicraft_core::profiling::is_enabled(),
+        input_latency: live.input_latency,
+        surface_info: surface_info.as_ref(),
+        frame_pacing: renderer.map_or_else(FramePacingStats::default, Renderer::frame_pacing_stats),
+        snapshot_pacing: world.map_or_else(SnapshotPacingStats::default, WorldView::snapshot_pacing_stats),
     })
 }
 
@@ -171,6 +218,63 @@ pub fn build(frame: &F3Frame<'_>) -> DebugF3View {
     let mut right = lines.right;
     right.push(frame.gpu.line());
     right.push(CpuReading::line(frame.cpu));
+    if let Some(dist) = frame.frame_dist {
+        right.push(dist.f3_line());
+    }
+    let dc = frame.draw_calls;
+    let vram_mb = frame.vram.total_bytes() as f64 / (1024.0 * 1024.0);
+    right.push(format!(
+        "Draws: {} (sky {}, opq {}, ent {}, trn {}, ui {}) | VRAM: {:.1} MB",
+        dc.total(),
+        dc.sky,
+        dc.opaque,
+        dc.entities,
+        dc.translucent,
+        dc.ui,
+        vram_mb,
+    ));
+    let game_pct = (f64::from(frame.world.tick_micros) / 50_000.0) * 100.0;
+    let alloc_kib = frame.mean_alloc_bytes_per_frame / 1024.0;
+    let prof_state = if frame.profiling_enabled { "ON" } else { "OFF" };
+    let tps_val = if frame.world.real_tps > 0.0 { frame.world.real_tps } else { 20.0 };
+    right.push(format!(
+        "TPS: {:.1} | Game: {:.1}% ({} us, delay {} us, catchup {}) | Net: {} us (queue {}) | Mesh: {}/{}",
+        tps_val,
+        game_pct,
+        frame.world.tick_micros,
+        frame.world.tick_delay_us,
+        frame.world.catch_up_ticks,
+        frame.world.net_event_micros,
+        frame.world.net_queue_depth,
+        frame.mesh_pool.active_workers,
+        frame.mesh_pool.worker_count,
+    ));
+    right.push(format!(
+        "Allocs/f: {:.0} ({:.1} KiB) | Prof: {} | Dirty Chunks: {}",
+        frame.mean_allocs_per_frame,
+        alloc_kib,
+        prof_state,
+        frame.world.dirty_chunks,
+    ));
+    right.push(frame.input_latency.f3_line());
+    if let Some(surf) = &frame.surface_info {
+        right.push(format!(
+            "Swapchain: {:?} | {:?} | {:?} | Latency: {} | Size: {}x{}",
+            surf.backend.unwrap_or(wgpu::Backend::Vulkan),
+            surf.format,
+            surf.present_mode,
+            surf.desired_maximum_frame_latency,
+            surf.width,
+            surf.height,
+        ));
+    }
+    right.push(frame.frame_pacing.summary_line());
+    right.push(frame.snapshot_pacing.f3_line());
+    let [fx, fy, fz] = frame.world.feet;
+    right.push(format!(
+        "Move: feet [{:.2}, {:.2}, {:.2}] | Resyncs: {}",
+        fx, fy, fz, frame.world.resyncs,
+    ));
     DebugF3View {
         left: lines.left,
         right,
@@ -202,6 +306,17 @@ mod tests {
             },
             gpu: GpuReading::Unsupported,
             cpu: None,
+            frame_dist: None,
+            draw_calls: DrawCallStats::default(),
+            vram: VramStats::default(),
+            mean_allocs_per_frame: 0.0,
+            mean_alloc_bytes_per_frame: 0.0,
+            mesh_pool: MeshPoolStats::default(),
+            profiling_enabled: false,
+            input_latency: InputLatencyMetrics::default(),
+            surface_info: None,
+            frame_pacing: FramePacingStats::default(),
+            snapshot_pacing: SnapshotPacingStats::default(),
         }
     }
 
@@ -280,6 +395,7 @@ mod tests {
             name: "Test GPU".to_owned(),
             vendor: "radv".to_owned(),
             backend: "Vulkan".to_owned(),
+            backend_type: Some(wgpu::Backend::Vulkan),
         };
         let camera = Camera::default();
         let view = build(&frame(&camera, &VideoOptions::default(), &world, &adapter));

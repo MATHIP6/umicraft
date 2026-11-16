@@ -59,8 +59,10 @@ pub(super) fn view_for(
     (font, display): (&FontAtlas, (u32, u32)),
 ) -> ModsView {
     if screen == Screen::Mods {
+        let mut hud = hud_editor_view::build(mods.registry(), lang, font, display);
+        hud.history = mods.history_state();
         ModsView {
-            hud: hud_editor_view::build(mods.registry(), lang, font, display),
+            hud,
             ..mods_view::build(mods.registry(), lang)
         }
     } else {
@@ -106,6 +108,8 @@ impl App {
         let next = if self.screen == Screen::Mods {
             Screen::None
         } else {
+            // "Cancel" of the HUD editor goes back to the state of now.
+            self.mods.begin_edit();
             Screen::Mods
         };
         self.set_screen(next);
@@ -116,7 +120,7 @@ impl App {
     /// went through, never for the frames of a drag. A change the registry
     /// refuses (a mod or setting that does not exist) is logged and dropped.
     pub(super) fn apply_mods_change(&mut self, change: &ModsOutcome) {
-        match mods_view::apply(self.mods.registry_mut(), change) {
+        match self.mods.apply_change(change) {
             Ok(true) => {
                 self.options.mods = self.mods.config();
                 self.save_options();

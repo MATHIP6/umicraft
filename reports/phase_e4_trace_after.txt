@@ -1,0 +1,35 @@
+--- serverbound tick diff (reference = vanilla) ---
+ticks       :      481      771
+keep-alives :       15       21
+
+packets per token        reference candidate
+  0x03                         221       497
+  0x04                         260       274
+  0x0B:start_sneak               1         1
+  0x0B:start_sprint              2         2
+  0x0B:stop_sneak                1         1
+  0x0B:stop_sprint               2         2
+
+tick shapes only in the reference:
+  (none)
+tick shapes only in the candidate:
+  (none)
+
+aligned ticks that differ: 290 (first 3 shown)
+  tick   481: -                                    | 0x03
+  tick   482: -                                    | 0x03
+  tick   483: -                                    | 0x03
+
+verdict: SAME SHAPES
+
+--- movement-packet cadence (logger timestamps, ms) ---
+            reference  candidate
+intervals         480        770
+mean            50.35      50.01
+std dev          3.22       6.10
+min / max     33 /  67    35 /  64
+
+packet bodies that differ in ticks with the same signature: 260 (first 3 shown)
+  tick     0 0x04                   3fe000000000000040100000000000004022828017c1e95201 | 3fe00000000000004010000000000000402282803d7275ad01
+  tick     1 0x04                   3fe000000000000040100000000000004022e75815647fb401 | 3fe000000000000040100000000000004022e7583cde586e01
+  tick     2 0x04                   3fe0000000000000401000000000000040235fa22fbc898c01 | 3fe0000000000000401000000000000040235fa25919753501

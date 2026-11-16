@@ -126,6 +126,15 @@ pub struct VideoEffects {
 }
 
 impl VideoApplier {
+    /// Creates a new `VideoApplier` initialized with `fullscreen`.
+    #[must_use]
+    pub fn new(fullscreen: bool) -> Self {
+        Self {
+            fullscreen,
+            mipmap_levels: None,
+        }
+    }
+
     /// The fullscreen state to switch to, or `None` when `wanted` is what is
     /// already set.
     fn fullscreen_change(&mut self, wanted: bool) -> Option<bool> {

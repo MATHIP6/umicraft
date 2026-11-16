@@ -126,6 +126,13 @@ impl WeatherRenderer {
         environment: RenderEnvironment,
         ticks: f64,
     ) {
+        if environment.rain_strength <= 0.0 || self.field.is_empty() {
+            if !self.mesh.vertices.is_empty() {
+                self.mesh.vertices.clear();
+                self.mesh.runs.clear();
+            }
+            return;
+        }
         let input = FrameInput {
             eye: camera.eye(),
             origin: camera.render_origin(),
@@ -144,13 +151,14 @@ impl WeatherRenderer {
     }
 
     /// Draws the frame's runs with the terrain's camera bind group.
-    pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup) {
+    pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup) -> u32 {
         if self.mesh.runs.is_empty() {
-            return;
+            return 0;
         }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, camera, &[]);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        let mut draws = 0;
         for run in &self.mesh.runs {
             let picture = match run.kind {
                 Precipitation::Rain => &self.rain,
@@ -158,7 +166,14 @@ impl WeatherRenderer {
             };
             pass.set_bind_group(1, picture, &[]);
             pass.draw(run.vertices.clone(), 0..1);
+            draws += 1;
         }
+        draws
+    }
+
+    /// Number of active weather vertices uploaded this frame.
+    pub(crate) fn vertex_count(&self) -> usize {
+        self.mesh.vertices.len()
     }
 }
 

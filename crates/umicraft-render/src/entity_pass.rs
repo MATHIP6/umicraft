@@ -458,13 +458,17 @@ impl EntityRenderer {
         batches: impl IntoIterator<Item = (wgpu::BufferSlice<'a>, u32, &'a wgpu::BindGroup)>,
     ) {
         let mut set_pipeline = false;
+        let mut current_texture: Option<&'a wgpu::BindGroup> = None;
         for (slice, vertex_count, texture_bind_group) in batches {
             if !set_pipeline {
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, camera_bind_group, &[]);
                 set_pipeline = true;
             }
-            pass.set_bind_group(1, texture_bind_group, &[]);
+            if !current_texture.is_some_and(|cur| std::ptr::eq(cur, texture_bind_group)) {
+                pass.set_bind_group(1, texture_bind_group, &[]);
+                current_texture = Some(texture_bind_group);
+            }
             pass.set_vertex_buffer(0, slice);
             pass.draw(0..vertex_count, 0..1);
         }

@@ -19,5 +19,12 @@ tokio = { workspace = true, features = ["fs", "rt"] }
 tracing.workspace = true
 umicraft-model.workspace = true
 
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "assets_loading"
+harness = false
+
 [lints]
 workspace = true

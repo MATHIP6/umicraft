@@ -4255,6 +4255,7 @@ dependencies = [
 name = "umicraft-assets"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "flate2",
  "png",
  "reqwest",
@@ -4310,6 +4311,8 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "base64 0.23.1",
+ "criterion",
+ "crossbeam-channel",
  "glam",
  "jpeg-decoder",
  "memory-stats",
@@ -4406,6 +4409,7 @@ name = "umicraft-protocol"
 version = "0.1.0"
 dependencies = [
  "aes",
+ "criterion",
  "flate2",
  "num-bigint 0.5.1",
  "proptest",
@@ -4424,6 +4428,7 @@ dependencies = [
  "naga",
  "pollster",
  "thiserror 2.0.21",
+ "tracing",
  "umicraft-core",
  "umicraft-game",
  "umicraft-mesh",
