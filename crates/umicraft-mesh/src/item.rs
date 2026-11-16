@@ -13,7 +13,7 @@
 //! which keeps a block icon lit the same whichever way the pose turns it
 //! (the reference uses fixed GUI lights for the same effect).
 
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 use umicraft_model::{AtlasLayout, ModelQuad};
 
 use crate::{tint, Vertex, VertexLight};
@@ -73,6 +73,27 @@ impl ItemMesh {
         self.push(quads, pose, style, |quad| gui_face_factor(quad.normal));
     }
 
+    /// Appends `quads` placed by `pose`, lit by the two world-fixed lights of
+    /// `RenderHelper.enableStandardItemLighting`.
+    ///
+    /// `light_frame` turns the space `pose` places into into one where the
+    /// lights are fixed (see [`item_light_factor`]); each quad gets the
+    /// brightness of its placed normal baked into the vertex tint, so
+    /// `style.light` must not ask for the world shade as well.
+    pub fn push_quads_lit(
+        &mut self,
+        quads: &[ModelQuad],
+        pose: &Mat4,
+        light_frame: &Mat4,
+        style: &ItemStyle<'_>,
+    ) {
+        // Normals take the inverse transpose, as the fixed pipeline does.
+        let normals = Mat3::from_mat4(*light_frame * *pose).inverse().transpose();
+        self.push(quads, pose, style, |quad| {
+            item_light_factor(normals * Vec3::from(quad.normal))
+        });
+    }
+
     fn push(
         &mut self,
         quads: &[ModelQuad],
@@ -125,6 +146,34 @@ pub fn gui_face_factor(normal: [f32; 3]) -> f32 {
     } else {
         0.592
     }
+}
+
+/// The brightness the two lights of `RenderHelper.enableStandardItemLighting`
+/// give a face whose normal is `normal`, in the frame where the lights point
+/// along `(0.2, 1, -0.7)` and `(-0.2, 1, 0.7)`: ambient 0.4 plus 0.6 per light,
+/// capped at 1. The pair is symmetric under a half turn about y, so the frame
+/// of the world and that of a view turned by a half turn light alike.
+///
+/// # Example
+///
+/// ```
+/// use glam::Vec3;
+/// use umicraft_mesh::item::item_light_factor;
+///
+/// assert_eq!(item_light_factor(Vec3::Y), 1.0);
+/// assert!((item_light_factor(-Vec3::Y) - 0.4).abs() < 1e-6);
+/// ```
+#[must_use]
+pub fn item_light_factor(normal: Vec3) -> f32 {
+    const AMBIENT: f32 = 0.4;
+    const DIFFUSE: f32 = 0.6;
+    let lights = [Vec3::new(0.2, 1.0, -0.7), Vec3::new(-0.2, 1.0, 0.7)];
+    let normal = normal.normalize_or_zero();
+    let diffuse: f32 = lights
+        .iter()
+        .map(|light| normal.dot(light.normalize()).max(0.0))
+        .sum();
+    (AMBIENT + DIFFUSE * diffuse).min(1.0)
 }
 
 /// Multiplies the three channels of a `0x00RRGGBB` tint by `factor`.
@@ -193,6 +242,35 @@ mod tests {
         assert_eq!(west, 0.592);
         assert_eq!(north, 0.4);
         assert_eq!(gui_face_factor([1.0, 0.0, 0.0]), west);
+    }
+
+    #[test]
+    fn the_standard_item_lights_follow_the_reference() {
+        assert_eq!(item_light_factor(Vec3::Y), 1.0);
+        assert!((item_light_factor(-Vec3::Y) - 0.4).abs() < 1e-6);
+        // A face turned to +z sees only the second light, at 0.7 / |(0.2, 1, 0.7)|.
+        let lit = 0.4 + 0.6 * 0.7 / Vec3::new(0.2, 1.0, 0.7).length();
+        assert!((item_light_factor(Vec3::Z) - lit).abs() < 1e-6);
+        assert_eq!(item_light_factor(Vec3::Z), item_light_factor(-Vec3::Z));
+    }
+
+    #[test]
+    fn push_quads_lit_lights_the_normal_as_placed() {
+        let atlas = AtlasLayout::from_keys(["items/apple"]);
+        let channel = |pose: Mat4, frame: Mat4| {
+            let mut mesh = ItemMesh::default();
+            mesh.push_quads_lit(&[quad(None)], &pose, &frame, &style(&atlas, &[]));
+            (mesh.vertices[0].tint & 0xFF) as f32 / 255.0
+        };
+        // The test quad faces north (-z); turned to face up it is fully lit.
+        let north = channel(Mat4::IDENTITY, Mat4::IDENTITY);
+        assert!((north - item_light_factor(-Vec3::Z)).abs() < 0.01);
+        let up = Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2);
+        assert_eq!(channel(up, Mat4::IDENTITY), 1.0);
+        assert_eq!(channel(Mat4::IDENTITY, up), 1.0);
+        // A scale does not change the light.
+        let scaled = channel(Mat4::from_scale(Vec3::new(0.5, 2.0, 1.0)), Mat4::IDENTITY);
+        assert!((scaled - north).abs() < 0.01);
     }
 
     #[test]

@@ -25,8 +25,7 @@
 //! per NIST SP 800-38A. This module does not authenticate anything by itself;
 //! a later auth crate owns the premium flow.
 
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{BlockEncrypt, KeyInit};
+use aes::cipher::{Block, BlockCipherEncrypt, KeyInit};
 use aes::Aes128;
 use num_bigint::BigInt;
 use rsa::pkcs8::DecodePublicKey;
@@ -87,7 +86,7 @@ impl AesCfb8Stream {
     /// the same ciphertext and feeds it back — NIST SP 800-38A CFB mode).
     fn process(&mut self, buf: &mut [u8], encrypting: bool) {
         for byte in buf.iter_mut() {
-            let mut block = GenericArray::clone_from_slice(&self.iv);
+            let mut block = Block::<Aes128>::from(self.iv);
             self.aes.encrypt_block(&mut block);
             let keystream = block[0];
 

@@ -12,6 +12,7 @@ use std::time::Instant;
 use super::overlay_views::{ActionBarView, BossView, SidebarView, TabListView, TitleView};
 use umicraft_game::chat::{ClickEvent, HoverEvent};
 use umicraft_game::hud::{vitals_view, BottomBar, HeldNameView, VitalsInput, VitalsView};
+use umicraft_game::inventory::effect_list::EffectLine;
 use umicraft_ui::mod_widget::ModWidgetView;
 use umicraft_ui::SlotItem;
 
@@ -84,6 +85,9 @@ pub struct HudState {
     /// The latency the server reports for the local player, in milliseconds,
     /// for the ping mod; `None` until the tab list has the player's entry.
     pub ping_ms: Option<u32>,
+    /// The potion effects of the player, in the order of the list beside the
+    /// survival and creative inventories; empty without effects.
+    pub effects: Vec<EffectLine>,
 }
 
 /// The two columns of the vanilla F3 screen, as built by
@@ -194,6 +198,8 @@ pub struct ChatInputView {
     pub text: String,
     /// The caret as a character index.
     pub caret: usize,
+    /// The selected character range, start before end, if any.
+    pub selection: Option<(usize, usize)>,
     /// Whether the caret is in the visible half of its blink.
     pub caret_visible: bool,
 }
@@ -233,6 +239,7 @@ impl Default for HudState {
             score: 0,
             mod_widgets: Vec::new(),
             ping_ms: None,
+            effects: Vec::new(),
         }
     }
 }

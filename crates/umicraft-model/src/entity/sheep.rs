@@ -9,6 +9,11 @@ use glam::{Mat4, Vec3};
 use super::child::{emit_child, ChildLayout};
 use super::{ModelBox, ModelPart, ModelVertex};
 
+/// Height of the neck (vanilla `rotationPointY` 6).
+const HEAD_PIVOT_Y: f32 = 18.0;
+/// How far a grazing sheep drops its head, in pixels.
+const GRAZE_DROP: f32 = 9.0;
+
 /// 1.8 Sheep model following MCP `ModelSheep2.java` (body) and `ModelSheep1.java` (wool).
 ///
 /// Vanilla renders the sheep in two passes with two textures:
@@ -61,7 +66,7 @@ impl SheepModel {
 
         // --- ModelSheep2 (base body, uses sheep.png) ---
         // MCP: addBox(-3, -4, -6, 6, 6, 8), pivot (0, 6, -8)
-        let head = ModelPart::new([0.0, 18.0, -8.0]).with_box(ModelBox::new(
+        let head = ModelPart::new([0.0, HEAD_PIVOT_Y, -8.0]).with_box(ModelBox::new(
             [-3.0, -2.0, -6.0],
             [6.0, 6.0, 8.0],
             [0.0, 0.0],
@@ -70,16 +75,17 @@ impl SheepModel {
         ));
 
         // MCP: addBox(-4, -10, -7, 8, 16, 6), pivot (0, 5, 2)
-        // Rotated PI/2: local Y→world Z, local Z→world Y. Pivot formula:
-        // pivot_umi_Y = 24 - pivot_mcp_Y + Z_min + Z_max = 24 - 5 + (-7) + (-1) = 11
-        let mut body = ModelPart::new([0.0, 11.0, 2.0]).with_box(ModelBox::new(
-            [-4.0, -10.0, -7.0],
+        // Rotated PI/2 about x in MCP's y-down frame. In this y-up frame the
+        // pivot is 24 - 5, the rotation is negated and the local y of the box
+        // is mirrored (-10..6 becomes -6..10), as for the cow.
+        let mut body = ModelPart::new([0.0, 19.0, 2.0]).with_box(ModelBox::new(
+            [-4.0, -6.0, -7.0],
             [8.0, 16.0, 6.0],
             [28.0, 8.0],
             tex,
             0.0,
         ));
-        body.rotation[0] = PI / 2.0;
+        body.rotation[0] = -PI / 2.0;
 
         // Legs: ModelQuadruped(12), pivot (±3, 12, ±7/±-5)
         let leg1 = ModelPart::new([-3.0, 12.0, 7.0]).with_box(ModelBox::new(
@@ -113,7 +119,7 @@ impl SheepModel {
 
         // --- ModelSheep1 (wool overlay, uses sheep_fur.png) ---
         // MCP: addBox(-3, -4, -4, 6, 6, 6, 0.6), pivot (0, 6, -8)
-        let wool_head = ModelPart::new([0.0, 18.0, -8.0]).with_box(ModelBox::new(
+        let wool_head = ModelPart::new([0.0, HEAD_PIVOT_Y, -8.0]).with_box(ModelBox::new(
             [-3.0, -2.0, -4.0],
             [6.0, 6.0, 6.0],
             [0.0, 0.0],
@@ -122,14 +128,14 @@ impl SheepModel {
         ));
 
         // MCP: addBox(-4, -10, -7, 8, 16, 6, 1.75), pivot (0, 5, 2)
-        let mut wool_body = ModelPart::new([0.0, 11.0, 2.0]).with_box(ModelBox::new(
-            [-4.0, -10.0, -7.0],
+        let mut wool_body = ModelPart::new([0.0, 19.0, 2.0]).with_box(ModelBox::new(
+            [-4.0, -6.0, -7.0],
             [8.0, 16.0, 6.0],
             [28.0, 8.0],
             tex,
             1.75,
         ));
-        wool_body.rotation[0] = PI / 2.0;
+        wool_body.rotation[0] = -PI / 2.0;
 
         // MCP: addBox(-2, 0, -2, 4, 6, 4, 0.5), pivot (±3, 12, ±7/±-5)
         let wool_leg1 = ModelPart::new([-3.0, 12.0, 7.0]).with_box(ModelBox::new(
@@ -185,7 +191,8 @@ impl SheepModel {
         head_yaw: f32,
         head_pitch: f32,
     ) {
-        let pitch_rad = head_pitch.to_radians();
+        // Flipping y turns the sense of x rotations around (as in `pose.rs`).
+        let pitch_rad = -head_pitch.to_radians();
         let yaw_rad = head_yaw.to_radians();
 
         self.head.rotation[0] = pitch_rad;
@@ -193,8 +200,9 @@ impl SheepModel {
         self.wool_head.rotation[0] = pitch_rad;
         self.wool_head.rotation[1] = yaw_rad;
 
-        let angle1 = (limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount;
-        let angle2 = (limb_swing * 0.6662 + PI).cos() * 1.4 * limb_swing_amount;
+        // MCP `ModelQuadruped` legs, x rotations negated like the head.
+        let angle1 = -(limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount;
+        let angle2 = -(limb_swing * 0.6662 + PI).cos() * 1.4 * limb_swing_amount;
 
         self.leg1.rotation[0] = angle1;
         self.leg2.rotation[0] = angle2;
@@ -205,6 +213,21 @@ impl SheepModel {
         self.wool_leg2.rotation[0] = angle2;
         self.wool_leg3.rotation[0] = angle2;
         self.wool_leg4.rotation[0] = angle1;
+    }
+
+    /// Lowers the head into the grass (MCP `ModelSheep1/2.setLivingAnimations`
+    /// with `EntitySheep.getHeadRotationPointY` and `getHeadRotationAngleX`):
+    /// `lowered` (`0..=1`) drops it by 9 pixels, and `angle`, the vanilla
+    /// pitch in radians while grazing, replaces the look pitch. Call after
+    /// [`Self::set_angles`].
+    pub fn set_graze(&mut self, lowered: f32, angle: Option<f32>) {
+        let pivot_y = HEAD_PIVOT_Y - lowered * GRAZE_DROP;
+        for head in [&mut self.head, &mut self.wool_head] {
+            head.pivot[1] = pivot_y;
+            if let Some(angle) = angle {
+                head.rotation[0] = -angle;
+            }
+        }
     }
 
     /// Emits the base body mesh (for `sheep.png`).
@@ -259,5 +282,23 @@ impl SheepModel {
         self.wool_leg3.emit(root, &mut out);
         self.wool_leg4.emit(root, &mut out);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_grazing_sheep_puts_its_head_down() {
+        // Regression: status 10 was ignored, so sheep never grazed.
+        let mut sheep = SheepModel::new();
+        sheep.set_angles(0.0, 0.0, 0.0, -20.0);
+        sheep.set_graze(1.0, Some(PI / 5.0));
+        assert_eq!(sheep.head.pivot[1], 9.0);
+        assert_eq!(sheep.wool_head.pivot[1], 9.0);
+        assert!((sheep.head.rotation[0] + PI / 5.0).abs() < 1e-6);
+        sheep.set_graze(0.0, None);
+        assert_eq!(sheep.head.pivot[1], HEAD_PIVOT_Y);
     }
 }

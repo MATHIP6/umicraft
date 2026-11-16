@@ -25,6 +25,7 @@ use umicraft_game::inventory::creative::tabs::{
     TAB_HEIGHT, TAB_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
 };
 use umicraft_game::inventory::creative::{owning_tab, visible_slots, CreativeSlot, CreativeTab};
+use umicraft_game::inventory::effect_list::EffectLine;
 use umicraft_game::inventory::tooltip::{tooltip, TooltipColor, TooltipLine, TooltipText};
 use umicraft_game::inventory::{WindowView, HOTBAR_START};
 use umicraft_protocol::packets::play::ItemStack;
@@ -34,6 +35,7 @@ use umicraft_ui::{draw_item, FontAtlas, Rect, TextStyle, Ui};
 
 use crate::creative_layout::CreativeLayout;
 use crate::creative_view::CreativeView;
+use crate::effect_list_draw::draw_effect_list;
 use crate::inventory_screen::{draw_cursor_item, DIMMING, FALLBACK_BACKGROUND, WHITE};
 use crate::item_icons::{slot_item, ItemView};
 use crate::portrait::{self, Spot};
@@ -80,6 +82,8 @@ pub struct CreativeScene<'a> {
     pub items: ItemView<'a>,
     /// Whether the search caret is in the visible half of its blink.
     pub caret_visible: bool,
+    /// The potion effects listed beside the window.
+    pub effects: &'a [EffectLine],
 }
 
 /// Where the tab button of `tab` is drawn, as scaled pixels relative to the
@@ -391,6 +395,14 @@ pub fn draw_creative_overlay(
         let lines = hover_lines(scene, layout.local((pointer[0], pointer[1])));
         draw_tooltip(ui, atlas, viewport, layout.scale() as f32, pointer, &lines);
     }
+    // Drawn last, over the tooltip, like `InventoryEffectRenderer.drawScreen`.
+    let window = layout.rect(0, 0, 0, 0);
+    draw_effect_list(
+        ui,
+        ((window.x, window.y), layout.scale()),
+        scene.gui_atlas,
+        scene.effects,
+    );
     spot
 }
 
@@ -453,6 +465,7 @@ mod tests {
             gui_atlas: None,
             items: ItemView::new(None, Default::default()),
             caret_visible: false,
+            effects: &[],
         }
     }
 
@@ -469,6 +482,7 @@ mod tests {
             gui_atlas: None,
             items: ItemView::new(None, Default::default()),
             caret_visible: false,
+            effects: &[],
         };
         assert_eq!(id_in(&scene, CreativeSlot::Grid(4)), Some(7));
         assert_eq!(id_in(&scene, CreativeSlot::Grid(5)), None);

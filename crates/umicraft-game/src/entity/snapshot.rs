@@ -12,12 +12,14 @@ use super::anim::{Animation, BedPose, SquidPose};
 use super::cape::{cape_angles, CapeAngles};
 use super::flags::EntityFlags;
 use super::flight::{DragonFlight, DragonPose};
+use super::guardian_beam::BeamTarget;
 use super::horse_state::{HorsePose, HorseState};
 use super::item::EntityItem;
 use super::kind::{EntityId, EntityKind};
 use super::leash::{LeashAnchor, LeashFrame};
 use super::limbs::LimbSwing;
 use super::meta::EntityMeta;
+use super::mob_state::{MobPose, MobState};
 use super::profile::PlayerProfile;
 use super::shadow::ShadowBlock;
 
@@ -96,14 +98,18 @@ pub struct EntityFrameData {
     pub squish: f32,
     /// The grazing, rearing and mouth of a horse.
     pub horse: Option<HorseState>,
+    /// The timers of a hop, a swing, a shake or a grazing.
+    pub mob: MobState,
     /// Whether another entity sits on this one.
     pub ridden: bool,
     /// The light in front of each block of a painting, column by column (the
     /// game thread samples it; empty for anything else).
     pub block_lights: Arc<[LightLevel]>,
-    /// Where the line of this bobber ties to the rod when the angler is the
-    /// local player in first person; set by the game thread.
-    pub rod_tip: Option<DVec3>,
+    /// Whether the line of this bobber ties to the rod in the first-person
+    /// hand (the angler is the local player, seen from their own eyes); set by
+    /// the game thread. The render thread places that end from the live
+    /// camera, which moves between two ticks.
+    pub tied_to_hand: bool,
     /// Whether this is the body of the local player.
     pub local: bool,
     /// Whether the viewer sees the invisible body as a ghost by team.
@@ -114,6 +120,9 @@ pub struct EntityFrameData {
     pub leash_holder: Option<EntityId>,
     /// Where the holder is, found by [`super::leash::leash_entities`].
     pub leash: Option<LeashFrame>,
+    /// What a guardian beams at, found by
+    /// [`super::guardian_beam::aim_guardians`].
+    pub beam: Option<BeamTarget>,
     /// Ticks lived at the current simulation tick.
     pub age_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
@@ -179,14 +188,16 @@ impl EntityFrameData {
             fishing: self.fishing,
             riding: self.riding,
             leash: self.leash.map(|holder| holder.at(a, origin)),
+            beam: self.beam.map(|target| target.at(a, origin)),
             local: self.local,
             ghost_visible: self.ghost_visible,
             squish: self.squish,
             squid: self.animation.squid_at(a),
             horse: self.horse.map(|horse| horse.pose(a)),
+            mob: self.mob.pose(a),
             ridden: self.ridden,
             block_lights: self.block_lights.clone(),
-            rod_tip: self.rod_tip.map(|tip| (tip - origin).as_vec3()),
+            tied_to_hand: self.tied_to_hand,
             flight: self
                 .flight
                 .as_ref()
@@ -267,6 +278,8 @@ pub struct EntityRenderSnapshot {
     pub riding: bool,
     /// The holder of the leash of the entity, if it is leashed.
     pub leash: Option<LeashAnchor>,
+    /// The middle of what a guardian beams at, relative to [`Self::origin`].
+    pub beam: Option<Vec3>,
     /// The flight pose of an ender dragon: its wing phase and the path it flew.
     pub flight: Option<DragonPose>,
     /// How much a slime or magma cube is squashed (`0` at rest, positive when
@@ -276,14 +289,16 @@ pub struct EntityRenderSnapshot {
     pub squid: SquidPose,
     /// How far a horse grazes, rears and opens its mouth.
     pub horse: Option<HorsePose>,
+    /// What a hop, a swing, a shake or a grazing does to the model.
+    pub mob: MobPose,
     /// Whether another entity sits on this one: a ridden horse shows its reins.
     pub ridden: bool,
     /// The light in front of each block of a painting, column by column; empty
     /// when the whole entity takes `light`.
     pub block_lights: Arc<[LightLevel]>,
-    /// Where the line of this bobber ties to the rod (first person only),
-    /// relative to [`Self::origin`].
-    pub rod_tip: Option<Vec3>,
+    /// Whether the line of this bobber ties to the rod in the first-person
+    /// hand, placed from the camera at render time.
+    pub tied_to_hand: bool,
     /// Whether this is the body of the local player: it is not lowered further
     /// when crouching (`RenderPlayer.doRender`).
     pub local: bool,
@@ -338,13 +353,15 @@ impl EntityRenderSnapshot {
             fishing: false,
             riding: false,
             leash: None,
+            beam: None,
             flight: None,
             squish: 0.0,
             squid: Default::default(),
             horse: None,
+            mob: MobPose::None,
             ridden: false,
             block_lights: Arc::default(),
-            rod_tip: None,
+            tied_to_hand: false,
             local: false,
             ghost_visible: false,
             age: 0.0,
@@ -390,11 +407,9 @@ mod tests {
     #[test]
     fn the_origin_is_carried_and_subtracted_from_every_position() {
         let origin = DVec3::new(1_000_000.0, 60.0, 1_000_000.0);
-        let mut frame = walker(1_000_001.0, 1_000_002.0);
-        frame.rod_tip = Some(DVec3::new(1_000_003.5, 65.0, 1_000_000.5));
+        let frame = walker(1_000_001.0, 1_000_002.0);
         let snapshot = frame.interpolate(1.0, origin);
         assert_eq!(snapshot.origin, origin);
         assert_eq!(snapshot.position, Vec3::new(2.0, 4.0, 0.25));
-        assert_eq!(snapshot.rod_tip, Some(Vec3::new(3.5, 5.0, 0.5)));
     }
 }

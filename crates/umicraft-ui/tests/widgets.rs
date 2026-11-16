@@ -1608,3 +1608,174 @@ fn a_control_chord_never_types_its_letter_but_altgr_does() {
     run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, with(altgr));
     assert_eq!(state.text(), "a");
 }
+
+/// Where character `index` of `text` sits on screen once the field has drawn
+/// (one frame establishes the text origin and the scale).
+fn char_position(
+    ui: &mut Ui,
+    id: WidgetId,
+    state: &mut TextFieldState,
+    atlas: &FontAtlas,
+    index: usize,
+) -> [f32; 2] {
+    let text = state.text().to_owned();
+    let (_, output) = run_field(ui, id, FIELD_RECT, atlas, state, UiInput::default());
+    let (origin, scale) = text_run(&output, &text).expect("the text is drawn");
+    [
+        origin[0] + atlas.char_index_to_x(&text, index, scale),
+        FIELD_RECT.y + FIELD_RECT.height * 0.5,
+    ]
+}
+
+#[test]
+fn control_z_undoes_a_typing_run_and_control_y_redoes_it() {
+    let (mut ui, id, mut state, atlas) = focused("");
+    for text in ["a", "b", "c"] {
+        run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, typed(text));
+    }
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        key(Key::ArrowLeft),
+    );
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, typed("X"));
+    assert_eq!(state.text(), "abXc");
+
+    let mut undo = |state: &mut TextFieldState| {
+        run_field(
+            &mut ui,
+            id,
+            FIELD_RECT,
+            &atlas,
+            state,
+            chord(CONTROL, Key::Z),
+        );
+    };
+    undo(&mut state);
+    assert_eq!(state.text(), "abc", "the caret move ended the first run");
+    undo(&mut state);
+    assert_eq!(state.text(), "", "abc was one step");
+    undo(&mut state);
+    assert_eq!(state.text(), "", "nothing left to undo");
+
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::Y),
+    );
+    assert_eq!(state.text(), "abc");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL_SHIFT, Key::Z),
+    );
+    assert_eq!(state.text(), "abXc", "Control+Shift+Z redoes too");
+}
+
+#[test]
+fn undo_restores_a_deleted_selection_and_a_new_edit_drops_the_redo() {
+    let (mut ui, id, mut state, atlas) = focused("hello world");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::A),
+    );
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        key(Key::Backspace),
+    );
+    assert_eq!(state.text(), "");
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::Z),
+    );
+    assert_eq!(state.text(), "hello world");
+
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, key(Key::End));
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, typed("!"));
+    run_field(
+        &mut ui,
+        id,
+        FIELD_RECT,
+        &atlas,
+        &mut state,
+        chord(CONTROL, Key::Y),
+    );
+    assert_eq!(state.text(), "hello world!", "the undone deletion is gone");
+}
+
+#[test]
+fn a_double_click_selects_a_word_and_a_triple_click_the_line() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::with_text("one two three");
+    let at = char_position(&mut ui, id, &mut state, &atlas, 5);
+
+    for _ in 0..2 {
+        run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, click(at));
+    }
+    assert_eq!(state.selected_text(), "two");
+
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, click(at));
+    assert_eq!(state.selected_text(), "one two three");
+}
+
+#[test]
+fn dragging_extends_the_selection_until_the_button_is_released() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::with_text("abcdef");
+    let from = char_position(&mut ui, id, &mut state, &atlas, 1);
+    let to = char_position(&mut ui, id, &mut state, &atlas, 4);
+
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, click(from));
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, moved(to));
+    assert_eq!(state.selected_text(), "bcd");
+
+    let release = UiInput::new(vec![InputEvent::PointerReleased {
+        position: to,
+        button: PointerButton::Left,
+    }]);
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, release);
+    let far = char_position(&mut ui, id, &mut state, &atlas, 6);
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, moved(far));
+    assert_eq!(state.selected_text(), "bcd", "no drag after the release");
+}
+
+#[test]
+fn shift_click_extends_from_the_caret() {
+    let atlas = FontAtlas::fallback();
+    let mut ui = Ui::new(VIEWPORT);
+    let id = ui.id("field");
+    let mut state = TextFieldState::with_text("abcdef");
+    state.set_caret(1);
+    let at = char_position(&mut ui, id, &mut state, &atlas, 4);
+    let input = UiInput {
+        events: click(at).events,
+        modifiers: SHIFT,
+    };
+    run_field(&mut ui, id, FIELD_RECT, &atlas, &mut state, input);
+    assert_eq!(state.selected_text(), "bcd");
+}

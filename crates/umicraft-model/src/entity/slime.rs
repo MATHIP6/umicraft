@@ -23,6 +23,9 @@ pub struct SlimeModel {
     pub scale: f32,
     /// Is magma cube.
     pub is_magma: bool,
+    /// The eight slices of a magma cube's shell, top first (empty parts for
+    /// a slime).
+    pub segments: [ModelPart; 8],
 }
 
 impl SlimeModel {
@@ -81,6 +84,7 @@ impl SlimeModel {
             mouth,
             scale,
             is_magma: false,
+            segments: std::array::from_fn(|_| ModelPart::new([0.0; 3])),
         }
     }
 
@@ -88,29 +92,25 @@ impl SlimeModel {
     #[must_use]
     pub fn magma_cube(scale: f32) -> Self {
         let tex = [64.0, 32.0];
-        let mut core = ModelPart::new([0.0, 0.0, 0.0]);
-
-        // 8 segmented slices from MCP ModelMagmaCube
-        for i in 0..8 {
+        // 8 slices from MCP ModelMagmaCube: slice `i` is at y `16 + i`
+        // (24 is the ground), so slice 0 is at 7 here and slice 7 at 0.
+        let segments = std::array::from_fn(|i| {
             let (u, v) = match i {
                 2 => (24.0, 10.0),
                 3 => (24.0, 19.0),
                 other => (0.0, other as f32),
             };
-            // In MCP: Y = 16 + i (where 24 is ground).
-            // So slice 0 is at Y=7, slice 7 is at Y=0.
-            let y = (7 - i) as f32;
-            core = core.with_box(ModelBox::new(
-                [-4.0, y, -4.0],
+            ModelPart::new([0.0; 3]).with_box(ModelBox::new(
+                [-4.0, (7 - i) as f32, -4.0],
                 [8.0, 1.0, 8.0],
                 [u, v],
                 tex,
                 0.0,
-            ));
-        }
+            ))
+        });
 
         // Inner core (4x4x4) at [0, 16] in MCP at Y=18..22 (Umicraft Y=2..6)
-        core = core.with_box(ModelBox::new(
+        let core = ModelPart::new([0.0; 3]).with_box(ModelBox::new(
             [-2.0, 2.0, -2.0],
             [4.0, 4.0, 4.0],
             [0.0, 16.0],
@@ -126,6 +126,18 @@ impl SlimeModel {
             mouth: ModelPart::new([0.0, 0.0, 0.0]),
             scale,
             is_magma: true,
+            segments,
+        }
+    }
+
+    /// Spreads a magma cube's slices apart as it stretches in a jump (MCP
+    /// `ModelMagmaCube.setLivingAnimations`): slice `i` rises by `(4 - i) *
+    /// squish * 1.7` pixels, so the top ones fly up and the bottom ones drop.
+    /// A squashed cube (`squish < 0`) keeps its slices together.
+    pub fn set_squish(&mut self, squish: f32) {
+        let stretch = squish.max(0.0);
+        for (i, segment) in self.segments.iter_mut().enumerate() {
+            segment.pivot[1] = (4.0 - i as f32) * stretch * 1.7;
         }
     }
 
@@ -135,6 +147,9 @@ impl SlimeModel {
         let mut out = Vec::new();
         let root = Mat4::from_scale(Vec3::splat(self.scale / 16.0));
         self.inner_body.emit(root, &mut out);
+        for segment in &self.segments {
+            segment.emit(root, &mut out);
+        }
         if !self.is_magma {
             self.right_eye.emit(root, &mut out);
             self.left_eye.emit(root, &mut out);
@@ -152,5 +167,25 @@ impl SlimeModel {
             self.outer_body.emit(root, &mut out);
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_jumping_magma_cube_spreads_its_slices() {
+        // Regression: the slices were one solid block, so the cube never
+        // opened up in a jump.
+        let mut cube = SlimeModel::magma_cube(1.0);
+        let rest = cube.emit_inner_mesh();
+        cube.set_squish(1.0);
+        assert!((cube.segments[0].pivot[1] - 6.8).abs() < 1e-6);
+        assert_eq!(cube.segments[4].pivot[1], 0.0);
+        assert!((cube.segments[7].pivot[1] + 5.1).abs() < 1e-5);
+        assert_ne!(cube.emit_inner_mesh(), rest);
+        cube.set_squish(-0.5);
+        assert_eq!(cube.emit_inner_mesh(), rest, "squashed, it stays shut");
     }
 }

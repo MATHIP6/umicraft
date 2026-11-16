@@ -6,11 +6,40 @@ use glam::{Mat4, Vec3};
 
 use super::{ModelBox, ModelPart, ModelVertex};
 
+/// Where the nose hangs on the head: 2 pixels up (vanilla y -2).
+const NOSE_PIVOT: [f32; 3] = [0.0, 2.0, 0.0];
+
+/// The angles of a witch's nose in the y-up frame (MCP
+/// `ModelWitch.setRotationAngles`): it wiggles by 4.5 degrees up and down and
+/// 2.5 sideways at a speed set by the last digit of the entity id, and is
+/// lifted by 0.9 rad while she holds an item (the wiggle sideways goes on).
+/// `ticks` are the whole ticks lived.
+///
+/// ```
+/// use umicraft_model::entity::witch_nose_angles;
+/// assert_eq!(witch_nose_angles(7, 10, false), [0.0, 0.0, -2.5_f32.to_radians()]);
+/// ```
+#[must_use]
+pub fn witch_nose_angles(ticks: u32, entity_id: i32, holding: bool) -> [f32; 3] {
+    let speed = 0.01 * (entity_id % 10) as f32;
+    let phase = ticks as f32 * speed;
+    let pitch = if holding {
+        -0.9
+    } else {
+        phase.sin() * 4.5_f32.to_radians()
+    };
+    let roll = phase.cos() * 2.5_f32.to_radians();
+    // Vanilla `(x, y, z)` is `(-x, y, -z)` in the y-up models.
+    [-pitch, 0.0, -roll]
+}
+
 /// Villager and Witch model (64×64 or 64×128 texture sheet) with robe, folded arms and elongated head.
 #[derive(Debug, Clone)]
 pub struct VillagerModel {
-    /// Head part with elongated forehead and protruding nose.
+    /// Head part with elongated forehead.
     pub head: ModelPart,
+    /// The nose, hanging from the head (with the wart of a witch).
+    pub nose: ModelPart,
     /// Torso part with robe body.
     pub body: ModelPart,
     /// Folded arms held in front of chest.
@@ -50,27 +79,28 @@ impl VillagerModel {
         let torso_py = 24.0;
         let leg_py = 12.0;
 
-        let mut head = ModelPart::new([0.0, torso_py, 0.0])
-            .with_box(ModelBox::new(
-                [-4.0, 0.0, -4.0],
-                [8.0, 10.0, 8.0],
-                [0.0, 0.0],
-                tex,
-                0.0,
-            ))
-            // Nose: 2×4×2 extending forward, hanging 1px below chin (MCP ModelVillager: pivot Y=-2, box Y=-1..3 -> Umicraft Y=-1..3)
-            .with_box(ModelBox::new(
-                [-1.0, -1.0, -6.0],
-                [2.0, 4.0, 2.0],
-                [24.0, 0.0],
-                tex,
-                0.0,
-            ));
+        let head = ModelPart::new([0.0, torso_py, 0.0]).with_box(ModelBox::new(
+            [-4.0, 0.0, -4.0],
+            [8.0, 10.0, 8.0],
+            [0.0, 0.0],
+            tex,
+            0.0,
+        ));
 
+        // Nose: 2×4×2 from a pivot 2 pixels up the head, hanging 1 pixel
+        // below the chin (MCP ModelVillager: pivot y -2, box y -1..3).
+        let mut nose = ModelPart::new(NOSE_PIVOT).with_box(ModelBox::new(
+            [-1.0, -3.0, -6.0],
+            [2.0, 4.0, 2.0],
+            [24.0, 0.0],
+            tex,
+            0.0,
+        ));
         if is_witch {
-            // Mole on nose (MCP ModelWitch: 1x1x1 at Y=0..1, Z=-6.75 with -0.25 dilation)
-            head = head.with_box(ModelBox::new(
-                [0.0, 0.0, -6.75],
+            // The wart (MCP ModelWitch: 1x1x1, its own pivot 2 pixels up the
+            // nose, box y 3..4, z -6.75, -0.25 dilation).
+            nose = nose.with_box(ModelBox::new(
+                [0.0, -2.0, -6.75],
                 [1.0, 1.0, 1.0],
                 [0.0, 0.0],
                 tex,
@@ -190,6 +220,7 @@ impl VillagerModel {
 
         Self {
             head,
+            nose,
             body,
             arms,
             right_leg,
@@ -214,12 +245,25 @@ impl VillagerModel {
         self.left_leg.rotation[0] = -leg_angle;
     }
 
+    /// Wiggles a witch's nose, or lifts it to sniff the item she holds (MCP
+    /// `ModelWitch.setRotationAngles`). `ticks` are the whole ticks lived.
+    pub fn set_witch_nose(&mut self, ticks: u32, entity_id: i32, holding: bool) {
+        self.nose.rotation = witch_nose_angles(ticks, entity_id, holding);
+        // `offsetY 0.1875` and `offsetZ -0.09375` blocks while holding.
+        self.nose.pivot = if holding {
+            [NOSE_PIVOT[0], NOSE_PIVOT[1] - 3.0, NOSE_PIVOT[2] - 1.5]
+        } else {
+            NOSE_PIVOT
+        };
+    }
+
     /// Emits all mesh vertices.
     #[must_use]
     pub fn emit_mesh(&self) -> Vec<ModelVertex> {
         let mut out = Vec::new();
         let root = Mat4::from_scale(Vec3::splat(1.0 / 16.0));
         self.head.emit(root, &mut out);
+        self.nose.emit(self.head.transform(root), &mut out);
         self.body.emit(root, &mut out);
         self.arms.emit(root, &mut out);
         self.right_leg.emit(root, &mut out);
@@ -244,5 +288,34 @@ impl VillagerModel {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_witch_wiggles_her_nose_and_lifts_it_to_drink() {
+        // Regression: the nose was part of the head and never moved.
+        let mut witch = VillagerModel::witch();
+        witch.set_witch_nose(0, 13, false);
+        let still = witch.emit_mesh();
+        witch.set_witch_nose(40, 13, false);
+        assert_ne!(witch.emit_mesh(), still);
+        witch.set_witch_nose(40, 13, true);
+        assert!((witch.nose.rotation[0] - 0.9).abs() < 1e-6);
+        assert_eq!(witch.nose.pivot, [0.0, -1.0, -1.5]);
+    }
+
+    #[test]
+    fn the_nose_hangs_where_it_did_on_the_head() {
+        // The nose box sits 1 pixel below the chin, 6 in front of the face.
+        let villager = VillagerModel::villager();
+        let low = villager
+            .nose
+            .transform(Mat4::IDENTITY)
+            .transform_point3(Vec3::new(-1.0, -3.0, -6.0));
+        assert_eq!(low, Vec3::new(-1.0, -1.0, -6.0));
     }
 }

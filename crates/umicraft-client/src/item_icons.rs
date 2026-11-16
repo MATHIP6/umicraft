@@ -143,6 +143,17 @@ impl ItemResources {
         Some((item_id, damage, nbt))
     }
 
+    /// The atlas layer of the picture a particle of an item shows (MCP
+    /// `ItemModelMesher.getParticleIcon`), for the pieces of a cracked item;
+    /// `None` for an item without a sprite model or a picture.
+    #[must_use]
+    pub fn particle_layer(&self, item_id: u16, damage: u16) -> Option<u32> {
+        let damageable =
+            items::lookup(i32::from(item_id)).is_some_and(items::ItemDef::is_damageable);
+        let model = self.models.model(item_id, damage, damageable)?;
+        self.atlas.layer(model.particle.as_deref()?)
+    }
+
     /// The texture layers the item models index.
     #[must_use]
     pub fn atlas(&self) -> &AtlasLayout {

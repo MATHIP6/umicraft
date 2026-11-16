@@ -133,18 +133,17 @@ impl WitherModel {
         }
     }
 
-    /// Sets head rotations and hover spine undulation.
-    pub fn set_angles(&mut self, anim_time: f32, head_yaw: f32, head_pitch: f32) {
-        let yaw_rad = head_yaw.to_radians();
-        let pitch_rad = head_pitch.to_radians();
-        self.center_head.rotation[1] = yaw_rad;
-        self.center_head.rotation[0] = -pitch_rad;
+    /// Turns the heads and breathes the spine (MCP
+    /// `ModelWither.setRotationAngles`).
+    ///
+    /// `age` is the ticks lived plus the partial tick (MCP `ageInTicks`); the
+    /// head angles are in degrees.
+    pub fn set_angles(&mut self, age: f32, head_yaw: f32, head_pitch: f32) {
+        self.center_head.rotation[1] = head_yaw.to_radians();
+        self.center_head.rotation[0] = -head_pitch.to_radians();
 
-        // Side heads look around slightly
-        let sway = (anim_time * 0.1).cos();
-        self.right_head.rotation[1] = yaw_rad + (anim_time * 0.5).sin() * 0.2;
-        self.left_head.rotation[1] = yaw_rad + (anim_time * 0.5 + 1.0).sin() * 0.2;
-
+        // The spine and tail breathe slowly with time.
+        let sway = (age * 0.1).cos();
         let spine_angle = (0.065 + 0.05 * sway) * std::f32::consts::PI;
         self.spine.rotation[0] = -spine_angle;
         self.tail.pivot = [
@@ -153,6 +152,19 @@ impl WitherModel {
             -0.5 + spine_angle.sin() * 10.0,
         ];
         self.tail.rotation[0] = -(0.265 + 0.1 * sway) * std::f32::consts::PI;
+    }
+
+    /// Turns the two side heads (MCP `ModelWither.setLivingAnimations`): `yaw`
+    /// relative to the torso and `pitch`, in degrees, right head first. The
+    /// vanilla pitch is negated for the flipped y.
+    pub fn set_side_heads(&mut self, yaw: [f32; 2], pitch: [f32; 2]) {
+        for (head, (yaw, pitch)) in [&mut self.right_head, &mut self.left_head]
+            .into_iter()
+            .zip(yaw.into_iter().zip(pitch))
+        {
+            head.rotation[1] = yaw.to_radians();
+            head.rotation[0] = -pitch.to_radians();
+        }
     }
 
     /// Emits the wither mesh vertices transformed into world units.
@@ -176,5 +188,21 @@ impl WitherModel {
 impl Default for WitherModel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_side_heads_look_their_own_way() {
+        let mut wither = WitherModel::new();
+        wither.set_angles(0.0, 0.0, 0.0);
+        wither.set_side_heads([30.0, -45.0], [10.0, 0.0]);
+        assert!((wither.right_head.rotation[1] - 30.0_f32.to_radians()).abs() < 1e-6);
+        assert!((wither.left_head.rotation[1] + 45.0_f32.to_radians()).abs() < 1e-6);
+        assert!((wither.right_head.rotation[0] + 10.0_f32.to_radians()).abs() < 1e-6);
+        assert_eq!(wither.center_head.rotation, [0.0; 3]);
     }
 }

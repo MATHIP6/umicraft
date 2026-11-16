@@ -52,10 +52,10 @@ pub use dragon::{DragonModel, FlightFrame};
 pub use enderman::EndermanModel;
 pub use endermite::EndermiteModel;
 pub use ghast::{GhastModel, RENDER_SCALE as GHAST_SCALE};
-pub use guardian::GuardianModel;
+pub use guardian::{GuardianLook, GuardianModel};
 pub use horse::{HorseLook, HorseModel};
 pub use humanoid::HumanoidModel;
-pub use iron_golem::IronGolemModel;
+pub use iron_golem::{triangle_wave, GolemAction, IronGolemModel};
 pub use ocelot::{OcelotModel, OcelotPose};
 pub use pose::{ArmPose, HumanoidPose};
 pub use quadruped::QuadrupedModel;
@@ -67,7 +67,7 @@ pub use slime::SlimeModel;
 pub use snowman::SnowmanModel;
 pub use spider::SpiderModel;
 pub use squid::SquidModel;
-pub use villager::VillagerModel;
+pub use villager::{witch_nose_angles, VillagerModel};
 pub use wither::WitherModel;
 pub use wolf::WolfModel;
 
@@ -709,6 +709,9 @@ pub enum TextureSlot {
     DragonBeam,
     /// The beam of a beacon (`entity/beacon_beam.png`), which scrolls up.
     BeaconBeam,
+    /// The beam of a guardian (`entity/guardian_beam.png`), which scrolls
+    /// along it and is drawn opaque in the tinted pipeline.
+    GuardianBeam,
     /// The sky layer of an end portal (`environment/end_sky.png`).
     EndSky,
     /// The swirl layers of an end portal (`entity/end_portal.png`).
@@ -780,6 +783,8 @@ pub enum TextureSlot {
     Ghast,
     /// Guardian texture.
     Guardian,
+    /// Elder guardian texture.
+    GuardianElder,
     /// Horse texture.
     Horse,
     /// Ocelot texture.
@@ -886,6 +891,13 @@ impl TextureSlot {
         )
     }
 
+    /// Whether the texture repeats past its edge: the glowing layers and the
+    /// guardian beam, whose coordinates scroll (`GL_REPEAT`).
+    #[must_use]
+    pub const fn repeats(self) -> bool {
+        self.is_additive() || matches!(self, Self::GuardianBeam)
+    }
+
     /// Whether this is an armour texture, which stays visible on an invisible
     /// entity.
     #[must_use]
@@ -942,6 +954,68 @@ mod tests {
         let model = ChickenModel::new();
         let mesh = model.emit_mesh();
         assert_eq!(mesh.len(), 288);
+    }
+
+    #[test]
+    fn the_cow_udder_hangs_under_the_belly_towards_the_rear() {
+        // Regression: the udder was drawn on the back of the cow.
+        let cow = QuadrupedModel::cow();
+        let transform = cow
+            .body
+            .transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)));
+        let bounds = |shape: &ModelBox| {
+            let mut mesh = Vec::new();
+            shape.emit_triangles(transform, &mut mesh);
+            let axis = |i: usize| {
+                let values = mesh.iter().map(|v| v.position[i]);
+                (
+                    values.clone().fold(f32::INFINITY, f32::min),
+                    values.fold(f32::NEG_INFINITY, f32::max),
+                )
+            };
+            (axis(1), axis(2))
+        };
+        let ((body_bottom, body_top), (body_front, body_rear)) = bounds(&cow.body.boxes[0]);
+        let ((udder_bottom, udder_top), (udder_front, udder_rear)) = bounds(&cow.body.boxes[1]);
+        assert!(
+            (udder_top - body_bottom).abs() < 1e-4,
+            "{udder_top} {body_bottom}"
+        );
+        assert!(udder_bottom < body_bottom && udder_top < body_top);
+        // MCP: the body spans z -8..10 and the udder z 4..10, in pixels.
+        assert!((body_front + 0.5).abs() < 1e-4 && (body_rear - 10.0 / 16.0).abs() < 1e-4);
+        assert!((udder_front - 0.25).abs() < 1e-4 && (udder_rear - 10.0 / 16.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn pig_and_sheep_bodies_span_the_mcp_extents() {
+        // Regression: the bodies kept the MCP boxes in a y-up frame, which
+        // swapped their front and rear faces.
+        let extents = |body: &ModelPart| {
+            let mut mesh = Vec::new();
+            body.emit(Mat4::from_scale(Vec3::splat(1.0 / 16.0)), &mut mesh);
+            let axis = |i: usize| {
+                let values = mesh.iter().map(|v| v.position[i] * 16.0);
+                (
+                    values.clone().fold(f32::INFINITY, f32::min),
+                    values.fold(f32::NEG_INFINITY, f32::max),
+                )
+            };
+            (axis(1), axis(2))
+        };
+        let close =
+            |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3;
+        // MCP y 5 + (-7..1) and z 2 + (-10..6), mirrored to y up.
+        let (y, z) = extents(&QuadrupedModel::pig().body);
+        assert!(
+            close(y, (6.0, 14.0)) && close(z, (-8.0, 8.0)),
+            "{y:?} {z:?}"
+        );
+        let (y, z) = extents(&SheepModel::new().body);
+        assert!(
+            close(y, (12.0, 18.0)) && close(z, (-8.0, 8.0)),
+            "{y:?} {z:?}"
+        );
     }
 
     #[test]
@@ -1045,5 +1119,60 @@ mod tests {
         assert!(!RabbitModel::new().emit_mesh().is_empty());
         assert!(!SilverfishModel::new().emit_mesh().is_empty());
         assert!(!WitherModel::new().emit_mesh().is_empty());
+    }
+
+    #[test]
+    fn every_mob_tilts_its_head_down_when_it_looks_down() {
+        // Regression: several models kept the MCP sign of the head pitch,
+        // but flipping y turns x rotations around (`pose.rs` negates them
+        // for the biped), so a pig, cow, sheep, chicken, creeper or snowman
+        // looking down raised its head.
+        macro_rules! pitch_of {
+            ($model:expr) => {{
+                let mut model = $model;
+                model.set_angles(0.0, 0.0, 0.0, 30.0);
+                model.head.rotation[0]
+            }};
+        }
+        let mut snowman = SnowmanModel::new();
+        snowman.set_angles(0.0, 30.0);
+        let pitches = [
+            ("cow", pitch_of!(QuadrupedModel::cow())),
+            ("pig", pitch_of!(QuadrupedModel::pig())),
+            ("sheep", pitch_of!(SheepModel::new())),
+            ("chicken", pitch_of!(ChickenModel::new())),
+            ("creeper", pitch_of!(CreeperModel::new())),
+            ("snowman", snowman.head.rotation[0]),
+            ("villager", pitch_of!(VillagerModel::villager())),
+            ("wolf", pitch_of!(WolfModel::new())),
+            ("spider", pitch_of!(SpiderModel::new())),
+            ("enderman", {
+                let mut enderman = EndermanModel::new();
+                enderman.set_pose(&HumanoidPose {
+                    head_pitch: 30.0,
+                    ..HumanoidPose::default()
+                });
+                enderman.head.rotation[0]
+            }),
+            ("iron golem", pitch_of!(IronGolemModel::new())),
+            ("ocelot", pitch_of!(OcelotModel::new())),
+        ];
+        for (name, pitch) in pitches {
+            assert!(
+                (pitch + 30.0_f32.to_radians()).abs() < 1e-5,
+                "{name}: {pitch}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sheep_steps_like_the_other_quadrupeds() {
+        // Regression: the sheep legs swung opposite to the pig and cow.
+        let mut sheep = SheepModel::new();
+        sheep.set_angles(1.0, 1.0, 0.0, 0.0);
+        let mut cow = QuadrupedModel::cow();
+        cow.set_angles(1.0, 1.0, 0.0, 0.0);
+        assert!((sheep.leg1.rotation[0] - cow.leg1.rotation[0]).abs() < 1e-6);
+        assert!((sheep.leg2.rotation[0] - cow.leg2.rotation[0]).abs() < 1e-6);
     }
 }

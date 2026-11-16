@@ -48,6 +48,7 @@ mod banner;
 mod name;
 mod potion;
 pub use potion::has_effects as potion_has_effects;
+pub(crate) use potion::{effect_name_key, elapsed_time};
 
 /// Registry name of the golden apple (`ItemAppleGold`).
 const GOLDEN_APPLE: &str = "golden_apple";

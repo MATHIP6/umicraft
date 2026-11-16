@@ -29,6 +29,7 @@ mod chest;
 mod crafting;
 mod decoration;
 mod dispenser;
+pub mod effect_list;
 mod enchanting;
 mod furnace;
 mod hopper;

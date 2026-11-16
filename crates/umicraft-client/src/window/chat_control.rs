@@ -10,9 +10,10 @@ use std::time::Instant;
 
 use umicraft_game::chat::{commands, on_click, ChatInput, ClickOutcome, TabOutcome};
 use winit::event::{ElementState, KeyEvent};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::KeyCode;
 
 use super::App;
+use crate::clipboard;
 use crate::game::GameEvent;
 use crate::screen::Screen;
 
@@ -23,16 +24,27 @@ pub(super) const CHAT_WHEEL_ROWS: isize = 7;
 /// The furthest the chat can be scrolled: more than the 100 messages kept.
 pub(super) const CHAT_SCROLL_MAX: isize = 2_000;
 
+/// Puts `text` on the clipboard, leaving it untouched when `text` is empty
+/// (copying an empty selection must not wipe what the user had copied).
+fn copy_to_clipboard(text: &str) {
+    if !text.is_empty() {
+        clipboard::write(text);
+    }
+}
+
 impl App {
     /// Handles a key press while the chat input is open.
     pub(super) fn handle_chat_key(&mut self, event: KeyEvent) {
-        let PhysicalKey::Code(code) = event.physical_key else {
+        let Some(code) = self.text_key_code(&event) else {
             return;
         };
         if event.state != ElementState::Pressed {
             return;
         }
-        let word = self.ctrl_held;
+        let (word, extend) = (self.ctrl_held, self.shift_held);
+        if self.ctrl_held && self.chat_shortcut(code) {
+            return;
+        }
         match code {
             KeyCode::Escape => self.set_screen(Screen::Chat.after_escape(self.options_origin)),
             KeyCode::Enter | KeyCode::NumpadEnter => self.submit_chat(),
@@ -43,10 +55,10 @@ impl App {
             KeyCode::PageDown => self.scroll_chat(-CHAT_PAGE),
             KeyCode::Backspace => self.chat_input.backspace(word),
             KeyCode::Delete => self.chat_input.delete(word),
-            KeyCode::ArrowLeft => self.chat_input.left(word),
-            KeyCode::ArrowRight => self.chat_input.right(word),
-            KeyCode::Home => self.chat_input.home(),
-            KeyCode::End => self.chat_input.end(),
+            KeyCode::ArrowLeft => self.chat_input.left(word, extend),
+            KeyCode::ArrowRight => self.chat_input.right(word, extend),
+            KeyCode::Home => self.chat_input.home(extend),
+            KeyCode::End => self.chat_input.end(extend),
             _ => {
                 // Control combinations are shortcuts, not text.
                 if !self.ctrl_held {
@@ -56,6 +68,25 @@ impl App {
                 }
             }
         }
+    }
+    /// Control+A, +C, +X, +V, +Z and +Y on the chat line (`GuiScreen.isKeyComboCtrl*`).
+    /// Returns whether `code` was one of them; the clipboard is the system's.
+    fn chat_shortcut(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::KeyA => self.chat_input.select_all(),
+            KeyCode::KeyC => copy_to_clipboard(&self.chat_input.selected_text()),
+            KeyCode::KeyX => copy_to_clipboard(&self.chat_input.cut()),
+            KeyCode::KeyV => {
+                if let Some(text) = clipboard::read() {
+                    self.chat_input.paste(&text);
+                }
+            }
+            KeyCode::KeyZ if self.shift_held => self.chat_input.redo(),
+            KeyCode::KeyZ => self.chat_input.undo(),
+            KeyCode::KeyY => self.chat_input.redo(),
+            _ => return false,
+        }
+        true
     }
     /// Opens the chat with `initial` already typed (`/` for the command key).
     pub(super) fn open_chat(&mut self, initial: &str) {
@@ -86,6 +117,18 @@ impl App {
                     self.send_event(GameEvent::LocalChat(listing));
                 }
             }
+        }
+    }
+    /// A left press in the open chat: on the input line it places the caret
+    /// or selects (click, double click, triple click, Shift+click); elsewhere
+    /// it acts on the chat run under the pointer.
+    pub(super) fn chat_press(&mut self) {
+        match self.chat_line {
+            Some(hit) if hit.inside => {
+                self.chat_input
+                    .press(hit.index, self.shift_held, Instant::now());
+            }
+            _ => self.chat_click(),
         }
     }
     /// Acts on a left click in the open chat: `run_command` sends,

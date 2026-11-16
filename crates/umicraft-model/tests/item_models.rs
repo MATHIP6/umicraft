@@ -132,6 +132,20 @@ fn a_block_item_uses_the_block_elements_and_a_lit_gui() {
 }
 
 #[test]
+fn a_particle_shows_the_particle_texture_or_the_first_sprite_layer() {
+    let set = set();
+    let sword = set.model(267, 0, true).expect("iron sword");
+    // A generated item falls back to `layer0`.
+    assert_eq!(sword.particle.as_deref(), Some("items/iron_sword"));
+    // A model without either has none; the real block models declare
+    // `particle` themselves.
+    let stone = set.model(1, 0, false).expect("stone");
+    assert_eq!(stone.particle, None);
+    let chest = set.model(54, 0, false).expect("chest");
+    assert_eq!(chest.particle, None);
+}
+
+#[test]
 fn builtin_entity_models_have_no_quads() {
     let set = set();
     let chest = set.model(54, 0, false).expect("chest");

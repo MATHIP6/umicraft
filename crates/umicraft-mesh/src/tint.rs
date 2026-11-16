@@ -2,7 +2,7 @@
 
 //! 1.8 biome tints for the grayscale grass, foliage and water textures.
 //!
-//! In 1.8 the grass block, the leaves, the vines and the tall grass use
+//! In 1.8 the grass block, the leaves (oak and acacia families, blocks 18 and 161), the vines and the tall grass use
 //! grayscale textures; the client multiplies them by a colour sampled from the
 //! biome (`ColorizerGrass`, `ColorizerFoliage`, `BiomeColorHelper`). The model
 //! format marks the affected faces with `tintindex`, and the world stores one
@@ -214,10 +214,86 @@ pub fn tint_class(state: BlockState) -> TintClass {
         2 => TintClass::Grass,
         31 if state.metadata() != 0 => TintClass::Grass,
         175 if matches!(state.metadata() & 3, 2 | 3) => TintClass::Grass,
-        18 | 106 => TintClass::Foliage,
+        18 if is_fixed_color_leaf(state) => TintClass::Untinted,
+        18 | 106 | 161 => TintClass::Foliage,
+        83 => TintClass::Grass,
         8 | 9 => TintClass::Water,
         _ => TintClass::Untinted,
     }
+}
+
+/// Vertex tint of a block state: a fixed colour (redstone power, spruce and
+/// birch leaves, stems), the biome colour of grass, foliage and water, or
+/// white.
+///
+/// Fixed colours do not depend on the biome, so they must not depend on the
+/// biome colormaps being available either.
+pub(crate) fn state_tint<S: BlockSource + ?Sized>(
+    source: &S,
+    state: BlockState,
+    x: i32,
+    z: i32,
+    tints: Option<&BiomeTints>,
+) -> u32 {
+    if let Some(rgb) = fixed_color(state) {
+        return pack(rgb);
+    }
+    tints.map_or(WHITE, |tints| {
+        biome_tint(source, tint_class(state), x, z, tints)
+    })
+}
+
+/// Block id of redstone wire (`BlockRedstoneWire`).
+const REDSTONE_WIRE: u16 = 55;
+
+/// Block ids of the pumpkin and melon stems (`BlockStem`).
+const STEMS: [u16; 2] = [104, 105];
+
+/// `ColorizerFoliage.getFoliageColorPine`: spruce leaves.
+const SPRUCE_LEAVES: [u8; 3] = [0x61, 0x99, 0x61];
+
+/// `ColorizerFoliage.getFoliageColorBirch`: birch leaves.
+const BIRCH_LEAVES: [u8; 3] = [0x80, 0xA7, 0x55];
+
+/// Whether an oak-family leaf block is the spruce or birch variant, which
+/// ignore the biome (`BlockOldLeaf.colorMultiplier`).
+fn is_fixed_color_leaf(state: BlockState) -> bool {
+    matches!(state.metadata() & 3, 1 | 2)
+}
+
+/// The biome-independent colour of a block state, if it has one.
+///
+/// Block fragments use it too (`EntityDiggingFX` multiplies by
+/// `colorMultiplier`), so a broken redstone wire sheds red particles.
+#[must_use]
+pub fn fixed_color(state: BlockState) -> Option<[u8; 3]> {
+    match state.id() {
+        REDSTONE_WIRE => Some(redstone_color(state.metadata())),
+        18 => match state.metadata() & 3 {
+            1 => Some(SPRUCE_LEAVES),
+            2 => Some(BIRCH_LEAVES),
+            _ => None,
+        },
+        id if STEMS.contains(&id) => Some(stem_color(state.metadata())),
+        _ => None,
+    }
+}
+
+/// Stem colour for a growth age (`BlockStem.getRenderColor`): green fading
+/// towards yellow-brown as it ripens.
+fn stem_color(age: u8) -> [u8; 3] {
+    let age = age & 7;
+    [age * 32, 255 - age * 8, age * 4]
+}
+
+/// Wire colour for a power level (`BlockRedstoneWire.colorMultiplier(int)`):
+/// dark red when unpowered, brightening to red-orange at 15.
+fn redstone_color(power: u8) -> [u8; 3] {
+    let level = f32::from(power.min(15)) / 15.0;
+    let red = if power == 0 { 0.3 } else { level * 0.6 + 0.4 };
+    let green = (level * level * 0.7 - 0.5).max(0.0);
+    let blue = (level * level * 0.6 - 0.7).max(0.0);
+    [red, green, blue].map(|channel| (channel * 255.0) as u8)
 }
 
 /// Samples the 3×3 biome-colour average at a block column.
@@ -375,11 +451,52 @@ mod tests {
         assert_eq!(tint_class(BlockState::new(175, 2)), TintClass::Grass);
         assert_eq!(tint_class(BlockState::new(175, 3)), TintClass::Grass);
         assert_eq!(tint_class(BlockState::new(18, 0)), TintClass::Foliage);
-        assert_eq!(tint_class(BlockState::new(18, 2)), TintClass::Foliage);
+        assert_eq!(tint_class(BlockState::new(18, 3)), TintClass::Foliage);
+        assert_eq!(tint_class(BlockState::new(18, 1)), TintClass::Untinted);
+        assert_eq!(tint_class(BlockState::new(18, 2)), TintClass::Untinted);
+        assert_eq!(tint_class(BlockState::new(83, 0)), TintClass::Grass);
         assert_eq!(tint_class(BlockState::new(106, 0)), TintClass::Foliage);
+        assert_eq!(tint_class(BlockState::new(161, 0)), TintClass::Foliage);
+        assert_eq!(tint_class(BlockState::new(161, 1)), TintClass::Foliage);
         assert_eq!(tint_class(BlockState::new(8, 0)), TintClass::Water);
         assert_eq!(tint_class(BlockState::new(9, 0)), TintClass::Water);
         assert_eq!(tint_class(BlockState::new(1, 0)), TintClass::Untinted);
+    }
+
+    #[test]
+    fn redstone_wire_is_tinted_by_power() {
+        // Values of `BlockRedstoneWire.colorMultiplier` at 0, 8 and 15.
+        assert_eq!(redstone_color(0), [76, 0, 0]);
+        assert_eq!(redstone_color(8), [183, 0, 0]);
+        assert_eq!(redstone_color(15), [255, 50, 0]);
+    }
+
+    #[test]
+    fn wire_tint_ignores_missing_colormaps() {
+        let grid = BiomeGrid { biome: 1 };
+        assert_eq!(
+            state_tint(&grid, BlockState::new(55, 15), 0, 0, None),
+            0x00FF_3200
+        );
+        assert_eq!(state_tint(&grid, BlockState::new(1, 0), 0, 0, None), WHITE);
+    }
+
+    #[test]
+    fn fixed_colours_ignore_the_biome_and_the_colormaps() {
+        let grid = BiomeGrid { biome: 1 };
+        let tint = |id, meta| state_tint(&grid, BlockState::new(id, meta), 0, 0, None);
+        assert_eq!(tint(18, 1), 0x0061_9961);
+        assert_eq!(tint(18, 2 | 8), 0x0080_A755);
+        assert_eq!(tint(18, 0), WHITE);
+        assert_eq!(tint(104, 0), 0x0000_FF00);
+        assert_eq!(tint(105, 7), 0x00E0_C71C);
+    }
+
+    #[test]
+    fn fixed_color_serves_block_fragments() {
+        // Regression: broken redstone wire shed white fragments.
+        assert_eq!(fixed_color(BlockState::new(55, 15)), Some([255, 50, 0]));
+        assert_eq!(fixed_color(BlockState::new(1, 0)), None);
     }
 
     struct BiomeGrid {

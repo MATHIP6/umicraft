@@ -18,8 +18,8 @@ use umicraft_game::chat::{ChatInput, SentHistory};
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_game::item_use::DropKind;
 use umicraft_render::{
-    chat_run_at, gui_scale, Camera, ChatInputView, HudState, NoIcons, Overlay, RenderEnvironment,
-    Renderer, ScreenOverlays, SkyState,
+    chat_input_hit, chat_run_at, gui_scale, Camera, ChatInputView, HudState, InputHit, NoIcons,
+    Overlay, RenderEnvironment, Renderer, ScreenOverlays, SkyState,
 };
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::menus::{ConnectStage, PanoramaTextures};
@@ -81,7 +81,7 @@ use crate::sky_textures::{load_border_texture, load_sky_textures};
 use crate::terrain_textures::TerrainTextures;
 use crate::texture_animator::TextureAnimator;
 use crate::ui_font::{self, LoadedFont};
-use crate::ui_input::UiInputTranslator;
+use crate::ui_input::{shortcut_code, UiInputTranslator};
 use crate::world_view::WorldView;
 use crate::zoom::Zoom;
 use umicraft_mesh::item::ItemMesh;
@@ -273,6 +273,8 @@ struct App {
     pointer: (f32, f32),
     /// The chat run under the pointer in the last frame (click and hover).
     chat_hover: Option<umicraft_render::ChatRunView>,
+    /// Where the pointer is on the chat input line, as of the last frame.
+    chat_line: Option<InputHit>,
     /// The pick block binding went down since the last input update.
     pick_block: bool,
     /// The drop key was pressed since the last input update.
@@ -462,6 +464,7 @@ impl App {
             particle_sprites: Vec::new(),
             pointer: (0.0, 0.0),
             chat_hover: None,
+            chat_line: None,
             pick_block: false,
             drop_item: None,
             toggle_perspective: false,
@@ -601,6 +604,20 @@ impl App {
             }
         }
         umicraft_core::boot_log!("apply_loaded_assets_completed");
+    }
+
+    /// The key of `event` as a text field reads it: with Control held, the
+    /// shortcut letters follow the layout (Control+A on an AZERTY keyboard is
+    /// not the key at the QWERTY `A`). Gameplay keys keep their position.
+    pub(super) fn text_key_code(&self, event: &KeyEvent) -> Option<KeyCode> {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return None;
+        };
+        Some(if self.ctrl_held {
+            shortcut_code(event, code)
+        } else {
+            code
+        })
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
@@ -793,7 +810,7 @@ impl App {
 
     /// Handles a key press while the game menu is open.
     fn handle_menu_key(&mut self, event: KeyEvent) {
-        let PhysicalKey::Code(code) = event.physical_key else {
+        let Some(code) = self.text_key_code(&event) else {
             return;
         };
         if code == KeyCode::Escape {
@@ -1194,6 +1211,7 @@ impl App {
             self.frame_hud.chat_input = chatting.then(|| ChatInputView {
                 text: self.chat_input.text(),
                 caret: self.chat_input.caret(),
+                selection: self.chat_input.selection(),
                 caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
                     .is_multiple_of(2),
             });
@@ -1220,6 +1238,18 @@ impl App {
             self.chat_hover = chatting
                 .then(|| chat_run_at(&self.frame_hud, (width, height), atlas, self.pointer))
                 .flatten();
+            self.chat_line = chatting.then(|| {
+                chat_input_hit(
+                    &self.chat_input.text(),
+                    (width, height),
+                    atlas,
+                    self.pointer,
+                )
+            });
+            if let Some(hit) = self.chat_line {
+                // The selection follows the pointer while the button is held.
+                self.chat_input.drag_to(hit.index);
+            }
             let rows = self
                 .chat_hover
                 .as_ref()
@@ -1283,8 +1313,10 @@ impl App {
                             // Vanilla toggles every 6 ticks (cursorCounter / 6 % 2).
                             caret_visible: (self.started.elapsed().as_millis() / 300)
                                 .is_multiple_of(2),
+                            effects: &world.hud().effects,
                         };
-                        let layout = CreativeLayout::new(width, height);
+                        let layout =
+                            CreativeLayout::for_effects(width, height, !scene.effects.is_empty());
                         self.portrait =
                             draw_creative_overlay(&mut self.ui, atlas, viewport, &layout, &scene);
                     }
@@ -1532,6 +1564,7 @@ impl App {
                 &mut self.particle_sprites,
                 environment.partial_tick,
                 self.camera.render_origin(),
+                self.items.as_deref(),
             );
             renderer.set_particles(&self.particle_sprites);
         }
@@ -1599,7 +1632,9 @@ impl App {
             let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
+            entity_textures.set_mob_appearance(world.mob_appearance(environment.partial_tick));
             entity_textures.set_camera_position(self.camera.relative_eye());
+            entity_textures.set_hand_swing(hand.swing);
             entity_textures.set_cull_view(self.camera.relative_eye(), self.camera.forward());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
@@ -2055,11 +2090,11 @@ impl ApplicationHandler for App {
                     self.inventory_button(state, button);
                     self.creative_button(state, button);
                 } else if screen.blocks_game_input() {
-                    if screen == Screen::Chat
-                        && button == MouseButton::Left
-                        && state == ElementState::Pressed
-                    {
-                        self.chat_click();
+                    if screen == Screen::Chat && button == MouseButton::Left {
+                        match state {
+                            ElementState::Pressed => self.chat_press(),
+                            ElementState::Released => self.chat_input.release(),
+                        }
                     }
                 } else {
                     self.handle_game_mouse(state, button);

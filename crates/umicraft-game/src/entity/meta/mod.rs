@@ -72,6 +72,11 @@ pub enum Variant {
     Ocelot(OcelotMeta),
     /// Rabbit coat.
     Rabbit(RabbitMeta),
+    /// Bat roosting flag (entry 16, bit 0).
+    Bat {
+        /// True while the bat hangs upside down from a ceiling.
+        hanging: bool,
+    },
     /// Pig saddle (entry 16).
     Pig {
         /// True when the pig wears a saddle.
@@ -79,10 +84,25 @@ pub enum Variant {
     },
     /// Enderman carried block and scream.
     Enderman(EndermanMeta),
-    /// Wither spawn countdown (entry 20), the ticks of invulnerability left.
+    /// Wither spawn countdown (entry 20) and the targets of its side heads
+    /// (entries 18 and 19).
     Wither {
-        /// `0` for a wither that is not being spawned.
+        /// The ticks of invulnerability left, `0` for a wither that is not
+        /// being spawned.
         invulnerable: i32,
+        /// The entity each side head watches, `0` for none
+        /// (`EntityWither.getWatchedTargetId(1)` and `(2)`).
+        targets: [i32; 2],
+    },
+    /// Guardian flags (entry 16) and the entity it beams at (entry 17).
+    Guardian {
+        /// It swims along (`func_175472_n`, flag 2): spikes in, tail fast.
+        moving: bool,
+        /// An elder guardian (flag 4): bigger, with its own texture.
+        elder: bool,
+        /// The entity it watches and beams at, `0` for none
+        /// (`EntityGuardian.getTargetedEntity`).
+        target: i32,
     },
     /// Ghast charging a fireball (entry 16).
     Ghast {
@@ -126,6 +146,7 @@ impl EntityMeta {
             EntityKind::Ocelot => animals::apply_ocelot(&mut variant, metadata),
             EntityKind::Rabbit => animals::apply_rabbit(&mut variant, metadata),
             EntityKind::Pig => animals::apply_pig(&mut variant, metadata),
+            EntityKind::Bat => animals::apply_bat(&mut variant, metadata),
             EntityKind::Horse => horse::apply(&mut variant, metadata),
             EntityKind::Slime | EntityKind::MagmaCube => {
                 monsters::apply_slime(&mut variant, metadata);
@@ -138,6 +159,7 @@ impl EntityMeta {
             EntityKind::Enderman => monsters::apply_enderman(&mut variant, metadata),
             EntityKind::Ghast => monsters::apply_ghast(&mut variant, metadata),
             EntityKind::Wither => monsters::apply_wither(&mut variant, metadata),
+            EntityKind::Guardian => monsters::apply_guardian(&mut variant, metadata),
             EntityKind::WitherSkull => monsters::apply_wither_skull(&mut variant, metadata),
             EntityKind::Boat | EntityKind::Minecart => {
                 monsters::apply_vehicle(&mut variant, metadata)

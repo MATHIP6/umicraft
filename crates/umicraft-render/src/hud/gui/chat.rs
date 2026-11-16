@@ -17,6 +17,9 @@ use crate::hud::{ChatRunView, HudState};
 
 /// The wrapped rows `GuiNewChat` keeps (`field_146253_i` is cut at 100).
 const MAX_ROWS: usize = 100;
+/// The highlight behind the selected text of the input line, the blue
+/// `GuiTextField.drawCursorVertical` inverts the text against.
+const SELECTION: Color = [0.0, 0.0, 1.0, 0.85];
 
 impl Piece for ChatRunView {
     fn text(&self) -> &str {
@@ -101,6 +104,36 @@ fn visible_window(state: &HudState, total: usize) -> (usize, usize, usize) {
     };
     let end = total - scroll;
     (end.saturating_sub(limit), end, scroll)
+}
+
+/// Where the pointer is on the chat input line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputHit {
+    /// The character boundary nearest to the pointer's x.
+    pub index: usize,
+    /// Whether the pointer is over the line itself; a drag that left it still
+    /// has an index.
+    pub inside: bool,
+}
+
+/// The place of `pointer` (physical pixels from the top-left) on the input
+/// line holding `text`, laid out as [`draw_chat`] does: the bar spans
+/// `(2, h - 14)` to `(w - 2, h - 2)` in GUI units and the text starts 4 units
+/// from the left.
+#[must_use]
+pub fn chat_input_hit(
+    text: &str,
+    viewport: (u32, u32),
+    font: &FontAtlas,
+    pointer: (f32, f32),
+) -> InputHit {
+    let sf = gui_scale(viewport.0, viewport.1) as f32;
+    let (gw, gh) = (viewport.0 as f32 / sf, viewport.1 as f32 / sf);
+    let (x, y) = (pointer.0 / sf, pointer.1 / sf);
+    InputHit {
+        index: font.x_to_char_index(text, x - 4.0, 1.0),
+        inside: (2.0..gw - 2.0).contains(&x) && (gh - 14.0..gh - 2.0).contains(&y),
+    }
 }
 
 /// The run of the open chat under `pointer` (`GuiNewChat.getChatComponent`).
@@ -216,6 +249,21 @@ pub(super) fn draw_chat(
 
         // `GuiTextField`: 0xE0E0E0 with a shadow, at (4, h - 12).
         let text = &input.text;
+        if let Some((start, end)) = input.selection {
+            let x = |index: usize| {
+                let before: String = text.chars().take(index).collect();
+                4.0 + font.measure(&before, 1.0)
+            };
+            list.rect(
+                Rect::new(
+                    x(start) * sf,
+                    (gh - 13.0) * sf,
+                    (x(end) - x(start)) * sf,
+                    10.0 * sf,
+                ),
+                SELECTION,
+            );
+        }
         let ink: Color = [0.878, 0.878, 0.878, 1.0];
         list.text(
             [(4.0 + 1.0) * sf, (gh - 12.0 + 1.0) * sf],
@@ -362,6 +410,7 @@ mod tests {
             chat_input: Some(ChatInputView {
                 text: "\u{e9}\u{e9}x".to_string(),
                 caret: 1,
+                selection: None,
                 caret_visible: true,
             }),
             ..HudState::default()
@@ -369,6 +418,26 @@ mod tests {
         // A byte slice at the character index 1 would panic inside "\u{e9}".
         draw_chat(&mut list, &state, 320.0, 180.0, 2.0, &font);
         assert!(!list.is_empty());
+    }
+
+    #[test]
+    fn a_selection_adds_one_highlight_and_counts_characters() {
+        let font = FontAtlas::fallback();
+        let commands = |selection| {
+            let mut list = DrawList::new();
+            let state = HudState {
+                chat_input: Some(ChatInputView {
+                    text: "\u{e9}\u{e9}x".to_string(),
+                    caret: 1,
+                    selection,
+                    caret_visible: false,
+                }),
+                ..HudState::default()
+            };
+            draw_chat(&mut list, &state, 320.0, 180.0, 2.0, &font);
+            list.len()
+        };
+        assert_eq!(commands(Some((1, 3))), commands(None) + 1);
     }
 
     #[test]
@@ -404,5 +473,23 @@ mod tests {
             shown(&tail, first, end),
             shown(&everything, all_first, all_end)
         );
+    }
+
+    #[test]
+    fn the_input_hit_maps_the_pointer_to_a_character_boundary() {
+        let font = FontAtlas::fallback();
+        // Scale 2 at 640x480: the bar is y 452..476 in pixels, text at x 8.
+        let x = (4.0 + font.measure("ab", 1.0)) * 2.0 + 0.5;
+        let hit = chat_input_hit("abcd", (640, 480), &font, (x, 460.0));
+        assert_eq!(
+            hit,
+            InputHit {
+                index: 2,
+                inside: true
+            }
+        );
+        let hit = chat_input_hit("abcd", (640, 480), &font, (x, 100.0));
+        assert!(!hit.inside, "a drag above the line still has an index");
+        assert_eq!(hit.index, 2);
     }
 }

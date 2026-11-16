@@ -10,6 +10,7 @@
 //! client at every window size.
 
 use umicraft_game::inventory::creative::tabs::{WINDOW_HEIGHT, WINDOW_WIDTH};
+use umicraft_ui::screens::effect_list::shifted_gui_left;
 use umicraft_ui::screens::gui_scale;
 use umicraft_ui::Rect;
 
@@ -29,15 +30,40 @@ impl CreativeLayout {
     /// The layout for a display of `width` by `height` physical pixels.
     #[must_use]
     pub fn new(width: u32, height: u32) -> Self {
+        Self::placed(width, height, |scaled_width| {
+            (scaled_width - WINDOW_WIDTH) / 2
+        })
+    }
+
+    /// The layout moved right for the potion effect list, as
+    /// `InventoryEffectRenderer.updateActivePotionEffects` does while the
+    /// player has an effect (`GuiContainerCreative` extends it).
+    #[must_use]
+    pub fn beside_effects(width: u32, height: u32) -> Self {
+        Self::placed(width, height, |scaled_width| {
+            shifted_gui_left(scaled_width, WINDOW_WIDTH)
+        })
+    }
+
+    /// [`Self::beside_effects`] when the player has an effect, else
+    /// [`Self::new`].
+    #[must_use]
+    pub fn for_effects(width: u32, height: u32, has_effects: bool) -> Self {
+        if has_effects {
+            Self::beside_effects(width, height)
+        } else {
+            Self::new(width, height)
+        }
+    }
+
+    /// The layout with `guiLeft` given by `left(scaled_width)`.
+    fn placed(width: u32, height: u32, left: impl Fn(i32) -> i32) -> Self {
         let scale = gui_scale(width, height);
         let scaled = |pixels: u32| i32::try_from(pixels.div_ceil(scale)).unwrap_or(i32::MAX);
         let (scaled_width, scaled_height) = (scaled(width), scaled(height));
         Self {
             scale,
-            origin: (
-                (scaled_width - WINDOW_WIDTH) / 2,
-                (scaled_height - WINDOW_HEIGHT) / 2,
-            ),
+            origin: (left(scaled_width), (scaled_height - WINDOW_HEIGHT) / 2),
             scaled: (scaled_width, scaled_height),
             display: (width as f32, height as f32),
         }
@@ -93,6 +119,14 @@ mod tests {
             layout.rect(0, 0, 195, 136),
             Rect::new(232.0, 104.0, 390.0, 272.0)
         );
+    }
+
+    #[test]
+    fn beside_the_effect_list_the_window_moves_and_clicks_follow() {
+        // 427 scaled pixels: guiLeft 160 + (427 - 195 - 200) / 2 = 176.
+        let layout = CreativeLayout::beside_effects(854, 480);
+        assert_eq!(layout.rect(0, 0, 1, 1), Rect::new(352.0, 104.0, 2.0, 2.0));
+        assert_eq!(layout.local((352.0, 104.0)), (0, 0));
     }
 
     #[test]

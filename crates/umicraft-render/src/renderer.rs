@@ -480,6 +480,10 @@ pub struct Renderer {
     glint_batches: BatchBuffer,
     /// Invisible entities a spectator sees, drawn translucent.
     ghost_batches: BatchBuffer,
+    /// The elder guardian apparition, drawn translucent with depth.
+    apparition_batches: BatchBuffer,
+    /// The guardian beams, opaque and coloured by their tint.
+    tinted_batches: BatchBuffer,
     /// The shadows under the entities.
     shadow_batches: BatchBuffer,
     /// Cached uniforms to avoid redundant `queue.write_buffer` transfers when uniforms are unchanged.
@@ -1199,6 +1203,8 @@ impl Renderer {
             additive_batches: BatchBuffer::default(),
             glint_batches: BatchBuffer::default(),
             ghost_batches: BatchBuffer::default(),
+            apparition_batches: BatchBuffer::default(),
+            tinted_batches: BatchBuffer::default(),
             shadow_batches: BatchBuffer::default(),
             last_camera_uniform: None,
             last_local_uniform: None,
@@ -2577,6 +2583,19 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
         self.ghost_batches.set(&self.device, &self.queue, batches);
     }
 
+    /// Uploads the guardian beams: opaque, unlit vertices whose light word
+    /// is their red, green and blue.
+    pub fn upload_tinted_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.tinted_batches.set(&self.device, &self.queue, batches);
+    }
+
+    /// Uploads the elder guardian apparition (its model, translucent by the
+    /// opacity bits of its vertices, writing depth).
+    pub fn upload_apparition_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
+        self.apparition_batches
+            .set(&self.device, &self.queue, batches);
+    }
+
     /// Uploads the enchantment glint of worn armour: the same vertices as the
     /// armour, drawn only where the armour wrote its depth.
     pub fn upload_glint_entities(&mut self, batches: &[(&[EntityVertex], &wgpu::BindGroup)]) {
@@ -2611,6 +2630,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
         self.additive_batches.clear();
         self.glint_batches.clear();
         self.ghost_batches.clear();
+        self.apparition_batches.clear();
+        self.tinted_batches.clear();
         self.shadow_batches.clear();
     }
 
@@ -3199,12 +3220,29 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                 .render(&mut pass, &self.local_camera_bind_group, batches);
         }
 
+        // The guardian beams, opaque like the entities they join.
+        if !self.tinted_batches.is_empty() {
+            let batches = self.tinted_batches.iter();
+            self.entity_renderer
+                .render_tinted(&mut pass, &self.local_camera_bind_group, batches);
+        }
+
         // The invisible entities a spectator sees, over the opaque ones.
         if !self.ghost_batches.is_empty() {
             draw_stats.entities += self.ghost_batches.batch_count();
             let batches = self.ghost_batches.iter();
             self.entity_renderer
                 .render_ghosts(&mut pass, &self.local_camera_bind_group, batches);
+        }
+
+        // The elder guardian apparition, a particle drawn after the entities.
+        if !self.apparition_batches.is_empty() {
+            let batches = self.apparition_batches.iter();
+            self.entity_renderer.render_apparition(
+                &mut pass,
+                &self.local_camera_bind_group,
+                batches,
+            );
         }
 
         // The glow of the entities is added over them, without writing depth.

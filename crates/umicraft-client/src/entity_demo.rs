@@ -455,13 +455,15 @@ pub(crate) fn make_snapshot(
         fishing: false,
         riding: false,
         leash: None,
+        beam: None,
         flight: None,
         squish: 0.0,
         squid: Default::default(),
         horse: None,
+        mob: umicraft_game::entity::MobPose::None,
         ridden: false,
         block_lights: std::sync::Arc::default(),
-        rod_tip: None,
+        tied_to_hand: false,
         local: false,
         ghost_visible: false,
         flags: EntityFlags::new(0, 0x7F),
@@ -1215,8 +1217,10 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
             snapshot.light = umicraft_world::LightLevel { block: 3, sky: 0 };
         }
         if look == Look::Spawning {
-            snapshot.meta.variant =
-                umicraft_game::entity::meta::Variant::Wither { invulnerable: 150 };
+            snapshot.meta.variant = umicraft_game::entity::meta::Variant::Wither {
+                invulnerable: 150,
+                targets: [0; 2],
+            };
         }
         if look == Look::Spectator {
             snapshot.spectator = true;

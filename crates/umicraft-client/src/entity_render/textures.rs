@@ -28,7 +28,7 @@ use super::mobs::skin_slot;
 use super::player::posed_player;
 use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
-use super::{mesh_entities_with, mesh_entities_with_into, MeshedEntities};
+use super::mesh_entities_with;
 use crate::map_render::{map_arm_vertices, MapBatch};
 
 /// Loads official textures from the jar if available, or falls back to procedural assets.
@@ -94,55 +94,20 @@ pub struct EntityTextures {
     shadows_enabled: Cell<bool>,
     /// Where the camera is, for the distance at which a shadow fades.
     camera: Cell<glam::Vec3>,
+    /// The swing progress of the first-person arm, which the line of the
+    /// local player's bobber follows.
+    hand_swing: Cell<f32>,
+    /// How far through its 30 ticks the elder guardian that haunts the screen
+    /// is, `None` when it does not.
+    appearance: Cell<Option<f32>>,
     /// What the player sees, to leave out the entities that are not in view.
     cull_view: Cell<Option<super::cull::CullView>>,
     /// The chests of the frame, meshed by the block-entity renderer and drawn
     /// with the entities (P7c). Taken by the next upload.
     block_entities: RefCell<BlockEntityMeshes>,
-    /// Pooled entity vertex batch maps reused across frames to avoid
-    /// reallocating 5 `HashMap<TextureSlot, Vec<EntityVertex>>` on every frame.
-    meshed_pool: RefCell<MeshedEntities>,
-    /// Reusable scratch vector for batch descriptors to avoid 5 Vec allocations per frame.
-    batch_scratch: RefCell<Vec<(*const [EntityVertex], *const wgpu::BindGroup)>>,
 }
 
 impl EntityTextures {
-    /// Populates `scratch` with batch descriptors from `map`, then returns a slice
-    /// matching `&[(&[EntityVertex], &wgpu::BindGroup)]`.
-    #[allow(unsafe_code)]
-    fn fill_batch_scratch<'a>(
-        scratch: &'a mut Vec<(*const [EntityVertex], *const wgpu::BindGroup)>,
-        map: &'a HashMap<TextureSlot, Vec<EntityVertex>>,
-        textures: &'a HashMap<TextureSlot, EntityTexture>,
-        extra: &'a [MapBatch],
-    ) -> &'a [(&'a [EntityVertex], &'a wgpu::BindGroup)] {
-        scratch.clear();
-        for (slot, verts) in map.iter() {
-            if !verts.is_empty() {
-                if let Some(tex) = textures.get(slot) {
-                    scratch.push((
-                        verts.as_slice() as *const [EntityVertex],
-                        tex.bind_group() as *const wgpu::BindGroup,
-                    ));
-                }
-            }
-        }
-        for b in extra {
-            scratch.push((
-                b.vertices.as_slice() as *const [EntityVertex],
-                &b.bind_group as *const wgpu::BindGroup,
-            ));
-        }
-        // SAFETY: (*const [EntityVertex], *const wgpu::BindGroup) has identical layout
-        // and alignment to (&'a [EntityVertex], &'a wgpu::BindGroup). The references
-        // borrowed from `map`, `textures`, and `extra` are valid for lifetime `'a`.
-        unsafe {
-            std::slice::from_raw_parts(
-                scratch.as_ptr() as *const (&'a [EntityVertex], &'a wgpu::BindGroup),
-                scratch.len(),
-            )
-        }
-    }
     /// Loads all entity textures from the verified jar or procedural fallbacks.
     #[must_use]
     pub fn load(renderer: &Renderer) -> Self {
@@ -150,8 +115,9 @@ impl EntityTextures {
         let mut textures = HashMap::new();
         for spec in texture_specs() {
             let (rgba, w, h) = load_or_fallback(jar.as_ref(), spec.jar_path, spec.fallback);
-            // The glowing layers scroll their coordinates past the edge.
-            let texture = if spec.slot.is_additive() {
+            // The glowing layers and the guardian beam scroll their
+            // coordinates past the edge.
+            let texture = if spec.slot.repeats() {
                 renderer.create_repeating_entity_texture(&rgba, w, h)
             } else {
                 renderer.create_entity_texture(&rgba, w, h)
@@ -169,9 +135,9 @@ impl EntityTextures {
             viewer_is_spectator: Cell::new(false),
             shadows_enabled: Cell::new(true),
             camera: Cell::new(glam::Vec3::ZERO),
+            hand_swing: Cell::new(0.0),
+            appearance: Cell::new(None),
             block_entities: RefCell::default(),
-            meshed_pool: RefCell::default(),
-            batch_scratch: RefCell::new(Vec::with_capacity(32)),
         }
     }
 
@@ -225,6 +191,18 @@ impl EntityTextures {
     /// still drawn.
     pub fn set_camera_position(&self, position: glam::Vec3) {
         self.camera.set(position);
+    }
+
+    /// Sets the swing progress of the first-person arm (`HandPose::swing`),
+    /// where the line of the local player's bobber ties in first person.
+    pub fn set_hand_swing(&self, swing: f32) {
+        self.hand_swing.set(swing);
+    }
+
+    /// Sets how far through its life the elder guardian that haunts the screen
+    /// is (`0..=1`, MCP `MobAppearance`), or `None` for none.
+    pub fn set_mob_appearance(&self, progress: Option<f32>) {
+        self.appearance.set(progress);
     }
 
     /// Hands over the tile-entity vertices of this frame, which the next
@@ -350,57 +328,52 @@ impl EntityTextures {
         self.skins
             .borrow_mut()
             .collect(renderer, &mut self.textures.borrow_mut());
-        let mut meshed = self.meshed_pool.borrow_mut();
-        mesh_entities_with_into(
+        let eye = super::Eye {
+            position: self.camera.get(),
+            yaw: self.view_yaw.get(),
+            pitch: self.view_pitch.get(),
+            hand_swing: self.hand_swing.get(),
+        };
+        let mut meshed = mesh_entities_with(
             snapshots,
             self,
-            (self.view_yaw.get(), self.view_pitch.get()),
+            eye,
             self.viewer_is_spectator.get(),
-            (self.camera.get(), self.cull_view.get()),
-            &mut meshed,
+            self.cull_view.get(),
         );
-        {
-            let mut block_entities = self.block_entities.borrow_mut();
-            for (slot, vertices) in &mut block_entities.solid {
-                if !vertices.is_empty() {
-                    meshed.solid.entry(*slot).or_default().append(vertices);
-                }
-            }
-            for (slot, vertices) in &mut block_entities.additive {
-                if !vertices.is_empty() {
-                    meshed.additive.entry(*slot).or_default().append(vertices);
-                }
-            }
-            self.banners.borrow_mut().ensure(
-                &block_entities.banners,
-                &mut self.textures.borrow_mut(),
-                self.jar.as_ref(),
-                renderer,
-            );
-            block_entities.banners.clear();
+        let apparition = self.appearance.get().map(|progress| {
+            super::appearance::elder_guardian(
+                self,
+                self.camera.get(),
+                (self.view_yaw.get(), self.view_pitch.get()),
+                progress,
+            )
+        });
+        let block_entities = self.block_entities.take();
+        for (slot, vertices) in block_entities.solid {
+            meshed.solid.entry(slot).or_default().extend(vertices);
         }
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
-        let mut scratch = self.batch_scratch.borrow_mut();
-
-        let solid = Self::fill_batch_scratch(&mut scratch, &meshed.solid, &textures, extra);
-        renderer.upload_entities(solid);
-
-        let additive = Self::fill_batch_scratch(&mut scratch, &meshed.additive, &textures, &[]);
-        renderer.upload_additive_entities(additive);
-
-        let glint = Self::fill_batch_scratch(&mut scratch, &meshed.glint, &textures, &[]);
-        renderer.upload_glint_entities(glint);
-
-        let ghost = Self::fill_batch_scratch(&mut scratch, &meshed.ghost, &textures, &[]);
-        renderer.upload_ghost_entities(ghost);
-
+        let mut solid = bound_batches(&meshed.solid, &textures);
+        solid.extend(extra.iter().map(|b| (b.vertices.as_slice(), &b.bind_group)));
+        renderer.upload_entities(&solid);
+        let additive = bound_batches(&meshed.additive, &textures);
+        renderer.upload_additive_entities(&additive);
+        let glint = bound_batches(&meshed.glint, &textures);
+        renderer.upload_glint_entities(&glint);
+        let ghost = bound_batches(&meshed.ghost, &textures);
+        renderer.upload_ghost_entities(&ghost);
+        renderer.upload_tinted_entities(&bound_batches(&meshed.tinted, &textures));
+        let apparition = apparition
+            .as_ref()
+            .map_or_else(Vec::new, |meshes| bound_batches(meshes, &textures));
+        renderer.upload_apparition_entities(&apparition);
         if !self.shadows_enabled.get() {
             meshed.shadows.clear();
         }
-        let shadows = Self::fill_batch_scratch(&mut scratch, &meshed.shadows, &textures, &[]);
-        renderer.upload_shadow_entities(shadows);
-        scratch.clear();
+        let shadows = bound_batches(&meshed.shadows, &textures);
+        renderer.upload_shadow_entities(&shadows);
     }
 
     /// The face of the skin at `url` for a tab list head, once it is downloaded,
@@ -427,9 +400,9 @@ impl EntityTextures {
         let meshed = mesh_entities_with(
             std::slice::from_ref(body),
             self,
-            (0.0, 0.0),
+            super::Eye::default(),
             false,
-            (Vec3::ZERO, None),
+            None,
         );
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
@@ -481,6 +454,23 @@ impl EntityTextures {
             self.textures.borrow_mut().insert(*slot, texture);
         }
     }
+}
+
+/// The batches of `meshes` that have vertices, each with the bind group of
+/// its texture; a slot whose texture is not loaded is left out.
+fn bound_batches<'a>(
+    meshes: &'a HashMap<TextureSlot, Vec<EntityVertex>>,
+    textures: &'a HashMap<TextureSlot, EntityTexture>,
+) -> Vec<(&'a [EntityVertex], &'a wgpu::BindGroup)> {
+    meshes
+        .iter()
+        .filter(|(_, verts)| !verts.is_empty())
+        .filter_map(|(slot, verts)| {
+            textures
+                .get(slot)
+                .map(|tex| (verts.as_slice(), tex.bind_group()))
+        })
+        .collect()
 }
 
 /// The texture of the first-person arm, whether its model is slim and the

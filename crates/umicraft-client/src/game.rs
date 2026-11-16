@@ -24,7 +24,6 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::entity_render::fishing::first_person_tip;
 use crate::pack_offer::ServerPackRequest;
 use crate::social_view;
 use glam::{DVec3, Vec3};
@@ -35,6 +34,7 @@ use umicraft_game::combat::{hurt_roll, ClickViewer, HitStar};
 use umicraft_game::digging::{
     enchantment_level, Digger, AQUA_AFFINITY, DEPTH_STRIDER, HASTE, MINING_FATIGUE,
 };
+use umicraft_game::entity::guardian_beam::{aim_guardians, BeamTarget};
 use umicraft_game::entity::leash::{leash_entities, LeashFrame};
 use umicraft_game::entity::light::{eye_light, light_entities};
 use umicraft_game::entity::nametag::mob_tag;
@@ -54,7 +54,9 @@ use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::{WindowKind, WindowManager, WindowView};
 use umicraft_game::item_use::{drop_item, DoorToggle, DropKind, ItemUse, UseAction, UseTick};
 use umicraft_game::movement::movement_stats;
-use umicraft_game::particles::{EffectContext, SpawnFilter};
+use umicraft_game::particles::{
+    is_bite_tick, Eater, EffectContext, ParticleKind, SpawnFilter, SpawnRequest,
+};
 use umicraft_game::physics::{DEFAULT_FLY_SPEED, DEFAULT_WALK_SPEED, SPRINT_FOOD_LIMIT};
 use umicraft_game::pick::{pick_block as pick_in, picked_item};
 use umicraft_game::piston::{motion, MovingBlocks};
@@ -68,7 +70,7 @@ use umicraft_game::server::maps::MapStore;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
 use umicraft_game::shapes::Aabb;
-use umicraft_game::sound::cue::SoundCue;
+use umicraft_game::sound::cue::{CueCategory, SoundCue};
 use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::traffic::{ServerView, SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::view::{camera_pose, Perspective};
@@ -1164,6 +1166,7 @@ impl Game {
             vitals: self.hud_view.views().vitals.clone(),
             bar: self.hud_view.views().bar,
             held_name: self.hud_view.views().held_name.clone(),
+            effects: self.hud_view.views().effects.clone(),
             ping_ms: self.local_ping_ms(),
             ..HudState::default()
         }
@@ -1710,6 +1713,7 @@ fn player_view(game: &Game) -> Option<(RenderState, bool)> {
         visible: hand_visible,
         shows_arm: game.hand.pose().shows_arm && hand_visible,
         item_use: game.item_use.view(),
+        fishing: game.body.bobber.is_some(),
         ..game.hand.pose()
     };
     Some((view, followed.is_none()))
@@ -1766,21 +1770,12 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         entities.push(game.body.frame_data());
     }
     // The line of the bobber of the local player ties to their rod, which is
-    // not among the frames from the first person.
+    // not among the frames from the first person: the render thread places
+    // that end from the camera of the frame.
     if first_person && !game.perspective.shows_player() {
-        let body = game.body.frame_data();
-        let feet = view.position - DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
-        let tip = feet
-            + first_person_tip(
-                game.yaw.to_degrees(),
-                game.pitch.to_degrees(),
-                game.body.animation.swing_progress_at(1.0),
-                body.flags.is_sneaking(),
-            )
-            .as_dvec3();
         for bobber in &mut entities {
             if bobber.kind == EntityKind::FishHook && bobber.object_data == game.entity_id {
-                bobber.rod_tip = Some(tip);
+                bobber.tied_to_hand = true;
             }
         }
     }
@@ -1801,6 +1796,17 @@ fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_time: Insta
         hanging: false,
     };
     leash_entities(&mut entities, Some((EntityId(game.entity_id), me)));
+    // The guardians beam at the local player too, from the feet of the two
+    // last ticks (the view is the orbit camera in the third person).
+    let me = game.state.as_ref().map(|state| {
+        let target = BeamTarget::of_feet(
+            state.previous_position(),
+            state.player().position,
+            umicraft_game::physics::PLAYER_HEIGHT,
+        );
+        (EntityId(game.entity_id), target)
+    });
+    aim_guardians(&mut entities, me);
     let hand_light = game.world.as_ref().map_or(LightLevel::FULL_SKY, |world| {
         rail_entities(world, &mut entities);
         light_entities(world, &mut entities);
@@ -2129,6 +2135,7 @@ fn apply_net_event(
             game.world = Some(World::new(info.dimension));
             game.dirty.clear();
             game.entities.clear();
+            game.body.bobber = None;
             game.entity_id = info.entity_id;
             game.hardcore = info.gamemode & 8 != 0;
             game.absorption = 0.0;
@@ -2336,6 +2343,8 @@ fn apply_net_event(
                 .as_ref()
                 .is_none_or(|world| world.dimension() != dimension);
             game.server.on_respawn(changed);
+            // `handleRespawn` makes a new player, without a bobber.
+            game.body.bobber = None;
             if changed {
                 // `handleRespawn` builds the new world with the type of the
                 // packet; a same-dimension respawn keeps the old one.
@@ -2478,6 +2487,7 @@ fn apply_net_event(
                 vel,
                 o.data,
             );
+            hook_local_angler(game, EntityId(o.entity_id), o.object_type, o.data);
         }
         // MCP `handleCollectItem`: the collected entity flies to the collector
         // in three ticks and leaves the world. The pop is not played.
@@ -2521,6 +2531,13 @@ fn apply_net_event(
         }
         PlayEvent::DestroyEntities(d) => {
             game.entities.destroy(&d.entity_ids);
+            if game
+                .body
+                .bobber
+                .is_some_and(|bobber| d.entity_ids.contains(&bobber.0))
+            {
+                game.body.bobber = None;
+            }
         }
         PlayEvent::EntityRelativeMove(m) => {
             let delta = DVec3::new(
@@ -2627,6 +2644,7 @@ fn apply_net_event(
                     state.on_local_player_status(status.status);
                 }
             }
+            spawn_status_particles(game, EntityId(status.entity_id), status.status);
             game.entities
                 .status(EntityId(status.entity_id), status.status);
         }
@@ -2723,6 +2741,8 @@ fn apply_net_event(
             game.server.apply_game_state(&packet);
             if packet.reason == GAMEMODE_REASON {
                 set_gamemode(game, GameMode::from_state_value(packet.value));
+            } else if packet.reason == ELDER_GUARDIAN_CURSE_REASON {
+                haunt(game);
             }
         }
         PlayEvent::BlockAction(packet) => {
@@ -2736,6 +2756,39 @@ fn apply_net_event(
             apply_trade_list(game, &packet.data, frames);
         }
         other => apply_server_state(&mut game.server, &other),
+    }
+}
+
+/// The `Change Game State` reason of the elder guardian curse (MCP
+/// `NetHandlerPlayClient.handleChangeGameState`: reason 10).
+const ELDER_GUARDIAN_CURSE_REASON: u8 = 10;
+
+/// The curse of an elder guardian: its apparition swings in front of the
+/// player and the curse sounds (MCP `handleChangeGameState`, reason 10).
+fn haunt(game: &mut Game) {
+    let Some(feet) = game.state.as_ref().map(GameState::position) else {
+        return;
+    };
+    if let Some(filter) = particle_filter(game) {
+        game.particles.spawn(
+            &SpawnRequest {
+                kind: ParticleKind::MobAppearance,
+                arguments: &[],
+                ignore_range: true,
+                position: feet,
+                velocity: DVec3::ZERO,
+            },
+            &filter,
+        );
+    }
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues([SoundCue {
+            name: std::borrow::Cow::Borrowed("mob.guardian.curse"),
+            pos: [feet.x, feet.y, feet.z],
+            volume: 1.0,
+            pitch: 1.0,
+            category: CueCategory::Hostile,
+        }]);
     }
 }
 
@@ -2867,6 +2920,71 @@ fn spawn_ambient_particles(game: &mut Game) {
     );
     if let Some(state) = game.state.as_mut() {
         state.queue_sound_cues(rain);
+    }
+}
+
+/// Creates the particles the mobs give off by themselves this tick (blaze
+/// smoke, enderman sparks, potion swirls...) and the puffs of the bodies whose
+/// death fall ended. Run after the entities moved and before the particles
+/// tick, as `Minecraft.runTick` updates the world before the effect renderer.
+fn spawn_mob_particles(game: &mut Game) {
+    let (Some(filter), Some(world)) = (particle_filter(game), game.world.as_ref()) else {
+        game.entities.drain_deaths().for_each(drop);
+        return;
+    };
+    for entity in game.entities.entities().values() {
+        game.particles.spawn_mob_tick(entity, world, &filter);
+        if let Some(end) = game.entities.beam_end(entity) {
+            game.particles.spawn_beam_bubbles(entity, end, &filter);
+        }
+    }
+    for body in game.entities.drain_deaths() {
+        game.particles.spawn_death_puff(&body, &filter);
+    }
+}
+
+/// The crumbs of the local player's own meal (MCP
+/// `EntityPlayer.updateItemUse`): the stored entities make theirs in
+/// `spawn_mob_particles`, but the local body is not stored, so its use state
+/// comes from `item_use`.
+fn spawn_local_crumbs(game: &mut Game) {
+    let Some(view) = game.item_use.view() else {
+        return;
+    };
+    if view.action != UseAction::Eat || !is_bite_tick(view.count as u32) {
+        return;
+    }
+    let (Some(filter), Some(state), Some(food)) = (
+        particle_filter(game),
+        game.state.as_ref(),
+        game.windows.selected_item(),
+    ) else {
+        return;
+    };
+    let eater = Eater {
+        eyes: state.player().eye_position(),
+        yaw: game.yaw.to_degrees(),
+        pitch: game.pitch.to_degrees(),
+    };
+    let id = food.item_id.unsigned_abs();
+    let damage = food.damage.unsigned_abs();
+    game.particles.spawn_crumbs(&eater, id, damage, &filter);
+    // The server relays the bite sound to the other players only.
+    let cue = game.particles.bite_cue(state.position());
+    if let Some(state) = game.state.as_mut() {
+        state.queue_sound_cues([cue]);
+    }
+}
+
+/// The particles of an `Entity Status` for another entity (MCP
+/// `handleStatusUpdate`): hearts, smoke, the witch's magic, the spawner puff.
+fn spawn_status_particles(game: &mut Game, id: EntityId, status: i8) {
+    let (Some(filter), Some(world)) = (particle_filter(game), game.world.as_ref()) else {
+        return;
+    };
+    if let Some(entity) = game.entities.entities().get(&id) {
+        game.particles
+            .spawn_mob_status(entity, status, world, &filter);
     }
 }
 
@@ -3432,6 +3550,18 @@ fn run_use(game: &mut Game, queue: &mut CommandQueue) {
     }
 }
 
+/// Registers the bobber `id` on the local player when they cast it (MCP
+/// `NetHandlerPlayClient.handleSpawnObject`: the angler of a new bobber gets
+/// it as `fishEntity`, the local player included). The entity store does not
+/// hold the local player, so it cannot do it: without this the rod of the
+/// local player never shows its cast model.
+fn hook_local_angler(game: &mut Game, id: EntityId, object_type: u8, angler: i32) {
+    if EntityKind::from_object_type(object_type) == EntityKind::FishHook && angler == game.entity_id
+    {
+        game.body.bobber = Some(id);
+    }
+}
+
 /// MCP `BlockDoor.onBlockActivated` runs on the client too: the door swings at
 /// once and the player hears it. The server sends that sound to everyone but
 /// the player who clicked (`playAuxSFXAtEntity`), so the clicking client has
@@ -3798,9 +3928,18 @@ fn tick(
     report_flight(game, was_flying, queue);
     follow_body(game);
     tick_overlays(game);
+    if let Some(state) = game.state.as_ref() {
+        // A mob may watch the local player, whose body is not in the store.
+        game.entities
+            .set_viewer(EntityId(game.entity_id), state.position());
+    }
     game.entities.tick();
     if let Some(world) = game.world.as_ref() {
         game.entities.tick_objects(world);
+    }
+    spawn_mob_particles(game);
+    spawn_local_crumbs(game);
+    if let Some(world) = game.world.as_ref() {
         game.particles.tick(world);
     }
     combat::tick_emitters(game);
@@ -4395,6 +4534,36 @@ mod tests {
             run_ticks(&mut game, &mut queue, 1);
         }
         assert_eq!(slots_in(&queue), [3]);
+    }
+
+    #[test]
+    fn the_elder_guardian_curse_haunts_the_player() {
+        // Regression: game state 10 did nothing, so no elder guardian showed.
+        use umicraft_game::particles::Behaviour;
+        use umicraft_protocol::packets::play::clientbound::ChangeGameState;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(16);
+        let change = |reason, value| PlayEvent::ChangeGameState(ChangeGameState { reason, value });
+        // Rain is not a curse.
+        handle_net(&mut game, change(1, 0.0), &mut queue, &frames);
+        assert!(game.particles.is_empty());
+        handle_net(&mut game, change(10, 0.0), &mut queue, &frames);
+        let apparition = game
+            .particles
+            .particles(umicraft_game::particles::Layer::Lit, false)
+            .iter()
+            .chain(
+                game.particles
+                    .particles(umicraft_game::particles::Layer::Lit, true),
+            )
+            .find(|particle| particle.behaviour == Behaviour::MobAppearance)
+            .expect("the apparition");
+        assert_eq!(apparition.position, DVec3::new(0.5, 64.0, 0.5));
+        let cues = game.state.as_mut().expect("placed").drain_sound_cues();
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].name, "mob.guardian.curse");
     }
 
     #[test]
@@ -5101,6 +5270,38 @@ mod tests {
         let snapshot = &game.entities.snapshots(0.0)[0];
         let item = snapshot.item.as_ref().expect("stack");
         assert_eq!((item.item_id, item.count), (264, 1));
+    }
+
+    #[test]
+    fn a_bobber_of_the_local_player_casts_their_rod_until_it_is_destroyed() {
+        use umicraft_protocol::packets::play::clientbound::DestroyEntities;
+
+        let mut game = game_on_floor_with(BlockState::AIR);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        let own = game.entity_id;
+        // Someone else's bobber does not cast the rod of the local player.
+        handle_net(
+            &mut game,
+            spawn_object_event(40, 90, own + 1),
+            &mut queue,
+            &frames,
+        );
+        assert!(!player_view(&game).expect("view").0.effects.hand.fishing);
+        handle_net(
+            &mut game,
+            spawn_object_event(41, 90, own),
+            &mut queue,
+            &frames,
+        );
+        assert_eq!(game.body.bobber, Some(EntityId(41)));
+        assert!(player_view(&game).expect("view").0.effects.hand.fishing);
+        assert!(game.body.frame_data().fishing, "the third person rod too");
+        let destroy = PlayEvent::DestroyEntities(DestroyEntities {
+            entity_ids: vec![41],
+        });
+        handle_net(&mut game, destroy, &mut queue, &frames);
+        assert_eq!(game.body.bobber, None);
     }
 
     #[test]
@@ -5964,6 +6165,52 @@ mod tests {
     }
 
     #[test]
+    fn the_local_player_eating_throws_crumbs_on_the_bite_ticks() {
+        // Regression: the local player's own meal showed no crumbs.
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 10.0;
+        game.windows.apply_set_slot(0, 36, wire_item(297, 0));
+        game.input.use_item = true;
+        let mut queue = CommandQueue::default();
+        click_use(&mut game, &mut queue);
+        let mut bites = Vec::new();
+        for _ in 0..40 {
+            let Some(view) = game.item_use.view() else {
+                break;
+            };
+            let before = game.particles.len();
+            spawn_local_crumbs(&mut game);
+            if game.particles.len() > before {
+                bites.push(view.count as u32);
+            }
+            run_use(&mut game, &mut queue);
+        }
+        assert_eq!(bites, [24, 20, 16, 12, 8, 4]);
+    }
+
+    #[test]
+    fn the_local_player_eating_bites_out_loud() {
+        // Regression: the local player's own meal made no sound.
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.food = 10.0;
+        game.windows.apply_set_slot(0, 36, wire_item(297, 0));
+        game.input.use_item = true;
+        let mut queue = CommandQueue::default();
+        click_use(&mut game, &mut queue);
+        let mut bites = 0;
+        for _ in 0..40 {
+            if game.item_use.view().is_none() {
+                break;
+            }
+            spawn_local_crumbs(&mut game);
+            let cues = game.state.as_mut().unwrap().drain_sound_cues();
+            bites += cues.iter().filter(|c| c.name == "random.eat").count();
+            run_use(&mut game, &mut queue);
+        }
+        assert_eq!(bites, 6);
+    }
+
+    #[test]
     fn the_server_finishing_the_meal_ends_the_use() {
         let mut game = game_on_floor_with(BlockState::AIR);
         game.food = 10.0;
@@ -5982,6 +6229,38 @@ mod tests {
         );
         handle_net(&mut game, status, &mut queue, &frames);
         assert!(!game.item_use.is_using());
+    }
+
+    fn game_with_mob(mob_type: u8) -> Game {
+        let mut game = game_on_floor_with(BlockState::AIR);
+        game.entities.spawn_mob(
+            EntityId(7),
+            mob_type,
+            DVec3::new(2.5, 64.0, 2.5),
+            0.0,
+            0.0,
+            0.0,
+            glam::Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        game
+    }
+
+    #[test]
+    fn a_blaze_near_the_player_smokes_every_tick() {
+        // Regression: no mob gave off its own particles.
+        let mut game = game_with_mob(61);
+        spawn_mob_particles(&mut game);
+        assert_eq!(game.particles.len(), 2);
+    }
+
+    #[test]
+    fn an_animal_in_love_shows_hearts() {
+        let mut game = game_with_mob(92);
+        let mut queue = CommandQueue::default();
+        let (frames, _received) = mpsc::sync_channel(8);
+        handle_net(&mut game, hurt_status(7, 18), &mut queue, &frames);
+        assert_eq!(game.particles.len(), 7);
     }
 
     fn hurt_status(entity_id: i32, status: i8) -> PlayEvent {

@@ -13,32 +13,23 @@ use std::borrow::Cow;
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::{EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_game::hand::bow_model_name;
+use umicraft_game::item_use::FISHING_ROD;
 use umicraft_game::items::{self, ItemKind, ToolKind};
 use umicraft_mesh::item::ItemStyle;
 use umicraft_model::display::DisplayContext;
-use umicraft_model::entity::ModelPart;
+use umicraft_model::entity::{witch_nose_angles, ModelPart};
 use umicraft_model::item::pose::held_pose;
 use umicraft_model::item::ItemModel;
 use umicraft_model::ModelQuad;
 
-use super::{quads_of, sprite_model, world_light, ItemLayers, BOW};
+use super::{quads_of, sprite_model, world_light, ItemLayers, BOW, FISHING_ROD_CAST};
 use crate::entity_render::{body_matrix, posed_humanoid_mob, posed_player, x_mirror, WITCH_SCALE};
 use crate::item_icons::ItemResources;
 
-/// The fishing rod item id.
-const FISHING_ROD: i16 = 346;
-/// The model of a rod with a bobber out (`ItemModelMesher` name).
-const FISHING_ROD_CAST: &str = "fishing_rod_cast";
 /// The carrot on a stick item id, the other item that turns around in a hand.
 const CARROT_ON_A_STICK: i16 = 398;
 /// Stick, bone and blaze rod: the plain items `Item.setFull3D` marks.
 const FULL_3D_PLAIN: [i16; 3] = [280, 352, 369];
-/// The x rotation of the witch's nose while she holds an item, in radians
-/// (MCP `ModelWitch.setRotationAngles`, `field_82900_g`).
-const WITCH_NOSE_PITCH: f32 = -0.9;
-/// Nose wobble about z, in degrees, and the per-entity speed of its phase.
-const WITCH_NOSE_ROLL_DEGREES: f32 = 2.5;
-const WITCH_NOSE_SPEED: f32 = 0.01;
 /// The nose pivot lies 2 model units above the neck, which is 24 up in this
 /// crate's y-up models (`villagerNose.setRotationPoint(0, -2, 0)`).
 const WITCH_NOSE_PIVOT: [f32; 3] = [0.0, 26.0, 0.0];
@@ -68,7 +59,7 @@ pub(super) fn push(
         tints: &tints,
     };
     let glint = resources.glints(stack.item_id, stack.damage, stack.nbt.as_deref());
-    layers.push(quads, &pose, &style, glint);
+    layers.push_world_lit(quads, &pose, &style, glint);
 }
 
 /// The stack the layer draws: a player with a bobber out holds a plain rod
@@ -185,11 +176,9 @@ fn hand_offset(entity: &EntityRenderSnapshot, item_id: i16) -> Mat4 {
 /// angles only, not those of the head it hangs on. The nose is pitched while
 /// she holds something and wobbles about z with the age of the entity.
 fn witch_frame(entity: &EntityRenderSnapshot, item_id: i16) -> Mat4 {
-    let phase = WITCH_NOSE_SPEED * (entity.id.0.rem_euclid(10)) as f32;
-    let roll = (entity.age * phase).cos() * WITCH_NOSE_ROLL_DEGREES.to_radians();
     let mut nose = ModelPart::new(WITCH_NOSE_PIVOT);
-    // Vanilla angles `(x, y, z)` are `(-x, y, -z)` in the y-up models.
-    nose.rotation = [-WITCH_NOSE_PITCH, 0.0, -roll];
+    // The same angles as the drawn nose (`ModelWitch`), with the item held.
+    nose.rotation = witch_nose_angles(entity.age.floor() as u32, entity.id.0, true);
     let nose = nose.transform(Mat4::from_scale(Vec3::splat(1.0 / 16.0)))
         * Mat4::from_scale(Vec3::splat(16.0))
         * y_flip();

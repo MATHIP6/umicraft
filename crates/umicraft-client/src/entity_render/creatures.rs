@@ -4,12 +4,13 @@
 //! golems, bosses).
 
 use umicraft_game::entity::meta::Variant;
-use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
+use umicraft_game::entity::mob_state::WitherHeads;
+use umicraft_game::entity::{EntityKind, EntityRenderSnapshot, MobPose};
 use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{
-    BatModel, BlazeModel, CreeperModel, DragonModel, EndermiteModel, GhastModel, GuardianModel,
-    ModelVertex, SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot, WitherModel,
-    GHAST_SCALE,
+    BatModel, BlazeModel, CreeperModel, DragonModel, EndermiteModel, GhastModel, GuardianLook,
+    GuardianModel, ModelVertex, SilverfishModel, SlimeModel, SnowmanModel, SquidModel, TextureSlot,
+    WitherModel, GHAST_SCALE,
 };
 
 use super::animals::with_eyes;
@@ -31,6 +32,7 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         swing,
         head_yaw,
         head_pitch,
+        age,
         ..
     } = pose;
     Some(match kind {
@@ -42,7 +44,9 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             one(TextureSlot::Slime, vertices)
         }
         EntityKind::MagmaCube => {
-            let mut vertices = SlimeModel::magma_cube(1.0).emit_inner_mesh();
+            let mut model = SlimeModel::magma_cube(1.0);
+            model.set_squish(ent.squish);
+            let mut vertices = model.emit_inner_mesh();
             squash(&mut vertices, ent);
             one(TextureSlot::MagmaCube, vertices)
         }
@@ -59,12 +63,13 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         }
         EntityKind::Bat => {
             let mut model = BatModel::new();
-            model.set_angles(swing);
+            let hanging = matches!(ent.meta.variant, Variant::Bat { hanging: true });
+            model.set_angles(age, head_yaw, head_pitch, hanging);
             one(TextureSlot::Bat, model.emit_mesh())
         }
         EntityKind::Blaze => {
             let mut model = BlazeModel::new();
-            model.set_angles(swing, head_yaw, head_pitch);
+            model.set_angles(age, head_yaw, head_pitch);
             one(TextureSlot::Blaze, model.emit_mesh())
         }
         EntityKind::Dragon => {
@@ -100,7 +105,7 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
         }
         EntityKind::Endermite => {
             let mut model = EndermiteModel::new();
-            model.set_angles(swing);
+            model.set_angles(age);
             one(TextureSlot::Endermite, model.emit_mesh())
         }
         EntityKind::Ghast => {
@@ -119,20 +124,41 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             )
         }
         EntityKind::Guardian => {
-            let mut model = GuardianModel::new();
-            model.set_angles(swing);
-            one(TextureSlot::Guardian, model.emit_mesh())
+            let elder = matches!(ent.meta.variant, Variant::Guardian { elder: true, .. });
+            let (mut model, slot) = if elder {
+                (GuardianModel::elder(), TextureSlot::GuardianElder)
+            } else {
+                (GuardianModel::new(), TextureSlot::Guardian)
+            };
+            let swim = match ent.mob {
+                MobPose::Guardian(swim) => swim,
+                _ => Default::default(),
+            };
+            let look = GuardianLook {
+                tail: swim.tail,
+                extension: swim.extension,
+                eye: swim.eye,
+            };
+            model.set_angles(age, head_yaw, head_pitch, look);
+            one(slot, model.emit_mesh())
         }
         EntityKind::Silverfish => {
             let mut model = SilverfishModel::new();
-            model.set_angles(swing);
+            model.set_angles(age);
             one(TextureSlot::Silverfish, model.emit_mesh())
         }
         EntityKind::Wither => {
+            let side_heads = match ent.mob {
+                MobPose::Wither(heads) => heads,
+                _ => WitherHeads::default(),
+            };
+            // The side heads turn relative to the torso.
+            let side_yaw = side_heads.yaw.map(|yaw| yaw - ent.body_yaw);
             let mut model = WitherModel::new();
-            model.set_angles(swing, head_yaw, head_pitch);
+            model.set_angles(age, head_yaw, head_pitch);
+            model.set_side_heads(side_yaw, side_heads.pitch);
             let invulnerable = match ent.meta.variant {
-                Variant::Wither { invulnerable } => invulnerable,
+                Variant::Wither { invulnerable, .. } => invulnerable,
                 _ => 0,
             };
             let scale = wither_scale(invulnerable);
@@ -143,7 +169,8 @@ pub(super) fn creature_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<
             // armour (MCP `LayerWitherAura`, `EntityWither.isArmored`).
             if ent.meta.living.health <= WITHER_ARMORED_HEALTH {
                 let mut aura = WitherModel::aura();
-                aura.set_angles(swing, head_yaw, head_pitch);
+                aura.set_angles(age, head_yaw, head_pitch);
+                aura.set_side_heads(side_yaw, side_heads.pitch);
                 let mut aura_mesh = aura.emit_mesh();
                 scale_mesh(&mut aura_mesh, scale);
                 layers.push(glowing(
@@ -246,6 +273,43 @@ fn creeper_swell(flash: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hovering_and_writhing_mobs_move_while_standing_still() {
+        // Regression: these models took the limb swing where MCP passes
+        // `ageInTicks`, so a mob that does not walk (a hovering blaze, a
+        // flying bat) was frozen.
+        let still = Pose {
+            swing: 0.0,
+            amount: 0.0,
+            head_yaw: 0.0,
+            head_pitch: 0.0,
+            age: 0.0,
+        };
+        for kind in [
+            EntityKind::Blaze,
+            EntityKind::Bat,
+            EntityKind::Silverfish,
+            EntityKind::Endermite,
+            EntityKind::Guardian,
+            EntityKind::Wither,
+        ] {
+            let ent = EntityRenderSnapshot::new(
+                umicraft_game::entity::EntityId(1),
+                kind,
+                glam::Vec3::ZERO,
+            );
+            let mesh = |age| {
+                let layers = creature_layers(&ent, Pose { age, ..still });
+                layers
+                    .and_then(|l| l.into_iter().next())
+                    .map(|l| l.vertices)
+            };
+            let (early, later) = (mesh(0.0), mesh(3.0));
+            assert!(early.is_some(), "{kind:?} has no model");
+            assert_ne!(early, later, "{kind:?} is frozen");
+        }
+    }
 
     #[test]
     fn a_stretched_slime_is_taller_and_thinner() {

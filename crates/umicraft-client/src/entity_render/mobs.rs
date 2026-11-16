@@ -33,6 +33,9 @@ pub(super) struct Pose {
     /// Head yaw relative to the body, in degrees.
     pub(super) head_yaw: f32,
     pub(super) head_pitch: f32,
+    /// Ticks lived plus the partial tick (MCP `ageInTicks`): drives the
+    /// idle motion of the models that move without walking.
+    pub(super) age: f32,
 }
 
 impl Pose {
@@ -42,6 +45,7 @@ impl Pose {
             amount: ent.limb_swing_amount,
             head_yaw: wrap_degrees(ent.head_yaw - ent.body_yaw),
             head_pitch: ent.pitch,
+            age: ent.age,
         }
     }
 }

@@ -77,12 +77,28 @@ pub(super) fn push(
         Pose::Sprite(frame) => frame * context_pose(model, DisplayContext::Ground),
     };
     let tints = resources.tints(item.item_id, item.damage, None);
+    let lit = takes_item_lights(entity.kind);
     let style = ItemStyle {
         atlas: resources.atlas(),
-        light: world_light(entity.light, false),
+        light: world_light(entity.light, !lit),
         tints: &tints,
     };
-    layers.push(quads, &matrix, &style, false);
+    if lit {
+        layers.push_world_lit(quads, &matrix, &style, false);
+    } else {
+        layers.push(quads, &matrix, &style, false);
+    }
+}
+
+/// Whether an object of `kind` is lit by the item lights of the entity pass
+/// rather than by the face shade of the world.
+///
+/// `RenderFallingBlock` turns the lights off and keeps the face shade baked
+/// in the block quads; the sprites (`RenderItem`), the primed TNT and the
+/// blocks of the carts (`renderBlockBrightness`) replace that colour, so the
+/// lights alone shade them.
+fn takes_item_lights(kind: EntityKind) -> bool {
+    kind != EntityKind::FallingBlock
 }
 
 /// The item an object shows and the pose that places it.
@@ -309,6 +325,19 @@ mod tests {
         cart.object_data = 2;
         let furnace = matrix(&cart_block(&cart).unwrap().1).transform_point3(Vec3::ZERO);
         assert!((chest.y - furnace.y - 0.75 * 2.0 / 16.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn only_a_falling_block_keeps_the_face_shade_of_the_world() {
+        assert!(!takes_item_lights(EntityKind::FallingBlock));
+        for kind in [
+            EntityKind::Snowball,
+            EntityKind::PrimedTnt,
+            EntityKind::Minecart,
+            EntityKind::SmallFireball,
+        ] {
+            assert!(takes_item_lights(kind), "{kind:?}");
+        }
     }
 
     #[test]

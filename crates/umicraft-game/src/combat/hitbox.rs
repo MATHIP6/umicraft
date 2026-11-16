@@ -11,7 +11,7 @@
 
 use glam::DVec3;
 
-use crate::entity::meta::Variant;
+use crate::entity::meta::{EntityMeta, Variant};
 use crate::entity::painting::ARTS;
 use crate::entity::{EntityKind, EntityRecord};
 use crate::shapes::Aabb;
@@ -30,6 +30,10 @@ const END_CRYSTAL: u8 = 51;
 const LARGE_FIREBALL: u8 = 63;
 const SMALL_FIREBALL: u8 = 64;
 const WITHER_SKULL: u8 = 66;
+
+/// Elder guardian size (MCP `EntityGuardian.setElder`, `setSize(1.9975F,
+/// 1.9975F)`).
+const ELDER_GUARDIAN: (f64, f64) = (1.9975, 1.9975);
 
 /// Armour stand size (MCP `EntityArmorStand`, `setSize(0.5F, 1.975F)`).
 const ARMOR_STAND: (f64, f64) = (0.5, 1.975);
@@ -52,7 +56,7 @@ pub fn hitbox(entity: &EntityRecord) -> Option<Aabb> {
         EntityKind::LeashKnot => return Some(knot_box(entity)),
         _ => {}
     }
-    let (width, height) = size(entity)?;
+    let (width, height) = body_size(entity)?;
     let half = width / 2.0 + COLLISION_BORDER;
     let feet = entity.position;
     Some(Aabb::new(
@@ -69,19 +73,21 @@ pub fn hitbox(entity: &EntityRecord) -> Option<Aabb> {
 /// collision border (MCP `Entity.width`, `Entity.height`).
 #[must_use]
 pub fn body_size(entity: &EntityRecord) -> Option<(f64, f64)> {
-    size(entity)
+    size_of(entity.kind, &entity.meta)
 }
 
-/// The width and height of an entity that can be targeted.
-fn size(entity: &EntityRecord) -> Option<(f64, f64)> {
-    match entity.kind {
+/// [`body_size`] of an entity of `kind` with `meta`, for the frames of the
+/// render thread, which carry no [`EntityRecord`].
+#[must_use]
+pub fn size_of(kind: EntityKind, meta: &EntityMeta) -> Option<(f64, f64)> {
+    match kind {
         EntityKind::Item | EntityKind::Arrow | EntityKind::FishHook | EntityKind::Dragon => None,
-        EntityKind::ArmorStand => match entity.meta.variant {
+        EntityKind::ArmorStand => match meta.variant {
             Variant::ArmorStand(stand) if stand.flags & 16 != 0 => None,
             _ => Some(ARMOR_STAND),
         },
         EntityKind::Slime | EntityKind::MagmaCube => {
-            let side = match entity.meta.variant {
+            let side = match meta.variant {
                 Variant::Slime(size) => 0.6 * f64::from(size),
                 _ => 0.6,
             };
@@ -109,8 +115,11 @@ fn size(entity: &EntityRecord) -> Option<(f64, f64)> {
         | EntityKind::FireworkRocket
         | EntityKind::XpOrb
         | EntityKind::Lightning => None,
+        EntityKind::Guardian if matches!(meta.variant, Variant::Guardian { elder: true, .. }) => {
+            Some(ELDER_GUARDIAN)
+        }
         kind => {
-            let scale = if entity.meta.baby { CHILD_SCALE } else { 1.0 };
+            let scale = if meta.baby { CHILD_SCALE } else { 1.0 };
             Some((
                 f64::from(kind.width()) * scale,
                 f64::from(kind.height()) * scale,
@@ -242,6 +251,22 @@ mod tests {
         let child = hitbox(&pig).unwrap();
         assert!(child.max.y < adult.max.y);
         assert!((child.max.y - (0.45 + 0.1)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn an_elder_guardian_is_bigger_than_a_guardian() {
+        // Regression: the elder had the 0.85 box of a guardian.
+        let mut guardian = record(EntityKind::Guardian, DVec3::ZERO);
+        assert_eq!(
+            body_size(&guardian),
+            Some((f64::from(0.85_f32), f64::from(0.85_f32)))
+        );
+        guardian.meta.variant = Variant::Guardian {
+            moving: false,
+            elder: true,
+            target: 0,
+        };
+        assert_eq!(body_size(&guardian), Some((1.9975, 1.9975)));
     }
 
     #[test]

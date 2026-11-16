@@ -76,6 +76,9 @@ pub struct ItemUseView {
 /// The bow item id.
 const BOW: i16 = 261;
 
+/// The fishing rod item id.
+pub const FISHING_ROD: i16 = 346;
+
 /// The potion item id; a splash potion (bit 14 of the damage) is thrown
 /// instead (MCP `ItemPotion.isSplash`).
 const POTION: i16 = 373;
@@ -421,6 +424,10 @@ impl ItemUse {
             output
                 .packets
                 .push(Outgoing::UseItem { item: item.clone() });
+            // MCP `ItemFishingRod.onItemRightClick` runs on the client too and
+            // swings the arm at the cast and at the retrieve (no other item's
+            // `onItemRightClick` does); the server only shows it to the others.
+            output.swing |= item.item_id == FISHING_ROD;
             self.start(tick, item);
         }
     }
@@ -614,6 +621,26 @@ mod tests {
         assert_eq!(output.packets, vec![Outgoing::UseItem { item: bread }]);
         assert!(!output.swing);
         assert!(state.is_using());
+    }
+
+    #[test]
+    fn casting_or_retrieving_a_fishing_rod_swings_the_arm() {
+        let (mut state, mut interaction) = (ItemUse::new(), Interaction::new());
+        let rod = item(FISHING_ROD, 0);
+        let output = run(&mut state, &mut interaction, &tick(Some(&rod), true, true));
+        assert_eq!(
+            output.packets,
+            vec![Outgoing::UseItem { item: rod.clone() }]
+        );
+        assert!(output.swing, "the rod swings the arm");
+        assert!(!state.is_using(), "the rod is not held in use");
+        // A click on a block the rod cannot place on falls through to the use.
+        let mut on_block = tick(Some(&rod), true, true);
+        on_block.target = Some(hit());
+        let mut state = ItemUse::new();
+        let output = run(&mut state, &mut interaction, &on_block);
+        assert!(output.swing);
+        assert!(output.packets.contains(&Outgoing::UseItem { item: rod }));
     }
 
     #[test]

@@ -23,6 +23,7 @@ use umicraft_game::hud::{
     bottom_bar, vitals_view, BottomBar, FlashFrame, HealthFlash, HeldIdentity, HeldNameTracker,
     HeldNameView, HorseJump, HurtResistance, Riding, VitalsInput, VitalsView,
 };
+use umicraft_game::inventory::effect_list::{effect_lines, EffectLine};
 use umicraft_game::inventory::tooltip::tooltip;
 use umicraft_game::items;
 use umicraft_game::server::attributes::Attributes;
@@ -60,6 +61,10 @@ pub(crate) struct HudViews {
     pub(crate) bar: BottomBar,
     /// The highlighted name of the held item.
     pub(crate) held_name: Option<HeldNameView>,
+    /// The potion effect list of the inventory screens. The times change
+    /// once a second, so the list republishes the HUD that often while an
+    /// effect runs.
+    pub(crate) effects: Vec<EffectLine>,
 }
 
 impl Default for HudViews {
@@ -68,6 +73,7 @@ impl Default for HudViews {
             vitals: None,
             bar: BottomBar::None,
             held_name: None,
+            effects: Vec::new(),
         }
     }
 }
@@ -259,6 +265,7 @@ impl HudTracker {
             vitals: draws_rows.then(|| vitals_view(&self.vitals_input(facts, riding, flash))),
             bar,
             held_name,
+            effects: effect_lines(facts.effects),
         }
     }
 

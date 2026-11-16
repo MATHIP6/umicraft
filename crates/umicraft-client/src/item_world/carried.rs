@@ -33,10 +33,12 @@ pub(super) fn push(
     let tints = resources.tints(item.item_id, item.damage, None);
     let style = ItemStyle {
         atlas: resources.atlas(),
-        light: world_light(entity.light, true),
+        light: world_light(entity.light, false),
         tints: &tints,
     };
-    layers.push(quads, &frame, &style, false);
+    // `LayerHeldBlock` uses `renderBlockBrightness`, whose colour replaces the
+    // face shade of the quads; the item lights of the entity pass light it.
+    layers.push_world_lit(quads, &frame, &style, false);
 }
 
 /// The block (as an item) an enderman carries, with the frame that places the

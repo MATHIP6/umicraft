@@ -97,6 +97,7 @@ mod tests {
             geometry: ItemGeometry::Entity,
             display: DisplayTransforms::default(),
             gui_3d,
+            particle: None,
         }
     }
 

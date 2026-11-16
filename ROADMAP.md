@@ -331,8 +331,9 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
   `WindowKind::implicit_slot_count`; check the horse (entity id in the packet).
 - **Player model**: done in the survival inventory and the creative Inventory
   tab (offscreen portrait block of the icon atlas, ADR-0025 addendum).
-- **Active effects list** in the inventory (needs the `Entity Effect` state of
-  P1/P2 drawn left of the window, `GuiInventory.drawActivePotionEffects`).
+- **Active effects list** in the inventory: done (2026-11-14), in the
+  survival and creative windows (`InventoryEffectRenderer`); not compared with
+  vanilla on a screen.
 - **Creative inventory gaps (2026-11-08):** none left in the code. Search by
   variant name, the tab-name line of the Search tooltip (blue, not bold),
   double click and Shift + double click in every tab, and the middle-button

@@ -87,10 +87,10 @@ impl AnvilField {
             }
             Edit::Backspace => input.backspace(false),
             Edit::Delete => input.delete(false),
-            Edit::Left => input.left(false),
-            Edit::Right => input.right(false),
-            Edit::Home => input.home(),
-            Edit::End => input.end(),
+            Edit::Left => input.left(false, false),
+            Edit::Right => input.right(false, false),
+            Edit::Home => input.home(false),
+            Edit::End => input.end(false),
         }
         let after = input.text();
         (after != before).then(|| outgoing_name(stack, &after))

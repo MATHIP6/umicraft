@@ -31,7 +31,7 @@ pub mod gui;
 mod overlay_views;
 mod state;
 
-pub use gui::{chat_run_at, draw_hud_gui, HudSheets};
+pub use gui::{chat_input_hit, chat_run_at, draw_hud_gui, HudSheets, InputHit};
 pub use overlay_views::{
     plain_text, ActionBarView, BossView, SidebarLineView, SidebarView, TabEntryView, TabListView,
     TabValueStyle, TitleView,

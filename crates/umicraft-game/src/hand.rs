@@ -193,8 +193,14 @@ pub struct HandPose {
     pub sway_yaw: f32,
     /// The pitch of the view in degrees; a held map tilts with it.
     pub view_pitch: f32,
+    /// The yaw of the view in degrees, which with the pitch fixes the item
+    /// lights (see [`Self::light_frame`]).
+    pub view_yaw: f32,
     /// The item being used (eaten, drunk, blocked with, drawn), if any.
     pub item_use: Option<ItemUseView>,
+    /// Whether the player has a bobber out: a held rod shows its cast model
+    /// (MCP `RenderItem.renderItemModelForEntity`, `fishEntity != null`).
+    pub fishing: bool,
 }
 
 /// An angle in degrees brought to `-180..180`.
@@ -214,8 +220,23 @@ impl HandPose {
             sway_pitch: (pitch - self.arm_pitch) * SWAY_SCALE,
             sway_yaw: wrap_degrees(yaw - self.arm_yaw) * SWAY_SCALE,
             view_pitch: pitch,
+            view_yaw: yaw,
             ..self
         }
+    }
+
+    /// The rotation from the camera space of the hand to the frame where the
+    /// two lights of `RenderHelper.enableStandardItemLighting` are fixed.
+    ///
+    /// MCP `ItemRenderer.rotateArroundXAndY` sets those lights through
+    /// `rotate(pitch, x)` then `rotate(yaw, y)`, before the sway and the item
+    /// transforms: a normal `n` of the camera space meets them as
+    /// `Ry(-yaw) Rx(-pitch) n` meets the lights unturned. The lights stay
+    /// still in the world while the held item turns with the view.
+    #[must_use]
+    pub fn light_frame(&self) -> Mat4 {
+        Mat4::from_rotation_y(-self.view_yaw.to_radians())
+            * Mat4::from_rotation_x(-self.view_pitch.to_radians())
     }
 
     /// The blend of the poses of two frames.
@@ -240,6 +261,8 @@ impl HandPose {
             sway_pitch: mix(self.sway_pitch, other.sway_pitch),
             sway_yaw: mix(self.sway_yaw, other.sway_yaw),
             view_pitch: mix(self.view_pitch, other.view_pitch),
+            // `swayed_by` sets the live yaw of the frame after the blend.
+            view_yaw: other.view_yaw,
             item_use: match (self.item_use, other.item_use) {
                 (Some(from), Some(to)) => Some(ItemUseView {
                     count: mix(from.count, to.count),
@@ -247,6 +270,7 @@ impl HandPose {
                 }),
                 (_, newer) => newer,
             },
+            fishing: other.fishing,
         }
     }
 
@@ -421,6 +445,27 @@ pub fn bow_model_name(ticks_used: u32) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_item_lights_stay_still_in_the_world_while_the_view_turns() {
+        let at = |yaw: f32, pitch: f32| HandPose::default().swayed_by(yaw, pitch).light_frame();
+        let towards_camera = Vec3::Z;
+        // Level, the face turned to the camera is a side face.
+        assert!(at(0.0, 0.0)
+            .transform_vector3(towards_camera)
+            .abs_diff_eq(Vec3::Z, 1e-6));
+        // Looking straight down, the face turned to the camera looks up.
+        let down = at(0.0, 90.0).transform_vector3(towards_camera);
+        assert!(down.abs_diff_eq(Vec3::Y, 1e-6), "{down}");
+        // Looking west (yaw 90), the face turns about y with the view. The
+        // reference turns the lights by the yaw without the half turn of the
+        // camera, which the symmetric pair of lights does not see.
+        let west = at(90.0, 0.0).transform_vector3(towards_camera);
+        assert!(west.abs_diff_eq(-Vec3::X, 1e-6), "{west}");
+        // The blend keeps the live yaw that `swayed_by` set.
+        let pose = HandPose::default().swayed_by(30.0, 0.0);
+        assert_eq!(pose.lerp(pose, 0.5).view_yaw, 30.0);
+    }
 
     fn stack(item_id: i16, size: i8) -> ItemStack {
         ItemStack {

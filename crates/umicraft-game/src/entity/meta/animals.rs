@@ -9,6 +9,8 @@ use super::Variant;
 /// Sheep entry: colour in the low nibble, shorn in bit 4
 /// (MCP `EntitySheep.getFleeceColor` / `getSheared`).
 const SHEEP_WOOL: u8 = 16;
+/// Entry of the bat's flags: bit 0 set while it hangs (MCP `EntityBat.entityInit`).
+const BAT_FLAGS: u8 = 16;
 /// Pig entry: saddle (MCP `EntityPig.getSaddled`).
 const PIG_SADDLE: u8 = 16;
 /// Tameable entry: bit 0 sitting, bit 1 angry (wolf), bit 2 tamed
@@ -101,6 +103,15 @@ pub(super) fn apply_sheep(variant: &mut Variant, metadata: &Metadata) {
     });
 }
 
+/// MCP `EntityBat.getIsBatHanging`: bit 0 of entry 16.
+pub(super) fn apply_bat(variant: &mut Variant, metadata: &Metadata) {
+    if let Some(flags) = metadata.get_byte(BAT_FLAGS) {
+        *variant = Variant::Bat {
+            hanging: flags & 1 != 0,
+        };
+    }
+}
+
 pub(super) fn apply_pig(variant: &mut Variant, metadata: &Metadata) {
     if let Some(saddle) = metadata.get_byte(PIG_SADDLE) {
         *variant = Variant::Pig {
@@ -174,6 +185,15 @@ mod tests {
     use super::super::{EntityMeta, Variant};
     use super::*;
     use crate::entity::kind::EntityKind;
+
+    #[test]
+    fn a_bat_hangs_by_bit_zero() {
+        let mut state = EntityMeta::default();
+        state.apply(EntityKind::Bat, &meta(vec![byte(16, 1)]));
+        assert_eq!(state.variant, Variant::Bat { hanging: true });
+        state.apply(EntityKind::Bat, &meta(vec![byte(16, 0)]));
+        assert_eq!(state.variant, Variant::Bat { hanging: false });
+    }
 
     #[test]
     fn a_sheep_has_a_colour_and_can_be_shorn() {

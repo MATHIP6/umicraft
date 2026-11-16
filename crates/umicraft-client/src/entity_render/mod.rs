@@ -16,6 +16,7 @@
 //! 3. Add the kind to the matching family builder in [`mobs`].
 
 mod animals;
+mod appearance;
 mod armor;
 mod arrows;
 mod banner_cache;
@@ -29,6 +30,7 @@ mod far_origin_tests;
 mod fire;
 pub(crate) mod fishing;
 mod glow;
+mod guardian_beam;
 mod hand;
 mod horse_coat;
 mod mobs;
@@ -74,31 +76,30 @@ pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    let mut out = HashMap::new();
-    mesh_entities_into(snapshots, &mut out);
-    out
+    mesh_entities_with(snapshots, &skins::NoSkins, Eye::default(), false, None).solid
 }
 
-/// Meshes entity snapshots into a caller-provided [`HashMap`] batch pool,
-/// clearing existing vertex vectors while retaining their allocated capacities
-/// to avoid per-frame heap reallocations.
+/// [`mesh_entities`] into a caller-provided map.
 pub fn mesh_entities_into(
     snapshots: &[EntityRenderSnapshot],
     out: &mut HashMap<TextureSlot, Vec<EntityVertex>>,
 ) {
-    let mut meshed = MeshedEntities {
-        solid: std::mem::take(out),
-        ..MeshedEntities::default()
-    };
-    mesh_entities_with_into(
-        snapshots,
-        &skins::NoSkins,
-        (0.0, 0.0),
-        false,
-        (Vec3::ZERO, None),
-        &mut meshed,
-    );
-    *out = meshed.solid;
+    *out = mesh_entities(snapshots);
+}
+
+/// The camera of the frame: where it is and where it looks (radians, in the
+/// convention of `umicraft_render::Camera`), which the sprites face and the
+/// first-person rod hangs from.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Eye {
+    /// The position, in the space of the snapshots.
+    pub(super) position: Vec3,
+    /// The yaw.
+    pub(super) yaw: f32,
+    /// The pitch.
+    pub(super) pitch: f32,
+    /// The swing progress of the first-person arm (`HandPose::swing`).
+    pub(super) hand_swing: f32,
 }
 
 /// The meshes of a frame: the lit entities, and the glowing layers that are
@@ -110,66 +111,33 @@ pub(crate) struct MeshedEntities {
     /// The glint of armour, drawn only where the armour is.
     pub(crate) glint: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The invisible entities a spectator sees, drawn translucent.
-    pub(crate) ghost: HashMap<TextureSlot, Vec<EntityVertex>>,
+    ghost: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The guardian beams, opaque and coloured by their tint.
+    tinted: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The shadows under the entities.
     pub(crate) shadows: HashMap<TextureSlot, Vec<EntityVertex>>,
-}
-
-impl MeshedEntities {
-    /// Clears all vertex lists while preserving every [`HashMap`] bucket and
-    /// inner [`Vec`] capacity for the next frame.
-    pub(crate) fn clear(&mut self) {
-        for v in self.solid.values_mut() {
-            v.clear();
-        }
-        for v in self.additive.values_mut() {
-            v.clear();
-        }
-        for v in self.glint.values_mut() {
-            v.clear();
-        }
-        for v in self.ghost.values_mut() {
-            v.clear();
-        }
-        for v in self.shadows.values_mut() {
-            v.clear();
-        }
-    }
 }
 
 /// [`mesh_entities`] with the downloaded skins and capes of players.
 pub(super) fn mesh_entities_with(
     snapshots: &[EntityRenderSnapshot],
     skins: &dyn skins::SkinLookup,
-    (view_yaw, view_pitch): (f32, f32),
+    eye: Eye,
     viewer_is_spectator: bool,
-    (camera, view): (Vec3, Option<CullView>),
+    view: Option<CullView>,
 ) -> MeshedEntities {
-    let mut out = MeshedEntities::default();
-    mesh_entities_with_into(
-        snapshots,
-        skins,
-        (view_yaw, view_pitch),
-        viewer_is_spectator,
-        (camera, view),
-        &mut out,
-    );
-    out
-}
-
-/// Meshes entities into a reusable [`MeshedEntities`] buffer pool, retaining
-/// `HashMap` and `Vec<EntityVertex>` capacities across frames.
-pub(crate) fn mesh_entities_with_into(
-    snapshots: &[EntityRenderSnapshot],
-    skins: &dyn skins::SkinLookup,
-    (view_yaw, view_pitch): (f32, f32),
-    viewer_is_spectator: bool,
-    (camera, view): (Vec3, Option<CullView>),
-    out: &mut MeshedEntities,
-) {
-    out.clear();
+    let (camera, view_yaw, view_pitch) = (eye.position, eye.yaw, eye.pitch);
+    let mut solid: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut additive: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut glint: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut ghost: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut tinted: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut shadows: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
     for ent in snapshots {
+        // A beam can be in view while its guardian is not
+        // (`RenderGuardian.shouldRender`).
+        guardian_beam::add_beam(&mut tinted, ent);
         // What the player cannot see is not meshed; `snapshots` stays whole for the
         // entities that read another one (a bobber, a leash, a crystal beam).
         if view.is_some_and(|view| cull::out_of_view(ent, view)) {
@@ -182,9 +150,9 @@ pub(crate) fn mesh_entities_with_into(
             if let Some(glow) = layer.glow {
                 let word = glow.light_word();
                 let target = if glow.equal_depth {
-                    &mut out.glint
+                    &mut glint
                 } else {
-                    &mut out.additive
+                    &mut additive
                 };
                 let dest = target.entry(layer.slot).or_default();
                 dest.reserve(layer.vertices.len());
@@ -196,9 +164,9 @@ pub(crate) fn mesh_entities_with_into(
             }
             let light = light | dye_bits(layer.dye) | (u32::from(layer.cutoff) << CUTOFF_SHIFT);
             let target = if layer.translucent {
-                &mut out.ghost
+                &mut ghost
             } else {
-                &mut out.solid
+                &mut solid
             };
             let dest = target.entry(layer.slot).or_default();
             dest.reserve(layer.vertices.len());
@@ -209,24 +177,33 @@ pub(crate) fn mesh_entities_with_into(
                     .map(|vertex| xform.transform(vertex, light)),
             );
         }
-        fire::add_fire(&mut out.solid, ent, view_yaw);
-        arrows::add_flying_arrow(&mut out.solid, ent, light);
-        vehicles::add_vehicle(&mut out.solid, ent, light);
-        xp::add_xp_orb(&mut out.solid, ent, light, view_yaw, view_pitch);
-        paintings::add_painting(&mut out.solid, ent, light);
-        small_models::add_small_model(&mut out.solid, ent, light);
-        bolt::add_lightning(&mut out.additive, ent);
-        tnt_flash::add_flash(&mut out.additive, ent);
-        rope::add_leash(&mut out.solid, ent);
-        dragon_beam::add_beam(&mut out.solid, ent, snapshots);
-        let eye = fishing::Eye {
-            position: camera,
-            yaw: view_yaw,
-            pitch: view_pitch,
-        };
-        fishing::add_bobber(&mut out.solid, ent, snapshots, light, eye);
-        shadow::add_shadow(&mut out.shadows, ent, camera);
+        fire::add_fire(&mut solid, ent, view_yaw);
+        arrows::add_flying_arrow(&mut solid, ent, light);
+        vehicles::add_vehicle(&mut solid, ent, light);
+        xp::add_xp_orb(&mut solid, ent, light, view_yaw, view_pitch);
+        paintings::add_painting(&mut solid, ent, light);
+        small_models::add_small_model(&mut solid, ent, light);
+        bolt::add_lightning(&mut additive, ent);
+        tnt_flash::add_flash(&mut additive, ent);
+        rope::add_leash(&mut solid, ent);
+        dragon_beam::add_beam(&mut solid, ent, snapshots);
+        fishing::add_bobber(&mut solid, ent, snapshots, light, eye);
+        shadow::add_shadow(&mut shadows, ent, camera);
     }
+
+    MeshedEntities {
+        solid,
+        additive,
+        glint,
+        ghost,
+        tinted,
+        shadows,
+    }
+}
+
+/// One vertex through a model matrix.
+fn transform_vertex(mv: ModelVertex, matrix: &Mat4, light: u32) -> EntityVertex {
+    MatrixTransform::new(*matrix).transform(mv, light)
 }
 
 /// Bit of [`EntityVertex::light`] that tints the vertex red, as the hurt and
@@ -436,13 +413,15 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                beam: None,
                 flight: None,
                 squish: 0.0,
                 squid: Default::default(),
                 horse: None,
+                mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
-                rod_tip: None,
+                tied_to_hand: false,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::new(0, 0x7F),
@@ -482,13 +461,15 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                beam: None,
                 flight: None,
                 squish: 0.0,
                 squid: Default::default(),
                 horse: None,
+                mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
-                rod_tip: None,
+                tied_to_hand: false,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),
@@ -528,13 +509,15 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                beam: None,
                 flight: None,
                 squish: 0.0,
                 squid: Default::default(),
                 horse: None,
+                mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
-                rod_tip: None,
+                tied_to_hand: false,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),
@@ -575,13 +558,15 @@ mod tests {
                 fishing: false,
                 riding: false,
                 leash: None,
+                beam: None,
                 flight: None,
                 squish: 0.0,
                 squid: Default::default(),
                 horse: None,
+                mob: umicraft_game::entity::MobPose::None,
                 ridden: false,
                 block_lights: std::sync::Arc::default(),
-                rod_tip: None,
+                tied_to_hand: false,
                 local: false,
                 ghost_visible: false,
                 flags: EntityFlags::default(),
