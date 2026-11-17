@@ -33,10 +33,6 @@ use super::state::Game;
 use crate::network::ClientCommand;
 use crate::social_view;
 
-/// The ticks the death animation runs before it stops
-/// (MCP `EntityLivingBase.onDeathUpdate`: `deathTime == 20`).
-pub(super) const DEATH_TICKS: u32 = 20;
-
 /// The number of ticks between two status updates.
 const STATUS_PERIOD: u64 = 20;
 
@@ -106,14 +102,7 @@ pub(super) fn tick(
     publish_text_screens(game, frames);
     tick_hand(game);
 
-    // The title and the action bar fade with the tick, so the HUD is
-    // published again on every tick while one of them is displayed.
-    if game.social.title.title().is_some()
-        || game.social.title.subtitle().is_some()
-        || game.social.action_bar.message().is_some()
-    {
-        game.social.title.tick();
-        game.social.action_bar.tick();
+    if game.social.tick_messages() {
         game.hud_dirty = true;
     }
     if social_view::tick_boss_bar(&mut game.social.boss_bar, &game.entities) {
@@ -161,17 +150,8 @@ pub(super) fn tick(
     } else {
         intent
     };
-    // Phase E.9: `EntityLivingBase.onDeathUpdate` (bytecode `pr.aZ`) counts the
-    // dead ticks and, at 20, calls `setDead()`: the dead player entity then stops
-    // updating, so the client sends no movement packet any more (measured on the
-    // vanilla 1.8.9 client: exactly 20 movement packets after the death, then
-    // silence). Until the respawn replaces the player, the tick reports nothing.
-    let entity_removed = game.dead() && game.vitals.death_time >= DEATH_TICKS;
-    game.vitals.death_time = if game.dead() {
-        (game.vitals.death_time + 1).min(DEATH_TICKS)
-    } else {
-        0
-    };
+    // A removed dead player reports nothing until the respawn replaces it.
+    let entity_removed = game.vitals.tick_death();
     apply_movement_stats(game);
     let was_flying = game
         .state

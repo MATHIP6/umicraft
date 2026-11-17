@@ -30,12 +30,12 @@ use crate::connection_end::ConnectionEnd;
 use crate::cracks::Crack;
 use crate::social_view;
 
-mod chat;
-mod controls;
-mod hotbar;
-mod metrics;
-mod social;
-mod vitals;
+pub(super) mod chat;
+pub(super) mod controls;
+pub(super) mod hotbar;
+pub(super) mod metrics;
+pub(super) mod social;
+pub(super) mod vitals;
 
 pub(super) use chat::ChatState;
 pub(super) use controls::Controls;
@@ -213,7 +213,7 @@ impl Game {
 
     /// Whether the local player is dead (MCP `EntityLivingBase.getHealth() <= 0`).
     pub(super) fn dead(&self) -> bool {
-        self.vitals.health <= 0.0
+        self.vitals.dead()
     }
 
     /// The entity the view follows (`Camera`, 0x43), if it is another one

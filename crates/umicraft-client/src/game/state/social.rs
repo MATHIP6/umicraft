@@ -33,3 +33,32 @@ impl Default for Social {
         }
     }
 }
+
+impl Social {
+    /// Advances the title and the action bar by one tick while one of them is
+    /// displayed. They fade with the tick, so `true` asks for the HUD to be
+    /// published again.
+    pub(in crate::game) fn tick_messages(&mut self) -> bool {
+        let shown = self.title.title().is_some()
+            || self.title.subtitle().is_some()
+            || self.action_bar.message().is_some();
+        if shown {
+            self.title.tick();
+            self.action_bar.tick();
+        }
+        shown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_displayed_message_asks_for_a_new_hud() {
+        let mut social = Social::default();
+        assert!(!social.tick_messages());
+        social.action_bar.show(r#"{"text":"hello"}"#);
+        assert!(social.tick_messages());
+    }
+}

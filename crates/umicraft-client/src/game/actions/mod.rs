@@ -61,14 +61,7 @@ pub(super) fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut Co
         select_slot(game, slot);
     }
     if update.hotbar_keys != [0; 9] {
-        for (total, new) in game.hotbar.key_presses.iter_mut().zip(update.hotbar_keys) {
-            *total = total.saturating_add(new);
-        }
-        // The player sees the slot the keys will give at the tick.
-        if let Some(slot) = (0..9u8)
-            .rev()
-            .find(|&slot| game.hotbar.key_presses[usize::from(slot)] > 0)
-        {
+        if let Some(slot) = game.hotbar.add_key_presses(update.hotbar_keys) {
             select_slot(game, slot);
         }
     }

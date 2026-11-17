@@ -9,10 +9,6 @@ use umicraft_render::ChatLineView;
 
 use super::state::Game;
 
-/// The number of chat messages kept (MCP GuiNewChat keeps 100). The HUD
-/// wraps them and shows the newest rows that fit.
-pub(super) const CHAT_HISTORY: usize = 100;
-
 /// A chat message from the chat JSON of the server, in the language of the
 /// downloaded `.lang` file.
 fn chat_line(json: &str) -> ChatLineView {
@@ -39,11 +35,8 @@ pub(super) fn show_chat(game: &mut Game, json: &str, position: Position) {
     }
 }
 
-/// Adds a message to the chat, dropping the oldest beyond [`CHAT_HISTORY`].
+/// Adds a message to the chat, which the HUD shows next.
 pub(super) fn push_chat(game: &mut Game, line: ChatLineView) {
-    game.chat.lines.push_back(line);
-    while game.chat.lines.len() > CHAT_HISTORY {
-        game.chat.lines.pop_front();
-    }
+    game.chat.push(line);
     game.hud_dirty = true;
 }

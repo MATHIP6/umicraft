@@ -86,14 +86,7 @@ pub(in crate::game) fn select_slot(game: &mut Game, slot: u8) {
 /// selects again at the next tick. The wheel, handled before, only counts
 /// when no key was pressed.
 pub(in crate::game) fn run_hotbar_keys(game: &mut Game) {
-    let mut keyed = None;
-    for (slot, presses) in game.hotbar.key_presses.iter_mut().enumerate() {
-        if *presses > 0 {
-            *presses -= 1;
-            keyed = Some(slot as u8);
-        }
-    }
-    if let Some(slot) = keyed {
+    if let Some(slot) = game.hotbar.take_key_press() {
         select_slot(game, slot);
     }
     game.hotbar.applied = game.hotbar.selected;
@@ -103,10 +96,9 @@ pub(in crate::game) fn run_hotbar_keys(game: &mut Game) {
 /// `PlayerControllerMP.syncCurrentPlayItem`, called by `updateController` at
 /// the start of a tick).
 pub(in crate::game) fn sync_held_item(game: &mut Game, queue: &mut CommandQueue) {
-    if game.hotbar.applied != game.hotbar.synced {
-        game.hotbar.synced = game.hotbar.applied;
+    if let Some(slot) = game.hotbar.take_sync() {
         queue.push(ClientCommand::HeldItemChange {
-            slot: i16::from(game.hotbar.synced),
+            slot: i16::from(slot),
         });
     }
 }
