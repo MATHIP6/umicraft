@@ -134,6 +134,7 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
         spawn: game.spawn,
         entities: entities.into(),
         local_body: Arc::new(game.body.frame_data()),
+        placement: game.placements,
         hand_light,
         selection: game.selection_outline().into(),
         cracks: game.cracks().into(),

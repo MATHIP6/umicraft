@@ -288,7 +288,9 @@ impl WorldView {
                 position,
                 yaw,
                 pitch,
+                placement,
             } => {
+                self.view.placement = placement;
                 self.view.teleport(position, yaw, pitch);
             }
             RenderEvent::Ended(end) => self.ended = Some(end),

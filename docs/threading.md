@@ -119,6 +119,14 @@ ADR-0005).
   via `WorldView::apply_look_delta` on the current frame. This eliminates the 1-frame
   roundtrip latency formerly required for the game thread to echo angles back through
   `AtomicLookSlot`, achieving true 0-frame mouse look latency for competitive PvP.
+  Once the mouse moved, the window owns the view angles and ignores the look of the
+  tick frames, so a server placement (packet 0x08) reaches it as
+  `RenderEvent::Teleport`. That event is a `try_send` on the frame queue and is
+  dropped when the queue is full (a teleport comes with a burst of chunks and
+  entities), so every `Frame` also carries the placement count of the game thread:
+  a count the window has not seen makes it snap to the look of the local body, as the
+  lost event would have. Without it the camera kept the old look while the physics
+  walked with the server's, and "forward" moved the player backwards on screen.
 - The game thread owns the authoritative view angles and simulation: the look deltas
   are applied to its yaw and pitch, and server corrections overwrite them. Between two
   20 Hz ticks, mouse look updates are published into a 64-byte aligned, lock-free

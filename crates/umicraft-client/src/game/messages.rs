@@ -160,6 +160,11 @@ pub struct Frame {
     /// The body of the local player, always present: the inventory screen
     /// draws it (`GuiInventory.drawEntityOnScreen`).
     pub local_body: Arc<EntityFrameData>,
+    /// How many server placements the game thread had applied when it built
+    /// the frame. A count the render thread has not seen in a
+    /// [`RenderEvent::Teleport`] means that event was dropped by the full
+    /// queue, and the view takes the look of the body instead.
+    pub placement: u32,
     /// The light at the eye of the local player, which lights the
     /// first-person item (MCP `ItemRenderer.func_178109_a`).
     pub hand_light: LightLevel,
@@ -263,6 +268,8 @@ pub enum RenderEvent {
         yaw: ViewAngle,
         /// The new pitch, or the turn a relative teleport adds.
         pitch: ViewAngle,
+        /// The placement count after this teleport (see [`Frame::placement`]).
+        placement: u32,
     },
     /// The world was replaced; the render thread drops its meshes.
     Reset,

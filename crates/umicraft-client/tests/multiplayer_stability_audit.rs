@@ -70,6 +70,7 @@ fn audit_server_setback_teleport_latency_is_zero() {
         position: setback_pos + DVec3::Y * 1.62,
         yaw,
         pitch,
+        placement: 1,
     };
     frames_tx
         .try_send(teleport_event)
@@ -82,6 +83,7 @@ fn audit_server_setback_teleport_latency_is_zero() {
             position,
             yaw: r_yaw,
             pitch: r_pitch,
+            ..
         } => {
             assert_eq!(position, setback_pos + DVec3::Y * 1.62);
             assert_eq!(r_yaw, yaw);

@@ -123,6 +123,10 @@ pub(super) struct Game {
     pub(super) body: EntityRecord,
     /// Where the mouse look is published to the render thread.
     pub(super) look: LookSlot,
+    /// How many server placements (`Player Position and Look`) were applied;
+    /// every [`Frame`](super::Frame) carries it so the render thread can
+    /// tell that it missed a [`RenderEvent::Teleport`](super::RenderEvent).
+    pub(super) placements: u32,
     /// The statistics of the session.
     pub(super) status_data: GameStatus,
     /// Whether the HUD has to be published again.
@@ -191,6 +195,7 @@ impl Game {
             hand: HandState::new(),
             body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
             look: LookSlot::default(),
+            placements: 0,
             status_data: GameStatus::default(),
             hud_dirty: true,
             hit_emitters: Vec::new(),

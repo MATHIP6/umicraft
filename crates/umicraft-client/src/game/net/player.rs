@@ -139,10 +139,15 @@ pub(in crate::game) fn apply_placement(
         _ => ViewAngle::To(now.to_radians()),
     };
     let raw = placement.raw.as_deref();
+    // The queue may be full (a teleport comes with a burst of chunks and
+    // entities) and drop the event; the next frame carries the new count,
+    // from which the render thread notices it (`View::push`).
+    game.placements = game.placements.wrapping_add(1);
     let _ = frames.try_send(RenderEvent::Teleport {
         position: eye,
         yaw: angle(0x08, game.yaw, raw.map(|raw| raw.yaw)),
         pitch: angle(0x10, game.pitch, raw.map(|raw| raw.pitch)),
+        placement: game.placements,
     });
 
     // The server expects the acknowledgement of the placement.

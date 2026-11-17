@@ -481,6 +481,7 @@ fn teleport_event_snaps_camera_immediately_without_gliding() {
             position: target,
             yaw: crate::game::ViewAngle::To(yaw),
             pitch: crate::game::ViewAngle::To(pitch),
+            placement: 0,
         })
         .expect("teleport event");
     harness.sync();
@@ -494,6 +495,82 @@ fn teleport_event_snaps_camera_immediately_without_gliding() {
     assert_eq!(snapped_sample.position, target);
     assert!((snapped_sample.yaw - yaw).abs() < 1e-5);
     assert!((snapped_sample.pitch - pitch).abs() < 1e-5);
+}
+
+/// Regression: a teleport whose event the full frame queue dropped left the
+/// mouse-look camera on the look from before it, while the physics walked
+/// with the server's look, so "forward" moved the player backwards on screen.
+#[test]
+fn a_frame_after_a_dropped_teleport_event_snaps_the_mouse_look_to_the_server_look() {
+    let mut harness = Harness::new();
+    let tick = Instant::now();
+    harness
+        .frames
+        .0
+        .send(RenderEvent::Frame(frame(glam::Vec3::ZERO, tick, 0)))
+        .expect("frame queue");
+    harness.sync();
+    harness.world_view.apply_look_delta(0.5, -0.2);
+
+    // The server turned the player around; only the next frame got through.
+    let (server_yaw, server_pitch) = (180.0_f32, 30.0_f32);
+    let mut after = frame(glam::Vec3::new(4.0, 0.0, 0.0), tick + TICK, 1);
+    after.placement = 1;
+    after.local_body = Arc::new(
+        EntityRecord::new(
+            EntityId(0),
+            EntityKind::Player,
+            glam::DVec3::ZERO,
+            server_yaw,
+            server_pitch,
+        )
+        .frame_data(),
+    );
+    harness
+        .frames
+        .0
+        .send(RenderEvent::Frame(after))
+        .expect("frame queue");
+    harness.sync();
+
+    let view = &harness.world_view.view;
+    assert!((view.player_yaw - server_yaw.to_radians()).abs() < 1e-5);
+    assert!((view.player_pitch - server_pitch.to_radians()).abs() < 1e-5);
+    let sample = view.sample(Instant::now()).expect("sample");
+    assert_eq!(sample.eye, glam::DVec3::new(4.0, 0.0, 0.0));
+    assert!((sample.yaw - server_yaw.to_radians()).abs() < 1e-5);
+}
+
+/// A frame of an already seen placement keeps the live mouse look.
+#[test]
+fn a_frame_of_a_seen_teleport_keeps_the_mouse_look() {
+    let mut harness = Harness::new();
+    let tick = Instant::now();
+    let teleport = RenderEvent::Teleport {
+        position: glam::DVec3::ZERO,
+        yaw: crate::game::ViewAngle::To(0.0),
+        pitch: crate::game::ViewAngle::To(0.0),
+        placement: 1,
+    };
+    let mut first = frame(glam::Vec3::ZERO, tick, 0);
+    first.placement = 1;
+    for event in [teleport, RenderEvent::Frame(first)] {
+        harness.frames.0.send(event).expect("frame queue");
+    }
+    harness.sync();
+    harness.world_view.apply_look_delta(0.5, -0.2);
+
+    let mut next = frame(glam::Vec3::ZERO, tick + TICK, 0);
+    next.placement = 1;
+    harness
+        .frames
+        .0
+        .send(RenderEvent::Frame(next))
+        .expect("frame queue");
+    harness.sync();
+
+    assert!((harness.world_view.view.player_yaw - 0.5).abs() < 1e-5);
+    assert!((harness.world_view.view.player_pitch + 0.2).abs() < 1e-5);
 }
 
 #[test]
@@ -750,6 +827,7 @@ fn server_setback_during_f5_teleports_orbit_and_camera_instantly() {
             position: target_eye,
             yaw: crate::game::ViewAngle::To(yaw),
             pitch: crate::game::ViewAngle::To(pitch),
+            placement: 0,
         })
         .expect("teleport");
     harness.sync();

@@ -355,6 +355,7 @@ fn test_audit_camera_transition_during_server_setback() {
             position: setback_eye,
             yaw: crate::game::ViewAngle::To(yaw),
             pitch: crate::game::ViewAngle::To(pitch),
+            placement: 0,
         })
         .expect("teleport");
 

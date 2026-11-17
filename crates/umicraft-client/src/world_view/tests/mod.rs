@@ -163,6 +163,7 @@ fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Box<Frame
             EntityRecord::new(EntityId(0), EntityKind::Player, glam::DVec3::ZERO, 0.0, 0.0)
                 .frame_data(),
         ),
+        placement: 0,
         hand_light: LightLevel::FULL_SKY,
         selection: Arc::from([]),
         cracks: Arc::from([]),

@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use umicraft_game::entity::EntityFrameData;
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::raycast::look_direction;
 use umicraft_game::view::{Perspective, THIRD_PERSON_DISTANCE};
@@ -41,6 +42,9 @@ pub(super) struct View {
     pub(super) local_mouse_look: bool,
     /// Where the game thread leaves the mouse look.
     pub(super) look_slot: Option<LookSlot>,
+    /// The newest server placement count the view snapped to (see
+    /// [`Frame::placement`]).
+    pub(super) placement: u32,
     /// The pitch of the local body in degrees, as of the newest look or tick.
     pub(super) body_pitch: Option<f32>,
     /// The newest signed world time in ticks.
@@ -153,6 +157,32 @@ impl View {
         self.particles = frame.particles;
         self.overlays = frame.overlays;
         self.debug = frame.debug;
+
+        if frame.placement != self.placement {
+            self.catch_up_teleport(frame.placement, &frame.local_body);
+        }
+    }
+
+    /// Snaps the view to a teleport whose [`RenderEvent::Teleport`] the full
+    /// frame queue dropped.
+    ///
+    /// The mouse look of the window owns the view yaw once it moved
+    /// (`local_mouse_look`), so without this the camera kept the look from
+    /// before the teleport while the physics walked with the server's: the
+    /// keys then moved the player sideways or backwards on screen. The body
+    /// of the frame carries the look of the game thread, server look included.
+    ///
+    /// [`RenderEvent::Teleport`]: crate::game::RenderEvent::Teleport
+    fn catch_up_teleport(&mut self, placement: u32, body: &EntityFrameData) {
+        self.placement = placement;
+        let Some(eye) = self.current.as_ref().map(|current| current.eye) else {
+            return;
+        };
+        self.teleport(
+            eye,
+            ViewAngle::To(body.yaw.to_radians()),
+            ViewAngle::To(body.pitch.to_radians()),
+        );
     }
 
     /// Applies the mouse look the game thread left in the slot since the last
