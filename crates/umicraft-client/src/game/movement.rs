@@ -43,8 +43,8 @@ pub(super) fn report_movement(game: &mut Game, intent: &InputIntent, queue: &mut
     let player = state.player();
     let snapshot = TickSnapshot {
         position,
-        yaw: game.yaw.to_degrees(),
-        pitch: game.pitch.to_degrees(),
+        yaw: game.yaw,
+        pitch: game.pitch,
         on_ground: player.on_ground,
         sprinting: player.sprinting,
         sneaking: player.sneaking,

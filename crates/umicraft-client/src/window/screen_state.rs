@@ -43,7 +43,7 @@ impl App {
         self.presses.place_block = false;
         self.presses.pick_block = false;
         self.presses.drop_item = None;
-        self.input.look = (0.0, 0.0);
+        self.input.mouse.clear();
         if screen.blocks_game_input() {
             self.capture_mouse(false);
         } else if was_blocking && !self.container_is_open() && !self.death_screen_visible() {

@@ -3,6 +3,8 @@
 //! The mouse look: continuous yaw, clamped pitch and the wire angles.
 
 use super::*;
+use crate::mouse_look::{look_turn, sensitivity_factor, MouseSteps};
+use umicraft_game::input::{set_angles, MAX_PITCH};
 
 #[test]
 fn the_input_update_turns_the_view() {
@@ -21,8 +23,7 @@ fn the_input_update_turns_the_view() {
         },
         &mut queue,
     );
-    assert!((game.yaw - 0.5).abs() < 1e-6);
-    assert!((game.pitch - 0.25).abs() < 1e-6);
+    assert_eq!((game.yaw, game.pitch), set_angles(0.0, 0.0, (0.5, 0.25)));
     assert_eq!(game.controls.input.forward, 1.0);
 }
 
@@ -34,7 +35,8 @@ fn turn_and_read_wire_yaw(game: &mut Game, queue: &mut CommandQueue, degrees: &[
         handle_input(
             game,
             InputUpdate {
-                look_yaw: step.to_radians(),
+                // Degrees to `setAngles` units (0.15 degree each).
+                look_yaw: step / 0.15,
                 ..InputUpdate::default()
             },
             queue,
@@ -63,7 +65,7 @@ fn turn_and_read_wire_yaw(game: &mut Game, queue: &mut CommandQueue, degrees: &[
 fn game_facing(degrees: f32) -> (Game, CommandQueue) {
     let mut game = game_on_floor_with(BlockState::AIR);
     game.playing = true;
-    game.yaw = degrees.to_radians();
+    game.yaw = degrees;
     (game, CommandQueue::default())
 }
 
@@ -184,14 +186,13 @@ fn test_rot_1_pitch_at_minus_90_degrees() {
     handle_input(
         &mut game,
         InputUpdate {
-            look_pitch: -10.0,
+            look_pitch: -1000.0,
             ..InputUpdate::default()
         },
         &mut queue,
     );
 
-    assert_eq!(game.pitch, -MAX_PITCH);
-    assert!((game.pitch.to_degrees() - (-90.0)).abs() < 1e-4);
+    assert_eq!(game.pitch, -90.0);
 
     tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
     let movements = movement_of(&queue);
@@ -220,14 +221,13 @@ fn test_rot_2_pitch_at_plus_90_degrees() {
     handle_input(
         &mut game,
         InputUpdate {
-            look_pitch: 10.0,
+            look_pitch: 1000.0,
             ..InputUpdate::default()
         },
         &mut queue,
     );
 
-    assert_eq!(game.pitch, MAX_PITCH);
-    assert!((game.pitch.to_degrees() - 90.0).abs() < 1e-4);
+    assert_eq!(game.pitch, 90.0);
 
     tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
     let movements = movement_of(&queue);
@@ -254,133 +254,75 @@ fn test_rot_3_pitch_clamp_beyond_limits() {
     handle_input(
         &mut game,
         InputUpdate {
-            look_pitch: 50.0,
+            look_pitch: 1000.0,
             ..InputUpdate::default()
         },
         &mut queue,
     );
-    assert_eq!(game.pitch, 90.0_f32.to_radians());
+    assert_eq!(game.pitch, MAX_PITCH);
 
     // Attempting to exceed lower limit
     handle_input(
         &mut game,
         InputUpdate {
-            look_pitch: -100.0,
+            look_pitch: -2000.0,
             ..InputUpdate::default()
         },
         &mut queue,
     );
-    assert_eq!(game.pitch, -90.0_f32.to_radians());
+    assert_eq!(game.pitch, -MAX_PITCH);
+}
+
+/// The degrees `pixels` of horizontal motion turn the look by.
+fn turned_degrees(pixels: i32, sensitivity: f32) -> f32 {
+    let controls = crate::options::ControlOptions {
+        mouse_sensitivity: sensitivity,
+        ..crate::options::ControlOptions::default()
+    };
+    set_angles(0.0, 0.0, look_turn((pixels, 0), &controls, 1.0)).0
 }
 
 #[test]
 fn test_rot_4_mouse_delta_1_10_100_pixels() {
-    // At default sensitivity (0.5), look_factor = 1.0
-    // In vanilla Minecraft: delta * 1.0 * 0.15 degrees
-    let speed = crate::window::MOUSE_SENSITIVITY;
-
-    // 1 pixel
-    let delta_1_rad = 1.0_f32 * speed;
-    let delta_1_deg = delta_1_rad.to_degrees();
-    assert!(
-        (delta_1_deg - 0.15).abs() < 1e-6,
-        "1px delta: expected 0.15°, got {delta_1_deg}"
-    );
-
-    // 10 pixels
-    let delta_10_rad = 10.0_f32 * speed;
-    let delta_10_deg = delta_10_rad.to_degrees();
-    assert!(
-        (delta_10_deg - 1.50).abs() < 1e-5,
-        "10px delta: expected 1.50°, got {delta_10_deg}"
-    );
-
-    // 100 pixels
-    let delta_100_rad = 100.0_f32 * speed;
-    let delta_100_deg = delta_100_rad.to_degrees();
-    assert!(
-        (delta_100_deg - 15.00).abs() < 1e-4,
-        "100px delta: expected 15.00°, got {delta_100_deg}"
-    );
+    // At the default sensitivity (0.5) the factor is 1: 0.15 degree a pixel.
+    assert_eq!(turned_degrees(1, 0.5), 0.15);
+    assert_eq!(turned_degrees(10, 0.5), 1.5);
+    assert_eq!(turned_degrees(100, 0.5), 15.0);
 }
 
 #[test]
 fn test_rot_5_sensitivity_scaling_levels() {
-    use crate::options::ControlOptions;
-
-    // Min sensitivity = 0.0
-    let ctrl_min = ControlOptions {
-        mouse_sensitivity: 0.0,
-        ..ControlOptions::default()
-    };
-    let factor_min = ctrl_min.look_factor();
-    let rot_min_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_min).to_degrees();
-    let expected_min = 100.0 * 0.064 * 0.15; // 0.96°
-    assert!(
-        (rot_min_deg - expected_min).abs() < 1e-4,
-        "min sens: got {rot_min_deg}, expected {expected_min}"
-    );
-
-    // Default sensitivity = 0.5
-    let ctrl_def = ControlOptions {
-        mouse_sensitivity: 0.5,
-        ..ControlOptions::default()
-    };
-    let factor_def = ctrl_def.look_factor();
-    let rot_def_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_def).to_degrees();
-    let expected_def = 100.0 * 1.0 * 0.15; // 15.0°
-    assert!(
-        (rot_def_deg - expected_def).abs() < 1e-4,
-        "default sens: got {rot_def_deg}, expected {expected_def}"
-    );
-
-    // Max sensitivity = 1.0
-    let ctrl_max = ControlOptions {
-        mouse_sensitivity: 1.0,
-        ..ControlOptions::default()
-    };
-    let factor_max = ctrl_max.look_factor();
-    let rot_max_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_max).to_degrees();
-    let expected_max = 100.0 * 4.096 * 0.15; // 61.44°
-    assert!(
-        (rot_max_deg - expected_max).abs() < 1e-4,
-        "max sens: got {rot_max_deg}, expected {expected_max}"
-    );
+    // 100 pixels at the lowest, default and highest sensitivity:
+    // f1 = 0.008, 1 and 4.096 (`(s * 0.6 + 0.2)^3 * 8`).
+    assert!((turned_degrees(100, 0.0) - 100.0 * 0.064 * 0.15).abs() < 1e-4);
+    assert_eq!(turned_degrees(100, 0.5), 15.0);
+    assert!((turned_degrees(100, 1.0) - 100.0 * 4.096 * 0.15).abs() < 1e-4);
 }
 
 #[test]
 fn test_rot_6_java_rust_rotation_comparison() {
-    use crate::options::ControlOptions;
-
-    let sensitivities = [0.0_f32, 0.2, 0.5, 0.8, 1.0];
-    let deltas = [1.0_f32, 5.0, 10.0, 25.0, 50.0, 100.0, -15.0, -80.0];
-
+    // MCP `EntityRenderer.updateCameraAndRender` then `Entity.setAngles`,
+    // in Java's types: the turn must be the same bits.
+    let sensitivities = [0.0_f32, 0.2, 0.37, 0.5, 0.8, 1.0];
+    let deltas = [1, 5, 10, 25, 50, 100, -15, -80];
     for &s in &sensitivities {
-        // Java 1.8.9 EntityRenderer.java formula:
         let f = s * 0.6_f32 + 0.2_f32;
         let f1 = f * f * f * 8.0_f32;
-
-        let ctrl = ControlOptions {
-            mouse_sensitivity: s,
-            ..ControlOptions::default()
-        };
-        let rust_factor = ctrl.look_factor();
-
         for &d in &deltas {
-            // Java setAngles:
-            let java_yaw_delta = (d as f64 * f1 as f64 * 0.15_f64) as f32;
-
-            // Rust window/mod.rs + game.rs:
-            let rust_speed = crate::window::MOUSE_SENSITIVITY * rust_factor;
-            let rust_yaw_delta_rad = d * rust_speed;
-            let rust_yaw_delta_deg = rust_yaw_delta_rad.to_degrees();
-
-            assert!(
-                (java_yaw_delta - rust_yaw_delta_deg).abs() < 1e-4,
-                "diff at sens={s}, delta={d}: java={java_yaw_delta}, rust={rust_yaw_delta_deg}"
-            );
+            let start = 123.456_f32;
+            let java = (f64::from(start) + f64::from(d as f32 * f1) * 0.15) as f32;
+            let controls = crate::options::ControlOptions {
+                mouse_sensitivity: s,
+                ..crate::options::ControlOptions::default()
+            };
+            let ours = set_angles(start, 0.0, look_turn((d, 0), &controls, 1.0)).0;
+            assert_eq!(ours.to_bits(), java.to_bits(), "sensitivity {s}, delta {d}");
         }
     }
+    assert_eq!(
+        sensitivity_factor(&crate::options::ControlOptions::default(), 1.0),
+        1.0
+    );
 }
 
 #[test]
@@ -468,14 +410,14 @@ fn test_rot_11_camera_rotation_and_wire_consistency() {
     let mut game = placed_game();
 
     // 1. Looking down at feet (+90°)
-    game.pitch = 90.0_f32.to_radians();
-    let wire_pitch = game.pitch.to_degrees();
+    game.pitch = 90.0;
+    let wire_pitch = game.pitch;
     assert!((wire_pitch - 90.0).abs() < 1e-4);
 
     let render_state = RenderState {
         position: DVec3::ZERO,
-        yaw: game.yaw,
-        pitch: game.pitch,
+        yaw: game.yaw.to_radians(),
+        pitch: game.pitch.to_radians(),
         eye: DVec3::new(0.0, 1.62, 0.0),
         orbit_start: Vec3::ZERO,
         on_ground: true,
@@ -486,17 +428,17 @@ fn test_rot_11_camera_rotation_and_wire_consistency() {
         (cam_pitch - (-90.0_f32.to_radians())).abs() < 1e-4,
         "camera pitch is flipped relative to game pitch"
     );
-    assert!((cam_yaw - (game.yaw + std::f32::consts::PI)).abs() < 1e-4);
+    assert!((cam_yaw - (game.yaw.to_radians() + std::f32::consts::PI)).abs() < 1e-4);
 
     // 2. Looking up at sky (-90°)
-    game.pitch = -90.0_f32.to_radians();
-    let wire_pitch_up = game.pitch.to_degrees();
+    game.pitch = -90.0;
+    let wire_pitch_up = game.pitch;
     assert!((wire_pitch_up - (-90.0)).abs() < 1e-4);
 
     let render_state_up = RenderState {
         position: DVec3::ZERO,
-        yaw: game.yaw,
-        pitch: game.pitch,
+        yaw: game.yaw.to_radians(),
+        pitch: game.pitch.to_radians(),
         eye: DVec3::new(0.0, 1.62, 0.0),
         orbit_start: Vec3::ZERO,
         on_ground: true,
@@ -517,15 +459,14 @@ fn drive_production_mouse_pipeline(
     zoom_factor: f32,
     deltas: &[(f64, f64)],
 ) {
-    let mut look = (0.0_f32, 0.0_f32);
+    let mut steps = MouseSteps::default();
     for &delta in deltas {
-        let (dyaw, dpitch) = crate::window::compute_mouse_look_delta(delta, controls, zoom_factor);
-        look.0 += dyaw;
-        look.1 += dpitch;
+        steps.add(delta);
     }
+    let turn = look_turn(steps.whole(), controls, zoom_factor);
     let update = InputUpdate {
-        look_yaw: look.0,
-        look_pitch: look.1,
+        look_yaw: turn.0,
+        look_pitch: turn.1,
         ..InputUpdate::default()
     };
     handle_input(game, update, queue);
@@ -901,6 +842,50 @@ fn test_pipeline_consistency_player_state_and_wire() {
     };
 
     // Exactly matches game state degrees
-    assert_eq!(game.yaw.to_degrees(), wire_yaw);
-    assert_eq!(game.pitch.to_degrees(), wire_pitch);
+    assert_eq!(game.yaw, wire_yaw);
+    assert_eq!(game.pitch, wire_pitch);
+}
+
+#[test]
+fn a_server_look_is_sent_back_bit_for_bit() {
+    // Regression (ADR-0076): the look went through radians and back, so a
+    // `Player Position and Look` at yaw -123.4567 came back as -123.45669555.
+    use umicraft_net::play::PlayerPlacement;
+
+    let mut game = placed_game();
+    let mut queue = CommandQueue::default();
+    let (frames, _) = mpsc::sync_channel(64);
+    let (chunks, _) = mpsc::sync_channel(64);
+    let (yaw, pitch) = (-123.4567_f32, 12.3456_f32);
+    let placement = PlayerPlacement {
+        x: 0.5,
+        y: 4.0,
+        z: 0.5,
+        yaw,
+        pitch,
+        raw: None,
+    };
+    handle_net(
+        &mut game,
+        PlayEvent::Placement(placement),
+        &mut queue,
+        &frames,
+    );
+    assert_eq!(
+        (game.yaw.to_bits(), game.pitch.to_bits()),
+        (yaw.to_bits(), pitch.to_bits())
+    );
+    queue.ordered.clear();
+    tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+    let looks: Vec<(u32, u32)> = movement_of(&queue)
+        .into_iter()
+        .filter_map(|command| match command {
+            ClientCommand::PositionLook { yaw, pitch, .. }
+            | ClientCommand::PlayerLook { yaw, pitch, .. } => {
+                Some((yaw.to_bits(), pitch.to_bits()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(looks, [(yaw.to_bits(), pitch.to_bits())]);
 }

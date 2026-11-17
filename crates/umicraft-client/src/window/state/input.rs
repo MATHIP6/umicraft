@@ -21,7 +21,9 @@ pub(in crate::window) struct InputTracking {
     pub(in crate::window) shift_held: bool,
     /// The pointer in physical pixels, for the chat hover and click.
     pub(in crate::window) pointer: (f32, f32),
-    pub(in crate::window) look: (f32, f32),
+    /// The mouse motion not yet handed to the game, kept in whole pixels
+    /// (ADR-0076).
+    pub(in crate::window) mouse: crate::mouse_look::MouseSteps,
     pub(in crate::window) last: InputState,
     pub(in crate::window) last_time: Instant,
 }

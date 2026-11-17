@@ -30,7 +30,7 @@ pub(super) fn pointed(game: &Game) -> Pointed {
     };
     let query = TargetQuery {
         eye,
-        look: look_direction(game.yaw, game.pitch),
+        look: look_direction(game.yaw.to_radians(), game.pitch.to_radians()),
         block_reach: game.reach(),
         extended_reach: game.gamemode == GameMode::Creative,
         block: game.block_target(),

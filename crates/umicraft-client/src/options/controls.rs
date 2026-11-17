@@ -23,19 +23,11 @@ impl Default for ControlOptions {
     }
 }
 
-impl ControlOptions {
-    /// The multiplier of the base look speed. It is the vanilla formula
-    /// `(sensitivity * 0.6 + 0.2)^3 * 8`, which is exactly `1.0` at the
-    /// default sensitivity.
-    #[must_use]
-    pub fn look_factor(&self) -> f32 {
-        (self.mouse_sensitivity * 0.6 + 0.2).powi(3) * 8.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::mouse_look::sensitivity_factor;
 
     #[test]
     fn the_look_factor_grows_with_the_sensitivity() {
@@ -47,8 +39,9 @@ mod tests {
             mouse_sensitivity: 1.0,
             ..ControlOptions::default()
         };
-        assert!(low.look_factor() < ControlOptions::default().look_factor());
-        assert!(ControlOptions::default().look_factor() < high.look_factor());
-        assert!(low.look_factor() > 0.0);
+        let factor = |controls: &ControlOptions| sensitivity_factor(controls, 1.0);
+        assert!(factor(&low) < factor(&ControlOptions::default()));
+        assert!(factor(&ControlOptions::default()) < factor(&high));
+        assert!(factor(&low) > 0.0);
     }
 }

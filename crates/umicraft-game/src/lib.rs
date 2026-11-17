@@ -110,9 +110,10 @@ pub struct ServerCorrection {
     pub y: f64,
     /// The authoritative Z of the player's feet.
     pub z: f64,
-    /// The authoritative horizontal view angle in radians.
+    /// The authoritative horizontal view angle in degrees, as the packet
+    /// carries it.
     pub yaw: f32,
-    /// The authoritative vertical view angle in radians.
+    /// The authoritative vertical view angle in degrees.
     pub pitch: f32,
     /// Whether the server has the player on the ground.
     pub on_ground: bool,
@@ -290,7 +291,7 @@ impl GameState {
 
         match base {
             Some((index, state)) => {
-                self.player.position = authoritative;
+                self.player.set_position(authoritative);
                 self.player.velocity = state.velocity;
                 self.player.on_ground = correction.on_ground;
                 self.player.yaw = correction.yaw;
@@ -333,7 +334,7 @@ impl GameState {
                 self.history = replayed;
             }
             None => {
-                self.player.position = authoritative;
+                self.player.set_position(authoritative);
                 self.player.velocity = DVec3::ZERO;
                 self.player.on_ground = correction.on_ground;
                 self.player.yaw = correction.yaw;
@@ -361,7 +362,7 @@ impl GameState {
             keep(relative[1], self.player.velocity.y),
             keep(relative[2], self.player.velocity.z),
         );
-        self.player.position = position;
+        self.player.set_position(position);
         self.player.on_ground = target.on_ground;
         self.player.yaw = target.yaw;
         self.player.pitch = target.pitch;
@@ -377,19 +378,16 @@ impl GameState {
     pub fn interpolated(&self, alpha: f32) -> RenderState {
         let alpha = f64::from(alpha.clamp(0.0, 1.0));
         let feet = self.previous_position.lerp(self.player.position, alpha);
-        let eye_height = if self.player.sneaking {
-            physics::EYE_HEIGHT - physics::SNEAKING_EYE_HEIGHT_OFFSET
-        } else {
-            physics::EYE_HEIGHT
-        };
+        let eye_height = physics::eye_height(self.player.sneaking);
         // Stays f64: the renderer subtracts its origin before any cast (F2-1a).
         let eye = feet + DVec3::Y * eye_height;
         RenderState {
             position: eye,
             eye,
             orbit_start: Vec3::ZERO,
-            yaw: self.player.yaw,
-            pitch: self.player.pitch,
+            // The game keeps degrees (ADR-0076); the renderer radians.
+            yaw: self.player.yaw.to_radians(),
+            pitch: self.player.pitch.to_radians(),
             on_ground: self.player.on_ground,
             effects: view::ViewEffects::at(&self.player, alpha as f32),
         }
@@ -475,7 +473,7 @@ impl GameState {
     /// The prediction history is dropped, the server never corrects a rider.
     pub fn ride(&mut self, feet: DVec3) {
         self.previous_position = self.player.position;
-        self.player.position = feet;
+        self.player.set_position(feet);
         self.player.velocity = DVec3::ZERO;
         self.tick += 1;
         self.history.clear();
@@ -613,16 +611,20 @@ mod tests {
             state.tick(&intent, &world);
         }
 
-        let ground = 0.6 * physics::GROUND_FRICTION;
-        let mut motion = 0.0;
+        // The vanilla arithmetic: `float` accelerations and frictions, widened
+        // when they meet the `double` motion (ADR-0076).
+        let ground = 0.6_f32 * physics::GROUND_FRICTION;
+        let walk = physics::WALK_SPEED as f32 * (0.162_771_36_f32 / (ground * ground * ground));
+        let mut motion = 0.0_f64;
         let mut expected = 0.0;
         for tick in 0..20 {
             let (acceleration, friction) = if tick < 2 {
-                (0.98 * 0.02, physics::GROUND_FRICTION)
+                (0.98_f32 * 0.02, physics::GROUND_FRICTION)
             } else {
-                (0.98 * 0.1 * 0.162_771_36 / ground.powi(3), ground)
+                (0.98_f32 * walk, ground)
             };
-            motion += acceleration;
+            motion += f64::from(acceleration);
+            let friction = f64::from(friction);
             expected += motion;
             motion *= friction;
         }

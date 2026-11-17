@@ -1,6 +1,6 @@
 # ADR-0076 — Vanilla angles and float math for the local player
 
-Status: proposed (2026-11-17)
+Status: accepted (2026-11-17)
 
 ## Context
 
@@ -44,8 +44,9 @@ arithmetic does not:
    conversion to radians happens once, where the render thread builds the
    camera (`RenderState`, `world_view`). Packets send the field unchanged.
 2. **`umicraft_game::mth`** holds `sin`, `cos` (the `MathHelper` table, built
-   once in a `OnceLock<Box<[f32; 65536]>>`), `wrap_degrees` and
-   `sqrt_float`. Physics, the sprint jump and every other place where
+   once in a `OnceLock<Box<[f32; 65536]>>`), `sqrt_float` and `radians`
+   (`deg * (float)Math.PI / 180.0F`); the existing
+   `entity::angle::wrap_degrees` stays where it is. Physics, the sprint jump and every other place where
    vanilla calls `MathHelper` use it; the renderer keeps exact trigonometry.
 3. **`float` where vanilla uses `float`.** `physics.rs` follows the
    reference's types: friction, acceleration and `moveFlying` in `f32`,
@@ -55,7 +56,14 @@ arithmetic does not:
    game only whole pixels, keeping the fraction for the next event; the
    rotation is then `(float)((double)yaw + (double)(px * f1) * 0.15D)`.
    The zoom factor multiplies `f1`, as OptiFine's zoom changes the
-   sensitivity.
+   sensitivity. `umicraft_client::mouse_look` holds the accumulator and the
+   factor, `umicraft_game::input::set_angles` the rotation.
+5. **The box is the truth** (added during the work). Vanilla moves the
+   bounding box and reads `posX = (minX + maxX) / 2` back from it
+   (`resetPositionToBB`); computing the position directly drifted by one
+   ulp after a few ticks. `Player::bounds` is now stored, moves go through
+   `set_bounds`/`move_bounds`, and the player's dimensions are the `float`
+   values (`0.6F / 2`, `1.8F`, eyes `1.62F`, sneaking `1.62F - 0.08F`).
 
 ## Consequences
 
@@ -80,4 +88,20 @@ arithmetic does not:
 
 Phase A (`umicraft-game`): `mth`, degrees in `Player`/`physics`/`traffic`,
 golden tests. Phase B (`umicraft-client`): `Game`, input, mouse
-accumulation, render conversion. A is merged before B starts.
+accumulation, render conversion. The unit change crosses both crates, so A
+and B landed in one commit; `mth` came first on its own.
+
+## Outcome (2026-11-17)
+
+- The vanilla 1.8.9 captures of phases E.2, E.5, E.6 and E.7 (walking,
+  sprinting, jumping, sprint-jumping, strafing, sneaking, the bottom and the
+  surface of a pool with Depth Strider III) are reproduced **to the bit**,
+  position, motion and ground flag, on every tick
+  (`crates/umicraft-game/tests/vanilla_replay.rs`). Before, the strict
+  comparison of E.10 showed 1e-8 to 3e-6.
+- The captures only look at yaw 0, so the yaws 37.35, 123.45, -71.1 and
+  1234.5 are checked against values computed with Java `float` semantics
+  (`tests/data/turning_sprint_jump.csv`); with the exact sine instead of
+  the table the first tick already differs by 9e-6.
+- A server look comes back bit for bit; whole mouse pixels only.
+- `physics::step` costs the same within the noise (`docs/perf-log.md`).

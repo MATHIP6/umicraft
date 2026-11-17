@@ -18,7 +18,10 @@ fn the_defaults_match_the_reference_game() {
     let options = Options::default();
     assert_eq!(options.video.fov, 70.0);
     assert_eq!(options.controls.mouse_sensitivity, 0.5);
-    assert!((options.controls.look_factor() - 1.0).abs() < 1e-5);
+    assert_eq!(
+        crate::mouse_look::sensitivity_factor(&options.controls, 1.0),
+        1.0
+    );
     assert_eq!(options.keys.get(Action::Forward), KeyCode::KeyW);
     assert_eq!(options.keys.get(Action::Command), KeyCode::Slash);
     assert_eq!(options.keys.get(Action::Hotbar9), KeyCode::Digit9);

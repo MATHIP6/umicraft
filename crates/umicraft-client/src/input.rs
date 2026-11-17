@@ -67,9 +67,11 @@ pub struct InputUpdate {
     pub created_at: Instant,
     /// The new key state; it replaces the previous one.
     pub state: InputState,
-    /// The yaw delta in radians; a positive delta turns the view to the right.
+    /// The horizontal mouse turn, the first argument of `Entity.setAngles`
+    /// (whole pixels times the sensitivity factor, see
+    /// [`crate::mouse_look::look_turn`]); positive turns to the right.
     pub look_yaw: f32,
-    /// The pitch delta in radians; a positive delta looks down.
+    /// The vertical mouse turn; positive looks down.
     pub look_pitch: f32,
     /// The hotbar slot the player selected, if any (the mouse wheel, which
     /// `Minecraft.runTick` handles before the keys).

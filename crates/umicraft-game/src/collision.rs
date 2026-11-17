@@ -58,6 +58,9 @@ impl Default for MoveOptions {
 pub struct MoveResult {
     /// The movement that was actually applied.
     pub delta: DVec3,
+    /// The box after the move. Prefer it to `original.offset(delta)`: the
+    /// box went through several offsets, each with its own rounding.
+    pub bounds: Aabb,
     /// The X movement was blocked by a block.
     pub blocked_x: bool,
     /// The Z movement was blocked by a block.
@@ -172,6 +175,7 @@ pub fn move_entity<S: BlockSource + ?Sized>(
 
     MoveResult {
         delta: current.min - original.min,
+        bounds: current,
         blocked_x: requested.x != x,
         blocked_z: requested.z != z,
         blocked_horizontally: requested.x != x || requested.z != z,

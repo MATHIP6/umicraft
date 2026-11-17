@@ -98,7 +98,13 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
         return first_person;
     };
     let eye = first_person.position;
-    let pose = camera_pose(game.perspective, eye, game.yaw, game.pitch, world);
+    let pose = camera_pose(
+        game.perspective,
+        eye,
+        game.yaw.to_radians(),
+        game.pitch.to_radians(),
+        world,
+    );
     // The same angles from the eye of the previous tick: the wall rays of
     // `orientCamera` start from the interpolated eye every frame, so the
     // renderer blends this orbit with the one above over the tick.
@@ -106,7 +112,13 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
         .state
         .as_ref()
         .map_or(eye, |state| state.interpolated(0.0).position);
-    let start_pose = camera_pose(game.perspective, start, game.yaw, game.pitch, world);
+    let start_pose = camera_pose(
+        game.perspective,
+        start,
+        game.yaw.to_radians(),
+        game.pitch.to_radians(),
+        world,
+    );
     RenderState {
         position: pose.position,
         eye: first_person.position,

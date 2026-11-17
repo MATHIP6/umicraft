@@ -21,40 +21,57 @@ use glam::DVec3;
 use crate::collision::{self, MoveOptions};
 use crate::input::{InputIntent, SPRINT_FORWARD_THRESHOLD};
 use crate::media;
+use crate::mth;
 use crate::shapes::{is_normal_cube, Aabb, BlockSource};
 use crate::sound::step::StepFacts;
 use crate::view;
 use umicraft_world::BlockState;
 
-/// The width of the player bounding box (MCP `Entity.java:259`).
-pub const PLAYER_WIDTH: f64 = 0.6;
+/// The width of the player bounding box (MCP `EntityPlayer.java`:
+/// `setSize(0.6F, 1.8F)`; `Entity.width` is a `float`).
+pub const PLAYER_WIDTH: f64 = 0.6_f32 as f64;
 
-/// The height of the player bounding box (MCP `Entity.java:260`).
-pub const PLAYER_HEIGHT: f64 = 1.8;
+/// The height of the player bounding box (`setSize(0.6F, 1.8F)`).
+pub const PLAYER_HEIGHT: f64 = 1.8_f32 as f64;
 
-/// Half the width of the player bounding box.
-pub const PLAYER_HALF_WIDTH: f64 = PLAYER_WIDTH / 2.0;
+/// Half the width of the player bounding box: `Entity.setPosition` computes
+/// `width / 2.0F` in `float` (MCP `Entity.java:365`).
+pub const PLAYER_HALF_WIDTH: f64 = (0.6_f32 / 2.0) as f64;
 
-/// The height of the player's eyes (MCP `EntityPlayer.java:2328`).
-pub const EYE_HEIGHT: f64 = 1.62;
+/// The height of the player's eyes (MCP `EntityPlayer.getEyeHeight`, `1.62F`).
+pub const EYE_HEIGHT: f64 = 1.62_f32 as f64;
 
-/// How much lower the eyes are while sneaking (MCP `EntityPlayer.java:2337`).
-pub const SNEAKING_EYE_HEIGHT_OFFSET: f64 = 0.08;
+/// How much lower the eyes are while sneaking (MCP `EntityPlayer.getEyeHeight`,
+/// `f -= 0.08F`, in `float`).
+pub const SNEAKING_EYE_HEIGHT_OFFSET: f32 = 0.08;
+
+/// The height of the eyes above the feet (MCP `EntityPlayer.getEyeHeight`):
+/// the subtraction is a `float` one, widened afterwards.
+#[must_use]
+pub fn eye_height(sneaking: bool) -> f64 {
+    if sneaking {
+        f64::from(1.62_f32 - SNEAKING_EYE_HEIGHT_OFFSET)
+    } else {
+        EYE_HEIGHT
+    }
+}
 
 /// The base value of the movement speed attribute of a player
-/// (MCP `EntityPlayer.java:193` and `PlayerCapabilities.java:24`).
-pub const WALK_SPEED: f64 = 0.1;
+/// (MCP `EntityPlayer.java:193`: `0.10000000149011612D`, the `float` 0.1).
+pub const WALK_SPEED: f64 = 0.100_000_001_490_116_12;
 
 /// The sprinting bonus of the movement speed attribute
-/// (MCP `EntityLivingBase.java:57`: `0.3` with operation `2`, multiply total).
-pub const SPRINT_SPEED_BONUS: f64 = 0.3;
+/// (MCP `EntityLivingBase.java:57`: `0.30000001192092896D` with operation
+/// `2`, multiply total).
+pub const SPRINT_SPEED_BONUS: f64 = 0.300_000_011_920_928_96;
 
 /// The default walking speed of the abilities
 /// (MCP `PlayerCapabilities.walkSpeed`, line 26).
 pub const DEFAULT_WALK_SPEED: f32 = 0.1;
 
-/// The upwards motion a Jump Boost level adds (MCP `EntityLivingBase.java:1562`).
-const JUMP_BOOST_PER_LEVEL: f64 = 0.1;
+/// The upwards motion a Jump Boost level adds (MCP `EntityLivingBase.java:1562`,
+/// `0.1F`, multiplied in `float`).
+const JUMP_BOOST_PER_LEVEL: f32 = 0.1;
 
 /// The food level above which the player may sprint
 /// (MCP `EntityPlayerSP.java:799`: `foodLevel > 6`).
@@ -68,34 +85,39 @@ pub const DEFAULT_FLY_SPEED: f32 = 0.05;
 pub const FLY_TOGGLE_TICKS: u32 = 7;
 
 /// The vertical flying acceleration per unit of flying speed
-/// (MCP `EntityPlayerSP.java:852,857`).
-const FLY_VERTICAL_FACTOR: f64 = 3.0;
+/// (MCP `EntityPlayerSP.java:852,857`: `getFlySpeed() * 3.0F`, in `float`).
+const FLY_VERTICAL_FACTOR: f32 = 3.0;
 
 /// The part of the vertical motion a flying player keeps each tick
 /// (MCP `EntityPlayer.java:1800`).
 const FLY_VERTICAL_KEEP: f64 = 0.6;
 
-/// The upwards motion of a jump (MCP `EntityLivingBase.java:1550`).
-pub const JUMP_MOTION: f64 = 0.42;
+/// The upwards motion of a jump (MCP `EntityLivingBase.java:1561`, `0.42F`).
+pub const JUMP_MOTION: f32 = 0.42;
 
-/// The forward boost of a sprinting jump (MCP `EntityLivingBase.java:1568`).
-pub const SPRINT_JUMP_BOOST: f64 = 0.2;
+/// The forward boost of a sprinting jump (MCP `EntityLivingBase.java:1568`,
+/// `MathHelper.sin(f) * 0.2F`, in `float`).
+pub const SPRINT_JUMP_BOOST: f32 = 0.2;
 
 /// The friction applied to the horizontal motion in the air; on the ground it
 /// is multiplied by the slipperiness of the block below
-/// (MCP `EntityLivingBase.java:1599-1604`).
-pub const GROUND_FRICTION: f64 = 0.91;
+/// (MCP `EntityLivingBase.java:1599-1604`, `0.91F`, in `float`).
+pub const GROUND_FRICTION: f32 = 0.91;
 
-/// The slipperiness of an ordinary block (MCP `Block.java:289`).
-pub const DEFAULT_SLIPPERINESS: f64 = 0.6;
+/// The slipperiness of an ordinary block (MCP `Block.java:289`, `0.6F`).
+pub const DEFAULT_SLIPPERINESS: f32 = 0.6;
 
 /// The horizontal motion the push out of a block sets
-/// (MCP `EntityPlayerSP.java:483`).
-pub const PUSH_OUT_SPEED: f64 = 0.1;
+/// (MCP `EntityPlayerSP.java:480`: `float f = 0.1F`, widened).
+pub const PUSH_OUT_SPEED: f64 = 0.100_000_001_490_116_12;
 
-/// The horizontal and downward speed limit on a ladder
-/// (MCP `EntityLivingBase.java:1627`, `0.15F`).
+/// The horizontal speed limit on a ladder
+/// (MCP `EntityLivingBase.java:1627`, `0.15F` widened).
 pub const LADDER_SPEED: f64 = 0.15000000596046448;
+
+/// The downward speed limit on a ladder (MCP `EntityLivingBase.java:1632`,
+/// `-0.15D`: a `double`, unlike the horizontal limit).
+const LADDER_FALL_SPEED: f64 = 0.15;
 
 /// The vertical motion of a player that walks into the wall on a ladder
 /// (MCP `EntityLivingBase.java:1649`).
@@ -138,22 +160,29 @@ const WEB_VERTICAL_FACTOR: f64 = 0.05000000074505806;
 /// The slime block id, the one block that bounces a landing entity.
 const SLIME_BLOCK: u16 = 165;
 
-/// The numerator of the movement speed factor (MCP `EntityLivingBase.java:1606`).
-pub const MOVE_SPEED_NUMERATOR: f64 = 0.16277136;
+/// The numerator of the movement speed factor (MCP `EntityLivingBase.java:1606`,
+/// `0.16277136F`, divided in `float`).
+pub const MOVE_SPEED_NUMERATOR: f32 = 0.162_771_36;
 
 /// The damping applied to the latched input before it is used
-/// (MCP `EntityLivingBase.java:2020-2021`).
-pub const INPUT_DAMPING: f64 = 0.98;
+/// (MCP `EntityLivingBase.java:2031-2032`, `0.98F`, in `float`).
+pub const INPUT_DAMPING: f32 = 0.98;
 
 /// The acceleration factor of a player in the air
-/// (MCP `EntityLivingBase.java:112` and `EntityPlayer.java:164`).
-pub const AIR_CONTROL: f64 = 0.02;
+/// (MCP `EntityPlayer.java:164`, `speedInAir = 0.02F`).
+pub const AIR_CONTROL: f32 = 0.02;
+
+/// The share of [`AIR_CONTROL`] a sprint adds, in `double`
+/// (MCP `EntityPlayer.java:631`).
+const SPRINT_AIR_CONTROL_BONUS: f64 = 0.3;
 
 /// The gravity applied every tick (MCP `EntityLivingBase.java:1666`).
 pub const GRAVITY: f64 = 0.08;
 
-/// The damping applied to the vertical motion (MCP `EntityLivingBase.java:1669`).
-pub const VERTICAL_DAMPING: f64 = 0.98;
+/// The damping applied to the vertical motion
+/// (MCP `EntityLivingBase.java:1669`, `0.9800000190734863D`: the `float`
+/// 0.98 written out).
+pub const VERTICAL_DAMPING: f64 = 0.980_000_019_073_486_3;
 
 /// The height of a ledge a player can step up (MCP `EntityLivingBase.java:208`).
 ///
@@ -188,13 +217,22 @@ pub const SPRINT_DURATION_TICKS: u32 = 600;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Player {
     /// The feet position: the centre of the bounding box on X and Z and its
-    /// bottom on Y (MCP `Entity.posX/posY/posZ`).
+    /// bottom on Y (MCP `Entity.posX/posY/posZ`). Read it freely; change it
+    /// only with [`Player::set_position`], which keeps
+    /// [`Player::bounds`] in step.
     pub position: DVec3,
+    /// The bounding box, the truth the moves work on: like vanilla
+    /// (`Entity.moveEntity` then `resetPositionToBB`), a move offsets the box
+    /// and the position is read back from it, so it carries the same rounding
+    /// as vanilla's `posX = (minX + maxX) / 2`.
+    pub bounds: Aabb,
     /// The motion vector (MCP `Entity.motionX/motionY/motionZ`).
     pub velocity: DVec3,
-    /// The horizontal view angle in radians.
+    /// The horizontal view angle in degrees, never wrapped
+    /// (MCP `Entity.rotationYaw`; ADR-0076).
     pub yaw: f32,
-    /// The vertical view angle in radians.
+    /// The vertical view angle in degrees, positive looking down
+    /// (MCP `Entity.rotationPitch`).
     pub pitch: f32,
     /// Whether the player rests on the ground.
     pub on_ground: bool,
@@ -234,6 +272,12 @@ pub struct Player {
     /// movement (MCP `EntityPlayer.java:627-634`), so the sprint state of the
     /// previous tick decides the speed of the current one.
     pub speed_multiplier: f64,
+    /// The acceleration in the air (MCP `EntityLivingBase.jumpMovementFactor`).
+    ///
+    /// `EntityPlayer.java:627-631` sets it *after* the movement, so like
+    /// [`Player::speed_multiplier`] it carries the sprint of the previous
+    /// tick.
+    pub jump_movement_factor: f32,
     /// How many ticks the bow in use has been drawn, `None` when no bow is
     /// drawn; it narrows the field of view.
     pub bow_draw_ticks: Option<u32>,
@@ -295,6 +339,7 @@ impl Default for Player {
     fn default() -> Self {
         Self {
             position: DVec3::ZERO,
+            bounds: bounds_at(DVec3::ZERO),
             velocity: DVec3::ZERO,
             yaw: 0.0,
             pitch: 0.0,
@@ -311,6 +356,7 @@ impl Default for Player {
             well_fed: true,
             blinded: false,
             speed_multiplier: 1.0,
+            jump_movement_factor: AIR_CONTROL,
             bow_draw_ticks: None,
             previous_forward: 0.0,
             collided_horizontally: false,
@@ -340,41 +386,45 @@ impl Player {
     /// Creates a player at the given feet position.
     #[must_use]
     pub fn new(position: DVec3) -> Self {
-        Self {
-            position,
-            ..Self::default()
-        }
+        let mut player = Self::default();
+        player.set_position(position);
+        player
     }
 
-    /// The bounding box of the player.
-    ///
-    /// MCP `Entity.setPosition` (line 365) builds the box as
-    /// `(x - width / 2, y, z - width / 2) .. (x + width / 2, y + height, z + width / 2)`.
+    /// The bounding box of the player ([`Player::bounds`]).
     #[must_use]
     pub fn bounding_box(&self) -> Aabb {
-        Aabb::new(
-            DVec3::new(
-                self.position.x - PLAYER_HALF_WIDTH,
-                self.position.y,
-                self.position.z - PLAYER_HALF_WIDTH,
-            ),
-            DVec3::new(
-                self.position.x + PLAYER_HALF_WIDTH,
-                self.position.y + PLAYER_HEIGHT,
-                self.position.z + PLAYER_HALF_WIDTH,
-            ),
-        )
+        self.bounds
+    }
+
+    /// Places the feet at `position` and rebuilds the box around them
+    /// (MCP `Entity.setPosition`, line 365).
+    pub fn set_position(&mut self, position: DVec3) {
+        self.position = position;
+        self.bounds = bounds_at(position);
+    }
+
+    /// Moves the box by `delta` and reads the position back from it
+    /// (MCP `Entity.moveEntity` then `resetPositionToBB`).
+    pub fn move_bounds(&mut self, delta: DVec3) {
+        self.set_bounds(self.bounds.offset(delta));
+    }
+
+    /// Takes `bounds` as the new box and reads the position back from it
+    /// (MCP `Entity.resetPositionToBB`).
+    pub fn set_bounds(&mut self, bounds: Aabb) {
+        self.bounds = bounds;
+        self.position = DVec3::new(
+            (bounds.min.x + bounds.max.x) / 2.0,
+            bounds.min.y,
+            (bounds.min.z + bounds.max.z) / 2.0,
+        );
     }
 
     /// The position of the player's eyes.
     #[must_use]
     pub fn eye_position(&self) -> DVec3 {
-        let height = if self.sneaking {
-            EYE_HEIGHT - SNEAKING_EYE_HEIGHT_OFFSET
-        } else {
-            EYE_HEIGHT
-        };
-        self.position + DVec3::Y * height
+        self.position + DVec3::Y * eye_height(self.sneaking)
     }
 
     /// Enables or disables the sprint.
@@ -385,6 +435,23 @@ impl Player {
         self.sprinting = sprinting;
         self.sprinting_ticks_left = if sprinting { SPRINT_DURATION_TICKS } else { 0 };
     }
+}
+
+/// The box `Entity.setPosition` builds around the feet:
+/// `(x - w/2, y, z - w/2) .. (x + w/2, y + h, z + w/2)`.
+fn bounds_at(position: DVec3) -> Aabb {
+    Aabb::new(
+        DVec3::new(
+            position.x - PLAYER_HALF_WIDTH,
+            position.y,
+            position.z - PLAYER_HALF_WIDTH,
+        ),
+        DVec3::new(
+            position.x + PLAYER_HALF_WIDTH,
+            position.y + PLAYER_HEIGHT,
+            position.z + PLAYER_HALF_WIDTH,
+        ),
+    )
 }
 
 /// Advances the player by exactly one tick.
@@ -447,11 +514,16 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
         if player.in_water || media::is_in_lava(player, world) {
             player.velocity.y += LIQUID_SWIM_UP;
         } else if player.on_ground && player.jump_ticks == 0 {
-            player.velocity.y = JUMP_MOTION + f64::from(player.jump_boost) * JUMP_BOOST_PER_LEVEL;
+            // MCP `EntityLivingBase.jump`: every product is a `float`
+            // widened on the addition.
+            player.velocity.y = f64::from(JUMP_MOTION);
+            if player.jump_boost > 0 {
+                player.velocity.y += f64::from(f32::from(player.jump_boost) * JUMP_BOOST_PER_LEVEL);
+            }
             if player.sprinting {
-                let (sin_yaw, cos_yaw) = player.yaw.sin_cos();
-                player.velocity.x -= f64::from(sin_yaw) * SPRINT_JUMP_BOOST;
-                player.velocity.z += f64::from(cos_yaw) * SPRINT_JUMP_BOOST;
+                let angle = player.yaw * mth::DEG_TO_RAD;
+                player.velocity.x -= f64::from(mth::sin(angle) * SPRINT_JUMP_BOOST);
+                player.velocity.z += f64::from(mth::cos(angle) * SPRINT_JUMP_BOOST);
             }
             player.jump_ticks = JUMP_COOLDOWN_TICKS;
         }
@@ -460,8 +532,8 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
     }
 
     // The travel step, MCP `EntityLivingBase.java:2020-2023`.
-    let strafe = f64::from(intent.strafe) * INPUT_DAMPING;
-    let forward = f64::from(intent.forward) * INPUT_DAMPING;
+    let strafe = intent.strafe * INPUT_DAMPING;
+    let forward = intent.forward * INPUT_DAMPING;
     travel(player, strafe, forward, world);
 
     // MCP `EntityPlayerSP.java:904-907`: touching the ground ends a flight,
@@ -476,6 +548,11 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
         1.0 + SPRINT_SPEED_BONUS
     } else {
         1.0
+    };
+    player.jump_movement_factor = if player.sprinting {
+        (f64::from(AIR_CONTROL) + f64::from(AIR_CONTROL) * SPRINT_AIR_CONTROL_BONUS) as f32
+    } else {
+        AIR_CONTROL
     };
     update_view_effects(player);
 }
@@ -513,7 +590,7 @@ fn update_view_effects(player: &mut Player) {
 /// The slipperiness of a block (MCP `Block.slipperiness`): ice and packed ice
 /// 0.98 (`BlockIce.java:23`, `BlockPackedIce.java:12`), slime 0.8
 /// (`BlockSlime.java:17`), every other block 0.6 (`Block.java:289`).
-fn slipperiness(state: BlockState) -> f64 {
+fn slipperiness(state: BlockState) -> f32 {
     match state.id() {
         79 | 174 => 0.98,
         SLIME_BLOCK => 0.8,
@@ -706,7 +783,7 @@ fn update_flight(player: &mut Player, intent: &InputIntent) {
     player.previous_jump = intent.jump;
 
     if player.flying {
-        let lift = f64::from(player.fly_speed) * FLY_VERTICAL_FACTOR;
+        let lift = f64::from(player.fly_speed * FLY_VERTICAL_FACTOR);
         if intent.sneak {
             player.velocity.y -= lift;
         }
@@ -722,7 +799,7 @@ fn update_flight(player: &mut Player, intent: &InputIntent) {
 /// MCP `EntityPlayer.moveEntityWithHeading` keeps the flight to itself and
 /// leaves the rest to `EntityLivingBase.moveEntityWithHeading`
 /// (lines 1591-1735): water, then lava, then the land.
-fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64, world: &S) {
+fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f32, forward: f32, world: &S) {
     if player.flying || player.no_clip {
         travel_on_land(player, strafe, forward, world);
     } else if player.in_water {
@@ -737,7 +814,7 @@ fn travel<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f6
 /// The water branch of MCP `EntityLivingBase.moveEntityWithHeading`
 /// (lines 1690-1716): an acceleration of 0.02 and a friction of 0.8, both
 /// moved towards the land values by Depth Strider.
-fn swim<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64, world: &S) {
+fn swim<S: BlockSource + ?Sized>(player: &mut Player, strafe: f32, forward: f32, world: &S) {
     let start_y = player.position.y;
     // The reference computes these in `float`.
     let mut friction = WATER_FRICTION;
@@ -752,16 +829,11 @@ fn swim<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64,
         // sprint modifier applied this tick (bytecode `pr.g`: `invokevirtual
         // bI()F`, `wn.bI()`); the cached `speed_multiplier` would give it one
         // tick late (phases E.3 to E.5).
-        let move_speed = (player.movement_speed
-            * if player.sprinting {
-                1.0 + SPRINT_SPEED_BONUS
-            } else {
-                1.0
-            }) as f32;
+        let move_speed = ai_move_speed(player);
         friction += (DEPTH_STRIDER_FRICTION - friction) * strider / 3.0;
         acceleration += (move_speed - acceleration) * strider / 3.0;
     }
-    move_flying(player, strafe, forward, f64::from(acceleration));
+    move_flying(player, strafe, forward, acceleration);
     move_player(player, world);
     player.velocity.x *= f64::from(friction);
     player.velocity.y *= f64::from(WATER_FRICTION);
@@ -774,12 +846,12 @@ fn swim<S: BlockSource + ?Sized>(player: &mut Player, strafe: f64, forward: f64,
 /// (lines 1718-1731): an acceleration of 0.02 and a friction of 0.5.
 fn wade_through_lava<S: BlockSource + ?Sized>(
     player: &mut Player,
-    strafe: f64,
-    forward: f64,
+    strafe: f32,
+    forward: f32,
     world: &S,
 ) {
     let start_y = player.position.y;
-    move_flying(player, strafe, forward, f64::from(LIQUID_ACCELERATION));
+    move_flying(player, strafe, forward, LIQUID_ACCELERATION);
     move_player(player, world);
     player.velocity *= 0.5;
     player.velocity.y -= LIQUID_GRAVITY;
@@ -801,8 +873,8 @@ fn climb_out_of_liquid<S: BlockSource + ?Sized>(player: &mut Player, start_y: f6
 /// rules.
 fn travel_on_land<S: BlockSource + ?Sized>(
     player: &mut Player,
-    strafe: f64,
-    forward: f64,
+    strafe: f32,
+    forward: f32,
     world: &S,
 ) {
     // MCP `EntityLivingBase.java:1599-1604`: the block below the feet sets
@@ -815,10 +887,11 @@ fn travel_on_land<S: BlockSource + ?Sized>(
     };
     let flying = player.flying;
     let kept_vertical = player.velocity.y;
+    // All in `float`, as `moveEntityWithHeading` computes it.
     let speed = if flying && !player.on_ground {
         // MCP `EntityPlayer.java:1798`: the flying speed replaces the air
         // control and doubles while sprinting.
-        f64::from(player.fly_speed) * if player.sprinting { 2.0 } else { 1.0 }
+        player.fly_speed * if player.sprinting { 2.0 } else { 1.0 }
     } else if player.on_ground {
         // MCP `EntityLivingBase.java:1606-1612` reads `getAIMoveSpeed()`, which
         // `EntityPlayer.java:1814` overrides to read the movement-speed
@@ -826,16 +899,10 @@ fn travel_on_land<S: BlockSource + ?Sized>(
         // (before the move) is already in it. The cached `speed_multiplier` is
         // refreshed after the move and would give the sprint one tick late
         // (phase E.3, bytecode `wn.bI()`).
-        player.movement_speed
-            * if player.sprinting {
-                1.0 + SPRINT_SPEED_BONUS
-            } else {
-                1.0
-            }
-            * (MOVE_SPEED_NUMERATOR / (friction * friction * friction))
+        ai_move_speed(player) * (MOVE_SPEED_NUMERATOR / (friction * friction * friction))
     } else {
         // MCP `EntityLivingBase.java:1613-1616`.
-        AIR_CONTROL * player.speed_multiplier
+        player.jump_movement_factor
     };
     move_flying(player, strafe, forward, speed);
 
@@ -844,7 +911,7 @@ fn travel_on_land<S: BlockSource + ?Sized>(
         player.fall_distance = 0.0;
         player.velocity.x = player.velocity.x.clamp(-LADDER_SPEED, LADDER_SPEED);
         player.velocity.z = player.velocity.z.clamp(-LADDER_SPEED, LADDER_SPEED);
-        player.velocity.y = player.velocity.y.max(-LADDER_SPEED);
+        player.velocity.y = player.velocity.y.max(-LADDER_FALL_SPEED);
         // A sneaking player holds on to the ladder.
         if player.sneaking && player.velocity.y < 0.0 {
             player.velocity.y = 0.0;
@@ -863,24 +930,32 @@ fn travel_on_land<S: BlockSource + ?Sized>(
 
 /// Accelerates the player along its look by `speed`.
 ///
-/// `moveFlying`, MCP `net/minecraft/entity/Entity.java:1214-1235`.
-fn move_flying(player: &mut Player, strafe: f64, forward: f64, speed: f64) {
-    let mut strafe = strafe;
-    let mut forward = forward;
+/// `moveFlying`, MCP `net/minecraft/entity/Entity.java:1224-1245`: the whole
+/// computation is in `float`, with the `MathHelper` table ([`mth`]), and
+/// only the two sums are widened to `double` (ADR-0076).
+fn move_flying(player: &mut Player, strafe: f32, forward: f32, speed: f32) {
     let norm = strafe * strafe + forward * forward;
     if norm >= 1.0e-4 {
-        let mut length = norm.sqrt();
-        if length < 1.0 {
-            length = 1.0;
-        }
+        let length = mth::sqrt_float(norm).max(1.0);
         let scale = speed / length;
-        strafe *= scale;
-        forward *= scale;
-        let (sin_yaw, cos_yaw) = player.yaw.sin_cos();
-        let (sin_yaw, cos_yaw) = (f64::from(sin_yaw), f64::from(cos_yaw));
-        player.velocity.x += strafe * cos_yaw - forward * sin_yaw;
-        player.velocity.z += forward * cos_yaw + strafe * sin_yaw;
+        let strafe = strafe * scale;
+        let forward = forward * scale;
+        let angle = mth::radians(player.yaw);
+        let (sin_yaw, cos_yaw) = (mth::sin(angle), mth::cos(angle));
+        player.velocity.x += f64::from(strafe * cos_yaw - forward * sin_yaw);
+        player.velocity.z += f64::from(forward * cos_yaw + strafe * sin_yaw);
     }
+}
+
+/// The movement speed the movement reads (MCP `EntityPlayer.getAIMoveSpeed`):
+/// the attribute with this tick's sprint modifier, narrowed to `float`.
+fn ai_move_speed(player: &Player) -> f32 {
+    let sprint = if player.sprinting {
+        1.0 + SPRINT_SPEED_BONUS
+    } else {
+        1.0
+    };
+    (player.movement_speed * sprint) as f32
 }
 
 /// Moves the player by its motion through the world.
@@ -892,7 +967,7 @@ fn move_flying(player: &mut Player, strafe: f64, forward: f64, speed: f64) {
 fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
     if player.no_clip {
         // MCP `Entity.java:595-600`: no collision at all.
-        player.position += player.velocity;
+        player.move_bounds(player.velocity);
         player.on_ground = false;
         player.collided_horizontally = false;
         return;
@@ -916,7 +991,7 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
             on_ground: player.on_ground,
         },
     );
-    player.position += result.delta;
+    player.set_bounds(result.bounds);
     if !player.flying {
         // MCP `Entity.moveEntity` line 862, skipped while flying
         // (`EntityPlayer.canTriggerWalking`).
@@ -961,11 +1036,11 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
 /// Gravity and friction, MCP `EntityLivingBase.java:1666-1671`; a flying
 /// player keeps 60 % of the vertical motion it had before the move instead
 /// (MCP `EntityPlayer.java:1800`).
-fn finish_travel(player: &mut Player, friction: f64, flying: bool, kept_vertical: f64) {
+fn finish_travel(player: &mut Player, friction: f32, flying: bool, kept_vertical: f64) {
     player.velocity.y -= GRAVITY;
     player.velocity.y *= VERTICAL_DAMPING;
-    player.velocity.x *= friction;
-    player.velocity.z *= friction;
+    player.velocity.x *= f64::from(friction);
+    player.velocity.z *= f64::from(friction);
     if flying {
         player.velocity.y = kept_vertical * FLY_VERTICAL_KEEP;
     }
@@ -978,6 +1053,13 @@ mod tests {
     use crate::shapes::BlockSource;
     use std::collections::HashMap;
     use umicraft_world::BlockState;
+
+    // The `float` constants of the module, widened for the `f64` arithmetic of
+    // the expectations below (they shadow the glob import).
+    const INPUT_DAMPING: f64 = super::INPUT_DAMPING as f64;
+    const MOVE_SPEED_NUMERATOR: f64 = super::MOVE_SPEED_NUMERATOR as f64;
+    const AIR_CONTROL: f64 = super::AIR_CONTROL as f64;
+    const GROUND_FRICTION: f64 = super::GROUND_FRICTION as f64;
 
     /// A block source backed by a hash map, for tests.
     #[derive(Debug, Default)]
@@ -1018,7 +1100,8 @@ mod tests {
     /// The friction on an ordinary block: `0.6 * 0.91`
     /// (MCP `EntityLivingBase.java:1603`).
     fn stone_friction() -> f64 {
-        DEFAULT_SLIPPERINESS * GROUND_FRICTION
+        // A `float` product, widened (MCP `EntityLivingBase.java:1603`).
+        f64::from(super::DEFAULT_SLIPPERINESS * super::GROUND_FRICTION)
     }
 
     /// The acceleration the player gains per tick while walking.
@@ -1098,23 +1181,9 @@ mod tests {
         intent.sprint = true;
         step(&mut player, &intent, &world);
         assert!(player.sprinting);
-        let sprint_factor = 1.0 + SPRINT_SPEED_BONUS;
-        let expected = INPUT_DAMPING
-            * WALK_SPEED
-            * sprint_factor
-            * (MOVE_SPEED_NUMERATOR / stone_friction().powi(3))
-            * stone_friction();
-        assert!(
-            (player.velocity.z - expected).abs() < 1e-12,
-            "expected {expected}, got {}",
-            player.velocity.z
-        );
-        // The vanilla 1.8.9 value of the reference run (float arithmetic).
-        assert!(
-            (player.velocity.z - 0.069_560_4).abs() < 1e-6,
-            "{}",
-            player.velocity.z
-        );
+        // The vanilla 1.8.9 value of the reference run (`reports/phase_e2_data`,
+        // first `sprint` row), to the bit since ADR-0076.
+        assert_eq!(player.velocity.z, 0.069_560_397_717_570_05);
         // The old result, one tick late, is gone.
         assert!((player.velocity.z - 0.053_508).abs() > 0.01);
     }
@@ -1133,7 +1202,9 @@ mod tests {
 
         step(&mut player, &intent, &world);
         assert!(player.sprinting && !player.on_ground);
-        let first = INPUT_DAMPING * AIR_CONTROL * GROUND_FRICTION;
+        // `moveFlying` scales the damped input in `float`; the motion widens it.
+        let air = f64::from(super::GROUND_FRICTION);
+        let first = f64::from(super::INPUT_DAMPING * super::AIR_CONTROL) * air;
         assert!(
             (player.velocity.z - first).abs() < 1e-12,
             "first air tick uses 0.02: expected {first}, got {}",
@@ -1142,8 +1213,8 @@ mod tests {
 
         step(&mut player, &intent, &world);
         // The motion is damped after the acceleration is added.
-        let second =
-            (first + INPUT_DAMPING * AIR_CONTROL * (1.0 + SPRINT_SPEED_BONUS)) * GROUND_FRICTION;
+        let sprint_air = (AIR_CONTROL + AIR_CONTROL * SPRINT_AIR_CONTROL_BONUS) as f32;
+        let second = (first + f64::from(super::INPUT_DAMPING * sprint_air)) * air;
         assert!(
             (player.velocity.z - second).abs() < 1e-12,
             "second air tick uses 0.026: expected {second}, got {}",
@@ -1172,8 +1243,10 @@ mod tests {
             !player.sprinting,
             "the hunger rule ends the sprint this tick"
         );
-        let plain_acceleration =
-            INPUT_DAMPING * WALK_SPEED * (MOVE_SPEED_NUMERATOR / stone_friction().powi(3));
+        // `getAIMoveSpeed` without the modifier, all in `float`.
+        let ground = super::DEFAULT_SLIPPERINESS * super::GROUND_FRICTION;
+        let factor = super::MOVE_SPEED_NUMERATOR / (ground * ground * ground);
+        let plain_acceleration = f64::from(super::INPUT_DAMPING * (WALK_SPEED as f32 * factor));
         // The motion is damped after the acceleration is added.
         let expected = (before + plain_acceleration) * stone_friction();
         assert!(
@@ -1217,17 +1290,13 @@ mod tests {
             step(&mut player, &intent, &world);
             highest = highest.max(player.position.y);
         }
-        // The jump rises 0.42 in the first tick and then decays by
-        // `(v - 0.08) * 0.98` every tick (MCP `EntityLivingBase.java:1666`),
-        // which sums up to 1.2491870944 blocks. The last rise of 0.00298 is
-        // dropped because it is below the 0.005 motion epsilon
-        // (MCP `EntityLivingBase.java:1968`).
-        let expected = 1.249_187_094_4;
-        assert!(
-            (highest - 1.0 - expected).abs() < 1e-9,
-            "expected {expected}, got {}",
-            highest - 1.0
-        );
+        // The jump rises 0.42F in the first tick and then decays by
+        // `(v - 0.08) * 0.98F` every tick (MCP `EntityLivingBase.java:1666`).
+        // The last rise of 0.00298 is dropped because it is below the 0.005
+        // motion epsilon (MCP `EntityLivingBase.java:1968`). The height is
+        // the peak of the vanilla 1.8.9 capture (`reports/phase_e2_data`,
+        // phase `jump1`: y 5.249187078744681 from a floor at 4).
+        assert_eq!(highest - 1.0, 1.249_187_078_744_681);
     }
 
     #[test]
@@ -1238,7 +1307,8 @@ mod tests {
         // The first tick: the player moves by the old velocity and then
         // gravity is applied (MCP `EntityLivingBase.java:1666`).
         assert_eq!(player.position.y, 10.0);
-        assert!((player.velocity.y + 0.0784).abs() < 1e-9);
+        // `(0 - 0.08) * 0.9800000190734863`, the `my` of every vanilla capture.
+        assert_eq!(player.velocity.y, -0.078_400_001_525_878_9);
     }
 
     #[test]
@@ -1368,12 +1438,8 @@ mod tests {
             step(&mut player, &InputIntent::still(0.0), &world);
         }
         assert!(player.on_ground);
-        // Cleared on landing, then one tick of gravity: (0 - 0.08) * 0.98.
-        assert!(
-            (player.velocity.y + 0.0784).abs() < 1e-9,
-            "{}",
-            player.velocity.y
-        );
+        // Cleared on landing, then one tick of gravity: (0 - 0.08) * 0.98F.
+        assert_eq!(player.velocity.y, -0.078_400_001_525_878_9);
     }
 
     /// The distance a walking player covers per tick on a plain block:
@@ -1561,7 +1627,7 @@ mod tests {
     fn a_flying_player_that_lands_stops_flying() {
         let world = flat_world();
         let mut player = flying_player();
-        player.position = DVec3::new(0.5, 1.0, 0.5);
+        player.set_position(DVec3::new(0.5, 1.0, 0.5));
         player.flying = true;
         let sneak = InputIntent {
             sneak: true,
@@ -1579,7 +1645,7 @@ mod tests {
         let world = flat_world();
         let mut player = flying_player();
         player.no_clip = true;
-        player.position = DVec3::new(0.5, 3.0, 0.5);
+        player.set_position(DVec3::new(0.5, 3.0, 0.5));
         let sneak = InputIntent {
             sneak: true,
             ..InputIntent::default()
@@ -1826,7 +1892,7 @@ mod tests {
     /// ground friction of the block below.
     #[test]
     fn soul_sand_slows_the_walk_per_block_overlapped() {
-        let friction = DEFAULT_SLIPPERINESS * GROUND_FRICTION;
+        let friction = stone_friction();
         // The box stays inside one soul sand column.
         let one = soul_sand_motion_after_one_tick(0.5, 0.1);
         assert!((one - 0.1 * 0.4 * friction).abs() < 1e-12, "{one}");
@@ -1856,7 +1922,7 @@ mod tests {
         // Now move: slowdown 0.4 must be applied
         player.velocity.z = 0.1;
         step(&mut player, &InputIntent::still(0.0), &world);
-        let friction = DEFAULT_SLIPPERINESS * GROUND_FRICTION;
+        let friction = stone_friction();
         assert!(
             (player.velocity.z - 0.1 * 0.4 * friction).abs() < 1e-12,
             "velocity was {}",

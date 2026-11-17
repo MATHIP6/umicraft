@@ -88,8 +88,8 @@ pub(super) fn spawn_local_crumbs(game: &mut Game) {
     };
     let eater = Eater {
         eyes: state.player().eye_position(),
-        yaw: game.yaw.to_degrees(),
-        pitch: game.pitch.to_degrees(),
+        yaw: game.yaw,
+        pitch: game.pitch,
     };
     let id = food.item_id.unsigned_abs();
     let damage = food.damage.unsigned_abs();

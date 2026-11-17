@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn without_anything_the_player_walks_at_the_default_speed() {
-        let stats = movement_stats(&Attributes::default(), &Effects::default(), 0.1);
+        let stats = movement_stats(&Attributes::default(), &Effects::default(), WALK_SPEED);
         assert_eq!(stats, MovementStats::default());
     }
 

@@ -85,13 +85,13 @@ pub(in crate::game) fn apply_placement(
         let position = state.position();
         placement.resolved_against(
             [position.x, position.y, position.z],
-            state.player().yaw.to_degrees(),
-            state.player().pitch.to_degrees(),
+            state.player().yaw,
+            state.player().pitch,
         )
     });
     let placement = resolved.as_ref().unwrap_or(placement);
-    let yaw = placement.yaw.to_radians();
-    let pitch = placement.pitch.to_radians();
+    let yaw = placement.yaw;
+    let pitch = placement.pitch;
     let position = DVec3::new(placement.x, placement.y, placement.z);
 
     match game.state.as_mut() {
@@ -129,15 +129,14 @@ pub(in crate::game) fn apply_placement(
     }
 
     // Immediately snap the local player body entity without triggering limb acceleration
-    game.body
-        .teleport_to_exact(position, game.yaw.to_degrees(), game.pitch.to_degrees());
+    game.body.teleport_to_exact(position, game.yaw, game.pitch);
 
     // Immediately notify render thread to snap camera view and prevent gliding
     let eye = position + glam::DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
     let _ = frames.try_send(RenderEvent::Teleport {
         position: eye,
-        yaw: game.yaw,
-        pitch: game.pitch,
+        yaw: game.yaw.to_radians(),
+        pitch: game.pitch.to_radians(),
     });
 
     // The server expects the acknowledgement of the placement.
@@ -180,8 +179,8 @@ pub(in crate::game) fn apply_correction(
         x: correction.x,
         y: correction.y,
         z: correction.z,
-        yaw: correction.yaw.to_degrees(),
-        pitch: correction.pitch.to_degrees(),
+        yaw: correction.yaw,
+        pitch: correction.pitch,
         on_ground: correction.on_ground,
     });
     game.server_view.forget_position();

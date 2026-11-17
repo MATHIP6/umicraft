@@ -210,7 +210,7 @@ impl App {
                 ctrl_held: false,
                 shift_held: false,
                 pointer: (0.0, 0.0),
-                look: (0.0, 0.0),
+                mouse: crate::mouse_look::MouseSteps::default(),
                 last: InputState::default(),
                 last_time: Instant::now(),
             },

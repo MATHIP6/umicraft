@@ -80,29 +80,6 @@ const CARET_BLINK_MS: u128 = 300;
 /// CPU and the battery.
 const BACKGROUND_FPS: u32 = 30;
 
-/// The look speed at the default sensitivity, in radians per pixel; the
-/// sensitivity option scales it.
-///
-/// In Minecraft Java 1.8.9 (`EntityRenderer.java:1095-1098` and `Entity.java:383-384`):
-/// `f = sensitivity * 0.6 + 0.2`
-/// `f1 = f^3 * 8`
-/// `deltaYaw = deltaX * f1 * 0.15°`
-/// At default sensitivity (0.5), f1 = 1.0, and 1 pixel of mouse motion equals 0.15 degrees.
-/// Converted to radians: 0.15° = 0.15 * π / 180 rad.
-pub(crate) const MOUSE_SENSITIVITY: f32 = 0.15_f32.to_radians();
-
-/// Computes the relative yaw and pitch deltas in radians from a raw mouse movement,
-/// applying the vanilla 1.8.9 sensitivity formula and mouse inversion.
-pub(crate) fn compute_mouse_look_delta(
-    delta: (f64, f64),
-    controls: &crate::options::ControlOptions,
-    zoom_look_factor: f32,
-) -> (f32, f32) {
-    let speed = MOUSE_SENSITIVITY * controls.look_factor() * zoom_look_factor;
-    let vertical = if controls.invert_mouse { -1.0 } else { 1.0 };
-    (delta.0 as f32 * speed, delta.1 as f32 * speed * vertical)
-}
-
 /// Runs the windowed client until the user closes the window.
 ///
 /// # Errors

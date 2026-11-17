@@ -8,7 +8,9 @@ use winit::window::CursorGrabMode;
 
 use super::App;
 use crate::input::{InputState, InputUpdate};
+use crate::mouse_look::look_turn;
 use crate::options::Action;
+use umicraft_game::input::set_angles;
 
 impl App {
     pub(super) fn capture_mouse(&mut self, capture: bool) {
@@ -94,8 +96,13 @@ impl App {
             self.options.mods = self.mods.config();
             self.save_options();
         }
+        // `EntityRenderer.updateCameraAndRender` turns the look by the whole
+        // pixels of the frame (`Mouse.getDX()` is an integer).
+        let pixels = self.input.mouse.whole();
+        let zoom = self.zoom.look_factor(self.mods.zoom().as_ref());
+        let turn = look_turn(pixels, &self.options.controls, zoom);
         let changed = state != self.input.last
-            || self.input.look != (0.0, 0.0)
+            || pixels != (0, 0)
             || self.presses.select_slot.is_some()
             || self.presses.hotbar_keys != [0; 9]
             || self.presses.break_block
@@ -109,8 +116,8 @@ impl App {
         let update = InputUpdate {
             created_at: self.input.last_time,
             state,
-            look_yaw: self.input.look.0,
-            look_pitch: self.input.look.1,
+            look_yaw: turn.0,
+            look_pitch: turn.1,
             select_slot: self.presses.select_slot,
             hotbar_keys: self.presses.hotbar_keys,
             break_block: self.presses.break_block,
@@ -124,13 +131,16 @@ impl App {
             .as_ref()
             .is_some_and(|session| session.send_input(update));
         if sent {
-            if self.input.look != (0.0, 0.0) {
+            if pixels != (0, 0) {
                 if let Some(world) = self.world.as_mut() {
-                    world.apply_look_delta(self.input.look.0, self.input.look.1);
+                    // The view of the window is in radians; the game thread
+                    // turns the authoritative look with `set_angles`.
+                    let (yaw, pitch) = set_angles(0.0, 0.0, turn);
+                    world.apply_look_delta(yaw.to_radians(), pitch.to_radians());
                 }
             }
             self.input.last = state;
-            self.input.look = (0.0, 0.0);
+            self.input.mouse.consume(pixels);
             self.presses.select_slot = None;
             self.presses.hotbar_keys = [0; 9];
             self.presses.break_block = false;

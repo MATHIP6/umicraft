@@ -79,8 +79,8 @@ pub(super) fn follow_body(game: &mut Game) {
         .map(|piece| piece.and_then(EntityItem::from_stack));
     game.body.follow(
         state.position(),
-        game.yaw.to_degrees(),
-        game.pitch.to_degrees(),
+        game.yaw,
+        game.pitch,
         EntityFlags::new(sneaking, 0x7F),
     );
     // The swing of the third person arm advances with the tick, as the

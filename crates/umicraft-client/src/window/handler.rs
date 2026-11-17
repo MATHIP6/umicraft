@@ -13,7 +13,6 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents};
 use winit::window::{Fullscreen, Window};
 
 use super::chat_control::CHAT_WHEEL_ROWS;
-use super::compute_mouse_look_delta;
 use super::startup::upload_sky_textures;
 use super::App;
 use crate::error::ClientError;
@@ -263,14 +262,9 @@ impl ApplicationHandler for App {
                 && !self.death_screen_visible()
             {
                 // A positive delta moves the mouse to the right and down; the
-                // game logic turns right and looks down with it.
-                let (dyaw, dpitch) = compute_mouse_look_delta(
-                    delta,
-                    &self.options.controls,
-                    self.zoom.look_factor(self.mods.zoom().as_ref()),
-                );
-                self.input.look.0 += dyaw;
-                self.input.look.1 += dpitch;
+                // game logic turns right and looks down with it. The motion
+                // is turned into a look once a frame, in whole pixels.
+                self.input.mouse.add(delta);
                 self.input.last_time = Instant::now();
             }
         }

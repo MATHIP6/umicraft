@@ -38,7 +38,7 @@ pub(super) fn publish_look(game: &Game) {
     if let Some((view, _)) = player_view(game) {
         let look = Look {
             view,
-            body_pitch: game.pitch.to_degrees(),
+            body_pitch: game.pitch,
         };
         game.look.store(look);
     }

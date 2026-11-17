@@ -85,7 +85,8 @@ fn the_real_loop_stops_ticking_while_congested_and_resumes_when_the_network_drai
     harness
         .inputs
         .send(InputUpdate {
-            look_yaw: 0.5,
+            // 100 mouse pixels at the default sensitivity: 15 degrees.
+            look_yaw: 100.0,
             select_slot: Some(3),
             ..InputUpdate::default()
         })
@@ -119,8 +120,8 @@ fn the_real_loop_stops_ticking_while_congested_and_resumes_when_the_network_drai
     assert_fall_has_no_gap(&falling_ys(&stream));
     // The turn made during the congestion reached the wire.
     let turned = stream.iter().any(|packet| match packet {
-        PlayServerbound::PlayerLook(p) => (p.yaw - 28.6479).abs() < 0.01,
-        PlayServerbound::PositionLook(p) => (p.yaw - 28.6479).abs() < 0.01,
+        PlayServerbound::PlayerLook(p) => p.yaw == 15.0,
+        PlayServerbound::PositionLook(p) => p.yaw == 15.0,
         _ => false,
     });
     assert!(turned, "the mouse movement during the congestion was kept");

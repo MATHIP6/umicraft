@@ -45,9 +45,9 @@ pub struct InputIntent {
     pub sneak: bool,
     /// Whether the sprint key is held.
     pub sprint: bool,
-    /// The horizontal view angle in radians.
+    /// The horizontal view angle in degrees (MCP `rotationYaw`, ADR-0076).
     pub yaw: f32,
-    /// The vertical view angle in radians.
+    /// The vertical view angle in degrees (MCP `rotationPitch`).
     pub pitch: f32,
 }
 
@@ -91,9 +91,9 @@ pub struct RawInput {
     /// Whether the player uses an item (eats, drinks, blocks, draws a bow)
     /// on foot, which slows it down.
     pub using_item: bool,
-    /// The horizontal view angle in radians.
+    /// The horizontal view angle in degrees (MCP `rotationYaw`, ADR-0076).
     pub yaw: f32,
-    /// The vertical view angle in radians.
+    /// The vertical view angle in degrees (MCP `rotationPitch`).
     pub pitch: f32,
 }
 
@@ -127,6 +127,35 @@ impl RawInput {
             pitch: self.pitch,
         }
     }
+}
+
+/// The highest and lowest pitch, in degrees (MCP `Entity.setAngles`).
+pub const MAX_PITCH: f32 = 90.0;
+
+/// The degrees one unit of mouse turn moves the look (MCP `Entity.setAngles`:
+/// `(double)yaw * 0.15D`).
+const TURN_DEGREES: f64 = 0.15;
+
+/// Turns a look by a mouse turn, the way `Entity.setAngles` does.
+///
+/// `turn` is what `EntityRenderer.updateCameraAndRender` hands to
+/// `setAngles`: whole mouse pixels times the sensitivity factor, positive to
+/// the right and downwards. The sums are made in `double` and narrowed to
+/// `float`, and the pitch is clamped to ±[`MAX_PITCH`]; the yaw is never
+/// wrapped. Returns the new `(yaw, pitch)` in degrees.
+///
+/// # Example
+/// ```
+/// use umicraft_game::input::set_angles;
+/// // 10 pixels to the right at the default sensitivity (factor 1).
+/// assert_eq!(set_angles(0.0, 0.0, (10.0, 0.0)), (1.5, 0.0));
+/// assert_eq!(set_angles(0.0, 89.0, (0.0, 100.0)).1, 90.0);
+/// ```
+#[must_use]
+pub fn set_angles(yaw: f32, pitch: f32, turn: (f32, f32)) -> (f32, f32) {
+    let yaw = (f64::from(yaw) + f64::from(turn.0) * TURN_DEGREES) as f32;
+    let pitch = (f64::from(pitch) + f64::from(turn.1) * TURN_DEGREES) as f32;
+    (yaw, pitch.clamp(-MAX_PITCH, MAX_PITCH))
 }
 
 #[cfg(test)]
@@ -187,5 +216,28 @@ mod tests {
         let intent = raw.to_intent();
         assert_eq!(intent.yaw, 1.25);
         assert_eq!(intent.pitch, -0.5);
+    }
+
+    #[test]
+    fn set_angles_adds_in_double_and_narrows_to_float() {
+        // MCP `Entity.setAngles`: `(float)((double)yaw + (double)turn * 0.15D)`.
+        let (yaw, _) = set_angles(123.456, 0.0, (7.0 * 1.3824, 0.0));
+        let expected = (f64::from(123.456_f32) + f64::from(7.0_f32 * 1.3824) * 0.15) as f32;
+        assert_eq!(yaw.to_bits(), expected.to_bits());
+    }
+
+    #[test]
+    fn set_angles_never_wraps_the_yaw() {
+        assert_eq!(
+            set_angles(359.85, 0.0, (2.0, 0.0)).0,
+            (359.85_f64 as f32 as f64 + 0.3) as f32
+        );
+        assert!(set_angles(0.0, 0.0, (-2.0, 0.0)).0 < 0.0);
+    }
+
+    #[test]
+    fn set_angles_clamps_the_pitch() {
+        assert_eq!(set_angles(0.0, 0.0, (0.0, 10_000.0)).1, MAX_PITCH);
+        assert_eq!(set_angles(0.0, 0.0, (0.0, -10_000.0)).1, -MAX_PITCH);
     }
 }

@@ -31,9 +31,9 @@ pub struct PendingTick {
     pub velocity: DVec3,
     /// Whether the player was on the ground after the tick.
     pub on_ground: bool,
-    /// The horizontal view angle after the tick, in radians.
+    /// The horizontal view angle after the tick, in degrees.
     pub yaw: f32,
-    /// The vertical view angle after the tick, in radians.
+    /// The vertical view angle after the tick, in degrees.
     pub pitch: f32,
 }
 

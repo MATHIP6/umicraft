@@ -100,7 +100,7 @@ pub fn apply<S: BlockSource + ?Sized>(player: &mut Player, push: Push, world: &S
                     on_ground: player.on_ground,
                 },
             );
-            player.position += result.delta;
+            player.set_bounds(result.bounds);
             player.on_ground = result.on_ground;
             player.collided_horizontally = result.blocked_horizontally;
         }
@@ -250,8 +250,9 @@ mod tests {
     fn a_push_cannot_move_the_player_through_a_wall() {
         let mut player = Player::new(DVec3::new(1.5, 0.0, 0.5));
         apply(&mut player, Push::Move(DVec3::new(0.5625, 0.0, 0.0)), &Wall);
-        // The wall starts at x = 2; the box is 0.3 wide on each side.
-        assert!((player.position.x - 1.7).abs() < 1e-9);
+        // The wall starts at x = 2; the box is 0.3F wide on each side.
+        let touching = 2.0 - crate::physics::PLAYER_HALF_WIDTH;
+        assert!((player.position.x - touching).abs() < 1e-9);
     }
 
     #[test]

@@ -75,6 +75,7 @@ pub mod model_resources;
 pub mod mods_hud_view;
 pub mod mods_runtime;
 pub mod mods_view;
+pub mod mouse_look;
 pub mod moving_blocks_draw;
 pub mod nametag_draw;
 pub mod network;

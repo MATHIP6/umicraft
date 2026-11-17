@@ -92,9 +92,10 @@ pub(super) struct Game {
     pub(super) spawn: Option<(i32, i32, i32)>,
     /// The player state; `None` before the first placement.
     pub(super) state: Option<GameState>,
-    /// The view angle in radians; yaw zero looks towards +Z (south).
+    /// The view angle in degrees, never wrapped (MCP `rotationYaw`,
+    /// ADR-0076); yaw zero looks towards +Z (south).
     pub(super) yaw: f32,
-    /// The view angle in radians; a positive pitch looks down.
+    /// The view angle in degrees; a positive pitch looks down.
     pub(super) pitch: f32,
     /// The keys held and the buttons pressed since the last tick.
     pub(super) controls: Controls,

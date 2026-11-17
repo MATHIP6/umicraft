@@ -5,6 +5,7 @@
 
 use umicraft_game::digging::{HASTE, MINING_FATIGUE};
 use umicraft_game::hand::SwingEffects;
+use umicraft_game::input::set_angles;
 
 use super::commands::CommandQueue;
 use super::state::Game;
@@ -14,10 +15,6 @@ use hotbar::select_slot;
 pub(super) mod attack;
 pub(super) mod hotbar;
 pub(super) mod use_item;
-
-/// The largest pitch the view may reach, in radians.
-/// Vanilla Minecraft Java 1.8.9 clamps pitch to [-90.0F, 90.0F] in `Entity.setAngles`.
-pub(super) const MAX_PITCH: f32 = 90.0_f32.to_radians();
 
 /// The Haste and Mining Fatigue effects that change the arm swing speed.
 pub(super) fn swing_effects(game: &Game) -> SwingEffects {
@@ -34,12 +31,7 @@ pub(super) fn swing_effects(game: &Game) -> SwingEffects {
 pub(super) fn tick_hand(game: &mut Game) {
     let effects = swing_effects(game);
     let held = game.windows.selected_item();
-    game.hand.tick(
-        held,
-        game.yaw.to_degrees(),
-        game.pitch.to_degrees(),
-        effects,
-    );
+    game.hand.tick(held, game.yaw, game.pitch, effects);
 }
 
 /// Handles one input update.
@@ -49,12 +41,10 @@ pub(super) fn tick_hand(game: &mut Game) {
 /// (`queue` is kept for the callers).
 pub(super) fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut CommandQueue) {
     game.controls.input = update.state;
-    // Continuous, never wrapped: MCP `Entity.setAngles` adds to `rotationYaw`
-    // and the packet carries it as is, so 359.9 turns into 360.2, not 0.2.
-    // The consumers of the yaw only use its sine and cosine or wrap the
-    // difference of two angles.
-    game.yaw += update.look_yaw;
-    game.pitch = (game.pitch + update.look_pitch).clamp(-MAX_PITCH, MAX_PITCH);
+    // Degrees, continuous, never wrapped: MCP `Entity.setAngles` adds to
+    // `rotationYaw` and the packet carries it as is, so 359.9 turns into
+    // 360.2, not 0.2 (ADR-0076).
+    (game.yaw, game.pitch) = set_angles(game.yaw, game.pitch, (update.look_yaw, update.look_pitch));
 
     // The wheel first, then the keys, as `runTick` does.
     if let Some(slot) = update.select_slot {
