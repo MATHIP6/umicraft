@@ -485,6 +485,8 @@ fn bounds_at(position: DVec3) -> Aabb {
 pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, world: &S) {
     player.yaw = intent.yaw;
     player.pitch = intent.pitch;
+    // The sprint double tap reads the sneak key of the previous tick.
+    let was_sneaking = player.sneaking;
     player.sneaking = intent.sneak;
     player.step_facts = StepFacts::default();
     player.prev_walk_distance = player.walk_distance;
@@ -503,7 +505,7 @@ pub fn step<S: BlockSource + ?Sized>(player: &mut Player, intent: &InputIntent, 
         }
     }
 
-    update_sprint(player, intent);
+    update_sprint(player, intent, was_sneaking);
 
     update_flight(player, intent);
 
@@ -750,7 +752,7 @@ fn push_out_of_block<S: BlockSource + ?Sized>(
 /// threshold is compared against the input of the *previous* tick, because
 /// the vanilla code reads the flag before it refreshes the input
 /// (line 785 before line 786); that is what makes the double tap work.
-fn update_sprint(player: &mut Player, intent: &InputIntent) {
+fn update_sprint(player: &mut Player, intent: &InputIntent, was_sneaking: bool) {
     if player.sprinting_ticks_left > 0 {
         player.sprinting_ticks_left -= 1;
         if player.sprinting_ticks_left == 0 {
@@ -771,10 +773,12 @@ fn update_sprint(player: &mut Player, intent: &InputIntent) {
     let may_start = may_sprint && !player.blinded;
 
     // The double tap: the forward input crossed the threshold while the
-    // player is on the ground and does not sneak.
+    // player is on the ground and did not sneak on the previous tick
+    // (`flag1 = movementInput.sneak` is read before the input is refreshed,
+    // MCP `EntityPlayerSP.java:783`).
     if may_start
         && player.on_ground
-        && !intent.sneak
+        && !was_sneaking
         && !was_above_threshold
         && above_threshold
         && !player.sprinting
@@ -1452,6 +1456,26 @@ mod tests {
         step(&mut player, &InputIntent::walking(0.0), &world);
         assert!(player.sprinting);
         assert_eq!(player.sprinting_ticks_left, SPRINT_DURATION_TICKS);
+    }
+
+    /// Regression: the double tap read the sneak key of the current tick.
+    /// Vanilla reads the previous one, so letting go of sneak and pressing
+    /// forward on the same tick does not count as a tap.
+    #[test]
+    fn a_tap_on_the_tick_sneak_is_released_does_not_count() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(0.0, 1.0, 0.0));
+        step(&mut player, &InputIntent::still(0.0), &world);
+        step(&mut player, &InputIntent::still(0.0), &world);
+        let mut sneaking = InputIntent::still(0.0);
+        sneaking.sneak = true;
+        step(&mut player, &sneaking, &world);
+        step(&mut player, &InputIntent::walking(0.0), &world);
+        assert_eq!(player.sprint_toggle_timer, 0, "no tap was counted");
+        // The next tap, a tick after the sneak, counts again.
+        step(&mut player, &InputIntent::still(0.0), &world);
+        step(&mut player, &InputIntent::walking(0.0), &world);
+        assert_eq!(player.sprint_toggle_timer, SPRINT_TOGGLE_TICKS);
     }
 
     /// A stone floor at y = 10 for z < 3 and at y = 9 for z >= 3: a one
