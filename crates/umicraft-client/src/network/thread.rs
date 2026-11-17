@@ -116,6 +116,7 @@ async fn run_session(
         chat_mode: config.chat_mode,
         chat_colors: config.chat_colors,
         skin_parts: config.skin_parts,
+        brand: config.brand.clone(),
         decline_server_packs: config.decline_server_packs,
         ..PlayOptions::default()
     });

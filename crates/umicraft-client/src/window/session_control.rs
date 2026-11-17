@@ -87,6 +87,7 @@ pub(super) fn network_config(
         chat_mode: options.chat.visibility.wire(),
         chat_colors: options.chat.colors,
         skin_parts: options.skin.parts_mask(),
+        brand: options.multiplayer.brand.clone(),
         handshake_host: args.handshake_host.clone().filter(|_| is_cli_server),
         decline_server_packs: pack_mode == ResourcePackMode::Disabled,
         account_skin: true,
@@ -274,6 +275,7 @@ mod tests {
         let mut options = Options::default();
         options.video.render_distance = 12;
         options.chat.colors = false;
+        options.multiplayer.brand = "vanilla".to_owned();
         let config = network_config(
             &args(&["--name", "Pixel"]),
             &options,
@@ -287,6 +289,7 @@ mod tests {
         assert_eq!(config.view_distance, 12);
         assert!(!config.chat_colors);
         assert_eq!(config.skin_parts, options.skin.parts_mask());
+        assert_eq!(config.brand, "vanilla");
     }
 
     #[test]

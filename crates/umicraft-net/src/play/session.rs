@@ -167,6 +167,11 @@ pub struct PlayOptions {
     pub decline_server_packs: bool,
 }
 
+/// The brand Umicraft announces on `MC|Brand` unless the player chose another
+/// one (spec §10; the vanilla client sends `vanilla`,
+/// `ClientBrandRetriever.getClientModName`).
+pub const DEFAULT_BRAND: &str = "umicraft";
+
 impl Default for PlayOptions {
     fn default() -> Self {
         Self {
@@ -175,7 +180,7 @@ impl Default for PlayOptions {
             chat_colors: true,
             chat_mode: 0,
             skin_parts: ALL_SKIN_PARTS,
-            brand: "umicraft".to_string(),
+            brand: DEFAULT_BRAND.to_string(),
             decline_server_packs: false,
         }
     }
