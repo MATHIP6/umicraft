@@ -88,6 +88,7 @@ pub(super) fn network_config(
         chat_colors: options.chat.colors,
         skin_parts: options.skin.parts_mask(),
         brand: options.multiplayer.brand.clone(),
+        locale: options.language.code.clone(),
         handshake_host: args.handshake_host.clone().filter(|_| is_cli_server),
         decline_server_packs: pack_mode == ResourcePackMode::Disabled,
         account_skin: true,

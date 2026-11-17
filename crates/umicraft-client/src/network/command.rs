@@ -274,13 +274,6 @@ pub enum ClientCommand {
     },
 }
 
-/// The `Client Settings` locale of a language code: lowercase (`fr_FR` is
-/// sent as `fr_fr`), as `Minecraft.getLanguageManager().getCurrentLanguage()
-/// .getLanguageCode()` is lowercased by the 1.8 client.
-fn locale_of(code: &str) -> String {
-    code.to_lowercase()
-}
-
 impl ClientCommand {
     /// The wire packet of the command.
     #[must_use]
@@ -448,7 +441,10 @@ impl ClientCommand {
                 chat_colors,
                 skin_parts,
             } => PlayServerbound::ClientSettings(serverbound::ClientSettings {
-                locale: locale_of(crate::language::current().code()),
+                // `GameSettings.language`, written as the language pack names
+                // it (`en_US`, `fr_FR`): the 1.8 client does not lowercase it
+                // (MCP `GameSettings.java:1214`).
+                locale: crate::language::current().code().to_owned(),
                 view_distance,
                 chat_mode,
                 chat_colors,

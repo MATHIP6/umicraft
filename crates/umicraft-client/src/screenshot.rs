@@ -47,6 +47,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         chat_colors: true,
         skin_parts: crate::options::SkinOptions::default().parts_mask(),
         brand: crate::options::MultiplayerOptions::default().brand,
+        locale: crate::options::LanguageOptions::default().code,
         handshake_host: args.handshake_host.clone(),
         // No window can ask the player, so no pack is installed.
         decline_server_packs: true,

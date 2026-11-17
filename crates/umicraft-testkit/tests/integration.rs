@@ -160,7 +160,7 @@ async fn full_offline_session_ping_login_play() {
         observed.client_settings.expect("client settings arrived");
     assert_eq!(
         (locale.as_str(), view, chat_mode, colors, skins),
-        ("en_us", 8, 0, true, 0b0111_1111)
+        ("en_US", 8, 0, true, 0b0111_1111)
     );
     assert_eq!(
         observed.brand,
@@ -209,7 +209,7 @@ async fn play_session_streams_join_placement_chat() {
     let observed = server.observed().snapshot();
     assert!(!observed.keepalive_echoes.is_empty());
     let (locale, view, _, _, _) = observed.client_settings.expect("entry packets");
-    assert_eq!((locale.as_str(), view), ("en_us", 8));
+    assert_eq!((locale.as_str(), view), ("en_US", 8));
 }
 
 /// The server sends a keepalive every 5 ms while the client writes a steady

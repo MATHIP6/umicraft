@@ -19,9 +19,9 @@ fn client_settings_carry_the_skin_parts_of_the_options() {
 }
 
 #[test]
-fn the_locale_is_the_lowercase_language_code() {
-    assert_eq!(locale_of("fr_FR"), "fr_fr");
-    assert_eq!(locale_of("en_US"), "en_us");
+fn the_locale_is_the_language_code_as_vanilla_writes_it() {
+    // Regression: the code was lowercased (`en_us`), the form of later
+    // versions; the 1.8 client sends `GameSettings.language` as is.
     let packet = ClientCommand::ClientSettings {
         view_distance: 8,
         chat_mode: 0,
@@ -32,9 +32,11 @@ fn the_locale_is_the_lowercase_language_code() {
     let PlayServerbound::ClientSettings(settings) = packet else {
         panic!("not a Client Settings packet");
     };
-    assert_eq!(
-        settings.locale,
-        locale_of(crate::language::current().code())
+    assert_eq!(settings.locale, crate::language::current().code());
+    assert!(
+        settings.locale.ends_with(|c: char| c.is_ascii_uppercase()),
+        "{}",
+        settings.locale
     );
 }
 

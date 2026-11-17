@@ -117,8 +117,8 @@ async fn run_session(
         chat_colors: config.chat_colors,
         skin_parts: config.skin_parts,
         brand: config.brand.clone(),
+        locale: config.locale.clone(),
         decline_server_packs: config.decline_server_packs,
-        ..PlayOptions::default()
     });
     // A full inbox blocks this thread in `send`, which slows the server down
     // through TCP instead of losing world data. A closed inbox means the game

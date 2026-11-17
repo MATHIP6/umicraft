@@ -147,7 +147,8 @@ impl PlayerPlacement {
 /// What the client announces in its entry packets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayOptions {
-    /// Locale string, e.g. `en_us`.
+    /// The language code, as the 1.8 client writes it (`en_US`, `fr_FR`;
+    /// MCP `GameSettings.language`).
     pub locale: String,
     /// Render distance in chunks announced in `Client Settings`.
     pub view_distance: u8,
@@ -167,6 +168,10 @@ pub struct PlayOptions {
     pub decline_server_packs: bool,
 }
 
+/// The language a 1.8 client announces until the player picks another
+/// (MCP `GameSettings.java:190`).
+pub const DEFAULT_LOCALE: &str = "en_US";
+
 /// The brand Umicraft announces on `MC|Brand` unless the player chose another
 /// one (spec §10; the vanilla client sends `vanilla`,
 /// `ClientBrandRetriever.getClientModName`).
@@ -175,7 +180,7 @@ pub const DEFAULT_BRAND: &str = "umicraft";
 impl Default for PlayOptions {
     fn default() -> Self {
         Self {
-            locale: "en_us".to_string(),
+            locale: DEFAULT_LOCALE.to_string(),
             view_distance: 8,
             chat_colors: true,
             chat_mode: 0,
