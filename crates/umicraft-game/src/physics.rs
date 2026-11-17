@@ -160,6 +160,22 @@ const WEB_VERTICAL_FACTOR: f64 = 0.05000000074505806;
 /// The slime block id, the one block that bounces a landing entity.
 const SLIME_BLOCK: u16 = 165;
 
+/// How far below the feet a move reads the block it ends on
+/// (MCP `Entity.moveEntity`: `0.20000000298023224D`).
+const STOOD_ON_DEPTH: f64 = 0.200_000_002_980_232_24;
+
+/// The vertical speed above which a slime block does not slow the walk
+/// (MCP `BlockSlime.java:61`).
+const SLIME_WALK_LIMIT: f64 = 0.1;
+
+/// The part of the horizontal motion a slime block keeps when still
+/// (MCP `BlockSlime.java:63`).
+const SLIME_WALK_FACTOR: f64 = 0.4;
+
+/// What the vertical speed adds back to [`SLIME_WALK_FACTOR`]
+/// (MCP `BlockSlime.java:63`).
+const SLIME_WALK_BOUNCE_SHARE: f64 = 0.2;
+
 /// The numerator of the movement speed factor (MCP `EntityLivingBase.java:1606`,
 /// `0.16277136F`, divided in `float`).
 pub const MOVE_SPEED_NUMERATOR: f32 = 0.162_771_36;
@@ -608,22 +624,43 @@ fn block_below_feet<S: BlockSource + ?Sized>(player: &Player, world: &S) -> Bloc
     )
 }
 
+/// The block a move ends on: MCP `Entity.moveEntity` reads it at
+/// `floor(posY - 0.20000000298023224D)` (the `float` 0.2 widened). The
+/// fence fallback of the reference only changes which ordinary block is
+/// read, never a slime block, so it is left out.
+fn stood_on<S: BlockSource + ?Sized>(player: &Player, world: &S) -> BlockState {
+    world.block(
+        player.position.x.floor() as i32,
+        (player.position.y - STOOD_ON_DEPTH).floor() as i32,
+        player.position.z.floor() as i32,
+    )
+}
+
 /// The vertical collision of a move: MCP `Entity.java:836-839` calls
-/// `onLanded` on the block at `floor(y - 0.2)`. Every block clears the
+/// `onLanded` on the block the move ends on. Every block clears the
 /// vertical motion (`Block.java:1111`), except a slime block, which reverses
 /// a downward motion unless the player sneaks (`BlockSlime.java:44-54`).
-fn land<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
-    let landed_on = world.block(
-        player.position.x.floor() as i32,
-        (player.position.y - 0.2).floor() as i32,
-        player.position.z.floor() as i32,
-    );
+fn land(player: &mut Player, landed_on: BlockState) {
     if landed_on.id() == SLIME_BLOCK && !player.sneaking {
         if player.velocity.y < 0.0 {
             player.velocity.y = -player.velocity.y;
         }
     } else {
         player.velocity.y = 0.0;
+    }
+}
+
+/// The block under a walking player acts on it (MCP `Entity.moveEntity`
+/// calls `onEntityCollidedWithBlock` with the block the move ends on): a
+/// slime block slows a player who neither bounces nor sneaks
+/// (`BlockSlime.java:59-66`: below 0.1 of vertical motion, the horizontal
+/// motion is scaled by `0.4 + |motionY| * 0.2`).
+fn walk_on(player: &mut Player, block: BlockState) {
+    let vertical = player.velocity.y.abs();
+    if block.id() == SLIME_BLOCK && vertical < SLIME_WALK_LIMIT && !player.sneaking {
+        let factor = SLIME_WALK_FACTOR + vertical * SLIME_WALK_BOUNCE_SHARE;
+        player.velocity.x *= factor;
+        player.velocity.z *= factor;
     }
 }
 
@@ -1016,11 +1053,15 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
     if result.blocked_z {
         player.velocity.z = 0.0;
     }
+    let landed_on = stood_on(player, world);
     if result.blocked_vertically {
-        land(player, world);
+        land(player, landed_on);
     }
     // `canTriggerWalking` and the safe-walk flag of `Entity.moveEntity`.
     let walks = !player.flying && !(was_on_ground && player.sneaking);
+    if walks && player.on_ground {
+        walk_on(player, landed_on);
+    }
     // The footsteps read the motion before `doBlockCollisions` changes it.
     player.step_facts = StepFacts {
         moved: true,
@@ -1873,6 +1914,40 @@ mod tests {
             }
         }
         TestBlocks::with(&blocks)
+    }
+
+    /// One tick of a player resting on a slime floor and sliding at 0.1.
+    fn slime_slide(sneak: bool) -> Player {
+        let world = floor_of(BlockState::new(165, 0));
+        let mut player = Player::new(DVec3::new(0.5, 11.0, 0.5));
+        player.on_ground = true;
+        // The motion every resting player has after a tick of gravity.
+        player.velocity = DVec3::new(0.0, -0.078_400_001_525_878_9, 0.1);
+        let mut intent = InputIntent::still(0.0);
+        intent.sneak = sneak;
+        step(&mut player, &intent, &world);
+        player
+    }
+
+    /// Regression: walking on a slime block did not slow the player
+    /// (`BlockSlime.onEntityCollidedWithBlock`, called by `Entity.moveEntity`
+    /// for the block under a walking entity).
+    #[test]
+    fn a_slime_block_slows_a_player_walking_on_it() {
+        let player = slime_slide(false);
+        assert!(player.on_ground);
+        // The landing bounced the resting motion back up (0.0784), which
+        // `0.4 + |motionY| * 0.2` reads; then the slime friction 0.8F * 0.91F.
+        let factor = 0.4 + 0.078_400_001_525_878_9 * 0.2;
+        let friction = f64::from(0.8_f32 * super::GROUND_FRICTION);
+        assert_eq!(player.velocity.z, 0.1 * factor * friction);
+    }
+
+    #[test]
+    fn a_sneaking_player_is_not_slowed_by_a_slime_block() {
+        let player = slime_slide(true);
+        let friction = f64::from(0.8_f32 * super::GROUND_FRICTION);
+        assert_eq!(player.velocity.z, 0.1 * friction);
     }
 
     /// The horizontal motion left after one tick that starts with
