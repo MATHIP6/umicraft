@@ -20,6 +20,7 @@
 use crate::context::Ui;
 use crate::draw::{Color, SpriteSheet};
 use crate::geom::Rect;
+use crate::theme::{fill_gradient, BackgroundSkin};
 use crate::widgets::gui_scale;
 
 /// Edge of one dirt tile in GUI units (`float f = 32.0F` in `drawBackground`).
@@ -133,6 +134,10 @@ fn tile_pixels(ui: &Ui) -> (f32, f32) {
 /// (`GuiScreen.drawBackground`): the dirt over the whole viewport.
 pub fn draw_menu_background(ui: &mut Ui) {
     let viewport = ui.viewport();
+    if let BackgroundSkin::Gradient { top, bottom, .. } = ui.theme().background {
+        fill_gradient(ui, viewport, (top, bottom));
+        return;
+    }
     let (_, tile) = tile_pixels(ui);
     draw_dirt(ui, viewport, [viewport.x, viewport.y], tile, BAND_TINT);
 }
@@ -142,6 +147,10 @@ pub fn draw_menu_background(ui: &mut Ui) {
 /// `list` is the list rectangle in pixels and `scroll` the scroll offset in
 /// pixels: the dirt moves with the content, as it does in vanilla.
 pub fn draw_list_background(ui: &mut Ui, list: Rect, scroll: f32) {
+    if let BackgroundSkin::Gradient { list: fill, .. } = ui.theme().background {
+        ui.draw().rect(list, fill);
+        return;
+    }
     let (_, tile) = tile_pixels(ui);
     draw_dirt(ui, list, [0.0, -scroll], tile, LIST_TINT);
 }
@@ -161,6 +170,16 @@ pub fn draw_list_overlay(ui: &mut Ui, list: Rect) {
         viewport.width,
         viewport.bottom() - list.bottom(),
     );
+    if let BackgroundSkin::Gradient {
+        top: from,
+        bottom: to,
+        ..
+    } = ui.theme().background
+    {
+        fill_gradient(ui, top, (from, to));
+        fill_gradient(ui, bottom, (from, to));
+        return;
+    }
     draw_dirt(ui, top, origin, tile, BAND_TINT);
     draw_dirt(ui, bottom, origin, tile, BAND_TINT);
     draw_shadows(ui, list, scale);

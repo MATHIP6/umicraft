@@ -18,6 +18,7 @@ use crate::draw::TextStyle;
 use crate::geom::Rect;
 use crate::id::WidgetId;
 use crate::text::FontAtlas;
+use crate::theme::{ControlState, WidgetSkin};
 
 use super::style;
 
@@ -91,6 +92,16 @@ pub fn button_tinted(
         response.hovered = false;
     } else if response.clicked {
         ui.note_button_press();
+    }
+
+    if let WidgetSkin::Flat(skin) = ui.theme().widgets {
+        let state = match (enabled, response.hovered) {
+            (false, _) => ControlState::Disabled,
+            (true, true) => ControlState::Hovered,
+            (true, false) => ControlState::Idle,
+        };
+        skin.draw_button(ui, rect, (atlas, label), state, tint);
+        return response;
     }
 
     if let Some(sheet) = ui.widgets_sheet() {
