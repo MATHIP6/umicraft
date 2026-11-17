@@ -449,3 +449,15 @@ observations that motivated them.
 
 - `client-pack/umicraft/font/hd/*.png`: the owner's own pixel font (see the pack's `SOURCES.md`). Glyph advances are derived from the pixels and match its `ascii.properties` (checked for all 158 listed characters at 8, 16, 24 and 32 px).
 - Ember and Amethyst colours were sampled from the owner's mock-ups (`menu-1.png`, `menu-2.png`).
+
+## 1.7 animations (ADR-0079)
+
+Reference: the local MCP 1.7.10 and 1.8.9 sources, read side by side (owner direction 2026-11-17).
+
+| Date | Area | Source | Notes |
+|---|---|---|---|
+| 2026-11-17 | Swing of an item in use | `mcp 1.7.10: .../client/renderer/ItemRenderer.java:380-416` (the swing shift only without a use, the swing rotations after the placement in every branch); `mcp 1.8.9: ItemRenderer.renderItemInFirstPerson` (`transformFirstPersonItem(f, 0.0F)` for each use action) | `HandPose::swing_while_using`, `HandPose::item_matrix`. |
+| 2026-11-17 | Attack while an item is in use | `mcp 1.7.10: .../client/Minecraft.java:1427-1457` (`func_147115_a`: no `isUsingItem` check, `swingItem` on a non-air block when `isCurrentToolAdventureModeExempt`); `mcp 1.8.9: Minecraft.sendClickBlockToController` (`!this.thePlayer.isUsingItem()`) | Local animation only, no packet. `client::game::actions::attack::swing_while_using`. |
+| 2026-11-17 | Equip animation rule | `mcp 1.7.10: ItemRenderer.java:683-722` (`updateEquippedItem`: same item and damage keeps the hand raised and swaps the shown stack); `mcp 1.8.9: ItemRenderer.updateEquippedItem` (`getIsItemStackEqual`: size, item, damage, tags) | `legacy::EquipRule`. |
+| 2026-11-17 | Sneak camera | `mcp 1.7.10: .../client/entity/EntityPlayerSP.java:196-199` (`ySize = 0.2F` while sneaking), `.../entity/Entity.java:617,623,850` (`ySize *= 0.4F` at the start of a move, `posY = minY + yOffset - ySize`); `mcp 1.8.9: EntityPlayer.getEyeHeight` (`- 0.08F` at once) | The steady drop is 0.08 in both; 1.7 interpolates it over a tick and lets it decay by 0.4 a tick after release. `legacy::SneakCamera`. |
+| 2026-11-17 | No difference | `EntityRenderer.setupViewBobbing`, `EntityRenderer.hurtCameraEffect`, `EntityPlayerSP.getFOVMultiplier` (1.7.10) against `AbstractClientPlayer.getFovModifier` (1.8.9), the eat and drink branch of `renderItemInFirstPerson` | Same formulas in both versions: nothing to port. |
