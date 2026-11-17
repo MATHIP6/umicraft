@@ -87,7 +87,6 @@ const BACKGROUND_FPS: u32 = 30;
 /// initialization failure. Runtime draw failures are surfaced the same way
 /// after the event loop returns.
 pub fn run(args: Args) -> Result<(), ClientError> {
-    umicraft_core::boot_log!("window_run_started");
     let options_path = options::default_path();
     let mut options = options_path
         .as_deref()
@@ -102,14 +101,10 @@ pub fn run(args: Args) -> Result<(), ClientError> {
     language::install(Arc::clone(&lang));
     let event_loop = EventLoop::new().map_err(|error| ClientError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    umicraft_core::boot_log!("event_loop_created");
     let mut app = App::new(args, options, options_path, lang)?;
-    umicraft_core::boot_log!("app_initialized");
-    umicraft_core::boot_log!("event_loop_run_app_starting");
     event_loop
         .run_app(&mut app)
         .map_err(|error| ClientError::Window(error.to_string()))?;
-    umicraft_core::boot_log!("event_loop_run_app_exited");
     if let Some(error) = app.exit_error {
         return Err(ClientError::Window(error));
     }

@@ -153,10 +153,6 @@ impl App {
     }
 
     pub(super) fn redraw(&mut self, event_loop: &ActiveEventLoop) {
-        let frame_num = umicraft_core::boot_log::frames_presented();
-        if frame_num < 10 {
-            umicraft_core::boot_log!("redraw_entry", "frame={frame_num}");
-        }
         self.poll_asset_loading();
         umicraft_core::profiling::new_frame();
         umicraft_core::profile_scope!("redraw");
@@ -279,15 +275,7 @@ impl App {
         if let Some(captured) = captured {
             self.save_screenshot(captured);
         }
-        if frame_num < 10 {
-            umicraft_core::boot_log!(
-                "redraw_render_finished",
-                "frame={frame_num}, is_err={}",
-                rendered.is_err()
-            );
-        }
         if let Err(error) = rendered {
-            umicraft_core::boot_log!("redraw_render_error", "{error}");
             self.exit_error = Some(error.to_string());
             event_loop.exit();
             return;
@@ -298,9 +286,6 @@ impl App {
         let budget = (!self.options.video.vsync && cap < options::UNLIMITED_FPS)
             .then(|| Duration::from_secs_f32(1.0 / cap as f32));
         self.clock.schedule_next(budget, Instant::now());
-        if frame_num < 10 {
-            umicraft_core::boot_log!("redraw_exit", "frame={frame_num}");
-        }
     }
 
     /// Hands the renderer what this frame shows besides the entities: the

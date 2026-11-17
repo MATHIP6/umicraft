@@ -26,7 +26,6 @@
 //! core.start().unwrap();
 //! ```
 
-pub mod boot_log;
 pub mod config;
 pub mod error;
 pub mod events;

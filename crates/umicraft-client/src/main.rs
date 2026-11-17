@@ -18,8 +18,6 @@ static ALLOCATOR: umicraft_core::profiling::CountingAllocator =
     umicraft_core::profiling::CountingAllocator::new();
 
 fn main() -> ExitCode {
-    umicraft_core::boot_log::init();
-    umicraft_core::boot_log!("main_started");
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),

@@ -161,11 +161,8 @@ impl App {
         let loader_thread = std::thread::Builder::new()
             .name("AssetLoader".to_string())
             .spawn(move || {
-                umicraft_core::boot_log!("async_asset_loader_start");
                 let font = ui_font::load();
-                umicraft_core::boot_log!("async_asset_loader_font_loaded");
                 let terrain = TerrainTextures::load_with_packs(&packs);
-                umicraft_core::boot_log!("async_asset_loader_terrain_loaded");
                 let _ = asset_tx.send(AsyncLoadedAssets { font, terrain });
             });
         if let Err(error) = loader_thread {
@@ -299,7 +296,6 @@ impl App {
         };
         match rx.try_recv() {
             Ok(assets) => {
-                umicraft_core::boot_log!("assets_received_on_main_thread");
                 self.assets.receiver = None;
                 self.apply_loaded_assets(assets);
             }
@@ -319,25 +315,21 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        umicraft_core::boot_log!("applying_loaded_assets_start");
 
         self.assets.font = assets.font;
         match ui_font::install(renderer, &self.assets.font.atlas) {
             Ok(installed) => {
                 self.assets.ui_atlas = Some(Arc::new(installed.atlas));
                 self.hud_cache.invalidate();
-                umicraft_core::boot_log!("official_ui_font_installed");
             }
             Err(error) => {
                 tracing::warn!(%error, "failed to install official font atlas; keeping fallback");
             }
         }
         self.assets.brand_atlas = ui_font::install_brand(renderer);
-        umicraft_core::boot_log!("brand_atlas_installed");
 
         renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
         let terrain = assets.terrain.install(renderer);
-        umicraft_core::boot_log!("terrain_installed");
 
         let gui_atlas = crate::official::grow_atlas(terrain.gui_atlas(), &[]);
         upload_gui_atlas(renderer, Some(&gui_atlas));
@@ -349,7 +341,6 @@ impl App {
         self.assets.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());
         self.assets.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
-        umicraft_core::boot_log!("gui_and_sky_uploaded");
 
         match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
             Ok(world) => self.world = Some(world),
@@ -357,14 +348,12 @@ impl App {
                 tracing::error!(%error, "WorldView::new failed");
             }
         }
-        umicraft_core::boot_log!("world_view_created");
 
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
             self.assets.ui_atlas.as_deref(),
         ));
         self.assets.map_textures = Some(MapTextures::load(renderer));
-        umicraft_core::boot_log!("entity_and_map_textures_loaded");
 
         if self.screen == Screen::Loading {
             if self.args.server().is_some() {
@@ -373,6 +362,5 @@ impl App {
                 self.screen = Screen::Title;
             }
         }
-        umicraft_core::boot_log!("apply_loaded_assets_completed");
     }
 }

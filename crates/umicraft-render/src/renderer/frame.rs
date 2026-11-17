@@ -216,15 +216,8 @@ impl Renderer {
         overlay: &Overlay,
         sky_state: &SkyState,
     ) -> Result<(), RenderError> {
-        let frame_num = umicraft_core::boot_log::frames_presented();
-        if frame_num < 10 {
-            umicraft_core::boot_log!("render_window_started", "frame={frame_num}");
-        }
         umicraft_core::profile_scope!("render_window");
         let acquire_start = std::time::Instant::now();
-        if frame_num < 10 {
-            umicraft_core::boot_log!("surface_get_current_texture_started", "frame={frame_num}");
-        }
         let frame = {
             let surface = self
                 .surface
@@ -236,22 +229,6 @@ impl Renderer {
             .elapsed()
             .as_micros()
             .min(u128::from(u32::MAX)) as u32;
-        if frame_num < 10 {
-            let status = match &frame {
-                wgpu::CurrentSurfaceTexture::Success(_) => "Success",
-                wgpu::CurrentSurfaceTexture::Suboptimal(_) => "Suboptimal",
-                wgpu::CurrentSurfaceTexture::Outdated => "Outdated",
-                wgpu::CurrentSurfaceTexture::Timeout => "Timeout",
-                wgpu::CurrentSurfaceTexture::Occluded => "Occluded",
-                wgpu::CurrentSurfaceTexture::Lost => "Lost",
-                wgpu::CurrentSurfaceTexture::Validation => "Validation",
-            };
-            umicraft_core::boot_log!(
-                "surface_get_current_texture_result",
-                "frame={frame_num}, status={status}, acquire_us={acquire_us}"
-            );
-        }
-
         match frame {
             wgpu::CurrentSurfaceTexture::Success(frame) => {
                 let encode_start = std::time::Instant::now();
@@ -275,9 +252,6 @@ impl Renderer {
                 if let Some(window) = &self.window {
                     window.pre_present_notify();
                 }
-                if frame_num < 10 {
-                    umicraft_core::boot_log!("queue_present_started", "frame={frame_num}");
-                }
                 let present_start = std::time::Instant::now();
                 self.queue.present(frame);
                 let present_now = std::time::Instant::now();
@@ -286,13 +260,6 @@ impl Renderer {
                     .as_micros()
                     .min(u128::from(u32::MAX)) as u32;
                 self.last_present_us.set(present_us);
-                let presented_count = umicraft_core::boot_log::log_frame_presented();
-                if frame_num < 10 {
-                    umicraft_core::boot_log!(
-                        "queue_present_done",
-                        "frame={frame_num}, present_us={present_us}, total_presented={presented_count}"
-                    );
-                }
 
                 self.frame_pacing.record_present(
                     present_now,

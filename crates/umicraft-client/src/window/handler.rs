@@ -39,20 +39,12 @@ impl ApplicationHandler for App {
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => {
-                umicraft_core::boot_log!("create_window_failed", "{error}");
                 self.exit_error = Some(format!("create window: {error}"));
                 event_loop.exit();
                 return;
             }
         };
         let surface_size = window.inner_size();
-        umicraft_core::boot_log!(
-            "window_created",
-            "size={}x{}, id={:?}",
-            surface_size.width,
-            surface_size.height,
-            window.id()
-        );
         self.resize(surface_size.width, surface_size.height);
 
         let backends = match self.args.backend.as_deref() {
@@ -82,44 +74,36 @@ impl ApplicationHandler for App {
         ));
         descriptor.backends = backends;
         let instance = wgpu::Instance::new(descriptor);
-        umicraft_core::boot_log!("renderer_new_windowed_starting", "backends={:?}", backends);
         let mut renderer = match Renderer::new_windowed(instance, window.clone()) {
             Ok(renderer) => renderer,
             Err(error) => {
-                umicraft_core::boot_log!("renderer_new_windowed_failed", "{error}");
                 self.exit_error = Some(error.to_string());
                 event_loop.exit();
                 return;
             }
         };
-        umicraft_core::boot_log!("renderer_new_windowed_done");
 
         // Upload the initial fallback atlas immediately so the first loading/UI frame can be presented
         match ui_font::install(&mut renderer, &self.assets.font.atlas) {
             Ok(installed) => {
                 self.assets.ui_atlas = Some(Arc::new(installed.atlas));
                 self.hud_cache.invalidate();
-                umicraft_core::boot_log!("ui_font_installed");
             }
             Err(error) => {
-                umicraft_core::boot_log!("ui_font_install_failed", "{error}");
                 self.exit_error = Some(ClientError::FontAtlas(error).to_string());
                 event_loop.exit();
                 return;
             }
         }
         self.assets.brand_atlas = ui_font::install_brand(&mut renderer);
-        umicraft_core::boot_log!("brand_atlas_installed");
 
         // Minimal procedural fallback setup & sky textures for instant responsive frame
         renderer.use_procedural_blocks();
         upload_sky_textures(&mut renderer);
-        umicraft_core::boot_log!("minimal_fallback_resources_ready");
 
         self.renderer = Some(renderer);
         self.window = Some(window.clone());
         event_loop.listen_device_events(DeviceEvents::Always);
-        umicraft_core::boot_log!("resumed_completed_requesting_initial_redraw");
         window.request_redraw();
     }
 
@@ -240,10 +224,6 @@ impl ApplicationHandler for App {
                 self.ui_input.clear();
             }
             WindowEvent::RedrawRequested => {
-                let frame_num = umicraft_core::boot_log::frames_presented();
-                if frame_num < 10 {
-                    umicraft_core::boot_log!("window_event_redraw_requested", "frame={frame_num}");
-                }
                 self.redraw(event_loop);
             }
             _ => {}
@@ -271,10 +251,6 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let frame_num = umicraft_core::boot_log::frames_presented();
-        if frame_num < 5 {
-            umicraft_core::boot_log!("about_to_wait_called", "frame={frame_num}");
-        }
         let now = Instant::now();
         if now + Duration::from_micros(500) >= self.clock.next_frame {
             if let Some(window) = &self.window {

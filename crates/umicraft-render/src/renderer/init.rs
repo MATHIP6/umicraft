@@ -63,20 +63,8 @@ impl Renderer {
         let surface = instance
             .create_surface(window.clone())
             .map_err(|error| RenderError::Surface(format!("{error:?}")))?;
-        umicraft_core::boot_log!("surface_created");
-        umicraft_core::boot_log!("adapter_requested");
         let adapter = request_adapter(&instance, Some(&surface))?;
-        let info = adapter.get_info();
-        umicraft_core::boot_log!(
-            "adapter_selected",
-            "name='{}', backend={:?}, driver='{}', type={:?}",
-            info.name,
-            info.backend,
-            info.driver,
-            info.device_type
-        );
         let (device, queue) = request_device(&adapter)?;
-        umicraft_core::boot_log!("device_created", "features={:?}", device.features());
         let mut config = surface
             .get_default_config(&adapter, width, height)
             .ok_or(RenderError::NoSurfaceConfig)?;
@@ -102,15 +90,6 @@ impl Renderer {
         config.desired_maximum_frame_latency = FRAME_LATENCY_UNCONSTRAINED;
         let format = config.format;
         surface.configure(&device, &config);
-        umicraft_core::boot_log!(
-            "surface_configured",
-            "width={}, height={}, format={:?}, present_mode={:?}, desired_latency={}",
-            config.width,
-            config.height,
-            config.format,
-            config.present_mode,
-            config.desired_maximum_frame_latency
-        );
 
         let info = adapter.get_info();
         tracing::info!(
@@ -183,10 +162,6 @@ impl Renderer {
         format: wgpu::TextureFormat,
         adapter: AdapterSummary,
     ) -> Result<Self, RenderError> {
-        umicraft_core::boot_log!(
-            "renderer_create_started",
-            "width={width}, height={height}, format={format:?}"
-        );
         let camera_buffer = resources::camera_buffer(&device, "camera uniform");
         let block_data = fallback_texture_data();
         let block_view = resources::block_texture(&device, &queue, &block_data);
@@ -399,7 +374,6 @@ impl Renderer {
         let world_glint = WorldGlint::new(&device, &terrain_layout, format);
 
         let gpu_timer = GpuTimer::new(&device, &queue);
-        umicraft_core::boot_log!("renderer_create_completed");
         Ok(Self {
             adapter,
             gpu_timer,
