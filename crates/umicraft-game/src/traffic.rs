@@ -58,6 +58,13 @@ pub struct TickSnapshot {
     pub riding: Option<SteerInput>,
 }
 
+/// The damping the vanilla client applies to the movement axes before it
+/// sends them in `Steer Vehicle`: MCP `EntityLivingBase.java:2031-2032`
+/// (`moveStrafing *= 0.98F`) runs inside `super.onUpdate()`, before
+/// `EntityPlayerSP.java:177` puts `moveStrafing` and `moveForward` in the
+/// packet. A value above 0.98 is something no vanilla client sends.
+pub const STEER_DAMPING: f32 = 0.98;
+
 /// The movement keys a riding player sends with `Steer Vehicle` (0x0C).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SteerInput {
@@ -69,6 +76,28 @@ pub struct SteerInput {
     pub jump: bool,
     /// Whether the sneak key (dismount) is held.
     pub sneak: bool,
+}
+
+impl SteerInput {
+    /// The steer packet of a tick from the movement axes of the input
+    /// (already scaled by the sneak), damped like the vanilla client does
+    /// ([`STEER_DAMPING`]).
+    ///
+    /// # Example
+    /// ```
+    /// use umicraft_game::traffic::SteerInput;
+    /// let steer = SteerInput::damped(0.0, 1.0, false, false);
+    /// assert_eq!(steer.forward, 0.98);
+    /// ```
+    #[must_use]
+    pub fn damped(strafe: f32, forward: f32, jump: bool, sneak: bool) -> Self {
+        Self {
+            strafe: strafe * STEER_DAMPING,
+            forward: forward * STEER_DAMPING,
+            jump,
+            sneak,
+        }
+    }
 }
 
 /// One serverbound packet of a tick.
@@ -405,6 +434,16 @@ mod tests {
                 TickPacket::SteerVehicle(steer),
             ]
         );
+    }
+
+    #[test]
+    fn the_steer_axes_are_damped_like_the_vanilla_client() {
+        let full = SteerInput::damped(1.0, -1.0, true, false);
+        assert_eq!((full.strafe, full.forward), (0.98, -0.98));
+        assert!(full.jump && !full.sneak);
+        // Sneaking scales first (0.3), the damping applies on top.
+        let sneaking = SteerInput::damped(0.3, 0.3, false, true);
+        assert_eq!(sneaking.forward, 0.3_f32 * 0.98);
     }
 
     #[test]

@@ -53,6 +53,34 @@ fn a_riding_tick_sends_look_then_steer() {
 }
 
 #[test]
+fn a_riding_tick_steers_with_the_damped_axes() {
+    // Regression: the raw 1.0 was sent, where vanilla sends `moveForward`
+    // after `EntityLivingBase` damped it to 0.98.
+    let mut game = placed_game();
+    game.vehicle = Some(42);
+    let mut queue = CommandQueue::default();
+    let forward = RawInput {
+        forward: 1.0,
+        strafe: -1.0,
+        ..RawInput::default()
+    }
+    .to_intent();
+    report_movement(&mut game, &forward, &mut queue);
+    assert!(matches!(
+        commands(&queue)[..],
+        [
+            ClientCommand::PlayerLook { .. },
+            ClientCommand::Input {
+                strafe: -0.98,
+                forward: 0.98,
+                jumping: false,
+                sneaking: false,
+            }
+        ]
+    ));
+}
+
+#[test]
 fn a_sneak_transition_is_announced_before_the_movement() {
     let mut game = placed_game();
     game.entity_id = 7;

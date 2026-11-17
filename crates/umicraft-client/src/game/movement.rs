@@ -16,9 +16,9 @@ use crate::network::ClientCommand;
 /// placed (a play packet that arrives during the login makes the server log
 /// `Bad packet id`), nor while the chunk under the player is missing: MCP
 /// `EntityPlayerSP.onUpdate` skips the whole update until
-/// `World.isBlockLoaded` holds for the player's column. The steer packet carries the raw wire values; the 0.98
-/// damping of `EntityLivingBase.java:2020` is applied by the game logic and
-/// by the server, so it must not be applied twice.
+/// `World.isBlockLoaded` holds for the player's column. The steer packet
+/// carries the axes damped by 0.98, as the vanilla client sends them
+/// ([`SteerInput::damped`]).
 pub(super) fn report_movement(game: &mut Game, intent: &InputIntent, queue: &mut CommandQueue) {
     let Some(state) = game
         .state
@@ -48,12 +48,9 @@ pub(super) fn report_movement(game: &mut Game, intent: &InputIntent, queue: &mut
         on_ground: player.on_ground,
         sprinting: player.sprinting,
         sneaking: player.sneaking,
-        riding: game.vehicle.map(|_| SteerInput {
-            strafe: intent.strafe,
-            forward: intent.forward,
-            jump: intent.jump,
-            sneak: intent.sneak,
-        }),
+        riding: game
+            .vehicle
+            .map(|_| SteerInput::damped(intent.strafe, intent.forward, intent.jump, intent.sneak)),
     };
     let packets = game.server_view.tick(&snapshot);
     if packets.reports_position() {
