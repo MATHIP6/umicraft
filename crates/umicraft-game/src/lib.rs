@@ -58,6 +58,7 @@ pub mod item_use;
 pub mod items;
 pub mod media;
 pub mod movement;
+pub mod mth;
 pub mod nbt;
 pub mod particles;
 pub mod physics;
