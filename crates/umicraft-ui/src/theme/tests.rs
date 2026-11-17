@@ -131,3 +131,16 @@ fn a_gradient_slice_matches_the_full_gradient() {
     assert!((from[0] - 0.5).abs() < 1e-6);
     assert_eq!(to, bottom);
 }
+
+#[test]
+fn only_the_vanilla_theme_keeps_the_game_font() {
+    assert_eq!(ThemeId::Vanilla.theme().font, FontSkin::Game);
+    assert_eq!(ThemeId::Ember.theme().font, FontSkin::Hd);
+    assert_eq!(ThemeId::Amethyst.theme().font, FontSkin::Hd);
+}
+
+#[test]
+fn the_hd_cell_follows_the_gui_scale() {
+    let cells: Vec<u32> = (1..=6).map(hd_cell_for_scale).collect();
+    assert_eq!(cells, [16, 16, 24, 32, 32, 32]);
+}

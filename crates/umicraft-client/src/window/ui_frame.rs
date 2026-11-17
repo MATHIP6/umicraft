@@ -68,6 +68,7 @@ impl App {
         let mut text_done = None;
         let mut respawn_clicked = false;
         let inventory_facts = self.inventory_facts();
+        self.sync_ui_font(width, height);
         // An owned handle: the steps below borrow `self` mutably.
         let atlas = Arc::clone(self.assets.ui_atlas.as_ref()?);
         let atlas = atlas.as_ref();

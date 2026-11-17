@@ -50,6 +50,7 @@ mod binding_input;
 mod chat_control;
 mod creative_window;
 mod death;
+mod font_sync;
 mod handler;
 mod hotbar_scroll;
 mod inventory_control;

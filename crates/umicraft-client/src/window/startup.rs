@@ -231,6 +231,7 @@ impl App {
                 font,
                 receiver: Some(asset_rx),
                 ui_atlas: None,
+                font_choice: crate::theme_font::FontChoice::Game,
                 brand_atlas: None,
                 gui_atlas: None,
                 items: None,

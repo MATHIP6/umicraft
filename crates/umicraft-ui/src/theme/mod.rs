@@ -14,11 +14,13 @@
 
 mod background;
 mod flat;
+mod font;
 mod palette;
 
 pub(crate) use background::fill_gradient;
 pub use background::BackgroundSkin;
 pub use flat::{ControlState, FlatSkin};
+pub use font::{hd_cell_for_scale, FontSkin, HD_CELLS};
 
 use crate::draw::Color;
 use palette::{AMETHYST, EMBER};
@@ -56,6 +58,7 @@ impl ThemeId {
             Self::Vanilla => Theme::VANILLA,
             Self::Ember => Theme {
                 widgets: WidgetSkin::Flat(EMBER),
+                font: FontSkin::Hd,
                 background: BackgroundSkin::Gradient {
                     top: palette::EMBER_BACKDROP_TOP,
                     bottom: palette::EMBER_BACKDROP_BOTTOM,
@@ -64,6 +67,7 @@ impl ThemeId {
             },
             Self::Amethyst => Theme {
                 widgets: WidgetSkin::Flat(AMETHYST),
+                font: FontSkin::Hd,
                 background: BackgroundSkin::Gradient {
                     top: palette::AMETHYST_BACKDROP,
                     bottom: palette::AMETHYST_BACKDROP,
@@ -90,6 +94,8 @@ pub struct Theme {
     pub widgets: WidgetSkin,
     /// The screen behind the menus and the lists drawn over it.
     pub background: BackgroundSkin,
+    /// The glyph grid of every text of the UI.
+    pub font: FontSkin,
 }
 
 impl Theme {
@@ -97,6 +103,7 @@ impl Theme {
     pub const VANILLA: Self = Self {
         widgets: WidgetSkin::Vanilla,
         background: BackgroundSkin::Dirt,
+        font: FontSkin::Game,
     };
 }
 

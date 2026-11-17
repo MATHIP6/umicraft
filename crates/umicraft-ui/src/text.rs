@@ -123,6 +123,8 @@ const GLYPH_GRID: u32 = 16;
 /// The 1.8 `ascii.png` is exactly 128×128 pixels; the reference renderer
 /// hard-codes 128-pixel UVs (`FontRenderer.java:254-261`).
 const REFERENCE_ATLAS_SIDE: u32 = 128;
+/// Largest side accepted for an HD glyph grid (32 texel cells).
+const MAX_HD_ATLAS_SIDE: u32 = 512;
 /// Code points of the basic multilingual plane, the size of `glyph_sizes.bin`.
 const UNICODE_CODE_POINTS: usize = 65_536;
 /// A Unicode page is 256×256 texels: a 16×16 grid of 16×16 glyph cells.
@@ -380,6 +382,32 @@ impl FontAtlas {
     ///
     /// The function never panics on malformed input.
     pub fn from_png(bytes: &[u8]) -> Result<Self, FontError> {
+        Self::from_grid_png(bytes, validate_atlas_dimensions)
+    }
+
+    /// Builds an atlas from a high-resolution copy of the 1.8 glyph grid.
+    ///
+    /// The image is a square whose side is a multiple of 128 (a 16×16 grid of
+    /// 8, 16, 24 or 32 texel cells). Advances and the line height stay in the
+    /// 8-texel units of the 1.8 font, so every layout function measures an HD
+    /// atlas exactly like the original; only the glyphs are drawn sharper
+    /// ([`Glyph::scale`] is `8 / cell`). An advance is the used columns scaled
+    /// back to 1.8 pixels, rounded up, plus one pixel of spacing: this
+    /// reproduces the `width.N` table of the HD font's `ascii.properties` for
+    /// every character.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`Self::from_png`], with [`FontError::InvalidDimensions`]
+    /// raised for an image that is not such a square.
+    pub fn from_hd_png(bytes: &[u8]) -> Result<Self, FontError> {
+        Self::from_grid_png(bytes, validate_hd_dimensions)
+    }
+
+    fn from_grid_png(
+        bytes: &[u8],
+        validate: fn(u32, u32) -> Result<(), FontError>,
+    ) -> Result<Self, FontError> {
         if !bytes.starts_with(&PNG_SIGNATURE) {
             return Err(FontError::InvalidSignature);
         }
@@ -388,13 +416,13 @@ impl FontAtlas {
         decoder.set_transformations(png::Transformations::normalize_to_color8());
         {
             let header = decoder.read_header_info()?;
-            validate_atlas_dimensions(header.width, header.height)?;
+            validate(header.width, header.height)?;
         }
 
         let mut reader = decoder.read_info()?;
         let mut buffer = vec![0u8; reader.output_buffer_size().unwrap_or(0)];
         let info = reader.next_frame(&mut buffer)?;
-        validate_atlas_dimensions(info.width, info.height)?;
+        validate(info.width, info.height)?;
 
         let (width, height) = (info.width, info.height);
         let coverage = coverage_from_frame(&info, &buffer)?;
@@ -734,6 +762,22 @@ fn validate_atlas_dimensions(width: u32, height: u32) -> Result<(), FontError> {
     }
 }
 
+/// Accepts a square HD glyph grid: a side that is a multiple of 128 and at
+/// most [`MAX_HD_ATLAS_SIDE`].
+fn validate_hd_dimensions(width: u32, height: u32) -> Result<(), FontError> {
+    let side_ok =
+        width.is_multiple_of(REFERENCE_ATLAS_SIDE) && (1..=MAX_HD_ATLAS_SIDE).contains(&width);
+    if width == height && side_ok {
+        Ok(())
+    } else {
+        Err(FontError::InvalidDimensions {
+            width,
+            height,
+            side: REFERENCE_ATLAS_SIDE,
+        })
+    }
+}
+
 /// Reduces one decoded PNG frame to one byte of coverage per pixel.
 ///
 /// The alpha channel is the coverage when the image has one (the 1.8 atlas is
@@ -880,6 +924,8 @@ fn unicode_glyph(character: char, size: u8, cell: [u32; 2], atlas: (u32, u32)) -
 fn build_grid_glyphs(width: u32, height: u32, atlas_width: u32, coverage: &[u8]) -> Vec<Glyph> {
     let cell_width = width / GLYPH_GRID;
     let cell_height = height / GLYPH_GRID;
+    // Texels per 1.8 pixel: 1 for the original grid, 2 to 4 for an HD one.
+    let texels = (cell_width / 8) as f32;
     let mut glyphs = Vec::with_capacity(GRID_CELLS);
 
     for (slot, character) in GRID_CHARS.chars().enumerate() {
@@ -893,11 +939,12 @@ fn build_grid_glyphs(width: u32, height: u32, atlas_width: u32, coverage: &[u8])
         let used = if character == ' ' {
             // The reference forces a four-pixel advance for the space
             // (`FontRenderer.java:177-180`, `:661-664`).
-            3
+            3 * texels as u32
         } else {
             used_columns(coverage, width, origin_x, origin_y, cell_width, cell_height)
         };
 
+        let advance = (used as f32 / texels).ceil() + 1.0;
         glyphs.push(Glyph {
             character,
             uv_min: [
@@ -908,9 +955,9 @@ fn build_grid_glyphs(width: u32, height: u32, atlas_width: u32, coverage: &[u8])
                 (origin_x + used) as f32 / atlas_width as f32,
                 (origin_y + cell_height) as f32 / height as f32,
             ],
-            advance: used as f32 + 1.0,
-            pen: used as f32 + 1.0,
-            scale: 1.0,
+            advance,
+            pen: advance,
+            scale: 1.0 / texels,
         });
     }
     glyphs.sort_by_key(|glyph| glyph.character);
