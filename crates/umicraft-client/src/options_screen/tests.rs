@@ -7,6 +7,7 @@ use umicraft_assets::pack_discovery::DiscoveredPack;
 use umicraft_assets::PackMetadata;
 use umicraft_core::lang::Lang;
 use umicraft_ui::menus::TitleStyle;
+use umicraft_ui::ThemeId;
 use umicraft_ui::{FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 
 use super::controls_page::sensitivity_label;
@@ -617,15 +618,28 @@ fn the_title_style_button_toggles_the_option() {
 }
 
 #[test]
-fn the_title_style_button_spans_both_columns() {
+fn the_title_style_and_theme_buttons_fill_the_row_like_the_columns() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
     frame(&mut screen, &mut options, vec![]);
     let style = screen.rect_of("title_style").expect("title style button");
     let fov = screen.rect_of("fov").expect("fov slider");
     let difficulty = screen.rect_of("difficulty").expect("difficulty button");
+    let theme = screen.rect_of("theme").expect("theme button");
     assert_eq!(style.x, fov.x);
-    assert_eq!(style.x + style.width, difficulty.x + difficulty.width);
+    assert_eq!(theme.x + theme.width, difficulty.x + difficulty.width);
+    assert_eq!(style.y, theme.y);
+}
+
+#[test]
+fn picking_a_theme_stores_it_and_marks_the_change() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "theme");
+    assert_eq!(screen.page(), Page::Theme);
+    let outcome = click_widget(&mut screen, &mut options, ThemeId::Amethyst.lang_key());
+    assert!(outcome.changed);
+    assert_eq!(options.menu.theme(), ThemeId::Amethyst);
 }
 
 #[test]

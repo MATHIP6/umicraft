@@ -29,7 +29,7 @@ pub enum ThemeId {
     /// The 1.8 look, textured by the active resource packs.
     #[default]
     Vanilla,
-    /// Near-black flat controls with an orange accent.
+    /// Near-black flat controls with an violet accent.
     Ember,
     /// Beveled purple controls over a dark backdrop.
     Amethyst,
