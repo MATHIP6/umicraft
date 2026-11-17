@@ -41,8 +41,11 @@ bucket changes (`window/font_sync.rs`).
 
 - A theme changes the font of all UI text, HUD and chat included, because the
   renderer has one game font texture per frame.
-- The HD font covers the 1.8 grid only (ASCII, Latin-1, symbols): characters
-  from the Unicode pages fall back to `?` under a non-vanilla theme.
+- The HD grid covers the 1.8 `ascii.png` characters only. Everything else is
+  drawn from the jar's Unicode pages, kept in `LoadedFont::unicode` and applied
+  to the HD grid with `FontAtlas::with_unicode`, exactly as for the game font
+  (those glyphs keep the vanilla look). Without a client jar there are no
+  pages, and such characters show as `?`.
 - `title_style` (layout of the title screen) and `theme` (look) are separate.
 - Themes are code, not files. Loading them from a file would need serde on the
   skin types; nothing blocks it.

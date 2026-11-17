@@ -24,10 +24,11 @@ impl App {
         }
         let atlas = match wanted {
             FontChoice::Game => self.assets.font.atlas.clone(),
-            FontChoice::Hd(cell) => theme_font::hd_atlas(cell).unwrap_or_else(|error| {
-                tracing::warn!(%error, "theme font unavailable; keeping the game font");
-                self.assets.font.atlas.clone()
-            }),
+            FontChoice::Hd(cell) => theme_font::hd_atlas(cell, self.assets.font.unicode.as_deref())
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "theme font unavailable; keeping the game font");
+                    self.assets.font.atlas.clone()
+                }),
         };
         let Some(renderer) = self.renderer.as_mut() else {
             return;

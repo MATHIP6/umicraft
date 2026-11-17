@@ -256,7 +256,7 @@ fn themed_font(view: &str, font: LoadedFont, height: u32) -> LoadedFont {
     let scale = gui_scale(height * 16 / 9, height);
     match FontChoice::for_skin(theme.font, scale) {
         FontChoice::Game => font,
-        FontChoice::Hd(cell) => match theme_font::hd_atlas(cell) {
+        FontChoice::Hd(cell) => match theme_font::hd_atlas(cell, font.unicode.as_deref()) {
             Ok(atlas) => LoadedFont { atlas, ..font },
             Err(error) => {
                 tracing::warn!(%error, "theme font unavailable; keeping the game font");
