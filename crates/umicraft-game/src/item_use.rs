@@ -24,8 +24,9 @@ use crate::entity::EntityRecord;
 use crate::gamemode::GameMode;
 use crate::interaction::{Interaction, Outgoing};
 use crate::items::{self, ItemKind, ToolKind};
+use crate::placement::{self, PlaceClick, Placement, Placer};
 use crate::raycast::RayHit;
-use crate::shapes::{Aabb, BlockSource};
+use crate::shapes::BlockSource;
 
 /// The ticks before a held right button clicks again
 /// (MCP `Minecraft.rightClickDelayTimer`, `rightClickMouse` line 1552).
@@ -264,8 +265,9 @@ pub struct UseTick<'a, W: BlockSource + ?Sized> {
     pub entity: Option<(&'a EntityRecord, EntityHit)>,
     /// The loaded world.
     pub world: &'a W,
-    /// The bounding box of the player, to refuse a placement inside it.
-    pub player: Option<Aabb>,
+    /// The player, who decides how a block is turned and may not be in the
+    /// way of the block it places.
+    pub player: Option<Placer<'a>>,
     /// Whether the sneak key is held.
     pub sneaking: bool,
     /// The selected hotbar slot.
@@ -289,6 +291,10 @@ pub struct UseOutput {
     pub swing: bool,
     /// The wooden door the click swings, to apply and play at once.
     pub door: Option<DoorToggle>,
+    /// The blocks the client places itself (MCP `ItemBlock.onItemUse` runs
+    /// on the client), to write at once; the held stack loses one item
+    /// outside creative.
+    pub placed: Option<Placement>,
 }
 
 /// The use state of the local player (MCP `EntityPlayer.itemInUse`).
@@ -399,6 +405,12 @@ impl ItemUse {
             }
             let item = held.cloned().unwrap_or(ItemStack::EMPTY);
             let places = held.is_some_and(is_block_item) && tick.mode.can_place();
+            let place = PlaceClick {
+                world: tick.world,
+                hit: &hit,
+                item: &item,
+                placer: tick.player.as_ref(),
+            };
             // MCP `PlayerControllerMP.onPlayerRightClick`:
             // 1. If the block is activated, send the block placement packet and swing.
             // 2. Else if holding an ItemBlock and mode can place, check `canPlaceBlockOnSide`:
@@ -408,7 +420,19 @@ impl ItemUse {
             let packet = if activated {
                 Some(Interaction::activate_block(&hit, item))
             } else if places {
-                interaction.place_block(tick.mode, &hit, tick.player.as_ref(), item)
+                placement::can_place_on_side(&place).then(|| {
+                    // `onItemUse` runs after the packet went out; adventure
+                    // players may not edit (`canPlayerEdit`).
+                    let placed = (tick.mode != GameMode::Adventure)
+                        .then(|| placement::predict(&place))
+                        .flatten();
+                    let target = placed
+                        .as_ref()
+                        .and_then(Placement::position)
+                        .unwrap_or_else(|| placement::target(tick.world, &hit));
+                    output.placed = placed;
+                    interaction.place_block(tick.mode, &hit, target, item.clone())
+                })
             } else {
                 Some(Interaction::activate_block(&hit, item))
             };
@@ -766,6 +790,28 @@ mod tests {
         assert!(output.swing);
         assert_eq!(output.packets.len(), 1);
         assert!(matches!(output.packets[0], Outgoing::Place { .. }));
+        // The client places the block itself, where the server will confirm it.
+        let placed: Vec<_> = output.placed.expect("predicted").changes().collect();
+        assert_eq!(
+            placed,
+            vec![(BlockPos::new(0, 1, 0), BlockState::new(4, 0))]
+        );
+        assert_eq!(
+            interaction.acknowledge_block(BlockPos::new(0, 1, 0)),
+            Some(crate::interaction::BlockAck::Placement)
+        );
+    }
+
+    #[test]
+    fn an_adventure_player_sends_the_click_but_places_nothing() {
+        let (mut state, mut interaction) = (ItemUse::new(), Interaction::new());
+        let cobble = item(4, 0);
+        let mut click = tick(Some(&cobble), true, true);
+        click.target = Some(hit());
+        click.mode = GameMode::Adventure;
+        let output = run(&mut state, &mut interaction, &click);
+        assert!(matches!(output.packets[0], Outgoing::Place { .. }));
+        assert_eq!(output.placed, None);
     }
 
     #[test]
@@ -941,8 +987,11 @@ mod tests {
 
     /// The box of a player standing in the cell above the origin, which is the
     /// cell next to the top face the `hit()` clicks.
-    fn player_in_the_way() -> Aabb {
-        Aabb::new(DVec3::new(0.2, 1.0, 0.2), DVec3::new(0.8, 2.8, 0.8))
+    fn player_in_the_way() -> Placer<'static> {
+        Placer::alone(crate::shapes::Aabb::new(
+            DVec3::new(0.2, 1.0, 0.2),
+            DVec3::new(0.8, 2.8, 0.8),
+        ))
     }
 
     fn click_with_player_in_the_way<W: BlockSource>(

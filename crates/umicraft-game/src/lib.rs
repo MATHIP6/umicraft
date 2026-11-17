@@ -65,6 +65,7 @@ pub mod physics;
 pub mod pick;
 pub mod piston;
 mod piston_shape;
+pub mod placement;
 pub mod player_list;
 pub mod prediction;
 pub mod raycast;

@@ -432,6 +432,15 @@ enum Kind {
     Hopper,
 }
 
+/// Whether the block id is a stair (`BlockStairs`).
+#[must_use]
+pub(crate) fn is_stairs(id: u16) -> bool {
+    matches!(
+        id,
+        53 | 67 | 108 | 109 | 114 | 128 | 134 | 135 | 136 | 156 | 163 | 164 | 180
+    )
+}
+
 /// Classifies a 1.8 block id (and its metadata) into a collision kind.
 ///
 /// The block ids are the registration ids of MCP
@@ -444,8 +453,7 @@ fn classify(id: u16, metadata: u8) -> Kind {
         44 | 126 | 182 => Kind::Slab(metadata & 8 != 0),
         // Double slabs are full cubes.
         43 | 125 | 181 => Kind::Cube,
-        // Stairs.
-        53 | 67 | 108 | 109 | 114 | 128 | 134 | 135 | 136 | 156 | 163 | 164 | 180 => Kind::Stairs,
+        id if is_stairs(id) => Kind::Stairs,
         // Fences, walls and fence gates.
         85 | 113 | 188..=192 => Kind::Fence,
         139 => Kind::Wall,

@@ -13,7 +13,6 @@
 //! `onPlayerRightClick`) and `EntityPlayerSP.onUpdate`; the per-mode
 //! differences live in [`GameMode`].
 
-use glam::DVec3;
 use umicraft_protocol::packets::play::serverbound::DiggingStatus;
 use umicraft_protocol::packets::play::{Facing, ItemStack};
 use umicraft_world::BlockPos;
@@ -23,7 +22,7 @@ use crate::digging::{self, Digger};
 use crate::entity::EntityId;
 use crate::gamemode::GameMode;
 use crate::raycast::{Face, RayHit};
-use crate::shapes::{Aabb, BlockSource};
+use crate::shapes::BlockSource;
 use crate::sound::block_events::{break_cue, HitSounds};
 use crate::sound::cue::SoundCue;
 
@@ -235,34 +234,23 @@ impl Interaction {
         output
     }
 
-    /// Places a block against the targeted face.
+    /// The packet of a click that places a block into `target`.
     ///
-    /// `player` is the bounding box of the player: a block inside it would
-    /// suffocate the player (the server applies the damage), so the
-    /// placement is skipped. The packet is sent in every mode, like MCP
-    /// `onPlayerRightClick`; only the confirmation is awaited when the mode
-    /// can place.
+    /// The caller has already checked `ItemBlock.canPlaceBlockOnSide`
+    /// (`crate::placement::can_place_on_side`). The packet is sent in every
+    /// mode, like MCP `onPlayerRightClick`; only the confirmation of
+    /// `target` is awaited when the mode can place.
     pub fn place_block(
         &mut self,
         mode: GameMode,
         hit: &RayHit,
-        player: Option<&Aabb>,
+        target: BlockPos,
         item: ItemStack,
-    ) -> Option<Outgoing> {
-        let face = wire_face(hit.face);
-        let offset = face_offset(face);
-        let target = BlockPos::new(
-            hit.block.x + offset.x,
-            hit.block.y + offset.y,
-            hit.block.z + offset.z,
-        );
-        if player.is_some_and(|player| player.intersects(&block_box(target))) {
-            return None;
-        }
+    ) -> Outgoing {
         if mode.can_place() {
             self.expected_placement = Some(target);
         }
-        Some(Self::block_click(hit, item))
+        Self::block_click(hit, item)
     }
 
     /// The packet of a click that the block itself consumes (a door, a chest,
@@ -493,12 +481,6 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
     }
 }
 
-/// The unit box of a block.
-fn block_box(block: BlockPos) -> Aabb {
-    let min = DVec3::new(f64::from(block.x), f64::from(block.y), f64::from(block.z));
-    Aabb::new(min, min + DVec3::ONE)
-}
-
 /// The offset of a face, in blocks.
 #[must_use]
 pub fn face_offset(face: Facing) -> BlockPos {
@@ -540,6 +522,7 @@ pub fn wire_face(face: Face) -> Facing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::DVec3;
 
     fn hit(block: BlockPos, face: Face) -> RayHit {
         RayHit {
@@ -1015,15 +998,20 @@ mod tests {
     #[test]
     fn a_placement_targets_the_block_next_to_the_face() {
         let mut interaction = Interaction::new();
-        let placed = interaction.place_block(GameMode::Survival, &stone(), None, ItemStack::EMPTY);
+        let placed = interaction.place_block(
+            GameMode::Survival,
+            &stone(),
+            BlockPos::new(3, 5, 5),
+            ItemStack::EMPTY,
+        );
         assert_eq!(
             placed,
-            Some(Outgoing::Place {
+            Outgoing::Place {
                 block: BlockPos::new(3, 4, 5),
                 face: Facing::Up,
                 item: ItemStack::EMPTY,
                 cursor: [8, 16, 4],
-            })
+            }
         );
         assert_eq!(
             interaction.acknowledge_block(BlockPos::new(3, 5, 5)),
@@ -1032,24 +1020,14 @@ mod tests {
     }
 
     #[test]
-    fn a_block_inside_the_player_is_not_placed() {
-        let mut interaction = Interaction::new();
-        let player = block_box(BlockPos::new(3, 5, 5));
-        let placed = interaction.place_block(
-            GameMode::Survival,
-            &stone(),
-            Some(&player),
-            ItemStack::EMPTY,
-        );
-        assert_eq!(placed, None);
-        assert_eq!(interaction.acknowledge_block(BlockPos::new(3, 5, 5)), None);
-    }
-
-    #[test]
     fn a_spectator_click_is_sent_but_never_awaited() {
         let mut interaction = Interaction::new();
-        let placed = interaction.place_block(GameMode::Spectator, &stone(), None, ItemStack::EMPTY);
-        assert!(placed.is_some());
+        interaction.place_block(
+            GameMode::Spectator,
+            &stone(),
+            BlockPos::new(3, 5, 5),
+            ItemStack::EMPTY,
+        );
         assert_eq!(interaction.acknowledge_block(BlockPos::new(3, 5, 5)), None);
     }
 

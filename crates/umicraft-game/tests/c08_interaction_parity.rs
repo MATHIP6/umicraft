@@ -17,6 +17,7 @@ use umicraft_game::interaction::{
     cursor, face_offset, wire_face, AttackTick, BlockAck, Interaction, Outgoing,
 };
 use umicraft_game::item_use::{ItemUse, UseTick};
+use umicraft_game::placement::Placer;
 use umicraft_game::raycast::{Face, RayHit};
 use umicraft_game::shapes::BlockSource;
 use umicraft_protocol::packets::play::facing::Facing;
@@ -366,7 +367,7 @@ fn test_allowed_block_placement() {
         held: true,
         target: Some(hit),
         world: &world,
-        player: Some(player_far),
+        player: Some(Placer::alone(player_far)),
         sneaking: false,
         slot: 0,
         item: Some(&dirt),
@@ -412,7 +413,7 @@ fn test_denied_block_placement_by_player_collision_falls_through_to_use_item() {
         held: true,
         target: Some(hit),
         world: &world,
-        player: Some(player_in_the_way),
+        player: Some(Placer::alone(player_in_the_way)),
         sneaking: false,
         slot: 0,
         item: Some(&dirt),

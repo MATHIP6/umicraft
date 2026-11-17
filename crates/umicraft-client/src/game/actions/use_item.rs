@@ -2,11 +2,15 @@
 
 //! The use button: placing, using the held item and opening doors.
 
+use umicraft_game::collision::Aabb;
+use umicraft_game::combat::body_size;
 use umicraft_game::combat::ClickViewer;
 use umicraft_game::editors::book::{WRITABLE_BOOK, WRITTEN_BOOK};
-use umicraft_game::entity::EntityId;
+use umicraft_game::entity::{EntityId, EntityKind, EntityRecord};
+use umicraft_game::gamemode::GameMode;
 use umicraft_game::interaction::Outgoing;
 use umicraft_game::item_use::{DoorToggle, UseTick};
+use umicraft_game::placement::{Placement, Placer};
 
 use super::swing_effects;
 use crate::game::combat;
@@ -23,6 +27,9 @@ pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
     let pressed = std::mem::take(&mut game.controls.use_pressed);
     if game.dead() {
         return;
+    }
+    if pressed || game.controls.input.use_item {
+        gather_blocking_entities(game);
     }
     let pointed = combat::pointed(game);
     let target = pointed.block();
@@ -49,7 +56,13 @@ pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
             target,
             entity,
             world,
-            player: Some(player.bounding_box()),
+            player: Some(Placer {
+                position: player.position,
+                bounds: player.bounding_box(),
+                yaw: player.yaw,
+                sneaking: player.sneaking,
+                others: &game.blocking_entities,
+            }),
             sneaking: player.sneaking,
             slot: game.hotbar.selected,
             item: item.as_ref(),
@@ -74,6 +87,9 @@ pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
     if let Some(door) = output.door {
         swing_door(game, door);
     }
+    if let Some(placed) = output.placed {
+        place_block(game, &placed);
+    }
     if output.swing {
         // MCP `Minecraft.rightClickMouse`: a used item swings the arm.
         queue.push(ClientCommand::Swing);
@@ -81,6 +97,61 @@ pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         game.hand.swing(effects);
         game.body.animation.swing_item();
     }
+}
+
+/// Writes the block the client placed itself (MCP `ItemBlock.onItemUse` on
+/// the client world) and takes the item from the stack outside creative
+/// (`onPlayerRightClick` restores the size in creative). The server's
+/// `Block Change` of the cell confirms or undoes it.
+fn place_block(game: &mut Game, placed: &Placement) {
+    if let Some(world) = game.world.as_mut() {
+        for (position, state) in placed.changes() {
+            tracing::debug!(?position, ?state, "placing a block");
+            game.dirty.extend(world.apply_block_change(position, state));
+        }
+    }
+    if game.gamemode != GameMode::Creative {
+        game.windows.shrink_selected();
+        game.hud_dirty = true;
+    }
+}
+
+/// Gathers the boxes of the entities a placed block may not overlap
+/// (`World.checkNoEntityCollision`: `preventEntitySpawning`, true for living
+/// entities, boats, minecarts, primed TNT, falling blocks and ender
+/// crystals).
+fn gather_blocking_entities(game: &mut Game) {
+    game.blocking_entities.clear();
+    game.blocking_entities.extend(
+        game.entities
+            .entities()
+            .values()
+            .filter(|entity| keeps_blocks_out(entity.kind))
+            .filter_map(body_box),
+    );
+}
+
+fn keeps_blocks_out(kind: EntityKind) -> bool {
+    kind.is_living()
+        || matches!(
+            kind,
+            EntityKind::Boat
+                | EntityKind::Minecart
+                | EntityKind::PrimedTnt
+                | EntityKind::FallingBlock
+                | EntityKind::EnderCrystal
+        )
+}
+
+/// The bounding box of an entity, from its feet and size.
+fn body_box(entity: &EntityRecord) -> Option<Aabb> {
+    let (width, height) = body_size(entity)?;
+    let half = width / 2.0;
+    let feet = entity.position;
+    Some(Aabb::new(
+        feet - glam::DVec3::new(half, 0.0, half),
+        feet + glam::DVec3::new(half, height, half),
+    ))
 }
 
 /// MCP `BlockDoor.onBlockActivated` runs on the client too: the door swings at

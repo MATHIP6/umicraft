@@ -424,6 +424,20 @@ impl WindowManager {
             .slot(HOTBAR_START + usize::from(self.selected_slot))
     }
 
+    /// Takes one item from the selected hotbar stack, emptying the slot when
+    /// none is left (MCP `ItemBlock.onItemUse`: `--stack.stackSize`, then
+    /// `Minecraft.rightClickMouse` clears a stack of size 0).
+    pub fn shrink_selected(&mut self) {
+        let index = HOTBAR_START + usize::from(self.selected_slot);
+        let rest = self.inventory.slot(index).map(|stack| {
+            let mut rest = stack.clone();
+            super::stack::add_count(&mut rest, -1);
+            rest
+        });
+        self.inventory
+            .set_slot(index, super::stack::normalize(rest));
+    }
+
     /// The helmet in the armour slot (slot 5 of the player window).
     #[must_use]
     pub fn helmet(&self) -> Option<&ItemStack> {
@@ -523,6 +537,19 @@ mod tests {
 
     fn diamond_sword() -> ItemStack {
         stack(276, 1)
+    }
+
+    #[test]
+    fn shrinking_the_selected_stack_takes_one_and_empties_the_last() {
+        let mut wm = WindowManager::new();
+        wm.set_selected_slot(2);
+        wm.apply_set_slot(0, 38, stack(4, 2));
+        wm.shrink_selected();
+        assert_eq!(wm.selected_item().map(|s| s.stack_size), Some(1));
+        wm.shrink_selected();
+        assert_eq!(wm.selected_item(), None);
+        wm.shrink_selected();
+        assert_eq!(wm.selected_item(), None);
     }
 
     #[test]
