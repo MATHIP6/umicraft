@@ -233,7 +233,7 @@ fn turn_and_read_wire_yaw(game: &mut Game, queue: &mut CommandQueue, degrees: &[
     let (frames, _frames_rx) = mpsc::sync_channel(64);
     let (chunks, _chunks_rx) = mpsc::sync_channel(64);
     tick(game, queue, &frames, &chunks, Instant::now());
-    let yaw = match queue.ordered.drain(..).last() {
+    let yaw = match queue.ordered.drain(..).next_back() {
         Some(ClientCommand::PositionLook { yaw, .. } | ClientCommand::PlayerLook { yaw, .. }) => {
             yaw
         }
@@ -3719,7 +3719,7 @@ fn a_congested_loop_keeps_serving_events_and_stops_on_request() {
             .expect("the loop runs");
     }
     let deadline = Instant::now() + std::time::Duration::from_secs(2);
-    while (harness.events.len() > 0 || harness.inputs.len() > 0) && Instant::now() < deadline {
+    while (!harness.events.is_empty() || !harness.inputs.is_empty()) && Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert_eq!(
