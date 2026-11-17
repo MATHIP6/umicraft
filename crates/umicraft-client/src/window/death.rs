@@ -21,7 +21,7 @@ impl App {
     /// True while the death screen is shown: the player is dead and has not
     /// asked to respawn yet.
     pub(super) fn death_screen_visible(&self) -> bool {
-        self.death_started.is_some() && !self.respawn_requested
+        self.death_started.is_some() && !self.presses.respawn
     }
 
     /// Opens or closes the death screen as the health changes
@@ -29,7 +29,7 @@ impl App {
     pub(super) fn update_death_screen(&mut self, now: Instant) {
         if !self.player_dead() {
             self.death_started = None;
-            self.respawn_requested = false;
+            self.presses.respawn = false;
             return;
         }
         if self.death_started.is_none() {
@@ -51,7 +51,7 @@ impl App {
         // MCP `GuiGameOver.actionPerformed` (button 0): `respawnPlayer`, then
         // the screen closes at once.
         self.send_event(GameEvent::Respawn);
-        self.respawn_requested = true;
+        self.presses.respawn = true;
         self.ui_input.clear();
         self.capture_mouse(true);
     }

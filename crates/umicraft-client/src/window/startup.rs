@@ -15,8 +15,10 @@ use umicraft_ui::menus::PanoramaTextures;
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui};
 
 use super::server_pack_control;
-use super::App;
 use super::FRAME_HISTORY;
+use super::{
+    App, Assets, ChatUi, FrameClock, FrameScratch, InputTracking, OptionsMenu, PendingPresses,
+};
 use crate::accounts::AccountsFlow;
 use crate::anvil_field::AnvilField;
 use crate::args::Args;
@@ -186,14 +188,17 @@ impl App {
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
             args,
-            saved_options: options.clone(),
+            options_menu: OptionsMenu {
+                path: options_path,
+                saved: options.clone(),
+                screen: OptionsScreen::new(),
+                outcome: OptionsOutcome::default(),
+                video_applier: VideoApplier::new(options.video.fullscreen),
+                origin: Screen::GameMenu,
+            },
             lang,
             mods: ModsRuntime::new(&options.mods),
-            video_applier: VideoApplier::new(options.video.fullscreen),
             options,
-            options_path,
-            options_screen: OptionsScreen::new(),
-            options_outcome: OptionsOutcome::default(),
             audio,
             window: None,
             renderer: None,
@@ -201,51 +206,69 @@ impl App {
             camera: Camera::default(),
             overlay: Overlay::new(1280, 720),
             show_overlay: true,
-            mouse_captured: false,
-            keys: HashSet::new(),
+            input: InputTracking {
+                keys: HashSet::new(),
+                buttons: HashSet::new(),
+                mouse_captured: false,
+                ctrl_held: false,
+                shift_held: false,
+                pointer: (0.0, 0.0),
+                look: (0.0, 0.0),
+                last: InputState::default(),
+                last_time: Instant::now(),
+            },
             world: None,
             session: None,
             menu: new_menu(last_server),
-            options_origin: Screen::GameMenu,
-            last_input: InputState::default(),
-            last_input_time: Instant::now(),
-            look: (0.0, 0.0),
-            select_slot: None,
-            hotbar_keys: [0; 9],
-            break_block: false,
-            buttons: HashSet::new(),
+            presses: PendingPresses {
+                select_slot: None,
+                hotbar_keys: [0; 9],
+                break_block: false,
+                place_block: false,
+                pick_block: false,
+                drop_item: None,
+                toggle_perspective: false,
+                screenshot: false,
+                respawn: false,
+            },
             death_started: None,
-            respawn_requested: false,
-            place_block: false,
             screen: Screen::Loading,
-            asset_receiver: Some(asset_rx),
-            chat_input: ChatInput::new(""),
-            sent_messages: SentHistory::new(),
-            chat_scroll: 0,
-            chat_opened: Instant::now(),
-            seen_completions: 0,
-            ctrl_held: false,
-            shift_held: false,
-            nametags: Vec::new(),
-            placed_tags: Vec::new(),
-            moving_blocks_mesh: umicraft_mesh::Mesh::default(),
-            last_hand: None,
+            assets: Assets {
+                font,
+                receiver: Some(asset_rx),
+                ui_atlas: None,
+                brand_atlas: None,
+                gui_atlas: None,
+                items: None,
+                hand_layers: ItemLayers::default(),
+                texture_animator: TextureAnimator::default(),
+                entity_textures: None,
+                map_textures: None,
+            },
+            chat: ChatUi {
+                input: ChatInput::new(""),
+                sent: SentHistory::new(),
+                scroll: 0,
+                opened: Instant::now(),
+                seen_completions: 0,
+                hover: None,
+                line: None,
+            },
+            frame: FrameScratch {
+                hud: HudState::default(),
+                hud_revision: 0,
+                hud_chat: None,
+                entities: Vec::new(),
+                particle_sprites: Vec::new(),
+                nametags: Vec::new(),
+                placed_tags: Vec::new(),
+                moving_blocks_mesh: umicraft_mesh::Mesh::default(),
+                last_hand: None,
+            },
             cpu: CpuSplit::default(),
             zoom: Zoom::default(),
             focused: true,
             hud_cache: HudCache::default(),
-            frame_hud: HudState::default(),
-            frame_hud_revision: 0,
-            frame_hud_chat: None,
-            frame_entities: Vec::new(),
-            particle_sprites: Vec::new(),
-            pointer: (0.0, 0.0),
-            chat_hover: None,
-            chat_line: None,
-            pick_block: false,
-            drop_item: None,
-            toggle_perspective: false,
-            screenshot_requested: false,
             creative_input: CreativeInput::new(),
             container_was_open: false,
             ui: Ui::new(ui_viewport),
@@ -256,12 +279,7 @@ impl App {
             menu_command: None,
             ui_input: UiInputTranslator::new(),
             inventory_input: InventoryInput::new(),
-            font,
-            ui_atlas: None,
-            brand_atlas: None,
-            gui_atlas: None,
             server_icons_revision: u64::MAX,
-            items: None,
             dials: DialAnimator::default(),
             world_items: WorldItems::default(),
             entity_icons: EntityIcons::default(),
@@ -269,19 +287,17 @@ impl App {
             anvil_field: AnvilField::default(),
             text_screens: TextScreens::default(),
             server_pack: server_pack_control::ServerPackRuntime::default(),
-            hand_layers: ItemLayers::default(),
-            texture_animator: TextureAnimator::default(),
-            entity_textures: None,
-            map_textures: None,
-            last_frame: Instant::now(),
-            next_frame: Instant::now(),
-            started: Instant::now(),
-            frame_times: VecDeque::with_capacity(FRAME_HISTORY),
-            frame_ms: 0.0,
-            fps: 0.0,
-            fps_meter: FpsMeter::new(Instant::now()),
-            metrics_window: FrameMetricsWindow::new(),
-            last_alloc_snapshot: umicraft_core::profiling::AllocSnapshot::now(),
+            clock: FrameClock {
+                last_frame: Instant::now(),
+                next_frame: Instant::now(),
+                started: Instant::now(),
+                frame_times: VecDeque::with_capacity(FRAME_HISTORY),
+                frame_ms: 0.0,
+                fps: 0.0,
+                fps_meter: FpsMeter::new(Instant::now()),
+                metrics_window: FrameMetricsWindow::new(),
+                last_alloc_snapshot: umicraft_core::profiling::AllocSnapshot::now(),
+            },
             exit_error: None,
         })
     }
@@ -291,19 +307,19 @@ impl App {
         if self.renderer.is_none() {
             return;
         }
-        let Some(rx) = self.asset_receiver.as_ref() else {
+        let Some(rx) = self.assets.receiver.as_ref() else {
             return;
         };
         match rx.try_recv() {
             Ok(assets) => {
                 umicraft_core::boot_log!("assets_received_on_main_thread");
-                self.asset_receiver = None;
+                self.assets.receiver = None;
                 self.apply_loaded_assets(assets);
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 tracing::warn!("Asset loader thread disconnected unexpectedly");
-                self.asset_receiver = None;
+                self.assets.receiver = None;
                 if self.screen == Screen::Loading {
                     self.screen = Screen::Title;
                 }
@@ -318,10 +334,10 @@ impl App {
         };
         umicraft_core::boot_log!("applying_loaded_assets_start");
 
-        self.font = assets.font;
-        match ui_font::install(renderer, &self.font.atlas) {
+        self.assets.font = assets.font;
+        match ui_font::install(renderer, &self.assets.font.atlas) {
             Ok(installed) => {
-                self.ui_atlas = Some(installed.atlas);
+                self.assets.ui_atlas = Some(installed.atlas);
                 self.hud_cache.invalidate();
                 umicraft_core::boot_log!("official_ui_font_installed");
             }
@@ -329,7 +345,7 @@ impl App {
                 tracing::warn!(%error, "failed to install official font atlas; keeping fallback");
             }
         }
-        self.brand_atlas = ui_font::install_brand(renderer);
+        self.assets.brand_atlas = ui_font::install_brand(renderer);
         umicraft_core::boot_log!("brand_atlas_installed");
 
         renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
@@ -341,11 +357,11 @@ impl App {
         upload_glint_texture(renderer, terrain.glint_texture());
         upload_sky_textures(renderer);
         self.panorama = upload_panorama(renderer);
-        self.gui_atlas = Some(gui_atlas);
+        self.assets.gui_atlas = Some(gui_atlas);
         self.server_icons_revision = u64::MAX;
-        self.items = terrain.items();
+        self.assets.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());
-        self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
+        self.assets.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
         umicraft_core::boot_log!("gui_and_sky_uploaded");
 
         match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
@@ -356,11 +372,11 @@ impl App {
         }
         umicraft_core::boot_log!("world_view_created");
 
-        self.entity_textures = Some(EntityTextures::load_with_font(
+        self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
-            self.ui_atlas.as_ref(),
+            self.assets.ui_atlas.as_ref(),
         ));
-        self.map_textures = Some(MapTextures::load(renderer));
+        self.assets.map_textures = Some(MapTextures::load(renderer));
         umicraft_core::boot_log!("entity_and_map_textures_loaded");
 
         if self.screen == Screen::Loading {

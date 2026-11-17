@@ -35,15 +35,15 @@ impl App {
         self.screen = screen;
         self.menu.enter(screen);
         self.ui_input.clear();
-        self.chat_scroll = 0;
-        self.keys.clear();
-        self.buttons.clear();
-        self.select_slot = None;
-        self.break_block = false;
-        self.place_block = false;
-        self.pick_block = false;
-        self.drop_item = None;
-        self.look = (0.0, 0.0);
+        self.chat.scroll = 0;
+        self.input.keys.clear();
+        self.input.buttons.clear();
+        self.presses.select_slot = None;
+        self.presses.break_block = false;
+        self.presses.place_block = false;
+        self.presses.pick_block = false;
+        self.presses.drop_item = None;
+        self.input.look = (0.0, 0.0);
         if screen.blocks_game_input() {
             self.capture_mouse(false);
         } else if was_blocking && !self.container_is_open() && !self.death_screen_visible() {

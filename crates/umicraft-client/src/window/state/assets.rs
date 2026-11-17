@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The fonts, atlases and textures the window loads, some in the background.
+
+use umicraft_ui::FontAtlas;
+
+use crate::entity_render::EntityTextures;
+use crate::item_icons::ItemResources;
+use crate::item_world::ItemLayers;
+use crate::map_render::MapTextures;
+use crate::texture_animator::TextureAnimator;
+use crate::ui_font::LoadedFont;
+use crate::window::startup::AsyncLoadedAssets;
+
+/// The fonts, atlases and textures loaded for the session.
+pub(in crate::window) struct Assets {
+    /// The font loaded at startup, before the renderer exists.
+    pub(in crate::window) font: LoadedFont,
+    /// Background asset loader channel receiver.
+    pub(in crate::window) receiver: Option<std::sync::mpsc::Receiver<AsyncLoadedAssets>>,
+    /// The atlas the renderer accepted; the UI metrics must match it.
+    pub(in crate::window) ui_atlas: Option<FontAtlas>,
+    /// The brand atlas the renderer accepted; `None` keeps the classic
+    /// title screen (ADR-0056).
+    pub(in crate::window) brand_atlas: Option<FontAtlas>,
+    /// The GUI texture atlas for inventory/container backgrounds.
+    pub(in crate::window) gui_atlas: Option<umicraft_assets::GuiAtlas>,
+    /// The baked item models, once the official assets are bound.
+    pub(in crate::window) items: Option<std::sync::Arc<ItemResources>>,
+    /// The first-person held item geometry of the frame.
+    pub(in crate::window) hand_layers: ItemLayers,
+    /// Steps the water, lava and fire textures once per game tick.
+    pub(in crate::window) texture_animator: TextureAnimator,
+    /// Entity textures bound for GPU rendering.
+    pub(in crate::window) entity_textures: Option<EntityTextures>,
+    /// The textures of filled maps, created with the entity textures.
+    pub(in crate::window) map_textures: Option<MapTextures>,
+}

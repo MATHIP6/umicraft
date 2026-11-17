@@ -124,7 +124,7 @@ impl App {
                 height as f32 - graph_height - 10.0,
                 graph_width,
                 graph_height,
-                self.frame_times.make_contiguous(),
+                self.clock.frame_times.make_contiguous(),
             );
         }
     }
@@ -162,29 +162,29 @@ impl App {
         umicraft_core::profile_scope!("redraw");
         let now = Instant::now();
         self.cpu.start(now);
-        let elapsed = (now - self.last_frame).as_secs_f32();
-        self.last_frame = now;
+        let elapsed = (now - self.clock.last_frame).as_secs_f32();
+        self.clock.last_frame = now;
         // Phase E.9: the game thread takes network events once per frame.
         if let Some(session) = self.session.as_ref() {
             session.note_frame(Duration::from_secs_f32(elapsed));
         }
         let frame_ms = elapsed * 1000.0;
-        self.frame_ms = if self.frame_ms == 0.0 {
+        self.clock.frame_ms = if self.clock.frame_ms == 0.0 {
             frame_ms
         } else {
-            self.frame_ms * 0.9 + frame_ms * 0.1
+            self.clock.frame_ms * 0.9 + frame_ms * 0.1
         };
-        self.fps = self.fps_meter.tick(now);
+        self.clock.fps = self.clock.fps_meter.tick(now);
         let alloc_now = umicraft_core::profiling::AllocSnapshot::now();
-        let alloc_delta = alloc_now.delta_since(self.last_alloc_snapshot);
-        self.last_alloc_snapshot = alloc_now;
-        self.metrics_window.push(now, frame_ms, alloc_delta);
+        let alloc_delta = alloc_now.delta_since(self.clock.last_alloc_snapshot);
+        self.clock.last_alloc_snapshot = alloc_now;
+        self.clock.metrics_window.push(now, frame_ms, alloc_delta);
         self.update_mods(now);
         if self.show_overlay {
-            if self.frame_times.len() >= FRAME_HISTORY {
-                self.frame_times.pop_front();
+            if self.clock.frame_times.len() >= FRAME_HISTORY {
+                self.clock.frame_times.pop_front();
             }
-            self.frame_times.push_back(frame_ms);
+            self.clock.frame_times.push_back(frame_ms);
         }
 
         // The Zoom mod narrows the field of view, with a glide in and out.
@@ -203,9 +203,9 @@ impl App {
         environment.gamma = self.options.video.gamma;
         // The camera is where it stays for this frame: the entities are made once.
         if let Some(world) = self.world.as_ref() {
-            world.entities_into(now, self.camera.render_origin(), &mut self.frame_entities);
+            world.entities_into(now, self.camera.render_origin(), &mut self.frame.entities);
         } else {
-            self.frame_entities.clear();
+            self.frame.entities.clear();
         }
         self.update_server_pack();
         self.update_music(now);
@@ -236,16 +236,16 @@ impl App {
         if let Some(command) = self.menu_command.take() {
             self.apply_menu_command(command, event_loop);
         }
-        let outcome = std::mem::take(&mut self.options_outcome);
+        let outcome = std::mem::take(&mut self.options_menu.outcome);
         self.apply_options_outcome(outcome);
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        let effects = self.video_applier.apply(
+        let effects = self.options_menu.video_applier.apply(
             &self.options.video,
             self.window.as_deref(),
             renderer,
-            self.entity_textures.as_ref(),
+            self.assets.entity_textures.as_ref(),
         );
         if effects.reload_atlas {
             self.reload_resources();
@@ -260,16 +260,16 @@ impl App {
         renderer.set_environment(environment);
         renderer.set_cloud_mode(self.options.video.cloud_mode());
         // 20 client ticks per second drive the cloud drift.
-        renderer.set_cloud_ticks((now - self.started).as_secs_f64() * 20.0);
+        renderer.set_cloud_ticks((now - self.clock.started).as_secs_f64() * 20.0);
         if let Some(world) = self.world.as_ref() {
             renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
             world.particle_sprites_into(
-                &mut self.particle_sprites,
+                &mut self.frame.particle_sprites,
                 environment.partial_tick,
                 self.camera.render_origin(),
-                self.items.as_deref(),
+                self.assets.items.as_deref(),
             );
-            renderer.set_particles(&self.particle_sprites);
+            renderer.set_particles(&self.frame.particle_sprites);
         }
         renderer.set_screen_overlays(
             self.world
@@ -280,10 +280,11 @@ impl App {
         );
         renderer.set_world_border(
             self.world.as_ref().and_then(WorldView::border),
-            (now - self.started).as_secs_f64(),
+            (now - self.clock.started).as_secs_f64(),
         );
-        renderer.set_glint_time((now - self.started).as_secs_f32());
-        self.texture_animator
+        renderer.set_glint_time((now - self.clock.started).as_secs_f32());
+        self.assets
+            .texture_animator
             .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
                 renderer.write_block_layer(layer, pixels);
             });
@@ -300,21 +301,24 @@ impl App {
                 .as_ref()
                 .and_then(|world| world.third_person_body(now)),
         );
-        renderer.set_nametags(&self.nametags, (width, height));
+        renderer.set_nametags(&self.frame.nametags, (width, height));
         if let Some((vertices, indices)) = self.world.as_mut().and_then(WorldView::take_crack_mesh)
         {
             renderer.set_block_cracks(&vertices, &indices);
         }
 
         if let Some(world) = self.world.as_ref() {
-            world.moving_blocks_mesh_into(environment.partial_tick, &mut self.moving_blocks_mesh);
-            renderer.set_moving_blocks(&self.moving_blocks_mesh);
+            world.moving_blocks_mesh_into(
+                environment.partial_tick,
+                &mut self.frame.moving_blocks_mesh,
+            );
+            renderer.set_moving_blocks(&self.frame.moving_blocks_mesh);
         }
 
         // No world, no hand: set again below when there is one.
         renderer.set_motion_blur_hand_moving(false);
         if let (Some(entity_textures), Some(world)) =
-            (self.entity_textures.as_ref(), self.world.as_ref())
+            (self.assets.entity_textures.as_ref(), self.world.as_ref())
         {
             // Everything below is built relative to this origin and the eye
             // relative to it (F2-1b); the entity pass draws with a camera
@@ -325,13 +329,13 @@ impl App {
                 render_origin.y as i32,
                 render_origin.z as i32,
             ];
-            let entities = &self.frame_entities;
+            let entities = &self.frame.entities;
             let hand = world.hand_pose(now);
             // The motion blur follows the hand too: a swing blurs it, a still hand not.
             renderer.set_motion_blur_hand_moving(
-                hand.visible && self.last_hand.is_some_and(|last| last != hand),
+                hand.visible && self.frame.last_hand.is_some_and(|last| last != hand),
             );
-            self.last_hand = hand.visible.then_some(hand);
+            self.frame.last_hand = hand.visible.then_some(hand);
             let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
@@ -346,9 +350,13 @@ impl App {
             let held_map = held_stack(world)
                 .filter(|_| hand.visible)
                 .and_then(|stack| map_id_of(stack.item_id, stack.damage));
-            let framed = self.map_textures.as_mut().map_or_else(Vec::new, |maps| {
-                maps.frame_batches(entities, world.maps(), renderer)
-            });
+            let framed = self
+                .assets
+                .map_textures
+                .as_mut()
+                .map_or_else(Vec::new, |maps| {
+                    maps.frame_batches(entities, world.maps(), renderer)
+                });
             let mut block_entities = if world.has_block_entities() {
                 mesh_block_entities(
                     world.block_entities(),
@@ -357,8 +365,8 @@ impl App {
                         signs: world.signs(),
                         data: world.block_entity_data(),
                         skins: entity_textures,
-                        seconds: (now - self.started).as_secs_f32(),
-                        font: self.ui_atlas.as_ref(),
+                        seconds: (now - self.clock.started).as_secs_f32(),
+                        font: self.assets.ui_atlas.as_ref(),
                         partial_tick: environment.partial_tick,
                         camera: self.camera.relative_eye(),
                         origin: render_origin_blocks,
@@ -368,7 +376,7 @@ impl App {
                 crate::block_entity_render::BlockEntityMeshes::default()
             };
             let mut hand_item = None;
-            if let Some(items) = self.items.as_deref() {
+            if let Some(items) = self.assets.items.as_deref() {
                 entity_items::push(&mut block_entities, entities, items, entity_textures);
                 hand_item = held_stack(world)
                     .filter(|_| hand.visible)
@@ -385,7 +393,7 @@ impl App {
             }
             entity_textures.set_block_entities(block_entities);
             entity_textures.mesh_and_upload_with(entities, &framed, renderer);
-            match (held_map, self.map_textures.as_mut()) {
+            match (held_map, self.assets.map_textures.as_mut()) {
                 (Some(map_id), Some(maps)) => {
                     let bob = self.camera.view_bob();
                     let held = maps.hand_batches(
@@ -412,41 +420,41 @@ impl App {
                     ),
                 },
             }
-            if let Some(items) = self.items.as_deref() {
+            if let Some(items) = self.assets.items.as_deref() {
                 self.world_items
                     .set_view(self.camera.yaw, self.camera.pitch);
                 let dropped = self.world_items.build(entities, items);
                 renderer.set_world_items(&dropped.items);
                 renderer.set_world_glint(&dropped.glint);
-                self.hand_layers.clear();
+                self.assets.hand_layers.clear();
                 if let Some(stack) = held_stack(world).filter(|stack| {
                     hand.visible && map_id_of(stack.item_id, stack.damage).is_none()
                 }) {
                     let nbt = stack.nbt.as_deref();
                     push_held_item(
-                        &mut self.hand_layers,
+                        &mut self.assets.hand_layers,
                         (stack.item_id, stack.damage, nbt),
                         &hand,
                         (self.camera.view_bob(), world.hand_light()),
                         items,
                     );
                 }
-                renderer.set_hand_items(&self.hand_layers.items);
-                renderer.set_hand_glint(&self.hand_layers.glint);
+                renderer.set_hand_items(&self.assets.hand_layers.items);
+                renderer.set_hand_glint(&self.assets.hand_layers.glint);
             }
         }
 
         if let (Some(spot), Some(textures), Some(body)) = (
             self.portrait,
-            self.entity_textures.as_ref(),
+            self.assets.entity_textures.as_ref(),
             self.world.as_ref().and_then(|world| world.local_body()),
         ) {
-            let mouse = spot.mouse_offset(self.pointer);
+            let mouse = spot.mouse_offset(self.input.pointer);
             let posed = turned_towards(body, mouse);
             let matrix = spot.placement.matrix(mouse);
             // The item in the hand lives in the item layers, not in the entity mesh.
             let mut held = ItemMesh::default();
-            if let Some(items) = self.items.as_deref() {
+            if let Some(items) = self.assets.items.as_deref() {
                 held.clone_from(
                     &WorldItems::default()
                         .build(std::slice::from_ref(&posed), items)
@@ -458,17 +466,17 @@ impl App {
         }
         if let (Some(frame), Some(items), Some(textures)) = (
             ui_frame.as_ref(),
-            self.items.as_deref(),
-            self.entity_textures.as_ref(),
+            self.assets.items.as_deref(),
+            self.assets.entity_textures.as_ref(),
         ) {
             self.entity_icons
                 .prepare(&frame.draw_list, items, textures, renderer);
         }
-        if std::mem::take(&mut self.screenshot_requested) {
+        if std::mem::take(&mut self.presses.screenshot) {
             renderer.request_capture();
         }
         self.cpu.lap(Stage::Scene);
-        let rendered = match (ui_frame.as_ref(), self.items.as_deref()) {
+        let rendered = match (ui_frame.as_ref(), self.assets.items.as_deref()) {
             (Some(frame), Some(items)) => renderer.render_with_ui(
                 &self.camera,
                 &self.overlay,
@@ -491,16 +499,18 @@ impl App {
             )
         });
         let input_to_frame_ms = (Instant::now()
-            .saturating_duration_since(self.last_input_time)
+            .saturating_duration_since(self.input.last_time)
             .as_secs_f32()
             * 1000.0)
             .min(999.0);
-        self.metrics_window.set_input_latency(InputLatencyMetrics {
-            input_processing_us: proc_us,
-            event_queue_latency_us: queue_us,
-            input_to_frame_ms,
-            presentation_time_ms: present_us as f32 / 1000.0,
-        });
+        self.clock
+            .metrics_window
+            .set_input_latency(InputLatencyMetrics {
+                input_processing_us: proc_us,
+                event_queue_latency_us: queue_us,
+                input_to_frame_ms,
+                presentation_time_ms: present_us as f32 / 1000.0,
+            });
         let captured = renderer.take_capture();
         if let Some(frame) = ui_frame {
             self.ui.recycle_output(frame);
@@ -526,16 +536,16 @@ impl App {
         if !self.options.video.vsync && cap < options::UNLIMITED_FPS {
             let budget = Duration::from_secs_f32(1.0 / cap as f32);
             let arrived = Instant::now();
-            if self.next_frame < arrived {
-                self.next_frame = arrived + budget;
+            if self.clock.next_frame < arrived {
+                self.clock.next_frame = arrived + budget;
             } else {
-                self.next_frame += budget;
-                if self.next_frame < arrived {
-                    self.next_frame = arrived;
+                self.clock.next_frame += budget;
+                if self.clock.next_frame < arrived {
+                    self.clock.next_frame = arrived;
                 }
             }
         } else {
-            self.next_frame = Instant::now();
+            self.clock.next_frame = Instant::now();
         }
         if frame_num < 10 {
             umicraft_core::boot_log!("redraw_exit", "frame={frame_num}");

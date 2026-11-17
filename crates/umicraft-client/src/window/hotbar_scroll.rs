@@ -43,7 +43,7 @@ impl App {
         self.session.is_some()
             && self.screen == Screen::None
             && !self.death_screen_visible()
-            && self.mouse_captured
+            && self.input.mouse_captured
             && self.held(Action::Zoom)
     }
 
@@ -64,18 +64,18 @@ impl App {
         if self.session.is_none()
             || self.screen != Screen::None
             || self.death_screen_visible()
-            || !self.mouse_captured
+            || !self.input.mouse_captured
         {
             return false;
         }
         // Several notches in one frame add up: start from the slot already
         // chosen and not yet sent, if any.
         let shown = self.world.as_ref().map(|world| world.hud().selected_slot);
-        let Some(current) = self.select_slot.or(shown) else {
+        let Some(current) = self.presses.select_slot.or(shown) else {
             return false;
         };
         if let Some(slot) = scrolled_slot(current, delta) {
-            self.select_slot = Some(slot);
+            self.presses.select_slot = Some(slot);
         }
         true
     }

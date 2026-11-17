@@ -41,7 +41,7 @@ impl App {
     /// The title screen to draw: the one the options select, or the
     /// classic one while no brand font is bound.
     pub(super) fn title_style(&self) -> TitleStyle {
-        shown_title_style(self.options.menu.style(), self.brand_atlas.is_some())
+        shown_title_style(self.options.menu.style(), self.assets.brand_atlas.is_some())
     }
 
     pub(super) fn advance_menus(&mut self, elapsed: Duration) {
@@ -125,14 +125,15 @@ impl App {
         if revision == self.server_icons_revision {
             return;
         }
-        let (Some(atlas), Some(renderer)) = (self.gui_atlas.as_ref(), self.renderer.as_mut())
+        let (Some(atlas), Some(renderer)) =
+            (self.assets.gui_atlas.as_ref(), self.renderer.as_mut())
         else {
             return;
         };
         let grown = crate::official::grow_atlas(Some(atlas), &self.menu.icon_images());
         upload_gui_atlas(renderer, Some(&grown));
         self.menu.assign_icon_sheets(&grown);
-        self.gui_atlas = Some(grown);
+        self.assets.gui_atlas = Some(grown);
         self.server_icons_revision = revision;
     }
 

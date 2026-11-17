@@ -41,29 +41,29 @@ impl App {
         if event.state != ElementState::Pressed {
             return;
         }
-        let (word, extend) = (self.ctrl_held, self.shift_held);
-        if self.ctrl_held && self.chat_shortcut(code) {
+        let (word, extend) = (self.input.ctrl_held, self.input.shift_held);
+        if self.input.ctrl_held && self.chat_shortcut(code) {
             return;
         }
         match code {
-            KeyCode::Escape => self.set_screen(Screen::Chat.after_escape(self.options_origin)),
+            KeyCode::Escape => self.set_screen(Screen::Chat.after_escape(self.options_menu.origin)),
             KeyCode::Enter | KeyCode::NumpadEnter => self.submit_chat(),
             KeyCode::Tab => self.complete_chat(),
-            KeyCode::ArrowUp => self.chat_input.history_previous(&mut self.sent_messages),
-            KeyCode::ArrowDown => self.chat_input.history_next(&mut self.sent_messages),
+            KeyCode::ArrowUp => self.chat.input.history_previous(&mut self.chat.sent),
+            KeyCode::ArrowDown => self.chat.input.history_next(&mut self.chat.sent),
             KeyCode::PageUp => self.scroll_chat(CHAT_PAGE),
             KeyCode::PageDown => self.scroll_chat(-CHAT_PAGE),
-            KeyCode::Backspace => self.chat_input.backspace(word),
-            KeyCode::Delete => self.chat_input.delete(word),
-            KeyCode::ArrowLeft => self.chat_input.left(word, extend),
-            KeyCode::ArrowRight => self.chat_input.right(word, extend),
-            KeyCode::Home => self.chat_input.home(extend),
-            KeyCode::End => self.chat_input.end(extend),
+            KeyCode::Backspace => self.chat.input.backspace(word),
+            KeyCode::Delete => self.chat.input.delete(word),
+            KeyCode::ArrowLeft => self.chat.input.left(word, extend),
+            KeyCode::ArrowRight => self.chat.input.right(word, extend),
+            KeyCode::Home => self.chat.input.home(extend),
+            KeyCode::End => self.chat.input.end(extend),
             _ => {
                 // Control combinations are shortcuts, not text.
-                if !self.ctrl_held {
+                if !self.input.ctrl_held {
                     if let Some(text) = event.text.as_ref() {
-                        self.chat_input.insert(text);
+                        self.chat.input.insert(text);
                     }
                 }
             }
@@ -73,17 +73,17 @@ impl App {
     /// Returns whether `code` was one of them; the clipboard is the system's.
     fn chat_shortcut(&mut self, code: KeyCode) -> bool {
         match code {
-            KeyCode::KeyA => self.chat_input.select_all(),
-            KeyCode::KeyC => copy_to_clipboard(&self.chat_input.selected_text()),
-            KeyCode::KeyX => copy_to_clipboard(&self.chat_input.cut()),
+            KeyCode::KeyA => self.chat.input.select_all(),
+            KeyCode::KeyC => copy_to_clipboard(&self.chat.input.selected_text()),
+            KeyCode::KeyX => copy_to_clipboard(&self.chat.input.cut()),
             KeyCode::KeyV => {
                 if let Some(text) = clipboard::read() {
-                    self.chat_input.paste(&text);
+                    self.chat.input.paste(&text);
                 }
             }
-            KeyCode::KeyZ if self.shift_held => self.chat_input.redo(),
-            KeyCode::KeyZ => self.chat_input.undo(),
-            KeyCode::KeyY => self.chat_input.redo(),
+            KeyCode::KeyZ if self.input.shift_held => self.chat.input.redo(),
+            KeyCode::KeyZ => self.chat.input.undo(),
+            KeyCode::KeyY => self.chat.input.redo(),
             _ => return false,
         }
         true
@@ -91,23 +91,23 @@ impl App {
     /// Opens the chat with `initial` already typed (`/` for the command key).
     pub(super) fn open_chat(&mut self, initial: &str) {
         self.set_screen(Screen::Chat);
-        self.chat_input = ChatInput::new(initial);
-        self.sent_messages.reset();
-        self.chat_scroll = 0;
-        self.chat_opened = Instant::now();
+        self.chat.input = ChatInput::new(initial);
+        self.chat.sent.reset();
+        self.chat.scroll = 0;
+        self.chat.opened = Instant::now();
     }
     /// Sends the typed line, remembers it for the history and closes the chat.
     pub(super) fn submit_chat(&mut self) {
-        let message = commands::outgoing(&self.chat_input.text());
+        let message = commands::outgoing(&self.chat.input.text());
         self.set_screen(Screen::None);
         if let Some(message) = message {
-            self.sent_messages.push(&message);
+            self.chat.sent.push(&message);
             self.send_event(GameEvent::Chat(message));
         }
     }
     /// Presses Tab in the chat: asks the server or cycles its answer.
     pub(super) fn complete_chat(&mut self) {
-        match self.chat_input.tab() {
+        match self.chat.input.tab() {
             TabOutcome::Nothing => {}
             TabOutcome::Request(text) => {
                 self.send_event(GameEvent::TabComplete(text));
@@ -123,10 +123,11 @@ impl App {
     /// or selects (click, double click, triple click, Shift+click); elsewhere
     /// it acts on the chat run under the pointer.
     pub(super) fn chat_press(&mut self) {
-        match self.chat_line {
+        match self.chat.line {
             Some(hit) if hit.inside => {
-                self.chat_input
-                    .press(hit.index, self.shift_held, Instant::now());
+                self.chat
+                    .input
+                    .press(hit.index, self.input.shift_held, Instant::now());
             }
             _ => self.chat_click(),
         }
@@ -135,25 +136,25 @@ impl App {
     /// `suggest_command` fills the input line, Shift inserts the run's
     /// insertion text (`GuiChat.mouseClicked`). Links are never followed.
     pub(super) fn chat_click(&mut self) {
-        let Some(run) = self.chat_hover.as_ref() else {
+        let Some(run) = self.chat.hover.as_ref() else {
             return;
         };
         match on_click(
             run.click.as_ref(),
             run.insertion.as_deref(),
-            self.shift_held,
+            self.input.shift_held,
         ) {
             ClickOutcome::Send(text) => {
                 self.send_event(GameEvent::Chat(text));
             }
-            ClickOutcome::Suggest(text) => self.chat_input.set_text(&text),
-            ClickOutcome::Insert(text) => self.chat_input.insert(&text),
+            ClickOutcome::Suggest(text) => self.chat.input.set_text(&text),
+            ClickOutcome::Insert(text) => self.chat.input.insert(&text),
             ClickOutcome::Nothing => {}
         }
     }
     /// Scrolls the open chat by `rows` (positive is towards older messages).
     pub(super) fn scroll_chat(&mut self, rows: isize) {
-        self.chat_scroll = (self.chat_scroll as isize + rows).clamp(0, CHAT_SCROLL_MAX) as usize;
+        self.chat.scroll = (self.chat.scroll as isize + rows).clamp(0, CHAT_SCROLL_MAX) as usize;
     }
     /// Hands a new tab-completion answer to the chat input.
     pub(super) fn process_completions(&mut self) {
@@ -161,13 +162,13 @@ impl App {
             return;
         };
         let serial = world.hud().completions_serial;
-        if serial == self.seen_completions {
+        if serial == self.chat.seen_completions {
             return;
         }
         let matches = world.hud().completions.clone();
-        self.seen_completions = serial;
+        self.chat.seen_completions = serial;
         if self.screen == Screen::Chat {
-            if let Some(listing) = self.chat_input.on_completions(&matches) {
+            if let Some(listing) = self.chat.input.on_completions(&matches) {
                 self.send_event(GameEvent::LocalChat(listing));
             }
         }

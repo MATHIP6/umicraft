@@ -72,7 +72,8 @@ impl App {
                 .as_ref()
                 .is_some_and(|world| world.status().gamemode == 1),
             anvil: name.map(|(_, view)| view),
-            caret_visible: (self.started.elapsed().as_millis() / CARET_BLINK_MS).is_multiple_of(2),
+            caret_visible: (self.clock.started.elapsed().as_millis() / CARET_BLINK_MS)
+                .is_multiple_of(2),
             effects: self
                 .world
                 .as_ref()
@@ -118,7 +119,7 @@ impl App {
             _ => event
                 .text
                 .as_deref()
-                .filter(|text| !self.ctrl_held && !text.chars().any(char::is_control))
+                .filter(|text| !self.input.ctrl_held && !text.chars().any(char::is_control))
                 .map(Edit::Insert),
         };
         let Some(edit) = edit else {
@@ -185,7 +186,7 @@ impl App {
             return;
         };
         if state == ElementState::Pressed && button == Button::Left {
-            if let Some(hotspot) = layout.hotspot_at(self.pointer) {
+            if let Some(hotspot) = layout.hotspot_at(self.input.pointer) {
                 self.send_container(ContainerAction::Press(hotspot));
                 return;
             }
@@ -252,7 +253,7 @@ impl App {
         let text = event
             .text
             .as_deref()
-            .filter(|_| !self.ctrl_held)
+            .filter(|_| !self.input.ctrl_held)
             .filter(|text| !text.chars().any(char::is_control));
         let key = match code {
             KeyCode::Escape => Key::Escape,
@@ -265,7 +266,7 @@ impl App {
                 None => return,
             },
         };
-        let Some(atlas) = self.ui_atlas.as_ref() else {
+        let Some(atlas) = self.assets.ui_atlas.as_ref() else {
             return;
         };
         let measure = |text: &str| atlas.measure(text, 1.0);

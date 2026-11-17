@@ -35,12 +35,13 @@ impl App {
             return;
         };
         let pressed = event.state == ElementState::Pressed && !event.repeat;
-        if self.options_screen.capturing().is_some() {
+        if self.options_menu.screen.capturing().is_some() {
             if pressed {
                 if code == KeyCode::Escape {
-                    self.options_screen.cancel_capture();
+                    self.options_menu.screen.cancel_capture();
                 } else {
-                    self.options_screen
+                    self.options_menu
+                        .screen
                         .capture(&mut self.options, Binding::Key(code));
                 }
             }
@@ -63,27 +64,27 @@ impl App {
     ) -> bool {
         if screen != Screen::Options
             || state != ElementState::Pressed
-            || self.options_screen.capturing().is_none()
+            || self.options_menu.screen.capturing().is_none()
         {
             return false;
         }
         if let Some(binding) = Binding::from_mouse(button) {
-            self.options_screen.capture(&mut self.options, binding);
+            self.options_menu.screen.capture(&mut self.options, binding);
         }
         true
     }
 
     /// Writes the options to disk when they changed since the last write.
     pub(super) fn save_options(&mut self) {
-        if self.options == self.saved_options {
+        if self.options == self.options_menu.saved {
             return;
         }
-        if let Some(path) = &self.options_path {
+        if let Some(path) = &self.options_menu.path {
             if let Err(error) = self.options.save(path) {
                 tracing::warn!(path = %path.display(), %error, "could not save the options");
             }
         }
-        self.saved_options = self.options.clone();
+        self.options_menu.saved = self.options.clone();
     }
 
     /// Tells the game thread how many particles to create.
@@ -95,13 +96,14 @@ impl App {
     /// they are now. Escape and Done lead back to the screen it was opened
     /// from: the title screen or the game menu.
     pub(super) fn open_options(&mut self, page: Page) {
-        self.options_origin = self.screen;
-        self.options_screen
-            .set_over_world(self.options_origin == Screen::GameMenu);
-        self.options_screen.set_catalog(Catalog::discover());
+        self.options_menu.origin = self.screen;
+        self.options_menu
+            .screen
+            .set_over_world(self.options_menu.origin == Screen::GameMenu);
+        self.options_menu.screen.set_catalog(Catalog::discover());
         self.sync_pack_icons();
         if page != Page::Main {
-            self.options_screen.open_page(page, &self.options);
+            self.options_menu.screen.open_page(page, &self.options);
         }
         self.set_screen(Screen::Options);
     }
@@ -111,15 +113,16 @@ impl App {
     /// images, so the favicons of the server list are put back on its next
     /// visit.
     fn sync_pack_icons(&mut self) {
-        let (Some(atlas), Some(renderer)) = (self.gui_atlas.as_ref(), self.renderer.as_mut())
+        let (Some(atlas), Some(renderer)) =
+            (self.assets.gui_atlas.as_ref(), self.renderer.as_mut())
         else {
             return;
         };
         let grown =
-            crate::official::grow_atlas(Some(atlas), &self.options_screen.pack_icon_images());
+            crate::official::grow_atlas(Some(atlas), &self.options_menu.screen.pack_icon_images());
         upload_gui_atlas(renderer, Some(&grown));
-        self.options_screen.assign_pack_icon_sheets(&grown);
-        self.gui_atlas = Some(grown);
+        self.options_menu.screen.assign_pack_icon_sheets(&grown);
+        self.assets.gui_atlas = Some(grown);
         self.server_icons_revision = u64::MAX;
     }
 
@@ -154,10 +157,12 @@ impl App {
     /// a changed render distance, chat setting or skin layer (when a session
     /// runs) and goes back to the screen that opened it.
     pub(super) fn close_options(&mut self) {
-        self.options_screen.reset();
+        self.options_menu.screen.reset();
         self.options.clamp();
-        let changed = ServerSettings::of(&self.options) != ServerSettings::of(&self.saved_options);
-        let particles_changed = self.options.video.particles != self.saved_options.video.particles;
+        let changed =
+            ServerSettings::of(&self.options) != ServerSettings::of(&self.options_menu.saved);
+        let particles_changed =
+            self.options.video.particles != self.options_menu.saved.video.particles;
         let settings = ServerSettings::of(&self.options);
         self.save_options();
         if particles_changed {
@@ -166,7 +171,7 @@ impl App {
         if changed {
             self.send_event(settings.event());
         }
-        self.set_screen(self.options_origin);
+        self.set_screen(self.options_menu.origin);
     }
 
     /// Hot-reloads the active resource packs, rebinding the block atlas and
@@ -184,23 +189,23 @@ impl App {
         };
         let installed = terrain.install(renderer);
         // The packs page can be opened again without a new catalog: keep its icons.
-        let icons = self.options_screen.pack_icon_images();
+        let icons = self.options_menu.screen.pack_icon_images();
         let gui_atlas = crate::official::grow_atlas(installed.gui_atlas(), &icons);
         upload_gui_atlas(renderer, Some(&gui_atlas));
-        self.options_screen.assign_pack_icon_sheets(&gui_atlas);
+        self.options_menu.screen.assign_pack_icon_sheets(&gui_atlas);
         upload_glint_texture(renderer, installed.glint_texture());
         upload_sky_textures(renderer);
-        self.gui_atlas = Some(gui_atlas);
+        self.assets.gui_atlas = Some(gui_atlas);
         self.hud_cache.invalidate();
         self.server_icons_revision = u64::MAX;
-        self.items = installed.items();
+        self.assets.items = installed.items();
         self.dials = DialAnimator::new(installed.dials());
-        self.texture_animator = TextureAnimator::new(installed.animations().to_vec());
-        self.entity_textures = Some(EntityTextures::load_with_font(
+        self.assets.texture_animator = TextureAnimator::new(installed.animations().to_vec());
+        self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
-            self.ui_atlas.as_ref(),
+            self.assets.ui_atlas.as_ref(),
         ));
-        self.map_textures = Some(MapTextures::load(renderer));
+        self.assets.map_textures = Some(MapTextures::load(renderer));
         if let Some(world) = self.world.as_mut() {
             world.reload_terrain(
                 &installed,

@@ -9,19 +9,15 @@
 //! chunk snapshots arrive over the bounded channels of the game thread
 //! (ADR-0005, ADR-0013).
 
-use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_core::lang::Lang;
-use umicraft_game::chat::{ChatInput, SentHistory};
-use umicraft_game::item_use::DropKind;
-use umicraft_render::{Camera, HudState, InputHit, Overlay, Renderer};
+use umicraft_render::{Camera, Overlay, Renderer};
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::menus::PanoramaTextures;
-use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Ui};
+use umicraft_ui::{debug_screen::DebugScreen, Ui};
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::keyboard::KeyCode;
 use winit::window::Window;
 
 use crate::anvil_field::AnvilField;
@@ -31,33 +27,24 @@ use crate::cpu_split::CpuSplit;
 use crate::creative_input::CreativeInput;
 use crate::dials::DialAnimator;
 use crate::entity_icons::EntityIcons;
-use crate::entity_render::EntityTextures;
 use crate::error::ClientError;
-use crate::fps_meter::FpsMeter;
 use crate::game::Session;
 use crate::hud_cache::HudCache;
-use crate::input::InputState;
 use crate::inventory_input::InventoryInput;
-use crate::item_icons::ItemResources;
-use crate::item_world::{ItemLayers, WorldItems};
+use crate::item_world::WorldItems;
 use crate::language;
-use crate::map_render::MapTextures;
 use crate::menu_flow::{MenuCommand, MenuFlow};
-use crate::metrics::FrameMetricsWindow;
 use crate::mods_runtime::ModsRuntime;
-use crate::nametag_draw::PlacedTag;
 use crate::options::{self, Options};
-use crate::options_effects::VideoApplier;
-use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
 use crate::portrait::Spot;
 use crate::screen::Screen;
 use crate::text_screens::TextScreens;
-use crate::texture_animator::TextureAnimator;
-use crate::ui_font::LoadedFont;
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
 use crate::zoom::Zoom;
-use startup::AsyncLoadedAssets;
+
+mod state;
+use state::{Assets, ChatUi, FrameClock, FrameScratch, InputTracking, OptionsMenu, PendingPresses};
 
 mod binding_input;
 mod chat_control;
@@ -155,14 +142,8 @@ pub fn run(args: Args) -> Result<(), ClientError> {
 
 struct App {
     args: Args,
-    /// The name tags of the frame, drawn by the renderer in the world pass.
-    nametags: Vec<umicraft_render::Nametag>,
-    /// Reusable screen-placed tag buffer so `place_tags_into` does not allocate per frame.
-    placed_tags: Vec<PlacedTag>,
-    /// Reusable dynamic moving-blocks / flower-pot mesh buffer across frames.
-    moving_blocks_mesh: umicraft_mesh::Mesh,
-    /// The pose of the hand in the last frame, to tell the motion blur when it moves.
-    last_hand: Option<umicraft_game::hand::HandPose>,
+    /// What the last frame gathered from the world, kept to reuse its buffers.
+    frame: FrameScratch,
     /// Where the CPU time of a frame goes, for F3.
     cpu: CpuSplit,
     /// The zoom of the Zoom mod.
@@ -171,33 +152,13 @@ struct App {
     focused: bool,
     /// The built HUD, kept while it does not change.
     hud_cache: HudCache,
-    /// Double-buffered HUD state on the render thread: synced from `WorldView`
-    /// only when `hud_revision` or `options.chat` changes, avoiding per-frame
-    /// heap clones of chat lines, tab list entries, and scoreboard rows.
-    frame_hud: HudState,
-    frame_hud_revision: u64,
-    frame_hud_chat: Option<options::ChatOptions>,
-    /// The entities of this frame, interpolated once: the tab list, the name tags and
-    /// the scene all read them (perf 2, B4).
-    frame_entities: Vec<umicraft_game::entity::EntityRenderSnapshot>,
-    /// The particle quads of the frame, rebuilt in place.
-    particle_sprites: Vec<umicraft_render::ParticleSprite>,
     /// The user's options: video, mouse, chat and the key bindings.
     options: Options,
     /// The language every UI text comes from (ADR-0039); also installed as
     /// the shared current language for the other threads.
     lang: Arc<Lang>,
-    /// Where the options are saved, when the platform has a data folder.
-    options_path: Option<std::path::PathBuf>,
-    /// The options as they are on disk and known to the server, to tell what
-    /// changed when the options screen closes.
-    saved_options: Options,
-    /// The options screen, shown while [`Screen::Options`] is current.
-    options_screen: OptionsScreen,
-    /// What the options screen did in the last UI frame, applied by `redraw`.
-    options_outcome: OptionsOutcome,
-    /// Applies the video options that act on the window and the renderer.
-    video_applier: VideoApplier,
+    /// The options screen, where it was opened from and how its edits are saved.
+    options_menu: OptionsMenu,
     /// The audio thread and its handle; silent with `--no-audio` or without
     /// downloaded assets (P11-E).
     audio: AudioBridge,
@@ -208,8 +169,8 @@ struct App {
     camera: Camera,
     overlay: Overlay,
     show_overlay: bool,
-    mouse_captured: bool,
-    keys: HashSet<KeyCode>,
+    /// What the keyboard and the mouse hold now, and the last input sent.
+    input: InputTracking,
     /// The camera, clock, chunk meshing and HUD of the game; created with
     /// the renderer, once the terrain textures are bound (ADR-0012, ADR-0013).
     world: Option<WorldView>,
@@ -219,56 +180,16 @@ struct App {
     /// The menu screens and their data: the server book, the pings, the
     /// dialogs (ADR-0044).
     menu: MenuFlow,
-    /// The screen the options were opened from: the title screen or the game
-    /// menu. Escape and Done go back there.
-    options_origin: Screen,
-    last_input: InputState,
-    last_input_time: Instant,
-    look: (f32, f32),
-    select_slot: Option<u8>,
-    /// The digit key presses not sent yet (MCP `KeyBinding.pressTime`).
-    hotbar_keys: [u8; 9],
-    break_block: bool,
-    /// The mouse buttons that are down, by `Binding::Mouse` index.
-    buttons: HashSet<u8>,
+    /// The presses not handed to the game thread yet.
+    presses: PendingPresses,
     /// When the death screen opened; `None` while the player lives.
     death_started: Option<Instant>,
-    /// The player pressed "Respawn" and waits for the server.
-    respawn_requested: bool,
-    /// The use button went down since the last input update.
-    place_block: bool,
     /// The screen that owns the keyboard and the mouse (ADR-0017). A server
     /// container shows the inventory screen without setting this field, see
     /// [`App::screen`].
     screen: Screen,
-    /// The line the player is typing while [`Screen::Chat`] is current.
-    chat_input: ChatInput,
-    /// The messages the player sent, for the up and down keys.
-    sent_messages: SentHistory,
-    /// How many rows the open chat is scrolled up.
-    chat_scroll: usize,
-    /// When the chat opened; the caret blinks from here.
-    chat_opened: Instant,
-    /// The completion answer the chat already handled.
-    seen_completions: u64,
-    /// Whether a Control key is held (word movement in the chat).
-    ctrl_held: bool,
-    /// Whether Shift is held: a chat click then inserts instead of acting.
-    shift_held: bool,
-    /// The pointer in physical pixels, for the chat hover and click.
-    pointer: (f32, f32),
-    /// The chat run under the pointer in the last frame (click and hover).
-    chat_hover: Option<umicraft_render::ChatRunView>,
-    /// Where the pointer is on the chat input line, as of the last frame.
-    chat_line: Option<InputHit>,
-    /// The pick block binding went down since the last input update.
-    pick_block: bool,
-    /// The drop key was pressed since the last input update.
-    drop_item: Option<DropKind>,
-    /// The perspective key was pressed since the last input update.
-    toggle_perspective: bool,
-    /// The screenshot binding was pressed; the next frame is saved.
-    screenshot_requested: bool,
+    /// The chat line: what is typed, the history, the scroll and the hover.
+    chat: ChatUi,
     /// Turns the mouse and keys on the creative screen into game events.
     creative_input: CreativeInput,
     /// Whether a server container was displayed on the previous frame.
@@ -290,22 +211,11 @@ struct App {
     ui_input: UiInputTranslator,
     /// Turns the mouse and keys on the inventory screen into slot clicks.
     inventory_input: InventoryInput,
-    /// The font loaded at startup, before the renderer exists.
-    font: LoadedFont,
-    /// Background asset loader channel receiver.
-    asset_receiver: Option<std::sync::mpsc::Receiver<AsyncLoadedAssets>>,
-    /// The atlas the renderer accepted; the UI metrics must match it.
-    ui_atlas: Option<FontAtlas>,
-    /// The brand atlas the renderer accepted; `None` keeps the classic
-    /// title screen (ADR-0056).
-    brand_atlas: Option<FontAtlas>,
-    /// The GUI texture atlas for inventory/container backgrounds.
-    gui_atlas: Option<umicraft_assets::GuiAtlas>,
+    /// The fonts, atlases and textures loaded for the session.
+    assets: Assets,
     /// The favicon revision of the menus the GUI atlas was last grown for
     /// (`u64::MAX` after the atlas was replaced).
     server_icons_revision: u64,
-    /// The baked item models, once the official assets are bound.
-    items: Option<std::sync::Arc<ItemResources>>,
     /// The compass and clock frames of the bound block array.
     dials: DialAnimator,
     /// The dropped-item geometry of the frame, kept for its buffers.
@@ -320,28 +230,8 @@ struct App {
     text_screens: TextScreens,
     /// The resource pack the connected server offered (NET-11).
     server_pack: server_pack_control::ServerPackRuntime,
-    /// The first-person held item geometry of the frame.
-    hand_layers: ItemLayers,
-    /// Steps the water, lava and fire textures once per game tick.
-    texture_animator: TextureAnimator,
-    /// Entity textures bound for GPU rendering.
-    entity_textures: Option<EntityTextures>,
-    /// The textures of filled maps, created with the entity textures.
-    map_textures: Option<MapTextures>,
-    last_frame: Instant,
-    /// When the frame-rate cap wants the next frame to start.
-    next_frame: Instant,
-    /// Origin of the clock that scrolls the enchantment glint.
-    started: Instant,
-    frame_times: VecDeque<f32>,
-    frame_ms: f32,
-    fps: f32,
-    /// Refreshes `fps` once per second for the F3 screen.
-    fps_meter: FpsMeter,
-    /// Rolling frametime percentiles, 1%/0.1% low FPS, and per-frame allocations.
-    metrics_window: FrameMetricsWindow,
-    /// Heap allocation snapshot taken at the start of the previous frame.
-    last_alloc_snapshot: umicraft_core::profiling::AllocSnapshot,
+    /// The timing of the displayed frames.
+    clock: FrameClock,
     /// The built-in mods (ADR-0065).
     mods: ModsRuntime,
     exit_error: Option<String>,

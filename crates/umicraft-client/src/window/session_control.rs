@@ -203,14 +203,14 @@ impl App {
     /// inventory, the text screens and the input that was waiting to be sent.
     fn forget_play_state(&mut self) {
         self.death_started = None;
-        self.respawn_requested = false;
+        self.presses.respawn = false;
         self.container_was_open = false;
-        self.last_input = crate::input::InputState::default();
+        self.input.last = crate::input::InputState::default();
         self.anvil_field = crate::anvil_field::AnvilField::default();
         self.text_screens = crate::text_screens::TextScreens::default();
         self.inventory_input.reset();
         self.creative_input.reset();
-        self.buttons.clear();
+        self.input.buttons.clear();
     }
 }
 

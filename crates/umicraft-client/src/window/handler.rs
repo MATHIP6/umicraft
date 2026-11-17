@@ -96,9 +96,9 @@ impl ApplicationHandler for App {
         umicraft_core::boot_log!("renderer_new_windowed_done");
 
         // Upload the initial fallback atlas immediately so the first loading/UI frame can be presented
-        match ui_font::install(&mut renderer, &self.font.atlas) {
+        match ui_font::install(&mut renderer, &self.assets.font.atlas) {
             Ok(installed) => {
-                self.ui_atlas = Some(installed.atlas);
+                self.assets.ui_atlas = Some(installed.atlas);
                 self.hud_cache.invalidate();
                 umicraft_core::boot_log!("ui_font_installed");
             }
@@ -109,7 +109,7 @@ impl ApplicationHandler for App {
                 return;
             }
         }
-        self.brand_atlas = ui_font::install_brand(&mut renderer);
+        self.assets.brand_atlas = ui_font::install_brand(&mut renderer);
         umicraft_core::boot_log!("brand_atlas_installed");
 
         // Minimal procedural fallback setup & sky textures for instant responsive frame
@@ -138,8 +138,8 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => self.resize(size.width, size.height),
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, event),
             WindowEvent::ModifiersChanged(modifiers) => {
-                self.ctrl_held = modifiers.state().control_key();
-                self.shift_held = modifiers.state().shift_key();
+                self.input.ctrl_held = modifiers.state().control_key();
+                self.input.shift_held = modifiers.state().shift_key();
                 self.ui_input.modifiers(modifiers.state());
                 let state = modifiers.state();
                 self.inventory_input
@@ -151,7 +151,7 @@ impl ApplicationHandler for App {
                 // Keep the pointer current even while the UI is closed: F4 can
                 // open the screen before the next mouse movement, and the first
                 // click must use the physical cursor, not the initial origin.
-                self.pointer = (position.x as f32, position.y as f32);
+                self.input.pointer = (position.x as f32, position.y as f32);
                 self.ui_input.pointer_moved(position);
                 self.inventory_pointer(position);
                 self.creative_pointer(position);
@@ -174,7 +174,7 @@ impl ApplicationHandler for App {
                     if screen == Screen::Chat && button == MouseButton::Left {
                         match state {
                             ElementState::Pressed => self.chat_press(),
-                            ElementState::Released => self.chat_input.release(),
+                            ElementState::Released => self.chat.input.release(),
                         }
                     }
                 } else {
@@ -212,7 +212,7 @@ impl ApplicationHandler for App {
                 if self.screen().uses_ui() {
                     self.ui_input.text(&text);
                 } else if self.screen == Screen::Chat {
-                    self.chat_input.insert(&text);
+                    self.chat.input.insert(&text);
                 }
             }
             // Coming back to a game with no screen open takes the mouse again,
@@ -235,8 +235,8 @@ impl ApplicationHandler for App {
                 if let Some(window) = self.window.as_ref().filter(|w| w.fullscreen().is_some()) {
                     window.set_minimized(true);
                 }
-                self.keys.clear();
-                self.buttons.clear();
+                self.input.keys.clear();
+                self.input.buttons.clear();
                 self.capture_mouse(false);
                 self.ui_input.clear();
             }
@@ -258,7 +258,7 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            if self.mouse_captured
+            if self.input.mouse_captured
                 && !self.screen().blocks_game_input()
                 && !self.death_screen_visible()
             {
@@ -269,9 +269,9 @@ impl ApplicationHandler for App {
                     &self.options.controls,
                     self.zoom.look_factor(self.mods.zoom().as_ref()),
                 );
-                self.look.0 += dyaw;
-                self.look.1 += dpitch;
-                self.last_input_time = Instant::now();
+                self.input.look.0 += dyaw;
+                self.input.look.1 += dpitch;
+                self.input.last_time = Instant::now();
             }
         }
     }
@@ -282,13 +282,13 @@ impl ApplicationHandler for App {
             umicraft_core::boot_log!("about_to_wait_called", "frame={frame_num}");
         }
         let now = Instant::now();
-        if now + Duration::from_micros(500) >= self.next_frame {
+        if now + Duration::from_micros(500) >= self.clock.next_frame {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
             event_loop.set_control_flow(ControlFlow::Poll);
         } else {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame));
+            event_loop.set_control_flow(ControlFlow::WaitUntil(self.clock.next_frame));
         }
     }
 }

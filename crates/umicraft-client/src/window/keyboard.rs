@@ -30,7 +30,7 @@ impl App {
         let PhysicalKey::Code(code) = event.physical_key else {
             return None;
         };
-        Some(if self.ctrl_held {
+        Some(if self.input.ctrl_held {
             shortcut_code(event, code)
         } else {
             code
@@ -44,7 +44,7 @@ impl App {
         // A key that goes up is released for the game whatever screen is open
         // (`Minecraft.runTick` sets the key binding state before the screen).
         if event.state == ElementState::Released {
-            self.keys.remove(&code);
+            self.input.keys.remove(&code);
         }
         // F4 is the Umicraft debug-screen toggle (F3 is the vanilla text
         // screen, F2 stays free for the screenshot). It is handled before the
@@ -66,7 +66,7 @@ impl App {
             && self.screen() != Screen::Options
             && matches!(self.options.keys.get(Action::Screenshot), Binding::Key(key) if key == code)
         {
-            self.screenshot_requested = true;
+            self.presses.screenshot = true;
             return;
         }
         if self.take_mods_shortcut(&event, code) {
@@ -129,21 +129,21 @@ impl App {
                 if !event.repeat {
                     match code {
                         KeyCode::Escape => {
-                            self.set_screen(Screen::None.after_escape(self.options_origin))
+                            self.set_screen(Screen::None.after_escape(self.options_menu.origin))
                         }
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
                         KeyCode::F3 => {
                             self.show_f3 = !self.show_f3;
                             if self.show_f3 {
                                 umicraft_core::profiling::set_alloc_tracking(true);
-                                self.last_alloc_snapshot =
+                                self.clock.last_alloc_snapshot =
                                     umicraft_core::profiling::AllocSnapshot::now();
                             } else if !umicraft_core::profiling::is_enabled() {
                                 umicraft_core::profiling::set_alloc_tracking(false);
                             }
                         }
                         // F3 + P toggles the runtime profiler and allocation tracker.
-                        KeyCode::KeyP if self.keys.contains(&KeyCode::F3) => {
+                        KeyCode::KeyP if self.input.keys.contains(&KeyCode::F3) => {
                             let enabled = umicraft_core::profiling::toggle();
                             if !enabled && self.show_f3 {
                                 umicraft_core::profiling::set_alloc_tracking(true);
@@ -151,19 +151,19 @@ impl App {
                         }
                         // F3 + T reloads the resource packs, whatever the
                         // chat key is bound to.
-                        KeyCode::KeyT if self.keys.contains(&KeyCode::F3) => {
+                        KeyCode::KeyT if self.input.keys.contains(&KeyCode::F3) => {
                             self.reload_resources();
                         }
                         _ => self.press_binding(Binding::Key(code)),
                     }
                 }
-                self.keys.insert(code);
-                self.last_input_time = Instant::now();
+                self.input.keys.insert(code);
+                self.input.last_time = Instant::now();
                 self.publish_input();
             }
             ElementState::Released => {
-                self.keys.remove(&code);
-                self.last_input_time = Instant::now();
+                self.input.keys.remove(&code);
+                self.input.last_time = Instant::now();
                 self.publish_input();
             }
         }
@@ -172,7 +172,9 @@ impl App {
     /// What the drop key drops: the whole stack with Ctrl held
     /// (MCP Minecraft.runTick line 2084, GuiScreen.isCtrlKeyDown).
     pub(super) fn drop_kind(&self) -> DropKind {
-        if self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight) {
+        if self.input.keys.contains(&KeyCode::ControlLeft)
+            || self.input.keys.contains(&KeyCode::ControlRight)
+        {
             DropKind::Stack
         } else {
             DropKind::One
@@ -186,7 +188,7 @@ impl App {
         };
         if code == KeyCode::Escape {
             if event.state == ElementState::Pressed && !event.repeat {
-                self.set_screen(Screen::GameMenu.after_escape(self.options_origin));
+                self.set_screen(Screen::GameMenu.after_escape(self.options_menu.origin));
             }
             return;
         }

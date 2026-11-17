@@ -92,9 +92,10 @@ impl App {
     pub(super) fn update_mods(&mut self, now: Instant) {
         let eye = self.camera.eye();
         self.mods.update(&FrameInput {
-            now_ms: u64::try_from(now.duration_since(self.started).as_millis()).unwrap_or(u64::MAX),
-            fps: self.fps.round() as u32,
-            frame_ms: self.frame_ms,
+            now_ms: u64::try_from(now.duration_since(self.clock.started).as_millis())
+                .unwrap_or(u64::MAX),
+            fps: self.clock.fps.round() as u32,
+            frame_ms: self.clock.frame_ms,
             eye: [eye.x, eye.y, eye.z],
             yaw_radians: self.camera.yaw,
             pitch_radians: self.camera.pitch,

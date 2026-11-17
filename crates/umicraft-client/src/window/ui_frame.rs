@@ -53,7 +53,7 @@ impl App {
     pub(super) fn build_ui_frame(&mut self, width: u32, height: u32) -> Option<UiOutput> {
         umicraft_core::profile_scope!("build_ui_frame");
         self.portrait = None;
-        self.nametags.clear();
+        self.frame.nametags.clear();
         // Only the title screen sets it again below; every other frame,
         // in particular a session's, draws the world.
         if let Some(renderer) = self.renderer.as_mut() {
@@ -64,8 +64,8 @@ impl App {
         let mut text_done = None;
         let mut respawn_clicked = false;
         let inventory_facts = self.inventory_facts();
-        let atlas = self.ui_atlas.as_ref()?;
-        let sheets = crate::official::hud_sheets(self.gui_atlas.as_ref());
+        let atlas = self.assets.ui_atlas.as_ref()?;
+        let sheets = crate::official::hud_sheets(self.assets.gui_atlas.as_ref());
         let screen = self.screen();
         // Without the GUI atlas the hotbar and the status rows are not drawn
         // (no sprite sheets); chat, titles, the sidebar and F3 still are.
@@ -79,21 +79,21 @@ impl App {
         self.ui.begin_frame(viewport, input);
         self.ui.set_widgets_sheet(sheets.widgets);
         self.ui
-            .set_menu_art(crate::official::menu_art(self.gui_atlas.as_ref()));
+            .set_menu_art(crate::official::menu_art(self.assets.gui_atlas.as_ref()));
 
         if in_game {
             let world_hud_rev = self.world.as_ref().map_or(0, WorldView::hud_revision);
-            if world_hud_rev != self.frame_hud_revision
-                || self.frame_hud_chat.as_ref() != Some(&self.options.chat)
+            if world_hud_rev != self.frame.hud_revision
+                || self.frame.hud_chat.as_ref() != Some(&self.options.chat)
             {
                 if let Some(world) = self.world.as_ref() {
-                    self.frame_hud.clone_from(world.hud());
+                    self.frame.hud.clone_from(world.hud());
                 } else {
-                    self.frame_hud = HudState::default();
+                    self.frame.hud = HudState::default();
                 }
-                self.options.chat.apply(&mut self.frame_hud);
-                self.frame_hud_revision = world_hud_rev;
-                self.frame_hud_chat = Some(self.options.chat.clone());
+                self.options.chat.apply(&mut self.frame.hud);
+                self.frame.hud_revision = world_hud_rev;
+                self.frame.hud_chat = Some(self.options.chat.clone());
             }
             let show_tab_list = self.screen == Screen::None
                 && !self.container_is_open()
@@ -103,15 +103,16 @@ impl App {
             // that is in the world and wears it.
             if show_tab_list {
                 if let (Some(tab), Some(textures), Some(world)) = (
-                    self.frame_hud.tab_list.as_mut(),
-                    self.entity_textures.as_ref(),
+                    self.frame.hud.tab_list.as_mut(),
+                    self.assets.entity_textures.as_ref(),
                     self.world.as_ref(),
                 ) {
                     // The local player is always in the world for the reference, but
                     // the entity list leaves it out in the first person.
                     let local = world.local_body();
                     let hats: std::collections::HashSet<u128> = self
-                        .frame_entities
+                        .frame
+                        .entities
                         .iter()
                         .chain(local.as_ref())
                         .filter(|entity| entity.flags.skin_parts & HAT_PART != 0)
@@ -128,48 +129,48 @@ impl App {
             }
             let chatting = self.screen == Screen::Chat;
             let debug_f3 = self.show_f3.then(|| {
-                let (mean_allocs, mean_bytes) = self.metrics_window.mean_allocs_per_frame();
+                let (mean_allocs, mean_bytes) = self.clock.metrics_window.mean_allocs_per_frame();
                 crate::debug_f3_view::build_live(
                     self.renderer.as_ref(),
                     self.world.as_ref(),
                     &crate::debug_f3_view::Live {
-                        fps: self.fps,
+                        fps: self.clock.fps,
                         cpu: self.cpu.reading(),
-                        frame_dist: self.metrics_window.distribution(),
+                        frame_dist: self.clock.metrics_window.distribution(),
                         mean_allocs_per_frame: mean_allocs as f64,
                         mean_alloc_bytes_per_frame: mean_bytes as f64,
                         video: &self.options.video,
                         display: (width, height),
                         camera: &self.camera,
-                        input_latency: self.metrics_window.input_latency(),
+                        input_latency: self.clock.metrics_window.input_latency(),
                     },
                 )
             });
-            let items = ItemView::new(self.items.as_deref(), self.dials.frames());
-            self.frame_hud.hotbar_items =
+            let items = ItemView::new(self.assets.items.as_deref(), self.dials.frames());
+            self.frame.hud.hotbar_items =
                 self.world.as_ref().map_or_else(Default::default, |world| {
                     hotbar_slot_items(&world.window_view().player_slots, items)
                 });
-            self.frame_hud.debug_f3 = debug_f3;
-            self.frame_hud.chat_open = chatting;
-            self.frame_hud.chat_scroll = self.chat_scroll;
-            self.frame_hud.chat_input = chatting.then(|| ChatInputView {
-                text: self.chat_input.text(),
-                caret: self.chat_input.caret(),
-                selection: self.chat_input.selection(),
-                caret_visible: (self.chat_opened.elapsed().as_millis() / CARET_BLINK_MS)
+            self.frame.hud.debug_f3 = debug_f3;
+            self.frame.hud.chat_open = chatting;
+            self.frame.hud.chat_scroll = self.chat.scroll;
+            self.frame.hud.chat_input = chatting.then(|| ChatInputView {
+                text: self.chat.input.text(),
+                caret: self.chat.input.caret(),
+                selection: self.chat.input.selection(),
+                caret_visible: (self.chat.opened.elapsed().as_millis() / CARET_BLINK_MS)
                     .is_multiple_of(2),
             });
             // The clock of the cached HUD stands still for a tick, so an unchanged
             // HUD compares equal and is not built again (perf 2, B2).
-            self.frame_hud.now = Some(self.hud_cache.clock(Instant::now()));
-            self.frame_hud.show_tab_list = show_tab_list;
+            self.frame.hud.now = Some(self.hud_cache.clock(Instant::now()));
+            self.frame.hud.show_tab_list = show_tab_list;
             // The mod widgets change with the frame (the fps, the position):
             // they are drawn after the cached HUD, in the same place of the order.
-            self.frame_hud.mod_widgets.clear();
+            self.frame.hud.mod_widgets.clear();
             self.hud_cache.draw(
                 self.ui.draw(),
-                &self.frame_hud,
+                &self.frame.hud,
                 (width, height),
                 (atlas, &sheets),
             );
@@ -180,28 +181,29 @@ impl App {
                 gui_scale(width, height) as f32,
                 atlas,
             );
-            self.chat_hover = chatting
-                .then(|| chat_run_at(&self.frame_hud, (width, height), atlas, self.pointer))
+            self.chat.hover = chatting
+                .then(|| chat_run_at(&self.frame.hud, (width, height), atlas, self.input.pointer))
                 .flatten();
-            self.chat_line = chatting.then(|| {
+            self.chat.line = chatting.then(|| {
                 chat_input_hit(
-                    &self.chat_input.text(),
+                    &self.chat.input.text(),
                     (width, height),
                     atlas,
-                    self.pointer,
+                    self.input.pointer,
                 )
             });
-            if let Some(hit) = self.chat_line {
+            if let Some(hit) = self.chat.line {
                 // The selection follows the pointer while the button is held.
-                self.chat_input.drag_to(hit.index);
+                self.chat.input.drag_to(hit.index);
             }
             let rows = self
-                .chat_hover
+                .chat
+                .hover
                 .as_ref()
                 .and_then(|run| run.hover.as_ref())
                 .map(|hover| crate::chat::hover_rows(hover, false))
                 .unwrap_or_default();
-            let pointer = [self.pointer.0, self.pointer.1];
+            let pointer = [self.input.pointer.0, self.input.pointer.1];
             let scale = gui_scale(width, height) as f32;
             umicraft_ui::widgets::tooltip::tooltip(
                 &mut self.ui,
@@ -215,13 +217,13 @@ impl App {
         if self.world.is_some() && in_game {
             // The world keeps drawing behind an inventory screen, name tags included.
             place_tags_into(
-                &self.frame_entities,
+                &self.frame.entities,
                 &self.camera,
                 width as f32,
                 height as f32,
-                &mut self.placed_tags,
+                &mut self.frame.placed_tags,
             );
-            draw_tags_into(atlas, &self.placed_tags, &mut self.nametags);
+            draw_tags_into(atlas, &self.frame.placed_tags, &mut self.frame.nametags);
         }
 
         if self.death_screen_visible() {
@@ -237,7 +239,7 @@ impl App {
                     self.menu_action = self.game_menu.show(&mut self.ui, atlas, &self.lang)
                 }
                 Screen::Options => {
-                    self.options_outcome = self.options_screen.show(
+                    self.options_menu.outcome = self.options_menu.screen.show(
                         &mut self.ui,
                         atlas,
                         &mut self.options,
@@ -253,10 +255,10 @@ impl App {
                         let scene = CreativeScene {
                             window: world.window_view(),
                             creative,
-                            gui_atlas: self.gui_atlas.as_ref(),
-                            items: ItemView::new(self.items.as_deref(), self.dials.frames()),
+                            gui_atlas: self.assets.gui_atlas.as_ref(),
+                            items: ItemView::new(self.assets.items.as_deref(), self.dials.frames()),
                             // Vanilla toggles every 6 ticks (cursorCounter / 6 % 2).
-                            caret_visible: (self.started.elapsed().as_millis() / 300)
+                            caret_visible: (self.clock.started.elapsed().as_millis() / 300)
                                 .is_multiple_of(2),
                             effects: &world.hud().effects,
                         };
@@ -278,20 +280,20 @@ impl App {
                             atlas,
                             viewport,
                             &wv,
-                            self.gui_atlas.as_ref(),
-                            ItemView::new(self.items.as_deref(), self.dials.frames()),
+                            self.assets.gui_atlas.as_ref(),
+                            ItemView::new(self.assets.items.as_deref(), self.dials.frames()),
                             &facts,
                         );
                     }
                 }
                 Screen::Sign | Screen::Book => {
-                    let caret =
-                        (self.started.elapsed().as_millis() / CARET_BLINK_MS).is_multiple_of(2);
+                    let caret = (self.clock.started.elapsed().as_millis() / CARET_BLINK_MS)
+                        .is_multiple_of(2);
                     let done = self.text_screens.draw(
                         &mut self.ui,
                         atlas,
                         viewport,
-                        self.gui_atlas.as_ref(),
+                        self.assets.gui_atlas.as_ref(),
                         caret,
                         &self.lang,
                     );
@@ -318,7 +320,7 @@ impl App {
                     let context = MenuContext {
                         stats_revision: self.world.as_ref().map_or(0, WorldView::stats_revision),
                         stats_loading: self.world.as_ref().is_some_and(WorldView::stats_loading),
-                        items: ItemView::new(self.items.as_deref(), self.dials.frames()),
+                        items: ItemView::new(self.assets.items.as_deref(), self.dials.frames()),
                         inventory_key: &inventory_key,
                         player_hash: java_string_hash(&self.args.name),
                         version: VERSION_LINE,
@@ -329,7 +331,7 @@ impl App {
                         stats,
                         panorama: self.panorama,
                         title_style: self.title_style(),
-                        brand_font: self.brand_atlas.as_ref().unwrap_or(atlas),
+                        brand_font: self.assets.brand_atlas.as_ref().unwrap_or(atlas),
                         mods: &mods_view,
                     };
                     let shown = self
@@ -347,7 +349,7 @@ impl App {
                 Screen::None | Screen::Chat => {}
             }
         }
-        let items = ItemView::new(self.items.as_deref(), self.dials.frames());
+        let items = ItemView::new(self.assets.items.as_deref(), self.dials.frames());
         menu_screens::draw_achievement_toast(
             &mut self.ui,
             atlas,

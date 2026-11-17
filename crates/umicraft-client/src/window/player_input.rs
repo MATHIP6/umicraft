@@ -12,12 +12,12 @@ use crate::options::Action;
 
 impl App {
     pub(super) fn capture_mouse(&mut self, capture: bool) {
-        let was_captured = self.mouse_captured;
+        let was_captured = self.input.mouse_captured;
         if was_captured && !capture {
             // A screen takes the mouse: the game forgets what was held.
             self.unpress_all();
         }
-        self.mouse_captured = capture;
+        self.input.mouse_captured = capture;
         let mut centred = None;
         if let Some(window) = &self.window {
             if capture {
@@ -45,7 +45,7 @@ impl App {
         if let Some(position) = centred {
             // The move event may arrive late or not at all (it depends on the
             // platform); the screens must already know where the cursor is.
-            self.pointer = (position.x as f32, position.y as f32);
+            self.input.pointer = (position.x as f32, position.y as f32);
             self.ui_input.pointer_moved(position);
             self.inventory_pointer(position);
             self.creative_pointer(position);
@@ -74,8 +74,8 @@ impl App {
         state.jump = self.held(Action::Jump);
         state.sneak = self.held(Action::Sneak);
         state.sprint = self.held(Action::Sprint);
-        state.attack = self.mouse_captured && self.held(Action::Attack);
-        state.use_item = self.mouse_captured && self.held(Action::Use);
+        state.attack = self.input.mouse_captured && self.held(Action::Attack);
+        state.use_item = self.input.mouse_captured && self.held(Action::Use);
         state
     }
 
@@ -94,50 +94,50 @@ impl App {
             self.options.mods = self.mods.config();
             self.save_options();
         }
-        let changed = state != self.last_input
-            || self.look != (0.0, 0.0)
-            || self.select_slot.is_some()
-            || self.hotbar_keys != [0; 9]
-            || self.break_block
-            || self.place_block
-            || self.pick_block
-            || self.drop_item.is_some()
-            || self.toggle_perspective;
+        let changed = state != self.input.last
+            || self.input.look != (0.0, 0.0)
+            || self.presses.select_slot.is_some()
+            || self.presses.hotbar_keys != [0; 9]
+            || self.presses.break_block
+            || self.presses.place_block
+            || self.presses.pick_block
+            || self.presses.drop_item.is_some()
+            || self.presses.toggle_perspective;
         if !changed {
             return;
         }
         let update = InputUpdate {
-            created_at: self.last_input_time,
+            created_at: self.input.last_time,
             state,
-            look_yaw: self.look.0,
-            look_pitch: self.look.1,
-            select_slot: self.select_slot,
-            hotbar_keys: self.hotbar_keys,
-            break_block: self.break_block,
-            place_block: self.place_block,
-            pick_block: self.pick_block,
-            drop_item: self.drop_item,
-            toggle_perspective: self.toggle_perspective,
+            look_yaw: self.input.look.0,
+            look_pitch: self.input.look.1,
+            select_slot: self.presses.select_slot,
+            hotbar_keys: self.presses.hotbar_keys,
+            break_block: self.presses.break_block,
+            place_block: self.presses.place_block,
+            pick_block: self.presses.pick_block,
+            drop_item: self.presses.drop_item,
+            toggle_perspective: self.presses.toggle_perspective,
         };
         let sent = self
             .session
             .as_ref()
             .is_some_and(|session| session.send_input(update));
         if sent {
-            if self.look != (0.0, 0.0) {
+            if self.input.look != (0.0, 0.0) {
                 if let Some(world) = self.world.as_mut() {
-                    world.apply_look_delta(self.look.0, self.look.1);
+                    world.apply_look_delta(self.input.look.0, self.input.look.1);
                 }
             }
-            self.last_input = state;
-            self.look = (0.0, 0.0);
-            self.select_slot = None;
-            self.hotbar_keys = [0; 9];
-            self.break_block = false;
-            self.place_block = false;
-            self.pick_block = false;
-            self.drop_item = None;
-            self.toggle_perspective = false;
+            self.input.last = state;
+            self.input.look = (0.0, 0.0);
+            self.presses.select_slot = None;
+            self.presses.hotbar_keys = [0; 9];
+            self.presses.break_block = false;
+            self.presses.place_block = false;
+            self.presses.pick_block = false;
+            self.presses.drop_item = None;
+            self.presses.toggle_perspective = false;
         }
     }
 }
