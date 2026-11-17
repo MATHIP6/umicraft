@@ -41,6 +41,8 @@ use super::hud::*;
 use super::look::*;
 use super::messages::*;
 use super::movement::*;
+use super::net::inventory::*;
+use super::net::world::*;
 use super::net::*;
 use super::particles::*;
 use super::publish::*;

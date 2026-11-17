@@ -15,7 +15,7 @@ use umicraft_game::inventory::creative::CreativeAction;
 
 use super::commands::CommandQueue;
 use super::messages::RenderEvent;
-use super::net::sync_armor;
+use super::net::inventory::sync_armor;
 use super::publish::publish_inventory;
 use super::state::Game;
 use crate::creative_input::{CreativeEvent, SlotClick};
