@@ -10,8 +10,8 @@ fn a_held_survival_click_digs_the_block_over_several_ticks_and_cracks_it() {
     let mut queue = CommandQueue::default();
     game.entity_id = 1;
     game.pitch = 1.5;
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     let block = BlockPos::new(0, 63, 0);
     let mut statuses = Vec::new();
     let mut cracked = false;
@@ -51,8 +51,8 @@ fn a_creative_break_removes_the_block_at_once_and_sends_only_the_start() {
     let mut queue = CommandQueue::default();
     game.gamemode = GameMode::Creative;
     game.pitch = 1.5;
-    game.attack_pressed = true;
-    game.input.attack = true;
+    game.controls.attack_pressed = true;
+    game.controls.input.attack = true;
     run_attack(&mut game, &mut queue);
     let world = game.world.as_ref().expect("world");
     assert_eq!(world.block(BlockPos::new(0, 63, 0)), BlockState::AIR);
@@ -66,8 +66,8 @@ fn a_spectator_cannot_break_blocks() {
     let mut queue = CommandQueue::default();
     game.gamemode = GameMode::Spectator;
     game.pitch = 1.5;
-    game.attack_pressed = true;
-    game.input.attack = true;
+    game.controls.attack_pressed = true;
+    game.controls.input.attack = true;
     run_attack(&mut game, &mut queue);
     assert_eq!(digging_commands(&queue), 0);
 }

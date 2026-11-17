@@ -79,7 +79,7 @@ fn a_rider_follows_its_vehicle_instead_of_walking() {
     let mut queue = CommandQueue::default();
     let (frames, _rx) = mpsc::sync_channel(8);
     let (chunks, _chunk_rx) = mpsc::sync_channel(8);
-    game.input.forward = 1.0;
+    game.controls.input.forward = 1.0;
     tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
     let position = game.state.as_ref().expect("state").position();
     assert!(
@@ -274,7 +274,7 @@ fn the_local_body_swings_its_limbs_while_walking() {
     let mut game = game_on_floor_with(BlockState::AIR);
     game.entity_id = 1;
     game.playing = true;
-    game.input.forward = 1.0;
+    game.controls.input.forward = 1.0;
     load_surrounding_columns(&mut game);
     let mut queue = CommandQueue::default();
     let (frames, _received) = mpsc::sync_channel(64);
@@ -286,7 +286,7 @@ fn the_local_body_swings_its_limbs_while_walking() {
     assert!(walking.limbs.amount > 0.1, "{}", walking.limbs.amount);
     assert!(walking.limbs.swing > 0.0);
 
-    game.input.forward = 0.0;
+    game.controls.input.forward = 0.0;
     for _ in 0..60 {
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
     }

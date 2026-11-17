@@ -88,13 +88,13 @@ pub(super) fn handle_net(
         publish_stats(game, frames);
     }
     if changes_name_tags {
-        let players = &game.player_list;
+        let players = &game.social.player_list;
         game.entities.refresh_spectators(|uuid| {
             players
                 .get(&u128::from_be_bytes(*uuid))
                 .is_some_and(|entry| entry.game_mode == SPECTATOR_WIRE)
         });
-        let (scoreboard, own_name) = (&game.scoreboard, game.own_name.as_str());
+        let (scoreboard, own_name) = (&game.social.scoreboard, game.own_name.as_str());
         game.entities
             .refresh_name_tags(|entity| entity_tag(scoreboard, own_name, entity));
         game.entities
@@ -125,37 +125,37 @@ fn apply_net_event(
         PlayEvent::Chat(json) => show_chat(game, &json, Position::Chat),
         PlayEvent::SystemChat(json) => show_chat(game, &json, Position::System),
         PlayEvent::ActionBar(json) => {
-            game.action_bar.show(&json);
+            game.social.action_bar.show(&json);
             game.hud_dirty = true;
         }
         PlayEvent::PlayerListItem(packet) => social::update_player_list(game, &packet),
         PlayEvent::PlayerListHeaderFooter(packet) => {
-            game.player_list.set_header_footer(&packet);
+            game.social.player_list.set_header_footer(&packet);
             game.hud_dirty = true;
         }
         PlayEvent::TabComplete(packet) => {
-            game.completions = packet.matches;
-            game.completions_serial += 1;
+            game.chat.completions = packet.matches;
+            game.chat.completions_serial += 1;
             game.hud_dirty = true;
         }
         PlayEvent::ScoreboardObjective(packet) => {
-            game.scoreboard.apply_objective(&packet);
+            game.social.scoreboard.apply_objective(&packet);
             game.hud_dirty = true;
         }
         PlayEvent::UpdateScore(packet) => {
-            game.scoreboard.apply_score(&packet);
+            game.social.scoreboard.apply_score(&packet);
             game.hud_dirty = true;
         }
         PlayEvent::DisplayScoreboard(packet) => {
-            game.scoreboard.apply_display(&packet);
+            game.social.scoreboard.apply_display(&packet);
             game.hud_dirty = true;
         }
         PlayEvent::Teams(packet) => {
-            game.scoreboard.apply_teams(&packet);
+            game.social.scoreboard.apply_teams(&packet);
             game.hud_dirty = true;
         }
         PlayEvent::Title(packet) => {
-            game.title.apply(&packet);
+            game.social.title.apply(&packet);
             game.hud_dirty = true;
         }
         PlayEvent::ChunkData(packet) => world::load_chunk(game, &packet),
@@ -194,8 +194,8 @@ fn apply_net_event(
             game.spawn = Some((packet.x, packet.y, packet.z));
         }
         PlayEvent::SetExperience(packet) => {
-            game.experience = packet.experience;
-            game.level = packet.level;
+            game.vitals.experience = packet.experience;
+            game.vitals.level = packet.level;
             game.hud_dirty = true;
         }
         PlayEvent::TimeUpdate(packet) => {

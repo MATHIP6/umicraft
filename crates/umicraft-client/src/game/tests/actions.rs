@@ -9,8 +9,8 @@ fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
     let mut game = game_on_floor_with(BlockState::AIR);
     let mut queue = CommandQueue::default();
     game.pitch = 1.5;
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     run_attack(&mut game, &mut queue);
     tick_hand(&mut game);
     assert!(game.hand.pose().swing > 0.0 || game.hand.swing_progress(1.0) >= 0.0);
@@ -47,8 +47,8 @@ fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
 }
 
 fn click_attack(game: &mut Game, queue: &mut CommandQueue) {
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     run_attack(game, queue);
 }
 
@@ -139,11 +139,11 @@ fn a_right_click_on_a_mob_interacts_before_using_the_item() {
 #[test]
 fn holding_the_use_button_eats_slowly_and_releasing_tells_the_server() {
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.food = 10.0;
+    game.vitals.food = 10.0;
     game.windows.apply_set_slot(0, 36, wire_item(297, 0));
     game.pitch = -0.5;
     let mut queue = CommandQueue::default();
-    game.input.use_item = true;
+    game.controls.input.use_item = true;
     click_use(&mut game, &mut queue);
     assert!(game.item_use.is_using());
     assert!(matches!(
@@ -151,7 +151,7 @@ fn holding_the_use_button_eats_slowly_and_releasing_tells_the_server() {
         ClientCommand::UseItem { item } if item.item_id == 297
     ));
 
-    game.input.use_item = false;
+    game.controls.input.use_item = false;
     run_use(&mut game, &mut queue);
     assert!(!game.item_use.is_using());
     assert!(commands(&queue).iter().any(|command| matches!(
@@ -166,10 +166,10 @@ fn holding_the_use_button_eats_slowly_and_releasing_tells_the_server() {
 #[test]
 fn the_published_hand_carries_the_item_use_until_it_ends() {
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.food = 10.0;
+    game.vitals.food = 10.0;
     game.windows.apply_set_slot(0, 36, wire_item(297, 0));
     game.pitch = -0.5;
-    game.input.use_item = true;
+    game.controls.input.use_item = true;
     let mut queue = CommandQueue::default();
     click_use(&mut game, &mut queue);
     let (frames, received) = mpsc::sync_channel(32);
@@ -191,9 +191,9 @@ fn the_published_hand_carries_the_item_use_until_it_ends() {
 fn the_local_player_eating_throws_crumbs_on_the_bite_ticks() {
     // Regression: the local player's own meal showed no crumbs.
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.food = 10.0;
+    game.vitals.food = 10.0;
     game.windows.apply_set_slot(0, 36, wire_item(297, 0));
-    game.input.use_item = true;
+    game.controls.input.use_item = true;
     let mut queue = CommandQueue::default();
     click_use(&mut game, &mut queue);
     let mut bites = Vec::new();
@@ -215,9 +215,9 @@ fn the_local_player_eating_throws_crumbs_on_the_bite_ticks() {
 fn the_local_player_eating_bites_out_loud() {
     // Regression: the local player's own meal made no sound.
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.food = 10.0;
+    game.vitals.food = 10.0;
     game.windows.apply_set_slot(0, 36, wire_item(297, 0));
-    game.input.use_item = true;
+    game.controls.input.use_item = true;
     let mut queue = CommandQueue::default();
     click_use(&mut game, &mut queue);
     let mut bites = 0;
@@ -236,11 +236,11 @@ fn the_local_player_eating_bites_out_loud() {
 #[test]
 fn the_server_finishing_the_meal_ends_the_use() {
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.food = 10.0;
+    game.vitals.food = 10.0;
     game.entity_id = 7;
     game.windows.apply_set_slot(0, 36, wire_item(297, 0));
     game.pitch = -0.5;
-    game.input.use_item = true;
+    game.controls.input.use_item = true;
     let mut queue = CommandQueue::default();
     click_use(&mut game, &mut queue);
     let (frames, _received) = mpsc::sync_channel(8);

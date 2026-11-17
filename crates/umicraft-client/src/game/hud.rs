@@ -27,11 +27,11 @@ pub(crate) fn hud_after(events: Vec<PlayEvent>, own_name: &str, ticks: u32) -> H
     for event in events {
         handle_net(&mut game, event, &mut queue, &frames);
     }
-    social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
+    social_view::tick_boss_bar(&mut game.social.boss_bar, &game.entities);
     for _ in 0..ticks {
-        game.title.tick();
-        game.action_bar.tick();
-        social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
+        game.social.title.tick();
+        game.social.action_bar.tick();
+        social_view::tick_boss_bar(&mut game.social.boss_bar, &game.entities);
     }
     game.hud()
 }
@@ -48,18 +48,18 @@ pub(super) fn tick_hud_view(game: &mut Game) {
     };
     let facts = crate::hud_view::HudFacts {
         mode: game.gamemode,
-        health: game.health,
-        food: game.food,
-        armor: game.armor,
-        experience: game.experience,
-        level: game.level,
+        health: game.vitals.health,
+        food: game.vitals.food,
+        armor: game.vitals.armor,
+        experience: game.vitals.experience,
+        level: game.vitals.level,
         effects: game.server.effects(),
         attributes: game.server.attributes(),
         vehicle: game.vehicle,
         entities: &game.entities,
         head_in_water,
         held: game.windows.selected_item(),
-        jump: game.input.jump,
+        jump: game.controls.input.jump,
     };
     if game.hud_view.tick(&facts) {
         game.hud_dirty = true;

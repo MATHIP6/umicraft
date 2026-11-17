@@ -33,7 +33,7 @@ pub(super) fn local_chat_line(text: &str) -> ChatLineView {
 /// keeps the system messages).
 pub(super) fn show_chat(game: &mut Game, json: &str, position: Position) {
     game.status_data.chat_messages += 1;
-    if chat_rules::shows(game.chat_mode, position) {
+    if chat_rules::shows(game.chat.mode, position) {
         let line = chat_line(json);
         push_chat(game, line);
     }
@@ -41,9 +41,9 @@ pub(super) fn show_chat(game: &mut Game, json: &str, position: Position) {
 
 /// Adds a message to the chat, dropping the oldest beyond [`CHAT_HISTORY`].
 pub(super) fn push_chat(game: &mut Game, line: ChatLineView) {
-    game.chat.push_back(line);
-    while game.chat.len() > CHAT_HISTORY {
-        game.chat.pop_front();
+    game.chat.lines.push_back(line);
+    while game.chat.lines.len() > CHAT_HISTORY {
+        game.chat.lines.pop_front();
     }
     game.hud_dirty = true;
 }

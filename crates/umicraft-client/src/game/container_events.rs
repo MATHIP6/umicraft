@@ -73,7 +73,7 @@ fn press(game: &mut Game, hotspot: Hotspot, queue: &mut CommandQueue) {
 fn enchant(game: &Game, window_id: u8, row: u8, queue: &mut CommandQueue) {
     let view = game.windows.view();
     let facts = ScreenFacts {
-        xp_level: game.level,
+        xp_level: game.vitals.level,
         creative: game.gamemode == GameMode::Creative,
         ..ScreenFacts::default()
     };
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn an_affordable_row_sends_enchant_item() {
         let mut game = placed_game();
-        game.level = 12;
+        game.vitals.level = 12;
         table(&mut game, [10, 20, 30], 3);
         let sent = run(&mut game, ContainerAction::Press(Hotspot::Enchant(0)));
         assert_eq!(
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn a_row_without_level_or_lapis_sends_nothing() {
         let mut game = placed_game();
-        game.level = 12;
+        game.vitals.level = 12;
         table(&mut game, [10, 20, 30], 1);
         assert!(run(&mut game, ContainerAction::Press(Hotspot::Enchant(1))).is_empty());
         assert!(run(&mut game, ContainerAction::Press(Hotspot::Enchant(2))).is_empty());
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn enchanting_needs_an_item_in_the_table() {
         let mut game = placed_game();
-        game.level = 50;
+        game.vitals.level = 50;
         table(&mut game, [10, 20, 30], 3);
         game.windows.apply_set_slot(3, 0, ItemStack::EMPTY);
         assert!(run(&mut game, ContainerAction::Press(Hotspot::Enchant(0))).is_empty());

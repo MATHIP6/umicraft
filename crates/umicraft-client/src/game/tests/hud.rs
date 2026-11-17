@@ -111,7 +111,7 @@ fn the_social_events_fill_the_hud() {
 
     // The title fades in from nothing, so it needs a few ticks to show.
     for _ in 0..5 {
-        game.title.tick();
+        game.social.title.tick();
     }
     let hud = game.hud();
     let sidebar = hud.sidebar.expect("the sidebar objective is displayed");
@@ -239,7 +239,7 @@ fn boss_mob_spawn_and_metadata_updates_hud_boss_bar() {
         &frames,
     );
 
-    social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
+    social_view::tick_boss_bar(&mut game.social.boss_bar, &game.entities);
     let hud = game.hud();
     let boss = hud.boss.expect("boss bar present after dragon spawn");
     assert_eq!(plain_text(&boss.name), "Ender Dragon");
@@ -262,7 +262,7 @@ fn boss_mob_spawn_and_metadata_updates_hud_boss_bar() {
         &frames,
     );
 
-    social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
+    social_view::tick_boss_bar(&mut game.social.boss_bar, &game.entities);
     let hud = game.hud();
     let boss = hud.boss.expect("boss bar present after damage");
     assert_eq!(boss.health, 0.5);
@@ -279,10 +279,10 @@ fn boss_mob_spawn_and_metadata_updates_hud_boss_bar() {
     // `BossStatus.statusBarTime` is 100 when the dragon was last seen and
     // the tick of that same frame already took one off: 99 remain.
     for _ in 0..98 {
-        social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
+        social_view::tick_boss_bar(&mut game.social.boss_bar, &game.entities);
     }
     assert!(game.hud().boss.is_some(), "the bar outlives the dragon");
-    social_view::tick_boss_bar(&mut game.boss_bar, &game.entities);
+    social_view::tick_boss_bar(&mut game.social.boss_bar, &game.entities);
     assert!(
         game.hud().boss.is_none(),
         "boss bar disappears 100 ticks after the dragon"

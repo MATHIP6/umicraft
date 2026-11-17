@@ -27,7 +27,7 @@ const CLEAR_BREAK_STAGE: u8 = 255;
 /// `PlayerControllerMP.onPlayerDestroyBlock`; the server confirms or
 /// restores them with a block change.
 pub(in crate::game) fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
-    let pressed = std::mem::take(&mut game.attack_pressed);
+    let pressed = std::mem::take(&mut game.controls.attack_pressed);
     // MCP `Minecraft.runTick` lines 2098-2121: the attack button does
     // nothing while an item is in use.
     if game.spectating() || game.dead() || game.item_use.is_using() {
@@ -74,7 +74,7 @@ pub(in crate::game) fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     let output = game.interaction.attack(&AttackTick {
         mode: game.gamemode,
         pressed,
-        held: game.input.attack,
+        held: game.controls.input.attack,
         target,
         entity,
         world,

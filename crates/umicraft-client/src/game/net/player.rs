@@ -195,8 +195,8 @@ pub(super) fn join_game(game: &mut Game, info: &JoinGameInfo, frames: &SyncSende
     game.entities.clear();
     game.body.bobber = None;
     game.entity_id = info.entity_id;
-    game.hardcore = info.gamemode & 8 != 0;
-    game.absorption = 0.0;
+    game.vitals.hardcore = info.gamemode & 8 != 0;
+    game.vitals.absorption = 0.0;
     game.server.on_join(info.entity_id);
     game.server_view = ServerView::default();
     game.vehicle = None;
@@ -205,15 +205,15 @@ pub(super) fn join_game(game: &mut Game, info: &JoinGameInfo, frames: &SyncSende
     // item use, pending click or open window survives a server switch.
     game.interaction = Interaction::new();
     game.item_use = ItemUse::new();
-    game.attack_pressed = false;
-    game.use_pressed = false;
+    game.controls.attack_pressed = false;
+    game.controls.use_pressed = false;
     game.pending_book = None;
     game.windows = WindowManager::new();
     // `handleJoinGame` makes a new `PlayerControllerMP`
     // (`currentPlayerItem` 0) and the new player starts on slot 0.
-    game.selected_slot = 0;
-    game.applied_slot = 0;
-    game.synced_slot = 0;
+    game.hotbar.selected = 0;
+    game.hotbar.applied = 0;
+    game.hotbar.synced = 0;
     publish_inventory(game, frames);
     set_gamemode(game, GameMode::from_wire(info.gamemode));
     game.dimension = info.dimension;
@@ -224,12 +224,12 @@ pub(super) fn join_game(game: &mut Game, info: &JoinGameInfo, frames: &SyncSende
     game.playing = true;
     game.status = "PLAYING".to_string();
     game.status_data.status = game.status.clone();
-    game.player_list = PlayerList::new();
-    game.scoreboard = Scoreboard::new();
-    game.title = TitleState::new();
-    game.action_bar = ActionBar::new();
-    game.boss_bar = BossBar::new();
-    game.completions.clear();
+    game.social.player_list = PlayerList::new();
+    game.social.scoreboard = Scoreboard::new();
+    game.social.title = TitleState::new();
+    game.social.action_bar = ActionBar::new();
+    game.social.boss_bar = BossBar::new();
+    game.chat.completions.clear();
     game.hud_dirty = true;
     let _ = frames.try_send(RenderEvent::Reset);
     publish_status(game, frames);
@@ -239,23 +239,23 @@ pub(super) fn join_game(game: &mut Game, info: &JoinGameInfo, frames: &SyncSende
 pub(super) fn update_health(game: &mut Game, packet: &UpdateHealth) {
     // MCP `EntityPlayerSP.setPlayerSPHealth`: a drop of health hurts, so
     // the camera shakes even where the server sent no `Entity Status 2`.
-    if game.health_known && packet.health < game.health {
+    if game.vitals.health_known && packet.health < game.vitals.health {
         game.body.animation.hurt();
     }
-    game.health_known = true;
-    game.health = packet.health;
-    game.food = packet.food as f32;
+    game.vitals.health_known = true;
+    game.vitals.health = packet.health;
+    game.vitals.food = packet.food as f32;
     game.hud_dirty = true;
 }
 
 /// `Held Item Change`: the server selects a hotbar slot.
 pub(super) fn change_held_item(game: &mut Game, slot: i8) {
     if (0..9).contains(&slot) {
-        game.selected_slot = slot as u8;
+        game.hotbar.selected = slot as u8;
         // `handleHeldItemChange` only sets `currentItem`; the
         // controller keeps `currentPlayerItem`, so the next sync
         // tells the server this slot back, like the vanilla client.
-        game.applied_slot = slot as u8;
+        game.hotbar.applied = slot as u8;
         game.windows.set_selected_slot(slot as u8);
         game.hud_dirty = true;
     }
@@ -271,14 +271,14 @@ pub(super) fn respawn(game: &mut Game, packet: &Respawn, frames: &SyncSender<Ren
     // whose sprint and sneak states start off).
     game.vehicle = None;
     // A new player entity: its first health update only sets the health.
-    game.health_known = false;
+    game.vitals.health_known = false;
     game.overlays.reset();
     game.server_view = ServerView::default();
     // The new player has a new inventory on slot 0, but the
     // controller is kept: `currentPlayerItem` stays, and the next
     // sync tells the server the slot if it was not 0.
-    game.selected_slot = 0;
-    game.applied_slot = 0;
+    game.hotbar.selected = 0;
+    game.hotbar.applied = 0;
     game.windows.set_selected_slot(0);
     // The server keeps the chunks of the dimension, so only a change
     // of the dimension replaces the world.
@@ -300,7 +300,7 @@ pub(super) fn respawn(game: &mut Game, packet: &Respawn, frames: &SyncSender<Ren
         game.particles.clear();
         // A new world has its own scoreboard; the tab list belongs to
         // the connection and stays.
-        game.scoreboard = Scoreboard::new();
+        game.social.scoreboard = Scoreboard::new();
         game.hud_dirty = true;
         // The new dimension has its own clock; the first `Time
         // Update` of the new world arrives right after the respawn.
@@ -313,8 +313,8 @@ pub(super) fn respawn(game: &mut Game, packet: &Respawn, frames: &SyncSender<Ren
     game.status = "RESPAWN".to_string();
     // The player comes back with a full health (MCP
     // `NetHandlerPlayClient.handleRespawn`).
-    game.health = 20.0;
-    game.food = 20.0;
+    game.vitals.health = 20.0;
+    game.vitals.food = 20.0;
     game.hud_dirty = true;
     game.status_data.status = game.status.clone();
     publish_status(game, frames);

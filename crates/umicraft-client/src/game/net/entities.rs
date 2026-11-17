@@ -314,12 +314,12 @@ pub(super) fn apply_entity_metadata(game: &mut Game, packet: &EntityMetadata) {
     if packet.entity_id == game.entity_id {
         // MCP EntityPlayer.getScore: data watcher 18.
         if let Some(score) = packet.metadata.get_int(SCORE_WATCHER) {
-            game.score = score;
+            game.vitals.score = score;
             game.hud_dirty = true;
         }
         // MCP `EntityPlayer.entityInit`: the absorption hearts.
         if let Some(absorption) = packet.metadata.get_float(ABSORPTION_WATCHER) {
-            game.absorption = absorption;
+            game.vitals.absorption = absorption;
             game.hud_dirty = true;
         }
         game.overlays.apply_metadata(&packet.metadata);

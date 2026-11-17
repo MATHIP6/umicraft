@@ -106,7 +106,7 @@ fn the_server_state_drives_the_movement_stats() {
     use umicraft_protocol::packets::play::clientbound::EntityEffect;
 
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.food = 6.0;
+    game.vitals.food = 6.0;
     game.server.on_join(1);
     game.server.apply_entity_effect(&EntityEffect {
         entity_id: 1,
@@ -158,9 +158,9 @@ fn a_player_who_uses_an_item_walks_at_a_fifth_of_the_speed() {
                 .expect("an empty column");
         }
         game.playing = true;
-        game.food = 10.0;
-        game.input.forward = 1.0;
-        game.input.use_item = using;
+        game.vitals.food = 10.0;
+        game.controls.input.forward = 1.0;
+        game.controls.input.use_item = using;
         game.windows.apply_set_slot(0, 36, wire_item(267, 0));
         game.pitch = -0.5;
         game.yaw = 0.0;

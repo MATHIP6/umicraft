@@ -24,7 +24,7 @@ pub(super) fn player_view(game: &Game) -> Option<(RenderState, bool)> {
         .and_then(|id| game.entities.camera_view(id, 1.0));
     let mut view = followed.unwrap_or_else(|| third_person_view(game, state.interpolated(1.0)));
     if followed.is_none() && game.dead() {
-        view.effects = view.effects.with_death(game.death_time as f32);
+        view.effects = view.effects.with_death(game.vitals.death_time as f32);
     }
     if followed.is_none() {
         view.effects = view
@@ -62,16 +62,16 @@ pub(super) fn debug_world(game: &Game) -> crate::debug_world::DebugWorld {
             // A client that has not seen the packet assumes normal.
             difficulty: game.server.difficulty().unwrap_or(2),
             world_time: game.world_time,
-            tick_micros: game.last_tick_micros,
-            net_event_micros: game.last_net_micros,
-            input_processing_micros: game.last_input_processing_us,
-            input_queue_latency_micros: game.last_input_queue_latency_us,
+            tick_micros: game.metrics.last_tick_micros,
+            net_event_micros: game.metrics.last_net_micros,
+            input_processing_micros: game.metrics.last_input_processing_us,
+            input_queue_latency_micros: game.metrics.last_input_queue_latency_us,
             resyncs: game.status_data.resyncs.min(u64::from(u32::MAX)) as u32,
-            real_tps: game.real_tps,
-            tick_delay_us: game.last_tick_delay_us,
-            max_tick_delay_us: game.max_tick_delay_us,
-            catch_up_ticks: game.catch_up_ticks_total,
-            net_queue_depth: game.net_queue_len,
+            real_tps: game.metrics.real_tps,
+            tick_delay_us: game.metrics.last_tick_delay_us,
+            max_tick_delay_us: game.metrics.max_tick_delay_us,
+            catch_up_ticks: game.metrics.catch_up_ticks_total,
+            net_queue_depth: game.metrics.net_queue_len,
             dirty_chunks: game.dirty.len(),
         },
     )

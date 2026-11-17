@@ -50,7 +50,7 @@ pub(super) fn pointed(game: &Game) -> Pointed {
 fn is_spectator(game: &Game, entity: &EntityRecord) -> bool {
     entity
         .uuid
-        .and_then(|uuid| game.player_list.get(&u128::from_be_bytes(uuid)))
+        .and_then(|uuid| game.social.player_list.get(&u128::from_be_bytes(uuid)))
         .is_some_and(|entry| {
             u8::try_from(entry.game_mode)
                 .is_ok_and(|mode| GameMode::from_wire(mode) == GameMode::Spectator)

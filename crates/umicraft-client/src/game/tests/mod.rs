@@ -142,7 +142,7 @@ fn game_on_floor_with(plant: BlockState) -> Game {
 
 /// Presses the use button once and runs the tick of the button.
 fn click_use(game: &mut Game, queue: &mut CommandQueue) {
-    game.use_pressed = true;
+    game.controls.use_pressed = true;
     run_use(game, queue);
 }
 
@@ -220,7 +220,7 @@ fn run_ticks(game: &mut Game, queue: &mut CommandQueue, count: usize) -> Vec<f64
 /// A game that walks forward (+z) and has already reached its pace.
 fn walking_game() -> Game {
     let mut game = placed_game();
-    game.input.forward = 1.0;
+    game.controls.input.forward = 1.0;
     run_ticks(&mut game, &mut CommandQueue::default(), 6);
     game
 }

@@ -69,13 +69,14 @@ pub(super) fn run(
         // 1. Drain high-priority inputs first: user actions never wait for network packets.
         while let Ok(update) = inputs.try_recv() {
             let queue_latency = Instant::now().saturating_duration_since(update.created_at);
-            game.last_input_queue_latency_us =
+            game.metrics.last_input_queue_latency_us =
                 queue_latency.as_micros().min(u128::from(u32::MAX)) as u32;
             let start = Instant::now();
             let before = (game.yaw, game.pitch);
             handle_input(&mut game, update, &mut queue);
             let elapsed = start.elapsed();
-            game.last_input_processing_us = elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
+            game.metrics.last_input_processing_us =
+                elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
             if (game.yaw, game.pitch) != before {
                 publish_look(&game);
             }
@@ -117,7 +118,7 @@ pub(super) fn run(
         }
         queue.flush();
 
-        game.net_queue_len = events.len();
+        game.metrics.net_queue_len = events.len();
 
         // 3. Process game ticking if a tick is already due, so network packet floods
         // cannot starve the 20 TPS simulation loop.
@@ -130,12 +131,12 @@ pub(super) fn run(
             while now >= next_tick && catches < MAX_CATCH_UP_TICKS && !queue.congested() {
                 let delay = now.saturating_duration_since(next_tick);
                 let delay_us = delay.as_micros().min(u128::from(u32::MAX)) as u32;
-                if delay_us > game.max_tick_delay_us {
-                    game.max_tick_delay_us = delay_us;
+                if delay_us > game.metrics.max_tick_delay_us {
+                    game.metrics.max_tick_delay_us = delay_us;
                 }
-                game.last_tick_delay_us = delay_us;
+                game.metrics.last_tick_delay_us = delay_us;
                 if catches > 0 {
-                    game.catch_up_ticks_total += 1;
+                    game.metrics.catch_up_ticks_total += 1;
                 }
                 tick(&mut game, &mut queue, &frames, &chunks, next_tick);
                 next_tick += TICK;
@@ -164,7 +165,7 @@ pub(super) fn run(
             let wait = timeout.min(next_drain.saturating_duration_since(now));
             if let Ok(update) = inputs.recv_timeout(wait) {
                 let queue_latency = Instant::now().saturating_duration_since(update.created_at);
-                game.last_input_queue_latency_us =
+                game.metrics.last_input_queue_latency_us =
                     queue_latency.as_micros().min(u128::from(u32::MAX)) as u32;
                 let before = (game.yaw, game.pitch);
                 handle_input(&mut game, update, &mut queue);
@@ -178,13 +179,13 @@ pub(super) fn run(
             recv(inputs) -> msg => {
                 if let Ok(update) = msg {
                     let queue_latency = Instant::now().saturating_duration_since(update.created_at);
-                    game.last_input_queue_latency_us =
+                    game.metrics.last_input_queue_latency_us =
                         queue_latency.as_micros().min(u128::from(u32::MAX)) as u32;
                     let start = Instant::now();
                     let before = (game.yaw, game.pitch);
                     handle_input(&mut game, update, &mut queue);
                     let elapsed = start.elapsed();
-                    game.last_input_processing_us =
+                    game.metrics.last_input_processing_us =
                         elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
                     if (game.yaw, game.pitch) != before {
                         publish_look(&game);
@@ -231,7 +232,7 @@ pub(super) fn handle_event(
             let start = Instant::now();
             handle_net(game, event, queue, frames);
             let elapsed = start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
-            game.net_micros_accum = game.net_micros_accum.saturating_add(elapsed);
+            game.metrics.net_micros_accum = game.metrics.net_micros_accum.saturating_add(elapsed);
             false
         }
         GameEvent::Disconnected(end) => {
@@ -248,13 +249,14 @@ pub(super) fn handle_event(
         }
         GameEvent::Input(update) => {
             let queue_latency = Instant::now().saturating_duration_since(update.created_at);
-            game.last_input_queue_latency_us =
+            game.metrics.last_input_queue_latency_us =
                 queue_latency.as_micros().min(u128::from(u32::MAX)) as u32;
             let start = Instant::now();
             let before = (game.yaw, game.pitch);
             handle_input(game, update, queue);
             let elapsed = start.elapsed();
-            game.last_input_processing_us = elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
+            game.metrics.last_input_processing_us =
+                elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
             if (game.yaw, game.pitch) != before {
                 // The view changed between two ticks: publish it right away,
                 // so the mouse look does not wait for the next tick.
@@ -285,7 +287,7 @@ pub(super) fn handle_event(
             chat_colors,
             skin_parts,
         } => {
-            game.chat_mode = chat_mode;
+            game.chat.mode = chat_mode;
             queue.push(ClientCommand::ClientSettings {
                 view_distance,
                 chat_mode,

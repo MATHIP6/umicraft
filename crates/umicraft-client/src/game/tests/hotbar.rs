@@ -9,7 +9,7 @@ fn the_selected_slot_is_announced_once() {
     let mut game = placed_game();
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 3);
-    assert_eq!(game.selected_slot, 3, "the player sees it at once");
+    assert_eq!(game.hotbar.selected, 3, "the player sees it at once");
     press_slot(&mut game, &mut queue, 3);
     assert!(queue.ordered.is_empty(), "nothing leaves between two ticks");
     for _ in 0..4 {
@@ -59,7 +59,7 @@ fn the_middle_button_selects_the_hotbar_slot_of_the_block() {
     let mut queue = CommandQueue::default();
     press_pick(&mut game, &mut queue);
     run_ticks(&mut game, &mut queue, 1);
-    assert_eq!(game.selected_slot, 2);
+    assert_eq!(game.hotbar.selected, 2);
     assert!(slots_in(&queue).is_empty(), "the sync is for the next tick");
     run_ticks(&mut game, &mut queue, 1);
     assert_eq!(slots_in(&queue), [2]);
@@ -263,7 +263,7 @@ fn a_creative_pick_sends_the_slot_packet_in_its_tick_and_the_sync_in_the_next() 
     run_ticks(&mut game, &mut queue, 1);
     // `sendSlotPacket` does not sync the slot first.
     assert_eq!(tags(&queue), ["creative", "move"]);
-    let chosen = i16::from(game.selected_slot);
+    let chosen = i16::from(game.hotbar.selected);
     assert_ne!(chosen, 0, "the free slot was selected");
     queue.ordered.clear();
     run_ticks(&mut game, &mut queue, 1);
@@ -277,8 +277,8 @@ fn a_slot_before_an_attack_is_announced_between_the_swing_and_the_attack_packet(
     game.pitch = 1.0;
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     let seen = tags(&queue);
     // `clickMouse`: swing, then the controller syncs and sends.
@@ -297,7 +297,7 @@ fn a_slot_before_a_use_is_announced_before_the_use_packet() {
     game.windows.apply_set_slot(0, 38, wire_item(1, 0));
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
-    game.use_pressed = true;
+    game.controls.use_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     // `rightClickMouse` on a block: the controller syncs, sends the
     // placement, and the swing comes after it.
@@ -313,8 +313,8 @@ fn the_actions_of_one_tick_keep_the_run_tick_order() {
     press_slot(&mut game, &mut queue, 2);
     press_drop(&mut game, &mut queue, DropKind::One);
     press_pick(&mut game, &mut queue);
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     let seen = tags(&queue);
     // keys (drop), then the click (swing, sync, controller), then the
@@ -346,7 +346,7 @@ fn a_slot_chosen_by_the_server_is_announced_back_at_the_next_tick() {
     handle_net(&mut game, PlayEvent::HeldItemChange(5), &mut queue, &frames);
     assert!(queue.ordered.is_empty(), "nothing at the event");
     run_ticks(&mut game, &mut queue, 1);
-    assert_eq!(game.selected_slot, 5);
+    assert_eq!(game.hotbar.selected, 5);
     assert_eq!(tags(&queue), ["slot5", "move"]);
     queue.ordered.clear();
     run_ticks(&mut game, &mut queue, 2);
@@ -396,7 +396,10 @@ fn two_digit_keys_in_one_tick_give_the_higher_key_whatever_the_order() {
         for key in order {
             press_key(&mut game, &mut queue, key);
         }
-        assert_eq!(game.selected_slot, 2, "the player sees the result at once");
+        assert_eq!(
+            game.hotbar.selected, 2,
+            "the player sees the result at once"
+        );
         run_ticks(&mut game, &mut queue, 3);
         assert_eq!(slots_in(&queue), [2], "order {order:?}");
     }
@@ -436,13 +439,13 @@ fn a_key_pressed_twice_selects_again_at_the_next_tick_over_the_wheel() {
     press_key(&mut game, &mut queue, 2);
     press_key(&mut game, &mut queue, 2);
     run_ticks(&mut game, &mut queue, 1);
-    assert_eq!(game.selected_slot, 1);
+    assert_eq!(game.hotbar.selected, 1);
     // The wheel moves to slot 5 before the next tick; the key still has
     // a press left, and the keys come after the wheel.
     press_slot(&mut game, &mut queue, 5);
-    assert_eq!(game.selected_slot, 5);
+    assert_eq!(game.hotbar.selected, 5);
     run_ticks(&mut game, &mut queue, 2);
-    assert_eq!(game.selected_slot, 1);
+    assert_eq!(game.hotbar.selected, 1);
     assert_eq!(slots_in(&queue), [1], "slot 5 never reached the server");
 }
 
@@ -483,9 +486,9 @@ fn a_join_starts_both_sides_on_slot_zero() {
     let mut game = placed_game();
     let mut queue = CommandQueue::default();
     let (frames, _received) = mpsc::sync_channel(16);
-    game.selected_slot = 5;
-    game.applied_slot = 5;
-    game.synced_slot = 5;
+    game.hotbar.selected = 5;
+    game.hotbar.applied = 5;
+    game.hotbar.synced = 5;
     handle_net(
         &mut game,
         PlayEvent::JoinGame(umicraft_net::play::JoinGameInfo {
@@ -501,7 +504,11 @@ fn a_join_starts_both_sides_on_slot_zero() {
         &frames,
     );
     assert_eq!(
-        (game.selected_slot, game.applied_slot, game.synced_slot),
+        (
+            game.hotbar.selected,
+            game.hotbar.applied,
+            game.hotbar.synced
+        ),
         (0, 0, 0)
     );
     queue.ordered.clear();
@@ -530,7 +537,7 @@ fn a_respawn_goes_back_to_slot_zero_and_tells_the_server_once() {
     assert_eq!(slots_in(&queue), [5]);
     queue.ordered.clear();
     handle_net(&mut game, respawn_event(), &mut queue, &frames);
-    assert_eq!(game.selected_slot, 0);
+    assert_eq!(game.hotbar.selected, 0);
     assert_eq!(game.windows.selected_slot(), 0);
     assert!(queue.ordered.is_empty(), "nothing at the event");
     place_after_respawn(&mut game, &mut queue, &frames);
@@ -576,7 +583,7 @@ fn a_use_of_the_item_in_the_air_syncs_then_uses_without_a_swing() {
     game.windows.apply_set_slot(0, 38, wire_item(297, 0));
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
-    game.use_pressed = true;
+    game.controls.use_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     // `sendUseItem`: sync, then the use; `rightClickMouse` swings only
     // after a placement or an activation.
@@ -591,7 +598,7 @@ fn a_tool_on_a_block_syncs_then_places_then_uses_without_a_swing() {
     game.windows.apply_set_slot(0, 38, wire_item(267, 0));
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
-    game.use_pressed = true;
+    game.controls.use_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     // The placement packet is sent, `onItemUse` fails, `sendUseItem`
     // follows; nothing swings.
@@ -605,7 +612,7 @@ fn a_click_on_a_mob_syncs_then_interacts_at_then_interacts_with_no_swing() {
     spawn_ahead(&mut game, false);
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
-    game.use_pressed = true;
+    game.controls.use_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     // `func_178894_a` (sync, interact-at), `interactWithEntitySendPacket`
     // (interact); the empty hand sends no use.
@@ -619,8 +626,8 @@ fn an_attack_on_a_mob_swings_then_syncs_then_attacks() {
     spawn_ahead(&mut game, false);
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     assert_eq!(tags(&queue), ["swing", "slot2", "attack", "move"]);
 }
@@ -632,13 +639,13 @@ fn a_click_that_only_swings_does_not_sync_the_slot() {
     game.pitch = -1.0;
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     // `clickMouse` on air: `swingItem`, no controller call, no sync.
     assert_eq!(tags(&queue), ["swing", "move"]);
     queue.ordered.clear();
-    game.input.attack = false;
+    game.controls.input.attack = false;
     run_ticks(&mut game, &mut queue, 1);
     assert_eq!(tags(&queue), ["slot2", "move"], "the next updateController");
 }

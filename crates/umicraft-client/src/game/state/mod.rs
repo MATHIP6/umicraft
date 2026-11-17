@@ -2,30 +2,25 @@
 
 //! The state the game thread owns, and the questions asked of it.
 
-use std::collections::{BTreeSet, VecDeque};
-use std::time::Instant;
+use std::collections::BTreeSet;
 
 use glam::DVec3;
 use umicraft_assets::profile_textures::{AccountSkinFetcher, ProfileTextures};
 use umicraft_game::entity::{EntityId, EntityKind, EntityRecord, EntityStore};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::hand::HandState;
-use umicraft_game::hud::boss_bar::BossBar;
 use umicraft_game::interaction::Interaction;
 use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::WindowManager;
-use umicraft_game::item_use::{DropKind, ItemUse};
-use umicraft_game::player_list::PlayerList;
+use umicraft_game::item_use::ItemUse;
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
-use umicraft_game::scoreboard::Scoreboard;
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
-use umicraft_game::title::{ActionBar, TitleState};
 use umicraft_game::traffic::ServerView;
 use umicraft_game::view::Perspective;
 use umicraft_game::GameState;
 use umicraft_protocol::packets::play::ItemStack;
-use umicraft_render::{ChatLineView, HudState, OutlineBox};
+use umicraft_render::{HudState, OutlineBox};
 use umicraft_world::{BlockPos, ChunkPos, World};
 
 use super::combat;
@@ -34,6 +29,20 @@ use super::messages::GameStatus;
 use crate::connection_end::ConnectionEnd;
 use crate::cracks::Crack;
 use crate::social_view;
+
+mod chat;
+mod controls;
+mod hotbar;
+mod metrics;
+mod social;
+mod vitals;
+
+pub(super) use chat::ChatState;
+pub(super) use controls::Controls;
+pub(super) use hotbar::Hotbar;
+pub(super) use metrics::TickMetrics;
+pub(super) use social::Social;
+pub(super) use vitals::Vitals;
 
 /// The seed of the particle random source; particles are cosmetic, so a fixed
 /// seed only makes a session repeatable.
@@ -87,48 +96,15 @@ pub(super) struct Game {
     pub(super) yaw: f32,
     /// The view angle in radians; a positive pitch looks down.
     pub(super) pitch: f32,
-    /// The latest key state.
-    pub(super) input: crate::input::InputState,
-    /// The health points.
-    pub(super) health: f32,
-    /// Whether a health update has come since the player was created: the first
-    /// one only sets the health, a later drop hurts (MCP
-    /// `EntityPlayerSP.hasValidHealth`).
-    pub(super) health_known: bool,
-    /// The food points.
-    pub(super) food: f32,
-    /// The armour points.
-    pub(super) armor: f32,
-    /// The experience bar fill, `0..=1`.
-    pub(super) experience: f32,
-    /// The experience level.
-    pub(super) level: i32,
-    /// The score of the death screen (data watcher 18 of the local player).
-    pub(super) score: i32,
-    /// The ticks since the death, up to [`DEATH_TICKS`](super::tick::DEATH_TICKS)
-    /// (MCP `EntityLivingBase.deathTime`).
-    pub(super) death_time: u32,
-    /// The selected hotbar slot.
-    pub(super) selected_slot: u8,
-    /// The slot as the last keyboard stage of a tick left it (MCP
-    /// `inventory.currentItem` between two ticks).
-    pub(super) applied_slot: u8,
-    /// The slot the server was last told (MCP
-    /// `PlayerControllerMP.currentPlayerItem`).
-    pub(super) synced_slot: u8,
-    /// The presses of each digit key not taken by a tick yet (MCP
-    /// `KeyBinding.pressTime`).
-    pub(super) hotbar_presses: [u8; 9],
-    /// The drop key presses since the last tick, oldest first.
-    pub(super) pending_drops: Vec<DropKind>,
-    /// The pick-block presses since the last tick.
-    pub(super) pending_picks: u32,
-    /// The chat messages, oldest first.
-    pub(super) chat: VecDeque<ChatLineView>,
-    /// The chat visibility the server was told (`ClientSettings` byte).
-    pub(super) chat_mode: u8,
-    /// Counts the tab-completion answers.
-    pub(super) completions_serial: u64,
+    /// The keys held and the buttons pressed since the last tick.
+    pub(super) controls: Controls,
+    /// The health, food, armour and experience of the local player.
+    pub(super) vitals: Vitals,
+    /// The selected hotbar slot, what the server was told of it, and the key
+    /// presses the next tick takes.
+    pub(super) hotbar: Hotbar,
+    /// The chat history, its visibility and the tab completions.
+    pub(super) chat: ChatState,
     /// What the server was last told about the player's movement.
     pub(super) server_view: ServerView,
     /// The vehicle the player rides (`Attach Entity`), `None` on foot.
@@ -137,14 +113,8 @@ pub(super) struct Game {
     pub(super) interaction: Interaction,
     /// The use of the held item (eating, blocking, drawing a bow).
     pub(super) item_use: ItemUse,
-    /// The use button went down since the last tick.
-    pub(super) use_pressed: bool,
     /// Where the camera sits (`F5`).
     pub(super) perspective: Perspective,
-    /// The `F5` presses since the last tick, applied by the next one.
-    pub(super) perspective_presses: u8,
-    /// The attack button went down since the last tick.
-    pub(super) attack_pressed: bool,
     /// The animation state of the first-person hand.
     pub(super) hand: HandState,
     /// The body of the local player, animated like any other player; drawn
@@ -158,10 +128,6 @@ pub(super) struct Game {
     pub(super) hud_dirty: bool,
     /// The bursts of critical stars still going (`EntityParticleEmitter`).
     pub(super) hit_emitters: Vec<umicraft_game::combat::HitEmitter>,
-    /// The absorption hearts of the local player (entry 17).
-    pub(super) absorption: f32,
-    /// Whether the world is hardcore (`Join Game`).
-    pub(super) hardcore: bool,
     /// The status rows, bars and held-item name of the HUD.
     pub(super) hud_view: crate::hud_view::HudTracker,
     /// Entities in the world (mobs, players, objects).
@@ -176,48 +142,14 @@ pub(super) struct Game {
     /// The tick-driven parity scenario and its state log (phase E.2);
     /// `None` outside `--script e1`.
     pub(super) e1: Option<crate::e1::E1Run>,
-    /// The tab list of the server.
-    pub(super) player_list: PlayerList,
-    /// The scoreboard of the current world.
-    pub(super) scoreboard: Scoreboard,
-    /// The title and subtitle.
-    pub(super) title: TitleState,
-    /// The message above the hotbar.
-    pub(super) action_bar: ActionBar,
-    /// The boss bar (`BossStatus`).
-    pub(super) boss_bar: BossBar,
-    /// The completions the server offered for the open chat line.
-    pub(super) completions: Vec<String>,
+    /// The tab list, the scoreboard, the title, the action bar and the boss bar.
+    pub(super) social: Social,
     /// The state of the creative inventory screen.
     pub(super) creative: CreativeScreen,
     /// The session state kept for later consumers (ADR-0020 section 3).
     pub(super) server: ServerState,
-    /// Execution time of the previous 20 Hz simulation tick, in microseconds.
-    pub(super) last_tick_micros: u32,
-    /// Maximum tick execution time observed, in microseconds.
-    pub(super) max_tick_micros: u32,
-    /// Delay of the latest tick from its scheduled instant, in microseconds.
-    pub(super) last_tick_delay_us: u32,
-    /// Maximum tick delay observed, in microseconds.
-    pub(super) max_tick_delay_us: u32,
-    /// Cumulative catch-up simulation ticks executed.
-    pub(super) catch_up_ticks_total: u64,
-    /// Measured simulation TPS.
-    pub(super) real_tps: f32,
-    /// Last instant TPS was recalculated.
-    pub(super) last_tps_instant: Instant,
-    /// Tick count at last TPS recalculation.
-    pub(super) last_tps_ticks: u64,
-    /// Current number of unread events in the network inbox.
-    pub(super) net_queue_len: usize,
-    /// Cumulative microseconds spent handling network events since the last tick.
-    pub(super) net_micros_accum: u32,
-    /// Microseconds spent handling network events in the previous tick window.
-    pub(super) last_net_micros: u32,
-    /// Execution time of the most recent input handling pass, in microseconds.
-    pub(super) last_input_processing_us: u32,
-    /// Queuing latency of the most recent input update, in microseconds.
-    pub(super) last_input_queue_latency_us: u32,
+    /// The timings the F3 screen shows: tick, network and input times, TPS.
+    pub(super) metrics: TickMetrics,
 }
 
 impl Game {
@@ -243,67 +175,31 @@ impl Game {
             state: None,
             yaw: 0.0,
             pitch: 0.0,
-            input: crate::input::InputState::default(),
-            health: 20.0,
-            health_known: false,
-            food: 20.0,
-            armor: 0.0,
-            experience: 0.0,
-            level: 0,
-            score: 0,
-            death_time: 0,
-            selected_slot: 0,
-            applied_slot: 0,
-            synced_slot: 0,
-            hotbar_presses: [0; 9],
-            pending_drops: Vec::new(),
-            pending_picks: 0,
-            chat: VecDeque::new(),
-            chat_mode: 0,
-            completions_serial: 0,
+            controls: Controls::default(),
+            vitals: Vitals::default(),
+            hotbar: Hotbar::default(),
+            chat: ChatState::default(),
             server_view: ServerView::default(),
             vehicle: None,
             interaction: Interaction::new(),
             item_use: ItemUse::new(),
-            pending_book: None,
-            use_pressed: false,
             perspective: Perspective::default(),
-            perspective_presses: 0,
-            attack_pressed: false,
             hand: HandState::new(),
             body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
             look: LookSlot::default(),
             status_data: GameStatus::default(),
             hud_dirty: true,
             hit_emitters: Vec::new(),
-            absorption: 0.0,
-            hardcore: false,
             hud_view: crate::hud_view::HudTracker::default(),
             entities: EntityStore::new(),
             windows: WindowManager::new(),
+            pending_book: None,
             own_name: String::new(),
             e1: None,
-            player_list: PlayerList::new(),
-            scoreboard: Scoreboard::new(),
-            title: TitleState::new(),
-            action_bar: ActionBar::new(),
-            boss_bar: BossBar::new(),
-            completions: Vec::new(),
+            social: Social::default(),
             creative: CreativeScreen::new(),
             server: ServerState::new(),
-            last_tick_micros: 0,
-            max_tick_micros: 0,
-            last_tick_delay_us: 0,
-            max_tick_delay_us: 0,
-            catch_up_ticks_total: 0,
-            real_tps: 20.0,
-            last_tps_instant: Instant::now(),
-            last_tps_ticks: 0,
-            net_queue_len: 0,
-            net_micros_accum: 0,
-            last_net_micros: 0,
-            last_input_processing_us: 0,
-            last_input_queue_latency_us: 0,
+            metrics: TickMetrics::default(),
         }
     }
 
@@ -317,7 +213,7 @@ impl Game {
 
     /// Whether the local player is dead (MCP `EntityLivingBase.getHealth() <= 0`).
     pub(super) fn dead(&self) -> bool {
-        self.health <= 0.0
+        self.vitals.health <= 0.0
     }
 
     /// The entity the view follows (`Camera`, 0x43), if it is another one
@@ -431,22 +327,26 @@ impl Game {
     /// The HUD state of the session.
     pub(super) fn hud(&self) -> HudState {
         HudState {
-            health: self.health,
-            food: self.food,
-            armor: self.armor,
-            level: self.level,
-            score: self.score,
-            selected_slot: self.selected_slot,
+            health: self.vitals.health,
+            food: self.vitals.food,
+            armor: self.vitals.armor,
+            level: self.vitals.level,
+            score: self.vitals.score,
+            selected_slot: self.hotbar.selected,
             crosshair: true,
-            chat: self.chat.iter().cloned().collect(),
-            action_bar: social_view::action_bar_view(&self.action_bar),
-            title: social_view::title_view(&self.title),
-            sidebar: social_view::sidebar_view(&self.scoreboard, &self.own_name),
-            tab_list: social_view::tab_list_view(&self.player_list, &self.scoreboard, true),
+            chat: self.chat.lines.iter().cloned().collect(),
+            action_bar: social_view::action_bar_view(&self.social.action_bar),
+            title: social_view::title_view(&self.social.title),
+            sidebar: social_view::sidebar_view(&self.social.scoreboard, &self.own_name),
+            tab_list: social_view::tab_list_view(
+                &self.social.player_list,
+                &self.social.scoreboard,
+                true,
+            ),
             show_tab_list: false,
-            completions: self.completions.clone(),
-            completions_serial: self.completions_serial,
-            boss: social_view::boss_view(&self.boss_bar),
+            completions: self.chat.completions.clone(),
+            completions_serial: self.chat.completions_serial,
+            boss: social_view::boss_view(&self.social.boss_bar),
             vitals: self.hud_view.views().vitals.clone(),
             bar: self.hud_view.views().bar,
             held_name: self.hud_view.views().held_name.clone(),
@@ -460,7 +360,7 @@ impl Game {
     /// server reports it (MCP `NetworkPlayerInfo.getResponseTime`). A negative
     /// value is not a measure.
     pub(super) fn local_ping_ms(&self) -> Option<u32> {
-        let entry = self.player_list.by_name(&self.own_name)?;
+        let entry = self.social.player_list.by_name(&self.own_name)?;
         u32::try_from(entry.ping).ok()
     }
 }

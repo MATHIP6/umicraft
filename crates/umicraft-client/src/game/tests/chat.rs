@@ -123,7 +123,7 @@ fn the_chat_visibility_filters_incoming_chat_and_system_messages() {
         handle_net(game, event, &mut CommandQueue::default(), &frames);
     };
     // Commands only: the system message stays, the player message goes.
-    game.chat_mode = 1;
+    game.chat.mode = 1;
     say(
         &mut game,
         PlayEvent::Chat(r#"{"text":"player"}"#.to_string()),
@@ -133,7 +133,7 @@ fn the_chat_visibility_filters_incoming_chat_and_system_messages() {
         PlayEvent::SystemChat(r#"{"text":"system"}"#.to_string()),
     );
     // Hidden: nothing is kept.
-    game.chat_mode = 2;
+    game.chat.mode = 2;
     say(
         &mut game,
         PlayEvent::SystemChat(r#"{"text":"late"}"#.to_string()),
@@ -158,7 +158,7 @@ fn a_client_settings_event_updates_the_chat_visibility_filter() {
         &mut queue,
         &frames,
     );
-    assert_eq!(game.chat_mode, 2);
+    assert_eq!(game.chat.mode, 2);
 }
 
 #[test]

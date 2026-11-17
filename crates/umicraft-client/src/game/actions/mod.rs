@@ -48,7 +48,7 @@ pub(super) fn tick_hand(game: &mut Game) {
 /// packets leave in the tick, where MCP `Minecraft.runTick` handles the keys
 /// (`queue` is kept for the callers).
 pub(super) fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut CommandQueue) {
-    game.input = update.state;
+    game.controls.input = update.state;
     // Continuous, never wrapped: MCP `Entity.setAngles` adds to `rotationYaw`
     // and the packet carries it as is, so 359.9 turns into 360.2, not 0.2.
     // The consumers of the yaw only use its sine and cosine or wrap the
@@ -61,13 +61,13 @@ pub(super) fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut Co
         select_slot(game, slot);
     }
     if update.hotbar_keys != [0; 9] {
-        for (total, new) in game.hotbar_presses.iter_mut().zip(update.hotbar_keys) {
+        for (total, new) in game.hotbar.key_presses.iter_mut().zip(update.hotbar_keys) {
             *total = total.saturating_add(new);
         }
         // The player sees the slot the keys will give at the tick.
         if let Some(slot) = (0..9u8)
             .rev()
-            .find(|&slot| game.hotbar_presses[usize::from(slot)] > 0)
+            .find(|&slot| game.hotbar.key_presses[usize::from(slot)] > 0)
         {
             select_slot(game, slot);
         }
@@ -79,14 +79,14 @@ pub(super) fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut Co
     // the mouse moves, ahead of the entities of the last frame: back in the
     // first person the camera sat inside the head that was still drawn.
     if update.toggle_perspective {
-        game.perspective_presses = game.perspective_presses.saturating_add(1);
+        game.controls.perspective_presses = game.controls.perspective_presses.saturating_add(1);
     }
-    game.attack_pressed |= update.break_block;
-    game.use_pressed |= update.place_block;
+    game.controls.attack_pressed |= update.break_block;
+    game.controls.use_pressed |= update.place_block;
     if update.pick_block {
-        game.pending_picks = game.pending_picks.saturating_add(1);
+        game.hotbar.picks = game.hotbar.picks.saturating_add(1);
     }
     if let Some(kind) = update.drop_item {
-        game.pending_drops.push(kind);
+        game.hotbar.drops.push(kind);
     }
 }

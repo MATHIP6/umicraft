@@ -20,7 +20,7 @@ const ARROW: i16 = 262;
 /// Runs one tick of the use button (`umicraft_game::item_use`): the click on
 /// a block or in the air, the held button and the release.
 pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
-    let pressed = std::mem::take(&mut game.use_pressed);
+    let pressed = std::mem::take(&mut game.controls.use_pressed);
     if game.dead() {
         return;
     }
@@ -45,15 +45,15 @@ pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         &UseTick {
             mode: game.gamemode,
             pressed,
-            held: game.input.use_item,
+            held: game.controls.input.use_item,
             target,
             entity,
             world,
             player: Some(player.bounding_box()),
             sneaking: player.sneaking,
-            slot: game.selected_slot,
+            slot: game.hotbar.selected,
             item: item.as_ref(),
-            food: game.food as i32,
+            food: game.vitals.food as i32,
             has_arrow,
             viewer: ClickViewer {
                 id: EntityId(game.entity_id),

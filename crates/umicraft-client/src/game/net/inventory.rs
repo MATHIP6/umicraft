@@ -17,7 +17,7 @@ use crate::network::ClientCommand;
 
 /// Recomputes the armour bar from the armour slots of the inventory.
 pub(in crate::game) fn sync_armor(game: &mut Game) {
-    game.armor = f32::from(game.windows.armor_value());
+    game.vitals.armor = f32::from(game.windows.armor_value());
     game.hud_dirty = true;
 }
 

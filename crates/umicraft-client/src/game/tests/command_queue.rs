@@ -165,8 +165,8 @@ fn a_movement_then_an_attack_leave_in_the_order_of_their_ticks() {
     game.pitch = 1.0;
     let mut queue = CommandQueue::default();
     run_ticks(&mut game, &mut queue, 1);
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     let moves = movement_indices(&queue);
     let swing = index_of(&queue, |c| matches!(c, ClientCommand::Swing));
@@ -187,7 +187,7 @@ fn a_movement_then_a_use_leave_in_the_order_of_their_ticks() {
     game.windows.apply_set_slot(0, 36, click_stack());
     let mut queue = CommandQueue::default();
     run_ticks(&mut game, &mut queue, 1);
-    game.use_pressed = true;
+    game.controls.use_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     let moves = movement_indices(&queue);
     let used = index_of(&queue, |c| {
@@ -210,12 +210,12 @@ fn interleaved_actions_keep_one_report_per_tick_and_their_own_tick() {
     let mut ends = Vec::new();
     run_ticks(&mut game, &mut queue, 1);
     ends.push(queue.ordered.len());
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
-    game.input.attack = false;
+    game.controls.input.attack = false;
     ends.push(queue.ordered.len());
-    game.use_pressed = true;
+    game.controls.use_pressed = true;
     run_ticks(&mut game, &mut queue, 1);
     ends.push(queue.ordered.len());
     run_ticks(&mut game, &mut queue, 1);

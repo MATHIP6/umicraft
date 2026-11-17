@@ -23,7 +23,7 @@ fn the_input_update_turns_the_view() {
     );
     assert!((game.yaw - 0.5).abs() < 1e-6);
     assert!((game.pitch - 0.25).abs() < 1e-6);
-    assert_eq!(game.input.forward, 1.0);
+    assert_eq!(game.controls.input.forward, 1.0);
 }
 
 /// Turns by `degrees`, runs one tick and returns the yaw of the movement

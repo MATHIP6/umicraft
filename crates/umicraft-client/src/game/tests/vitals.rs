@@ -10,14 +10,14 @@ fn the_armour_bar_follows_the_armour_slots() {
     game.windows.apply_set_slot(0, 5, wire_item(310, 0));
     game.windows.apply_set_slot(0, 6, wire_item(311, 0));
     sync_armor(&mut game);
-    assert_eq!(game.armor, 11.0);
+    assert_eq!(game.vitals.armor, 11.0);
 }
 
 #[test]
 fn the_hud_carries_the_rows_and_bars_of_the_tick() {
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.experience = 0.5;
-    game.level = 4;
+    game.vitals.experience = 0.5;
+    game.vitals.level = 4;
     let (frames, _received) = mpsc::sync_channel(16);
     handle_net(
         &mut game,
@@ -25,7 +25,7 @@ fn the_hud_carries_the_rows_and_bars_of_the_tick() {
         &mut CommandQueue::default(),
         &frames,
     );
-    game.health = 7.0;
+    game.vitals.health = 7.0;
     tick_hud_view(&mut game);
     let hud = game.hud();
     let hearts = hud.vitals.expect("survival shows the rows").hearts;
@@ -43,9 +43,9 @@ fn the_hud_carries_the_rows_and_bars_of_the_tick() {
 fn a_dead_player_neither_moves_attacks_nor_places() {
     let mut game = game_on_floor_with(BlockState::AIR);
     game.playing = true;
-    game.input.forward = 1.0;
-    game.input.attack = true;
-    game.attack_pressed = true;
+    game.controls.input.forward = 1.0;
+    game.controls.input.attack = true;
+    game.controls.attack_pressed = true;
     game.pitch = 1.5;
     let mut queue = CommandQueue::default();
     let (frames, _received) = mpsc::sync_channel(8);
@@ -77,10 +77,10 @@ fn the_death_animation_runs_twenty_ticks_and_stops_with_the_respawn() {
     for _ in 0..30 {
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
     }
-    assert_eq!(game.death_time, DEATH_TICKS);
+    assert_eq!(game.vitals.death_time, DEATH_TICKS);
     handle_net(&mut game, health_update(20.0), &mut queue, &frames);
     tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
-    assert_eq!(game.death_time, 0);
+    assert_eq!(game.vitals.death_time, 0);
 }
 
 /// Phase E.9: a dead player entity stops updating after 20 dead ticks
@@ -203,8 +203,8 @@ fn the_score_comes_from_the_local_player_metadata() {
         })
     };
     handle_net(&mut game, metadata(9, 100), &mut queue, &frames);
-    assert_eq!(game.score, 0, "another entity's score is not ours");
+    assert_eq!(game.vitals.score, 0, "another entity's score is not ours");
     handle_net(&mut game, metadata(3, 57), &mut queue, &frames);
-    assert_eq!(game.score, 57);
+    assert_eq!(game.vitals.score, 57);
     assert_eq!(game.hud().score, 57);
 }

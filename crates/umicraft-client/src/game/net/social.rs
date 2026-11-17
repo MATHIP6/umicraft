@@ -10,7 +10,7 @@ use crate::profiles::profile_from_properties;
 /// `Player List Item`: the tab list, and the profiles (skins) of the
 /// players it adds.
 pub(super) fn update_player_list(game: &mut Game, packet: &PlayerListItem) {
-    game.player_list.apply(packet);
+    game.social.player_list.apply(packet);
     game.server.apply_player_list(packet);
     if let PlayerListItem::AddPlayer(entries) = packet {
         for entry in entries {

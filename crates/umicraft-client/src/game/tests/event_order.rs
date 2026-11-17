@@ -286,7 +286,7 @@ fn test_event_order_8_respawn_followed_by_placement() {
     let mut queue = CommandQueue::default();
     let (frames, _) = mpsc::sync_channel(64);
 
-    game.health = 0.0;
+    game.vitals.health = 0.0;
     handle_net(
         &mut game,
         PlayEvent::Respawn(umicraft_protocol::packets::play::clientbound::Respawn {
@@ -299,7 +299,7 @@ fn test_event_order_8_respawn_followed_by_placement() {
         &frames,
     );
 
-    assert_eq!(game.health, 20.0);
+    assert_eq!(game.vitals.health, 20.0);
     assert!(game.state.is_none());
 
     handle_net(
@@ -422,7 +422,7 @@ fn test_event_order_12_fifo_order_preserved() {
             &frames,
         );
         assert_eq!(
-            game.selected_slot, i as u8,
+            game.hotbar.selected, i as u8,
             "slot updated in exact FIFO order"
         );
     }

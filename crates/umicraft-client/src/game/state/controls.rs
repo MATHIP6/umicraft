@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The controls of the player between two ticks.
+
+/// The keys held and the buttons pressed since the last tick.
+#[derive(Default)]
+pub(in crate::game) struct Controls {
+    /// The latest key state.
+    pub(in crate::game) input: crate::input::InputState,
+    /// The attack button went down since the last tick.
+    pub(in crate::game) attack_pressed: bool,
+    /// The use button went down since the last tick.
+    pub(in crate::game) use_pressed: bool,
+    /// The `F5` presses since the last tick, applied by the next one.
+    pub(in crate::game) perspective_presses: u8,
+}

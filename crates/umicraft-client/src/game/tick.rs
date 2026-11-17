@@ -67,7 +67,7 @@ fn tick_overlays(game: &mut Game) {
 
 /// Cycles the perspective once per `F5` press since the last tick.
 pub(super) fn apply_perspective_presses(game: &mut Game) {
-    for _ in 0..std::mem::take(&mut game.perspective_presses) {
+    for _ in 0..std::mem::take(&mut game.controls.perspective_presses) {
         game.perspective = game.perspective.next();
     }
 }
@@ -82,7 +82,7 @@ pub(super) fn tick(
 ) {
     umicraft_core::profile_scope!("game tick");
     let tick_start = Instant::now();
-    game.last_net_micros = std::mem::take(&mut game.net_micros_accum);
+    game.metrics.last_net_micros = std::mem::take(&mut game.metrics.net_micros_accum);
     game.status_data.ticks += 1;
     apply_perspective_presses(game);
     // MCP `Minecraft.runTick`: `updateController` syncs the slot, the hotbar
@@ -91,7 +91,7 @@ pub(super) fn tick(
     // and the pick-block.
     sync_held_item(game, queue);
     run_hotbar_keys(game);
-    for kind in std::mem::take(&mut game.pending_drops) {
+    for kind in std::mem::take(&mut game.hotbar.drops) {
         if let Some(outgoing) = drop_item(game.gamemode, kind) {
             queue.push(command_of(outgoing));
         }
@@ -108,15 +108,15 @@ pub(super) fn tick(
 
     // The title and the action bar fade with the tick, so the HUD is
     // published again on every tick while one of them is displayed.
-    if game.title.title().is_some()
-        || game.title.subtitle().is_some()
-        || game.action_bar.message().is_some()
+    if game.social.title.title().is_some()
+        || game.social.title.subtitle().is_some()
+        || game.social.action_bar.message().is_some()
     {
-        game.title.tick();
-        game.action_bar.tick();
+        game.social.title.tick();
+        game.social.action_bar.tick();
         game.hud_dirty = true;
     }
-    if social_view::tick_boss_bar(&mut game.boss_bar, &game.entities) {
+    if social_view::tick_boss_bar(&mut game.social.boss_bar, &game.entities) {
         game.hud_dirty = true;
     }
 
@@ -132,21 +132,21 @@ pub(super) fn tick(
         None
     };
     if let Some(keys) = e1_keys {
-        game.input.forward = f32::from(i8::from(keys.w) - i8::from(keys.s));
-        game.input.strafe = f32::from(i8::from(keys.a) - i8::from(keys.d));
-        game.input.jump = keys.jump;
-        game.input.sneak = keys.sneak;
-        game.input.sprint = keys.sprint;
+        game.controls.input.forward = f32::from(i8::from(keys.w) - i8::from(keys.s));
+        game.controls.input.strafe = f32::from(i8::from(keys.a) - i8::from(keys.d));
+        game.controls.input.jump = keys.jump;
+        game.controls.input.sneak = keys.sneak;
+        game.controls.input.sprint = keys.sprint;
     }
 
     // The intent of the tick: the raw key state with the yaw and the pitch
     // the player is looking at.
     let intent = RawInput {
-        forward: game.input.forward,
-        strafe: game.input.strafe,
-        jump: game.input.jump,
-        sneak: game.input.sneak,
-        sprint: game.input.sprint,
+        forward: game.controls.input.forward,
+        strafe: game.controls.input.strafe,
+        jump: game.controls.input.jump,
+        sneak: game.controls.input.sneak,
+        sprint: game.controls.input.sprint,
         using_item: game.item_use.is_using() && game.vehicle.is_none(),
         yaw: game.yaw,
         pitch: game.pitch,
@@ -166,9 +166,9 @@ pub(super) fn tick(
     // updating, so the client sends no movement packet any more (measured on the
     // vanilla 1.8.9 client: exactly 20 movement packets after the death, then
     // silence). Until the respawn replaces the player, the tick reports nothing.
-    let entity_removed = game.dead() && game.death_time >= DEATH_TICKS;
-    game.death_time = if game.dead() {
-        (game.death_time + 1).min(DEATH_TICKS)
+    let entity_removed = game.dead() && game.vitals.death_time >= DEATH_TICKS;
+    game.vitals.death_time = if game.dead() {
+        (game.vitals.death_time + 1).min(DEATH_TICKS)
     } else {
         0
     };
@@ -255,19 +255,24 @@ pub(super) fn tick(
     }
     if game.status_data.ticks.is_multiple_of(STATUS_PERIOD) {
         let now = Instant::now();
-        let elapsed = now.duration_since(game.last_tps_instant).as_secs_f32();
+        let elapsed = now
+            .duration_since(game.metrics.last_tps_instant)
+            .as_secs_f32();
         if elapsed > 0.0 {
-            let ticks_delta = game.status_data.ticks.saturating_sub(game.last_tps_ticks);
-            game.real_tps = ticks_delta as f32 / elapsed;
-            game.last_tps_instant = now;
-            game.last_tps_ticks = game.status_data.ticks;
+            let ticks_delta = game
+                .status_data
+                .ticks
+                .saturating_sub(game.metrics.last_tps_ticks);
+            game.metrics.real_tps = ticks_delta as f32 / elapsed;
+            game.metrics.last_tps_instant = now;
+            game.metrics.last_tps_ticks = game.status_data.ticks;
         }
         publish_status(game, frames);
     }
     let tick_elapsed = tick_start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
-    game.last_tick_micros = tick_elapsed;
-    if tick_elapsed > game.max_tick_micros {
-        game.max_tick_micros = tick_elapsed;
+    game.metrics.last_tick_micros = tick_elapsed;
+    if tick_elapsed > game.metrics.max_tick_micros {
+        game.metrics.max_tick_micros = tick_elapsed;
     }
 }
 
