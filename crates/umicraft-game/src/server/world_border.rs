@@ -9,6 +9,8 @@
 
 use umicraft_protocol::packets::play::clientbound::world_border::WorldBorder as BorderPacket;
 
+use crate::collision::BorderBounds;
+
 /// Milliseconds per client tick.
 const TICK_MS: i64 = 50;
 /// MCP `WorldBorder` default diameter.
@@ -157,17 +159,26 @@ impl Border {
     /// (`WorldBorder.getClosestDistance`). The walls never pass the portal
     /// boundary (`minX`, `maxX`, `minZ` and `maxZ` clamp to it).
     pub fn closest_distance(&self, x: f64, z: f64) -> f64 {
+        let walls = self.bounds();
+        (x - walls.min_x)
+            .min(walls.max_x - x)
+            .min(z - walls.min_z)
+            .min(walls.max_z - z)
+    }
+
+    /// The walls now (`WorldBorder.minX`, `minZ`, `maxX`, `maxZ`): the
+    /// centre plus or minus half the diameter, clamped to the portal
+    /// boundary.
+    #[must_use]
+    pub fn bounds(&self) -> BorderBounds {
         let reach = f64::from(self.portal_boundary);
         let half = self.diameter() / 2.0;
-        let (min_x, max_x) = (
-            (self.center_x - half).max(-reach),
-            (self.center_x + half).min(reach),
-        );
-        let (min_z, max_z) = (
-            (self.center_z - half).max(-reach),
-            (self.center_z + half).min(reach),
-        );
-        (x - min_x).min(max_x - x).min(z - min_z).min(max_z - z)
+        BorderBounds {
+            min_x: (self.center_x - half).max(-reach),
+            min_z: (self.center_z - half).max(-reach),
+            max_x: (self.center_x + half).min(reach),
+            max_z: (self.center_z + half).min(reach),
+        }
     }
 
     /// The portal boundary (MCP `WorldBorder.getSize`).

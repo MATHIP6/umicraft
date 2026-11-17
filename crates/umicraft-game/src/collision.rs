@@ -19,10 +19,74 @@
 //! boxes on the stack.
 
 use glam::DVec3;
-use umicraft_world::BlockPos;
+use umicraft_world::{BlockPos, BlockState};
 
 pub use crate::shapes::Aabb;
 use crate::shapes::{shape_of, BlockSource};
+
+/// The walls of the world border on X and Z (MCP `WorldBorder.minX`, `minZ`,
+/// `maxX`, `maxZ`, already clamped to the portal boundary).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BorderBounds {
+    /// The west wall.
+    pub min_x: f64,
+    /// The north wall.
+    pub min_z: f64,
+    /// The east wall.
+    pub max_x: f64,
+    /// The south wall.
+    pub max_z: f64,
+}
+
+impl BorderBounds {
+    /// Whether any part of the block column `(x, z)` is inside
+    /// (MCP `WorldBorder.contains(BlockPos)`).
+    #[must_use]
+    pub fn contains_block(&self, x: i32, z: i32) -> bool {
+        f64::from(x) + 1.0 > self.min_x
+            && f64::from(x) < self.max_x
+            && f64::from(z) + 1.0 > self.min_z
+            && f64::from(z) < self.max_z
+    }
+
+    /// Whether `(x, z)` is inside the walls moved outwards by `margin`
+    /// (MCP `World.isInsideBorder`, which uses 1 or -1).
+    #[must_use]
+    pub fn contains_point(&self, x: f64, z: f64, margin: f64) -> bool {
+        x > self.min_x - margin
+            && x < self.max_x + margin
+            && z > self.min_z - margin
+            && z < self.max_z + margin
+    }
+}
+
+/// A block source where everything beyond the world border is stone, for
+/// the collision of an entity inside the border (MCP
+/// `World.getCollidingBoundingBoxes`: `Blocks.stone` replaces the block of
+/// any position the border does not contain).
+pub struct Bordered<'a, S: BlockSource + ?Sized> {
+    /// The real blocks.
+    pub world: &'a S,
+    /// The border.
+    pub walls: BorderBounds,
+}
+
+/// The stone the border is made of for the collisions.
+const BORDER_STONE: BlockState = BlockState::new(1, 0);
+
+impl<S: BlockSource + ?Sized> BlockSource for Bordered<'_, S> {
+    fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+        if self.walls.contains_block(x, z) {
+            self.world.block(x, y, z)
+        } else {
+            BORDER_STONE
+        }
+    }
+
+    fn is_column_loaded(&self, x: i32, z: i32) -> bool {
+        self.world.is_column_loaded(x, z)
+    }
+}
 
 /// The highest world coordinate that holds blocks in a 1.8 world.
 const MAX_BLOCK_Y: i32 = 255;

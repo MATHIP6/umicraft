@@ -18,7 +18,7 @@
 
 use glam::DVec3;
 
-use crate::collision::{self, MoveOptions};
+use crate::collision::{self, BorderBounds, Bordered, MoveOptions};
 use crate::input::{InputIntent, SPRINT_FORWARD_THRESHOLD};
 use crate::media;
 use crate::mth;
@@ -305,6 +305,12 @@ pub struct Player {
     pub previous_forward: f32,
     /// Whether the last move was blocked horizontally.
     pub collided_horizontally: bool,
+    /// The world border, `None` when the game has not set one (tests).
+    pub border: Option<BorderBounds>,
+    /// Whether the player was last found outside the border (MCP
+    /// `Entity.isOutsideBorder`): it widens or narrows the border test by a
+    /// block so a player outside is not walled in.
+    pub outside_border: bool,
     /// Whether the last move touched a cobweb, which slows the next one
     /// (MCP `Entity.isInWeb`).
     pub in_web: bool,
@@ -380,6 +386,8 @@ impl Default for Player {
             bow_draw_ticks: None,
             previous_forward: 0.0,
             collided_horizontally: false,
+            border: None,
+            outside_border: false,
             in_web: false,
             in_water: false,
             depth_strider: 0,
@@ -1029,16 +1037,20 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
         player.velocity = DVec3::ZERO;
     }
     let was_on_ground = player.on_ground;
-    let result = collision::move_entity(
-        player.bounding_box(),
-        delta,
-        world,
-        MoveOptions {
-            step_height: STEP_HEIGHT,
-            sneaking: player.sneaking,
-            on_ground: player.on_ground,
-        },
-    );
+    let options = MoveOptions {
+        step_height: STEP_HEIGHT,
+        sneaking: player.sneaking,
+        on_ground: player.on_ground,
+    };
+    let result = match border_walls(player) {
+        Some(walls) => collision::move_entity(
+            player.bounding_box(),
+            delta,
+            &Bordered { world, walls },
+            options,
+        ),
+        None => collision::move_entity(player.bounding_box(), delta, world, options),
+    };
     player.set_bounds(result.bounds);
     if !player.flying {
         // MCP `Entity.moveEntity` line 862, skipped while flying
@@ -1083,6 +1095,22 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
         splash_velocity: player.step_facts.splash_velocity,
     };
     media::collide_with_blocks(player, world);
+}
+
+/// The border the move collides with, if the player is inside it, and the
+/// update of [`Player::outside_border`].
+///
+/// MCP `World.getCollidingBoundingBoxes` tests `isInsideBorder` (the walls
+/// moved out by a block, or in by a block for a player already outside) and
+/// flips `outsideBorder` to match. The flag settles on the first query of a
+/// move, and the reference queries again from the same position, so one test
+/// per move gives the same walls as the reference.
+fn border_walls(player: &mut Player) -> Option<BorderBounds> {
+    let walls = player.border?;
+    let margin = if player.outside_border { -1.0 } else { 1.0 };
+    let inside = walls.contains_point(player.position.x, player.position.z, margin);
+    player.outside_border = !inside;
+    inside.then_some(walls)
 }
 
 /// Gravity and friction, MCP `EntityLivingBase.java:1666-1671`; a flying
@@ -1961,6 +1989,58 @@ mod tests {
             }
         }
         TestBlocks::with(&blocks)
+    }
+
+    /// A border whose east wall is at x = 10.
+    fn east_wall_at_ten() -> BorderBounds {
+        BorderBounds {
+            min_x: -10.0,
+            min_z: -100.0,
+            max_x: 10.0,
+            max_z: 100.0,
+        }
+    }
+
+    /// Regression: the world border was no wall for the local player
+    /// (MCP `World.getCollidingBoundingBoxes` puts stone beyond it).
+    #[test]
+    fn the_world_border_stops_a_player_inside_it() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(9.0, 1.0, 0.5));
+        player.border = Some(east_wall_at_ten());
+        for _ in 0..40 {
+            step(&mut player, &InputIntent::walking(-90.0), &world);
+        }
+        assert!(player.collided_horizontally);
+        assert_eq!(
+            player.bounding_box().max.x,
+            10.0,
+            "the box rests on the wall"
+        );
+        assert!(!player.outside_border);
+    }
+
+    #[test]
+    fn a_player_outside_the_border_is_not_walled_in() {
+        let world = flat_world();
+        let mut player = Player::new(DVec3::new(12.0, 1.0, 0.5));
+        player.border = Some(east_wall_at_ten());
+        for _ in 0..20 {
+            step(&mut player, &InputIntent::walking(-90.0), &world);
+        }
+        assert!(player.outside_border);
+        assert!(player.position.x > 13.0, "walked on: {}", player.position.x);
+        // Walking back in: the wall is no obstacle until the player is a
+        // block inside (the narrowed test of an outside player).
+        for _ in 0..40 {
+            step(&mut player, &InputIntent::walking(90.0), &world);
+        }
+        assert!(
+            player.position.x < 9.0,
+            "came back in: {}",
+            player.position.x
+        );
+        assert!(!player.outside_border);
     }
 
     /// One tick of a player resting on a slime floor and sliding at 0.1.

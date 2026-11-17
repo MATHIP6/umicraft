@@ -57,6 +57,7 @@ pub(super) fn apply_movement_stats(game: &mut Game) {
         f64::from(walk_speed),
     );
     state.set_movement(stats, walk_speed, game.vitals.food > SPRINT_FOOD_LIMIT);
+    state.set_border(game.server.border().bounds());
     let strider = game
         .windows
         .boots()

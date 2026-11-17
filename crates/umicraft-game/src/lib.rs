@@ -417,6 +417,12 @@ impl GameState {
         self.player.well_fed = well_fed;
     }
 
+    /// Sets the world border the player collides with
+    /// (`Border::bounds` of the server state).
+    pub fn set_border(&mut self, walls: collision::BorderBounds) {
+        self.player.border = Some(walls);
+    }
+
     /// Tells how long the bow in use has been drawn (`None` when there is none).
     pub fn set_bow_draw(&mut self, ticks: Option<u32>) {
         self.player.bow_draw_ticks = ticks;
