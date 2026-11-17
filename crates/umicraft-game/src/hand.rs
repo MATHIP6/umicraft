@@ -15,6 +15,7 @@ use glam::{Mat4, Vec3};
 use umicraft_protocol::packets::play::ItemStack;
 
 use crate::item_use::{ItemUseView, UseAction};
+use crate::legacy::LegacyAnimations;
 
 /// The ticks of an arm swing without Haste or Mining Fatigue
 /// (MCP `EntityLivingBase.getArmSwingAnimationEnd`).
@@ -70,6 +71,8 @@ pub struct HandState {
     /// The view as of the last tick, the yaw continuous with `arm_yaw`.
     view_pitch: f32,
     view_yaw: f32,
+    /// The 1.7 animations that change the hand (ADR-0079).
+    legacy: LegacyAnimations,
 }
 
 impl HandState {
@@ -80,6 +83,12 @@ impl HandState {
             equipped: 1.0,
             ..Self::default()
         }
+    }
+
+    /// Selects the 1.7 animations of the hand: the equip rule and whether an
+    /// item in use follows the swing. They apply from the next tick.
+    pub fn set_legacy(&mut self, legacy: LegacyAnimations) {
+        self.legacy = legacy;
     }
 
     /// Starts an arm swing (MCP `EntityLivingBase.swingItem`): it only
@@ -124,14 +133,15 @@ impl HandState {
         self.swing_progress = self.swing_ticks_done as f32 / end as f32;
     }
 
-    /// MCP `ItemRenderer.updateEquippedItem`.
+    /// MCP `ItemRenderer.updateEquippedItem`, with the rule of the selected
+    /// version ([`crate::legacy::EquipRule`]).
     fn tick_equip(&mut self, held: Option<&ItemStack>) {
-        let changed = match (self.item.as_ref(), held) {
-            (None, None) => false,
-            (Some(shown), Some(now)) => shown != now,
-            _ => true,
-        };
-        let target = if changed { 0.0 } else { 1.0 };
+        let same = self.legacy.equip_rule().same_item(self.item.as_ref(), held);
+        if same && self.item.as_ref() != held {
+            // 1.7 shows the new stack at once, without a dip.
+            self.item = held.cloned();
+        }
+        let target = if same { 1.0 } else { 0.0 };
         self.equipped += (target - self.equipped).clamp(-EQUIP_STEP, EQUIP_STEP);
         if self.equipped < 0.1 {
             self.item = held.cloned();
@@ -163,6 +173,7 @@ impl HandState {
             arm_pitch: self.arm_pitch,
             arm_yaw: self.arm_yaw,
             item_use: None,
+            swing_while_using: self.legacy.block_hit,
             ..HandPose::default()
         }
         .swayed_by(self.view_yaw, self.view_pitch)
@@ -201,6 +212,11 @@ pub struct HandPose {
     /// Whether the player has a bobber out: a held rod shows its cast model
     /// (MCP `RenderItem.renderItemModelForEntity`, `fishEntity != null`).
     pub fishing: bool,
+    /// Whether an item in use still turns with the swing, as in 1.7
+    /// (ADR-0079): 1.7.10 `ItemRenderer.renderItemInFirstPerson` applies the
+    /// swing rotations whatever the item does, 1.8.9 passes a swing of 0
+    /// while the item is in use.
+    pub swing_while_using: bool,
 }
 
 /// An angle in degrees brought to `-180..180`.
@@ -271,6 +287,7 @@ impl HandPose {
                 (_, newer) => newer,
             },
             fishing: other.fishing,
+            swing_while_using: other.swing_while_using,
         }
     }
 
@@ -284,25 +301,36 @@ impl HandPose {
     /// `BOW` `func_178098_a` after `transformFirstPersonItem`. The factors are
     /// multiplied in the order of the `GlStateManager` calls. The item's own
     /// first-person pose follows (`umicraft_model::item::pose::held_pose`).
+    ///
+    /// With [`Self::swing_while_using`] the item in use keeps the swing
+    /// rotations, still without the swing shift (1.7.10
+    /// `ItemRenderer.java:402-416`): the "block hit" of 1.7.
     #[must_use]
     pub fn item_matrix(&self) -> Mat4 {
         let sway = rotate(self.sway_pitch, Vec3::X) * rotate(self.sway_yaw, Vec3::Y);
+        let use_swing = if self.swing_while_using {
+            self.swing
+        } else {
+            0.0
+        };
         sway * match self.item_use {
             None => self.swing_shift() * self.placement(self.swing),
             Some(ItemUseView {
                 action: action @ (UseAction::Eat | UseAction::Drink),
                 count,
                 ..
-            }) => eat_drink_motion(count, action.max_duration() as f32) * self.placement(0.0),
+            }) => eat_drink_motion(count, action.max_duration() as f32) * self.placement(use_swing),
             Some(ItemUseView {
                 action: UseAction::Block,
                 ..
-            }) => self.placement(0.0) * block_pose(),
+            }) => self.placement(use_swing) * block_pose(),
             Some(ItemUseView {
                 action: UseAction::Bow,
                 count,
                 ..
-            }) => self.placement(0.0) * bow_draw(UseAction::Bow.max_duration() as f32 - count),
+            }) => {
+                self.placement(use_swing) * bow_draw(UseAction::Bow.max_duration() as f32 - count)
+            }
         }
     }
 
@@ -772,6 +800,55 @@ mod tests {
             swinging.item_matrix(),
             using(UseAction::Block, 100.0).item_matrix()
         );
+    }
+
+    #[test]
+    fn with_the_1_7_block_hit_an_item_in_use_turns_with_the_swing() {
+        let block_hit = |swing: f32| HandPose {
+            swing,
+            swing_while_using: true,
+            ..using(UseAction::Block, 100.0)
+        };
+        let raised = using(UseAction::Block, 100.0).item_matrix();
+        assert_eq!(block_hit(0.0).item_matrix(), raised, "at rest: no change");
+        assert_ne!(block_hit(0.5).item_matrix(), raised);
+        // The rotations of the swing only: the placement point stays where
+        // it is, as 1.7 left out the swing shift of an item in use.
+        let at = |pose: HandPose| pose.item_matrix().transform_point3(Vec3::ZERO);
+        let eating = HandPose {
+            swing: 0.5,
+            swing_while_using: true,
+            ..using(UseAction::Eat, 32.0)
+        };
+        assert!((at(eating) - at(using(UseAction::Eat, 32.0))).length() < 1e-5);
+    }
+
+    #[test]
+    fn the_1_7_hand_keeps_raised_while_the_count_changes() {
+        let mut hand = HandState::new();
+        hand.set_legacy(LegacyAnimations {
+            equip: true,
+            ..LegacyAnimations::default()
+        });
+        for _ in 0..10 {
+            hand.tick(Some(&stack(1, 10)), 0.0, 0.0, idle());
+        }
+        hand.tick(Some(&stack(1, 9)), 0.0, 0.0, idle());
+        assert!(hand.pose().equip < 0.01, "no dip");
+        assert_eq!(hand.item.as_ref().map(|s| s.stack_size), Some(9));
+        hand.tick(Some(&stack(2, 9)), 0.0, 0.0, idle());
+        assert!(hand.pose().equip > 0.3, "another item still dips");
+    }
+
+    #[test]
+    fn the_pose_carries_the_block_hit_switch() {
+        let mut hand = HandState::new();
+        assert!(!hand.pose().swing_while_using);
+        hand.set_legacy(LegacyAnimations {
+            block_hit: true,
+            ..LegacyAnimations::default()
+        });
+        assert!(hand.pose().swing_while_using);
     }
 
     #[test]
