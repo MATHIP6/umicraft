@@ -106,15 +106,11 @@ use umicraft_game::inventory::payload;
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_ui::menus::ConnectStage;
 
-#[path = "combat.rs"]
 mod combat;
-#[path = "creative_events.rs"]
 mod creative_events;
 use creative_events::apply_creative_event;
-#[path = "container_events.rs"]
 mod container_events;
 use container_events::{apply_container_action, apply_trade_list};
-#[path = "inventory_events.rs"]
 mod inventory_events;
 use inventory_events::apply_inventory_action;
 
