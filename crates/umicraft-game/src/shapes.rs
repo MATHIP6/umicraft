@@ -281,10 +281,7 @@ impl BlockShape {
         }; MAX_BOXES];
         boxes[0] = first;
         boxes[1] = second;
-        Self {
-            boxes,
-            count: 2,
-        }
+        Self { boxes, count: 2 }
     }
 
     /// Three collision boxes.
@@ -297,10 +294,7 @@ impl BlockShape {
         boxes[0] = first;
         boxes[1] = second;
         boxes[2] = third;
-        Self {
-            boxes,
-            count: 3,
-        }
+        Self { boxes, count: 3 }
     }
 
     /// Five collision boxes (cauldron, hopper).
@@ -1104,32 +1098,50 @@ mod tests {
             // 1. Closed, bottom half (meta 0): 0.1875 high on the floor.
             let closed_bottom = shape_of(BlockState::new(id, 0), &world, pos);
             assert_eq!(closed_bottom.boxes().len(), 1);
-            assert_eq!(closed_bottom.boxes()[0], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.1875, 1.0)));
+            assert_eq!(
+                closed_bottom.boxes()[0],
+                Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.1875, 1.0))
+            );
 
             // 2. Closed, top half (meta 8): 0.1875 thick under the ceiling.
             let closed_top = shape_of(BlockState::new(id, 8), &world, pos);
             assert_eq!(closed_top.boxes().len(), 1);
-            assert_eq!(closed_top.boxes()[0], Aabb::new(DVec3::new(0.0, 0.8125, 0.0), DVec3::ONE));
+            assert_eq!(
+                closed_top.boxes()[0],
+                Aabb::new(DVec3::new(0.0, 0.8125, 0.0), DVec3::ONE)
+            );
 
             // 3. Open, facing north (meta 4): wall on south side.
             let open_north = shape_of(BlockState::new(id, 4), &world, pos);
             assert_eq!(open_north.boxes().len(), 1);
-            assert_eq!(open_north.boxes()[0], Aabb::new(DVec3::new(0.0, 0.0, 0.8125), DVec3::ONE));
+            assert_eq!(
+                open_north.boxes()[0],
+                Aabb::new(DVec3::new(0.0, 0.0, 0.8125), DVec3::ONE)
+            );
 
             // 4. Open, facing south (meta 5): wall on north side.
             let open_south = shape_of(BlockState::new(id, 5), &world, pos);
             assert_eq!(open_south.boxes().len(), 1);
-            assert_eq!(open_south.boxes()[0], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 1.0, 0.1875)));
+            assert_eq!(
+                open_south.boxes()[0],
+                Aabb::new(DVec3::ZERO, DVec3::new(1.0, 1.0, 0.1875))
+            );
 
             // 5. Open, facing west (meta 6): wall on east side.
             let open_west = shape_of(BlockState::new(id, 6), &world, pos);
             assert_eq!(open_west.boxes().len(), 1);
-            assert_eq!(open_west.boxes()[0], Aabb::new(DVec3::new(0.8125, 0.0, 0.0), DVec3::ONE));
+            assert_eq!(
+                open_west.boxes()[0],
+                Aabb::new(DVec3::new(0.8125, 0.0, 0.0), DVec3::ONE)
+            );
 
             // 6. Open, facing east (meta 7): wall on west side.
             let open_east = shape_of(BlockState::new(id, 7), &world, pos);
             assert_eq!(open_east.boxes().len(), 1);
-            assert_eq!(open_east.boxes()[0], Aabb::new(DVec3::ZERO, DVec3::new(0.1875, 1.0, 1.0)));
+            assert_eq!(
+                open_east.boxes()[0],
+                Aabb::new(DVec3::ZERO, DVec3::new(0.1875, 1.0, 1.0))
+            );
         }
     }
 
@@ -1139,7 +1151,10 @@ mod tests {
         let pos = BlockPos::new(0, 0, 0);
         let soul_sand = shape_of(BlockState::new(88, 0), &world, pos);
         assert_eq!(soul_sand.boxes().len(), 1);
-        assert_eq!(soul_sand.boxes()[0], Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.875, 1.0)));
+        assert_eq!(
+            soul_sand.boxes()[0],
+            Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.875, 1.0))
+        );
     }
 
     #[test]

@@ -60,8 +60,7 @@ impl FrameDistribution {
 
         // Slowest 1% tail average (at least 1 sample).
         let tail_1_count = (len as f32 * 0.01).ceil().max(1.0) as usize;
-        let tail_1_mean =
-            sorted[len - tail_1_count..].iter().sum::<f32>() / tail_1_count as f32;
+        let tail_1_mean = sorted[len - tail_1_count..].iter().sum::<f32>() / tail_1_count as f32;
 
         // Slowest 0.1% tail average (at least 1 sample).
         let tail_0_1_count = (len as f32 * 0.001).ceil().max(1.0) as usize;

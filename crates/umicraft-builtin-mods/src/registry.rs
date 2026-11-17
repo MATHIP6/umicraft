@@ -294,12 +294,14 @@ impl ModRegistry {
                         entry.placement = placement.sanitized();
                     }
                     entry.locked = saved.locked && entry.is_hud();
-                    entry.custom = saved.custom.filter(|_| entry.is_hud()).map(|saved| {
-                        SavedWidget {
-                            placement: saved.placement.sanitized(),
-                            ..saved
-                        }
-                    });
+                    entry.custom =
+                        saved
+                            .custom
+                            .filter(|_| entry.is_hud())
+                            .map(|saved| SavedWidget {
+                                placement: saved.placement.sanitized(),
+                                ..saved
+                            });
                 }
                 None => {
                     self.unknown.insert(id.clone(), saved.clone());

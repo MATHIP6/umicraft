@@ -634,7 +634,10 @@ impl Renderer {
         format: wgpu::TextureFormat,
         adapter: AdapterSummary,
     ) -> Result<Self, RenderError> {
-        umicraft_core::boot_log!("renderer_create_started", "width={width}, height={height}, format={format:?}");
+        umicraft_core::boot_log!(
+            "renderer_create_started",
+            "width={width}, height={height}, format={format:?}"
+        );
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera uniform"),
             size: std::mem::size_of::<CameraUniform>() as u64,
@@ -1640,12 +1643,12 @@ impl Renderer {
         }
     }
 
-#[inline(always)]
-fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
-    let mut runs = ChunkRuns::empty();
-    pass.visible_runs(mask, group, |r| runs.push(r));
-    runs
-}
+    #[inline(always)]
+    fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
+        let mut runs = ChunkRuns::empty();
+        pass.visible_runs(mask, group, |r| runs.push(r));
+        runs
+    }
 
     /// Rebuilds the reused per-frame draw lists from the chunks that are
     /// inside the render distance and the view frustum.
@@ -1686,17 +1689,26 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
             let slots = &self.mesh_slots;
             let chunk_map = &self.chunks;
             let cave_reach = reach.min(24);
-            self.cave_graph
-                .update((eye.x, eye.y, eye.z), cave_reach, self.chunks_version, |pos| {
+            self.cave_graph.update(
+                (eye.x, eye.y, eye.z),
+                cave_reach,
+                self.chunks_version,
+                |pos| {
                     chunk_map.get(&pos).and_then(|&slot| {
-                        slots.get(slot as usize).and_then(Option::as_ref).map(|s| &s.mesh.connectivity)
+                        slots
+                            .get(slot as usize)
+                            .and_then(Option::as_ref)
+                            .map(|s| &s.mesh.connectivity)
                     })
-                });
+                },
+            );
         }
         let cave = self.cave_culling.then_some(&self.cave_graph);
         let cave_reach = reach.min(24);
         for (slot_idx, slot_entry) in self.mesh_slots.iter().enumerate() {
-            let Some(entry) = slot_entry.as_ref() else { continue; };
+            let Some(entry) = slot_entry.as_ref() else {
+                continue;
+            };
             let pos = entry.pos;
             let mesh = &entry.mesh;
             let dx = (pos.x - eye_chunk.x).abs();
@@ -1749,8 +1761,16 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                 .then_with(|| a.pos.cmp(&b.pos))
         });
         for c in &self.opaque_candidates {
-            let Some(slot) = self.mesh_slots.get(c.slot as usize).and_then(Option::as_ref) else { continue; };
-            let Some(opaque) = &slot.mesh.opaque else { continue; };
+            let Some(slot) = self
+                .mesh_slots
+                .get(c.slot as usize)
+                .and_then(Option::as_ref)
+            else {
+                continue;
+            };
+            let Some(opaque) = &slot.mesh.opaque else {
+                continue;
+            };
             if opaque.epoch == self.cutout_epoch {
                 if !c.has_cutout {
                     let runs = if c.sections == 0xFFFF {
@@ -1761,7 +1781,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                         Self::collect_chunk_runs(opaque, c.sections, Group::Solid)
                     };
                     if runs.count > 0 {
-                        self.visible_solid.push(PreparedChunkDraw { slot: c.slot, runs });
+                        self.visible_solid
+                            .push(PreparedChunkDraw { slot: c.slot, runs });
                     }
                 } else {
                     let mut runs = ChunkRuns::empty();
@@ -1769,7 +1790,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                         runs.push(0..opaque.quads * 6);
                     } else {
                         let solid_runs = Self::collect_chunk_runs(opaque, c.sections, Group::Solid);
-                        let cutout_runs = Self::collect_chunk_runs(opaque, c.sections, Group::Cutout);
+                        let cutout_runs =
+                            Self::collect_chunk_runs(opaque, c.sections, Group::Cutout);
                         for r in solid_runs.as_slice() {
                             runs.push(r.clone());
                         }
@@ -1778,7 +1800,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                         }
                     }
                     if runs.count > 0 {
-                        self.visible_cutout.push(PreparedChunkDraw { slot: c.slot, runs });
+                        self.visible_cutout
+                            .push(PreparedChunkDraw { slot: c.slot, runs });
                     }
                 }
             } else {
@@ -1796,7 +1819,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                     }
                 }
                 if runs.count > 0 {
-                    self.visible_cutout.push(PreparedChunkDraw { slot: c.slot, runs });
+                    self.visible_cutout
+                        .push(PreparedChunkDraw { slot: c.slot, runs });
                 }
             }
         }
@@ -1807,8 +1831,16 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                 .then_with(|| a.pos.cmp(&b.pos))
         });
         for c in &self.transparent_candidates {
-            let Some(slot) = self.mesh_slots.get(c.slot as usize).and_then(Option::as_ref) else { continue; };
-            let Some(transparent) = &slot.mesh.transparent else { continue; };
+            let Some(slot) = self
+                .mesh_slots
+                .get(c.slot as usize)
+                .and_then(Option::as_ref)
+            else {
+                continue;
+            };
+            let Some(transparent) = &slot.mesh.transparent else {
+                continue;
+            };
             let runs = if c.sections == 0xFFFF {
                 let mut r = ChunkRuns::empty();
                 r.push(0..transparent.quads * 6);
@@ -1817,7 +1849,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                 Self::collect_chunk_runs(transparent, c.sections, Group::Solid)
             };
             if runs.count > 0 {
-                self.visible_transparent.push(PreparedChunkDraw { slot: c.slot, runs });
+                self.visible_transparent
+                    .push(PreparedChunkDraw { slot: c.slot, runs });
             }
         }
     }
@@ -2754,7 +2787,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
             .as_ref()
             .is_none_or(|cached| bytemuck::bytes_of(cached) != uniform_bytes)
         {
-            self.queue.write_buffer(&self.camera_buffer, 0, uniform_bytes);
+            self.queue
+                .write_buffer(&self.camera_buffer, 0, uniform_bytes);
             self.last_camera_uniform = Some(uniform);
         }
 
@@ -2769,7 +2803,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
             .as_ref()
             .is_none_or(|cached| bytemuck::bytes_of(cached) != local_bytes)
         {
-            self.queue.write_buffer(&self.local_camera_buffer, 0, local_bytes);
+            self.queue
+                .write_buffer(&self.local_camera_buffer, 0, local_bytes);
             self.last_local_uniform = Some(local);
         }
 
@@ -2789,11 +2824,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
             .as_ref()
             .is_none_or(|cached| bytemuck::bytes_of(cached) != hand_bytes)
         {
-            self.queue.write_buffer(
-                &self.hand_camera_buffer,
-                0,
-                hand_bytes,
-            );
+            self.queue
+                .write_buffer(&self.hand_camera_buffer, 0, hand_bytes);
             self.last_hand_uniform = Some(hand_uniform);
         }
     }
@@ -2858,8 +2890,10 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                 .ok_or_else(|| RenderError::Surface("renderer has no surface".into()))?;
             surface.get_current_texture()
         };
-        let acquire_us =
-            acquire_start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
+        let acquire_us = acquire_start
+            .elapsed()
+            .as_micros()
+            .min(u128::from(u32::MAX)) as u32;
         if frame_num < 10 {
             let status = match &frame {
                 wgpu::CurrentSurfaceTexture::Success(_) => "Success",
@@ -2889,13 +2923,11 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                         });
                 self.begin_gpu_timing();
                 self.draw(&view, overlay, &mut encoder, sky_state);
-                let encode_us =
-                    encode_start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
+                let encode_us = encode_start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
 
                 let submit_start = std::time::Instant::now();
                 self.submit_timed(encoder);
-                let submit_us =
-                    submit_start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
+                let submit_us = submit_start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
 
                 self.capture_frame(&frame.texture);
                 if let Some(window) = &self.window {
@@ -3105,7 +3137,8 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
         let target_bytes = pixel_count * if self.offscreen.is_some() { 12 } else { 8 };
         let atlas_bytes = match &self.official_blocks {
             Some((tex, w, h)) => {
-                let base = u64::from(*w) * u64::from(*h) * 4 * u64::from(tex.depth_or_array_layers());
+                let base =
+                    u64::from(*w) * u64::from(*h) * 4 * u64::from(tex.depth_or_array_layers());
                 // Mip chain adds at most ~1/3 over base.
                 if tex.mip_level_count() > 1 {
                     base + base / 3
@@ -3113,12 +3146,13 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                     base
                 }
             }
-            None => u64::from(TEXTURE_SIZE) * u64::from(TEXTURE_SIZE) * 4 * u64::from(TEXTURE_LAYERS),
+            None => {
+                u64::from(TEXTURE_SIZE) * u64::from(TEXTURE_SIZE) * 4 * u64::from(TEXTURE_LAYERS)
+            }
         };
         let font_bytes = u64::from(self.ui_atlas.width) * u64::from(self.ui_atlas.height);
-        let icon_bytes = u64::from(crate::items::ICON_ATLAS_SIZE)
-            * u64::from(crate::items::ICON_ATLAS_SIZE)
-            * 8; // colour + depth
+        let icon_bytes =
+            u64::from(crate::items::ICON_ATLAS_SIZE) * u64::from(crate::items::ICON_ATLAS_SIZE) * 8; // colour + depth
         VramStats {
             chunk_buffers,
             dynamic_buffers,
@@ -3299,7 +3333,11 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
         pass.set_bind_group(0, &self.chunk_bind_group, &[]);
         self.quad_indices.bind(&mut pass);
         for draw in &self.visible_transparent {
-            let Some(slot) = self.mesh_slots.get(draw.slot as usize).and_then(Option::as_ref) else {
+            let Some(slot) = self
+                .mesh_slots
+                .get(draw.slot as usize)
+                .and_then(Option::as_ref)
+            else {
                 continue;
             };
             let Some(transparent) = &slot.mesh.transparent else {
@@ -3486,7 +3524,11 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
             &self.visible_cutout
         };
         for draw in list {
-            let Some(slot) = self.mesh_slots.get(draw.slot as usize).and_then(Option::as_ref) else {
+            let Some(slot) = self
+                .mesh_slots
+                .get(draw.slot as usize)
+                .and_then(Option::as_ref)
+            else {
                 continue;
             };
             let Some(opaque) = &slot.mesh.opaque else {

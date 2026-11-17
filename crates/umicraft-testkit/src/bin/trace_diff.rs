@@ -75,7 +75,11 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
         match argv[index].as_str() {
             "--help" | "-h" => return Err(USAGE.to_string()),
             "--anchor" => {
-                anchor = Some(argv.get(index + 1).ok_or("missing value after --anchor")?.clone());
+                anchor = Some(
+                    argv.get(index + 1)
+                        .ok_or("missing value after --anchor")?
+                        .clone(),
+                );
                 index += 2;
             }
             "--motion-nth" => {

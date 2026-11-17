@@ -521,13 +521,11 @@ impl ClientResources {
                 .as_deref()
                 .map(|bytes| DecodedPng::decode(GLINT_PATH, bytes));
         }
-        let glint = glint
-            .transpose()?
-            .map(|png| GlintTexture {
-                width: png.width,
-                height: png.height,
-                pixels: png.pixels,
-            });
+        let glint = glint.transpose()?.map(|png| GlintTexture {
+            width: png.width,
+            height: png.height,
+            pixels: png.pixels,
+        });
         Ok(Self {
             files,
             raw_colormaps,
@@ -838,7 +836,10 @@ fn restore(
         return Err(error);
     };
     tracing::warn!(path, %error, "ignoring an invalid pack image");
-    match base.get(path).filter(|bytes| files.get(path) != Some(*bytes)) {
+    match base
+        .get(path)
+        .filter(|bytes| files.get(path) != Some(*bytes))
+    {
         Some(bytes) => {
             files.insert(path.to_string(), bytes.clone());
             DecodedPng::decode(path, bytes).map(Some)

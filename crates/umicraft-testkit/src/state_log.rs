@@ -173,9 +173,16 @@ impl StateLog {
     #[must_use]
     pub fn runs(&self) -> Vec<Run<'_>> {
         let mut runs: Vec<Run<'_>> = Vec::new();
-        for sample in self.samples.iter().filter(|s| s.script_tick >= 0 && s.phase != "end") {
+        for sample in self
+            .samples
+            .iter()
+            .filter(|s| s.script_tick >= 0 && s.phase != "end")
+        {
             match runs.last_mut() {
-                Some(run) if run.name == sample.phase && sample.script_tick == run.last_script_tick() + 1 => {
+                Some(run)
+                    if run.name == sample.phase
+                        && sample.script_tick == run.last_script_tick() + 1 =>
+                {
                     run.samples.push(sample);
                 }
                 _ => runs.push(Run {
@@ -336,14 +343,17 @@ impl StateDiff {
     /// Whether the logs agree within the tolerance in every phase.
     #[must_use]
     pub fn passes(&self) -> bool {
-        self.sequence_mismatch.is_none() && !self.phases.is_empty() && self.phases.iter().all(PhaseDiff::passes)
+        self.sequence_mismatch.is_none()
+            && !self.phases.is_empty()
+            && self.phases.iter().all(PhaseDiff::passes)
     }
 
     /// A human-readable report.
     #[must_use]
     pub fn render(&self) -> String {
         let t = &self.tolerance;
-        let mut out = String::from("--- state diff (reference = vanilla, internal player state) ---\n");
+        let mut out =
+            String::from("--- state diff (reference = vanilla, internal player state) ---\n");
         let _ = writeln!(
             out,
             "tolerance : {} (position {} blocks/axis, motion {} blocks/tick, rotation {} deg)",
@@ -363,7 +373,17 @@ impl StateDiff {
         let _ = writeln!(
             out,
             "\n{:<16} {:>9} {:>11} {:>11} {:>11} {:>11} {:>11} {:>7} {:>4} {:>4} {:>4}",
-            "phase", "ticks", "max|dx|", "max|dy|", "max|dz|", "max|dm|", "max|dyaw|", "ground", "spr", "snk", "keys"
+            "phase",
+            "ticks",
+            "max|dx|",
+            "max|dy|",
+            "max|dz|",
+            "max|dm|",
+            "max|dyaw|",
+            "ground",
+            "spr",
+            "snk",
+            "keys"
         );
         for p in &self.phases {
             let motion = p.motion.iter().map(|w| w.error).fold(0.0, f64::max);
@@ -404,7 +424,12 @@ impl StateDiff {
                 .iter()
                 .filter_map(|(name, at)| at.map(|offset| format!("{name}@+{offset}")))
                 .collect();
-            let _ = writeln!(out, "  {}: first divergence (tick offset in phase): {}", p.name, list.join(" "));
+            let _ = writeln!(
+                out,
+                "  {}: first divergence (tick offset in phase): {}",
+                p.name,
+                list.join(" ")
+            );
         }
         let verdict = if self.passes() {
             "IDENTICAL WITHIN TOLERANCE"
@@ -436,11 +461,26 @@ fn compare_run(a: &Run<'_>, b: &Run<'_>, t: &Tolerance) -> PhaseDiff {
             let error = (x.pos[axis] - y.pos[axis]).abs();
             squared += error * error;
             track(&mut diff.position[axis], error, t.position, offset);
-            track(&mut diff.motion[axis], (x.motion[axis] - y.motion[axis]).abs(), t.motion, offset);
+            track(
+                &mut diff.motion[axis],
+                (x.motion[axis] - y.motion[axis]).abs(),
+                t.motion,
+                offset,
+            );
         }
         track(&mut diff.distance, squared.sqrt(), t.position, offset);
-        track(&mut diff.yaw, f64::from((x.yaw - y.yaw).abs()), f64::from(t.rotation), offset);
-        track(&mut diff.pitch, f64::from((x.pitch - y.pitch).abs()), f64::from(t.rotation), offset);
+        track(
+            &mut diff.yaw,
+            f64::from((x.yaw - y.yaw).abs()),
+            f64::from(t.rotation),
+            offset,
+        );
+        track(
+            &mut diff.pitch,
+            f64::from((x.pitch - y.pitch).abs()),
+            f64::from(t.rotation),
+            offset,
+        );
         diff.on_ground += usize::from(x.on_ground != y.on_ground);
         diff.sprinting += usize::from(x.sprinting != y.sprinting);
         diff.sneaking += usize::from(x.sneaking != y.sneaking);
@@ -468,7 +508,14 @@ mod tests {
             lines.push(line(pre, -1, "pre", 0.0, 0.0, true));
         }
         for k in 0..3 {
-            lines.push(line(shift + k, k as i64, "walk", 0.2 * k as f64 + dx, 0.2 + dm, true));
+            lines.push(line(
+                shift + k,
+                k as i64,
+                "walk",
+                0.2 * k as f64 + dx,
+                0.2 + dm,
+                true,
+            ));
         }
         for k in 0..3 {
             lines.push(line(shift + 3 + k, 3 + k as i64, "stop", 0.6, 0.0, true));
@@ -484,16 +531,28 @@ mod tests {
 
     #[test]
     fn a_shifted_start_does_not_matter_but_a_value_does() {
-        let same = StateDiff::new(&scenario(0, 0.0, 0.0), &scenario(7, 0.0, 0.0), Tolerance::STRICT);
+        let same = StateDiff::new(
+            &scenario(0, 0.0, 0.0),
+            &scenario(7, 0.0, 0.0),
+            Tolerance::STRICT,
+        );
         assert!(same.passes(), "{}", same.render());
-        let moved = StateDiff::new(&scenario(0, 0.0, 0.0), &scenario(3, 1e-9, 0.0), Tolerance::STRICT);
+        let moved = StateDiff::new(
+            &scenario(0, 0.0, 0.0),
+            &scenario(3, 1e-9, 0.0),
+            Tolerance::STRICT,
+        );
         assert!(!moved.passes());
         assert_eq!(moved.phases[0].position[0].first_over, Some(0));
     }
 
     #[test]
     fn motion_is_compared_from_the_logged_values() {
-        let diff = StateDiff::new(&scenario(0, 0.0, 0.0), &scenario(0, 0.0, 1e-12), Tolerance::STRICT);
+        let diff = StateDiff::new(
+            &scenario(0, 0.0, 0.0),
+            &scenario(0, 0.0, 1e-12),
+            Tolerance::STRICT,
+        );
         assert!(!diff.passes());
         assert!(diff.phases[0].motion[0].first_over.is_some());
     }
@@ -508,7 +567,11 @@ mod tests {
         let diff = StateDiff::new(&scenario(0, 0.0, 0.0), &scenario(0, 0.005, 0.0), loose);
         assert!(diff.passes(), "{}", diff.render());
         assert!(diff.render().contains("EXPLICIT"));
-        let strict = StateDiff::new(&scenario(0, 0.0, 0.0), &scenario(0, 0.005, 0.0), Tolerance::STRICT);
+        let strict = StateDiff::new(
+            &scenario(0, 0.0, 0.0),
+            &scenario(0, 0.005, 0.0),
+            Tolerance::STRICT,
+        );
         assert!(!strict.passes());
         assert!(strict.render().contains("STRICT"));
     }

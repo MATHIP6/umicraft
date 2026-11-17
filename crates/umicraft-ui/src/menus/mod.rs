@@ -50,8 +50,8 @@ pub use disconnected::{DisconnectedOutcome, DisconnectedScreen};
 pub use loading::LoadingScreen;
 pub use mods::{
     mods_layout, HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, HudWidgetView,
-    ModCardView, ModValue, ModsLayout,
-    ModsOutcome, ModsScreen, ModsView, SettingControl, SettingView, Snap,
+    ModCardView, ModValue, ModsLayout, ModsOutcome, ModsScreen, ModsView, SettingControl,
+    SettingView, Snap,
 };
 pub use pack_mode::ResourcePackMode;
 pub use panorama::{

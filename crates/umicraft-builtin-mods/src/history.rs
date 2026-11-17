@@ -120,7 +120,10 @@ mod tests {
         history.record(state(false), "fps/size");
         let _ = history.undo(state(true));
         history.record(state(false), "fps/size");
-        assert!(history.can_undo(), "the same tag after an undo is a new step");
+        assert!(
+            history.can_undo(),
+            "the same tag after an undo is a new step"
+        );
     }
 
     #[test]

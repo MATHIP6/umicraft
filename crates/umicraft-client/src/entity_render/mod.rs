@@ -269,7 +269,8 @@ impl MatrixTransform {
         let sx2 = matrix.x_axis.truncate().length_squared();
         let sy2 = matrix.y_axis.truncate().length_squared();
         let sz2 = matrix.z_axis.truncate().length_squared();
-        let inv_normal_scale = if (sx2 - sy2).abs() < 1e-4 && (sx2 - sz2).abs() < 1e-4 && sx2 > 1e-6 {
+        let inv_normal_scale = if (sx2 - sy2).abs() < 1e-4 && (sx2 - sz2).abs() < 1e-4 && sx2 > 1e-6
+        {
             Some(1.0 / sx2.sqrt())
         } else {
             None
@@ -287,7 +288,9 @@ impl MatrixTransform {
             .transform_point3(Vec3::from(mv.position))
             .to_array();
         let normal = match self.inv_normal_scale {
-            Some(inv_scale) => (self.matrix.transform_vector3(Vec3::from(mv.normal)) * inv_scale).to_array(),
+            Some(inv_scale) => {
+                (self.matrix.transform_vector3(Vec3::from(mv.normal)) * inv_scale).to_array()
+            }
             None => self
                 .matrix
                 .transform_vector3(Vec3::from(mv.normal))

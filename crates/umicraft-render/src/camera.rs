@@ -408,24 +408,44 @@ impl Frustum {
         let ez = _mm256_set1_ps(extent.z);
 
         let px = _mm256_setr_ps(
-            self.planes[0].x, self.planes[1].x, self.planes[2].x,
-            self.planes[3].x, self.planes[4].x, self.planes[5].x,
-            0.0, 0.0,
+            self.planes[0].x,
+            self.planes[1].x,
+            self.planes[2].x,
+            self.planes[3].x,
+            self.planes[4].x,
+            self.planes[5].x,
+            0.0,
+            0.0,
         );
         let py = _mm256_setr_ps(
-            self.planes[0].y, self.planes[1].y, self.planes[2].y,
-            self.planes[3].y, self.planes[4].y, self.planes[5].y,
-            0.0, 0.0,
+            self.planes[0].y,
+            self.planes[1].y,
+            self.planes[2].y,
+            self.planes[3].y,
+            self.planes[4].y,
+            self.planes[5].y,
+            0.0,
+            0.0,
         );
         let pz = _mm256_setr_ps(
-            self.planes[0].z, self.planes[1].z, self.planes[2].z,
-            self.planes[3].z, self.planes[4].z, self.planes[5].z,
-            0.0, 0.0,
+            self.planes[0].z,
+            self.planes[1].z,
+            self.planes[2].z,
+            self.planes[3].z,
+            self.planes[4].z,
+            self.planes[5].z,
+            0.0,
+            0.0,
         );
         let pw = _mm256_setr_ps(
-            self.planes[0].w, self.planes[1].w, self.planes[2].w,
-            self.planes[3].w, self.planes[4].w, self.planes[5].w,
-            0.0, 0.0,
+            self.planes[0].w,
+            self.planes[1].w,
+            self.planes[2].w,
+            self.planes[3].w,
+            self.planes[4].w,
+            self.planes[5].w,
+            0.0,
+            0.0,
         );
 
         let sign_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFF_FFFF));
@@ -482,17 +502,43 @@ impl Frustum {
         let zero = _mm_setzero_ps();
 
         // Planes 0..3
-        let px0 = _mm_setr_ps(self.planes[0].x, self.planes[1].x, self.planes[2].x, self.planes[3].x);
-        let py0 = _mm_setr_ps(self.planes[0].y, self.planes[1].y, self.planes[2].y, self.planes[3].y);
-        let pz0 = _mm_setr_ps(self.planes[0].z, self.planes[1].z, self.planes[2].z, self.planes[3].z);
-        let pw0 = _mm_setr_ps(self.planes[0].w, self.planes[1].w, self.planes[2].w, self.planes[3].w);
+        let px0 = _mm_setr_ps(
+            self.planes[0].x,
+            self.planes[1].x,
+            self.planes[2].x,
+            self.planes[3].x,
+        );
+        let py0 = _mm_setr_ps(
+            self.planes[0].y,
+            self.planes[1].y,
+            self.planes[2].y,
+            self.planes[3].y,
+        );
+        let pz0 = _mm_setr_ps(
+            self.planes[0].z,
+            self.planes[1].z,
+            self.planes[2].z,
+            self.planes[3].z,
+        );
+        let pw0 = _mm_setr_ps(
+            self.planes[0].w,
+            self.planes[1].w,
+            self.planes[2].w,
+            self.planes[3].w,
+        );
 
         let abs_x0 = _mm_and_ps(px0, sign_mask);
         let abs_y0 = _mm_and_ps(py0, sign_mask);
         let abs_z0 = _mm_and_ps(pz0, sign_mask);
 
-        let dist0 = _mm_add_ps(_mm_add_ps(_mm_mul_ps(cx, px0), _mm_mul_ps(cy, py0)), _mm_add_ps(_mm_mul_ps(cz, pz0), pw0));
-        let r0 = _mm_add_ps(_mm_add_ps(_mm_mul_ps(ex, abs_x0), _mm_mul_ps(ey, abs_y0)), _mm_mul_ps(ez, abs_z0));
+        let dist0 = _mm_add_ps(
+            _mm_add_ps(_mm_mul_ps(cx, px0), _mm_mul_ps(cy, py0)),
+            _mm_add_ps(_mm_mul_ps(cz, pz0), pw0),
+        );
+        let r0 = _mm_add_ps(
+            _mm_add_ps(_mm_mul_ps(ex, abs_x0), _mm_mul_ps(ey, abs_y0)),
+            _mm_mul_ps(ez, abs_z0),
+        );
         let outside0 = _mm_cmplt_ps(_mm_add_ps(dist0, r0), zero);
         if _mm_movemask_ps(outside0) != 0 {
             return FrustumIntersection::Outside;
@@ -508,8 +554,14 @@ impl Frustum {
         let abs_y1 = _mm_and_ps(py1, sign_mask);
         let abs_z1 = _mm_and_ps(pz1, sign_mask);
 
-        let dist1 = _mm_add_ps(_mm_add_ps(_mm_mul_ps(cx, px1), _mm_mul_ps(cy, py1)), _mm_add_ps(_mm_mul_ps(cz, pz1), pw1));
-        let r1 = _mm_add_ps(_mm_add_ps(_mm_mul_ps(ex, abs_x1), _mm_mul_ps(ey, abs_y1)), _mm_mul_ps(ez, abs_z1));
+        let dist1 = _mm_add_ps(
+            _mm_add_ps(_mm_mul_ps(cx, px1), _mm_mul_ps(cy, py1)),
+            _mm_add_ps(_mm_mul_ps(cz, pz1), pw1),
+        );
+        let r1 = _mm_add_ps(
+            _mm_add_ps(_mm_mul_ps(ex, abs_x1), _mm_mul_ps(ey, abs_y1)),
+            _mm_mul_ps(ez, abs_z1),
+        );
         let outside1 = _mm_cmplt_ps(_mm_add_ps(dist1, r1), zero);
         if (_mm_movemask_ps(outside1) & 0x03) != 0 {
             return FrustumIntersection::Outside;
@@ -753,7 +805,10 @@ mod tests {
                     let max = min + Vec3::splat(16.0);
                     let scalar = frustum.intersects_aabb_scalar(min, max);
                     let simd = frustum.intersects_aabb(min, max);
-                    assert_eq!(scalar, simd, "scalar vs simd mismatch at section ({cx}, {sy}, {cz})");
+                    assert_eq!(
+                        scalar, simd,
+                        "scalar vs simd mismatch at section ({cx}, {sy}, {cz})"
+                    );
 
                     // If scalar says it's visible, the column mask interval MUST include it
                     if scalar {

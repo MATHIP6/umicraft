@@ -109,7 +109,11 @@ pub(super) fn draw_lock(ui: &mut Ui, at: (f32, f32), size: f32, color: Color) {
     );
     ui.draw().rounded_rect(body, size * 0.1, color);
     let bar = size * 0.12;
-    let (left, right, top) = (at.0 - size * 0.25, at.0 + size * 0.25 - bar, at.1 - size * 0.5);
+    let (left, right, top) = (
+        at.0 - size * 0.25,
+        at.0 + size * 0.25 - bar,
+        at.1 - size * 0.5,
+    );
     for rect in [
         Rect::new(left, top, bar, size * 0.5),
         Rect::new(right, top, bar, size * 0.5),
@@ -229,7 +233,10 @@ impl ModsScreen {
             .filter(|entry| query.is_empty() || entry.name.to_lowercase().contains(&query))
             .collect();
         if entries.is_empty() {
-            let at = (body.x + body.width * 0.5, list_row(body, 0, scale).y + 8.0 * scale);
+            let at = (
+                body.x + body.width * 0.5,
+                list_row(body, 0, scale).y + 8.0 * scale,
+            );
             let style = (theme::TEXT_SIZE_SMALL, theme::TEXT_MUTED, Align::Center);
             paint.text(ui, lang.tr("umicraft.mods.editor.no_match"), at, style);
             return None;
@@ -247,7 +254,9 @@ impl ModsScreen {
             let track = row_toggle(row, scale);
             // The row answers left of its switch, so one click does one thing.
             let name_area = Rect::new(row.x, row.y, track.x - row.x - 2.0 * scale, row.height);
-            let hover = self.motion.hover(&format!("editor/row/{}", entry.id), ui.is_hovered(row));
+            let hover = self
+                .motion
+                .hover(&format!("editor/row/{}", entry.id), ui.is_hovered(row));
             let fill = if selected {
                 with_opacity(TILE_ON, 2.2)
             } else {
@@ -255,7 +264,12 @@ impl ModsScreen {
             };
             ui.draw().rounded_rect(row, theme::RADIUS * scale, fill);
             if selected {
-                let bar = Rect::new(row.x, row.y + 3.0 * scale, 1.5 * scale, row.height - 6.0 * scale);
+                let bar = Rect::new(
+                    row.x,
+                    row.y + 3.0 * scale,
+                    1.5 * scale,
+                    row.height - 6.0 * scale,
+                );
                 ui.draw().rounded_rect(bar, 0.75 * scale, theme::ACCENT);
             }
             let hidden = self.editor.hidden.contains(&entry.id);
@@ -273,7 +287,12 @@ impl ModsScreen {
                 theme::TEXT_SIZE_BODY * scale,
                 name_area.right() - name_x - lock_room,
             );
-            paint.text(ui, &name, (name_x, middle), (theme::TEXT_SIZE_BODY, color, Align::Left));
+            paint.text(
+                ui,
+                &name,
+                (name_x, middle),
+                (theme::TEXT_SIZE_BODY, color, Align::Left),
+            );
             if entry.locked {
                 let at = (name_area.right() - 4.0 * scale, middle);
                 draw_lock(ui, at, 6.0 * scale, theme::TEXT_MUTED);
@@ -317,14 +336,32 @@ impl ModsScreen {
         let (can_undo, can_redo) = view.hud.history;
 
         let tools = split(action_row(layout.footer, 0, scale), 4, scale);
-        if chip(ui, paint, tools[0], label("umicraft.mods.editor.undo"), (can_undo, false)) {
+        if chip(
+            ui,
+            paint,
+            tools[0],
+            label("umicraft.mods.editor.undo"),
+            (can_undo, false),
+        ) {
             asked = hud(HudEditorOutcome::Undo);
         }
-        if chip(ui, paint, tools[1], label("umicraft.mods.editor.redo"), (can_redo, false)) {
+        if chip(
+            ui,
+            paint,
+            tools[1],
+            label("umicraft.mods.editor.redo"),
+            (can_redo, false),
+        ) {
             asked = hud(HudEditorOutcome::Redo);
         }
         let grid = (true, self.editor.grid);
-        if chip(ui, paint, tools[2], label("umicraft.mods.editor.grid"), grid) {
+        if chip(
+            ui,
+            paint,
+            tools[2],
+            label("umicraft.mods.editor.grid"),
+            grid,
+        ) {
             self.editor.grid = !self.editor.grid;
         }
         let dim = (true, self.editor.dim);
@@ -333,9 +370,17 @@ impl ModsScreen {
         }
 
         let presets = [
-            ("umicraft.mods.editor.preset.default", HudPresetKind::Default, true),
+            (
+                "umicraft.mods.editor.preset.default",
+                HudPresetKind::Default,
+                true,
+            ),
             ("umicraft.mods.editor.preset.pvp", HudPresetKind::Pvp, true),
-            ("umicraft.mods.editor.preset.minimal", HudPresetKind::Minimal, true),
+            (
+                "umicraft.mods.editor.preset.minimal",
+                HudPresetKind::Minimal,
+                true,
+            ),
             (
                 "umicraft.mods.editor.preset.custom",
                 HudPresetKind::Custom,
@@ -353,14 +398,32 @@ impl ModsScreen {
 
         let last = split(action_row(layout.footer, 3, scale), 3, scale);
         let any = !view.hud.entries.is_empty();
-        if chip(ui, paint, last[0], label("umicraft.mods.editor.reset_all"), (any, false)) {
+        if chip(
+            ui,
+            paint,
+            last[0],
+            label("umicraft.mods.editor.reset_all"),
+            (any, false),
+        ) {
             self.editor.confirm = true;
         }
-        if chip(ui, paint, last[1], label("umicraft.mods.editor.cancel"), (true, false)) {
+        if chip(
+            ui,
+            paint,
+            last[1],
+            label("umicraft.mods.editor.cancel"),
+            (true, false),
+        ) {
             asked = hud(HudEditorOutcome::Cancel);
             self.close_editor();
         }
-        if chip(ui, paint, last[2], label("umicraft.mods.editor.save"), (true, true)) {
+        if chip(
+            ui,
+            paint,
+            last[2],
+            label("umicraft.mods.editor.save"),
+            (true, true),
+        ) {
             asked = hud(HudEditorOutcome::Save);
             self.close_editor();
         }

@@ -71,7 +71,10 @@ fn snowman_pumpkin() -> EntityItem {
 /// `LayerSnowmanHead`: the pumpkin sits 0.34375 above the head origin.
 fn snowman_frame(entity: &EntityRenderSnapshot) -> Mat4 {
     let mut model = SnowmanModel::new();
-    model.set_angles(wrap_degrees(entity.head_yaw - entity.body_yaw), entity.pitch);
+    model.set_angles(
+        wrap_degrees(entity.head_yaw - entity.body_yaw),
+        entity.pitch,
+    );
     body_matrix(entity)
         * x_mirror()
         * head_chain(&model.head)

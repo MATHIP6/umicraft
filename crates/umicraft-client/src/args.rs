@@ -180,7 +180,9 @@ pub const HUD_VIEWS: [&str; 26] = [
 ];
 
 /// The scripted sessions the headless mode knows.
-pub const SCRIPTS: [&str; 8] = ["default", "idle", "movement", "combat", "e1", "e2", "e3", "e4"];
+pub const SCRIPTS: [&str; 8] = [
+    "default", "idle", "movement", "combat", "e1", "e2", "e3", "e4",
+];
 
 /// The top-level mode selected by the parsed arguments.
 ///

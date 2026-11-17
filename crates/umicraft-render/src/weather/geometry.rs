@@ -87,8 +87,7 @@ impl WeatherMesh {
     fn push_quad(&mut self, kind: Precipitation, corners: [WeatherVertex; 4]) {
         let start = self.vertices.len() as u32;
         self.vertices.extend_from_slice(&[
-            corners[0], corners[1], corners[2],
-            corners[0], corners[2], corners[3],
+            corners[0], corners[1], corners[2], corners[0], corners[2], corners[3],
         ]);
         let end = self.vertices.len() as u32;
         match self.runs.last_mut() {
@@ -211,7 +210,7 @@ fn rain_speed(seed: u64) -> f64 {
     let s1 = (s0.wrapping_mul(MULTIPLIER).wrapping_add(0xB)) & MASK;
     let s2 = (s1.wrapping_mul(MULTIPLIER).wrapping_add(0xB)) & MASK;
     let high = s1 >> 22; // 26 bits
-    let low = s2 >> 21;  // 27 bits
+    let low = s2 >> 21; // 27 bits
     let next_double = ((high << 27) + low) as f64 / 9007199254740992.0;
     3.0 + next_double
 }

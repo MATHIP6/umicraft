@@ -388,7 +388,8 @@ impl WorldView {
             }
             self.apply(event, target);
         }
-        self.snapshot_pacing.record_arrival(Instant::now(), frame_events);
+        self.snapshot_pacing
+            .record_arrival(Instant::now(), frame_events);
         // After the frames, so a look newer than the tick they carry wins.
         self.view.take_look();
         while let Ok(ChunkEvent { pos, snapshot }) = chunks.try_recv() {
@@ -883,7 +884,11 @@ impl WorldView {
                 self.stats_loading = false;
             }
             RenderEvent::Connect(stage) => self.connect_stage = stage,
-            RenderEvent::Teleport { position, yaw, pitch } => {
+            RenderEvent::Teleport {
+                position,
+                yaw,
+                pitch,
+            } => {
                 self.view.teleport(position, yaw, pitch);
             }
             RenderEvent::Ended(end) => self.ended = Some(end),
@@ -1114,7 +1119,11 @@ impl View {
             Perspective::FirstPerson => (self.player_yaw, self.player_pitch, eye),
             Perspective::ThirdPersonBack => {
                 let dir = look_direction(self.player_yaw, self.player_pitch) * -1.0;
-                (self.player_yaw, self.player_pitch, eye + dir * self.orbit_distance)
+                (
+                    self.player_yaw,
+                    self.player_pitch,
+                    eye + dir * self.orbit_distance,
+                )
             }
             Perspective::ThirdPersonFront => {
                 let dir = look_direction(self.player_yaw, self.player_pitch) * 1.0;
@@ -1194,7 +1203,8 @@ impl View {
         if !self.local_mouse_look {
             self.body_pitch = Some(look.body_pitch);
             if self.perspective == Perspective::ThirdPersonFront {
-                self.player_yaw = (look.view.yaw - std::f32::consts::PI).rem_euclid(std::f32::consts::TAU);
+                self.player_yaw =
+                    (look.view.yaw - std::f32::consts::PI).rem_euclid(std::f32::consts::TAU);
                 self.player_pitch = -look.view.pitch;
             } else {
                 self.player_yaw = look.view.yaw;
@@ -1321,12 +1331,7 @@ impl View {
             thunder_strength: self.weather.thunder_strength,
             lightning_ticks: self.weather.lightning_ticks,
             flat_world: self.flat_world,
-            ..RenderEnvironment::new(
-                self.dimension,
-                self.world_time,
-                partial_tick,
-                view_distance,
-            )
+            ..RenderEnvironment::new(self.dimension, self.world_time, partial_tick, view_distance)
         }
     }
 
@@ -1434,7 +1439,10 @@ mod tests {
         fn send_unload(&self, pos: ChunkPos) {
             self.chunks
                 .0
-                .send(ChunkEvent { pos, snapshot: None })
+                .send(ChunkEvent {
+                    pos,
+                    snapshot: None,
+                })
                 .expect("chunk queue");
         }
 
@@ -2372,15 +2380,25 @@ mod tests {
         harness
             .frames
             .0
-            .send(RenderEvent::Frame(frame(glam::Vec3::new(1.0, 0.0, 0.0), later, 0)))
+            .send(RenderEvent::Frame(frame(
+                glam::Vec3::new(1.0, 0.0, 0.0),
+                later,
+                0,
+            )))
             .expect("frame queue");
         harness.sync();
 
         // Camera must preserve the live mouse angles and NOT roll back to 0.0!
         let preserved_yaw = harness.world_view.view.current.unwrap().yaw;
         let preserved_pitch = harness.world_view.view.current.unwrap().pitch;
-        assert!((preserved_yaw - yaw_delta).abs() < 1e-5, "{preserved_yaw} vs {yaw_delta}");
-        assert!((preserved_pitch - pitch_delta).abs() < 1e-5, "{preserved_pitch} vs {pitch_delta}");
+        assert!(
+            (preserved_yaw - yaw_delta).abs() < 1e-5,
+            "{preserved_yaw} vs {yaw_delta}"
+        );
+        assert!(
+            (preserved_pitch - pitch_delta).abs() < 1e-5,
+            "{preserved_pitch} vs {pitch_delta}"
+        );
 
         // 3. A stale echo arrives via LookSlot
         let slot = crate::game::LookSlot::default();
@@ -2399,7 +2417,10 @@ mod tests {
 
         // The camera must STILL keep the live mouse angles and NOT roll back to 0.05!
         let final_yaw = harness.world_view.view.current.unwrap().yaw;
-        assert!((final_yaw - yaw_delta).abs() < 1e-5, "{final_yaw} vs {yaw_delta}");
+        assert!(
+            (final_yaw - yaw_delta).abs() < 1e-5,
+            "{final_yaw} vs {yaw_delta}"
+        );
     }
 
     #[test]
@@ -2412,7 +2433,11 @@ mod tests {
         f1.state.eye = eye;
         f1.state.position = eye + glam::DVec3::new(0.0, 0.0, -4.0);
         f1.state.orbit_start = glam::Vec3::new(0.0, 0.0, -4.0);
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
 
         let s = harness.world_view.view.sample(tick).expect("sample");
@@ -2448,7 +2473,11 @@ mod tests {
         f1.state.yaw = std::f32::consts::PI;
         f1.state.pitch = 0.0;
         f1.state.orbit_start = glam::Vec3::new(0.0, 0.0, 4.0);
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
 
         let s = harness.world_view.view.sample(tick).expect("sample");
@@ -2480,7 +2509,11 @@ mod tests {
         // 1. FirstPerson
         let mut f1 = frame(eye.as_vec3(), tick, 0);
         f1.perspective = Perspective::FirstPerson;
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
         let s1 = harness.world_view.view.sample(tick).expect("sample");
         assert_eq!(s1.position, eye);
@@ -2490,7 +2523,11 @@ mod tests {
         let mut f2 = frame(eye.as_vec3(), later, 1);
         f2.perspective = Perspective::ThirdPersonBack;
         f2.state.position = eye + glam::DVec3::new(0.0, 0.0, -4.0);
-        harness.frames.0.send(RenderEvent::Frame(f2)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f2))
+            .expect("frame");
         harness.sync();
 
         // Sample halfway: must NOT glide from (0, 64, 0) to (0, 64, -4); must cut instantly to -4!
@@ -2510,7 +2547,11 @@ mod tests {
         let mut f3 = frame(eye.as_vec3(), later2, 2);
         f3.perspective = Perspective::ThirdPersonFront;
         f3.state.position = eye + glam::DVec3::new(0.0, 0.0, 4.0);
-        harness.frames.0.send(RenderEvent::Frame(f3)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f3))
+            .expect("frame");
         harness.sync();
         let s3 = harness
             .world_view
@@ -2527,7 +2568,11 @@ mod tests {
         let later3 = later2 + TICK;
         let mut f4 = frame(eye.as_vec3(), later3, 3);
         f4.perspective = Perspective::FirstPerson;
-        harness.frames.0.send(RenderEvent::Frame(f4)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f4))
+            .expect("frame");
         harness.sync();
         let s4 = harness
             .world_view
@@ -2545,7 +2590,11 @@ mod tests {
         let mut f1 = frame(eye.as_vec3(), tick, 0);
         f1.perspective = Perspective::ThirdPersonBack;
         f1.state.position = eye + glam::DVec3::new(0.0, 0.0, -4.0);
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
 
         // Server setback / teleport to new location
@@ -2638,7 +2687,11 @@ mod tests {
             )
             .frame_data(),
         );
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
 
         let s1 = harness.world_view.view.sample(tick).expect("sample");
@@ -2667,7 +2720,11 @@ mod tests {
             )
             .frame_data(),
         );
-        harness.frames.0.send(RenderEvent::Frame(f2)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f2))
+            .expect("frame");
         harness.sync();
 
         let s2 = harness.world_view.view.sample(later).expect("sample");
@@ -2698,7 +2755,11 @@ mod tests {
             )
             .frame_data(),
         );
-        harness.frames.0.send(RenderEvent::Frame(f3)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f3))
+            .expect("frame");
         harness.sync();
 
         let s3 = harness.world_view.view.sample(later2).expect("sample");
@@ -2798,7 +2859,11 @@ mod tests {
         f_init.state.eye = eye;
         f_init.state.position = eye + glam::DVec3::new(0.0, 0.0, -4.0);
         f_init.state.orbit_start = glam::Vec3::new(0.0, 0.0, -4.0);
-        harness.frames.0.send(RenderEvent::Frame(f_init)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f_init))
+            .expect("frame");
         harness.sync();
 
         // Jump & fall trajectory over 20 ticks
@@ -2826,14 +2891,21 @@ mod tests {
             harness.sync();
 
             // Test sub-tick interpolation stability
-            let sample = harness.world_view.view.sample(tick + TICK / 2).expect("sample");
+            let sample = harness
+                .world_view
+                .view
+                .sample(tick + TICK / 2)
+                .expect("sample");
             let orbit_offset = sample.position - sample.eye;
             assert!(
                 (orbit_offset.length() - 4.0).abs() < 1e-4,
                 "vertical dynamic orbit distance: {}",
                 orbit_offset.length()
             );
-            assert!((orbit_offset.y).abs() < 1e-4, "vertical tilt introduced in orbit");
+            assert!(
+                (orbit_offset.y).abs() < 1e-4,
+                "vertical tilt introduced in orbit"
+            );
         }
     }
 
@@ -2851,7 +2923,11 @@ mod tests {
 
         // Baseline initial frame
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         for i in 1..=15 {
@@ -2917,7 +2993,11 @@ mod tests {
         // Frame in FirstPerson
         let mut f1 = frame(eye.as_vec3(), tick, 0);
         f1.perspective = Perspective::FirstPerson;
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
 
         // Next event: Server setback to (50, 70, -100) and simultaneous toggle to ThirdPersonFront
@@ -2954,10 +3034,18 @@ mod tests {
             )
             .frame_data(),
         );
-        harness.frames.0.send(RenderEvent::Frame(f2)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f2))
+            .expect("frame");
         harness.sync();
 
-        let s = harness.world_view.view.sample(later + TICK / 2).expect("sample");
+        let s = harness
+            .world_view
+            .view
+            .sample(later + TICK / 2)
+            .expect("sample");
         assert_eq!(s.eye, setback_eye);
         assert!((s.position - (setback_eye + dir * 4.0)).length() < 1e-4);
         assert!(
@@ -2978,7 +3066,11 @@ mod tests {
         f0.state.eye = eye0;
         f0.state.position = eye0 + glam::DVec3::new(0.0, 0.0, -4.0);
         f0.state.orbit_start = glam::Vec3::new(0.0, 0.0, -4.0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
 
         let later = tick + TICK;
         let mut f1 = frame(eye1.as_vec3(), later, 1);
@@ -2986,7 +3078,11 @@ mod tests {
         f1.state.eye = eye1;
         f1.state.position = eye1 + glam::DVec3::new(0.0, 0.0, -4.0);
         f1.state.orbit_start = glam::Vec3::new(0.0, 0.0, -4.0);
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
 
         // Compare samples at exact same wall-clock timestamp sampled with high density (1000 FPS) vs standard (60 FPS)
@@ -3016,7 +3112,11 @@ mod tests {
 
         // Send baseline frame
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         for i in 1..=10 {
@@ -3044,7 +3144,11 @@ mod tests {
                 let sample_time = tick + Duration::from_secs_f32(0.05 * alpha_step);
                 let sample = harness.world_view.view.sample(sample_time).expect("sample");
                 assert_eq!(sample.eye, eye, "stationary eye must remain unchanged");
-                let expected_dist = if p == Perspective::FirstPerson { 0.0 } else { 4.0 };
+                let expected_dist = if p == Perspective::FirstPerson {
+                    0.0
+                } else {
+                    4.0
+                };
                 assert!(
                     ((sample.position - sample.eye).length() - expected_dist).abs() < 1e-4,
                     "orbit distance must be exact"
@@ -3067,7 +3171,11 @@ mod tests {
         ];
 
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         for i in 1..=10 {
@@ -3094,7 +3202,11 @@ mod tests {
             harness.frames.0.send(RenderEvent::Frame(f)).expect("frame");
             harness.sync();
 
-            let sample = harness.world_view.view.sample(tick + TICK / 2).expect("sample");
+            let sample = harness
+                .world_view
+                .view
+                .sample(tick + TICK / 2)
+                .expect("sample");
             let expected_eye = prev_eye.lerp(eye, 0.5);
             assert!(
                 (sample.eye - expected_eye).length() < 1e-4,
@@ -3102,11 +3214,12 @@ mod tests {
                 sample.eye,
                 expected_eye
             );
-            let expected_pos = expected_eye + match p {
-                Perspective::FirstPerson => glam::DVec3::ZERO,
-                Perspective::ThirdPersonBack => glam::DVec3::new(0.0, 0.0, -4.0),
-                Perspective::ThirdPersonFront => glam::DVec3::new(0.0, 0.0, 4.0),
-            };
+            let expected_pos = expected_eye
+                + match p {
+                    Perspective::FirstPerson => glam::DVec3::ZERO,
+                    Perspective::ThirdPersonBack => glam::DVec3::new(0.0, 0.0, -4.0),
+                    Perspective::ThirdPersonFront => glam::DVec3::new(0.0, 0.0, 4.0),
+                };
             assert!(
                 (sample.position - expected_pos).length() < 1e-4,
                 "camera must be placed at new orbit offset from interpolated eye"
@@ -3130,7 +3243,11 @@ mod tests {
 
         let mut eye = glam::DVec3::new(0.0, jump_heights[0], 0.0);
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         for i in 1..jump_heights.len() {
@@ -3192,7 +3309,11 @@ mod tests {
         ];
 
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         for i in 1..jump_heights.len() {
@@ -3219,13 +3340,21 @@ mod tests {
             harness.frames.0.send(RenderEvent::Frame(f)).expect("frame");
             harness.sync();
 
-            let sample = harness.world_view.view.sample(tick + TICK / 2).expect("sample");
+            let sample = harness
+                .world_view
+                .view
+                .sample(tick + TICK / 2)
+                .expect("sample");
             let expected_eye = prev_eye.lerp(eye, 0.5);
             assert!(
                 (sample.eye - expected_eye).length() < 1e-4,
                 "combined 3D movement + jump must interpolate smoothly"
             );
-            let expected_dist = if p == Perspective::FirstPerson { 0.0 } else { 4.0 };
+            let expected_dist = if p == Perspective::FirstPerson {
+                0.0
+            } else {
+                4.0
+            };
             assert!(
                 ((sample.position - sample.eye).length() - expected_dist).abs() < 1e-4,
                 "orbit distance must remain constant during jump + movement"
@@ -3246,7 +3375,11 @@ mod tests {
         ];
 
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         for i in 1..=10 {
@@ -3263,8 +3396,16 @@ mod tests {
             // Direct raw mouse look delta applied on the render thread
             harness.world_view.apply_look_delta(0.1, -0.05);
 
-            let sample = harness.world_view.view.sample(tick + TICK / 2).expect("sample");
-            let expected_dist = if p == Perspective::FirstPerson { 0.0 } else { 4.0 };
+            let sample = harness
+                .world_view
+                .view
+                .sample(tick + TICK / 2)
+                .expect("sample");
+            let expected_dist = if p == Perspective::FirstPerson {
+                0.0
+            } else {
+                4.0
+            };
             assert!(
                 ((sample.position - sample.eye).length() - expected_dist).abs() < 1e-4,
                 "raw mouse look must maintain exact orbit distance across perspective toggles"
@@ -3286,7 +3427,11 @@ mod tests {
         ];
 
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         for i in 1..jump_heights.len() {
@@ -3303,8 +3448,16 @@ mod tests {
             // Continuous 360-degree rotation step
             harness.world_view.apply_look_delta(0.5, 0.1);
 
-            let sample = harness.world_view.view.sample(tick + TICK / 2).expect("sample");
-            let expected_dist = if p == Perspective::FirstPerson { 0.0 } else { 4.0 };
+            let sample = harness
+                .world_view
+                .view
+                .sample(tick + TICK / 2)
+                .expect("sample");
+            let expected_dist = if p == Perspective::FirstPerson {
+                0.0
+            } else {
+                4.0
+            };
             assert!(
                 ((sample.position - sample.eye).length() - expected_dist).abs() < 1e-4,
                 "orbit radius must never collapse or diverge during 360-degree look + jump"
@@ -3326,7 +3479,11 @@ mod tests {
         ];
 
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         for i in 1..=6 {
@@ -3354,13 +3511,21 @@ mod tests {
             harness.frames.0.send(RenderEvent::Frame(f)).expect("frame");
             harness.sync();
 
-            let sample = harness.world_view.view.sample(tick + TICK / 2).expect("sample");
+            let sample = harness
+                .world_view
+                .view
+                .sample(tick + TICK / 2)
+                .expect("sample");
             let expected_eye = prev_eye.lerp(eye, 0.5);
             assert!(
                 (sample.eye - expected_eye).length() < 1e-4,
                 "knockback impulse must interpolate smoothly across F5 toggles"
             );
-            let expected_dist = if p == Perspective::FirstPerson { 0.0 } else { 4.0 };
+            let expected_dist = if p == Perspective::FirstPerson {
+                0.0
+            } else {
+                4.0
+            };
             assert!(
                 ((sample.position - sample.eye).length() - expected_dist).abs() < 1e-4,
                 "orbit distance must remain strictly anchored to knocked back eye"
@@ -3375,7 +3540,11 @@ mod tests {
         let mut eye = glam::DVec3::new(0.0, 64.0, 0.0);
 
         let f0 = frame(eye.as_vec3(), tick, 0);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         // 1. Move in ThirdPersonBack
@@ -3385,7 +3554,11 @@ mod tests {
         f1.perspective = Perspective::ThirdPersonBack;
         f1.state.eye = eye;
         f1.state.position = eye + glam::DVec3::new(0.0, 0.0, -4.0);
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
 
         // 2. Server setback / rubberband teleport occurs
@@ -3394,7 +3567,10 @@ mod tests {
 
         // Immediate sample after teleport must be snapped at setback_pos with NO glide
         let s_snap = harness.world_view.view.sample(tick).expect("sample");
-        assert_eq!(s_snap.eye, setback_pos, "eye must snap to setback position instantly");
+        assert_eq!(
+            s_snap.eye, setback_pos,
+            "eye must snap to setback position instantly"
+        );
         assert_eq!(
             s_snap.position,
             setback_pos + glam::DVec3::new(0.0, 0.0, -4.0),
@@ -3409,10 +3585,18 @@ mod tests {
         f2.state.eye = next_eye;
         f2.state.position = next_eye + glam::DVec3::new(0.0, 0.0, 4.0);
         f2.state.yaw = std::f32::consts::PI;
-        harness.frames.0.send(RenderEvent::Frame(f2)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f2))
+            .expect("frame");
         harness.sync();
 
-        let s_after = harness.world_view.view.sample(tick + TICK / 2).expect("sample");
+        let s_after = harness
+            .world_view
+            .view
+            .sample(tick + TICK / 2)
+            .expect("sample");
         let expected_eye = setback_pos.lerp(next_eye, 0.5);
         assert!(
             (s_after.eye - expected_eye).length() < 1e-4,
@@ -3448,19 +3632,39 @@ mod tests {
         let fd = rec.frame_data();
         f0.local_body = Arc::new(fd.clone());
         f0.entities = Arc::from([fd]);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         // Turn head 30° to the right via raw mouse look
-        harness.world_view.apply_look_delta(30.0_f32.to_radians(), 0.0);
+        harness
+            .world_view
+            .apply_look_delta(30.0_f32.to_radians(), 0.0);
         let mut out = Vec::new();
-        harness.world_view.entities_into(tick, glam::DVec3::ZERO, &mut out);
+        harness
+            .world_view
+            .entities_into(tick, glam::DVec3::ZERO, &mut out);
 
         let local = out.iter().find(|e| e.local).expect("local player snapshot");
-        assert!((local.head_yaw - 30.0).abs() < 1e-3, "head must face 30°, got {}", local.head_yaw);
-        assert!((local.body_yaw - 0.0).abs() < 1e-3, "body must stay still at 0°, got {}", local.body_yaw);
+        assert!(
+            (local.head_yaw - 30.0).abs() < 1e-3,
+            "head must face 30°, got {}",
+            local.head_yaw
+        );
+        assert!(
+            (local.body_yaw - 0.0).abs() < 1e-3,
+            "body must stay still at 0°, got {}",
+            local.body_yaw
+        );
         let net_head_yaw = wrap_degrees(local.head_yaw - local.body_yaw);
-        assert!((net_head_yaw - 30.0).abs() < 1e-3, "netHeadYaw must be exactly 30°, got {}", net_head_yaw);
+        assert!(
+            (net_head_yaw - 30.0).abs() < 1e-3,
+            "netHeadYaw must be exactly 30°, got {}",
+            net_head_yaw
+        );
     }
 
     #[test]
@@ -3478,20 +3682,35 @@ mod tests {
         let fd = rec.frame_data();
         f0.local_body = Arc::new(fd.clone());
         f0.entities = Arc::from([fd]);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         // Turn head 90° right: twist clamps to 75°, diff*diff > 2500 applies 0.2*75 = 15°
         // Expected body_yaw = 90 - 75 + 15 = 30°
-        harness.world_view.apply_look_delta(90.0_f32.to_radians(), 0.0);
+        harness
+            .world_view
+            .apply_look_delta(90.0_f32.to_radians(), 0.0);
         let mut out = Vec::new();
-        harness.world_view.entities_into(tick, glam::DVec3::ZERO, &mut out);
+        harness
+            .world_view
+            .entities_into(tick, glam::DVec3::ZERO, &mut out);
 
         let local = out.iter().find(|e| e.local).expect("local player snapshot");
         assert!((local.head_yaw - 90.0).abs() < 1e-3, "head must face 90°");
-        assert!((local.body_yaw - 30.0).abs() < 1e-3, "body must be dragged to 30°, got {}", local.body_yaw);
+        assert!(
+            (local.body_yaw - 30.0).abs() < 1e-3,
+            "body must be dragged to 30°, got {}",
+            local.body_yaw
+        );
         let net_head_yaw = wrap_degrees(local.head_yaw - local.body_yaw);
-        assert!((net_head_yaw - 60.0).abs() < 1e-3, "netHeadYaw must be 60° (within 75° bound)");
+        assert!(
+            (net_head_yaw - 60.0).abs() < 1e-3,
+            "netHeadYaw must be 60° (within 75° bound)"
+        );
     }
 
     #[test]
@@ -3507,14 +3726,20 @@ mod tests {
         let fd = rec.frame_data();
         f0.local_body = Arc::new(fd.clone());
         f0.entities = Arc::from([fd]);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         let deltas = [60.0_f32, -120.0, 150.0, -180.0, 70.0, -90.0];
         for d in deltas {
             harness.world_view.apply_look_delta(d.to_radians(), 0.0);
             let mut out = Vec::new();
-            harness.world_view.entities_into(tick, glam::DVec3::ZERO, &mut out);
+            harness
+                .world_view
+                .entities_into(tick, glam::DVec3::ZERO, &mut out);
             let local = out.iter().find(|e| e.local).expect("local player");
             let net_head_yaw = wrap_degrees(local.head_yaw - local.body_yaw);
             assert!(
@@ -3539,22 +3764,40 @@ mod tests {
         let fd = rec.frame_data();
         f0.local_body = Arc::new(fd.clone());
         f0.entities = Arc::from([fd]);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         // 1. At 45° (45^2 = 2025 <= 2500): body stays at 0°
-        harness.world_view.apply_look_delta(45.0_f32.to_radians(), 0.0);
+        harness
+            .world_view
+            .apply_look_delta(45.0_f32.to_radians(), 0.0);
         let mut out = Vec::new();
-        harness.world_view.entities_into(tick, glam::DVec3::ZERO, &mut out);
+        harness
+            .world_view
+            .entities_into(tick, glam::DVec3::ZERO, &mut out);
         let local45 = out.iter().find(|e| e.local).unwrap();
-        assert!((local45.body_yaw - 0.0).abs() < 1e-3, "body must stay 0° under 50°");
+        assert!(
+            (local45.body_yaw - 0.0).abs() < 1e-3,
+            "body must stay 0° under 50°"
+        );
 
         // 2. Further to 60° (60^2 = 3600 > 2500): body catches up by 60 * 0.2 = 12°
-        harness.world_view.apply_look_delta(15.0_f32.to_radians(), 0.0);
+        harness
+            .world_view
+            .apply_look_delta(15.0_f32.to_radians(), 0.0);
         out.clear();
-        harness.world_view.entities_into(tick, glam::DVec3::ZERO, &mut out);
+        harness
+            .world_view
+            .entities_into(tick, glam::DVec3::ZERO, &mut out);
         let local60 = out.iter().find(|e| e.local).unwrap();
-        assert!((local60.body_yaw - 12.0).abs() < 1e-3, "body must catch up to 12° at 60° look");
+        assert!(
+            (local60.body_yaw - 12.0).abs() < 1e-3,
+            "body must catch up to 12° at 60° look"
+        );
         assert!((local60.head_yaw - 60.0).abs() < 1e-3);
     }
 
@@ -3570,7 +3813,11 @@ mod tests {
         let mut remote0 = EntityRecord::new(EntityId(2), EntityKind::Player, eye, 0.0, 0.0);
         remote0.local = false;
         f0.entities = Arc::from([remote0.frame_data()]);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         // Tick 1 with entity turning to 40°
@@ -3584,18 +3831,32 @@ mod tests {
         remote1.body_yaw.offset = 12.0;
         remote1.body_yaw.previous = 0.0;
         f1.entities = Arc::from([remote1.frame_data()]);
-        harness.frames.0.send(RenderEvent::Frame(f1)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f1))
+            .expect("frame");
         harness.sync();
 
         // Sample at alpha = 0.5 (halfway between ticks)
         let t_half = t1 + TICK / 2;
         let mut out = Vec::new();
-        harness.world_view.entities_into(t_half, glam::DVec3::ZERO, &mut out);
+        harness
+            .world_view
+            .entities_into(t_half, glam::DVec3::ZERO, &mut out);
         let remote = out.iter().find(|e| e.id == EntityId(2)).unwrap();
         // Head smoothly interpolates: (0° to 40° at alpha 0.5 is 20°)
-        assert!((remote.head_yaw - 20.0).abs() < 1e-3, "sub-tick head_yaw must smoothly interpolate, got {}", remote.head_yaw);
+        assert!(
+            (remote.head_yaw - 20.0).abs() < 1e-3,
+            "sub-tick head_yaw must smoothly interpolate, got {}",
+            remote.head_yaw
+        );
         // Body smoothly interpolates: (0° to 12° at alpha 0.5 is 6°)
-        assert!((remote.body_yaw - 6.0).abs() < 1e-3, "sub-tick body_yaw must smoothly interpolate, got {}", remote.body_yaw);
+        assert!(
+            (remote.body_yaw - 6.0).abs() < 1e-3,
+            "sub-tick body_yaw must smoothly interpolate, got {}",
+            remote.body_yaw
+        );
     }
 
     #[test]
@@ -3612,18 +3873,33 @@ mod tests {
         let fd = rec.frame_data();
         f0.local_body = Arc::new(fd.clone());
         f0.entities = Arc::from([fd]);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         // Apply mouse delta of +15° (from 355° to 10°)
-        harness.world_view.apply_look_delta(15.0_f32.to_radians(), 0.0);
+        harness
+            .world_view
+            .apply_look_delta(15.0_f32.to_radians(), 0.0);
         let mut out = Vec::new();
-        harness.world_view.entities_into(tick, glam::DVec3::ZERO, &mut out);
+        harness
+            .world_view
+            .entities_into(tick, glam::DVec3::ZERO, &mut out);
         let local = out.iter().find(|e| e.local).unwrap();
 
-        assert!((wrap_degrees(local.head_yaw) - 10.0).abs() < 1e-3, "head must wrap to 10°");
+        assert!(
+            (wrap_degrees(local.head_yaw) - 10.0).abs() < 1e-3,
+            "head must wrap to 10°"
+        );
         let net_head_yaw = wrap_degrees(local.head_yaw - local.body_yaw);
-        assert!((net_head_yaw - 15.0).abs() < 1e-3, "netHeadYaw must be +15°, got {}", net_head_yaw);
+        assert!(
+            (net_head_yaw - 15.0).abs() < 1e-3,
+            "netHeadYaw must be +15°, got {}",
+            net_head_yaw
+        );
     }
 
     #[test]
@@ -3638,11 +3914,17 @@ mod tests {
         let fd = rec.frame_data();
         f0.local_body = Arc::new(fd.clone());
         f0.entities = Arc::from([fd]);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         let mut out = Vec::new();
-        harness.world_view.entities_into(tick, glam::DVec3::ZERO, &mut out);
+        harness
+            .world_view
+            .entities_into(tick, glam::DVec3::ZERO, &mut out);
         let local = out.iter().find(|e| e.local).unwrap();
         assert!((local.head_yaw - 45.0).abs() < 1e-3);
         assert!((local.body_yaw - 45.0).abs() < 1e-3);
@@ -3661,17 +3943,31 @@ mod tests {
         let fd = rec.frame_data();
         f0.local_body = Arc::new(fd.clone());
         f0.entities = Arc::from([fd]);
-        harness.frames.0.send(RenderEvent::Frame(f0)).expect("frame");
+        harness
+            .frames
+            .0
+            .send(RenderEvent::Frame(f0))
+            .expect("frame");
         harness.sync();
 
         // In front view, camera is looking at player's face from the front
         // Turning mouse 20° turns player look direction towards 20°
-        harness.world_view.apply_look_delta(20.0_f32.to_radians(), 0.0);
+        harness
+            .world_view
+            .apply_look_delta(20.0_f32.to_radians(), 0.0);
         let mut out = Vec::new();
-        harness.world_view.entities_into(tick, glam::DVec3::ZERO, &mut out);
+        harness
+            .world_view
+            .entities_into(tick, glam::DVec3::ZERO, &mut out);
         let local = out.iter().find(|e| e.local).unwrap();
-        assert!((local.head_yaw - 20.0).abs() < 1e-3, "head must face player_yaw 20°");
-        assert!((local.body_yaw - 0.0).abs() < 1e-3, "body stays within 50° limit");
+        assert!(
+            (local.head_yaw - 20.0).abs() < 1e-3,
+            "head must face player_yaw 20°"
+        );
+        assert!(
+            (local.body_yaw - 0.0).abs() < 1e-3,
+            "body stays within 50° limit"
+        );
         let net = wrap_degrees(local.head_yaw - local.body_yaw);
         assert!((net - 20.0).abs() < 1e-3);
     }
@@ -3684,13 +3980,19 @@ mod tests {
         body.update_player((0.2, 0.0), 0.0, false);
         // target = atan2(0.0, 0.2) - 90 = -90°
         // offset += wrap_degrees(-90 - 0) * 0.3 = -27°
-        assert!((body.offset - (-27.0)).abs() < 1e-3, "body aligns towards movement direction");
+        assert!(
+            (body.offset - (-27.0)).abs() < 1e-3,
+            "body aligns towards movement direction"
+        );
 
         // When swinging arm (PvP attack during jump):
         // target snaps to yaw (0°), pulling body back towards aim
         body.update_player((0.2, 0.0), 0.0, true);
         // target = 0°, offset += wrap_degrees(0 - (-27)) * 0.3 = -27 + 8.1 = -18.9°
-        assert!((body.offset - (-18.9)).abs() < 1e-3, "swinging snaps target towards aim");
+        assert!(
+            (body.offset - (-18.9)).abs() < 1e-3,
+            "swinging snaps target towards aim"
+        );
     }
 
     #[test]
@@ -3717,7 +4019,11 @@ mod tests {
         let snap = record.frame_data().interpolate(0.5, glam::DVec3::ZERO);
         assert_eq!(snap.head_yaw, 180.0);
         assert_eq!(snap.body_yaw, 180.0);
-        assert_eq!(wrap_degrees(snap.head_yaw - snap.body_yaw), 0.0, "zero residual twist after setback");
+        assert_eq!(
+            wrap_degrees(snap.head_yaw - snap.body_yaw),
+            0.0,
+            "zero residual twist after setback"
+        );
     }
 
     #[test]
@@ -3758,7 +4064,11 @@ mod tests {
         harness
             .frames
             .0
-            .send(RenderEvent::Frame(frame(glam::Vec3::new(1.0, 0.0, 0.0), delayed_tick, 0)))
+            .send(RenderEvent::Frame(frame(
+                glam::Vec3::new(1.0, 0.0, 0.0),
+                delayed_tick,
+                0,
+            )))
             .unwrap();
         harness.sync();
 
@@ -3770,7 +4080,10 @@ mod tests {
         );
 
         // At 25ms after arrival, partial_tick should interpolate smoothly around 0.5
-        let alpha_halfway = harness.world_view.view.partial_tick(now + Duration::from_millis(25));
+        let alpha_halfway = harness
+            .world_view
+            .view
+            .partial_tick(now + Duration::from_millis(25));
         assert!(
             (alpha_halfway - 0.5).abs() < 0.1,
             "delayed snapshot must interpolate smoothly over 50ms window (got {alpha_halfway})"

@@ -320,7 +320,11 @@ pub fn render_extras(reference: &Trace, candidate: &Trace, show: usize) -> Strin
     let _ = writeln!(out, "intervals   {:>9}  {:>9}", a.intervals, b.intervals);
     let _ = writeln!(out, "mean        {:>9.2}  {:>9.2}", a.mean_ms, b.mean_ms);
     let _ = writeln!(out, "std dev     {:>9.2}  {:>9.2}", a.std_ms, b.std_ms);
-    let _ = writeln!(out, "min / max   {:>4} /{:>4}  {:>4} /{:>4}", a.min_ms, a.max_ms, b.min_ms, b.max_ms);
+    let _ = writeln!(
+        out,
+        "min / max   {:>4} /{:>4}  {:>4} /{:>4}",
+        a.min_ms, a.max_ms, b.min_ms, b.max_ms
+    );
     let bodies = body_mismatches(reference, candidate);
     let _ = writeln!(
         out,
@@ -328,7 +332,14 @@ pub fn render_extras(reference: &Trace, candidate: &Trace, show: usize) -> Strin
         bodies.len()
     );
     for m in bodies.iter().take(show) {
-        let _ = writeln!(out, "  tick {:>5} {:<22} {} | {}", m.index, m.token.to_string(), m.reference, m.candidate);
+        let _ = writeln!(
+            out,
+            "  tick {:>5} {:<22} {} | {}",
+            m.index,
+            m.token.to_string(),
+            m.reference,
+            m.candidate
+        );
     }
     out
 }
@@ -420,7 +431,10 @@ mod tests {
         let found = body_mismatches(&a, &b);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].index, 1);
-        assert_eq!((found[0].reference.as_str(), found[0].candidate.as_str()), ("0304", "0305"));
+        assert_eq!(
+            (found[0].reference.as_str(), found[0].candidate.as_str()),
+            ("0304", "0305")
+        );
         assert!(body_mismatches(&a, &a).is_empty());
     }
 

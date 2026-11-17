@@ -69,7 +69,9 @@ impl HudEditorView {
     /// Whether the widget of the mod `id` is locked in place.
     #[must_use]
     pub fn is_locked(&self, id: &str) -> bool {
-        self.entries.iter().any(|entry| entry.id == id && entry.locked)
+        self.entries
+            .iter()
+            .any(|entry| entry.id == id && entry.locked)
     }
 }
 

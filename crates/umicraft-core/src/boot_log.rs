@@ -101,10 +101,7 @@ pub fn log_frame_presented() -> u64 {
     let mut guard = BOOT_LOGGER.lock().unwrap();
     if let Some(ref mut logger) = *guard {
         let total = now.duration_since(logger.start).as_secs_f64() * 1000.0;
-        let line = format!(
-            "[{:>8.2}ms] [BOOT] frame_presented count={}",
-            total, count
-        );
+        let line = format!("[{:>8.2}ms] [BOOT] frame_presented count={}", total, count);
         let _ = writeln!(logger.file, "{}", line);
         let _ = logger.file.flush();
     }

@@ -157,7 +157,8 @@ fn is_state_file(path: &Path) -> bool {
 
 /// The strict-by-default comparison of two state logs.
 fn run_state(args: &Args) -> Result<bool, String> {
-    let load = |path: &Path| StateLog::load(path).map_err(|error| format!("{}: {error}", path.display()));
+    let load =
+        |path: &Path| StateLog::load(path).map_err(|error| format!("{}: {error}", path.display()));
     let tolerance = Tolerance {
         position: args.tolerance.unwrap_or(0.0),
         motion: args.motion_tolerance.unwrap_or(0.0),
@@ -181,12 +182,16 @@ fn load(path: &Path) -> Result<Trajectory, String> {
 
 fn main() -> ExitCode {
     let result = parse_args(std::env::args().skip(1).collect()).and_then(|args| {
-        match (is_state_file(&args.reference), is_state_file(&args.candidate)) {
+        match (
+            is_state_file(&args.reference),
+            is_state_file(&args.candidate),
+        ) {
             (true, true) => return run_state(&args),
             (false, false) => {}
             _ => {
                 return Err(
-                    "one input is a state log and the other is not: compare like with like".to_string(),
+                    "one input is a state log and the other is not: compare like with like"
+                        .to_string(),
                 )
             }
         }
@@ -245,6 +250,10 @@ mod tests {
         assert!(args(&["a", "b", "--tolerance", "-1"]).is_err());
         assert!(args(&["a", "b", "--rot-tolerance"]).is_err());
         assert!(args(&["a", "b", "--align", "random"]).is_err());
-        assert!(args(&["a", "b", "--align", "motion"]).expect("valid").align_motion);
+        assert!(
+            args(&["a", "b", "--align", "motion"])
+                .expect("valid")
+                .align_motion
+        );
     }
 }

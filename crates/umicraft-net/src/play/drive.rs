@@ -129,7 +129,9 @@ pub async fn drive(
                         Err(_) => break,
                     }
                 }
-                counters.sent.fetch_add(batch.len() as u64, Ordering::Relaxed);
+                counters
+                    .sent
+                    .fetch_add(batch.len() as u64, Ordering::Relaxed);
                 connection.write_packets(&batch).await?;
             }
             Incoming::Packet(id, body) => {
@@ -143,7 +145,9 @@ pub async fn drive(
                             counters.keepalives_answered.fetch_add(1, Ordering::Relaxed);
                         }
                     }
-                    counters.sent.fetch_add(replies.len() as u64, Ordering::Relaxed);
+                    counters
+                        .sent
+                        .fetch_add(replies.len() as u64, Ordering::Relaxed);
                     connection.write_packet_refs(&replies).await?;
                 }
                 if let Some(threshold) = reaction.compression_threshold() {

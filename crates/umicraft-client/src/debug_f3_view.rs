@@ -168,7 +168,10 @@ pub fn build_live(
         input_latency: live.input_latency,
         surface_info: surface_info.as_ref(),
         frame_pacing: renderer.map_or_else(FramePacingStats::default, Renderer::frame_pacing_stats),
-        snapshot_pacing: world.map_or_else(SnapshotPacingStats::default, WorldView::snapshot_pacing_stats),
+        snapshot_pacing: world.map_or_else(
+            SnapshotPacingStats::default,
+            WorldView::snapshot_pacing_stats,
+        ),
     })
 }
 
@@ -236,7 +239,11 @@ pub fn build(frame: &F3Frame<'_>) -> DebugF3View {
     let game_pct = (f64::from(frame.world.tick_micros) / 50_000.0) * 100.0;
     let alloc_kib = frame.mean_alloc_bytes_per_frame / 1024.0;
     let prof_state = if frame.profiling_enabled { "ON" } else { "OFF" };
-    let tps_val = if frame.world.real_tps > 0.0 { frame.world.real_tps } else { 20.0 };
+    let tps_val = if frame.world.real_tps > 0.0 {
+        frame.world.real_tps
+    } else {
+        20.0
+    };
     right.push(format!(
         "TPS: {:.1} | Game: {:.1}% ({} us, delay {} us, catchup {}) | Net: {} us (queue {}) | Mesh: {}/{}",
         tps_val,
@@ -251,10 +258,7 @@ pub fn build(frame: &F3Frame<'_>) -> DebugF3View {
     ));
     right.push(format!(
         "Allocs/f: {:.0} ({:.1} KiB) | Prof: {} | Dirty Chunks: {}",
-        frame.mean_allocs_per_frame,
-        alloc_kib,
-        prof_state,
-        frame.world.dirty_chunks,
+        frame.mean_allocs_per_frame, alloc_kib, prof_state, frame.world.dirty_chunks,
     ));
     right.push(frame.input_latency.f3_line());
     if let Some(surf) = &frame.surface_info {

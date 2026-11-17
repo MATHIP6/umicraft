@@ -159,7 +159,10 @@ fn a_classic_deflated_pack_overrides_textures_with_their_transparency() {
         deflated("pack.mcmeta", MCMETA),
         deflated(STONE, &png(16, 16, [200, 100, 50, 128])),
         deflated(deep, &png(16, 16, [1, 2, 3, 0])),
-        deflated("assets/minecraft/sounds/unused.ogg", b"not read by anything"),
+        deflated(
+            "assets/minecraft/sounds/unused.ogg",
+            b"not read by anything",
+        ),
         deflated("README.txt", b"not an asset"),
     ]);
     assert_eq!(pack.metadata().map(|meta| meta.pack_format), Some(1));
@@ -204,7 +207,9 @@ fn a_large_texture_is_capped_in_the_array_and_kept_whole_beside_it() {
         deflated(STONE, &png(512, 512, [9, 9, 9, 255])),
         deflated(apple, &png(512, 512, [7, 7, 7, 255])),
     ]);
-    let layered = base("large").apply_packs(&[pack]).expect("the pack applies");
+    let layered = base("large")
+        .apply_packs(&[pack])
+        .expect("the pack applies");
     let atlas = layered.atlas();
     assert_eq!(
         (atlas.width(), atlas.height()),
@@ -212,7 +217,11 @@ fn a_large_texture_is_capped_in_the_array_and_kept_whole_beside_it() {
         "layers are capped"
     );
     assert_eq!(texel(&layered, "blocks/stone"), [9, 9, 9, 255]);
-    assert_eq!(texel(&layered, "blocks/dirt"), BASE_DIRT, "16 pixels scaled up");
+    assert_eq!(
+        texel(&layered, "blocks/dirt"),
+        BASE_DIRT,
+        "16 pixels scaled up"
+    );
     assert_eq!(atlas.hires_edge(), 512);
     assert_eq!(atlas.hires_layers().len(), 2, "the stone and the apple");
 }
@@ -304,7 +313,9 @@ fn the_last_of_two_entries_with_one_name_wins() {
         stored(STONE, &png(16, 16, [2, 2, 2, 255])),
     ]);
     assert_eq!(pack.file_count(), 1);
-    let layered = base("twice").apply_packs(&[pack]).expect("the pack applies");
+    let layered = base("twice")
+        .apply_packs(&[pack])
+        .expect("the pack applies");
     assert_eq!(texel(&layered, "blocks/stone"), [2, 2, 2, 255]);
 }
 
@@ -376,7 +387,11 @@ fn a_broken_image_in_a_pack_gives_way_to_the_one_underneath() {
         Some(256),
         "the sheet of the base"
     );
-    assert_eq!(layered.get(WIDGETS), None, "GUI sheets are not model resources");
+    assert_eq!(
+        layered.get(WIDGETS),
+        None,
+        "GUI sheets are not model resources"
+    );
     let maps = layered.colormaps().expect("the colormaps of the base");
     assert_eq!(maps.grass.sample(0.5, 0.5), [0, 200, 0]);
     assert_eq!(layered.glint_texture(), base.glint_texture());
@@ -386,8 +401,7 @@ fn a_broken_image_in_a_pack_gives_way_to_the_one_underneath() {
 #[test]
 fn a_broken_image_in_the_jar_is_still_an_error() {
     let bytes = zip(&[stored(STONE, &broken_png(16, 16))]);
-    let path =
-        std::env::temp_dir().join(format!("umicraft-broken-jar-{}.jar", std::process::id()));
+    let path = std::env::temp_dir().join(format!("umicraft-broken-jar-{}.jar", std::process::id()));
     std::fs::write(&path, &bytes).expect("written");
     let jar = ClientJar::open(&path, &hash::sha1_hex(&bytes), bytes.len() as u64).expect("jar");
     let result = ClientResources::load(&jar);

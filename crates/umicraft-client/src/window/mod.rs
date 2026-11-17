@@ -1782,7 +1782,10 @@ impl App {
         let present_us = renderer.presentation_time_us();
         let (proc_us, queue_us) = self.world.as_ref().map_or((0, 0), |w| {
             let debug = w.debug_world();
-            (debug.input_processing_micros, debug.input_queue_latency_micros)
+            (
+                debug.input_processing_micros,
+                debug.input_queue_latency_micros,
+            )
         });
         let input_to_frame_ms = (Instant::now()
             .saturating_duration_since(self.last_input_time)
@@ -1934,11 +1937,7 @@ pub(crate) fn compute_mouse_look_delta(
     zoom_look_factor: f32,
 ) -> (f32, f32) {
     let speed = MOUSE_SENSITIVITY * controls.look_factor() * zoom_look_factor;
-    let vertical = if controls.invert_mouse {
-        -1.0
-    } else {
-        1.0
-    };
+    let vertical = if controls.invert_mouse { -1.0 } else { 1.0 };
     (delta.0 as f32 * speed, delta.1 as f32 * speed * vertical)
 }
 
@@ -1988,7 +1987,10 @@ impl ApplicationHandler for App {
                 wgpu::Backends::VULKAN
             }
             Some(other) => {
-                tracing::warn!(backend = other, "Unknown backend selection; falling back to all backends");
+                tracing::warn!(
+                    backend = other,
+                    "Unknown backend selection; falling back to all backends"
+                );
                 wgpu::Backends::all()
             }
             None => {
@@ -1997,9 +1999,9 @@ impl ApplicationHandler for App {
             }
         };
 
-        let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(
-            Box::new(event_loop.owned_display_handle()),
-        );
+        let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
+            event_loop.owned_display_handle(),
+        ));
         descriptor.backends = backends;
         let instance = wgpu::Instance::new(descriptor);
         umicraft_core::boot_log!("renderer_new_windowed_starting", "backends={:?}", backends);

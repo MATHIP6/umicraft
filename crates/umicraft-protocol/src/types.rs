@@ -136,7 +136,10 @@ mod tests {
         let mut buffer = Vec::new();
         assert!(matches!(
             write_string_capped(&mut buffer, &text_257),
-            Err(ProtocolError::StringTooLong { chars: 257, limit: 256 })
+            Err(ProtocolError::StringTooLong {
+                chars: 257,
+                limit: 256
+            })
         ));
     }
 
@@ -152,7 +155,9 @@ mod tests {
         let err = read_string_capped(&mut &buf_1450[..]).unwrap_err();
         match err {
             ProtocolError::Invariant(msg) => {
-                assert!(msg.contains("string declares 1450 bytes, byte budget for 256 chars is 1024"));
+                assert!(
+                    msg.contains("string declares 1450 bytes, byte budget for 256 chars is 1024")
+                );
             }
             other => panic!("expected Invariant error, got {other:?}"),
         }
@@ -190,7 +195,10 @@ mod tests {
         let mut buf = Vec::new();
         assert!(matches!(
             write_string_capped(&mut buf, &emojis_257),
-            Err(ProtocolError::StringTooLong { chars: 257, limit: 256 })
+            Err(ProtocolError::StringTooLong {
+                chars: 257,
+                limit: 256
+            })
         ));
     }
 
@@ -244,7 +252,10 @@ mod tests {
         let mut buf = Vec::new();
         assert!(matches!(
             write_string(&mut buf, &long_json, MAX_JSON_CHARS),
-            Err(ProtocolError::StringTooLong { chars: 32768, limit: 32767 })
+            Err(ProtocolError::StringTooLong {
+                chars: 32768,
+                limit: 32767
+            })
         ));
 
         // Wire payload declaring byte length over budget (32767 * 4 = 131068)

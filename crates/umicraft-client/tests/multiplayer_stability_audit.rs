@@ -42,11 +42,18 @@ fn audit_game_thread_tick_respect_and_no_packet_backlog() {
                 break;
             }
         }
-        assert!(slice <= MAX_EVENTS_PER_PASS, "slice never exceeds 32 events");
+        assert!(
+            slice <= MAX_EVENTS_PER_PASS,
+            "slice never exceeds 32 events"
+        );
     }
 
     assert_eq!(drained_total, 200, "all 200 events successfully processed");
-    assert_eq!(events_rx.len(), 0, "network queue completely drained: zero permanent backlog");
+    assert_eq!(
+        events_rx.len(),
+        0,
+        "network queue completely drained: zero permanent backlog"
+    );
 }
 
 #[test]
@@ -64,12 +71,18 @@ fn audit_server_setback_teleport_latency_is_zero() {
         yaw,
         pitch,
     };
-    frames_tx.try_send(teleport_event).expect("immediate delivery");
+    frames_tx
+        .try_send(teleport_event)
+        .expect("immediate delivery");
 
     // Verify received immediately without waiting for any simulation tick
     let received = frames_rx.try_recv().expect("event in queue");
     match received {
-        RenderEvent::Teleport { position, yaw: r_yaw, pitch: r_pitch } => {
+        RenderEvent::Teleport {
+            position,
+            yaw: r_yaw,
+            pitch: r_pitch,
+        } => {
             assert_eq!(position, setback_pos + DVec3::Y * 1.62);
             assert_eq!(r_yaw, yaw);
             assert_eq!(r_pitch, pitch);
@@ -89,7 +102,9 @@ fn audit_delayed_snapshots_never_clamp_partial_tick_to_one() {
     let tick_instant = Some(base); // wall clock arrival on render thread
     let now = base + Duration::from_millis(25); // 25ms after arrival (halfway through frame)
 
-    let from_tick = now.saturating_duration_since(delayed_tick_time).as_secs_f32();
+    let from_tick = now
+        .saturating_duration_since(delayed_tick_time)
+        .as_secs_f32();
     let elapsed = if from_tick <= tick_secs {
         from_tick
     } else if let Some(instant) = tick_instant {
@@ -155,11 +170,17 @@ fn audit_zero_regression_vanilla_head_rotation_and_f5_perspectives() {
     let mut body = BodyYaw::new(0.0);
     // When moving along +X (yaw -90°):
     body.update_player((0.2, 0.0), 0.0, false);
-    assert!((body.offset - (-27.0)).abs() < 1e-3, "body aligns towards movement direction");
+    assert!(
+        (body.offset - (-27.0)).abs() < 1e-3,
+        "body aligns towards movement direction"
+    );
 
     // When swinging arm (PvP attack):
     body.update_player((0.2, 0.0), 0.0, true);
-    assert!((body.offset - (-18.9)).abs() < 1e-3, "swinging snaps target towards aim");
+    assert!(
+        (body.offset - (-18.9)).abs() < 1e-3,
+        "swinging snaps target towards aim"
+    );
 
     let net_twist = wrap_degrees(0.0 - body.offset);
     assert!((net_twist - 18.9).abs() < 1e-3);

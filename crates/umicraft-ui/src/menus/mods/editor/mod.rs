@@ -347,9 +347,12 @@ impl ModsScreen {
         let first = left + (SIZE.0 - 2.0 * BUTTON.0 - gap) * 0.5;
         let y = top + SIZE.1 - BUTTON.1 - 8.0;
         let mut answer = None;
-        for (index, key) in ["umicraft.mods.editor.cancel", "umicraft.mods.editor.reset_all"]
-            .into_iter()
-            .enumerate()
+        for (index, key) in [
+            "umicraft.mods.editor.cancel",
+            "umicraft.mods.editor.reset_all",
+        ]
+        .into_iter()
+        .enumerate()
         {
             let x = first + index as f32 * (BUTTON.0 + gap);
             let rect = gui.rect(x, y, BUTTON.0, BUTTON.1);

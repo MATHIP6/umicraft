@@ -9,7 +9,6 @@
 //! - `net.minecraft.util.EnumFacing`
 
 use glam::DVec3;
-use umicraft_world::{BlockPos, BlockState};
 use umicraft_game::collision::Aabb;
 use umicraft_game::combat::interact::ClickViewer;
 use umicraft_game::digging::Digger;
@@ -25,6 +24,7 @@ use umicraft_protocol::packets::play::item_stack::ItemStack;
 use umicraft_protocol::packets::play::serverbound::player_block_placement::PlayerBlockPlacement;
 use umicraft_protocol::packets::play::serverbound::player_digging::{DiggingStatus, PlayerDigging};
 use umicraft_protocol::packets::EncodablePacket;
+use umicraft_world::{BlockPos, BlockState};
 
 /// A simple test world containing blocks specified by coordinates.
 struct TestWorld {
@@ -518,7 +518,9 @@ fn test_sword_on_solid_block_sequence_and_wire_order() {
     );
     assert_eq!(
         output.packets[1],
-        Outgoing::UseItem { item: sword.clone() }
+        Outgoing::UseItem {
+            item: sword.clone()
+        }
     );
     assert!(!output.swing);
     assert!(state.is_using());
@@ -696,7 +698,10 @@ fn test_c07_release_use_item_on_button_release() {
     };
     let out_press = state.tick(&mut interaction, &tick_press);
     assert_eq!(out_press.packets.len(), 1);
-    assert_eq!(out_press.packets[0], Outgoing::UseItem { item: bow.clone() });
+    assert_eq!(
+        out_press.packets[0],
+        Outgoing::UseItem { item: bow.clone() }
+    );
     assert!(state.is_using());
 
     // Tick 2: Player releases right-click (held: false) -> releases bow
@@ -738,7 +743,7 @@ fn test_c07_release_use_item_on_button_release() {
     let mut wire_release = Vec::new();
     c07_release.encode_body(&mut wire_release).unwrap();
     assert_eq!(wire_release[0], 5); // Status 5 = ReleaseUseItem
-    // Position (0, 0, 0) packed into i64 is 0
+                                    // Position (0, 0, 0) packed into i64 is 0
     assert_eq!(&wire_release[1..9], &[0; 8]);
     assert_eq!(wire_release[9], 0); // Face Down = 0
 }

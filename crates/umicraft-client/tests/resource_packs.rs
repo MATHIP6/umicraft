@@ -85,7 +85,11 @@ fn every_real_pack_loads_and_uploads() {
             gui.pixels().len() / (1024 * 1024),
         );
     }
-    assert!(failures.is_empty(), "packs that failed:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "packs that failed:\n{}",
+        failures.join("\n")
+    );
 }
 
 const STONE_MODEL: &str = "assets/minecraft/models/block/stone.json";
@@ -139,10 +143,22 @@ fn a_broken_model_of_a_pack_gives_way_to_the_official_one() {
     let resources = ModelResources::from_resources_and_packs(base.clone(), &[pack])
         .expect("a broken model is not fatal");
     let files = resources.resources();
-    assert_eq!(files.get(STONE_MODEL), base.get(STONE_MODEL), "the official model");
-    assert_eq!(files.get(DIRT_MODEL), Some(CUSTOM_DIRT), "the valid model stays");
+    assert_eq!(
+        files.get(STONE_MODEL),
+        base.get(STONE_MODEL),
+        "the official model"
+    );
+    assert_eq!(
+        files.get(DIRT_MODEL),
+        Some(CUSTOM_DIRT),
+        "the valid model stays"
+    );
     assert_eq!(stone_texel(&resources), RED, "and so do the textures");
-    assert_eq!(resources.stats().block_states, 2912, "every block state bakes");
+    assert_eq!(
+        resources.stats().block_states,
+        2912,
+        "every block state bakes"
+    );
 }
 
 /// A pack made for a later version: its models name a parent 1.8 does not
@@ -187,7 +203,10 @@ fn switching_packs_on_the_gpu_releases_the_previous_textures() {
     };
     let plain = install(&[]);
     let heavy = install(&[pack_of(&[(STONE_TEXTURE, &large)])]);
-    assert!(heavy > plain, "256 pixel layers take more than 32: {heavy} > {plain}");
+    assert!(
+        heavy > plain,
+        "256 pixel layers take more than 32: {heavy} > {plain}"
+    );
     assert_eq!(install(&[]), plain, "back to the default pack");
     assert_eq!(install(&[pack_of(&[(STONE_TEXTURE, &large)])]), heavy);
     assert_eq!(install(&[]), plain, "and back again");

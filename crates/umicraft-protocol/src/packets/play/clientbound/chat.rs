@@ -83,7 +83,8 @@ mod tests {
         let mut buffer = Vec::new();
         packet.encode_body(&mut buffer).unwrap();
         // Body length on wire: VarInt length prefix + 1450 bytes JSON + 1 byte position
-        let decoded = Chat::decode(&mut &buffer[..]).expect("1450-byte Minemen chat must decode successfully");
+        let decoded = Chat::decode(&mut &buffer[..])
+            .expect("1450-byte Minemen chat must decode successfully");
         assert_eq!(decoded, packet);
     }
 
@@ -103,7 +104,8 @@ mod tests {
 
         let mut buffer = Vec::new();
         packet.encode_body(&mut buffer).unwrap();
-        let decoded = Chat::decode(&mut &buffer[..]).expect("1077-byte Minemen chat must decode successfully");
+        let decoded = Chat::decode(&mut &buffer[..])
+            .expect("1077-byte Minemen chat must decode successfully");
         assert_eq!(decoded, packet);
     }
 

@@ -79,7 +79,8 @@ impl Rows<'_> {
         let size = theme::TEXT_SIZE_SMALL + 0.5;
         let text = fit_text(self.paint.brand, text, size * self.paint.scale, room);
         let style = (size, theme::TEXT, Align::Left);
-        self.paint.text(ui, &text, (row.x + 2.0 * self.paint.scale, middle), style);
+        self.paint
+            .text(ui, &text, (row.x + 2.0 * self.paint.scale, middle), style);
     }
 
     /// A row with a switch; returns the state asked for.
@@ -92,14 +93,25 @@ impl Rows<'_> {
         let (row, live) = self.next(LINE);
         let track = row_toggle(row, self.paint.scale);
         let middle = row.y + row.height * 0.5;
-        self.label(ui, label, row, (middle, track.x - row.x - 4.0 * self.paint.scale));
+        self.label(
+            ui,
+            label,
+            row,
+            (middle, track.x - row.x - 4.0 * self.paint.scale),
+        );
         let id = ui.id(key);
         let hover = hover_level(ui, track);
         toggle(ui, id, track, on, (hover, look.0, look.1)).filter(|_| live)
     }
 
     /// A row with a value between a `-` and a `+`; returns `-1.0` or `1.0`.
-    fn stepper(&mut self, ui: &mut Ui, (key, label): (&str, &str), value: &str, on: bool) -> Option<f32> {
+    fn stepper(
+        &mut self,
+        ui: &mut Ui,
+        (key, label): (&str, &str),
+        value: &str,
+        on: bool,
+    ) -> Option<f32> {
         let scale = self.paint.scale;
         let (row, live) = self.next(LINE);
         let middle = row.y + row.height * 0.5;
@@ -113,7 +125,11 @@ impl Rows<'_> {
         };
         let (minus, plus) = (button(0.0), button(1.0));
         self.label(ui, label, row, (middle, minus.x - row.x - 4.0 * scale));
-        let style = (theme::TEXT_SIZE_SMALL + 0.5, theme::TEXT_MUTED, Align::Center);
+        let style = (
+            theme::TEXT_SIZE_SMALL + 0.5,
+            theme::TEXT_MUTED,
+            Align::Center,
+        );
         let at = ((minus.right() + plus.x) * 0.5, middle);
         self.paint.text(ui, value, at, style);
         ui.push_id(key);
@@ -185,7 +201,11 @@ impl ModsScreen {
             .and_then(|id| view.hud.entries.iter().find(|entry| entry.id == id));
         let Some(entry) = entry else {
             let at = (area.x + area.width * 0.5, area.y + 12.0 * scale);
-            let style = (theme::TEXT_SIZE_SMALL + 0.5, theme::TEXT_MUTED, Align::Center);
+            let style = (
+                theme::TEXT_SIZE_SMALL + 0.5,
+                theme::TEXT_MUTED,
+                Align::Center,
+            );
             paint.text(ui, lang.tr("umicraft.mods.editor.none"), at, style);
             return None;
         };
@@ -208,7 +228,12 @@ impl ModsScreen {
 
         let (title, _) = rows.next(10.0);
         let name_style = (theme::TEXT_SIZE_BODY, theme::TEXT, Align::Left);
-        paint.text(ui, &entry.name, (title.x, title.y + title.height * 0.5), name_style);
+        paint.text(
+            ui,
+            &entry.name,
+            (title.x, title.y + title.height * 0.5),
+            name_style,
+        );
 
         if let Some(widget) = widget {
             let rect = widget_rect(font, &widget.widget);
@@ -249,7 +274,11 @@ impl ModsScreen {
             let now = aligned(rect.y, rect.height, screen[1]);
             let label = lang.tr("umicraft.mods.editor.vertical");
             if let Some(index) = rows.choices(ui, ("v", label), &down, (now, movable)) {
-                let y = [0.0, (screen[1] - rect.height) * 0.5, screen[1] - rect.height][index];
+                let y = [
+                    0.0,
+                    (screen[1] - rect.height) * 0.5,
+                    screen[1] - rect.height,
+                ][index];
                 changed = hud(moved(0.0, y - rect.y));
             }
             // The arrow keys move the widget too, for the last pixel.
@@ -271,11 +300,26 @@ impl ModsScreen {
             let (row, live) = rows.next(TALL);
             let (min, max) = view.hud.scale_range;
             let now = widget.widget.scale;
-            rows.label(ui, lang.tr("umicraft.mods.editor.scale"), row, (row.y + 4.5 * scale, row.width * 0.6));
+            rows.label(
+                ui,
+                lang.tr("umicraft.mods.editor.scale"),
+                row,
+                (row.y + 4.5 * scale, row.width * 0.6),
+            );
             let value_style = (theme::TEXT_SIZE_SMALL, theme::TEXT_MUTED, Align::Right);
             let shown = format!("x{now:.2}");
-            paint.text(ui, &shown, (row.right() - 2.0 * scale, row.y + 4.5 * scale), value_style);
-            let track = Rect::new(row.x + 2.0 * scale, row.y + 11.0 * scale, row.width - 4.0 * scale, 9.0 * scale);
+            paint.text(
+                ui,
+                &shown,
+                (row.right() - 2.0 * scale, row.y + 4.5 * scale),
+                value_style,
+            );
+            let track = Rect::new(
+                row.x + 2.0 * scale,
+                row.y + 11.0 * scale,
+                row.width - 4.0 * scale,
+                9.0 * scale,
+            );
             let range = SliderRange {
                 min,
                 max,
@@ -293,7 +337,12 @@ impl ModsScreen {
             }
             let (row, _) = rows.next(LINE);
             let middle = row.y + row.height * 0.5;
-            rows.label(ui, lang.tr("umicraft.mods.editor.dimensions"), row, (middle, row.width * 0.6));
+            rows.label(
+                ui,
+                lang.tr("umicraft.mods.editor.dimensions"),
+                row,
+                (middle, row.width * 0.6),
+            );
             let size = format!("{:.0} x {:.0}", rect.width, rect.height);
             paint.text(ui, &size, (row.right() - 2.0 * scale, middle), value_style);
         }
@@ -315,7 +364,9 @@ impl ModsScreen {
         }
 
         rows.section(ui, lang.tr("umicraft.mods.editor.behavior"));
-        let look = self.motion.level(&format!("editor/enabled/{id}"), entry.enabled);
+        let look = self
+            .motion
+            .level(&format!("editor/enabled/{id}"), entry.enabled);
         let label = lang.tr("umicraft.mods.editor.enabled");
         if let Some(enabled) = rows.switch(ui, ("enabled", label), (entry.enabled, look)) {
             changed = Some(ModsOutcome::Toggle {
@@ -323,7 +374,9 @@ impl ModsScreen {
                 enabled,
             });
         }
-        let look = self.motion.level(&format!("editor/locked/{id}"), entry.locked);
+        let look = self
+            .motion
+            .level(&format!("editor/locked/{id}"), entry.locked);
         let label = lang.tr("umicraft.mods.editor.locked");
         if let Some(locked) = rows.switch(ui, ("locked", label), (entry.locked, look)) {
             changed = hud(HudEditorOutcome::Lock {
@@ -407,7 +460,12 @@ impl ModsScreen {
                     row.height - 2.0 * scale,
                 );
                 let middle = row.y + row.height * 0.5;
-                rows.label(ui, &setting.label, row, (middle, button.x - row.x - 4.0 * scale));
+                rows.label(
+                    ui,
+                    &setting.label,
+                    row,
+                    (middle, button.x - row.x - 4.0 * scale),
+                );
                 let current = options.get(*selected).map_or("", |(_, text)| text.as_str());
                 let clicked = chip(ui, paint, button, ("control", current), (true, false));
                 let next = options.get((*selected + 1) % options.len().max(1))?;

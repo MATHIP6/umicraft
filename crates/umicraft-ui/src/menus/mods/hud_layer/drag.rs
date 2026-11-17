@@ -91,7 +91,11 @@ pub(in crate::menus::mods) fn clamp_into(rect: Rect, screen: [f32; 2]) -> Rect {
 
 /// `rect` at scale `to` instead of `from`, its top-left corner staying put
 /// unless the screen edge pushes it back.
-pub(in crate::menus::mods) fn rescaled(rect: Rect, (from, to): (f32, f32), screen: [f32; 2]) -> Rect {
+pub(in crate::menus::mods) fn rescaled(
+    rect: Rect,
+    (from, to): (f32, f32),
+    screen: [f32; 2],
+) -> Rect {
     let factor = to / from;
     clamp_into(
         Rect::new(rect.x, rect.y, rect.width * factor, rect.height * factor),

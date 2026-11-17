@@ -128,15 +128,24 @@ fn the_button_of_the_list_opens_the_editor_and_escape_leaves_it() {
     );
     assert_eq!(show_view(&mut screen, &editor_view(), click_at(edit)), None);
     assert_eq!(screen.page, Page::HudEditor);
-    assert!(screen.can_go_back(), "Escape is the menu's, not the window's");
-    assert_eq!(show_view(&mut screen, &editor_view(), key(Key::Escape)), None);
+    assert!(
+        screen.can_go_back(),
+        "Escape is the menu's, not the window's"
+    );
+    assert_eq!(
+        show_view(&mut screen, &editor_view(), key(Key::Escape)),
+        None
+    );
     assert_eq!(screen.page, Page::List);
 }
 
 #[test]
 fn the_button_is_not_shown_without_a_widget_to_place() {
     let mut screen = on_list();
-    assert!(!has_text(&texts(&mut screen, &view()), "umicraft.mods.editor.open"));
+    assert!(!has_text(
+        &texts(&mut screen, &view()),
+        "umicraft.mods.editor.open"
+    ));
     assert!(has_text(
         &texts(&mut screen, &editor_view()),
         "umicraft.mods.editor.open"
@@ -166,7 +175,10 @@ fn the_dock_keeps_its_clicks() {
 #[test]
 fn the_dock_goes_to_the_side_the_selected_widget_is_not_on() {
     let mut screen = in_editor();
-    assert!(!screen.editor.left, "as many widgets on both sides: it stays");
+    assert!(
+        !screen.editor.left,
+        "as many widgets on both sides: it stays"
+    );
     screen.hud.select(Some("cps".into()));
     show_view(&mut screen, &editor_view(), UiInput::default());
     assert!(screen.editor.left, "cps is on the right");
@@ -223,7 +235,10 @@ fn the_arrows_move_the_selected_widget_by_one_unit() {
     assert_eq!((rect.x, rect.y), (20.0, 99.0));
     // On the list of widgets the arrows are not the widget's.
     screen.editor.tab = TAB_WIDGETS;
-    assert_eq!(show_view(&mut screen, &editor_view(), key(Key::ArrowRight)), None);
+    assert_eq!(
+        show_view(&mut screen, &editor_view(), key(Key::ArrowRight)),
+        None
+    );
 }
 
 #[test]
@@ -322,11 +337,17 @@ fn reset_all_asks_before_it_resets() {
 
     let mut screen = in_editor();
     let reset_all = action(3, 0, 3);
-    assert_eq!(show_view(&mut screen, &editor_view(), click_at(reset_all)), None);
+    assert_eq!(
+        show_view(&mut screen, &editor_view(), click_at(reset_all)),
+        None
+    );
     assert!(screen.editor.confirm, "nothing is reset yet");
     // While the question is up the widgets do not move.
     assert_eq!(drag(&mut screen, &editor_view(), [20.0, 100.0]), None);
-    assert_eq!(show_view(&mut screen, &editor_view(), click_at(button(0.0))), None);
+    assert_eq!(
+        show_view(&mut screen, &editor_view(), click_at(button(0.0))),
+        None
+    );
     assert!(!screen.editor.confirm, "cancelled");
 
     show_view(&mut screen, &editor_view(), click_at(reset_all));
@@ -390,13 +411,24 @@ fn the_game_is_not_blurred_behind_the_editor() {
 
 #[test]
 fn the_dock_fits_narrow_and_wide_screens() {
-    for (width, height) in [(640.0, 480.0), (1280.0, 720.0), (1920.0, 1080.0), (2560.0, 1080.0)] {
+    for (width, height) in [
+        (640.0, 480.0),
+        (1280.0, 720.0),
+        (1920.0, 1080.0),
+        (2560.0, 1080.0),
+    ] {
         let gui = Gui::new(Rect::new(0.0, 0.0, width, height));
         for left in [false, true] {
             let layout = dock_layout(&gui, dock_x(gui.width, left));
             let dock = layout.dock;
-            assert!(dock.x >= 0.0 && dock.right() <= width + 0.5, "{width}x{height}");
-            assert!(dock.y >= 0.0 && dock.bottom() <= height + 0.5, "{width}x{height}");
+            assert!(
+                dock.x >= 0.0 && dock.right() <= width + 0.5,
+                "{width}x{height}"
+            );
+            assert!(
+                dock.y >= 0.0 && dock.bottom() <= height + 0.5,
+                "{width}x{height}"
+            );
             for part in [layout.header, layout.tabs, layout.body, layout.footer] {
                 assert!(part.x >= dock.x && part.right() <= dock.right() + 0.5);
                 assert!(part.y >= dock.y && part.bottom() <= dock.bottom() + 0.5);

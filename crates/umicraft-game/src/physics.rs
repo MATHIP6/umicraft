@@ -1110,7 +1110,11 @@ mod tests {
             player.velocity.z
         );
         // The vanilla 1.8.9 value of the reference run (float arithmetic).
-        assert!((player.velocity.z - 0.069_560_4).abs() < 1e-6, "{}", player.velocity.z);
+        assert!(
+            (player.velocity.z - 0.069_560_4).abs() < 1e-6,
+            "{}",
+            player.velocity.z
+        );
         // The old result, one tick late, is gone.
         assert!((player.velocity.z - 0.053_508).abs() > 0.01);
     }
@@ -1164,7 +1168,10 @@ mod tests {
 
         player.well_fed = false;
         step(&mut player, &intent, &world);
-        assert!(!player.sprinting, "the hunger rule ends the sprint this tick");
+        assert!(
+            !player.sprinting,
+            "the hunger rule ends the sprint this tick"
+        );
         let plain_acceleration =
             INPUT_DAMPING * WALK_SPEED * (MOVE_SPEED_NUMERATOR / stone_friction().powi(3));
         // The motion is damped after the acceleration is added.
@@ -2346,8 +2353,15 @@ mod tests {
             "expected {expected}, got {}",
             player.velocity.z
         );
-        assert!((player.velocity.z - 0.133_911_468).abs() < 1e-6, "{}", player.velocity.z);
-        assert!((player.velocity.z - walking).abs() > 0.01, "the old, late result");
+        assert!(
+            (player.velocity.z - 0.133_911_468).abs() < 1e-6,
+            "{}",
+            player.velocity.z
+        );
+        assert!(
+            (player.velocity.z - walking).abs() > 0.01,
+            "the old, late result"
+        );
     }
 
     /// Walking in water with Depth Strider III keeps its behaviour: the
@@ -2357,12 +2371,19 @@ mod tests {
         let (world, mut player) = settled_wader();
         let before = player.velocity.z;
         step(&mut player, &InputIntent::walking(0.0), &world);
-        assert!((player.velocity.z - before).abs() < 1e-6, "still at its steady speed");
+        assert!(
+            (player.velocity.z - before).abs() < 1e-6,
+            "still at its steady speed"
+        );
         // Steady state: acceleration * friction / (1 - friction), float constants.
         let friction = f64::from(0.546_000_06_f32);
         let acceleration = INPUT_DAMPING * f64::from(WALK_SPEED as f32);
         let steady = acceleration * friction / (1.0 - friction);
-        assert!((player.velocity.z - steady).abs() < 1e-6, "{} vs {steady}", player.velocity.z);
+        assert!(
+            (player.velocity.z - steady).abs() < 1e-6,
+            "{} vs {steady}",
+            player.velocity.z
+        );
     }
 
     /// A flying creative player is not slowed by the water branch

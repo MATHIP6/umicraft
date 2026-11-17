@@ -98,7 +98,10 @@ impl App {
         let folder =
             umicraft_assets::cache::data_dir().map(|dir| dir.join(screenshot_file::FOLDER));
         let lang = std::sync::Arc::clone(&self.lang);
-        let events = self.session.as_ref().map(|session| session.events().clone());
+        let events = self
+            .session
+            .as_ref()
+            .map(|session| session.events().clone());
         let spawned = std::thread::Builder::new()
             .name("umicraft-screenshot".to_string())
             .spawn(move || {
@@ -117,9 +120,8 @@ impl App {
                 // `Minecraft.runTick` prints the result in the chat. Without a game
                 // there is no chat to print in: the log above is all there is.
                 if let Some(events) = events {
-                    let _ = events.try_send(GameEvent::LocalChat(screenshot_chat_line(
-                        &lang, &saved,
-                    )));
+                    let _ =
+                        events.try_send(GameEvent::LocalChat(screenshot_chat_line(&lang, &saved)));
                 }
             });
         if let Err(error) = spawned {

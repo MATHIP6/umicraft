@@ -29,8 +29,8 @@ pub mod settings;
 pub mod traits;
 
 pub use config::{ModConfig, ModsConfig, SavedWidget};
-pub use history::History;
 pub use context::ModContext;
+pub use history::History;
 pub use hud::{
     Anchor, HudContent, HudLine, HudPlacement, HudPreset, HudRect, HudStyle, Shadow, MAX_SCALE,
     MIN_SCALE,

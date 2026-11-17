@@ -73,10 +73,18 @@ impl Keys {
     /// (the `keys_pressed_WASDJSC` column).
     #[must_use]
     pub fn pressed(&self) -> String {
-        [self.w, self.a, self.s, self.d, self.jump, self.sneak, self.sprint]
-            .iter()
-            .map(|down| if *down { '1' } else { '0' })
-            .collect()
+        [
+            self.w,
+            self.a,
+            self.s,
+            self.d,
+            self.jump,
+            self.sneak,
+            self.sprint,
+        ]
+        .iter()
+        .map(|down| if *down { '1' } else { '0' })
+        .collect()
     }
 }
 
@@ -102,11 +110,32 @@ pub fn e1_script() -> Vec<TickPhase> {
         phase("stop1", 40, still),
         phase("sprint", 40, Keys { sprint: true, ..w }),
         phase("stop2", 40, still),
-        phase("jump1", 1, Keys { jump: true, ..still }),
+        phase(
+            "jump1",
+            1,
+            Keys {
+                jump: true,
+                ..still
+            },
+        ),
         phase("jump1_air", 19, still),
-        phase("jump2", 1, Keys { jump: true, ..still }),
+        phase(
+            "jump2",
+            1,
+            Keys {
+                jump: true,
+                ..still
+            },
+        ),
         phase("jump2_air", 19, still),
-        phase("jump3", 1, Keys { jump: true, ..still }),
+        phase(
+            "jump3",
+            1,
+            Keys {
+                jump: true,
+                ..still
+            },
+        ),
         phase("jump3_air", 19, still),
         phase("stop3", 20, still),
         phase(
@@ -122,7 +151,14 @@ pub fn e1_script() -> Vec<TickPhase> {
         phase("strafe_left", 40, Keys { a: true, ..still }),
         phase("strafe_right", 40, Keys { d: true, ..still }),
         phase("stop5", 20, still),
-        phase("sneak_still", 20, Keys { sneak: true, ..still }),
+        phase(
+            "sneak_still",
+            20,
+            Keys {
+                sneak: true,
+                ..still
+            },
+        ),
         phase("sneak_walk", 40, Keys { sneak: true, ..w }),
         phase("stop6", 40, still),
     ]
@@ -173,7 +209,14 @@ pub fn e4_script() -> Vec<TickPhase> {
         phase("approach", 15, Keys { w: true, ..still }),
         phase("surface_walk", 40, wj),
         phase("surface_sprint", 40, Keys { sprint: true, ..wj }),
-        phase("surface_stop", 20, Keys { jump: true, ..still }),
+        phase(
+            "surface_stop",
+            20,
+            Keys {
+                jump: true,
+                ..still
+            },
+        ),
     ]
 }
 
@@ -211,7 +254,10 @@ impl E1Run {
     /// The file could not be created.
     pub fn open(path: &Path, name: &str) -> std::io::Result<Self> {
         let phases = scenario(name).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("unknown scenario {name}"))
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("unknown scenario {name}"),
+            )
         })?;
         let mut log = BufWriter::new(File::create(path)?);
         let total: u32 = phases.iter().map(|phase| phase.ticks).sum();
@@ -330,7 +376,11 @@ mod tests {
             .join(format!("../../tools/vanilla-agent/scenarios/{name}.txt"));
         let text = std::fs::read_to_string(&path).expect("scenario file");
         let mut parsed = Vec::new();
-        for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        for line in text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        {
             let words: Vec<&str> = line.split_whitespace().collect();
             match words[0] {
                 "settle" => assert_eq!(words[1].parse::<u32>().unwrap(), SETTLE_TICKS),
@@ -364,7 +414,8 @@ mod tests {
     }
 
     fn run() -> E1Run {
-        let path = std::env::temp_dir().join(format!("umicraft-e1-test-{}.csv", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("umicraft-e1-test-{}.csv", std::process::id()));
         E1Run::open(&path, "e1").expect("log file")
     }
 
@@ -380,11 +431,18 @@ mod tests {
             assert_eq!(run.before(true), Keys::default());
         }
         let first = run.before(true);
-        assert!(first.w && !first.sprint, "the first phase is a walk: {first:?}");
+        assert!(
+            first.w && !first.sprint,
+            "the first phase is a walk: {first:?}"
+        );
         for _ in 0..39 {
             assert!(run.before(true).w);
         }
-        assert_eq!(run.before(true), Keys::default(), "stop1 releases everything");
+        assert_eq!(
+            run.before(true),
+            Keys::default(),
+            "stop1 releases everything"
+        );
     }
 
     #[test]

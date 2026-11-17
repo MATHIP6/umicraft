@@ -146,7 +146,8 @@ impl Connection {
         self.write_frame_buf.clear();
         self.write_body_buf.push(packet.packet_id());
         EncodablePacket::encode_body(packet, &mut self.write_body_buf)?;
-        self.framing.write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
+        self.framing
+            .write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
         if let Some(cipher) = self.write_cipher.as_mut() {
             cipher.encrypt(&mut self.write_frame_buf);
         }
@@ -176,7 +177,8 @@ impl Connection {
             self.write_body_buf.clear();
             self.write_body_buf.push(packet.packet_id());
             EncodablePacket::encode_body(packet, &mut self.write_body_buf)?;
-            self.framing.write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
+            self.framing
+                .write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
         }
         if let Some(cipher) = self.write_cipher.as_mut() {
             cipher.encrypt(&mut self.write_frame_buf);
@@ -204,7 +206,8 @@ impl Connection {
             self.write_body_buf.clear();
             self.write_body_buf.push(packet.packet_id());
             EncodablePacket::encode_body(*packet, &mut self.write_body_buf)?;
-            self.framing.write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
+            self.framing
+                .write_frame(&mut self.write_frame_buf, &self.write_body_buf)?;
         }
         if let Some(cipher) = self.write_cipher.as_mut() {
             cipher.encrypt(&mut self.write_frame_buf);

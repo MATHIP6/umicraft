@@ -173,7 +173,13 @@ fn the_widgets_keep_their_side_on_other_window_shapes() {
     });
     let corner = HudPlacement::at(Anchor::BottomRight, -4.0, -4.0);
     registry.set_placement("fps", corner).expect("fps");
-    for display in [(854, 480), (1280, 720), (1920, 1080), (2560, 1080), (640, 480)] {
+    for display in [
+        (854, 480),
+        (1280, 720),
+        (1920, 1080),
+        (2560, 1080),
+        (640, 480),
+    ] {
         let view = build(&registry, &lang(), &FontAtlas::fallback(), display);
         let widget = &view.widgets[0].widget;
         let size = umicraft_ui::mod_widget::measure(

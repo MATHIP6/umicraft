@@ -48,7 +48,9 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                 index += 2;
             }
             "--connections" => {
-                let value = argv.get(index + 1).ok_or("missing value after --connections")?;
+                let value = argv
+                    .get(index + 1)
+                    .ok_or("missing value after --connections")?;
                 connections = Some(
                     value
                         .parse::<usize>()
@@ -251,7 +253,9 @@ mod tests {
     #[test]
     fn connections_flag_is_parsed_and_validated() {
         let ok = parse_args(
-            ["a:1", "b:2", "--connections", "2"].map(String::from).to_vec(),
+            ["a:1", "b:2", "--connections", "2"]
+                .map(String::from)
+                .to_vec(),
         )
         .expect("valid arguments");
         assert_eq!(ok.connections, Some(2));
@@ -261,6 +265,11 @@ mod tests {
                 .connections,
             None
         );
-        assert!(parse_args(["a:1", "b:2", "--connections", "0"].map(String::from).to_vec()).is_err());
+        assert!(parse_args(
+            ["a:1", "b:2", "--connections", "0"]
+                .map(String::from)
+                .to_vec()
+        )
+        .is_err());
     }
 }

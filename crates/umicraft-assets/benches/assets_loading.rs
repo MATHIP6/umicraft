@@ -183,7 +183,10 @@ fn bench_assets(c: &mut Criterion) {
     // Benchmark resource pack loading from zip bytes
     let pack_png = solid_png(16, 16, [255, 0, 0, 255]);
     let pack_entries: Vec<(&str, &[u8])> = vec![
-        ("pack.mcmeta", br#"{"pack":{"pack_format":1,"description":"Bench pack"}}"#),
+        (
+            "pack.mcmeta",
+            br#"{"pack":{"pack_format":1,"description":"Bench pack"}}"#,
+        ),
         ("assets/minecraft/textures/blocks/block_0.png", &pack_png),
         ("assets/minecraft/textures/blocks/block_1.png", &pack_png),
     ];

@@ -181,11 +181,9 @@ impl BlockSource for ChunkSnapshot {
         let dx = chunk_x - self.origin.x;
         let dz = chunk_z - self.origin.z;
         if dx == 1 && dz == 1 {
-            return self.chunks[4]
-                .as_ref()
-                .map_or(BlockState::AIR, |column| {
-                    column.block((x & 15) as usize, y as usize, (z & 15) as usize)
-                });
+            return self.chunks[4].as_ref().map_or(BlockState::AIR, |column| {
+                column.block((x & 15) as usize, y as usize, (z & 15) as usize)
+            });
         }
         if !(0..3).contains(&dx) || !(0..3).contains(&dz) {
             return BlockState::AIR;

@@ -251,9 +251,13 @@ async fn drive_downloads(
             let client = client.clone();
             let cache = cache.clone();
             in_flight.spawn(async move {
-                let image = load(&url, client.as_deref(), cache.as_deref().map(PathBuf::as_path))
-                    .await
-                    .map_err(|error| error.to_string());
+                let image = load(
+                    &url,
+                    client.as_deref(),
+                    cache.as_deref().map(PathBuf::as_path),
+                )
+                .await
+                .map_err(|error| error.to_string());
                 FetchedTexture { url, image }
             });
         }

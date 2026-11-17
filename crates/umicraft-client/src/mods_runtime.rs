@@ -11,8 +11,8 @@
 use umicraft_builtin_mods::{
     mods, History, HudWidget, ModContext, ModInput, ModRegistry, ModsConfig, RegistryError,
 };
-use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
+use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 
 use crate::input::InputState;
 use crate::options::ModsOptions;

@@ -24,11 +24,11 @@ use super::armor::armor_texture;
 use super::banner_cache::BannerCache;
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
+use super::mesh_entities_with;
 use super::mobs::skin_slot;
 use super::player::posed_player;
 use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
-use super::mesh_entities_with;
 use crate::map_render::{map_arm_vertices, MapBatch};
 
 /// Loads official textures from the jar if available, or falls back to procedural assets.

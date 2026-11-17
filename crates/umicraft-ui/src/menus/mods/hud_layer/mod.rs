@@ -24,9 +24,7 @@ mod tests;
 mod toolbar;
 mod view;
 
-pub use view::{
-    HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, HudWidgetView, Snap,
-};
+pub use view::{HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, HudWidgetView, Snap};
 
 /// The gear of the widget whose text covers `rect`, for the tests of the menu.
 #[cfg(test)]

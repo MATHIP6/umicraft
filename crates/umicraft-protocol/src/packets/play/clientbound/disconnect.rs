@@ -60,10 +60,7 @@ mod tests {
 
     #[test]
     fn disconnect_handles_large_kick_reason() {
-        let large_reason = format!(
-            r#"{{"text":"Banned: {}"}}"#,
-            "Reason detail ".repeat(100)
-        );
+        let large_reason = format!(r#"{{"text":"Banned: {}"}}"#, "Reason detail ".repeat(100));
         let packet = Disconnect {
             reason: large_reason,
         };

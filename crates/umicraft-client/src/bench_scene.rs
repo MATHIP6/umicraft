@@ -28,7 +28,8 @@ use umicraft_core::profiling::{AllocDelta, AllocSnapshot};
 use umicraft_game::entity::{EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_mesh::{ChunkSnapshot, Mesh};
 use umicraft_render::{
-    Camera, DrawCallStats, Overlay, ParticleSprite, RenderEnvironment, Renderer, VramStats, GROUP_NAMES,
+    Camera, DrawCallStats, Overlay, ParticleSprite, RenderEnvironment, Renderer, VramStats,
+    GROUP_NAMES,
 };
 use umicraft_world::{BlockState, ChunkColumn, ChunkPos};
 
@@ -147,7 +148,12 @@ impl BenchScenario {
     #[must_use]
     pub fn view_distance(self, default_vd: u8) -> u8 {
         match self {
-            Self::Empty | Self::WeatherA | Self::WeatherB | Self::WeatherC | Self::WeatherD | Self::WeatherE => 0,
+            Self::Empty
+            | Self::WeatherA
+            | Self::WeatherB
+            | Self::WeatherC
+            | Self::WeatherD
+            | Self::WeatherE => 0,
             Self::Chunks8 | Self::WeatherF | Self::WeatherG => 8,
             Self::Chunks16 => 16,
             Self::Chunks24 => 24,
@@ -453,7 +459,11 @@ struct ScenarioContext {
     weather_temp: f32,
 }
 
-fn create_bench_precipitation_field(cx: i32, cz: i32, temp: f32) -> Arc<umicraft_render::PrecipitationField> {
+fn create_bench_precipitation_field(
+    cx: i32,
+    cz: i32,
+    temp: f32,
+) -> Arc<umicraft_render::PrecipitationField> {
     let mut field = umicraft_render::PrecipitationField::new(cx, cz);
     for z in cz - 12..=cz + 12 {
         for x in cx - 12..=cx + 12 {
@@ -507,7 +517,11 @@ fn measure(
         if frame == WARMUP_FRAMES {
             alloc_start = AllocSnapshot::now();
         }
-        let pose = pose_at(frame.saturating_sub(WARMUP_FRAMES), frames, context.scenario);
+        let pose = pose_at(
+            frame.saturating_sub(WARMUP_FRAMES),
+            frames,
+            context.scenario,
+        );
         camera.set_eye(origin_block + pose.offset.as_dvec3());
         camera.yaw = pose.yaw;
         camera.pitch = pose.pitch;
@@ -576,7 +590,11 @@ fn measure(
                         let angle = (p as f32 / 24.0) * std::f32::consts::TAU + t;
                         let speed = 0.5 + (p % 3) as f32 * 0.3;
                         context.particles.push(ParticleSprite {
-                            center: Vec3::new(speed * angle.cos(), 65.5 + 0.2 * (p as f32).sin(), speed * angle.sin()),
+                            center: Vec3::new(
+                                speed * angle.cos(),
+                                65.5 + 0.2 * (p as f32).sin(),
+                                speed * angle.sin(),
+                            ),
                             half_size: 0.12,
                             uv_min: [0.0, 0.0],
                             uv_max: [1.0, 1.0],
@@ -920,12 +938,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let mut renderer = Renderer::new_offscreen(args.width, args.height)?;
     let installed = TerrainTextures::load().install(&mut renderer);
     renderer.set_cave_culling(!args.bench_no_cave_culling);
-    renderer.set_environment(RenderEnvironment::new(
-        0,
-        args.time,
-        0.0,
-        reach as u8,
-    ));
+    renderer.set_environment(RenderEnvironment::new(0, args.time, 0.0, reach as u8));
 
     let (world, meshes, gen_wall_ms, mesh_wall_ms) = if matches!(
         scenario,
@@ -997,7 +1010,12 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 let angle = (i as f32 / count as f32) * std::f32::consts::TAU;
                 let radius = 6.0 + (i % 6) as f32 * 3.5;
                 let pos = Vec3::new(radius * angle.cos(), 65.0, radius * angle.sin());
-                let mut snap = crate::entity_demo::make_snapshot(i as i32 + 1, kinds[i % kinds.len()], pos, None);
+                let mut snap = crate::entity_demo::make_snapshot(
+                    i as i32 + 1,
+                    kinds[i % kinds.len()],
+                    pos,
+                    None,
+                );
                 snap.yaw = angle.to_degrees() + 90.0;
                 snap.body_yaw = snap.yaw;
                 snap.head_yaw = snap.yaw;
@@ -1007,31 +1025,91 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         BenchScenario::PvpCombat => {
             context.entity_textures = Some(EntityTextures::load(&renderer));
             let p1 = {
-                let mut snap = crate::entity_demo::make_snapshot(1, EntityKind::Player, Vec3::new(-1.6, 65.0, 0.0), None);
+                let mut snap = crate::entity_demo::make_snapshot(
+                    1,
+                    EntityKind::Player,
+                    Vec3::new(-1.6, 65.0, 0.0),
+                    None,
+                );
                 snap.yaw = 90.0;
                 snap.body_yaw = 90.0;
                 snap.head_yaw = 90.0;
                 snap.armor = [
-                    Some(EntityItem { item_id: 310, damage: 0, count: 1, nbt: None }),
-                    Some(EntityItem { item_id: 311, damage: 0, count: 1, nbt: None }),
-                    Some(EntityItem { item_id: 312, damage: 0, count: 1, nbt: None }),
-                    Some(EntityItem { item_id: 313, damage: 0, count: 1, nbt: None }),
+                    Some(EntityItem {
+                        item_id: 310,
+                        damage: 0,
+                        count: 1,
+                        nbt: None,
+                    }),
+                    Some(EntityItem {
+                        item_id: 311,
+                        damage: 0,
+                        count: 1,
+                        nbt: None,
+                    }),
+                    Some(EntityItem {
+                        item_id: 312,
+                        damage: 0,
+                        count: 1,
+                        nbt: None,
+                    }),
+                    Some(EntityItem {
+                        item_id: 313,
+                        damage: 0,
+                        count: 1,
+                        nbt: None,
+                    }),
                 ];
-                snap.held = Some(EntityItem { item_id: 276, damage: 0, count: 1, nbt: None });
+                snap.held = Some(EntityItem {
+                    item_id: 276,
+                    damage: 0,
+                    count: 1,
+                    nbt: None,
+                });
                 snap
             };
             let p2 = {
-                let mut snap = crate::entity_demo::make_snapshot(2, EntityKind::Player, Vec3::new(1.6, 65.0, 0.0), None);
+                let mut snap = crate::entity_demo::make_snapshot(
+                    2,
+                    EntityKind::Player,
+                    Vec3::new(1.6, 65.0, 0.0),
+                    None,
+                );
                 snap.yaw = 270.0;
                 snap.body_yaw = 270.0;
                 snap.head_yaw = 270.0;
                 snap.armor = [
-                    Some(EntityItem { item_id: 310, damage: 0, count: 1, nbt: None }),
-                    Some(EntityItem { item_id: 311, damage: 0, count: 1, nbt: None }),
-                    Some(EntityItem { item_id: 312, damage: 0, count: 1, nbt: None }),
-                    Some(EntityItem { item_id: 313, damage: 0, count: 1, nbt: None }),
+                    Some(EntityItem {
+                        item_id: 310,
+                        damage: 0,
+                        count: 1,
+                        nbt: None,
+                    }),
+                    Some(EntityItem {
+                        item_id: 311,
+                        damage: 0,
+                        count: 1,
+                        nbt: None,
+                    }),
+                    Some(EntityItem {
+                        item_id: 312,
+                        damage: 0,
+                        count: 1,
+                        nbt: None,
+                    }),
+                    Some(EntityItem {
+                        item_id: 313,
+                        damage: 0,
+                        count: 1,
+                        nbt: None,
+                    }),
                 ];
-                snap.held = Some(EntityItem { item_id: 276, damage: 0, count: 1, nbt: None });
+                snap.held = Some(EntityItem {
+                    item_id: 276,
+                    damage: 0,
+                    count: 1,
+                    nbt: None,
+                });
                 snap
             };
             context.entities.push(p1);
@@ -1066,7 +1144,12 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 let angle = (i as f32 / 100.0) * std::f32::consts::TAU;
                 let radius = 8.0 + (i % 5) as f32 * 5.0;
                 let pos = Vec3::new(radius * angle.cos(), 65.0, radius * angle.sin());
-                let snap = crate::entity_demo::make_snapshot(i as i32 + 1, kinds[i % kinds.len()], pos, None);
+                let snap = crate::entity_demo::make_snapshot(
+                    i as i32 + 1,
+                    kinds[i % kinds.len()],
+                    pos,
+                    None,
+                );
                 context.entities.push(snap);
             }
             for i in 0..1000 {
@@ -1130,7 +1213,12 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                 let angle = (i as f32 / 50.0) * std::f32::consts::TAU;
                 let radius = 6.0 + (i % 6) as f32 * 3.5;
                 let pos = Vec3::new(radius * angle.cos(), 65.0, radius * angle.sin());
-                let snap = crate::entity_demo::make_snapshot(i as i32 + 1, kinds[i % kinds.len()], pos, None);
+                let snap = crate::entity_demo::make_snapshot(
+                    i as i32 + 1,
+                    kinds[i % kinds.len()],
+                    pos,
+                    None,
+                );
                 context.entities.push(snap);
             }
             for i in 0..500 {
@@ -1157,7 +1245,13 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         0.0,
         f64::from(origin.z * 16) + 8.0,
     );
-    let measurement = measure(&mut renderer, args, origin_block, args.bench_frames, context)?;
+    let measurement = measure(
+        &mut renderer,
+        args,
+        origin_block,
+        args.bench_frames,
+        context,
+    )?;
     print!("{}", report(args, &facts, &measurement, scenario));
     if let Some(path) = args.screenshot.as_deref() {
         let image = renderer.read_pixels()?;

@@ -109,7 +109,11 @@ impl Framing {
                         (res, consumed)
                     });
                     match res {
-                        Ok(Status::StreamEnd) | Ok(Status::Ok) if inflated.len() == uncompressed_len => Ok(inflated),
+                        Ok(Status::StreamEnd) | Ok(Status::Ok)
+                            if inflated.len() == uncompressed_len =>
+                        {
+                            Ok(inflated)
+                        }
                         Ok(_) => Err(ProtocolError::Invariant(format!(
                             "compressed packet claims {uncompressed_len} bytes but inflated to {}",
                             inflated.len()
@@ -162,7 +166,9 @@ impl Framing {
                     Ok((id, body))
                 } else {
                     if uncompressed_len == 0 {
-                        return Err(ProtocolError::Invariant("zero uncompressed length".to_string()));
+                        return Err(ProtocolError::Invariant(
+                            "zero uncompressed length".to_string(),
+                        ));
                     }
                     let wire_len = inner.len();
                     let mut inflated = Vec::with_capacity(uncompressed_len);
@@ -175,7 +181,9 @@ impl Framing {
                         (res, consumed)
                     });
                     match res {
-                        Ok(Status::StreamEnd) | Ok(Status::Ok) if inflated.len() == uncompressed_len => {
+                        Ok(Status::StreamEnd) | Ok(Status::Ok)
+                            if inflated.len() == uncompressed_len =>
+                        {
                             let id = inflated[0];
                             inflated.drain(..1);
                             Ok((id, inflated))
@@ -307,7 +315,9 @@ mod tests {
         // Compressed under threshold
         let framing_uncompressed = Framing::Compressed { threshold: 256 };
         let mut buffer = Vec::new();
-        framing_uncompressed.write_frame(&mut buffer, payload).unwrap();
+        framing_uncompressed
+            .write_frame(&mut buffer, payload)
+            .unwrap();
         let mut reader = buffer.as_slice();
         let _ = read_var_u32(&mut reader).unwrap();
         let (id, body) = framing_uncompressed.unwrap_packet(reader).unwrap();
@@ -317,7 +327,9 @@ mod tests {
         // Compressed over threshold
         let framing_compressed = Framing::Compressed { threshold: 4 };
         let mut buffer = Vec::new();
-        framing_compressed.write_frame(&mut buffer, payload).unwrap();
+        framing_compressed
+            .write_frame(&mut buffer, payload)
+            .unwrap();
         let mut reader = buffer.as_slice();
         let _ = read_var_u32(&mut reader).unwrap();
         let (id, body) = framing_compressed.unwrap_packet(reader).unwrap();

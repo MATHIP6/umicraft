@@ -255,4 +255,3 @@ mod tests {
         assert_eq!(stats.p99_interval_us, 0);
     }
 }
-
