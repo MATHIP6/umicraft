@@ -19,7 +19,8 @@ use umicraft_game::media::is_on_ladder;
 use umicraft_game::particles::{ParticleKind, SpawnRequest};
 use umicraft_game::raycast::look_direction;
 
-use super::Game;
+use super::particles::particle_filter;
+use super::state::Game;
 
 /// What the crosshair points at: the block ray first, then the entities
 /// (MCP `EntityRenderer.getMouseOver`).
@@ -142,7 +143,7 @@ fn throw_stars(game: &mut Game, emitter: &HitEmitter) {
     let Some((feet, width, height)) = body_of(game, emitter.target) else {
         return;
     };
-    let Some(filter) = super::particle_filter(game) else {
+    let Some(filter) = particle_filter(game) else {
         return;
     };
     let kind = match emitter.star {

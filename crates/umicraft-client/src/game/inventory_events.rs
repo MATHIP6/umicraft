@@ -12,7 +12,11 @@ use umicraft_game::gamemode::GameMode;
 use umicraft_game::inventory::click::{drag_sequence, ClickRequest};
 use umicraft_game::inventory::ClickCommand;
 
-use super::{publish_inventory, sync_armor, CommandQueue, Game, RenderEvent};
+use super::commands::CommandQueue;
+use super::messages::RenderEvent;
+use super::net::sync_armor;
+use super::publish::publish_inventory;
+use super::state::Game;
 use crate::inventory_input::InventoryAction;
 use crate::network::ClientCommand;
 

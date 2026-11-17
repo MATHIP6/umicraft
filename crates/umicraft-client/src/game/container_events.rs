@@ -14,7 +14,10 @@ use umicraft_game::inventory::payload;
 use umicraft_game::inventory::WindowKind;
 use umicraft_ui::screens::{beacon_effect, enchant_row_available, Hotspot};
 
-use super::{publish_inventory, CommandQueue, Game, RenderEvent};
+use super::commands::CommandQueue;
+use super::messages::RenderEvent;
+use super::publish::publish_inventory;
+use super::state::Game;
 use crate::inventory_input::ContainerAction;
 use crate::inventory_screen::{screen_state, ScreenFacts};
 use crate::network::ClientCommand;
