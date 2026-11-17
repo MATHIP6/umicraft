@@ -192,6 +192,9 @@ pub enum ClientCommand {
     Respawn,
     /// `Client Status` (0x16): the statistics request of the statistics screen.
     RequestStats,
+    /// `Client Status` (0x16): the inventory key opened the inventory
+    /// (`OPEN_INVENTORY_ACHIEVEMENT`).
+    OpenInventory,
     /// `Held Item Change` (0x09): the selected hotbar slot.
     HeldItemChange {
         /// The slot index.
@@ -431,6 +434,9 @@ impl ClientCommand {
             }),
             Self::RequestStats => PlayServerbound::ClientStatus(serverbound::ClientStatus {
                 action: serverbound::ClientStatusAction::RequestStats,
+            }),
+            Self::OpenInventory => PlayServerbound::ClientStatus(serverbound::ClientStatus {
+                action: serverbound::ClientStatusAction::OpenInventoryAchievement,
             }),
             Self::HeldItemChange { slot } => {
                 PlayServerbound::HeldItemChange(ServerHeldItemChange { slot })

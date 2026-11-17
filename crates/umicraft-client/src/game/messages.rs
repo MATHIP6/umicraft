@@ -99,6 +99,8 @@ pub enum GameEvent {
     Respawn,
     /// The statistics screen opened: ask the server for the counters.
     RequestStats,
+    /// The inventory key opened the player's inventory.
+    InventoryOpened,
 }
 
 /// One simulation frame published to the render thread.

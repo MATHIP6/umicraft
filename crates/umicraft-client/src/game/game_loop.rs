@@ -17,7 +17,7 @@ use super::chat::{local_chat_line, push_chat};
 use super::commands::CommandQueue;
 use super::container_events::apply_container_action;
 use super::creative_events::apply_creative_event;
-use super::inventory_events::apply_inventory_action;
+use super::inventory_events::{apply_inventory_action, report_inventory_opened};
 use super::messages::{GameEvent, RenderEvent};
 use super::net::handle_net;
 use super::publish::{publish_inventory, publish_look, publish_status};
@@ -315,6 +315,10 @@ pub(super) fn handle_event(
             // MCP `GuiStats` / `GuiIngameMenu` button 6 send `Client Status`
             // (REQUEST_STATS); the answer is `Statistics` (0x37).
             queue.push(ClientCommand::RequestStats);
+            false
+        }
+        GameEvent::InventoryOpened => {
+            report_inventory_opened(game, queue);
             false
         }
         GameEvent::Respawn => {

@@ -8,6 +8,7 @@
 
 use std::sync::mpsc::SyncSender;
 
+use umicraft_game::entity::{EntityId, EntityKind};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::inventory::click::{drag_sequence, ClickRequest};
 use umicraft_game::inventory::ClickCommand;
@@ -19,6 +20,31 @@ use super::publish::publish_inventory;
 use super::state::Game;
 use crate::inventory_input::InventoryAction;
 use crate::network::ClientCommand;
+
+/// Tells the server that the inventory key opened the player's inventory.
+///
+/// MCP `Minecraft.java:2100`: the vanilla client sends `Client Status`
+/// (`OPEN_INVENTORY_ACHIEVEMENT`) every time the key opens the inventory, in
+/// creative too (`GuiInventory` turns into the creative screen afterwards).
+/// Servers and anti-cheats track the open inventory with it, so clicks in
+/// window 0 without it look like an inventory opened in secret.
+///
+/// On a horse the key opens the horse's inventory instead
+/// (`EntityPlayerSP.sendHorseInventory`, an `Entity Action`); Umicraft does not
+/// open that screen yet, so nothing is sent rather than a packet that does not
+/// match the screen.
+pub(super) fn report_inventory_opened(game: &Game, queue: &mut CommandQueue) {
+    if !game.playing {
+        return;
+    }
+    let on_horse = game
+        .vehicle
+        .and_then(|vehicle| game.entities.kind(EntityId(vehicle)))
+        == Some(EntityKind::Horse);
+    if !on_horse {
+        queue.push(ClientCommand::OpenInventory);
+    }
+}
 
 /// Predicts the clicks of `action` on the local window, queues the matching
 /// `Click Window` packets and publishes the new window state.

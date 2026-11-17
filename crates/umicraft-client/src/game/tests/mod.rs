@@ -66,6 +66,7 @@ mod event_order;
 mod game_loop;
 mod hotbar;
 mod hud;
+mod inventory_key;
 mod join;
 mod look;
 mod movement;

@@ -31,6 +31,7 @@ impl App {
     /// Opens the inventory key's screen: the creative window in creative
     /// mode, the survival inventory otherwise (MCP `Minecraft.runTick`).
     pub(super) fn open_inventory(&mut self) {
+        self.send_event(GameEvent::InventoryOpened);
         let creative = self
             .world
             .as_ref()
