@@ -4,7 +4,6 @@
 
 use umicraft_game::traffic::{SteerInput, TickPacket, TickSnapshot};
 use umicraft_game::InputIntent;
-use umicraft_world::ChunkPos;
 
 use super::commands::CommandQueue;
 use super::state::Game;
@@ -14,9 +13,10 @@ use crate::network::ClientCommand;
 ///
 /// Nothing is sent before the server is in the play state and the player is
 /// placed (a play packet that arrives during the login makes the server log
-/// `Bad packet id`), nor while the chunk under the player is missing: MCP
-/// `EntityPlayerSP.onUpdate` skips the whole update until
-/// `World.isBlockLoaded` holds for the player's column. The steer packet
+/// `Bad packet id`). A missing chunk under the player does not stop the
+/// reports: MCP `EntityPlayerSP.onUpdate` tests `World.isBlockLoaded`, which
+/// is always true on the client (`ChunkProviderClient.chunkExists`), so
+/// vanilla reports every tick while it waits for the chunk. The steer packet
 /// carries the axes damped by 0.98, as the vanilla client sends them
 /// ([`SteerInput::damped`]).
 pub(super) fn report_movement(game: &mut Game, intent: &InputIntent, queue: &mut CommandQueue) {
@@ -28,18 +28,6 @@ pub(super) fn report_movement(game: &mut Game, intent: &InputIntent, queue: &mut
         return;
     };
     let position = state.position();
-    let column = ChunkPos::new(
-        (position.x.floor() as i32).div_euclid(16),
-        (position.z.floor() as i32).div_euclid(16),
-    );
-    if game
-        .world
-        .as_ref()
-        .and_then(|world| world.chunk(column))
-        .is_none()
-    {
-        return;
-    }
     let player = state.player();
     let snapshot = TickSnapshot {
         position,

@@ -158,17 +158,18 @@ pub(super) fn tick(
         .as_ref()
         .is_some_and(|state| state.player().flying);
 
-    // The simulation only runs on a loaded world.
+    // The simulation runs even before the player's column arrives: the
+    // vanilla client does (`ChunkProviderClient.chunkExists` is always
+    // true) and the physics sinks the player there instead of pulling it
+    // down (`BlockSource::is_column_loaded`).
     let ready = game.world_ready();
-    if ready {
-        let seat = game
-            .vehicle
-            .and_then(|vehicle| game.entities.rider_feet(EntityId(vehicle)));
-        if let (Some(state), Some(world)) = (game.state.as_mut(), game.world.as_ref()) {
-            match seat {
-                Some(feet) => state.ride(feet),
-                None => state.tick(&intent, world),
-            }
+    let seat = game
+        .vehicle
+        .and_then(|vehicle| game.entities.rider_feet(EntityId(vehicle)));
+    if let (Some(state), Some(world)) = (game.state.as_mut(), game.world.as_ref()) {
+        match seat {
+            Some(feet) => state.ride(feet),
+            None => state.tick(&intent, world),
         }
     }
     if let (Some(run), Some(state)) = (game.e1.as_mut(), game.state.as_ref()) {

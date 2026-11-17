@@ -247,3 +247,52 @@ fn turning_moves_like_vanilla_float_arithmetic() {
         }
     }
 }
+
+/// A world whose chunks have not arrived: air everywhere, no column loaded.
+struct NotYetSent;
+
+impl BlockSource for NotYetSent {
+    fn block(&self, _x: i32, _y: i32, _z: i32) -> BlockState {
+        BlockState::AIR
+    }
+
+    fn is_column_loaded(&self, _x: i32, _z: i32) -> bool {
+        false
+    }
+}
+
+/// Regression: Umicraft froze the player and sent nothing until its chunk
+/// arrived. Vanilla keeps ticking and sinks at 0.1 a tick
+/// (`EntityLivingBase.moveEntityWithHeading`); the first rows of the e1
+/// capture were logged before the chunk arrived.
+#[test]
+fn the_player_sinks_like_vanilla_over_a_missing_chunk() {
+    let rows = parse(include_str!(
+        "../../../reports/phase_e2_data/vanilla189-e1-state.csv"
+    ));
+    let sinking: Vec<&Row> = rows
+        .iter()
+        .take_while(|row| row.motion.y == -0.098_000_001_907_348_64)
+        .collect();
+    assert!(
+        sinking.len() >= 5,
+        "the capture starts over a missing chunk"
+    );
+    let mut player = Player::new(sinking[0].position);
+    player.velocity = sinking[0].motion;
+    for row in &sinking[1..] {
+        physics::step(&mut player, &RawInput::default().to_intent(), &NotYetSent);
+        assert_eq!(
+            player.position.to_array().map(f64::to_bits),
+            row.position.to_array().map(f64::to_bits),
+            "tick {}",
+            row.tick
+        );
+        assert_eq!(
+            player.velocity.y.to_bits(),
+            row.motion.y.to_bits(),
+            "tick {}",
+            row.tick
+        );
+    }
+}

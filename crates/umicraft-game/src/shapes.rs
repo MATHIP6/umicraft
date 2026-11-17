@@ -36,17 +36,36 @@ use crate::selection::{horizontal_neighbours, pane_connects};
 pub trait BlockSource {
     /// The block state at the given world position.
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState;
+
+    /// Whether the chunk column holding block `(x, z)` has arrived.
+    ///
+    /// The vanilla client keeps simulating the player over a missing column
+    /// (its `ChunkProviderClient.chunkExists` is always true) but replaces the
+    /// gravity there (MCP `EntityLivingBase.moveEntityWithHeading`). Test
+    /// sources are fully loaded unless they say otherwise.
+    fn is_column_loaded(&self, _x: i32, _z: i32) -> bool {
+        true
+    }
 }
 
 impl BlockSource for World {
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
         World::block(self, BlockPos::new(x, y, z))
     }
+
+    fn is_column_loaded(&self, x: i32, z: i32) -> bool {
+        self.chunk(umicraft_world::ChunkPos::new(x >> 4, z >> 4))
+            .is_some()
+    }
 }
 
 impl<T: BlockSource + ?Sized> BlockSource for &T {
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
         (**self).block(x, y, z)
+    }
+
+    fn is_column_loaded(&self, x: i32, z: i32) -> bool {
+        (**self).is_column_loaded(x, z)
     }
 }
 

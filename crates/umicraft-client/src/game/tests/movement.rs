@@ -5,16 +5,24 @@
 use super::*;
 
 #[test]
-fn nothing_is_sent_while_the_player_column_is_not_loaded() {
-    // Regression: Umicraft sent bursts of packets before the world
-    // loaded; vanilla stays silent until the column is there.
+fn the_player_reports_every_tick_while_its_column_is_missing() {
+    // Regression: Umicraft froze and sent nothing until the player's column
+    // arrived. Vanilla keeps ticking (`ChunkProviderClient.chunkExists` is
+    // always true), sinks at 0.1 a tick and reports it.
     let mut game = Game::new();
     game.playing = true;
-    game.state = Some(GameState::new(DVec3::new(0.0, 4.0, 0.0)));
+    game.state = Some(GameState::new(DVec3::new(0.5, 4.0, 0.5)));
     game.world = Some(World::new(0));
     let mut queue = CommandQueue::default();
-    report_movement(&mut game, &InputIntent::still(0.0), &mut queue);
-    assert!(queue.ordered.is_empty());
+    let (frames, _) = mpsc::sync_channel(64);
+    let (chunks, _) = mpsc::sync_channel(64);
+    for _ in 0..3 {
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+    }
+    let reports = movement_of(&queue);
+    assert_eq!(reports.len(), 3, "one report a tick: {reports:?}");
+    let sunk = game.state.as_ref().expect("placed").position().y;
+    assert!(sunk < 4.0 && sunk > 3.6, "the player sinks slowly: {sunk}");
 }
 
 #[test]

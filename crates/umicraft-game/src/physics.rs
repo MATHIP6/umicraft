@@ -195,6 +195,10 @@ const SPRINT_AIR_CONTROL_BONUS: f64 = 0.3;
 /// The gravity applied every tick (MCP `EntityLivingBase.java:1666`).
 pub const GRAVITY: f64 = 0.08;
 
+/// The vertical motion over a missing chunk column, before the damping
+/// (MCP `EntityLivingBase.java:1668`: `motionY = -0.1D`).
+const UNLOADED_SINK_SPEED: f64 = 0.1;
+
 /// The damping applied to the vertical motion
 /// (MCP `EntityLivingBase.java:1669`, `0.9800000190734863D`: the `float`
 /// 0.98 written out).
@@ -962,7 +966,10 @@ fn travel_on_land<S: BlockSource + ?Sized>(
         player.velocity.y = LADDER_CLIMB;
     }
 
-    finish_travel(player, friction, flying, kept_vertical);
+    // MCP `EntityLivingBase.java:1664`: `(int)posX`, a truncation, picks the
+    // column; a missing one holds the player instead of pulling it down.
+    let column_loaded = world.is_column_loaded(player.position.x as i32, player.position.z as i32);
+    finish_travel(player, friction, flying, kept_vertical, column_loaded);
 }
 
 /// Accelerates the player along its look by `speed`.
@@ -1077,8 +1084,24 @@ fn move_player<S: BlockSource + ?Sized>(player: &mut Player, world: &S) {
 /// Gravity and friction, MCP `EntityLivingBase.java:1666-1671`; a flying
 /// player keeps 60 % of the vertical motion it had before the move instead
 /// (MCP `EntityPlayer.java:1800`).
-fn finish_travel(player: &mut Player, friction: f32, flying: bool, kept_vertical: f64) {
-    player.velocity.y -= GRAVITY;
+fn finish_travel(
+    player: &mut Player,
+    friction: f32,
+    flying: bool,
+    kept_vertical: f64,
+    column_loaded: bool,
+) {
+    if column_loaded {
+        player.velocity.y -= GRAVITY;
+    } else {
+        // MCP `EntityLivingBase.java:1664-1675`: over a column the server has
+        // not sent, the client sinks at a steady 0.1 (stops at y = 0).
+        player.velocity.y = if player.position.y > 0.0 {
+            -UNLOADED_SINK_SPEED
+        } else {
+            0.0
+        };
+    }
     player.velocity.y *= VERTICAL_DAMPING;
     player.velocity.x *= f64::from(friction);
     player.velocity.z *= f64::from(friction);
