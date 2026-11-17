@@ -83,77 +83,10 @@ impl Renderer {
         self.panorama.draw(&mut pass);
         self.stamp(&mut pass, 1);
 
-        // Opaque terrain, nearest chunk first: the SOLID quads (no alpha
-        // test, early depth rejection) and then the CUTOUT ones, which
-        // discard texels. Both write depth and do not depend on the order.
-        self.quad_indices.bind(&mut pass);
-        pass.set_bind_group(0, &self.chunk_bind_group, &[]);
-        if !self.visible_solid.is_empty() {
-            pass.set_pipeline(&self.terrain_solid_pipeline);
-            draw_stats.opaque += self.draw_visible_opaque(&mut pass, true);
-        }
-        if !self.visible_cutout.is_empty() {
-            pass.set_pipeline(&self.terrain_pipeline);
-            draw_stats.opaque += self.draw_visible_opaque(&mut pass, false);
-        }
-        self.moving_blocks.draw_opaque(&mut pass);
+        draw_stats.opaque += self.draw_opaque_terrain(&mut pass);
         self.stamp(&mut pass, 2);
 
-        // The shadows lie on the ground, drawn before the entities.
-        if !self.shadow_batches.is_empty() {
-            draw_stats.entities += self.shadow_batches.batch_count();
-            let batches = self.shadow_batches.iter();
-            self.entity_renderer
-                .render_shadows(&mut pass, &self.local_camera_bind_group, batches);
-        }
-
-        // Entities: depth write on, cutout discard, rendered between opaque and transparent passes.
-        if !self.entity_batches.is_empty() {
-            draw_stats.entities += self.entity_batches.batch_count();
-            let batches = self.entity_batches.iter();
-            self.entity_renderer
-                .render(&mut pass, &self.local_camera_bind_group, batches);
-        }
-
-        // The guardian beams, opaque like the entities they join.
-        if !self.tinted_batches.is_empty() {
-            let batches = self.tinted_batches.iter();
-            self.entity_renderer
-                .render_tinted(&mut pass, &self.local_camera_bind_group, batches);
-        }
-
-        // The invisible entities a spectator sees, over the opaque ones.
-        if !self.ghost_batches.is_empty() {
-            draw_stats.entities += self.ghost_batches.batch_count();
-            let batches = self.ghost_batches.iter();
-            self.entity_renderer
-                .render_ghosts(&mut pass, &self.local_camera_bind_group, batches);
-        }
-
-        // The elder guardian apparition, a particle drawn after the entities.
-        if !self.apparition_batches.is_empty() {
-            let batches = self.apparition_batches.iter();
-            self.entity_renderer.render_apparition(
-                &mut pass,
-                &self.local_camera_bind_group,
-                batches,
-            );
-        }
-
-        // The glow of the entities is added over them, without writing depth.
-        if !self.additive_batches.is_empty() {
-            draw_stats.entities += self.additive_batches.batch_count();
-            let batches = self.additive_batches.iter();
-            self.entity_renderer
-                .render_additive(&mut pass, &self.local_camera_bind_group, batches);
-        }
-
-        if !self.glint_batches.is_empty() {
-            draw_stats.entities += self.glint_batches.batch_count();
-            let batches = self.glint_batches.iter();
-            self.entity_renderer
-                .render_glint(&mut pass, &self.local_camera_bind_group, batches);
-        }
+        draw_stats.entities += self.draw_entity_batches(&mut pass);
 
         // `renderEntities` draws the labels with the entities, before the
         // particles and the translucent terrain.
@@ -191,36 +124,7 @@ impl Renderer {
             .draw(&mut pass, &self.local_terrain_bind_group);
         draw_stats.translucent += self.weather.draw(&mut pass, &self.local_camera_bind_group);
 
-        // Transparent terrain: water/glass, farthest chunk first, with
-        // depth testing but no depth writes so blended faces do not occlude
-        // each other by submission order.
-        pass.set_pipeline(&self.terrain_transparent_pipeline);
-        pass.set_bind_group(0, &self.chunk_bind_group, &[]);
-        self.quad_indices.bind(&mut pass);
-        for draw in &self.visible_transparent {
-            let Some(slot) = self
-                .mesh_slots
-                .get(draw.slot as usize)
-                .and_then(Option::as_ref)
-            else {
-                continue;
-            };
-            let Some(transparent) = &slot.mesh.transparent else {
-                continue;
-            };
-            let mut bound = false;
-            for range in draw.runs.as_slice() {
-                if !bound {
-                    pass.set_vertex_buffer(0, transparent.vertex_buffer.slice(..));
-                    bound = true;
-                }
-                pass.draw_indexed(range.clone(), 0, 0..1);
-                draw_stats.translucent += 1;
-            }
-        }
-        // Drawn after the chunks' blended faces: a handful of quads, so no
-        // sorting against them.
-        self.moving_blocks.draw_transparent(&mut pass);
+        draw_stats.translucent += self.draw_transparent_terrain(&mut pass);
 
         // The world border follows the weather and precedes the high clouds.
         self.border.draw(&mut pass);
@@ -248,29 +152,13 @@ impl Renderer {
             // overlays and the HUD sharp on top. The depth buffer is kept.
             drop(pass);
             self.motion_blur.run(encoder);
-            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("motion blur composite pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            pass = composite_pass(
+                encoder,
+                view,
+                &self.depth_view,
+                "motion blur composite pass",
+                wgpu::LoadOp::Load,
+            );
             self.motion_blur.blit(&mut pass);
             // Sharp, and still tested against the depth buffer of the world.
             self.nametags
@@ -290,32 +178,141 @@ impl Renderer {
             // the HUD and the menu sharp on top.
             drop(pass);
             self.scene_blur.blur(encoder);
-            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("blurred pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            pass = composite_pass(
+                encoder,
+                view,
+                &self.depth_view,
+                "blurred pass",
+                wgpu::LoadOp::Clear(1.0),
+            );
             self.scene_blur.blit(&mut pass);
         }
 
+        draw_stats.ui += self.draw_ui(&mut pass, overlay);
+        self.last_draw_calls.set(draw_stats);
+        self.stamp(&mut pass, 5);
+    }
+
+    /// The opaque terrain, nearest chunk first: the SOLID quads (no alpha
+    /// test, early depth rejection) and then the CUTOUT ones, which discard
+    /// texels. Both write depth and do not depend on the order. Returns the
+    /// draw calls.
+    fn draw_opaque_terrain(&self, pass: &mut wgpu::RenderPass<'_>) -> u32 {
+        let mut draws = 0;
+        self.quad_indices.bind(pass);
+        pass.set_bind_group(0, &self.chunk_bind_group, &[]);
+        if !self.visible_solid.is_empty() {
+            pass.set_pipeline(&self.terrain_solid_pipeline);
+            draws += self.draw_visible_opaque(pass, true);
+        }
+        if !self.visible_cutout.is_empty() {
+            pass.set_pipeline(&self.terrain_pipeline);
+            draws += self.draw_visible_opaque(pass, false);
+        }
+        self.moving_blocks.draw_opaque(pass);
+        draws
+    }
+
+    /// The entity batches, between the opaque and the translucent terrain:
+    /// shadows, bodies, beams, ghosts, the apparition, the glow and the
+    /// enchantment glint. Returns the batches drawn.
+    fn draw_entity_batches<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) -> u32 {
+        let mut draws = 0;
+        // The shadows lie on the ground, drawn before the entities.
+        if !self.shadow_batches.is_empty() {
+            draws += self.shadow_batches.batch_count();
+            let batches = self.shadow_batches.iter();
+            self.entity_renderer
+                .render_shadows(pass, &self.local_camera_bind_group, batches);
+        }
+
+        // Entities: depth write on, cutout discard, rendered between opaque and transparent passes.
+        if !self.entity_batches.is_empty() {
+            draws += self.entity_batches.batch_count();
+            let batches = self.entity_batches.iter();
+            self.entity_renderer
+                .render(pass, &self.local_camera_bind_group, batches);
+        }
+
+        // The guardian beams, opaque like the entities they join.
+        if !self.tinted_batches.is_empty() {
+            let batches = self.tinted_batches.iter();
+            self.entity_renderer
+                .render_tinted(pass, &self.local_camera_bind_group, batches);
+        }
+
+        // The invisible entities a spectator sees, over the opaque ones.
+        if !self.ghost_batches.is_empty() {
+            draws += self.ghost_batches.batch_count();
+            let batches = self.ghost_batches.iter();
+            self.entity_renderer
+                .render_ghosts(pass, &self.local_camera_bind_group, batches);
+        }
+
+        // The elder guardian apparition, a particle drawn after the entities.
+        if !self.apparition_batches.is_empty() {
+            let batches = self.apparition_batches.iter();
+            self.entity_renderer
+                .render_apparition(pass, &self.local_camera_bind_group, batches);
+        }
+
+        // The glow of the entities is added over them, without writing depth.
+        if !self.additive_batches.is_empty() {
+            draws += self.additive_batches.batch_count();
+            let batches = self.additive_batches.iter();
+            self.entity_renderer
+                .render_additive(pass, &self.local_camera_bind_group, batches);
+        }
+
+        if !self.glint_batches.is_empty() {
+            draws += self.glint_batches.batch_count();
+            let batches = self.glint_batches.iter();
+            self.entity_renderer
+                .render_glint(pass, &self.local_camera_bind_group, batches);
+        }
+        draws
+    }
+
+    /// The translucent terrain: water and glass, farthest chunk first, with
+    /// depth testing but no depth writes so blended faces do not occlude each
+    /// other by submission order; then the moving blocks. Returns the draw
+    /// calls.
+    fn draw_transparent_terrain(&self, pass: &mut wgpu::RenderPass<'_>) -> u32 {
+        let mut draws = 0;
+        pass.set_pipeline(&self.terrain_transparent_pipeline);
+        pass.set_bind_group(0, &self.chunk_bind_group, &[]);
+        self.quad_indices.bind(pass);
+        for draw in &self.visible_transparent {
+            let Some(slot) = self
+                .mesh_slots
+                .get(draw.slot as usize)
+                .and_then(Option::as_ref)
+            else {
+                continue;
+            };
+            let Some(transparent) = &slot.mesh.transparent else {
+                continue;
+            };
+            let mut bound = false;
+            for range in draw.runs.as_slice() {
+                if !bound {
+                    pass.set_vertex_buffer(0, transparent.vertex_buffer.slice(..));
+                    bound = true;
+                }
+                pass.draw_indexed(range.clone(), 0, 0..1);
+                draws += 1;
+            }
+        }
+        // Drawn after the chunks' blended faces: a handful of quads, so no
+        // sorting against them.
+        self.moving_blocks.draw_transparent(pass);
+        draws
+    }
+
+    /// The HUD (`overlay`) and the UI batches over the finished picture.
+    /// Returns the draw calls.
+    fn draw_ui(&self, pass: &mut wgpu::RenderPass<'_>, overlay: &Overlay) -> u32 {
+        let mut draws = 0;
         if !overlay.is_empty() || !self.ui_pass.is_empty() {
             pass.set_vertex_buffer(0, self.overlay_buffer.slice(..));
             // The HUD uses the overlay pipeline with its own fallback atlas.
@@ -348,7 +345,7 @@ impl Renderer {
                         pass.set_bind_group(0, &self.icon_gui_bind_group, &[]);
                     }
                     UiBatchKind::IconGlint => {
-                        if !self.glint.bind(&mut pass) {
+                        if !self.glint.bind(pass) {
                             continue;
                         }
                     }
@@ -367,14 +364,13 @@ impl Renderer {
                     }
                 }
                 pass.draw(first..end, 0..1);
-                draw_stats.ui += 1;
+                draws += 1;
             }
         }
         if !overlay.is_empty() {
-            draw_stats.ui += 1;
+            draws += 1;
         }
-        self.last_draw_calls.set(draw_stats);
-        self.stamp(&mut pass, 5);
+        draws
     }
 
     /// Draws the SOLID (`solid`) or the CUTOUT quads of every visible opaque
@@ -411,4 +407,38 @@ impl Renderer {
         }
         draws
     }
+}
+
+/// A pass over the final `view` after a blur of the world: cleared to black,
+/// on the depth buffer of the world (kept with `LoadOp::Load`).
+fn composite_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    view: &'a wgpu::TextureView,
+    depth: &'a wgpu::TextureView,
+    label: &str,
+    depth_load: wgpu::LoadOp<f32>,
+) -> wgpu::RenderPass<'a> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some(label),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: depth,
+            depth_ops: Some(wgpu::Operations {
+                load: depth_load,
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    })
 }
