@@ -5,7 +5,7 @@
 //! (`GuiOverlayDebug.getDebugInfoRight`).
 
 /// Name, driver and backend of the adapter the renderer runs on.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AdapterSummary {
     /// The adapter name (`GL_RENDERER` in the reference).
     pub name: String,
@@ -16,17 +16,6 @@ pub struct AdapterSummary {
     pub backend: String,
     /// The raw WGPU backend enum variant, when known.
     pub backend_type: Option<wgpu::Backend>,
-}
-
-impl Default for AdapterSummary {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            vendor: String::new(),
-            backend: String::new(),
-            backend_type: None,
-        }
-    }
 }
 
 impl AdapterSummary {

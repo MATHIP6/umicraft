@@ -1705,18 +1705,14 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
                 continue;
             }
             let cave_mask = match cave {
-                Some(c) => {
-                    if dx <= cave_reach && dz <= cave_reach {
-                        let m = c.mask(pos);
-                        if m == 0 {
-                            continue;
-                        }
-                        m
-                    } else {
-                        0xFFFF
+                Some(c) if dx <= cave_reach && dz <= cave_reach => {
+                    let m = c.mask(pos);
+                    if m == 0 {
+                        continue;
                     }
+                    m
                 }
-                None => 0xFFFF,
+                _ => 0xFFFF,
             };
             let sections = sections_in_frustum(pos, &frustum, origin) & cave_mask;
             if sections == 0 {
@@ -2756,7 +2752,7 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
         if self
             .last_camera_uniform
             .as_ref()
-            .map_or(true, |cached| bytemuck::bytes_of(cached) != uniform_bytes)
+            .is_none_or(|cached| bytemuck::bytes_of(cached) != uniform_bytes)
         {
             self.queue.write_buffer(&self.camera_buffer, 0, uniform_bytes);
             self.last_camera_uniform = Some(uniform);
@@ -2771,7 +2767,7 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
         if self
             .last_local_uniform
             .as_ref()
-            .map_or(true, |cached| bytemuck::bytes_of(cached) != local_bytes)
+            .is_none_or(|cached| bytemuck::bytes_of(cached) != local_bytes)
         {
             self.queue.write_buffer(&self.local_camera_buffer, 0, local_bytes);
             self.last_local_uniform = Some(local);
@@ -2791,7 +2787,7 @@ fn collect_chunk_runs(pass: &ChunkPass, mask: u16, group: Group) -> ChunkRuns {
         if self
             .last_hand_uniform
             .as_ref()
-            .map_or(true, |cached| bytemuck::bytes_of(cached) != hand_bytes)
+            .is_none_or(|cached| bytemuck::bytes_of(cached) != hand_bytes)
         {
             self.queue.write_buffer(
                 &self.hand_camera_buffer,
