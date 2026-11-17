@@ -4,6 +4,7 @@
 
 use umicraft_game::digging::{enchantment_level, Digger, AQUA_AFFINITY, HASTE, MINING_FATIGUE};
 use umicraft_game::entity::EntityId;
+use umicraft_game::gamemode::GameMode;
 use umicraft_game::interaction::{AttackTick, Outgoing};
 use umicraft_protocol::packets::play::clientbound::BlockBreakAnim;
 use umicraft_world::{BlockPos, BlockState};
@@ -20,6 +21,27 @@ const WATER_STILL: u16 = 9;
 
 /// A `Block Break Animation` stage that removes the cracks.
 const CLEAR_BREAK_STAGE: u8 = 255;
+
+/// The 1.7 block hit (ADR-0079): with the 1.7 Animations mod, holding attack
+/// at a block while an item is in use swings the arm, as 1.7.10
+/// `Minecraft.func_147115_a` did; 1.8.9 `sendClickBlockToController` skips
+/// it while an item is in use. Only the local animation runs: no dig and no
+/// swing packet leaves, so the server sees a 1.8 client. Adventure mode never
+/// swings (1.7 swung there only with the right tool for the block).
+fn swing_while_using(game: &mut Game) {
+    let applies = game.legacy.block_hit
+        && game.item_use.is_using()
+        && game.controls.input.attack
+        && !game.spectating()
+        && !game.dead()
+        && game.gamemode != GameMode::Adventure
+        && combat::pointed(game).block().is_some();
+    if applies {
+        let effects = swing_effects(game);
+        game.hand.swing(effects);
+        game.body.animation.swing_item();
+    }
+}
 
 /// Runs one tick of the attack button (`umicraft_game::interaction`).
 ///
@@ -39,6 +61,7 @@ pub(in crate::game) fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
                 "attack click ignored"
             );
         }
+        swing_while_using(game);
         return;
     }
     let pointed = combat::pointed(game);

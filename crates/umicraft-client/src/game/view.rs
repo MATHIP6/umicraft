@@ -8,7 +8,7 @@ use umicraft_game::combat::hurt_roll;
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::hand::HandPose;
 use umicraft_game::view::{camera_pose, Perspective};
-use umicraft_game::RenderState;
+use umicraft_game::{GameState, RenderState};
 use umicraft_world::BlockPos;
 
 use super::state::Game;
@@ -22,7 +22,7 @@ pub(super) fn player_view(game: &Game) -> Option<(RenderState, bool)> {
     let followed = game
         .camera_entity()
         .and_then(|id| game.entities.camera_view(id, 1.0));
-    let mut view = followed.unwrap_or_else(|| third_person_view(game, state.interpolated(1.0)));
+    let mut view = followed.unwrap_or_else(|| third_person_view(game, own_eye(game, state, true)));
     if followed.is_none() && game.dead() {
         view.effects = view.effects.with_death(game.vitals.death_time as f32);
     }
@@ -91,6 +91,21 @@ pub(super) fn sky_temperature(game: &Game, position: DVec3) -> f32 {
         )
 }
 
+/// The first-person view of the player at the end of the tick (`at_end`) or
+/// at its start, with the eye where the 1.7 sneak camera puts it when the
+/// 1.7 Animations mod asks for it (ADR-0079).
+fn own_eye(game: &Game, state: &GameState, at_end: bool) -> RenderState {
+    let mut view = state.interpolated(if at_end { 1.0 } else { 0.0 });
+    if game.legacy.sneak_camera {
+        let correction = game
+            .sneak_camera
+            .eye_correction(state.player().sneaking, at_end);
+        view.position.y += correction;
+        view.eye.y += correction;
+    }
+    view
+}
+
 /// Moves the first-person view of the player to the camera of the chosen
 /// perspective (MCP `EntityRenderer.orientCamera`).
 fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
@@ -111,7 +126,7 @@ fn third_person_view(game: &Game, first_person: RenderState) -> RenderState {
     let start = game
         .state
         .as_ref()
-        .map_or(eye, |state| state.interpolated(0.0).position);
+        .map_or(eye, |state| own_eye(game, state, false).position);
     let start_pose = camera_pose(
         game.perspective,
         start,

@@ -74,6 +74,8 @@ pub enum GameEvent {
     },
     /// The player changed the particle option (`0`, `1` or `2`).
     ParticleSetting(u8),
+    /// The 1.7 animations the built-in mod selects (ADR-0079).
+    LegacyAnimations(umicraft_game::legacy::LegacyAnimations),
     /// A line the client shows in its own chat (the completion list).
     LocalChat(String),
     /// Request to re-mesh every loaded chunk column (e.g. after a resource pack reload).
