@@ -61,6 +61,7 @@ mod icons;
 mod init;
 mod pipelines;
 mod readback;
+mod resources;
 mod scene;
 mod stats;
 mod surface;

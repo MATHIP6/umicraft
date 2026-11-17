@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use umicraft_mesh::item::ItemMesh;
-use umicraft_mesh::TEXTURE_LAYERS;
 use umicraft_world::ChunkMap;
 use winit::window::Window;
 
@@ -13,13 +12,14 @@ use super::pipelines::{
     create_overlay_pipeline, create_overlay_pipeline_with_entry, create_terrain_pipeline,
     TerrainPipelineState, TERRAIN_WGSL,
 };
+use super::resources;
 use super::surface::{
     create_depth, create_offscreen, present_mode, request_adapter, request_device,
     FRAME_LATENCY_UNCONSTRAINED,
 };
 use super::textures::{create_font_bind_group, create_terrain_bind_group};
 use super::Renderer;
-use super::{CameraUniform, DEFAULT_MIPMAP_LEVELS, OVERLAY_MIN_BYTES};
+use super::{DEFAULT_MIPMAP_LEVELS, OVERLAY_MIN_BYTES};
 use crate::adapter::AdapterSummary;
 use crate::batch_buffer::BatchBuffer;
 use crate::border::BorderRenderer;
@@ -187,124 +187,18 @@ impl Renderer {
             "renderer_create_started",
             "width={width}, height={height}, format={format:?}"
         );
-        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("camera uniform"),
-            size: std::mem::size_of::<CameraUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let block_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("block texture array"),
-            size: wgpu::Extent3d {
-                width: TEXTURE_SIZE,
-                height: TEXTURE_SIZE,
-                depth_or_array_layers: TEXTURE_LAYERS,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let camera_buffer = resources::camera_buffer(&device, "camera uniform");
         let block_data = fallback_texture_data();
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &block_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &block_data,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(TEXTURE_SIZE * 4),
-                rows_per_image: Some(TEXTURE_SIZE),
-            },
-            wgpu::Extent3d {
-                width: TEXTURE_SIZE,
-                height: TEXTURE_SIZE,
-                depth_or_array_layers: TEXTURE_LAYERS,
-            },
-        );
-        let block_view = block_texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("block texture array view"),
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        });
+        let block_view = resources::block_texture(&device, &queue, &block_data);
 
         // The HUD and the UI start on the original 3×5 fallback atlas. A
         // user-installed 1.8 atlas replaces the UI binding only, so the M3
         // overlay keeps the metrics it was built with.
         let ui_atlas = ui_pass::fallback_atlas();
-        let font_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("overlay font atlas"),
-            size: wgpu::Extent3d {
-                width: ui_atlas.width,
-                height: ui_atlas.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &font_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &ui_atlas.pixels,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(ui_atlas.width),
-                rows_per_image: Some(ui_atlas.height),
-            },
-            wgpu::Extent3d {
-                width: ui_atlas.width,
-                height: ui_atlas.height,
-                depth_or_array_layers: 1,
-            },
-        );
-        let font_view = font_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let font_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("font sampler"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
-
-        let block_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("block sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            // Items, particles and icons never use the mips
-            // (`setBlurMipmap(false, false)` in the reference).
-            lod_max_clamp: 0.0,
-            ..Default::default()
-        });
-        // The chunks: `GL_NEAREST_MIPMAP_LINEAR` (`setBlurMipmapDirect(false,
-        // true)`), nearest texel in each level and a linear blend of the two.
-        let mip_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("terrain mip sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            ..Default::default()
-        });
+        let font_view = resources::font_texture(&device, &queue, &ui_atlas);
+        let font_sampler = resources::font_sampler(&device);
+        let block_sampler = resources::block_sampler(&device);
+        let mip_sampler = resources::mip_sampler(&device);
 
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain shader"),
@@ -315,79 +209,8 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("../overlay.wgsl").into()),
         });
 
-        let terrain_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("terrain bind group layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // The large textures: a second array and the map to it.
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-        let overlay_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("overlay bind group layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+        let terrain_layout = resources::terrain_layout(&device);
+        let overlay_layout = resources::texture_layout(&device, "overlay bind group layout");
 
         let hires = HiresBlocks::none(&device, &queue);
         let terrain_bind_group = create_terrain_bind_group(
@@ -398,12 +221,7 @@ impl Renderer {
             &block_view,
             &hires,
         );
-        let local_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("local camera uniform"),
-            size: std::mem::size_of::<CameraUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let local_camera_buffer = resources::camera_buffer(&device, "local camera uniform");
         let local_terrain_bind_group = create_terrain_bind_group(
             &device,
             &terrain_layout,
@@ -470,40 +288,13 @@ impl Renderer {
             wgpu::BlendState::ALPHA_BLENDING,
             "fs_smooth",
         );
-        let brand_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("brand font sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
+        let brand_sampler = resources::brand_sampler(&device);
         let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gui overlay shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../gui_overlay.wgsl").into()),
         });
         let gui_overlay_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("gui overlay bind group layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
+            resources::texture_layout(&device, "gui overlay bind group layout");
         let gui_overlay_pipeline = create_overlay_pipeline(
             &device,
             &gui_overlay_shader,
@@ -511,25 +302,12 @@ impl Renderer {
             format,
             wgpu::BlendState::ALPHA_BLENDING,
         );
-        // MCP `GuiIngame.renderGameOverlay`: `tryBlendFuncSeparate(775, 769,
-        // 1, 0)` for the crosshair, i.e. `src * (1 - dst) + dst * (1 - src)`.
         let gui_inverted_pipeline = create_overlay_pipeline_with_entry(
             &device,
             &gui_overlay_shader,
             &gui_overlay_layout,
             format,
-            wgpu::BlendState {
-                color: wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::OneMinusDst,
-                    dst_factor: wgpu::BlendFactor::OneMinusSrc,
-                    operation: wgpu::BlendOperation::Add,
-                },
-                alpha: wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::One,
-                    dst_factor: wgpu::BlendFactor::Zero,
-                    operation: wgpu::BlendOperation::Add,
-                },
-            },
+            resources::inverted_blend(),
             "fs_alpha_test",
         );
         let sky = SkyRenderer::new(&device, &queue, format);
@@ -537,49 +315,26 @@ impl Renderer {
         let border = BorderRenderer::new(&device, &queue, format);
         let panorama = PanoramaRenderer::new(&device, format);
 
-        let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("camera bind group layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("entity camera bind group"),
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
-        let local_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("local entity camera bind group"),
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: local_camera_buffer.as_entire_binding(),
-            }],
-        });
-        let hand_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hand camera uniform"),
-            size: std::mem::size_of::<CameraUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let hand_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hand camera bind group"),
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: hand_camera_buffer.as_entire_binding(),
-            }],
-        });
+        let camera_layout = resources::camera_layout(&device);
+        let camera_bind_group = resources::camera_bind_group(
+            &device,
+            &camera_layout,
+            &camera_buffer,
+            "entity camera bind group",
+        );
+        let local_camera_bind_group = resources::camera_bind_group(
+            &device,
+            &camera_layout,
+            &local_camera_buffer,
+            "local entity camera bind group",
+        );
+        let hand_camera_buffer = resources::camera_buffer(&device, "hand camera uniform");
+        let hand_camera_bind_group = resources::camera_bind_group(
+            &device,
+            &camera_layout,
+            &hand_camera_buffer,
+            "hand camera bind group",
+        );
         let entity_renderer = EntityRenderer::new(&device, &camera_layout, format);
         let outline = OutlineRenderer::new(&device, &camera_layout, format);
         let weather = WeatherRenderer::new(&device, &queue, &camera_layout, format);
@@ -617,14 +372,12 @@ impl Renderer {
             &block_view,
             &hires,
         );
-        let icon_entity_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("icon entity camera bind group"),
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: icon_atlas.camera_buffer().as_entire_binding(),
-            }],
-        });
+        let icon_entity_bind_group = resources::camera_bind_group(
+            &device,
+            &camera_layout,
+            icon_atlas.camera_buffer(),
+            "icon entity camera bind group",
+        );
         let world_items = DynamicMesh::new(&device, "world items");
         let moving_blocks = MovingBlocksPass::new(&device);
         let hand_items = DynamicMesh::new(&device, "hand items");
