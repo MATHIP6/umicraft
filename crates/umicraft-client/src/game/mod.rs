@@ -22,7 +22,7 @@
 //! * Thread and channels: `session` starts the threads, `game_loop` runs
 //!   the loop, `messages` holds what crosses the threads and `look` the
 //!   lock-free mouse look slot.
-//! * State: `state` is the `Game` the thread owns.
+//! * State: `state` is the `Game` the thread owns, with its field groups.
 //! * Inbound: `net` applies the clientbound packets; `inventory_events`,
 //!   `container_events` and `creative_events` apply the window's screen events.
 //! * The tick: `tick` runs one simulation step in the order of

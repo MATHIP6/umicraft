@@ -21,7 +21,7 @@ what the game thread does:
 |---|---|
 | `session`, `game_loop` | the thread start and its loop (inputs, frame-paced network events, ticks) |
 | `messages`, `look` | what crosses the threads; the lock-free mouse look slot |
-| `state` | the `Game` struct and the questions asked of it |
+| `state/` | the `Game` struct and the questions asked of it; its field groups (`vitals`, `hotbar`, `controls`, `chat`, `social`, `metrics`) |
 | `net/` | `mod.rs` dispatches each `PlayEvent`; `player`, `world`, `entities`, `inventory`, `social` hold the handlers; `wire` the units of the entity packets |
 | `tick` | one simulation step, in the order of MCP `Minecraft.runTick` |
 | `actions/` | the input updates and the buttons: `attack`, `use_item`, `hotbar` |
@@ -43,9 +43,14 @@ Rules for code added later:
 
 - The split was a pure move: the bodies did not change, the 1 234 test names
   did not change, and the arms of `apply_net_event` became handlers verbatim.
-- `Game` still has 80 fields that every function sees in full. Grouping them
-  into sub-structs (vitals, hotbar, chat, server HUD, tick metrics), so a
-  handler takes only the part it changes, is the next step and is not done
-  here.
+- `Game` had 80 fields that every function saw in full. A second pass moved
+  36 of them into groups under `state/`: `Vitals`, `Hotbar`, `Controls`,
+  `ChatState`, `Social` and `TickMetrics`, each in its own file with its
+  `Default`. `Game` keeps 44 fields. A rule that only touches one group is a
+  method of that group with its own unit tests (the chat history limit, the
+  death animation, the digit keys and slot sync, the title fade, the
+  timings); the free functions keep what spans several parts of the state
+  (the windows, the HUD flag, the command queue). New fields go into the
+  group they belong to rather than onto `Game`.
 - Line references to `game.rs` in older documents (roadmap review, ADR-0016,
   ADR-0029, perf log) point at the file as it was then.
