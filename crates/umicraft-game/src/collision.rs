@@ -667,6 +667,28 @@ mod tests {
         assert_eq!(walking.delta.x, 1.2);
     }
 
+    /// Regression test: a fence beside glass grew an arm towards it, so a
+    /// player brushing past the fence was stopped by a box the server does
+    /// not have and the anti-cheat logged the mismatch.
+    #[test]
+    fn a_player_walks_past_a_fence_that_does_not_connect_to_glass() {
+        let world = TestBlocks::with(&[
+            (0, 0, 0, BlockState::new(85, 0)),
+            (1, 0, 0, BlockState::new(20, 0)),
+        ]);
+        // A box south of the fence, between its post (x < 0.625) and the
+        // glass (x > 1), in front of where the wrong east arm stood.
+        let player = Aabb::new(DVec3::new(0.7, 0.0, 1.0), DVec3::new(0.95, 1.8, 1.25));
+        let moved = move_entity(
+            player,
+            DVec3::new(0.0, 0.0, -0.5),
+            &world,
+            MoveOptions::default(),
+        );
+        assert_eq!(moved.delta.z, -0.5);
+        assert!(!moved.blocked_horizontally);
+    }
+
     #[test]
     fn a_walking_player_walks_off_a_ledge() {
         let world = TestBlocks::with(&[(0, 0, 0, BlockState::new(1, 0))]);

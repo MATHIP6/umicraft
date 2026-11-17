@@ -15,7 +15,9 @@
 //! * **Stairs** — `BlockStairs.setBaseCollisionBounds` plus the step box of
 //!   `BlockStairs.func_176306_h`.
 //! * **Fences** — `BlockFence.addCollisionBoxesToList`: a post plus the arms
-//!   towards the connected neighbours, 1.5 blocks tall.
+//!   towards the connected neighbours, 1.5 blocks tall. Walls (`BlockWall`)
+//!   are their 1.5 tall bounds, gates (`BlockFenceGate`) a 1.5 tall plank
+//!   when closed and nothing when open.
 //!
 //! Everything else is either a full cube or has no collision at all; the
 //! partial-height blocks (plates, carpet, snow layers, cake, ...) use the
@@ -25,7 +27,7 @@ use glam::DVec3;
 use umicraft_world::{BlockPos, BlockState, World};
 
 use crate::piston_shape;
-use crate::selection::{horizontal_neighbours, pane_connects};
+use crate::selection::{fence_connections, horizontal_neighbours, pane_connects};
 
 /// Read access to block states by world coordinate.
 ///
@@ -249,7 +251,8 @@ impl Aabb {
 /// The maximum number of collision boxes a single block state contributes.
 ///
 /// Cauldrons and hoppers contribute 5 boxes (1 base + 4 walls); a stair at
-/// an inner corner three, fences two; nothing in 1.8 needs more.
+/// an inner corner three, fences and brewing stands two; nothing in 1.8
+/// needs more.
 pub const MAX_BOXES: usize = 5;
 
 /// The collision geometry of a block state, relative to the block origin.
@@ -375,16 +378,20 @@ enum Kind {
     Slab(bool),
     /// A stair block.
     Stairs,
-    /// A fence, wall or fence gate.
+    /// A fence: a post and arms towards its connections.
     Fence,
+    /// A cobblestone wall: its bounds, 1.5 blocks tall.
+    Wall,
+    /// A fence gate: a plank across its facing, or nothing when open.
+    FenceGate,
+    /// A brewing stand: a rod on a thin base.
+    BrewingStand,
     /// A thin plate (glass pane, iron bars) that reaches its connected neighbours.
     Pane,
     /// A box that covers the full footprint and is `f64` blocks tall.
     Column(f64),
-    /// A cube inset by one sixteenth on both horizontal axes (cactus).
+    /// A cube inset by one sixteenth on both horizontal axes and on top (cactus).
     Cactus,
-    /// An anvil, whose slab orientation depends on the metadata.
-    Anvil,
     /// A snow layer, whose height depends on the metadata.
     SnowLayer,
     /// A chest, trapped chest or ender chest: 0.875 high, inset by a sixteenth
@@ -400,7 +407,7 @@ enum Kind {
     /// read from both halves (the same as its selection box).
     Door,
     /// A block that collides with exactly its selection box: a ladder, a trapdoor,
-    /// a lily pad, a cocoa pod or a flower pot.
+    /// a lily pad, a cocoa pod, a flower pot, an anvil, a cake or a dragon egg.
     Bounds,
     /// The frame of the End portal: a base, and the eye of Ender when set.
     EndPortalFrame,
@@ -425,7 +432,9 @@ fn classify(id: u16, metadata: u8) -> Kind {
         // Stairs.
         53 | 67 | 108 | 109 | 114 | 128 | 134 | 135 | 136 | 156 | 163 | 164 | 180 => Kind::Stairs,
         // Fences, walls and fence gates.
-        85 | 107 | 113 | 139 | 183..=192 => Kind::Fence,
+        85 | 113 | 188..=192 => Kind::Fence,
+        139 => Kind::Wall,
+        107 | 183..=187 => Kind::FenceGate,
         // Glass panes and iron bars.
         101 | 102 | 160 => Kind::Pane,
         // No collision box at all: `getCollisionBoundingBox` returns null in
@@ -440,10 +449,10 @@ fn classify(id: u16, metadata: u8) -> Kind {
         171 => Kind::Column(0.0625),
         // Daylight detectors.
         151 | 178 => Kind::Column(0.375),
-        // Cake, bed, enchanting table and brewing stand.
-        92 => Kind::Column(0.5),
+        // Bed, enchanting table and brewing stand.
         26 => Kind::Column(0.5625),
-        116 | 117 => Kind::Column(0.75),
+        116 => Kind::Column(0.75),
+        117 => Kind::BrewingStand,
         // Cauldron (5 boxes: 0.3125 base + 4 walls).
         118 => Kind::Cauldron,
         // Hopper (5 boxes: 0.625 base + 4 walls).
@@ -455,16 +464,16 @@ fn classify(id: u16, metadata: u8) -> Kind {
         144 => Kind::Skull,
         54 | 130 | 146 => Kind::Chest,
         81 => Kind::Cactus,
-        145 => Kind::Anvil,
         78 => Kind::SnowLayer,
         // Wooden, iron and the five other doors: `BlockDoor` collides with the
         // bounds of its state.
         64 | 71 | 193..=197 => Kind::Door,
         // Ladders (`BlockLadder`), trapdoors (`BlockTrapDoor`), lily pads
-        // (`BlockLilyPad`), cocoa pods (`BlockCocoa`) and flower pots
-        // (`BlockFlowerPot`) collide with their bounds, which are their selection
-        // bounds.
-        65 | 96 | 111 | 127 | 140 | 167 => Kind::Bounds,
+        // (`BlockLilyPad`), cocoa pods (`BlockCocoa`), flower pots
+        // (`BlockFlowerPot`), anvils (`BlockAnvil`), cakes (`BlockCake`) and the
+        // dragon egg (`BlockDragonEgg`) collide with their bounds, which are
+        // their selection bounds.
+        65 | 92 | 96 | 111 | 122 | 127 | 140 | 145 | 167 => Kind::Bounds,
         // The frame of the End portal.
         120 => Kind::EndPortalFrame,
         // Decorations and other blocks without a collision box.
@@ -491,23 +500,12 @@ pub fn shape_of<S: BlockSource + ?Sized>(
         Kind::Cube => BlockShape::cube(),
         Kind::Slab(top) => BlockShape::slab(top),
         Kind::Column(height) => BlockShape::column(height),
+        // `BlockCactus.getCollisionBoundingBox` insets the top by a sixteenth
+        // too, unlike its 1.0 tall selection bounds.
         Kind::Cactus => BlockShape::single(Aabb::new(
             DVec3::new(0.0625, 0.0, 0.0625),
-            DVec3::new(0.9375, 1.0, 0.9375),
+            DVec3::new(0.9375, 0.9375, 0.9375),
         )),
-        Kind::Anvil => {
-            if state.metadata() & 1 == 0 {
-                BlockShape::single(Aabb::new(
-                    DVec3::new(0.0, 0.0, 0.125),
-                    DVec3::new(1.0, 1.0, 0.875),
-                ))
-            } else {
-                BlockShape::single(Aabb::new(
-                    DVec3::new(0.125, 0.0, 0.0),
-                    DVec3::new(0.875, 1.0, 1.0),
-                ))
-            }
-        }
         // `BlockSnow.getCollisionBoundingBox` is `layers - 1` eighths high, one
         // layer under the selection box (`getBoundsForLayers`): a player
         // walks onto a single layer and steps up to five.
@@ -525,7 +523,12 @@ pub fn shape_of<S: BlockSource + ?Sized>(
         Kind::Door => selection_shape(state, world, pos),
         // `BlockLadder` and `BlockCocoa` apply `setBlockBoundsBasedOnState` and
         // return the bounds; `BlockLilyPad` returns its bounds directly and the
-        // flower pot has no override, so the default is its constructor bounds.
+        // flower pot and dragon egg have no override, so the default is their
+        // constructor bounds. `BlockCake.getCollisionBoundingBox` builds the
+        // same box as its bounds. `BlockAnvil` has no override either: the
+        // bounds are the ones its facing sets (vanilla reuses the bounds the
+        // last `setBlockBoundsBasedOnState` call left, which is this anvil's
+        // own as soon as it was looked at or rendered).
         Kind::Bounds => selection_shape(state, world, pos),
         // `BlockEndPortalFrame.addCollisionBoxesToList`: the 0.8125 high base,
         // then the eye (bit 4 of the metadata) as a small box on top.
@@ -545,7 +548,10 @@ pub fn shape_of<S: BlockSource + ?Sized>(
         // the collision is their bounds, which are the selection bounds.
         Kind::Chest => selection_shape(state, world, pos),
         Kind::Stairs => stair_shape(state, world, pos),
-        Kind::Fence => fence_shape(world, pos),
+        Kind::Fence => fence_shape(state, world, pos),
+        Kind::Wall => wall_shape(state, world, pos),
+        Kind::FenceGate => fence_gate_shape(state.metadata()),
+        Kind::BrewingStand => brewing_stand_shape(),
         Kind::Cauldron => cauldron_shape(),
         Kind::Hopper => hopper_shape(),
     }
@@ -809,74 +815,85 @@ fn stair_shape<S: BlockSource + ?Sized>(state: BlockState, world: &S, pos: Block
     }
 }
 
-/// The collision boxes of a fence, wall or fence gate.
+/// The collision boxes of a fence.
 ///
 /// MCP `BlockFence.addCollisionBoxesToList` (line 50) emits a post-and-arm
-/// box for the north/south axis and a second one for the west/east axis.
-fn fence_shape<S: BlockSource + ?Sized>(world: &S, pos: BlockPos) -> BlockShape {
-    let north = fence_connects(world, pos, 0);
-    let south = fence_connects(world, pos, 1);
-    let west = fence_connects(world, pos, 2);
-    let east = fence_connects(world, pos, 3);
-
-    // The post is 0.375..0.625 wide and 1.5 blocks tall; an arm reaches the
-    // full edge of the block it is connected to.
-    let mut min_x = 0.375;
-    let mut max_x = 0.625;
-    let mut min_z = 0.375;
-    let mut max_z = 0.625;
-    if north {
-        min_z = 0.0;
-    }
-    if south {
-        max_z = 1.0;
-    }
-    let north_south = Aabb::new(DVec3::new(min_x, 0.0, min_z), DVec3::new(max_x, 1.5, max_z));
-
-    min_x = 0.375;
-    max_x = 0.625;
-    min_z = 0.375;
-    max_z = 0.625;
-    if west {
-        min_x = 0.0;
-    }
-    if east {
-        max_x = 1.0;
-    }
-    let west_east = Aabb::new(DVec3::new(min_x, 0.0, min_z), DVec3::new(max_x, 1.5, max_z));
-
-    if north || south {
-        BlockShape::pair(north_south, west_east)
-    } else {
-        // Without a north/south arm only the post (plus any west/east arm)
-        // exists; the post is already part of `west_east`.
-        BlockShape::single(west_east)
+/// box for the north/south axis when it has a connection there, then one for
+/// the west/east axis when it has a connection there or none on the other
+/// axis (the lone post).
+fn fence_shape<S: BlockSource + ?Sized>(state: BlockState, world: &S, pos: BlockPos) -> BlockShape {
+    const LO: f64 = 0.375;
+    const HI: f64 = 0.625;
+    let [north, south, west, east] = fence_connections(state, world, pos);
+    let north_south = Aabb::new(
+        DVec3::new(LO, 0.0, if north { 0.0 } else { LO }),
+        DVec3::new(HI, FENCE_HEIGHT, if south { 1.0 } else { HI }),
+    );
+    let west_east = Aabb::new(
+        DVec3::new(if west { 0.0 } else { LO }, 0.0, LO),
+        DVec3::new(if east { 1.0 } else { HI }, FENCE_HEIGHT, HI),
+    );
+    match (north || south, west || east) {
+        (true, true) => BlockShape::pair(north_south, west_east),
+        (true, false) => BlockShape::single(north_south),
+        (false, _) => BlockShape::single(west_east),
     }
 }
 
-/// True when the neighbour in the given direction connects to the fence.
+/// How tall fences, walls and gates are for collisions (the `1.5F` of
+/// `BlockFence`, `BlockWall` and `BlockFenceGate`).
+const FENCE_HEIGHT: f64 = 1.5;
+
+/// The collision box of a cobblestone wall.
 ///
-/// `direction` is 0 = north (−Z), 1 = south (+Z), 2 = west (−X), 3 = east (+X).
+/// MCP `BlockWall.getCollisionBoundingBox` applies
+/// `setBlockBoundsBasedOnState`, which are the selection bounds, and raises
+/// `maxY` to 1.5.
+fn wall_shape<S: BlockSource + ?Sized>(state: BlockState, world: &S, pos: BlockPos) -> BlockShape {
+    let bounds = selection_shape(state, world, pos).boxes()[0];
+    BlockShape::single(Aabb::new(
+        bounds.min,
+        DVec3::new(bounds.max.x, FENCE_HEIGHT, bounds.max.z),
+    ))
+}
+
+/// The collision box of a fence gate from its metadata.
 ///
-/// MCP `BlockFence.canConnectTo` (line 161) connects a fence to other fences
-/// and gates and to opaque full cubes.
-fn fence_connects<S: BlockSource + ?Sized>(world: &S, pos: BlockPos, direction: u8) -> bool {
-    let neighbour = match direction {
-        0 => BlockPos::new(pos.x, pos.y, pos.z - 1),
-        1 => BlockPos::new(pos.x, pos.y, pos.z + 1),
-        2 => BlockPos::new(pos.x - 1, pos.y, pos.z),
-        _ => BlockPos::new(pos.x + 1, pos.y, pos.z),
+/// MCP `BlockFenceGate.getCollisionBoundingBox`: nothing when open (bit 2),
+/// otherwise a 0.25 thick plank, 1.5 tall, across the facing: along X for a
+/// gate facing north or south (`getHorizontal(meta & 3)` is even), along Z
+/// for one facing west or east.
+fn fence_gate_shape(metadata: u8) -> BlockShape {
+    if metadata & 4 != 0 {
+        return BlockShape::EMPTY;
+    }
+    let plank = if metadata & 1 == 0 {
+        Aabb::new(
+            DVec3::new(0.0, 0.0, 0.375),
+            DVec3::new(1.0, FENCE_HEIGHT, 0.625),
+        )
+    } else {
+        Aabb::new(
+            DVec3::new(0.375, 0.0, 0.0),
+            DVec3::new(0.625, FENCE_HEIGHT, 1.0),
+        )
     };
-    let other = world.block(neighbour.x, neighbour.y, neighbour.z);
-    if other.is_air() {
-        return false;
-    }
-    if matches!(classify(other.id(), other.metadata()), Kind::Fence) {
-        return true;
-    }
-    // Solid full cubes hold a fence in place, pumpkins do not
-    // (MCP `BlockFence.canConnectTo`, line 164).
-    matches!(classify(other.id(), other.metadata()), Kind::Cube) && other.id() != 86
+    BlockShape::single(plank)
+}
+
+/// The two collision boxes of a brewing stand.
+///
+/// MCP `BlockBrewingStand.addCollisionBoxesToList`: the rod
+/// `(0.4375, 0, 0.4375)-(0.5625, 0.875, 0.5625)`, then the base
+/// `setBlockBoundsForItemRender`, `(0, 0, 0)-(1, 0.125, 1)`.
+fn brewing_stand_shape() -> BlockShape {
+    BlockShape::pair(
+        Aabb::new(
+            DVec3::new(0.4375, 0.0, 0.4375),
+            DVec3::new(0.5625, 0.875, 0.5625),
+        ),
+        Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.125, 1.0)),
+    )
 }
 
 #[cfg(test)]
@@ -1037,10 +1054,236 @@ mod tests {
     fn a_fence_reaches_towards_a_connected_neighbour() {
         let world = TestBlocks::with(&[(0, 0, -1, BlockState::new(85, 0))]);
         let fence = shape_of(BlockState::new(85, 0), &world, BlockPos::new(0, 0, 0));
-        assert_eq!(fence.boxes().len(), 2);
+        // Only the north/south box: the west/east one is skipped when that
+        // axis has no connection and the other has one.
+        assert_eq!(fence.boxes().len(), 1);
         // The north arm reaches the edge of the block.
         assert_eq!(fence.boxes()[0].min.z, 0.0);
         assert_eq!(fence.boxes()[0].max.z, 0.625);
+    }
+
+    /// The `(min x, max x, min z, max z)` footprint of every box of the oak
+    /// fence at the origin, with `east` as its only neighbour (at x = 1).
+    fn fence_footprint(east: BlockState) -> Vec<[f64; 4]> {
+        let world = TestBlocks::with(&[(1, 0, 0, east)]);
+        shape_of(BlockState::new(85, 0), &world, BlockPos::new(0, 0, 0))
+            .boxes()
+            .iter()
+            .map(|b| [b.min.x, b.max.x, b.min.z, b.max.z])
+            .collect()
+    }
+
+    /// Regression test: the collision fence connected to every block the
+    /// collision table calls a cube (glass, leaves, glowstone, a lit
+    /// pumpkin...) and to walls, so a player pressed against such a fence
+    /// stopped 0.375 short of where the server put them, and the anti-cheat
+    /// logged it. `BlockFence.canConnectTo` only takes opaque full cubes that
+    /// are not gourds, fences of its material and gates.
+    #[test]
+    fn a_fence_connects_only_to_what_vanilla_connects_it_to() {
+        let post = vec![[0.375, 0.625, 0.375, 0.625]];
+        let arm = vec![[0.375, 1.0, 0.375, 0.625]];
+        let cases = [
+            (1, true),    // stone
+            (20, false),  // glass
+            (18, false),  // leaves
+            (89, false),  // glowstone
+            (46, false),  // TNT
+            (86, false),  // pumpkin
+            (91, false),  // lit pumpkin
+            (103, false), // melon
+            (166, false), // barrier
+            (139, false), // cobblestone wall
+            (113, false), // nether brick fence: another material
+            (152, true),  // redstone block
+            (120, true),  // End portal frame
+            (188, true),  // spruce fence
+            (107, true),  // oak gate
+            (186, true),  // dark oak gate
+        ];
+        for (id, connects) in cases {
+            let expected = if connects { &arm } else { &post };
+            assert_eq!(
+                &fence_footprint(BlockState::new(id, 0)),
+                expected,
+                "id {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_nether_brick_fence_connects_to_nether_brick_fences_only() {
+        let world = TestBlocks::with(&[
+            (0, 0, -1, BlockState::new(113, 0)),
+            (1, 0, 0, BlockState::new(85, 0)),
+        ]);
+        let fence = shape_of(BlockState::new(113, 0), &world, BlockPos::new(0, 0, 0));
+        assert_eq!(fence.boxes().len(), 1);
+        assert_eq!(fence.boxes()[0].min.z, 0.0);
+        assert_eq!(fence.boxes()[0].max.x, 0.625);
+    }
+
+    /// Regression test: gates were fences, so an open gate still blocked the
+    /// player and a closed one was a post with arms.
+    #[test]
+    fn a_closed_gate_is_a_plank_across_its_facing_and_an_open_one_is_empty() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        for id in [107, 183, 184, 185, 186, 187] {
+            // Facing south (0) or north (2): the plank runs along X.
+            for meta in [0, 2] {
+                let gate = shape_of(BlockState::new(id, meta), &world, pos);
+                assert_eq!(
+                    gate.boxes(),
+                    &[Aabb::new(
+                        DVec3::new(0.0, 0.0, 0.375),
+                        DVec3::new(1.0, 1.5, 0.625)
+                    )]
+                );
+            }
+            // Facing west (1) or east (3): the plank runs along Z.
+            for meta in [1, 3] {
+                let gate = shape_of(BlockState::new(id, meta), &world, pos);
+                assert_eq!(
+                    gate.boxes(),
+                    &[Aabb::new(
+                        DVec3::new(0.375, 0.0, 0.0),
+                        DVec3::new(0.625, 1.5, 1.0)
+                    )]
+                );
+            }
+            for meta in 4..8 {
+                assert!(shape_of(BlockState::new(id, meta), &world, pos).is_empty());
+            }
+        }
+    }
+
+    /// Regression test: walls collided as fences (a 0.25 wide post) instead
+    /// of their 0.5 wide bounds.
+    #[test]
+    fn a_wall_collides_with_its_bounds_raised_to_one_and_a_half() {
+        let pos = BlockPos::new(0, 0, 0);
+        let wall = BlockState::new(139, 0);
+        let alone = shape_of(wall, &TestBlocks::default(), pos);
+        assert_eq!(
+            alone.boxes(),
+            &[Aabb::new(
+                DVec3::new(0.25, 0.0, 0.25),
+                DVec3::new(0.75, 1.5, 0.75)
+            )]
+        );
+        // A straight north/south run is narrower (and lower when selected).
+        let run = TestBlocks::with(&[(0, 0, -1, wall), (0, 0, 1, wall)]);
+        assert_eq!(
+            shape_of(wall, &run, pos).boxes(),
+            &[Aabb::new(
+                DVec3::new(0.3125, 0.0, 0.0),
+                DVec3::new(0.6875, 1.5, 1.0)
+            )]
+        );
+    }
+
+    /// Regression test: the anvil boxes were swapped, so a player pressed
+    /// against the narrow side of an anvil stood 0.125 inside it for the
+    /// server. `getHorizontal(meta & 3)` is west or east for odd values,
+    /// whose axis is X and whose bounds are inset on Z.
+    #[test]
+    fn an_anvil_is_narrow_across_its_facing() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        for damage in [0, 4, 8] {
+            for meta in [1, 3] {
+                let anvil = shape_of(BlockState::new(145, meta | damage), &world, pos);
+                assert_eq!(
+                    anvil.boxes(),
+                    &[Aabb::new(
+                        DVec3::new(0.0, 0.0, 0.125),
+                        DVec3::new(1.0, 1.0, 0.875)
+                    )]
+                );
+            }
+            for meta in [0, 2] {
+                let anvil = shape_of(BlockState::new(145, meta | damage), &world, pos);
+                assert_eq!(
+                    anvil.boxes(),
+                    &[Aabb::new(
+                        DVec3::new(0.125, 0.0, 0.0),
+                        DVec3::new(0.875, 1.0, 1.0)
+                    )]
+                );
+            }
+        }
+    }
+
+    /// Regression test: the brewing stand was a 0.75 tall column.
+    #[test]
+    fn a_brewing_stand_is_a_rod_on_a_thin_base() {
+        let stand = shape_of(
+            BlockState::new(117, 0),
+            &TestBlocks::default(),
+            BlockPos::new(0, 0, 0),
+        );
+        assert_eq!(
+            stand.boxes(),
+            &[
+                Aabb::new(
+                    DVec3::new(0.4375, 0.0, 0.4375),
+                    DVec3::new(0.5625, 0.875, 0.5625)
+                ),
+                Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.125, 1.0)),
+            ]
+        );
+    }
+
+    /// Regression test: the cake was a full-footprint column, the cactus 1.0
+    /// tall and the dragon egg a full cube.
+    #[test]
+    fn cakes_cacti_and_dragon_eggs_are_inset() {
+        let world = TestBlocks::default();
+        let pos = BlockPos::new(0, 0, 0);
+        let boxes = |id, meta| shape_of(BlockState::new(id, meta), &world, pos).boxes()[0];
+        assert_eq!(
+            boxes(92, 0),
+            Aabb::new(
+                DVec3::new(0.0625, 0.0, 0.0625),
+                DVec3::new(0.9375, 0.5, 0.9375)
+            )
+        );
+        // Three bites: (1 + 3 * 2) / 16 from the west.
+        assert_eq!(boxes(92, 3).min.x, 0.4375);
+        assert_eq!(
+            boxes(81, 0),
+            Aabb::new(
+                DVec3::new(0.0625, 0.0, 0.0625),
+                DVec3::new(0.9375, 0.9375, 0.9375)
+            )
+        );
+        assert_eq!(
+            boxes(122, 0),
+            Aabb::new(
+                DVec3::new(0.0625, 0.0, 0.0625),
+                DVec3::new(0.9375, 1.0, 0.9375)
+            )
+        );
+    }
+
+    /// Regression test: panes connected through the normal-cube table, which
+    /// leaves out leaves, glowstone and the redstone block and keeps the
+    /// mob spawner and slime, unlike `Block.fullBlock`.
+    #[test]
+    fn panes_connect_to_full_blocks_as_vanilla_counts_them() {
+        let pos = BlockPos::new(0, 0, 0);
+        let pane = BlockState::new(102, 0);
+        let west_arm = |id| {
+            let world = TestBlocks::with(&[(-1, 0, 0, BlockState::new(id, 0))]);
+            shape_of(pane, &world, pos).boxes().len() == 1
+        };
+        for id in [1, 18, 20, 46, 89, 152, 161, 169, 101, 160] {
+            assert!(west_arm(id), "id {id} connects");
+        }
+        for id in [52, 79, 120, 165, 166, 138] {
+            assert!(!west_arm(id), "id {id} does not connect");
+        }
     }
 
     #[test]

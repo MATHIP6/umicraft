@@ -610,10 +610,12 @@ fn cake(meta: u8) -> Bounds {
 /// Whether a neighbour holds up a fence or a wall: an opaque full cube that
 /// is not a gourd (MCP `BlockFence.canConnectTo` / `BlockWall.canConnectTo`,
 /// `block.blockMaterial.isOpaque() && isFullCube() && material != gourd`;
-/// barriers never connect). Approximated by the normal-cube table minus the
-/// gourds (86, 103), the barrier (166) and the end portal frame (120).
+/// barriers never connect). That is the normal-cube table (which also asks
+/// for `!canProvidePower`) plus the redstone block, minus the gourds (86, 91,
+/// 103) and the barrier (166). The End portal frame (120) is an opaque full
+/// cube for this test: only `isOpaqueCube` is false on it.
 fn connects_to_solid(state: BlockState) -> bool {
-    is_normal_cube(state) && !matches!(state.id(), 86 | 103 | 120 | 166)
+    (is_normal_cube(state) || state.id() == 152) && !matches!(state.id(), 86 | 91 | 103 | 166)
 }
 
 /// Whether the block is a fence gate (`instanceof BlockFenceGate`).
@@ -637,20 +639,29 @@ pub(crate) fn horizontal_neighbours<S: BlockSource + ?Sized>(
 
 /// MCP `BlockFence.setBlockBoundsBasedOnState`: a 0.25 wide post that
 /// reaches the block edge towards each connected neighbour, 1.0 tall (the
-/// 1.5 tall box is collision only). A fence connects to a fence of the same
-/// material (wood or nether brick), to any gate and to solid cubes.
+/// 1.5 tall box is collision only).
 fn fence<S: BlockSource + ?Sized>(state: BlockState, world: &S, pos: BlockPos) -> Bounds {
-    // `BlockFence` ids: 113 is the nether brick fence (rock material), the
-    // others are wooden.
+    let [n, s, w, e] = fence_connections(state, world, pos);
+    post_bounds(n, s, w, e, 0.375, 1.0)
+}
+
+/// Whether the fence `state` at `pos` connects north, south, west and east
+/// (MCP `BlockFence.canConnectTo`): to a fence of the same material (wood, or
+/// nether brick for 113), to any gate and to solid cubes. A wall is not a
+/// fence and does not connect.
+pub(crate) fn fence_connections<S: BlockSource + ?Sized>(
+    state: BlockState,
+    world: &S,
+    pos: BlockPos,
+) -> [bool; 4] {
     let is_nether = |id: u16| id == 113;
     let is_fence = |id: u16| matches!(id, 85 | 113 | 188..=192);
-    let [n, s, w, e] = horizontal_neighbours(world, pos).map(|other| {
+    horizontal_neighbours(world, pos).map(|other| {
         let id = other.id();
         (is_fence(id) && is_nether(id) == is_nether(state.id()))
             || is_fence_gate(id)
             || connects_to_solid(other)
-    });
-    post_bounds(n, s, w, e, 0.375, 1.0)
+    })
 }
 
 /// MCP `BlockWall.setBlockBoundsBasedOnState`: a 0.5 wide post, 1.0 tall, or
@@ -686,11 +697,20 @@ fn post_bounds(north: bool, south: bool, west: bool, east: bool, lo: f32, height
 }
 
 /// MCP `BlockPane.canPaneConnectToBlock`: a full block, a pane or glass.
+///
+/// "Full block" is `Block.fullBlock`, the value `isOpaqueCube()` had when the
+/// block was constructed. It differs from the normal-cube table: the
+/// leaves (18, 161) count because their `fancyGraphics` field is still false
+/// inside the `Block` constructor, and so do TNT (46), glowstone (89), the
+/// redstone block (152) and the sea lantern (169), whose materials are
+/// translucent or which power redstone; the mob spawner (52), slime (165),
+/// End portal frame (120) and barrier (166) override `isOpaqueCube` to false.
 pub(crate) fn pane_connects(this_id: u16, other: BlockState) -> bool {
     let id = other.id();
     id == this_id
         || matches!(id, 20 | 95 | 101 | 102 | 160)
-        || (is_normal_cube(other) && !matches!(id, 120 | 166))
+        || matches!(id, 18 | 46 | 89 | 152 | 161 | 169)
+        || (is_normal_cube(other) && !matches!(id, 52 | 120 | 165 | 166))
 }
 
 /// MCP `BlockPane.setBlockBoundsBasedOnState` (glass panes and iron bars): a
