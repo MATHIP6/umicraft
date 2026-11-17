@@ -93,9 +93,9 @@ pub(crate) const OVERLAY_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
 const ICON_DEPTH: f32 = 32.0;
 /// The terrain shader with the shared fog falloff in front.
 const TERRAIN_WGSL: &str = concat!(
-    include_str!("fog.wgsl"),
-    include_str!("lightmap.wgsl"),
-    include_str!("terrain.wgsl")
+    include_str!("../fog.wgsl"),
+    include_str!("../lightmap.wgsl"),
+    include_str!("../terrain.wgsl")
 );
 
 /// Frames the presentation queue may hold (F2-5e). When vsync is active, 1 keeps
@@ -763,7 +763,7 @@ impl Renderer {
         });
         let overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("overlay shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("overlay.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../overlay.wgsl").into()),
         });
 
         let terrain_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -931,7 +931,7 @@ impl Renderer {
         });
         let gui_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gui overlay shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("gui_overlay.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../gui_overlay.wgsl").into()),
         });
         let gui_overlay_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
