@@ -201,6 +201,19 @@ impl Camera {
         )
     }
 
+    /// The rotation from world to camera space: the pitch about X after the
+    /// yaw about Y, as MCP `EntityRenderer.orientCamera` turns the view with
+    /// two `glRotatef` calls.
+    ///
+    /// A `look_to` with a fixed up vector is undefined when the view is
+    /// parallel to it: at a pitch of exactly ±90 degrees (which the clamp
+    /// reaches, and which is a hair past π/2 in `f32`) the view swung round
+    /// by half a turn. Two rotations have no such point.
+    #[must_use]
+    pub fn view_rotation(&self) -> Mat4 {
+        Mat4::from_rotation_x(-self.pitch) * Mat4::from_rotation_y(self.yaw)
+    }
+
     /// Rotates by a mouse delta in radians and clamps the pitch.
     pub fn look(&mut self, delta_yaw: f32, delta_pitch: f32) {
         self.yaw = (self.yaw + delta_yaw).rem_euclid(std::f32::consts::TAU);
@@ -274,11 +287,8 @@ impl Camera {
     pub fn view_projection_from(&self, origin: DVec3) -> Mat4 {
         // WebGPU NDC is Y-up with Z in 0..1, i.e. the DirectX convention.
         let view = self.view_bob
-            * glam::camera::rh::view::look_to_mat4(
-                (self.eye - origin).as_vec3(),
-                self.forward(),
-                Vec3::Y,
-            );
+            * self.view_rotation()
+            * Mat4::from_translation(-(self.eye - origin).as_vec3());
         let projection = glam::camera::rh::proj::directx::perspective(
             self.fov_y * self.fov_modifier,
             self.aspect,
@@ -819,6 +829,40 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn the_rotation_view_matches_look_to_away_from_the_poles() {
+        for (yaw, pitch) in [(0.0_f32, 0.0_f32), (1.2, 0.4), (-2.5, -1.1), (4.0, 1.5)] {
+            let camera = Camera::new(Vec3::ZERO, yaw, pitch);
+            let look_to =
+                glam::camera::rh::view::look_to_mat4(Vec3::ZERO, camera.forward(), Vec3::Y);
+            let rotation = camera.view_rotation();
+            assert!(
+                rotation.abs_diff_eq(look_to, 1e-5),
+                "yaw {yaw}, pitch {pitch}: {rotation:?} against {look_to:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn looking_straight_up_or_down_keeps_the_yaw() {
+        // Regression: at the clamped pitch (±90 degrees, a hair past π/2 in
+        // f32) the `look_to` view swung round by half a turn.
+        for pitch in [MAX_PITCH, -MAX_PITCH] {
+            for yaw in [0.0_f32, 0.7, 2.0, -1.3] {
+                let at_pole = Camera::new(Vec3::ZERO, yaw, pitch).view_rotation();
+                let near_pole =
+                    Camera::new(Vec3::ZERO, yaw, pitch - pitch.signum() * 1e-3).view_rotation();
+                assert!(
+                    at_pole.abs_diff_eq(near_pole, 1e-2),
+                    "yaw {yaw}, pitch {pitch}: the view jumps at the pole"
+                );
+                // The camera's right vector stays horizontal and follows the yaw.
+                let right = at_pole.transpose().transform_vector3(Vec3::X);
+                assert!(right.abs_diff_eq(Vec3::new(yaw.cos(), 0.0, yaw.sin()), 1e-5));
             }
         }
     }
