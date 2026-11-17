@@ -25,3 +25,15 @@ Thumbs.db
 /fuzz/corpus/
 /fuzz/artifacts/
 /fuzz/coverage/
+
+# Local-only files that slipped into PR #24: renders and screenshots made from
+# the reference client (spec §3), Windows noise, local packet captures (see
+# docs/parity-harness.md) and the vanilla-agent build output.
+/title.png
+/mob_renders/
+/vulcan-test/
+/runtime/
+/tools/vanilla-agent/build/
+/tools/vanilla-agent/build-probe/
+desktop.ini
+*.class
