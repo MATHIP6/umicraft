@@ -21,6 +21,7 @@
 use glam::DVec3;
 use umicraft_world::{BlockPos, BlockState};
 
+use crate::piston::{MovingBlock, MovingBlocks};
 pub use crate::shapes::Aabb;
 use crate::shapes::{shape_of, BlockSource};
 
@@ -90,6 +91,10 @@ impl<S: BlockSource + ?Sized> BlockSource for Bordered<'_, S> {
     fn for_each_entity_box(&self, area: &Aabb, f: &mut dyn FnMut(&Aabb)) {
         self.world.for_each_entity_box(area, f);
     }
+
+    fn moving_block(&self, x: i32, y: i32, z: i32) -> Option<MovingBlock> {
+        self.world.moving_block(x, y, z)
+    }
 }
 
 /// A block source plus the collision boxes of the solid entities around
@@ -119,6 +124,38 @@ impl<S: BlockSource + ?Sized> BlockSource for WithEntities<'_, S> {
         {
             f(obstacle);
         }
+    }
+
+    fn moving_block(&self, x: i32, y: i32, z: i32) -> Option<MovingBlock> {
+        self.world.moving_block(x, y, z)
+    }
+}
+
+/// A block source plus the blocks the pistons are moving (the client's
+/// `TileEntityPiston`s), whose `piston_extension` blocks collide with the
+/// moved block (see [`BlockSource::moving_block`]).
+pub struct WithMovingBlocks<'a, S: BlockSource + ?Sized> {
+    /// The blocks.
+    pub world: &'a S,
+    /// The blocks in flight.
+    pub moving: &'a MovingBlocks,
+}
+
+impl<S: BlockSource + ?Sized> BlockSource for WithMovingBlocks<'_, S> {
+    fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+        self.world.block(x, y, z)
+    }
+
+    fn is_column_loaded(&self, x: i32, z: i32) -> bool {
+        self.world.is_column_loaded(x, z)
+    }
+
+    fn for_each_entity_box(&self, area: &Aabb, f: &mut dyn FnMut(&Aabb)) {
+        self.world.for_each_entity_box(area, f);
+    }
+
+    fn moving_block(&self, x: i32, y: i32, z: i32) -> Option<MovingBlock> {
+        self.moving.at([x, y, z]).copied()
     }
 }
 
@@ -687,6 +724,43 @@ mod tests {
         );
         assert_eq!(moved.delta.z, -0.5);
         assert!(!moved.blocked_horizontally);
+    }
+
+    /// Regression test: a block in flight (a `piston_extension`) did not
+    /// block the player, who walked into it while the server stopped them.
+    #[test]
+    fn a_player_is_stopped_by_a_block_a_piston_is_pushing() {
+        let world = TestBlocks::with(&[(1, 0, 0, BlockState::new(36, 0))]);
+        let mut moving = MovingBlocks::default();
+        moving.push(MovingBlock {
+            pos: [1, 0, 0],
+            state: BlockState::new(1, 0),
+            direction: [0, 0, 1],
+            extending: true,
+            show_head: false,
+            progress: 1.0,
+            last_progress: 0.5,
+            light: umicraft_world::LightLevel::default(),
+        });
+        let source = WithMovingBlocks {
+            world: &world,
+            moving: &moving,
+        };
+        let moved = move_entity(
+            player_box(0.0),
+            DVec3::new(1.0, 0.0, 0.0),
+            &source,
+            MoveOptions::default(),
+        );
+        assert_eq!(moved.delta.x, 0.7, "stopped at the face x = 1");
+        // Without the animation the extension block is empty.
+        let free = move_entity(
+            player_box(0.0),
+            DVec3::new(1.0, 0.0, 0.0),
+            &world,
+            MoveOptions::default(),
+        );
+        assert_eq!(free.delta.x, 1.0);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 use std::sync::mpsc::SyncSender;
 use std::time::Instant;
 
-use umicraft_game::collision::{boat_box, WithEntities};
+use umicraft_game::collision::{boat_box, WithEntities, WithMovingBlocks};
 use umicraft_game::entity::{EntityId, EntityKind};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::input::RawInput;
@@ -187,9 +187,12 @@ pub(super) fn tick(
             Some(feet) => state.ride(feet),
             None => state.tick(
                 &intent,
-                &WithEntities {
-                    world,
-                    boxes: &game.solid_entities,
+                &WithMovingBlocks {
+                    world: &WithEntities {
+                        world,
+                        boxes: &game.solid_entities,
+                    },
+                    moving: game.server.moving_blocks(),
                 },
             ),
         }

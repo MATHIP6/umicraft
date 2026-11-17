@@ -26,6 +26,7 @@
 use glam::DVec3;
 use umicraft_world::{BlockPos, BlockState, World};
 
+use crate::piston::MovingBlock;
 use crate::piston_shape;
 use crate::selection::{fence_connections, horizontal_neighbours, pane_connects};
 
@@ -53,6 +54,14 @@ pub trait BlockSource {
     /// `area`, in world space. MCP `World.getCollidingBoundingBoxes` adds
     /// them after the blocks; test sources have none.
     fn for_each_entity_box(&self, _area: &Aabb, _f: &mut dyn FnMut(&Aabb)) {}
+
+    /// The block a piston is moving into `(x, y, z)`, the client's
+    /// `TileEntityPiston` there. A `piston_extension` (36) block without one
+    /// has no collision box (`BlockPistonMoving.getCollisionBoundingBox`
+    /// returns `null`); test sources have none.
+    fn moving_block(&self, _x: i32, _y: i32, _z: i32) -> Option<MovingBlock> {
+        None
+    }
 }
 
 impl BlockSource for World {
@@ -77,6 +86,10 @@ impl<T: BlockSource + ?Sized> BlockSource for &T {
 
     fn for_each_entity_box(&self, area: &Aabb, f: &mut dyn FnMut(&Aabb)) {
         (**self).for_each_entity_box(area, f);
+    }
+
+    fn moving_block(&self, x: i32, y: i32, z: i32) -> Option<MovingBlock> {
+        (**self).moving_block(x, y, z)
     }
 }
 
@@ -386,6 +399,8 @@ enum Kind {
     FenceGate,
     /// A brewing stand: a rod on a thin base.
     BrewingStand,
+    /// A `piston_extension`: the box of the block a piston is moving in.
+    MovingPiston,
     /// A thin plate (glass pane, iron bars) that reaches its connected neighbours.
     Pane,
     /// A box that covers the full footprint and is `f64` blocks tall.
@@ -460,6 +475,7 @@ fn classify(id: u16, metadata: u8) -> Kind {
         // Soul sand is 0.875 high (MCP `BlockSoulSand.java:23`).
         88 => Kind::Column(0.875),
         29 | 33 => Kind::PistonBase,
+        36 => Kind::MovingPiston,
         34 => Kind::PistonHead,
         144 => Kind::Skull,
         54 | 130 | 146 => Kind::Chest,
@@ -477,8 +493,8 @@ fn classify(id: u16, metadata: u8) -> Kind {
         // The frame of the End portal.
         120 => Kind::EndPortalFrame,
         // Decorations and other blocks without a collision box.
-        6 | 30 | 31 | 32 | 36 | 37 | 38 | 39 | 40 | 50 | 51 | 59 | 63 | 68 | 69 | 75 | 76 | 77
-        | 83 | 106 | 115 | 119 | 131 | 132 | 141 | 142 | 143 | 175 | 176 | 177 => Kind::Empty,
+        6 | 30 | 31 | 32 | 37 | 38 | 39 | 40 | 50 | 51 | 59 | 63 | 68 | 69 | 75 | 76 | 77 | 83
+        | 106 | 115 | 119 | 131 | 132 | 141 | 142 | 143 | 175 | 176 | 177 => Kind::Empty,
         // Everything else is a full cube.
         _ => Kind::Cube,
     }
@@ -552,6 +568,7 @@ pub fn shape_of<S: BlockSource + ?Sized>(
         Kind::Wall => wall_shape(state, world, pos),
         Kind::FenceGate => fence_gate_shape(state.metadata()),
         Kind::BrewingStand => brewing_stand_shape(),
+        Kind::MovingPiston => moving_piston_shape(world, pos),
         Kind::Cauldron => cauldron_shape(),
         Kind::Hopper => hopper_shape(),
     }
@@ -879,6 +896,75 @@ fn fence_gate_shape(metadata: u8) -> BlockShape {
         )
     };
     BlockShape::single(plank)
+}
+
+/// The collision box of a `piston_extension` block, from the block moving
+/// into it.
+///
+/// MCP `BlockPistonMoving.getCollisionBoundingBox` and `getBoundingBox`: the
+/// collision box of the moved block at this position, stretched back along
+/// the facing by the progress of the previous tick (`getProgress(0.0F)`,
+/// turned to `1 - progress` while extending). Only the face on the side the
+/// facing points to moves: a box pushed east keeps its west face and pulls
+/// its east face back, which leaves a flat (still blocking) box at the start
+/// of an extension. A moved block without a box, air, another moving block or
+/// no animation at all give nothing.
+///
+/// `getCollisionBoundingBox` is a single box; for the blocks that collide
+/// through a box list (stairs, fences, cauldrons...) the reference returns
+/// the bounds the block last set, which this approximates with the
+/// selection bounds.
+fn moving_piston_shape<S: BlockSource + ?Sized>(world: &S, pos: BlockPos) -> BlockShape {
+    let Some(moving) = world.moving_block(pos.x, pos.y, pos.z) else {
+        return BlockShape::EMPTY;
+    };
+    if moving.state.is_air() || moving.state.id() == 36 {
+        return BlockShape::EMPTY;
+    }
+    let shape = if adds_a_box_list(classify(moving.state.id(), moving.state.metadata())) {
+        selection_shape(moving.state, world, pos)
+    } else {
+        shape_of(moving.state, world, pos)
+    };
+    let [moved] = shape.boxes() else {
+        return BlockShape::EMPTY;
+    };
+    let moved = *moved;
+    let progress = if moving.extending {
+        1.0 - moving.last_progress
+    } else {
+        moving.last_progress
+    };
+    let mut min = moved.min.to_array();
+    let mut max = moved.max.to_array();
+    for axis in 0..3 {
+        // `(double)((float)offset * progress)`, exact for a unit offset.
+        let shift = f64::from(moving.direction[axis] as f32 * progress);
+        if moving.direction[axis] < 0 {
+            min[axis] -= shift;
+        } else {
+            max[axis] -= shift;
+        }
+    }
+    BlockShape::single(Aabb::new(DVec3::from_array(min), DVec3::from_array(max)))
+}
+
+/// Whether the block collides through `addCollisionBoxesToList` (fences,
+/// panes, stairs, cauldrons, hoppers, brewing stands, End portal frames,
+/// piston heads) rather than a single `getCollisionBoundingBox`, whose
+/// default is the block bounds.
+fn adds_a_box_list(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Fence
+            | Kind::Pane
+            | Kind::Stairs
+            | Kind::Cauldron
+            | Kind::Hopper
+            | Kind::BrewingStand
+            | Kind::EndPortalFrame
+            | Kind::PistonHead
+    )
 }
 
 /// The two collision boxes of a brewing stand.
@@ -1598,6 +1684,104 @@ mod tests {
             (0, 0, 1, BlockState::new(1, 0)),
         ]);
         assert_eq!(shape_of(pane, &corner, pos).boxes().len(), 2);
+    }
+
+    /// A world with a `piston_extension` at the origin and the block
+    /// `moved` sliding into it towards `direction`.
+    struct Sliding {
+        moving: MovingBlock,
+    }
+
+    impl BlockSource for Sliding {
+        fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+            if (x, y, z) == (0, 0, 0) {
+                BlockState::new(36, 0)
+            } else {
+                BlockState::AIR
+            }
+        }
+
+        fn moving_block(&self, x: i32, y: i32, z: i32) -> Option<MovingBlock> {
+            ((x, y, z) == (0, 0, 0)).then_some(self.moving)
+        }
+    }
+
+    fn sliding(moved: BlockState, direction: [i32; 3], extending: bool, last: f32) -> Sliding {
+        Sliding {
+            moving: MovingBlock {
+                pos: [0, 0, 0],
+                state: moved,
+                direction,
+                extending,
+                show_head: false,
+                progress: (last + 0.5).min(1.0),
+                last_progress: last,
+                light: umicraft_world::LightLevel::default(),
+            },
+        }
+    }
+
+    fn moving_box(world: &Sliding) -> Vec<Aabb> {
+        shape_of(BlockState::new(36, 0), world, BlockPos::new(0, 0, 0))
+            .boxes()
+            .to_vec()
+    }
+
+    /// Regression test: the `piston_extension` had no collision box, so a
+    /// player against a block in flight walked into it while the server
+    /// stopped them.
+    #[test]
+    fn a_block_pushed_east_keeps_its_west_face_and_grows_its_east_face() {
+        let stone = BlockState::new(1, 0);
+        // `1 - lastProgress` while extending: flat, half, then whole.
+        let expected = [(0.0, 0.0), (0.5, 0.5), (1.0, 1.0)];
+        for (last, (_, max_x)) in [0.0, 0.5, 1.0].into_iter().zip(expected) {
+            let boxes = moving_box(&sliding(stone, [1, 0, 0], true, last));
+            assert_eq!(
+                boxes,
+                vec![Aabb::new(DVec3::ZERO, DVec3::new(max_x, 1.0, 1.0))],
+                "last progress {last}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_block_moving_west_or_down_moves_its_low_face() {
+        let stone = BlockState::new(1, 0);
+        let west = moving_box(&sliding(stone, [-1, 0, 0], true, 0.5));
+        assert_eq!(west, vec![Aabb::new(DVec3::new(0.5, 0.0, 0.0), DVec3::ONE)]);
+        // Retracting uses the progress itself.
+        let down = moving_box(&sliding(stone, [0, -1, 0], false, 0.5));
+        assert_eq!(down, vec![Aabb::new(DVec3::new(0.0, 0.5, 0.0), DVec3::ONE)]);
+    }
+
+    #[test]
+    fn a_moving_block_takes_the_collision_box_of_what_moves() {
+        // A bottom slab pushed up, half way.
+        let slab = moving_box(&sliding(BlockState::new(44, 0), [0, 1, 0], true, 0.5));
+        assert_eq!(
+            slab,
+            vec![Aabb::new(DVec3::ZERO, DVec3::new(1.0, 0.0, 1.0))]
+        );
+        // A fence uses its 1.0 high bounds, not its 1.5 high post.
+        let fence = moving_box(&sliding(BlockState::new(85, 0), [0, 0, 1], false, 0.0));
+        assert_eq!(
+            fence,
+            vec![Aabb::new(
+                DVec3::new(0.375, 0.0, 0.375),
+                DVec3::new(0.625, 1.0, 0.625)
+            )]
+        );
+    }
+
+    #[test]
+    fn a_moving_piston_without_a_block_in_flight_does_not_collide() {
+        let world = TestBlocks::with(&[(0, 0, 0, BlockState::new(36, 0))]);
+        assert!(shape_of(BlockState::new(36, 0), &world, BlockPos::new(0, 0, 0)).is_empty());
+        let air = sliding(BlockState::AIR, [1, 0, 0], true, 0.5);
+        assert!(moving_box(&air).is_empty());
+        let flower = sliding(BlockState::new(38, 0), [1, 0, 0], true, 0.5);
+        assert!(moving_box(&flower).is_empty());
     }
 
     #[test]
