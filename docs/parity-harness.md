@@ -35,7 +35,7 @@ One play session per file.
 
 **Movement script (60 s)** — the same timeline as
 `umicraft-client --headless --script movement` (`movement_script` in
-`crates/umicraft-client/src/input.rs`; keep both in sync):
+`crates/umicraft-client/src/headless/script.rs`; keep both in sync):
 
 | From | To | Action |
 |---|---|---|
@@ -52,7 +52,7 @@ One play session per file.
 ## 2b. Combat script (owner, for P6)
 
 The 1v1 timeline of `umicraft-client --headless --script combat`
-(`combat_script` in `crates/umicraft-client/src/input.rs`; keep both in
+(`combat_script` in `crates/umicraft-client/src/headless/script.rs`; keep both in
 sync). Set up on the same offline server, on flat ground, `difficulty=0`,
 the same spot and the same opponent for both sides. A player walks through a
 mob (the collision is soft in 1.8), so the opponent needs a barrier in front:

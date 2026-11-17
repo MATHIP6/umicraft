@@ -14,10 +14,11 @@ use std::time::{Duration, Instant};
 use crate::args::Args;
 use crate::error::ClientError;
 use crate::game::{GameEvent, GameStatus, RenderEvent, Session, TICK};
-use crate::input::{
-    combat_script, default_script, idle_script, movement_script, Script, ScriptPhase,
-};
 use crate::network::NetworkConfig;
+
+pub mod script;
+
+use script::{combat_script, default_script, idle_script, movement_script, Script, ScriptPhase};
 
 /// The summary of a headless session.
 #[derive(Debug, Default, Clone)]
@@ -222,7 +223,7 @@ mod tests {
     fn the_known_scripts_are_built() {
         assert!(!phases("default").is_empty());
         assert_eq!(phases("idle").len(), 1);
-        assert_eq!(phases("idle")[0].step, crate::input::ScriptStep::Idle);
+        assert_eq!(phases("idle")[0].step, script::ScriptStep::Idle);
         assert_eq!(phases("movement").len(), movement_script().len());
         assert_eq!(phases("combat").len(), combat_script().len());
     }
