@@ -15,7 +15,8 @@ use umicraft_ui::{FontAtlas, Ui};
 use winit::event::KeyEvent;
 use winit::event_loop::ActiveEventLoop;
 
-use super::{upload_gui_atlas, App};
+use super::startup::upload_gui_atlas;
+use super::App;
 use crate::achievements_view::{toast_content, AchievementsContext};
 use crate::game::GameEvent;
 use crate::item_icons::ItemView;

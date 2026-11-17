@@ -1,0 +1,375 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Starting the window: the state of the app, the assets loaded in the
+//! background and the textures uploaded once they arrive.
+
+use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
+use std::time::Instant;
+
+use umicraft_core::lang::Lang;
+use umicraft_game::chat::{ChatInput, SentHistory};
+use umicraft_render::{Camera, HudState, Overlay, Renderer};
+use umicraft_ui::game_menu::GameMenu;
+use umicraft_ui::menus::PanoramaTextures;
+use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui};
+
+use super::server_pack_control;
+use super::App;
+use super::FRAME_HISTORY;
+use crate::accounts::AccountsFlow;
+use crate::anvil_field::AnvilField;
+use crate::args::Args;
+use crate::audio_bridge::AudioBridge;
+use crate::cpu_split::CpuSplit;
+use crate::creative_input::CreativeInput;
+use crate::dials::DialAnimator;
+use crate::entity_icons::EntityIcons;
+use crate::entity_render::EntityTextures;
+use crate::error::ClientError;
+use crate::fps_meter::FpsMeter;
+use crate::hud_cache::HudCache;
+use crate::input::InputState;
+use crate::inventory_input::InventoryInput;
+use crate::item_world::{ItemLayers, WorldItems};
+use crate::map_render::MapTextures;
+use crate::menu_flow::MenuFlow;
+use crate::mesher::worker_count;
+use crate::metrics::FrameMetricsWindow;
+use crate::mods_runtime::ModsRuntime;
+use crate::options::Options;
+use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
+use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
+use crate::panorama_faces::load_panorama_faces;
+use crate::screen::Screen;
+use crate::servers::{Pinger, ServerBook};
+use crate::sky_textures::{load_border_texture, load_sky_textures};
+use crate::terrain_textures::TerrainTextures;
+use crate::text_screens::TextScreens;
+use crate::texture_animator::TextureAnimator;
+use crate::ui_font::{self, LoadedFont};
+use crate::ui_input::UiInputTranslator;
+use crate::world_view::WorldView;
+use crate::zoom::Zoom;
+
+/// Decoded asset data delivered asynchronously by the background asset loader.
+pub(super) struct AsyncLoadedAssets {
+    pub(super) font: LoadedFont,
+    pub(super) terrain: TerrainTextures,
+}
+
+/// Starts the thread that pings the saved servers. Without it the list still
+/// works and every row stays "pinging".
+fn start_pinger() -> Option<Pinger> {
+    match Pinger::new() {
+        Ok(pinger) => Some(pinger),
+        Err(error) => {
+            tracing::warn!(%error, "server pings are off");
+            None
+        }
+    }
+}
+
+/// A number that differs from start to start, for the title splash.
+fn menu_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// Uploads the GUI atlas to the renderer, if available.
+pub(super) fn upload_gui_atlas(
+    renderer: &mut Renderer,
+    gui_atlas: Option<&umicraft_assets::GuiAtlas>,
+) {
+    if let Some(atlas) = gui_atlas {
+        if !atlas.is_empty() {
+            match renderer.set_gui_atlas(atlas.width(), atlas.height(), atlas.pixels()) {
+                Ok(()) => tracing::info!(
+                    regions = atlas.regions().len(),
+                    "{}x{} GUI texture atlas uploaded",
+                    atlas.width(),
+                    atlas.height()
+                ),
+                Err(error) => tracing::error!(
+                    %error,
+                    "GUI texture atlas rejected; the previous GUI textures stay"
+                ),
+            }
+        }
+    }
+}
+
+/// Uploads the sun, moon and End sky pictures of the verified jar.
+pub(super) fn upload_sky_textures(renderer: &mut Renderer) {
+    let jar = crate::official::find_verified_jar().ok();
+    renderer.set_sky_textures(&load_sky_textures(jar.as_ref()));
+    if let Some(forcefield) = load_border_texture(jar.as_ref()) {
+        renderer.set_border_texture(&forcefield);
+    }
+}
+
+/// Uploads the six title panorama faces of the verified jar; `None` keeps the
+/// dirt background (no jar, or a face that does not decode).
+pub(super) fn upload_panorama(renderer: &mut Renderer) -> Option<PanoramaTextures> {
+    let jar = crate::official::find_verified_jar().ok();
+    renderer.upload_panorama(&load_panorama_faces(jar.as_ref())?)
+}
+
+/// Uploads the enchantment glint texture to the renderer, if available.
+pub(super) fn upload_glint_texture(
+    renderer: &mut Renderer,
+    glint: Option<&umicraft_assets::GlintTexture>,
+) {
+    if let Some(glint) = glint {
+        renderer.set_glint_texture(glint.width, glint.height, &glint.pixels);
+    }
+}
+
+/// The menu flow, with the splash of the user's `splashes.txt` when there is
+/// one (the title screen keeps its original list otherwise).
+fn new_menu(last_server: String) -> MenuFlow {
+    let seed = menu_seed();
+    let mut menu = MenuFlow::new(
+        ServerBook::open_default(),
+        start_pinger(),
+        last_server,
+        seed,
+    );
+    menu.set_accounts(AccountsFlow::open_default());
+    let lines = crate::splash::load_lines();
+    if let Some(splash) = crate::splash::choose(&lines, crate::splash::today(), seed) {
+        menu.set_splash(splash);
+    }
+    menu
+}
+
+impl App {
+    pub(super) fn new(
+        args: Args,
+        options: Options,
+        options_path: Option<std::path::PathBuf>,
+        lang: Arc<Lang>,
+    ) -> Result<Self, ClientError> {
+        // Launch background thread to decode heavy assets without blocking the main event loop
+        let packs = pack_paths(
+            &args.resource_packs,
+            &options,
+            packs_folder().as_deref(),
+            None,
+        );
+        let (asset_tx, asset_rx) = std::sync::mpsc::channel();
+        let loader_thread = std::thread::Builder::new()
+            .name("AssetLoader".to_string())
+            .spawn(move || {
+                umicraft_core::boot_log!("async_asset_loader_start");
+                let font = ui_font::load();
+                umicraft_core::boot_log!("async_asset_loader_font_loaded");
+                let terrain = TerrainTextures::load_with_packs(&packs);
+                umicraft_core::boot_log!("async_asset_loader_terrain_loaded");
+                let _ = asset_tx.send(AsyncLoadedAssets { font, terrain });
+            });
+        if let Err(error) = loader_thread {
+            tracing::error!(%error, "Failed to spawn background asset loader thread");
+        }
+
+        let font = LoadedFont {
+            atlas: FontAtlas::fallback(),
+            source: crate::ui_font::FontSource::Fallback,
+        };
+        let audio = if args.no_audio {
+            AudioBridge::disabled()
+        } else {
+            AudioBridge::start(&options.sound)
+        };
+        let last_server = options.multiplayer.last_server.clone();
+        let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
+        Ok(Self {
+            args,
+            saved_options: options.clone(),
+            lang,
+            mods: ModsRuntime::new(&options.mods),
+            video_applier: VideoApplier::new(options.video.fullscreen),
+            options,
+            options_path,
+            options_screen: OptionsScreen::new(),
+            options_outcome: OptionsOutcome::default(),
+            audio,
+            window: None,
+            renderer: None,
+            panorama: None,
+            camera: Camera::default(),
+            overlay: Overlay::new(1280, 720),
+            show_overlay: true,
+            mouse_captured: false,
+            keys: HashSet::new(),
+            world: None,
+            session: None,
+            menu: new_menu(last_server),
+            options_origin: Screen::GameMenu,
+            last_input: InputState::default(),
+            last_input_time: Instant::now(),
+            look: (0.0, 0.0),
+            select_slot: None,
+            hotbar_keys: [0; 9],
+            break_block: false,
+            buttons: HashSet::new(),
+            death_started: None,
+            respawn_requested: false,
+            place_block: false,
+            screen: Screen::Loading,
+            asset_receiver: Some(asset_rx),
+            chat_input: ChatInput::new(""),
+            sent_messages: SentHistory::new(),
+            chat_scroll: 0,
+            chat_opened: Instant::now(),
+            seen_completions: 0,
+            ctrl_held: false,
+            shift_held: false,
+            nametags: Vec::new(),
+            placed_tags: Vec::new(),
+            moving_blocks_mesh: umicraft_mesh::Mesh::default(),
+            last_hand: None,
+            cpu: CpuSplit::default(),
+            zoom: Zoom::default(),
+            focused: true,
+            hud_cache: HudCache::default(),
+            frame_hud: HudState::default(),
+            frame_hud_revision: 0,
+            frame_hud_chat: None,
+            frame_entities: Vec::new(),
+            particle_sprites: Vec::new(),
+            pointer: (0.0, 0.0),
+            chat_hover: None,
+            chat_line: None,
+            pick_block: false,
+            drop_item: None,
+            toggle_perspective: false,
+            screenshot_requested: false,
+            creative_input: CreativeInput::new(),
+            container_was_open: false,
+            ui: Ui::new(ui_viewport),
+            show_f3: false,
+            debug_screen: DebugScreen::new(),
+            game_menu: GameMenu::new(),
+            menu_action: None,
+            menu_command: None,
+            ui_input: UiInputTranslator::new(),
+            inventory_input: InventoryInput::new(),
+            font,
+            ui_atlas: None,
+            brand_atlas: None,
+            gui_atlas: None,
+            server_icons_revision: u64::MAX,
+            items: None,
+            dials: DialAnimator::default(),
+            world_items: WorldItems::default(),
+            entity_icons: EntityIcons::default(),
+            portrait: None,
+            anvil_field: AnvilField::default(),
+            text_screens: TextScreens::default(),
+            server_pack: server_pack_control::ServerPackRuntime::default(),
+            hand_layers: ItemLayers::default(),
+            texture_animator: TextureAnimator::default(),
+            entity_textures: None,
+            map_textures: None,
+            last_frame: Instant::now(),
+            next_frame: Instant::now(),
+            started: Instant::now(),
+            frame_times: VecDeque::with_capacity(FRAME_HISTORY),
+            frame_ms: 0.0,
+            fps: 0.0,
+            fps_meter: FpsMeter::new(Instant::now()),
+            metrics_window: FrameMetricsWindow::new(),
+            last_alloc_snapshot: umicraft_core::profiling::AllocSnapshot::now(),
+            exit_error: None,
+        })
+    }
+
+    /// Checks if the background worker has finished decoding assets.
+    pub(super) fn poll_asset_loading(&mut self) {
+        if self.renderer.is_none() {
+            return;
+        }
+        let Some(rx) = self.asset_receiver.as_ref() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(assets) => {
+                umicraft_core::boot_log!("assets_received_on_main_thread");
+                self.asset_receiver = None;
+                self.apply_loaded_assets(assets);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                tracing::warn!("Asset loader thread disconnected unexpectedly");
+                self.asset_receiver = None;
+                if self.screen == Screen::Loading {
+                    self.screen = Screen::Title;
+                }
+            }
+        }
+    }
+
+    /// Finalizes asset loading on the GPU and transitions from the loading screen.
+    fn apply_loaded_assets(&mut self, assets: AsyncLoadedAssets) {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        umicraft_core::boot_log!("applying_loaded_assets_start");
+
+        self.font = assets.font;
+        match ui_font::install(renderer, &self.font.atlas) {
+            Ok(installed) => {
+                self.ui_atlas = Some(installed.atlas);
+                self.hud_cache.invalidate();
+                umicraft_core::boot_log!("official_ui_font_installed");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to install official font atlas; keeping fallback");
+            }
+        }
+        self.brand_atlas = ui_font::install_brand(renderer);
+        umicraft_core::boot_log!("brand_atlas_installed");
+
+        renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
+        let terrain = assets.terrain.install(renderer);
+        umicraft_core::boot_log!("terrain_installed");
+
+        let gui_atlas = crate::official::grow_atlas(terrain.gui_atlas(), &[]);
+        upload_gui_atlas(renderer, Some(&gui_atlas));
+        upload_glint_texture(renderer, terrain.glint_texture());
+        upload_sky_textures(renderer);
+        self.panorama = upload_panorama(renderer);
+        self.gui_atlas = Some(gui_atlas);
+        self.server_icons_revision = u64::MAX;
+        self.items = terrain.items();
+        self.dials = DialAnimator::new(terrain.dials());
+        self.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
+        umicraft_core::boot_log!("gui_and_sky_uploaded");
+
+        match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
+            Ok(world) => self.world = Some(world),
+            Err(error) => {
+                tracing::error!(%error, "WorldView::new failed");
+            }
+        }
+        umicraft_core::boot_log!("world_view_created");
+
+        self.entity_textures = Some(EntityTextures::load_with_font(
+            renderer,
+            self.ui_atlas.as_ref(),
+        ));
+        self.map_textures = Some(MapTextures::load(renderer));
+        umicraft_core::boot_log!("entity_and_map_textures_loaded");
+
+        if self.screen == Screen::Loading {
+            if self.args.server().is_some() {
+                self.connect_from_arguments();
+            } else {
+                self.screen = Screen::Title;
+            }
+        }
+        umicraft_core::boot_log!("apply_loaded_assets_completed");
+    }
+}

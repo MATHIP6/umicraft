@@ -12,7 +12,8 @@ use std::sync::Arc;
 use winit::event::{ElementState, KeyEvent, MouseButton};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use super::{upload_glint_texture, upload_gui_atlas, upload_sky_textures, App};
+use super::startup::{upload_glint_texture, upload_gui_atlas, upload_sky_textures};
+use super::App;
 use crate::dials::DialAnimator;
 use crate::entity_render::EntityTextures;
 use crate::game::GameEvent;
