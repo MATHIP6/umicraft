@@ -479,8 +479,8 @@ fn teleport_event_snaps_camera_immediately_without_gliding() {
         .0
         .send(RenderEvent::Teleport {
             position: target,
-            yaw,
-            pitch,
+            yaw: crate::game::ViewAngle::To(yaw),
+            pitch: crate::game::ViewAngle::To(pitch),
         })
         .expect("teleport event");
     harness.sync();
@@ -748,8 +748,8 @@ fn server_setback_during_f5_teleports_orbit_and_camera_instantly() {
         .0
         .send(RenderEvent::Teleport {
             position: target_eye,
-            yaw,
-            pitch,
+            yaw: crate::game::ViewAngle::To(yaw),
+            pitch: crate::game::ViewAngle::To(pitch),
         })
         .expect("teleport");
     harness.sync();

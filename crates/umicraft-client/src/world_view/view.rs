@@ -13,7 +13,7 @@ use umicraft_game::RenderState;
 use umicraft_render::{BorderView, FogContext, RenderEnvironment};
 
 use crate::fog_context::FogLight;
-use crate::game::{Frame, LookSlot, TICK};
+use crate::game::{Frame, LookSlot, ViewAngle, TICK};
 use crate::overlay_state::OverlayInputs;
 use crate::overlay_view::VignetteShade;
 use crate::weather_view::WeatherView;
@@ -210,10 +210,16 @@ impl View {
 
     /// Snaps the render camera immediately to the exact eye position and angles on a
     /// server teleport (packet 0x08), resetting previous state to eliminate visual gliding.
-    pub(super) fn teleport(&mut self, position: glam::DVec3, yaw: f32, pitch: f32) {
-        self.player_yaw = yaw;
-        self.player_pitch = pitch;
-        self.body_pitch = Some(pitch.to_degrees());
+    ///
+    /// A relative angle turns the view the window has now: the mouse may have
+    /// turned it after the game thread built the event.
+    pub(super) fn teleport(&mut self, position: glam::DVec3, yaw: ViewAngle, pitch: ViewAngle) {
+        const MAX_PITCH: f32 = 90.0_f32.to_radians();
+        self.player_yaw = yaw.applied_to(self.player_yaw);
+        self.player_pitch = pitch
+            .applied_to(self.player_pitch)
+            .clamp(-MAX_PITCH, MAX_PITCH);
+        self.body_pitch = Some(self.player_pitch.to_degrees());
 
         let new_eye = position;
         let (cam_yaw, cam_pitch, cam_pos) = self.camera_pose_from_player(new_eye);

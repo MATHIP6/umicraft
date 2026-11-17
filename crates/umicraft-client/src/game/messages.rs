@@ -103,6 +103,32 @@ pub enum GameEvent {
     InventoryOpened,
 }
 
+/// An angle of the view a teleport sets, in radians.
+///
+/// `Player Position and Look` can make the yaw and the pitch relative (flags
+/// 0x08 and 0x10): vanilla adds them to the look the player has *now*
+/// (`NetHandlerPlayClient.handlePlayerPosLook`). The window turns its view
+/// with the mouse before the game thread hears of it, so a relative angle
+/// must be added to the window's view too, not replaced by the game's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewAngle {
+    /// The view takes this angle.
+    To(f32),
+    /// The view turns by this angle.
+    By(f32),
+}
+
+impl ViewAngle {
+    /// The angle after the teleport, from the angle the view has now.
+    #[must_use]
+    pub fn applied_to(self, now: f32) -> f32 {
+        match self {
+            Self::To(angle) => angle,
+            Self::By(turn) => now + turn,
+        }
+    }
+}
+
 /// One simulation frame published to the render thread.
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -233,10 +259,10 @@ pub enum RenderEvent {
     Teleport {
         /// Absolute target eye position in world space.
         position: glam::DVec3,
-        /// Yaw facing angle in radians.
-        yaw: f32,
-        /// Pitch looking angle in radians.
-        pitch: f32,
+        /// The new yaw, or the turn a relative teleport adds to the look.
+        yaw: ViewAngle,
+        /// The new pitch, or the turn a relative teleport adds.
+        pitch: ViewAngle,
     },
     /// The world was replaced; the render thread drops its meshes.
     Reset,

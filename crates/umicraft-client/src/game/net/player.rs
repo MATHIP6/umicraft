@@ -27,7 +27,7 @@ use umicraft_world::World;
 use super::wire::VELOCITY_UNITS;
 use crate::game::abilities::{apply_mode_rules, set_gamemode};
 use crate::game::commands::{command_of, CommandQueue};
-use crate::game::messages::RenderEvent;
+use crate::game::messages::{RenderEvent, ViewAngle};
 use crate::game::particles::particle_filter;
 use crate::game::publish::{publish_inventory, publish_status};
 use crate::game::state::Game;
@@ -80,14 +80,14 @@ pub(in crate::game) fn apply_placement(
     frames: &SyncSender<RenderEvent>,
 ) {
     // Relative flags apply to where the player is now, not to the last
-    // placement the session saw.
+    // placement the session saw, and to the look the player has now (the
+    // mouse turned it since the last tick, and the physics does not run on
+    // a vehicle or over a missing chunk): MCP `handlePlayerPosLook` adds to
+    // the live `rotationYaw`.
+    let (look_yaw, look_pitch) = (game.yaw, game.pitch);
     let resolved = game.state.as_ref().map(|state| {
         let position = state.position();
-        placement.resolved_against(
-            [position.x, position.y, position.z],
-            state.player().yaw,
-            state.player().pitch,
-        )
+        placement.resolved_against([position.x, position.y, position.z], look_yaw, look_pitch)
     });
     let placement = resolved.as_ref().unwrap_or(placement);
     let yaw = placement.yaw;
@@ -133,10 +133,16 @@ pub(in crate::game) fn apply_placement(
 
     // Immediately notify render thread to snap camera view and prevent gliding
     let eye = position + glam::DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
+    let flags = placement.raw.as_deref().map_or(0, |raw| raw.flags);
+    let angle = |bit: u8, now: f32, turn: Option<f32>| match turn {
+        Some(turn) if flags & bit != 0 => ViewAngle::By(turn.to_radians()),
+        _ => ViewAngle::To(now.to_radians()),
+    };
+    let raw = placement.raw.as_deref();
     let _ = frames.try_send(RenderEvent::Teleport {
         position: eye,
-        yaw: game.yaw.to_radians(),
-        pitch: game.pitch.to_radians(),
+        yaw: angle(0x08, game.yaw, raw.map(|raw| raw.yaw)),
+        pitch: angle(0x10, game.pitch, raw.map(|raw| raw.pitch)),
     });
 
     // The server expects the acknowledgement of the placement.

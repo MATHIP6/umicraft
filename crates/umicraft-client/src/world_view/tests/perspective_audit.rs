@@ -470,7 +470,11 @@ fn test_audit_f5_spam_during_server_setback() {
 
     // 2. Server setback / rubberband teleport occurs
     let setback_pos = glam::DVec3::new(0.0, 64.0, 0.0);
-    harness.world_view.view.teleport(setback_pos, 0.0, 0.0);
+    harness.world_view.view.teleport(
+        setback_pos,
+        crate::game::ViewAngle::To(0.0),
+        crate::game::ViewAngle::To(0.0),
+    );
 
     // Immediate sample after teleport must be snapped at setback_pos with NO glide
     let s_snap = harness.world_view.view.sample(tick).expect("sample");
@@ -513,4 +517,39 @@ fn test_audit_f5_spam_during_server_setback() {
         ((s_after.position - s_after.eye).length() - 4.0).abs() < 1e-4,
         "front view orbit must be exact after setback"
     );
+}
+
+#[test]
+fn a_relative_teleport_keeps_the_view_the_mouse_gave() {
+    // Regression: a setback with relative rotation (GrimAC) snapped the view
+    // to the game's look, which had not yet heard of the latest mouse turns.
+    let mut harness = Harness::new();
+    let eye = glam::DVec3::new(0.0, 64.0, 0.0);
+    harness
+        .frames
+        .0
+        .send(RenderEvent::Frame(frame(eye.as_vec3(), Instant::now(), 0)))
+        .expect("frame");
+    harness.sync();
+    harness.world_view.view.apply_look_delta(1.2, 0.3);
+    let (yaw, pitch) = (
+        harness.world_view.view.player_yaw,
+        harness.world_view.view.player_pitch,
+    );
+
+    harness.world_view.view.teleport(
+        eye,
+        crate::game::ViewAngle::By(0.0),
+        crate::game::ViewAngle::By(0.0),
+    );
+    assert_eq!(harness.world_view.view.player_yaw, yaw);
+    assert_eq!(harness.world_view.view.player_pitch, pitch);
+
+    harness.world_view.view.teleport(
+        eye,
+        crate::game::ViewAngle::By(0.5),
+        crate::game::ViewAngle::To(-0.25),
+    );
+    assert_eq!(harness.world_view.view.player_yaw, yaw + 0.5);
+    assert_eq!(harness.world_view.view.player_pitch, -0.25);
 }

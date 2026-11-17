@@ -889,3 +889,59 @@ fn a_server_look_is_sent_back_bit_for_bit() {
         .collect();
     assert_eq!(looks, [(yaw.to_bits(), pitch.to_bits())]);
 }
+
+#[test]
+fn a_relative_teleport_turns_the_live_look() {
+    // Regression: the relative yaw and pitch of a `Player Position and Look`
+    // were added to the look of the last physics tick (stale on a vehicle,
+    // over a missing chunk, or after a mouse turn within the tick), so the
+    // view jumped. MCP `handlePlayerPosLook` adds them to the live look.
+    use umicraft_net::play::{PlayerPlacement, RawPlacement};
+
+    let mut game = placed_game();
+    let mut queue = CommandQueue::default();
+    let (frames, received) = mpsc::sync_channel(64);
+    handle_input(
+        &mut game,
+        InputUpdate {
+            look_yaw: 300.0,
+            look_pitch: -100.0,
+            ..InputUpdate::default()
+        },
+        &mut queue,
+    );
+    let (yaw, pitch) = (game.yaw, game.pitch);
+    assert_eq!((yaw, pitch), (45.0, -15.0));
+    let raw = RawPlacement {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        yaw: 10.0,
+        pitch: 0.0,
+        flags: 0x01 | 0x02 | 0x04 | 0x08 | 0x10,
+    };
+    let state = game.state.as_ref().expect("placed").position();
+    let placement = PlayerPlacement {
+        x: state.x,
+        y: state.y,
+        z: state.z,
+        yaw: 10.0,
+        pitch: 0.0,
+        raw: Some(Box::new(raw)),
+    };
+    handle_net(
+        &mut game,
+        PlayEvent::Placement(placement),
+        &mut queue,
+        &frames,
+    );
+    assert_eq!((game.yaw, game.pitch), (55.0, -15.0));
+    let teleport = received.try_iter().find_map(|event| match event {
+        RenderEvent::Teleport { yaw, pitch, .. } => Some((yaw, pitch)),
+        _ => None,
+    });
+    assert_eq!(
+        teleport,
+        Some((ViewAngle::By(10.0_f32.to_radians()), ViewAngle::By(0.0)))
+    );
+}

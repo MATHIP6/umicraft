@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use glam::DVec3;
-use umicraft_client::game::{GameEvent, RenderEvent, TICK};
+use umicraft_client::game::{GameEvent, RenderEvent, ViewAngle, TICK};
 use umicraft_client::world_view::SnapshotPacingTracker;
 use umicraft_game::entity::angle::wrap_degrees;
 use umicraft_game::entity::BodyYaw;
@@ -62,8 +62,8 @@ fn audit_server_setback_teleport_latency_is_zero() {
 
     // When server sends packet 0x08 (Player Placement / Setback):
     let setback_pos = DVec3::new(100.0, 64.0, -50.0);
-    let yaw = 45.0_f32.to_radians();
-    let pitch = 15.0_f32.to_radians();
+    let yaw = ViewAngle::To(45.0_f32.to_radians());
+    let pitch = ViewAngle::To(15.0_f32.to_radians());
 
     // RenderEvent::Teleport must be dispatched immediately
     let teleport_event = RenderEvent::Teleport {
