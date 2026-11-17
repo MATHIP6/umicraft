@@ -98,7 +98,7 @@ impl ApplicationHandler for App {
         // Upload the initial fallback atlas immediately so the first loading/UI frame can be presented
         match ui_font::install(&mut renderer, &self.assets.font.atlas) {
             Ok(installed) => {
-                self.assets.ui_atlas = Some(installed.atlas);
+                self.assets.ui_atlas = Some(Arc::new(installed.atlas));
                 self.hud_cache.invalidate();
                 umicraft_core::boot_log!("ui_font_installed");
             }

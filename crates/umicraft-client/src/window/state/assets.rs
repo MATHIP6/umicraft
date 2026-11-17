@@ -2,6 +2,8 @@
 
 //! The fonts, atlases and textures the window loads, some in the background.
 
+use std::sync::Arc;
+
 use umicraft_ui::FontAtlas;
 
 use crate::entity_render::EntityTextures;
@@ -19,7 +21,7 @@ pub(in crate::window) struct Assets {
     /// Background asset loader channel receiver.
     pub(in crate::window) receiver: Option<std::sync::mpsc::Receiver<AsyncLoadedAssets>>,
     /// The atlas the renderer accepted; the UI metrics must match it.
-    pub(in crate::window) ui_atlas: Option<FontAtlas>,
+    pub(in crate::window) ui_atlas: Option<Arc<FontAtlas>>,
     /// The brand atlas the renderer accepted; `None` keeps the classic
     /// title screen (ADR-0056).
     pub(in crate::window) brand_atlas: Option<FontAtlas>,

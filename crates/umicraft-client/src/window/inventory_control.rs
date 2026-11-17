@@ -266,7 +266,7 @@ impl App {
                 None => return,
             },
         };
-        let Some(atlas) = self.assets.ui_atlas.as_ref() else {
+        let Some(atlas) = self.assets.ui_atlas.as_deref() else {
             return;
         };
         let measure = |text: &str| atlas.measure(text, 1.0);

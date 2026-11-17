@@ -431,7 +431,7 @@ impl App {
                         data: world.block_entity_data(),
                         skins: entity_textures,
                         seconds: (now - self.clock.started).as_secs_f32(),
-                        font: self.assets.ui_atlas.as_ref(),
+                        font: self.assets.ui_atlas.as_deref(),
                         partial_tick,
                         camera: self.camera.relative_eye(),
                         origin: render_origin_blocks,

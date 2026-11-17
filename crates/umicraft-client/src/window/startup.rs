@@ -324,7 +324,7 @@ impl App {
         self.assets.font = assets.font;
         match ui_font::install(renderer, &self.assets.font.atlas) {
             Ok(installed) => {
-                self.assets.ui_atlas = Some(installed.atlas);
+                self.assets.ui_atlas = Some(Arc::new(installed.atlas));
                 self.hud_cache.invalidate();
                 umicraft_core::boot_log!("official_ui_font_installed");
             }
@@ -361,7 +361,7 @@ impl App {
 
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
-            self.assets.ui_atlas.as_ref(),
+            self.assets.ui_atlas.as_deref(),
         ));
         self.assets.map_textures = Some(MapTextures::load(renderer));
         umicraft_core::boot_log!("entity_and_map_textures_loaded");

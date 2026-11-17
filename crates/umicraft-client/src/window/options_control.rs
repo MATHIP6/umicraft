@@ -203,7 +203,7 @@ impl App {
         self.assets.texture_animator = TextureAnimator::new(installed.animations().to_vec());
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
-            self.assets.ui_atlas.as_ref(),
+            self.assets.ui_atlas.as_deref(),
         ));
         self.assets.map_textures = Some(MapTextures::load(renderer));
         if let Some(world) = self.world.as_mut() {
