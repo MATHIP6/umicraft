@@ -238,3 +238,16 @@ fn without_congestion_every_tick_sends_exactly_one_report() {
     );
     assert_fall_has_no_gap(&falling_ys(&stream));
 }
+
+#[test]
+fn after_a_stall_up_to_ten_ticks_run_at_once() {
+    // MCP `Timer.updateTimer` caps the elapsed ticks at 10; Umicraft ran 3,
+    // so a hitch left the server short of movement packets.
+    let start = Instant::now();
+    let at = |ticks: f64| start + crate::game::TICK.mul_f64(ticks);
+    assert_eq!(ticks_due(start, at(1.0)), 0, "not due yet");
+    assert_eq!(ticks_due(at(1.0), at(1.0)), 1);
+    assert_eq!(ticks_due(at(3.5), at(1.0)), 3);
+    assert_eq!(ticks_due(at(10.0), at(1.0)), MAX_CATCH_UP_TICKS);
+    assert_eq!(ticks_due(at(10_000.0), at(1.0)), 10);
+}

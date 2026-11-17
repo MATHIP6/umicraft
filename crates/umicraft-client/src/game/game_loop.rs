@@ -114,11 +114,11 @@ pub(super) fn run(
         // cannot starve the 20 TPS simulation loop.
         let mut now = Instant::now();
         if now >= next_tick {
-            const MAX_CATCH_UP_TICKS: u32 = 3;
+            let due = ticks_due(now, next_tick);
             let mut catches = 0;
             // A congested queue stops the ticks (see `PENDING_LIMIT`); the
             // clamp below then waits one tick length before trying again.
-            while now >= next_tick && catches < MAX_CATCH_UP_TICKS && !queue.congested() {
+            while catches < due && !queue.congested() {
                 game.metrics
                     .record_tick_delay(now.saturating_duration_since(next_tick), catches > 0);
                 tick(&mut game, &mut queue, &frames, &chunks, next_tick);
@@ -126,8 +126,9 @@ pub(super) fn run(
                 catches += 1;
             }
             if next_tick <= now {
-                // The thread fell too far behind (more than 3 ticks missed);
-                // clamp next_tick to prevent a spiral of death.
+                // The thread fell too far behind (more than
+                // `MAX_CATCH_UP_TICKS` missed): the rest of the time is
+                // dropped, as vanilla's timer drops it.
                 next_tick = now + TICK;
             }
             queue.flush();
@@ -181,6 +182,22 @@ pub(super) fn run(
     if let Some(reason) = ended {
         let _ = frames.send(RenderEvent::Ended(reason));
     }
+}
+
+/// The most ticks one pass runs after a stall. MCP `Timer.updateTimer`
+/// caps `elapsedTicks` at 10, so after a hitch the vanilla client runs up to
+/// ten ticks (and sends ten movement packets) at once and drops the time
+/// beyond; fewer ticks leave the server short of packets for that time.
+pub(super) const MAX_CATCH_UP_TICKS: u32 = 10;
+
+/// How many ticks are due at `now` when the next one was due at
+/// `next_tick`, at most [`MAX_CATCH_UP_TICKS`].
+pub(super) fn ticks_due(now: Instant, next_tick: Instant) -> u32 {
+    if now < next_tick {
+        return 0;
+    }
+    let late = now.duration_since(next_tick).as_nanos() / TICK.as_nanos();
+    u32::try_from(late + 1).map_or(MAX_CATCH_UP_TICKS, |due| due.min(MAX_CATCH_UP_TICKS))
 }
 
 /// Handles one input update, timing its wait and its handling for the F3
