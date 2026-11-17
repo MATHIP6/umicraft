@@ -431,8 +431,7 @@ impl AtomicLookSlot {
             .store(look.view.pitch.to_bits(), Ordering::Relaxed);
         self.body_pitch
             .store(look.body_pitch.to_bits(), Ordering::Relaxed);
-        self.on_ground
-            .store(look.view.on_ground, Ordering::Relaxed);
+        self.on_ground.store(look.view.on_ground, Ordering::Relaxed);
         self.seq.store(s1.wrapping_add(1), Ordering::Release);
     }
 
@@ -669,8 +668,10 @@ impl Session {
     /// thread takes network events at most once per such period (phase E.9).
     pub fn note_frame(&self, duration: std::time::Duration) {
         let micros = u32::try_from(duration.as_micros()).unwrap_or(u32::MAX);
-        self.frame_micros
-            .store(micros.clamp(MIN_FRAME_MICROS, MAX_FRAME_MICROS), Ordering::Relaxed);
+        self.frame_micros.store(
+            micros.clamp(MIN_FRAME_MICROS, MAX_FRAME_MICROS),
+            Ordering::Relaxed,
+        );
     }
 
     /// The number of serverbound packets the socket thread wrote.
@@ -1376,8 +1377,7 @@ fn run(
             let before = (game.yaw, game.pitch);
             handle_input(&mut game, update, &mut queue);
             let elapsed = start.elapsed();
-            game.last_input_processing_us =
-                elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
+            game.last_input_processing_us = elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
             if (game.yaw, game.pitch) != before {
                 publish_look(&game);
             }
@@ -1576,8 +1576,7 @@ fn handle_event(
             let before = (game.yaw, game.pitch);
             handle_input(game, update, queue);
             let elapsed = start.elapsed();
-            game.last_input_processing_us =
-                elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
+            game.last_input_processing_us = elapsed.as_micros().min(u128::from(u32::MAX)) as u32;
             if (game.yaw, game.pitch) != before {
                 // The view changed between two ticks: publish it right away,
                 // so the mouse look does not wait for the next tick.
@@ -3282,7 +3281,8 @@ fn apply_placement(
     }
 
     // Immediately snap the local player body entity without triggering limb acceleration
-    game.body.teleport_to_exact(position, game.yaw.to_degrees(), game.pitch.to_degrees());
+    game.body
+        .teleport_to_exact(position, game.yaw.to_degrees(), game.pitch.to_degrees());
 
     // Immediately notify render thread to snap camera view and prevent gliding
     let eye = position + glam::DVec3::Y * umicraft_game::physics::EYE_HEIGHT;
@@ -3691,8 +3691,8 @@ fn sync_held_item_before_click(game: &mut Game, queue: &mut CommandQueue, since:
     if game.applied_slot == game.synced_slot {
         return;
     }
-    let first = (since..queue.ordered.len())
-        .find(|&at| !matches!(queue.ordered[at], ClientCommand::Swing));
+    let first =
+        (since..queue.ordered.len()).find(|&at| !matches!(queue.ordered[at], ClientCommand::Swing));
     if let Some(at) = first {
         game.synced_slot = game.applied_slot;
         queue.ordered.insert(
@@ -3851,7 +3851,10 @@ fn tick(
     // Phase E.2: the tick-driven scenario `e1` chooses the keys of the tick.
     // It counts client ticks and only sets the input state.
     let e1_keys = if game.world_ready() {
-        let on_ground = game.state.as_ref().is_some_and(|state| state.player().on_ground);
+        let on_ground = game
+            .state
+            .as_ref()
+            .is_some_and(|state| state.player().on_ground);
         game.e1.as_mut().map(|run| run.before(on_ground))
     } else {
         None
@@ -4164,7 +4167,9 @@ fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
         if full {
             return true;
         }
-        let snapshot = world.chunk(pos).map(|_| ChunkSnapshot::from_world(world, pos));
+        let snapshot = world
+            .chunk(pos)
+            .map(|_| ChunkSnapshot::from_world(world, pos));
         match chunks.try_send(ChunkEvent { pos, snapshot }) {
             Ok(()) => false,
             Err(mpsc::TrySendError::Full(_)) | Err(mpsc::TrySendError::Disconnected(_)) => {
@@ -4373,11 +4378,7 @@ mod tests {
 
     /// Turns by `degrees`, runs one tick and returns the yaw of the movement
     /// packet that tick queued, decoded from the encoded wire bytes.
-    fn turn_and_read_wire_yaw(
-        game: &mut Game,
-        queue: &mut CommandQueue,
-        degrees: &[f32],
-    ) -> f32 {
+    fn turn_and_read_wire_yaw(game: &mut Game, queue: &mut CommandQueue, degrees: &[f32]) -> f32 {
         use umicraft_protocol::EncodablePacket;
         for step in degrees {
             handle_input(
@@ -4894,14 +4895,20 @@ mod tests {
         apply_perspective_presses(&mut game);
         assert_eq!(game.perspective, Perspective::ThirdPersonBack);
         let sel_back = game.selection_outline();
-        assert_eq!(sel_back, sel_fp, "selection raycast must remain strictly from eye");
+        assert_eq!(
+            sel_back, sel_fp,
+            "selection raycast must remain strictly from eye"
+        );
 
         // Switch to ThirdPersonFront
         handle_input(&mut game, toggle, &mut queue);
         apply_perspective_presses(&mut game);
         assert_eq!(game.perspective, Perspective::ThirdPersonFront);
         let sel_front = game.selection_outline();
-        assert_eq!(sel_front, sel_fp, "front view camera must NOT invert raycast reach!");
+        assert_eq!(
+            sel_front, sel_fp,
+            "front view camera must NOT invert raycast reach!"
+        );
     }
 
     #[test]
@@ -4924,13 +4931,21 @@ mod tests {
         );
 
         // Cycle through all perspectives and verify other entity's data remains untouched
-        for p in [Perspective::FirstPerson, Perspective::ThirdPersonBack, Perspective::ThirdPersonFront] {
+        for p in [
+            Perspective::FirstPerson,
+            Perspective::ThirdPersonBack,
+            Perspective::ThirdPersonFront,
+        ] {
             game.perspective = p;
             publish_frame(&game, &frames, Instant::now());
             let Ok(RenderEvent::Frame(frame)) = received.try_recv() else {
                 panic!("expected frame");
             };
-            let other = frame.entities.iter().find(|e| e.id == other_id).expect("other entity");
+            let other = frame
+                .entities
+                .iter()
+                .find(|e| e.id == other_id)
+                .expect("other entity");
             assert_eq!(other.position, other_pos);
             assert_eq!(other.yaw, 45.0);
             assert_eq!(other.pitch, 10.0);
@@ -5118,8 +5133,16 @@ mod tests {
             sent.push(queue.ordered.iter().filter(|c| is_movement(c)).count());
             queue.ordered.clear();
         }
-        assert_eq!(sent[..20].iter().sum::<usize>(), 20, "one per dead tick: {sent:?}");
-        assert_eq!(sent[20..].iter().sum::<usize>(), 0, "then silence: {sent:?}");
+        assert_eq!(
+            sent[..20].iter().sum::<usize>(),
+            20,
+            "one per dead tick: {sent:?}"
+        );
+        assert_eq!(
+            sent[20..].iter().sum::<usize>(),
+            0,
+            "then silence: {sent:?}"
+        );
         // The respawn brings the packets back.
         handle_net(&mut game, health_update(20.0), &mut queue, &frames);
         queue.ordered.clear();
@@ -5864,7 +5887,11 @@ mod tests {
         });
 
         queue.flush();
-        assert_eq!(queue.ordered.len(), 2, "the second chat and the report wait");
+        assert_eq!(
+            queue.ordered.len(),
+            2,
+            "the second chat and the report wait"
+        );
         let Ok(PlayServerbound::Chat(chat)) = receiver.try_recv() else {
             panic!("the first chat is sent as its wire packet");
         };
@@ -6712,7 +6739,14 @@ mod tests {
         let mut start = 0;
         let mut segments = Vec::new();
         for end in ends {
-            segments.push(queue.ordered.iter().skip(start).take(end - start).collect::<Vec<_>>());
+            segments.push(
+                queue
+                    .ordered
+                    .iter()
+                    .skip(start)
+                    .take(end - start)
+                    .collect::<Vec<_>>(),
+            );
             start = end;
         }
         for segment in &segments {
@@ -6721,15 +6755,19 @@ mod tests {
                 1,
                 "one report per tick: {segment:?}"
             );
-            assert!(is_movement(segment.last().expect("a command")), "{segment:?}");
+            assert!(
+                is_movement(segment.last().expect("a command")),
+                "{segment:?}"
+            );
         }
         assert_eq!(segments[0].len(), 1, "a plain tick sends only its report");
         assert!(segments[1]
             .iter()
             .any(|c| matches!(c, ClientCommand::PlayerDigging { .. })));
-        assert!(segments[2]
-            .iter()
-            .any(|c| matches!(c, ClientCommand::Swing | ClientCommand::PlayerBlockPlacement { .. })));
+        assert!(segments[2].iter().any(|c| matches!(
+            c,
+            ClientCommand::Swing | ClientCommand::PlayerBlockPlacement { .. }
+        )));
     }
 
     fn pushed_positions(queue: &mut CommandQueue, count: u32) {
@@ -7047,7 +7085,10 @@ mod tests {
         run_ticks(&mut game, &mut queue, 1);
         let seen = tags(&queue);
         // `clickMouse`: swing, then the controller syncs and sends.
-        assert!(in_order(&seen, &["swing", "slot2", "dig", "move"]), "{seen:?}");
+        assert!(
+            in_order(&seen, &["swing", "slot2", "dig", "move"]),
+            "{seen:?}"
+        );
         assert_eq!(slots_in(&queue), [2], "once");
     }
 
@@ -7500,7 +7541,8 @@ mod tests {
                 frame_micros: std::sync::Arc::clone(&frame_micros),
             };
             let flag = std::sync::Arc::clone(&stop);
-            let thread = std::thread::spawn(move || run(channels, flag, "tester".to_string(), None));
+            let thread =
+                std::thread::spawn(move || run(channels, flag, "tester".to_string(), None));
             Self {
                 inputs: inputs_tx,
                 events: events_tx,
@@ -7517,7 +7559,11 @@ mod tests {
         /// Joins a world of empty air and places the player high above it,
         /// so it falls (and reports a new position every tick) for a long time.
         fn join_world(&self) {
-            let send = |event| self.events.send(GameEvent::Net(event)).expect("the loop runs");
+            let send = |event| {
+                self.events
+                    .send(GameEvent::Net(event))
+                    .expect("the loop runs")
+            };
             send(PlayEvent::JoinGame(umicraft_net::play::JoinGameInfo {
                 entity_id: 1,
                 gamemode: 0,
@@ -7594,7 +7640,11 @@ mod tests {
 
         fn finish(&mut self) -> Vec<PlayServerbound> {
             self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
-            self.thread.take().expect("running").join().expect("the loop ends");
+            self.thread
+                .take()
+                .expect("running")
+                .join()
+                .expect("the loop ends");
             self.read_for(std::time::Duration::from_millis(20))
         }
     }
@@ -7611,7 +7661,8 @@ mod tests {
                 ..Default::default()
             }))
         };
-        let confirmed = |packet: &PlayServerbound| matches!(packet, PlayServerbound::PositionLook(_));
+        let confirmed =
+            |packet: &PlayServerbound| matches!(packet, PlayServerbound::PositionLook(_));
         // Let the join settle and drop its confirmations, so exactly one
         // teleport is in flight, as with a real server.
         let settle = Instant::now() + std::time::Duration::from_millis(200);
@@ -7702,10 +7753,16 @@ mod tests {
     /// A lost report of a falling player doubles one step; the steps of a
     /// fall grow by less than 30 % after the first ten ticks.
     fn assert_fall_has_no_gap(ys: &[f64]) {
-        assert!(ys.windows(2).all(|w| w[1] < w[0]), "reports out of order or twice");
+        assert!(
+            ys.windows(2).all(|w| w[1] < w[0]),
+            "reports out of order or twice"
+        );
         let steps: Vec<f64> = ys.windows(2).map(|w| w[0] - w[1]).collect();
         for (i, pair) in steps.windows(2).enumerate().skip(8) {
-            assert!(pair[1] / pair[0] < 1.3, "a report is missing near #{i}: {pair:?}");
+            assert!(
+                pair[1] / pair[0] < 1.3,
+                "a report is missing near #{i}: {pair:?}"
+            );
         }
     }
 
@@ -7750,7 +7807,11 @@ mod tests {
 
         // Nothing queued was dropped, duplicated or reordered.
         assert_eq!(chats_of(&stream), sent);
-        assert_eq!(slots_of(&stream), [3], "the slot pressed while congested, once");
+        assert_eq!(
+            slots_of(&stream),
+            [3],
+            "the slot pressed while congested, once"
+        );
         assert_fall_has_no_gap(&falling_ys(&stream));
         // The turn made during the congestion reached the wire.
         let turned = stream.iter().any(|packet| match packet {
@@ -7773,7 +7834,11 @@ mod tests {
                 )
             })
             .count();
-        assert_eq!(reports, total_ticks + 1, "{reports} reports for {total_ticks} ticks");
+        assert_eq!(
+            reports,
+            total_ticks + 1,
+            "{reports} reports for {total_ticks} ticks"
+        );
     }
 
     #[test]
@@ -7812,13 +7877,20 @@ mod tests {
                 .events
                 .send(GameEvent::Input(InputUpdate::default()))
                 .expect("the loop runs");
-            harness.inputs.send(InputUpdate::default()).expect("the loop runs");
+            harness
+                .inputs
+                .send(InputUpdate::default())
+                .expect("the loop runs");
         }
         let deadline = Instant::now() + std::time::Duration::from_secs(2);
         while (harness.events.len() > 0 || harness.inputs.len() > 0) && Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert_eq!(harness.events.len() + harness.inputs.len(), 0, "the loop took them");
+        assert_eq!(
+            harness.events.len() + harness.inputs.len(),
+            0,
+            "the loop took them"
+        );
         std::thread::sleep(std::time::Duration::from_millis(400));
         assert_eq!(harness.ticks(), 0, "and it is still congested");
         // Shutdown works while congested.
@@ -7854,7 +7926,11 @@ mod tests {
             })
             .count();
         assert!(ticks >= 20);
-        assert_eq!(reports, ticks + 1, "the placement's acknowledgement is the extra one");
+        assert_eq!(
+            reports,
+            ticks + 1,
+            "the placement's acknowledgement is the extra one"
+        );
         assert_fall_has_no_gap(&falling_ys(&stream));
     }
 
@@ -7877,7 +7953,10 @@ mod tests {
         }
         assert!(!queue.congested());
         assert_eq!(xs.len(), PENDING_LIMIT * 2);
-        assert!(xs.windows(2).all(|w| w[1] == w[0] + 1.0), "FIFO, no duplicate");
+        assert!(
+            xs.windows(2).all(|w| w[1] == w[0] + 1.0),
+            "FIFO, no duplicate"
+        );
     }
 
     #[test]
@@ -8710,14 +8789,17 @@ mod tests {
         harness.join_world();
         harness.wait_for_ticks(3);
         // Send S12 knockback upwards (+0.5 blocks/tick) to the local player (id 1)
-        harness.events.send(GameEvent::Net(PlayEvent::EntityVelocity(
-            umicraft_protocol::packets::play::clientbound::EntityVelocity {
-                entity_id: 1,
-                velocity_x: 0,
-                velocity_y: 4000,
-                velocity_z: 0,
-            },
-        ))).expect("event sent");
+        harness
+            .events
+            .send(GameEvent::Net(PlayEvent::EntityVelocity(
+                umicraft_protocol::packets::play::clientbound::EntityVelocity {
+                    entity_id: 1,
+                    velocity_x: 0,
+                    velocity_y: 4000,
+                    velocity_z: 0,
+                },
+            )))
+            .expect("event sent");
         // Wait for the next tick to execute
         harness.wait_for_ticks(1);
         let stream = harness.finish();
@@ -8732,7 +8814,10 @@ mod tests {
                 break;
             }
         }
-        assert!(had_upward_or_reduced_fall, "S12 velocity took effect immediately before tick: {ys:?}");
+        assert!(
+            had_upward_or_reduced_fall,
+            "S12 velocity took effect immediately before tick: {ys:?}"
+        );
     }
 
     #[test]
@@ -8748,19 +8833,28 @@ mod tests {
 
         // Receive S12 event between ticks
         let entity_id = game.entity_id;
-        handle_net(&mut game, PlayEvent::EntityVelocity(
-            umicraft_protocol::packets::play::clientbound::EntityVelocity {
-                entity_id,
-                velocity_x: 0,
-                velocity_y: 8000, // 1.0 b/t
-                velocity_z: 0,
-            },
-        ), &mut queue, &frames);
+        handle_net(
+            &mut game,
+            PlayEvent::EntityVelocity(
+                umicraft_protocol::packets::play::clientbound::EntityVelocity {
+                    entity_id,
+                    velocity_x: 0,
+                    velocity_y: 8000, // 1.0 b/t
+                    velocity_z: 0,
+                },
+            ),
+            &mut queue,
+            &frames,
+        );
 
         // Execute tick 2: velocity must be incorporated into this tick's movement
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
         let pos_after = game.state.as_ref().unwrap().position();
-        assert!(pos_after.y > 64.0, "tick 2 incorporated S12: y={}", pos_after.y);
+        assert!(
+            pos_after.y > 64.0,
+            "tick 2 incorporated S12: y={}",
+            pos_after.y
+        );
     }
 
     #[test]
@@ -8771,19 +8865,28 @@ mod tests {
         let (chunks, _) = mpsc::sync_channel(64);
 
         // S08 arrives before tick
-        handle_net(&mut game, PlayEvent::Placement(
-            umicraft_net::play::PlayerPlacement {
+        handle_net(
+            &mut game,
+            PlayEvent::Placement(umicraft_net::play::PlayerPlacement {
                 x: 100.0,
                 y: 150.0,
                 z: 200.0,
                 yaw: 45.0,
                 pitch: 10.0,
                 ..Default::default()
-            },
-        ), &mut queue, &frames);
+            }),
+            &mut queue,
+            &frames,
+        );
 
-        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(100.0, 150.0, 200.0));
-        assert!(matches!(queue.ordered.front(), Some(ClientCommand::AckPosition { .. })));
+        assert_eq!(
+            game.state.as_ref().unwrap().position(),
+            DVec3::new(100.0, 150.0, 200.0)
+        );
+        assert!(matches!(
+            queue.ordered.front(),
+            Some(ClientCommand::AckPosition { .. })
+        ));
 
         // Tick simulates from the new position
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
@@ -8799,21 +8902,31 @@ mod tests {
         let (frames, _) = mpsc::sync_channel(64);
 
         for i in 1..=3 {
-            handle_net(&mut game, PlayEvent::Placement(
-                umicraft_net::play::PlayerPlacement {
+            handle_net(
+                &mut game,
+                PlayEvent::Placement(umicraft_net::play::PlayerPlacement {
                     x: i as f64 * 10.0,
                     y: 100.0,
                     z: i as f64 * 10.0,
                     ..Default::default()
-                },
-            ), &mut queue, &frames);
+                }),
+                &mut queue,
+                &frames,
+            );
         }
 
-        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(30.0, 100.0, 30.0));
-        let acks: Vec<f64> = queue.ordered.iter().filter_map(|cmd| match cmd {
-            ClientCommand::AckPosition { x, .. } => Some(*x),
-            _ => None,
-        }).collect();
+        assert_eq!(
+            game.state.as_ref().unwrap().position(),
+            DVec3::new(30.0, 100.0, 30.0)
+        );
+        let acks: Vec<f64> = queue
+            .ordered
+            .iter()
+            .filter_map(|cmd| match cmd {
+                ClientCommand::AckPosition { x, .. } => Some(*x),
+                _ => None,
+            })
+            .collect();
         assert_eq!(acks, vec![10.0, 20.0, 30.0]);
     }
 
@@ -8824,25 +8937,36 @@ mod tests {
         let (frames, _) = mpsc::sync_channel(64);
         let (chunks, _) = mpsc::sync_channel(64);
 
-        handle_net(&mut game, PlayEvent::Placement(
-            umicraft_net::play::PlayerPlacement {
+        handle_net(
+            &mut game,
+            PlayEvent::Placement(umicraft_net::play::PlayerPlacement {
                 x: 10.0,
                 y: 100.0,
                 z: 10.0,
                 ..Default::default()
-            },
-        ), &mut queue, &frames);
+            }),
+            &mut queue,
+            &frames,
+        );
         let entity_id = game.entity_id;
-        handle_net(&mut game, PlayEvent::EntityVelocity(
-            umicraft_protocol::packets::play::clientbound::EntityVelocity {
-                entity_id,
-                velocity_x: 0,
-                velocity_y: 8000,
-                velocity_z: 0,
-            },
-        ), &mut queue, &frames);
+        handle_net(
+            &mut game,
+            PlayEvent::EntityVelocity(
+                umicraft_protocol::packets::play::clientbound::EntityVelocity {
+                    entity_id,
+                    velocity_x: 0,
+                    velocity_y: 8000,
+                    velocity_z: 0,
+                },
+            ),
+            &mut queue,
+            &frames,
+        );
 
-        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(10.0, 100.0, 10.0));
+        assert_eq!(
+            game.state.as_ref().unwrap().position(),
+            DVec3::new(10.0, 100.0, 10.0)
+        );
         assert_eq!(game.state.as_ref().unwrap().player().velocity.y, 1.0);
 
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
@@ -8858,13 +8982,24 @@ mod tests {
         let (frames, _) = mpsc::sync_channel(64);
         let (chunks, _) = mpsc::sync_channel(64);
 
-        handle_net(&mut game, PlayEvent::BlockChange(
-            BlockChange::at(0, 65, 0, 1 << 4), // Stone
-        ), &mut queue, &frames);
+        handle_net(
+            &mut game,
+            PlayEvent::BlockChange(
+                BlockChange::at(0, 65, 0, 1 << 4), // Stone
+            ),
+            &mut queue,
+            &frames,
+        );
 
-        assert_eq!(game.world.as_ref().unwrap().block(BlockPos::new(0, 65, 0)), BlockState::new(1, 0));
+        assert_eq!(
+            game.world.as_ref().unwrap().block(BlockPos::new(0, 65, 0)),
+            BlockState::new(1, 0)
+        );
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
-        assert_eq!(game.world.as_ref().unwrap().block(BlockPos::new(0, 65, 0)), BlockState::new(1, 0));
+        assert_eq!(
+            game.world.as_ref().unwrap().block(BlockPos::new(0, 65, 0)),
+            BlockState::new(1, 0)
+        );
     }
 
     #[test]
@@ -8873,35 +9008,51 @@ mod tests {
         let mut queue = CommandQueue::default();
         let (frames, _) = mpsc::sync_channel(64);
 
-        handle_net(&mut game, PlayEvent::JoinGame(umicraft_net::play::JoinGameInfo {
-            entity_id: 42,
-            gamemode: 1,
-            dimension: 0,
-            difficulty: 1,
-            max_players: 10,
-            level_type: "flat".to_string(),
-            reduced_debug_info: false,
-        }), &mut queue, &frames);
+        handle_net(
+            &mut game,
+            PlayEvent::JoinGame(umicraft_net::play::JoinGameInfo {
+                entity_id: 42,
+                gamemode: 1,
+                dimension: 0,
+                difficulty: 1,
+                max_players: 10,
+                level_type: "flat".to_string(),
+                reduced_debug_info: false,
+            }),
+            &mut queue,
+            &frames,
+        );
 
         assert_eq!(game.entity_id, 42);
         assert_eq!(game.gamemode, GameMode::Creative);
         assert!(game.world.is_some());
         assert!(game.state.is_none());
 
-        handle_net(&mut game, PlayEvent::SpawnPosition(
-            umicraft_protocol::packets::play::clientbound::SpawnPosition { x: 0, y: 64, z: 0 }
-        ), &mut queue, &frames);
-        handle_net(&mut game, PlayEvent::Placement(
-            umicraft_net::play::PlayerPlacement {
+        handle_net(
+            &mut game,
+            PlayEvent::SpawnPosition(
+                umicraft_protocol::packets::play::clientbound::SpawnPosition { x: 0, y: 64, z: 0 },
+            ),
+            &mut queue,
+            &frames,
+        );
+        handle_net(
+            &mut game,
+            PlayEvent::Placement(umicraft_net::play::PlayerPlacement {
                 x: 0.5,
                 y: 65.0,
                 z: 0.5,
                 ..Default::default()
-            }
-        ), &mut queue, &frames);
+            }),
+            &mut queue,
+            &frames,
+        );
 
         assert!(game.state.is_some());
-        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(0.5, 65.0, 0.5));
+        assert_eq!(
+            game.state.as_ref().unwrap().position(),
+            DVec3::new(0.5, 65.0, 0.5)
+        );
     }
 
     #[test]
@@ -8911,29 +9062,38 @@ mod tests {
         let (frames, _) = mpsc::sync_channel(64);
 
         game.health = 0.0;
-        handle_net(&mut game, PlayEvent::Respawn(
-            umicraft_protocol::packets::play::clientbound::Respawn {
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(umicraft_protocol::packets::play::clientbound::Respawn {
                 dimension: 0,
                 difficulty: 1,
                 game_mode: 0,
                 world_type: "default".to_string(),
-            }
-        ), &mut queue, &frames);
+            }),
+            &mut queue,
+            &frames,
+        );
 
         assert_eq!(game.health, 20.0);
         assert!(game.state.is_none());
 
-        handle_net(&mut game, PlayEvent::Placement(
-            umicraft_net::play::PlayerPlacement {
+        handle_net(
+            &mut game,
+            PlayEvent::Placement(umicraft_net::play::PlayerPlacement {
                 x: 10.0,
                 y: 70.0,
                 z: 10.0,
                 ..Default::default()
-            }
-        ), &mut queue, &frames);
+            }),
+            &mut queue,
+            &frames,
+        );
 
         assert!(game.state.is_some());
-        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(10.0, 70.0, 10.0));
+        assert_eq!(
+            game.state.as_ref().unwrap().position(),
+            DVec3::new(10.0, 70.0, 10.0)
+        );
     }
 
     #[test]
@@ -8942,29 +9102,38 @@ mod tests {
         let mut queue = CommandQueue::default();
         let (frames, _) = mpsc::sync_channel(64);
 
-        handle_net(&mut game, PlayEvent::Respawn(
-            umicraft_protocol::packets::play::clientbound::Respawn {
+        handle_net(
+            &mut game,
+            PlayEvent::Respawn(umicraft_protocol::packets::play::clientbound::Respawn {
                 dimension: -1,
                 difficulty: 1,
                 game_mode: 0,
                 world_type: "default".to_string(),
-            }
-        ), &mut queue, &frames);
+            }),
+            &mut queue,
+            &frames,
+        );
 
         assert_eq!(game.dimension, -1);
         assert_eq!(game.world.as_ref().unwrap().dimension(), -1);
         assert!(game.state.is_none());
 
-        handle_net(&mut game, PlayEvent::Placement(
-            umicraft_net::play::PlayerPlacement {
+        handle_net(
+            &mut game,
+            PlayEvent::Placement(umicraft_net::play::PlayerPlacement {
                 x: 5.0,
                 y: 80.0,
                 z: 5.0,
                 ..Default::default()
-            }
-        ), &mut queue, &frames);
+            }),
+            &mut queue,
+            &frames,
+        );
 
-        assert_eq!(game.state.as_ref().unwrap().position(), DVec3::new(5.0, 80.0, 5.0));
+        assert_eq!(
+            game.state.as_ref().unwrap().position(),
+            DVec3::new(5.0, 80.0, 5.0)
+        );
     }
 
     #[test]
@@ -8975,11 +9144,21 @@ mod tests {
         let (chunks, _) = mpsc::sync_channel(64);
 
         for i in 0..3 {
-            tick(&mut game, &mut queue, &frames, &chunks, Instant::now() + Duration::from_millis(50 * i));
+            tick(
+                &mut game,
+                &mut queue,
+                &frames,
+                &chunks,
+                Instant::now() + Duration::from_millis(50 * i),
+            );
         }
 
         let movements = movement_of(&queue);
-        assert_eq!(movements.len(), 3, "3 catch-up ticks produce exactly 3 movement reports");
+        assert_eq!(
+            movements.len(),
+            3,
+            "3 catch-up ticks produce exactly 3 movement reports"
+        );
     }
 
     #[test]
@@ -8992,9 +9171,12 @@ mod tests {
         let (chunks, _) = mpsc::sync_channel(1000);
 
         for i in 0..150 {
-            handle_net(&mut game, PlayEvent::BlockChange(
-                BlockChange::at(i, 60, 0, 1 << 4),
-            ), &mut queue, &frames);
+            handle_net(
+                &mut game,
+                PlayEvent::BlockChange(BlockChange::at(i, 60, 0, 1 << 4)),
+                &mut queue,
+                &frames,
+            );
         }
 
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
@@ -9008,8 +9190,16 @@ mod tests {
         let (frames, _) = mpsc::sync_channel(64);
 
         for i in 0..5 {
-            handle_net(&mut game, PlayEvent::HeldItemChange(i as i8), &mut queue, &frames);
-            assert_eq!(game.selected_slot, i as u8, "slot updated in exact FIFO order");
+            handle_net(
+                &mut game,
+                PlayEvent::HeldItemChange(i as i8),
+                &mut queue,
+                &frames,
+            );
+            assert_eq!(
+                game.selected_slot, i as u8,
+                "slot updated in exact FIFO order"
+            );
         }
     }
 
@@ -9042,10 +9232,15 @@ mod tests {
         assert!(!movements.is_empty());
         let last = movements.last().unwrap();
         let wire_pitch = match last {
-            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => *pitch,
+            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => {
+                *pitch
+            }
             other => panic!("expected look report, got {other:?}"),
         };
-        assert!((wire_pitch - (-90.0)).abs() < 1e-4, "wire pitch must be -90.0°, got {wire_pitch}");
+        assert!(
+            (wire_pitch - (-90.0)).abs() < 1e-4,
+            "wire pitch must be -90.0°, got {wire_pitch}"
+        );
     }
 
     #[test]
@@ -9073,10 +9268,15 @@ mod tests {
         assert!(!movements.is_empty());
         let last = movements.last().unwrap();
         let wire_pitch = match last {
-            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => *pitch,
+            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => {
+                *pitch
+            }
             other => panic!("expected look report, got {other:?}"),
         };
-        assert!((wire_pitch - 90.0).abs() < 1e-4, "wire pitch must be +90.0°, got {wire_pitch}");
+        assert!(
+            (wire_pitch - 90.0).abs() < 1e-4,
+            "wire pitch must be +90.0°, got {wire_pitch}"
+        );
     }
 
     #[test]
@@ -9116,17 +9316,26 @@ mod tests {
         // 1 pixel
         let delta_1_rad = 1.0_f32 * speed;
         let delta_1_deg = delta_1_rad.to_degrees();
-        assert!((delta_1_deg - 0.15).abs() < 1e-6, "1px delta: expected 0.15°, got {delta_1_deg}");
+        assert!(
+            (delta_1_deg - 0.15).abs() < 1e-6,
+            "1px delta: expected 0.15°, got {delta_1_deg}"
+        );
 
         // 10 pixels
         let delta_10_rad = 10.0_f32 * speed;
         let delta_10_deg = delta_10_rad.to_degrees();
-        assert!((delta_10_deg - 1.50).abs() < 1e-5, "10px delta: expected 1.50°, got {delta_10_deg}");
+        assert!(
+            (delta_10_deg - 1.50).abs() < 1e-5,
+            "10px delta: expected 1.50°, got {delta_10_deg}"
+        );
 
         // 100 pixels
         let delta_100_rad = 100.0_f32 * speed;
         let delta_100_deg = delta_100_rad.to_degrees();
-        assert!((delta_100_deg - 15.00).abs() < 1e-4, "100px delta: expected 15.00°, got {delta_100_deg}");
+        assert!(
+            (delta_100_deg - 15.00).abs() < 1e-4,
+            "100px delta: expected 15.00°, got {delta_100_deg}"
+        );
     }
 
     #[test]
@@ -9134,25 +9343,43 @@ mod tests {
         use crate::options::ControlOptions;
 
         // Min sensitivity = 0.0
-        let ctrl_min = ControlOptions { mouse_sensitivity: 0.0, ..ControlOptions::default() };
+        let ctrl_min = ControlOptions {
+            mouse_sensitivity: 0.0,
+            ..ControlOptions::default()
+        };
         let factor_min = ctrl_min.look_factor();
         let rot_min_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_min).to_degrees();
         let expected_min = 100.0 * 0.064 * 0.15; // 0.96°
-        assert!((rot_min_deg - expected_min).abs() < 1e-4, "min sens: got {rot_min_deg}, expected {expected_min}");
+        assert!(
+            (rot_min_deg - expected_min).abs() < 1e-4,
+            "min sens: got {rot_min_deg}, expected {expected_min}"
+        );
 
         // Default sensitivity = 0.5
-        let ctrl_def = ControlOptions { mouse_sensitivity: 0.5, ..ControlOptions::default() };
+        let ctrl_def = ControlOptions {
+            mouse_sensitivity: 0.5,
+            ..ControlOptions::default()
+        };
         let factor_def = ctrl_def.look_factor();
         let rot_def_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_def).to_degrees();
         let expected_def = 100.0 * 1.0 * 0.15; // 15.0°
-        assert!((rot_def_deg - expected_def).abs() < 1e-4, "default sens: got {rot_def_deg}, expected {expected_def}");
+        assert!(
+            (rot_def_deg - expected_def).abs() < 1e-4,
+            "default sens: got {rot_def_deg}, expected {expected_def}"
+        );
 
         // Max sensitivity = 1.0
-        let ctrl_max = ControlOptions { mouse_sensitivity: 1.0, ..ControlOptions::default() };
+        let ctrl_max = ControlOptions {
+            mouse_sensitivity: 1.0,
+            ..ControlOptions::default()
+        };
         let factor_max = ctrl_max.look_factor();
         let rot_max_deg = (100.0 * crate::window::MOUSE_SENSITIVITY * factor_max).to_degrees();
         let expected_max = 100.0 * 4.096 * 0.15; // 61.44°
-        assert!((rot_max_deg - expected_max).abs() < 1e-4, "max sens: got {rot_max_deg}, expected {expected_max}");
+        assert!(
+            (rot_max_deg - expected_max).abs() < 1e-4,
+            "max sens: got {rot_max_deg}, expected {expected_max}"
+        );
     }
 
     #[test]
@@ -9167,7 +9394,10 @@ mod tests {
             let f = s * 0.6_f32 + 0.2_f32;
             let f1 = f * f * f * 8.0_f32;
 
-            let ctrl = ControlOptions { mouse_sensitivity: s, ..ControlOptions::default() };
+            let ctrl = ControlOptions {
+                mouse_sensitivity: s,
+                ..ControlOptions::default()
+            };
             let rust_factor = ctrl.look_factor();
 
             for &d in &deltas {
@@ -9193,7 +9423,10 @@ mod tests {
         // Turning +2.0° crosses 360°
         let wire_yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[2.0]);
         // Must be continuous 361.0°, NEVER 1.0° (which would be a -360° jump)
-        assert!((wire_yaw - 361.0).abs() < 1e-2, "expected 361.0°, got {wire_yaw}");
+        assert!(
+            (wire_yaw - 361.0).abs() < 1e-2,
+            "expected 361.0°, got {wire_yaw}"
+        );
     }
 
     #[test]
@@ -9202,13 +9435,16 @@ mod tests {
         // Turning -2.0° goes negative
         let wire_yaw = turn_and_read_wire_yaw(&mut game, &mut queue, &[-2.0]);
         // Must be continuous -2.0°, NEVER 358.0° (which would be a +360° jump)
-        assert!((wire_yaw - (-2.0)).abs() < 1e-2, "expected -2.0°, got {wire_yaw}");
+        assert!(
+            (wire_yaw - (-2.0)).abs() < 1e-2,
+            "expected -2.0°, got {wire_yaw}"
+        );
     }
 
     #[test]
     fn test_rot_9_c05_player_look_serialization() {
-        use umicraft_protocol::EncodablePacket;
         use umicraft_protocol::packets::play::serverbound::PlayerLook;
+        use umicraft_protocol::EncodablePacket;
 
         let packet = PlayerLook {
             yaw: 185.5,
@@ -9218,7 +9454,11 @@ mod tests {
 
         let mut bytes = Vec::new();
         packet.encode_body(&mut bytes).expect("encode");
-        assert_eq!(bytes.len(), 9, "C05 must be 9 bytes: 4 bytes yaw + 4 bytes pitch + 1 byte on_ground");
+        assert_eq!(
+            bytes.len(),
+            9,
+            "C05 must be 9 bytes: 4 bytes yaw + 4 bytes pitch + 1 byte on_ground"
+        );
 
         let decoded = PlayerLook::decode(&mut &bytes[..]).expect("decode");
         assert_eq!(decoded.yaw, 185.5);
@@ -9228,8 +9468,8 @@ mod tests {
 
     #[test]
     fn test_rot_10_c06_position_look_serialization() {
-        use umicraft_protocol::EncodablePacket;
         use umicraft_protocol::packets::play::serverbound::PositionLook;
+        use umicraft_protocol::EncodablePacket;
 
         let packet = PositionLook {
             x: 123.456,
@@ -9242,7 +9482,11 @@ mod tests {
 
         let mut bytes = Vec::new();
         packet.encode_body(&mut bytes).expect("encode");
-        assert_eq!(bytes.len(), 33, "C06 must be 33 bytes: 24 bytes (3*f64) + 8 bytes (2*f32) + 1 byte on_ground");
+        assert_eq!(
+            bytes.len(),
+            33,
+            "C06 must be 33 bytes: 24 bytes (3*f64) + 8 bytes (2*f32) + 1 byte on_ground"
+        );
 
         let decoded = PositionLook::decode(&mut &bytes[..]).expect("decode");
         assert_eq!(decoded.x, 123.456);
@@ -9272,7 +9516,10 @@ mod tests {
             effects: umicraft_game::view::ViewEffects::default(),
         };
         let (cam_yaw, cam_pitch) = camera_angles(&render_state);
-        assert!((cam_pitch - (-90.0_f32.to_radians())).abs() < 1e-4, "camera pitch is flipped relative to game pitch");
+        assert!(
+            (cam_pitch - (-90.0_f32.to_radians())).abs() < 1e-4,
+            "camera pitch is flipped relative to game pitch"
+        );
         assert!((cam_yaw - (game.yaw + std::f32::consts::PI)).abs() < 1e-4);
 
         // 2. Looking up at sky (-90°)
@@ -9306,7 +9553,8 @@ mod tests {
     ) {
         let mut look = (0.0_f32, 0.0_f32);
         for &delta in deltas {
-            let (dyaw, dpitch) = crate::window::compute_mouse_look_delta(delta, controls, zoom_factor);
+            let (dyaw, dpitch) =
+                crate::window::compute_mouse_look_delta(delta, controls, zoom_factor);
             look.0 += dyaw;
             look.1 += dpitch;
         }
@@ -9336,14 +9584,21 @@ mod tests {
         let movements = movement_of(&queue);
         assert!(!movements.is_empty());
         let (yaw, pitch) = match movements.last().unwrap() {
-            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            ClientCommand::PositionLook { yaw, pitch, .. }
+            | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
             other => panic!("expected look report, got {other:?}"),
         };
 
         let expected_yaw = 100.0 * 0.064 * 0.15; // 0.96°
         let expected_pitch = 50.0 * 0.064 * 0.15; // 0.48°
-        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
-        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+        assert!(
+            (yaw - expected_yaw).abs() < 1e-4,
+            "yaw: expected {expected_yaw}, got {yaw}"
+        );
+        assert!(
+            (pitch - expected_pitch).abs() < 1e-4,
+            "pitch: expected {expected_pitch}, got {pitch}"
+        );
     }
 
     #[test]
@@ -9364,14 +9619,21 @@ mod tests {
         let movements = movement_of(&queue);
         assert!(!movements.is_empty());
         let (yaw, pitch) = match movements.last().unwrap() {
-            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            ClientCommand::PositionLook { yaw, pitch, .. }
+            | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
             other => panic!("expected look report, got {other:?}"),
         };
 
         let expected_yaw = 100.0 * 1.0 * 0.15; // 15.0°
         let expected_pitch = -50.0 * 1.0 * 0.15; // -7.5°
-        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
-        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+        assert!(
+            (yaw - expected_yaw).abs() < 1e-4,
+            "yaw: expected {expected_yaw}, got {yaw}"
+        );
+        assert!(
+            (pitch - expected_pitch).abs() < 1e-4,
+            "pitch: expected {expected_pitch}, got {pitch}"
+        );
     }
 
     #[test]
@@ -9392,14 +9654,21 @@ mod tests {
         let movements = movement_of(&queue);
         assert!(!movements.is_empty());
         let (yaw, pitch) = match movements.last().unwrap() {
-            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            ClientCommand::PositionLook { yaw, pitch, .. }
+            | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
             other => panic!("expected look report, got {other:?}"),
         };
 
         let expected_yaw = -20.0 * 4.096 * 0.15; // -12.288°
         let expected_pitch = 30.0 * 4.096 * 0.15; // 18.432°
-        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
-        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+        assert!(
+            (yaw - expected_yaw).abs() < 1e-4,
+            "yaw: expected {expected_yaw}, got {yaw}"
+        );
+        assert!(
+            (pitch - expected_pitch).abs() < 1e-4,
+            "pitch: expected {expected_pitch}, got {pitch}"
+        );
     }
 
     #[test]
@@ -9414,20 +9683,33 @@ mod tests {
         };
 
         // Two movements: (+50, +40) then (-80, -100) -> net (-30, -60)
-        drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(50.0, 40.0), (-80.0, -100.0)]);
+        drive_production_mouse_pipeline(
+            &mut game,
+            &mut queue,
+            &controls,
+            1.0,
+            &[(50.0, 40.0), (-80.0, -100.0)],
+        );
         tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
 
         let movements = movement_of(&queue);
         assert!(!movements.is_empty());
         let (yaw, pitch) = match movements.last().unwrap() {
-            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            ClientCommand::PositionLook { yaw, pitch, .. }
+            | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
             other => panic!("expected look report, got {other:?}"),
         };
 
         let expected_yaw = -30.0 * 0.15; // -4.5°
         let expected_pitch = -60.0 * 0.15; // -9.0°
-        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
-        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+        assert!(
+            (yaw - expected_yaw).abs() < 1e-4,
+            "yaw: expected {expected_yaw}, got {yaw}"
+        );
+        assert!(
+            (pitch - expected_pitch).abs() < 1e-4,
+            "pitch: expected {expected_pitch}, got {pitch}"
+        );
     }
 
     #[test]
@@ -9456,14 +9738,21 @@ mod tests {
         let movements = movement_of(&queue);
         assert!(!movements.is_empty());
         let (yaw, pitch) = match movements.last().unwrap() {
-            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            ClientCommand::PositionLook { yaw, pitch, .. }
+            | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
             other => panic!("expected look report, got {other:?}"),
         };
 
         let expected_yaw = 48.0 * 0.15; // 7.2°
         let expected_pitch = 11.0 * 0.15; // 1.65°
-        assert!((yaw - expected_yaw).abs() < 1e-4, "yaw: expected {expected_yaw}, got {yaw}");
-        assert!((pitch - expected_pitch).abs() < 1e-4, "pitch: expected {expected_pitch}, got {pitch}");
+        assert!(
+            (yaw - expected_yaw).abs() < 1e-4,
+            "yaw: expected {expected_yaw}, got {yaw}"
+        );
+        assert!(
+            (pitch - expected_pitch).abs() < 1e-4,
+            "pitch: expected {expected_pitch}, got {pitch}"
+        );
     }
 
     #[test]
@@ -9483,21 +9772,37 @@ mod tests {
 
         let movements = movement_of(&queue);
         let pitch_up = match movements.last().unwrap() {
-            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => *pitch,
+            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => {
+                *pitch
+            }
             other => panic!("expected look report, got {other:?}"),
         };
-        assert!((pitch_up - (-90.0)).abs() < 1e-4, "expected -90.0°, got {pitch_up}");
+        assert!(
+            (pitch_up - (-90.0)).abs() < 1e-4,
+            "expected -90.0°, got {pitch_up}"
+        );
 
         // 2. Pushing mouse way down -> should clamp to +90.0°
         drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(0.0, 10000.0)]);
-        tick(&mut game, &mut queue, &frames, &chunks, Instant::now() + Duration::from_millis(50));
+        tick(
+            &mut game,
+            &mut queue,
+            &frames,
+            &chunks,
+            Instant::now() + Duration::from_millis(50),
+        );
 
         let movements = movement_of(&queue);
         let pitch_down = match movements.last().unwrap() {
-            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => *pitch,
+            ClientCommand::PositionLook { pitch, .. } | ClientCommand::PlayerLook { pitch, .. } => {
+                *pitch
+            }
             other => panic!("expected look report, got {other:?}"),
         };
-        assert!((pitch_down - 90.0).abs() < 1e-4, "expected +90.0°, got {pitch_down}");
+        assert!(
+            (pitch_down - 90.0).abs() < 1e-4,
+            "expected +90.0°, got {pitch_down}"
+        );
     }
 
     #[test]
@@ -9523,13 +9828,16 @@ mod tests {
             ClientCommand::PositionLook { yaw, .. } | ClientCommand::PlayerLook { yaw, .. } => *yaw,
             other => panic!("expected look report, got {other:?}"),
         };
-        assert!((yaw - 450.0).abs() < 1e-2, "continuous yaw must be 450.0°, got {yaw}");
+        assert!(
+            (yaw - 450.0).abs() < 1e-2,
+            "continuous yaw must be 450.0°, got {yaw}"
+        );
     }
 
     #[test]
     fn test_pipeline_c05_c06_serialization_after_multiple_rotations() {
-        use umicraft_protocol::EncodablePacket;
         use umicraft_protocol::packets::play::serverbound::{PlayerLook, PositionLook};
+        use umicraft_protocol::EncodablePacket;
 
         let mut game = placed_game();
         let mut queue = CommandQueue::default();
@@ -9546,7 +9854,14 @@ mod tests {
 
         let movements1 = movement_of(&queue);
         let (c06_pos, c06_yaw, c06_pitch) = match movements1.last().unwrap() {
-            ClientCommand::PositionLook { x, y, z, yaw, pitch, .. } => (DVec3::new(*x, *y, *z), *yaw, *pitch),
+            ClientCommand::PositionLook {
+                x,
+                y,
+                z,
+                yaw,
+                pitch,
+                ..
+            } => (DVec3::new(*x, *y, *z), *yaw, *pitch),
             other => panic!("expected PositionLook (C06), got {other:?}"),
         };
         let mut c06_bytes = Vec::new();
@@ -9572,7 +9887,13 @@ mod tests {
 
         // 2. Subsequent tick with rotation alone reports C05 PlayerLook (9 bytes)
         drive_production_mouse_pipeline(&mut game, &mut queue, &controls, 1.0, &[(200.0, 100.0)]);
-        tick(&mut game, &mut queue, &frames, &chunks, Instant::now() + Duration::from_millis(50));
+        tick(
+            &mut game,
+            &mut queue,
+            &frames,
+            &chunks,
+            Instant::now() + Duration::from_millis(50),
+        );
 
         let movements2 = movement_of(&queue);
         let (c05_yaw, c05_pitch) = match movements2.last().unwrap() {
@@ -9580,9 +9901,13 @@ mod tests {
             other => panic!("expected PlayerLook (C05), got {other:?}"),
         };
         let mut c05_bytes = Vec::new();
-        PlayerLook { yaw: c05_yaw, pitch: c05_pitch, on_ground: false }
-            .encode_body(&mut c05_bytes)
-            .expect("encode c05");
+        PlayerLook {
+            yaw: c05_yaw,
+            pitch: c05_pitch,
+            on_ground: false,
+        }
+        .encode_body(&mut c05_bytes)
+        .expect("encode c05");
         assert_eq!(c05_bytes.len(), 9, "C05 must be exactly 9 bytes");
         let decoded_c05 = PlayerLook::decode(&mut &c05_bytes[..]).expect("decode c05");
         assert_eq!(decoded_c05.yaw, c05_yaw);
@@ -9605,7 +9930,8 @@ mod tests {
 
         let movements = movement_of(&queue);
         let (wire_yaw, wire_pitch) = match movements.last().unwrap() {
-            ClientCommand::PositionLook { yaw, pitch, .. } | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
+            ClientCommand::PositionLook { yaw, pitch, .. }
+            | ClientCommand::PlayerLook { yaw, pitch, .. } => (*yaw, *pitch),
             other => panic!("expected look report, got {other:?}"),
         };
 
