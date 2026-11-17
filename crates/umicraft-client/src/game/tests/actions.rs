@@ -8,7 +8,7 @@ use super::*;
 fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
     let mut game = game_on_floor_with(BlockState::AIR);
     let mut queue = CommandQueue::default();
-    game.pitch = 1.5;
+    game.pitch = 85.9;
     game.controls.input.attack = true;
     game.controls.attack_pressed = true;
     run_attack(&mut game, &mut queue);
@@ -23,7 +23,7 @@ fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
     let mut empty = game_on_floor_with(BlockState::AIR);
     let mut queue = CommandQueue::default();
     // Aim ahead of the feet: the block below the player cannot be built on.
-    empty.pitch = 1.0;
+    empty.pitch = 57.3;
     click_use(&mut empty, &mut queue);
     assert!(!queue
         .ordered
@@ -141,7 +141,7 @@ fn holding_the_use_button_eats_slowly_and_releasing_tells_the_server() {
     let mut game = game_on_floor_with(BlockState::AIR);
     game.vitals.food = 10.0;
     game.windows.apply_set_slot(0, 36, wire_item(297, 0));
-    game.pitch = -0.5;
+    game.pitch = -28.6;
     let mut queue = CommandQueue::default();
     game.controls.input.use_item = true;
     click_use(&mut game, &mut queue);
@@ -168,7 +168,7 @@ fn the_published_hand_carries_the_item_use_until_it_ends() {
     let mut game = game_on_floor_with(BlockState::AIR);
     game.vitals.food = 10.0;
     game.windows.apply_set_slot(0, 36, wire_item(297, 0));
-    game.pitch = -0.5;
+    game.pitch = -28.6;
     game.controls.input.use_item = true;
     let mut queue = CommandQueue::default();
     click_use(&mut game, &mut queue);
@@ -239,7 +239,7 @@ fn the_server_finishing_the_meal_ends_the_use() {
     game.vitals.food = 10.0;
     game.entity_id = 7;
     game.windows.apply_set_slot(0, 36, wire_item(297, 0));
-    game.pitch = -0.5;
+    game.pitch = -28.6;
     game.controls.input.use_item = true;
     let mut queue = CommandQueue::default();
     click_use(&mut game, &mut queue);

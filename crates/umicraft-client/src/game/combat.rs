@@ -17,7 +17,6 @@ use umicraft_game::entity::{EntityId, EntityRecord};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::media::is_on_ladder;
 use umicraft_game::particles::{ParticleKind, SpawnRequest};
-use umicraft_game::raycast::look_direction;
 
 use super::particles::particle_filter;
 use super::state::Game;
@@ -30,7 +29,7 @@ pub(super) fn pointed(game: &Game) -> Pointed {
     };
     let query = TargetQuery {
         eye,
-        look: look_direction(game.yaw.to_radians(), game.pitch.to_radians()),
+        look: game.look(),
         block_reach: game.reach(),
         extended_reach: game.gamemode == GameMode::Creative,
         block: game.block_target(),

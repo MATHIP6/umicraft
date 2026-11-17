@@ -46,7 +46,7 @@ fn a_dead_player_neither_moves_attacks_nor_places() {
     game.controls.input.forward = 1.0;
     game.controls.input.attack = true;
     game.controls.attack_pressed = true;
-    game.pitch = 1.5;
+    game.pitch = 85.9;
     let mut queue = CommandQueue::default();
     let (frames, _received) = mpsc::sync_channel(8);
     let (chunks, _chunk_received) = mpsc::sync_channel(8);

@@ -162,7 +162,7 @@ fn a_player_who_uses_an_item_walks_at_a_fifth_of_the_speed() {
         game.controls.input.forward = 1.0;
         game.controls.input.use_item = using;
         game.windows.apply_set_slot(0, 36, wire_item(267, 0));
-        game.pitch = -0.5;
+        game.pitch = -28.6;
         game.yaw = 0.0;
         let mut queue = CommandQueue::default();
         let (frames, _received) = mpsc::sync_channel(8);

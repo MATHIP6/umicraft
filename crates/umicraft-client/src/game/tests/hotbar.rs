@@ -53,7 +53,7 @@ fn q_and_ctrl_q_send_the_drop_packets() {
 #[test]
 fn the_middle_button_selects_the_hotbar_slot_of_the_block() {
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
     game.windows.apply_set_slot(0, 38, wire_item(2, 0));
     game.playing = true;
     let mut queue = CommandQueue::default();
@@ -69,7 +69,7 @@ fn the_middle_button_selects_the_hotbar_slot_of_the_block() {
 fn a_creative_pick_fills_a_free_slot_and_tells_the_server() {
     let mut game = game_on_floor_with(BlockState::AIR);
     game.gamemode = GameMode::Creative;
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
     let mut queue = CommandQueue::default();
     pick_block(&mut game, &mut queue);
     let given = game.windows.selected_item().expect("an item was given");
@@ -83,7 +83,7 @@ fn a_creative_pick_fills_a_free_slot_and_tells_the_server() {
 #[test]
 fn a_survival_pick_without_the_item_changes_nothing() {
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
     let mut queue = CommandQueue::default();
     pick_block(&mut game, &mut queue);
     assert!(queue.ordered.is_empty());
@@ -239,7 +239,7 @@ fn every_drop_press_is_a_packet() {
 fn a_survival_pick_leaves_no_packet_in_its_tick_and_the_slot_in_the_next() {
     let mut game = game_on_floor_with(BlockState::AIR);
     game.playing = true;
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
     game.windows.apply_set_slot(0, 38, wire_item(2, 0));
     let mut queue = CommandQueue::default();
     press_pick(&mut game, &mut queue);
@@ -256,7 +256,7 @@ fn a_creative_pick_sends_the_slot_packet_in_its_tick_and_the_sync_in_the_next() 
     let mut game = game_on_floor_with(BlockState::AIR);
     game.playing = true;
     game.gamemode = GameMode::Creative;
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
     game.windows.apply_set_slot(0, 36, wire_item(1, 0));
     let mut queue = CommandQueue::default();
     press_pick(&mut game, &mut queue);
@@ -274,7 +274,7 @@ fn a_creative_pick_sends_the_slot_packet_in_its_tick_and_the_sync_in_the_next() 
 fn a_slot_before_an_attack_is_announced_between_the_swing_and_the_attack_packet() {
     let mut game = placed_game();
     game.entity_id = 1;
-    game.pitch = 1.0;
+    game.pitch = 57.3;
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
     game.controls.input.attack = true;
@@ -293,7 +293,7 @@ fn a_slot_before_an_attack_is_announced_between_the_swing_and_the_attack_packet(
 fn a_slot_before_a_use_is_announced_before_the_use_packet() {
     let mut game = placed_game();
     game.entity_id = 1;
-    game.pitch = 1.0;
+    game.pitch = 57.3;
     game.windows.apply_set_slot(0, 38, wire_item(1, 0));
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
@@ -308,7 +308,7 @@ fn a_slot_before_a_use_is_announced_before_the_use_packet() {
 fn the_actions_of_one_tick_keep_the_run_tick_order() {
     let mut game = placed_game();
     game.entity_id = 1;
-    game.pitch = 1.0;
+    game.pitch = 57.3;
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
     press_drop(&mut game, &mut queue, DropKind::One);
@@ -579,7 +579,7 @@ fn a_respawn_on_slot_zero_sends_nothing() {
 fn a_use_of_the_item_in_the_air_syncs_then_uses_without_a_swing() {
     let mut game = placed_game();
     game.entity_id = 1;
-    game.pitch = -1.0;
+    game.pitch = -57.3;
     game.windows.apply_set_slot(0, 38, wire_item(297, 0));
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
@@ -594,7 +594,7 @@ fn a_use_of_the_item_in_the_air_syncs_then_uses_without_a_swing() {
 fn a_tool_on_a_block_syncs_then_places_then_uses_without_a_swing() {
     let mut game = placed_game();
     game.entity_id = 1;
-    game.pitch = 1.0;
+    game.pitch = 57.3;
     game.windows.apply_set_slot(0, 38, wire_item(267, 0));
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
@@ -636,7 +636,7 @@ fn an_attack_on_a_mob_swings_then_syncs_then_attacks() {
 fn a_click_that_only_swings_does_not_sync_the_slot() {
     let mut game = placed_game();
     game.entity_id = 1;
-    game.pitch = -1.0;
+    game.pitch = -57.3;
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
     game.controls.input.attack = true;

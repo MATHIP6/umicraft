@@ -9,7 +9,7 @@ fn a_held_survival_click_digs_the_block_over_several_ticks_and_cracks_it() {
     let mut game = game_on_floor_with(BlockState::AIR);
     let mut queue = CommandQueue::default();
     game.entity_id = 1;
-    game.pitch = 1.5;
+    game.pitch = 85.9;
     game.controls.input.attack = true;
     game.controls.attack_pressed = true;
     let block = BlockPos::new(0, 63, 0);
@@ -50,7 +50,7 @@ fn a_creative_break_removes_the_block_at_once_and_sends_only_the_start() {
     let mut game = game_on_floor_with(BlockState::AIR);
     let mut queue = CommandQueue::default();
     game.gamemode = GameMode::Creative;
-    game.pitch = 1.5;
+    game.pitch = 85.9;
     game.controls.attack_pressed = true;
     game.controls.input.attack = true;
     run_attack(&mut game, &mut queue);
@@ -65,7 +65,7 @@ fn a_spectator_cannot_break_blocks() {
     let mut game = game_on_floor_with(BlockState::AIR);
     let mut queue = CommandQueue::default();
     game.gamemode = GameMode::Spectator;
-    game.pitch = 1.5;
+    game.pitch = 85.9;
     game.controls.attack_pressed = true;
     game.controls.input.attack = true;
     run_attack(&mut game, &mut queue);
@@ -108,8 +108,10 @@ fn the_cracks_follow_every_breaker_and_vanish_with_the_block() {
 
 #[test]
 fn looking_at_the_floor_selects_the_floor_block() {
+    // Regression (ADR-0076): the look is in degrees; the ray read it as
+    // radians, so the outline (and the dig) went to another block.
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
     let boxes = game.selection_outline();
     assert_eq!(
         boxes,
@@ -126,8 +128,8 @@ fn a_selection_is_offset_by_the_block_position_and_follows_its_shape() {
     // half a block high, so the outline must not be the full block.
     let mut game = game_on_floor_with(BlockState::new(44, 0));
     game.state = Some(GameState::new(DVec3::new(0.5, 64.0, 3.5)));
-    game.pitch = 0.45;
-    game.yaw = std::f32::consts::PI;
+    game.pitch = 25.8;
+    game.yaw = 180.0;
     let boxes = game.selection_outline();
     assert_eq!(boxes.len(), 1);
     assert_eq!(boxes[0].min, [0.0, 64.0, 0.0]);
@@ -137,9 +139,9 @@ fn a_selection_is_offset_by_the_block_position_and_follows_its_shape() {
 #[test]
 fn looking_at_the_sky_or_being_a_spectator_selects_nothing() {
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.pitch = -std::f32::consts::FRAC_PI_2;
+    game.pitch = -90.0;
     assert!(game.selection_outline().is_empty());
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
     game.gamemode = GameMode::Spectator;
     assert!(game.selection_outline().is_empty());
 }
@@ -147,7 +149,7 @@ fn looking_at_the_sky_or_being_a_spectator_selects_nothing() {
 #[test]
 fn an_adventure_player_gets_no_selection_outline() {
     let mut game = game_on_floor_with(BlockState::AIR);
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
     assert!(!game.selection_outline().is_empty());
     game.gamemode = GameMode::Adventure;
     assert!(game.selection_outline().is_empty());

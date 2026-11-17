@@ -162,7 +162,7 @@ fn no_intermediate_position_is_lost() {
 fn a_movement_then_an_attack_leave_in_the_order_of_their_ticks() {
     let mut game = walking_game();
     game.entity_id = 1;
-    game.pitch = 1.0;
+    game.pitch = 57.3;
     let mut queue = CommandQueue::default();
     run_ticks(&mut game, &mut queue, 1);
     game.controls.input.attack = true;
@@ -183,7 +183,7 @@ fn a_movement_then_an_attack_leave_in_the_order_of_their_ticks() {
 fn a_movement_then_a_use_leave_in_the_order_of_their_ticks() {
     let mut game = walking_game();
     game.entity_id = 1;
-    game.pitch = 1.0;
+    game.pitch = 57.3;
     game.windows.apply_set_slot(0, 36, click_stack());
     let mut queue = CommandQueue::default();
     run_ticks(&mut game, &mut queue, 1);
@@ -204,7 +204,7 @@ fn a_movement_then_a_use_leave_in_the_order_of_their_ticks() {
 fn interleaved_actions_keep_one_report_per_tick_and_their_own_tick() {
     let mut game = walking_game();
     game.entity_id = 1;
-    game.pitch = 1.0;
+    game.pitch = 57.3;
     game.windows.apply_set_slot(0, 36, click_stack());
     let mut queue = CommandQueue::default();
     let mut ends = Vec::new();

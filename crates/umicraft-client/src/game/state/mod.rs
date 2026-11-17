@@ -236,11 +236,16 @@ impl Game {
             .map(|state| state.player().eye_position())
     }
 
+    /// The unit vector the player looks along. The game keeps degrees
+    /// (ADR-0076); the ray takes radians.
+    pub(super) fn look(&self) -> DVec3 {
+        look_direction(self.yaw.to_radians(), self.pitch.to_radians())
+    }
+
     /// The block the crosshair points at, entities aside.
     pub(super) fn block_target(&self) -> Option<RayHit> {
         let eye = self.eye()?;
-        let direction = look_direction(self.yaw, self.pitch);
-        raycast(eye, direction, self.reach(), self.world.as_ref()?)
+        raycast(eye, self.look(), self.reach(), self.world.as_ref()?)
     }
 
     /// The block the crosshair points at: none when an entity is nearer

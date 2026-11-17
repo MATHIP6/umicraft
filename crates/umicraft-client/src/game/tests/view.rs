@@ -177,7 +177,7 @@ fn f5_attack_and_block_selection_raycast_is_unaffected_by_perspective() {
     let mut queue = CommandQueue::default();
 
     // Player looks down at the floor block at (0, 63, 0)
-    game.pitch = std::f32::consts::FRAC_PI_2;
+    game.pitch = 90.0;
 
     // FirstPerson: selection outline targets the floor stone block
     let sel_fp = game.selection_outline();
