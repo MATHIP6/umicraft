@@ -222,8 +222,8 @@ mod tests {
     #[test]
     fn a_full_destination_moves_nothing() {
         let mut w = TestWindow::container(WindowKind::Hopper, 5);
-        for i in 0..5 {
-            w.own[i] = Some(stack(2, 64));
+        for slot in w.own.iter_mut().take(5) {
+            *slot = Some(stack(2, 64));
         }
         w.inv.set_slot(9, Some(stack(1, 3)));
         assert_eq!(shift(&mut w, 5), None);
