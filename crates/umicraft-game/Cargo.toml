@@ -28,3 +28,7 @@ criterion = "0.8"
 [[bench]]
 name = "particles"
 harness = false
+
+[[bench]]
+name = "physics"
+harness = false
