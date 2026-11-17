@@ -13,7 +13,7 @@ use winit::event_loop::ActiveEventLoop;
 use super::mods_menu;
 use super::session_control::lifecycle_step;
 use super::App;
-use super::{BACKGROUND_FPS, FRAME_HISTORY};
+use super::BACKGROUND_FPS;
 use crate::audio_bridge::listener::listener_of;
 use crate::audio_bridge::music::MusicWorld;
 use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
@@ -162,30 +162,12 @@ impl App {
         umicraft_core::profile_scope!("redraw");
         let now = Instant::now();
         self.cpu.start(now);
-        let elapsed = (now - self.clock.last_frame).as_secs_f32();
-        self.clock.last_frame = now;
+        let elapsed = self.clock.tick(now, self.show_overlay);
         // Phase E.9: the game thread takes network events once per frame.
         if let Some(session) = self.session.as_ref() {
             session.note_frame(Duration::from_secs_f32(elapsed));
         }
-        let frame_ms = elapsed * 1000.0;
-        self.clock.frame_ms = if self.clock.frame_ms == 0.0 {
-            frame_ms
-        } else {
-            self.clock.frame_ms * 0.9 + frame_ms * 0.1
-        };
-        self.clock.fps = self.clock.fps_meter.tick(now);
-        let alloc_now = umicraft_core::profiling::AllocSnapshot::now();
-        let alloc_delta = alloc_now.delta_since(self.clock.last_alloc_snapshot);
-        self.clock.last_alloc_snapshot = alloc_now;
-        self.clock.metrics_window.push(now, frame_ms, alloc_delta);
         self.update_mods(now);
-        if self.show_overlay {
-            if self.clock.frame_times.len() >= FRAME_HISTORY {
-                self.clock.frame_times.pop_front();
-            }
-            self.clock.frame_times.push_back(frame_ms);
-        }
 
         // The Zoom mod narrows the field of view, with a glide in and out.
         let zooming = self.zoom_held();
@@ -252,9 +234,87 @@ impl App {
         } else if effects.remesh {
             self.send_event(GameEvent::ReMeshAll);
         }
-        let Some(renderer) = self.renderer.as_mut() else {
+        // The renderer leaves `self` while the scene is handed to it, so the
+        // steps can read the rest of the window state alongside it.
+        let Some(mut renderer) = self.renderer.take() else {
             return;
         };
+        let partial_tick = environment.partial_tick;
+        self.send_scene(&mut renderer, now, environment, elapsed, (width, height));
+        self.upload_entities(&mut renderer, now, partial_tick);
+        self.draw_portrait(&mut renderer);
+        let renderer = self.renderer.insert(renderer);
+        if let (Some(frame), Some(items), Some(textures)) = (
+            ui_frame.as_ref(),
+            self.assets.items.as_deref(),
+            self.assets.entity_textures.as_ref(),
+        ) {
+            self.entity_icons
+                .prepare(&frame.draw_list, items, textures, renderer);
+        }
+        if std::mem::take(&mut self.presses.screenshot) {
+            renderer.request_capture();
+        }
+        self.cpu.lap(Stage::Scene);
+        let rendered = match (ui_frame.as_ref(), self.assets.items.as_deref()) {
+            (Some(frame), Some(items)) => renderer.render_with_ui(
+                &self.camera,
+                &self.overlay,
+                &frame.draw_list,
+                &mut IconSource(items),
+            ),
+            (Some(frame), None) => {
+                renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list, &mut NoIcons)
+            }
+            (None, _) => renderer.render(&self.camera, &self.overlay),
+        };
+        self.cpu.lap(Stage::Render);
+        self.cpu.finish();
+        let present_us = renderer.presentation_time_us();
+        let captured = renderer.take_capture();
+        self.record_input_latency(present_us);
+        if let Some(frame) = ui_frame {
+            self.ui.recycle_output(frame);
+        }
+        if let Some(captured) = captured {
+            self.save_screenshot(captured);
+        }
+        if frame_num < 10 {
+            umicraft_core::boot_log!(
+                "redraw_render_finished",
+                "frame={frame_num}, is_err={}",
+                rendered.is_err()
+            );
+        }
+        if let Err(error) = rendered {
+            umicraft_core::boot_log!("redraw_render_error", "{error}");
+            self.exit_error = Some(error.to_string());
+            event_loop.exit();
+            return;
+        }
+        // The frame-rate cap: the deadline of the next frame, for the
+        // event-driven scheduling of `about_to_wait`.
+        let cap = frame_cap(self.options.video.max_fps, self.focused);
+        let budget = (!self.options.video.vsync && cap < options::UNLIMITED_FPS)
+            .then(|| Duration::from_secs_f32(1.0 / cap as f32));
+        self.clock.schedule_next(budget, Instant::now());
+        if frame_num < 10 {
+            umicraft_core::boot_log!("redraw_exit", "frame={frame_num}");
+        }
+    }
+
+    /// Hands the renderer what this frame shows besides the entities: the
+    /// environment, the clouds, rain and particles, the screen overlays, the
+    /// border, the animated textures, the selection, the blurs, the name tags,
+    /// the cracks and the moving blocks.
+    fn send_scene(
+        &mut self,
+        renderer: &mut Renderer,
+        now: Instant,
+        environment: RenderEnvironment,
+        elapsed: f32,
+        (width, height): (u32, u32),
+    ) {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
@@ -314,7 +374,12 @@ impl App {
             );
             renderer.set_moving_blocks(&self.frame.moving_blocks_mesh);
         }
+    }
 
+    /// Builds and uploads the entities of the frame: their textures and
+    /// meshes, the block entities, the dropped items, the maps and the
+    /// first-person hand with what it holds.
+    fn upload_entities(&mut self, renderer: &mut Renderer, now: Instant, partial_tick: f32) {
         // No world, no hand: set again below when there is one.
         renderer.set_motion_blur_hand_moving(false);
         if let (Some(entity_textures), Some(world)) =
@@ -339,7 +404,7 @@ impl App {
             let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
-            entity_textures.set_mob_appearance(world.mob_appearance(environment.partial_tick));
+            entity_textures.set_mob_appearance(world.mob_appearance(partial_tick));
             entity_textures.set_camera_position(self.camera.relative_eye());
             entity_textures.set_hand_swing(hand.swing);
             entity_textures.set_cull_view(self.camera.relative_eye(), self.camera.forward());
@@ -367,7 +432,7 @@ impl App {
                         skins: entity_textures,
                         seconds: (now - self.clock.started).as_secs_f32(),
                         font: self.assets.ui_atlas.as_ref(),
-                        partial_tick: environment.partial_tick,
+                        partial_tick,
                         camera: self.camera.relative_eye(),
                         origin: render_origin_blocks,
                     },
@@ -443,7 +508,11 @@ impl App {
                 renderer.set_hand_glint(&self.assets.hand_layers.glint);
             }
         }
+    }
 
+    /// Draws the player into the portrait of the inventory screen, turned
+    /// towards the mouse.
+    fn draw_portrait(&mut self, renderer: &mut Renderer) {
         if let (Some(spot), Some(textures), Some(body)) = (
             self.portrait,
             self.assets.entity_textures.as_ref(),
@@ -464,33 +533,12 @@ impl App {
             }
             textures.render_portrait(&posed, matrix, &held, renderer);
         }
-        if let (Some(frame), Some(items), Some(textures)) = (
-            ui_frame.as_ref(),
-            self.assets.items.as_deref(),
-            self.assets.entity_textures.as_ref(),
-        ) {
-            self.entity_icons
-                .prepare(&frame.draw_list, items, textures, renderer);
-        }
-        if std::mem::take(&mut self.presses.screenshot) {
-            renderer.request_capture();
-        }
-        self.cpu.lap(Stage::Scene);
-        let rendered = match (ui_frame.as_ref(), self.assets.items.as_deref()) {
-            (Some(frame), Some(items)) => renderer.render_with_ui(
-                &self.camera,
-                &self.overlay,
-                &frame.draw_list,
-                &mut IconSource(items),
-            ),
-            (Some(frame), None) => {
-                renderer.render_with_ui(&self.camera, &self.overlay, &frame.draw_list, &mut NoIcons)
-            }
-            (None, _) => renderer.render(&self.camera, &self.overlay),
-        };
-        self.cpu.lap(Stage::Render);
-        self.cpu.finish();
-        let present_us = renderer.presentation_time_us();
+    }
+
+    /// Records the input latency of the frame for F3: how long the game
+    /// thread took the last input and how long it waited, the time from the
+    /// last input to this frame, and `present_us`, the presentation time.
+    fn record_input_latency(&mut self, present_us: u32) {
         let (proc_us, queue_us) = self.world.as_ref().map_or((0, 0), |w| {
             let debug = w.debug_world();
             (
@@ -511,44 +559,5 @@ impl App {
                 input_to_frame_ms,
                 presentation_time_ms: present_us as f32 / 1000.0,
             });
-        let captured = renderer.take_capture();
-        if let Some(frame) = ui_frame {
-            self.ui.recycle_output(frame);
-        }
-        if let Some(captured) = captured {
-            self.save_screenshot(captured);
-        }
-        if frame_num < 10 {
-            umicraft_core::boot_log!(
-                "redraw_render_finished",
-                "frame={frame_num}, is_err={}",
-                rendered.is_err()
-            );
-        }
-        if let Err(error) = rendered {
-            umicraft_core::boot_log!("redraw_render_error", "{error}");
-            self.exit_error = Some(error.to_string());
-            event_loop.exit();
-            return;
-        }
-        // The frame-rate cap. Calculate next frame deadline for non-blocking event-driven scheduling.
-        let cap = frame_cap(self.options.video.max_fps, self.focused);
-        if !self.options.video.vsync && cap < options::UNLIMITED_FPS {
-            let budget = Duration::from_secs_f32(1.0 / cap as f32);
-            let arrived = Instant::now();
-            if self.clock.next_frame < arrived {
-                self.clock.next_frame = arrived + budget;
-            } else {
-                self.clock.next_frame += budget;
-                if self.clock.next_frame < arrived {
-                    self.clock.next_frame = arrived;
-                }
-            }
-        } else {
-            self.clock.next_frame = Instant::now();
-        }
-        if frame_num < 10 {
-            umicraft_core::boot_log!("redraw_exit", "frame={frame_num}");
-        }
     }
 }

@@ -3,7 +3,7 @@
 //! Starting the window: the state of the app, the assets loaded in the
 //! background and the textures uploaded once they arrive.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -15,7 +15,6 @@ use umicraft_ui::menus::PanoramaTextures;
 use umicraft_ui::{debug_screen::DebugScreen, FontAtlas, Rect, Ui};
 
 use super::server_pack_control;
-use super::FRAME_HISTORY;
 use super::{
     App, Assets, ChatUi, FrameClock, FrameScratch, InputTracking, OptionsMenu, PendingPresses,
 };
@@ -29,7 +28,6 @@ use crate::dials::DialAnimator;
 use crate::entity_icons::EntityIcons;
 use crate::entity_render::EntityTextures;
 use crate::error::ClientError;
-use crate::fps_meter::FpsMeter;
 use crate::hud_cache::HudCache;
 use crate::input::InputState;
 use crate::inventory_input::InventoryInput;
@@ -37,7 +35,6 @@ use crate::item_world::{ItemLayers, WorldItems};
 use crate::map_render::MapTextures;
 use crate::menu_flow::MenuFlow;
 use crate::mesher::worker_count;
-use crate::metrics::FrameMetricsWindow;
 use crate::mods_runtime::ModsRuntime;
 use crate::options::Options;
 use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
@@ -287,17 +284,7 @@ impl App {
             anvil_field: AnvilField::default(),
             text_screens: TextScreens::default(),
             server_pack: server_pack_control::ServerPackRuntime::default(),
-            clock: FrameClock {
-                last_frame: Instant::now(),
-                next_frame: Instant::now(),
-                started: Instant::now(),
-                frame_times: VecDeque::with_capacity(FRAME_HISTORY),
-                frame_ms: 0.0,
-                fps: 0.0,
-                fps_meter: FpsMeter::new(Instant::now()),
-                metrics_window: FrameMetricsWindow::new(),
-                last_alloc_snapshot: umicraft_core::profiling::AllocSnapshot::now(),
-            },
+            clock: FrameClock::new(Instant::now()),
             exit_error: None,
         })
     }

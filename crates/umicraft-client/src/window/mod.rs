@@ -74,7 +74,6 @@ const CLI_DEFAULT_VIEW_DISTANCE: u8 = 8;
 
 /// How long the chat caret stays on, then off, in milliseconds (6 ticks).
 const CARET_BLINK_MS: u128 = 300;
-const FRAME_HISTORY: usize = 120;
 
 /// The frame rate of a window that has lost the focus (or is minimized): the game
 /// goes on, but it stops competing with the program in front for the GPU, the
