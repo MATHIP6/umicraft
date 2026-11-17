@@ -326,16 +326,9 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
         self.output.packets.push(Outgoing::Swing);
     }
 
-    /// Whether the held item only swings at a block: a sword or a potion. The arm
-    /// swings, but no dig starts, so no crack, no chips, no hit sound and no break
-    /// show for a block that is not going to break.
-    fn swings_only(&self) -> bool {
-        self.tick.digger.held.is_some_and(|stack| {
-            digging::is_sword(stack.item_id) || digging::is_potion(stack.item_id)
-        })
-    }
-
-    /// MCP `Minecraft.clickMouse`.
+    /// MCP `Minecraft.clickMouse`. Every item digs, a sword and a potion
+    /// included (`PlayerControllerMP.clickBlock` has no exception for them;
+    /// a sword cuts cobwebs fast, `ItemSword.getStrVsBlock`).
     fn click(&mut self) {
         if let Some(entity) = self.tick.entity {
             self.output.packets.extend(attack_packets(entity));
@@ -343,7 +336,6 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
         }
         self.swing();
         match self.tick.target {
-            Some(_) if self.swings_only() => {}
             Some(hit) if self.block_id(hit.block) != 0 => {
                 self.click_block(&hit);
             }
@@ -362,11 +354,7 @@ impl<W: BlockSource + ?Sized> AttackRun<'_, '_, W> {
         }
         match self.tick.target {
             Some(hit) if self.tick.held && self.block_id(hit.block) != 0 => {
-                if self.swings_only() {
-                    // A dig left over from another item stops; the arm keeps swinging.
-                    self.reset();
-                    self.swing();
-                } else if self.damage_block(&hit) {
+                if self.damage_block(&hit) {
                     self.swing();
                 }
             }
@@ -1094,20 +1082,23 @@ mod tests {
         (interaction, outputs)
     }
 
+    /// Regression: a sword or a potion only swung at a block, with no
+    /// `Player Digging`; vanilla's `PlayerControllerMP.clickBlock` digs with
+    /// any item.
     #[test]
-    fn a_sword_or_a_potion_only_swings_at_a_block_in_every_mode() {
+    fn a_sword_or_a_potion_digs_like_any_item_in_survival() {
         for item in [276, 373] {
-            for mode in [GameMode::Survival, GameMode::Creative] {
-                let (interaction, outputs) = holding(item, mode);
-                for output in &outputs {
-                    assert!(dig_status(output).is_empty(), "item {item} in {mode:?}");
-                    assert!(output.broken.is_empty());
-                    assert!(output.sounds.is_empty(), "no hit sound");
-                    assert!(output.progress.is_none(), "no cracks");
-                    assert!(output.packets.contains(&Outgoing::Swing), "the arm swings");
-                }
-                assert_eq!(interaction.digging_block(), None, "no dig, so no chips");
-            }
+            let (interaction, outputs) = holding(item, GameMode::Survival);
+            assert_eq!(
+                dig_status(&outputs[0]),
+                [DiggingStatus::StartDestroyBlock],
+                "item {item}"
+            );
+            assert!(
+                outputs[0].packets.contains(&Outgoing::Swing),
+                "the arm swings"
+            );
+            assert_eq!(interaction.digging_block(), Some(BlockPos::new(3, 4, 5)));
         }
     }
 
