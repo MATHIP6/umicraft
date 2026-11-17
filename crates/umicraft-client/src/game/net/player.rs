@@ -24,6 +24,7 @@ use umicraft_protocol::packets::play::clientbound::{
 };
 use umicraft_world::World;
 
+use super::wire::VELOCITY_UNITS;
 use crate::game::abilities::{apply_mode_rules, set_gamemode};
 use crate::game::commands::{command_of, CommandQueue};
 use crate::game::messages::RenderEvent;
@@ -31,10 +32,6 @@ use crate::game::particles::particle_filter;
 use crate::game::publish::{publish_inventory, publish_status};
 use crate::game::state::Game;
 use crate::network::ClientCommand;
-
-/// The wire units of `Entity Velocity` per block per tick
-/// (MCP `handleEntityVelocity`: `/ 8000`).
-pub(in crate::game) const VELOCITY_UNITS: f64 = 8000.0;
 
 /// The `Change Game State` reason of the elder guardian curse (MCP
 /// `NetHandlerPlayClient.handleChangeGameState`: reason 10).

@@ -3,7 +3,7 @@
 //! The packets about entities: spawns, moves, metadata, statuses and
 //! animations.
 
-use glam::{DVec3, Vec3};
+use glam::DVec3;
 use umicraft_game::combat::HitStar;
 use umicraft_game::entity::{EntityFlags, EntityId, EntityItem, EntityKind, EntityStore};
 use umicraft_protocol::packets::play::clientbound::{
@@ -15,6 +15,7 @@ use umicraft_protocol::packets::play::clientbound::{
 use umicraft_protocol::packets::play::Metadata;
 use umicraft_world::BlockPos;
 
+use super::wire;
 use crate::game::combat;
 use crate::game::particles::spawn_status_particles;
 use crate::game::state::Game;
@@ -102,13 +103,9 @@ pub(in crate::game) fn hook_local_angler(
 
 /// `Entity Teleport`: an absolute position and look.
 pub(super) fn teleport_entity(game: &mut Game, packet: &EntityTeleport) {
-    let pos = DVec3::new(
-        f64::from(packet.x) / 32.0,
-        f64::from(packet.y) / 32.0,
-        f64::from(packet.z) / 32.0,
-    );
-    let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
-    let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
+    let pos = wire::position(packet.x, packet.y, packet.z);
+    let yaw = wire::angle(packet.yaw);
+    let pitch = wire::angle(packet.pitch);
     game.entities.teleport(
         EntityId(packet.entity_id),
         pos,
@@ -140,13 +137,9 @@ pub(super) fn equip_entity(game: &mut Game, packet: &EntityEquipment) {
 
 /// `Spawn Player`: another player, with the profile of its tab list entry.
 pub(super) fn spawn_player(game: &mut Game, packet: &SpawnPlayer) {
-    let pos = DVec3::new(
-        f64::from(packet.x) / 32.0,
-        f64::from(packet.y) / 32.0,
-        f64::from(packet.z) / 32.0,
-    );
-    let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
-    let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
+    let pos = wire::position(packet.x, packet.y, packet.z);
+    let yaw = wire::angle(packet.yaw);
+    let pitch = wire::angle(packet.pitch);
     // `Spawn Player` carries an item id only: no damage, count or NBT.
     let held = (packet.held_item > 0).then_some(EntityItem {
         item_id: packet.held_item,
@@ -177,19 +170,11 @@ pub(super) fn spawn_player(game: &mut Game, packet: &SpawnPlayer) {
 
 /// `Spawn Mob`.
 pub(super) fn spawn_mob(game: &mut Game, packet: &SpawnMob) {
-    let pos = DVec3::new(
-        f64::from(packet.x) / 32.0,
-        f64::from(packet.y) / 32.0,
-        f64::from(packet.z) / 32.0,
-    );
-    let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
-    let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
-    let head_yaw = f32::from(packet.head_yaw) * 360.0 / 256.0;
-    let vel = Vec3::new(
-        f32::from(packet.velocity_x) / 8000.0,
-        f32::from(packet.velocity_y) / 8000.0,
-        f32::from(packet.velocity_z) / 8000.0,
-    );
+    let pos = wire::position(packet.x, packet.y, packet.z);
+    let yaw = wire::angle(packet.yaw);
+    let pitch = wire::angle(packet.pitch);
+    let head_yaw = wire::angle(packet.head_yaw);
+    let vel = wire::velocity(packet.velocity_x, packet.velocity_y, packet.velocity_z);
     let id = EntityId(packet.entity_id);
     game.entities.spawn_mob(
         id,
@@ -209,18 +194,10 @@ pub(super) fn spawn_mob(game: &mut Game, packet: &SpawnMob) {
 
 /// `Spawn Object`: vehicles, projectiles, items and the like.
 pub(super) fn spawn_object(game: &mut Game, packet: &SpawnObject) {
-    let pos = DVec3::new(
-        f64::from(packet.x) / 32.0,
-        f64::from(packet.y) / 32.0,
-        f64::from(packet.z) / 32.0,
-    );
-    let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
-    let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
-    let vel = Vec3::new(
-        f32::from(packet.velocity_x) / 8000.0,
-        f32::from(packet.velocity_y) / 8000.0,
-        f32::from(packet.velocity_z) / 8000.0,
-    );
+    let pos = wire::position(packet.x, packet.y, packet.z);
+    let pitch = wire::angle(packet.pitch);
+    let yaw = wire::angle(packet.yaw);
+    let vel = wire::velocity(packet.velocity_x, packet.velocity_y, packet.velocity_z);
     game.entities.spawn_object(
         EntityId(packet.entity_id),
         packet.object_type,
@@ -255,22 +232,14 @@ pub(super) fn collect_item(game: &mut Game, packet: &CollectItem) {
 /// MCP `handleSpawnGlobalEntity`: type 1 is a lightning bolt, the only
 /// global entity of 1.8.
 pub(super) fn spawn_lightning(game: &mut Game, packet: &SpawnGlobalEntity) {
-    let pos = DVec3::new(
-        f64::from(packet.x) / 32.0,
-        f64::from(packet.y) / 32.0,
-        f64::from(packet.z) / 32.0,
-    );
+    let pos = wire::position(packet.x, packet.y, packet.z);
     game.entities
         .spawn_lightning(EntityId(packet.entity_id), pos);
 }
 
 /// `Spawn Experience Orb`.
 pub(super) fn spawn_xp_orb(game: &mut Game, packet: &SpawnXpOrb) {
-    let pos = DVec3::new(
-        f64::from(packet.x) / 32.0,
-        f64::from(packet.y) / 32.0,
-        f64::from(packet.z) / 32.0,
-    );
+    let pos = wire::position(packet.x, packet.y, packet.z);
     game.entities
         .spawn_xp_orb(EntityId(packet.entity_id), pos, packet.count);
 }
@@ -299,32 +268,24 @@ pub(super) fn destroy_entities(game: &mut Game, packet: &DestroyEntities) {
 
 /// `Entity Relative Move`.
 pub(super) fn move_entity(game: &mut Game, packet: &EntityRelativeMove) {
-    let delta = DVec3::new(
-        f64::from(packet.dx) / 32.0,
-        f64::from(packet.dy) / 32.0,
-        f64::from(packet.dz) / 32.0,
-    );
+    let delta = wire::position(packet.dx, packet.dy, packet.dz);
     game.entities
         .move_relative(EntityId(packet.entity_id), delta, packet.on_ground);
 }
 
 /// `Entity Look`.
 pub(super) fn turn_entity(game: &mut Game, packet: &EntityLook) {
-    let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
-    let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
+    let yaw = wire::angle(packet.yaw);
+    let pitch = wire::angle(packet.pitch);
     game.entities
         .look(EntityId(packet.entity_id), yaw, pitch, packet.on_ground);
 }
 
 /// `Entity Look And Relative Move`.
 pub(super) fn move_and_turn_entity(game: &mut Game, packet: &EntityLookMove) {
-    let delta = DVec3::new(
-        f64::from(packet.dx) / 32.0,
-        f64::from(packet.dy) / 32.0,
-        f64::from(packet.dz) / 32.0,
-    );
-    let yaw = f32::from(packet.yaw) * 360.0 / 256.0;
-    let pitch = f32::from(packet.pitch) * 360.0 / 256.0;
+    let delta = wire::position(packet.dx, packet.dy, packet.dz);
+    let yaw = wire::angle(packet.yaw);
+    let pitch = wire::angle(packet.pitch);
     game.entities.look_move(
         EntityId(packet.entity_id),
         delta,
@@ -336,18 +297,14 @@ pub(super) fn move_and_turn_entity(game: &mut Game, packet: &EntityLookMove) {
 
 /// `Entity Head Look`.
 pub(super) fn turn_entity_head(game: &mut Game, packet: &EntityHeadLook) {
-    let head_yaw = f32::from(packet.head_yaw) * 360.0 / 256.0;
+    let head_yaw = wire::angle(packet.head_yaw);
     game.entities
         .set_head_yaw(EntityId(packet.entity_id), head_yaw);
 }
 
 /// `Entity Velocity` of another entity.
 pub(super) fn set_entity_velocity(game: &mut Game, packet: &EntityVelocity) {
-    let vel = Vec3::new(
-        f32::from(packet.velocity_x) / 8000.0,
-        f32::from(packet.velocity_y) / 8000.0,
-        f32::from(packet.velocity_z) / 8000.0,
-    );
+    let vel = wire::velocity(packet.velocity_x, packet.velocity_y, packet.velocity_z);
     game.entities.set_velocity(EntityId(packet.entity_id), vel);
 }
 

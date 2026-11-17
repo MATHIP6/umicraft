@@ -27,6 +27,7 @@ pub(super) mod entities;
 pub(super) mod inventory;
 pub(super) mod player;
 pub(super) mod social;
+mod wire;
 pub(super) mod world;
 
 /// The name tag text of an entity under the team rules, if it has one.
