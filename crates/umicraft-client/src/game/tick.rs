@@ -5,7 +5,8 @@
 use std::sync::mpsc::SyncSender;
 use std::time::Instant;
 
-use umicraft_game::entity::EntityId;
+use umicraft_game::collision::{boat_box, WithEntities};
+use umicraft_game::entity::{EntityId, EntityKind};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::input::RawInput;
 use umicraft_game::item_use::drop_item;
@@ -62,6 +63,20 @@ fn tick_overlays(game: &mut Game) {
 }
 
 /// Cycles the perspective once per `F5` press since the last tick.
+/// Gathers the collision boxes of the boats (MCP
+/// `World.getCollidingBoundingBoxes` adds `EntityBoat.getCollisionBoundingBox`;
+/// no other entity is solid for a player).
+pub(super) fn gather_solid_entities(game: &mut Game) {
+    game.solid_entities.clear();
+    game.solid_entities.extend(
+        game.entities
+            .entities()
+            .values()
+            .filter(|entity| entity.kind == EntityKind::Boat)
+            .map(|boat| boat_box(boat.position)),
+    );
+}
+
 pub(super) fn apply_perspective_presses(game: &mut Game) {
     for _ in 0..std::mem::take(&mut game.controls.perspective_presses) {
         game.perspective = game.perspective.next();
@@ -166,10 +181,17 @@ pub(super) fn tick(
     let seat = game
         .vehicle
         .and_then(|vehicle| game.entities.rider_feet(EntityId(vehicle)));
+    gather_solid_entities(game);
     if let (Some(state), Some(world)) = (game.state.as_mut(), game.world.as_ref()) {
         match seat {
             Some(feet) => state.ride(feet),
-            None => state.tick(&intent, world),
+            None => state.tick(
+                &intent,
+                &WithEntities {
+                    world,
+                    boxes: &game.solid_entities,
+                },
+            ),
         }
     }
     if let (Some(run), Some(state)) = (game.e1.as_mut(), game.state.as_ref()) {

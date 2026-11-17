@@ -86,6 +86,64 @@ impl<S: BlockSource + ?Sized> BlockSource for Bordered<'_, S> {
     fn is_column_loaded(&self, x: i32, z: i32) -> bool {
         self.world.is_column_loaded(x, z)
     }
+
+    fn for_each_entity_box(&self, area: &Aabb, f: &mut dyn FnMut(&Aabb)) {
+        self.world.for_each_entity_box(area, f);
+    }
+}
+
+/// A block source plus the collision boxes of the solid entities around
+/// the player (see [`boat_box`]).
+pub struct WithEntities<'a, S: BlockSource + ?Sized> {
+    /// The blocks.
+    pub world: &'a S,
+    /// The entity boxes, in world space.
+    pub boxes: &'a [Aabb],
+}
+
+impl<S: BlockSource + ?Sized> BlockSource for WithEntities<'_, S> {
+    fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+        self.world.block(x, y, z)
+    }
+
+    fn is_column_loaded(&self, x: i32, z: i32) -> bool {
+        self.world.is_column_loaded(x, z)
+    }
+
+    fn for_each_entity_box(&self, area: &Aabb, f: &mut dyn FnMut(&Aabb)) {
+        self.world.for_each_entity_box(area, f);
+        for obstacle in self
+            .boxes
+            .iter()
+            .filter(|obstacle| obstacle.intersects(area))
+        {
+            f(obstacle);
+        }
+    }
+}
+
+/// The width of a boat (MCP `EntityBoat`: `setSize(1.5F, 0.6F)`).
+const BOAT_WIDTH: f32 = 1.5;
+
+/// The height of a boat.
+const BOAT_HEIGHT: f32 = 0.6;
+
+/// The collision box of a boat whose feet are at `position`
+/// (MCP `EntityBoat.getCollisionBoundingBox` is its bounding box, built by
+/// `Entity.setPosition` from the `float` size). Boats are the only entities
+/// a player collides with: a minecart's `getCollisionBoundingBox` is `null`,
+/// and so is the player's own `getCollisionBox`.
+#[must_use]
+pub fn boat_box(position: DVec3) -> Aabb {
+    let half = f64::from(BOAT_WIDTH / 2.0);
+    Aabb::new(
+        DVec3::new(position.x - half, position.y, position.z - half),
+        DVec3::new(
+            position.x + half,
+            position.y + f64::from(BOAT_HEIGHT),
+            position.z + half,
+        ),
+    )
 }
 
 /// The highest world coordinate that holds blocks in a 1.8 world.
@@ -423,6 +481,13 @@ fn for_each_collision_box<S: BlockSource + ?Sized>(
             }
         }
     }
+    // The solid entities come after the blocks (MCP
+    // `World.getCollidingBoundingBoxes`), kept when they meet the mask.
+    world.for_each_entity_box(mask, &mut |obstacle| {
+        if obstacle.intersects(mask) {
+            f(obstacle);
+        }
+    });
 }
 
 #[cfg(test)]

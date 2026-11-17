@@ -216,8 +216,10 @@ pub const VERTICAL_DAMPING: f64 = 0.980_000_019_073_486_3;
 ///   and the horizontal move is no longer blocked by the ledge.
 ///
 /// The two therefore end up at the same place, and the client must keep the
-/// 0.6 to be able to walk up a slab at all.
-pub const STEP_HEIGHT: f64 = 0.6;
+/// 0.6 to be able to walk up a slab at all. It is the `float` 0.6F widened
+/// (`0.6000000238418579`): a ledge exactly 0.6F high, such as a boat, can be
+/// stepped onto.
+pub const STEP_HEIGHT: f64 = 0.6_f32 as f64;
 
 /// Motions smaller than this are dropped (MCP `EntityLivingBase.java:1963`).
 pub const MOTION_EPSILON: f64 = 0.005;
@@ -1989,6 +1991,38 @@ mod tests {
             }
         }
         TestBlocks::with(&blocks)
+    }
+
+    /// Regression: boats were not solid for the local player (MCP
+    /// `World.getCollidingBoundingBoxes` adds `EntityBoat.getCollisionBoundingBox`).
+    #[test]
+    fn a_player_lands_on_a_boat_and_steps_onto_it() {
+        let world = flat_world();
+        let boats = [collision::boat_box(DVec3::new(0.5, 1.0, 0.5))];
+        let with_boats = collision::WithEntities {
+            world: &world,
+            boxes: &boats,
+        };
+        let mut player = Player::new(DVec3::new(0.5, 3.0, 0.5));
+        for _ in 0..20 {
+            step(&mut player, &InputIntent::still(0.0), &with_boats);
+        }
+        assert!(player.on_ground);
+        assert_eq!(
+            player.position.y,
+            1.0 + f64::from(0.6_f32),
+            "on the boat's top"
+        );
+
+        // From the side the boat is stepped onto: it is 0.6F high, exactly
+        // the step height `EntityLivingBase` sets (`stepHeight = 0.6F`).
+        let mut walker = Player::new(DVec3::new(0.5, 1.0, -2.0));
+        let mut highest = walker.position.y;
+        for _ in 0..40 {
+            step(&mut walker, &InputIntent::walking(0.0), &with_boats);
+            highest = highest.max(walker.position.y);
+        }
+        assert_eq!(highest, 1.0 + f64::from(0.6_f32), "stepped onto the boat");
     }
 
     /// A border whose east wall is at x = 10.

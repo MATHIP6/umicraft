@@ -46,6 +46,11 @@ pub trait BlockSource {
     fn is_column_loaded(&self, _x: i32, _z: i32) -> bool {
         true
     }
+
+    /// Hands `f` the collision boxes of the solid entities (boats) near
+    /// `area`, in world space. MCP `World.getCollidingBoundingBoxes` adds
+    /// them after the blocks; test sources have none.
+    fn for_each_entity_box(&self, _area: &Aabb, _f: &mut dyn FnMut(&Aabb)) {}
 }
 
 impl BlockSource for World {
@@ -66,6 +71,10 @@ impl<T: BlockSource + ?Sized> BlockSource for &T {
 
     fn is_column_loaded(&self, x: i32, z: i32) -> bool {
         (**self).is_column_loaded(x, z)
+    }
+
+    fn for_each_entity_box(&self, area: &Aabb, f: &mut dyn FnMut(&Aabb)) {
+        (**self).for_each_entity_box(area, f);
     }
 }
 

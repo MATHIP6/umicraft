@@ -234,3 +234,34 @@ fn a_riding_jump_leaves_ahead_of_the_report_of_its_tick_only() {
     queue.push_before_movement(jump(), 0);
     assert_eq!(queue.ordered, [action, jump(), report()]);
 }
+
+#[test]
+fn a_boat_holds_the_player_up() {
+    // Regression: boats were not solid for the local player (MCP
+    // `World.getCollidingBoundingBoxes` adds `EntityBoat.getCollisionBoundingBox`).
+    let mut game = placed_game();
+    game.state = Some(GameState::new(DVec3::new(3.5, 66.0, 3.5)));
+    game.entities.spawn_object(
+        EntityId(9),
+        1,
+        DVec3::new(3.5, 64.0, 3.5),
+        0.0,
+        0.0,
+        Vec3::ZERO,
+        0,
+    );
+    let mut queue = CommandQueue::default();
+    let (frames, _) = mpsc::sync_channel(64);
+    let (chunks, _) = mpsc::sync_channel(64);
+    for _ in 0..30 {
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        queue.ordered.clear();
+    }
+    let player = game.state.as_ref().expect("placed").player();
+    assert!(player.on_ground);
+    assert_eq!(
+        player.position.y,
+        64.0 + f64::from(0.6_f32),
+        "standing on the boat"
+    );
+}

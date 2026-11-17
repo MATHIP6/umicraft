@@ -129,6 +129,9 @@ pub(super) struct Game {
     pub(super) hud_dirty: bool,
     /// The bursts of critical stars still going (`EntityParticleEmitter`).
     pub(super) hit_emitters: Vec<umicraft_game::combat::HitEmitter>,
+    /// The collision boxes of the boats, gathered before each tick; the
+    /// buffer is reused so the tick does not allocate.
+    pub(super) solid_entities: Vec<umicraft_game::collision::Aabb>,
     /// The status rows, bars and held-item name of the HUD.
     pub(super) hud_view: crate::hud_view::HudTracker,
     /// Entities in the world (mobs, players, objects).
@@ -191,6 +194,7 @@ impl Game {
             status_data: GameStatus::default(),
             hud_dirty: true,
             hit_emitters: Vec::new(),
+            solid_entities: Vec::new(),
             hud_view: crate::hud_view::HudTracker::default(),
             entities: EntityStore::new(),
             windows: WindowManager::new(),
