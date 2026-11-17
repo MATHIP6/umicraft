@@ -30,7 +30,9 @@ use umicraft_ui::game_menu::{GameMenu, GameMenuLabels};
 use umicraft_ui::menus::{
     stats_tab_rect, ConnectStage, MenuArt, PanoramaTextures, PanoramaView, StatsTab, TitleStyle,
 };
-use umicraft_ui::{DrawList, FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
+use umicraft_ui::{
+    gui_scale, DrawList, FontAtlas, InputEvent, PointerButton, Rect, ThemeId, Ui, UiInput,
+};
 use winit::keyboard::KeyCode;
 
 use crate::args::{Args, HUD_VIEWS};
@@ -49,7 +51,8 @@ use crate::options_screen::{Catalog, OptionsScreen};
 use crate::screen::Screen;
 use crate::screenshot::write_png;
 use crate::servers::ServerBook;
-use crate::ui_font::{self, FontSource};
+use crate::theme_font::{self, FontChoice};
+use crate::ui_font::{self, FontSource, LoadedFont};
 
 /// The name of the scripted player: a member of the red team.
 const PLAYER: &str = "Steve";
@@ -238,6 +241,31 @@ fn click(rect: Rect) -> UiInput {
     ])
 }
 
+/// The theme a demo view shows: the one in its name, vanilla otherwise.
+fn view_theme(view: &str) -> ThemeId {
+    match view {
+        "options-ember" => ThemeId::Ember,
+        "options-amethyst" => ThemeId::Amethyst,
+        _ => ThemeId::Vanilla,
+    }
+}
+
+/// `font`, or the HD font of the view's theme when it has one.
+fn themed_font(view: &str, font: LoadedFont, height: u32) -> LoadedFont {
+    let theme = view_theme(view).theme();
+    let scale = gui_scale(height * 16 / 9, height);
+    match FontChoice::for_skin(theme.font, scale) {
+        FontChoice::Game => font,
+        FontChoice::Hd(cell) => match theme_font::hd_atlas(cell) {
+            Ok(atlas) => LoadedFont { atlas, ..font },
+            Err(error) => {
+                tracing::warn!(%error, "theme font unavailable; keeping the game font");
+                font
+            }
+        },
+    }
+}
+
 /// Runs the options screen through `inputs` (one UI frame each), then returns
 /// the draw list of a last idle frame.
 fn run_options(
@@ -252,6 +280,7 @@ fn run_options(
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     let mut ui = Ui::new(viewport);
     ui.set_widgets_sheet(widgets_sheet);
+    ui.set_theme(options.menu.theme().theme());
     ui.set_menu_art(art);
     let mut screen = OptionsScreen::new();
     if let Some(catalog) = catalog {
@@ -443,8 +472,9 @@ fn build(
                 scene: output.draw_list,
             }
         }
-        "options" => {
+        "options" | "options-ember" | "options-amethyst" => {
             let mut options = Options::default();
+            options.menu.theme = view_theme(view).into();
             options.video.fov = 95.0;
             options.video.render_distance = 12;
             let (screen, draw_list) = run_options(
@@ -614,7 +644,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     } else {
         HUD_VIEWS[0]
     };
-    let font = ui_font::load();
+    let font = themed_font(view, ui_font::load(), args.height);
     let gui_atlas = crate::official::load_gui_atlas();
     // The server list shows an icon of its own, so its atlas grows by one.
     let gui_atlas = match view {
