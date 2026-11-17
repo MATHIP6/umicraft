@@ -82,7 +82,7 @@ pub(super) fn tick(
 ) {
     umicraft_core::profile_scope!("game tick");
     let tick_start = Instant::now();
-    game.metrics.last_net_micros = std::mem::take(&mut game.metrics.net_micros_accum);
+    game.metrics.start_tick();
     game.status_data.ticks += 1;
     apply_perspective_presses(game);
     // MCP `Minecraft.runTick`: `updateController` syncs the slot, the hotbar
@@ -254,26 +254,11 @@ pub(super) fn tick(
         }
     }
     if game.status_data.ticks.is_multiple_of(STATUS_PERIOD) {
-        let now = Instant::now();
-        let elapsed = now
-            .duration_since(game.metrics.last_tps_instant)
-            .as_secs_f32();
-        if elapsed > 0.0 {
-            let ticks_delta = game
-                .status_data
-                .ticks
-                .saturating_sub(game.metrics.last_tps_ticks);
-            game.metrics.real_tps = ticks_delta as f32 / elapsed;
-            game.metrics.last_tps_instant = now;
-            game.metrics.last_tps_ticks = game.status_data.ticks;
-        }
+        game.metrics
+            .update_tps(game.status_data.ticks, Instant::now());
         publish_status(game, frames);
     }
-    let tick_elapsed = tick_start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
-    game.metrics.last_tick_micros = tick_elapsed;
-    if tick_elapsed > game.metrics.max_tick_micros {
-        game.metrics.max_tick_micros = tick_elapsed;
-    }
+    game.metrics.record_tick_time(tick_start.elapsed());
 }
 
 /// Advances the moving piston blocks and lets them push the local player.
