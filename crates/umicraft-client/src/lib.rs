@@ -71,6 +71,7 @@ mod mesh_queue;
 pub mod mesh_settings;
 pub mod mesher;
 pub mod metrics;
+pub mod mod_icons;
 pub mod model_resources;
 pub mod mods_facts;
 pub mod mods_hud_view;

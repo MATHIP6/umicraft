@@ -10,6 +10,7 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::menus::ModsView;
 use umicraft_ui::FontAtlas;
 
+use crate::mod_icons::ModIcons;
 use crate::{hud_editor_view, mods_view};
 
 /// The mods menu of the demo: every built-in mod listed, three HUD mods on at
@@ -43,7 +44,7 @@ pub fn view(lang: &Lang, font: &FontAtlas, display: (u32, u32)) -> ModsView {
         ..ModContext::default()
     });
     ModsView {
-        hud: hud_editor_view::build(&registry, lang, font, display),
+        hud: hud_editor_view::build(&registry, lang, font, display, &ModIcons::default()),
         ..mods_view::build(&registry, lang)
     }
 }

@@ -21,7 +21,9 @@ use umicraft_ui::FontAtlas;
 use super::App;
 use crate::game::GameEvent;
 use crate::hud_editor_view;
+use crate::item_icons::ItemView;
 use crate::menu_flow::MenuFlow;
+use crate::mod_icons::ModIcons;
 use crate::mods_hud_view::mod_widget_views;
 use crate::mods_runtime::{FrameInput, ModsRuntime};
 use crate::mods_view;
@@ -44,11 +46,12 @@ pub(super) fn hud_widgets(
     mods: &ModsRuntime,
     font: &FontAtlas,
     display: (u32, u32),
+    icons: &ModIcons<'_>,
 ) -> Vec<ModWidgetView> {
     if screen == Screen::Mods {
         Vec::new()
     } else {
-        mod_widget_views(mods.hud_widgets(), font, display)
+        mod_widget_views(mods.hud_widgets(), font, display, icons)
     }
 }
 
@@ -59,9 +62,10 @@ pub(super) fn view_for(
     screen: Screen,
     (mods, lang): (&ModsRuntime, &Lang),
     (font, display): (&FontAtlas, (u32, u32)),
+    icons: &ModIcons<'_>,
 ) -> ModsView {
     if screen == Screen::Mods {
-        let mut hud = hud_editor_view::build(mods.registry(), lang, font, display);
+        let mut hud = hud_editor_view::build(mods.registry(), lang, font, display, icons);
         hud.history = mods.history_state();
         ModsView {
             hud,
@@ -73,6 +77,21 @@ pub(super) fn view_for(
 }
 
 impl App {
+    /// What the pictures of the mod widgets are made from this frame: the
+    /// inventory of the session, the item resources and the GUI textures.
+    pub(super) fn mod_icons(&self) -> ModIcons<'_> {
+        let world = self.world.as_ref();
+        ModIcons {
+            slots: world.map(|world| &world.window_view().player_slots[..]),
+            selected: world.map_or(0, |world| world.hud().selected_slot),
+            items: Some(ItemView::new(
+                self.assets.items.as_deref(),
+                self.dials.frames(),
+            )),
+            gui_atlas: self.assets.gui_atlas.as_ref(),
+        }
+    }
+
     /// The key bound to [`Action::Mods`] (right Shift by default, the left one
     /// stays the sneak key) opens the mods menu over a game and closes it
     /// again. It is taken before the other key bindings so it triggers no
@@ -214,8 +233,10 @@ mod tests {
             ..FrameInput::default()
         });
         let font = FontAtlas::fallback();
-        let on_hud = hud_widgets(Screen::None, &mods, &font, (800, 600));
+        let on_hud = hud_widgets(Screen::None, &mods, &font, (800, 600), &ModIcons::default());
         assert!(!on_hud.is_empty(), "the HUD draws it in the game");
-        assert!(hud_widgets(Screen::Mods, &mods, &font, (800, 600)).is_empty());
+        assert!(
+            hud_widgets(Screen::Mods, &mods, &font, (800, 600), &ModIcons::default()).is_empty()
+        );
     }
 }

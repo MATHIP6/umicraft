@@ -21,6 +21,7 @@ use umicraft_ui::menus::{
 };
 use umicraft_ui::{FontAtlas, Rect};
 
+use crate::mod_icons::ModIcons;
 use crate::mods_hud_view::mod_widget_views;
 
 /// The colour of the label a widget shows while its mod has nothing to say yet.
@@ -36,6 +37,7 @@ pub fn build(
     lang: &Lang,
     font: &FontAtlas,
     display: (u32, u32),
+    icons: &ModIcons<'_>,
 ) -> HudEditorView {
     let names: Vec<(&str, String)> = registry
         .mods()
@@ -55,7 +57,7 @@ pub fn build(
     let placeholders: Vec<Option<HudContent>> = registry
         .hud_widgets()
         .map(|widget| {
-            widget.content.lines().is_empty().then(|| {
+            (widget.content.lines().is_empty() && widget.content.cells().is_empty()).then(|| {
                 let mut content = HudContent::default();
                 content
                     .line(PLACEHOLDER_COLOR)
@@ -71,7 +73,7 @@ pub fn build(
             content: placeholder.as_ref().unwrap_or(widget.content),
             ..widget
         });
-    let views = mod_widget_views(widgets, font, display);
+    let views = mod_widget_views(widgets, font, display, icons);
     let scale = gui_scale(display.0, display.1) as f32;
     HudEditorView {
         widgets: registry

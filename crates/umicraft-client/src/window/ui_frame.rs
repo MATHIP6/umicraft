@@ -238,7 +238,13 @@ impl App {
             (width, height),
             (atlas, sheets),
         );
-        let widgets = mods_menu::hud_widgets(self.screen(), &self.mods, atlas, (width, height));
+        let widgets = mods_menu::hud_widgets(
+            self.screen(),
+            &self.mods,
+            atlas,
+            (width, height),
+            &self.mod_icons(),
+        );
         umicraft_ui::mod_widget::draw_mod_widgets(
             self.ui.draw(),
             &widgets,
@@ -367,8 +373,12 @@ impl App {
             | Screen::Achievements
             | Screen::Mods => {
                 let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
-                let mods_view =
-                    mods_menu::view_for(screen, (&self.mods, &self.lang), (atlas, (width, height)));
+                let mods_view = mods_menu::view_for(
+                    screen,
+                    (&self.mods, &self.lang),
+                    (atlas, (width, height)),
+                    &self.mod_icons(),
+                );
                 let inventory_key = self.options.keys.get(Action::Inventory).label(&self.lang);
                 let context = MenuContext {
                     stats_revision: self.world.as_ref().map_or(0, WorldView::stats_revision),

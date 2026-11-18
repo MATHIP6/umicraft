@@ -17,7 +17,13 @@ fn lang() -> Lang {
 }
 
 fn view_of(registry: &ModRegistry) -> HudEditorView {
-    build(registry, &lang(), &FontAtlas::fallback(), DISPLAY)
+    build(
+        registry,
+        &lang(),
+        &FontAtlas::fallback(),
+        DISPLAY,
+        &ModIcons::default(),
+    )
 }
 
 fn placement(registry: &ModRegistry, id: &str) -> HudPlacement {
@@ -155,8 +161,12 @@ fn every_hud_mod_is_listed_on_or_off_with_its_lock() {
             ("coordinates", false, false),
             ("cps", false, true),
             ("ping", false, false),
+            ("keystrokes", false, false),
+            ("combo_counter", false, false),
+            ("armor_status", false, false),
+            ("potion_effects", false, false),
         ],
-        "the four mods that have a widget, and no other"
+        "the eight mods that have a widget, and no other"
     );
     assert!(view.is_locked("cps") && !view.is_locked("fps"));
     assert!(!view.has_custom);
@@ -180,7 +190,13 @@ fn the_widgets_keep_their_side_on_other_window_shapes() {
         (2560, 1080),
         (640, 480),
     ] {
-        let view = build(&registry, &lang(), &FontAtlas::fallback(), display);
+        let view = build(
+            &registry,
+            &lang(),
+            &FontAtlas::fallback(),
+            display,
+            &ModIcons::default(),
+        );
         let widget = &view.widgets[0].widget;
         let size = umicraft_ui::mod_widget::measure(
             &FontAtlas::fallback(),

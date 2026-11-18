@@ -139,3 +139,6 @@ feature must not grow them.
   `coordinates` are not localized (the mods do not see the language). `ping_ms` is
   `None` until the client measures the ping, and `sprinting` is the key state, not the
   player's.
+- **Amended: keystrokes, combo counter, armor status and potion effects** are built-in HUD mods
+  with boxes, pictures and a detail line; see ADR-0080. This lifts the "known limit" that
+  `keystrokes` needed the key state in `ModContext`.
