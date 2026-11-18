@@ -36,6 +36,11 @@ const SETTINGS: &[SettingDef] = &[
         label_key: "umicraft.mods.legacy_animations.sneak_camera",
         kind: SettingKind::Toggle { default: true },
     },
+    SettingDef {
+        key: "item_position",
+        label_key: "umicraft.mods.legacy_animations.item_position",
+        kind: SettingKind::Toggle { default: true },
+    },
 ];
 
 /// The 1.7 animations mod.
@@ -63,7 +68,7 @@ mod tests {
         assert!(!m.meta().default_enabled, "the 1.8 look is the default");
         assert!(m.hud().is_none(), "it draws no widget");
         let settings = ModSettings::defaults(m.settings());
-        for key in ["block_hit", "equip", "sneak_camera"] {
+        for key in ["block_hit", "equip", "sneak_camera", "item_position"] {
             assert!(settings.bool(key), "{key}");
         }
     }

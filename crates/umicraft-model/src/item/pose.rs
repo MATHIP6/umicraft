@@ -71,6 +71,39 @@ pub fn held_pose(model: &ItemModel, context: DisplayContext) -> Mat4 {
     Mat4::from_scale(Vec3::splat(2.0)) * model.transform(context).matrix() * centre_model()
 }
 
+/// The depth of the front face of a flat sprite in model space
+/// (`ItemModelGenerator`: the sprite spans `7.5..8.5` pixels).
+const SPRITE_FRONT: f32 = 7.5 / 16.0;
+
+/// Model space to the frame of a flat sprite held in the first-person hand as
+/// the 1.7 client drew it (ADR-0079), in place of [`held_pose`].
+///
+/// 1.7.10 `ItemRenderer.renderItem` has no item models: its 2D branch
+/// (lines 104-113) places every sprite with the same calls, `translate(0,
+/// -0.3, 0)`, `scale(1.5)`, `rotate(50, Y)`, `rotate(335, Z)`,
+/// `translate(-0.9375, -0.0625, 0)`, then `renderItemIn2D` draws a unit
+/// square whose `x` runs against `u` and whose depth goes from 0 to
+/// -1/16. The first factor below takes the baked sprite to that square: a
+/// half turn about the vertical axis, which mirrors `u` and keeps the faces
+/// facing out. `turned` is `Item.shouldRotateAroundWhenRendering` (the
+/// fishing rod and the carrot on a stick), a half turn about Y first.
+#[must_use]
+pub fn legacy_flat_held_pose(turned: bool) -> Mat4 {
+    let turn = if turned {
+        Mat4::from_rotation_y(std::f32::consts::PI)
+    } else {
+        Mat4::IDENTITY
+    };
+    let to_square = Mat4::from_translation(Vec3::new(1.0, 0.0, SPRITE_FRONT))
+        * Mat4::from_scale(Vec3::new(-1.0, 1.0, -1.0));
+    turn * Mat4::from_translation(Vec3::new(0.0, -0.3, 0.0))
+        * Mat4::from_scale(Vec3::splat(1.5))
+        * Mat4::from_rotation_y(50.0_f32.to_radians())
+        * Mat4::from_rotation_z(335.0_f32.to_radians())
+        * Mat4::from_translation(Vec3::new(-0.9375, -0.0625, 0.0))
+        * to_square
+}
+
 /// Model space to the frame of a dropped item (`RenderEntityItem`).
 ///
 /// Lit blocks are halved first (the extra `scale(0.5)` of the 3D branch);
@@ -99,6 +132,31 @@ mod tests {
             gui_3d,
             particle: None,
         }
+    }
+
+    #[test]
+    fn the_1_7_sprite_sits_where_1_7_drew_its_square() {
+        let pose = legacy_flat_held_pose(false);
+        // The bottom left of the picture (u 0, v 1) is the corner `x = 1`
+        // of the 1.7 square, the top right (u 1, v 0) its corner `y = 1`.
+        let square = |x: f32, y: f32| {
+            {
+                Mat4::from_translation(Vec3::new(0.0, -0.3, 0.0))
+                    * Mat4::from_scale(Vec3::splat(1.5))
+                    * Mat4::from_rotation_y(50.0_f32.to_radians())
+                    * Mat4::from_rotation_z(335.0_f32.to_radians())
+                    * Mat4::from_translation(Vec3::new(-0.9375, -0.0625, 0.0))
+            }
+            .transform_point3(Vec3::new(x, y, 0.0))
+        };
+        let front = |u: f32, v: f32| pose.transform_point3(Vec3::new(u, 1.0 - v, SPRITE_FRONT));
+        assert!((front(0.0, 1.0) - square(1.0, 0.0)).length() < 1e-5);
+        assert!((front(1.0, 0.0) - square(0.0, 1.0)).length() < 1e-5);
+        // A pure placement: no mirror, so the faces keep their winding.
+        assert!(pose.determinant() > 0.0);
+        let turned = legacy_flat_held_pose(true).transform_point3(Vec3::ONE);
+        let plain = pose.transform_point3(Vec3::ONE);
+        assert!((turned - Vec3::new(-plain.x, plain.y, -plain.z)).length() < 1e-5);
     }
 
     #[test]

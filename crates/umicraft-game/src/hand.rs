@@ -174,6 +174,7 @@ impl HandState {
             arm_yaw: self.arm_yaw,
             item_use: None,
             swing_while_using: self.legacy.block_hit,
+            legacy_item_position: self.legacy.item_position,
             ..HandPose::default()
         }
         .swayed_by(self.view_yaw, self.view_pitch)
@@ -217,6 +218,11 @@ pub struct HandPose {
     /// swing rotations whatever the item does, 1.8.9 passes a swing of 0
     /// while the item is in use.
     pub swing_while_using: bool,
+    /// Whether a flat item is drawn where 1.7 drew it (ADR-0079): the client
+    /// then places it with `umicraft_model::item::pose::legacy_flat_held_pose`
+    /// instead of the model's first-person pose, and a drawn bow stretches in
+    /// that frame ([`bow_draw_1_7`]).
+    pub legacy_item_position: bool,
 }
 
 /// An angle in degrees brought to `-180..180`.
@@ -288,6 +294,7 @@ impl HandPose {
             },
             fishing: other.fishing,
             swing_while_using: other.swing_while_using,
+            legacy_item_position: other.legacy_item_position,
         }
     }
 
@@ -329,7 +336,13 @@ impl HandPose {
                 count,
                 ..
             }) => {
-                self.placement(use_swing) * bow_draw(UseAction::Bow.max_duration() as f32 - count)
+                let ticks = UseAction::Bow.max_duration() as f32 - count;
+                let draw = if self.legacy_item_position {
+                    bow_draw_1_7(ticks)
+                } else {
+                    bow_draw(ticks)
+                };
+                self.placement(use_swing) * draw
             }
         }
     }
@@ -437,9 +450,19 @@ fn block_pose() -> Mat4 {
 /// MCP `ItemRenderer.func_178098_a`: the pose of a bow drawn for
 /// `ticks` (`maxUseDuration - (itemInUseCount - partialTicks + 1)`).
 fn bow_draw(ticks: f32) -> Mat4 {
+    let pull = bow_pull(ticks);
+    bow_aim(ticks, pull) * Mat4::from_scale(Vec3::new(1.0, 1.0, 1.0 + pull * 0.2))
+}
+
+/// How far a bow drawn for `ticks` is pulled, `0` to `1`: the pull eases in
+/// quadratically and stops at a full draw.
+fn bow_pull(ticks: f32) -> f32 {
     let seconds = ticks / 20.0;
-    // The pull eases in quadratically and stops at a full draw.
-    let pull = ((seconds * seconds + seconds * 2.0) / 3.0).min(1.0);
+    ((seconds * seconds + seconds * 2.0) / 3.0).min(1.0)
+}
+
+/// The turn, shake and pull back of a drawn bow, shared by 1.7 and 1.8.
+fn bow_aim(ticks: f32, pull: f32) -> Mat4 {
     let shake = if pull > 0.1 {
         ((ticks - 0.1) * 1.3).sin() * (pull - 0.1) * 0.01
     } else {
@@ -451,7 +474,20 @@ fn bow_draw(ticks: f32) -> Mat4 {
         * translate(-0.9, 0.2, 0.0)
         * translate(0.0, shake, 0.0)
         * translate(0.0, 0.0, pull * 0.1)
+}
+
+/// The pose of a bow drawn for `ticks` as 1.7.10 `ItemRenderer` built it
+/// (lines 435-461): the turn and the pull of [`bow_draw`], then the stretch
+/// along the depth of the 2D sprite, which sits turned by `renderItem`'s
+/// `rotate(50, Y)` and `rotate(335, Z)` and raised by 0.5.
+fn bow_draw_1_7(ticks: f32) -> Mat4 {
+    let pull = bow_pull(ticks);
+    let into_sprite = rotate(-335.0, Vec3::Z) * rotate(-50.0, Vec3::Y) * translate(0.0, 0.5, 0.0);
+    let out_of_sprite = translate(0.0, -0.5, 0.0) * rotate(50.0, Vec3::Y) * rotate(335.0, Vec3::Z);
+    bow_aim(ticks, pull)
+        * into_sprite
         * Mat4::from_scale(Vec3::new(1.0, 1.0, 1.0 + pull * 0.2))
+        * out_of_sprite
 }
 
 /// The model of a bow being drawn, `None` before the draw has begun.
@@ -821,6 +857,26 @@ mod tests {
             ..using(UseAction::Eat, 32.0)
         };
         assert!((at(eating) - at(using(UseAction::Eat, 32.0))).length() < 1e-5);
+    }
+
+    #[test]
+    fn the_1_7_bow_stretches_along_the_depth_of_its_sprite() {
+        let drawn = |legacy: bool| HandPose {
+            legacy_item_position: legacy,
+            ..using(UseAction::Bow, 72_000.0 - 40.0)
+        };
+        let rest = |legacy: bool| HandPose {
+            legacy_item_position: legacy,
+            ..using(UseAction::Bow, 72_000.0)
+        };
+        // The depth axis of the 1.7 sprite, in the frame the sprite is drawn in.
+        let depth = (rotate(-335.0, Vec3::Z) * rotate(-50.0, Vec3::Y)).transform_vector3(Vec3::Z);
+        let length =
+            |pose: HandPose, axis: Vec3| pose.item_matrix().transform_vector3(axis).length();
+        assert!((length(drawn(true), depth) / length(rest(true), depth) - 1.2).abs() < 1e-4);
+        // 1.8 stretches the item frame's Z instead.
+        assert!((length(drawn(false), Vec3::Z) / length(rest(false), Vec3::Z) - 1.2).abs() < 1e-4);
+        assert_ne!(drawn(true).item_matrix(), drawn(false).item_matrix());
     }
 
     #[test]

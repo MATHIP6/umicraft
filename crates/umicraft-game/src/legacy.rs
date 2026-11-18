@@ -15,7 +15,10 @@
 //! - [`LegacyAnimations::equip`]: the hand only dips again when the item or
 //!   its damage changes, not its count or its tags ([`EquipRule`]);
 //! - [`LegacyAnimations::sneak_camera`]: the view glides down and up when
-//!   sneaking instead of snapping ([`SneakCamera`]).
+//!   sneaking instead of snapping ([`SneakCamera`]);
+//! - [`LegacyAnimations::item_position`]: a flat item in the first-person
+//!   hand sits where 1.7 drew it, smaller and further left, which is most
+//!   visible on a blocking sword (`HandPose::legacy_item_position`).
 
 use umicraft_protocol::packets::play::ItemStack;
 
@@ -31,6 +34,8 @@ pub struct LegacyAnimations {
     pub equip: bool,
     /// The 1.7 glide of the view when sneaking ([`SneakCamera`]).
     pub sneak_camera: bool,
+    /// The 1.7 place of a flat item in the first-person hand.
+    pub item_position: bool,
 }
 
 impl LegacyAnimations {
@@ -150,7 +155,7 @@ mod tests {
     #[test]
     fn all_off_is_the_1_8_client() {
         let off = LegacyAnimations::default();
-        assert!(!off.block_hit && !off.equip && !off.sneak_camera);
+        assert!(!off.block_hit && !off.equip && !off.sneak_camera && !off.item_position);
         assert_eq!(off.equip_rule(), EquipRule::V1_8);
     }
 

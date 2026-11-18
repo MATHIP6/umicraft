@@ -131,6 +131,7 @@ umicraft.mods.legacy_animations.desc=La main et la vue bougent comme en 1.7. Vou
 umicraft.mods.legacy_animations.block_hit=Block hit
 umicraft.mods.legacy_animations.equip=Pas de rechargement quand le nombre change
 umicraft.mods.legacy_animations.sneak_camera=Caméra de sneak fluide
+umicraft.mods.legacy_animations.item_position=Position 1.7 des items
 umicraft.accounts.button=Compte : %s
 umicraft.accounts.button.none=Compte
 umicraft.accounts.title=Choisir un compte...

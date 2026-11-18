@@ -131,6 +131,7 @@ umicraft.mods.legacy_animations.desc=The hand and the view move as they did in 1
 umicraft.mods.legacy_animations.block_hit=Block hit
 umicraft.mods.legacy_animations.equip=No dip when the count changes
 umicraft.mods.legacy_animations.sneak_camera=Smooth sneak camera
+umicraft.mods.legacy_animations.item_position=1.7 item position
 umicraft.accounts.button=Account: %s
 umicraft.accounts.button.none=Account
 umicraft.accounts.title=Choose an account...

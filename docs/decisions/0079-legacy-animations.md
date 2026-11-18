@@ -32,6 +32,17 @@ toggle per real difference, all on by default:
 - `sneak_camera`: the view glides down and back up when sneaking, from the
   `ySize` of 1.7.10 (`EntityPlayerSP.onLivingUpdate` sets it to 0.2,
   `Entity.moveEntity` multiplies it by 0.4 each move).
+- `item_position`: a flat sprite in the first-person hand takes the fixed
+  placement of 1.7.10 `ItemRenderer.renderItem` (2D branch) instead of the
+  `firstperson` pose of its 1.8 model
+  (`umicraft_model::item::pose::legacy_flat_held_pose`). With the vanilla
+  sword model the two differ little at rest but clearly while blocking: the
+  1.7 sword is about 13 % smaller, further left and more upright. The fishing
+  rod and the carrot on a stick turn half around first
+  (`shouldRotateAroundWhenRendering`), and a drawn bow stretches along the
+  depth of its sprite as 1.7 did. It applies to every flat item, not only
+  while blocking, so that the sword does not jump when the block starts.
+  Blocks are placed alike by both versions and keep their model pose.
 
 The settings flow as plain data: the mod holds the toggles,
 `ModsRuntime::legacy_animations` reads them into
@@ -56,9 +67,7 @@ on a real 1.7 client, which sent the swing.
     `EntityRenderSnapshot` in about ten places of the entity renderer, which
     have no way to see a client setting yet. That needs a render style
     passed through the entity meshing, a change of its own.
-  - The 1.7 position of flat items in the hand (`ItemRenderer.renderItem`
-    with its fixed 2D transform): 1.8 places them with the first-person
-    display transform of the item model, which comes from the resource pack.
-    Replacing it needs a check against the vanilla models in a real window.
+  - With `item_position` on, a resource pack's own `firstperson` pose of a
+    flat item is not used, as 1.7 had no such pose.
 - In adventure mode the block hit never swings; 1.7 swung there with the
   right tool for the block.

@@ -199,6 +199,7 @@ impl ModsRuntime {
                 block_hit: view.settings.bool("block_hit"),
                 equip: view.settings.bool("equip"),
                 sneak_camera: view.settings.bool("sneak_camera"),
+                item_position: view.settings.bool("item_position"),
             })
     }
 
@@ -398,6 +399,7 @@ mod tests {
                 block_hit: true,
                 equip: false,
                 sneak_camera: true,
+                item_position: true,
             }
         );
     }
