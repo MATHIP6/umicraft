@@ -9,6 +9,7 @@
 pub(crate) mod hud_style;
 
 mod armor_status;
+mod capes;
 mod combo_counter;
 mod coordinates;
 mod cps;
@@ -47,6 +48,7 @@ pub fn all() -> Vec<Box<dyn BuiltinMod>> {
         Box::new(zoom::Zoom),
         Box::new(no_hurt_cam::NoHurtCam),
         Box::new(legacy_animations::LegacyAnimations),
+        Box::new(capes::Capes),
         Box::new(toggle_sprint::ToggleSprint::default()),
     ]
 }
