@@ -47,13 +47,13 @@ const CAPACITY: usize = 128;
 /// The clicks of the last second, in a ring buffer of fixed size: pushing and
 /// counting never allocate.
 #[derive(Debug, Clone)]
-struct ClickWindow {
+pub(super) struct ClickWindow {
     /// `(time of the frame, clicks that frame)`, oldest at `head`.
     frames: [(u64, u32); CAPACITY],
     head: usize,
     len: usize,
     /// Sum of the clicks in `frames`, kept so counting is O(1).
-    total: u32,
+    pub(super) total: u32,
 }
 
 impl Default for ClickWindow {
@@ -69,7 +69,7 @@ impl Default for ClickWindow {
 
 impl ClickWindow {
     /// Records `clicks` at `now_ms` and forgets what left the window.
-    fn record(&mut self, now_ms: u64, clicks: u32) {
+    pub(super) fn record(&mut self, now_ms: u64, clicks: u32) {
         self.expire(now_ms);
         if clicks == 0 {
             return;

@@ -67,23 +67,18 @@ mod tests {
     use crate::mods::{assert_reads_only_schema_keys, drawn_texts};
     use crate::settings::SettingValue;
 
-    const CTX: ModContext = ModContext {
-        now_ms: 0,
-        fps: 144,
-        frame_ms: 6.94,
-        position: [0.0; 3],
-        yaw: 0.0,
-        pitch: 0.0,
-        sprinting: false,
-        left_clicks: 0,
-        right_clicks: 0,
-        ping_ms: None,
-    };
+    fn ctx() -> ModContext {
+        ModContext {
+            fps: 144,
+            frame_ms: 6.94,
+            ..ModContext::default()
+        }
+    }
 
     #[test]
     fn shows_the_fps() {
         let settings = ModSettings::defaults(SETTINGS);
-        assert_eq!(drawn_texts(&Fps, &CTX, &settings), ["144 FPS"]);
+        assert_eq!(drawn_texts(&Fps, &ctx(), &settings), ["144 FPS"]);
     }
 
     #[test]
@@ -92,7 +87,7 @@ mod tests {
         settings
             .set("frame_time", &SettingValue::Bool(true))
             .expect("known key");
-        assert_eq!(drawn_texts(&Fps, &CTX, &settings), ["144 FPS (6.9 ms)"]);
+        assert_eq!(drawn_texts(&Fps, &ctx(), &settings), ["144 FPS (6.9 ms)"]);
     }
 
     #[test]
@@ -102,7 +97,7 @@ mod tests {
             .set("color", &SettingValue::Text("#00ff00".into()))
             .expect("known key");
         let mut out = HudContent::default();
-        Fps.draw(&CTX, &settings, &mut out);
+        Fps.draw(&ctx(), &settings, &mut out);
         assert_eq!(out.lines()[0].color, 0x00_ff00);
     }
 
