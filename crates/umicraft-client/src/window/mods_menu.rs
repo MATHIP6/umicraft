@@ -12,6 +12,7 @@ use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::KeyCode;
 
+use umicraft_builtin_mods::{CombatInfo, KeyState, MAX_EFFECTS};
 use umicraft_core::lang::Lang;
 use umicraft_render::ModWidgetView;
 use umicraft_ui::menus::{ModsOutcome, ModsView};
@@ -92,6 +93,14 @@ impl App {
     /// Feeds the built-in mods once per frame with what the window knows.
     pub(super) fn update_mods(&mut self, now: Instant) {
         let eye = self.camera.eye();
+        let (hud, slots) = match self.world.as_ref() {
+            Some(world) => (Some(world.hud()), Some(&world.window_view().player_slots)),
+            None => (None, None),
+        };
+        let (armor, held) = slots.map_or(Default::default(), |slots| {
+            let selected = hud.map_or(0, |hud| hud.selected_slot);
+            crate::mods_facts::equipment(slots, selected)
+        });
         self.mods.update(&FrameInput {
             now_ms: u64::try_from(now.duration_since(self.clock.started).as_millis())
                 .unwrap_or(u64::MAX),
@@ -101,7 +110,25 @@ impl App {
             yaw_radians: self.camera.yaw,
             pitch_radians: self.camera.pitch,
             sprinting: self.held(Action::Sprint),
-            ping_ms: self.world.as_ref().and_then(|world| world.hud().ping_ms),
+            ping_ms: hud.and_then(|hud| hud.ping_ms),
+            keys: KeyState {
+                forward: self.held(Action::Forward),
+                left: self.held(Action::Left),
+                back: self.held(Action::Back),
+                right: self.held(Action::Right),
+                jump: self.held(Action::Jump),
+                attack: self.held(Action::Attack),
+                use_item: self.held(Action::Use),
+            },
+            combat: hud.map_or(CombatInfo::default(), |hud| CombatInfo {
+                hits: hud.combat.0,
+                hurts: hud.combat.1,
+            }),
+            armor,
+            held,
+            effects: hud.map_or([None; MAX_EFFECTS], |hud| {
+                crate::mods_facts::effects(&hud.active_effects)
+            }),
         });
     }
 

@@ -59,6 +59,7 @@ fn is_spectator(game: &Game, entity: &EntityRecord) -> bool {
 /// Applies what a hit on `target` does to the local player: the sprint
 /// reset of `EntityPlayer.attackTargetEntityWithCurrentItem`.
 pub(super) fn after_attack(game: &mut Game, target: EntityId) {
+    game.combat_log.attacked(target.0, game.status_data.ticks);
     let Some(kind) = game.entities.kind(target) else {
         return;
     };

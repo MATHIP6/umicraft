@@ -72,6 +72,7 @@ pub mod mesh_settings;
 pub mod mesher;
 pub mod metrics;
 pub mod model_resources;
+pub mod mods_facts;
 pub mod mods_hud_view;
 pub mod mods_runtime;
 pub mod mods_view;

@@ -9,7 +9,8 @@
 //! base, the frame (spec of the ADR: "per frame, not per tick").
 
 use umicraft_builtin_mods::{
-    mods, History, HudWidget, ModContext, ModInput, ModRegistry, ModsConfig, RegistryError,
+    mods, ArmorPiece, CombatInfo, EffectInfo, History, HudWidget, KeyState, ModContext, ModInput,
+    ModRegistry, ModsConfig, RegistryError, MAX_EFFECTS,
 };
 use umicraft_game::legacy::LegacyAnimations;
 use umicraft_model::entity::BipedStyle;
@@ -58,6 +59,16 @@ pub struct FrameInput {
     pub sprinting: bool,
     /// The round trip to the server, when measured.
     pub ping_ms: Option<u32>,
+    /// The movement keys and mouse buttons held.
+    pub keys: KeyState,
+    /// The hits dealt and hurts taken so far.
+    pub combat: CombatInfo,
+    /// The armor worn, helmet first.
+    pub armor: [Option<ArmorPiece>; 4],
+    /// The item in the hand.
+    pub held: Option<ArmorPiece>,
+    /// The active potion effects.
+    pub effects: [Option<EffectInfo>; MAX_EFFECTS],
 }
 
 /// The registry of the built-in mods and the per-frame data it needs.
@@ -299,6 +310,11 @@ impl ModsRuntime {
             left_clicks: self.left_clicks,
             right_clicks: self.right_clicks,
             ping_ms: frame.ping_ms,
+            keys: frame.keys,
+            combat: frame.combat,
+            armor: frame.armor,
+            held: frame.held,
+            effects: frame.effects,
         }
     }
 }
@@ -331,6 +347,22 @@ mod tests {
         let ctx = runtime.context(&frame());
         assert!((ctx.position[1] - 64.0).abs() < 1e-9);
         assert!((ctx.yaw - 180.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_facts_of_the_frame_reach_the_mods() {
+        let runtime = ModsRuntime::new(&ModsOptions::default());
+        let input = FrameInput {
+            keys: KeyState {
+                forward: true,
+                ..KeyState::default()
+            },
+            combat: CombatInfo { hits: 3, hurts: 1 },
+            ..frame()
+        };
+        let ctx = runtime.context(&input);
+        assert!(ctx.keys.forward);
+        assert_eq!(ctx.combat, CombatInfo { hits: 3, hurts: 1 });
     }
 
     #[test]
