@@ -56,6 +56,7 @@ fn mod_icon(id: &str) -> Icon {
         "potion_effects" => Icon::Flask,
         "legacy_animations" => Icon::Sword,
         "direction_hud" => Icon::Compass,
+        "capes" => Icon::Cape,
         _ => Icon::Grid,
     }
 }

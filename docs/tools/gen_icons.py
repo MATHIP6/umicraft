@@ -2,8 +2,8 @@
 """Rasterizes the SVG icons of the UI into crates/umicraft-ui/assets/icons.r8.
 
 The icons are Phosphor Icons (regular weight, MIT, see
-crates/umicraft-ui/assets/icons/LICENSE-phosphor.txt): one filled path each on
-a 256 unit grid. The output is one 48x48 coverage bitmap (one byte per texel)
+crates/umicraft-ui/assets/icons/LICENSE-phosphor.txt), except the ones drawn for
+Umicraft (close, cape): one path each on a 256 unit grid. The output is one 48x48 coverage bitmap (one byte per texel)
 per icon, in the order of `Icon::ALL` in crates/umicraft-ui/src/icons.rs.
 
 Usage: python docs/tools/gen_icons.py
@@ -21,7 +21,7 @@ SIDE = 48
 SUPERSAMPLE = 8
 GRID = 256.0
 # The order of `Icon::ALL`.
-ORDER = ["grid", "sliders", "search", "close", "gauge", "target", "cursor", "signal", "run", "blur", "gear", "lightbulb", "binoculars", "camera", "keyboard", "lightning", "shield", "flask", "sword", "compass"]
+ORDER = ["grid", "sliders", "search", "close", "gauge", "target", "cursor", "signal", "run", "blur", "gear", "lightbulb", "binoculars", "camera", "keyboard", "lightning", "shield", "flask", "sword", "compass", "cape"]
 
 # Icons drawn turned, in degrees clockwise about the centre of the grid, and shrunk by
 # `TURNED_FIT` so a turned corner stays off the edge of the bitmap.
