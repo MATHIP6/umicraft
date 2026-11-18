@@ -17,7 +17,7 @@ fn widget(id: &str, position: [f32; 2]) -> HudWidgetView {
             lines: vec![ModLine::new("60 FPS", 0xFFFFFF)],
             position,
             scale: 1.0,
-            style: Default::default(),
+            ..ModWidgetView::default()
         },
     }
 }

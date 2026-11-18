@@ -38,7 +38,7 @@ use crate::context::Ui;
 use crate::geom::Rect;
 use crate::input::{InputEvent, PointerButton};
 use crate::menus::common::Gui;
-use crate::mod_widget::{measure, ModWidgetView};
+use crate::mod_widget::{measure_body, ModWidgetView};
 use crate::text::FontAtlas;
 
 pub(in crate::menus::mods) use drag::{clamp_into, rescaled};
@@ -290,6 +290,12 @@ impl HudLayer {
 
 /// The rectangle a widget covers, in GUI units.
 pub(in crate::menus::mods) fn widget_rect(font: &FontAtlas, widget: &ModWidgetView) -> Rect {
-    let (width, height) = measure(font, &widget.lines, widget.scale, &widget.style);
+    let (width, height) = measure_body(
+        font,
+        &widget.lines,
+        &widget.cells,
+        widget.scale,
+        &widget.style,
+    );
     Rect::new(widget.position[0], widget.position[1], width, height)
 }
