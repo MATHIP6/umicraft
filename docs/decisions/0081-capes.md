@@ -110,13 +110,23 @@ impl CapeResolver {
 pub enum CapeError { /* thiserror: Http, TooLarge, Decode, BadSize, BadJson, HostNotAllowed */ }
 ```
 
+Added while building it: `CapeOwner::has_valid_name` (OptiFine is skipped
+for a name outside `[A-Za-z0-9_]{1,16}`, as the name goes into its URL),
+and the re-exported `CapeSource` / `ImageSource` of the JSON answers.
+
 Client side:
 
 - `ModsRuntime::capes() -> Option<CapeSettings>` with
-  `CapeSettings { own: Option<CapeProvider>, enabled: Vec<CapeProvider> }`,
-  `None` while the mod is off.
+  `CapeSettings { own: Option<CapeProvider>, enabled: [bool; 4] }` (in the
+  order of `CapeProvider::ALL`, `Copy` so the per-frame read never
+  allocates), `None` while the mod is off. `EntityTextures::set_capes` takes
+  it with the local player's UUID every frame; a change of either drops the
+  worker (and the answers still on their way), the results and the uploaded
+  frames.
 - `entity_render/capes.rs`: `CapeSet` keyed by UUID (`Pending`, `Absent`,
-  `Ready { first: u32, frames: u32 }`), uploads with
+  `Ready { first: u32, frames: u32 }`). Its worker starts with the first
+  lookup, so with the mod off no thread runs and no request leaves. It
+  uploads with
   `Renderer::create_entity_texture` into the new
   `TextureSlot::CustomCape(u32)`.
 - `SkinLookup::custom_cape(uuid, name) -> Option<u32>` asks on first use, as

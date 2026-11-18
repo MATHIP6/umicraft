@@ -6,6 +6,7 @@
 //! - [`mobs`]: one builder per mob family, mapping a snapshot to mesh layers.
 //! - [`player`]: the posed player model, shared with held items.
 //! - `skins`: the downloads of player skins and capes.
+//! - `capes`: the third-party capes of the Capes mod (ADR-0081).
 //! - [`pose`]: the humanoid pose of a snapshot.
 //! - [`transform`]: where a model stands, turns, falls and sleeps.
 //! - [`hand`]: the first-person arm.
@@ -21,6 +22,7 @@ mod armor;
 mod arrows;
 mod banner_cache;
 mod bolt;
+mod capes;
 mod creatures;
 mod cull;
 mod dragon_beam;
@@ -59,6 +61,7 @@ use umicraft_model::entity::{BipedStyle, ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
 pub(crate) use animals::WITCH_SCALE;
+pub use capes::CapeSettings;
 pub use cull::CullView;
 pub use hand::hand_vertices;
 pub(crate) use mobs::posed_humanoid_mob;

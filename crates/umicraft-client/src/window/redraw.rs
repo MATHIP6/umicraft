@@ -387,13 +387,21 @@ impl App {
                 hand.visible && self.frame.last_hand.is_some_and(|last| last != hand),
             );
             self.frame.last_hand = hand.visible.then_some(hand);
-            let hand_skin = entity_textures.hand_skin(world.local_body().as_ref());
+            let local_body = world.local_body();
+            let hand_skin = entity_textures.hand_skin(local_body.as_ref());
             entity_textures.set_view_yaw(self.camera.yaw);
             entity_textures.set_view_pitch(self.camera.pitch);
             entity_textures.set_mob_appearance(world.mob_appearance(partial_tick));
             entity_textures.set_camera_position(self.camera.relative_eye());
             entity_textures.set_hand_swing(hand.swing);
             entity_textures.set_biped_style(style);
+            entity_textures.set_capes(
+                self.mods.capes(),
+                local_body
+                    .as_ref()
+                    .and_then(|body| body.uuid)
+                    .map(u128::from_be_bytes),
+            );
             entity_textures.set_cull_view(self.camera.relative_eye(), self.camera.forward());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)

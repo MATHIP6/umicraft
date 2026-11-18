@@ -845,6 +845,10 @@ pub enum TextureSlot {
     Skin(u32),
     /// The cape of a player, by the index the texture cache gave it.
     Cape(u32),
+    /// One frame of a third-party cape (ADR-0081), by the index the cape
+    /// cache gave it. Apart from [`Self::Cape`] so the two caches never
+    /// hand out the same slot.
+    CustomCape(u32),
     /// A horse coat composed from a base colour and a marking, keyed by the
     /// metadata variant (`base | marking << 8`).
     HorseCoat(u16),

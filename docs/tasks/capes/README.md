@@ -1,6 +1,6 @@
 # Capes built-in mod: plan
 
-Status: **phase 1 done** (branch `feat/capes`). Design: ADR-0081.
+Status: **phases 1 to 3 done** (branch `feat/capes`); the visual check in game and the MinecraftCapes answer of a cape owner remain. Design: ADR-0081.
 
 ## File ownership
 
