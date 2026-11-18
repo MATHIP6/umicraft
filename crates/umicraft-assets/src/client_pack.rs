@@ -28,6 +28,13 @@ const LOGO: &[u8] = include_bytes!("../client-pack/umicraft/textures/ui/logo.png
 const SETTINGS: &[u8] = include_bytes!("../client-pack/umicraft/textures/ui/settings.png");
 const BRAND_FONT: &[u8] = include_bytes!("../client-pack/umicraft/font/Inter-SemiBold.ttf");
 
+/// The HD font grids, `(cell size in texels, PNG)`, smallest first.
+const HD_FONTS: [(u32, &[u8]); 3] = [
+    (16, include_bytes!("../client-pack/umicraft/font/hd/16.png")),
+    (24, include_bytes!("../client-pack/umicraft/font/hd/24.png")),
+    (32, include_bytes!("../client-pack/umicraft/font/hd/32.png")),
+];
+
 /// The panorama faces in file order.
 const PANORAMA: [&[u8]; FACE_COUNT] = [
     include_bytes!("../client-pack/umicraft/textures/ui/panorama/panorama_0.png"),
@@ -70,6 +77,16 @@ pub fn panorama_png(face: usize) -> Option<&'static [u8]> {
 #[must_use]
 pub fn brand_font_ttf() -> &'static [u8] {
     BRAND_FONT
+}
+
+/// The PNG of the HD font grid whose cells are `cell` texels wide (16, 24 or
+/// 32), `None` for any other size.
+#[must_use]
+pub fn hd_font_png(cell: u32) -> Option<&'static [u8]> {
+    HD_FONTS
+        .iter()
+        .find(|(known, _)| *known == cell)
+        .map(|(_, png)| *png)
 }
 
 /// Decodes the embedded panorama, the same way the jar one is decoded.
@@ -124,6 +141,17 @@ mod tests {
             DecodedPng::decode(name, bytes).expect("embedded PNG decodes");
         }
         assert!(panorama_png(FACE_COUNT).is_none());
+    }
+
+    #[test]
+    fn the_hd_fonts_are_square_grids_of_their_cell_size() {
+        for cell in [16, 24, 32] {
+            let png = hd_font_png(cell).expect("bundled size");
+            let decoded = DecodedPng::decode("hd font", png).expect("decodes");
+            assert_eq!(decoded.width, cell * 16);
+            assert_eq!(decoded.height, cell * 16);
+        }
+        assert!(hd_font_png(8).is_none());
     }
 
     #[test]

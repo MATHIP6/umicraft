@@ -51,6 +51,7 @@ pub mod modern;
 pub mod screens;
 pub mod styled_text;
 pub mod text;
+pub mod theme;
 pub mod widgets;
 
 pub use context::{Ui, UiOutput, UiResponse};
@@ -62,4 +63,5 @@ pub use screens::{
     gui_scale, gui_scale_option, set_gui_scale_option, ScaledResolution, ScreenKind, ScreenLayout,
 };
 pub use text::{FontAtlas, FontError, Glyph};
+pub use theme::{Theme, ThemeId};
 pub use widgets::{draw_item, SlotItem};

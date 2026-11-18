@@ -117,7 +117,8 @@ options:
                       action bar) and the options screens from scripted server
                       packets; no server or GPU unless --screenshot is given
   --hud-view NAME     scene of --hud-demo: overview, tab, chat, menu, options,
-                      controls, chat-options, title, servers (default: overview)
+                      controls, chat-options, title, servers, options-ember, options-amethyst
+                      (default: overview)
   --synthetic-panorama  with --hud-demo --hud-view title: draw generated gradient
                       faces instead of the panorama of the user's jar
   --block-demo        mesh and report the M5/M6 acceptance blocks from the official
@@ -150,12 +151,14 @@ options:
   --help, -h          print this help";
 
 /// The scenes of `--hud-demo`.
-pub const HUD_VIEWS: [&str; 26] = [
+pub const HUD_VIEWS: [&str; 28] = [
     "overview",
     "tab",
     "chat",
     "menu",
     "options",
+    "options-ember",
+    "options-amethyst",
     "video",
     "controls",
     "chat-options",

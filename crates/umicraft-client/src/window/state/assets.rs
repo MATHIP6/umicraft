@@ -11,6 +11,7 @@ use crate::item_icons::ItemResources;
 use crate::item_world::ItemLayers;
 use crate::map_render::MapTextures;
 use crate::texture_animator::TextureAnimator;
+use crate::theme_font::FontChoice;
 use crate::ui_font::LoadedFont;
 use crate::window::startup::AsyncLoadedAssets;
 
@@ -22,6 +23,8 @@ pub(in crate::window) struct Assets {
     pub(in crate::window) receiver: Option<std::sync::mpsc::Receiver<AsyncLoadedAssets>>,
     /// The atlas the renderer accepted; the UI metrics must match it.
     pub(in crate::window) ui_atlas: Option<Arc<FontAtlas>>,
+    /// Which font `ui_atlas` was built for, so a theme or scale change swaps it.
+    pub(in crate::window) font_choice: FontChoice,
     /// The brand atlas the renderer accepted; `None` keeps the classic
     /// title screen (ADR-0056).
     pub(in crate::window) brand_atlas: Option<FontAtlas>,

@@ -106,6 +106,7 @@ pub mod terrain_textures;
 mod test_support;
 mod text_screens;
 pub mod texture_animator;
+pub mod theme_font;
 mod tooltip_draw;
 pub mod ui_demo;
 pub mod ui_font;

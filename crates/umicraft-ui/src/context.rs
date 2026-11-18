@@ -27,6 +27,7 @@ use crate::geom::Rect;
 use crate::id::WidgetId;
 use crate::input::{InputEvent, Key, PointerButton, UiInput};
 use crate::menus::MenuArt;
+use crate::theme::Theme;
 
 /// What one widget reports after it has been drawn.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -94,6 +95,8 @@ pub struct Ui {
     widgets_sheet: Option<SpriteSheet>,
     /// The menu textures (dirt, title logo) of the user's client jar.
     menu_art: MenuArt,
+    /// How buttons, sliders and menu backgrounds are painted.
+    theme: Theme,
     /// Text a widget asked to put on the clipboard (Control+C or Control+X).
     clipboard: Option<String>,
 }
@@ -118,6 +121,7 @@ impl Ui {
             button_presses: 0,
             widgets_sheet: None,
             menu_art: MenuArt::default(),
+            theme: Theme::default(),
             clipboard: None,
         }
     }
@@ -276,6 +280,17 @@ impl Ui {
     /// Sets the textures the menu screens draw as sprites.
     pub fn set_menu_art(&mut self, art: MenuArt) {
         self.menu_art = art;
+    }
+
+    /// Sets the theme the widgets and menu backgrounds are painted with.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+    }
+
+    /// The active theme; [`Theme::VANILLA`] until [`Self::set_theme`] is called.
+    #[must_use]
+    pub fn theme(&self) -> Theme {
+        self.theme
     }
 
     /// The menu textures; empty fields select the original fallbacks.

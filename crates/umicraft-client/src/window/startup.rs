@@ -46,6 +46,7 @@ use crate::sky_textures::{load_border_texture, load_sky_textures};
 use crate::terrain_textures::TerrainTextures;
 use crate::text_screens::TextScreens;
 use crate::texture_animator::TextureAnimator;
+use crate::theme_font::FontChoice;
 use crate::ui_font::{self, LoadedFont};
 use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
@@ -171,6 +172,7 @@ impl App {
 
         let font = LoadedFont {
             atlas: FontAtlas::fallback(),
+            unicode: None,
             source: crate::ui_font::FontSource::Fallback,
         };
         let audio = if args.no_audio {
@@ -231,6 +233,7 @@ impl App {
                 font,
                 receiver: Some(asset_rx),
                 ui_atlas: None,
+                font_choice: FontChoice::Game,
                 brand_atlas: None,
                 gui_atlas: None,
                 items: None,
@@ -319,6 +322,9 @@ impl App {
         self.assets.font = assets.font;
         match ui_font::install(renderer, &self.assets.font.atlas) {
             Ok(installed) => {
+                // The game font is bound now: the theme font is swapped in
+                // again by the next frame if the theme wants it.
+                self.assets.font_choice = FontChoice::Game;
                 self.assets.ui_atlas = Some(Arc::new(installed.atlas));
                 self.hud_cache.invalidate();
             }

@@ -14,6 +14,9 @@
 //! **both** the loaded atlas and the fallback is a fatal error, which
 //! [`install`] reports to the caller.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use thiserror::Error;
 #[cfg(test)]
 use umicraft_assets::install::OfficialInstall;
@@ -54,6 +57,9 @@ impl std::fmt::Display for FontSource {
 pub struct LoadedFont {
     /// The atlas the UI should measure and draw with.
     pub atlas: FontAtlas,
+    /// The Unicode pages of the jar the atlas was extended with, kept so a
+    /// theme font can draw the same characters.
+    pub unicode: Option<Arc<UnicodePages>>,
     /// Whether the atlas is the real 1.8 font or the built-in fallback.
     pub source: FontSource,
 }
@@ -100,13 +106,16 @@ pub fn load() -> LoadedFont {
                     tracing::warn!(%error, "could not read the Unicode font pages");
                     Vec::new()
                 });
-            Ok::<_, FontLoadError>(with_unicode(grid, entries))
+            Ok::<_, FontLoadError>((grid, UnicodePages::from_entries(entries)))
         });
     match loaded {
-        Ok(atlas) => {
+        Ok((grid, unicode)) => {
             tracing::info!("loaded the 1.8 font from the client jar");
             LoadedFont {
-                atlas,
+                atlas: unicode
+                    .as_ref()
+                    .map_or(grid.clone(), |pages| pages.extend(&grid)),
+                unicode: unicode.map(Arc::new),
                 source: FontSource::Official,
             }
         }
@@ -193,6 +202,7 @@ fn load_from_install(install: Option<OfficialInstall>) -> LoadedFont {
             );
             LoadedFont {
                 atlas,
+                unicode: None,
                 source: FontSource::Official,
             }
         }
@@ -215,37 +225,54 @@ fn load_official(install: &OfficialInstall) -> Result<FontAtlas, FontLoadError> 
     Ok(FontAtlas::from_png(&png)?)
 }
 
-/// `grid` extended with the Unicode pages found in `entries` (the jar entries
-/// of `glyph_sizes.bin` and `unicode_page_XX.png`), so that characters outside
-/// the 1.8 grid draw as in vanilla instead of as `?`. Without the sizes file
-/// the grid is returned as it is.
-fn with_unicode(grid: FontAtlas, entries: Vec<(String, Vec<u8>)>) -> FontAtlas {
-    let mut sizes = None;
-    let mut pages = std::collections::HashMap::new();
-    for (name, bytes) in entries {
-        if name == SIZES_ENTRY {
-            sizes = Some(bytes);
-        } else if let Some(page) = name
-            .strip_prefix(PAGE_PREFIX)
-            .and_then(|rest| rest.strip_suffix(".png"))
-            .and_then(|hex| u8::from_str_radix(hex, 16).ok())
-        {
-            pages.insert(page, bytes);
+/// The Unicode half of the 1.8 font: `glyph_sizes.bin` and the
+/// `unicode_page_XX.png` files of the jar, kept as bytes so any glyph grid can
+/// be extended with them (the game font and the HD theme font alike).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnicodePages {
+    sizes: Vec<u8>,
+    pages: HashMap<u8, Vec<u8>>,
+}
+
+impl UnicodePages {
+    /// Collects the pages from the jar `entries`; `None` without the sizes
+    /// file, since the pages alone say nothing about glyph widths.
+    #[must_use]
+    pub fn from_entries(entries: Vec<(String, Vec<u8>)>) -> Option<Self> {
+        let mut sizes = None;
+        let mut pages = HashMap::new();
+        for (name, bytes) in entries {
+            if name == SIZES_ENTRY {
+                sizes = Some(bytes);
+            } else if let Some(page) = name
+                .strip_prefix(PAGE_PREFIX)
+                .and_then(|rest| rest.strip_suffix(".png"))
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            {
+                pages.insert(page, bytes);
+            }
         }
+        Some(Self {
+            sizes: sizes?,
+            pages,
+        })
     }
-    let Some(sizes) = sizes else {
-        return grid;
-    };
-    let count = pages.len();
-    let atlas = grid.with_unicode(&sizes, |page| pages.remove(&page));
-    tracing::info!(pages = count, "loaded the Unicode font pages");
-    atlas
+
+    /// `grid` extended with these pages, so that characters outside the 1.8
+    /// grid draw as in vanilla instead of as `?`.
+    #[must_use]
+    pub fn extend(&self, grid: &FontAtlas) -> FontAtlas {
+        let atlas = grid.with_unicode(&self.sizes, |page| self.pages.get(&page).cloned());
+        tracing::info!(pages = self.pages.len(), "loaded the Unicode font pages");
+        atlas
+    }
 }
 
 /// The built-in original font.
 fn fallback_font() -> LoadedFont {
     LoadedFont {
         atlas: FontAtlas::fallback(),
+        unicode: None,
         source: FontSource::Fallback,
     }
 }

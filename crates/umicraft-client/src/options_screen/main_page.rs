@@ -51,8 +51,7 @@ impl OptionsScreen {
         );
 
         // Umicraft's own option, in the free row between the sliders and the pages.
-        // It spans both columns, gap included, so its edges line up with them.
-        let style = gui.rect(left, h6 + 18.0, right + HALF_W - left, BUTTON_H);
+        let style = gui.rect(left, h6 + 18.0, HALF_W, BUTTON_H);
         let label = option_label(
             lang,
             "umicraft.options.titleStyle",
@@ -61,6 +60,19 @@ impl OptionsScreen {
         if self.button(ui, atlas, "title_style", style, &label, true, None) {
             options.menu.toggle_title_style();
             outcome.changed = true;
+        }
+
+        let theme = gui.rect(right, h6 + 18.0, HALF_W, BUTTON_H);
+        if self.button(
+            ui,
+            atlas,
+            "theme",
+            theme,
+            lang.tr("umicraft.options.theme"),
+            true,
+            None,
+        ) {
+            self.open(Page::Theme, options);
         }
 
         // (id, label key, y offset, x): the pages the client has no backend

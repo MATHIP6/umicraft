@@ -39,6 +39,7 @@ mod snooper_page;
 mod sounds_page;
 #[cfg(test)]
 mod tests;
+mod theme_page;
 mod video_page;
 
 pub use catalog::Catalog;
@@ -65,6 +66,8 @@ pub enum Page {
     Language,
     /// `GuiSnooper`.
     Snooper,
+    /// Umicraft's theme picker (ADR-0078).
+    Theme,
 }
 
 /// What one frame of the screen did.
@@ -252,6 +255,7 @@ impl OptionsScreen {
             Page::ResourcePacks => self.show_packs(ui, atlas, options, gui, lang, &mut outcome),
             Page::Language => self.show_language(ui, atlas, options, gui, lang, &mut outcome),
             Page::Snooper => self.show_snooper(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Theme => self.show_theme(ui, atlas, options, gui, lang, &mut outcome),
         }
         ui.pop_id();
         outcome

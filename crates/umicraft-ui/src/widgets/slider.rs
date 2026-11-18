@@ -15,6 +15,7 @@ use crate::geom::Rect;
 use crate::id::WidgetId;
 use crate::input::{InputEvent, Key, PointerButton};
 use crate::text::FontAtlas;
+use crate::theme::WidgetSkin;
 
 use super::style;
 
@@ -81,12 +82,17 @@ pub fn slider(
         ui.note_button_press();
     }
     // With the real texture the handle and text follow the GUI scale, as in vanilla.
-    let skin = if ui.widgets_sheet().is_some() {
+    let flat = match ui.theme().widgets {
+        WidgetSkin::Flat(skin) => Some(skin),
+        WidgetSkin::Vanilla => None,
+    };
+    let skin = if flat.is_some() || ui.widgets_sheet().is_some() {
         (rect.height / 20.0).round().max(1.0)
     } else {
         1.0
     };
-    let handle_width = HANDLE_WIDTH * skin;
+    let handle_texels = flat.map_or(HANDLE_WIDTH, |skin| skin.handle_texels);
+    let handle_width = handle_texels * skin;
     let travel = (rect.width - handle_width).max(1.0);
     let to_value = |x: f32| ((x - rect.x - handle_width * 0.5) / travel).clamp(0.0, 1.0);
 
@@ -131,6 +137,12 @@ pub fn slider(
     let changed = (value - start).abs() > f32::EPSILON;
     if changed {
         ui.mark_changed(id);
+    }
+
+    if let Some(flat) = flat {
+        let hovered = response.hovered || state.dragging;
+        flat.draw_slider(ui, rect, (atlas, label), value, hovered);
+        return (value, changed);
     }
 
     if let Some(sheet) = ui.widgets_sheet() {

@@ -68,6 +68,7 @@ impl App {
         let mut text_done = None;
         let mut respawn_clicked = false;
         let inventory_facts = self.inventory_facts();
+        self.sync_ui_font(width, height);
         // An owned handle: the steps below borrow `self` mutably.
         let atlas = Arc::clone(self.assets.ui_atlas.as_ref()?);
         let atlas = atlas.as_ref();
@@ -84,6 +85,7 @@ impl App {
         let input = self.ui_input.take();
         self.ui.begin_frame(viewport, input);
         self.ui.set_widgets_sheet(sheets.widgets);
+        self.ui.set_theme(self.options.menu.theme().theme());
         self.ui
             .set_menu_art(crate::official::menu_art(self.assets.gui_atlas.as_ref()));
 
