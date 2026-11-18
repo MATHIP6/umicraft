@@ -16,7 +16,7 @@ use umicraft_assets::skin::decode_png_bytes;
 use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_game::hand::HandPose;
 use umicraft_mesh::item::ItemMesh;
-use umicraft_model::entity::TextureSlot;
+use umicraft_model::entity::{BipedStyle, TextureSlot};
 use umicraft_render::{EntityTexture, EntityVertex, Renderer};
 use umicraft_ui::FontAtlas;
 
@@ -26,7 +26,7 @@ use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
 use super::mobs::skin_slot;
-use super::player::posed_player;
+use super::player::has_slim_arms;
 use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
 use crate::map_render::{map_arm_vertices, MapBatch};
@@ -90,6 +90,8 @@ pub struct EntityTextures {
     view_pitch: Cell<f32>,
     /// Whether the local player is a spectator, who sees invisible entities.
     viewer_is_spectator: Cell<bool>,
+    /// The pose of the players, 1.8 or 1.7 (ADR-0079).
+    biped_style: Cell<BipedStyle>,
     /// Whether the shadows under the entities are drawn ("Entity Shadows").
     shadows_enabled: Cell<bool>,
     /// Where the camera is, for the distance at which a shadow fades.
@@ -133,6 +135,7 @@ impl EntityTextures {
             view_yaw: Cell::new(0.0),
             view_pitch: Cell::new(0.0),
             viewer_is_spectator: Cell::new(false),
+            biped_style: Cell::new(BipedStyle::V1_8),
             shadows_enabled: Cell::new(true),
             camera: Cell::new(glam::Vec3::ZERO),
             hand_swing: Cell::new(0.0),
@@ -223,6 +226,12 @@ impl EntityTextures {
         self.viewer_is_spectator.set(spectator);
     }
 
+    /// Sets the pose the players are drawn in: the 1.7 one while the
+    /// 1.7 Animations mod asks for it (ADR-0079).
+    pub fn set_biped_style(&self, style: BipedStyle) {
+        self.biped_style.set(style);
+    }
+
     /// The texture and arm model of the first-person hand: those of the local
     /// player's body (the downloaded skin and its slim flag), or the default
     /// skin until the local profile is known.
@@ -230,7 +239,7 @@ impl EntityTextures {
     pub fn hand_skin(&self, local: Option<&EntityRenderSnapshot>) -> HandSkin {
         match local {
             Some(body) => {
-                let (_, is_slim) = posed_player(body);
+                let is_slim = has_slim_arms(body);
                 (
                     skin_slot(body, is_slim, self),
                     is_slim,
@@ -338,7 +347,10 @@ impl EntityTextures {
             snapshots,
             self,
             eye,
-            self.viewer_is_spectator.get(),
+            super::Viewer {
+                spectator: self.viewer_is_spectator.get(),
+                style: self.biped_style.get(),
+            },
             self.cull_view.get(),
         );
         let apparition = self.appearance.get().map(|progress| {
@@ -401,7 +413,10 @@ impl EntityTextures {
             std::slice::from_ref(body),
             self,
             super::Eye::default(),
-            false,
+            super::Viewer {
+                style: self.biped_style.get(),
+                ..super::Viewer::default()
+            },
             None,
         );
         self.compose_missing_coats(meshed.solid.keys(), renderer);

@@ -129,7 +129,7 @@ mod tests {
             crate::entity_render::mobs::build_entity_layers_for(
                 &ent,
                 &crate::entity_render::skins::NoSkins,
-                false,
+                crate::entity_render::Viewer::default(),
             )
         };
         let living = layers(0.0);

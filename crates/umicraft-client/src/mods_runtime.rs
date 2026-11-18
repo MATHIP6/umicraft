@@ -11,6 +11,8 @@
 use umicraft_builtin_mods::{
     mods, History, HudWidget, ModContext, ModInput, ModRegistry, ModsConfig, RegistryError,
 };
+use umicraft_game::legacy::LegacyAnimations;
+use umicraft_model::entity::BipedStyle;
 use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
 use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 
@@ -29,6 +31,9 @@ const ZOOM_ID: &str = "zoom";
 
 /// The id of the No Hurt Cam mod.
 const NO_HURT_CAM_ID: &str = "no_hurt_cam";
+
+/// The id of the 1.7 Animations mod, whose toggles the game thread is given.
+const LEGACY_ANIMATIONS_ID: &str = "legacy_animations";
 
 /// Height of the eye above the feet of a standing player, in blocks (MCP
 /// `EntityPlayer.getEyeHeight`), to turn the camera into the feet position.
@@ -182,6 +187,33 @@ impl ModsRuntime {
         self.registry
             .mods()
             .any(|view| view.meta.id.as_str() == NO_HURT_CAM_ID && view.enabled)
+    }
+
+    /// The 1.7 animations the game thread is to run: all off while the
+    /// 1.7 Animations mod is off, else the ones its toggles select.
+    #[must_use]
+    pub fn legacy_animations(&self) -> LegacyAnimations {
+        self.registry
+            .mods()
+            .find(|view| view.meta.id.as_str() == LEGACY_ANIMATIONS_ID && view.enabled)
+            .map_or_else(LegacyAnimations::default, |view| LegacyAnimations {
+                block_hit: view.settings.bool("block_hit"),
+                equip: view.settings.bool("equip"),
+                sneak_camera: view.settings.bool("sneak_camera"),
+                item_position: view.settings.bool("item_position"),
+                third_person: view.settings.bool("third_person"),
+            })
+    }
+
+    /// The pose the renderer draws the players in: the 1.7 one while the
+    /// 1.7 Animations mod asks for it (ADR-0079).
+    #[must_use]
+    pub fn biped_style(&self) -> BipedStyle {
+        if self.legacy_animations().third_person {
+            BipedStyle::V1_7
+        } else {
+            BipedStyle::V1_8
+        }
     }
 
     /// Whether the Fullbright mod is on: the world is lit at full strength.
@@ -356,6 +388,41 @@ mod tests {
             .set_enabled("motion_blur", false)
             .expect("the mod exists");
         assert_eq!(runtime.motion_blur(), None);
+    }
+
+    #[test]
+    fn the_legacy_animations_follow_the_switch_and_the_toggles() {
+        let mut runtime = ModsRuntime::new(&ModsOptions::default());
+        assert_eq!(runtime.legacy_animations(), LegacyAnimations::default());
+        runtime
+            .registry_mut()
+            .set_enabled(LEGACY_ANIMATIONS_ID, true)
+            .expect("the mod exists");
+        runtime
+            .registry_mut()
+            .set_setting(
+                LEGACY_ANIMATIONS_ID,
+                "equip",
+                &umicraft_builtin_mods::SettingValue::Bool(false),
+            )
+            .expect("the setting exists");
+        assert_eq!(
+            runtime.legacy_animations(),
+            LegacyAnimations {
+                block_hit: true,
+                equip: false,
+                sneak_camera: true,
+                item_position: true,
+                third_person: true,
+            }
+        );
+        assert_eq!(runtime.biped_style(), BipedStyle::V1_7);
+        runtime
+            .registry_mut()
+            .set_enabled(LEGACY_ANIMATIONS_ID, false)
+            .expect("the mod exists");
+        assert_eq!(runtime.biped_style(), BipedStyle::V1_8);
+        assert_eq!(runtime.legacy_animations(), LegacyAnimations::default());
     }
 
     #[test]

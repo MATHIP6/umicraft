@@ -116,6 +116,11 @@ pub(super) fn tick(
     run_pick_blocks(game, queue);
     publish_text_screens(game, frames);
     tick_hand(game);
+    let sneaking = game
+        .state
+        .as_ref()
+        .is_some_and(|state| state.player().sneaking);
+    game.sneak_camera.tick(sneaking);
 
     if game.social.tick_messages() {
         game.hud_dirty = true;

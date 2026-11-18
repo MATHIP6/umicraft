@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
-use umicraft_model::entity::{HumanoidModel, ModelPart, ModelVertex, TextureSlot};
+use umicraft_model::entity::{BipedStyle, HumanoidModel, ModelPart, ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
 use super::mobs::EntityLayer;
@@ -138,13 +138,14 @@ fn draws(id: i32, count: u8, len: usize) -> Vec<Draw> {
 }
 
 /// The arrow layers of `ent`: players only, as `RenderPlayer` is the only
-/// renderer with a `LayerArrow` in 1.8.
-pub(super) fn arrow_layers(ent: &EntityRenderSnapshot) -> Vec<EntityLayer> {
+/// renderer with a `LayerArrow` in 1.8. They stick in the body posed in
+/// `style`.
+pub(super) fn arrow_layers(ent: &EntityRenderSnapshot, style: BipedStyle) -> Vec<EntityLayer> {
     let count = ent.meta.living.arrows;
     if ent.kind != EntityKind::Player || count == 0 {
         return Vec::new();
     }
-    let (model, slim) = posed_player(ent);
+    let (model, slim) = posed_player(ent, style);
     let table: &[Shape] = if slim { &SLIM } else { &CLASSIC };
     let arrow = arrow_model();
     let mut vertices = Vec::new();
@@ -301,16 +302,16 @@ mod tests {
 
     #[test]
     fn a_player_without_arrows_and_the_other_kinds_draw_none() {
-        assert!(arrow_layers(&player_with(0)).is_empty());
+        assert!(arrow_layers(&player_with(0), BipedStyle::V1_8).is_empty());
         let mut cow = player_with(3);
         cow.kind = EntityKind::Cow;
-        assert!(arrow_layers(&cow).is_empty());
+        assert!(arrow_layers(&cow, BipedStyle::V1_8).is_empty());
     }
 
     #[test]
     fn each_arrow_is_six_quads_on_the_arrow_texture() {
         // Two plate quads and four shaft quads, two triangles each.
-        let layers = arrow_layers(&player_with(3));
+        let layers = arrow_layers(&player_with(3), BipedStyle::V1_8);
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].slot, TextureSlot::Arrow);
         assert_eq!(layers[0].vertices.len(), 3 * 6 * 6);
@@ -319,7 +320,7 @@ mod tests {
     #[test]
     fn the_arrows_stay_near_the_body() {
         // An arrow is 0.9 block long and may stick out of a part by that much.
-        for vertex in &arrow_layers(&player_with(8))[0].vertices {
+        for vertex in &arrow_layers(&player_with(8), BipedStyle::V1_8)[0].vertices {
             let [x, y, z] = vertex.position;
             assert!(x.abs() < 1.5 && z.abs() < 1.5, "{x} {z}");
             assert!((-0.9..2.6).contains(&y), "{y}");

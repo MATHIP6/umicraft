@@ -11,7 +11,7 @@
 use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::child::scale_mesh;
-use umicraft_model::entity::{CapeModel, HumanoidModel, ModelVertex, TextureSlot};
+use umicraft_model::entity::{BipedStyle, CapeModel, HumanoidModel, ModelVertex, TextureSlot};
 
 use umicraft_game::entity::wrap_degrees;
 
@@ -24,6 +24,7 @@ use super::player::posed_player;
 use super::pose::humanoid_pose;
 use super::skins::SkinLookup;
 use super::skull::skull_layers;
+use super::Viewer;
 
 /// The animation inputs every model's `set_angles` takes.
 #[derive(Clone, Copy)]
@@ -101,7 +102,7 @@ pub(super) fn build_entity_layers(
     ent: &EntityRenderSnapshot,
     skins: &dyn SkinLookup,
 ) -> Vec<EntityLayer> {
-    build_entity_layers_for(ent, skins, false)
+    build_entity_layers_for(ent, skins, Viewer::default())
 }
 
 /// [`build_entity_layers`] for a viewer who is, or is not, a spectator: a
@@ -109,13 +110,13 @@ pub(super) fn build_entity_layers(
 pub(super) fn build_entity_layers_for(
     ent: &EntityRenderSnapshot,
     skins: &dyn SkinLookup,
-    viewer_is_spectator: bool,
+    viewer: Viewer,
 ) -> Vec<EntityLayer> {
     let pose = Pose::of(ent);
     let mut layers = if ent.kind == EntityKind::Creeper {
         creeper_layers(ent, pose)
     } else {
-        humanoid_layers(ent, skins)
+        humanoid_layers(ent, skins, viewer.style)
             .or_else(|| animal_layers(ent, pose))
             .or_else(|| creature_layers(ent, pose))
             .unwrap_or_default()
@@ -125,7 +126,7 @@ pub(super) fn build_entity_layers_for(
     // A spectator sees the main model, the first layer, as a ghost
     // (`isInvisibleToPlayer`).
     if ent.flags.is_invisible() {
-        let sees_ghost = viewer_is_spectator || ent.ghost_visible;
+        let sees_ghost = viewer.spectator || ent.ghost_visible;
         let ghost = (sees_ghost && !layers.is_empty()).then(|| layers.remove(0));
         layers.retain(|layer| layer.slot.is_armor() || layer.slot == TextureSlot::EnchantGlint);
         if let Some(mut body) = ghost {
@@ -136,17 +137,21 @@ pub(super) fn build_entity_layers_for(
     // A skull on the head is drawn even when its wearer is invisible.
     layers.extend(skull_layers(ent, skins));
     // Arrows in the body are drawn on an invisible player too.
-    layers.extend(arrow_layers(ent));
+    layers.extend(arrow_layers(ent, viewer.style));
     layers
 }
 
 /// Two-legged, two-armed models.
-fn humanoid_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -> Option<Vec<EntityLayer>> {
+fn humanoid_layers(
+    ent: &EntityRenderSnapshot,
+    skins: &dyn SkinLookup,
+    style: BipedStyle,
+) -> Option<Vec<EntityLayer>> {
     if ent.kind == EntityKind::Player {
-        let (model, is_slim) = posed_player(ent);
+        let (model, is_slim) = posed_player(ent, style);
         let slot = skin_slot(ent, is_slim, skins);
         let mut layers = one(slot, model.emit_mesh());
-        layers.extend(armor_layers(ent, 1.0));
+        layers.extend(armor_layers(ent, 1.0, style));
         layers.extend(cape_layer(ent, skins));
         return Some(layers);
     }
@@ -158,7 +163,7 @@ fn humanoid_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -> Option
     };
     scale_mesh(&mut vertices, scale);
     let mut layers = one(slot, vertices);
-    layers.extend(armor_layers(ent, scale));
+    layers.extend(armor_layers(ent, scale, BipedStyle::V1_8));
     Some(layers)
 }
 
@@ -250,6 +255,13 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use umicraft_game::entity::{EntityFlags, EntityId, PlayerProfile};
+
+    fn spectator() -> Viewer {
+        Viewer {
+            spectator: true,
+            ..Viewer::default()
+        }
+    }
 
     /// A lookup where every texture is ready with index 3.
     struct Ready;
@@ -493,17 +505,17 @@ mod tests {
             nbt: None,
         });
         // Anyone else sees only the armour.
-        let others = build_entity_layers_for(&zombie, &Ready, false);
+        let others = build_entity_layers_for(&zombie, &Ready, Viewer::default());
         assert!(others.iter().all(|layer| !layer.translucent));
         assert_eq!(others.len(), 1);
         // A spectator also sees the body, translucent, under the armour.
-        let ghosts = build_entity_layers_for(&zombie, &Ready, true);
+        let ghosts = build_entity_layers_for(&zombie, &Ready, spectator());
         assert_eq!(ghosts.len(), 2);
         assert!(ghosts[0].translucent && ghosts[0].slot == TextureSlot::Zombie);
         assert!(!ghosts[1].translucent && ghosts[1].slot.is_armor());
         // A visible entity is never a ghost.
         zombie.flags = EntityFlags::new(0, 0x7F);
-        assert!(build_entity_layers_for(&zombie, &Ready, true)
+        assert!(build_entity_layers_for(&zombie, &Ready, spectator())
             .iter()
             .all(|layer| !layer.translucent));
     }
@@ -513,8 +525,11 @@ mod tests {
         let mut creeper =
             EntityRenderSnapshot::new(EntityId(15), EntityKind::Creeper, glam::Vec3::ZERO);
         creeper.flags = EntityFlags::new(0x20, 0x7F);
-        assert!(build_entity_layers_for(&creeper, &Ready, false).is_empty());
-        assert_eq!(build_entity_layers_for(&creeper, &Ready, true).len(), 1);
+        assert!(build_entity_layers_for(&creeper, &Ready, Viewer::default()).is_empty());
+        assert_eq!(
+            build_entity_layers_for(&creeper, &Ready, spectator()).len(),
+            1
+        );
     }
 
     #[test]

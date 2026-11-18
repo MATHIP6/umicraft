@@ -28,6 +28,18 @@ pub enum ArmPose {
     AimingBow,
 }
 
+/// Which client's biped pose to draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BipedStyle {
+    /// The 1.8 pose.
+    #[default]
+    V1_8,
+    /// The 1.7 pose of the 1.7 Animations mod (ADR-0079): a blocking arm
+    /// keeps a yaw of 0, as 1.7.10 `ModelBiped.setRotationAngles` (line 152)
+    /// sets no yaw for `heldItemRight == 3`.
+    V1_7,
+}
+
 /// The inputs of one humanoid pose, in the units of the vanilla model.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct HumanoidPose {
@@ -52,6 +64,8 @@ pub struct HumanoidPose {
     pub arms_forward: bool,
     /// Sitting on a vehicle (MCP `ModelBiped.isRiding`).
     pub riding: bool,
+    /// The client whose pose is drawn.
+    pub style: BipedStyle,
 }
 
 /// Vanilla rotations of the six parts, `[x, y, z]` in radians.
@@ -124,7 +138,11 @@ pub(super) fn vanilla_angles(pose: &HumanoidPose) -> Angles {
         ArmPose::Holding => right_arm[0] = right_arm[0] * 0.5 - PI / 10.0,
         ArmPose::Blocking => {
             right_arm[0] = right_arm[0] * 0.5 - PI / 10.0 * 3.0;
-            right_arm[1] = -PI / 6.0;
+            // 1.8.9 `ModelBiped.setRotationAngles` turns the blocking arm
+            // inwards; 1.7.10 leaves it straight.
+            if pose.style == BipedStyle::V1_8 {
+                right_arm[1] = -PI / 6.0;
+            }
         }
         ArmPose::Empty | ArmPose::AimingBow => {}
     }
@@ -219,6 +237,22 @@ mod tests {
         // Only the breathing roll moves the arms.
         assert!((model.right_arm.rotation[2] + 0.1).abs() < 1e-5);
         assert!((model.left_arm.rotation[2] - 0.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_1_7_blocking_arm_does_not_turn_inwards() {
+        let blocking = |style| {
+            posed(HumanoidPose {
+                arms: ArmPose::Blocking,
+                style,
+                ..HumanoidPose::default()
+            })
+        };
+        let modern = blocking(BipedStyle::V1_8);
+        let legacy = blocking(BipedStyle::V1_7);
+        assert!((modern.right_arm.rotation[1] + PI / 6.0).abs() < 1e-6);
+        assert_eq!(legacy.right_arm.rotation[1], 0.0);
+        assert_eq!(modern.right_arm.rotation[0], legacy.right_arm.rotation[0]);
     }
 
     #[test]

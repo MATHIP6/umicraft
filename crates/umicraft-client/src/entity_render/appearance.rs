@@ -85,7 +85,7 @@ pub(super) fn elder_guardian(
     let matrix = placement(camera, yaw, pitch, progress) * transform::model_matrix(&guardian);
     let light = FULL_LIGHT | (opacity_bits(progress) << OPACITY_SHIFT);
     let mut meshes: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
-    for layer in mobs::build_entity_layers_for(&guardian, skins, false) {
+    for layer in mobs::build_entity_layers_for(&guardian, skins, super::Viewer::default()) {
         meshes.entry(layer.slot).or_default().extend(
             layer
                 .vertices

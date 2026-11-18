@@ -12,6 +12,7 @@ mod coordinates;
 mod cps;
 mod fps;
 mod fullbright;
+mod legacy_animations;
 mod motion_blur;
 mod no_hurt_cam;
 mod ping;
@@ -35,6 +36,7 @@ pub fn all() -> Vec<Box<dyn BuiltinMod>> {
         Box::new(fullbright::Fullbright),
         Box::new(zoom::Zoom),
         Box::new(no_hurt_cam::NoHurtCam),
+        Box::new(legacy_animations::LegacyAnimations),
         Box::new(toggle_sprint::ToggleSprint::default()),
     ]
 }

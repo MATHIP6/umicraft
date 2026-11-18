@@ -13,6 +13,7 @@ use umicraft_game::interaction::Interaction;
 use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::WindowManager;
 use umicraft_game::item_use::ItemUse;
+use umicraft_game::legacy::{LegacyAnimations, SneakCamera};
 use umicraft_game::raycast::{look_direction, raycast, RayHit};
 use umicraft_game::server::ServerState;
 use umicraft_game::shapes::selection_shape;
@@ -118,6 +119,11 @@ pub(super) struct Game {
     pub(super) perspective: Perspective,
     /// The animation state of the first-person hand.
     pub(super) hand: HandState,
+    /// The 1.7 animations the built-in mod selects (ADR-0079).
+    pub(super) legacy: LegacyAnimations,
+    /// The 1.7 drop of the view while sneaking, ticked whatever the mod so
+    /// switching it on mid-sneak does not jump.
+    pub(super) sneak_camera: SneakCamera,
     /// The body of the local player, animated like any other player; drawn
     /// in the third-person perspectives.
     pub(super) body: EntityRecord,
@@ -196,6 +202,8 @@ impl Game {
             item_use: ItemUse::new(),
             perspective: Perspective::default(),
             hand: HandState::new(),
+            legacy: LegacyAnimations::default(),
+            sneak_camera: SneakCamera::default(),
             body: EntityRecord::new(EntityId(0), EntityKind::Player, DVec3::ZERO, 0.0, 0.0),
             look: LookSlot::default(),
             placements: 0,

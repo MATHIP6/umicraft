@@ -3,6 +3,7 @@
 //! Clicks on entities and blocks, and the use of the held item.
 
 use super::*;
+use umicraft_game::legacy::LegacyAnimations;
 
 #[test]
 fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
@@ -161,6 +162,46 @@ fn holding_the_use_button_eats_slowly_and_releasing_tells_the_server() {
             ..
         }
     )));
+}
+
+/// A player blocking with a sword, aiming at the floor with attack held.
+fn blocking_at_the_floor(legacy: LegacyAnimations) -> (Game, CommandQueue) {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    game.legacy = legacy;
+    game.windows.apply_set_slot(0, 36, wire_item(276, 0));
+    game.pitch = -28.6;
+    game.controls.input.use_item = true;
+    let mut queue = CommandQueue::default();
+    click_use(&mut game, &mut queue);
+    assert!(game.item_use.is_using(), "the sword is raised");
+    game.pitch = 85.9;
+    game.controls.input.attack = true;
+    (game, queue)
+}
+
+#[test]
+fn the_1_7_block_hit_swings_the_arm_without_a_packet() {
+    let legacy = LegacyAnimations {
+        block_hit: true,
+        ..LegacyAnimations::default()
+    };
+    let (mut game, mut queue) = blocking_at_the_floor(legacy);
+    let sent = queue.ordered.len();
+    run_attack(&mut game, &mut queue);
+    tick_hand(&mut game);
+    assert!(game.hand.pose().swing == 0.0 && game.hand.swing_progress(1.0) == 0.0);
+    tick_hand(&mut game);
+    assert!(game.hand.pose().swing > 0.0, "the arm swings");
+    assert_eq!(queue.ordered.len(), sent, "the server is told nothing");
+}
+
+#[test]
+fn the_1_8_attack_does_nothing_while_an_item_is_in_use() {
+    let (mut game, mut queue) = blocking_at_the_floor(LegacyAnimations::default());
+    run_attack(&mut game, &mut queue);
+    tick_hand(&mut game);
+    tick_hand(&mut game);
+    assert_eq!(game.hand.pose().swing, 0.0);
 }
 
 #[test]

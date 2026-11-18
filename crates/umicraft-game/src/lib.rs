@@ -56,6 +56,7 @@ pub mod inventory;
 pub mod item_nbt;
 pub mod item_use;
 pub mod items;
+pub mod legacy;
 pub mod media;
 pub mod movement;
 pub mod mth;

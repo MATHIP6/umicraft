@@ -425,3 +425,23 @@ fn the_local_body_wears_the_skin_of_the_account_when_the_server_sends_none() {
         Some("http://textures.minecraft.net/texture/cd")
     );
 }
+
+#[test]
+fn the_1_7_sneak_camera_rises_back_over_a_few_ticks() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    // The key was just let go: 1.8 stands at once, 1.7 is still 0.032 lower.
+    game.sneak_camera.tick(true);
+    game.sneak_camera.tick(false);
+    let eye_y = |game: &Game| {
+        let (view, own) = player_view(game).expect("a view");
+        assert!(own);
+        view.position.y
+    };
+    let vanilla = eye_y(&game);
+    game.legacy = umicraft_game::legacy::LegacyAnimations {
+        sneak_camera: true,
+        ..Default::default()
+    };
+    let lowered = vanilla - eye_y(&game);
+    assert!((lowered - 0.032).abs() < 1e-6, "{lowered}");
+}

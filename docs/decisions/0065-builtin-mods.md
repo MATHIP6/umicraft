@@ -132,6 +132,8 @@ feature must not grow them.
   thread folds both into one angle. Its icon is the Phosphor camera turned (12 degrees)
   clockwise: `gen_icons.py` turns an icon listed in `TURNS` about the centre of the grid and
   shrinks it a little (`TURNED_FIT`) so a corner stays off the bitmap edge.
+- **1.7 Animations.** A visual mod (`legacy_animations`, off by default) with three toggles,
+  `block_hit`, `equip` and `sneak_camera`; the game thread runs them. See ADR-0079.
 - **Known limits.** `keystrokes` and the toggle-sprint indicator need WASD state in
   `ModContext`/`ModInput` and a `hud()` that sees the settings. The directions of
   `coordinates` are not localized (the mods do not see the language). `ping_ms` is

@@ -18,6 +18,7 @@ use umicraft_ui::menus::{ModsOutcome, ModsView};
 use umicraft_ui::FontAtlas;
 
 use super::App;
+use crate::game::GameEvent;
 use crate::hud_editor_view;
 use crate::menu_flow::MenuFlow;
 use crate::mods_hud_view::mod_widget_views;
@@ -125,10 +126,16 @@ impl App {
             Ok(true) => {
                 self.options.mods = self.mods.config();
                 self.save_options();
+                self.send_legacy_animations();
             }
             Ok(false) => {}
             Err(error) => tracing::warn!(%error, "ignored a change of the mods menu"),
         }
+    }
+
+    /// Tells the game thread which 1.7 animations to run (ADR-0079).
+    pub(super) fn send_legacy_animations(&self) {
+        self.send_event(GameEvent::LegacyAnimations(self.mods.legacy_animations()));
     }
 
     /// Hands a key to the mods menu. Escape closes it from the list; on the

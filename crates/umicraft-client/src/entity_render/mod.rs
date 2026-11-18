@@ -55,14 +55,15 @@ use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
-use umicraft_model::entity::{ModelVertex, TextureSlot};
+use umicraft_model::entity::{BipedStyle, ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
 pub(crate) use animals::WITCH_SCALE;
 pub use cull::CullView;
 pub use hand::hand_vertices;
 pub(crate) use mobs::posed_humanoid_mob;
-pub(crate) use player::posed_player;
+pub(crate) use player::{player_head, posed_player};
+pub(crate) use pose::arm_pose;
 pub(crate) use skins::head_face;
 #[cfg(test)]
 pub(crate) use skins::NoSkins;
@@ -76,7 +77,14 @@ pub(crate) use transform::{body_matrix, part_frame, x_mirror};
 pub fn mesh_entities(
     snapshots: &[EntityRenderSnapshot],
 ) -> HashMap<TextureSlot, Vec<EntityVertex>> {
-    mesh_entities_with(snapshots, &skins::NoSkins, Eye::default(), false, None).solid
+    mesh_entities_with(
+        snapshots,
+        &skins::NoSkins,
+        Eye::default(),
+        Viewer::default(),
+        None,
+    )
+    .solid
 }
 
 /// [`mesh_entities`] into a caller-provided map.
@@ -102,6 +110,16 @@ pub(super) struct Eye {
     pub(super) hand_swing: f32,
 }
 
+/// What the viewer's own state and settings change in the meshes.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Viewer {
+    /// Whether the local player is a spectator, who sees invisible entities
+    /// as ghosts.
+    pub(super) spectator: bool,
+    /// The pose of the players: 1.8, or 1.7 with the 1.7 Animations mod.
+    pub(super) style: BipedStyle,
+}
+
 /// The meshes of a frame: the lit entities, and the glowing layers that are
 /// added over them.
 #[derive(Default)]
@@ -123,7 +141,7 @@ pub(super) fn mesh_entities_with(
     snapshots: &[EntityRenderSnapshot],
     skins: &dyn skins::SkinLookup,
     eye: Eye,
-    viewer_is_spectator: bool,
+    viewer: Viewer,
     view: Option<CullView>,
 ) -> MeshedEntities {
     let (camera, view_yaw, view_pitch) = (eye.position, eye.yaw, eye.pitch);
@@ -146,7 +164,7 @@ pub(super) fn mesh_entities_with(
         let matrix = transform::model_matrix(ent);
         let xform = MatrixTransform::new(matrix);
         let light = entity_light(ent);
-        for layer in mobs::build_entity_layers_for(ent, skins, viewer_is_spectator) {
+        for layer in mobs::build_entity_layers_for(ent, skins, viewer) {
             if let Some(glow) = layer.glow {
                 let word = glow.light_word();
                 let target = if glow.equal_depth {

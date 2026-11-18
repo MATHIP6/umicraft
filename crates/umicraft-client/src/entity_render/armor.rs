@@ -12,7 +12,7 @@ use umicraft_assets::skin::decode_png_bytes;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_game::item_nbt::ItemDisplay;
 use umicraft_model::entity::child::scale_mesh;
-use umicraft_model::entity::{ArmorMaterial, HumanoidModel, TextureSlot};
+use umicraft_model::entity::{ArmorMaterial, BipedStyle, HumanoidModel, HumanoidPose, TextureSlot};
 
 use super::glow::glint_layers;
 use super::mobs::EntityLayer;
@@ -22,12 +22,19 @@ use super::pose::humanoid_pose;
 const DEFAULT_LEATHER: u32 = 0x00A0_6540;
 
 /// The armour layers of `ent`, helmet first. `scale` is the entity scale of
-/// the mob wearing it.
-pub(super) fn armor_layers(ent: &EntityRenderSnapshot, scale: f32) -> Vec<EntityLayer> {
+/// the mob wearing it, `style` the pose of its body.
+pub(super) fn armor_layers(
+    ent: &EntityRenderSnapshot,
+    scale: f32,
+    style: BipedStyle,
+) -> Vec<EntityLayer> {
     if !wears_armor(ent.kind) {
         return Vec::new();
     }
-    let pose = humanoid_pose(ent, ent.kind != EntityKind::Player);
+    let pose = HumanoidPose {
+        style,
+        ..humanoid_pose(ent, ent.kind != EntityKind::Player)
+    };
     let mut layers = Vec::new();
     for slot in (1..=4u8).rev() {
         let Some(item) = &ent.armor[usize::from(slot) - 1] else {
@@ -147,12 +154,15 @@ mod tests {
     }
 
     fn slots(ent: &EntityRenderSnapshot) -> Vec<TextureSlot> {
-        armor_layers(ent, 1.0).iter().map(|l| l.slot).collect()
+        armor_layers(ent, 1.0, BipedStyle::V1_8)
+            .iter()
+            .map(|l| l.slot)
+            .collect()
     }
 
     #[test]
     fn a_bare_player_wears_nothing() {
-        assert!(armor_layers(&player(), 1.0).is_empty());
+        assert!(armor_layers(&player(), 1.0, BipedStyle::V1_8).is_empty());
     }
 
     #[test]

@@ -285,6 +285,11 @@ pub(super) fn handle_event(
             game.particle_setting = umicraft_game::particles::ParticleSetting::from_index(index);
             false
         }
+        GameEvent::LegacyAnimations(legacy) => {
+            game.legacy = legacy;
+            game.hand.set_legacy(legacy);
+            false
+        }
         GameEvent::LocalChat(text) => {
             let line = local_chat_line(&text);
             push_chat(game, line);

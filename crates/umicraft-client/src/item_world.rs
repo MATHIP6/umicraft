@@ -20,7 +20,8 @@ use umicraft_game::items;
 use umicraft_mesh::item::{ItemMesh, ItemStyle};
 use umicraft_mesh::VertexLight;
 use umicraft_model::display::DisplayContext;
-use umicraft_model::item::pose::{context_pose, ground_pose, held_pose};
+use umicraft_model::entity::BipedStyle;
+use umicraft_model::item::pose::{context_pose, ground_pose, held_pose, legacy_flat_held_pose};
 use umicraft_model::item::{ItemGeometry, ItemModel};
 use umicraft_model::ModelQuad;
 use umicraft_world::LightLevel;
@@ -49,6 +50,8 @@ pub struct WorldItems {
     layers: ItemLayers,
     /// Where the camera looks, for the sprites that face it.
     view: objects::View,
+    /// The pose of the players holding an item (ADR-0079).
+    style: BipedStyle,
 }
 
 impl WorldItems {
@@ -56,6 +59,12 @@ impl WorldItems {
     /// `umicraft_render::Camera`) that thrown items and fireballs face.
     pub fn set_view(&mut self, yaw: f32, pitch: f32) {
         self.view = objects::View::of_camera(yaw, pitch);
+    }
+
+    /// Sets the pose the players are drawn in, so that their items follow
+    /// the arm: the 1.7 one while the 1.7 Animations mod asks for it.
+    pub fn set_biped_style(&mut self, style: BipedStyle) {
+        self.style = style;
     }
 
     /// Rebuilds the meshes from the entity snapshots and returns them.
@@ -77,7 +86,9 @@ impl WorldItems {
                 (EntityKind::ItemFrame, framed, _) => {
                     push_item_frame(&mut self.layers, entity, framed, items);
                 }
-                (_, _, Some(held)) => held::push(&mut self.layers, entity, held, items),
+                (_, _, Some(held)) => {
+                    held::push(&mut self.layers, entity, held, items, self.style);
+                }
                 _ => {}
             }
             head::push(&mut self.layers, entity, items);
@@ -179,6 +190,8 @@ const BOW: i16 = 261;
 const FISHING_ROD_CAST: &str = "fishing_rod_cast";
 /// The item id of a filled map, which has its own frame model.
 const FILLED_MAP: i16 = 358;
+/// The item id of the carrot on a stick, turned around in the 1.7 hand.
+const CARROT_ON_A_STICK: i16 = 398;
 
 /// The frame of an item frame entity: its block centre, turned by `180 - yaw`.
 pub(crate) fn frame_base(entity: &EntityRenderSnapshot) -> Mat4 {
@@ -269,7 +282,7 @@ pub fn push_held_item(
         light: world_light(light, false),
         tints: &tints,
     };
-    let pose = bob * hand.item_matrix() * held_pose(model, DisplayContext::FirstPerson);
+    let pose = bob * hand.item_matrix() * first_person_pose(model, item_id, hand);
     // Blocks and flat items alike take the standard item lights (MCP
     // `ItemRenderer.rotateArroundXAndY`; `RenderItem.renderQuad` replaces the
     // face shade baked in the quads), which sit in the bobbed frame: the bob
@@ -277,6 +290,19 @@ pub fn push_held_item(
     let light_frame = hand.light_frame() * bob.inverse();
     let glint = resources.glints(item_id, damage, nbt);
     layers.push_lit(quads, (&pose, &light_frame), &style, glint);
+}
+
+/// Model space to the frame of the first-person hand: the model's own pose,
+/// or the place 1.7 gave every flat sprite when the 1.7 Animations mod asks
+/// for it (ADR-0079). Blocks are drawn alike by both versions.
+fn first_person_pose(model: &ItemModel, item_id: i16, hand: &HandPose) -> Mat4 {
+    if hand.legacy_item_position && !model.gui_3d {
+        // 1.7.10 `Item.shouldRotateAroundWhenRendering`.
+        let turned = matches!(item_id, FISHING_ROD | CARROT_ON_A_STICK);
+        legacy_flat_held_pose(turned)
+    } else {
+        held_pose(model, DisplayContext::FirstPerson)
+    }
 }
 
 /// The model of the item in the first-person hand: the bow shows its
@@ -789,10 +815,64 @@ mod player_render_tests {
         entity.head_yaw = 0.0;
         entity.limb_swing_amount = 0.0;
         let held = entity.held.clone().expect("a held item");
-        let hand = held::hand_frame(&entity, &held)
+        let hand = held::hand_frame(&entity, &held, BipedStyle::V1_8)
             .expect("a player has a hand")
             .transform_point3(Vec3::ZERO);
         assert!(hand.x < entity.position.x - 0.2, "{hand}");
+    }
+
+    /// Renders a player blocking with a sword, seen from the front, in the
+    /// 1.8 and the 1.7 pose; set `UMICRAFT_BLOCK_DUMP` to a directory to keep
+    /// `block_1_8.png` and `block_1_7.png`.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn a_blocking_player_from_the_front() {
+        let resources = ModelResources::load().expect("official resources");
+        let items = resources.items();
+        let atlas = resources.atlas();
+        let mut blocker = player(1, 0.0, 276, false);
+        blocker.position = Vec3::new(0.0, 78.4, -2.6);
+        (blocker.yaw, blocker.body_yaw, blocker.head_yaw) = (0.0, 0.0, 0.0);
+        blocker.limb_swing_amount = 0.0;
+        blocker.flags = EntityFlags::new(0x10, 0);
+        for (style, name) in [
+            (BipedStyle::V1_8, "block_1_8"),
+            (BipedStyle::V1_7, "block_1_7"),
+        ] {
+            let mut renderer = Renderer::new_offscreen(320, 180).expect("renderer");
+            renderer
+                .set_block_atlas(
+                    atlas.width(),
+                    atlas.height(),
+                    atlas.layers(),
+                    atlas.pixels(),
+                )
+                .expect("atlas");
+            let snapshots = [blocker.clone()];
+            let textures = EntityTextures::load(&renderer);
+            textures.set_biped_style(style);
+            textures.mesh_and_upload(&snapshots, &mut renderer);
+            let mut world = WorldItems::default();
+            world.set_biped_style(style);
+            renderer.set_world_items(&world.build(&snapshots, &items).items);
+            renderer
+                .render(
+                    &crate::test_support::world_camera(),
+                    &Overlay::new(320, 180),
+                )
+                .expect("render");
+            let image = renderer.read_pixels().expect("readback");
+            if let Ok(dir) = std::env::var("UMICRAFT_BLOCK_DUMP") {
+                let file = std::fs::File::create(format!("{dir}/{name}.png")).expect("dump file");
+                let mut encoder = png::Encoder::new(file, image.width, image.height);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                    .expect("png");
+            }
+        }
     }
 
     /// Renders two players holding a sword and a torch; set
@@ -885,7 +965,8 @@ mod use_render_tests {
         }
     }
 
-    /// Renders the bow drawn, an apple being eaten and a sword blocking; set
+    /// Renders the bow drawn, an apple being eaten and a sword at rest and
+    /// blocking, then the sword and the bow at their 1.7 place; set
     /// `UMICRAFT_USE_DUMP` to a directory to keep the PNGs.
     #[test]
     #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
@@ -900,7 +981,23 @@ mod use_render_tests {
         };
         render_hand((261, 0), using(UseAction::Bow, 71_980.0, 20), "bow");
         render_hand((260, 0), using(UseAction::Eat, 12.0, 20), "eat");
+        render_hand((276, 0), HandPose::default(), "sword");
         render_hand((276, 0), using(UseAction::Block, 71_990.0, 10), "block");
+        let legacy = |pose: HandPose| HandPose {
+            legacy_item_position: true,
+            ..pose
+        };
+        render_hand(
+            (261, 0),
+            legacy(using(UseAction::Bow, 71_980.0, 20)),
+            "bow_1_7",
+        );
+        render_hand((276, 0), legacy(HandPose::default()), "sword_1_7");
+        render_hand(
+            (276, 0),
+            legacy(using(UseAction::Block, 71_990.0, 10)),
+            "block_1_7",
+        );
     }
 }
 

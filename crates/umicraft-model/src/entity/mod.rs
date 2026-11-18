@@ -57,7 +57,7 @@ pub use horse::{HorseLook, HorseModel};
 pub use humanoid::HumanoidModel;
 pub use iron_golem::{triangle_wave, GolemAction, IronGolemModel};
 pub use ocelot::{OcelotModel, OcelotPose};
-pub use pose::{ArmPose, HumanoidPose};
+pub use pose::{ArmPose, BipedStyle, HumanoidPose};
 pub use quadruped::QuadrupedModel;
 pub use rabbit::RabbitModel;
 pub use sheep::SheepModel;

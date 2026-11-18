@@ -17,13 +17,15 @@ use umicraft_game::item_use::FISHING_ROD;
 use umicraft_game::items::{self, ItemKind, ToolKind};
 use umicraft_mesh::item::ItemStyle;
 use umicraft_model::display::DisplayContext;
-use umicraft_model::entity::{witch_nose_angles, ModelPart};
-use umicraft_model::item::pose::held_pose;
+use umicraft_model::entity::{witch_nose_angles, ArmPose, BipedStyle, ModelPart};
+use umicraft_model::item::pose::{held_pose, legacy_flat_held_pose};
 use umicraft_model::item::ItemModel;
 use umicraft_model::ModelQuad;
 
 use super::{quads_of, sprite_model, world_light, ItemLayers, BOW, FISHING_ROD_CAST};
-use crate::entity_render::{body_matrix, posed_humanoid_mob, posed_player, x_mirror, WITCH_SCALE};
+use crate::entity_render::{
+    arm_pose, body_matrix, posed_humanoid_mob, posed_player, x_mirror, WITCH_SCALE,
+};
 use crate::item_icons::ItemResources;
 
 /// The carrot on a stick item id, the other item that turns around in a hand.
@@ -34,7 +36,8 @@ const FULL_3D_PLAIN: [i16; 3] = [280, 352, 369];
 /// crate's y-up models (`villagerNose.setRotationPoint(0, -2, 0)`).
 const WITCH_NOSE_PIVOT: [f32; 3] = [0.0, 26.0, 0.0];
 
-/// Appends the item `held` by `entity`, if its kind shows one.
+/// Appends the item `held` by `entity`, if its kind shows one; a player is
+/// posed in `style`.
 ///
 /// A player with a bobber out shows a rod whatever it holds, a bow in use
 /// shows the drawing model (`RenderItem.renderItemModelForEntity`).
@@ -43,15 +46,16 @@ pub(super) fn push(
     entity: &EntityRenderSnapshot,
     held: &EntityItem,
     resources: &ItemResources,
+    style: BipedStyle,
 ) {
     let stack = shown_stack(entity, held);
     let Some((model, quads)) = shown_model(resources, entity, &stack) else {
         return;
     };
-    let Some(frame) = hand_frame(entity, &stack) else {
+    let Some(frame) = hand_frame(entity, &stack, style) else {
         return;
     };
-    let pose = frame * held_pose(model, DisplayContext::ThirdPerson);
+    let pose = frame * item_pose(model, entity, stack.item_id, style);
     let tints = resources.tints(stack.item_id, stack.damage, stack.nbt.as_deref());
     let style = ItemStyle {
         atlas: resources.atlas(),
@@ -103,13 +107,77 @@ fn shown_model<'a>(
     named.or_else(|| sprite_model(resources, stack.item_id, stack.damage))
 }
 
-/// The frame of an item in the hand of `entity`, up to the item's own pose;
-/// `None` for kinds with no held-item layer.
-pub(super) fn hand_frame(entity: &EntityRenderSnapshot, stack: &EntityItem) -> Option<Mat4> {
+/// The frame of an item in the hand of `entity`, a player posed in
+/// `style`, up to the item's own pose; `None` for kinds with no held-item
+/// layer.
+pub(super) fn hand_frame(
+    entity: &EntityRenderSnapshot,
+    stack: &EntityItem,
+    style: BipedStyle,
+) -> Option<Mat4> {
     if entity.kind == EntityKind::Witch {
         return Some(witch_frame(entity, stack.item_id));
     }
-    biped_frame(entity, stack.item_id)
+    biped_frame(entity, stack.item_id, style)
+}
+
+/// From the palm to the model space of the item: the model's third-person
+/// pose, or for a player drawn in the 1.7 style the fixed placement of 1.7
+/// (ADR-0079). Blocks and torches are placed alike by both versions.
+fn item_pose(
+    model: &ItemModel,
+    entity: &EntityRenderSnapshot,
+    item_id: i16,
+    style: BipedStyle,
+) -> Mat4 {
+    let legacy = style == BipedStyle::V1_7
+        && entity.kind == EntityKind::Player
+        && !model.gui_3d
+        && !is_torch(item_id);
+    if legacy {
+        let blocking = arm_pose(entity) == ArmPose::Blocking;
+        legacy_player_item_pose(item_id, blocking) * legacy_flat_held_pose(false)
+    } else {
+        held_pose(model, DisplayContext::ThirdPerson)
+    }
+}
+
+/// The placement 1.7.10 `RenderPlayer.renderEquippedItems` (lines 314-358)
+/// gives a flat item in the hand, before `ItemRenderer.renderItem` draws the
+/// sprite: the bow, the handle-like items (`isFull3D`, raised and turned
+/// across the body while `blocking`) and the other items each have theirs.
+fn legacy_player_item_pose(item_id: i16, blocking: bool) -> Mat4 {
+    let rotate = |degrees: f32, axis: Vec3| Mat4::from_axis_angle(axis, degrees.to_radians());
+    let translate = |x: f32, y: f32, z: f32| Mat4::from_translation(Vec3::new(x, y, z));
+    let upright = || {
+        Mat4::from_scale(Vec3::new(0.625, -0.625, 0.625))
+            * rotate(-100.0, Vec3::X)
+            * rotate(45.0, Vec3::Y)
+    };
+    if item_id == BOW {
+        translate(0.0, 0.125, 0.3125) * rotate(-20.0, Vec3::Y) * upright()
+    } else if is_full_3d(item_id) {
+        let turned = if turns_around(item_id) {
+            rotate(180.0, Vec3::Z) * translate(0.0, -0.125, 0.0)
+        } else {
+            Mat4::IDENTITY
+        };
+        let block = if blocking {
+            translate(0.05, 0.0, -0.1)
+                * rotate(-50.0, Vec3::Y)
+                * rotate(-10.0, Vec3::X)
+                * rotate(-60.0, Vec3::Z)
+        } else {
+            Mat4::IDENTITY
+        };
+        turned * block * translate(0.0, 0.1875, 0.0) * upright()
+    } else {
+        translate(0.25, 0.1875, -0.1875)
+            * Mat4::from_scale(Vec3::splat(0.375))
+            * rotate(60.0, Vec3::Z)
+            * rotate(-90.0, Vec3::X)
+            * rotate(20.0, Vec3::Z)
+    }
 }
 
 /// The right-hand frame of a biped (`LayerHeldItem`).
@@ -121,9 +189,9 @@ pub(super) fn hand_frame(entity: &EntityRenderSnapshot, stack: &EntityItem) -> O
 /// The arm frame of the vanilla model has y pointing down while this crate's
 /// models have it pointing up, so the chain is conjugated by a y flip (the
 /// arm boxes are the same boxes with negated y).
-fn biped_frame(entity: &EntityRenderSnapshot, item_id: i16) -> Option<Mat4> {
+fn biped_frame(entity: &EntityRenderSnapshot, item_id: i16, style: BipedStyle) -> Option<Mat4> {
     let (arm, scale) = if entity.kind == EntityKind::Player {
-        (posed_player(entity).0.right_arm, 1.0)
+        (posed_player(entity, style).0.right_arm, 1.0)
     } else {
         let mob = posed_humanoid_mob(entity)?;
         (mob.model.right_arm, mob.scale)
@@ -335,10 +403,16 @@ mod tests {
             EntityKind::ZombieVillager,
             EntityKind::Witch,
         ] {
-            assert!(hand_frame(&entity(kind), &sword).is_some(), "{kind:?}");
+            assert!(
+                hand_frame(&entity(kind), &sword, BipedStyle::V1_8).is_some(),
+                "{kind:?}"
+            );
         }
         for kind in [EntityKind::Villager, EntityKind::Cow, EntityKind::Creeper] {
-            assert!(hand_frame(&entity(kind), &sword).is_none(), "{kind:?}");
+            assert!(
+                hand_frame(&entity(kind), &sword, BipedStyle::V1_8).is_none(),
+                "{kind:?}"
+            );
         }
     }
 
@@ -346,9 +420,13 @@ mod tests {
     fn a_zombie_holds_the_item_on_its_right_and_in_front_of_it() {
         // Yaw 0 faces south (+Z): the right hand is to the west (-X) and the
         // arms are stretched forward.
-        let hand = hand_frame(&entity(EntityKind::Zombie), &stack(GOLDEN_SWORD))
-            .expect("zombie hand")
-            .transform_point3(Vec3::ZERO);
+        let hand = hand_frame(
+            &entity(EntityKind::Zombie),
+            &stack(GOLDEN_SWORD),
+            BipedStyle::V1_8,
+        )
+        .expect("zombie hand")
+        .transform_point3(Vec3::ZERO);
         assert!(hand.x < -0.2, "{hand}");
         assert!(hand.z > 0.3, "{hand}");
         assert!((0.9..1.6).contains(&hand.y), "{hand}");
@@ -357,8 +435,10 @@ mod tests {
     #[test]
     fn a_giant_holds_the_item_six_times_as_far_out() {
         let sword = stack(GOLDEN_SWORD);
-        let zombie = hand_frame(&entity(EntityKind::Zombie), &sword).expect("zombie");
-        let giant = hand_frame(&entity(EntityKind::Giant), &sword).expect("giant");
+        let zombie =
+            hand_frame(&entity(EntityKind::Zombie), &sword, BipedStyle::V1_8).expect("zombie");
+        let giant =
+            hand_frame(&entity(EntityKind::Giant), &sword, BipedStyle::V1_8).expect("giant");
         let (zombie, giant) = (
             zombie.transform_point3(Vec3::ZERO),
             giant.transform_point3(Vec3::ZERO),
@@ -373,7 +453,7 @@ mod tests {
         let mut baby = adult.clone();
         baby.meta.baby = true;
         let height = |e: &EntityRenderSnapshot| {
-            hand_frame(e, &sword)
+            hand_frame(e, &sword, BipedStyle::V1_8)
                 .expect("hand")
                 .transform_point3(Vec3::ZERO)
                 .y
@@ -383,7 +463,7 @@ mod tests {
 
     #[test]
     fn the_witch_holds_the_item_in_front_of_her_folded_arms() {
-        let hand = hand_frame(&entity(EntityKind::Witch), &stack(POTION))
+        let hand = hand_frame(&entity(EntityKind::Witch), &stack(POTION), BipedStyle::V1_8)
             .expect("witch")
             .transform_point3(Vec3::ZERO);
         assert!(hand.z > 0.1, "in front of her (south at yaw 0): {hand}");
