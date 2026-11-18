@@ -41,6 +41,11 @@ const SETTINGS: &[SettingDef] = &[
         label_key: "umicraft.mods.legacy_animations.item_position",
         kind: SettingKind::Toggle { default: true },
     },
+    SettingDef {
+        key: "third_person",
+        label_key: "umicraft.mods.legacy_animations.third_person",
+        kind: SettingKind::Toggle { default: true },
+    },
 ];
 
 /// The 1.7 animations mod.
@@ -68,7 +73,13 @@ mod tests {
         assert!(!m.meta().default_enabled, "the 1.8 look is the default");
         assert!(m.hud().is_none(), "it draws no widget");
         let settings = ModSettings::defaults(m.settings());
-        for key in ["block_hit", "equip", "sneak_camera", "item_position"] {
+        for key in [
+            "block_hit",
+            "equip",
+            "sneak_camera",
+            "item_position",
+            "third_person",
+        ] {
             assert!(settings.bool(key), "{key}");
         }
     }

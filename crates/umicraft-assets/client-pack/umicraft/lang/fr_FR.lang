@@ -132,6 +132,7 @@ umicraft.mods.legacy_animations.block_hit=Block hit
 umicraft.mods.legacy_animations.equip=Pas de rechargement quand le nombre change
 umicraft.mods.legacy_animations.sneak_camera=Caméra de sneak fluide
 umicraft.mods.legacy_animations.item_position=Position 1.7 des items
+umicraft.mods.legacy_animations.third_person=Blocage 1.7 en 3e personne
 umicraft.accounts.button=Compte : %s
 umicraft.accounts.button.none=Compte
 umicraft.accounts.title=Choisir un compte...

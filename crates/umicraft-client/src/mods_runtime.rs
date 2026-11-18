@@ -12,6 +12,7 @@ use umicraft_builtin_mods::{
     mods, History, HudWidget, ModContext, ModInput, ModRegistry, ModsConfig, RegistryError,
 };
 use umicraft_game::legacy::LegacyAnimations;
+use umicraft_model::entity::BipedStyle;
 use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
 use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 
@@ -200,7 +201,19 @@ impl ModsRuntime {
                 equip: view.settings.bool("equip"),
                 sneak_camera: view.settings.bool("sneak_camera"),
                 item_position: view.settings.bool("item_position"),
+                third_person: view.settings.bool("third_person"),
             })
+    }
+
+    /// The pose the renderer draws the players in: the 1.7 one while the
+    /// 1.7 Animations mod asks for it (ADR-0079).
+    #[must_use]
+    pub fn biped_style(&self) -> BipedStyle {
+        if self.legacy_animations().third_person {
+            BipedStyle::V1_7
+        } else {
+            BipedStyle::V1_8
+        }
     }
 
     /// Whether the Fullbright mod is on: the world is lit at full strength.
@@ -400,8 +413,16 @@ mod tests {
                 equip: false,
                 sneak_camera: true,
                 item_position: true,
+                third_person: true,
             }
         );
+        assert_eq!(runtime.biped_style(), BipedStyle::V1_7);
+        runtime
+            .registry_mut()
+            .set_enabled(LEGACY_ANIMATIONS_ID, false)
+            .expect("the mod exists");
+        assert_eq!(runtime.biped_style(), BipedStyle::V1_8);
+        assert_eq!(runtime.legacy_animations(), LegacyAnimations::default());
     }
 
     #[test]

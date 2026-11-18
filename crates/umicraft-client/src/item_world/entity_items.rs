@@ -13,7 +13,7 @@ use glam::Mat4;
 use umicraft_game::entity::{EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_game::hand::HandPose;
 use umicraft_model::display::DisplayContext;
-use umicraft_model::entity::TextureSlot;
+use umicraft_model::entity::{BipedStyle, TextureSlot};
 use umicraft_model::item::pose::held_pose;
 use umicraft_render::EntityVertex;
 use umicraft_world::LightLevel;
@@ -81,7 +81,9 @@ fn push_held(
     let Some(mesh) = entity_item_mesh(held.item_id, held.damage, held.nbt.as_deref(), skins) else {
         return;
     };
-    let Some(frame) = hand_frame(entity, held) else {
+    // A skull or a banner is never blocked with, so the arm is the same in
+    // both styles.
+    let Some(frame) = hand_frame(entity, held, BipedStyle::V1_8) else {
         return;
     };
     let pose = frame * held_pose(model, DisplayContext::ThirdPerson);

@@ -13,7 +13,7 @@ use umicraft_model::entity::{ArmorMaterial, ModelPart, SnowmanModel};
 use umicraft_model::item::pose::held_pose;
 
 use super::{sprite_model, world_light, ItemLayers};
-use crate::entity_render::{body_matrix, part_frame, posed_humanoid_mob, posed_player, x_mirror};
+use crate::entity_render::{body_matrix, part_frame, player_head, posed_humanoid_mob, x_mirror};
 use crate::item_icons::ItemResources;
 
 /// The pumpkin block item id.
@@ -86,7 +86,7 @@ fn snowman_frame(entity: &EntityRenderSnapshot) -> Mat4 {
 /// `LayerCustomHead` for a block item: the frame of the head of a biped.
 fn biped_frame(entity: &EntityRenderSnapshot) -> Option<Mat4> {
     let (head, scale) = match entity.kind {
-        EntityKind::Player => (posed_player(entity).0.head, 1.0),
+        EntityKind::Player => (player_head(entity), 1.0),
         _ => {
             let mob = posed_humanoid_mob(entity)?;
             // Skeletons, zombies, zombie villagers and pigmen only: the giant

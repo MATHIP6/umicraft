@@ -20,6 +20,7 @@ use umicraft_game::items;
 use umicraft_mesh::item::{ItemMesh, ItemStyle};
 use umicraft_mesh::VertexLight;
 use umicraft_model::display::DisplayContext;
+use umicraft_model::entity::BipedStyle;
 use umicraft_model::item::pose::{context_pose, ground_pose, held_pose, legacy_flat_held_pose};
 use umicraft_model::item::{ItemGeometry, ItemModel};
 use umicraft_model::ModelQuad;
@@ -49,6 +50,8 @@ pub struct WorldItems {
     layers: ItemLayers,
     /// Where the camera looks, for the sprites that face it.
     view: objects::View,
+    /// The pose of the players holding an item (ADR-0079).
+    style: BipedStyle,
 }
 
 impl WorldItems {
@@ -56,6 +59,12 @@ impl WorldItems {
     /// `umicraft_render::Camera`) that thrown items and fireballs face.
     pub fn set_view(&mut self, yaw: f32, pitch: f32) {
         self.view = objects::View::of_camera(yaw, pitch);
+    }
+
+    /// Sets the pose the players are drawn in, so that their items follow
+    /// the arm: the 1.7 one while the 1.7 Animations mod asks for it.
+    pub fn set_biped_style(&mut self, style: BipedStyle) {
+        self.style = style;
     }
 
     /// Rebuilds the meshes from the entity snapshots and returns them.
@@ -77,7 +86,9 @@ impl WorldItems {
                 (EntityKind::ItemFrame, framed, _) => {
                     push_item_frame(&mut self.layers, entity, framed, items);
                 }
-                (_, _, Some(held)) => held::push(&mut self.layers, entity, held, items),
+                (_, _, Some(held)) => {
+                    held::push(&mut self.layers, entity, held, items, self.style);
+                }
                 _ => {}
             }
             head::push(&mut self.layers, entity, items);
@@ -804,10 +815,64 @@ mod player_render_tests {
         entity.head_yaw = 0.0;
         entity.limb_swing_amount = 0.0;
         let held = entity.held.clone().expect("a held item");
-        let hand = held::hand_frame(&entity, &held)
+        let hand = held::hand_frame(&entity, &held, BipedStyle::V1_8)
             .expect("a player has a hand")
             .transform_point3(Vec3::ZERO);
         assert!(hand.x < entity.position.x - 0.2, "{hand}");
+    }
+
+    /// Renders a player blocking with a sword, seen from the front, in the
+    /// 1.8 and the 1.7 pose; set `UMICRAFT_BLOCK_DUMP` to a directory to keep
+    /// `block_1_8.png` and `block_1_7.png`.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn a_blocking_player_from_the_front() {
+        let resources = ModelResources::load().expect("official resources");
+        let items = resources.items();
+        let atlas = resources.atlas();
+        let mut blocker = player(1, 0.0, 276, false);
+        blocker.position = Vec3::new(0.0, 78.4, -2.6);
+        (blocker.yaw, blocker.body_yaw, blocker.head_yaw) = (0.0, 0.0, 0.0);
+        blocker.limb_swing_amount = 0.0;
+        blocker.flags = EntityFlags::new(0x10, 0);
+        for (style, name) in [
+            (BipedStyle::V1_8, "block_1_8"),
+            (BipedStyle::V1_7, "block_1_7"),
+        ] {
+            let mut renderer = Renderer::new_offscreen(320, 180).expect("renderer");
+            renderer
+                .set_block_atlas(
+                    atlas.width(),
+                    atlas.height(),
+                    atlas.layers(),
+                    atlas.pixels(),
+                )
+                .expect("atlas");
+            let snapshots = [blocker.clone()];
+            let textures = EntityTextures::load(&renderer);
+            textures.set_biped_style(style);
+            textures.mesh_and_upload(&snapshots, &mut renderer);
+            let mut world = WorldItems::default();
+            world.set_biped_style(style);
+            renderer.set_world_items(&world.build(&snapshots, &items).items);
+            renderer
+                .render(
+                    &crate::test_support::world_camera(),
+                    &Overlay::new(320, 180),
+                )
+                .expect("render");
+            let image = renderer.read_pixels().expect("readback");
+            if let Ok(dir) = std::env::var("UMICRAFT_BLOCK_DUMP") {
+                let file = std::fs::File::create(format!("{dir}/{name}.png")).expect("dump file");
+                let mut encoder = png::Encoder::new(file, image.width, image.height);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                    .expect("png");
+            }
+        }
     }
 
     /// Renders two players holding a sword and a torch; set

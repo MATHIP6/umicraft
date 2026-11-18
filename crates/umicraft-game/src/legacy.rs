@@ -18,7 +18,10 @@
 //!   sneaking instead of snapping ([`SneakCamera`]);
 //! - [`LegacyAnimations::item_position`]: a flat item in the first-person
 //!   hand sits where 1.7 drew it, smaller and further left, which is most
-//!   visible on a blocking sword (`HandPose::legacy_item_position`).
+//!   visible on a blocking sword (`HandPose::legacy_item_position`);
+//! - [`LegacyAnimations::third_person`]: the players are drawn as 1.7 drew
+//!   them, a blocking arm straight and the held item at its 1.7 place (the
+//!   renderer, `umicraft_model::entity::BipedStyle`).
 
 use umicraft_protocol::packets::play::ItemStack;
 
@@ -36,6 +39,8 @@ pub struct LegacyAnimations {
     pub sneak_camera: bool,
     /// The 1.7 place of a flat item in the first-person hand.
     pub item_position: bool,
+    /// The 1.7 blocking pose and held items of the players seen from outside.
+    pub third_person: bool,
 }
 
 impl LegacyAnimations {
@@ -155,7 +160,13 @@ mod tests {
     #[test]
     fn all_off_is_the_1_8_client() {
         let off = LegacyAnimations::default();
-        assert!(!off.block_hit && !off.equip && !off.sneak_camera && !off.item_position);
+        assert!(
+            !off.block_hit
+                && !off.equip
+                && !off.sneak_camera
+                && !off.item_position
+                && !off.third_person
+        );
         assert_eq!(off.equip_rule(), EquipRule::V1_8);
     }
 

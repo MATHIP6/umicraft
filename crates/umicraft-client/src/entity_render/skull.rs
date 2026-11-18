@@ -21,7 +21,7 @@ use umicraft_game::item_nbt::ItemDisplay;
 use super::skins::SkinLookup;
 
 use super::mobs::{posed_humanoid_mob, EntityLayer};
-use super::player::posed_player;
+use super::player::player_head;
 
 /// The skull item id.
 const SKULL: i16 = 397;
@@ -38,7 +38,7 @@ pub(super) fn skull_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -
         return Vec::new();
     };
     let (head, scale) = match ent.kind {
-        EntityKind::Player => (posed_player(ent).0.head, 1.0),
+        EntityKind::Player => (player_head(ent), 1.0),
         EntityKind::Zombie | EntityKind::Skeleton | EntityKind::ZombiePigman => {
             match posed_humanoid_mob(ent) {
                 Some(mob) => (mob.model.head, mob.scale),
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn the_skull_is_a_little_larger_than_the_head_and_sits_on_its_pivot() {
         let player = wearing(EntityKind::Player, 0);
-        let head = posed_player(&player).0.head;
+        let head = player_head(&player);
         let vertices = &skull_layers(&player, &NoSkins)[0].vertices;
         let width = |axis: usize| {
             let values = vertices.iter().map(|v| v.position[axis]);

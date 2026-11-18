@@ -367,6 +367,7 @@ impl App {
     fn upload_entities(&mut self, renderer: &mut Renderer, now: Instant, partial_tick: f32) {
         // No world, no hand: set again below when there is one.
         renderer.set_motion_blur_hand_moving(false);
+        let style = self.mods.biped_style();
         if let (Some(entity_textures), Some(world)) =
             (self.assets.entity_textures.as_ref(), self.world.as_ref())
         {
@@ -392,6 +393,7 @@ impl App {
             entity_textures.set_mob_appearance(world.mob_appearance(partial_tick));
             entity_textures.set_camera_position(self.camera.relative_eye());
             entity_textures.set_hand_swing(hand.swing);
+            entity_textures.set_biped_style(style);
             entity_textures.set_cull_view(self.camera.relative_eye(), self.camera.forward());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
@@ -473,6 +475,7 @@ impl App {
             if let Some(items) = self.assets.items.as_deref() {
                 self.world_items
                     .set_view(self.camera.yaw, self.camera.pitch);
+                self.world_items.set_biped_style(style);
                 let dropped = self.world_items.build(entities, items);
                 renderer.set_world_items(&dropped.items);
                 renderer.set_world_glint(&dropped.glint);
@@ -509,8 +512,10 @@ impl App {
             // The item in the hand lives in the item layers, not in the entity mesh.
             let mut held = ItemMesh::default();
             if let Some(items) = self.assets.items.as_deref() {
+                let mut portrait_items = WorldItems::default();
+                portrait_items.set_biped_style(self.mods.biped_style());
                 held.clone_from(
-                    &WorldItems::default()
+                    &portrait_items
                         .build(std::slice::from_ref(&posed), items)
                         .items,
                 );

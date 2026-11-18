@@ -4,7 +4,7 @@
 
 use umicraft_game::entity::{wrap_degrees, EntityKind, EntityRenderSnapshot};
 use umicraft_game::item_use::{use_action, UseAction};
-use umicraft_model::entity::{ArmPose, HumanoidPose};
+use umicraft_model::entity::{ArmPose, BipedStyle, HumanoidPose};
 use umicraft_protocol::packets::play::ItemStack;
 
 /// The pose of a humanoid mob or player (MCP `ModelBiped` inputs as
@@ -23,12 +23,14 @@ pub(super) fn humanoid_pose(entity: &EntityRenderSnapshot, arms_forward: bool) -
         arms: arm_pose(entity),
         arms_forward,
         riding: entity.riding,
+        // The callers that draw a player set the style of the frame.
+        style: BipedStyle::V1_8,
     }
 }
 
 /// What the right hand of a player does: nothing, holds an item, or uses it
 /// (the item-use flag of the metadata marks a sword raised or a bow drawn).
-fn arm_pose(entity: &EntityRenderSnapshot) -> ArmPose {
+pub(crate) fn arm_pose(entity: &EntityRenderSnapshot) -> ArmPose {
     let Some(held) = entity
         .held
         .as_ref()

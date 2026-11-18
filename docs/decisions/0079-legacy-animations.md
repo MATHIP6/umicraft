@@ -43,6 +43,16 @@ toggle per real difference, all on by default:
   depth of its sprite as 1.7 did. It applies to every flat item, not only
   while blocking, so that the sword does not jump when the block starts.
   Blocks are placed alike by both versions and keep their model pose.
+- `third_person`: the players seen from outside take the 1.7 pose. A
+  blocking arm keeps a yaw of 0 (1.7.10 `ModelBiped.setRotationAngles`, where
+  1.8.9 turns it by -30 degrees), and a flat item in a player's hand takes
+  the fixed placement of 1.7.10 `RenderPlayer.renderEquippedItems` (bow,
+  handle-like items with the turn across the body while blocking, other
+  items) before the 1.7 sprite chain, in place of the model's `thirdperson`
+  pose. The renderer reads it from `ModsRuntime::biped_style` each frame
+  (`EntityTextures::set_biped_style`, `WorldItems::set_biped_style`) and
+  passes `umicraft_model::entity::BipedStyle` down to the humanoid pose; the
+  game thread does not need it. Mobs, blocks and torches keep the 1.8 look.
 
 The settings flow as plain data: the mod holds the toggles,
 `ModsRuntime::legacy_animations` reads them into
@@ -61,12 +71,11 @@ on a real 1.7 client, which sent the swing.
 ## Consequences
 
 - Left for later, with the reason:
-  - Third-person blocking without the 30 degree arm yaw of 1.8.9
-    `ModelBiped` (`heldItemRight == 3`) and the sneaking body without the 0.2
-    lowering of 1.8.9 `ModelBiped.render`: the humanoid pose is built from
-    `EntityRenderSnapshot` in about ten places of the entity renderer, which
-    have no way to see a client setting yet. That needs a render style
-    passed through the entity meshing, a change of its own.
+  - The sneaking body without the 0.2 lowering of 1.8.9 `ModelBiped.render`
+    (and the matching lift of the held item): `BipedStyle` now reaches the
+    pose, so it is a small follow-up.
+  - A fishing player shows a stick in 1.7 (`RenderPlayer`, line 303); the
+    1.8 rod is kept.
   - With `item_position` on, a resource pack's own `firstperson` pose of a
     flat item is not used, as 1.7 had no such pose.
 - In adventure mode the block hit never swings; 1.7 swung there with the
