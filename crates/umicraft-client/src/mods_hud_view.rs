@@ -6,9 +6,12 @@
 
 use umicraft_builtin_mods::{HudStyle, HudWidget, Shadow};
 use umicraft_render::{
-    gui_scale, measure_mod_widget, ModLine, ModWidgetView, ShadowStyle, WidgetStyle,
+    gui_scale, measure_mod_widget_view, ModCell, ModLabel, ModLine, ModTick, ModWidgetView,
+    ShadowStyle, WidgetStyle,
 };
 use umicraft_ui::FontAtlas;
+
+use crate::mod_icons::ModIcons;
 
 /// The look the renderer draws for the style a mod chose.
 fn widget_style(style: &HudStyle) -> WidgetStyle {
@@ -31,34 +34,82 @@ fn widget_style(style: &HudStyle) -> WidgetStyle {
 ///
 /// The placement is resolved in GUI units (window size divided by the GUI scale),
 /// so a widget keeps its place when the window or the GUI scale changes. A widget
-/// with no line yet (first frame) is skipped.
+/// with nothing to draw yet (first frame) is skipped. A widget whose centre is on
+/// the right half of the screen is mirrored, so its pictures stay at the edge; the
+/// `invert` option of the mod swaps that.
 #[must_use]
 pub fn mod_widget_views<'a>(
     widgets: impl Iterator<Item = HudWidget<'a>>,
     font: &FontAtlas,
     display: (u32, u32),
+    icons: &ModIcons<'_>,
 ) -> Vec<ModWidgetView> {
     let scale = gui_scale(display.0, display.1) as f32;
     let screen = (display.0 as f32 / scale, display.1 as f32 / scale);
     widgets
-        .filter(|widget| !widget.content.lines().is_empty())
+        .filter(|widget| !widget.content.is_empty())
         .map(|widget| {
             let lines: Vec<ModLine> = widget
                 .content
                 .lines()
                 .iter()
-                .map(|line| ModLine::new(line.text.as_str(), line.color))
+                .map(|line| ModLine {
+                    icon: icons.resolve(line.icon),
+                    detail: line.detail.clone(),
+                    detail_color: line.detail_color,
+                    ..ModLine::new(line.text.as_str(), line.color)
+                })
                 .collect();
-            let style = widget_style(&widget.content.style);
-            // Measured at scale 1: `HudPlacement::rect` applies the widget scale.
-            let size = measure_mod_widget(font, &lines, 1.0, &style);
-            let rect = widget.placement.rect(size, screen);
-            ModWidgetView {
+            let cells: Vec<ModCell> = widget
+                .content
+                .cells()
+                .iter()
+                .map(|cell| ModCell {
+                    rect: cell.rect,
+                    pressed: cell.pressed,
+                    color: cell.color,
+                    text: cell.text.clone(),
+                })
+                .collect();
+            let labels = widget
+                .content
+                .labels()
+                .iter()
+                .map(|label| ModLabel {
+                    at: label.at,
+                    text: label.text.clone(),
+                    color: label.color,
+                    alpha: label.alpha,
+                    scale: label.scale,
+                })
+                .collect();
+            let ticks = widget
+                .content
+                .ticks()
+                .iter()
+                .map(|tick| ModTick {
+                    rect: tick.rect,
+                    color: tick.color,
+                    alpha: tick.alpha,
+                })
+                .collect();
+            let mut view = ModWidgetView {
                 lines,
-                position: [rect.x, rect.y],
-                scale: widget.placement.scale,
-                style,
-            }
+                cells,
+                labels,
+                ticks,
+                reserve: widget.content.reserve,
+                style: widget_style(&widget.content.style),
+                ..ModWidgetView::default()
+            };
+            // Measured at scale 1: `HudPlacement::rect` applies the widget scale.
+            let rect = widget
+                .placement
+                .rect(measure_mod_widget_view(font, &view), screen);
+            view.mirrored = (rect.x + rect.w / 2.0 > screen.0 / 2.0) != widget.content.invert;
+            view.position = [rect.x, rect.y];
+            view.scale = widget.placement.scale;
+            view
         })
         .collect()
 }
@@ -66,6 +117,7 @@ pub fn mod_widget_views<'a>(
 #[cfg(test)]
 mod tests {
     use umicraft_builtin_mods::{mods, Anchor, HudPlacement, ModContext, ModRegistry};
+    use umicraft_render::measure_mod_widget;
 
     use super::*;
 
@@ -78,7 +130,12 @@ mod tests {
             fps: 60,
             ..ModContext::default()
         });
-        mod_widget_views(registry.hud_widgets(), &FontAtlas::fallback(), (800, 600))
+        mod_widget_views(
+            registry.hud_widgets(),
+            &FontAtlas::fallback(),
+            (800, 600),
+            &ModIcons::default(),
+        )
     }
 
     #[test]
@@ -120,9 +177,54 @@ mod tests {
                 .expect("fps option");
         }
         registry.update(&ModContext::default());
-        let view = &mod_widget_views(registry.hud_widgets(), &FontAtlas::fallback(), (800, 600))[0];
+        let view = &mod_widget_views(
+            registry.hud_widgets(),
+            &FontAtlas::fallback(),
+            (800, 600),
+            &ModIcons::default(),
+        )[0];
         assert_eq!(view.style.background, Some([1.0, 0.0, 0.0, 0.5]));
         assert_eq!(view.style.padding, 4.0);
         assert_eq!(view.style.shadow, ShadowStyle::Off);
+    }
+
+    #[test]
+    fn the_invert_option_swaps_the_side_of_the_pictures() {
+        use umicraft_builtin_mods::SettingValue;
+
+        let mut registry = ModRegistry::new(mods::all()).expect("distinct ids");
+        registry
+            .set_enabled("armor_status", true)
+            .expect("the mod exists");
+        let left_half = HudPlacement::at(Anchor::TopLeft, 0.0, 0.0);
+        registry
+            .set_placement("armor_status", left_half)
+            .expect("the mod has a widget");
+        let mirrored = |registry: &ModRegistry| {
+            let views = mod_widget_views(
+                registry
+                    .hud_widgets()
+                    .filter(|w| w.id.as_str() == "armor_status"),
+                &FontAtlas::fallback(),
+                (800, 600),
+                &ModIcons::default(),
+            );
+            views.first().map(|view| view.mirrored)
+        };
+        let context = ModContext {
+            held: Some(umicraft_builtin_mods::ArmorPiece {
+                name: "diamond_sword",
+                damage: 0,
+                max_damage: 1561,
+            }),
+            ..ModContext::default()
+        };
+        registry.update(&context);
+        assert_eq!(mirrored(&registry), Some(false), "left half, icon first");
+        registry
+            .set_setting("armor_status", "invert", &SettingValue::Bool(true))
+            .expect("the option exists");
+        registry.update(&context);
+        assert_eq!(mirrored(&registry), Some(true), "inverted: text then icon");
     }
 }

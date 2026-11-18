@@ -21,7 +21,7 @@ SIDE = 48
 SUPERSAMPLE = 8
 GRID = 256.0
 # The order of `Icon::ALL`.
-ORDER = ["grid", "sliders", "search", "close", "gauge", "target", "cursor", "signal", "run", "blur", "gear", "lightbulb", "binoculars", "camera"]
+ORDER = ["grid", "sliders", "search", "close", "gauge", "target", "cursor", "signal", "run", "blur", "gear", "lightbulb", "binoculars", "camera", "keyboard", "lightning", "shield", "flask", "sword", "compass"]
 
 # Icons drawn turned, in degrees clockwise about the centre of the grid, and shrunk by
 # `TURNED_FIT` so a turned corner stays off the edge of the bitmap.

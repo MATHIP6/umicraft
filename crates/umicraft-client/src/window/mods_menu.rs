@@ -12,6 +12,7 @@ use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::KeyCode;
 
+use umicraft_builtin_mods::{CombatInfo, KeyState, MAX_EFFECTS};
 use umicraft_core::lang::Lang;
 use umicraft_render::ModWidgetView;
 use umicraft_ui::menus::{ModsOutcome, ModsView};
@@ -20,7 +21,9 @@ use umicraft_ui::FontAtlas;
 use super::App;
 use crate::game::GameEvent;
 use crate::hud_editor_view;
+use crate::item_icons::ItemView;
 use crate::menu_flow::MenuFlow;
+use crate::mod_icons::ModIcons;
 use crate::mods_hud_view::mod_widget_views;
 use crate::mods_runtime::{FrameInput, ModsRuntime};
 use crate::mods_view;
@@ -43,11 +46,12 @@ pub(super) fn hud_widgets(
     mods: &ModsRuntime,
     font: &FontAtlas,
     display: (u32, u32),
+    icons: &ModIcons<'_>,
 ) -> Vec<ModWidgetView> {
     if screen == Screen::Mods {
         Vec::new()
     } else {
-        mod_widget_views(mods.hud_widgets(), font, display)
+        mod_widget_views(mods.hud_widgets(), font, display, icons)
     }
 }
 
@@ -58,9 +62,10 @@ pub(super) fn view_for(
     screen: Screen,
     (mods, lang): (&ModsRuntime, &Lang),
     (font, display): (&FontAtlas, (u32, u32)),
+    icons: &ModIcons<'_>,
 ) -> ModsView {
     if screen == Screen::Mods {
-        let mut hud = hud_editor_view::build(mods.registry(), lang, font, display);
+        let mut hud = hud_editor_view::build(mods.registry(), lang, font, display, icons);
         hud.history = mods.history_state();
         ModsView {
             hud,
@@ -72,6 +77,21 @@ pub(super) fn view_for(
 }
 
 impl App {
+    /// What the pictures of the mod widgets are made from this frame: the
+    /// inventory of the session, the item resources and the GUI textures.
+    pub(super) fn mod_icons(&self) -> ModIcons<'_> {
+        let world = self.world.as_ref();
+        ModIcons {
+            slots: world.map(|world| &world.window_view().player_slots[..]),
+            selected: world.map_or(0, |world| world.hud().selected_slot),
+            items: Some(ItemView::new(
+                self.assets.items.as_deref(),
+                self.dials.frames(),
+            )),
+            gui_atlas: self.assets.gui_atlas.as_ref(),
+        }
+    }
+
     /// The key bound to [`Action::Mods`] (right Shift by default, the left one
     /// stays the sneak key) opens the mods menu over a game and closes it
     /// again. It is taken before the other key bindings so it triggers no
@@ -92,6 +112,14 @@ impl App {
     /// Feeds the built-in mods once per frame with what the window knows.
     pub(super) fn update_mods(&mut self, now: Instant) {
         let eye = self.camera.eye();
+        let (hud, slots) = match self.world.as_ref() {
+            Some(world) => (Some(world.hud()), Some(&world.window_view().player_slots)),
+            None => (None, None),
+        };
+        let (armor, held) = slots.map_or(Default::default(), |slots| {
+            let selected = hud.map_or(0, |hud| hud.selected_slot);
+            crate::mods_facts::equipment(slots, selected)
+        });
         self.mods.update(&FrameInput {
             now_ms: u64::try_from(now.duration_since(self.clock.started).as_millis())
                 .unwrap_or(u64::MAX),
@@ -101,7 +129,25 @@ impl App {
             yaw_radians: self.camera.yaw,
             pitch_radians: self.camera.pitch,
             sprinting: self.held(Action::Sprint),
-            ping_ms: self.world.as_ref().and_then(|world| world.hud().ping_ms),
+            ping_ms: hud.and_then(|hud| hud.ping_ms),
+            keys: KeyState {
+                forward: self.held(Action::Forward),
+                left: self.held(Action::Left),
+                back: self.held(Action::Back),
+                right: self.held(Action::Right),
+                jump: self.held(Action::Jump),
+                attack: self.held(Action::Attack),
+                use_item: self.held(Action::Use),
+            },
+            combat: hud.map_or(CombatInfo::default(), |hud| CombatInfo {
+                hits: hud.combat.0,
+                hurts: hud.combat.1,
+            }),
+            armor,
+            held,
+            effects: hud.map_or([None; MAX_EFFECTS], |hud| {
+                crate::mods_facts::effects(&hud.active_effects)
+            }),
         });
     }
 
@@ -187,8 +233,10 @@ mod tests {
             ..FrameInput::default()
         });
         let font = FontAtlas::fallback();
-        let on_hud = hud_widgets(Screen::None, &mods, &font, (800, 600));
+        let on_hud = hud_widgets(Screen::None, &mods, &font, (800, 600), &ModIcons::default());
         assert!(!on_hud.is_empty(), "the HUD draws it in the game");
-        assert!(hud_widgets(Screen::Mods, &mods, &font, (800, 600)).is_empty());
+        assert!(
+            hud_widgets(Screen::Mods, &mods, &font, (800, 600), &ModIcons::default()).is_empty()
+        );
     }
 }

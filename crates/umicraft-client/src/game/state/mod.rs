@@ -32,6 +32,7 @@ use crate::cracks::Crack;
 use crate::social_view;
 
 pub(super) mod chat;
+mod combat_log;
 pub(super) mod controls;
 pub(super) mod hotbar;
 pub(super) mod metrics;
@@ -39,6 +40,7 @@ pub(super) mod social;
 pub(super) mod vitals;
 
 pub(super) use chat::ChatState;
+pub(super) use combat_log::CombatLog;
 pub(super) use controls::Controls;
 pub(super) use hotbar::Hotbar;
 pub(super) use metrics::TickMetrics;
@@ -102,6 +104,8 @@ pub(super) struct Game {
     pub(super) controls: Controls,
     /// The health, food, armour and experience of the local player.
     pub(super) vitals: Vitals,
+    /// The hits dealt and hurts taken, for the combo counter mod.
+    pub(super) combat_log: CombatLog,
     /// The selected hotbar slot, what the server was told of it, and the key
     /// presses the next tick takes.
     pub(super) hotbar: Hotbar,
@@ -194,6 +198,7 @@ impl Game {
             pitch: 0.0,
             controls: Controls::default(),
             vitals: Vitals::default(),
+            combat_log: CombatLog::default(),
             hotbar: Hotbar::default(),
             chat: ChatState::default(),
             server_view: ServerView::default(),
@@ -378,6 +383,8 @@ impl Game {
             bar: self.hud_view.views().bar,
             held_name: self.hud_view.views().held_name.clone(),
             effects: self.hud_view.views().effects.clone(),
+            active_effects: self.server.effects().iter().copied().collect(),
+            combat: self.combat_log.totals(),
             ping_ms: self.local_ping_ms(),
             ..HudState::default()
         }

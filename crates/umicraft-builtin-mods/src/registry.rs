@@ -245,6 +245,22 @@ impl ModRegistry {
         }
     }
 
+    /// What the widget of the HUD mod `id` would show for `ctx`, with the mod's own
+    /// settings, without touching its state. The mods menu uses it to preview a
+    /// widget that has nothing to show yet (a potion effect list with no effect).
+    /// `None` for an unknown mod or one with no widget.
+    #[must_use]
+    pub fn preview(&self, id: &str, ctx: &ModContext) -> Option<HudContent> {
+        let entry = self
+            .entries
+            .iter()
+            .find(|e| e.module.meta().id.as_str() == id && e.is_hud())?;
+        let mut content = HudContent::default();
+        entry.module.draw(ctx, &entry.settings, &mut content);
+        content.style = HudStyle::from_settings(&entry.settings);
+        Some(content)
+    }
+
     /// The widgets to draw: enabled HUD mods, in registration order.
     pub fn hud_widgets(&self) -> impl Iterator<Item = HudWidget<'_>> {
         self.entries

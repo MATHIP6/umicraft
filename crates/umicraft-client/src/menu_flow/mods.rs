@@ -88,8 +88,7 @@ mod tests {
                     widget: ModWidgetView {
                         lines: vec![ModLine::new("60 FPS", 0xFFFFFF)],
                         position: [10.0, 100.0],
-                        scale: 1.0,
-                        style: Default::default(),
+                        ..ModWidgetView::default()
                     },
                 }],
                 screen: [427.0, 240.0],

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The options every HUD mod shares: what is behind the text and how the text is
-//! shadowed. A mod lists them with [`hud_settings!`], after its own. Their language
+//! shadowed. A mod lists them with [`hud_settings!`] (or [`hud_settings_bare!`], with the background off), after its own. Their language
 //! keys are `umicraft.mods.hud.*`, once for all the mods.
 
 use crate::settings::{SettingDef, SettingKind};
@@ -9,6 +9,13 @@ pub(crate) const BACKGROUND: SettingDef = SettingDef {
     key: "background",
     label_key: "umicraft.mods.hud.background",
     kind: SettingKind::Toggle { default: true },
+};
+/// The background of the widgets made of icons and boxes, off until the player
+/// asks for it: a panel behind them hides the point of the icons.
+pub(crate) const BACKGROUND_BARE: SettingDef = SettingDef {
+    key: "background",
+    label_key: "umicraft.mods.hud.background",
+    kind: SettingKind::Toggle { default: false },
 };
 pub(crate) const BACKGROUND_COLOR: SettingDef = SettingDef {
     key: "background_color",
@@ -87,3 +94,20 @@ macro_rules! hud_settings {
     };
 }
 pub(crate) use hud_settings;
+
+/// Like [`hud_settings!`] but the background starts off, for widgets of icons.
+macro_rules! hud_settings_bare {
+    ($($own:expr),* $(,)?) => {
+        &[
+            $($own,)*
+            $crate::mods::hud_style::BACKGROUND_BARE,
+            $crate::mods::hud_style::BACKGROUND_COLOR,
+            $crate::mods::hud_style::BACKGROUND_OPACITY,
+            $crate::mods::hud_style::CORNER_RADIUS,
+            $crate::mods::hud_style::PADDING,
+            $crate::mods::hud_style::SHADOW,
+            $crate::mods::hud_style::SHADOW_COLOR,
+        ]
+    };
+}
+pub(crate) use hud_settings_bare;

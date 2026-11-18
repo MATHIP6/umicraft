@@ -251,6 +251,7 @@ pub(super) fn update_health(game: &mut Game, packet: &UpdateHealth) {
     // the camera shakes even where the server sent no `Entity Status 2`.
     if game.vitals.health_known && packet.health < game.vitals.health {
         game.body.animation.hurt();
+        game.combat_log.local_hurt();
     }
     game.vitals.health_known = true;
     game.vitals.health = packet.health;

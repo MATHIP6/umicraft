@@ -351,6 +351,17 @@ pub(super) fn attach_entity(game: &mut Game, packet: &AttachEntity) {
     }
 }
 
+/// Feeds a hurt of `entity` to the combat log of the combo counter mod.
+fn note_hurt(game: &mut Game, entity: i32) {
+    let counted = if entity == game.entity_id {
+        game.combat_log.local_hurt();
+        true
+    } else {
+        game.combat_log.entity_hurt(entity, game.status_data.ticks)
+    };
+    game.hud_dirty |= counted;
+}
+
 /// `Entity Status`: the end of an item use, hurts, deaths and their
 /// particles.
 pub(super) fn apply_entity_status(game: &mut Game, packet: &EntityStatus) {
@@ -361,6 +372,9 @@ pub(super) fn apply_entity_status(game: &mut Game, packet: &EntityStatus) {
     }
     // `handleStatusUpdate(2)` of the local player: the hurt shake of the
     // camera and the resistance that flashes the hearts.
+    if packet.status == 2 {
+        note_hurt(game, packet.entity_id);
+    }
     if packet.entity_id == game.entity_id && packet.status == 2 {
         game.body.animation.hurt_by_status();
     }
@@ -379,6 +393,9 @@ pub(super) fn apply_entity_status(game: &mut Game, packet: &EntityStatus) {
 /// `Animation`: swings, hurts and the stars of a critical hit.
 pub(super) fn play_animation(game: &mut Game, packet: &Animation) {
     // `performHurtAnimation` of the local player.
+    if packet.animation == 1 {
+        note_hurt(game, packet.entity_id);
+    }
     if packet.entity_id == game.entity_id && packet.animation == 1 {
         game.body.animation.hurt();
     }

@@ -48,11 +48,23 @@ pub enum Icon {
     Binoculars,
     /// A camera turned a little (see `TURNS` in `gen_icons.py`): no hurt cam.
     Camera,
+    /// A keyboard: keystrokes.
+    Keyboard,
+    /// A lightning bolt: the combo counter.
+    Lightning,
+    /// A shield: armor status.
+    Shield,
+    /// A flask: potion effects.
+    Flask,
+    /// A sword: 1.7 animations.
+    Sword,
+    /// A compass: the direction HUD.
+    Compass,
 }
 
 impl Icon {
     /// Every icon, in the order of their bitmaps and characters.
-    pub const ALL: [Icon; 14] = [
+    pub const ALL: [Icon; 20] = [
         Icon::Grid,
         Icon::Sliders,
         Icon::Search,
@@ -67,6 +79,12 @@ impl Icon {
         Icon::Lightbulb,
         Icon::Binoculars,
         Icon::Camera,
+        Icon::Keyboard,
+        Icon::Lightning,
+        Icon::Shield,
+        Icon::Flask,
+        Icon::Sword,
+        Icon::Compass,
     ];
 
     fn index(self) -> usize {

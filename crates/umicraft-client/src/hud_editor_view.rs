@@ -11,8 +11,8 @@
 
 use umicraft_builtin_mods::hud::snap::snap_rect;
 use umicraft_builtin_mods::{
-    HudContent, HudPlacement, HudPreset, HudRect, HudWidget, ModRegistry, RegistryError, MAX_SCALE,
-    MIN_SCALE,
+    EffectInfo, HudContent, HudPlacement, HudPreset, HudRect, HudWidget, ModContext, ModRegistry,
+    RegistryError, MAX_EFFECTS, MAX_SCALE, MIN_SCALE,
 };
 use umicraft_core::lang::Lang;
 use umicraft_render::gui_scale;
@@ -21,21 +21,51 @@ use umicraft_ui::menus::{
 };
 use umicraft_ui::{FontAtlas, Rect};
 
+use crate::mod_icons::ModIcons;
 use crate::mods_hud_view::mod_widget_views;
 
 /// The colour of the label a widget shows while its mod has nothing to say yet.
 const PLACEHOLDER_COLOR: u32 = 0xFF_FF_FF;
 
+/// The id of the potion effects mod, whose widget is empty without an effect.
+const POTION_EFFECTS_ID: &str = "potion_effects";
+
+/// The Speed II effect with 1:23 left that the potion effects widget shows in the
+/// menu while the player has no effect, so there is something to place.
+fn test_effect_context() -> ModContext {
+    let mut effects = [None; MAX_EFFECTS];
+    effects[0] = Some(EffectInfo {
+        id: 1,
+        amplifier: 1,
+        ticks: 20 * 83,
+    });
+    ModContext {
+        effects,
+        ..ModContext::default()
+    }
+}
+
+/// What an empty widget of the mod `id` shows in the menu instead of its name,
+/// `None` for a mod that has no test content.
+fn preview(registry: &ModRegistry, id: &str) -> Option<HudContent> {
+    (id == POTION_EFFECTS_ID)
+        .then(|| registry.preview(id, &test_effect_context()))
+        .flatten()
+        .filter(|content| !content.is_empty())
+}
+
 /// The widgets of the enabled HUD mods on a window of `display` pixels.
 ///
 /// A mod that is on but has no line yet (the first frame, or a counter that
-/// shows nothing) gets its name as a placeholder so it can still be grabbed.
+/// shows nothing) gets its name as a placeholder so it can still be grabbed; the
+/// potion effects mod shows a test effect instead.
 #[must_use]
 pub fn build(
     registry: &ModRegistry,
     lang: &Lang,
     font: &FontAtlas,
     display: (u32, u32),
+    icons: &ModIcons<'_>,
 ) -> HudEditorView {
     let names: Vec<(&str, String)> = registry
         .mods()
@@ -55,12 +85,14 @@ pub fn build(
     let placeholders: Vec<Option<HudContent>> = registry
         .hud_widgets()
         .map(|widget| {
-            widget.content.lines().is_empty().then(|| {
-                let mut content = HudContent::default();
-                content
-                    .line(PLACEHOLDER_COLOR)
-                    .push_str(&name_of(widget.id.as_str()));
-                content
+            widget.content.is_empty().then(|| {
+                preview(registry, widget.id.as_str()).unwrap_or_else(|| {
+                    let mut content = HudContent::default();
+                    content
+                        .line(PLACEHOLDER_COLOR)
+                        .push_str(&name_of(widget.id.as_str()));
+                    content
+                })
             })
         })
         .collect();
@@ -71,7 +103,7 @@ pub fn build(
             content: placeholder.as_ref().unwrap_or(widget.content),
             ..widget
         });
-    let views = mod_widget_views(widgets, font, display);
+    let views = mod_widget_views(widgets, font, display, icons);
     let scale = gui_scale(display.0, display.1) as f32;
     HudEditorView {
         widgets: registry

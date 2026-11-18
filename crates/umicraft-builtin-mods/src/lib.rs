@@ -29,11 +29,11 @@ pub mod settings;
 pub mod traits;
 
 pub use config::{ModConfig, ModsConfig, SavedWidget};
-pub use context::ModContext;
+pub use context::{ArmorPiece, CombatInfo, EffectInfo, KeyState, ModContext, MAX_EFFECTS};
 pub use history::History;
 pub use hud::{
-    Anchor, HudContent, HudLine, HudPlacement, HudPreset, HudRect, HudStyle, Shadow, MAX_SCALE,
-    MIN_SCALE,
+    Anchor, HudCell, HudContent, HudIcon, HudLabel, HudLine, HudPlacement, HudPreset, HudRect,
+    HudStyle, HudTick, Shadow, MAX_SCALE, MIN_SCALE,
 };
 pub use id::{ModCategory, ModId};
 pub use meta::ModMeta;

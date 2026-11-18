@@ -17,7 +17,13 @@ fn lang() -> Lang {
 }
 
 fn view_of(registry: &ModRegistry) -> HudEditorView {
-    build(registry, &lang(), &FontAtlas::fallback(), DISPLAY)
+    build(
+        registry,
+        &lang(),
+        &FontAtlas::fallback(),
+        DISPLAY,
+        &ModIcons::default(),
+    )
 }
 
 fn placement(registry: &ModRegistry, id: &str) -> HudPlacement {
@@ -155,8 +161,13 @@ fn every_hud_mod_is_listed_on_or_off_with_its_lock() {
             ("coordinates", false, false),
             ("cps", false, true),
             ("ping", false, false),
+            ("keystrokes", false, false),
+            ("combo_counter", false, false),
+            ("armor_status", false, false),
+            ("potion_effects", false, false),
+            ("direction_hud", false, false),
         ],
-        "the four mods that have a widget, and no other"
+        "the nine mods that have a widget, and no other"
     );
     assert!(view.is_locked("cps") && !view.is_locked("fps"));
     assert!(!view.has_custom);
@@ -180,7 +191,13 @@ fn the_widgets_keep_their_side_on_other_window_shapes() {
         (2560, 1080),
         (640, 480),
     ] {
-        let view = build(&registry, &lang(), &FontAtlas::fallback(), display);
+        let view = build(
+            &registry,
+            &lang(),
+            &FontAtlas::fallback(),
+            display,
+            &ModIcons::default(),
+        );
         let widget = &view.widgets[0].widget;
         let size = umicraft_ui::mod_widget::measure(
             &FontAtlas::fallback(),
@@ -193,4 +210,41 @@ fn the_widgets_keep_their_side_on_other_window_shapes() {
         assert!((right - 4.0).abs() < 0.01, "{display:?}: {right}");
         assert!((bottom - 4.0).abs() < 0.01, "{display:?}: {bottom}");
     }
+}
+
+#[test]
+fn the_effects_widget_shows_a_test_effect_while_the_player_has_none() {
+    let mut registry = registry();
+    registry
+        .set_enabled("potion_effects", true)
+        .expect("the mod exists");
+    registry.update(&ModContext::default());
+    let view = view_of(&registry);
+    let line = &view
+        .widgets
+        .iter()
+        .find(|widget| widget.id == "potion_effects")
+        .expect("the widget is listed")
+        .widget
+        .lines[0];
+    assert_eq!(
+        (line.text.as_str(), line.detail.as_str()),
+        ("Speed II", "1:23")
+    );
+}
+
+#[test]
+fn a_mod_with_no_test_content_shows_its_name() {
+    let mut registry = registry();
+    registry
+        .set_enabled("armor_status", true)
+        .expect("the mod exists");
+    registry.update(&ModContext::default());
+    let view = view_of(&registry);
+    let widget = view
+        .widgets
+        .iter()
+        .find(|widget| widget.id == "armor_status")
+        .expect("the widget is listed");
+    assert_eq!(widget.widget.lines[0].text, widget.name);
 }

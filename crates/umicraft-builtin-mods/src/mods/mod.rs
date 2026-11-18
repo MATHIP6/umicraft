@@ -8,14 +8,19 @@
 
 pub(crate) mod hud_style;
 
+mod armor_status;
+mod combo_counter;
 mod coordinates;
 mod cps;
+mod direction_hud;
 mod fps;
 mod fullbright;
+mod keystrokes;
 mod legacy_animations;
 mod motion_blur;
 mod no_hurt_cam;
 mod ping;
+mod potion_effects;
 mod toggle_sprint;
 mod zoom;
 
@@ -32,6 +37,11 @@ pub fn all() -> Vec<Box<dyn BuiltinMod>> {
         Box::new(coordinates::Coordinates),
         Box::new(cps::Cps::default()),
         Box::new(ping::Ping),
+        Box::new(keystrokes::Keystrokes::default()),
+        Box::new(combo_counter::ComboCounter::default()),
+        Box::new(armor_status::ArmorStatus),
+        Box::new(potion_effects::PotionEffects),
+        Box::new(direction_hud::DirectionHud),
         Box::new(motion_blur::MotionBlur),
         Box::new(fullbright::Fullbright),
         Box::new(zoom::Zoom),

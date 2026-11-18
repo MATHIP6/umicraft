@@ -88,7 +88,7 @@ fn level_key(amplifier: i8) -> Option<&'static str> {
 }
 
 /// `Potion.getStatusIconIndex` for the potions that have an icon.
-fn status_icon(effect_id: u8) -> Option<u8> {
+pub fn status_icon(effect_id: u8) -> Option<u8> {
     STATUS_ICONS
         .iter()
         .find(|&&(id, _)| id == effect_id)

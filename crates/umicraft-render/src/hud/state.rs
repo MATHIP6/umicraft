@@ -13,6 +13,7 @@ use super::overlay_views::{ActionBarView, BossView, SidebarView, TabListView, Ti
 use umicraft_game::chat::{ClickEvent, HoverEvent};
 use umicraft_game::hud::{vitals_view, BottomBar, HeldNameView, VitalsInput, VitalsView};
 use umicraft_game::inventory::effect_list::EffectLine;
+use umicraft_game::server::effects::ActiveEffect;
 use umicraft_ui::mod_widget::ModWidgetView;
 use umicraft_ui::SlotItem;
 
@@ -88,6 +89,10 @@ pub struct HudState {
     /// The potion effects of the player, in the order of the list beside the
     /// survival and creative inventories; empty without effects.
     pub effects: Vec<EffectLine>,
+    /// The active potion effects with their ticks left, for the potion effects mod.
+    pub active_effects: Vec<ActiveEffect>,
+    /// The `(hits dealt, hurts taken)` totals of the session, for the combo counter mod.
+    pub combat: (u32, u32),
 }
 
 /// The two columns of the vanilla F3 screen, as built by
@@ -240,6 +245,8 @@ impl Default for HudState {
             mod_widgets: Vec::new(),
             ping_ms: None,
             effects: Vec::new(),
+            active_effects: Vec::new(),
+            combat: (0, 0),
         }
     }
 }
