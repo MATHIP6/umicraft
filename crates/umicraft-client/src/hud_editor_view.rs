@@ -51,7 +51,7 @@ fn preview(registry: &ModRegistry, id: &str) -> Option<HudContent> {
     (id == POTION_EFFECTS_ID)
         .then(|| registry.preview(id, &test_effect_context()))
         .flatten()
-        .filter(|content| !content.lines().is_empty())
+        .filter(|content| !content.is_empty())
 }
 
 /// The widgets of the enabled HUD mods on a window of `display` pixels.
@@ -85,7 +85,7 @@ pub fn build(
     let placeholders: Vec<Option<HudContent>> = registry
         .hud_widgets()
         .map(|widget| {
-            (widget.content.lines().is_empty() && widget.content.cells().is_empty()).then(|| {
+            widget.content.is_empty().then(|| {
                 preview(registry, widget.id.as_str()).unwrap_or_else(|| {
                     let mut content = HudContent::default();
                     content

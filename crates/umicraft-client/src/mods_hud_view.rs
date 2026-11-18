@@ -6,7 +6,8 @@
 
 use umicraft_builtin_mods::{HudStyle, HudWidget, Shadow};
 use umicraft_render::{
-    gui_scale, measure_mod_widget_body, ModCell, ModLine, ModWidgetView, ShadowStyle, WidgetStyle,
+    gui_scale, measure_mod_widget_view, ModCell, ModLabel, ModLine, ModTick, ModWidgetView,
+    ShadowStyle, WidgetStyle,
 };
 use umicraft_ui::FontAtlas;
 
@@ -46,7 +47,7 @@ pub fn mod_widget_views<'a>(
     let scale = gui_scale(display.0, display.1) as f32;
     let screen = (display.0 as f32 / scale, display.1 as f32 / scale);
     widgets
-        .filter(|widget| !widget.content.lines().is_empty() || !widget.content.cells().is_empty())
+        .filter(|widget| !widget.content.is_empty())
         .map(|widget| {
             let lines: Vec<ModLine> = widget
                 .content
@@ -70,18 +71,45 @@ pub fn mod_widget_views<'a>(
                     text: cell.text.clone(),
                 })
                 .collect();
-            let style = widget_style(&widget.content.style);
-            // Measured at scale 1: `HudPlacement::rect` applies the widget scale.
-            let size = measure_mod_widget_body(font, &lines, &cells, 1.0, &style);
-            let rect = widget.placement.rect(size, screen);
-            ModWidgetView {
+            let labels = widget
+                .content
+                .labels()
+                .iter()
+                .map(|label| ModLabel {
+                    at: label.at,
+                    text: label.text.clone(),
+                    color: label.color,
+                    alpha: label.alpha,
+                    scale: label.scale,
+                })
+                .collect();
+            let ticks = widget
+                .content
+                .ticks()
+                .iter()
+                .map(|tick| ModTick {
+                    rect: tick.rect,
+                    color: tick.color,
+                    alpha: tick.alpha,
+                })
+                .collect();
+            let mut view = ModWidgetView {
                 lines,
                 cells,
-                mirrored: (rect.x + rect.w / 2.0 > screen.0 / 2.0) != widget.content.invert,
-                position: [rect.x, rect.y],
-                scale: widget.placement.scale,
-                style,
-            }
+                labels,
+                ticks,
+                reserve: widget.content.reserve,
+                style: widget_style(&widget.content.style),
+                ..ModWidgetView::default()
+            };
+            // Measured at scale 1: `HudPlacement::rect` applies the widget scale.
+            let rect = widget
+                .placement
+                .rect(measure_mod_widget_view(font, &view), screen);
+            view.mirrored = (rect.x + rect.w / 2.0 > screen.0 / 2.0) != widget.content.invert;
+            view.position = [rect.x, rect.y];
+            view.scale = widget.placement.scale;
+            view
         })
         .collect()
 }

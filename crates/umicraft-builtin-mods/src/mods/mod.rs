@@ -12,6 +12,7 @@ mod armor_status;
 mod combo_counter;
 mod coordinates;
 mod cps;
+mod direction_hud;
 mod fps;
 mod fullbright;
 mod keystrokes;
@@ -40,6 +41,7 @@ pub fn all() -> Vec<Box<dyn BuiltinMod>> {
         Box::new(combo_counter::ComboCounter::default()),
         Box::new(armor_status::ArmorStatus),
         Box::new(potion_effects::PotionEffects),
+        Box::new(direction_hud::DirectionHud),
         Box::new(motion_blur::MotionBlur),
         Box::new(fullbright::Fullbright),
         Box::new(zoom::Zoom),

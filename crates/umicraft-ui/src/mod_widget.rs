@@ -160,15 +160,49 @@ pub struct ModCell {
     pub text: String,
 }
 
+/// A text centered on a point of a widget, with its own opacity and size.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModLabel {
+    /// `[x, y]` in GUI units from the top-left of the content: the center of
+    /// the text and its top edge.
+    pub at: [f32; 2],
+    /// The text.
+    pub text: String,
+    /// The colour as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`; the shadow fades with it.
+    pub alpha: f32,
+    /// Size relative to the normal text.
+    pub scale: f32,
+}
+
+/// A small filled rectangle of a widget.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModTick {
+    /// `[x, y, width, height]` in GUI units from the top-left of the content.
+    pub rect: [f32; 4],
+    /// The colour as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+}
+
 /// A mod widget whose position is already resolved.
 ///
-/// A widget holds stacked lines or fixed boxes; a mod uses one kind.
+/// A widget holds stacked lines, fixed boxes or freely placed labels and ticks;
+/// a mod uses one kind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModWidgetView {
     /// The lines, top to bottom.
     pub lines: Vec<ModLine>,
     /// The boxes, placed by their own rectangle.
     pub cells: Vec<ModCell>,
+    /// The free texts, placed by their center.
+    pub labels: Vec<ModLabel>,
+    /// The small rectangles.
+    pub ticks: Vec<ModTick>,
+    /// The size `[width, height]` in GUI units the content keeps at least.
+    pub reserve: [f32; 2],
     /// Whether the rows are mirrored (text, then picture, against the right
     /// edge), which keeps the pictures at the edge of the screen on its right half.
     pub mirrored: bool,
@@ -186,6 +220,9 @@ impl Default for ModWidgetView {
         Self {
             lines: Vec::new(),
             cells: Vec::new(),
+            labels: Vec::new(),
+            ticks: Vec::new(),
+            reserve: [0.0; 2],
             mirrored: false,
             position: [0.0; 2],
             scale: 1.0,
@@ -198,13 +235,24 @@ impl ModWidgetView {
     /// Whether there is nothing to draw.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.lines.is_empty() && self.cells.is_empty()
+        self.lines.is_empty()
+            && self.cells.is_empty()
+            && self.labels.is_empty()
+            && self.ticks.is_empty()
+            && self.reserve == [0.0; 2]
+    }
+
+    /// The size of the panel at its scale, in GUI units; see [`measure`].
+    #[must_use]
+    pub fn size(&self, font: &FontAtlas) -> (f32, f32) {
+        measure_view(font, self)
     }
 }
 
-/// The size of the content (without the padding) of lines and boxes, in GUI
-/// units at scale 1.
-fn content_size(font: &FontAtlas, lines: &[ModLine], cells: &[ModCell]) -> (f32, f32) {
+/// The size of the content (without the padding) of a widget, in GUI units at
+/// scale 1: the largest of its lines, boxes, labels, ticks and reserved size.
+fn content_size(font: &FontAtlas, widget: &ModWidgetView) -> (f32, f32) {
+    let lines = &widget.lines;
     let rows = lines.iter().map(|line| line.height()).sum::<f32>();
     // The last plain row has no gap below its glyphs; a tall row has no gap either.
     let trailing = lines
@@ -214,14 +262,26 @@ fn content_size(font: &FontAtlas, lines: &[ModLine], cells: &[ModCell]) -> (f32,
         .iter()
         .map(|line| line.width(font))
         .fold(0.0_f32, f32::max);
-    let (cells_width, cells_height) = cells.iter().fold((0.0_f32, 0.0_f32), |(w, h), cell| {
-        let [x, y, width, height] = cell.rect;
+    let (width, height) =
+        widget
+            .cells
+            .iter()
+            .fold((lines_width, (rows - trailing).max(0.0)), |(w, h), cell| {
+                let [x, y, width, height] = cell.rect;
+                (w.max(x + width), h.max(y + height))
+            });
+    let (width, height) = widget.ticks.iter().fold((width, height), |(w, h), tick| {
+        let [x, y, width, height] = tick.rect;
         (w.max(x + width), h.max(y + height))
     });
-    (
-        lines_width.max(cells_width),
-        (rows - trailing).max(cells_height),
-    )
+    let (width, height) = widget.labels.iter().fold((width, height), |(w, h), label| {
+        let text_width = font.measure(&label.text, 1.0) * label.scale;
+        (
+            w.max(label.at[0] + text_width / 2.0),
+            h.max(label.at[1] + LINE_HEIGHT * label.scale),
+        )
+    });
+    (width.max(widget.reserve[0]), height.max(widget.reserve[1]))
 }
 
 /// The size of the panel for `lines` at `scale`, in GUI units.
@@ -231,25 +291,29 @@ fn content_size(font: &FontAtlas, lines: &[ModLine], cells: &[ModCell]) -> (f32,
 /// An empty list measures `(0.0, 0.0)`.
 #[must_use]
 pub fn measure(font: &FontAtlas, lines: &[ModLine], scale: f32, style: &WidgetStyle) -> (f32, f32) {
-    measure_body(font, lines, &[], scale, style)
+    measure_view(
+        font,
+        &ModWidgetView {
+            lines: lines.to_vec(),
+            scale,
+            style: *style,
+            ..ModWidgetView::default()
+        },
+    )
 }
 
-/// [`measure`] for a widget that may also hold boxes.
+/// The size of the panel of `widget` at its scale and with its style, in GUI
+/// units, `(0.0, 0.0)` for an empty widget.
 #[must_use]
-pub fn measure_body(
-    font: &FontAtlas,
-    lines: &[ModLine],
-    cells: &[ModCell],
-    scale: f32,
-    style: &WidgetStyle,
-) -> (f32, f32) {
-    if lines.is_empty() && cells.is_empty() {
+pub fn measure_view(font: &FontAtlas, widget: &ModWidgetView) -> (f32, f32) {
+    if widget.is_empty() {
         return (0.0, 0.0);
     }
-    let (width, height) = content_size(font, lines, cells);
+    let (width, height) = content_size(font, widget);
+    let padding = 2.0 * widget.style.padding;
     (
-        (width + 2.0 * style.padding) * scale,
-        (height + 2.0 * style.padding) * scale,
+        (width + padding) * widget.scale,
+        (height + padding) * widget.scale,
     )
 }
 
@@ -288,7 +352,7 @@ fn draw_widget(list: &mut DrawList, widget: &ModWidgetView, sf: f32, font: &Font
         return;
     }
     let style = &widget.style;
-    let (width, height) = measure_body(font, &widget.lines, &widget.cells, widget.scale, style);
+    let (width, height) = measure_view(font, widget);
     let [x, y] = widget.position;
     if let Some(background) = style.background.filter(|colour| colour[3] > 0.0) {
         let panel = Rect::new(x * sf, y * sf, width * sf, height * sf);
@@ -303,6 +367,26 @@ fn draw_widget(list: &mut DrawList, widget: &ModWidgetView, sf: f32, font: &Font
     let inner_width = width / widget.scale - 2.0 * style.padding;
     for cell in &widget.cells {
         draw_cell(list, cell, origin, style, font);
+    }
+    for tick in &widget.ticks {
+        let [x, y, width, height] = tick.rect;
+        let mut colour = rgb(tick.color);
+        colour[3] = tick.alpha;
+        list.rect(origin.rect(x, y, width, height), colour);
+    }
+    for label in &widget.labels {
+        let text_width = font.measure(&label.text, 1.0) * label.scale;
+        let at = origin.at(label.at[0] - text_width / 2.0, label.at[1]);
+        let mut ink = rgb(label.color);
+        ink[3] = label.alpha;
+        draw_text(
+            list,
+            at,
+            &label.text,
+            ink,
+            style.shadow,
+            origin.unit * label.scale,
+        );
     }
     let mut row_top = 0.0;
     for line in &widget.lines {
@@ -449,7 +533,9 @@ fn draw_text(
 ) {
     let shadow = match shadow {
         ShadowStyle::Vanilla => Some(shadow_of(ink)),
-        ShadowStyle::Color(colour) => Some(rgb(colour)),
+        ShadowStyle::Color(colour) => {
+            Some([rgb(colour)[0], rgb(colour)[1], rgb(colour)[2], ink[3]])
+        }
         ShadowStyle::Off => None,
     };
     if let Some(shadow) = shadow {
@@ -743,10 +829,7 @@ mod tests {
             },
         ];
         let view = only(Vec::new(), cells, false);
-        assert_eq!(
-            measure_body(&font, &view.lines, &view.cells, 1.0, &view.style),
-            (70.0, 34.0)
-        );
+        assert_eq!(measure_view(&font, &view), (70.0, 34.0));
         let mut list = DrawList::new();
         draw_mod_widgets(&mut list, &[view], 1.0, &font);
         let fills: Vec<Color> = list
@@ -760,5 +843,86 @@ mod tests {
             })
             .collect();
         assert_eq!(fills, [CELL_LIT, CELL_IDLE]);
+    }
+
+    fn marks() -> ModWidgetView {
+        ModWidgetView {
+            labels: vec![ModLabel {
+                at: [50.0, 4.0],
+                text: "S".into(),
+                color: 0xFF_FFFF,
+                alpha: 0.5,
+                scale: 2.0,
+            }],
+            ticks: vec![ModTick {
+                rect: [10.0, 1.0, 1.0, 3.0],
+                color: 0xFF_FFFF,
+                alpha: 0.25,
+            }],
+            reserve: [100.0, 30.0],
+            style: WidgetStyle {
+                background: None,
+                padding: 0.0,
+                ..WidgetStyle::default()
+            },
+            ..ModWidgetView::default()
+        }
+    }
+
+    #[test]
+    fn a_reserved_size_keeps_the_widget_from_shrinking() {
+        let font = FontAtlas::fallback();
+        let view = marks();
+        assert_eq!(measure_view(&font, &view), (100.0, 30.0));
+        let bigger = ModWidgetView {
+            reserve: [0.0; 2],
+            ..marks()
+        };
+        let (width, height) = measure_view(&font, &bigger);
+        assert_eq!(height, 4.0 + LINE_HEIGHT * 2.0, "the label sets the height");
+        assert!(
+            width >= 50.0,
+            "to the middle of the label and half its width"
+        );
+    }
+
+    #[test]
+    fn a_reserve_alone_is_not_an_empty_widget() {
+        let view = ModWidgetView {
+            reserve: [10.0, 10.0],
+            ..ModWidgetView::default()
+        };
+        assert!(!view.is_empty());
+        assert!(ModWidgetView::default().is_empty());
+    }
+
+    #[test]
+    fn labels_are_centered_scaled_and_faded_and_ticks_are_faded_rectangles() {
+        let font = FontAtlas::fallback();
+        let mut list = DrawList::new();
+        draw_mod_widgets(&mut list, &[marks()], 1.0, &font);
+        let commands = list.commands();
+        let DrawCommand::Rect { rect, color } = &commands[0] else {
+            panic!("expected the tick first, got {:?}", commands[0]);
+        };
+        assert_eq!(*rect, Rect::new(10.0, 1.0, 1.0, 3.0));
+        assert_eq!(color[3], 0.25);
+        let (
+            DrawCommand::Text { style: shadow, .. },
+            DrawCommand::Text {
+                position,
+                style,
+                text,
+            },
+        ) = (&commands[1], &commands[2])
+        else {
+            panic!("expected the shadow then the label");
+        };
+        assert_eq!(text, "S");
+        assert_eq!(style.scale, 2.0);
+        assert_eq!(style.color[3], 0.5);
+        assert_eq!(shadow.color[3], 0.5, "the shadow fades with the text");
+        let width = font.measure("S", 1.0) * 2.0;
+        assert_eq!(*position, [50.0 - width / 2.0, 4.0]);
     }
 }

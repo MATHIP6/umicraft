@@ -46,6 +46,34 @@ pub struct HudCell {
     pub text: String,
 }
 
+/// A text placed freely in a widget, centered on a point and faded: the numbers
+/// and letters of the direction HUD.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HudLabel {
+    /// `[x, y]` in GUI units from the top-left of the widget: the center of the
+    /// text horizontally and its top edge.
+    pub at: [f32; 2],
+    /// The text.
+    pub text: String,
+    /// Color as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+    /// Size of the text relative to the normal one.
+    pub scale: f32,
+}
+
+/// A small filled rectangle of a widget, such as a mark of the direction HUD ruler.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct HudTick {
+    /// `[x, y, width, height]` in GUI units from the top-left of the widget.
+    pub rect: [f32; 4],
+    /// Color as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+}
+
 /// The lines and boxes of one widget.
 ///
 /// `clear` keeps the strings allocated, so after the first frames a mod writes
@@ -56,11 +84,18 @@ pub struct HudContent {
     used: usize,
     cells: Vec<HudCell>,
     cells_used: usize,
+    labels: Vec<HudLabel>,
+    labels_used: usize,
+    ticks: Vec<HudTick>,
     /// The look of the widget, set by the registry from the shared options.
     pub style: HudStyle,
     /// Whether the player asked to swap the side of the pictures: they stand
     /// where the client would not put them on its own (see `mirrored` in the UI).
     pub invert: bool,
+    /// The size `[width, height]` in GUI units the widget keeps whatever it draws
+    /// (`[0.0; 2]` for none), so a widget whose marks come and go does not
+    /// change size and jump. Set by the mod on each draw.
+    pub reserve: [f32; 2],
 }
 
 impl HudContent {
@@ -68,6 +103,9 @@ impl HudContent {
     pub fn clear(&mut self) {
         self.used = 0;
         self.cells_used = 0;
+        self.labels_used = 0;
+        self.ticks.clear();
+        self.reserve = [0.0; 2];
     }
 
     /// Starts a new line of the given color and returns its (empty) text to write into.
@@ -103,6 +141,50 @@ impl HudContent {
         cell.color = color;
         cell.text.clear();
         &mut cell.text
+    }
+
+    /// Starts a new free text centered on `at` and returns its (empty) text to
+    /// write into.
+    pub fn label(&mut self, at: [f32; 2], color: u32, alpha: f32, scale: f32) -> &mut String {
+        if self.labels_used == self.labels.len() {
+            self.labels.push(HudLabel::default());
+        }
+        let label = &mut self.labels[self.labels_used];
+        self.labels_used += 1;
+        label.at = at;
+        label.color = color;
+        label.alpha = alpha;
+        label.scale = scale;
+        label.text.clear();
+        &mut label.text
+    }
+
+    /// The free texts written since the last [`clear`](Self::clear).
+    #[must_use]
+    pub fn labels(&self) -> &[HudLabel] {
+        &self.labels[..self.labels_used]
+    }
+
+    /// Adds a small filled rectangle.
+    pub fn tick(&mut self, rect: [f32; 4], color: u32, alpha: f32) {
+        self.ticks.push(HudTick { rect, color, alpha });
+    }
+
+    /// The rectangles added since the last [`clear`](Self::clear).
+    #[must_use]
+    pub fn ticks(&self) -> &[HudTick] {
+        &self.ticks
+    }
+
+    /// Whether the widget shows nothing: no line, box, label or mark, and no
+    /// reserved size.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.used == 0
+            && self.cells_used == 0
+            && self.labels_used == 0
+            && self.ticks.is_empty()
+            && self.reserve == [0.0; 2]
     }
 
     /// The boxes written since the last [`clear`](Self::clear).
@@ -164,6 +246,27 @@ mod tests {
             (HudIcon::Effect(3), "", "")
         );
         assert_eq!((line.color, line.detail_color), (0x44_5566, 0x44_5566));
+    }
+
+    #[test]
+    fn labels_ticks_and_the_reserve_are_cleared_with_the_rest() {
+        let mut c = HudContent::default();
+        c.label([10.0, 2.0], 0xff_ffff, 0.5, 1.5).push('S');
+        c.tick([1.0, 2.0, 1.0, 3.0], 0xff_ffff, 1.0);
+        c.reserve = [100.0, 20.0];
+        assert_eq!(
+            (c.labels()[0].text.as_str(), c.labels()[0].scale),
+            ("S", 1.5)
+        );
+        assert_eq!(c.ticks().len(), 1);
+        c.clear();
+        assert!(c.labels().is_empty() && c.ticks().is_empty());
+        assert_eq!(c.reserve, [0.0; 2]);
+        assert_eq!(
+            c.label([0.0; 2], 0, 1.0, 1.0),
+            "",
+            "a reused label has no old text"
+        );
     }
 
     #[test]

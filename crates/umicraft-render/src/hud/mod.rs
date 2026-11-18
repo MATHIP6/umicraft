@@ -40,6 +40,6 @@ pub use state::{
     ChatInputView, ChatLineView, ChatRunView, ChatStyle, DebugF3View, HudState, HOTBAR_SLOTS,
 };
 pub use umicraft_ui::mod_widget::{
-    measure as measure_mod_widget, measure_body as measure_mod_widget_body, ModCell, ModIcon,
-    ModLine, ModWidgetView, ShadowStyle, WidgetStyle,
+    measure as measure_mod_widget, measure_view as measure_mod_widget_view, ModCell, ModIcon,
+    ModLabel, ModLine, ModTick, ModWidgetView, ShadowStyle, WidgetStyle,
 };

@@ -59,3 +59,12 @@ and a second text under it.
   only real effects.
 - **Menu icons.** Four Phosphor icons (MIT, same set as the others, regenerated with
   `docs/tools/gen_icons.py`): `keyboard`, `lightning`, `shield`, `flask`, `sword` (1.7 animations).
+- **Direction HUD** (`direction_hud`, off by default, `compass` icon): a ruler at the top of the
+  screen, from a screenshot by the owner. Degrees every 15, a larger letter every 45 (yaw 0
+  is south and grows clockwise, as in F3 and the coordinates mod), the heading and an arrow in
+  the middle, and every mark fading with the square of its distance to the middle. It needs two
+  more things from `HudContent`: free `labels` (centered text with its own opacity and size)
+  and `ticks` (small filled rectangles), and a `reserve` size so the widget does not change
+  size, and jump, as marks come and go. Options: width (120 to 400 units, 150 degrees visible
+  whatever the width), degrees, heading, color. `measure_view` now measures a whole
+  `ModWidgetView` and replaces `measure_body`.

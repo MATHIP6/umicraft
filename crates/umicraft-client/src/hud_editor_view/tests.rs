@@ -165,8 +165,9 @@ fn every_hud_mod_is_listed_on_or_off_with_its_lock() {
             ("combo_counter", false, false),
             ("armor_status", false, false),
             ("potion_effects", false, false),
+            ("direction_hud", false, false),
         ],
-        "the eight mods that have a widget, and no other"
+        "the nine mods that have a widget, and no other"
     );
     assert!(view.is_locked("cps") && !view.is_locked("fps"));
     assert!(!view.has_custom);
