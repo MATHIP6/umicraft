@@ -197,3 +197,39 @@ fn a_full_queue_refuses_more_requests() {
     drop(queue);
     assert!(!resolver.request(query(UUID, "a", &[])), "worker gone");
 }
+
+/// Asks the real services about a well-known account, one provider at a
+/// time, and prints what each answers. Needs the network, so it only runs
+/// with `cargo test -p umicraft-assets live_services -- --ignored --nocapture`.
+#[test]
+#[ignore = "talks to the real cape services"]
+fn live_services() {
+    /// The public account `Notch`.
+    const NOTCH: u128 = 0x069a_79f4_44e9_4726_a5be_fca9_0e38_aaf5;
+    let resolver = CapeResolver::spawn();
+    for provider in CapeProvider::ALL {
+        assert!(resolver.request(query(NOTCH, "Notch", &[provider])));
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let result = loop {
+            if let Some(result) = resolver.poll().next() {
+                break result;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{} did not answer",
+                provider.key()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let found = result.cape.map(|found| {
+            let image = found.image;
+            format!(
+                "{}x{}, {} frame(s)",
+                image.width,
+                image.height,
+                image.frames.len()
+            )
+        });
+        println!("{}: {found:?}", provider.key());
+    }
+}
