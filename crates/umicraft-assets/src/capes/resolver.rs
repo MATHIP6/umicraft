@@ -9,7 +9,6 @@
 //! queries in flight. Each query tries its providers in order and stops at
 //! the first cape; a provider that errors is logged and skipped.
 
-use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread;
 use std::time::Duration;
@@ -109,12 +108,22 @@ impl CapeEndpoints {
 /// Whether a redirect to `next`, after `previous` earlier hops, is followed.
 ///
 /// A redirect is the server's choice, so it must stay on an allowed host.
+/// `previous` counts the URLs already requested, as `Policy::limited` does.
 fn follows_redirect(previous: usize, next: &Url, allow: UrlCheck) -> bool {
     previous <= MAX_REDIRECTS && allow(next.as_str())
 }
 
-fn build_client(allow: UrlCheck) -> Result<Client, reqwest::Error> {
-    Client::builder()
+fn build_client(endpoints: &CapeEndpoints) -> Result<Client, reqwest::Error> {
+    let allow = endpoints.allow;
+    let builder = Client::builder();
+    // The tests talk to a local server, which a proxy from the environment
+    // must not intercept.
+    let builder = if endpoints.origin.is_some() {
+        builder.no_proxy()
+    } else {
+        builder
+    };
+    builder
         .user_agent(concat!("Umicraft/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(TOTAL_TIMEOUT)
@@ -247,6 +256,7 @@ impl CapeResolver {
         thread::Builder::new()
             .name("cape-fetch".to_owned())
             .spawn(move || worker(queue, &sender, endpoints))
+            .inspect_err(|error| tracing::warn!(%error, "cape worker did not start"))
             .ok();
         Self { requests, results }
     }
@@ -268,8 +278,12 @@ fn worker(
     results: &SyncSender<CapeResult>,
     endpoints: CapeEndpoints,
 ) {
-    let Ok(client) = build_client(endpoints.allow) else {
-        return;
+    let client = match build_client(&endpoints) {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!(%error, "cape worker has no HTTP client");
+            return;
+        }
     };
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -281,31 +295,28 @@ fn worker(
     runtime.block_on(drive(queue, results, fetcher));
 }
 
-/// Moves queries from the queue into at most [`MAX_CONCURRENT_QUERIES`]
-/// running tasks and forwards their results, until the resolver is dropped
-/// and everything has finished.
+/// Takes queries from the queue while fewer than [`MAX_CONCURRENT_QUERIES`]
+/// run, and forwards their results, until the resolver is dropped and
+/// everything has finished. Queries left in the bounded queue wait there, so
+/// the worker never holds an unbounded backlog.
 async fn drive(
     mut queue: AsyncReceiver<CapeQuery>,
     results: &SyncSender<CapeResult>,
     fetcher: Fetcher,
 ) {
-    let mut waiting: VecDeque<CapeQuery> = VecDeque::new();
     let mut in_flight: JoinSet<CapeResult> = JoinSet::new();
     let mut open = true;
     loop {
-        while in_flight.len() < MAX_CONCURRENT_QUERIES {
-            let Some(query) = waiting.pop_front() else {
-                break;
-            };
-            let fetcher = fetcher.clone();
-            in_flight.spawn(async move { fetcher.resolve(query).await });
-        }
-        if !open && waiting.is_empty() && in_flight.is_empty() {
+        if !open && in_flight.is_empty() {
             return;
         }
+        let has_room = in_flight.len() < MAX_CONCURRENT_QUERIES;
         tokio::select! {
-            query = queue.recv(), if open => match query {
-                Some(query) => waiting.push_back(query),
+            query = queue.recv(), if open && has_room => match query {
+                Some(query) => {
+                    let fetcher = fetcher.clone();
+                    in_flight.spawn(async move { fetcher.resolve(query).await });
+                }
                 None => open = false,
             },
             Some(joined) = in_flight.join_next(), if !in_flight.is_empty() => {
