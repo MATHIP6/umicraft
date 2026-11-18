@@ -25,6 +25,11 @@ static META: ModMeta = ModMeta {
 
 const SETTINGS: &[SettingDef] = hud_settings_bare![
     SettingDef {
+        key: "invert",
+        label_key: "umicraft.mods.armor_status.invert",
+        kind: SettingKind::Toggle { default: false },
+    },
+    SettingDef {
         key: "durability",
         label_key: "umicraft.mods.armor_status.durability",
         kind: SettingKind::Choice {
@@ -114,6 +119,7 @@ impl BuiltinMod for ArmorStatus {
     }
 
     fn draw(&self, ctx: &ModContext, settings: &ModSettings, out: &mut HudContent) {
+        out.invert = settings.bool("invert");
         let text_color = parse_color(settings.text("color"));
         let dynamic = settings.text("damage_color") == "dynamic";
         let names = settings.bool("names");
@@ -228,6 +234,19 @@ mod tests {
     }
 
     #[test]
+    fn the_invert_option_reaches_the_content() {
+        let mut settings = ModSettings::defaults(SETTINGS);
+        let mut out = HudContent::default();
+        ArmorStatus.draw(&ctx(), &settings, &mut out);
+        assert!(!out.invert, "off by default");
+        settings
+            .set("invert", &SettingValue::Bool(true))
+            .expect("known key");
+        ArmorStatus.draw(&ctx(), &settings, &mut out);
+        assert!(out.invert);
+    }
+
+    #[test]
     fn no_armour_draws_nothing() {
         let out = drawn_texts(
             &ArmorStatus,
@@ -241,7 +260,14 @@ mod tests {
     fn reads_only_its_schema() {
         assert_reads_only_schema_keys(
             &ArmorStatus,
-            &["durability", "damage_color", "color", "held", "names"],
+            &[
+                "durability",
+                "damage_color",
+                "color",
+                "held",
+                "names",
+                "invert",
+            ],
         );
     }
 }

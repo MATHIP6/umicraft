@@ -326,3 +326,28 @@ fn a_restored_config_brings_back_every_part_of_the_layout() {
     r.apply_config(&before);
     assert_eq!(r.config(), before);
 }
+
+#[test]
+fn a_preview_draws_a_widget_without_touching_the_mod() {
+    let r = registry();
+    let preview = r
+        .preview(
+            "counter",
+            &ModContext {
+                fps: 99,
+                ..ModContext::default()
+            },
+        )
+        .expect("counter has a widget");
+    assert_eq!(preview.lines()[0].text, "99 FPS");
+    let shown = r.hud_widgets().next().expect("one widget").content;
+    assert!(
+        shown.lines().is_empty(),
+        "the real widget is not drawn into"
+    );
+    assert!(r.preview("ghost", &ModContext::default()).is_none());
+    assert!(
+        r.preview("zoom", &ModContext::default()).is_none(),
+        "no widget"
+    );
+}

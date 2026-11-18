@@ -46,3 +46,16 @@ and a second text under it.
   inventory effect list; the blink of the last ten seconds uses the frame clock.
 - The server-less `--hud-demo` shows the widgets without pictures (no session, no assets).
 - A future reach mod would add its own field to `CombatInfo` (append-only).
+
+## Amendments
+
+- **Invert option.** Armor status and potion effects have an `invert` toggle (off by
+  default) that swaps the side of the picture and the text: the client mirrors a widget
+  on the right half of the screen on its own, and `invert` flips that choice for the widget
+  (`HudContent::invert`, read in `mods_hud_view`).
+- **Test effect in the mods menu.** While the mods menu is open, a potion effects widget that
+  has nothing to show draws a test effect (Speed II, 1:23) through
+  `ModRegistry::preview`, so the player has something to place. The HUD itself still shows
+  only real effects.
+- **Menu icons.** Four Phosphor icons (MIT, same set as the others, regenerated with
+  `docs/tools/gen_icons.py`): `keyboard`, `lightning`, `shield`, `flask`.

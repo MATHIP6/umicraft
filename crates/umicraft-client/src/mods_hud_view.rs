@@ -34,7 +34,8 @@ fn widget_style(style: &HudStyle) -> WidgetStyle {
 /// The placement is resolved in GUI units (window size divided by the GUI scale),
 /// so a widget keeps its place when the window or the GUI scale changes. A widget
 /// with nothing to draw yet (first frame) is skipped. A widget whose centre is on
-/// the right half of the screen is mirrored, so its pictures stay at the edge.
+/// the right half of the screen is mirrored, so its pictures stay at the edge; the
+/// `invert` option of the mod swaps that.
 #[must_use]
 pub fn mod_widget_views<'a>(
     widgets: impl Iterator<Item = HudWidget<'a>>,
@@ -76,7 +77,7 @@ pub fn mod_widget_views<'a>(
             ModWidgetView {
                 lines,
                 cells,
-                mirrored: rect.x + rect.w / 2.0 > screen.0 / 2.0,
+                mirrored: (rect.x + rect.w / 2.0 > screen.0 / 2.0) != widget.content.invert,
                 position: [rect.x, rect.y],
                 scale: widget.placement.scale,
                 style,
@@ -157,5 +158,45 @@ mod tests {
         assert_eq!(view.style.background, Some([1.0, 0.0, 0.0, 0.5]));
         assert_eq!(view.style.padding, 4.0);
         assert_eq!(view.style.shadow, ShadowStyle::Off);
+    }
+
+    #[test]
+    fn the_invert_option_swaps_the_side_of_the_pictures() {
+        use umicraft_builtin_mods::SettingValue;
+
+        let mut registry = ModRegistry::new(mods::all()).expect("distinct ids");
+        registry
+            .set_enabled("armor_status", true)
+            .expect("the mod exists");
+        let left_half = HudPlacement::at(Anchor::TopLeft, 0.0, 0.0);
+        registry
+            .set_placement("armor_status", left_half)
+            .expect("the mod has a widget");
+        let mirrored = |registry: &ModRegistry| {
+            let views = mod_widget_views(
+                registry
+                    .hud_widgets()
+                    .filter(|w| w.id.as_str() == "armor_status"),
+                &FontAtlas::fallback(),
+                (800, 600),
+                &ModIcons::default(),
+            );
+            views.first().map(|view| view.mirrored)
+        };
+        let context = ModContext {
+            held: Some(umicraft_builtin_mods::ArmorPiece {
+                name: "diamond_sword",
+                damage: 0,
+                max_damage: 1561,
+            }),
+            ..ModContext::default()
+        };
+        registry.update(&context);
+        assert_eq!(mirrored(&registry), Some(false), "left half, icon first");
+        registry
+            .set_setting("armor_status", "invert", &SettingValue::Bool(true))
+            .expect("the option exists");
+        registry.update(&context);
+        assert_eq!(mirrored(&registry), Some(true), "inverted: text then icon");
     }
 }

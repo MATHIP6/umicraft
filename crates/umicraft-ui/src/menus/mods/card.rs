@@ -50,6 +50,10 @@ fn mod_icon(id: &str) -> Icon {
         "fullbright" => Icon::Lightbulb,
         "zoom" => Icon::Binoculars,
         "no_hurt_cam" => Icon::Camera,
+        "keystrokes" => Icon::Keyboard,
+        "combo_counter" => Icon::Lightning,
+        "armor_status" => Icon::Shield,
+        "potion_effects" => Icon::Flask,
         _ => Icon::Grid,
     }
 }

@@ -58,6 +58,9 @@ pub struct HudContent {
     cells_used: usize,
     /// The look of the widget, set by the registry from the shared options.
     pub style: HudStyle,
+    /// Whether the player asked to swap the side of the pictures: they stand
+    /// where the client would not put them on its own (see `mirrored` in the UI).
+    pub invert: bool,
 }
 
 impl HudContent {

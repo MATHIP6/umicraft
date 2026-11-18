@@ -210,3 +210,40 @@ fn the_widgets_keep_their_side_on_other_window_shapes() {
         assert!((bottom - 4.0).abs() < 0.01, "{display:?}: {bottom}");
     }
 }
+
+#[test]
+fn the_effects_widget_shows_a_test_effect_while_the_player_has_none() {
+    let mut registry = registry();
+    registry
+        .set_enabled("potion_effects", true)
+        .expect("the mod exists");
+    registry.update(&ModContext::default());
+    let view = view_of(&registry);
+    let line = &view
+        .widgets
+        .iter()
+        .find(|widget| widget.id == "potion_effects")
+        .expect("the widget is listed")
+        .widget
+        .lines[0];
+    assert_eq!(
+        (line.text.as_str(), line.detail.as_str()),
+        ("Speed II", "1:23")
+    );
+}
+
+#[test]
+fn a_mod_with_no_test_content_shows_its_name() {
+    let mut registry = registry();
+    registry
+        .set_enabled("armor_status", true)
+        .expect("the mod exists");
+    registry.update(&ModContext::default());
+    let view = view_of(&registry);
+    let widget = view
+        .widgets
+        .iter()
+        .find(|widget| widget.id == "armor_status")
+        .expect("the widget is listed");
+    assert_eq!(widget.widget.lines[0].text, widget.name);
+}

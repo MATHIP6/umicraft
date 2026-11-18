@@ -199,3 +199,5 @@ umicraft.mods.potion_effects.colors=Color names by effect
 umicraft.mods.potion_effects.name_color=Name color
 umicraft.mods.potion_effects.duration_color=Time color
 umicraft.mods.potion_effects.blink=Blink when ending
+umicraft.mods.armor_status.invert=Swap icon and text sides
+umicraft.mods.potion_effects.invert=Swap icon and text sides

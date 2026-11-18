@@ -24,6 +24,11 @@ static META: ModMeta = ModMeta {
 
 const SETTINGS: &[SettingDef] = hud_settings_bare![
     SettingDef {
+        key: "invert",
+        label_key: "umicraft.mods.potion_effects.invert",
+        kind: SettingKind::Toggle { default: false },
+    },
+    SettingDef {
         key: "icons",
         label_key: "umicraft.mods.potion_effects.icons",
         kind: SettingKind::Toggle { default: true },
@@ -123,6 +128,7 @@ impl BuiltinMod for PotionEffects {
     }
 
     fn draw(&self, ctx: &ModContext, settings: &ModSettings, out: &mut HudContent) {
+        out.invert = settings.bool("invert");
         let icons = settings.bool("icons");
         let names = settings.bool("names");
         let colors = settings.bool("colors");
@@ -247,6 +253,19 @@ mod tests {
     }
 
     #[test]
+    fn the_invert_option_reaches_the_content() {
+        let mut settings = ModSettings::defaults(SETTINGS);
+        let mut out = HudContent::default();
+        PotionEffects.draw(&ctx(0), &settings, &mut out);
+        assert!(!out.invert, "off by default");
+        settings
+            .set("invert", &crate::settings::SettingValue::Bool(true))
+            .expect("known key");
+        PotionEffects.draw(&ctx(0), &settings, &mut out);
+        assert!(out.invert);
+    }
+
+    #[test]
     fn levels_are_roman_numerals() {
         let mut text = String::new();
         roman(4, &mut text);
@@ -266,6 +285,7 @@ mod tests {
                 "name_color",
                 "duration_color",
                 "blink",
+                "invert",
             ],
         );
     }
