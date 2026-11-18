@@ -16,7 +16,7 @@ What the Fabric mod does, and what applies to a 1.8 client:
 |---|---|
 | Providers OptiFine, LabyMod, MinecraftCapes, Cosmetica | Ported. |
 | Provider Cloaks+ (a bare IP over plain HTTP) | Not ported (owner, 2026-11-18). |
-| Own cape: one chosen provider; others: first provider with a cape | Ported. |
+| Own cape: one chosen provider; others: first provider with a cape | Ported, plus an `all` choice (the default) that gives the local player the order of the others. The order differs: OptiFine comes last (owner, 2026-11-18). |
 | HD capes padded into `64·2ⁿ x 32·2ⁿ` | Ported. The cape box UVs are normalised (`CapeModel`), so a larger texture needs no model change. |
 | Animated capes: vertical strip of `w x w/2` frames, 100 ms each | Ported. |
 | LabyMod "no cape" placeholder image ignored | Ported. |
@@ -35,11 +35,11 @@ Settings (`umicraft-builtin-mods/src/mods/capes.rs`):
 
 | Key | Kind | Default |
 |---|---|---|
-| `own_source` | Choice `minecraft`, `optifine`, `labymod`, `minecraftcapes`, `cosmetica` | `minecraft` (the local player keeps the Mojang cape, as in the Fabric mod) |
-| `optifine` | Toggle | on |
+| `own_source` | Choice `all`, `labymod`, `minecraftcapes`, `cosmetica`, `optifine`, `minecraft` | `all` (the local player is looked up like everybody else; owner, 2026-11-18) |
 | `labymod` | Toggle | on |
 | `minecraftcapes` | Toggle | on |
 | `cosmetica` | Toggle | on |
+| `optifine` | Toggle | on |
 
 A provider whose toggle is off is never asked, not even for the local player.
 
@@ -48,9 +48,13 @@ A provider whose toggle is off is never asked, not even for the local player.
 - Only players with a version-4 UUID (online-mode accounts) are looked up.
   NPCs (version 2) and offline-mode players (version 3) are not sent to any
   service.
-- The local player asks only `own_source`; `minecraft` means no lookup.
-- Every other player asks the enabled providers in the order OptiFine,
-  LabyMod, MinecraftCapes, Cosmetica, and keeps the first cape found.
+- Lookup order, for every player: LabyMod, MinecraftCapes, Cosmetica,
+  OptiFine, then the Mojang cape of the profile. The first cape found wins
+  and the later providers are not asked. OptiFine comes last, just before
+  Mojang, by owner decision (2026-11-18); the Fabric mod asks it first.
+- The local player follows the same order on `all` (the default). A single
+  provider asks only that one (the Mojang cape if it has none); `minecraft`
+  means no lookup.
 - A third-party cape replaces the Mojang cape of the profile; without one the
   Mojang cape shows as before. The skin part "Cape" and invisibility still
   hide it (`cape_layer`).
@@ -83,7 +87,7 @@ A provider whose toggle is off is never asked, not even for the local player.
 ```rust
 pub enum CapeProvider { OptiFine, LabyMod, MinecraftCapes, Cosmetica }
 impl CapeProvider {
-    pub const ALL: [Self; 4];                     // lookup order
+    pub const ALL: [Self; 4];                     // lookup order: LabyMod, MinecraftCapes, Cosmetica, OptiFine
     pub fn key(self) -> &'static str;             // "optifine", ...: the setting keys
     pub fn from_key(key: &str) -> Option<Self>;
     pub fn request(self, owner: &CapeOwner) -> CapeRequest;
@@ -117,7 +121,8 @@ and the re-exported `CapeSource` / `ImageSource` of the JSON answers.
 Client side:
 
 - `ModsRuntime::capes() -> Option<CapeSettings>` with
-  `CapeSettings { own: Option<CapeProvider>, enabled: [bool; 4] }` (in the
+  `CapeSettings { own: OwnCape, enabled: [bool; 4] }`, where
+  `OwnCape` is `All`, `Provider(CapeProvider)` or `Mojang` (`enabled` in the
   order of `CapeProvider::ALL`, `Copy` so the per-frame read never
   allocates), `None` while the mod is off. `EntityTextures::set_capes` takes
   it with the local player's UUID every frame; a change of either drops the

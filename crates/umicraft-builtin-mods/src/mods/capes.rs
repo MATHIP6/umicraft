@@ -20,15 +20,27 @@ static META: ModMeta = ModMeta {
     default_enabled: true,
 };
 
-/// The sources of the local player's cape. `minecraft` keeps the Mojang cape,
+/// The sources of the local player's cape. `all` asks every enabled service
+/// in the order used for the other players; `minecraft` keeps the Mojang cape,
 /// so no service is asked; the others are the keys of the provider toggles.
+/// The services come in lookup order (OptiFine last, ADR-0081).
 const OWN_SOURCES: &[&str] = &[
-    "minecraft",
-    "optifine",
+    "all",
     "labymod",
     "minecraftcapes",
     "cosmetica",
+    "optifine",
+    "minecraft",
 ];
+
+/// One toggle per service, in lookup order.
+const fn provider_toggle(key: &'static str, label_key: &'static str) -> SettingDef {
+    SettingDef {
+        key,
+        label_key,
+        kind: SettingKind::Toggle { default: true },
+    }
+}
 
 const SETTINGS: &[SettingDef] = &[
     SettingDef {
@@ -39,26 +51,10 @@ const SETTINGS: &[SettingDef] = &[
             default: 0,
         },
     },
-    SettingDef {
-        key: "optifine",
-        label_key: "umicraft.mods.capes.optifine",
-        kind: SettingKind::Toggle { default: true },
-    },
-    SettingDef {
-        key: "labymod",
-        label_key: "umicraft.mods.capes.labymod",
-        kind: SettingKind::Toggle { default: true },
-    },
-    SettingDef {
-        key: "minecraftcapes",
-        label_key: "umicraft.mods.capes.minecraftcapes",
-        kind: SettingKind::Toggle { default: true },
-    },
-    SettingDef {
-        key: "cosmetica",
-        label_key: "umicraft.mods.capes.cosmetica",
-        kind: SettingKind::Toggle { default: true },
-    },
+    provider_toggle("labymod", "umicraft.mods.capes.labymod"),
+    provider_toggle("minecraftcapes", "umicraft.mods.capes.minecraftcapes"),
+    provider_toggle("cosmetica", "umicraft.mods.capes.cosmetica"),
+    provider_toggle("optifine", "umicraft.mods.capes.optifine"),
 ];
 
 /// The capes mod.
@@ -88,9 +84,9 @@ mod tests {
     }
 
     #[test]
-    fn it_keeps_the_mojang_cape_and_asks_every_service_by_default() {
+    fn it_asks_every_service_for_everybody_by_default() {
         let settings = ModSettings::defaults(Capes.settings());
-        assert_eq!(settings.text("own_source"), "minecraft");
+        assert_eq!(settings.text("own_source"), "all");
         for key in ["optifine", "labymod", "minecraftcapes", "cosmetica"] {
             assert!(settings.bool(key), "{key}");
         }
@@ -101,11 +97,12 @@ mod tests {
         assert_eq!(
             OWN_SOURCES,
             [
-                "minecraft",
-                "optifine",
+                "all",
                 "labymod",
                 "minecraftcapes",
-                "cosmetica"
+                "cosmetica",
+                "optifine",
+                "minecraft"
             ]
         );
         assert!(matches!(

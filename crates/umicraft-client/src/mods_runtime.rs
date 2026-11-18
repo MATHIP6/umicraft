@@ -18,7 +18,7 @@ use umicraft_model::entity::BipedStyle;
 use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
 use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 
-use crate::entity_render::CapeSettings;
+use crate::entity_render::{CapeSettings, OwnCape};
 use crate::input::InputState;
 use crate::options::ModsOptions;
 use crate::zoom::ZoomSettings;
@@ -238,7 +238,7 @@ impl ModsRuntime {
     /// The Capes mod settings while it is on, `None` while it is off
     /// (ADR-0081). Read every frame, so a change in the menu applies at once.
     /// A provider's toggle has the provider's key (`CapeProvider::key`); the
-    /// `minecraft` choice of the own source is no provider, the Mojang cape.
+    /// own source reads as an [`OwnCape`].
     #[must_use]
     pub fn capes(&self) -> Option<CapeSettings> {
         let capes = self
@@ -246,7 +246,7 @@ impl ModsRuntime {
             .mods()
             .find(|view| view.meta.id.as_str() == CAPES_ID && view.enabled)?;
         Some(CapeSettings {
-            own: CapeProvider::from_key(capes.settings.text(CAPES_OWN_SOURCE)),
+            own: OwnCape::from_key(capes.settings.text(CAPES_OWN_SOURCE)),
             enabled: CapeProvider::ALL.map(|provider| capes.settings.bool(provider.key())),
         })
     }
@@ -453,10 +453,10 @@ mod tests {
         assert_eq!(
             runtime.capes(),
             Some(CapeSettings {
-                own: None,
+                own: OwnCape::All,
                 enabled: [true; 4],
             }),
-            "on by default, every provider on, the Mojang cape for the player"
+            "on by default, every provider on, for the player too"
         );
         let registry = runtime.registry_mut();
         registry
@@ -472,8 +472,8 @@ mod tests {
         assert_eq!(
             runtime.capes(),
             Some(CapeSettings {
-                own: Some(CapeProvider::LabyMod),
-                enabled: [true, true, true, false],
+                own: OwnCape::Provider(CapeProvider::LabyMod),
+                enabled: [true, true, false, true],
             })
         );
         runtime

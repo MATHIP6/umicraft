@@ -18,12 +18,35 @@ use umicraft_model::entity::TextureSlot;
 /// Fabric mod "Capes", `docs/sources.md` section "Capes").
 const FRAME_MS: u64 = 100;
 
+/// Where the local player's cape comes from (the `own_source` setting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnCape {
+    /// Every enabled service, in the order used for the other players.
+    All,
+    /// This service only.
+    Provider(CapeProvider),
+    /// No service: the Mojang cape of the profile.
+    Mojang,
+}
+
+impl OwnCape {
+    /// Reads the `own_source` setting: `all`, `minecraft` or a provider key.
+    /// Anything else, which the sanitized settings never hold, means `All`.
+    #[must_use]
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "minecraft" => Self::Mojang,
+            _ => CapeProvider::from_key(key).map_or(Self::All, Self::Provider),
+        }
+    }
+}
+
 /// What the Capes mod asks for, read from it every frame
 /// (`ModsRuntime::capes`). `Copy`, so reading it each frame never allocates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapeSettings {
-    /// The provider of the local player's cape; `None` keeps the Mojang one.
-    pub own: Option<CapeProvider>,
+    /// Where the local player's cape comes from.
+    pub own: OwnCape,
     /// Whether each provider is asked, in the order of [`CapeProvider::ALL`].
     pub enabled: [bool; CapeProvider::ALL.len()],
 }
@@ -37,21 +60,23 @@ impl CapeSettings {
             .any(|(p, on)| *p == provider && on)
     }
 
-    /// The providers to ask for `uuid`: only the chosen one for the local
-    /// player, and only while its toggle is on; every enabled one, in lookup
-    /// order, for the others.
+    /// The providers to ask for `uuid`: every enabled one, in lookup order,
+    /// for the other players and for the local player on [`OwnCape::All`];
+    /// the chosen one, while its toggle is on, or none for the Mojang cape.
     fn providers_for(&self, uuid: u128, own_uuid: Option<u128>) -> Vec<CapeProvider> {
-        if own_uuid == Some(uuid) {
-            return self
-                .own
-                .filter(|own| self.is_enabled(*own))
+        let own = if own_uuid == Some(uuid) {
+            self.own
+        } else {
+            OwnCape::All
+        };
+        match own {
+            OwnCape::All => CapeProvider::ALL
                 .into_iter()
-                .collect();
+                .filter(|p| self.is_enabled(*p))
+                .collect(),
+            OwnCape::Provider(provider) if self.is_enabled(provider) => vec![provider],
+            OwnCape::Provider(_) | OwnCape::Mojang => Vec::new(),
         }
-        CapeProvider::ALL
-            .into_iter()
-            .filter(|p| self.is_enabled(*p))
-            .collect()
     }
 }
 
@@ -219,7 +244,7 @@ mod tests {
     /// A version-3 UUID (offline-mode server), never looked up.
     const OFFLINE: u128 = 0x069a_79f4_44e9_3726_a5be_fca9_0e38_aaf5;
 
-    fn all_on(own: Option<CapeProvider>) -> CapeSettings {
+    fn all_on(own: OwnCape) -> CapeSettings {
         CapeSettings {
             own,
             enabled: [true; 4],
@@ -252,24 +277,51 @@ mod tests {
 
     #[test]
     fn the_local_player_asks_only_the_chosen_and_enabled_provider() {
-        let mut settings = all_on(Some(CapeProvider::LabyMod));
+        let mut settings = all_on(OwnCape::Provider(CapeProvider::LabyMod));
         let me = Some(ONLINE);
         assert_eq!(settings.providers_for(ONLINE, me), [CapeProvider::LabyMod]);
         assert_eq!(settings.providers_for(1, me), CapeProvider::ALL);
-        settings.enabled[1] = false;
+        settings.enabled[0] = false;
         assert!(settings.providers_for(ONLINE, me).is_empty());
         assert_eq!(
             settings.providers_for(1, me),
             [
-                CapeProvider::OptiFine,
                 CapeProvider::MinecraftCapes,
-                CapeProvider::Cosmetica
+                CapeProvider::Cosmetica,
+                CapeProvider::OptiFine
             ]
         );
         assert!(
-            all_on(None).providers_for(ONLINE, me).is_empty(),
+            all_on(OwnCape::Mojang).providers_for(ONLINE, me).is_empty(),
             "Mojang cape"
         );
+    }
+
+    #[test]
+    fn on_all_the_local_player_follows_the_order_of_the_others() {
+        let mut settings = all_on(OwnCape::All);
+        settings.enabled[2] = false;
+        let me = Some(ONLINE);
+        assert_eq!(
+            settings.providers_for(ONLINE, me),
+            settings.providers_for(1, me)
+        );
+        assert_eq!(
+            settings.providers_for(ONLINE, me).last(),
+            Some(&CapeProvider::OptiFine),
+            "OptiFine last, just before the Mojang cape"
+        );
+    }
+
+    #[test]
+    fn the_own_source_setting_reads_into_an_own_cape() {
+        assert_eq!(OwnCape::from_key("all"), OwnCape::All);
+        assert_eq!(OwnCape::from_key("minecraft"), OwnCape::Mojang);
+        assert_eq!(
+            OwnCape::from_key("optifine"),
+            OwnCape::Provider(CapeProvider::OptiFine)
+        );
+        assert_eq!(OwnCape::from_key("???"), OwnCape::All);
     }
 
     #[test]
@@ -293,7 +345,7 @@ mod tests {
     #[test]
     fn offline_players_and_players_without_providers_are_absent_without_a_request() {
         let mut set = CapeSet::new();
-        set.configure(Some(all_on(None)), Some(ONLINE));
+        set.configure(Some(all_on(OwnCape::Mojang)), Some(ONLINE));
         assert_eq!(set.lookup(OFFLINE, "Steve"), None);
         assert_eq!(set.lookup(ONLINE, "Me"), None);
         assert_eq!(set.states.get(&OFFLINE), Some(&State::Absent));
@@ -304,7 +356,7 @@ mod tests {
     #[test]
     fn an_answer_uploads_every_frame_and_the_lookup_animates_them() {
         let mut set = CapeSet::new();
-        set.configure(Some(all_on(None)), None);
+        set.configure(Some(all_on(OwnCape::Mojang)), None);
         set.states.insert(ONLINE, State::Pending);
         let slots = answer(&mut set, ONLINE, Some(cape(3)));
         let expected: Vec<_> = (0..3).map(TextureSlot::CustomCape).collect();
@@ -321,7 +373,7 @@ mod tests {
     #[test]
     fn a_missing_cape_is_remembered_and_unasked_answers_are_ignored() {
         let mut set = CapeSet::new();
-        set.configure(Some(all_on(None)), None);
+        set.configure(Some(all_on(OwnCape::Mojang)), None);
         set.states.insert(ONLINE, State::Pending);
         assert!(answer(&mut set, ONLINE, None).is_empty());
         assert_eq!(set.states.get(&ONLINE), Some(&State::Absent));
@@ -335,19 +387,22 @@ mod tests {
     #[test]
     fn a_settings_change_starts_over_and_frees_the_textures() {
         let mut set = CapeSet::new();
-        set.configure(Some(all_on(None)), None);
+        set.configure(Some(all_on(OwnCape::Mojang)), None);
         set.states.insert(ONLINE, State::Absent);
         let mut removed = false;
         set.collect(|_, _: &[u8], _, _| {}, || removed = true);
         assert!(removed, "the first configuration counts as a reset");
 
-        set.configure(Some(all_on(None)), None);
+        set.configure(Some(all_on(OwnCape::Mojang)), None);
         let mut removed = false;
         set.collect(|_, _: &[u8], _, _| {}, || removed = true);
         assert!(!removed, "same settings: nothing changes");
         assert!(set.states.contains_key(&ONLINE));
 
-        set.configure(Some(all_on(Some(CapeProvider::OptiFine))), None);
+        set.configure(
+            Some(all_on(OwnCape::Provider(CapeProvider::OptiFine))),
+            None,
+        );
         assert!(set.states.is_empty());
         let mut removed = false;
         set.collect(|_, _: &[u8], _, _| {}, || removed = true);

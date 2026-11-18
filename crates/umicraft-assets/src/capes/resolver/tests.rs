@@ -76,9 +76,8 @@ fn the_endpoints_move_only_the_origin() {
 fn the_first_provider_with_a_cape_wins_and_later_ones_are_not_asked() {
     let server = TestServer::start(|_| {
         vec![
-            route(OPTI_PATH, Reply::status(404)),
             route(LABY_PATH, Reply::ok(palette_png_22x17())),
-            route(MC_PATH, Reply::ok("{}")),
+            route(OPTI_PATH, Reply::ok(palette_png_22x17())),
         ]
     });
     let result = resolve(&server, query(UUID, "Steve", &CapeProvider::ALL));
@@ -86,7 +85,26 @@ fn the_first_provider_with_a_cape_wins_and_later_ones_are_not_asked() {
     assert_eq!(result.uuid, UUID);
     assert_eq!(found.provider, CapeProvider::LabyMod);
     assert_eq!((found.image.width, found.image.height), (64, 32));
-    assert_eq!(server.hits(), [OPTI_PATH, LABY_PATH]);
+    assert_eq!(server.hits(), [LABY_PATH]);
+}
+
+#[test]
+fn optifine_is_asked_last() {
+    let server = TestServer::start(|_| {
+        vec![
+            route(MC_PATH, Reply::ok("{}")),
+            route(OPTI_PATH, Reply::ok(palette_png_22x17())),
+        ]
+    });
+    let result = resolve(&server, query(UUID, "Steve", &CapeProvider::ALL));
+    assert_eq!(
+        result.cape.map(|c| c.provider),
+        Some(CapeProvider::OptiFine)
+    );
+    assert_eq!(
+        server.hits(),
+        [LABY_PATH, MC_PATH, COSMETICA_PATH, OPTI_PATH]
+    );
 }
 
 #[test]
@@ -123,10 +141,10 @@ fn only_the_asked_providers_are_used_in_the_given_order() {
 
 #[test]
 fn optifine_is_skipped_for_a_name_that_is_not_url_safe() {
-    let server = TestServer::start(|_| vec![route(LABY_PATH, Reply::ok(palette_png_22x17()))]);
+    let server = TestServer::start(|_| vec![route(OPTI_PATH, Reply::ok(palette_png_22x17()))]);
     let result = resolve(&server, query(UUID, "a/../b", &CapeProvider::ALL));
-    assert_eq!(result.cape.map(|c| c.provider), Some(CapeProvider::LabyMod));
-    assert_eq!(server.hits(), [LABY_PATH]);
+    assert_eq!(result.cape, None);
+    assert_eq!(server.hits(), [LABY_PATH, MC_PATH, COSMETICA_PATH]);
 }
 
 #[test]

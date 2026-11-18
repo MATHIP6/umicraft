@@ -61,7 +61,7 @@ use umicraft_model::entity::{BipedStyle, ModelVertex, TextureSlot};
 use umicraft_render::EntityVertex;
 
 pub(crate) use animals::WITCH_SCALE;
-pub use capes::CapeSettings;
+pub use capes::{CapeSettings, OwnCape};
 pub use cull::CullView;
 pub use hand::hand_vertices;
 pub(crate) use mobs::posed_humanoid_mob;

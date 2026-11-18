@@ -92,12 +92,13 @@ impl CapeOwner {
 }
 
 impl CapeProvider {
-    /// Every provider, in the order a player is looked up.
+    /// Every provider, in the order a player is looked up. OptiFine comes
+    /// last, just before the Mojang cape (owner decision, ADR-0081).
     pub const ALL: [Self; 4] = [
-        Self::OptiFine,
         Self::LabyMod,
         Self::MinecraftCapes,
         Self::Cosmetica,
+        Self::OptiFine,
     ];
 
     /// The key of the provider in the mod settings.
@@ -181,7 +182,7 @@ mod tests {
     fn all_is_the_lookup_order() {
         assert_eq!(
             CapeProvider::ALL.map(CapeProvider::key),
-            ["optifine", "labymod", "minecraftcapes", "cosmetica"]
+            ["labymod", "minecraftcapes", "cosmetica", "optifine"]
         );
     }
 
