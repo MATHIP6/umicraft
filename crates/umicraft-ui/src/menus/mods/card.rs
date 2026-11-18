@@ -54,6 +54,7 @@ fn mod_icon(id: &str) -> Icon {
         "combo_counter" => Icon::Lightning,
         "armor_status" => Icon::Shield,
         "potion_effects" => Icon::Flask,
+        "legacy_animations" => Icon::Sword,
         _ => Icon::Grid,
     }
 }

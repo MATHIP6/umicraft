@@ -58,4 +58,4 @@ and a second text under it.
   `ModRegistry::preview`, so the player has something to place. The HUD itself still shows
   only real effects.
 - **Menu icons.** Four Phosphor icons (MIT, same set as the others, regenerated with
-  `docs/tools/gen_icons.py`): `keyboard`, `lightning`, `shield`, `flask`.
+  `docs/tools/gen_icons.py`): `keyboard`, `lightning`, `shield`, `flask`, `sword` (1.7 animations).
