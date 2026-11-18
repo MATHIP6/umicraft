@@ -19,7 +19,10 @@ mod allowlist;
 mod error;
 mod image;
 mod provider;
+mod resolver;
 mod response;
+#[cfg(test)]
+mod test_server;
 #[cfg(test)]
 mod test_support;
 
@@ -27,4 +30,5 @@ pub use allowlist::is_allowed_cape_url;
 pub use error::CapeError;
 pub use image::{decode_cape, CapeImage};
 pub use provider::{CapeOwner, CapeProvider, CapeRequest, ResponseKind};
+pub use resolver::{CapeQuery, CapeResolver, CapeResult, FoundCape};
 pub use response::{CapeSource, ImageSource};
