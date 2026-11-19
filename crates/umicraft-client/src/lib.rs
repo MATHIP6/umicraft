@@ -35,6 +35,7 @@ mod creative_layout;
 mod creative_screen;
 pub mod creative_view;
 mod debug_f3_view;
+mod debug_lines;
 pub mod debug_world;
 pub mod dials;
 pub mod e1;

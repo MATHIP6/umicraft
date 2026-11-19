@@ -9,6 +9,7 @@ use winit::event::{ElementState, KeyEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
+use super::debug_chords::DebugChord;
 use super::App;
 use crate::options::{Action, Binding};
 use crate::screen::Screen;
@@ -132,29 +133,15 @@ impl App {
                             self.set_screen(Screen::None.after_escape(self.options_menu.origin))
                         }
                         KeyCode::F1 => self.show_overlay = !self.show_overlay,
-                        KeyCode::F3 => {
-                            self.show_f3 = !self.show_f3;
-                            if self.show_f3 {
-                                umicraft_core::profiling::set_alloc_tracking(true);
-                                self.clock.last_alloc_snapshot =
-                                    umicraft_core::profiling::AllocSnapshot::now();
-                            } else if !umicraft_core::profiling::is_enabled() {
-                                umicraft_core::profiling::set_alloc_tracking(false);
-                            }
-                        }
-                        // F3 + P toggles the runtime profiler and allocation tracker.
-                        KeyCode::KeyP if self.input.keys.contains(&KeyCode::F3) => {
-                            let enabled = umicraft_core::profiling::toggle();
-                            if !enabled && self.show_f3 {
-                                umicraft_core::profiling::set_alloc_tracking(true);
-                            }
-                        }
-                        // F3 + T reloads the resource packs, whatever the
-                        // chat key is bound to.
-                        KeyCode::KeyT if self.input.keys.contains(&KeyCode::F3) => {
-                            self.reload_resources();
-                        }
-                        _ => self.press_binding(Binding::Key(code)),
+                        // The text screen toggles when F3 comes back up, and
+                        // only if no chord used it (see `debug_chords`).
+                        KeyCode::F3 => self.f3_chord_used = false,
+                        // F3 + a letter is a chord, whatever that letter is
+                        // bound to.
+                        _ => match DebugChord::from_key(code).filter(|_| self.f3_held()) {
+                            Some(chord) => self.run_debug_chord(chord),
+                            None => self.press_binding(Binding::Key(code)),
+                        },
                     }
                 }
                 self.input.keys.insert(code);
@@ -162,6 +149,9 @@ impl App {
                 self.publish_input();
             }
             ElementState::Released => {
+                if code == KeyCode::F3 && !self.f3_chord_used {
+                    self.toggle_f3_screen();
+                }
                 self.input.keys.remove(&code);
                 self.input.last_time = Instant::now();
                 self.publish_input();

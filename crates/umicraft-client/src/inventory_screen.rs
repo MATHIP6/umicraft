@@ -495,7 +495,7 @@ fn draw_hovered_tooltip(
     let (Some(stack), Some(pointer)) = (stack, ui.pointer()) else {
         return;
     };
-    let lines = umicraft_game::inventory::tooltip::tooltip(stack);
+    let lines = crate::tooltip_draw::item_lines(stack);
     draw_tooltip(ui, atlas, viewport, layout.scale as f32, pointer, &lines);
 }
 

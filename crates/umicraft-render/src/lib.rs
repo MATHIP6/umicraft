@@ -76,7 +76,7 @@ pub use items::{
 };
 pub use motion_blur::{MotionBlurSettings, MotionBlurVersion};
 pub use nametag::Nametag;
-pub use outline::{edge_vertices, OutlineBox, OUTLINE_GROWTH};
+pub use outline::{edge_vertices, DebugLine, OutlineBox, MAX_DEBUG_LINES, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
 pub use overlays::{Portal, ScreenOverlays, Underwater};
 pub use particles::{ParticleSprite, MAX_SPRITES};

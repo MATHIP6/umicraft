@@ -50,6 +50,7 @@ mod binding_input;
 mod chat_control;
 mod creative_window;
 mod death;
+mod debug_chords;
 mod font_sync;
 mod handler;
 mod hotbar_scroll;
@@ -170,6 +171,13 @@ struct App {
     ui: Ui,
     /// Whether the vanilla F3 text screen is shown (toggled by F3).
     show_f3: bool,
+    /// Whether a chord was used since F3 went down; then its release leaves
+    /// the text screen as it is.
+    f3_chord_used: bool,
+    /// Whether the entity hitboxes are drawn (F3 + B).
+    show_hitboxes: bool,
+    /// Whether the chunk borders are drawn (F3 + G).
+    show_chunk_borders: bool,
     /// The acceptance screen shown while [`Screen::Debug`] is current.
     debug_screen: DebugScreen,
     /// The menu shown while [`Screen::GameMenu`] is current.

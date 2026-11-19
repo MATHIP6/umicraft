@@ -112,6 +112,7 @@ impl Renderer {
         let eyes_in_water = self.screen_overlays.underwater.is_some();
         if !eyes_in_water {
             self.outline.draw(&mut pass, &self.camera_bind_group);
+            self.debug_lines.draw(&mut pass, &self.camera_bind_group);
         }
 
         // The clouds hide behind terrain and hide the water behind them, as in
@@ -141,6 +142,7 @@ impl Renderer {
         // Under water the box comes after the translucent layer instead.
         if eyes_in_water {
             self.outline.draw(&mut pass, &self.camera_bind_group);
+            self.debug_lines.draw(&mut pass, &self.camera_bind_group);
         }
         self.stamp(&mut pass, 4);
 

@@ -180,6 +180,7 @@ impl App {
         } else {
             AudioBridge::start(&options.sound)
         };
+        crate::tooltip_draw::set_advanced(options.controls.advanced_tooltips);
         let last_server = options.multiplayer.last_server.clone();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
@@ -270,6 +271,9 @@ impl App {
             container_was_open: false,
             ui: Ui::new(ui_viewport),
             show_f3: false,
+            f3_chord_used: false,
+            show_hitboxes: false,
+            show_chunk_borders: false,
             debug_screen: DebugScreen::new(),
             game_menu: GameMenu::new(),
             menu_action: None,

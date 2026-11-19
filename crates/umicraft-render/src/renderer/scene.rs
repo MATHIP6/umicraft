@@ -16,7 +16,7 @@ use crate::clouds::CloudMode;
 use crate::environment::RenderEnvironment;
 use crate::motion_blur::MotionBlurSettings;
 use crate::nametag::Nametag;
-use crate::outline::OutlineBox;
+use crate::outline::{DebugLine, OutlineBox};
 use crate::overlays::{Pictures, ScreenOverlays};
 use crate::particles::ParticleSprite;
 use crate::sky::{SkyImage, SkyTextures};
@@ -169,6 +169,14 @@ impl Renderer {
     pub fn set_selection_outline(&mut self, boxes: &[OutlineBox]) {
         self.outline
             .set_boxes(&self.queue, boxes, (self.width, self.height));
+    }
+
+    /// Sets the coloured debug lines (F3 + B hitboxes, F3 + G chunk borders)
+    /// for the following frames; an empty slice hides them. They are drawn
+    /// with the selection outline and, like it, are hidden by terrain.
+    pub fn set_debug_lines(&mut self, lines: &[DebugLine]) {
+        self.debug_lines
+            .set_lines(&self.queue, lines, (self.width, self.height));
     }
 
     /// Switches the motion blur of the world on (`Some`) or off (`None`), or

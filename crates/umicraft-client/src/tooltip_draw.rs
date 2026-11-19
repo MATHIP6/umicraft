@@ -9,12 +9,32 @@
 //! are not all vanilla keys yet) becomes a humanised last key segment
 //! (`item.diamond_sword.name` gives "Diamond Sword").
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use umicraft_core::lang::Lang;
-use umicraft_game::inventory::tooltip::{TooltipLine, TooltipText};
+use umicraft_game::inventory::tooltip::{tooltip_advanced, TooltipLine, TooltipText};
+use umicraft_protocol::packets::play::ItemStack;
 use umicraft_ui::widgets::tooltip::{self, TooltipRow};
 use umicraft_ui::{FontAtlas, Rect, Ui};
 
 pub(crate) use umicraft_ui::widgets::tooltip::text_color;
+
+/// Whether item tooltips show the advanced lines (F3 + H).
+///
+/// Process-wide because the screens that draw item tooltips receive scene
+/// snapshots, not the options; the window sets it when the options load and
+/// when the chord flips it.
+static ADVANCED: AtomicBool = AtomicBool::new(false);
+
+/// Turns the advanced item tooltips on or off.
+pub(crate) fn set_advanced(on: bool) {
+    ADVANCED.store(on, Ordering::Relaxed);
+}
+
+/// The tooltip lines of `stack` as the player's setting asks for them.
+pub(crate) fn item_lines(stack: &ItemStack) -> Vec<TooltipLine> {
+    tooltip_advanced(stack, ADVANCED.load(Ordering::Relaxed))
+}
 
 /// The text of a tooltip text in the current language.
 pub fn resolve(text: &TooltipText) -> String {

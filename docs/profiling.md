@@ -34,6 +34,7 @@ Conformément aux contraintes d'ingénierie performance :
 3. **En jeu (Runtime)** :
    - `F3` : affiche l'overlay de télémétrie complète et active automatiquement le comptage d'allocations par frame (`ALLOC_TRACKING_ENABLED = true`). Fermer `F3` coupe le comptage si `--profile` n'est pas actif.
    - `F3 + P` : bascule (`umicraft_core::profiling::toggle()`) à chaud la collecte des scopes de profilage et le suivi d'allocations, avec indicateur visuel `Prof: ON/OFF` dans la colonne droite de `F3`.
+   - Autres raccourcis `F3 + lettre` (A, B, D, F, G, H, S, T) : voir ADR-0082.
 
 ### 2.3 Flamegraphs (CPU Sampling)
 Le profil `[profile.release]` ou un profil dédié avec symboles permet de générer des flamegraphs SVG avec `cargo-flamegraph` (sous Windows via `dtrace` / ETW ou `blondie`, sous Linux via `perf`) :

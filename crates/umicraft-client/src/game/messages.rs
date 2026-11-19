@@ -78,6 +78,8 @@ pub enum GameEvent {
     LegacyAnimations(umicraft_game::legacy::LegacyAnimations),
     /// A line the client shows in its own chat (the completion list).
     LocalChat(String),
+    /// F3 + D: empties the chat history.
+    ClearChat,
     /// Request to re-mesh every loaded chunk column (e.g. after a resource pack reload).
     ReMeshAll,
     /// The client closes a container or the player inventory (E / Escape).

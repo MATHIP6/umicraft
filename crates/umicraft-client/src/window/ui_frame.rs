@@ -271,7 +271,7 @@ impl App {
             .hover
             .as_ref()
             .and_then(|run| run.hover.as_ref())
-            .map(|hover| crate::chat::hover_rows(hover, false))
+            .map(|hover| crate::chat::hover_rows(hover, self.options.controls.advanced_tooltips))
             .unwrap_or_default();
         let pointer = [self.input.pointer.0, self.input.pointer.1];
         let scale = gui_scale(width, height) as f32;

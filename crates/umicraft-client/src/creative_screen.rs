@@ -26,7 +26,7 @@ use umicraft_game::inventory::creative::tabs::{
 };
 use umicraft_game::inventory::creative::{owning_tab, visible_slots, CreativeSlot, CreativeTab};
 use umicraft_game::inventory::effect_list::EffectLine;
-use umicraft_game::inventory::tooltip::{tooltip, TooltipColor, TooltipLine, TooltipText};
+use umicraft_game::inventory::tooltip::{TooltipColor, TooltipLine, TooltipText};
 use umicraft_game::inventory::{WindowView, HOTBAR_START};
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::PORTRAIT_KEY;
@@ -326,7 +326,7 @@ fn hover_lines(scene: &CreativeScene<'_>, point: (i32, i32)) -> Vec<TooltipLine>
 /// (`GuiContainerCreative.renderToolTip`), in blue; the bold style of that
 /// line is not drawn, the tooltip font has no bold.
 fn item_lines(tab: CreativeTab, stack: &ItemStack) -> Vec<TooltipLine> {
-    let mut lines = tooltip(stack);
+    let mut lines = crate::tooltip_draw::item_lines(stack);
     if tab == CreativeTab::Search {
         if let Some(owner) = owning_tab(stack) {
             let mut line = key_line(&owner.translation_key());

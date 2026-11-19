@@ -43,7 +43,7 @@ use crate::items::{DynamicMesh, GlintPass, IconAtlas, WorldGlint};
 use crate::lightmap::{self, TorchFlicker};
 use crate::motion_blur::MotionBlur;
 use crate::nametag::NametagRenderer;
-use crate::outline::OutlineRenderer;
+use crate::outline::LineRenderer;
 use crate::overlays::{ScreenOverlays, ScreenRenderer};
 use crate::panorama::PanoramaRenderer;
 use crate::particles::{ParticleRenderer, ParticleSprite};
@@ -367,7 +367,9 @@ pub struct Renderer {
     free_mesh_slots: Vec<u32>,
     camera_bind_group: wgpu::BindGroup,
     entity_renderer: EntityRenderer,
-    outline: OutlineRenderer,
+    outline: LineRenderer,
+    /// The coloured lines of the debug chords (hitboxes, chunk borders).
+    debug_lines: LineRenderer,
     /// The blur of the game behind a menu, and whether a menu asks for it.
     scene_blur: SceneBlur,
     /// The motion blur of the world (the Motion Blur mod).

@@ -37,7 +37,7 @@ use crate::items::{DynamicMesh, GlintPass, IconAtlas, WorldGlint};
 use crate::lightmap::TorchFlicker;
 use crate::motion_blur::MotionBlur;
 use crate::nametag::NametagRenderer;
-use crate::outline::OutlineRenderer;
+use crate::outline::{LineRenderer, MAX_DEBUG_LINES, SELECTION_EDGES};
 use crate::overlays::{ScreenOverlays, ScreenRenderer};
 use crate::panorama::PanoramaRenderer;
 use crate::particles::ParticleRenderer;
@@ -311,7 +311,8 @@ impl Renderer {
             "hand camera bind group",
         );
         let entity_renderer = EntityRenderer::new(&device, &camera_layout, format);
-        let outline = OutlineRenderer::new(&device, &camera_layout, format);
+        let outline = LineRenderer::new(&device, &camera_layout, format, SELECTION_EDGES);
+        let debug_lines = LineRenderer::new(&device, &camera_layout, format, MAX_DEBUG_LINES);
         let weather = WeatherRenderer::new(&device, &queue, &camera_layout, format);
         let particles = ParticleRenderer::new(&device, &queue, &terrain_layout, format);
         let screen = ScreenRenderer::new(&device, &queue, &terrain_layout, format);
@@ -474,6 +475,7 @@ impl Renderer {
             camera_bind_group,
             entity_renderer,
             outline,
+            debug_lines,
             scene_blur,
             motion_blur: MotionBlur::new(format),
             background_blur: false,

@@ -25,6 +25,11 @@ pub(in crate::game) struct ChatState {
 }
 
 impl ChatState {
+    /// Forgets every message (F3 + D, `GuiNewChat.clearChatMessages`).
+    pub(in crate::game) fn clear(&mut self) {
+        self.lines.clear();
+    }
+
     /// Adds a message, dropping the oldest beyond [`CHAT_HISTORY`].
     pub(in crate::game) fn push(&mut self, line: ChatLineView) {
         self.lines.push_back(line);
@@ -42,6 +47,14 @@ mod tests {
 
     fn line(text: &str) -> ChatLineView {
         crate::chat::line_from_runs(&umicraft_game::chat::local(text), Instant::now())
+    }
+
+    #[test]
+    fn clearing_forgets_every_message() {
+        let mut chat = ChatState::default();
+        chat.push(line("hello"));
+        chat.clear();
+        assert!(chat.lines.is_empty());
     }
 
     #[test]

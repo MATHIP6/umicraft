@@ -295,6 +295,11 @@ pub(super) fn handle_event(
             push_chat(game, line);
             false
         }
+        GameEvent::ClearChat => {
+            game.chat.clear();
+            game.hud_dirty = true;
+            false
+        }
         GameEvent::ReMeshAll => {
             if let Some(world) = game.world.as_ref() {
                 for (pos, _) in world.chunks() {
