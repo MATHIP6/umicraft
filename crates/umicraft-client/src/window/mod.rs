@@ -26,6 +26,7 @@ use crate::audio_bridge::AudioBridge;
 use crate::cpu_split::CpuSplit;
 use crate::creative_input::CreativeInput;
 use crate::dials::DialAnimator;
+use crate::discord::Presence;
 use crate::entity_icons::EntityIcons;
 use crate::error::ClientError;
 use crate::game::Session;
@@ -115,6 +116,8 @@ pub fn run(args: Args) -> Result<(), ClientError> {
 
 struct App {
     args: Args,
+    /// The Discord Rich Presence, kept in line with the screen every loop turn.
+    discord: Presence,
     /// What the last frame gathered from the world, kept to reuse its buffers.
     frame: FrameScratch,
     /// Where the CPU time of a frame goes, for F3.

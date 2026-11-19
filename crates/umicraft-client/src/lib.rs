@@ -38,6 +38,7 @@ mod debug_f3_view;
 mod debug_lines;
 pub mod debug_world;
 pub mod dials;
+pub mod discord;
 pub mod e1;
 mod effect_list_draw;
 pub mod entity_demo;

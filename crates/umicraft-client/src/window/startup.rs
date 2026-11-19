@@ -193,6 +193,7 @@ impl App {
                 video_applier: VideoApplier::new(options.video.fullscreen),
                 origin: Screen::GameMenu,
             },
+            discord: crate::discord::Presence::spawn(),
             lang,
             mods: ModsRuntime::new(&options.mods),
             options,

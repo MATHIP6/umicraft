@@ -15,6 +15,7 @@ use winit::window::{Fullscreen, Window};
 use super::chat_control::CHAT_WHEEL_ROWS;
 use super::startup::upload_sky_textures;
 use super::App;
+use crate::discord::Status;
 use crate::error::ClientError;
 use crate::screen::Screen;
 use crate::ui_font::{self};
@@ -251,6 +252,8 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.discord
+            .show(Status::of(self.screen(), self.session.is_some()));
         let now = Instant::now();
         if now + Duration::from_micros(500) >= self.clock.next_frame {
             if let Some(window) = &self.window {
