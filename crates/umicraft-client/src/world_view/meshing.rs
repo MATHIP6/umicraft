@@ -10,10 +10,10 @@ use umicraft_render::{Camera, Renderer};
 use umicraft_world::ChunkPos;
 
 use super::WorldView;
-use crate::block_entity_render::push_pot_plants;
-use crate::mesher::{MeshPool, MeshResult};
-use crate::moving_blocks_draw::mesh_moving_blocks_into;
-use crate::terrain_textures::InstalledTerrain;
+use crate::meshing::pool::{MeshPool, MeshResult};
+use crate::resources::terrain::InstalledTerrain;
+use crate::scene::block_entity::push_pot_plants;
+use crate::scene::moving_blocks::mesh_moving_blocks_into;
 
 /// Mesh jobs kept in flight per worker: enough to keep the worker busy, few
 /// enough that a newly important chunk is picked soon.
@@ -55,7 +55,7 @@ impl MeshTarget for Renderer {
 impl WorldView {
     /// Live telemetry snapshot of the chunk meshing worker pool.
     #[must_use]
-    pub fn mesh_pool_stats(&self) -> crate::mesher::MeshPoolStats {
+    pub fn mesh_pool_stats(&self) -> crate::meshing::pool::MeshPoolStats {
         self.pool.stats()
     }
 

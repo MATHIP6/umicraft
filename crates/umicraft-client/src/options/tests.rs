@@ -19,7 +19,7 @@ fn the_defaults_match_the_reference_game() {
     assert_eq!(options.video.fov, 70.0);
     assert_eq!(options.controls.mouse_sensitivity, 0.5);
     assert_eq!(
-        crate::mouse_look::sensitivity_factor(&options.controls, 1.0),
+        crate::input::mouse_look::sensitivity_factor(&options.controls, 1.0),
         1.0
     );
     assert_eq!(options.keys.get(Action::Forward), KeyCode::KeyW);

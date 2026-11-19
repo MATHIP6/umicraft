@@ -11,7 +11,7 @@ use umicraft_render::HudState;
 use super::commands::CommandQueue;
 use super::net::handle_net;
 use super::state::Game;
-use crate::social_view;
+use crate::hud::social as social_view;
 
 /// The HUD a session would show after the server sent `events`, with the
 /// title and the action bar advanced by `ticks` game ticks.
@@ -41,12 +41,12 @@ pub(crate) fn hud_after(events: Vec<PlayEvent>, own_name: &str, ticks: u32) -> H
 pub(super) fn tick_hud_view(game: &mut Game) {
     let head_in_water = match (game.state.as_ref(), game.world.as_ref()) {
         (Some(state), Some(world)) => {
-            crate::fog_context::medium_at(world, state.player().eye_position())
+            crate::scene::fog::medium_at(world, state.player().eye_position())
                 == umicraft_render::FogMedium::Water
         }
         _ => false,
     };
-    let facts = crate::hud_view::HudFacts {
+    let facts = crate::hud::player::HudFacts {
         mode: game.gamemode,
         health: game.vitals.health,
         food: game.vitals.food,

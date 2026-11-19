@@ -25,7 +25,7 @@ pub(super) fn spawn_ambient_particles(game: &mut Game) {
         return;
     };
     let player = state.player();
-    let viewer = crate::particle_ambient::Viewer {
+    let viewer = crate::scene::particle_ambient::Viewer {
         position: player.position,
         motion: player.velocity,
         running: player.sprinting && !player.in_water && player.on_ground,

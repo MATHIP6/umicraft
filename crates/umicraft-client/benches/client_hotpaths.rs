@@ -12,12 +12,12 @@ use std::time::Instant;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use glam::{DVec3, Vec3};
-use umicraft_client::entity_render::{mesh_entities, mesh_entities_into};
+use umicraft_client::debug::metrics::{FrameDistribution, InputLatencyMetrics};
 use umicraft_client::game::{AtomicLookSlot, Look};
-use umicraft_client::hud_cache::HudCache;
+use umicraft_client::hud::cache::HudCache;
 use umicraft_client::input::{InputState, InputUpdate};
-use umicraft_client::metrics::{FrameDistribution, InputLatencyMetrics};
-use umicraft_client::ui_font;
+use umicraft_client::resources::ui_font;
+use umicraft_client::scene::entity::{mesh_entities, mesh_entities_into};
 use umicraft_game::entity::{EntityId, EntityKind, EntityRecord, EntityRenderSnapshot};
 use umicraft_game::view::ViewEffects;
 use umicraft_game::RenderState;

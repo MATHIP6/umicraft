@@ -25,8 +25,8 @@ use super::look::Look;
 use super::messages::{ChunkEvent, Frame, RenderEvent, TextScreenRequest};
 use super::state::Game;
 use super::view::{debug_world, player_view, sky_temperature};
-use crate::fog_context::fog_context;
 use crate::pack_offer::ServerPackRequest;
+use crate::scene::fog::fog_context;
 
 /// Publishes only the view of the player, for a look that changed between two
 /// ticks.
@@ -151,14 +151,14 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
             game.dimension,
             game.world_time,
         ),
-        border: crate::border_view::border_view(game.server.border()),
-        weather: crate::weather_view::WeatherView::new(
+        border: crate::scene::border::border_view(game.server.border()),
+        weather: crate::scene::weather::WeatherView::new(
             game.server.weather(),
             game.world.as_ref(),
             view.position.x.floor() as i32,
             view.position.z.floor() as i32,
         ),
-        particles: crate::particle_view::collect(&game.particles, game.world.as_ref()).into(),
+        particles: crate::scene::particles::collect(&game.particles, game.world.as_ref()).into(),
         overlays: game
             .overlays
             .inputs(game.perspective == Perspective::FirstPerson),

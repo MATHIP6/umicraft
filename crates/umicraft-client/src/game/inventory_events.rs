@@ -18,8 +18,8 @@ use super::messages::RenderEvent;
 use super::net::inventory::sync_armor;
 use super::publish::publish_inventory;
 use super::state::Game;
-use crate::inventory_input::InventoryAction;
 use crate::network::ClientCommand;
+use crate::screens::inventory::input::InventoryAction;
 
 /// Tells the server that the inventory key opened the player's inventory.
 ///

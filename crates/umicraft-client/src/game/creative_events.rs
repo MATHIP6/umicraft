@@ -18,10 +18,10 @@ use super::messages::RenderEvent;
 use super::net::inventory::sync_armor;
 use super::publish::publish_inventory;
 use super::state::Game;
-use crate::creative_input::{CreativeEvent, SlotClick};
-use crate::creative_view::CreativeView;
 use crate::network::ClientCommand;
-use crate::tooltip_draw::resolve;
+use crate::screens::creative::input::{CreativeEvent, SlotClick};
+use crate::screens::creative::view::CreativeView;
+use crate::screens::tooltip::resolve;
 
 /// Applies `event` to the creative screen and the local inventory, queues the
 /// `Creative Inventory Action` packets and publishes the new state.

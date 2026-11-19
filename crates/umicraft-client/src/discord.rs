@@ -15,7 +15,7 @@ use discord_rich_presence::activity::{Activity, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use thiserror::Error;
 
-use crate::screen::Screen;
+use crate::screens::Screen;
 
 /// The Discord application that owns the card (created in the Developer Portal;
 /// the id is public, it appears in every Rich Presence payload).

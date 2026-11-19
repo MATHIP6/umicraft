@@ -7,7 +7,7 @@ use thiserror::Error;
 use umicraft_render::{FontAtlasError, RenderError};
 use umicraft_world::WorldError;
 
-use crate::model_resources::ModelResourcesError;
+use crate::resources::models::ModelResourcesError;
 
 /// Fatal client failure.
 #[derive(Debug, Error)]

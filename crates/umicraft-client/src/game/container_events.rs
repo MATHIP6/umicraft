@@ -18,9 +18,9 @@ use super::commands::CommandQueue;
 use super::messages::RenderEvent;
 use super::publish::publish_inventory;
 use super::state::Game;
-use crate::inventory_input::ContainerAction;
-use crate::inventory_screen::{screen_state, ScreenFacts};
 use crate::network::ClientCommand;
+use crate::screens::inventory::draw::{screen_state, ScreenFacts};
+use crate::screens::inventory::input::ContainerAction;
 
 /// The window property holding the primary power of a beacon.
 const BEACON_PRIMARY: i16 = 1;

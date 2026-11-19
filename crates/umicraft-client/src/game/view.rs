@@ -47,14 +47,14 @@ pub(super) fn player_view(game: &Game) -> Option<(RenderState, bool)> {
 }
 
 /// The world facts of the F3 screen, empty before the first chunk.
-pub(super) fn debug_world(game: &Game) -> crate::debug_world::DebugWorld {
+pub(super) fn debug_world(game: &Game) -> crate::debug::world::DebugWorld {
     let (Some(world), Some(state)) = (game.world.as_ref(), game.state.as_ref()) else {
-        return crate::debug_world::DebugWorld::default();
+        return crate::debug::world::DebugWorld::default();
     };
     let feet = state.position();
-    crate::debug_world::collect(
+    crate::debug::world::collect(
         world,
-        &crate::debug_world::DebugInputs {
+        &crate::debug::world::DebugInputs {
             loaded_entities: game.entities.len(),
             particles: game.particles.len(),
             feet: [feet.x, feet.y, feet.z],

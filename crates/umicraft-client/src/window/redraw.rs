@@ -16,17 +16,17 @@ use super::App;
 use super::BACKGROUND_FPS;
 use crate::audio_bridge::listener::listener_of;
 use crate::audio_bridge::music::MusicWorld;
-use crate::block_entity_render::{mesh_block_entities, BlockEntityScene};
-use crate::cpu_split::Stage;
-use crate::dials::DialInputs;
+use crate::debug::cpu_split::Stage;
+use crate::debug::metrics::InputLatencyMetrics;
 use crate::game::GameEvent;
-use crate::item_icons::IconSource;
-use crate::item_world::{entity_items, push_held_item, WorldItems};
-use crate::map_render::map_id_of;
-use crate::metrics::InputLatencyMetrics;
+use crate::hud::dials::DialInputs;
 use crate::options::{self};
-use crate::portrait::{carry, turned_towards};
-use crate::screen::Screen;
+use crate::resources::item_icons::IconSource;
+use crate::scene::block_entity::{mesh_block_entities, BlockEntityScene};
+use crate::scene::item_world::{entity_items, push_held_item, WorldItems};
+use crate::scene::map::map_id_of;
+use crate::screens::portrait::{carry, turned_towards};
+use crate::screens::Screen;
 use crate::world_view::WorldView;
 
 /// The frame-rate cap in force: the option, and at most [`BACKGROUND_FPS`] without
@@ -440,7 +440,7 @@ impl App {
                     },
                 )
             } else {
-                crate::block_entity_render::BlockEntityMeshes::default()
+                crate::scene::block_entity::BlockEntityMeshes::default()
             };
             let mut hand_item = None;
             if let Some(items) = self.assets.items.as_deref() {

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use umicraft_ui::gui_scale;
 
 use super::App;
-use crate::theme_font::{self, FontChoice};
-use crate::ui_font;
+use crate::resources::theme_font::{self, FontChoice};
+use crate::resources::ui_font;
 
 impl App {
     /// Installs the font the active theme wants at the current GUI scale.

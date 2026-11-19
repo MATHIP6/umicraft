@@ -17,7 +17,7 @@ use umicraft_render::DebugLine;
 use winit::keyboard::KeyCode;
 
 use super::App;
-use crate::debug_lines::{chunk_border_lines, hitbox_lines};
+use crate::debug::lines::{chunk_border_lines, hitbox_lines};
 use crate::game::GameEvent;
 use crate::options::RENDER_DISTANCE;
 
@@ -136,7 +136,7 @@ impl App {
             || self.input.keys.contains(&KeyCode::ShiftRight);
         let video = &mut self.options.video;
         video.render_distance = stepped_render_distance(video.render_distance, shift);
-        self.send_event(crate::options_effects::ServerSettings::of(&self.options).event());
+        self.send_event(crate::options::effects::ServerSettings::of(&self.options).event());
         self.save_options();
     }
 
@@ -144,7 +144,7 @@ impl App {
     fn toggle_advanced_tooltips(&mut self) {
         let controls = &mut self.options.controls;
         controls.advanced_tooltips = !controls.advanced_tooltips;
-        crate::tooltip_draw::set_advanced(controls.advanced_tooltips);
+        crate::screens::tooltip::set_advanced(controls.advanced_tooltips);
         self.save_options();
     }
 }

@@ -69,9 +69,9 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         let path = args.state_log.as_ref().ok_or_else(|| {
             ClientError::Network("--script e1 needs --state-log FILE".to_string())
         })?;
-        let run = crate::e1::E1Run::open(path, &args.script)
+        let run = crate::demos::e1::E1Run::open(path, &args.script)
             .map_err(|error| ClientError::Network(format!("{}: {error}", path.display())))?;
-        crate::e1::install(run);
+        crate::demos::e1::install(run);
     }
     let session = Session::start(NetworkConfig {
         host: host.to_string(),

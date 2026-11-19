@@ -46,7 +46,7 @@ mod tests {
     use super::*;
 
     fn line(text: &str) -> ChatLineView {
-        crate::chat::line_from_runs(&umicraft_game::chat::local(text), Instant::now())
+        crate::hud::chat::line_from_runs(&umicraft_game::chat::local(text), Instant::now())
     }
 
     #[test]

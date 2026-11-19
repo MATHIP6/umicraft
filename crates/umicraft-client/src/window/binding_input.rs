@@ -15,7 +15,7 @@ use winit::keyboard::KeyCode;
 use super::App;
 use crate::game::GameEvent;
 use crate::options::{Action, Binding};
-use crate::screenshot_file;
+use crate::screenshot::file;
 
 impl App {
     /// Whether the binding of `action` is held. Shift and Control are told
@@ -61,7 +61,7 @@ impl App {
         let actions: Vec<Action> = self.options.keys.actions_for(binding).collect();
         for action in actions {
             // An action that opened a screen takes the press; the others wait.
-            if self.screen != crate::screen::Screen::None {
+            if self.screen != crate::screens::Screen::None {
                 break;
             }
             self.run_action(action);
@@ -97,8 +97,7 @@ impl App {
     /// worker thread so PNG encoding and disk I/O never stall the render loop,
     /// then reports the outcome in the log and in the in-game chat.
     pub(super) fn save_screenshot(&self, captured: Result<umicraft_render::Image, RenderError>) {
-        let folder =
-            umicraft_assets::cache::data_dir().map(|dir| dir.join(screenshot_file::FOLDER));
+        let folder = umicraft_assets::cache::data_dir().map(|dir| dir.join(file::FOLDER));
         let lang = std::sync::Arc::clone(&self.lang);
         let events = self
             .session
@@ -109,7 +108,7 @@ impl App {
             .spawn(move || {
                 let saved = match (captured, folder) {
                     (Ok(image), Some(folder)) => {
-                        screenshot_file::save(&folder, &image.rgba, image.width, image.height)
+                        file::save(&folder, &image.rgba, image.width, image.height)
                             .map_err(|error| error.to_string())
                     }
                     (Err(error), _) => Err(error.to_string()),

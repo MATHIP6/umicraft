@@ -5,8 +5,8 @@
 
 use umicraft_render::HudState;
 
-use crate::nametag_draw::PlacedTag;
 use crate::options::{self};
+use crate::scene::nametag::PlacedTag;
 
 /// What the last frame gathered from the world, kept to reuse its buffers.
 pub(in crate::window) struct FrameScratch {

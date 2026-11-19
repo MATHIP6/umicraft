@@ -28,10 +28,10 @@ use umicraft_world::{ChunkPos, LightLevel};
 use super::meshing::*;
 use super::pacing::*;
 use super::*;
-use crate::connection_end::ConnectionEnd;
-use crate::cracks::{Crack, STAGES};
 use crate::game::{ChunkEvent, Frame, GameStatus, RenderEvent, TICK};
-use crate::terrain_textures::TerrainTextures;
+use crate::resources::terrain::TerrainTextures;
+use crate::scene::cracks::{Crack, STAGES};
+use crate::screens::connection_end::ConnectionEnd;
 use crate::test_support::TextureTarget;
 
 mod body_yaw;
@@ -173,10 +173,10 @@ fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Box<Frame
         block_entity_data: Arc::default(),
         sky_temperature: umicraft_render::RenderEnvironment::PLAINS_TEMPERATURE,
         fog: FogContext::DEFAULT,
-        border: crate::border_view::border_view(&Border::default()),
-        weather: crate::weather_view::WeatherView::default(),
+        border: crate::scene::border::border_view(&Border::default()),
+        weather: crate::scene::weather::WeatherView::default(),
         particles: Arc::from([]),
-        overlays: crate::overlay_state::OverlayInputs::default(),
+        overlays: crate::scene::overlay_state::OverlayInputs::default(),
         debug: Arc::default(),
         signs: Arc::default(),
     })

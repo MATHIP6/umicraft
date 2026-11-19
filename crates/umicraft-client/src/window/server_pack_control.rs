@@ -22,7 +22,7 @@ use umicraft_ui::{FontAtlas, Ui};
 use super::server_pack::{Effect, ServerPackFlow};
 use super::App;
 use crate::game::GameEvent;
-use crate::screen::Screen;
+use crate::screens::Screen;
 use crate::servers::ResourcePackMode;
 
 /// A finished download: its generation and the cached pack, `None` on failure.

@@ -15,7 +15,7 @@ use umicraft_assets::profile_textures::{skin_from_image, TextureFetcher};
 use umicraft_assets::skin::{procedural_fallback_skin, SkinModel};
 use umicraft_auth::Account;
 
-use crate::entity_render::{head_face, load_or_fallback};
+use crate::scene::entity::{head_face, load_or_fallback};
 
 const STEVE_PATH: &str = "assets/minecraft/textures/entity/steve.png";
 const ALEX_PATH: &str = "assets/minecraft/textures/entity/alex.png";
@@ -31,7 +31,7 @@ impl Defaults {
     /// The faces of the game's own `steve.png` and `alex.png`, or of the
     /// procedural stand-ins when the assets are not installed.
     fn from_assets() -> Self {
-        let jar = crate::official::find_verified_jar().ok();
+        let jar = crate::resources::official::find_verified_jar().ok();
         let face = |path: &str, model| {
             let (rgba, _, _) = load_or_fallback(jar.as_ref(), path, || {
                 (procedural_fallback_skin(model), 64, 64)

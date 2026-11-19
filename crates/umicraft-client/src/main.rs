@@ -8,10 +8,8 @@ use std::process::ExitCode;
 
 use tracing_subscriber::EnvFilter;
 use umicraft_client::args::{Args, Mode, USAGE};
-use umicraft_client::{
-    audio_bridge, bench_scene, block_demo, entity_demo, headless, hud_demo, launch_session,
-    screenshot, setup_cli, ui_demo, window,
-};
+use umicraft_client::demos::{bench_scene, block_demo, entity_demo, hud_demo, ui_demo};
+use umicraft_client::{audio_bridge, headless, launch_session, screenshot, setup_cli, window};
 
 #[global_allocator]
 static ALLOCATOR: umicraft_core::profiling::CountingAllocator =

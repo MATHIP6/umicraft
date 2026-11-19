@@ -17,8 +17,8 @@ use super::startup::upload_sky_textures;
 use super::App;
 use crate::discord::Status;
 use crate::error::ClientError;
-use crate::screen::Screen;
-use crate::ui_font::{self};
+use crate::resources::ui_font::{self};
+use crate::screens::Screen;
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {

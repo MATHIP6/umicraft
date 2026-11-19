@@ -25,7 +25,7 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::menus::{AccountBadge, AccountRow, AccountsScreen, DeviceCodePrompt};
 use umicraft_ui::{FontAtlas, Ui};
 
-use crate::screen::Screen;
+use crate::screens::Screen;
 use heads::Heads;
 use worker::Event;
 

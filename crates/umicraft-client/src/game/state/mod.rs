@@ -27,9 +27,9 @@ use umicraft_world::{BlockPos, ChunkPos, World};
 use super::combat;
 use super::look::LookSlot;
 use super::messages::GameStatus;
-use crate::connection_end::ConnectionEnd;
-use crate::cracks::Crack;
-use crate::social_view;
+use crate::hud::social as social_view;
+use crate::scene::cracks::Crack;
+use crate::screens::connection_end::ConnectionEnd;
 
 pub(super) mod chat;
 mod combat_log;
@@ -58,11 +58,11 @@ pub(super) struct Game {
     /// The client-side particles (P8).
     pub(super) particles: umicraft_game::particles::ParticleEngine,
     /// The ambient sources of the particles (blocks, rain, sprint dust).
-    pub(super) ambient: crate::particle_ambient::AmbientSpawner,
+    pub(super) ambient: crate::scene::particle_ambient::AmbientSpawner,
     /// How many particles are created (`GameSettings.particleSetting`).
     pub(super) particle_setting: umicraft_game::particles::ParticleSetting,
     /// What the screen overlays need to know of the player (P8-f).
-    pub(super) overlays: crate::overlay_state::OverlayTracker,
+    pub(super) overlays: crate::scene::overlay_state::OverlayTracker,
     /// The chunks whose geometry changed and still need a snapshot.
     pub(super) dirty: BTreeSet<ChunkPos>,
     /// The human-readable status.
@@ -150,7 +150,7 @@ pub(super) struct Game {
     /// a use click; the buffer is reused.
     pub(super) blocking_entities: Vec<umicraft_game::collision::Aabb>,
     /// The status rows, bars and held-item name of the HUD.
-    pub(super) hud_view: crate::hud_view::HudTracker,
+    pub(super) hud_view: crate::hud::player::HudTracker,
     /// Entities in the world (mobs, players, objects).
     pub(super) entities: EntityStore,
     /// The inventory and container window model.
@@ -162,7 +162,7 @@ pub(super) struct Game {
     pub(super) own_name: String,
     /// The tick-driven parity scenario and its state log (phase E.2);
     /// `None` outside `--script e1`.
-    pub(super) e1: Option<crate::e1::E1Run>,
+    pub(super) e1: Option<crate::demos::e1::E1Run>,
     /// The tab list, the scoreboard, the title, the action bar and the boss bar.
     pub(super) social: Social,
     /// The state of the creative inventory screen.
@@ -178,9 +178,9 @@ impl Game {
         Self {
             world: None,
             particles: umicraft_game::particles::ParticleEngine::new(PARTICLE_SEED),
-            ambient: crate::particle_ambient::AmbientSpawner::default(),
+            ambient: crate::scene::particle_ambient::AmbientSpawner::default(),
             particle_setting: umicraft_game::particles::ParticleSetting::default(),
-            overlays: crate::overlay_state::OverlayTracker::default(),
+            overlays: crate::scene::overlay_state::OverlayTracker::default(),
             dirty: BTreeSet::new(),
             status: "CONNECTING".to_string(),
             end: None,
@@ -217,7 +217,7 @@ impl Game {
             hit_emitters: Vec::new(),
             solid_entities: Vec::new(),
             blocking_entities: Vec::new(),
-            hud_view: crate::hud_view::HudTracker::default(),
+            hud_view: crate::hud::player::HudTracker::default(),
             entities: EntityStore::new(),
             windows: WindowManager::new(),
             pending_book: None,

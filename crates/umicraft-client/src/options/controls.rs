@@ -32,7 +32,7 @@ impl Default for ControlOptions {
 mod tests {
     use super::*;
 
-    use crate::mouse_look::sensitivity_factor;
+    use crate::input::mouse_look::sensitivity_factor;
 
     #[test]
     fn the_look_factor_grows_with_the_sensitivity() {

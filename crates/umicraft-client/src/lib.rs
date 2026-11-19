@@ -9,115 +9,52 @@
 //! The crate is also usable as a library for the acceptance driver and tests:
 //! [`args`] parses the CLI, [`network`] owns the connection, [`game`] owns the
 //! world and the player, [`input`] turns the keys into the intent of the
-//! game logic, [`mesher`] runs the CPU mesher pool, [`headless`] plays a
-//! scripted session without a window, [`screenshot`] writes a PNG,
-//! [`ui_demo`] drives the M4 debug screen without a window or a server,
-//! [`block_demo`] proves the M5 model/atlas path without a server, and
-//! [`ui_font`] loads the user's 1.8 font or the built-in fallback.
+//! game logic, [`headless`] plays a scripted session without a window and
+//! [`screenshot`] writes a PNG.
+//!
+//! # Layout
+//!
+//! * The threads: [`network`], [`game`], [`window`] and the render thread's
+//!   [`world_view`]; [`headless`] runs the game thread without a window.
+//! * What the window draws: [`screens`] (menus, inventories, options), [`hud`],
+//!   [`debug`] (F3 and the frame metrics) and [`scene`] (entities, items,
+//!   particles, weather, overlays); [`meshing`] builds the chunk meshes and
+//!   [`resources`] loads the textures, models and fonts.
+//! * [`mods`] is the client side of the built-in mods.
+//! * [`demos`] holds the server-less runs (`--block-demo`, `--hud-demo`, ...).
+//! * The rest are the session's settings and services: [`options`],
+//!   [`servers`], [`profiles`], [`audio_bridge`], [`discord`], the command line
+//!   ([`args`], [`launch_session`], [`setup_cli`]) and the errors.
 
 mod accounts;
-mod achievements_view;
-mod anvil_field;
 pub mod args;
 pub mod audio_bridge;
-pub mod bench_scene;
-pub mod block_demo;
-mod block_entity_render;
-mod border_view;
-mod caption;
-pub mod chat;
-mod clipboard;
-pub mod connection_end;
-pub mod cpu_split;
-pub mod cracks;
-pub mod creative_input;
-mod creative_layout;
-mod creative_screen;
-pub mod creative_view;
-mod debug_f3_view;
-mod debug_lines;
-pub mod debug_world;
-pub mod dials;
 pub mod discord;
-pub mod e1;
-mod effect_list_draw;
-pub mod entity_demo;
-mod entity_icons;
-pub mod entity_render;
 pub mod error;
-mod fog_context;
-mod fps_meter;
 pub mod game;
 pub mod headless;
-pub mod hud_cache;
-pub mod hud_demo;
-mod hud_demo_mods;
-mod hud_demo_panorama;
-mod hud_demo_servers;
-mod hud_demo_stats;
-pub mod hud_editor_view;
-mod hud_view;
 pub mod input;
-pub mod inventory_input;
-mod inventory_screen;
-mod inventory_winit;
-pub mod item_icons;
-pub mod item_tints;
-pub mod item_world;
 mod language;
 pub mod launch_session;
-pub mod map_render;
-mod menu_flow;
-mod menu_rows;
-mod mesh_queue;
-pub mod mesh_settings;
-pub mod mesher;
-pub mod metrics;
-pub mod mod_icons;
-pub mod model_resources;
-pub mod mods_facts;
-pub mod mods_hud_view;
-pub mod mods_runtime;
-pub mod mods_view;
-pub mod mouse_look;
-pub mod moving_blocks_draw;
-pub mod nametag_draw;
 pub mod network;
-mod official;
 pub mod options;
-pub mod options_effects;
-pub mod options_screen;
-pub mod overlay_state;
-pub mod overlay_view;
 pub mod pack_offer;
-mod panorama_faces;
-pub mod particle_ambient;
-pub mod particle_view;
-pub(crate) mod portrait;
-mod process_memory;
 pub mod profiles;
-pub mod screen;
 pub mod screenshot;
-mod screenshot_file;
 pub mod servers;
 pub mod setup_cli;
-mod sky_textures;
-mod social_view;
-mod splash;
-mod stats_view;
-pub mod terrain_textures;
 #[cfg(test)]
 mod test_support;
-mod text_screens;
-pub mod texture_animator;
-pub mod theme_font;
-mod tooltip_draw;
-pub mod ui_demo;
-pub mod ui_font;
-pub mod ui_input;
-pub mod weather_view;
 pub mod window;
 pub mod world_view;
-pub mod zoom;
+
+pub mod debug;
+pub mod demos;
+pub mod hud;
+pub mod meshing;
+pub mod mods;
+pub mod resources;
+pub mod scene;
+pub mod screens;
 
 pub use error::ClientError;

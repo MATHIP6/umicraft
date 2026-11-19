@@ -13,9 +13,9 @@ use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::KeyCode;
 
 use super::App;
-use crate::clipboard;
 use crate::game::GameEvent;
-use crate::screen::Screen;
+use crate::input::clipboard;
+use crate::screens::Screen;
 
 /// Rows a Page Up or Page Down scrolls the open chat.
 pub(super) const CHAT_PAGE: isize = 19;

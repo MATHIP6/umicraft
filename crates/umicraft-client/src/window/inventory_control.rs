@@ -17,14 +17,16 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use super::{App, CARET_BLINK_MS};
-use crate::anvil_field::Edit;
 use crate::game::GameEvent;
-use crate::inventory_input::{Button, ContainerAction, Context, InventoryAction, InventoryKey};
-use crate::inventory_screen::{screen_input, ScreenFacts};
-use crate::inventory_winit;
 use crate::options::{Action, Binding};
-use crate::screen::Screen;
-use crate::text_screens::{Done, Key, TextScreens};
+use crate::screens::anvil_field::Edit;
+use crate::screens::inventory::draw::{screen_input, ScreenFacts};
+use crate::screens::inventory::input::{
+    Button, ContainerAction, Context, InventoryAction, InventoryKey,
+};
+use crate::screens::inventory::winit_keys;
+use crate::screens::text::{Done, Key, TextScreens};
+use crate::screens::Screen;
 
 impl App {
     /// Handles a key press while the inventory or a container screen is open.
@@ -181,7 +183,7 @@ impl App {
             self.inventory_key(binding);
         }
         let (Some((layout, context)), Some(button)) =
-            (self.inventory_screen(), inventory_winit::button(button))
+            (self.inventory_screen(), winit_keys::button(button))
         else {
             return;
         };

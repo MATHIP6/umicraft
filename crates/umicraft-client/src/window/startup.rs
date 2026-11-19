@@ -19,38 +19,38 @@ use super::{
     App, Assets, ChatUi, FrameClock, FrameScratch, InputTracking, OptionsMenu, PendingPresses,
 };
 use crate::accounts::AccountsFlow;
-use crate::anvil_field::AnvilField;
 use crate::args::Args;
 use crate::audio_bridge::AudioBridge;
-use crate::cpu_split::CpuSplit;
-use crate::creative_input::CreativeInput;
-use crate::dials::DialAnimator;
-use crate::entity_icons::EntityIcons;
-use crate::entity_render::EntityTextures;
+use crate::debug::cpu_split::CpuSplit;
 use crate::error::ClientError;
-use crate::hud_cache::HudCache;
+use crate::hud::cache::HudCache;
+use crate::hud::dials::DialAnimator;
+use crate::input::ui::UiInputTranslator;
 use crate::input::InputState;
-use crate::inventory_input::InventoryInput;
-use crate::item_world::{ItemLayers, WorldItems};
-use crate::map_render::MapTextures;
-use crate::menu_flow::MenuFlow;
-use crate::mesher::worker_count;
-use crate::mods_runtime::ModsRuntime;
+use crate::meshing::pool::worker_count;
+use crate::mods::runtime::ModsRuntime;
+use crate::mods::zoom::Zoom;
+use crate::options::effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options::Options;
-use crate::options_effects::{pack_paths, packs_folder, VideoApplier};
-use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
-use crate::panorama_faces::load_panorama_faces;
-use crate::screen::Screen;
+use crate::resources::entity_icons::EntityIcons;
+use crate::resources::panorama::load_panorama_faces;
+use crate::resources::sky::{load_border_texture, load_sky_textures};
+use crate::resources::terrain::TerrainTextures;
+use crate::resources::texture_animator::TextureAnimator;
+use crate::resources::theme_font::FontChoice;
+use crate::resources::ui_font::{self, LoadedFont};
+use crate::scene::entity::EntityTextures;
+use crate::scene::item_world::{ItemLayers, WorldItems};
+use crate::scene::map::MapTextures;
+use crate::screens::anvil_field::AnvilField;
+use crate::screens::creative::input::CreativeInput;
+use crate::screens::inventory::input::InventoryInput;
+use crate::screens::menu_flow::MenuFlow;
+use crate::screens::options::{OptionsScreen, Outcome as OptionsOutcome};
+use crate::screens::text::TextScreens;
+use crate::screens::Screen;
 use crate::servers::{Pinger, ServerBook};
-use crate::sky_textures::{load_border_texture, load_sky_textures};
-use crate::terrain_textures::TerrainTextures;
-use crate::text_screens::TextScreens;
-use crate::texture_animator::TextureAnimator;
-use crate::theme_font::FontChoice;
-use crate::ui_font::{self, LoadedFont};
-use crate::ui_input::UiInputTranslator;
 use crate::world_view::WorldView;
-use crate::zoom::Zoom;
 
 /// Decoded asset data delivered asynchronously by the background asset loader.
 pub(super) struct AsyncLoadedAssets {
@@ -102,7 +102,7 @@ pub(super) fn upload_gui_atlas(
 
 /// Uploads the sun, moon and End sky pictures of the verified jar.
 pub(super) fn upload_sky_textures(renderer: &mut Renderer) {
-    let jar = crate::official::find_verified_jar().ok();
+    let jar = crate::resources::official::find_verified_jar().ok();
     renderer.set_sky_textures(&load_sky_textures(jar.as_ref()));
     if let Some(forcefield) = load_border_texture(jar.as_ref()) {
         renderer.set_border_texture(&forcefield);
@@ -112,7 +112,7 @@ pub(super) fn upload_sky_textures(renderer: &mut Renderer) {
 /// Uploads the six title panorama faces of the verified jar; `None` keeps the
 /// dirt background (no jar, or a face that does not decode).
 pub(super) fn upload_panorama(renderer: &mut Renderer) -> Option<PanoramaTextures> {
-    let jar = crate::official::find_verified_jar().ok();
+    let jar = crate::resources::official::find_verified_jar().ok();
     renderer.upload_panorama(&load_panorama_faces(jar.as_ref())?)
 }
 
@@ -137,8 +137,10 @@ fn new_menu(last_server: String) -> MenuFlow {
         seed,
     );
     menu.set_accounts(AccountsFlow::open_default());
-    let lines = crate::splash::load_lines();
-    if let Some(splash) = crate::splash::choose(&lines, crate::splash::today(), seed) {
+    let lines = crate::screens::splash::load_lines();
+    if let Some(splash) =
+        crate::screens::splash::choose(&lines, crate::screens::splash::today(), seed)
+    {
         menu.set_splash(splash);
     }
     menu
@@ -173,14 +175,14 @@ impl App {
         let font = LoadedFont {
             atlas: FontAtlas::fallback(),
             unicode: None,
-            source: crate::ui_font::FontSource::Fallback,
+            source: crate::resources::ui_font::FontSource::Fallback,
         };
         let audio = if args.no_audio {
             AudioBridge::disabled()
         } else {
             AudioBridge::start(&options.sound)
         };
-        crate::tooltip_draw::set_advanced(options.controls.advanced_tooltips);
+        crate::screens::tooltip::set_advanced(options.controls.advanced_tooltips);
         let last_server = options.multiplayer.last_server.clone();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         Ok(Self {
@@ -211,7 +213,7 @@ impl App {
                 ctrl_held: false,
                 shift_held: false,
                 pointer: (0.0, 0.0),
-                mouse: crate::mouse_look::MouseSteps::default(),
+                mouse: crate::input::mouse_look::MouseSteps::default(),
                 last: InputState::default(),
                 last_time: Instant::now(),
             },
@@ -342,7 +344,7 @@ impl App {
         renderer.set_mipmap_levels(u32::from(self.options.video.mipmap_levels));
         let terrain = assets.terrain.install(renderer);
 
-        let gui_atlas = crate::official::grow_atlas(terrain.gui_atlas(), &[]);
+        let gui_atlas = crate::resources::official::grow_atlas(terrain.gui_atlas(), &[]);
         upload_gui_atlas(renderer, Some(&gui_atlas));
         upload_glint_texture(renderer, terrain.glint_texture());
         upload_sky_textures(renderer);

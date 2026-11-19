@@ -24,7 +24,7 @@ static CURRENT: RwLock<Option<Arc<Lang>>> = RwLock::new(None);
 /// A language that cannot be read is logged and replaced by `en_US`, and a
 /// missing `en_US` leaves the offline fallback, so the client always starts.
 pub(crate) fn load(code: &str) -> Lang {
-    let english = crate::official::load_en_us_lang();
+    let english = crate::resources::official::load_en_us_lang();
     let selected = (code != Lang::DEFAULT_CODE)
         .then(|| load_selected(code))
         .flatten();

@@ -3,8 +3,8 @@
 //! Which screen is open, and what it lets through to the world.
 
 use super::App;
-use crate::anvil_field::AnvilField;
-use crate::screen::Screen;
+use crate::screens::anvil_field::AnvilField;
+use crate::screens::Screen;
 
 impl App {
     /// The screen that owns the input right now.

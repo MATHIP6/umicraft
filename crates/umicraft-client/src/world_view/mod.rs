@@ -38,16 +38,16 @@ use umicraft_render::{HudState, OutlineBox};
 use umicraft_ui::menus::ConnectStage;
 use umicraft_world::{ChunkMap, LightLevel};
 
-use crate::achievements_view::newly_unlocked;
-use crate::connection_end::ConnectionEnd;
-use crate::cracks::{crack_mesh, Crack, STAGES};
-use crate::creative_view::CreativeView;
 use crate::error::ClientError;
 use crate::game::{ChunkEvent, GameStatus, RenderEvent, TextScreenRequest};
-use crate::mesh_queue::MeshQueue;
-use crate::mesher::MeshPool;
+use crate::meshing::pool::MeshPool;
+use crate::meshing::queue::MeshQueue;
 use crate::pack_offer::ServerPackRequest;
-use crate::terrain_textures::{InstalledTerrain, TerrainMesher};
+use crate::resources::terrain::{InstalledTerrain, TerrainMesher};
+use crate::scene::cracks::{crack_mesh, Crack, STAGES};
+use crate::screens::achievements::newly_unlocked;
+use crate::screens::connection_end::ConnectionEnd;
+use crate::screens::creative::view::CreativeView;
 
 mod camera;
 mod meshing;

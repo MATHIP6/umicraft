@@ -8,7 +8,7 @@ use umicraft_ui::widgets::BUTTON_DELAY_TICKS;
 
 use super::App;
 use crate::game::GameEvent;
-use crate::screen::Screen;
+use crate::screens::Screen;
 
 impl App {
     /// True while the local player is dead (MCP `getHealth() <= 0`).

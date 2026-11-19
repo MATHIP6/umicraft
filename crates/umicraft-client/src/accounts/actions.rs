@@ -9,7 +9,7 @@ use umicraft_auth::{AuthError, MicrosoftLogin, RenewedSession, Session};
 use umicraft_ui::menus::AccountsOutcome;
 
 use super::{worker, AccountsFlow, SessionState};
-use crate::screen::Screen;
+use crate::screens::Screen;
 
 impl AccountsFlow {
     /// Carries out `outcome`; returns the screen to leave for, if any.
@@ -50,7 +50,7 @@ impl AccountsFlow {
             AccountsOutcome::Refresh => self.renew_selected(),
             AccountsOutcome::CancelLogin => self.cancel_login(),
             AccountsOutcome::OpenUrl(url) => super::browser::open(&url),
-            AccountsOutcome::CopyText(text) => crate::clipboard::write(&text),
+            AccountsOutcome::CopyText(text) => crate::input::clipboard::write(&text),
         }
         None
     }

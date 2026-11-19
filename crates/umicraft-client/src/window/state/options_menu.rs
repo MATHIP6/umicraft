@@ -3,10 +3,10 @@
 //! The options screen: the page state, the screen it returns to, and the
 //! saved copy its edits are compared with.
 
+use crate::options::effects::VideoApplier;
 use crate::options::Options;
-use crate::options_effects::VideoApplier;
-use crate::options_screen::{OptionsScreen, Outcome as OptionsOutcome};
-use crate::screen::Screen;
+use crate::screens::options::{OptionsScreen, Outcome as OptionsOutcome};
+use crate::screens::Screen;
 
 /// The options screen, where it was opened from and how its edits are saved.
 pub(in crate::window) struct OptionsMenu {

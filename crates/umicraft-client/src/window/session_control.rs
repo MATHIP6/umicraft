@@ -13,11 +13,11 @@
 use super::App;
 use crate::accounts::Identity;
 use crate::args::Args;
-use crate::connection_end::{ConnectionEnd, EndPhase};
 use crate::game::{GameEvent, Session};
 use crate::network::NetworkConfig;
 use crate::options::Options;
-use crate::screen::Screen;
+use crate::screens::connection_end::{ConnectionEnd, EndPhase};
+use crate::screens::Screen;
 use crate::servers::{ResourcePackMode, ServerAddress};
 
 /// What the window does with the session this frame.
@@ -209,8 +209,8 @@ impl App {
         self.presses.respawn = false;
         self.container_was_open = false;
         self.input.last = crate::input::InputState::default();
-        self.anvil_field = crate::anvil_field::AnvilField::default();
-        self.text_screens = crate::text_screens::TextScreens::default();
+        self.anvil_field = crate::screens::anvil_field::AnvilField::default();
+        self.text_screens = crate::screens::text::TextScreens::default();
         self.inventory_input.reset();
         self.creative_input.reset();
         self.input.buttons.clear();

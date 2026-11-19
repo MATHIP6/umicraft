@@ -51,10 +51,10 @@ use super::state::vitals::DEATH_TICKS;
 use super::state::*;
 use super::tick::*;
 use super::view::*;
+use crate::hud::social as social_view;
 use crate::input::InputState;
 use crate::input::InputUpdate;
 use crate::network::{self, ClientCommand};
-use crate::social_view;
 
 mod abilities;
 mod actions;

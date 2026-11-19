@@ -17,7 +17,7 @@ use umicraft_render::{BorderView, FogMedium, OutlineBox, PrecipitationField, Scr
 use umicraft_world::LightLevel;
 
 use super::WorldView;
-use crate::overlay_view::{compose, SpriteLayers, ViewFacts};
+use crate::scene::overlay::{compose, SpriteLayers, ViewFacts};
 
 impl WorldView {
     /// The columns rain and snow fall on in the newest frame (empty while it
@@ -32,7 +32,7 @@ impl WorldView {
     /// (MCP `MobAppearance.renderParticle`: `(age + partial) / maxAge`).
     #[must_use]
     pub fn mob_appearance(&self, partial_ticks: f32) -> Option<f32> {
-        crate::particle_view::mob_appearance(&self.view.particles, partial_ticks)
+        crate::scene::particles::mob_appearance(&self.view.particles, partial_ticks)
     }
 
     /// The quads of the newest frame's particles at `partial_ticks` into the
@@ -45,16 +45,16 @@ impl WorldView {
         out: &mut Vec<umicraft_render::ParticleSprite>,
         partial_ticks: f32,
         origin: glam::DVec3,
-        items: Option<&crate::item_icons::ItemResources>,
+        items: Option<&crate::resources::item_icons::ItemResources>,
     ) {
         let context = self.mesher.model_context();
-        crate::particle_view::sprites_into(
+        crate::scene::particles::sprites_into(
             out,
             &self.view.particles,
             partial_ticks,
             origin,
-            &crate::particle_view::Pictures {
-                blocks: |state| crate::particle_view::block_sprite(context?, state),
+            &crate::scene::particles::Pictures {
+                blocks: |state| crate::scene::particles::block_sprite(context?, state),
                 items: |id, damage| items?.particle_layer(id, damage),
             },
         );
@@ -104,7 +104,7 @@ impl WorldView {
 
     /// The world facts of the F3 screen from the newest frame.
     #[must_use]
-    pub fn debug_world(&self) -> &crate::debug_world::DebugWorld {
+    pub fn debug_world(&self) -> &crate::debug::world::DebugWorld {
         &self.view.debug
     }
 

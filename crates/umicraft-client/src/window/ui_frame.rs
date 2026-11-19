@@ -18,16 +18,16 @@ use super::menu_screens;
 use super::menu_screens::VERSION_LINE;
 use super::mods_menu;
 use super::{App, CARET_BLINK_MS};
-use crate::achievements_view::java_string_hash;
-use crate::creative_layout::CreativeLayout;
-use crate::creative_screen::{draw_creative_overlay, CreativeScene};
-use crate::inventory_screen::{draw_inventory_overlay, ScreenFacts};
-use crate::item_icons::{slot_item, ItemView};
-use crate::menu_flow::{MenuContext, MenuFrame};
-use crate::nametag_draw::{draw_tags_into, place_tags_into};
 use crate::options::Action;
-use crate::screen::Screen;
-use crate::text_screens::Done;
+use crate::resources::item_icons::{slot_item, ItemView};
+use crate::scene::nametag::{draw_tags_into, place_tags_into};
+use crate::screens::achievements::java_string_hash;
+use crate::screens::creative::draw::{draw_creative_overlay, CreativeScene};
+use crate::screens::creative::layout::CreativeLayout;
+use crate::screens::inventory::draw::{draw_inventory_overlay, ScreenFacts};
+use crate::screens::menu_flow::{MenuContext, MenuFrame};
+use crate::screens::text::Done;
+use crate::screens::Screen;
 use crate::world_view::WorldView;
 
 /// The `HAT` bit of the skin parts (`EnumPlayerModelParts.HAT`).
@@ -72,7 +72,7 @@ impl App {
         // An owned handle: the steps below borrow `self` mutably.
         let atlas = Arc::clone(self.assets.ui_atlas.as_ref()?);
         let atlas = atlas.as_ref();
-        let sheets = crate::official::hud_sheets(self.assets.gui_atlas.as_ref());
+        let sheets = crate::resources::official::hud_sheets(self.assets.gui_atlas.as_ref());
         let screen = self.screen();
         // Without the GUI atlas the hotbar and the status rows are not drawn
         // (no sprite sheets); chat, titles, the sidebar and F3 still are.
@@ -86,8 +86,9 @@ impl App {
         self.ui.begin_frame(viewport, input);
         self.ui.set_widgets_sheet(sheets.widgets);
         self.ui.set_theme(self.options.menu.theme().theme());
-        self.ui
-            .set_menu_art(crate::official::menu_art(self.assets.gui_atlas.as_ref()));
+        self.ui.set_menu_art(crate::resources::official::menu_art(
+            self.assets.gui_atlas.as_ref(),
+        ));
 
         if in_game {
             self.build_hud(atlas, &sheets, viewport, (width, height));
@@ -123,7 +124,7 @@ impl App {
         let output = self.ui.end_frame();
         // Control+C and Control+X of a text field.
         if let Some(text) = self.ui.take_clipboard() {
-            crate::clipboard::write(&text);
+            crate::input::clipboard::write(&text);
         }
         self.audio.sync_volumes(&self.options.sound);
         self.audio
@@ -195,10 +196,10 @@ impl App {
         let chatting = self.screen == Screen::Chat;
         let debug_f3 = self.show_f3.then(|| {
             let (mean_allocs, mean_bytes) = self.clock.metrics_window.mean_allocs_per_frame();
-            crate::debug_f3_view::build_live(
+            crate::debug::f3::build_live(
                 self.renderer.as_ref(),
                 self.world.as_ref(),
-                &crate::debug_f3_view::Live {
+                &crate::debug::f3::Live {
                     fps: self.clock.fps,
                     cpu: self.cpu.reading(),
                     frame_dist: self.clock.metrics_window.distribution(),
@@ -271,7 +272,9 @@ impl App {
             .hover
             .as_ref()
             .and_then(|run| run.hover.as_ref())
-            .map(|hover| crate::chat::hover_rows(hover, self.options.controls.advanced_tooltips))
+            .map(|hover| {
+                crate::hud::chat::hover_rows(hover, self.options.controls.advanced_tooltips)
+            })
             .unwrap_or_default();
         let pointer = [self.input.pointer.0, self.input.pointer.1];
         let scale = gui_scale(width, height) as f32;

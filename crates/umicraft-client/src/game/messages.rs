@@ -27,13 +27,13 @@ use umicraft_ui::menus::ConnectStage;
 use umicraft_world::{ChunkPos, LightLevel};
 
 use super::look::LookSlot;
-use crate::connection_end::ConnectionEnd;
-use crate::cracks::Crack;
-use crate::creative_input::CreativeEvent;
-use crate::creative_view::CreativeView;
 use crate::input::InputUpdate;
-use crate::inventory_input::{ContainerAction, InventoryAction};
 use crate::pack_offer::ServerPackRequest;
+use crate::scene::cracks::Crack;
+use crate::screens::connection_end::ConnectionEnd;
+use crate::screens::creative::input::CreativeEvent;
+use crate::screens::creative::view::CreativeView;
+use crate::screens::inventory::input::{ContainerAction, InventoryAction};
 
 /// A message the game thread receives.
 #[derive(Debug)]
@@ -202,13 +202,13 @@ pub struct Frame {
     /// The world border of the dimension (P7g).
     pub border: BorderView,
     /// Rain, thunder, the lightning flash and the columns rain falls on (P7f).
-    pub weather: crate::weather_view::WeatherView,
+    pub weather: crate::scene::weather::WeatherView,
     /// The live particles with the light where they stand (P8).
-    pub particles: Arc<[crate::particle_view::ParticleDraw]>,
+    pub particles: Arc<[crate::scene::particles::ParticleDraw]>,
     /// What the screen overlays need to decide what shows (P8-f).
-    pub overlays: crate::overlay_state::OverlayInputs,
+    pub overlays: crate::scene::overlay_state::OverlayInputs,
     /// The world facts the F3 screen prints (P9-h).
-    pub debug: Arc<crate::debug_world::DebugWorld>,
+    pub debug: Arc<crate::debug::world::DebugWorld>,
 }
 
 /// The statistics the debug overlay shows.

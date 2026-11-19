@@ -15,7 +15,7 @@ use tracing::span;
 use tracing::{Event, Metadata, Subscriber};
 use umicraft_render::BlockAtlasError;
 
-use crate::terrain_textures::BlockTextureTarget;
+use crate::resources::terrain::BlockTextureTarget;
 
 /// A subscriber that records every event message.
 #[derive(Clone, Default)]

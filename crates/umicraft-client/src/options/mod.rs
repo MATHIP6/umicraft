@@ -46,6 +46,8 @@ pub use video::{
     MAX_SMOOTH_LIGHTING, MIPMAP_LEVELS, RENDER_DISTANCE, UNLIMITED_FPS,
 };
 
+pub mod effects;
+
 /// The name of the options file.
 pub const FILE_NAME: &str = "options.toml";
 

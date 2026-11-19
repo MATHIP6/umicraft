@@ -14,8 +14,8 @@ use std::time::Instant;
 
 use umicraft_assets::pack_discovery::discover_packs;
 use umicraft_assets::ResourcePack;
-use umicraft_client::model_resources::ModelResources;
-use umicraft_client::terrain_textures::TerrainTextures;
+use umicraft_client::resources::models::ModelResources;
+use umicraft_client::resources::terrain::TerrainTextures;
 use umicraft_render::Renderer;
 
 #[test]

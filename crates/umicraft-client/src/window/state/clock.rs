@@ -6,8 +6,8 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use crate::fps_meter::FpsMeter;
-use crate::metrics::FrameMetricsWindow;
+use crate::debug::fps_meter::FpsMeter;
+use crate::debug::metrics::FrameMetricsWindow;
 
 /// The frame times the F3 graph keeps.
 const FRAME_HISTORY: usize = 120;

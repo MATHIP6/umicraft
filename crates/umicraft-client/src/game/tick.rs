@@ -31,8 +31,8 @@ use super::publish::{
     publish_chunks, publish_frame, publish_sounds, publish_status, publish_text_screens,
 };
 use super::state::Game;
+use crate::hud::social as social_view;
 use crate::network::ClientCommand;
-use crate::social_view;
 
 /// The number of ticks between two status updates.
 const STATUS_PERIOD: u64 = 20;
@@ -45,7 +45,7 @@ fn tick_overlays(game: &mut Game) {
     let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
         return;
     };
-    let facts = crate::overlay_state::PlayerFacts {
+    let facts = crate::scene::overlay_state::PlayerFacts {
         world,
         feet: state.position(),
         eye: state.player().eye_position(),

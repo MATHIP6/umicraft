@@ -13,11 +13,11 @@ use umicraft_game::view::{Perspective, THIRD_PERSON_DISTANCE};
 use umicraft_game::RenderState;
 use umicraft_render::{BorderView, FogContext, RenderEnvironment};
 
-use crate::fog_context::FogLight;
 use crate::game::{Frame, LookSlot, ViewAngle, TICK};
-use crate::overlay_state::OverlayInputs;
-use crate::overlay_view::VignetteShade;
-use crate::weather_view::WeatherView;
+use crate::scene::fog::FogLight;
+use crate::scene::overlay::VignetteShade;
+use crate::scene::overlay_state::OverlayInputs;
+use crate::scene::weather::WeatherView;
 
 /// The camera of the player, interpolated between the two newest frames.
 #[derive(Debug, Default)]
@@ -68,11 +68,11 @@ pub(super) struct View {
     /// Rain, thunder, lightning and the precipitation columns of the newest frame.
     pub(super) weather: WeatherView,
     /// The particles of the newest frame (P8).
-    pub(super) particles: Arc<[crate::particle_view::ParticleDraw]>,
+    pub(super) particles: Arc<[crate::scene::particles::ParticleDraw]>,
     /// What decides the screen overlays, of the newest frame (P8-f).
     pub(super) overlays: OverlayInputs,
     /// The facts the F3 screen prints, of the newest frame (P9-h).
-    pub(super) debug: Arc<crate::debug_world::DebugWorld>,
+    pub(super) debug: Arc<crate::debug::world::DebugWorld>,
     /// The vignette brightness, eased frame by frame.
     pub(super) vignette: VignetteShade,
 }

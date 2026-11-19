@@ -14,9 +14,9 @@ use umicraft_protocol::PlayServerbound;
 use umicraft_ui::menus::ConnectStage;
 
 use super::NetworkConfig;
-use crate::connection_end::{ConnectionEnd, EndPhase};
 use crate::error::ClientError;
 use crate::game::GameEvent;
+use crate::screens::connection_end::{ConnectionEnd, EndPhase};
 
 /// Starts the network thread and returns its join handle.
 ///

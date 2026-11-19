@@ -4,7 +4,7 @@
 //! by default) that opens and closes the menu, the keys it takes, the blur it
 //! puts over the game and the changes it makes, HUD widgets included.
 //!
-//! The screen is drawn by `MenuFlow` (see `menu_flow/mods.rs`) and laid out in
+//! The screen is drawn by `MenuFlow` (see `screens/menu_flow/mods.rs`) and laid out in
 //! `umicraft_ui::menus::mods`; the blur is applied by the renderer.
 
 use std::time::Instant;
@@ -20,15 +20,15 @@ use umicraft_ui::FontAtlas;
 
 use super::App;
 use crate::game::GameEvent;
-use crate::hud_editor_view;
-use crate::item_icons::ItemView;
-use crate::menu_flow::MenuFlow;
-use crate::mod_icons::ModIcons;
-use crate::mods_hud_view::mod_widget_views;
-use crate::mods_runtime::{FrameInput, ModsRuntime};
-use crate::mods_view;
+use crate::mods::hud::mod_widget_views;
+use crate::mods::hud_editor;
+use crate::mods::icons::ModIcons;
+use crate::mods::menu;
+use crate::mods::runtime::{FrameInput, ModsRuntime};
 use crate::options::{Action, Binding};
-use crate::screen::Screen;
+use crate::resources::item_icons::ItemView;
+use crate::screens::menu_flow::MenuFlow;
+use crate::screens::Screen;
 
 /// How blurred the game behind the current screen is, `0.0` to `1.0`: the
 /// mods menu blurs it (and the blur fades in while the menu opens).
@@ -65,11 +65,11 @@ pub(super) fn view_for(
     icons: &ModIcons<'_>,
 ) -> ModsView {
     if screen == Screen::Mods {
-        let mut hud = hud_editor_view::build(mods.registry(), lang, font, display, icons);
+        let mut hud = hud_editor::build(mods.registry(), lang, font, display, icons);
         hud.history = mods.history_state();
         ModsView {
             hud,
-            ..mods_view::build(mods.registry(), lang)
+            ..menu::build(mods.registry(), lang)
         }
     } else {
         ModsView::default()
@@ -118,7 +118,7 @@ impl App {
         };
         let (armor, held) = slots.map_or(Default::default(), |slots| {
             let selected = hud.map_or(0, |hud| hud.selected_slot);
-            crate::mods_facts::equipment(slots, selected)
+            crate::mods::facts::equipment(slots, selected)
         });
         self.mods.update(&FrameInput {
             now_ms: u64::try_from(now.duration_since(self.clock.started).as_millis())
@@ -146,7 +146,7 @@ impl App {
             armor,
             held,
             effects: hud.map_or([None; MAX_EFFECTS], |hud| {
-                crate::mods_facts::effects(&hud.active_effects)
+                crate::mods::facts::effects(&hud.active_effects)
             }),
         });
     }

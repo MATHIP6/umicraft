@@ -25,9 +25,9 @@ use super::session::GameChannels;
 use super::state::Game;
 use super::tick::tick;
 use super::TICK;
-use crate::connection_end::ConnectionEnd;
 use crate::input::InputUpdate;
 use crate::network::ClientCommand;
+use crate::screens::connection_end::ConnectionEnd;
 
 /// The game thread loop.
 pub(super) fn run(
@@ -50,7 +50,7 @@ pub(super) fn run(
     let mut deferred: VecDeque<GameEvent> = VecDeque::new();
     let mut game = Game::new();
     game.own_name = own_name;
-    game.e1 = crate::e1::take();
+    game.e1 = crate::demos::e1::take();
     game.account_skin = account_skin;
     // The first event of the queue, which is still empty: the render thread
     // reads the mouse look from this slot, never from the queue.

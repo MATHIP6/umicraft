@@ -11,9 +11,9 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 use super::debug_chords::DebugChord;
 use super::App;
+use crate::input::ui::shortcut_code;
 use crate::options::{Action, Binding};
-use crate::screen::Screen;
-use crate::ui_input::shortcut_code;
+use crate::screens::Screen;
 
 /// True when this key event must toggle the debug screen.
 ///

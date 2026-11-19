@@ -14,18 +14,18 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 use super::startup::{upload_glint_texture, upload_gui_atlas, upload_sky_textures};
 use super::App;
-use crate::dials::DialAnimator;
-use crate::entity_render::EntityTextures;
 use crate::game::GameEvent;
+use crate::hud::dials::DialAnimator;
 use crate::language;
-use crate::map_render::MapTextures;
-use crate::mesher::worker_count;
+use crate::meshing::pool::worker_count;
+use crate::options::effects::{open_folder, pack_paths, packs_folder, ServerSettings};
 use crate::options::Binding;
-use crate::options_effects::{open_folder, pack_paths, packs_folder, ServerSettings};
-use crate::options_screen::{Catalog, Outcome as OptionsOutcome, Page};
-use crate::screen::Screen;
-use crate::terrain_textures::TerrainTextures;
-use crate::texture_animator::TextureAnimator;
+use crate::resources::terrain::TerrainTextures;
+use crate::resources::texture_animator::TextureAnimator;
+use crate::scene::entity::EntityTextures;
+use crate::scene::map::MapTextures;
+use crate::screens::options::{Catalog, Outcome as OptionsOutcome, Page};
+use crate::screens::Screen;
 
 impl App {
     /// Handles a key while the options screen is open. While a key binding
@@ -118,8 +118,10 @@ impl App {
         else {
             return;
         };
-        let grown =
-            crate::official::grow_atlas(Some(atlas), &self.options_menu.screen.pack_icon_images());
+        let grown = crate::resources::official::grow_atlas(
+            Some(atlas),
+            &self.options_menu.screen.pack_icon_images(),
+        );
         upload_gui_atlas(renderer, Some(&grown));
         self.options_menu.screen.assign_pack_icon_sheets(&grown);
         self.assets.gui_atlas = Some(grown);
@@ -190,7 +192,7 @@ impl App {
         let installed = terrain.install(renderer);
         // The packs page can be opened again without a new catalog: keep its icons.
         let icons = self.options_menu.screen.pack_icon_images();
-        let gui_atlas = crate::official::grow_atlas(installed.gui_atlas(), &icons);
+        let gui_atlas = crate::resources::official::grow_atlas(installed.gui_atlas(), &icons);
         upload_gui_atlas(renderer, Some(&gui_atlas));
         self.options_menu.screen.assign_pack_icon_sheets(&gui_atlas);
         upload_glint_texture(renderer, installed.glint_texture());

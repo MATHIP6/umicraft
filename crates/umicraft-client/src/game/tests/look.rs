@@ -3,7 +3,7 @@
 //! The mouse look: continuous yaw, clamped pitch and the wire angles.
 
 use super::*;
-use crate::mouse_look::{look_turn, sensitivity_factor, MouseSteps};
+use crate::input::mouse_look::{look_turn, sensitivity_factor, MouseSteps};
 use umicraft_game::input::{set_angles, MAX_PITCH};
 
 #[test]

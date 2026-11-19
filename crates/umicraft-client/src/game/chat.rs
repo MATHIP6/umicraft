@@ -12,8 +12,8 @@ use super::state::Game;
 /// A chat message from the chat JSON of the server, in the language of the
 /// downloaded `.lang` file.
 fn chat_line(json: &str) -> ChatLineView {
-    crate::chat::line_from_runs(
-        &chat_rules::parse(json, crate::chat::lang().table()),
+    crate::hud::chat::line_from_runs(
+        &chat_rules::parse(json, crate::hud::chat::lang().table()),
         Instant::now(),
     )
 }
@@ -21,7 +21,7 @@ fn chat_line(json: &str) -> ChatLineView {
 /// A line the client writes itself. It is never mistaken for JSON (a player
 /// named `null` or `123`).
 pub(super) fn local_chat_line(text: &str) -> ChatLineView {
-    crate::chat::line_from_runs(&chat_rules::local(text), Instant::now())
+    crate::hud::chat::line_from_runs(&chat_rules::local(text), Instant::now())
 }
 
 /// Shows a chat packet unless the chat visibility the player chose filters it

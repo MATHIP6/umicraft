@@ -11,10 +11,10 @@ use umicraft_render::HudState;
 use umicraft_ui::menus::ConnectStage;
 
 use super::WorldView;
-use crate::connection_end::ConnectionEnd;
-use crate::creative_view::CreativeView;
 use crate::game::{GameStatus, TextScreenRequest};
 use crate::pack_offer::ServerPackRequest;
+use crate::screens::connection_end::ConnectionEnd;
+use crate::screens::creative::view::CreativeView;
 
 impl WorldView {
     /// The newest HUD the game thread published.

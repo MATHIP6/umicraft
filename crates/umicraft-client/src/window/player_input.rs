@@ -7,8 +7,8 @@ use winit::dpi::PhysicalPosition;
 use winit::window::CursorGrabMode;
 
 use super::App;
+use crate::input::mouse_look::look_turn;
 use crate::input::{InputState, InputUpdate};
-use crate::mouse_look::look_turn;
 use crate::options::Action;
 use umicraft_game::input::set_angles;
 

@@ -12,7 +12,7 @@ use winit::event::MouseScrollDelta;
 
 use super::App;
 use crate::options::Action;
-use crate::screen::Screen;
+use crate::screens::Screen;
 
 /// Slots of the hotbar.
 const SLOTS: i32 = 9;

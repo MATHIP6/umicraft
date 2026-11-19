@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use umicraft_ui::FontAtlas;
 
-use crate::entity_render::EntityTextures;
-use crate::item_icons::ItemResources;
-use crate::item_world::ItemLayers;
-use crate::map_render::MapTextures;
-use crate::texture_animator::TextureAnimator;
-use crate::theme_font::FontChoice;
-use crate::ui_font::LoadedFont;
+use crate::resources::item_icons::ItemResources;
+use crate::resources::texture_animator::TextureAnimator;
+use crate::resources::theme_font::FontChoice;
+use crate::resources::ui_font::LoadedFont;
+use crate::scene::entity::EntityTextures;
+use crate::scene::item_world::ItemLayers;
+use crate::scene::map::MapTextures;
 use crate::window::startup::AsyncLoadedAssets;
 
 /// The fonts, atlases and textures loaded for the session.
