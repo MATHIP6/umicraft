@@ -354,6 +354,7 @@ impl ClientResources {
             UNKNOWN_SERVER_PATH,
             UNKNOWN_PACK_PATH,
             DEFAULT_PACK_PATH,
+            SIGN_PATH,
             GLINT_PATH,
         ])?;
 
@@ -596,6 +597,7 @@ impl GuiAtlas {
             UNKNOWN_SERVER_PATH,
             UNKNOWN_PACK_PATH,
             DEFAULT_PACK_PATH,
+            SIGN_PATH,
         ])?;
         let mut raw_gui = BTreeMap::new();
         let mut tiles = BTreeMap::new();
@@ -683,17 +685,22 @@ const UNKNOWN_PACK_PATH: &str = "assets/minecraft/textures/misc/unknown_pack.png
 /// The `pack.png` at the root of the client jar: the icon of the built-in
 /// "Default" pack (`DefaultResourcePack.getPackImage`).
 const DEFAULT_PACK_PATH: &str = "pack.png";
+/// The sign texture, which the sign editor draws flat in the GUI
+/// (`GuiEditSign` renders the sign model facing the screen).
+const SIGN_PATH: &str = "assets/minecraft/textures/entity/sign.png";
 
 /// The textures outside `textures/gui/` that the GUI atlas holds anyway, with
 /// their region names.
-const EXTRA_GUI_TEXTURES: [(&str, &str); 3] = [
+const EXTRA_GUI_TEXTURES: [(&str, &str); 4] = [
     (UNKNOWN_SERVER_PATH, "misc/unknown_server"),
     (UNKNOWN_PACK_PATH, "misc/unknown_pack"),
     (DEFAULT_PACK_PATH, "misc/default_pack"),
+    (SIGN_PATH, "entity/sign"),
 ];
 
 /// True for a GUI texture PNG (container backgrounds, widgets, icons) or one
-/// of the [`EXTRA_GUI_TEXTURES`] (the default server and pack icons).
+/// of the [`EXTRA_GUI_TEXTURES`] (the default server and pack icons, the
+/// sign).
 fn is_gui_texture(path: &str) -> bool {
     (path.starts_with(GUI_TEXTURES_PREFIX) && path.ends_with(".png"))
         || EXTRA_GUI_TEXTURES.iter().any(|(extra, _)| *extra == path)
@@ -1197,6 +1204,9 @@ mod tests {
             gui_texture_name(DEFAULT_PACK_PATH).as_deref(),
             Some("misc/default_pack")
         );
+        // The sign editor draws the sign texture.
+        assert!(is_gui_texture(SIGN_PATH));
+        assert_eq!(gui_texture_name(SIGN_PATH).as_deref(), Some("entity/sign"));
         assert!(!is_gui_texture("pack.png.mcmeta"));
         assert!(!is_gui_texture("assets/pack.png"));
         assert!(!is_gui_texture("assets/minecraft/textures/misc/shadow.png"));
