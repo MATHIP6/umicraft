@@ -8,6 +8,7 @@
 //! It counts the clicks between two frames because the mods have a single time
 //! base, the frame (spec of the ADR: "per frame, not per tick").
 
+use umicraft_assets::capes::CapeProvider;
 use umicraft_builtin_mods::{
     mods, ArmorPiece, CombatInfo, EffectInfo, History, HudWidget, KeyState, ModContext, ModInput,
     ModRegistry, ModsConfig, RegistryError, MAX_EFFECTS,
@@ -17,6 +18,7 @@ use umicraft_model::entity::BipedStyle;
 use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
 use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 
+use crate::entity_render::{CapeSettings, OwnCape};
 use crate::input::InputState;
 use crate::options::ModsOptions;
 use crate::zoom::ZoomSettings;
@@ -35,6 +37,12 @@ const NO_HURT_CAM_ID: &str = "no_hurt_cam";
 
 /// The id of the 1.7 Animations mod, whose toggles the game thread is given.
 const LEGACY_ANIMATIONS_ID: &str = "legacy_animations";
+
+/// The id of the Capes mod, whose settings the entity textures are given.
+const CAPES_ID: &str = "capes";
+
+/// The setting of the Capes mod that picks the local player's provider.
+const CAPES_OWN_SOURCE: &str = "own_source";
 
 /// Height of the eye above the feet of a standing player, in blocks (MCP
 /// `EntityPlayer.getEyeHeight`), to turn the camera into the feet position.
@@ -225,6 +233,22 @@ impl ModsRuntime {
         } else {
             BipedStyle::V1_8
         }
+    }
+
+    /// The Capes mod settings while it is on, `None` while it is off
+    /// (ADR-0081). Read every frame, so a change in the menu applies at once.
+    /// A provider's toggle has the provider's key (`CapeProvider::key`); the
+    /// own source reads as an [`OwnCape`].
+    #[must_use]
+    pub fn capes(&self) -> Option<CapeSettings> {
+        let capes = self
+            .registry
+            .mods()
+            .find(|view| view.meta.id.as_str() == CAPES_ID && view.enabled)?;
+        Some(CapeSettings {
+            own: OwnCape::from_key(capes.settings.text(CAPES_OWN_SOURCE)),
+            enabled: CapeProvider::ALL.map(|provider| capes.settings.bool(provider.key())),
+        })
     }
 
     /// Whether the Fullbright mod is on: the world is lit at full strength.
@@ -420,6 +444,43 @@ mod tests {
             .set_enabled("motion_blur", false)
             .expect("the mod exists");
         assert_eq!(runtime.motion_blur(), None);
+    }
+
+    #[test]
+    fn the_capes_settings_follow_the_switch_the_choice_and_the_toggles() {
+        use umicraft_builtin_mods::SettingValue;
+        let mut runtime = ModsRuntime::new(&ModsOptions::default());
+        assert_eq!(
+            runtime.capes(),
+            Some(CapeSettings {
+                own: OwnCape::All,
+                enabled: [true; 4],
+            }),
+            "on by default, every provider on, for the player too"
+        );
+        let registry = runtime.registry_mut();
+        registry
+            .set_setting(
+                CAPES_ID,
+                CAPES_OWN_SOURCE,
+                &SettingValue::Text("labymod".into()),
+            )
+            .expect("the setting exists");
+        registry
+            .set_setting(CAPES_ID, "cosmetica", &SettingValue::Bool(false))
+            .expect("the setting exists");
+        assert_eq!(
+            runtime.capes(),
+            Some(CapeSettings {
+                own: OwnCape::Provider(CapeProvider::LabyMod),
+                enabled: [true, true, false, true],
+            })
+        );
+        runtime
+            .registry_mut()
+            .set_enabled(CAPES_ID, false)
+            .expect("the mod exists");
+        assert_eq!(runtime.capes(), None);
     }
 
     #[test]

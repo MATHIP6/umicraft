@@ -467,3 +467,18 @@ Reference: the local MCP 1.7.10 and 1.8.9 sources, read side by side (owner dire
 | 2026-11-18 | PvP HUD mods: effect list | `mcp: Potion.getDurationString`, `Potion.potionTypes`, `Potion.liquidColor` | The `m:ss` time, `**:**` for the 32767-tick marker, the 23 effect names and their liquid colours in `mods/potion_effects.rs`. Not re-checked against `mcp/` in this checkout (absent); the status icon grid is the one of `inventory::effect_list`. |
 | 2026-11-18 | PvP HUD mods: hit confirmation | observed protocol behaviour (`Entity Status 2`, `Animation 1`) | The server sends no "hit landed" packet; a hit is counted when the attacked entity is hurt within 10 ticks (`state/combat_log.rs`). Not measured against a live server yet. |
 | 2026-11-18 | Direction HUD layout | owner screenshot of the target look (`/tmp/tes/screen.png`, not in the repository) | Ruler with a number every 15 degrees, letters at the eight directions, heading and arrow above the middle, marks fading to the edges. Sizes and the 150 degrees visible are an estimate from the picture, not measured. |
+
+## Capes (ADR-0081)
+
+Reference: the behaviour of the Fabric mod "Capes" (LGPL-2.1, read only, no code taken) and requests made to the services on 2026-11-18.
+
+| Date | Area | Source | Notes |
+|---|---|---|---|
+| 2026-11-18 | Provider URLs | Fabric mod "Capes" (`CapeType.getURL`) | OptiFine `http://s.optifine.net/capes/<name>.png`; LabyMod `https://dl.labymod.net/capes/<uuid with dashes>`; Cosmetica `https://api.cosmetica.cc/users/<uuid with dashes>/cape` (JSON); MinecraftCapes `https://api.minecraftcapes.net/profile/<uuid without dashes>` (JSON). |
+| 2026-11-18 | OptiFine has no HTTPS | observed: `https://s.optifine.net/capes/Notch.png` does not answer, `http://` gives `200 image/png` | Plain HTTP is allowed for `optifine.net` only. |
+| 2026-11-18 | LabyMod redirect | observed: `dl.labymod.net/capes/<uuid>` answers `301` to `https://items.laby.net/<id>/textures/<uuid>.png`, a 22 x 17 paletted PNG | Redirects followed only to an allowed host; small capes are padded into 64 x 32. |
+| 2026-11-18 | LabyMod placeholder | Fabric mod "Capes" (`PlayerHandler.setCapeTexture`) | An image whose first four pixels read as the UUID `ff305f81-ff30-5f90-ff30-5f90ff305f90` (ABGR ints) is LabyMod's "no cape" image. Not seen in our probe. |
+| 2026-11-18 | Cosmetica response | observed: unknown user gives `404` JSON `{"message":"User not found",...}`; Fabric mod reads `cloak.texture` and `cloak.frames` (animated when `frames > 1`) | |
+| 2026-11-18 | MinecraftCapes response | observed: `{"animatedCape":false,"capeGlint":false,"upsideDown":false,"textures":{"_IMPORTANT":"We are removing base64 textures, please use the above parameters instead."}}` for a player without a cape | The Fabric mod reads `cape_url` and `animated_cape_url`; the cape-owner shape must be confirmed with a real profile before the merge. |
+| 2026-11-18 | Cape worker limits | our choice, not a service rule | 4 queries in flight, queue of 256, connect 5 s / total 10 s, at most 5 redirects (counted as `reqwest::redirect::Policy::limited` does), bodies 1 MiB (PNG) and 64 KiB (JSON), source images at most 2048 x 2048, at most 64 frames. Any non-2xx answer means "no cape from this provider". |
+| 2026-11-18 | HD and animated capes | Fabric mod "Capes" (`parseCape`, `parseAnimatedCape`, `getCape`) | Static: pad top-left into the smallest `64·2ⁿ x 32·2ⁿ`. Animated: frames of `w x w/2` stacked downward, 100 ms each. |

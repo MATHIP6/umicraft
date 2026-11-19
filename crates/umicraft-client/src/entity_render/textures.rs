@@ -22,6 +22,7 @@ use umicraft_ui::FontAtlas;
 
 use super::armor::armor_texture;
 use super::banner_cache::BannerCache;
+use super::capes::{CapeSet, CapeSettings};
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
@@ -82,6 +83,8 @@ pub struct EntityTextures {
     jar: Option<ClientJar>,
     /// The skins and capes of players.
     skins: RefCell<SkinSet>,
+    /// The third-party capes of players (ADR-0081).
+    capes: RefCell<CapeSet>,
     /// The composed banner designs among `textures`.
     banners: RefCell<BannerCache>,
     /// The camera yaw the flames of burning entities face.
@@ -130,6 +133,7 @@ impl EntityTextures {
             textures: RefCell::new(textures),
             jar,
             skins: RefCell::new(SkinSet::new()),
+            capes: RefCell::new(CapeSet::new()),
             banners: RefCell::default(),
             cull_view: Cell::new(None),
             view_yaw: Cell::new(0.0),
@@ -230,6 +234,32 @@ impl EntityTextures {
     /// 1.7 Animations mod asks for it (ADR-0079).
     pub fn set_biped_style(&self, style: BipedStyle) {
         self.biped_style.set(style);
+    }
+
+    /// Sets what the Capes mod asks for (`None` while it is off) and the
+    /// UUID of the local player, whose cape comes from the chosen provider
+    /// only (ADR-0081). Called every frame; a change starts the lookups over.
+    pub fn set_capes(&self, settings: Option<CapeSettings>, own_uuid: Option<u128>) {
+        self.capes.borrow_mut().configure(settings, own_uuid);
+    }
+
+    /// Turns the skins, capes and third-party capes that finished
+    /// downloading into GPU textures.
+    fn collect_downloads(&self, renderer: &Renderer) {
+        let mut textures = self.textures.borrow_mut();
+        self.skins.borrow_mut().collect(renderer, &mut textures);
+        let mut uploaded = Vec::new();
+        let mut stale = false;
+        self.capes.borrow_mut().collect(
+            |slot, rgba, width, height| {
+                uploaded.push((slot, renderer.create_entity_texture(rgba, width, height)));
+            },
+            || stale = true,
+        );
+        if stale {
+            textures.retain(|slot, _| !matches!(slot, TextureSlot::CustomCape(_)));
+        }
+        textures.extend(uploaded);
     }
 
     /// The texture and arm model of the first-person hand: those of the local
@@ -334,9 +364,7 @@ impl EntityTextures {
         renderer: &mut Renderer,
     ) {
         umicraft_core::profile_scope!("mesh_entities");
-        self.skins
-            .borrow_mut()
-            .collect(renderer, &mut self.textures.borrow_mut());
+        self.collect_downloads(renderer);
         let eye = super::Eye {
             position: self.camera.get(),
             yaw: self.view_yaw.get(),
@@ -406,9 +434,7 @@ impl EntityTextures {
         held: &ItemMesh,
         renderer: &mut Renderer,
     ) {
-        self.skins
-            .borrow_mut()
-            .collect(renderer, &mut self.textures.borrow_mut());
+        self.collect_downloads(renderer);
         let meshed = mesh_entities_with(
             std::slice::from_ref(body),
             self,
@@ -502,5 +528,9 @@ impl SkinLookup for EntityTextures {
 
     fn cape(&self, url: &str) -> Option<u32> {
         self.skins.borrow_mut().lookup(url, SkinKind::Cape)
+    }
+
+    fn custom_cape(&self, uuid: u128, name: &str) -> Option<u32> {
+        self.capes.borrow_mut().lookup(uuid, name)
     }
 }

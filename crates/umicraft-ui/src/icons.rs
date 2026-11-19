@@ -60,11 +60,13 @@ pub enum Icon {
     Sword,
     /// A compass: the direction HUD.
     Compass,
+    /// A cape: the Capes mod.
+    Cape,
 }
 
 impl Icon {
     /// Every icon, in the order of their bitmaps and characters.
-    pub const ALL: [Icon; 20] = [
+    pub const ALL: [Icon; 21] = [
         Icon::Grid,
         Icon::Sliders,
         Icon::Search,
@@ -85,6 +87,7 @@ impl Icon {
         Icon::Flask,
         Icon::Sword,
         Icon::Compass,
+        Icon::Cape,
     ];
 
     fn index(self) -> usize {

@@ -21,6 +21,12 @@ pub(crate) trait SkinLookup {
     fn skin(&self, url: &str) -> Option<u32>;
     /// The index of the cape at `url`, once it is ready.
     fn cape(&self, url: &str) -> Option<u32>;
+    /// The texture index of the third-party cape frame to draw for the
+    /// player `uuid` named `name` (ADR-0081), asking for the lookup on the
+    /// first call. None by default: only the world's textures look capes up.
+    fn custom_cape(&self, _uuid: u128, _name: &str) -> Option<u32> {
+        None
+    }
 }
 
 /// No skin is ever ready: everybody wears the default skin.

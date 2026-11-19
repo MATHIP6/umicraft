@@ -234,17 +234,22 @@ pub(crate) fn skin_slot(
 }
 
 /// The cape of a player, when it is enabled, downloaded and the player is
-/// visible (MCP `LayerCape.doRenderLayer`).
+/// visible (MCP `LayerCape.doRenderLayer`). A third-party cape of the Capes
+/// mod (ADR-0081) replaces the Mojang one of the profile.
 fn cape_layer(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -> Option<EntityLayer> {
-    let enabled = ent.flags.skin_parts & CAPE_PART != 0 && !ent.flags.is_invisible();
-    let index = ent
-        .profile
-        .as_ref()
-        .and_then(|profile| profile.cape_url.as_deref())
-        .filter(|_| enabled)
-        .and_then(|url| skins.cape(url))?;
+    if ent.flags.skin_parts & CAPE_PART == 0 || ent.flags.is_invisible() {
+        return None;
+    }
+    let profile = ent.profile.as_ref()?;
+    let custom = ent
+        .uuid
+        .and_then(|uuid| skins.custom_cape(u128::from_be_bytes(uuid), &profile.name));
+    let slot = match custom {
+        Some(index) => TextureSlot::CustomCape(index),
+        None => TextureSlot::Cape(skins.cape(profile.cape_url.as_deref()?)?),
+    };
     let mesh = CapeModel::new().emit_mesh(ent.cape.pitch, ent.cape.roll, ent.flags.is_sneaking());
-    Some(EntityLayer::new(TextureSlot::Cape(index), mesh))
+    Some(EntityLayer::new(slot, mesh))
 }
 
 /// Bit of the skin parts that shows the cape (MCP `EnumPlayerModelParts.CAPE`).
@@ -307,6 +312,46 @@ mod tests {
         let slots = slots(&player(0x7F), &super::super::skins::NoSkins);
         assert_eq!(slots.len(), 1);
         assert!(matches!(slots[0], TextureSlot::Steve | TextureSlot::Alex));
+    }
+
+    /// [`Ready`], plus a third-party cape (ADR-0081) for the UUID `7` only.
+    struct WithCustomCape;
+
+    impl SkinLookup for WithCustomCape {
+        fn skin(&self, url: &str) -> Option<u32> {
+            Ready.skin(url)
+        }
+
+        fn cape(&self, url: &str) -> Option<u32> {
+            Ready.cape(url)
+        }
+
+        fn custom_cape(&self, uuid: u128, _name: &str) -> Option<u32> {
+            (uuid == 7).then_some(9)
+        }
+    }
+
+    #[test]
+    fn a_third_party_cape_replaces_the_mojang_cape() {
+        let mut entity = player(0x7F);
+        entity.uuid = Some(7u128.to_be_bytes());
+        assert_eq!(
+            slots(&entity, &WithCustomCape),
+            vec![TextureSlot::Skin(3), TextureSlot::CustomCape(9)]
+        );
+        entity.uuid = Some(8u128.to_be_bytes());
+        assert_eq!(
+            slots(&entity, &WithCustomCape),
+            vec![TextureSlot::Skin(3), TextureSlot::Cape(3)],
+            "without one the Mojang cape stays"
+        );
+        let mut hidden = player(0x7E);
+        hidden.uuid = Some(7u128.to_be_bytes());
+        assert_eq!(
+            slots(&hidden, &WithCustomCape),
+            vec![TextureSlot::Skin(3)],
+            "the cape part hides a third-party cape too"
+        );
     }
 
     #[test]
