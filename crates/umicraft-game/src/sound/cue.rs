@@ -29,6 +29,9 @@ pub enum CueCategory {
     Ambient,
 }
 
+/// The name of the cue that stops the jukebox instead of playing a sound.
+pub const STOP_RECORDS: &str = "records.stop";
+
 /// One sound to play, positioned in the world.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SoundCue {
@@ -42,4 +45,26 @@ pub struct SoundCue {
     pub pitch: f32,
     /// Volume slider the cue obeys.
     pub category: CueCategory,
+}
+
+impl SoundCue {
+    /// The cue that ends the record playing at `pos` (MCP
+    /// `RenderGlobal.playRecord` stops the sound of the jukebox before it
+    /// starts another, or alone when the disc was taken out).
+    #[must_use]
+    pub fn stop_records(pos: [f64; 3]) -> Self {
+        Self {
+            name: Cow::Borrowed(STOP_RECORDS),
+            pos,
+            volume: 0.0,
+            pitch: 1.0,
+            category: CueCategory::Records,
+        }
+    }
+
+    /// Whether this is the cue made by [`Self::stop_records`].
+    #[must_use]
+    pub fn is_stop_records(&self) -> bool {
+        self.name == STOP_RECORDS
+    }
 }

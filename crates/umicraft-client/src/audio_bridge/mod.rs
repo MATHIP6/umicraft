@@ -108,7 +108,19 @@ impl AudioBridge {
     /// Plays the cues the game thread produced, oldest first.
     pub fn play_cues(&self, cues: &[SoundCue]) {
         for cue in cues {
-            self.play(cues::request_of(cue));
+            if cue.is_stop_records() {
+                self.stop_records();
+            } else {
+                self.play(cues::request_of(cue));
+            }
+        }
+    }
+
+    /// Ends the record of a jukebox. Records and music are the two streaming
+    /// voices, so both stop; the music ticker starts a new track on its own.
+    fn stop_records(&self) {
+        if let Some(handle) = &self.handle {
+            handle.stop_music();
         }
     }
 

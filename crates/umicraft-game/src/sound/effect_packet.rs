@@ -41,12 +41,20 @@ const RECORDS: [&str; 12] = [
     "13", "cat", "blocks", "chirp", "far", "mall", "mellohi", "stal", "strad", "ward", "11", "wait",
 ];
 
+/// The name of the record of an item id (`13`, `cat`, ...), `None` for any
+/// other item. The title of a record is the lang key `item.record.<name>.desc`.
+#[must_use]
+pub fn record_name(item_id: i32) -> Option<&'static str> {
+    let index = usize::try_from(item_id.checked_sub(FIRST_RECORD_ID)?).ok()?;
+    RECORDS.get(index).copied()
+}
+
 /// Cues produced by an Effect packet; empty for particle-only or unknown ids.
 ///
 /// `rng` supplies the pitch jitter; `break_sound` maps a block id (the low 12
 /// bits of the data of id 2001) to its step sound type, or `None` for air.
-/// A record id 1005 with a non-record item is the "stop the jukebox" case,
-/// which makes no cue (stopping is the audio backend's business).
+/// Every id 1005 starts with a [`SoundCue::stop_records`] cue; a non-record
+/// item is the "stop the jukebox" case and makes no other.
 ///
 /// ```
 /// # use umicraft_game::sound::effect_packet::effect_cues;
@@ -120,26 +128,26 @@ fn jitter(rng: &mut impl CueRandom) -> f32 {
     spread(rng) * 0.2 + 1.0
 }
 
-/// Id 1005: the record named by the item id, playing at the block corner.
+/// Id 1005: ends the record of this jukebox, then plays the one named by the
+/// item id at the block corner. A data that is no record (the jukebox was
+/// emptied) only stops (`RenderGlobal.playRecord`).
 fn record_cue(effect: &Effect) -> Vec<SoundCue> {
-    let index = effect
-        .data
-        .checked_sub(FIRST_RECORD_ID)
-        .and_then(|i| usize::try_from(i).ok());
-    let Some(name) = index.and_then(|i| RECORDS.get(i)) else {
-        return Vec::new();
-    };
-    vec![SoundCue {
-        name: Cow::Owned(format!("records.{name}")),
-        pos: [
-            f64::from(effect.x),
-            f64::from(effect.y),
-            f64::from(effect.z),
-        ],
-        volume: 4.0,
-        pitch: 1.0,
-        category: CueCategory::Records,
-    }]
+    let corner = [
+        f64::from(effect.x),
+        f64::from(effect.y),
+        f64::from(effect.z),
+    ];
+    let mut cues = vec![SoundCue::stop_records(corner)];
+    if let Some(name) = record_name(effect.data) {
+        cues.push(SoundCue {
+            name: Cow::Owned(format!("records.{name}")),
+            pos: corner,
+            volume: 4.0,
+            pitch: 1.0,
+            category: CueCategory::Records,
+        });
+    }
+    cues
 }
 
 /// Id 2001: `(volume + 1) / 2` at `frequency * 0.8` of the block's break
@@ -251,20 +259,25 @@ mod tests {
 
     #[test]
     fn records_map_item_ids_and_play_at_the_block_corner() {
-        let cue = &cues(1005, 2257, vec![])[0];
+        let all = cues(1005, 2257, vec![]);
+        assert!(all[0].is_stop_records());
+        let cue = &all[1];
         assert_eq!(cue.name, "records.cat");
         assert_eq!(cue.pos, [10.0, 64.0, -3.0]);
         assert_eq!((cue.volume, cue.pitch), (4.0, 1.0));
         assert_eq!(cue.category, CueCategory::Records);
-        assert_eq!(cues(1005, 2267, vec![])[0].name, "records.wait");
+        assert_eq!(cues(1005, 2267, vec![])[1].name, "records.wait");
     }
 
     #[test]
-    fn stopping_a_record_or_a_non_record_makes_no_cue() {
-        assert!(cues(1005, 0, vec![]).is_empty());
-        assert!(cues(1005, 2255, vec![]).is_empty());
-        assert!(cues(1005, 2268, vec![]).is_empty());
-        assert!(cues(1005, -5, vec![]).is_empty());
+    fn a_non_record_only_stops_the_jukebox() {
+        // Regression: taking the disc out left the music playing.
+        for data in [0, 2255, 2268, -5] {
+            let all = cues(1005, data, vec![]);
+            assert_eq!(all.len(), 1, "{data}");
+            assert!(all[0].is_stop_records());
+            assert_eq!(all[0].pos, [10.0, 64.0, -3.0]);
+        }
     }
 
     #[test]
