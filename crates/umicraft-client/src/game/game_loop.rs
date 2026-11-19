@@ -319,7 +319,14 @@ pub(super) fn handle_event(
             apply_inventory_action(game, action, queue, frames);
             false
         }
+        GameEvent::SignTyped { position, lines } => {
+            game.server.block_entities_mut().set_sign(position, lines);
+            false
+        }
         GameEvent::SignEdited { position, lines } => {
+            game.server
+                .block_entities_mut()
+                .set_sign(position, lines.clone());
             queue.push(ClientCommand::UpdateSign { position, lines });
             false
         }

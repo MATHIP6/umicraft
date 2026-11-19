@@ -82,3 +82,45 @@ fn an_unloaded_column_forgets_its_signs() {
     );
     assert!(game.server.block_entities().sign(SIGN_AT).is_none());
 }
+
+#[test]
+fn typed_lines_show_on_the_sign_and_the_finished_ones_are_sent() {
+    let (mut game, mut queue, frames) = game_with_sign();
+    let typed = [
+        "\"hi!\"".to_owned(),
+        String::new(),
+        String::new(),
+        String::new(),
+    ];
+    handle_event(
+        &mut game,
+        GameEvent::SignTyped {
+            position: SIGN_AT,
+            lines: typed.clone(),
+        },
+        &mut queue,
+        &frames,
+    );
+    assert_eq!(game.server.block_entities().sign(SIGN_AT), Some(&typed));
+    assert!(commands(&queue).is_empty(), "a preview sends nothing");
+
+    let finished = [
+        "\"done\"".to_owned(),
+        String::new(),
+        String::new(),
+        String::new(),
+    ];
+    handle_event(
+        &mut game,
+        GameEvent::SignEdited {
+            position: SIGN_AT,
+            lines: finished.clone(),
+        },
+        &mut queue,
+        &frames,
+    );
+    assert_eq!(game.server.block_entities().sign(SIGN_AT), Some(&finished));
+    assert!(commands(&queue)
+        .iter()
+        .any(|command| matches!(command, ClientCommand::UpdateSign { position, .. } if *position == SIGN_AT)));
+}

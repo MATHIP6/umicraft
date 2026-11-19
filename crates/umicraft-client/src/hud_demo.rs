@@ -39,7 +39,7 @@ use crate::args::{Args, HUD_VIEWS};
 use crate::connection_end::{ConnectionEnd, EndPhase};
 use crate::dials::DialFrames;
 use crate::error::ClientError;
-use crate::game::hud_after;
+use crate::game::{hud_after, TextScreenRequest};
 use crate::hud_demo_mods;
 use crate::hud_demo_panorama;
 use crate::hud_demo_servers;
@@ -51,6 +51,7 @@ use crate::options_screen::{Catalog, OptionsScreen};
 use crate::screen::Screen;
 use crate::screenshot::write_png;
 use crate::servers::ServerBook;
+use crate::text_screens::TextScreens;
 use crate::theme_font::{self, FontChoice};
 use crate::ui_font::{self, FontSource, LoadedFont};
 
@@ -436,6 +437,57 @@ fn menu_scene(
     (demo, frame.panorama)
 }
 
+/// Whether `view` is the sign editor.
+fn is_sign_view(view: &str) -> bool {
+    matches!(view, "sign" | "sign-wall")
+}
+
+/// The sign editor over a sign with styled lines: a standing sign for
+/// `sign`, a wall sign for `sign-wall`, the second line being edited.
+fn sign_scene(
+    view: &str,
+    (width, height): (u32, u32),
+    atlas: &FontAtlas,
+    (sheets, gui_atlas): (&HudSheets, Option<&GuiAtlas>),
+) -> Demo {
+    let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
+    let mut ui = Ui::new(viewport);
+    ui.set_widgets_sheet(sheets.widgets);
+    let mut screens = TextScreens::default();
+    let lines = [
+        "Umicraft".to_owned(),
+        "\u{a7}cred \u{a7}lbold".to_owned(),
+        "\u{a7}nunderlined".to_owned(),
+        "\u{a7}9\u{a7}mstruck".to_owned(),
+    ];
+    screens.open(TextScreenRequest::Sign {
+        position: (0, 64, 0),
+        lines,
+        standing: view == "sign",
+    });
+    screens.key(crate::text_screens::Key::Down, &|text| {
+        atlas.measure(text, 1.0)
+    });
+    let lang = crate::language::load(Lang::DEFAULT_CODE);
+    ui.begin_frame(viewport, UiInput::default());
+    screens.draw(&mut ui, atlas, viewport, gui_atlas, true, &lang);
+    let output = ui.end_frame();
+    Demo {
+        lines: vec![
+            ("screen", "Sign".to_owned()),
+            (
+                "sign texture",
+                gui_atlas
+                    .and_then(|a| a.region("entity/sign"))
+                    .is_some()
+                    .to_string(),
+            ),
+            ("draw commands", output.draw_list.len().to_string()),
+        ],
+        scene: output.draw_list,
+    }
+}
+
 fn build(
     view: &str,
     (width, height): (u32, u32),
@@ -658,7 +710,11 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     let art = crate::official::menu_art(gui_atlas.as_ref());
     let viewport = (args.width, args.height);
     let Some(path) = args.screenshot.as_deref() else {
-        let demo = build(view, viewport, &font.atlas, (&sheets, art));
+        let demo = if is_sign_view(view) {
+            sign_scene(view, viewport, &font.atlas, (&sheets, gui_atlas.as_ref()))
+        } else {
+            build(view, viewport, &font.atlas, (&sheets, art))
+        };
         print!("{}", demo.render(view, viewport, font.source));
         return Ok(());
     };
@@ -693,6 +749,14 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
         let scene = (textures, gui_atlas.as_ref(), icons);
         let fonts = (&installed.atlas, brand.as_ref());
         menu_scene(view, viewport, fonts, (&sheets, art), scene)
+    } else if is_sign_view(view) {
+        let sign = sign_scene(
+            view,
+            viewport,
+            &installed.atlas,
+            (&sheets, gui_atlas.as_ref()),
+        );
+        (sign, None)
     } else {
         (
             build(view, viewport, &installed.atlas, (&sheets, art)),

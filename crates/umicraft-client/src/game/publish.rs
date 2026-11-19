@@ -18,8 +18,8 @@ use umicraft_game::entity::rail::rail_entities;
 use umicraft_game::entity::shadow::shadow_entities;
 use umicraft_game::entity::{EntityId, EntityKind};
 use umicraft_game::view::Perspective;
-use umicraft_mesh::ChunkSnapshot;
-use umicraft_world::{LightLevel, World};
+use umicraft_mesh::{BlockEntityKind, ChunkSnapshot};
+use umicraft_world::{BlockPos, LightLevel, World};
 
 use super::look::Look;
 use super::messages::{ChunkEvent, Frame, RenderEvent, TextScreenRequest};
@@ -189,7 +189,18 @@ pub(super) fn publish_text_screens(game: &mut Game, frames: &SyncSender<RenderEv
             .map_or_else(Default::default, |(_, lines)| {
                 lines.clone().map(|line| unformatted_text(&line, &lang))
             });
-        requests.push(TextScreenRequest::Sign { position, lines });
+        let (x, y, z) = position;
+        // `GuiEditSign` draws a standing sign for the standing sign block and
+        // a wall sign for anything else.
+        let standing = game.world.as_ref().is_some_and(|world| {
+            BlockEntityKind::of(world.block(BlockPos::new(x, y, z)))
+                == Some(BlockEntityKind::StandingSign)
+        });
+        requests.push(TextScreenRequest::Sign {
+            position,
+            lines,
+            standing,
+        });
     }
     if let Some(stack) = game.pending_book.take() {
         requests.push(TextScreenRequest::Book {

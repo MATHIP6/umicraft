@@ -88,6 +88,14 @@ pub enum GameEvent {
     Inventory(InventoryAction),
     /// A click on a button or text change of a container screen.
     Container(ContainerAction),
+    /// The lines of the sign being edited changed. They show on the sign at
+    /// once, as `GuiEditSign` edits the tile entity in place; nothing is sent.
+    SignTyped {
+        /// Block position of the sign.
+        position: (i32, i32, i32),
+        /// The four lines as chat-component JSON.
+        lines: [String; 4],
+    },
     /// The player finished editing a sign.
     SignEdited {
         /// Block position of the sign.
@@ -290,6 +298,8 @@ pub enum TextScreenRequest {
         position: (i32, i32, i32),
         /// What the four lines read now.
         lines: [String; 4],
+        /// A standing sign (with its post); a wall sign otherwise.
+        standing: bool,
     },
     /// The book screen of a book and quill or a written book.
     Book {

@@ -65,9 +65,14 @@ pub struct BlockEntities {
 impl BlockEntities {
     /// Stores the four lines of a sign (0x33).
     pub fn apply_sign(&mut self, packet: &UpdateSign) {
-        let pos = (packet.x, packet.y, packet.z);
+        self.set_sign((packet.x, packet.y, packet.z), packet.lines.clone());
+    }
+
+    /// Sets the four lines (chat JSON) of the sign at `pos`: a server update,
+    /// or the text the player is typing in the sign editor.
+    pub fn set_sign(&mut self, pos: Pos, lines: [String; 4]) {
         if self.signs.len() < MAX_ENTRIES || self.signs.contains_key(&pos) {
-            Arc::make_mut(&mut self.signs).insert(pos, packet.lines.clone());
+            Arc::make_mut(&mut self.signs).insert(pos, lines);
         }
     }
 
