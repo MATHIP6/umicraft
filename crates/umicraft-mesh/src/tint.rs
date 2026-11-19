@@ -246,6 +246,13 @@ pub(crate) fn state_tint<S: BlockSource + ?Sized>(
 /// Block id of redstone wire (`BlockRedstoneWire`).
 const REDSTONE_WIRE: u16 = 55;
 
+/// Block id of the lily pad (`BlockLilyPad`).
+const LILY_PAD: u16 = 111;
+
+/// `BlockLilyPad.colorMultiplier` (2129968): a fixed green in the world, the
+/// same in every biome.
+const LILY_PAD_COLOR: [u8; 3] = [0x20, 0x80, 0x30];
+
 /// Block ids of the pumpkin and melon stems (`BlockStem`).
 const STEMS: [u16; 2] = [104, 105];
 
@@ -274,6 +281,7 @@ pub fn fixed_color(state: BlockState) -> Option<[u8; 3]> {
             2 => Some(BIRCH_LEAVES),
             _ => None,
         },
+        LILY_PAD => Some(LILY_PAD_COLOR),
         id if STEMS.contains(&id) => Some(stem_color(state.metadata())),
         _ => None,
     }
@@ -497,6 +505,11 @@ mod tests {
         // Regression: broken redstone wire shed white fragments.
         assert_eq!(fixed_color(BlockState::new(55, 15)), Some([255, 50, 0]));
         assert_eq!(fixed_color(BlockState::new(1, 0)), None);
+        // A lily pad is the same green in every biome (`BlockLilyPad`).
+        assert_eq!(
+            fixed_color(BlockState::new(111, 0)),
+            Some([0x20, 0x80, 0x30])
+        );
     }
 
     struct BiomeGrid {
