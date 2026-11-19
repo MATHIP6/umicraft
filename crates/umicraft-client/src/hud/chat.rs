@@ -36,6 +36,7 @@ pub(crate) fn lang() -> Arc<Lang> {
 /// The tab-list header, the title and the action bar are legitimately empty
 /// (`{"text":""}` clears them). A malformed component is returned unchanged.
 #[must_use]
+#[cfg(test)]
 pub fn flatten(json: &str) -> String {
     chat::plain(&parse_runs(json))
 }

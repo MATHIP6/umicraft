@@ -4,7 +4,7 @@
 
 use winit::keyboard::KeyCode;
 
-use super::names::BINDABLE;
+use super::names::{key_from_name, key_label, key_name, BINDABLE};
 use super::*;
 
 #[test]

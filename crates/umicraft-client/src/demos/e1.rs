@@ -332,11 +332,6 @@ impl E1Run {
             let _ = self.log.flush();
         }
     }
-
-    /// Flushes the log.
-    pub fn finish(&mut self) {
-        let _ = self.log.flush();
-    }
 }
 
 /// The run waiting for the game thread to pick it up.

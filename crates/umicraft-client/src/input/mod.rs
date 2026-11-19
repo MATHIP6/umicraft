@@ -15,8 +15,8 @@ use std::time::Instant;
 use umicraft_game::item_use::DropKind;
 
 pub(crate) mod clipboard;
-pub mod mouse_look;
-pub mod ui;
+pub(crate) mod mouse_look;
+pub(crate) mod ui;
 
 /// The movement key state, sampled by an input source.
 ///

@@ -12,7 +12,6 @@ mod tests;
 
 pub use action::Action;
 pub use binding::Binding;
-pub use names::{is_reserved, key_from_name, key_label, key_name};
 
 /// The [`Binding`] of every [`Action`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +68,7 @@ impl KeyBindings {
 
     /// The first action bound to `binding`.
     #[must_use]
+    #[cfg(test)]
     pub fn action_for(&self, binding: impl Into<Binding>) -> Option<Action> {
         self.actions_for(binding).next()
     }

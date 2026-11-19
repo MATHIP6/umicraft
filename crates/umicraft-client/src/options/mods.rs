@@ -72,7 +72,7 @@ mod tests {
         assert_eq!(options.mods, ModsOptions::default());
         assert_eq!(
             options.menu.title_style,
-            crate::options::TitleStyleSetting::Classic
+            crate::options::menu::TitleStyleSetting::Classic
         );
         let _ = std::fs::remove_dir_all(path.parent().expect("folder"));
     }

@@ -266,6 +266,7 @@ impl ModsRuntime {
     }
 
     /// The registry, for the mods menu to change a setting.
+    #[cfg(test)]
     pub fn registry_mut(&mut self) -> &mut ModRegistry {
         &mut self.registry
     }

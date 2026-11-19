@@ -152,7 +152,6 @@ impl WorldView {
                 pos,
                 generation,
                 mut mesh,
-                build_micros: _,
             }) = self.pool.try_recv()
             else {
                 break;

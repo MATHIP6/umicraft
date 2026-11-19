@@ -3,10 +3,10 @@
 //! The debug screens and their measurements: the F3 screen, the debug chord
 //! lines, the world facts and the frame metrics.
 
-pub mod cpu_split;
+pub(crate) mod cpu_split;
 pub(crate) mod f3;
 pub(crate) mod fps_meter;
 pub(crate) mod lines;
 pub mod metrics;
 pub(crate) mod process_memory;
-pub mod world;
+pub(crate) mod world;

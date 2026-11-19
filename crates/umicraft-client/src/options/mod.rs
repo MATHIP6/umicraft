@@ -33,12 +33,12 @@ mod video;
 
 pub use chat::{ChatOptions, ChatVisibility};
 pub use controls::ControlOptions;
-pub use keys::{is_reserved, key_from_name, key_label, key_name, Action, Binding, KeyBindings};
+pub use keys::{Action, Binding, KeyBindings};
 pub use language::LanguageOptions;
-pub use menu::{MenuOptions, ThemeSetting, TitleStyleSetting};
+pub use menu::{MenuOptions, ThemeSetting};
 pub use mods::ModsOptions;
 pub use multiplayer::MultiplayerOptions;
-pub use packs::{is_pack_name, ResourcePackOptions, MAX_PACK_DEPTH, PACKS_FOLDER};
+pub use packs::{ResourcePackOptions, PACKS_FOLDER};
 pub use skin::{SkinOptions, SkinPart};
 pub use sound::{CategoryLabel, SoundCategory, SoundOptions};
 pub use video::{
@@ -46,7 +46,7 @@ pub use video::{
     MAX_SMOOTH_LIGHTING, MIPMAP_LEVELS, RENDER_DISTANCE, UNLIMITED_FPS,
 };
 
-pub mod effects;
+pub(crate) mod effects;
 
 /// The name of the options file.
 pub const FILE_NAME: &str = "options.toml";

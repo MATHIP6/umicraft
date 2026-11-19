@@ -3,10 +3,10 @@
 //! The client side of the built-in mods (ADR-0065): the runtime, the mods menu,
 //! the HUD widgets and the HUD editor.
 
-pub mod facts;
-pub mod hud;
-pub mod hud_editor;
-pub mod icons;
-pub mod menu;
-pub mod runtime;
-pub mod zoom;
+pub(crate) mod facts;
+pub(crate) mod hud;
+pub(crate) mod hud_editor;
+pub(crate) mod icons;
+pub(crate) mod menu;
+pub(crate) mod runtime;
+pub(crate) mod zoom;

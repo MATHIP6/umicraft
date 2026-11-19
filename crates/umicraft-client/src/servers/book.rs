@@ -93,8 +93,9 @@ impl fmt::Display for ServerAddress {
 /// show a message instead.)
 ///
 /// # Example
-/// ```
-/// use umicraft_client::servers::parse_address;
+/// ```ignore
+/// // `servers` is private to the crate, so the example is not run as a
+/// // doctest; the unit tests of this module cover it.
 ///
 /// let address = parse_address("play.example.com:25570").unwrap();
 /// assert_eq!(address.port, 25570);
@@ -456,6 +457,17 @@ pub enum EditError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_address_keeps_its_port_and_defaults_without_one() {
+        let address = parse_address(" play.example.com:25570 ").expect("valid");
+        assert_eq!(address.host, "play.example.com");
+        assert_eq!(address.port, 25570);
+        assert_eq!(
+            parse_address("play.example.com").expect("valid").port,
+            DEFAULT_PORT
+        );
+    }
 
     #[test]
     fn the_pack_mode_survives_a_save_and_old_files_read_as_prompt() {

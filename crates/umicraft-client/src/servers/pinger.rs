@@ -175,6 +175,7 @@ impl Pinger {
 
     /// The generation of the latest [`Pinger::refresh`] (0 before the first).
     #[must_use]
+    #[cfg(test)]
     pub fn generation(&self) -> u64 {
         self.generation
     }

@@ -18,13 +18,13 @@
 
 pub(crate) mod achievements;
 pub(crate) mod anvil_field;
-pub mod connection_end;
-pub mod creative;
+pub(crate) mod connection_end;
+pub(crate) mod creative;
 pub(crate) mod effect_list;
-pub mod inventory;
+pub(crate) mod inventory;
 pub(crate) mod menu_flow;
 pub(crate) mod menu_rows;
-pub mod options;
+pub(crate) mod options;
 pub(crate) mod portrait;
 pub(crate) mod splash;
 pub(crate) mod stats;

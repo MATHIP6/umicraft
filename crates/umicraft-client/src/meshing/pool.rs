@@ -39,8 +39,6 @@ pub struct MeshResult {
     pub generation: u64,
     /// CPU mesh; empty when the column is empty or unloaded.
     pub mesh: Mesh,
-    /// CPU time spent building this chunk mesh, in microseconds.
-    pub build_micros: u32,
 }
 
 /// Live telemetry counters shared by all workers in a [`MeshPool`].
@@ -203,6 +201,7 @@ impl MeshPool {
 
     /// Blocking result wait used by screenshot mode.
     #[must_use]
+    #[cfg(test)]
     pub fn recv(&self) -> Option<MeshResult> {
         self.results.as_ref().and_then(|rx| rx.recv().ok())
     }
@@ -244,7 +243,6 @@ fn worker_loop(
             pos: job.pos,
             generation: job.generation,
             mesh,
-            build_micros,
         };
         if results.send(result).is_err() {
             return;

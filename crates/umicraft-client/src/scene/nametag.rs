@@ -61,6 +61,7 @@ pub struct PlacedTag {
 /// given to `WorldView::entities`), so the projection works on small numbers
 /// even at x = 1 000 000 (F2-1b).
 #[must_use]
+#[cfg(test)]
 pub fn place_tags(
     entities: &[EntityRenderSnapshot],
     camera: &Camera,
@@ -186,6 +187,7 @@ fn project(view_projection: glam::Mat4, point: Vec3, width: f32, height: f32) ->
 /// full strength with it. A crouching player's tag (`renderName`) has the
 /// box and the faint text only, both under the depth test.
 #[must_use]
+#[cfg(test)]
 pub fn draw_tags(font: &FontAtlas, tags: &[PlacedTag]) -> Vec<Nametag> {
     let mut out = Vec::with_capacity(tags.len());
     draw_tags_into(font, tags, &mut out);

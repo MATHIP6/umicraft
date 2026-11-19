@@ -26,6 +26,7 @@ const HEAD_STICKY_BIT: u8 = 8;
 /// The vertices are in world coordinates, so the renderer draws the result
 /// like a chunk. The mesh is empty when nothing moves.
 #[must_use]
+#[cfg(test)]
 pub fn mesh_moving_blocks(
     blocks: &MovingBlocks,
     partial_tick: f32,

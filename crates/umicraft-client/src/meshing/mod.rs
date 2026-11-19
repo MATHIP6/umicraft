@@ -3,6 +3,6 @@
 //! The CPU meshing of the chunks: the worker pool, the queue and the settings
 //! the workers read.
 
-pub mod pool;
+pub(crate) mod pool;
 pub(crate) mod queue;
-pub mod settings;
+pub(crate) mod settings;

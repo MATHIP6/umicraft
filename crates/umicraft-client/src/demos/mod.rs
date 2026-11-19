@@ -7,7 +7,7 @@
 pub mod bench_scene;
 pub mod block_demo;
 pub(crate) mod caption;
-pub mod e1;
+pub(crate) mod e1;
 pub mod entity_demo;
 pub mod hud_demo;
 pub mod ui_demo;

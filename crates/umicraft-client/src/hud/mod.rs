@@ -4,7 +4,7 @@
 //! dials, and the cached draw list.
 
 pub mod cache;
-pub mod chat;
-pub mod dials;
+pub(crate) mod chat;
+pub(crate) mod dials;
 pub(crate) mod player;
 pub(crate) mod social;

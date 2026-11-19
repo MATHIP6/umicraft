@@ -37,14 +37,9 @@ impl TextureAnimator {
         }
     }
 
-    /// Number of animated layers.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.animations.len()
-    }
-
     /// Whether no layer is animated.
     #[must_use]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.animations.is_empty()
     }

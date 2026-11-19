@@ -4,6 +4,7 @@
 
 use winit::keyboard::KeyCode;
 
+use super::menu::TitleStyleSetting;
 use super::*;
 
 fn temp_folder(name: &str) -> PathBuf {

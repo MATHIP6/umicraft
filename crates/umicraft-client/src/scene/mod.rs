@@ -5,15 +5,15 @@
 
 pub(crate) mod block_entity;
 pub(crate) mod border;
-pub mod cracks;
+pub(crate) mod cracks;
 pub mod entity;
 pub(crate) mod fog;
-pub mod item_world;
-pub mod map;
-pub mod moving_blocks;
-pub mod nametag;
-pub mod overlay;
-pub mod overlay_state;
-pub mod particle_ambient;
-pub mod particles;
-pub mod weather;
+pub(crate) mod item_world;
+pub(crate) mod map;
+pub(crate) mod moving_blocks;
+pub(crate) mod nametag;
+pub(crate) mod overlay;
+pub(crate) mod overlay_state;
+pub(crate) mod particle_ambient;
+pub(crate) mod particles;
+pub(crate) mod weather;

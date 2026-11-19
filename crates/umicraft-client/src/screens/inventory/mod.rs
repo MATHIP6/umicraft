@@ -4,5 +4,5 @@
 //! translation of winit keys.
 
 pub(crate) mod draw;
-pub mod input;
+pub(crate) mod input;
 pub(crate) mod winit_keys;

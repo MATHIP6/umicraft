@@ -366,6 +366,7 @@ impl OptionsScreen {
 
     /// The names of the packs the draft selects, highest priority first.
     #[must_use]
+    #[cfg(test)]
     pub fn pack_draft(&self) -> &[String] {
         &self.pack_draft
     }

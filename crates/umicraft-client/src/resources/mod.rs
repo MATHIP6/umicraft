@@ -4,13 +4,13 @@
 //! array, the block models, the fonts, the icons and the sky pictures.
 
 pub(crate) mod entity_icons;
-pub mod item_icons;
-pub mod item_tints;
+pub(crate) mod item_icons;
+pub(crate) mod item_tints;
 pub mod models;
 pub(crate) mod official;
 pub(crate) mod panorama;
 pub(crate) mod sky;
 pub mod terrain;
-pub mod texture_animator;
-pub mod theme_font;
+pub(crate) mod texture_animator;
+pub(crate) mod theme_font;
 pub mod ui_font;
