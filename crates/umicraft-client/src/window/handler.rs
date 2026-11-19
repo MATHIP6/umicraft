@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use umicraft_core::events::EventBus;
 use umicraft_render::Renderer;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -268,6 +269,16 @@ impl ApplicationHandler for App {
     /// Runs once when the event loop ends normally, which is the only place the
     /// crash sentinel may be disarmed: a panic or crash never reaches it.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // Shutdown-quiescence rule (ADR-0086, F3.3): `umi_mod_shutdown` frees the
+        // closures the buses call, so every dispatcher must be gone first. Dropping
+        // the session joins the game thread (and its bus); the render bus goes next.
+        drop(self.session.take());
+        for handle in self.releasing.drain(..) {
+            if handle.join().is_err() {
+                tracing::warn!("a session-drop thread panicked");
+            }
+        }
+        self.render_bus = EventBus::default();
         if let Some(external_mods) = self.external_mods.take() {
             external_mods.shutdown();
         }

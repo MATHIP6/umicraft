@@ -52,6 +52,7 @@ use crate::screens::text::TextScreens;
 use crate::screens::Screen;
 use crate::servers::{Pinger, ServerBook};
 use crate::world_view::WorldView;
+use umicraft_modhost::EventThread;
 
 /// Decoded asset data delivered asynchronously by the background asset loader.
 pub(super) struct AsyncLoadedAssets {
@@ -188,6 +189,10 @@ impl App {
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
         let external_mods =
             umicraft_assets::cache::data_dir().map(|dir| ExternalMods::start(&dir, args.safe_mode));
+        let render_bus = external_mods
+            .as_ref()
+            .map(|mods| mods.bus(EventThread::Render))
+            .unwrap_or_default();
         Ok(Self {
             args,
             options_menu: OptionsMenu {
@@ -202,6 +207,8 @@ impl App {
             lang,
             mods: ModsRuntime::new(&options.mods),
             external_mods,
+            render_bus,
+            releasing: Vec::new(),
             options,
             audio,
             window: None,

@@ -273,7 +273,15 @@ impl LoopHarness {
             frame_micros: std::sync::Arc::clone(&frame_micros),
         };
         let flag = std::sync::Arc::clone(&stop);
-        let thread = std::thread::spawn(move || run(channels, flag, "tester".to_string(), None));
+        let thread = std::thread::spawn(move || {
+            run(
+                channels,
+                flag,
+                "tester".to_string(),
+                None,
+                Default::default(),
+            )
+        });
         Self {
             inputs: inputs_tx,
             events: events_tx,

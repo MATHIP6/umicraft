@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 
 use glam::DVec3;
 use umicraft_assets::profile_textures::{AccountSkinFetcher, ProfileTextures};
+use umicraft_core::events::EventBus;
 use umicraft_game::entity::{EntityId, EntityKind, EntityRecord, EntityStore};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::hand::HandState;
@@ -171,6 +172,8 @@ pub(super) struct Game {
     pub(super) server: ServerState,
     /// The timings the F3 screen shows: tick, network and input times, TPS.
     pub(super) metrics: TickMetrics,
+    /// The mod events of this thread (ADR-0086); empty without external mods.
+    pub(super) bus: EventBus,
 }
 
 impl Game {
@@ -227,6 +230,7 @@ impl Game {
             creative: CreativeScreen::new(),
             server: ServerState::new(),
             metrics: TickMetrics::default(),
+            bus: EventBus::default(),
         }
     }
 

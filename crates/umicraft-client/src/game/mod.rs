@@ -46,6 +46,7 @@ mod hud;
 mod inventory_events;
 mod look;
 mod messages;
+mod mod_events;
 mod movement;
 mod net;
 mod particles;

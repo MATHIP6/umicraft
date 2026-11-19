@@ -12,6 +12,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use umicraft_core::events::EventBus;
 use umicraft_core::lang::Lang;
 use umicraft_render::{Camera, Overlay, Renderer};
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
@@ -59,6 +60,7 @@ mod hotbar_scroll;
 mod inventory_control;
 mod keyboard;
 mod menu_screens;
+mod mod_events;
 mod mods_menu;
 mod options_control;
 mod player_input;
@@ -220,5 +222,11 @@ struct App {
     mods: ModsRuntime,
     /// The external native mods and the crash sentinel; shut down on a clean exit.
     external_mods: Option<ExternalMods>,
+    /// The mod events of the render thread (connection and screens). Dropped
+    /// before `external_mods` shuts down: its handlers call into the mods.
+    render_bus: EventBus,
+    /// The threads still dropping stopped sessions; joined at exit before the
+    /// mods shut down, because their game threads may still dispatch.
+    releasing: Vec<std::thread::JoinHandle<()>>,
     exit_error: Option<String>,
 }

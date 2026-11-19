@@ -17,7 +17,7 @@ use umicraft_net::play::PlayEvent;
 use umicraft_protocol::packets::play::clientbound::effect::Effect;
 
 use super::abilities::apply_mode_rules;
-use super::chat::show_chat;
+use super::chat::{show_action_bar, show_chat};
 use super::commands::CommandQueue;
 use super::container_events::apply_trade_list;
 use super::messages::RenderEvent;
@@ -126,10 +126,7 @@ fn apply_net_event(
         }
         PlayEvent::Chat(json) => show_chat(game, &json, Position::Chat),
         PlayEvent::SystemChat(json) => show_chat(game, &json, Position::System),
-        PlayEvent::ActionBar(json) => {
-            game.social.action_bar.show(&json);
-            game.hud_dirty = true;
-        }
+        PlayEvent::ActionBar(json) => show_action_bar(game, &json),
         PlayEvent::PlayerListItem(packet) => social::update_player_list(game, &packet),
         PlayEvent::PlayerListHeaderFooter(packet) => {
             game.social.player_list.set_header_footer(&packet);

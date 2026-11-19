@@ -81,6 +81,38 @@ pub enum Screen {
 }
 
 impl Screen {
+    /// The stable snake_case name mods see in the screen events (ADR-0086).
+    ///
+    /// Part of the modding API: a name is never changed or reused once released.
+    /// [`Screen::None`] is "no screen" (the game has the input), so it has no
+    /// opened or closed event; its name only keeps this total.
+    #[must_use]
+    pub const fn mod_name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Chat => "chat",
+            Self::Inventory => "inventory",
+            Self::Creative => "creative_inventory",
+            Self::GameMenu => "game_menu",
+            Self::Options => "options",
+            Self::PackPrompt => "pack_prompt",
+            Self::Sign => "sign",
+            Self::Book => "book",
+            Self::Debug => "debug",
+            Self::Title => "title",
+            Self::Loading => "loading",
+            Self::ServerList => "server_list",
+            Self::ServerEdit => "server_edit",
+            Self::ConfirmDelete => "confirm_delete",
+            Self::Accounts => "accounts",
+            Self::Connecting => "connecting",
+            Self::Disconnected => "disconnected",
+            Self::Stats => "stats",
+            Self::Achievements => "achievements",
+            Self::Mods => "mods",
+        }
+    }
+
     /// Whether the immediate-mode UI receives the pointer and the keys.
     #[must_use]
     pub const fn uses_ui(self) -> bool {
@@ -174,6 +206,41 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::Screen;
+
+    #[test]
+    fn mod_names_are_unique_snake_case() {
+        let all = [
+            Screen::None,
+            Screen::Chat,
+            Screen::Inventory,
+            Screen::Creative,
+            Screen::GameMenu,
+            Screen::Options,
+            Screen::PackPrompt,
+            Screen::Sign,
+            Screen::Book,
+            Screen::Debug,
+            Screen::Title,
+            Screen::Loading,
+            Screen::ServerList,
+            Screen::ServerEdit,
+            Screen::ConfirmDelete,
+            Screen::Accounts,
+            Screen::Connecting,
+            Screen::Disconnected,
+            Screen::Stats,
+            Screen::Achievements,
+            Screen::Mods,
+        ];
+        let names: std::collections::HashSet<_> = all.iter().map(|s| s.mod_name()).collect();
+        assert_eq!(names.len(), all.len(), "every screen has its own name");
+        for name in names {
+            assert!(
+                name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'),
+                "{name} is snake_case"
+            );
+        }
+    }
 
     #[test]
     fn only_the_empty_screen_lets_the_game_read_input() {

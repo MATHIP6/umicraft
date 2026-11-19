@@ -10,6 +10,8 @@
 //! A child of [`super`] so it reaches the window state without widening its
 //! visibility.
 
+use std::thread::JoinHandle;
+
 use super::App;
 use crate::accounts::Identity;
 use crate::args::Args;
@@ -101,14 +103,22 @@ pub(super) fn network_config(
 /// thread may sit in a connect attempt for seconds. The render thread must
 /// never wait for that (ADR-0005), so cancelling a connection hands the
 /// session to a short-lived thread.
-fn release_in_background(session: Session) {
+///
+/// Returns the thread's handle so the exit path can join it: the game
+/// thread dispatches mod events until that drop completes, and mods may only
+/// be shut down once no dispatcher is left (ADR-0086, F3.3 quiescence rule).
+fn release_in_background(session: Session) -> Option<JoinHandle<()>> {
     let spawned = std::thread::Builder::new()
         .name("umicraft-session-drop".to_string())
         .spawn(move || drop(session));
-    if let Err(error) = spawned {
-        // The closure, and with it the session, was dropped by the failed
-        // spawn on this thread; nothing is left to clean up.
-        tracing::warn!(%error, "could not drop the session in the background");
+    match spawned {
+        Ok(handle) => Some(handle),
+        Err(error) => {
+            // The closure, and with it the session, was dropped by the failed
+            // spawn on this thread; nothing is left to clean up.
+            tracing::warn!(%error, "could not drop the session in the background");
+            None
+        }
     }
 }
 
@@ -134,11 +144,12 @@ impl App {
             self.set_screen(Screen::Accounts);
             return;
         }
-        self.stop_session();
+        self.stop_session("");
         let pack_mode = self.menu.pack_mode_for(address);
         let config = network_config(&self.args, &self.options, address, pack_mode, identity);
-        match Session::start(config) {
+        match Session::start(config, self.game_bus()) {
             Ok(session) => {
+                self.emit_connected(&address.to_string());
                 self.server_pack.set_mode(pack_mode);
                 self.session = Some(session);
                 self.send_particle_setting();
@@ -167,14 +178,14 @@ impl App {
     /// Ends the session and goes to the server list (the pause menu's
     /// Disconnect, cancelling a connection).
     pub(super) fn disconnect(&mut self) {
-        self.stop_session();
+        self.stop_session("");
         self.set_screen(Screen::ServerList);
     }
 
     /// Ends the session and shows the disconnected screen for `end`, in the
     /// player's language.
     pub(super) fn show_disconnected(&mut self, end: &ConnectionEnd) {
-        self.stop_session();
+        self.stop_session(&end.to_string());
         self.menu.set_disconnected(end, &self.lang);
         self.set_screen(Screen::Disconnected);
     }
@@ -189,10 +200,13 @@ impl App {
     }
 
     /// Stops and drops the session, forgets everything the world view and
-    /// the window kept of it and frees the mouse.
-    fn stop_session(&mut self) {
+    /// the window kept of it and frees the mouse. `reason` goes to the mods'
+    /// `Disconnected` event, empty when the player left.
+    fn stop_session(&mut self, reason: &str) {
         if let Some(session) = self.session.take() {
-            release_in_background(session);
+            self.releasing.retain(|handle| !handle.is_finished());
+            self.releasing.extend(release_in_background(session));
+            self.emit_disconnected(reason);
         }
         if let (Some(world), Some(renderer)) = (self.world.as_mut(), self.renderer.as_mut()) {
             world.clear_session(renderer);

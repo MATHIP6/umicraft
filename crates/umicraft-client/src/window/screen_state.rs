@@ -32,7 +32,9 @@ impl App {
             return;
         }
         let was_blocking = self.screen.blocks_game_input();
+        let previous = self.screen;
         self.screen = screen;
+        self.emit_screen_events(previous, screen);
         self.menu.enter(screen);
         self.ui_input.clear();
         self.chat.scroll = 0;

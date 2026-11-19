@@ -9,10 +9,11 @@
 
 use std::path::{Path, PathBuf};
 
+use umicraft_core::events::EventBus;
 use umicraft_modapi_sys::UMI_API_VERSION;
 use umicraft_modhost::{
-    discover, resolve, ApiVersion, Candidate, CrashSentinel, Discovered, ModHost, SentinelGuard,
-    TrustList,
+    discover, resolve, ApiVersion, Candidate, CrashSentinel, Discovered, EventThread, ModHost,
+    SentinelGuard, TrustList,
 };
 
 /// Folder of the installed mods, inside the data directory.
@@ -85,7 +86,22 @@ impl ExternalMods {
         Self { host, sentinel }
     }
 
-    /// Shuts every mod down, then disarms the sentinel. Call on a clean exit only.
+    /// A bus with the subscriptions of the mods that live on `thread`.
+    ///
+    /// Empty in safe mode, so an emitter that checks `has_subscribers` pays
+    /// nothing. Build one per thread and move it there: a bus is dispatched on
+    /// one thread only.
+    pub(crate) fn bus(&self, thread: EventThread) -> EventBus {
+        let mut bus = EventBus::default();
+        if let Some(host) = &self.host {
+            host.install(&mut bus, thread);
+        }
+        bus
+    }
+
+    /// Shuts every mod down, then disarms the sentinel. Call on a clean exit only,
+    /// after every thread that dispatches to a mod has stopped and every bus built
+    /// by [`ExternalMods::bus`] is dropped (shutdown-quiescence rule, ADR-0086).
     pub(crate) fn shutdown(mut self) {
         if let Some(host) = &mut self.host {
             host.shutdown_all();
@@ -232,6 +248,17 @@ mod tests {
             CrashSentinel::armed(&sentinel_path(&dir)),
             "dropping must not disarm"
         );
+    }
+
+    #[test]
+    fn a_run_without_mods_builds_empty_buses() {
+        let dir = scratch("buses");
+        let mods = ExternalMods::start(&dir, true);
+        for thread in [EventThread::Game, EventThread::Render] {
+            let bus = mods.bus(thread);
+            assert!(!bus.has_subscribers::<umicraft_modhost::PreTick>());
+        }
+        mods.shutdown();
     }
 
     #[test]

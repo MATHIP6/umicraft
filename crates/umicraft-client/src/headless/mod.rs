@@ -73,22 +73,25 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
             .map_err(|error| ClientError::Network(format!("{}: {error}", path.display())))?;
         crate::demos::e1::install(run);
     }
-    let session = Session::start(NetworkConfig {
-        host: host.to_string(),
-        port,
-        name: args.name.clone(),
-        session: args.session.clone(),
-        view_distance: args.view_distance,
-        chat_mode: 0,
-        chat_colors: true,
-        skin_parts: crate::options::SkinOptions::default().parts_mask(),
-        brand: crate::options::MultiplayerOptions::default().brand,
-        locale: crate::options::LanguageOptions::default().code,
-        handshake_host: args.handshake_host.clone(),
-        // No window can ask the player, so no pack is installed.
-        decline_server_packs: true,
-        account_skin: false,
-    })?;
+    let session = Session::start(
+        NetworkConfig {
+            host: host.to_string(),
+            port,
+            name: args.name.clone(),
+            session: args.session.clone(),
+            view_distance: args.view_distance,
+            chat_mode: 0,
+            chat_colors: true,
+            skin_parts: crate::options::SkinOptions::default().parts_mask(),
+            brand: crate::options::MultiplayerOptions::default().brand,
+            locale: crate::options::LanguageOptions::default().code,
+            handshake_host: args.handshake_host.clone(),
+            // No window can ask the player, so no pack is installed.
+            decline_server_packs: true,
+            account_skin: false,
+        },
+        umicraft_core::events::EventBus::default(),
+    )?;
 
     let mut script = Script::new(phases(&args.script));
     let mut report = Report::default();
