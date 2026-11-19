@@ -117,7 +117,8 @@ options:
                       action bar) and the options screens from scripted server
                       packets; no server or GPU unless --screenshot is given
   --hud-view NAME     scene of --hud-demo: overview, tab, chat, menu, options,
-                      controls, chat-options, title, servers, options-ember, options-amethyst
+                      controls, chat-options, title, servers, options-ember, options-amethyst,
+                      sign, sign-wall
                       (default: overview)
   --synthetic-panorama  with --hud-demo --hud-view title: draw generated gradient
                       faces instead of the panorama of the user's jar
@@ -151,7 +152,7 @@ options:
   --help, -h          print this help";
 
 /// The scenes of `--hud-demo`.
-pub const HUD_VIEWS: [&str; 28] = [
+pub const HUD_VIEWS: [&str; 30] = [
     "overview",
     "tab",
     "chat",
@@ -180,6 +181,8 @@ pub const HUD_VIEWS: [&str; 28] = [
     "mods_list",
     "hud-editor",
     "hud-editor-list",
+    "sign",
+    "sign-wall",
 ];
 
 /// The scripted sessions the headless mode knows.

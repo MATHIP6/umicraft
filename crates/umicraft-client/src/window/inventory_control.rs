@@ -272,6 +272,8 @@ impl App {
         let measure = |text: &str| atlas.measure(text, 1.0);
         if let Some(done) = self.text_screens.key(key, &measure) {
             self.finish_text_screen(done);
+        } else if let Some(preview) = self.text_screens.sign_preview() {
+            self.send_event(preview);
         }
     }
 }

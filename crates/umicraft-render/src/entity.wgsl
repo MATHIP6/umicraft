@@ -69,6 +69,27 @@ var<private> DYES = array<vec3<f32>, 16>(
     vec3<f32>(0.1, 0.1, 0.1),
 );
 
+// The sixteen chat colours `§0`..`§f` (MCP `FontRenderer.colorCode`), for
+// the text of the signs.
+var<private> CHAT_COLORS = array<vec3<f32>, 16>(
+    vec3<f32>(0.0, 0.0, 0.0),
+    vec3<f32>(0.0, 0.0, 0.6667),
+    vec3<f32>(0.0, 0.6667, 0.0),
+    vec3<f32>(0.0, 0.6667, 0.6667),
+    vec3<f32>(0.6667, 0.0, 0.0),
+    vec3<f32>(0.6667, 0.0, 0.6667),
+    vec3<f32>(1.0, 0.6667, 0.0),
+    vec3<f32>(0.6667, 0.6667, 0.6667),
+    vec3<f32>(0.3333, 0.3333, 0.3333),
+    vec3<f32>(0.3333, 0.3333, 1.0),
+    vec3<f32>(0.3333, 1.0, 0.3333),
+    vec3<f32>(0.3333, 1.0, 1.0),
+    vec3<f32>(1.0, 0.3333, 0.3333),
+    vec3<f32>(1.0, 0.3333, 1.0),
+    vec3<f32>(1.0, 1.0, 0.3333),
+    vec3<f32>(1.0, 1.0, 1.0),
+);
+
 fn face_shade(normal: vec3<f32>) -> f32 {
     let ax = abs(normal.x);
     let ay = abs(normal.y);
@@ -91,7 +112,7 @@ fn entity_vertex(in: VertexIn) -> VertexOut {
     out.light = lightmap_sample(f32(in.light & 0x0Fu), f32((in.light >> 4u) & 0x0Fu));
     out.shade = face_shade(in.normal);
     // Bit 8: hurt tint. Bits 9..=12: white flash level (the creeper fuse).
-    // Bit 13: dye tint, bits 14..=17 the dye.
+    // Bit 13: dye tint, bits 14..=17 the dye (a chat colour with bit 18).
     out.hurt = f32((in.light >> 8u) & 1u);
     out.flash = f32((in.light >> 9u) & 15u) / 15.0;
     let dyed = (in.light >> 13u) & 1u;
@@ -107,7 +128,11 @@ fn entity_vertex(in: VertexIn) -> VertexOut {
     // Bit 18: experience orb, whose colour cycles with the phase of bits
     // 19..=26, in 256 steps of a turn (MCP `RenderXPOrb`: red
     // `(sin p + 1) / 2`, green 1, blue `(sin (p + 4.1887903) + 1) / 10`).
-    if (((in.light >> 18u) & 1u) == 1u) {
+    // Bits 13 and 18 together: the chat colour of bits 14..=17 (sign text);
+    // an orb never sets the dye bit.
+    if (((in.light >> 18u) & 1u) == 1u && dyed == 1u) {
+        out.dye = CHAT_COLORS[(in.light >> 14u) & 15u];
+    } else if (((in.light >> 18u) & 1u) == 1u) {
         let phase = f32((in.light >> 19u) & 255u) * 0.02454369;
         out.dye = vec3<f32>(
             (sin(phase) + 1.0) * 0.5,

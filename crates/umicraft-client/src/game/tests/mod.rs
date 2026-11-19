@@ -71,6 +71,7 @@ mod join;
 mod look;
 mod movement;
 mod particles;
+mod signs;
 mod view;
 mod vitals;
 

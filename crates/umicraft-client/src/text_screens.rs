@@ -3,15 +3,23 @@
 //! The book and sign screens: drawing, buttons and keys around the state
 //! machines of [`umicraft_game::editors`] (MCP `GuiScreenBook`, `GuiEditSign`).
 //!
-//! Deviations from the reference, recorded in `docs/parity.md`: the sign is a
-//! flat board instead of the 3D sign model, and the page arrows are plain
-//! hit areas drawn from `book.png`.
+//! The sign editor draws the front faces of the board and the post from
+//! `entity/sign.png`, which is all the reference's orthographic front view of
+//! the sign model shows, at the positions of [`SignLayout`], and the lines
+//! with their `§` styles and the `> line <` marker of the line being edited.
+//!
+//! Deviations from the reference, recorded in `docs/parity.md`: italic sign
+//! text is drawn upright (the UI has no sheared glyphs), and the page arrows
+//! are plain hit areas drawn from `book.png`.
 
 use umicraft_assets::GuiAtlas;
 use umicraft_core::lang::Lang;
 use umicraft_game::editors::book::{BookEditor, PAGE_WIDTH};
-use umicraft_game::editors::sign::SignEditor;
+use umicraft_game::editors::sign::{SignEditor, SignLayout, BOARD_TEXELS, POST_TEXELS, TEXT_SCALE};
 use umicraft_game::editors::wrap::wrap;
+use umicraft_ui::game_menu::draw_default_background;
+use umicraft_ui::legacy_text::parse_legacy;
+use umicraft_ui::styled_text::{draw_styled, styled_width, StyledRun};
 use umicraft_ui::widgets::button_enabled;
 use umicraft_ui::{gui_scale, FontAtlas, Rect, TextStyle, Ui};
 
@@ -39,9 +47,13 @@ const DONE_WIDE: f32 = 200.0;
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const GREY: [f32; 4] = [0.5, 0.5, 0.5, 1.0];
 const WHITE: [f32; 4] = [1.0; 4];
-/// Planks of the flat sign.
-const BOARD: [f32; 4] = [0.55, 0.42, 0.25, 1.0];
-const BOARD_EDGE: [f32; 4] = [0.30, 0.22, 0.12, 1.0];
+/// The colour of the sign when the GUI atlas has no sign texture.
+const PLANKS: [f32; 4] = [0.55, 0.42, 0.25, 1.0];
+/// Top of the title (`drawCenteredString(..., 40, 0xFFFFFF)`).
+const TITLE_TOP: f32 = 40.0;
+/// The Done button sits this far under a quarter of the screen height
+/// (`height / 4 + 120`).
+const DONE_BELOW_QUARTER: f32 = 120.0;
 
 /// A key the text screens act on, already independent of the windowing
 /// library.
@@ -68,7 +80,11 @@ pub(crate) struct Done(pub Option<GameEvent>);
 #[derive(Debug)]
 struct SignScreen {
     position: (i32, i32, i32),
+    standing: bool,
     editor: SignEditor,
+    /// The lines the world sign last showed, to send a preview only when
+    /// they change.
+    previewed: [String; 4],
 }
 
 #[derive(Debug)]
@@ -90,9 +106,15 @@ impl TextScreens {
     pub(crate) fn open(&mut self, request: TextScreenRequest) -> Option<Screen> {
         *self = Self::default();
         match request {
-            TextScreenRequest::Sign { position, lines } => {
+            TextScreenRequest::Sign {
+                position,
+                lines,
+                standing,
+            } => {
                 self.sign = Some(SignScreen {
                     position,
+                    standing,
+                    previewed: lines.clone(),
                     editor: SignEditor::new(lines),
                 });
                 Some(Screen::Sign)
@@ -116,6 +138,12 @@ impl TextScreens {
         self.book.as_mut()?.key(key, measure)
     }
 
+    /// The lines of the sign being edited when they changed since the last
+    /// call, so the world sign shows what is typed.
+    pub(crate) fn sign_preview(&mut self) -> Option<GameEvent> {
+        self.sign.as_mut()?.preview()
+    }
+
     /// Draws the open screen and returns `Some` when a button ended it.
     pub(crate) fn draw(
         &mut self,
@@ -135,7 +163,7 @@ impl TextScreens {
             lang,
         };
         if let Some(sign) = self.sign.as_mut() {
-            return sign.draw(view, caret_visible);
+            return sign.draw(view, gui_atlas, caret_visible);
         }
         self.book.as_mut()?.draw(view, gui_atlas, caret_visible)
     }
@@ -175,6 +203,23 @@ impl View<'_> {
         self.atlas.measure(text, 1.0)
     }
 
+    /// Draws `text` centred on `centre` with its shadow
+    /// (`drawCenteredString`).
+    fn centred_shadowed(&mut self, centre: f32, y: f32, text: &str, color: [f32; 4]) {
+        let left = centre - (self.width(text) as i32 / 2) as f32;
+        let at = self.point(left, y);
+        let runs = [StyledRun::plain(text, color)];
+        draw_styled(self.ui.draw(), self.atlas, at, &runs, self.scale, true, 0);
+    }
+
+    /// A point in GUI pixels from the top-left of the screen.
+    fn point(&self, x: f32, y: f32) -> [f32; 2] {
+        [
+            self.viewport.x + x * self.scale,
+            self.viewport.y + y * self.scale,
+        ]
+    }
+
     fn button(&mut self, id: &str, rect: Rect, label: &str, enabled: bool) -> bool {
         let id = self.ui.id(id);
         button_enabled(self.ui, id, rect, self.atlas, label, enabled).clicked
@@ -183,6 +228,11 @@ impl View<'_> {
     /// The screen width in GUI pixels.
     fn gui_width(&self) -> f32 {
         self.viewport.width / self.scale
+    }
+
+    /// The screen height in GUI pixels.
+    fn gui_height(&self) -> f32 {
+        self.viewport.height / self.scale
     }
 }
 
@@ -207,33 +257,81 @@ impl SignScreen {
         }))
     }
 
-    fn draw(&mut self, mut view: View<'_>, caret_visible: bool) -> Option<Done> {
-        view.ui.draw().rect(view.viewport, [0.0, 0.0, 0.0, 0.55]);
-        let centre = view.gui_width() / 2.0;
-        let title = view.lang.tr("sign.edit");
-        let title_x = centre - view.width(title) / 2.0;
-        view.text(title_x, 40.0, title, WHITE);
+    /// The preview event when the lines changed since the last one.
+    fn preview(&mut self) -> Option<GameEvent> {
+        if self.editor.lines() == &self.previewed {
+            return None;
+        }
+        self.previewed = self.editor.lines().clone();
+        Some(GameEvent::SignTyped {
+            position: self.position,
+            lines: self.editor.json_lines(),
+        })
+    }
 
-        let board = view.rect(centre - 60.0, 70.0, 120.0, 60.0);
-        view.ui.draw().rect(board, BOARD_EDGE);
-        let inner = view.rect(centre - 58.0, 72.0, 116.0, 56.0);
-        view.ui.draw().rect(inner, BOARD);
+    /// `GuiEditSign.drawScreen`. `marker_visible` is the blink of the
+    /// `> line <` marker (`updateCounter / 6 % 2 == 0`).
+    fn draw(
+        &mut self,
+        mut view: View<'_>,
+        gui_atlas: Option<&GuiAtlas>,
+        marker_visible: bool,
+    ) -> Option<Done> {
+        draw_default_background(view.ui);
+        let centre = (view.gui_width() / 2.0).floor();
+        let title = view.lang.tr("sign.edit");
+        view.centred_shadowed(centre, TITLE_TOP, title, WHITE);
+
+        let layout = SignLayout::new(self.standing);
+        draw_sign(&mut view, gui_atlas, &layout, centre);
         for (index, line) in self.editor.lines().iter().enumerate() {
-            let selected = index == self.editor.line();
-            let shown = if selected && caret_visible {
-                format!("> {line} <")
-            } else {
-                line.clone()
-            };
-            let x = centre - view.width(&shown) / 2.0;
-            view.text(x, 76.0 + index as f32 * 10.0, &shown, BLACK);
+            let edited = marker_visible && index == self.editor.line();
+            draw_sign_line(&mut view, line, edited, (centre, layout.line_top(index)));
         }
 
-        let done = view.rect(centre - DONE_WIDE / 2.0, 150.0, DONE_WIDE, BUTTON.1);
+        let top = (view.gui_height() / 4.0).floor() + DONE_BELOW_QUARTER;
+        let done = view.rect(centre - DONE_WIDE / 2.0, top, DONE_WIDE, BUTTON.1);
         let label = view.lang.tr("gui.done");
         view.button("sign_done", done, label, true)
             .then(|| self.finish())
     }
+}
+
+/// Draws the front of the board and, for a standing sign, of the post.
+fn draw_sign(view: &mut View<'_>, gui_atlas: Option<&GuiAtlas>, layout: &SignLayout, centre: f32) {
+    let region = gui_atlas.and_then(|atlas| atlas.region("entity/sign"));
+    let parts = [
+        Some((layout.board, BOARD_TEXELS)),
+        layout.post.map(|post| (post, POST_TEXELS)),
+    ];
+    for ([x0, y0, x1, y1], (u, v, width, height)) in parts.into_iter().flatten() {
+        let rect = view.rect(centre + x0, y0, x1 - x0, y1 - y0);
+        match region {
+            Some(region) => {
+                let src = region.sub_region(u, v, width, height);
+                view.ui.draw().image(src, rect, WHITE);
+            }
+            None => view.ui.draw().rect(rect, PLANKS),
+        }
+    }
+}
+
+/// Draws one line of the sign centred on `centre`, as the sign renderer does
+/// in black with the `§` styles of the line; the edited line reads
+/// `> line <`, its own styles ending before the closing mark
+/// (`getFormattedText` ends with `§r`).
+fn draw_sign_line(view: &mut View<'_>, line: &str, edited: bool, (centre, top): (f32, f32)) {
+    let text = if edited {
+        format!("> {line}\u{a7}r <")
+    } else {
+        line.to_owned()
+    };
+    let runs = parse_legacy(&text, BLACK);
+    // `-getStringWidth(s) / 2`, an integer division, in font pixels.
+    let left = -(styled_width(view.atlas, &runs, 1.0) as i32 / 2) as f32;
+    let at = view.point(centre + left * TEXT_SCALE, top);
+    let scale = view.scale * TEXT_SCALE;
+    draw_styled(view.ui.draw(), view.atlas, at, &runs, scale, false, 0);
 }
 
 impl BookScreen {
@@ -437,6 +535,7 @@ mod tests {
         let sign = TextScreenRequest::Sign {
             position: (1, 2, 3),
             lines: Default::default(),
+            standing: true,
         };
         assert_eq!(screens.open(sign), Some(Screen::Sign));
         assert_eq!(screens.open(book_request(386)), Some(Screen::Book));
@@ -450,6 +549,7 @@ mod tests {
         screens.open(TextScreenRequest::Sign {
             position: (1, 2, 3),
             lines: Default::default(),
+            standing: false,
         });
         assert!(screens.key(Key::Text("hi"), &chars).is_none());
         let Some(Done(Some(GameEvent::SignEdited { position, lines }))) =
@@ -467,6 +567,7 @@ mod tests {
         screens.open(TextScreenRequest::Sign {
             position: (0, 0, 0),
             lines: Default::default(),
+            standing: true,
         });
         screens.key(Key::Text("a"), &chars);
         screens.key(Key::Enter, &chars);
@@ -477,6 +578,29 @@ mod tests {
             panic!("sign");
         };
         assert_eq!(&lines[..2], ["\"a\"", "\"b\""]);
+    }
+
+    #[test]
+    fn typing_on_a_sign_previews_the_lines_once_per_change() {
+        let mut screens = TextScreens::default();
+        screens.open(TextScreenRequest::Sign {
+            position: (4, 5, 6),
+            lines: ["old".into(), String::new(), String::new(), String::new()],
+            standing: true,
+        });
+        assert!(screens.sign_preview().is_none(), "nothing typed yet");
+        screens.key(Key::Text("!"), &chars);
+        let Some(GameEvent::SignTyped { position, lines }) = screens.sign_preview() else {
+            panic!("a preview after typing");
+        };
+        assert_eq!(position, (4, 5, 6));
+        assert_eq!(lines[0], "\"old!\"");
+        assert!(screens.sign_preview().is_none(), "no change, no preview");
+        screens.key(Key::Down, &chars);
+        assert!(
+            screens.sign_preview().is_none(),
+            "moving the caret changes no text"
+        );
     }
 
     #[test]

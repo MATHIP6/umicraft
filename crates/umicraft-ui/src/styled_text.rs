@@ -258,8 +258,24 @@ fn drawn_width(font: &FontAtlas, run: &StyledRun) -> f32 {
         .sum()
 }
 
-/// Replaces every printable glyph of `text` by one of the same advance.
-fn scramble(font: &FontAtlas, text: &str, tick: u32, first_glyph: u64) -> String {
+/// Replaces every printable glyph of `text` by one of the same advance, as
+/// `FontRenderer.renderStringAtPos` does for obfuscated (`§k`) text.
+///
+/// The choice is a hash of `tick` and the index of the glyph (`first_glyph`
+/// for the first character), so a tick always gives the same glyphs and the
+/// next tick other ones. Blank and Unicode characters are kept.
+///
+/// ```
+/// use umicraft_ui::styled_text::scramble;
+/// use umicraft_ui::FontAtlas;
+///
+/// let font = FontAtlas::fallback();
+/// let text = scramble(&font, "ab c", 3, 0);
+/// assert_eq!(text.chars().count(), 4);
+/// assert_eq!(text.chars().nth(2), Some(' '));
+/// ```
+#[must_use]
+pub fn scramble(font: &FontAtlas, text: &str, tick: u32, first_glyph: u64) -> String {
     text.chars()
         .zip(first_glyph..)
         .map(|(character, index)| scrambled_glyph(font, character, mix(tick, index)))

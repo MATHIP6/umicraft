@@ -361,7 +361,7 @@ impl App {
 
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
-            self.assets.ui_atlas.as_deref(),
+            self.assets.ui_atlas.as_ref(),
         ));
         self.assets.map_textures = Some(MapTextures::load(renderer));
 

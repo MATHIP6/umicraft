@@ -418,6 +418,12 @@ impl App {
                 .map_or_else(Vec::new, |maps| {
                     maps.frame_batches(entities, world.maps(), renderer)
                 });
+            // The UI font may have been swapped since the textures were made
+            // (theme font, GUI scale): the sign text must sample the atlas
+            // its glyphs are laid out with.
+            if let Some(font) = self.assets.ui_atlas.as_ref() {
+                entity_textures.sync_sign_font(renderer, font);
+            }
             let mut block_entities = if world.has_block_entities() {
                 mesh_block_entities(
                     world.block_entities(),

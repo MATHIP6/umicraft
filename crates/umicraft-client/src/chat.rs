@@ -37,7 +37,14 @@ pub(crate) fn lang() -> Arc<Lang> {
 /// (`{"text":""}` clears them). A malformed component is returned unchanged.
 #[must_use]
 pub fn flatten(json: &str) -> String {
-    chat::plain(&chat::parse(json, lang().table()))
+    chat::plain(&parse_runs(json))
+}
+
+/// The styled runs of a chat JSON component, translated in the current
+/// language. A malformed component is one run of its raw text.
+#[must_use]
+pub(crate) fn parse_runs(json: &str) -> Vec<Run> {
+    chat::parse(json, lang().table())
 }
 
 /// The HUD view of parsed runs, stamped with the arrival time.

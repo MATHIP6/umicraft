@@ -41,13 +41,16 @@ pub struct GuiRegion {
 ///
 /// The reference addresses the sheets of `textures/gui/` (widgets, icons, the
 /// container backgrounds...) in a 256 x 256 space and `stats_icons.png` in a
-/// 128 x 128 one (`GuiStats` uses `0.0078125F`). The textures that are drawn
-/// whole or tiled (the menu background, `misc/` icons, the map tiles) have no
-/// such space and keep their own size.
+/// 128 x 128 one (`GuiStats` uses `0.0078125F`), and the sign texture the
+/// 64 x 32 one of its model. The textures that are drawn whole or tiled (the
+/// menu background, `misc/` icons, the map tiles) have no such space and keep
+/// their own size.
 #[must_use]
 pub fn coordinate_space(name: &str, width: u32, height: u32) -> (u32, u32) {
     match name {
         "container/stats_icons" => (128, 128),
+        // Addressed like the sign model's 64 x 32 sheet (`ModelSign`).
+        "entity/sign" => (64, 32),
         "options_background" => (width, height),
         _ if name.starts_with("misc/")
             || name.starts_with("blocks/")
@@ -589,6 +592,11 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn the_sign_texture_uses_the_64_by_32_space_of_its_model() {
+        assert_eq!(coordinate_space("entity/sign", 128, 64), (64, 32));
     }
 
     #[test]
