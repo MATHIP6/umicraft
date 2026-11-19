@@ -55,7 +55,7 @@ pointer that the host passes back untouched.
 |---|---|
 | `UmiStr { ptr, len }` | borrowed UTF-8, valid for the call only; `ptr` may be null when `len` is 0 |
 | `UmiStatus` (`i32`) | `OK`, `ERROR`, `PANICKED`, `UNSUPPORTED`, `INVALID_ARGUMENT`, `DENIED`, `CONFLICT` |
-| `UmiModHandle` (`u32`) | the host's index of a loaded mod |
+| `UmiModHandle` (`UmiModContext *`) | opaque pointer to the host's per-mod state, passed back to every host function; a pointer and not an index so the host needs no process-global registry (amended 2026-11-19, before any mod was built) |
 | `UmiEventId` (`u32`) | stable event id; never reused |
 | `UmiEventHeader { size, id, flags }` | first field of every event payload; `flags` holds `CANCELLABLE`, `CANCELLED` |
 | `UmiMode` | `OBSERVE`, `INTERCEPT` |

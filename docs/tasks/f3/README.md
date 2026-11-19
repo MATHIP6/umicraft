@@ -72,3 +72,54 @@ incompatible API (ADR-0087 rules), missing dependency, dependency version not
 matched, dependency rejected (cascades), dependency cycle, service conflict
 (two mods replace the same service: the later in load order is rejected).
 Wrap chains: `Resolution::wrappers(service)` in load order.
+
+## F3.2 interface (frozen before the work is split)
+
+`UmiModHandle` is an opaque pointer to the host's per-mod `UmiModContext`
+(ADR-0087, amended): host functions reach their state through it, with no
+process-global registry.
+
+### `umicraft-modapi` (mod side; files `crates/umicraft-modapi/**`)
+
+- `trait Mod: Send + Sized + 'static { fn init(cx: &mut InitCx<'_>) -> Result<Self, ModError>; fn shutdown(&mut self) {} }`.
+- `InitCx`: `logger() -> Logger`, `observe::<E: Event>(priority, FnMut(&E) + Send + 'static)`,
+  `intercept::<E: Event>(priority, FnMut(&mut E, &mut Control) + Send + 'static)`;
+  both return `Result<(), ModError>` mapped from the host's `UmiStatus`.
+- `Logger: Copy + Send + Sync` with `error/warn/info/debug/trace(&str)`; valid
+  for the life of the process because the host table and the context are.
+- `trait Event` (sealed): `const ID`, the `#[repr(C)]` raw payload, a safe view.
+  F3.2 ships `PreTick` and `PostTick` (`tick() -> u64`). `Control::cancel()`
+  is a no-op error-free call on events that are not cancellable.
+- `umicraft_mod!(MyMod)` emits `umi_mod_api_version`, `umi_mod_init`,
+  `umi_mod_shutdown`. Every entry point and every trampoline runs inside
+  `catch_unwind` and returns `UmiStatus::PANICKED` on panic. The handler
+  closures are boxed, their pointer is the `user` pointer, and they are
+  freed by `umi_mod_shutdown`.
+- `unsafe` only in `src/ffi.rs` (ADR-0087).
+
+### `umicraft-modhost` loader (host side; files `crates/umicraft-modhost/src/{host,load,trust,sentinel,discover}*`)
+
+- `discover(mods_dir) -> Vec<Discovered>`: one entry per sub-directory with a
+  `mod.toml`: its directory and `Result<Manifest, ManifestError>`.
+- `TrustList` (`trusted.toml`: mod id → lowercase hex SHA-256), `load`/`save`,
+  `sha256_file(path)`; a library loads when its hash is listed, or when a
+  `confirm(&Manifest, &str /*hex*/) -> bool` callback accepts it (then it
+  is added to the list).
+- `CrashSentinel`: `armed(path) -> bool` (left by a previous crash), `arm(path)
+  -> SentinelGuard` that removes the file on `disarm()` (clean exit only, not
+  on drop during a panic).
+- `ModHost::load(resolution, mods_dir, trust, confirm) -> (ModHost, Vec<LoadFailure>)`:
+  in resolution order, opens `bin/<os>-<arch>/<file>`, checks
+  `umi_mod_api_version` with `UmiVersion::accepts`, calls `umi_mod_init`
+  with the `UmiHost` table and the mod's context. A failure (missing file,
+  refused hash, missing symbol, API mismatch, init error or panic) is a
+  `LoadFailure` and never aborts the others.
+- Host functions: `log` forwards to `tracing` with the mod id as a field
+  (invalid UTF-8 replaced, length capped); `subscribe` records
+  `(event, mode, priority, handler, user)` in the context, refuses unknown
+  events/modes, null handlers and calls after `init` returned.
+- `ModHost::subscriptions(event) -> impl Iterator` (load order, then priority)
+  for the F3.3 dispatcher; `ModHost::disable(id)` calls `umi_mod_shutdown`
+  once and drops the mod's subscriptions; `ModHost::shutdown_all()` at exit.
+  Libraries stay mapped until `ModHost` is dropped.
+- `unsafe` only in `src/ffi.rs` (ADR-0087).

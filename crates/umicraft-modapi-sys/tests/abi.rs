@@ -16,7 +16,7 @@ fn layouts_are_stable_on_64_bit() {
     assert_eq!(offset_of!(UmiVersion, minor), 2);
 
     assert_eq!(size_of::<UmiStatus>(), 4);
-    assert_eq!(size_of::<UmiModHandle>(), 4);
+    assert_eq!(size_of::<UmiModHandle>(), size_of::<usize>());
     assert_eq!(size_of::<UmiEventId>(), 4);
     assert_eq!(size_of::<UmiMode>(), 4);
     assert_eq!(size_of::<UmiLevel>(), 4);

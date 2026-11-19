@@ -92,7 +92,21 @@ impl UmiStatus {
     }
 }
 
-/// The host's index of a loaded mod, passed to `umi_mod_init`.
+/// The host's per-mod state; opaque to mods, which only hold pointers to it.
+///
+/// A zero-sized `repr(C)` struct with a private field: it cannot be built or
+/// read outside the host, and cbindgen emits it as an incomplete C type.
+#[repr(C)]
+pub struct UmiModContext {
+    _private: [u8; 0],
+}
+
+/// The handle a mod passes back to every host function.
+///
+/// A pointer rather than an index so that host functions reach their state
+/// without a process-global registry: several hosts (tests run in parallel)
+/// never share one. The host keeps the pointee alive and at a fixed address
+/// until the client exits (ADR-0086: unload means disable).
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UmiModHandle(pub u32);
+pub struct UmiModHandle(pub *mut UmiModContext);

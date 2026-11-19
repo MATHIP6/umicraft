@@ -1,0 +1,14 @@
+[package]
+name = "umicraft-modapi"
+description = "Rust helper for Umicraft mod authors: safe wrappers over the C ABI, the Mod trait and umicraft_mod! (ADR-0086)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+umicraft-modapi-sys.workspace = true
+
+[lints]
+workspace = true

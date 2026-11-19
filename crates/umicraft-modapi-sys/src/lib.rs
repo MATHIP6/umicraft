@@ -23,4 +23,4 @@ pub use exports::{
     UMI_MOD_INIT_SYMBOL, UMI_MOD_SHUTDOWN_SYMBOL,
 };
 pub use host::{UmiHandlerFn, UmiHost, UmiLevel, UmiMode};
-pub use types::{UmiModHandle, UmiStatus, UmiStr, UmiVersion, UMI_API_VERSION};
+pub use types::{UmiModContext, UmiModHandle, UmiStatus, UmiStr, UmiVersion, UMI_API_VERSION};

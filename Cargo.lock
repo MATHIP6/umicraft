@@ -4396,6 +4396,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-modapi"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi-sys",
+]
+
+[[package]]
 name = "umicraft-modapi-sys"
 version = "0.1.0"
 
@@ -4413,11 +4420,15 @@ dependencies = [
 name = "umicraft-modhost"
 version = "0.1.0"
 dependencies = [
+ "libloading",
  "proptest",
  "semver",
  "serde",
+ "sha2",
  "thiserror 2.0.21",
  "toml",
+ "tracing",
+ "umicraft-modapi-sys",
 ]
 
 [[package]]
