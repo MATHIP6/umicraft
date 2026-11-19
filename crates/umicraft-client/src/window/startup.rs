@@ -28,6 +28,7 @@ use crate::hud::dials::DialAnimator;
 use crate::input::ui::UiInputTranslator;
 use crate::input::InputState;
 use crate::meshing::pool::worker_count;
+use crate::mods::external::ExternalMods;
 use crate::mods::runtime::ModsRuntime;
 use crate::mods::zoom::Zoom;
 use crate::options::effects::{pack_paths, packs_folder, VideoApplier};
@@ -185,6 +186,8 @@ impl App {
         crate::screens::tooltip::set_advanced(options.controls.advanced_tooltips);
         let last_server = options.multiplayer.last_server.clone();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
+        let external_mods =
+            umicraft_assets::cache::data_dir().map(|dir| ExternalMods::start(&dir, args.safe_mode));
         Ok(Self {
             args,
             options_menu: OptionsMenu {
@@ -198,6 +201,7 @@ impl App {
             discord: crate::discord::Presence::spawn(),
             lang,
             mods: ModsRuntime::new(&options.mods),
+            external_mods,
             options,
             audio,
             window: None,

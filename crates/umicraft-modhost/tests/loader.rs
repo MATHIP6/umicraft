@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Tests of discovery and of the load failure paths that need no real library.
 
 use std::fs;

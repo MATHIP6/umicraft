@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The trust list: which library hash the player accepted for each mod.
 //!
 //! Native mods run with the client's full rights, so a library loads only if its

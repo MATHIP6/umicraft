@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Implementation behind `umicraft_mod!`; not public API.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};

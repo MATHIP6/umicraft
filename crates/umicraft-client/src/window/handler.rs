@@ -264,4 +264,12 @@ impl ApplicationHandler for App {
             event_loop.set_control_flow(ControlFlow::WaitUntil(self.clock.next_frame));
         }
     }
+
+    /// Runs once when the event loop ends normally, which is the only place the
+    /// crash sentinel may be disarmed: a panic or crash never reaches it.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(external_mods) = self.external_mods.take() {
+            external_mods.shutdown();
+        }
+    }
 }

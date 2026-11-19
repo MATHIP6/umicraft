@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The host's per-mod state, reached by mods through an opaque handle.
 
 use std::borrow::Cow;

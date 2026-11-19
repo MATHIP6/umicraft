@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Core value types shared by every part of the ABI.
 
 /// A borrowed UTF-8 string, valid for the duration of the call only.

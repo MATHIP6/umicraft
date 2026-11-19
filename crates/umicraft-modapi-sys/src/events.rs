@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Event identifiers and payload layouts.
 
 /// Stable event id; ids are never reused (ADR-0087).

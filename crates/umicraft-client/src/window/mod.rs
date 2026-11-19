@@ -30,6 +30,7 @@ use crate::hud::cache::HudCache;
 use crate::hud::dials::DialAnimator;
 use crate::input::ui::UiInputTranslator;
 use crate::language;
+use crate::mods::external::ExternalMods;
 use crate::mods::runtime::ModsRuntime;
 use crate::mods::zoom::Zoom;
 use crate::options::{self, Options};
@@ -217,5 +218,7 @@ struct App {
     clock: FrameClock,
     /// The built-in mods (ADR-0065).
     mods: ModsRuntime,
+    /// The external native mods and the crash sentinel; shut down on a clean exit.
+    external_mods: Option<ExternalMods>,
     exit_error: Option<String>,
 }

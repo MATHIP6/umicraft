@@ -92,6 +92,13 @@ Without a host and port the window opens on the title screen, where
 Multiplayer lists your saved servers. With a host and port it connects at
 start. Always use `--release`: a debug build is several times slower.
 
+External native mods live in `<data dir>/mods/<id>/` (`mod.toml` plus
+`bin/<os>-<arch>/<library>`). A library only loads once its SHA-256 is listed under
+`[trusted]` in `<data dir>/mods/trusted.toml` (`<id> = "<hash>"`; the log prints the
+line to add). The client keeps `<data dir>/umicraft.running` while it runs; if the
+previous run did not exit cleanly, or you pass `--safe-mode`, no external mod is
+loaded.
+
 Controls:
 
 - **WASD** move, **Space** jump, **Shift** sneak, **Ctrl** sprint.

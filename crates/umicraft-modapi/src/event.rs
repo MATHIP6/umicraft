@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Typed views over the event payloads of the C ABI.
 
 use umicraft_modapi_sys::{UmiEventId, UmiPostTick, UmiPreTick};

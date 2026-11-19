@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Where a mod's native library lives for each platform.
 
 /// A supported operating system.

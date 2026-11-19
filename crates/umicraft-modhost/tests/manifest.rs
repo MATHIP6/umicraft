@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Tests of `mod.toml` parsing, identifiers, API versions and library names.
 
 use umicraft_modhost::{

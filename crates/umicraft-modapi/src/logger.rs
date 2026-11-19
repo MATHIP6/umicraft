@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Logging through the host.
 
 use umicraft_modapi_sys::{UmiLevel, UmiModHandle, UmiStr};

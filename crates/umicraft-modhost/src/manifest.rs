@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The `mod.toml` manifest (spec §8.2).
 //!
 //! The file is first deserialized into private raw structs (strict: unknown keys are

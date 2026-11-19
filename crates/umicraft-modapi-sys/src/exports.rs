@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The three symbols every mod library exports.
 
 use crate::{UmiHost, UmiModHandle, UmiStatus, UmiVersion};

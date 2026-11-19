@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Rust helper for Umicraft mod authors (ADR-0086).
 //!
 //! A mod implements [`Mod`], registers handlers through [`InitCx`] and exports

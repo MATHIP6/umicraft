@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Errors of manifest parsing.
 
 use std::path::PathBuf;

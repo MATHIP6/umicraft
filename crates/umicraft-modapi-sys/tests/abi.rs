@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Layout, version and symbol checks that pin the ABI of ADR-0087.
 
 use core::mem::{align_of, offset_of, size_of};

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! [`ModHost`]: the loaded mods and their lifecycle.
 
 use std::path::Path;

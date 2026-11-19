@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The C ABI of the Umicraft modding API (ADR-0087).
 //!
 //! Everything here is `#[repr(C)]` or `#[repr(transparent)]`, so C, C++, Zig

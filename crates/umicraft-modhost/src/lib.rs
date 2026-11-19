@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Host side of the Umicraft modding API (ADR-0086).
 //!
 //! F3.1 covers the part that needs no native code: reading a mod's `mod.toml`

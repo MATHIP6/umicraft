@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Every `unsafe` operation of the host: the raw-pointer edge of the C ABI.
 //!
 //! Host functions handed to mods, symbol lookup in loaded libraries, and the one

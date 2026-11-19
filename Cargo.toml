@@ -20,6 +20,8 @@ members = [
     "crates/umicraft-modapi-sys",
     "crates/umicraft-modapi",
     "crates/umicraft-modhost",
+    "mods/examples/hello",
+    "mods/examples/panicking",
 ]
 
 [workspace.package]

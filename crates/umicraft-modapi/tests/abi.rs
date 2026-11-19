@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Drives the exports of `umicraft_mod!` through a fake host, the way the
 //! real loader does.
 

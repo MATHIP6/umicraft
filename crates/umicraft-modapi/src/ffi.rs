@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! All `unsafe` of the crate: reading host-provided pointers and owning the
 //! boxed handler closures behind the `user` pointers (ADR-0087).
 #![allow(unsafe_code)]

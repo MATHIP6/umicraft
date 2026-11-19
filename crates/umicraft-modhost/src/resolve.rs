@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Deciding which mods load and in which order.
 //!
 //! Every way a mod can fail to load (missing or rejected dependency, cycle, service

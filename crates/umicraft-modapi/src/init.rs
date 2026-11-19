@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The `Mod` trait and the context handed to it during `init`.
 
 use umicraft_modapi_sys::{UmiHost, UmiModHandle, UmiMode};

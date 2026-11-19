@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Finding installed mods: every sub-directory of the mods folder with a `mod.toml`.
 
 use std::fs;

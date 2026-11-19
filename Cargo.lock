@@ -4348,7 +4348,9 @@ dependencies = [
  "umicraft-core",
  "umicraft-game",
  "umicraft-mesh",
+ "umicraft-modapi-sys",
  "umicraft-model",
+ "umicraft-modhost",
  "umicraft-net",
  "umicraft-protocol",
  "umicraft-render",
@@ -4369,6 +4371,20 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "umicraft-example-hello"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
+]
+
+[[package]]
+name = "umicraft-example-panicking"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
 ]
 
 [[package]]

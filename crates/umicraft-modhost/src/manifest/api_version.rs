@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The `major.minor` API version a mod declares.
 
 use std::fmt;

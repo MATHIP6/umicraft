@@ -1,0 +1,9 @@
+[mod]
+id = "hello"
+name = "Hello"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "0.1"
+license = "MIT"
+description = "Teaching example: logs, observes PreTick and intercepts PostTick."
+library = "hello"

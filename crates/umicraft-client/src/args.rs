@@ -141,6 +141,8 @@ options:
   --resource-pack PATH path to a resource pack directory or .zip (repeatable)
   --setup-assets      download and verify official 1.8.8 assets then exit
   --no-audio          start without the sound engine (no device, no thread)
+  --safe-mode         start without loading any external mod (also entered
+                      automatically after a run that did not exit cleanly)
   --audio-probe       play a few sound events on the system device and exit
   --profile           enable runtime profiling and per-frame allocation tracking at start
   --time N            world time in ticks (signed; default: 6000 noon)
@@ -286,6 +288,8 @@ pub struct Args {
     pub setup_assets: bool,
     /// Whether the sound engine stays off (`--no-audio`).
     pub no_audio: bool,
+    /// Whether external mods stay unloaded for this run (`--safe-mode`, spec §8.6).
+    pub safe_mode: bool,
     /// Whether the audio probe was requested (`--audio-probe`).
     pub audio_probe: bool,
     /// Whether runtime profiling and allocation tracking start enabled (`--profile`).
@@ -383,6 +387,7 @@ impl Args {
         let mut dump_mobs = None;
         let mut setup_assets = false;
         let mut no_audio = false;
+        let mut safe_mode = false;
         let mut audio_probe = false;
         let mut profile = false;
         let mut resource_packs = Vec::new();
@@ -530,6 +535,10 @@ impl Args {
                 }
                 "--no-audio" => {
                     no_audio = true;
+                    index += 1;
+                }
+                "--safe-mode" => {
+                    safe_mode = true;
                     index += 1;
                 }
                 "--audio-probe" => {
@@ -680,6 +689,7 @@ impl Args {
             dump_mobs,
             setup_assets,
             no_audio,
+            safe_mode,
             audio_probe,
             profile,
             resource_packs,
@@ -1016,6 +1026,14 @@ mod tests {
         assert!(args.no_audio);
         assert_eq!(args.mode(), Mode::Windowed);
         assert!(!Args::parse(&words(&[])).expect("defaults").no_audio);
+    }
+
+    #[test]
+    fn safe_mode_is_a_flag_that_keeps_the_windowed_mode() {
+        let args = Args::parse(&words(&["--safe-mode"])).expect("title screen in safe mode");
+        assert!(args.safe_mode);
+        assert_eq!(args.mode(), Mode::Windowed);
+        assert!(!Args::parse(&words(&[])).expect("defaults").safe_mode);
     }
 
     #[test]

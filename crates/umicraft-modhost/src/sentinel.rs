@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The crash sentinel: a file that exists only while the client is running.
 //!
 //! Mods run native code that can crash the process, and a crash cannot be caught. The
