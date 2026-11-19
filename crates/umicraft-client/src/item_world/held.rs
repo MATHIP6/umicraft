@@ -28,6 +28,10 @@ use crate::entity_render::{
 };
 use crate::item_icons::ItemResources;
 
+/// `Blocks.chest`, `Blocks.ender_chest` and `Blocks.trapped_chest` as items.
+const CHEST: i16 = 54;
+const ENDER_CHEST: i16 = 130;
+const TRAPPED_CHEST: i16 = 146;
 /// The carrot on a stick item id, the other item that turns around in a hand.
 const CARROT_ON_A_STICK: i16 = 398;
 /// Stick, bone and blaze rod: the plain items `Item.setFull3D` marks.
@@ -133,7 +137,7 @@ fn item_pose(
     let legacy = style == BipedStyle::V1_7
         && entity.kind == EntityKind::Player
         && !model.gui_3d
-        && !is_torch(item_id);
+        && !has_block_pose(item_id);
     if legacy {
         let blocking = arm_pose(entity) == ArmPose::Blocking;
         legacy_player_item_pose(item_id, blocking) * legacy_flat_held_pose(false)
@@ -223,10 +227,10 @@ fn baby_transform() -> Mat4 {
 }
 
 /// From the arm to the palm: translate(-1/16, 7/16, 1/16), the pose of
-/// torches and the sneak lift.
+/// block-pose items (torches, chests) and the sneak lift.
 fn hand_offset(entity: &EntityRenderSnapshot, item_id: i16) -> Mat4 {
     let mut hand = Mat4::from_translation(Vec3::new(-0.0625, 0.4375, 0.0625));
-    if is_torch(item_id) {
+    if has_block_pose(item_id) {
         hand *= Mat4::from_translation(Vec3::new(0.0, 0.1875, -0.3125))
             * Mat4::from_rotation_x(20.0_f32.to_radians())
             * Mat4::from_rotation_y(45.0_f32.to_radians())
@@ -295,9 +299,12 @@ fn y_flip() -> Mat4 {
     Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0))
 }
 
-/// The blocks whose item uses the torch pose in a hand (`getRenderType() == 2`).
-pub(super) fn is_torch(item_id: i16) -> bool {
-    matches!(item_id, 50 | 75 | 76)
+/// The blocks whose item uses the small block pose in a hand: torches and,
+/// because `BlockChest` and `BlockEnderChest` return render type 2, the
+/// chest, ender chest and trapped chest (MCP `LayerHeldItem`). Without it a
+/// held chest, which has no display transform, would be drawn a block wide.
+pub(super) fn has_block_pose(item_id: i16) -> bool {
+    matches!(item_id, 50 | 75 | 76 | CHEST | ENDER_CHEST | TRAPPED_CHEST)
 }
 
 /// MCP `Item.isFull3D`: tools and swords (`ItemTool`, `ItemSword`,
@@ -339,6 +346,16 @@ mod tests {
             count: 1,
             nbt: None,
         }
+    }
+
+    #[test]
+    fn a_held_chest_is_shrunk_like_a_torch() {
+        let hand = |id| hand_offset(&entity(EntityKind::Player), id);
+        let size = |id| hand(id).transform_vector3(Vec3::X).length();
+        for id in [CHEST, ENDER_CHEST, TRAPPED_CHEST, 50] {
+            assert!((size(id) - 0.375).abs() < 1e-5, "{id}");
+        }
+        assert!((size(IRON_SWORD) - 1.0).abs() < 1e-5);
     }
 
     #[test]
