@@ -29,6 +29,10 @@ and the editor draws the sign model facing the screen (`GuiEditSign`).
 - **Live text.** Each change in the editor sends `GameEvent::SignTyped`, which
   sets the local sign lines without a packet, as the reference edits the tile
   entity in place. The server's `Update Sign` still overrides them.
+- **Font in step.** The sign text texture remembers the UI atlas it was made
+  from and is remade, before the frame is meshed, whenever `ui_atlas` is
+  another atlas (a theme with an HD font or a GUI scale change swaps it after
+  the textures are loaded; the glyphs then read the wrong cells).
 - **Lifetime.** Sign and block entity data are removed when the block becomes
   another block or the column is unloaded or replaced.
 

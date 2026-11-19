@@ -70,7 +70,7 @@ pub(crate) struct BlockEntityScene<'a> {
     /// follow the world clock (the beam, the book).
     pub seconds: f32,
     /// The font the sign text is laid out with, `None` before it is loaded.
-    /// It must be the atlas `EntityTextures::set_sign_font` was given, since
+    /// It must be the atlas `EntityTextures::sync_sign_font` was given, since
     /// the glyph UVs address that texture.
     pub font: Option<&'a FontAtlas>,
     /// Interpolation between two ticks.

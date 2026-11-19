@@ -7,6 +7,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::block_entity_render::BannerDesign;
 use crate::block_entity_render::{BannerDesigns, BlockEntityMeshes};
@@ -69,6 +70,12 @@ pub fn procedural_dirt_texture() -> Vec<u8> {
     rgba
 }
 
+/// Whether the sign text texture made from `current` must be remade for
+/// `wanted`.
+fn needs_sign_font(current: Option<&Arc<FontAtlas>>, wanted: &Arc<FontAtlas>) -> bool {
+    current.is_none_or(|current| !Arc::ptr_eq(current, wanted))
+}
+
 // ---------------------------------------------------------------------------
 // Texture registry
 // ---------------------------------------------------------------------------
@@ -87,6 +94,9 @@ pub struct EntityTextures {
     capes: RefCell<CapeSet>,
     /// The composed banner designs among `textures`.
     banners: RefCell<BannerCache>,
+    /// The font atlas the sign text texture was made from: the glyph UVs of
+    /// the sign renderer are only right for this atlas.
+    sign_font: RefCell<Option<Arc<FontAtlas>>>,
     /// The camera yaw the flames of burning entities face.
     view_yaw: Cell<f32>,
     /// The camera pitch the experience orbs face.
@@ -135,6 +145,7 @@ impl EntityTextures {
             skins: RefCell::new(SkinSet::new()),
             capes: RefCell::new(CapeSet::new()),
             banners: RefCell::default(),
+            sign_font: RefCell::new(None),
             cull_view: Cell::new(None),
             view_yaw: Cell::new(0.0),
             view_pitch: Cell::new(0.0),
@@ -150,21 +161,35 @@ impl EntityTextures {
 
     /// [`Self::load`] plus the sign text texture of `font`, if there is one.
     #[must_use]
-    pub fn load_with_font(renderer: &Renderer, font: Option<&FontAtlas>) -> Self {
+    pub fn load_with_font(renderer: &Renderer, font: Option<&Arc<FontAtlas>>) -> Self {
         let textures = Self::load(renderer);
         if let Some(font) = font {
-            textures.set_sign_font(renderer, font);
+            textures.sync_sign_font(renderer, font);
         }
         textures
+    }
+
+    /// Remakes the sign text texture when `font` is not the atlas it was made
+    /// from. The UI font is swapped after the textures are loaded (a theme
+    /// with an HD font, a GUI scale change), and glyph UVs of the new atlas
+    /// read garbage from a texture of the old one; calling this with the
+    /// atlas the sign renderer lays the text out with keeps the two in step.
+    /// The check is a pointer comparison, so a steady frame does nothing.
+    pub fn sync_sign_font(&self, renderer: &Renderer, font: &Arc<FontAtlas>) {
+        if !needs_sign_font(self.sign_font.borrow().as_ref(), font) {
+            return;
+        }
+        self.set_sign_font(renderer, font);
+        *self.sign_font.borrow_mut() = Some(Arc::clone(font));
     }
 
     /// Makes the texture of the sign text from the coverage of `font`: white
     /// with the coverage as alpha, so the entity pass's alpha test cuts the
     /// glyphs out and the chat colour of each vertex tints them (black, the
     /// colour `0` of the reference, unless the line says otherwise). The
-    /// glyph UVs of the sign renderer address this atlas, so it must be called
-    /// again with the new atlas whenever the UI font changes.
-    pub fn set_sign_font(&self, renderer: &Renderer, font: &FontAtlas) {
+    /// glyph UVs of the sign renderer address this atlas; see
+    /// [`Self::sync_sign_font`].
+    fn set_sign_font(&self, renderer: &Renderer, font: &FontAtlas) {
         let rgba: Vec<u8> = font
             .pixels
             .iter()
@@ -533,5 +558,20 @@ impl SkinLookup for EntityTextures {
 
     fn custom_cape(&self, uuid: u128, name: &str) -> Option<u32> {
         self.capes.borrow_mut().lookup(uuid, name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sign_font_is_remade_only_for_another_atlas() {
+        let first = Arc::new(FontAtlas::fallback());
+        let same_pixels = Arc::new(FontAtlas::fallback());
+        assert!(needs_sign_font(None, &first), "nothing made yet");
+        assert!(!needs_sign_font(Some(&first), &Arc::clone(&first)));
+        // A swapped UI font is a new atlas, even with the same content.
+        assert!(needs_sign_font(Some(&first), &same_pixels));
     }
 }
