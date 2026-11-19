@@ -484,3 +484,9 @@ Reference: the behaviour of the Fabric mod "Capes" (LGPL-2.1, read only, no code
 | 2026-11-18 | HD and animated capes | Fabric mod "Capes" (`parseCape`, `parseAnimatedCape`, `getCape`) | Static: pad top-left into the smallest `64·2ⁿ x 32·2ⁿ`. Animated: frames of `w x w/2` stacked downward, 100 ms each. |
 | 2026-11-18 | F3 chords | MCP 1.8.9 `Minecraft.runTick` (`Keyboard.isKeyDown(61)` plus A=30, B=48, D=32, F=33, H=35, P=25, S=31, T=20; C=46 held 6 s crashes) | Ported A, B, D, F, H, S, T; P keeps the profiler (ADR-0082). |
 | 2026-11-18 | F3 + G chunk borders | later vanilla versions (not in 1.8.9); design is ours | Yellow corners and 16-block section outlines, blue block grid on the walls of the player's chunk. |
+
+## Signs (feat/sign-parity)
+
+| Date | Area | Source | Notes |
+|---|---|---|---|
+| 2026-11-18 | Sign text lifetime | MCP `Chunk.setBlockState` (`block1 != block` → `removeTileEntity`), `ChunkProviderClient.unloadChunk` | The text of a sign (and the data of any block entity) is dropped when the block becomes another block or the column unloads; a metadata change keeps it. A ground-up column also drops it: the server sends the block entities again after the chunk. |

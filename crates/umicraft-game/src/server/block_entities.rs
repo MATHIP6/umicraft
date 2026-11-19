@@ -7,7 +7,11 @@
 //! reference only applies sign and tile entity updates to a block entity that
 //! already exists in a loaded chunk; the chunk store of Umicraft keeps no
 //! block entities yet, so the latest update per position is kept here until
-//! the renderer consumes it.
+//! the renderer consumes it. An entry goes with its block, as a tile entity
+//! does: the game thread calls [`BlockEntities::remove`] when the block at the
+//! position becomes another block and [`BlockEntities::remove_column`] when a
+//! column is unloaded or replaced (MCP `Chunk.setBlockState`,
+//! `ChunkProviderClient.unloadChunk`).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -105,6 +109,16 @@ impl BlockEntities {
         }
     }
 
+    /// Forgets the data of every position in the chunk column `(chunk_x,
+    /// chunk_z)`: the column was unloaded or replaced by a ground-up payload,
+    /// whose block entities the server sends again (MCP
+    /// `ChunkProviderClient.unloadChunk` drops the tile entities with the
+    /// chunk).
+    pub fn remove_column(&mut self, chunk_x: i32, chunk_z: i32) {
+        remove_column_of(&mut self.signs, chunk_x, chunk_z);
+        remove_column_of(&mut self.entities, chunk_x, chunk_z);
+    }
+
     /// Forgets everything (the dimension changed).
     pub fn clear(&mut self) {
         if !self.signs.is_empty() {
@@ -152,6 +166,27 @@ impl BlockEntities {
     /// All running animations as `(breaker entity id, progress)`.
     pub fn break_animations(&self) -> impl Iterator<Item = (i32, &BreakProgress)> {
         self.breaking.iter().map(|(id, progress)| (*id, progress))
+    }
+}
+
+/// Removes the entries of `table` inside the chunk column, copying a shared
+/// table only when something is removed. The table is ordered by `x` first,
+/// so only the sixteen `x` slices of the column are visited.
+fn remove_column_of<V: Clone>(table: &mut Arc<BTreeMap<Pos, V>>, chunk_x: i32, chunk_z: i32) {
+    let x0 = chunk_x.saturating_mul(16);
+    let x1 = x0.saturating_add(15);
+    let z_range = chunk_z.saturating_mul(16)..=chunk_z.saturating_mul(16).saturating_add(15);
+    let doomed: Vec<Pos> = table
+        .range((x0, i32::MIN, i32::MIN)..=(x1, i32::MAX, i32::MAX))
+        .map(|(pos, _)| *pos)
+        .filter(|&(_, _, z)| z_range.contains(&z))
+        .collect();
+    if doomed.is_empty() {
+        return;
+    }
+    let table = Arc::make_mut(table);
+    for pos in doomed {
+        table.remove(&pos);
     }
 }
 
@@ -239,6 +274,39 @@ mod tests {
         assert_eq!(blocks.signs().count(), MAX_ENTRIES);
         blocks.apply_sign(&sign(0, "new"));
         assert_eq!(blocks.sign((0, 64, 0)).unwrap()[0], "new");
+    }
+
+    #[test]
+    fn removing_a_column_forgets_only_its_signs_and_block_entities() {
+        let mut blocks = BlockEntities::default();
+        for (x, z) in [(0, 0), (15, 15), (16, 0), (-1, 0), (3, 16)] {
+            blocks.apply_sign(&UpdateSign {
+                x,
+                y: 64,
+                z,
+                lines: Default::default(),
+            });
+        }
+        blocks.apply_update(&UpdateBlockEntity {
+            x: 7,
+            y: 2,
+            z: 9,
+            action: 4,
+            nbt: None,
+        });
+        blocks.remove_column(0, 0);
+        let left: Vec<Pos> = blocks.signs().map(|(pos, _)| pos).collect();
+        assert_eq!(left, [(-1, 64, 0), (3, 64, 16), (16, 64, 0)]);
+        assert!(blocks.block_entity((7, 2, 9)).is_none());
+    }
+
+    #[test]
+    fn removing_an_empty_column_keeps_the_snapshot_shared() {
+        let mut blocks = BlockEntities::default();
+        blocks.apply_sign(&sign(40, "a"));
+        let before = blocks.sign_table();
+        blocks.remove_column(0, 0);
+        assert!(Arc::ptr_eq(&before, &blocks.sign_table()));
     }
 
     #[test]
