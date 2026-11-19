@@ -23,7 +23,7 @@ java -javaagent:build/e2-agent.jar=scenario=scenarios/e1.txt,log=out/vanilla-e1-
   (`motion*` are `Entity.motionX/Y/Z`; `Double.toString`/`Float.toString`, so values round-trip exactly).
 - The script starts after `settle` consecutive on-ground ticks, ends after the last phase, and exits the JVM
   `exit_after` ticks later (`Runtime.halt`, log flushed first).
-- Scenario: `scenarios/e1.txt`, shared with `crates/umicraft-client/src/e1.rs` (a test keeps them equal).
+- Scenario: `scenarios/e1.txt`, shared with `crates/umicraft-client/src/demos/e1.rs` (a test keeps them equal).
 
 ## Names it depends on
 

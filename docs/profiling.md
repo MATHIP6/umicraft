@@ -56,20 +56,20 @@ cargo run --release -p umicraft-client
 
 ## 3. Système de Métriques (F3 & Benchmarks)
 
-Toutes les métriques demandées sont calculées de manière déterministe et partagées entre l'overlay `F3` ([`debug_f3_view.rs`](../crates/umicraft-client/src/debug_f3_view.rs)) et le benchmark offscreen ([`bench_scene.rs`](../crates/umicraft-client/src/bench_scene.rs)) :
+Toutes les métriques demandées sont calculées de manière déterministe et partagées entre l'overlay `F3` ([`debug/f3.rs`](../crates/umicraft-client/src/debug/f3.rs)) et le benchmark offscreen ([`demos/bench_scene.rs`](../crates/umicraft-client/src/demos/bench_scene.rs)) :
 
 | Métrique | Source / Module | Description |
 |---|---|---|
-| **FPS moyens, 1% Low, 0.1% Low** | [`metrics.rs`](../crates/umicraft-client/src/metrics.rs) (`FrameDistribution`) | `mean_fps = 1000 / mean_ms`. `1% Low FPS` = `1000 / moyenne(1% frames les plus lentes)` sur fenêtre glissante de 1 000 frames. |
-| **Frametime moyen, P50, P95, P99, P99.9, Max** | [`metrics.rs`](../crates/umicraft-client/src/metrics.rs) (`FrameDistribution`) | Percentiles exacts par méthode *nearest-rank* sur l'historique glissant (rafraîchi toutes les 500 ms en jeu). |
-| **Temps CPU par système (Render thread)** | [`cpu_split.rs`](../crates/umicraft-client/src/cpu_split.rs) (`CpuSplit`) | Découpage par frame en 4 étapes : `world` (sync chunks/entités), `hud` (construction UI/HUD), `scene` (meshing entités/block-entities/particules), `render` (encodage wgpu + submit). |
+| **FPS moyens, 1% Low, 0.1% Low** | [`debug/metrics.rs`](../crates/umicraft-client/src/debug/metrics.rs) (`FrameDistribution`) | `mean_fps = 1000 / mean_ms`. `1% Low FPS` = `1000 / moyenne(1% frames les plus lentes)` sur fenêtre glissante de 1 000 frames. |
+| **Frametime moyen, P50, P95, P99, P99.9, Max** | [`debug/metrics.rs`](../crates/umicraft-client/src/debug/metrics.rs) (`FrameDistribution`) | Percentiles exacts par méthode *nearest-rank* sur l'historique glissant (rafraîchi toutes les 500 ms en jeu). |
+| **Temps CPU par système (Render thread)** | [`debug/cpu_split.rs`](../crates/umicraft-client/src/debug/cpu_split.rs) (`CpuSplit`) | Découpage par frame en 4 étapes : `world` (sync chunks/entités), `hud` (construction UI/HUD), `scene` (meshing entités/block-entities/particules), `render` (encodage wgpu + submit). |
 | **Temps GPU par passe** | [`gpu_timer.rs`](../crates/umicraft-render/src/gpu_timer.rs) (`GpuTimer`) | Requêtes matérielles `wgpu::QueryType::Timestamp` sur 5 groupes : `sky`, `opaque`, `entities`, `translucent`, `ui`. |
-| **Utilisation des threads** | [`debug_world.rs`](../crates/umicraft-client/src/debug_world.rs) & [`mesher.rs`](../crates/umicraft-client/src/mesher.rs) | Thread `game` : `tick_micros` et `%` du budget de 50 ms (20 Hz). Thread `net` : `net_event_micros` et `SessionCounters::mean_packet_micros()`. Pool `mesh` : `active_workers / worker_count` et temps moyen par chunk. |
+| **Utilisation des threads** | [`debug/world.rs`](../crates/umicraft-client/src/debug/world.rs) & [`meshing/pool.rs`](../crates/umicraft-client/src/meshing/pool.rs) | Thread `game` : `tick_micros` et `%` du budget de 50 ms (20 Hz). Thread `net` : `net_event_micros` et `SessionCounters::mean_packet_micros()`. Pool `mesh` : `active_workers / worker_count` et temps moyen par chunk. |
 | **Allocations mémoire par frame** | [`profiling.rs`](../crates/umicraft-core/src/profiling.rs) (`CountingAllocator`) | Nombre d'`alloc`, `realloc` et octets alloués par frame (`Allocs/f: N (X.X KiB)`). |
-| **RAM consommée** | [`process_memory.rs`](../crates/umicraft-client/src/process_memory.rs) | Working Set / RSS physique du processus via `memory-stats`. |
-| **VRAM consommée** | [`renderer.rs`](../crates/umicraft-render/src/renderer.rs) (`VramStats`) | Somme exacte des buffers GPU résidents : `chunk_buffers` (sommets opaques/translucides + quad index buffer partagé), `dynamic_buffers` (entités, particules, UI, uniformes), `textures` (atlas blocs, mipmaps, lightmap, cibles offscreen). |
-| **Draw Calls** | [`renderer.rs`](../crates/umicraft-render/src/renderer.rs) (`DrawCallStats`) | Compteur exact d'appels `draw` / `draw_indexed` par frame et par passe (`sky`, `opaque`, `entities`, `translucent`, `ui`, `total`). |
-| **Temps de construction des chunks** | [`mesher.rs`](../crates/umicraft-client/src/mesher.rs) & [`bench_scene.rs`](../crates/umicraft-client/src/bench_scene.rs) | `MeshResult::build_micros`, `MeshPoolStats` (moyenne et max en µs) et distribution complète (`mean`, `p50`, `p95`, `p99`, `max`) dans `--bench-scene`. |
+| **RAM consommée** | [`debug/process_memory.rs`](../crates/umicraft-client/src/debug/process_memory.rs) | Working Set / RSS physique du processus via `memory-stats`. |
+| **VRAM consommée** | [`gpu_timer.rs`](../crates/umicraft-render/src/gpu_timer.rs) (`VramStats`) | Somme exacte des buffers GPU résidents : `chunk_buffers` (sommets opaques/translucides + quad index buffer partagé), `dynamic_buffers` (entités, particules, UI, uniformes), `textures` (atlas blocs, mipmaps, lightmap, cibles offscreen). |
+| **Draw Calls** | [`gpu_timer.rs`](../crates/umicraft-render/src/gpu_timer.rs) (`DrawCallStats`) | Compteur exact d'appels `draw` / `draw_indexed` par frame et par passe (`sky`, `opaque`, `entities`, `translucent`, `ui`, `total`). |
+| **Temps de construction des chunks** | [`meshing/pool.rs`](../crates/umicraft-client/src/meshing/pool.rs) & [`demos/bench_scene.rs`](../crates/umicraft-client/src/demos/bench_scene.rs) | `MeshPoolStats` (temps de chaque job, moyenne et max en µs) et distribution complète (`mean`, `p50`, `p95`, `p99`, `max`) dans `--bench-scene`. |
 | **Temps de traitement réseau** | [`drive.rs`](../crates/umicraft-net/src/play/drive.rs) (`SessionCounters`) | `processing_nanos` atomique cumulé sur le décodage/dispatch des paquets Play + `net_event_micros` par tick côté `game`. |
 
 ---

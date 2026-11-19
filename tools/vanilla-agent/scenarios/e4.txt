@@ -1,6 +1,6 @@
 # Scenario e4 (phase E.7): surface swimming. Same walk and sprint as e3 in a deeper pool
 # (x -5..5, y 1..3, z 4..30) with the jump key held so the swimmer floats (onGround false).
-# Same ticks as crates/umicraft-client/src/e1.rs.
+# Same ticks as crates/umicraft-client/src/demos/e1.rs.
 settle 40
 exit_after 40
 phase approach 15 W

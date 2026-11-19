@@ -32,7 +32,7 @@ picked up, and delete it when it is done.
   vanilla tooltip background `0x100010` showed as a bright purple and the
   blue `0x5555FF` text as periwinkle. White and black are unaffected. Only the
   tooltip is fixed, on the CPU (`linear` / `vanilla` in
-  `crates/umicraft-client/src/tooltip_draw.rs`, commit f379d02); every other
+  `crates/umicraft-client/src/screens/tooltip.rs`, commit f379d02); every other
   coloured UI element (coloured chat and HUD text, button and slot fills, the
   death screen, the debug screen) still has it.
 - **Also suspected:** every multiplicative brightness factor applied to a texel in the shaders (world face shade 0.6 / 0.8 / 0.5, entity shade, item lighting) is multiplied in linear space, so it darkens less than the vanilla factor does on 8-bit values. The GUI block icons are fixed by converting the factor (`gui_face_factor` in `crates/umicraft-mesh/src/item.rs`); check the terrain and entity shaders against the vanilla screenshots.
@@ -67,7 +67,7 @@ picked up, and delete it when it is done.
 - **No frustum culling:** every uploaded chunk is drawn each frame, including
   behind the camera.
 - **Mesh queue without priority:** the workers share one FIFO behind a
-  `Mutex` (`crates/umicraft-client/src/mesher.rs`); spec §7.1 asks for a
+  `Mutex` (`crates/umicraft-client/src/meshing/pool.rs`); spec §7.1 asks for a
   priority by distance and view direction.
 - **Each column is meshed about twice while a world loads,** because a new
   column dirties its loaded neighbours. Delaying the mesh until the four
