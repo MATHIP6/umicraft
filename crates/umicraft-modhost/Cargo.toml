@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 crossbeam-channel.workspace = true
+umicraft-builtin-mods.workspace = true
 umicraft-core.workspace = true
 libloading.workspace = true
 sha2.workspace = true

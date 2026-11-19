@@ -15,6 +15,16 @@
 //! | [`ChatSend`] | game | yes | [`ChatSend::set_text`] |
 //! | [`Connected`], [`Disconnected`] | render | no | no |
 //! | [`ScreenOpened`], [`ScreenClosed`] | render | no | no |
+//! | [`KeyPressed`] | render | no | no |
+//!
+//! # Settings, HUD, keys and commands
+//!
+//! During `init` a mod also declares what the player can see and change:
+//! [`InitCx::toggle`], `slider`, `choice` and `color` return a [`Setting`]
+//! handle to read later; [`InitCx::hud_widget`] draws with a [`Hud`] at a
+//! [`Placement`]; [`InitCx::key`] adds a key binding that arrives as
+//! [`KeyPressed`]; [`InitCx::command`] adds a `/command`; [`InitCx::chat`]
+//! gives a [`Chat`] to print local lines.
 //!
 //! Setters work only inside [`InitCx::intercept`] handlers; observers get a
 //! copy and the host answers `DENIED`.
@@ -33,22 +43,28 @@
 //! umicraft_modapi::umicraft_mod!(Hello);
 //! ```
 
+mod chat;
 mod error;
 mod event;
 mod ffi;
 mod host;
+mod hud;
 mod init;
 mod logger;
 #[doc(hidden)]
 pub mod private;
+mod setting;
 
+pub use chat::Chat;
 pub use error::ModError;
 pub use event::{
-    ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event, PostTick,
-    PreTick, ScreenClosed, ScreenOpened,
+    ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event, KeyPressed,
+    PostTick, PreTick, ScreenClosed, ScreenOpened,
 };
+pub use hud::{Anchor, Hud, Placement};
 pub use init::{InitCx, Mod};
 pub use logger::Logger;
+pub use setting::Setting;
 
 /// Exports `umi_mod_api_version`, `umi_mod_init` and `umi_mod_shutdown` for a
 /// type implementing [`Mod`]; use it once per mod library.

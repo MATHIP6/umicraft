@@ -4,7 +4,7 @@
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use umicraft_modapi_sys::{UmiEventId, UmiHandlerFn, UmiLevel, UmiMode, UmiStatus};
 
@@ -12,6 +12,8 @@ use crate::budget::{ModStats, Stats};
 use crate::events::is_known;
 use crate::ffi::UserPtr;
 use crate::manifest::ModId;
+use crate::ui::shared::HostShared;
+use crate::ui::state::UiState;
 use crate::worker::WorkerSlot;
 
 /// A handler a mod registered through `subscribe`.
@@ -35,16 +37,28 @@ pub struct Subscription {
 ///
 /// Everything is behind a mutex or an atomic because `log` may be called from any
 /// thread at any time.
+///
+/// **Enable model** (F3.4): a mod is enabled when the player wants it
+/// ([`ModContext::is_wanted`], set by the player's switch) and it has not failed
+/// ([`ModContext::is_failed`], set by the host for a panic, an error status, an
+/// exhausted budget or a failed init, never cleared). Switching a mod off and on
+/// again is safe because nothing is freed until `umi_mod_shutdown` at exit; a
+/// failed mod stays off because its state may be broken.
 #[derive(Debug)]
 pub struct ModContext {
     id: ModId,
     subscriptions: Mutex<Vec<Subscription>>,
     init_done: AtomicBool,
-    enabled: AtomicBool,
+    wanted: AtomicBool,
+    failed: AtomicBool,
     /// Set once `umi_mod_init` succeeded; cleared by whoever calls `umi_mod_shutdown`.
     shutdown_due: AtomicBool,
     stats: Stats,
     worker: WorkerSlot,
+    pub(crate) ui: UiState,
+    pub(crate) shared: Arc<HostShared>,
+    /// This context as an `Arc`, for the command table's weak back-pointer.
+    pub(crate) me: Weak<ModContext>,
 }
 
 /// Longest log message forwarded, so a mod cannot flood the log with one call.
@@ -56,17 +70,30 @@ fn log_text(bytes: &[u8]) -> Cow<'_, str> {
 }
 
 impl ModContext {
-    /// Creates the context of mod `id`: not initialised, not enabled.
-    pub fn new(id: ModId) -> Self {
-        Self {
+    /// Creates the context of mod `id`: not initialised, not enabled, with a command
+    /// table and chat outbox of its own (for tests and benchmarks).
+    pub fn new(id: ModId) -> Arc<Self> {
+        Self::with_shared(id, Arc::default())
+    }
+
+    /// Creates the context of mod `id` inside a host whose mods share `shared`.
+    ///
+    /// Returns an `Arc` because the command table needs a weak pointer back to the
+    /// context that registered a command.
+    pub fn with_shared(id: ModId, shared: Arc<HostShared>) -> Arc<Self> {
+        Arc::new_cyclic(|me| Self {
             id,
             subscriptions: Mutex::new(Vec::new()),
             init_done: AtomicBool::new(false),
-            enabled: AtomicBool::new(false),
+            wanted: AtomicBool::new(false),
+            failed: AtomicBool::new(false),
             shutdown_due: AtomicBool::new(false),
             stats: Stats::default(),
             worker: WorkerSlot::default(),
-        }
+            ui: UiState::default(),
+            shared,
+            me: me.clone(),
+        })
     }
 
     /// The mod this context belongs to.
@@ -74,9 +101,32 @@ impl ModContext {
         &self.id
     }
 
-    /// Whether `umi_mod_init` succeeded and the mod was not disabled since.
+    /// Whether the mod runs: the player wants it and it has not failed.
     pub fn is_enabled(&self) -> bool {
-        self.enabled.load(Ordering::Acquire)
+        self.is_wanted() && !self.is_failed()
+    }
+
+    /// The player's switch: on after a successful init, until the player turns it off.
+    pub fn is_wanted(&self) -> bool {
+        self.wanted.load(Ordering::Acquire)
+    }
+
+    /// Whether the mod failed (failed init, panic, error status or exhausted budget).
+    /// A failed mod stays disabled until the client restarts.
+    pub fn is_failed(&self) -> bool {
+        self.failed.load(Ordering::Acquire)
+    }
+
+    /// Sets the player's switch. Only a flag, because a dispatch to the mod may be in
+    /// flight and `umi_mod_shutdown` frees the closures its trampolines use
+    /// (shutdown-quiescence rule, ADR-0086). Returns `false` and changes nothing for
+    /// a failed mod.
+    pub fn set_wanted(&self, wanted: bool) -> bool {
+        if self.is_failed() {
+            return false;
+        }
+        self.wanted.store(wanted, Ordering::Release);
+        true
     }
 
     fn lock(&self) -> MutexGuard<'_, Vec<Subscription>> {
@@ -133,33 +183,34 @@ impl ModContext {
     }
 
     /// Closes the registration window once `umi_mod_init` returned. On success the
-    /// mod becomes enabled and owes a `umi_mod_shutdown`; on failure its partial
-    /// registrations are dropped.
+    /// mod becomes enabled and owes a `umi_mod_shutdown`; on failure it is marked
+    /// failed and its partial registrations, commands included, are dropped.
     pub fn finish_init(&self, succeeded: bool) {
         self.init_done.store(true, Ordering::Release);
+        let withdrawn = self.ui.seal(succeeded);
         if succeeded {
             self.shutdown_due.store(true, Ordering::Release);
-            self.enabled.store(true, Ordering::Release);
+            self.wanted.store(true, Ordering::Release);
         } else {
+            self.failed.store(true, Ordering::Release);
             self.lock().clear();
+            self.shared.remove_commands(&withdrawn);
         }
     }
 
-    /// Disables the mod: the dispatcher skips it from now on. Only a flag, because a
-    /// dispatch to the mod may be in flight and `umi_mod_shutdown` frees the closures
-    /// its trampolines use (shutdown-quiescence rule, ADR-0086). Returns whether the
-    /// mod was enabled.
-    pub fn disable(&self) -> bool {
-        self.enabled.swap(false, Ordering::AcqRel)
-    }
-
-    /// Disables the mod because it misbehaved and logs `reason` once, however many
-    /// handlers fail at the same time.
+    /// Fails the mod because it misbehaved and logs `reason` once, however many
+    /// handlers fail at the same time. The dispatcher skips it from now on.
     pub(crate) fn fail(&self, reason: &str) {
-        if self.disable() {
+        if !self.failed.swap(true, Ordering::AcqRel) {
             let mod_id = &self.id;
             tracing::error!(%mod_id, "mod disabled: {reason}");
         }
+    }
+
+    /// Marks the mod as finished for good, silently: used at exit so nothing
+    /// re-enables it while it shuts down.
+    pub(crate) fn retire(&self) {
+        self.failed.store(true, Ordering::Release);
     }
 
     /// Whether `umi_mod_shutdown` is still owed; true for exactly one caller, and
@@ -175,6 +226,19 @@ impl ModContext {
 
     pub(crate) fn counters(&self) -> &Stats {
         &self.stats
+    }
+
+    /// Counters of the widget draw functions (budget [`HUD_BUDGET`](crate::HUD_BUDGET)).
+    pub fn hud_stats(&self) -> ModStats {
+        self.ui.hud_stats().snapshot()
+    }
+
+    pub(crate) fn hud_counters(&self) -> &Stats {
+        self.ui.hud_stats()
+    }
+
+    pub(crate) fn command_counters(&self) -> &Stats {
+        self.ui.command_stats()
     }
 
     pub(crate) fn worker(&self) -> &WorkerSlot {
@@ -197,129 +261,4 @@ impl ModContext {
 }
 
 #[cfg(test)]
-mod tests {
-    use core::ffi::c_void;
-
-    use umicraft_modapi_sys::UmiEventHeader;
-
-    use super::*;
-
-    extern "C" fn noop(_: *mut UmiEventHeader, _: *mut c_void) -> UmiStatus {
-        UmiStatus::OK
-    }
-
-    fn context() -> ModContext {
-        ModContext::new("hud".to_owned().try_into().unwrap())
-    }
-
-    fn subscribe(cx: &ModContext, event: UmiEventId, handler: Option<UmiHandlerFn>) -> UmiStatus {
-        cx.subscribe(
-            event,
-            UmiMode::OBSERVE,
-            0,
-            handler,
-            UserPtr::new(std::ptr::null_mut()),
-        )
-    }
-
-    #[test]
-    fn subscribe_records_a_valid_handler() {
-        let cx = context();
-        assert_eq!(
-            subscribe(&cx, UmiEventId::PRE_TICK, Some(noop)),
-            UmiStatus::OK
-        );
-        assert_eq!(cx.subscriptions(UmiEventId::PRE_TICK).len(), 1);
-        assert!(cx.subscriptions(UmiEventId::POST_TICK).is_empty());
-    }
-
-    #[test]
-    fn subscribe_refuses_null_handler_unknown_event_and_unknown_mode() {
-        let cx = context();
-        assert_eq!(
-            subscribe(&cx, UmiEventId::PRE_TICK, None),
-            UmiStatus::INVALID_ARGUMENT
-        );
-        assert_eq!(
-            subscribe(&cx, UmiEventId(999), Some(noop)),
-            UmiStatus::INVALID_ARGUMENT
-        );
-        let bad_mode = cx.subscribe(
-            UmiEventId::PRE_TICK,
-            UmiMode(7),
-            0,
-            Some(noop),
-            UserPtr::new(std::ptr::null_mut()),
-        );
-        assert_eq!(bad_mode, UmiStatus::INVALID_ARGUMENT);
-        assert!(cx.subscriptions(UmiEventId::PRE_TICK).is_empty());
-    }
-
-    #[test]
-    fn subscribe_after_init_is_denied() {
-        let cx = context();
-        cx.finish_init(true);
-        assert_eq!(
-            subscribe(&cx, UmiEventId::PRE_TICK, Some(noop)),
-            UmiStatus::DENIED
-        );
-    }
-
-    #[test]
-    fn failed_init_drops_subscriptions_and_stays_disabled() {
-        let cx = context();
-        subscribe(&cx, UmiEventId::PRE_TICK, Some(noop));
-        cx.finish_init(false);
-        assert!(!cx.is_enabled());
-        assert!(cx.subscriptions(UmiEventId::PRE_TICK).is_empty());
-        assert!(!cx.disable());
-    }
-
-    #[test]
-    fn disable_is_a_flag_and_reports_the_first_call_only() {
-        let cx = context();
-        subscribe(&cx, UmiEventId::PRE_TICK, Some(noop));
-        cx.finish_init(true);
-        assert!(cx.disable());
-        assert!(!cx.disable());
-        assert!(!cx.is_enabled());
-        // The list stays: a dispatch in flight may still read it.
-        assert_eq!(cx.subscriptions(UmiEventId::PRE_TICK).len(), 1);
-    }
-
-    #[test]
-    fn shutdown_is_owed_once_and_only_after_a_successful_init() {
-        let cx = context();
-        cx.finish_init(true);
-        cx.fail("test");
-        assert!(!cx.is_enabled());
-        assert!(
-            cx.take_shutdown_due(),
-            "a disabled mod still owes its shutdown"
-        );
-        assert!(!cx.take_shutdown_due());
-
-        let failed = context();
-        failed.finish_init(false);
-        assert!(!failed.take_shutdown_due());
-    }
-
-    #[test]
-    fn subscribe_accepts_the_eight_events_of_api_0_2() {
-        let cx = context();
-        for id in 1..=8 {
-            assert_eq!(subscribe(&cx, UmiEventId(id), Some(noop)), UmiStatus::OK);
-        }
-        assert_eq!(
-            subscribe(&cx, UmiEventId(9), Some(noop)),
-            UmiStatus::INVALID_ARGUMENT
-        );
-        assert_eq!(cx.all_subscriptions().len(), 8);
-    }
-
-    #[test]
-    fn log_text_replaces_invalid_utf8_and_caps_length() {
-        assert_eq!(log_text(b"ok\xff"), "ok\u{fffd}");
-        assert_eq!(log_text(&vec![b'a'; 10_000]).len(), MAX_LOG_BYTES);
-    }
-}
+mod tests;

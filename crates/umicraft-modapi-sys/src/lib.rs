@@ -16,11 +16,13 @@ mod events;
 mod exports;
 mod host;
 mod types;
+mod ui;
 
 pub use events::{
     UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader, UmiEventId,
-    UmiPostTick, UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT,
-    UMI_CHAT_POSITION_SYSTEM, UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED, UMI_EVENT_MUTABLE,
+    UmiKeyPressed, UmiPostTick, UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR,
+    UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM, UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED,
+    UMI_EVENT_MUTABLE,
 };
 pub use exports::{
     UmiModApiVersionFn, UmiModInitFn, UmiModShutdownFn, UMI_MOD_API_VERSION_SYMBOL,
@@ -28,3 +30,7 @@ pub use exports::{
 };
 pub use host::{UmiHandlerFn, UmiHost, UmiLevel, UmiMode};
 pub use types::{UmiModContext, UmiModHandle, UmiStatus, UmiStr, UmiVersion, UMI_API_VERSION};
+pub use ui::{
+    UmiCommandFn, UmiHudCx, UmiHudDrawFn, UmiHudPlacement, UmiSettingDef, UmiSettingKind,
+    UmiSettingValue,
+};

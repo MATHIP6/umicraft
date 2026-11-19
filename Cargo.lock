@@ -4446,6 +4446,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "tracing",
+ "umicraft-builtin-mods",
  "umicraft-core",
  "umicraft-modapi-sys",
 ]

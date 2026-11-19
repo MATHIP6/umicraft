@@ -9,9 +9,12 @@
 #![allow(unsafe_code)]
 
 mod event;
+mod hud;
+mod ui;
 
 #[cfg(test)]
 pub(crate) use event::testing;
+pub(crate) use hud::with_hud_cx;
 
 use core::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -25,7 +28,7 @@ use umicraft_modapi_sys::{
 };
 
 use crate::context::ModContext;
-use crate::error::LoadError;
+use crate::error::{DeclareError, LoadError};
 
 /// The `user` pointer a mod gave to `subscribe`, opaque to the host.
 ///
@@ -80,6 +83,31 @@ fn bytes_of<'a>(s: UmiStr, max: usize) -> &'a [u8] {
     unsafe { core::slice::from_raw_parts(s.ptr, s.len.min(max)) }
 }
 
+/// Reads a mod-provided string of at most `max` bytes as UTF-8, `None` if it is longer
+/// or not valid UTF-8.
+fn utf8_of<'a>(s: UmiStr, max: usize) -> Option<&'a str> {
+    if s.len > max {
+        return None;
+    }
+    std::str::from_utf8(bytes_of(s, max)).ok()
+}
+
+/// Like [`utf8_of`] but for a declaration: the failure says which text was wrong.
+/// An empty string passes; the caller decides whether empty is allowed.
+fn text_of<'a>(s: UmiStr, what: &'static str, max: usize) -> Result<&'a str, DeclareError> {
+    utf8_of(s, max).ok_or(DeclareError::Text { what, max })
+}
+
+/// Runs `body` with the context behind `handle`, turning a null handle into
+/// `INVALID_ARGUMENT` and a panic into `PANICKED`, so nothing unwinds into the mod.
+fn guarded(handle: UmiModHandle, body: impl FnOnce(&ModContext) -> UmiStatus) -> UmiStatus {
+    catch_unwind(AssertUnwindSafe(|| match context_of(handle) {
+        Some(context) => body(context),
+        None => UmiStatus::INVALID_ARGUMENT,
+    }))
+    .unwrap_or(UmiStatus::PANICKED)
+}
+
 /// Longest message read from a mod; the context caps again when logging.
 const MAX_MESSAGE_BYTES: usize = 8192;
 
@@ -100,11 +128,9 @@ extern "C" fn host_subscribe(
     handler: Option<UmiHandlerFn>,
     user: *mut c_void,
 ) -> UmiStatus {
-    catch_unwind(AssertUnwindSafe(|| match context_of(me) {
-        Some(context) => context.subscribe(event, mode, priority, handler, UserPtr::new(user)),
-        None => UmiStatus::INVALID_ARGUMENT,
-    }))
-    .unwrap_or(UmiStatus::PANICKED)
+    guarded(me, |context| {
+        context.subscribe(event, mode, priority, handler, UserPtr::new(user))
+    })
 }
 
 /// Builds the function table handed to every mod.
@@ -115,6 +141,17 @@ pub fn host_table() -> UmiHost {
         log: host_log,
         subscribe: host_subscribe,
         event_set_text: event::host_event_set_text,
+        register_setting: ui::host_register_setting,
+        setting_get: ui::host_setting_get,
+        register_hud_widget: ui::host_register_hud_widget,
+        hud_line: hud::host_hud_line,
+        hud_label: hud::host_hud_label,
+        hud_cell: hud::host_hud_cell,
+        hud_tick: hud::host_hud_tick,
+        hud_reserve: hud::host_hud_reserve,
+        register_key: ui::host_register_key,
+        register_command: ui::host_register_command,
+        chat_print: ui::host_chat_print,
     }
 }
 
@@ -176,7 +213,7 @@ mod tests {
         UmiStatus::OK
     }
 
-    fn context() -> ModContext {
+    fn context() -> std::sync::Arc<ModContext> {
         ModContext::new("hud".to_owned().try_into().unwrap())
     }
 

@@ -127,3 +127,14 @@ screens, ECS components.
 - Each phase of `docs/tasks/f3/README.md` adds a benchmark of the dispatch it
   touches; with no mod loaded the cost must be within noise.
 - Spec §8.4 item 3 and §13 items 4 and 6 are updated accordingly.
+
+## Amendments
+
+- **2026-11-19, F3.4 — no raw key events.** The `KeyInput` event of the
+  extension table is replaced by `KEY_PRESSED`, fired only for the key
+  bindings a mod registered, only to that mod, and only while no screen is
+  open. A raw key stream would let any mod read what the player types in
+  the chat, on signs or in a server's login prompt.
+- **2026-11-19, F3.3 — disable is a flag.** `ModHost::disable` only flips the
+  mod's flag; `umi_mod_shutdown` runs once, in `shutdown_all`, after every
+  dispatching thread has stopped (`docs/tasks/f3/README.md`, quiescence rule).

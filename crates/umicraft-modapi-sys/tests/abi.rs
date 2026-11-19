@@ -48,7 +48,7 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (40, 8));
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (128, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -75,7 +75,7 @@ fn version_compatibility_rules() {
         assert_eq!(host.accepts(module), expected, "{host:?} vs {module:?}");
     }
     assert!(UMI_API_VERSION.accepts(UMI_API_VERSION));
-    assert_eq!(UMI_API_VERSION, v(0, 2));
+    assert_eq!(UMI_API_VERSION, v(0, 3));
 }
 
 #[test]
@@ -167,4 +167,28 @@ fn string_event_layouts() {
         assert_eq!((size, offset), (32, 16));
     }
     assert_eq!(offset_of!(UmiHost, event_set_text), 32);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn ui_layouts() {
+    assert_eq!(UmiEventId::KEY_PRESSED.0, 9);
+    assert_eq!(size_of::<UmiKeyPressed>(), 32);
+    assert_eq!(offset_of!(UmiSettingDef, key), 8);
+    assert_eq!(offset_of!(UmiSettingDef, choices), 64);
+    assert_eq!(size_of::<UmiSettingDef>(), 88);
+    assert_eq!(size_of::<UmiSettingValue>(), 20);
+    assert_eq!(size_of::<UmiHudPlacement>(), 16);
+    assert_eq!(offset_of!(UmiHost, register_setting), 40);
+    assert_eq!(offset_of!(UmiHost, chat_print), 120);
+    assert_eq!(
+        [
+            UmiSettingKind::TOGGLE,
+            UmiSettingKind::SLIDER,
+            UmiSettingKind::CHOICE,
+            UmiSettingKind::COLOR
+        ]
+        .map(|k| k.0),
+        [1, 2, 3, 4]
+    );
 }

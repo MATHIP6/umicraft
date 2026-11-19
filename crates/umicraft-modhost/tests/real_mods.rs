@@ -12,13 +12,17 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
+use std::time::Duration;
 
+use umicraft_builtin_mods::SettingValue;
 use umicraft_core::EventBus;
 use umicraft_modapi_sys::{UmiEventId, UmiMode, UmiStatus};
 use umicraft_modhost::{
     discover, library_file_name, platform_dir, resolve, ApiVersion, Arch, Candidate, ChatSend,
-    EventThread, LoadError, ModHost, ModId, Os, PostTick, PreTick, TrustList,
+    CommandOutcome, EventThread, KeyPressed, LoadError, ModHost, ModId, Os, PostTick, PreTick,
+    TrustList,
 };
 
 /// The directory holding the built example libraries (`<target>/<profile>`).
@@ -59,7 +63,13 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> Self {
-        let dir = std::env::temp_dir().join(format!("umi-real-mods-{}", std::process::id()));
+        // One directory per test: the tests of this file run in parallel.
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "umi-real-mods-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Self(dir)
@@ -98,7 +108,7 @@ fn hello_loads_panicking_fails_and_handlers_run() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 2 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 3 });
     assert_eq!(resolution.order.len(), 2);
 
     let mut trust = TrustList::default();
@@ -109,7 +119,7 @@ fn hello_loads_panicking_fails_and_handlers_run() {
     });
 
     // The panic is contained: only `panicking` failed, and the process is alive.
-    assert_eq!(failures.len(), 1);
+    assert_eq!(failures.len(), 1, "{failures:?}");
     assert_eq!(failures[0].id.as_str(), "panicking");
     assert!(matches!(
         failures[0].reason,
@@ -157,12 +167,84 @@ fn hello_loads_panicking_fails_and_handlers_run() {
         .1;
     assert_eq!(hello.calls, 2, "the post-tick and the chat interceptors");
 
-    // Disabling is a flag: the mod stops being dispatched to, and exit shuts it down.
-    assert!(host.disable(&id("hello")));
-    assert!(!host.disable(&id("hello")));
+    // Switching off is a flag: the mod stops being dispatched to, and can come back.
+    host.set_enabled(&id("hello"), false).unwrap();
     let mut untouched = ChatSend::new(":shrug:");
     game.dispatch(&mut untouched);
     assert_eq!(untouched.text(), ":shrug:");
     assert_eq!(host.subscriptions(UmiEventId::PRE_TICK).count(), 0);
     assert_eq!(host.enabled().count(), 0);
+    host.set_enabled(&id("hello"), true).unwrap();
+    let mut back = ChatSend::new(":shrug:");
+    game.dispatch(&mut back);
+    assert_ne!(back.text(), ":shrug:");
+}
+
+/// What a player of the real `hello` mod sees: settings, a widget, a key, a command.
+#[test]
+fn hello_declares_settings_a_widget_a_key_and_a_command() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "hello");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 3 });
+    let (host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let hello = id("hello");
+
+    let view = host.mods().next().unwrap();
+    assert_eq!(
+        (view.name, view.enabled, view.failed),
+        ("Hello", true, false)
+    );
+    let keys: Vec<_> = view.settings().map(|s| s.spec.key.clone()).collect();
+    assert_eq!(keys, ["show_ticks", "tick_color"]);
+    let bindings: Vec<_> = host.key_bindings().collect();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(
+        (bindings[0].key, bindings[0].default_binding),
+        ("greet", "KeyH")
+    );
+
+    // The widget draws a line on the render thread.
+    host.draw_widgets();
+    let mut lines = Vec::new();
+    host.visit_widgets(|w| {
+        lines.extend(w.content.lines().iter().map(|l| l.text.clone()));
+        assert_eq!((w.mod_id.as_str(), w.key), ("hello", "ticks"));
+    });
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].starts_with("ticks: "), "{lines:?}");
+
+    // A setting changes what the mod's closure reads.
+    host.set_setting(&hello, "show_ticks", &SettingValue::Bool(false))
+        .unwrap();
+    host.draw_widgets();
+    let mut shown = 0;
+    host.visit_widgets(|w| shown += w.content.lines().len());
+    assert_eq!(shown, 0);
+
+    // The key binding fires an observer on the render thread's worker, which prints.
+    let mut render = EventBus::default();
+    host.install(&mut render, EventThread::Render);
+    render.dispatch(&mut KeyPressed::new(hello.clone(), "greet"));
+    let outbox = host.chat_outbox();
+    let line = outbox.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(line, "hello from the key binding");
+
+    // `/hello bob` runs on the client and prints; `/hello` alone is refused with
+    // its usage, and the mod stays enabled.
+    let commands = host.commands();
+    assert_eq!(commands.complete("he"), ["hello"]);
+    assert_eq!(commands.run("/hello bob"), CommandOutcome::Ran);
+    assert_eq!(outbox.try_recv().as_deref(), Ok("hello, bob"));
+    assert_eq!(commands.run("/hello"), CommandOutcome::Rejected);
+    assert!(outbox
+        .try_recv()
+        .is_ok_and(|line| line.starts_with("Usage: /hello")));
+    assert_eq!(host.set_enabled(&hello, true), Ok(()));
+    assert!(host.enabled().any(|id| id == &hello));
 }

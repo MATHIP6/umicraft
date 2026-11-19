@@ -4,8 +4,8 @@
 
 use umicraft_modapi_sys::{
     UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader, UmiEventId,
-    UmiPostTick, UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT,
-    UMI_CHAT_POSITION_SYSTEM,
+    UmiKeyPressed, UmiPostTick, UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR,
+    UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
 };
 
 use crate::ffi::str_of;
@@ -95,6 +95,15 @@ view!(
     UmiEventId::CHAT_SEND
 );
 view!(
+    /// The player pressed a key binding this mod registered with
+    /// [`InitCx::key`](crate::InitCx::key), with no screen open. Delivered to
+    /// the registering mod only: the API has no raw key stream, so a mod
+    /// cannot read what the player types (ADR-0086).
+    KeyPressed,
+    UmiKeyPressed,
+    UmiEventId::KEY_PRESSED
+);
+view!(
     /// The client joined a server.
     Connected,
     UmiConnected,
@@ -148,7 +157,10 @@ impl From<u8> for ChatPosition {
 /// The pointer is derived from the whole view, not from its header field, so
 /// it keeps the provenance the host needs to write the rest of the payload.
 fn replace_text<V: Event>(view: &mut V, text: &str) -> Result<(), ModError> {
-    host::set_text(core::ptr::from_mut(view).cast::<UmiEventHeader>(), text)
+    let event = core::ptr::from_mut(view).cast::<UmiEventHeader>();
+    // The host is the authority on whether the event is mutable, so the flag
+    // is not checked here and cannot disagree with it.
+    host::call(|host, _| (host.event_set_text)(event, host::utf8(text))).and_then(ModError::check)
 }
 
 impl PreTick {
@@ -199,6 +211,13 @@ impl ChatSend {
     /// [`ModError::HostRefused`] with `DENIED` when called from an observer.
     pub fn set_text(&mut self, text: &str) -> Result<(), ModError> {
         replace_text(self, text)
+    }
+}
+
+impl KeyPressed {
+    /// The id the mod gave the binding in [`InitCx::key`](crate::InitCx::key).
+    pub fn key(&self) -> &str {
+        str_of(&self.0.key)
     }
 }
 

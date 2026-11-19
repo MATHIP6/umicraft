@@ -1,24 +1,43 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Cost of dispatching an event (F3.3, ADR-0086): with no subscriber, with one Rust
-//! handler, and with one foreign intercept handler through the mod adapter.
+//! handler, and with one foreign intercept handler through the mod adapter; and (F3.4)
+//! of drawing one foreign HUD widget that writes a line.
 
 use core::ffi::c_void;
 use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use umicraft_builtin_mods::HudPlacement;
 use umicraft_core::module::ModuleId;
 use umicraft_core::EventBus;
-use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiMode, UmiStatus};
-use umicraft_modhost::{install_mod, ChatSend, EventThread, ModContext, PreTick, UserPtr};
+use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiHudCx, UmiMode, UmiStatus, UmiStr};
+use umicraft_modhost::{
+    host_table, install_mod, ChatSend, EventThread, ModContext, PreTick, UserPtr,
+};
 
 extern "C" fn noop(_: *mut UmiEventHeader, _: *mut c_void) -> UmiStatus {
     UmiStatus::OK
 }
 
+/// A widget that writes one line, the way a typical mod does.
+extern "C" fn draw_one_line(hud: *mut UmiHudCx, _: *mut c_void) -> UmiStatus {
+    (host_table().hud_line)(hud, UmiStr::from_static("fps 60"), 0x00ff_ffff)
+}
+
+fn widget_context() -> Arc<ModContext> {
+    let context = ModContext::new("bench".to_owned().try_into().unwrap());
+    let user = UserPtr::new(std::ptr::null_mut());
+    let placement = HudPlacement::default();
+    let registered = context.register_widget("main", "Main", placement, Some(draw_one_line), user);
+    assert!(registered.is_ok());
+    context.finish_init(true);
+    context
+}
+
 fn foreign_bus() -> EventBus {
-    let context = Arc::new(ModContext::new("bench".to_owned().try_into().unwrap()));
+    let context = ModContext::new("bench".to_owned().try_into().unwrap());
     let user = UserPtr::new(std::ptr::null_mut());
     context.subscribe(
         UmiEventId::PRE_TICK,
@@ -63,5 +82,20 @@ fn dispatch(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, dispatch);
+fn draw_widgets(c: &mut Criterion) {
+    let context = widget_context();
+    c.bench_function("modhost_hud/draw_one_foreign_widget", |b| {
+        b.iter(|| context.draw_widgets());
+    });
+    c.bench_function("modhost_hud/draw_and_visit_one_foreign_widget", |b| {
+        b.iter(|| {
+            context.draw_widgets();
+            context.visit_widgets(|w| {
+                black_box(w.content.lines().len());
+            });
+        });
+    });
+}
+
+criterion_group!(benches, dispatch, draw_widgets);
 criterion_main!(benches);

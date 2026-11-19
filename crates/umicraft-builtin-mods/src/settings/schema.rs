@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The description of a setting: what the settings page shows and what is valid.
 
+use super::rules::{parse_hex_color, snap_slider};
 use super::SettingValue;
 
 /// The shape of a setting and its default.
@@ -68,27 +69,23 @@ impl SettingDef {
     pub fn sanitize(&self, value: &SettingValue) -> SettingValue {
         match (self.kind, value) {
             (SettingKind::Toggle { .. }, SettingValue::Bool(_)) => value.clone(),
-            (SettingKind::Slider { min, max, step, .. }, SettingValue::Number(n))
-                if n.is_finite() && step > 0.0 =>
-            {
-                let snapped = min + ((n - min) / step).round() * step;
-                SettingValue::Number(snapped.clamp(min, max))
+            (SettingKind::Slider { min, max, step, .. }, SettingValue::Number(n)) => {
+                match snap_slider(*n, min, max, step) {
+                    Some(snapped) => SettingValue::Number(snapped),
+                    None => self.default_value(),
+                }
             }
             (SettingKind::Choice { options, .. }, SettingValue::Text(t))
                 if options.contains(&t.as_str()) =>
             {
                 value.clone()
             }
-            (SettingKind::Color { .. }, SettingValue::Text(t)) if is_hex_color(t) => value.clone(),
+            (SettingKind::Color { .. }, SettingValue::Text(t)) if parse_hex_color(t).is_some() => {
+                value.clone()
+            }
             _ => self.default_value(),
         }
     }
-}
-
-/// Whether `text` is `#rrggbb`.
-fn is_hex_color(text: &str) -> bool {
-    text.strip_prefix('#')
-        .is_some_and(|hex| hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 #[cfg(test)]

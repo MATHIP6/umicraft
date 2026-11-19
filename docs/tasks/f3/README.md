@@ -221,3 +221,85 @@ Game thread: `PreTick`/`PostTick` around `tick()`, `ChatReceived` before
 `Connected`/`Disconnected` in `session_control`, `ScreenOpened`/`Closed` in
 `set_screen` with stable names. The game thread receives its bus from
 `Session::start`; `exiting` drops the session before `shutdown_all`.
+
+## F3.4 interface (frozen before the work is split)
+
+API **0.3**: `UmiSettingDef`/`UmiSettingValue`/`UmiSettingKind`,
+`UmiHudPlacement`, opaque `UmiHudCx`, `UmiHudDrawFn`, `UmiCommandFn`,
+event `KEY_PRESSED` (9, render thread, payload `UmiKeyPressed { header, key }`)
+and the host functions `register_setting`, `setting_get`,
+`register_hud_widget`, `hud_line`/`hud_label`/`hud_cell`/`hud_tick`/`hud_reserve`,
+`register_key`, `register_command`, `chat_print` (ADR-0086 amendment: no raw
+key events). Registrations are accepted during `umi_mod_init` only. Texts
+are literal UTF-8, copied by the host. Keys of settings, widgets and key
+bindings follow `^[a-z][a-z0-9_]{0,63}$`; command names `^[a-z][a-z0-9_-]{0,31}$`.
+
+### `umicraft-modhost` (host side)
+
+- Depends on `umicraft-builtin-mods` for the shared HUD and settings data
+  model (`HudContent`, `HudPlacement`, `Anchor`, `SettingValue`) instead of
+  duplicating it; validation rules shared with the built-in settings
+  (slider clamp and step, colour format) are moved into public pure helpers
+  of `umicraft-builtin-mods` and reused.
+- Per-mod declarations in `ModContext`: owned setting specs with their value
+  held in atomics (`setting_get` from any thread without a lock), widget
+  specs (draw fn, user, default placement, current placement, a
+  `Mutex<HudContent>`), key specs (id, label, default binding name).
+- Host-wide shared state (`Arc`, created by `ModHost::load` and given to every
+  context): the command table (a name taken twice → `CONFLICT` for the
+  second mod) and the chat outbox (bounded queue of 64 local lines, dropped
+  when full) that `chat_print` feeds.
+- **Enable switch.** A mod is enabled when the player wants it and it has not
+  failed. `ModHost::set_enabled(id, bool)` changes the player's wish and can
+  re-enable a mod the player switched off (its handlers were never freed);
+  a failed mod stays off until restart.
+- **Config.** `ExternalModConfig { enabled, settings, placements, keys }`
+  (serde, unknown keys kept) with `load(path)`/`save(path)` helpers;
+  `ModHost::config(id)` and `ModHost::apply_config(id, &cfg)` (values
+  sanitised against the specs; unknown keys kept for a later version of the
+  mod). `ModHost::set_setting(id, key, value)`, `set_placement(id, widget,
+  placement)`, `set_key(id, key, binding_name)`.
+- **HUD.** `ModHost::draw_widgets(&self) -> Vec<DrawnWidget>` (or a visitor
+  without allocation): for each widget of each enabled mod, clear its
+  content, call `draw` on the render thread with a `UmiHudCx` that points to
+  it, timed against a 0.5 ms budget with the F3.3 counters; a non-`OK` status
+  or a budget exhaustion fails the mod. A `DrawnWidget` exposes mod id,
+  widget key, label, placement and `&HudContent`. The `hud_*` host functions
+  reject a null cx, non-finite numbers and invalid UTF-8.
+- **Keys.** `ModHost::key_bindings()` lists `(mod id, key id, label,
+  default binding name, current binding name)`. Host event `KeyPressed`
+  carries a target mod id outside the ABI payload, and the dispatch adapter
+  calls only the target mod's handlers (a `HostEvent::target` method,
+  `None` for every other event).
+- **Commands.** `ModHost::commands() -> CommandTable` (`Send + Clone`, moved
+  to the game thread with the game bus): `run(line) -> CommandOutcome
+  { NotACommand, Ran, Rejected, Failed }` (`/name args`; the handler is
+  budgeted like an intercept handler; `ERROR` means the arguments were
+  refused, so the usage is printed and the mod stays enabled; a panic or
+  another status fails the mod), `complete(prefix) ->
+  Vec<String>` for tab completion, `usage(name)`. `ModHost::chat_outbox()`
+  returns the receiver end of the local lines.
+
+### `umicraft-modapi` (mod side)
+
+`InitCx::{toggle, slider, choice, color}` return a `Setting<T>` handle
+(`Copy + Send + Sync`, `get()`); `InitCx::hud_widget(key, label, Placement,
+FnMut(&mut Hud) + Send)` with `Hud::{line, label, cell, tick, reserve}`;
+`InitCx::key(key, label, default)` and the `KeyPressed` view (`key()`);
+`InitCx::command(name, usage, FnMut(&str) -> Result<(), ModError> + Send)`;
+`InitCx::chat() -> Chat` (`Copy + Send + Sync`, `print(&str)`). The host
+functions a handle needs after `init` are kept in the mod-side static
+introduced in F3.3, generalised to the whole host table.
+
+### Client (after the two above)
+
+External mods appear in the mods menu as cards of an extra category (name and
+description from `mod.toml`, settings from their specs, enable switch);
+card ids are prefixed `ext:` so outcomes route to `ModHost`. Their widgets
+are drawn with the built-in widgets and are movable in the HUD editor. Their
+key bindings are listed on the controls page under the mod's name and
+dispatched as `KeyPressed` on a press with no screen open. `/name` lines are
+run by the `CommandTable` on the game thread before `ChatSend`; tab
+completion merges local command names. Each mod's choices persist in
+`<options dir>/mods/<id>.toml`. A mod id equal to a built-in mod id is
+refused at load.

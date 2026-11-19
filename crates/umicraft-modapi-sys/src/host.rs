@@ -4,7 +4,10 @@
 
 use core::ffi::c_void;
 
-use crate::{UmiEventHeader, UmiEventId, UmiModHandle, UmiStatus, UmiStr, UmiVersion};
+use crate::{
+    UmiCommandFn, UmiEventHeader, UmiEventId, UmiHudCx, UmiHudDrawFn, UmiHudPlacement,
+    UmiModHandle, UmiSettingDef, UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
+};
 
 /// How a handler takes part in an event.
 #[repr(transparent)]
@@ -72,4 +75,82 @@ pub struct UmiHost {
     /// `UMI_EVENT_MUTABLE`, `INVALID_ARGUMENT` for another event or invalid
     /// UTF-8. Added in API 0.2.
     pub event_set_text: extern "C" fn(event: *mut UmiEventHeader, text: UmiStr) -> UmiStatus,
+    /// Declares a setting (during `umi_mod_init` only). `CONFLICT` for a
+    /// key already used, `INVALID_ARGUMENT` for an invalid definition.
+    /// Added in API 0.3.
+    pub register_setting: extern "C" fn(me: UmiModHandle, def: *const UmiSettingDef) -> UmiStatus,
+    /// Reads the current value of setting `key` into `out`; callable from any
+    /// thread at any time. `INVALID_ARGUMENT` for an unknown key.
+    pub setting_get:
+        extern "C" fn(me: UmiModHandle, key: UmiStr, out: *mut UmiSettingValue) -> UmiStatus,
+    /// Declares a HUD widget `key` (during `umi_mod_init` only), drawn by
+    /// `draw` each frame while the mod is enabled. The player can move and
+    /// scale it in the mods menu; `placement` is the default.
+    pub register_hud_widget: extern "C" fn(
+        me: UmiModHandle,
+        key: UmiStr,
+        label: UmiStr,
+        placement: UmiHudPlacement,
+        draw: Option<UmiHudDrawFn>,
+        user: *mut c_void,
+    ) -> UmiStatus,
+    /// Adds a text line to the widget being drawn (`color`: `0xRRGGBB`).
+    pub hud_line: extern "C" fn(hud: *mut UmiHudCx, text: UmiStr, color: u32) -> UmiStatus,
+    /// Adds free text at `(x, y)` inside the widget, in widget pixels.
+    pub hud_label: extern "C" fn(
+        hud: *mut UmiHudCx,
+        x: f32,
+        y: f32,
+        text: UmiStr,
+        color: u32,
+        alpha: f32,
+        scale: f32,
+    ) -> UmiStatus,
+    /// Adds a boxed cell (a key of a keystrokes display, for instance).
+    pub hud_cell: extern "C" fn(
+        hud: *mut UmiHudCx,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        pressed: u8,
+        text: UmiStr,
+        color: u32,
+    ) -> UmiStatus,
+    /// Adds a filled rectangle.
+    pub hud_tick: extern "C" fn(
+        hud: *mut UmiHudCx,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: u32,
+        alpha: f32,
+    ) -> UmiStatus,
+    /// Reserves at least `width` x `height` widget pixels for labels, cells
+    /// and ticks, which do not size the widget by themselves.
+    pub hud_reserve: extern "C" fn(hud: *mut UmiHudCx, width: f32, height: f32) -> UmiStatus,
+    /// Declares a key binding `key` (during `umi_mod_init` only), listed on
+    /// the controls page under the mod's name. `default_binding` is a key
+    /// name such as `KeyG` or `Mouse4`, or empty for unbound. A press fires
+    /// `KEY_PRESSED` for this mod only.
+    pub register_key: extern "C" fn(
+        me: UmiModHandle,
+        key: UmiStr,
+        label: UmiStr,
+        default_binding: UmiStr,
+    ) -> UmiStatus,
+    /// Declares the client command `/<name>` (during `umi_mod_init` only);
+    /// the line is not sent to the server. `CONFLICT` if another mod took
+    /// the name.
+    pub register_command: extern "C" fn(
+        me: UmiModHandle,
+        name: UmiStr,
+        usage: UmiStr,
+        run: Option<UmiCommandFn>,
+        user: *mut c_void,
+    ) -> UmiStatus,
+    /// Shows `text` as a local chat line (never sent); callable from any
+    /// thread.
+    pub chat_print: extern "C" fn(me: UmiModHandle, text: UmiStr) -> UmiStatus,
 }

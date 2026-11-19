@@ -55,6 +55,24 @@ pub enum Anchor {
 }
 
 impl Anchor {
+    /// The anchor with row-by-row index `index` (0 top left, 4 centre, 8 bottom
+    /// right), the numbering of the modding ABI; `None` above 8.
+    #[must_use]
+    pub const fn from_index(index: u32) -> Option<Self> {
+        Some(match index {
+            0 => Self::TopLeft,
+            1 => Self::TopCenter,
+            2 => Self::TopRight,
+            3 => Self::MiddleLeft,
+            4 => Self::Center,
+            5 => Self::MiddleRight,
+            6 => Self::BottomLeft,
+            7 => Self::BottomCenter,
+            8 => Self::BottomRight,
+            _ => return None,
+        })
+    }
+
     /// The anchor as `(horizontal, vertical)` fractions of the free space: 0 is the
     /// left or top, 0.5 the middle, 1 the right or bottom.
     #[must_use]
@@ -216,6 +234,21 @@ mod tests {
 
     const SCREEN: (f32, f32) = (400.0, 300.0);
     const SIZE: (f32, f32) = (100.0, 20.0);
+
+    #[test]
+    fn anchor_indices_follow_the_row_by_row_numbering() {
+        assert_eq!(Anchor::from_index(0), Some(Anchor::TopLeft));
+        assert_eq!(Anchor::from_index(4), Some(Anchor::Center));
+        assert_eq!(Anchor::from_index(8), Some(Anchor::BottomRight));
+        assert_eq!(Anchor::from_index(9), None);
+        for index in 0..9 {
+            let (fx, fy) = Anchor::from_index(index).unwrap().fractions();
+            assert_eq!(
+                (fx, fy),
+                ((index % 3) as f32 / 2.0, (index / 3) as f32 / 2.0)
+            );
+        }
+    }
 
     #[test]
     fn corners_hug_the_screen_edges() {

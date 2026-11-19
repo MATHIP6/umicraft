@@ -12,12 +12,16 @@ use crate::error::IdError;
 /// Longest identifier, in characters, so ids stay usable as file and table names.
 const MAX_LEN: usize = 64;
 
-/// Checks `^[a-z][a-z0-9_<extra>]{0,63}$` without a regex dependency.
-fn is_valid(text: &str, extra: &[char]) -> bool {
+/// Checks `^[a-z][a-z0-9_<extra>]{0,max_len-1}$` without a regex dependency.
+///
+/// Shared by manifest ids and by the keys and names a mod declares at run time
+/// (settings, widgets, key bindings, commands), so one grammar rule has one
+/// implementation.
+pub(crate) fn is_valid(text: &str, extra: &[char], max_len: usize) -> bool {
     let mut chars = text.chars();
     let first_ok = chars.next().is_some_and(|c| c.is_ascii_lowercase());
     first_ok
-        && text.len() <= MAX_LEN
+        && text.len() <= max_len
         && chars
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || extra.contains(&c))
 }
@@ -41,7 +45,7 @@ macro_rules! identifier {
             type Error = IdError;
 
             fn try_from(value: String) -> Result<Self, IdError> {
-                if is_valid(&value, $extra) {
+                if is_valid(&value, $extra, MAX_LEN) {
                     Ok(Self(value))
                 } else {
                     Err(IdError { kind: $kind, value, grammar: $grammar })

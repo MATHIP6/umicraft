@@ -8,9 +8,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use umicraft_modapi_sys::UMI_API_VERSION;
 pub use umicraft_modapi_sys::{UmiHost, UmiModHandle, UmiStatus, UmiVersion};
 
-use crate::ffi::{self, OwnedHandler};
+use crate::ffi::{self, OwnedUser};
 use crate::host;
-use crate::{InitCx, Mod};
+use crate::{InitCx, Logger, Mod};
 
 /// Runs `body`, turning a panic into [`UmiStatus::PANICKED`]: unwinding out
 /// of an `extern "C"` function aborts the whole client.
@@ -21,7 +21,7 @@ pub(crate) fn guarded(body: impl FnOnce() -> UmiStatus) -> UmiStatus {
 struct Running<M> {
     instance: M,
     // Kept alive until after `Mod::shutdown`: the host may still call them.
-    _handlers: Vec<OwnedHandler>,
+    _handlers: Vec<OwnedUser>,
 }
 
 /// Holds the mod between `umi_mod_init` and `umi_mod_shutdown`.
@@ -52,18 +52,18 @@ impl<M: Mod> ModState<M> {
         if slot.is_some() {
             return UmiStatus::CONFLICT;
         }
-        host::remember(host);
+        host::remember(host, me);
         let mut cx = InitCx::new(host, me);
         match M::init(&mut cx) {
             Ok(instance) => {
                 *slot = Some(Running {
                     instance,
-                    _handlers: cx.into_handlers(),
+                    _handlers: cx.into_owned(),
                 });
                 UmiStatus::OK
             }
             Err(error) => {
-                cx.logger().error(&error.to_string());
+                Logger.error(&error.to_string());
                 UmiStatus::ERROR
             }
         }

@@ -170,3 +170,111 @@ pub enum DiscoverError {
         id: String,
     },
 }
+
+/// Why a registration made during `umi_mod_init` (setting, widget, key binding or
+/// command) was refused. The host function reports it to the mod as a
+/// [`UmiStatus`] ([`DeclareError::status`]) and logs the text for the mod's author.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum DeclareError {
+    /// The call came after `umi_mod_init` returned.
+    #[error("registrations are only accepted during `umi_mod_init`")]
+    Late,
+    /// A key or name breaks its grammar.
+    #[error("invalid {what} `{value}`: expected {grammar}")]
+    InvalidKey {
+        /// What is being named (`setting key`, `command name`, ...).
+        what: &'static str,
+        /// The rejected text.
+        value: String,
+        /// The accepted grammar, as a regular expression.
+        grammar: &'static str,
+    },
+    /// The same key or name was declared twice (by this mod or, for commands, by
+    /// another one).
+    #[error("{what} `{value}` is already registered")]
+    Duplicate {
+        /// What is being named.
+        what: &'static str,
+        /// The repeated text.
+        value: String,
+    },
+    /// A text is empty, too long or not UTF-8.
+    #[error("{what} must be valid UTF-8 of 1 to {max} bytes")]
+    Text {
+        /// Which text.
+        what: &'static str,
+        /// Its length limit, in bytes.
+        max: usize,
+    },
+    /// A definition is inconsistent (a slider with `min >= max`, an unknown
+    /// anchor, a null function...).
+    #[error("{what}: {why}")]
+    Invalid {
+        /// What is being declared.
+        what: &'static str,
+        /// What is wrong with it.
+        why: &'static str,
+    },
+    /// The mod declared more of something than the host accepts.
+    #[error("at most {max} {what} may be registered")]
+    TooMany {
+        /// What is being declared.
+        what: &'static str,
+        /// The limit.
+        max: usize,
+    },
+}
+
+impl DeclareError {
+    /// The status a mod receives: `DENIED` for a late call or too many items,
+    /// `CONFLICT` for a name already taken, `INVALID_ARGUMENT` otherwise.
+    pub fn status(&self) -> UmiStatus {
+        match self {
+            Self::Late | Self::TooMany { .. } => UmiStatus::DENIED,
+            Self::Duplicate { .. } => UmiStatus::CONFLICT,
+            _ => UmiStatus::INVALID_ARGUMENT,
+        }
+    }
+}
+
+/// Why the player's enable switch could not be changed.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum EnableError {
+    /// No loaded mod has this id.
+    #[error("no loaded mod `{0}`")]
+    UnknownMod(ModId),
+    /// The mod failed (panic, error status, over budget, or failed to initialise)
+    /// and stays off until the client restarts.
+    #[error("mod `{0}` failed and stays disabled until restart")]
+    Failed(ModId),
+}
+
+/// Why a mod's setting, widget placement or key binding could not be changed.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ConfigureError {
+    /// No loaded mod has this id.
+    #[error("no loaded mod `{0}`")]
+    UnknownMod(ModId),
+    /// The mod declared no such setting, widget or key binding.
+    #[error("the mod declares no {kind} `{key}`")]
+    UnknownKey {
+        /// `setting`, `widget` or `key binding`.
+        kind: &'static str,
+        /// The key that was asked for.
+        key: String,
+    },
+}
+
+/// Why a mod's configuration file could not be read or written.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    /// The file could not be read or written.
+    #[error("mod config I/O failed: {0}")]
+    Io(#[from] std::io::Error),
+    /// The file is not valid TOML for a mod config.
+    #[error("mod config is malformed: {0}")]
+    Parse(#[from] toml::de::Error),
+    /// The config could not be serialised (a non-finite number, for instance).
+    #[error("mod config cannot be serialised: {0}")]
+    Serialize(#[from] toml::ser::Error),
+}

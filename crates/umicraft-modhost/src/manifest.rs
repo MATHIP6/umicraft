@@ -16,6 +16,7 @@ use semver::{Version, VersionReq};
 use serde::Deserialize;
 
 pub use api_version::{ApiVersion, ApiVersionError};
+pub(crate) use id::is_valid as is_identifier;
 pub use id::{ModId, ServiceId};
 pub use platform::{library_file_name, platform_dir, Arch, Os};
 

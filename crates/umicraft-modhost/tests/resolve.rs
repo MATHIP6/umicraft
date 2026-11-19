@@ -7,12 +7,12 @@ use umicraft_modhost::{
     resolve, ApiVersion, Candidate, Manifest, ModId, RejectReason, Resolution, ServiceId,
 };
 
-const HOST: ApiVersion = ApiVersion { major: 0, minor: 1 };
+const HOST: ApiVersion = ApiVersion { major: 0, minor: 3 };
 
 /// Builds a manifest from compact parts: dependencies as `(id, requirement)`.
 fn manifest(id: &str, deps: &[(&str, &str)], priority: i32) -> Manifest {
     let mut text = format!(
-        "[mod]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nauthors = []\napi_version = \"0.1\"\n\
+        "[mod]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nauthors = []\napi_version = \"0.3\"\n\
          [dependencies]\n"
     );
     for (dep, req) in deps {

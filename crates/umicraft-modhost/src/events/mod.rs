@@ -13,6 +13,7 @@
 //! Built-in Rust modules subscribe to these same types on the core `EventBus`.
 
 mod chat;
+mod key;
 mod screen;
 mod session;
 mod tick;
@@ -21,7 +22,10 @@ use std::mem::size_of;
 
 use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiStr, UMI_EVENT_CANCELLED};
 
+use crate::manifest::ModId;
+
 pub use chat::{ChatReceived, ChatSend};
+pub use key::KeyPressed;
 pub use screen::{ScreenClosed, ScreenOpened};
 pub use session::{Connected, Disconnected};
 pub use tick::{PostTick, PreTick};
@@ -39,7 +43,7 @@ pub enum EventThread {
 
 /// What the dispatcher needs to know about an ABI event type.
 ///
-/// Implemented by the eight event types of this module only: the `Send` impls and
+/// Implemented by the nine event types of this module only: the `Send` impls and
 /// `event_set_text` rely on the host being the sole builder of these events.
 pub trait HostEvent: Clone + Send + 'static {
     /// The event id of the payload.
@@ -65,6 +69,14 @@ pub trait HostEvent: Clone + Send + 'static {
         std::ptr::from_mut(self).cast()
     }
 
+    /// The only mod the event is for, or `None` when it goes to every subscriber.
+    ///
+    /// Both dispatch adapters (intercept and observe) check it, so an event aimed at
+    /// one mod never reaches another mod's handler.
+    fn target(&self) -> Option<&ModId> {
+        None
+    }
+
     /// Whether a handler cancelled the event.
     fn is_cancelled(&self) -> bool {
         self.header().flags & UMI_EVENT_CANCELLED != 0
@@ -83,6 +95,7 @@ pub(crate) fn is_known(id: UmiEventId) -> bool {
             | UmiEventId::DISCONNECTED
             | UmiEventId::SCREEN_OPENED
             | UmiEventId::SCREEN_CLOSED
+            | UmiEventId::KEY_PRESSED
     )
 }
 
@@ -96,7 +109,7 @@ fn header_for<P>(id: UmiEventId) -> UmiEventHeader {
 }
 
 /// An ABI view of `text`, valid while `text` is not changed or dropped.
-fn umi_str(text: &str) -> UmiStr {
+pub(crate) fn umi_str(text: &str) -> UmiStr {
     UmiStr {
         ptr: text.as_ptr(),
         len: text.len(),

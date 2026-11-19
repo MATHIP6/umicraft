@@ -10,9 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use umicraft_modapi_sys::{UmiEventHeader, UmiStr, UMI_EVENT_CANCELLED};
+use umicraft_modapi_sys::{UmiEventHeader, UmiStatus, UmiStr, UMI_EVENT_CANCELLED};
 
 use super::*;
+use crate::budget::MAX_CONSECUTIVE_OVERRUNS;
 use crate::ffi::{host_table, testing};
 use crate::worker::QUEUE_CAPACITY;
 
@@ -97,7 +98,7 @@ fn mod_with(
     id: &str,
     handlers: &[(UmiEventId, UmiMode, i32, UmiHandlerFn, usize)],
 ) -> Arc<ModContext> {
-    let context = Arc::new(ModContext::new(id.to_owned().try_into().unwrap()));
+    let context = ModContext::new(id.to_owned().try_into().unwrap());
     for &(event, mode, priority, handler, token) in handlers {
         let user = UserPtr::new(token as *mut c_void);
         let status = context.subscribe(event, mode, priority, Some(handler), user);
@@ -306,7 +307,7 @@ fn only_the_subscriptions_of_the_installed_thread_are_registered() {
 #[test]
 fn a_disabled_mod_registers_nothing() {
     let cx = mod_with("off", &[intercepting(UmiEventId::PRE_TICK, 0, record, 1)]);
-    cx.disable();
+    cx.set_wanted(false);
 
     let bus = install(&[&cx], EventThread::Game);
 
@@ -380,11 +381,58 @@ fn a_disabled_mods_observer_gets_nothing() {
         )],
     );
     let mut bus = install(&[&cx], EventThread::Game);
-    cx.disable();
+    cx.set_wanted(false);
 
     bus.dispatch(&mut PreTick::new(0));
     cx.worker().stop();
 
     assert!(observed(7003).is_empty());
     assert_eq!(cx.stats().dropped, 0);
+}
+
+#[test]
+fn key_pressed_only_reaches_the_mod_it_is_aimed_at() {
+    let both = |token| {
+        [
+            intercepting(UmiEventId::KEY_PRESSED, 0, record, token),
+            (
+                UmiEventId::KEY_PRESSED,
+                UmiMode::OBSERVE,
+                0,
+                observe as UmiHandlerFn,
+                token + 1000,
+            ),
+        ]
+    };
+    let target = mod_with("target", &both(1));
+    let bystander = mod_with("bystander", &both(2));
+    let mut bus = install(&[&target, &bystander], EventThread::Render);
+    let id: crate::ModId = "target".to_owned().try_into().unwrap();
+
+    assert!(!bus.dispatch(&mut KeyPressed::new(id, "jump")));
+    target.worker().stop();
+    bystander.worker().stop();
+
+    assert_eq!(ran(), [1], "only the target's intercept handler ran");
+    assert_eq!(observed(1001).len(), 1);
+    assert!(
+        observed(1002).is_empty(),
+        "the other mod's observer got nothing"
+    );
+}
+
+#[test]
+fn key_pressed_is_a_render_event_and_carries_its_key() {
+    let cx = mod_with(
+        "keys",
+        &[intercepting(UmiEventId::KEY_PRESSED, 0, record, 1)],
+    );
+    let game = install(&[&cx], EventThread::Game);
+    let render = install(&[&cx], EventThread::Render);
+
+    assert!(!game.has_subscribers::<KeyPressed>());
+    assert!(render.has_subscribers::<KeyPressed>());
+    let event = KeyPressed::new("keys".to_owned().try_into().unwrap(), "toggle");
+    assert_eq!(event.key(), "toggle");
+    assert_eq!(event.target().map(crate::ModId::as_str), Some("keys"));
 }

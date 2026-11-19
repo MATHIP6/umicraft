@@ -10,7 +10,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiStatus, UmiStr, UMI_EVENT_MUTABLE};
 
 use super::bytes_of;
-use crate::events::{ChatReceived, ChatSend, Connected, Disconnected, ScreenClosed, ScreenOpened};
+use crate::events::{
+    ChatReceived, ChatSend, Connected, Disconnected, KeyPressed, ScreenClosed, ScreenOpened,
+};
 
 /// Declares host events `Send`: the raw pointers in their payload target the `String`
 /// the same struct owns.
@@ -29,6 +31,7 @@ send_events!(
     ChatSend,
     Connected,
     Disconnected,
+    KeyPressed,
     ScreenOpened,
     ScreenClosed
 );
@@ -91,6 +94,11 @@ pub(crate) mod testing {
     pub(crate) fn flags_of(event: *mut UmiEventHeader) -> u32 {
         // SAFETY: tests pass the pointer a dispatcher handed to a handler.
         unsafe { (*event).flags }
+    }
+
+    /// Copies the text of a `UmiStr` a host function passed to a fake mod.
+    pub(crate) fn text(s: UmiStr) -> String {
+        String::from_utf8_lossy(bytes_of(s, usize::MAX)).into_owned()
     }
 
     /// Sets `flag` in the header of the event behind `event`.

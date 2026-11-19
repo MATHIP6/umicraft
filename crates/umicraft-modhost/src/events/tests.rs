@@ -15,6 +15,7 @@ fn events_are_send() {
     assert_send::<Disconnected>();
     assert_send::<ScreenOpened>();
     assert_send::<ScreenClosed>();
+    assert_send::<KeyPressed>();
 }
 
 #[test]
@@ -116,7 +117,20 @@ fn table_matches_the_documented_threads_and_flags() {
 }
 
 #[test]
-fn known_ids_are_one_to_eight() {
-    assert!((1..=8).all(|id| is_known(UmiEventId(id))));
-    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(9)));
+fn known_ids_are_one_to_nine() {
+    assert!((1..=9).all(|id| is_known(UmiEventId(id))));
+    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(10)));
+}
+
+#[test]
+fn key_pressed_is_aimed_at_one_mod_and_the_others_at_everyone() {
+    let id: ModId = "target".to_owned().try_into().unwrap();
+    let event = KeyPressed::new(id.clone(), "jump");
+    assert_eq!(event.target(), Some(&id));
+    assert_eq!(event.clone().target(), Some(&id));
+    assert_eq!(event.key(), "jump");
+    assert_eq!(event.header().id, UmiEventId::KEY_PRESSED);
+    assert_eq!(KeyPressed::THREAD, EventThread::Render);
+    assert_eq!(PreTick::new(1).target(), None);
+    assert_eq!(ChatSend::new("x").target(), None);
 }

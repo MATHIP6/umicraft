@@ -38,5 +38,8 @@ pub use hud::{
 pub use id::{ModCategory, ModId};
 pub use meta::ModMeta;
 pub use registry::{HudWidget, ModRegistry, ModView, RegistryError};
-pub use settings::{ModSettings, SettingDef, SettingKind, SettingValue, SettingsError};
+pub use settings::{
+    format_hex_color, parse_hex_color, snap_slider, ModSettings, SettingDef, SettingKind,
+    SettingValue, SettingsError,
+};
 pub use traits::{BuiltinMod, HudSpec, ModInput};

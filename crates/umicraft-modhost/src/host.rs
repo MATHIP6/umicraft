@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! [`ModHost`]: the loaded mods and their lifecycle.
+//!
+//! The player-facing API (menu views, config, HUD, keys, commands) is in `ui`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -14,12 +16,13 @@ use crate::dispatch::install_mod;
 use crate::events::EventThread;
 
 use crate::context::{ModContext, Subscription};
-use crate::error::{LoadError, LoadFailure};
+use crate::error::{EnableError, LoadError, LoadFailure};
 use crate::ffi::{exports_of, handle_of, host_table, open_library};
 use crate::load::{authorize, locate_library};
 use crate::manifest::{Manifest, ModId};
 use crate::resolve::Resolution;
 use crate::trust::TrustList;
+use crate::ui::shared::HostShared;
 
 /// One mod whose `umi_mod_init` ran (successfully or not).
 ///
@@ -28,6 +31,7 @@ use crate::trust::TrustList;
 /// stays here, disabled, because the mod may have kept its handle or started a
 /// thread; unmapping the library or freeing the context could then crash the client.
 struct LoadedMod {
+    manifest: Manifest,
     context: Arc<ModContext>,
     shutdown: UmiModShutdownFn,
     _library: Library,
@@ -42,6 +46,8 @@ struct LoadedMod {
 /// freed while the mod might still run, because [`Drop`] disables every mod first.
 pub struct ModHost {
     mods: Vec<LoadedMod>,
+    /// Command table and chat outbox, shared with every mod's context.
+    shared: Arc<HostShared>,
     /// Boxed so its address, which every mod keeps, never changes.
     table: Box<UmiHost>,
 }
@@ -64,6 +70,7 @@ impl ModHost {
     {
         let mut host = Self {
             mods: Vec::new(),
+            shared: Arc::default(),
             table: Box::new(host_table()),
         };
         let mut failures = Vec::new();
@@ -97,10 +104,11 @@ impl ModHost {
                 module,
             });
         }
-        let context = Arc::new(ModContext::new(manifest.id.clone()));
+        let context = ModContext::with_shared(manifest.id.clone(), Arc::clone(&self.shared));
         let status = (exports.init)(&*self.table, handle_of(&context));
         context.finish_init(status.is_ok());
         self.mods.push(LoadedMod {
+            manifest: manifest.clone(),
             context,
             shutdown: exports.shutdown,
             _library: library,
@@ -154,15 +162,34 @@ impl ModHost {
             .collect()
     }
 
-    /// Disables mod `id`: the dispatcher skips it from now on. Only a flag; its
-    /// `umi_mod_shutdown` runs in [`ModHost::shutdown_all`], once nothing can still
-    /// be calling into it (shutdown-quiescence rule, ADR-0086). Returns whether the
-    /// mod was enabled.
-    pub fn disable(&self, id: &ModId) -> bool {
+    /// Sets the player's switch of mod `id`; the dispatcher skips a mod that is off.
+    ///
+    /// Only a flag: nothing is freed, so the mod can be switched on again, and its
+    /// `umi_mod_shutdown` runs in [`ModHost::shutdown_all`], once nothing can still be
+    /// calling into it (shutdown-quiescence rule, ADR-0086). Buses installed earlier
+    /// keep their handlers and consult the flag per call, so the change takes effect
+    /// at once on every thread.
+    ///
+    /// # Errors
+    ///
+    /// [`EnableError::UnknownMod`] for an id that is not loaded, and
+    /// [`EnableError::Failed`] for a mod that failed: it stays off until restart.
+    pub fn set_enabled(&self, id: &ModId, enabled: bool) -> Result<(), EnableError> {
+        let context = self
+            .context(id)
+            .ok_or_else(|| EnableError::UnknownMod(id.clone()))?;
+        if context.set_wanted(enabled) {
+            Ok(())
+        } else {
+            Err(EnableError::Failed(id.clone()))
+        }
+    }
+
+    pub(crate) fn context(&self, id: &ModId) -> Option<&ModContext> {
         self.mods
             .iter()
-            .find(|m| m.context.id() == id)
-            .is_some_and(|m| m.context.disable())
+            .map(|m| &*m.context)
+            .find(|context| context.id() == id)
     }
 
     /// Stops the mods for good: no handler runs afterwards.
@@ -182,7 +209,8 @@ fn shutdown_mods<'a>(
     mods: impl DoubleEndedIterator<Item = (&'a ModContext, UmiModShutdownFn)> + Clone,
 ) {
     for (context, _) in mods.clone() {
-        context.disable();
+        // Retired, not just switched off: nothing may re-enable a mod mid-shutdown.
+        context.retire();
     }
     for (context, _) in mods.clone() {
         context.worker().stop();
@@ -199,6 +227,8 @@ impl Drop for ModHost {
         self.shutdown_all();
     }
 }
+
+mod ui;
 
 #[cfg(test)]
 mod tests {
@@ -226,7 +256,7 @@ mod tests {
     }
 
     fn started(id: &str) -> Arc<ModContext> {
-        let cx = Arc::new(ModContext::new(id.to_owned().try_into().unwrap()));
+        let cx = ModContext::new(id.to_owned().try_into().unwrap());
         let status = cx.subscribe(
             UmiEventId::PRE_TICK,
             UmiMode::OBSERVE,

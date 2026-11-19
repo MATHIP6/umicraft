@@ -2,38 +2,21 @@
 
 //! Logging through the host.
 
-use umicraft_modapi_sys::{UmiLevel, UmiModHandle, UmiStr};
+use umicraft_modapi_sys::UmiLevel;
 
-use crate::ffi::SharedHandle;
-
-type LogFn = extern "C" fn(UmiModHandle, UmiLevel, UmiStr);
+use crate::host;
 
 /// Sends messages to the host's log, tagged with the mod's id by the host.
 ///
-/// Cheap to copy and usable from any thread: the host table and the mod
-/// context live for the whole process (ADR-0086: unload means disable).
+/// Cheap to copy and usable from any thread: it reads the host table kept by
+/// the mod-side static (see the `host` module). Before `init` it does nothing.
 #[derive(Debug, Clone, Copy)]
-pub struct Logger {
-    log: LogFn,
-    me: SharedHandle,
-}
+pub struct Logger;
 
 impl Logger {
-    pub(crate) fn new(log: LogFn, me: UmiModHandle) -> Self {
-        Self {
-            log,
-            me: SharedHandle::new(me),
-        }
-    }
-
-    fn send(&self, level: UmiLevel, msg: &str) {
-        // The `UmiStr` only borrows `msg` for the duration of the call, as the
-        // ABI requires.
-        let msg = UmiStr {
-            ptr: msg.as_ptr(),
-            len: msg.len(),
-        };
-        (self.log)(self.me.get(), level, msg);
+    fn send(self, level: UmiLevel, msg: &str) {
+        // A refusal means "no host yet": there is nowhere to log to.
+        let _ = host::call(|host, me| (host.log)(me, level, host::utf8(msg)));
     }
 
     /// Logs something that failed.

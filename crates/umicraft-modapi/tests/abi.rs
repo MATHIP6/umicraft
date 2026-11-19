@@ -7,13 +7,14 @@
 #![allow(unsafe_code)]
 
 use core::ffi::c_void;
+use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
-    umicraft_mod, ChatReceived, ChatSend, Connected, Disconnected, InitCx, Mod, ModError, PostTick,
-    PreTick, ScreenClosed, ScreenOpened,
+    umicraft_mod, Anchor, Chat, ChatReceived, ChatSend, Connected, Disconnected, InitCx,
+    KeyPressed, Mod, ModError, Placement, PostTick, PreTick, ScreenClosed, ScreenOpened, Setting,
 };
 use umicraft_modapi_sys::*;
 
@@ -33,6 +34,43 @@ static SHUTDOWNS: AtomicUsize = AtomicUsize::new(0);
 static FAIL_INIT: AtomicBool = AtomicBool::new(false);
 static PANIC_ON_TICK: AtomicBool = AtomicBool::new(false);
 static REFUSE_SUBSCRIBE: AtomicBool = AtomicBool::new(false);
+static REFUSE_HUD: AtomicBool = AtomicBool::new(false);
+/// Setting definitions the fake host received, one `kind:key:label:details` each.
+static DEFS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The values `setting_get` answers with, by key; a missing key is unknown.
+static VALUES: Mutex<Option<HashMap<String, UmiSettingValue>>> = Mutex::new(None);
+static WIDGETS: Mutex<Vec<Widget>> = Mutex::new(Vec::new());
+/// Every `hud_*` call the fake host received, as text.
+static HUD_CALLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static COMMANDS: Mutex<Vec<Command>> = Mutex::new(Vec::new());
+static CHAT: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// What the mod registered, for the tests to read through.
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+
+#[derive(Clone, Copy)]
+struct Ui {
+    show: Setting<bool>,
+    tint: Setting<u32>,
+    volume: Setting<f32>,
+    mode: Setting<u32>,
+    unknown: Setting<u32>,
+    chat: Chat,
+}
+
+struct Widget {
+    key: String,
+    label: String,
+    placement: UmiHudPlacement,
+    draw: UmiHudDrawFn,
+    user: usize,
+}
+
+#[derive(Clone, Copy)]
+struct Command {
+    run: UmiCommandFn,
+    user: usize,
+}
 
 #[derive(Clone, Copy)]
 struct Sub {
@@ -77,6 +115,43 @@ fn register_view_handlers(cx: &mut InitCx<'_>) -> Result<(), ModError> {
     cx.observe::<ScreenClosed>(0, |e| see(format!("closed={}", e.name())))
 }
 
+/// Settings, a widget, a key binding and a command, as a mod author writes them.
+fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
+    let ui = Ui {
+        show: cx.toggle("show", "Show", true)?,
+        tint: cx.color("tint", "Tint", 0x00FF_8800)?,
+        volume: cx.slider("volume", "Volume", 0.0, 10.0, 0.5, 3.0)?,
+        mode: cx.choice("mode", "Mode", &["a", "b", "c"], 1)?,
+        unknown: cx.color("other", "Other", 7)?,
+        chat: cx.chat(),
+    };
+    *UI.lock().unwrap() = Some(ui);
+    let placement = Placement::new(Anchor::BottomRight)
+        .offset(2.0, 3.0)
+        .scale(1.5);
+    cx.hud_widget("clock", "Clock", placement, move |hud| {
+        if ui.show.get() {
+            hud.line("on", ui.tint.get());
+            hud.reserve(10.0, 5.0);
+        }
+    })?;
+    cx.hud_widget("gauge", "Gauge", Placement::new(Anchor::Center), |hud| {
+        hud.label(1.0, 2.0, "text", 0xFF_FFFF, 0.5, 2.0);
+        hud.cell(3.0, 4.0, 5.0, 6.0, true, "W", 0x00_FF00);
+        hud.tick(7.0, 8.0, 9.0, 10.0, 0x00_00FF, 0.25);
+    })?;
+    cx.key("greet", "Greet", "KeyH")?;
+    cx.observe::<KeyPressed>(0, |e| see(format!("key={}", e.key())))?;
+    cx.command("say", "/say <text>", move |args| match args {
+        "boom" => panic!("boom"),
+        "" => Err(ModError::msg("empty")),
+        text => {
+            ui.chat.print(text);
+            Ok(())
+        }
+    })
+}
+
 struct TestMod;
 
 impl Mod for TestMod {
@@ -94,6 +169,7 @@ impl Mod for TestMod {
             control.cancel();
         })?;
         register_view_handlers(cx)?;
+        register_ui(cx)?;
         if FAIL_INIT.load(SeqCst) {
             return Err(ModError::msg("nope"));
         }
@@ -162,6 +238,169 @@ extern "C" fn fake_set_text(event: *mut UmiEventHeader, text: UmiStr) -> UmiStat
     UmiStatus::OK
 }
 
+fn text_of(text: UmiStr) -> String {
+    // SAFETY: the module under test passes a live UTF-8 slice for the call.
+    let bytes = unsafe { std::slice::from_raw_parts(text.ptr, text.len) };
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+extern "C" fn fake_register_setting(_me: UmiModHandle, def: *const UmiSettingDef) -> UmiStatus {
+    // SAFETY: the module under test passes a definition that lives for the call.
+    let def = unsafe { *def };
+    let details = match def.kind {
+        UmiSettingKind::TOGGLE => format!("{}", def.toggle_default),
+        UmiSettingKind::SLIDER => format!(
+            "{}..{}/{}={}",
+            def.slider_min, def.slider_max, def.slider_step, def.slider_default
+        ),
+        UmiSettingKind::CHOICE => {
+            // SAFETY: `choices` points at `choices_len` strings for the call.
+            let labels = unsafe { std::slice::from_raw_parts(def.choices, def.choices_len) };
+            let labels: Vec<_> = labels.iter().map(|l| text_of(*l)).collect();
+            format!("{labels:?}={}", def.choice_default)
+        }
+        _ => format!("{:06x}", def.color_default),
+    };
+    assert_eq!(def.size as usize, size_of::<UmiSettingDef>());
+    DEFS.lock().unwrap().push(format!(
+        "{}:{}:{}:{details}",
+        def.kind.0,
+        text_of(def.key),
+        text_of(def.label)
+    ));
+    UmiStatus::OK
+}
+
+extern "C" fn fake_setting_get(
+    _me: UmiModHandle,
+    key: UmiStr,
+    out: *mut UmiSettingValue,
+) -> UmiStatus {
+    let values = VALUES.lock().unwrap();
+    match values.as_ref().and_then(|v| v.get(&text_of(key))) {
+        Some(value) => {
+            // SAFETY: the module under test passes a writable value.
+            unsafe { *out = *value };
+            UmiStatus::OK
+        }
+        None => UmiStatus::INVALID_ARGUMENT,
+    }
+}
+
+extern "C" fn fake_register_hud_widget(
+    _me: UmiModHandle,
+    key: UmiStr,
+    label: UmiStr,
+    placement: UmiHudPlacement,
+    draw: Option<UmiHudDrawFn>,
+    user: *mut c_void,
+) -> UmiStatus {
+    WIDGETS.lock().unwrap().push(Widget {
+        key: text_of(key),
+        label: text_of(label),
+        placement,
+        draw: draw.expect("trampoline is never null"),
+        user: user as usize,
+    });
+    UmiStatus::OK
+}
+
+fn hud_call(call: String) -> UmiStatus {
+    if REFUSE_HUD.load(SeqCst) {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    HUD_CALLS.lock().unwrap().push(call);
+    UmiStatus::OK
+}
+
+extern "C" fn fake_hud_line(_hud: *mut UmiHudCx, text: UmiStr, color: u32) -> UmiStatus {
+    hud_call(format!("line {} {color:06x}", text_of(text)))
+}
+
+extern "C" fn fake_hud_label(
+    _hud: *mut UmiHudCx,
+    x: f32,
+    y: f32,
+    text: UmiStr,
+    color: u32,
+    alpha: f32,
+    scale: f32,
+) -> UmiStatus {
+    hud_call(format!(
+        "label {x} {y} {} {color:06x} {alpha} {scale}",
+        text_of(text)
+    ))
+}
+
+extern "C" fn fake_hud_cell(
+    _hud: *mut UmiHudCx,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    pressed: u8,
+    text: UmiStr,
+    color: u32,
+) -> UmiStatus {
+    hud_call(format!(
+        "cell {x} {y} {width} {height} {pressed} {} {color:06x}",
+        text_of(text)
+    ))
+}
+
+extern "C" fn fake_hud_tick(
+    _hud: *mut UmiHudCx,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: u32,
+    alpha: f32,
+) -> UmiStatus {
+    hud_call(format!("tick {x} {y} {width} {height} {color:06x} {alpha}"))
+}
+
+extern "C" fn fake_hud_reserve(_hud: *mut UmiHudCx, width: f32, height: f32) -> UmiStatus {
+    hud_call(format!("reserve {width} {height}"))
+}
+
+extern "C" fn fake_register_key(
+    _me: UmiModHandle,
+    key: UmiStr,
+    label: UmiStr,
+    default_binding: UmiStr,
+) -> UmiStatus {
+    KEYS.lock().unwrap().push(format!(
+        "{}:{}:{}",
+        text_of(key),
+        text_of(label),
+        text_of(default_binding)
+    ));
+    UmiStatus::OK
+}
+
+extern "C" fn fake_register_command(
+    _me: UmiModHandle,
+    name: UmiStr,
+    usage: UmiStr,
+    run: Option<UmiCommandFn>,
+    user: *mut c_void,
+) -> UmiStatus {
+    DEFS.lock()
+        .unwrap()
+        .push(format!("command:{}:{}", text_of(name), text_of(usage)));
+    COMMANDS.lock().unwrap().push(Command {
+        run: run.expect("trampoline is never null"),
+        user: user as usize,
+    });
+    UmiStatus::OK
+}
+
+extern "C" fn fake_chat_print(_me: UmiModHandle, text: UmiStr) -> UmiStatus {
+    CHAT.lock().unwrap().push(text_of(text));
+    UmiStatus::OK
+}
+
 fn host() -> UmiHost {
     UmiHost {
         size: size_of::<UmiHost>(),
@@ -169,6 +408,17 @@ fn host() -> UmiHost {
         log: fake_log,
         subscribe: fake_subscribe,
         event_set_text: fake_set_text,
+        register_setting: fake_register_setting,
+        setting_get: fake_setting_get,
+        register_hud_widget: fake_register_hud_widget,
+        hud_line: fake_hud_line,
+        hud_label: fake_hud_label,
+        hud_cell: fake_hud_cell,
+        hud_tick: fake_hud_tick,
+        hud_reserve: fake_hud_reserve,
+        register_key: fake_register_key,
+        register_command: fake_register_command,
+        chat_print: fake_chat_print,
     }
 }
 
@@ -184,14 +434,18 @@ fn fresh() -> MutexGuard<'static, ()> {
     LOGS.lock().unwrap().clear();
     SUBS.lock().unwrap().clear();
     TICKS.lock().unwrap().clear();
-    for list in [&SEEN, &SET_CALLS] {
+    for list in [&SEEN, &SET_CALLS, &DEFS, &HUD_CALLS, &KEYS, &CHAT] {
         list.lock().unwrap().clear();
     }
+    WIDGETS.lock().unwrap().clear();
+    COMMANDS.lock().unwrap().clear();
+    *VALUES.lock().unwrap() = Some(HashMap::new());
+    *UI.lock().unwrap() = None;
     SET_RESULTS.lock().unwrap().clear();
     for counter in [&DROPS, &SHUTDOWNS] {
         counter.store(0, SeqCst);
     }
-    for flag in [&FAIL_INIT, &PANIC_ON_TICK, &REFUSE_SUBSCRIBE] {
+    for flag in [&FAIL_INIT, &PANIC_ON_TICK, &REFUSE_SUBSCRIBE, &REFUSE_HUD] {
         flag.store(false, SeqCst);
     }
     guard
@@ -283,7 +537,7 @@ fn init_registers_the_subscriptions_and_logs() {
     let _guard = fresh();
     init_ok();
     let subs = SUBS.lock().unwrap();
-    assert_eq!(subs.len(), 9);
+    assert_eq!(subs.len(), 10);
     assert_eq!(
         (subs[0].event, subs[0].mode, subs[0].priority),
         (UmiEventId::PRE_TICK, UmiMode::OBSERVE, 5)
@@ -560,4 +814,250 @@ fn null_empty_and_invalid_utf8_strings_read_as_empty() {
         assert_eq!(call(sub, &mut chat_send(text, 0)), UmiStatus::OK);
         assert_eq!(seen()[0], "send=");
     }
+}
+
+fn ui() -> Ui {
+    UI.lock().unwrap().unwrap()
+}
+
+fn set_value(key: &str, value: UmiSettingValue) {
+    VALUES
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .insert(key.to_owned(), value);
+}
+
+fn value(kind: UmiSettingKind) -> UmiSettingValue {
+    UmiSettingValue {
+        kind,
+        toggle: 0,
+        slider: 0.0,
+        choice: 0,
+        color: 0,
+    }
+}
+
+fn widget() -> (UmiHudDrawFn, *mut c_void) {
+    let widgets = WIDGETS.lock().unwrap();
+    (widgets[0].draw, widgets[0].user as *mut c_void)
+}
+
+fn draw() -> UmiStatus {
+    let (draw, user) = widget();
+    let mut fake_cx = 0_u8;
+    draw(std::ptr::from_mut(&mut fake_cx).cast(), user)
+}
+
+fn run_command(args: &'static str) -> UmiStatus {
+    let command = COMMANDS.lock().unwrap()[0];
+    (command.run)(text(args), command.user as *mut c_void)
+}
+
+#[test]
+fn settings_are_registered_with_their_definitions() {
+    let _guard = fresh();
+    init_ok();
+    assert_eq!(
+        DEFS.lock().unwrap()[..4],
+        [
+            "1:show:Show:1",
+            "4:tint:Tint:ff8800",
+            "2:volume:Volume:0..10/0.5=3",
+            "3:mode:Mode:[\"a\", \"b\", \"c\"]=1",
+        ]
+    );
+}
+
+#[test]
+fn setting_get_reads_the_hosts_value() {
+    let _guard = fresh();
+    init_ok();
+    set_value(
+        "show",
+        UmiSettingValue {
+            toggle: 0,
+            ..value(UmiSettingKind::TOGGLE)
+        },
+    );
+    set_value(
+        "tint",
+        UmiSettingValue {
+            color: 0x123456,
+            ..value(UmiSettingKind::COLOR)
+        },
+    );
+    set_value(
+        "volume",
+        UmiSettingValue {
+            slider: 7.5,
+            ..value(UmiSettingKind::SLIDER)
+        },
+    );
+    set_value(
+        "mode",
+        UmiSettingValue {
+            choice: 2,
+            ..value(UmiSettingKind::CHOICE)
+        },
+    );
+    let ui = ui();
+    assert!(!ui.show.get());
+    assert_eq!(ui.tint.get(), 0x123456);
+    assert!((ui.volume.get() - 7.5).abs() < f32::EPSILON);
+    assert_eq!(ui.mode.get(), 2);
+}
+
+#[test]
+fn setting_get_falls_back_to_the_default_on_error_or_wrong_kind() {
+    let _guard = fresh();
+    init_ok();
+    let ui = ui();
+    // Unknown key: the fake host answers INVALID_ARGUMENT.
+    assert!(ui.show.get());
+    assert_eq!(ui.unknown.get(), 7);
+    // A host answering another kind than asked is ignored, not misread.
+    set_value(
+        "tint",
+        UmiSettingValue {
+            choice: 1,
+            ..value(UmiSettingKind::CHOICE)
+        },
+    );
+    assert_eq!(ui.tint.get(), 0x00FF_8800);
+}
+
+#[test]
+fn hud_widget_is_registered_and_draws_through_the_host() {
+    let _guard = fresh();
+    init_ok();
+    {
+        let widgets = WIDGETS.lock().unwrap();
+        assert_eq!(
+            (widgets[0].key.as_str(), widgets[0].label.as_str()),
+            ("clock", "Clock")
+        );
+        assert_eq!(
+            widgets[0].placement,
+            UmiHudPlacement {
+                anchor: 8,
+                offset_x: 2.0,
+                offset_y: 3.0,
+                scale: 1.5
+            }
+        );
+    }
+    assert_eq!(draw(), UmiStatus::OK);
+    assert_eq!(
+        *HUD_CALLS.lock().unwrap(),
+        ["line on ff8800", "reserve 10 5"]
+    );
+    // Toggled off: the draw closure sees the new value.
+    HUD_CALLS.lock().unwrap().clear();
+    set_value("show", value(UmiSettingKind::TOGGLE));
+    assert_eq!(draw(), UmiStatus::OK);
+    assert!(HUD_CALLS.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_refused_hud_call_stops_the_frame_but_not_the_widget() {
+    let _guard = fresh();
+    init_ok();
+    REFUSE_HUD.store(true, SeqCst);
+    assert_eq!(draw(), UmiStatus::OK);
+    assert!(HUD_CALLS.lock().unwrap().is_empty());
+    REFUSE_HUD.store(false, SeqCst);
+    assert_eq!(draw(), UmiStatus::OK);
+    assert_eq!(HUD_CALLS.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn draw_trampoline_rejects_a_null_cx_and_a_null_user() {
+    let _guard = fresh();
+    init_ok();
+    let (draw, user) = widget();
+    assert_eq!(
+        draw(std::ptr::null_mut(), user),
+        UmiStatus::INVALID_ARGUMENT
+    );
+    let mut fake_cx = 0_u8;
+    let status = draw(
+        std::ptr::from_mut(&mut fake_cx).cast(),
+        std::ptr::null_mut(),
+    );
+    assert_eq!(status, UmiStatus::INVALID_ARGUMENT);
+}
+
+#[test]
+fn every_hud_primitive_reaches_the_host() {
+    let _guard = fresh();
+    init_ok();
+    let (draw, user) = {
+        let widgets = WIDGETS.lock().unwrap();
+        (widgets[1].draw, widgets[1].user as *mut c_void)
+    };
+    let mut fake_cx = 0_u8;
+    assert_eq!(
+        draw(std::ptr::from_mut(&mut fake_cx).cast(), user),
+        UmiStatus::OK
+    );
+    assert_eq!(
+        *HUD_CALLS.lock().unwrap(),
+        [
+            "label 1 2 text ffffff 0.5 2",
+            "cell 3 4 5 6 1 W 00ff00",
+            "tick 7 8 9 10 0000ff 0.25",
+        ]
+    );
+}
+
+#[test]
+fn key_binding_is_registered_and_key_pressed_is_viewed() {
+    let _guard = fresh();
+    init_ok();
+    assert_eq!(*KEYS.lock().unwrap(), ["greet:Greet:KeyH"]);
+    let mut pressed = UmiKeyPressed {
+        header: header(UmiEventId::KEY_PRESSED, size_of::<UmiKeyPressed>(), 0),
+        key: text("greet"),
+    };
+    assert_eq!(
+        call(sub_for(UmiEventId::KEY_PRESSED), &mut pressed),
+        UmiStatus::OK
+    );
+    assert_eq!(seen(), ["key=greet"]);
+}
+
+#[test]
+fn command_is_registered_and_maps_results_to_statuses() {
+    let _guard = fresh();
+    init_ok();
+    assert!(DEFS
+        .lock()
+        .unwrap()
+        .contains(&"command:say:/say <text>".to_string()));
+    assert_eq!(run_command("hi there"), UmiStatus::OK);
+    assert_eq!(*CHAT.lock().unwrap(), ["hi there"]);
+    assert_eq!(run_command(""), UmiStatus::ERROR);
+    assert_eq!(run_command("boom"), UmiStatus::PANICKED);
+    assert_eq!(CHAT.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn command_with_a_null_user_is_invalid() {
+    let _guard = fresh();
+    init_ok();
+    let command = COMMANDS.lock().unwrap()[0];
+    assert_eq!(
+        (command.run)(text("x"), std::ptr::null_mut()),
+        UmiStatus::INVALID_ARGUMENT
+    );
+}
+
+#[test]
+fn chat_handle_prints_through_the_host() {
+    let _guard = fresh();
+    init_ok();
+    ui().chat.print("local line");
+    assert_eq!(*CHAT.lock().unwrap(), ["local line"]);
 }

@@ -25,6 +25,17 @@ impl ModError {
     }
 }
 
+impl ModError {
+    /// Maps a host status to `Ok` for `OK` and to a refusal otherwise.
+    pub(crate) fn check(status: UmiStatus) -> Result<(), Self> {
+        if status.is_ok() {
+            Ok(())
+        } else {
+            Err(Self::HostRefused(status))
+        }
+    }
+}
+
 impl fmt::Display for ModError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

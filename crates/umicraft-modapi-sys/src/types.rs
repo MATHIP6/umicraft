@@ -46,8 +46,9 @@ pub struct UmiVersion {
 /// The API version of this crate: unstable `0.x` until the `1.0` freeze.
 ///
 /// 0.2 added the chat, connection and screen events, `UMI_EVENT_MUTABLE` and
-/// `UmiHost::event_set_text` (F3.3).
-pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 2 };
+/// `UmiHost::event_set_text` (F3.3); 0.3 added settings, HUD widgets, key
+/// bindings, client commands and `KEY_PRESSED` (F3.4).
+pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 3 };
 
 impl UmiVersion {
     /// Whether a host of version `self` can load a mod built for `mod_version`.

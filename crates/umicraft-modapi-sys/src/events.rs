@@ -31,6 +31,10 @@ impl UmiEventId {
     pub const SCREEN_OPENED: Self = Self(7);
     /// A screen closed; payload [`UmiScreen`].
     pub const SCREEN_CLOSED: Self = Self(8);
+    /// One of the mod's own key bindings was pressed while no screen was
+    /// open; payload [`UmiKeyPressed`]. Delivered only to the mod that
+    /// registered the key: mods never see the player's other keystrokes.
+    pub const KEY_PRESSED: Self = Self(9);
 }
 
 /// `UmiEventHeader::flags` bit: a handler may cancel the event.
@@ -133,4 +137,14 @@ pub struct UmiScreen {
     /// Stable screen name (`chat`, `inventory`, `game_menu`, …); the list is
     /// in `docs/modding/events.md` and names are never reused.
     pub name: UmiStr,
+}
+
+/// Payload of [`UmiEventId::KEY_PRESSED`].
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UmiKeyPressed {
+    /// Common header.
+    pub header: UmiEventHeader,
+    /// The key id the mod gave to `register_key`.
+    pub key: UmiStr,
 }
