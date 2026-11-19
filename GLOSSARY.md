@@ -68,3 +68,21 @@ protocol only carries it. ADR-0011.
 **Built-in mod** — a client feature compiled into Umicraft that the player switches on and configures in the mods menu (FPS counter, coordinates, toggle sprint...). Not an external mod with an API (F3). See ADR-0065.
 
 **HUD widget** — the text box a built-in mod draws on the HUD, placed by an anchor, an offset and a scale, and moved with the mouse directly in the mods menu.
+
+## Modding
+
+**Built-in mod** — a feature compiled into the client and listed in the mods
+menu (`umicraft-builtin-mods`). Not part of the external modding API.
+ADR-0065.
+
+**External mod** — a dynamic library with a `mod.toml` manifest, loaded by
+`umicraft-modhost` through the C ABI. ADR-0086.
+
+**Intercept** — a mod handler that runs synchronously on the thread that owns
+the event, within a time budget, and may cancel or modify it. ADR-0086.
+
+**Observe** — a mod handler that receives a copy of the event on the mod's
+worker thread; it cannot cancel and never delays the owning thread. ADR-0086.
+
+**Resolution** — the outcome of checking every candidate mod's manifest: the
+load order and, for each mod that will not load, the reason. ADR-0086.
