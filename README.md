@@ -1,34 +1,51 @@
+<div align="center">
+
+<img src="docs/assets/logo.png" width="96" alt="Umicraft logo">
+
 # Umicraft
 
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
 (protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
 
-Status: the project follows [`ROADMAP.md`](ROADMAP.md) (parity with the vanilla 1.8.8
-client); the current milestone is **P1** (protocol completeness and vanilla traffic). M0–M7 are
-done or nearly so; **M8 (entities) is partial and defective**, see
-[`docs/roadmap-review.md`](docs/roadmap-review.md) §3.3 — its remaining work moves to P5.
-The client logs in offline-mode, decodes chunk/block packets into a compact
-world, runs the player simulation on a game thread, meshes chunks on worker
-threads, and renders them with wgpu either in a window or to an offscreen PNG.
-M4 added the backend-agnostic `umicraft-ui` crate, the custom widget layer, the
-F2 debug screen, and runtime loading of the user's real 1.8 font with an
-original fallback. M5 adds the 1.8 blockstate/model parser, the block registry,
-the real block/item texture array, the model mesher, and the server-less
-`--block-demo` acceptance path. M6 adds smooth block/sky lighting and
-per-vertex ambient occlusion, the `Time Update`-driven sky/sun/moon/cloud/fog
-pass with a signed world clock, and a farthest-first translucent pass for
-water, glass and leaves. M7 adds the official first-run asset setup with
-SHA-1 verification and resume support, 1.8 resource pack layering (folder
-or .zip), and hot reloading via `F3 + T` / `F4` (ADR-0014). M8 adds the
-typed entity store and protocol in `umicraft-game`, player skins (async Mojang fetch,
-64×32 to 64×64 upgrade, classic and slim models), articulated models (Steve,
-Alex, Zombie, Cow, Dropped Item), GPU entity rendering pass in `wgpu` with fog
-and lighting, and the server-less `--entity-demo` acceptance path (ADR-0015).
+> **Work in progress.** Umicraft is under active development and is not ready
+> for everyday play. Expect missing features, bugs and breaking changes.
+>
+> **Anti-cheat warning.** Umicraft is not the vanilla client. We try to make
+> its packets, timings and movement as close to vanilla as possible, but the
+> match is not perfect yet, so server anti-cheats can still flag it, kick you
+> or ban you. **Do not connect to large public servers.** Use it on your own
+> server or on servers where you have permission, and at your own risk.
+
+**Community:** join the [Discord server](https://discord.gg/7EwBaNDag2) to chat,
+report bugs and follow progress.
+
+## Status
+
+The project follows [`ROADMAP.md`](ROADMAP.md), whose goal is parity with the
+vanilla 1.8.8 client. We are roughly at **F2**, the performance pass (started
+early, see ADR-0058 and `docs/tasks/f2/README.md`), while the remaining parity
+phases (P-series) are still being completed.
+
+Already working:
+
+- Offline-mode login and a streaming play session.
+- Chunk and block decoding, with chunk meshing on worker threads.
+- Real 1.8 block models, textures, smooth lighting and ambient occlusion.
+- Sky, sun, moon, clouds, fog and translucent water, glass and leaves.
+- Official asset setup with SHA-1 verification, plus resource pack layering and
+  hot reloading.
+- Player simulation, block breaking and placing, and chat.
+- Player skins and first entity models (partial, being reworked in P5).
+- A custom UI layer with a title screen and a server list.
+
+Still to come: items and inventory, full entity support, combat, particles,
+HUD and options screens, audio and online-mode login. See the roadmap for the
+full list.
 
 ## Workspace
 
 | Crate | Responsibility |
-|---|---|
+| --- | --- |
 | `umicraft-core` | Module registry, typed services, event bus, fixed-timestep scheduler, config |
 | `umicraft-protocol` | Protocol 47 packets, framing, compression, encryption |
 | `umicraft-net` | Tokio connection, login, ping, streaming play session |
@@ -38,7 +55,7 @@ and lighting, and the server-less `--entity-demo` acceptance path (ADR-0015).
 | `umicraft-mesh` | Cube/model chunk mesher and texture-layer mapping |
 | `umicraft-render` | wgpu renderer, camera, textures, HUD and UI draw-list pass |
 | `umicraft-ui` | Immediate-mode UI: layout, focus, widgets, font atlas, draw list |
-| `umicraft-client` | Windowed play, headless session, screenshots, UI demo and block demo |
+| `umicraft-client` | Windowed play, headless session, screenshots and demos |
 | `umicraft-testkit` | Fake server, packet capture/replay, test utilities |
 
 ## Prerequisites
@@ -47,8 +64,7 @@ and lighting, and the server-less `--entity-demo` acceptance path (ADR-0015).
 - A working wgpu backend: Vulkan on Linux, Metal on macOS, DX12 on Windows.
   A software Vulkan implementation (llvmpipe/Lavapipe) works for the offscreen
   screenshot path.
-- An offline-mode 1.8.x server for live testing. The development notes use a
-  Paper/PandaSpigot 1.8.8 server on `127.0.0.1:25599` with an FLAT world.
+- An offline-mode 1.8.x server to connect to.
 
 ## Download the official assets (first run)
 
@@ -61,209 +77,64 @@ cargo run --release -p umicraft-client -- --setup-assets
 
 They are stored in the local Umicraft cache and reused on every later run. If
 an official `.minecraft/versions/1.8.8` installation already exists, it is used
-first and this step is not needed. Without assets the client falls back to the
-original procedural textures and font (and `--block-demo` refuses to start).
+first and this step is not needed. Without assets the client falls back to
+original procedural textures and font. No Mojang asset is stored in this
+repository or in a release.
 
 ## Run the graphical client
 
 ```sh
 cargo run --release -p umicraft-client
-cargo run --release -p umicraft-client -- 127.0.0.1 25599 --name Umicraft --view-distance 8
+cargo run --release -p umicraft-client -- 127.0.0.1 25565 --name Umicraft --view-distance 8
 ```
 
-Without a host and port the window opens on the title screen: Multiplayer
-lists your saved servers, where you add one, connect and disconnect. With a
-host and port it connects at start.
-
-Always play and measure with `--release`. A debug build compiles the whole
-client, including the zlib decompression of the chunks and the mesher,
-without optimisation: measured on the same machine and world it loads the
-chunks about five times slower (≈10.5 s instead of ≈2 s) and renders about
-three times fewer frames.
+Without a host and port the window opens on the title screen, where
+Multiplayer lists your saved servers. With a host and port it connects at
+start. Always use `--release`: a debug build is several times slower.
 
 Controls:
 
 - **WASD** move, **Space** jump, **Shift** sneak, **Ctrl** sprint.
 - **Left click** capture the mouse, then break a block; **right click** place
   a block; **1-9** select the hotbar slot; **T** open the chat.
-- **F1** toggle the debug overlay.
-- **F2** toggle the M4 debug screen: a text field, a button, a scrollable list
-  and a visible caret. The game keeps running while it is open; the mouse is
-  released and keyboard/mouse input goes to the UI.
 - **Esc** release the mouse, or quit when the mouse is not captured.
 
-The overlay shows FPS/frame time, position/rotation, chunk/mesh/face counts,
-chat/block-update/packet counters, and a frame-time graph.
-
-At startup the client reads the user's official 1.8.8 client jar once, bakes
-the blockstate/model set and uploads the real block/item texture array. If the
-installation is missing, the jar is corrupt or a model is unsupported, it logs
-one warning and keeps the original procedural terrain path; real model meshes
-and the fallback texture array are never mixed. No Mojang asset is stored in
-this repository or in a release.
-
-## UI acceptance demo
-
-The M4 debug screen also runs without a window, a server or a GPU. It drives
-the real `umicraft-ui` screen through the same `UiInput` vocabulary as the
-windowed client and prints a stable report:
+## Other modes
 
 ```sh
-cargo run -p umicraft-client -- --ui-demo
+# Render one offscreen frame to a PNG (no window needed)
+cargo run --release -p umicraft-client -- 127.0.0.1 25565 --screenshot out.png
+
+# Protocol-only client (no GPU)
+cargo run -p umicraft-net --bin umicraft-headless -- 127.0.0.1 25565 --stay-secs 60
 ```
 
-Add `--screenshot` to render the same final state offscreen to a PNG:
+The `--ui-demo`, `--block-demo` and `--entity-demo` modes run server-less
+acceptance scenes used during development.
 
-```sh
-cargo run -p umicraft-client -- --ui-demo --screenshot /tmp/umicraft-ui.png
-```
+## Development
 
-If a local official Minecraft installation is found, the real
-`assets/minecraft/textures/font/ascii.png` is read from its 1.8.8 client jar at
-runtime. Otherwise the original 3×5 fallback font is used and a warning is
-printed. No Mojang asset is stored in this repository or in a release.
-
-## Block acceptance demo
-
-`--block-demo` exercises the complete M5 path without a server:
-
-```sh
-cargo run -p umicraft-client -- --block-demo
-```
-
-It builds a synthetic stone platform with the acceptance blocks (common cubes,
-every ore, all 16 wool colours and the slab/stairs/fence/pane/torch/shape row),
-meshes it with the real model mesher and prints the ADR-0007 counts:
-
-```text
-blockstates       : 340
-source models     : 1080
-block textures    : 382 (373 png + 9 mcmeta)
-item textures     : 229 (227 png + 2 mcmeta)
-texture layers    : 601
-atlas             : 32x32 RGBA8, 2,461,696 bytes
-block states      : ...
-biome tints       : on
-quads             : ...
-fallback variants : ...
-```
-
-`biome tints : on` means the jar provided both 256×256 colormaps and the demo
-columns use plains (id 1); the report prints `off` when a custom jar omits them
-and the terrain keeps its previous grey/white output. The colormaps are read
-from the verified user jar at runtime and never stored in the repository or a
-release.
-
-The report needs no GPU and no server. Add `--screenshot` to upload the real
-texture array, render one offscreen frame and write a 1280×720 PNG:
-
-```sh
-cargo run -p umicraft-client -- --block-demo --screenshot /tmp/m5-blocks.png
-```
-
-Unlike the other modes, `--block-demo` needs the official resources and exits
-with a clear typed error when they are unavailable.
-
-## Entity acceptance demo
-
-`--entity-demo` exercises the complete M8 entity system without a server:
-
-```sh
-cargo run -p umicraft-client -- --entity-demo
-```
-
-It builds a synthetic scene with 5 acceptance entities (Steve classic, Alex slim,
-Zombie with arms forward, Cow quadruped with animated legs/horns/udder, and a dropped
-3D dirt block item), meshes them with articulated box models, and reports the ADR-0015
-compliance metrics:
-
-```text
-=== UMICRAFT M8 ENTITY SYSTEM ACCEPTANCE REPORT ===
-Entities in synthetic scene: 5
-  1. Steve (HumanoidModel classic 4px arms, dual-layer) at (5.0, 64.0, 6.0) - 432 vertices
-  2. Alex (HumanoidModel slim 3px arms, walking pose) at (7.0, 64.0, 6.0) - 432 vertices
-  3. Zombie (HumanoidModel zombie arms forward) at (9.0, 64.0, 6.0) - 432 vertices
-  4. Cow (QuadrupedModel 4 legs, horns) at (11.0, 64.0, 6.0) - 324 vertices
-  5. Dropped Item (Floating item cuboid) at (7.0, 64.2, 4.0) - 36 vertices
-Total vertices: 1656
-Total triangles: 552
-```
-
-Known gap: the dropped-item cube is counted in the report but the renderer no
-longer draws it (dropped items now go through the P3 item path, which needs a
-registry model rather than the old procedural cube).
-
-Add `--screenshot` to render an offscreen 1280×720 PNG:
-
-```sh
-cargo run -p umicraft-client -- --entity-demo --screenshot target/m8-entities.png
-```
-
-Alternative camera perspectives are available via `--demo-view`:
-- `--demo-view overview` (default, front-facing view)
-- `--demo-view back` (reverse angle showing hair, back of clothing, cow pattern)
-- `--demo-view closeup` (close-up on Steve & Alex dual-layer clothing and slim arms)
-- `--demo-view walk-cycle` (5-entity animation progression showing limb swings)
-
-When the official jar is found, the real 1.8.8 textures are used; otherwise,
-clean-room procedural textures provide 100% offline fallback functionality.
-
-## Render an offscreen screenshot
-
-```sh
-cargo run --release -p umicraft-client -- 127.0.0.1 25599 --name UmicraftM2 \
-  --view-distance 8 --screenshot /tmp/umicraft.png \
-  --collect-secs 8 --width 1280 --height 720
-```
-
-Screenshot mode collects world packets for the requested duration, meshes all
-loaded chunks through the worker pool, renders one frame, and writes an RGBA
-PNG. It does not need a window or a display server. When the official resources
-are available the workers use the model mesher and the renderer samples the
-real texture array; otherwise the screenshot falls back to the procedural cubes
-and textures as a whole.
-
-## Headless protocol client
-
-The M1 acceptance driver stays available for checking login/keepalive behavior
-without a GPU:
-
-```sh
-cargo run -p umicraft-net --bin umicraft-headless -- 127.0.0.1 25599 \
-  --name Umicraft --stay-secs 60
-```
-
-## Quality gates
+Quality gates before any change:
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-cargo deny check licenses bans
 ```
 
-The GPU smoke tests are opt-in because they need a working adapter:
-
-```sh
-cargo test -p umicraft-render offscreen_smoke -- --ignored --nocapture
-cargo test -p umicraft-render --test offscreen_ui -- --ignored
-cargo test -p umicraft-client -- --ignored
-```
-
-The real-font decoder test is also ignored by default and reads the path in
-`UMICRAFT_FONT_PNG` when it is set:
-
-```sh
-UMICRAFT_FONT_PNG=/path/to/ascii.png \
-  cargo test -p umicraft-ui --test text -- --ignored
-```
+GPU smoke tests are opt-in because they need a working adapter:
+`cargo test -p umicraft-client -- --ignored`.
 
 ## Documentation
 
-- `docs/threading.md` — network/mesh/render thread boundaries and queue sizes.
+- [`ROADMAP.md`](ROADMAP.md) — the path to parity with the vanilla client.
+- `UMICRAFT_SPEC.md` — requirements and clean-room rules.
+- `docs/threading.md` — thread boundaries and queue sizes.
 - `docs/sources.md` — provenance for protocol and behavior facts.
 - `docs/perf-log.md` — benchmark baselines.
 - `docs/decisions/` — architecture decision records.
-- `docs/backlog.md` — known gaps, follow-ups and decisions waiting outside a milestone.
-- `UMICRAFT_SPEC.md` (repository root) — requirements and roadmap.
+- `docs/backlog.md` — known gaps and follow-ups.
+
+## License
+
+Dual-licensed under MIT or Apache-2.0, at your option.
