@@ -9,6 +9,7 @@ use umicraft_modapi_sys::UMI_API_VERSION;
 pub use umicraft_modapi_sys::{UmiHost, UmiModHandle, UmiStatus, UmiVersion};
 
 use crate::ffi::{self, OwnedHandler};
+use crate::host;
 use crate::{InitCx, Mod};
 
 /// Runs `body`, turning a panic into [`UmiStatus::PANICKED`]: unwinding out
@@ -51,6 +52,7 @@ impl<M: Mod> ModState<M> {
         if slot.is_some() {
             return UmiStatus::CONFLICT;
         }
+        host::remember(host);
         let mut cx = InitCx::new(host, me);
         match M::init(&mut cx) {
             Ok(instance) => {

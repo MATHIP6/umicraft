@@ -3,13 +3,17 @@
 //! Example mod: hello.
 //!
 //! The smallest useful Umicraft mod, meant to be copied as a starting point. It shows
-//! the three things most mods do: log through the host, observe an event, and
-//! intercept an event. See `mods/examples/README.md` for how to build and install it.
+//! the things most mods do: log through the host, observe an event, intercept an
+//! event, and rewrite text. See `mods/examples/README.md` for how to build and install it.
 
-use umicraft_modapi::{umicraft_mod, InitCx, Mod, ModError, PostTick, PreTick};
+use umicraft_modapi::{umicraft_mod, ChatSend, InitCx, Mod, ModError, PostTick, PreTick};
 
 /// Priority of the `PostTick` handler; lower values run first.
 const POST_TICK_PRIORITY: i32 = 10;
+
+/// What the player types, and what is sent instead.
+const SHRUG_TOKEN: &str = ":shrug:";
+const SHRUG: &str = "\u{af}\\_(\u{30c4})_/\u{af}";
 
 /// The mod's state, kept alive by the host between `init` and `shutdown`.
 struct Hello {
@@ -38,6 +42,17 @@ impl Mod for Hello {
         cx.intercept::<PostTick>(POST_TICK_PRIORITY, move |event, _control| {
             if event.tick() % 200 == 0 {
                 log.trace(&format!("post-tick {}", event.tick()));
+            }
+        })?;
+
+        // Intercepting a chat line lets the mod rewrite it before it is sent.
+        // `set_text` can fail (a host may refuse), so log instead of ignoring it.
+        cx.intercept::<ChatSend>(0, move |event, _control| {
+            if event.text().contains(SHRUG_TOKEN) {
+                let shrugged = event.text().replace(SHRUG_TOKEN, SHRUG);
+                if let Err(error) = event.set_text(&shrugged) {
+                    log.warn(&error.to_string());
+                }
             }
         })?;
 

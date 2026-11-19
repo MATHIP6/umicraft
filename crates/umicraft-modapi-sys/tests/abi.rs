@@ -48,7 +48,7 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (32, 8));
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (40, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -75,7 +75,7 @@ fn version_compatibility_rules() {
         assert_eq!(host.accepts(module), expected, "{host:?} vs {module:?}");
     }
     assert!(UMI_API_VERSION.accepts(UMI_API_VERSION));
-    assert_eq!(UMI_API_VERSION, v(0, 1));
+    assert_eq!(UMI_API_VERSION, v(0, 2));
 }
 
 #[test]
@@ -120,7 +120,23 @@ fn status_values_and_ids_match_the_contract() {
         [1, 2, 3, 4, 5]
     );
     assert_eq!((UmiEventId::PRE_TICK.0, UmiEventId::POST_TICK.0), (1, 2));
-    assert_eq!((UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED), (1, 2));
+    assert_eq!(
+        (
+            UMI_EVENT_CANCELLABLE,
+            UMI_EVENT_CANCELLED,
+            UMI_EVENT_MUTABLE
+        ),
+        (1, 2, 4)
+    );
+    let ids = [
+        UmiEventId::CHAT_RECEIVED,
+        UmiEventId::CHAT_SEND,
+        UmiEventId::CONNECTED,
+        UmiEventId::DISCONNECTED,
+        UmiEventId::SCREEN_OPENED,
+        UmiEventId::SCREEN_CLOSED,
+    ];
+    assert_eq!(ids.map(|id| id.0), [3, 4, 5, 6, 7, 8]);
 }
 
 #[test]
@@ -130,4 +146,25 @@ fn umistr_constructors() {
     let s = UmiStr::from_static("héllo");
     assert_eq!(s.len, 6);
     assert!(!s.ptr.is_null());
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn string_event_layouts() {
+    // header (12) + padding (4) + UmiStr (16), then the position byte.
+    assert_eq!(offset_of!(UmiChatReceived, json), 16);
+    assert_eq!(offset_of!(UmiChatReceived, position), 32);
+    assert_eq!(size_of::<UmiChatReceived>(), 40);
+    for (size, offset) in [
+        (size_of::<UmiChatSend>(), offset_of!(UmiChatSend, text)),
+        (size_of::<UmiConnected>(), offset_of!(UmiConnected, address)),
+        (
+            size_of::<UmiDisconnected>(),
+            offset_of!(UmiDisconnected, reason),
+        ),
+        (size_of::<UmiScreen>(), offset_of!(UmiScreen, name)),
+    ] {
+        assert_eq!((size, offset), (32, 16));
+    }
+    assert_eq!(offset_of!(UmiHost, event_set_text), 32);
 }

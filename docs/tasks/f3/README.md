@@ -120,9 +120,10 @@ process-global registry.
   events/modes, null handlers and calls after `init` returned.
 - `ModHost::subscriptions(event) -> impl Iterator` (load order, then priority)
   for the F3.3 dispatcher; `ModHost::disable(id)` calls `umi_mod_shutdown`
-  once and drops the mod's subscriptions; `ModHost::shutdown_all()` at exit.
+  once and drops the mod's subscriptions (changed in F3.3: disable is a flag
+  only, `umi_mod_shutdown` runs in `shutdown_all`); `ModHost::shutdown_all()` at exit.
   Libraries stay mapped until `ModHost` is dropped.
-- `unsafe` only in `src/ffi.rs` (ADR-0087).
+- `unsafe` only in `src/ffi.rs` (ADR-0087; split into `src/ffi/` in F3.3).
 
 ### Rule for F3.3 (found in the F3.2 review)
 
@@ -143,3 +144,80 @@ thread, after the mod's worker has drained), or at client exit.
   `trusted.toml` in the log; the confirmation dialog comes with the mod
   manager. Every discovered mod is enabled until then.
 - Mods load in the windowed client only, not in the headless one.
+
+## F3.3 interface (frozen before the work is split)
+
+API **0.2** (exact match while `0.x`): events `CHAT_RECEIVED` (3), `CHAT_SEND`
+(4), `CONNECTED` (5), `DISCONNECTED` (6), `SCREEN_OPENED` (7),
+`SCREEN_CLOSED` (8) with their payloads in `umicraft-modapi-sys`, the flag
+`UMI_EVENT_MUTABLE` (4) and `UmiHost::event_set_text`. `KeyInput` moves to
+F3.4 with the open key bindings (it needs a stable key code table).
+
+| Event | Thread | Cancellable | Mutable |
+|---|---|---|---|
+| `PRE_TICK`, `POST_TICK` | game | no | no |
+| `CHAT_RECEIVED` | game | yes (line hidden) | JSON text |
+| `CHAT_SEND` | game | yes (nothing sent) | line |
+| `CONNECTED`, `DISCONNECTED` | render | no | no |
+| `SCREEN_OPENED`, `SCREEN_CLOSED` | render | no | no |
+
+### `umicraft-core` (`src/events.rs`)
+
+- `Event: 'static` (no `Send`: a bus belongs to one thread; the bus itself
+  stays `Send` because handlers are, so it can be built on the main thread
+  and moved). Handlers are kept sorted at registration (stable within a
+  priority), never per dispatch.
+- `EventBus::has_subscribers::<E>() -> bool`, so an emitter skips building a
+  payload (and its allocations) when nobody listens: no cost without mods.
+
+### `umicraft-modhost` dispatch (`src/events/**`, `src/dispatch.rs`, `src/worker.rs`, `benches/`)
+
+- **Host events**: one Rust type per ABI event, `#[repr(C)]` with the ABI
+  payload as first field, owning its strings (the payload's `UmiStr` points
+  into them): `PreTick`, `PostTick`, `ChatReceived`, `ChatSend`,
+  `Connected`, `Disconnected`, `ScreenOpened`, `ScreenClosed`. Constructors
+  take the client's values; accessors read the (possibly replaced) text and
+  the cancel flag. Built-in Rust modules can subscribe to the same types on
+  the core bus. They are `Send` (the pointers target owned heap data; one
+  justified `unsafe impl` in `ffi.rs`) so an observer can get a copy.
+- `EventThread { Game, Render }` and the static table event → thread.
+- `ModHost::install(&self, bus: &mut EventBus, thread: EventThread)`
+  registers one adapter per subscription of that thread. An intercept
+  adapter: skips a disabled mod; sets `MUTABLE` (and `CANCELLABLE` per the
+  table) for the call; times the call; maps `CANCELLED` to
+  `EventCx::cancel`; on `PANICKED` or another non-`OK` status disables the
+  mod (flag only) and logs once. An observe adapter sends a copy to the
+  mod's worker without blocking (bounded queue of 256, dropped when full and
+  counted).
+- **Worker**: one thread per mod with observers, `umicraft-mod-<id>`,
+  started by `install`'s first observe subscription and stopped at
+  `shutdown_all`.
+- **Budget**: an intercept call over 1 ms counts as an overrun and is logged
+  (first one, then every 100th); 50 consecutive overruns disable the mod.
+- **Stats** per mod (atomics, for the F3.8 profiler): calls, total and max
+  nanoseconds, overruns, dropped observations.
+- **Disable is a flag**: `ModHost::disable` no longer calls
+  `umi_mod_shutdown`; only `shutdown_all` does, once, after the client has
+  stopped every thread that dispatches (shutdown-quiescence rule above).
+- `event_set_text`: checks `MUTABLE` and the id, validates UTF-8, stores the
+  replacement in the host event and repoints the payload's `UmiStr`.
+- Criterion bench `dispatch`: `PreTick` with no subscriber, with one Rust
+  handler, with one foreign intercept handler; `ChatSend` with no
+  subscriber. Numbers go to `docs/perf-log.md`.
+
+### `umicraft-modapi` (mod side)
+
+Views `ChatReceived` (`json()`, `position()`, `set_json()`), `ChatSend`
+(`text()`, `set_text()`), `Connected` (`address()`), `Disconnected`
+(`reason()`), `ScreenOpened`/`ScreenClosed` (`name()`). Text getters return
+`&str` borrowed from the event (invalid UTF-8 from a non-conforming host
+reads as empty). Setters return `Result<(), ModError>` and call
+`event_set_text`.
+
+### Client wiring (after the two above)
+
+Game thread: `PreTick`/`PostTick` around `tick()`, `ChatReceived` before
+`push_chat`, `ChatSend` before the chat command is queued. Render thread:
+`Connected`/`Disconnected` in `session_control`, `ScreenOpened`/`Closed` in
+`set_screen` with stable names. The game thread receives its bus from
+`Session::start`; `exiting` drops the session before `shutdown_all`.

@@ -66,4 +66,10 @@ pub struct UmiHost {
         handler: Option<UmiHandlerFn>,
         user: *mut c_void,
     ) -> UmiStatus,
+    /// Replaces the text of the event being intercepted (`CHAT_RECEIVED`:
+    /// the JSON; `CHAT_SEND`: the line). Later handlers and the client see the
+    /// new text. Returns `DENIED` unless the event carries
+    /// `UMI_EVENT_MUTABLE`, `INVALID_ARGUMENT` for another event or invalid
+    /// UTF-8. Added in API 0.2.
+    pub event_set_text: extern "C" fn(event: *mut UmiEventHeader, text: UmiStr) -> UmiStatus,
 }

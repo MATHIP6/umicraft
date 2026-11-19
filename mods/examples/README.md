@@ -2,7 +2,7 @@
 
 | Example | Shows |
 |---|---|
-| `hello` | The template to copy: logging, an `observe` handler on `PreTick`, an `intercept` handler on `PostTick` at priority 10, and `shutdown`. |
+| `hello` | The template to copy: logging, an `observe` handler on `PreTick`, an `intercept` handler on `PostTick` at priority 10, an `intercept` handler on `ChatSend` that replaces `:shrug:` with a shrug through `set_text`, and `shutdown`. |
 | `panicking` | A mod whose `init` panics. The host reports `PANICKED` and keeps running. A test fixture, not a template. |
 
 ## Build and install

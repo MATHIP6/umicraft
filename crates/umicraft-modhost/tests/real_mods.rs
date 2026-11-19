@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Loads the real `hello` and `panicking` example cdylibs (F3.2 acceptance test).
+//! Loads the real `hello` and `panicking` example cdylibs (F3.2 acceptance test) and
+//! dispatches events to them through a core `EventBus` (F3.3).
 //!
 //! The libraries are built once per test binary with `cargo build --offline`. The
 //! target directory is `CARGO_TARGET_DIR` when set, otherwise it is derived from the
@@ -13,12 +14,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use umicraft_modapi_sys::{
-    UmiEventHeader, UmiEventId, UmiMode, UmiPostTick, UmiPreTick, UmiStatus, UMI_EVENT_CANCELLABLE,
-};
+use umicraft_core::EventBus;
+use umicraft_modapi_sys::{UmiEventId, UmiMode, UmiStatus};
 use umicraft_modhost::{
-    discover, library_file_name, platform_dir, resolve, ApiVersion, Arch, Candidate, LoadError,
-    ModHost, ModId, Os, TrustList,
+    discover, library_file_name, platform_dir, resolve, ApiVersion, Arch, Candidate, ChatSend,
+    EventThread, LoadError, ModHost, ModId, Os, PostTick, PreTick, TrustList,
 };
 
 /// The directory holding the built example libraries (`<target>/<profile>`).
@@ -88,14 +88,6 @@ fn id(text: &str) -> ModId {
     text.to_owned().try_into().unwrap()
 }
 
-fn header(id: UmiEventId, flags: u32, size: usize) -> UmiEventHeader {
-    UmiEventHeader {
-        size: u32::try_from(size).unwrap(),
-        id,
-        flags,
-    }
-}
-
 #[test]
 fn hello_loads_panicking_fails_and_handlers_run() {
     let tmp = TempDir::new();
@@ -106,12 +98,12 @@ fn hello_loads_panicking_fails_and_handlers_run() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 1 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 2 });
     assert_eq!(resolution.order.len(), 2);
 
     let mut trust = TrustList::default();
     let mut asked = Vec::new();
-    let (mut host, failures) = ModHost::load(&resolution, &tmp.0, &mut trust, |m, hash| {
+    let (host, failures) = ModHost::load(&resolution, &tmp.0, &mut trust, |m, hash| {
         asked.push((m.id.to_string(), hash.to_owned()));
         true
     });
@@ -140,36 +132,37 @@ fn hello_loads_panicking_fails_and_handlers_run() {
     assert_eq!(post[0].mode, UmiMode::INTERCEPT);
     assert_eq!(post[0].priority, 10);
 
-    // Call the handlers the way the dispatcher will. Calling an `extern "C"` fn
-    // pointer and casting pointers are safe; the mod does the dereferencing.
-    let mut pre_tick = UmiPreTick {
-        header: header(UmiEventId::PRE_TICK, 0, size_of::<UmiPreTick>()),
-        tick: 7,
-    };
-    let status = (pre[0].handler)(
-        std::ptr::from_mut(&mut pre_tick).cast(),
-        pre[0].user.as_ptr(),
-    );
-    assert_eq!(status, UmiStatus::OK);
+    // The handlers are installed on the game bus only: no render event is hooked.
+    let mut game = EventBus::default();
+    host.install(&mut game, EventThread::Game);
+    let mut render = EventBus::default();
+    host.install(&mut render, EventThread::Render);
+    assert!(game.has_subscribers::<PreTick>() && game.has_subscribers::<ChatSend>());
+    assert!(!render.has_subscribers::<PreTick>());
 
-    let mut post_tick = UmiPostTick {
-        header: header(
-            UmiEventId::POST_TICK,
-            UMI_EVENT_CANCELLABLE,
-            size_of::<UmiPostTick>(),
-        ),
-        tick: 7,
-    };
-    let status = (post[0].handler)(
-        std::ptr::from_mut(&mut post_tick).cast(),
-        post[0].user.as_ptr(),
+    assert!(!game.dispatch(&mut PreTick::new(7)));
+    assert!(!game.dispatch(&mut PostTick::new(7)));
+    let mut chat = ChatSend::new("hi :shrug:");
+    assert!(!game.dispatch(&mut chat));
+    assert_eq!(
+        chat.text(),
+        "hi \u{af}\\_(\u{30c4})_/\u{af}",
+        "hello rewrote the line"
     );
-    assert_eq!(status, UmiStatus::OK);
+    let stats = host.stats();
+    let hello = &stats
+        .iter()
+        .find(|(id, _)| id.as_str() == "hello")
+        .unwrap()
+        .1;
+    assert_eq!(hello.calls, 2, "the post-tick and the chat interceptors");
 
-    // Disabling shuts the mod down once and drops its subscriptions.
+    // Disabling is a flag: the mod stops being dispatched to, and exit shuts it down.
     assert!(host.disable(&id("hello")));
     assert!(!host.disable(&id("hello")));
+    let mut untouched = ChatSend::new(":shrug:");
+    game.dispatch(&mut untouched);
+    assert_eq!(untouched.text(), ":shrug:");
     assert_eq!(host.subscriptions(UmiEventId::PRE_TICK).count(), 0);
-    assert_eq!(host.subscriptions(UmiEventId::POST_TICK).count(), 0);
     assert_eq!(host.enabled().count(), 0);
 }

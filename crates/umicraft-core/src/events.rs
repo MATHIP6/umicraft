@@ -4,6 +4,9 @@
 //!
 //! Handlers are per-event-type, carry a `priority` (lower runs first, stable
 //! within a priority), and receive the event mutable so they can rewrite values.
+//! The list is kept sorted at registration, never per dispatch (ADR-0086), so a
+//! dispatch with no handler costs one map lookup and emitters can skip building
+//! a payload with [`EventBus::has_subscribers`].
 //! A handler may cancel the dispatch: later-priority handlers are skipped and
 //! the emitter sees `dispatch` return `true`.
 //!
@@ -21,9 +24,13 @@ use crate::module::ModuleId;
 type DispatchFn = Box<dyn FnMut(&mut dyn Any, &mut EventCx) + Send>;
 
 /// Marker for event payload types that can be dispatched through [`EventBus`].
-pub trait Event: Send + 'static {}
+///
+/// Not `Send`: a bus belongs to the thread that dispatches on it, so payloads
+/// may hold raw pointers (the modding ABI does). The bus itself stays `Send`
+/// because its handlers are, so it can be built on one thread and moved.
+pub trait Event: 'static {}
 
-impl<T: Send + 'static> Event for T {}
+impl<T: 'static> Event for T {}
 
 /// Shared state across one dispatch; handlers cancel by calling [`EventCx::cancel`].
 #[derive(Debug, Default)]
@@ -79,17 +86,19 @@ impl std::fmt::Debug for EventBus {
 impl EventBus {
     /// Subscribes `handler` to events of type `E`.
     ///
-    /// Lower `priority` runs first; equal priorities run in registration order.
+    /// Lower `priority` runs first; equal priorities run in registration order
+    /// (the handler is inserted after the last one of priority <= its own).
     /// `subscriber` tags the handler (per-module profiling/debugging in UI-4).
     pub fn on<E, F>(&mut self, subscriber: ModuleId, priority: i32, mut handler: F)
     where
         E: Event,
         F: FnMut(&mut E, &mut EventCx) + Send + 'static,
     {
-        self.subscriptions
-            .entry(std::any::TypeId::of::<E>())
-            .or_default()
-            .push(Subscription {
+        let list = self.subscriptions.entry(TypeId::of::<E>()).or_default();
+        let at = list.partition_point(|existing| existing.priority <= priority);
+        list.insert(
+            at,
+            Subscription {
                 priority,
                 subscriber,
                 run: Box::new(move |raw: &mut dyn Any, cx: &mut EventCx| {
@@ -97,7 +106,19 @@ impl EventBus {
                         handler(event, cx);
                     }
                 }),
-            });
+            },
+        );
+    }
+
+    /// Whether at least one handler listens to `E`.
+    ///
+    /// Emitters call this before building a payload that allocates, so an
+    /// event nobody listens to costs nothing (ADR-0086).
+    #[must_use]
+    pub fn has_subscribers<E: Event>(&self) -> bool {
+        self.subscriptions
+            .get(&TypeId::of::<E>())
+            .is_some_and(|list| !list.is_empty())
     }
 
     /// Dispatches `event` to its handlers in priority order.
@@ -108,10 +129,6 @@ impl EventBus {
         let Some(subscriptions) = self.subscriptions.get_mut(&TypeId::of::<E>()) else {
             return false;
         };
-        // Sorted per dispatch so subscriber list mutations stay simple; the
-        // list is tiny (builtin + modules), so the cost is negligible until
-        // profiling justifies a sorted-insert (M14 perf pass benches this).
-        subscriptions.sort_by_key(|subscription| subscription.priority);
         let mut cx = EventCx::default();
         for subscription in subscriptions {
             if cx.is_cancelled() {
@@ -200,6 +217,47 @@ mod tests {
         let mut counter = Counter(41);
         bus.dispatch(&mut counter);
         assert_eq!(counter.0, 42);
+    }
+
+    #[test]
+    fn equal_priorities_keep_registration_order_among_others() {
+        let mut bus = EventBus::default();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        for (label, priority) in [("b1", 5), ("a", -1), ("b2", 5), ("c", 9), ("a2", -1)] {
+            let handler = log(&order, label);
+            bus.on::<Probe, _>(ModuleId::new(label), priority, handler);
+        }
+
+        bus.dispatch(&mut Probe);
+
+        assert_eq!(*order.lock().unwrap(), ["a", "a2", "b1", "b2", "c"]);
+        let tags: Vec<_> = bus
+            .subscribers::<Probe>()
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect();
+        assert_eq!(tags, ["a", "a2", "b1", "b2", "c"]);
+    }
+
+    #[test]
+    fn has_subscribers_tracks_the_event_type() {
+        struct Other;
+        let mut bus = EventBus::default();
+        assert!(!bus.has_subscribers::<Probe>());
+        bus.on::<Probe, _>(ModuleId::new("p"), 0, |_: &mut Probe, _cx| {});
+        assert!(bus.has_subscribers::<Probe>());
+        assert!(!bus.has_subscribers::<Other>());
+    }
+
+    #[test]
+    fn bus_is_send_and_events_need_not_be() {
+        fn assert_send<T: Send>() {}
+        assert_send::<EventBus>();
+        // A payload with a raw pointer is a valid event.
+        struct Raw(#[allow(dead_code)] *const u8);
+        let mut bus = EventBus::default();
+        bus.on::<Raw, _>(ModuleId::new("raw"), 0, |_: &mut Raw, _cx| {});
+        assert!(!bus.dispatch(&mut Raw(std::ptr::null())));
     }
 
     #[test]

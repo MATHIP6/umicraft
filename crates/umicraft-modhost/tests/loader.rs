@@ -38,7 +38,7 @@ impl Drop for TempDir {
 }
 
 fn manifest_text(id: &str) -> String {
-    format!("[mod]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nauthors = []\napi_version = \"0.1\"\n")
+    format!("[mod]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nauthors = []\napi_version = \"0.2\"\n")
 }
 
 fn write_mod(root: &Path, dir: &str, manifest: Option<&str>) {

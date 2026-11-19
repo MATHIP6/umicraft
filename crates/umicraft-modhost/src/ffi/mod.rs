@@ -4,9 +4,14 @@
 //!
 //! Host functions handed to mods, symbol lookup in loaded libraries, and the one
 //! `Send` claim about mod pointers live here so the rest of the crate stays safe
-//! (ADR-0087). Policy (what is allowed, what is logged) lives in
+//! (ADR-0087; the event-specific part is in `event`). Policy (what is allowed, what is logged) lives in
 //! [`crate::context`]; this module only converts raw arguments into safe ones.
 #![allow(unsafe_code)]
+
+mod event;
+
+#[cfg(test)]
+pub(crate) use event::testing;
 
 use core::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -109,6 +114,7 @@ pub fn host_table() -> UmiHost {
         version: UMI_API_VERSION,
         log: host_log,
         subscribe: host_subscribe,
+        event_set_text: event::host_event_set_text,
     }
 }
 

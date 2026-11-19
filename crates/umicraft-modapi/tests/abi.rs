@@ -11,13 +11,22 @@ use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use umicraft_modapi::{umicraft_mod, InitCx, Mod, ModError, PostTick, PreTick};
+use umicraft_modapi::{
+    umicraft_mod, ChatReceived, ChatSend, Connected, Disconnected, InitCx, Mod, ModError, PostTick,
+    PreTick, ScreenClosed, ScreenOpened,
+};
 use umicraft_modapi_sys::*;
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static LOGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static SUBS: Mutex<Vec<Sub>> = Mutex::new(Vec::new());
 static TICKS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+/// What the view-reading handlers saw, one `name=value` line per call.
+static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Results of `set_*` calls made by the handlers.
+static SET_RESULTS: Mutex<Vec<Result<(), ModError>>> = Mutex::new(Vec::new());
+/// Texts the fake host was asked to set.
+static SET_CALLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static DROPS: AtomicUsize = AtomicUsize::new(0);
 static DROPS_AT_SHUTDOWN: AtomicUsize = AtomicUsize::new(usize::MAX);
 static SHUTDOWNS: AtomicUsize = AtomicUsize::new(0);
@@ -42,6 +51,32 @@ impl Drop for DropToken {
     }
 }
 
+fn see(line: String) {
+    SEEN.lock().unwrap().push(line);
+}
+
+/// Observers read every view; the chat intercepts also write through it.
+fn register_view_handlers(cx: &mut InitCx<'_>) -> Result<(), ModError> {
+    cx.intercept::<ChatSend>(0, |e, _| {
+        see(format!("send={}", e.text()));
+        let result = e.set_text("replaced");
+        see(format!("send_after={}", e.text()));
+        SET_RESULTS.lock().unwrap().push(result);
+    })?;
+    cx.observe::<ChatReceived>(0, |e| {
+        see(format!("chat={} {:?}", e.json(), e.position()));
+    })?;
+    cx.intercept::<ChatReceived>(1, |e, _| {
+        let result = e.set_json("{\"text\":\"new\"}");
+        see(format!("chat_after={}", e.json()));
+        SET_RESULTS.lock().unwrap().push(result);
+    })?;
+    cx.observe::<Connected>(0, |e| see(format!("connected={}", e.address())))?;
+    cx.observe::<Disconnected>(0, |e| see(format!("disconnected={}", e.reason())))?;
+    cx.observe::<ScreenOpened>(0, |e| see(format!("opened={}", e.name())))?;
+    cx.observe::<ScreenClosed>(0, |e| see(format!("closed={}", e.name())))
+}
+
 struct TestMod;
 
 impl Mod for TestMod {
@@ -58,6 +93,7 @@ impl Mod for TestMod {
             let _keep = &token;
             control.cancel();
         })?;
+        register_view_handlers(cx)?;
         if FAIL_INIT.load(SeqCst) {
             return Err(ModError::msg("nope"));
         }
@@ -100,12 +136,39 @@ extern "C" fn fake_subscribe(
     UmiStatus::OK
 }
 
+/// Enforces what the real host does: `MUTABLE` and a chat event, valid UTF-8.
+/// Repoints the payload's string at a leaked copy, as the host repoints into
+/// its owned text.
+extern "C" fn fake_set_text(event: *mut UmiEventHeader, text: UmiStr) -> UmiStatus {
+    // SAFETY: the module under test passes the live payload it was given.
+    let header = unsafe { *event };
+    if header.flags & UMI_EVENT_MUTABLE == 0 {
+        return UmiStatus::DENIED;
+    }
+    // SAFETY: the module under test passes a live slice for the call.
+    let bytes = unsafe { std::slice::from_raw_parts(text.ptr, text.len) };
+    let Ok(copy) = std::str::from_utf8(bytes) else {
+        return UmiStatus::INVALID_ARGUMENT;
+    };
+    let copy: &'static str = Box::leak(copy.to_owned().into_boxed_str());
+    let repointed = UmiStr::from_static(copy);
+    // SAFETY: the id says which payload type `event` points to.
+    match header.id {
+        UmiEventId::CHAT_SEND => unsafe { (*event.cast::<UmiChatSend>()).text = repointed },
+        UmiEventId::CHAT_RECEIVED => unsafe { (*event.cast::<UmiChatReceived>()).json = repointed },
+        _ => return UmiStatus::INVALID_ARGUMENT,
+    }
+    SET_CALLS.lock().unwrap().push(copy.to_owned());
+    UmiStatus::OK
+}
+
 fn host() -> UmiHost {
     UmiHost {
         size: size_of::<UmiHost>(),
         version: UMI_API_VERSION,
         log: fake_log,
         subscribe: fake_subscribe,
+        event_set_text: fake_set_text,
     }
 }
 
@@ -121,6 +184,10 @@ fn fresh() -> MutexGuard<'static, ()> {
     LOGS.lock().unwrap().clear();
     SUBS.lock().unwrap().clear();
     TICKS.lock().unwrap().clear();
+    for list in [&SEEN, &SET_CALLS] {
+        list.lock().unwrap().clear();
+    }
+    SET_RESULTS.lock().unwrap().clear();
     for counter in [&DROPS, &SHUTDOWNS] {
         counter.store(0, SeqCst);
     }
@@ -141,6 +208,42 @@ fn sub_for(event: UmiEventId) -> Sub {
         .iter()
         .find(|s| s.event == event)
         .unwrap()
+}
+
+fn sub_with(event: UmiEventId, mode: UmiMode) -> Sub {
+    *SUBS
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|s| s.event == event && s.mode == mode)
+        .unwrap()
+}
+
+fn text(s: &'static str) -> UmiStr {
+    UmiStr::from_static(s)
+}
+
+fn chat_send(text: UmiStr, flags: u32) -> UmiChatSend {
+    UmiChatSend {
+        header: header(UmiEventId::CHAT_SEND, size_of::<UmiChatSend>(), flags),
+        text,
+    }
+}
+
+fn chat_received(json: UmiStr, position: u8, flags: u32) -> UmiChatReceived {
+    UmiChatReceived {
+        header: header(
+            UmiEventId::CHAT_RECEIVED,
+            size_of::<UmiChatReceived>(),
+            flags,
+        ),
+        json,
+        position,
+    }
+}
+
+fn seen() -> Vec<String> {
+    SEEN.lock().unwrap().clone()
 }
 
 fn header(id: UmiEventId, size: usize, flags: u32) -> UmiEventHeader {
@@ -180,7 +283,7 @@ fn init_registers_the_subscriptions_and_logs() {
     let _guard = fresh();
     init_ok();
     let subs = SUBS.lock().unwrap();
-    assert_eq!(subs.len(), 2);
+    assert_eq!(subs.len(), 9);
     assert_eq!(
         (subs[0].event, subs[0].mode, subs[0].priority),
         (UmiEventId::PRE_TICK, UmiMode::OBSERVE, 5)
@@ -307,4 +410,154 @@ fn host_refusal_frees_the_closure_at_once() {
         .lock()
         .unwrap()
         .contains(&"1:host refused the request (status 5)".to_string()));
+}
+
+#[test]
+fn chat_received_view_reads_json_and_position() {
+    let _guard = fresh();
+    init_ok();
+    let sub = sub_with(UmiEventId::CHAT_RECEIVED, UmiMode::OBSERVE);
+    for (raw, name) in [
+        (0, "Chat"),
+        (1, "System"),
+        (2, "ActionBar"),
+        (9, "Other(9)"),
+    ] {
+        SEEN.lock().unwrap().clear();
+        let mut payload = chat_received(text("{\"text\":\"hi\"}"), raw, 0);
+        assert_eq!(call(sub, &mut payload), UmiStatus::OK);
+        assert_eq!(seen(), [format!("chat={{\"text\":\"hi\"}} {name}")]);
+    }
+}
+
+#[test]
+fn chat_send_set_text_through_intercept_is_visible_and_ok() {
+    let _guard = fresh();
+    init_ok();
+    let sub = sub_with(UmiEventId::CHAT_SEND, UmiMode::INTERCEPT);
+    let mut payload = chat_send(text("hi :shrug:"), UMI_EVENT_MUTABLE);
+    assert_eq!(call(sub, &mut payload), UmiStatus::OK);
+    assert_eq!(seen(), ["send=hi :shrug:", "send_after=replaced"]);
+    assert_eq!(*SET_RESULTS.lock().unwrap(), [Ok(())]);
+    assert_eq!(*SET_CALLS.lock().unwrap(), ["replaced"]);
+    // The host-side payload now points at the replacement.
+    // SAFETY: the fake host leaked the replacement, so it lives forever.
+    let now = unsafe { std::slice::from_raw_parts(payload.text.ptr, payload.text.len) };
+    assert_eq!(now, b"replaced");
+}
+
+#[test]
+fn chat_received_set_json_through_intercept_works() {
+    let _guard = fresh();
+    init_ok();
+    let sub = sub_with(UmiEventId::CHAT_RECEIVED, UmiMode::INTERCEPT);
+    let mut payload = chat_received(text("{}"), 0, UMI_EVENT_MUTABLE);
+    assert_eq!(call(sub, &mut payload), UmiStatus::OK);
+    assert_eq!(seen(), ["chat_after={\"text\":\"new\"}"]);
+    assert_eq!(*SET_RESULTS.lock().unwrap(), [Ok(())]);
+}
+
+#[test]
+fn set_text_without_the_mutable_flag_is_denied() {
+    let _guard = fresh();
+    init_ok();
+    let sub = sub_with(UmiEventId::CHAT_SEND, UmiMode::INTERCEPT);
+    let mut payload = chat_send(text("hi"), 0);
+    assert_eq!(call(sub, &mut payload), UmiStatus::OK);
+    assert_eq!(
+        *SET_RESULTS.lock().unwrap(),
+        [Err(ModError::HostRefused(UmiStatus::DENIED))]
+    );
+    assert_eq!(seen(), ["send=hi", "send_after=hi"]);
+    assert!(SET_CALLS.lock().unwrap().is_empty());
+}
+
+#[test]
+fn connection_and_screen_views_read_their_text() {
+    let _guard = fresh();
+    init_ok();
+    let mut connected = UmiConnected {
+        header: header(UmiEventId::CONNECTED, size_of::<UmiConnected>(), 0),
+        address: text("play.example.org:25565"),
+    };
+    let mut disconnected = UmiDisconnected {
+        header: header(UmiEventId::DISCONNECTED, size_of::<UmiDisconnected>(), 0),
+        reason: text("Timed out"),
+    };
+    let screen = |id, name| UmiScreen {
+        header: header(id, size_of::<UmiScreen>(), 0),
+        name,
+    };
+    let mut opened = screen(UmiEventId::SCREEN_OPENED, text("inventory"));
+    let mut closed = screen(UmiEventId::SCREEN_CLOSED, text("chat"));
+    assert_eq!(
+        call(sub_for(UmiEventId::CONNECTED), &mut connected),
+        UmiStatus::OK
+    );
+    assert_eq!(
+        call(sub_for(UmiEventId::DISCONNECTED), &mut disconnected),
+        UmiStatus::OK
+    );
+    assert_eq!(
+        call(sub_for(UmiEventId::SCREEN_OPENED), &mut opened),
+        UmiStatus::OK
+    );
+    assert_eq!(
+        call(sub_for(UmiEventId::SCREEN_CLOSED), &mut closed),
+        UmiStatus::OK
+    );
+    assert_eq!(
+        seen(),
+        [
+            "connected=play.example.org:25565",
+            "disconnected=Timed out",
+            "opened=inventory",
+            "closed=chat"
+        ]
+    );
+}
+
+#[test]
+fn the_two_screen_events_are_not_interchangeable() {
+    let _guard = fresh();
+    init_ok();
+    let mut opened = UmiScreen {
+        header: header(UmiEventId::SCREEN_OPENED, size_of::<UmiScreen>(), 0),
+        name: text("chat"),
+    };
+    let closed_sub = sub_for(UmiEventId::SCREEN_CLOSED);
+    assert_eq!(call(closed_sub, &mut opened), UmiStatus::INVALID_ARGUMENT);
+    assert!(seen().is_empty());
+}
+
+#[test]
+fn view_with_the_wrong_event_id_is_invalid() {
+    let _guard = fresh();
+    init_ok();
+    let sub = sub_with(UmiEventId::CHAT_SEND, UmiMode::INTERCEPT);
+    let mut payload = chat_received(text("{}"), 0, UMI_EVENT_MUTABLE);
+    assert_eq!(call(sub, &mut payload), UmiStatus::INVALID_ARGUMENT);
+}
+
+#[test]
+fn null_empty_and_invalid_utf8_strings_read_as_empty() {
+    let _guard = fresh();
+    init_ok();
+    let sub = sub_with(UmiEventId::CHAT_SEND, UmiMode::INTERCEPT);
+    let bad = [0xff_u8, 0xfe];
+    for text in [
+        UmiStr::EMPTY,
+        UmiStr {
+            ptr: bad.as_ptr(),
+            len: 0,
+        },
+        UmiStr {
+            ptr: bad.as_ptr(),
+            len: bad.len(),
+        },
+    ] {
+        SEEN.lock().unwrap().clear();
+        assert_eq!(call(sub, &mut chat_send(text, 0)), UmiStatus::OK);
+        assert_eq!(seen()[0], "send=");
+    }
 }

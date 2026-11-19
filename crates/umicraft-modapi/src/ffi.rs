@@ -8,7 +8,8 @@ use core::ffi::c_void;
 use std::mem::size_of;
 
 use umicraft_modapi_sys::{
-    UmiEventHeader, UmiHost, UmiModHandle, UmiStatus, UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED,
+    UmiEventHeader, UmiHost, UmiModHandle, UmiStatus, UmiStr, UMI_EVENT_CANCELLABLE,
+    UMI_EVENT_CANCELLED,
 };
 
 use crate::event::{Control, Event};
@@ -75,6 +76,21 @@ impl Drop for OwnedHandler {
 unsafe fn free_handler<E: Event>(user: *mut c_void) {
     // SAFETY: guaranteed by the caller.
     drop(unsafe { Box::from_raw(user.cast::<Handler<E>>()) });
+}
+
+/// Reads a host string as `&str`; the borrow of `text` bounds the lifetime,
+/// matching the ABI rule that payload strings live for the handler call.
+///
+/// Null, empty and invalid UTF-8 all read as `""`: the host is trusted to send
+/// UTF-8, but a non-conforming one must not make a mod panic or read garbage.
+pub(crate) fn str_of(text: &UmiStr) -> &str {
+    if text.ptr.is_null() || text.len == 0 {
+        return "";
+    }
+    // SAFETY: non-null with `len` bytes the host promises are readable for the
+    // payload's lifetime, which the borrow of `text` stays within (ADR-0087).
+    let bytes = unsafe { core::slice::from_raw_parts(text.ptr, text.len) };
+    core::str::from_utf8(bytes).unwrap_or("")
 }
 
 /// Validates the host table: non-null and large enough for every field this

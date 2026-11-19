@@ -6,6 +6,19 @@
 //! the C entry points with [`umicraft_mod!`]. All `unsafe` lives in the private
 //! `ffi` module (ADR-0087); everything a mod author touches is safe.
 //!
+//! # Events
+//!
+//! | View | Thread | Cancellable | Text setter |
+//! |---|---|---|---|
+//! | [`PreTick`], [`PostTick`] | game | no | no |
+//! | [`ChatReceived`] | game | yes | [`ChatReceived::set_json`] |
+//! | [`ChatSend`] | game | yes | [`ChatSend::set_text`] |
+//! | [`Connected`], [`Disconnected`] | render | no | no |
+//! | [`ScreenOpened`], [`ScreenClosed`] | render | no | no |
+//!
+//! Setters work only inside [`InitCx::intercept`] handlers; observers get a
+//! copy and the host answers `DENIED`.
+//!
 //! ```ignore
 //! struct Hello;
 //!
@@ -23,13 +36,17 @@
 mod error;
 mod event;
 mod ffi;
+mod host;
 mod init;
 mod logger;
 #[doc(hidden)]
 pub mod private;
 
 pub use error::ModError;
-pub use event::{Control, Event, PostTick, PreTick};
+pub use event::{
+    ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event, PostTick,
+    PreTick, ScreenClosed, ScreenOpened,
+};
 pub use init::{InitCx, Mod};
 pub use logger::Logger;
 
