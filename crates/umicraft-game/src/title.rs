@@ -152,11 +152,32 @@ impl TitleState {
     }
 }
 
+/// `java.awt.Color.HSBtoRGB` for a hue in turns, `saturation` and `brightness`.
+fn hsb_to_rgb(hue: f32, saturation: f32, brightness: f32) -> [u8; 3] {
+    let sector = (hue - hue.floor()) * 6.0;
+    let f = sector - sector.floor();
+    let p = brightness * (1.0 - saturation);
+    let q = brightness * (1.0 - saturation * f);
+    let t = brightness * (1.0 - saturation * (1.0 - f));
+    let (r, g, b) = match sector as u8 {
+        0 => (brightness, t, p),
+        1 => (q, brightness, p),
+        2 => (p, brightness, t),
+        3 => (p, q, brightness),
+        4 => (t, p, brightness),
+        _ => (brightness, p, q),
+    };
+    [r, g, b].map(|channel| (channel * 255.0 + 0.5) as u8)
+}
+
 /// The one-line message above the hotbar.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ActionBar {
     message: String,
     remaining: i32,
+    /// Whether the message is a "Now playing" record title, drawn in rainbow
+    /// colours (`GuiIngame.recordIsPlaying`).
+    record: bool,
 }
 
 impl ActionBar {
@@ -170,6 +191,27 @@ impl ActionBar {
     pub fn show(&mut self, json: &str) {
         self.message = json.to_string();
         self.remaining = ACTION_BAR_TICKS;
+        self.record = false;
+    }
+
+    /// Shows the title of the record a jukebox starts, like the action bar
+    /// but in rainbow colours (MCP `GuiIngame.setRecordPlayingMessage`).
+    pub fn show_record(&mut self, text: &str) {
+        self.show(&serde_json::json!({ "text": text }).to_string());
+        self.record = true;
+    }
+
+    /// Whether the message is a record title, see [`Self::show_record`].
+    #[must_use]
+    pub fn is_record(&self) -> bool {
+        self.record
+    }
+
+    /// The colour of a record title at `partial_tick`: the hue turns once
+    /// every 50 ticks (`Color.HSBtoRGB(left / 50, 0.7, 0.6)`).
+    #[must_use]
+    pub fn record_color(&self, partial_tick: f32) -> [u8; 3] {
+        hsb_to_rgb((self.remaining as f32 - partial_tick) / 50.0, 0.7, 0.6)
     }
 
     /// Advances the timer by one game tick.
@@ -308,6 +350,23 @@ mod tests {
         run(&mut state, 70 + 10);
         let fading = state.alpha(0.0);
         assert!(fading > 0.0 && fading < 1.0, "fading was {fading}");
+    }
+
+    #[test]
+    fn a_record_title_is_an_action_bar_in_rainbow_colours() {
+        let mut bar = ActionBar::new();
+        bar.show_record("Now playing: C418 - cat \"x\"");
+        assert!(bar.is_record());
+        assert_eq!(
+            bar.message(),
+            Some(r#"{"text":"Now playing: C418 - cat \"x\""}"#)
+        );
+        // Hue 60/50 turns: 0.2 of a turn is in sector 1 (yellow to green),
+        // q = 0.6 * (1 - 0.7 * 0.2), as `Color.HSBtoRGB` computes it.
+        assert_eq!(bar.record_color(0.0), [132, 153, 46]);
+        assert_ne!(bar.record_color(0.0), bar.record_color(5.0));
+        bar.show("{}");
+        assert!(!bar.is_record());
     }
 
     #[test]

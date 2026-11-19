@@ -12,7 +12,9 @@ use umicraft_game::hud::team_names::{player_label, sees_team_ghost};
 use umicraft_game::inventory::payload;
 use umicraft_game::scoreboard::Scoreboard;
 use umicraft_game::server::ServerState;
+use umicraft_game::sound::effect_packet::record_name;
 use umicraft_net::play::PlayEvent;
+use umicraft_protocol::packets::play::clientbound::effect::Effect;
 
 use super::abilities::apply_mode_rules;
 use super::chat::show_chat;
@@ -219,6 +221,7 @@ fn apply_net_event(
                 state.on_effect(&packet);
             }
             apply_effect(game, &packet);
+            show_record_title(game, &packet);
         }
         PlayEvent::SoundEffect(packet) => {
             if let Some(state) = game.state.as_mut() {
@@ -272,4 +275,24 @@ fn apply_server_state(server: &mut ServerState, event: &PlayEvent) {
         // them when they arrive.
         _ => {}
     }
+}
+
+/// The effect id of a jukebox starting or stopping (`RenderGlobal.playAuxSFX`).
+const RECORD_EFFECT: i32 = 1005;
+
+/// Shows "Now playing: <title>" above the hotbar when a jukebox starts a
+/// record (MCP `RenderGlobal.playRecord`: `setRecordPlayingMessage`).
+fn show_record_title(game: &mut Game, packet: &Effect) {
+    if packet.effect_id != RECORD_EFFECT {
+        return;
+    }
+    let Some(name) = record_name(packet.data) else {
+        return;
+    };
+    let lang = crate::language::current();
+    let key = format!("item.record.{name}.desc");
+    let title = lang.tr(&key);
+    let text = lang.tr_args("record.nowPlaying", &[title]);
+    game.social.action_bar.show_record(&text);
+    game.hud_dirty = true;
 }

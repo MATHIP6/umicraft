@@ -99,8 +99,15 @@ pub(crate) fn title_view(state: &TitleState) -> Option<TitleView> {
 /// The action bar message with its opacity, while one is displayed.
 pub(crate) fn action_bar_view(bar: &ActionBar) -> Option<ActionBarView> {
     let frame = action_bar_frame(bar, translations().table(), 0.0)?;
+    let mut text = run_views(&frame.text);
+    if bar.is_record() {
+        let color = bar.record_color(0.0);
+        for run in &mut text {
+            run.color = color;
+        }
+    }
     Some(ActionBarView {
-        text: run_views(&frame.text),
+        text,
         alpha: frame.alpha,
     })
 }
