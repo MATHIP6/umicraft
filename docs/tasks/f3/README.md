@@ -123,3 +123,12 @@ process-global registry.
   once and drops the mod's subscriptions; `ModHost::shutdown_all()` at exit.
   Libraries stay mapped until `ModHost` is dropped.
 - `unsafe` only in `src/ffi.rs` (ADR-0087).
+
+### Rule for F3.3 (found in the F3.2 review)
+
+A mod's trampoline reaches its closure through the `user` pointer without a
+lock, and `umi_mod_shutdown` frees the closures. The host must therefore
+never call `umi_mod_shutdown` while a dispatch to that mod may be in flight:
+disabling flips the mod's flag first, and the shutdown runs at a quiescent
+point (between ticks on the game thread, between frames on the render
+thread, after the mod's worker has drained), or at client exit.
