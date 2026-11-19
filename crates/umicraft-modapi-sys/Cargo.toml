@@ -1,0 +1,13 @@
+[package]
+name = "umicraft-modapi-sys"
+description = "The C ABI of the Umicraft modding API: repr(C) types, ids and function-pointer types (ADR-0087)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true
