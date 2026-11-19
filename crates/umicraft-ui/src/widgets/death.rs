@@ -18,6 +18,7 @@ use crate::draw::{Color, TextStyle};
 use crate::geom::Rect;
 use crate::text::FontAtlas;
 
+use super::button::button_enabled;
 use super::gui_scale;
 use super::style;
 
@@ -122,22 +123,26 @@ pub fn death_screen(
         &[(&score_label, style::TEXT), (&score_text, YELLOW)],
     );
 
+    // The shared button draws the `widgets.png` texture (or the active theme's
+    // skin); the title screen button is never enabled, see above.
     let respawn_id = ui.id("death.respawn");
-    let clicked = draw_button(
+    let clicked = button_enabled(
         ui,
-        atlas,
-        buttons_enabled.then_some(respawn_id),
+        respawn_id,
         layout.respawn,
-        lang.tr("deathScreen.respawn"),
-        layout.scale,
-    );
-    draw_button(
-        ui,
         atlas,
-        None,
+        lang.tr("deathScreen.respawn"),
+        buttons_enabled,
+    )
+    .clicked;
+    let title_id = ui.id("death.titleScreen");
+    button_enabled(
+        ui,
+        title_id,
         layout.title_screen,
+        atlas,
         lang.tr("deathScreen.titleScreen"),
-        layout.scale,
+        false,
     );
 
     if clicked {
@@ -185,43 +190,6 @@ fn centered_text(
         ui.draw().text([x, y], *text, TextStyle::new(scale, *color));
         x += atlas.measure(text, scale);
     }
-}
-
-/// Draws a button; `id` is `None` for a disabled one. True when clicked.
-fn draw_button(
-    ui: &mut Ui,
-    atlas: &FontAtlas,
-    id: Option<crate::id::WidgetId>,
-    rect: Rect,
-    label: &str,
-    scale: f32,
-) -> bool {
-    let response = id.map(|id| ui.response(id, rect));
-    let hovered = response.is_some_and(|response| response.hovered);
-    let fill = match (id.is_some(), hovered) {
-        (false, _) => style::BUTTON_DISABLED,
-        (true, true) => style::BUTTON_HOVER,
-        (true, false) => style::BUTTON,
-    };
-    ui.draw().rect(rect, fill);
-    let width = atlas.measure(label, scale);
-    let height = atlas.line_height(scale);
-    let color = if id.is_some() {
-        style::TEXT
-    } else {
-        style::TEXT_DIM
-    };
-    ui.push_clip(rect);
-    ui.draw().text(
-        [
-            rect.x + (rect.width - width).max(0.0) * 0.5,
-            rect.y + (rect.height - height).max(0.0) * 0.5,
-        ],
-        label,
-        TextStyle::new(scale, color),
-    );
-    ui.pop_clip();
-    response.is_some_and(|response| response.clicked)
 }
 
 #[cfg(test)]
