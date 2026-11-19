@@ -7,35 +7,41 @@
 //! laid out in font pixels (x right, y down) as `drawString` does and mapped
 //! to the block by [`sign_text_transform`].
 //!
-//! The reference draws each line as the first line of the component wrapped to
-//! 90 pixels (`GuiUtilRenderComponents.func_178908_a`), centred on the
-//! plane's origin, in black. Here the wrap is a trim to 90 pixels, which is
-//! the same for text that fits and cuts a longer line at the same place as
-//! its first wrapped line unless the wrap would break it at a space.
-//! The reference has no distance of its own for the text: it is drawn with
-//! the tile entity, so the cut of `mod.rs` applies to both.
+//! The reference draws each line as the formatted text of the first line of
+//! the component wrapped to 90 pixels (`GuiUtilRenderComponents.func_178908_a`
+//! with the colours forced on), centred on the plane's origin, in black unless
+//! the component says otherwise; [`sign_text`](super::sign_text) lays the
+//! styles out. The reference has no distance of its own for the text: it is
+//! drawn with the tile entity, so the cut of `mod.rs` applies to both.
 
 use std::collections::HashMap;
 
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use umicraft_game::server::block_entities::Pos;
 use umicraft_mesh::{BlockEntityKind, BlockEntityRef};
 use umicraft_model::entity::{
-    sign_text_transform, standing_sign_degrees, wall_sign_degrees, ModelVertex, SignModel,
-    TextureSlot,
+    sign_text_transform, standing_sign_degrees, wall_sign_degrees, SignModel, TextureSlot,
 };
 use umicraft_render::EntityVertex;
 use umicraft_ui::FontAtlas;
 
-use super::{push_at_block, BlockEntityScene};
+use super::sign_text::{self, TextQuad};
+use super::{light_word, push_at_block, BlockEntityScene};
 use crate::chat;
 
 /// The widest a line is drawn, in font pixels (the `90` of the reference).
-const MAX_LINE_WIDTH: f32 = 90.0;
+pub(crate) const MAX_LINE_WIDTH: f32 = 90.0;
 /// Pixels between the tops of two lines (`j * 10`).
 const LINE_SPACING: f32 = 10.0;
 /// Lines of a sign.
 const LINES: usize = 4;
+/// The light-word bits that colour a vertex with the chat colour of bits
+/// 14..=17: the dye and orb bits together (`entity.wgsl`, `CHAT_COLORS`).
+const CHAT_COLOR_BITS: u32 = (1 << 13) | (1 << 18);
+/// Shift of the chat colour index in the light word.
+const CHAT_COLOR_SHIFT: u32 = 14;
+/// Client ticks per second, the rate the obfuscated glyphs change at.
+const TICKS_PER_SECOND: f32 = 20.0;
 
 /// Draws the sign at `entry`, with its text when the lines are known.
 pub(super) fn add_sign(
@@ -55,13 +61,11 @@ pub(super) fn add_sign(
     let (Some(font), Some(lines)) = (scene.font, scene.signs.get(&pos)) else {
         return;
     };
-    let text = text_vertices(font, lines, standing, degrees);
-    if !text.is_empty() {
-        push_at_block(
-            batches.entry(TextureSlot::SignText).or_default(),
-            text,
-            entry,
-        );
+    let tick = (scene.seconds * TICKS_PER_SECOND) as u32;
+    let quads = line_quads(font, lines, tick);
+    if !quads.is_empty() {
+        let out = batches.entry(TextureSlot::SignText).or_default();
+        push_text(out, &quads, standing, degrees, entry);
     }
 }
 
@@ -74,89 +78,54 @@ fn rotation_degrees(standing: bool, metadata: u8) -> f32 {
     }
 }
 
-/// The glyph quads of the four lines, in block space.
-fn text_vertices(
-    font: &FontAtlas,
-    lines: &[String; LINES],
-    standing: bool,
-    degrees: f32,
-) -> Vec<ModelVertex> {
-    let plane = sign_text_transform(standing, degrees);
-    let normal = plane
-        .transform_vector3(Vec3::Z)
-        .normalize_or_zero()
-        .to_array();
+/// The quads of the four lines, in font pixels around the plane's origin.
+fn line_quads(font: &FontAtlas, lines: &[String; LINES], tick: u32) -> Vec<TextQuad> {
     let mut out = Vec::new();
     for (index, line) in lines.iter().enumerate() {
-        let text = trim_to_width(font, &chat::flatten(line), MAX_LINE_WIDTH);
-        let left = -(font.measure(&text, 1.0) as i32 / 2) as f32;
+        let row = sign_text::first_row(font, &chat::parse_runs(line), MAX_LINE_WIDTH);
+        // `-getStringWidth(s) / 2`, an integer division.
+        let left = -(sign_text::width(font, &row) as i32 / 2) as f32;
         let top = index as f32 * LINE_SPACING - (LINES * 5) as f32;
-        let mut pen = left;
-        for character in text.chars() {
-            if let Some(glyph) = font.glyph_or_fallback(character) {
-                if !character.is_whitespace() {
-                    push_glyph(&mut out, glyph_rect(font, glyph, pen, top), &plane, normal);
-                }
-                // The pen moves by what drawing returns, `(int) f`.
-                pen += glyph.pen.trunc();
-            }
-        }
+        sign_text::layout(font, &row, (left, top), tick, &mut out);
     }
     out
 }
 
-/// A glyph placed in the text plane: corners `[x0, y0, x1, y1]` and the UVs
-/// `[u0, v0, u1, v1]` of the same rectangle in the atlas.
-type GlyphRect = ([f32; 4], [f32; 4]);
-
-/// The rectangle of `glyph` with its pen at `(x, y)`.
-fn glyph_rect(font: &FontAtlas, glyph: &umicraft_ui::Glyph, x: f32, y: f32) -> GlyphRect {
-    let width = (glyph.uv_max[0] - glyph.uv_min[0]) * font.width as f32 * glyph.scale;
-    let height = (glyph.uv_max[1] - glyph.uv_min[1]) * font.height as f32 * glyph.scale;
-    (
-        [x, y, x + width, y + height],
-        [
-            glyph.uv_min[0],
-            glyph.uv_min[1],
-            glyph.uv_max[0],
-            glyph.uv_max[1],
-        ],
-    )
-}
-
-/// Appends the two triangles of a glyph rectangle.
-fn push_glyph(
-    out: &mut Vec<ModelVertex>,
-    (rect, uv): GlyphRect,
-    plane: &glam::Mat4,
-    normal: [f32; 3],
+/// Maps the quads onto the sign at `entry` and appends their two triangles
+/// each, lit like the sign and coloured by their chat colour.
+fn push_text(
+    out: &mut Vec<EntityVertex>,
+    quads: &[TextQuad],
+    standing: bool,
+    degrees: f32,
+    entry: &BlockEntityRef,
 ) {
-    let corner = |x: f32, y: f32, u: f32, v: f32| ModelVertex {
-        position: plane.transform_point3(Vec3::new(x, y, 0.0)).to_array(),
-        normal,
-        uv: [u, v],
-    };
-    let [x0, y0, x1, y1] = rect;
-    let [u0, v0, u1, v1] = uv;
-    let (a, b) = (corner(x0, y0, u0, v0), corner(x1, y0, u1, v0));
-    let (c, d) = (corner(x1, y1, u1, v1), corner(x0, y1, u0, v1));
-    out.extend([a, b, c, a, c, d]);
-}
-
-/// The longest start of `text` that is at most `width` pixels wide
-/// (`FontRenderer.trimStringToWidth`, which stops before a character that
-/// would pass the width).
-fn trim_to_width(font: &FontAtlas, text: &str, width: f32) -> String {
-    let mut used = 0.0;
-    let mut kept = String::new();
-    for character in text.chars() {
-        used += font.advance(character, 1.0);
-        if used > width {
-            break;
-        }
-        kept.push(character);
+    let [x, y, z] = entry.position;
+    let plane = Mat4::from_translation(Vec3::new(x as f32, y as f32, z as f32))
+        * sign_text_transform(standing, degrees);
+    let normal = plane
+        .transform_vector3(Vec3::Z)
+        .normalize_or_zero()
+        .to_array();
+    let light = light_word(entry) | CHAT_COLOR_BITS;
+    for quad in quads {
+        let light = light | (u32::from(quad.color & 15) << CHAT_COLOR_SHIFT);
+        let [u0, v0, u1, v1] = quad.uv;
+        let uvs = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+        let corner = |index: usize| EntityVertex {
+            position: plane
+                .transform_point3(Vec3::new(
+                    quad.corners[index][0],
+                    quad.corners[index][1],
+                    0.0,
+                ))
+                .to_array(),
+            normal,
+            uv: uvs[index],
+            light,
+        };
+        out.extend([0, 1, 2, 0, 2, 3].map(corner));
     }
-    kept
 }
 
 #[cfg(test)]
@@ -241,12 +210,44 @@ mod tests {
     }
 
     #[test]
-    fn a_long_line_is_trimmed_to_ninety_pixels() {
+    fn a_long_line_is_cut_to_ninety_pixels() {
         let font = FontAtlas::fallback();
-        let trimmed = trim_to_width(&font, &"a".repeat(100), MAX_LINE_WIDTH);
-        assert!(font.measure(&trimmed, 1.0) <= MAX_LINE_WIDTH);
-        assert!(font.measure(&format!("{trimmed}a"), 1.0) > MAX_LINE_WIDTH);
-        assert_eq!(trim_to_width(&font, "short", MAX_LINE_WIDTH), "short");
+        let long = "a".repeat(100);
+        let quads = line_quads(
+            &font,
+            &[format!("\"{long}\""), "".into(), "".into(), "".into()],
+            0,
+        );
+        let right = quads
+            .iter()
+            .flat_map(|quad| quad.corners)
+            .map(|[x, _]| x)
+            .fold(f32::MIN, f32::max);
+        assert!(right <= MAX_LINE_WIDTH / 2.0 + 1.0, "{right}");
+    }
+
+    #[test]
+    fn coloured_text_carries_its_chat_colour_in_the_light_word() {
+        let font = FontAtlas::fallback();
+        let red = SignTable::from([(
+            (4, 70, 9),
+            [
+                r#"{"text":"Hi","color":"red"}"#.to_owned(),
+                r#""\u00a79a""#.to_owned(),
+                String::new(),
+                String::new(),
+            ],
+        )]);
+        let batches = draw(&entry(STANDING_SIGN, 0), &red, Some(&font));
+        let colours: Vec<u32> = batches[&TextureSlot::SignText]
+            .iter()
+            .map(|vertex| {
+                assert_eq!(vertex.light & CHAT_COLOR_BITS, CHAT_COLOR_BITS);
+                (vertex.light >> CHAT_COLOR_SHIFT) & 15
+            })
+            .collect();
+        // "Hi" in red (12), then "a" in blue (9).
+        assert_eq!(colours, [[12; 6], [12; 6], [9; 6]].concat());
     }
 
     #[test]

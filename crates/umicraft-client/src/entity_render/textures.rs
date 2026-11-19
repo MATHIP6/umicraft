@@ -158,16 +158,17 @@ impl EntityTextures {
         textures
     }
 
-    /// Makes the texture of the sign text from the coverage of `font`: black
+    /// Makes the texture of the sign text from the coverage of `font`: white
     /// with the coverage as alpha, so the entity pass's alpha test cuts the
-    /// glyphs out (the reference draws the text in black, colour `0`). The
+    /// glyphs out and the chat colour of each vertex tints them (black, the
+    /// colour `0` of the reference, unless the line says otherwise). The
     /// glyph UVs of the sign renderer address this atlas, so it must be called
     /// again with the new atlas whenever the UI font changes.
     pub fn set_sign_font(&self, renderer: &Renderer, font: &FontAtlas) {
         let rgba: Vec<u8> = font
             .pixels
             .iter()
-            .flat_map(|&coverage| [0, 0, 0, coverage])
+            .flat_map(|&coverage| [255, 255, 255, coverage])
             .collect();
         let texture = renderer.create_entity_texture(&rgba, font.width, font.height);
         self.textures

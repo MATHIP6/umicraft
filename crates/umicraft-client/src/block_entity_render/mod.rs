@@ -27,6 +27,7 @@ mod end_portal;
 mod flower_pot;
 mod item;
 mod sign;
+mod sign_text;
 mod skull;
 mod spawner;
 
