@@ -12,12 +12,12 @@ use std::thread::JoinHandle;
 
 use tokio::sync::mpsc::Sender as CommandSender;
 use umicraft_assets::profile_textures::AccountSkinFetcher;
-use umicraft_core::events::EventBus;
 use umicraft_net::play::SessionCounters;
 use umicraft_protocol::PlayServerbound;
 
 use super::game_loop::run;
 use super::messages::{ChunkEvent, GameEvent, RenderEvent};
+use super::mod_events::GameMods;
 use crate::error::ClientError;
 use crate::input::InputUpdate;
 use crate::network::{self, NetworkConfig};
@@ -75,14 +75,14 @@ const MAX_FRAME_MICROS: u32 = 100_000;
 impl Session {
     /// Starts the network thread and the game thread.
     ///
-    /// `bus` carries the mod subscriptions of the game thread; it moves into
-    /// that thread, which alone dispatches on it. Pass `EventBus::default()`
-    /// for a session without mods.
+    /// `mods` carries the mod subscriptions and the client commands of the game
+    /// thread; they move into that thread, which alone dispatches on them. Pass
+    /// `GameMods::default()` for a session without mods.
     ///
     /// # Errors
     /// [`ClientError::Network`] or [`ClientError::Worker`] when a thread
     /// cannot be spawned.
-    pub fn start(config: NetworkConfig, bus: EventBus) -> Result<Self, ClientError> {
+    pub fn start(config: NetworkConfig, mods: GameMods) -> Result<Self, ClientError> {
         let (inputs_tx, inputs_rx) = crossbeam_channel::bounded(INPUT_CAPACITY);
         let (events_tx, events_rx) = crossbeam_channel::bounded(INBOX_CAPACITY);
         let (frames_tx, frames_rx) = mpsc::sync_channel(FRAME_CAPACITY);
@@ -117,7 +117,7 @@ impl Session {
             Arc::clone(&stop),
             own_name,
             account_skin,
-            bus,
+            mods,
         )?;
 
         Ok(Self {
@@ -214,10 +214,10 @@ fn spawn_game_thread(
     stop: Arc<AtomicBool>,
     own_name: String,
     account_skin: Option<AccountSkinFetcher>,
-    bus: EventBus,
+    mods: GameMods,
 ) -> Result<JoinHandle<()>, ClientError> {
     std::thread::Builder::new()
         .name("umicraft-game".to_string())
-        .spawn(move || run(channels, stop, own_name, account_skin, bus))
+        .spawn(move || run(channels, stop, own_name, account_skin, mods))
         .map_err(|error| ClientError::Worker(format!("spawn game thread: {error}")))
 }

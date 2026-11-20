@@ -203,7 +203,13 @@ impl ModsScreen {
         let hud = self.hud.show(ui, fonts, lang, &view.hud, zones);
         // The gear of a widget opens the settings of its mod; the client never sees it.
         let opened = match &hud {
-            Some(HudEditorOutcome::OpenSettings { id }) => Some(id.clone()),
+            Some(HudEditorOutcome::OpenSettings { id }) => Some(
+                view.hud
+                    .entries
+                    .iter()
+                    .find(|entry| entry.id == *id)
+                    .map_or_else(|| id.clone(), |entry| entry.card.clone()),
+            ),
             _ => None,
         };
 

@@ -18,6 +18,7 @@ use super::menu_screens;
 use super::menu_screens::VERSION_LINE;
 use super::mods_menu;
 use super::{App, CARET_BLINK_MS};
+use crate::mods::external::ExternalMods;
 use crate::options::Action;
 use crate::resources::item_icons::{slot_item, ItemView};
 use crate::scene::nametag::{draw_tags_into, place_tags_into};
@@ -241,7 +242,10 @@ impl App {
         );
         let widgets = mods_menu::hud_widgets(
             self.screen(),
-            &self.mods,
+            (
+                &self.mods,
+                self.external_mods.as_ref().and_then(ExternalMods::host),
+            ),
             atlas,
             (width, height),
             &self.mod_icons(),
@@ -304,6 +308,7 @@ impl App {
                 self.menu_action = self.game_menu.show(&mut self.ui, atlas, &self.lang)
             }
             Screen::Options => {
+                self.sync_mod_keys();
                 self.options_menu.outcome = self.options_menu.screen.show(
                     &mut self.ui,
                     atlas,
@@ -378,7 +383,11 @@ impl App {
                 let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
                 let mods_view = mods_menu::view_for(
                     screen,
-                    (&self.mods, &self.lang),
+                    (
+                        &self.mods,
+                        self.external_mods.as_ref().and_then(ExternalMods::host),
+                        &self.lang,
+                    ),
                     (atlas, (width, height)),
                     &self.mod_icons(),
                 );

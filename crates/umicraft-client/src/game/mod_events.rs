@@ -18,12 +18,23 @@ use umicraft_game::chat::{commands, Position};
 use umicraft_modapi_sys::{
     UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
 };
-use umicraft_modhost::{ChatReceived, ChatSend, PostTick, PreTick};
+use umicraft_modhost::{ChatReceived, ChatSend, CommandOutcome, CommandTable, PostTick, PreTick};
 
+use super::chat::{local_chat_line, push_chat};
 use super::commands::CommandQueue;
 use super::messages::{ChunkEvent, RenderEvent};
 use super::state::Game;
 use super::tick::tick;
+
+/// What the mods give the game thread of a session: its event bus and the client
+/// commands. Bundled so `Session::start` takes one parameter for all of it.
+#[derive(Default)]
+pub struct GameMods {
+    /// The subscriptions of the mods that live on the game thread; empty without mods.
+    pub bus: EventBus,
+    /// The commands of the mods (`/name`); `None` without mods.
+    pub commands: Option<CommandTable>,
+}
 
 /// Runs one game tick between its [`PreTick`] and [`PostTick`] events.
 ///
@@ -90,6 +101,48 @@ pub(super) fn outgoing_chat(bus: &mut EventBus, message: String) -> Option<Strin
     sendable(event.text().to_owned())
 }
 
+/// What happens to a typed line after the client commands saw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineAction {
+    /// Not a client command: on to the `ChatSend` mods and the server.
+    Send,
+    /// A client command handled it, or refused its arguments: nothing is sent.
+    Swallow,
+    /// A command broke its mod: nothing is sent and the player is told.
+    SwallowAndWarn,
+}
+
+/// The fate of a line given what [`CommandTable::run`] did with it.
+const fn line_action(outcome: CommandOutcome) -> LineAction {
+    match outcome {
+        CommandOutcome::NotACommand => LineAction::Send,
+        CommandOutcome::Ran | CommandOutcome::Rejected => LineAction::Swallow,
+        CommandOutcome::Failed => LineAction::SwallowAndWarn,
+    }
+}
+
+/// Handles a line the player typed: a `/name` of a mod runs here and is never sent
+/// (a server must not see a client-only command); any other line goes through
+/// [`outgoing_chat`]. Returns what to queue as a chat packet, if anything.
+pub(super) fn typed_chat(game: &mut Game, message: String) -> Option<String> {
+    let outcome = game
+        .commands
+        .as_ref()
+        .map_or(CommandOutcome::NotACommand, |table| table.run(&message));
+    match line_action(outcome) {
+        LineAction::Send => outgoing_chat(&mut game.bus, message),
+        LineAction::Swallow => None,
+        LineAction::SwallowAndWarn => {
+            let lang = crate::hud::chat::lang();
+            push_chat(
+                game,
+                local_chat_line(lang.tr("umicraft.mods.external.disabled")),
+            );
+            None
+        }
+    }
+}
+
 /// The line if the server accepts it: not empty and within the limit, which
 /// counts characters, not bytes.
 fn sendable(message: String) -> Option<String> {
@@ -121,6 +174,26 @@ mod tests {
         assert_eq!(
             outgoing_chat(&mut bus, "hello".into()).as_deref(),
             Some("hello")
+        );
+    }
+
+    #[test]
+    fn only_a_line_no_command_took_is_sent() {
+        assert_eq!(line_action(CommandOutcome::NotACommand), LineAction::Send);
+        assert_eq!(line_action(CommandOutcome::Ran), LineAction::Swallow);
+        assert_eq!(line_action(CommandOutcome::Rejected), LineAction::Swallow);
+        assert_eq!(
+            line_action(CommandOutcome::Failed),
+            LineAction::SwallowAndWarn
+        );
+    }
+
+    #[test]
+    fn a_line_goes_on_when_no_command_table_is_given() {
+        let mut game = Game::new();
+        assert_eq!(
+            typed_chat(&mut game, "/gamemode 1".into()).as_deref(),
+            Some("/gamemode 1")
         );
     }
 

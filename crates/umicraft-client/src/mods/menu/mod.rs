@@ -110,7 +110,8 @@ pub fn apply(registry: &mut ModRegistry, outcome: &ModsOutcome) -> Result<bool, 
     Ok(true)
 }
 
-fn setting_value(value: &ModValue) -> SettingValue {
+/// The setting value a menu control reports.
+pub(crate) fn setting_value(value: &ModValue) -> SettingValue {
     match value {
         ModValue::Bool(on) => SettingValue::Bool(*on),
         ModValue::Number(number) => SettingValue::Number(*number),

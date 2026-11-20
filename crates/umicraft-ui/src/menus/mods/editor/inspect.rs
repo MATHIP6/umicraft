@@ -211,7 +211,7 @@ impl ModsScreen {
         };
         let id = entry.id.clone();
         let widget = view.hud.widgets.iter().find(|w| w.id == id);
-        let card = view.cards.iter().find(|card| card.id == id);
+        let card = view.cards.iter().find(|card| card.id == entry.card);
         let screen = view.hud.screen;
         let movable = !entry.locked;
         let hud = |outcome| Some(ModsOutcome::Hud(outcome));

@@ -14,13 +14,16 @@ use winit::keyboard::KeyCode;
 
 use umicraft_builtin_mods::{CombatInfo, KeyState, MAX_EFFECTS};
 use umicraft_core::lang::Lang;
+use umicraft_modhost::ModHost;
 use umicraft_render::ModWidgetView;
 use umicraft_ui::menus::{ModsOutcome, ModsView};
 use umicraft_ui::FontAtlas;
 
 use super::App;
 use crate::game::GameEvent;
-use crate::mods::hud::mod_widget_views;
+use crate::mods::external::ExternalMods;
+use crate::mods::external_menu;
+use crate::mods::hud::{item_of, mod_widget_view, mod_widget_views};
 use crate::mods::hud_editor;
 use crate::mods::icons::ModIcons;
 use crate::mods::menu;
@@ -39,20 +42,28 @@ pub(super) fn background_blur(screen: Screen, menu: &MenuFlow) -> f32 {
     }
 }
 
-/// The mod widgets the HUD draws. The mods menu draws them itself, where the
-/// player drags them, so the HUD leaves them out while it is open.
+/// The mod widgets the HUD draws: the built-in ones, then those the external mods
+/// drew this frame (see [`App::update_mods`]), converted the same way. The mods menu
+/// draws them itself, where the player drags them, so the HUD leaves them out while
+/// it is open.
 pub(super) fn hud_widgets(
     screen: Screen,
-    mods: &ModsRuntime,
+    (mods, external): (&ModsRuntime, Option<&ModHost>),
     font: &FontAtlas,
     display: (u32, u32),
     icons: &ModIcons<'_>,
 ) -> Vec<ModWidgetView> {
     if screen == Screen::Mods {
-        Vec::new()
-    } else {
-        mod_widget_views(mods.hud_widgets(), font, display, icons)
+        return Vec::new();
     }
+    let mut views = mod_widget_views(mods.hud_widgets().map(item_of), font, display, icons);
+    if let Some(host) = external {
+        host.visit_widgets(|drawn| {
+            let item = (drawn.placement, drawn.content);
+            views.extend(mod_widget_view(item, font, display, icons));
+        });
+    }
+    views
 }
 
 /// What the mods menu lists and the HUD widgets it lets the player move: built
@@ -60,17 +71,22 @@ pub(super) fn hud_widgets(
 /// reads it.
 pub(super) fn view_for(
     screen: Screen,
-    (mods, lang): (&ModsRuntime, &Lang),
+    (mods, external, lang): (&ModsRuntime, Option<&ModHost>, &Lang),
     (font, display): (&FontAtlas, (u32, u32)),
     icons: &ModIcons<'_>,
 ) -> ModsView {
     if screen == Screen::Mods {
         let mut hud = hud_editor::build(mods.registry(), lang, font, display, icons);
         hud.history = mods.history_state();
-        ModsView {
+        let mut view = ModsView {
             hud,
             ..menu::build(mods.registry(), lang)
+        };
+        if let Some(host) = external {
+            external_menu::extend(&mut view, host, lang);
+            hud_editor::external::extend(&mut view.hud, host, font, display, icons);
         }
+        view
     } else {
         ModsView::default()
     }
@@ -109,8 +125,17 @@ impl App {
         applies
     }
 
-    /// Feeds the built-in mods once per frame with what the window knows.
+    /// Feeds the mods once per frame with what the window knows: the built-in ones
+    /// get their context, the external ones draw their widgets (so they are drawn
+    /// once per frame whether the HUD or the HUD editor shows them), and the chat
+    /// lines the external mods printed go to the game.
     pub(super) fn update_mods(&mut self, now: Instant) {
+        if self.session.is_some() {
+            if let Some(host) = self.external_mods.as_ref().and_then(ExternalMods::host) {
+                host.draw_widgets();
+            }
+        }
+        self.forward_mod_chat();
         let eye = self.camera.eye();
         let (hud, slots) = match self.world.as_ref() {
             Some(world) => (Some(world.hud()), Some(&world.window_view().player_slots)),
@@ -168,6 +193,16 @@ impl App {
     /// went through, never for the frames of a drag. A change the registry
     /// refuses (a mod or setting that does not exist) is logged and dropped.
     pub(super) fn apply_mods_change(&mut self, change: &ModsOutcome) {
+        let route = external_menu::route(change);
+        if let Some(request) = route.external {
+            self.apply_external_change(request);
+        }
+        if route.builtin {
+            self.apply_builtin_change(change);
+        }
+    }
+
+    fn apply_builtin_change(&mut self, change: &ModsOutcome) {
         match self.mods.apply_change(change) {
             Ok(true) => {
                 self.options.mods = self.mods.config();
@@ -175,6 +210,21 @@ impl App {
                 self.send_legacy_animations();
             }
             Ok(false) => {}
+            Err(error) => tracing::warn!(%error, "ignored a change of the mods menu"),
+        }
+    }
+
+    /// Carries out a change of the menu for an external mod and saves that mod's
+    /// choices. A refused change (a failed mod's switch, an unknown key) is logged.
+    fn apply_external_change(&mut self, request: external_menu::Request<'_>) {
+        let Some(mods) = &self.external_mods else {
+            return;
+        };
+        let Some(host) = mods.host() else {
+            return;
+        };
+        match external_menu::apply(host, request) {
+            Ok(changed) => changed.iter().for_each(|id| mods.save_config(id)),
             Err(error) => tracing::warn!(%error, "ignored a change of the mods menu"),
         }
     }
@@ -233,10 +283,21 @@ mod tests {
             ..FrameInput::default()
         });
         let font = FontAtlas::fallback();
-        let on_hud = hud_widgets(Screen::None, &mods, &font, (800, 600), &ModIcons::default());
-        assert!(!on_hud.is_empty(), "the HUD draws it in the game");
-        assert!(
-            hud_widgets(Screen::Mods, &mods, &font, (800, 600), &ModIcons::default()).is_empty()
+        let on_hud = hud_widgets(
+            Screen::None,
+            (&mods, None),
+            &font,
+            (800, 600),
+            &ModIcons::default(),
         );
+        assert!(!on_hud.is_empty(), "the HUD draws it in the game");
+        assert!(hud_widgets(
+            Screen::Mods,
+            (&mods, None),
+            &font,
+            (800, 600),
+            &ModIcons::default()
+        )
+        .is_empty());
     }
 }

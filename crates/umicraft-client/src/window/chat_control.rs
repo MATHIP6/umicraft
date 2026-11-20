@@ -24,6 +24,28 @@ pub(super) const CHAT_WHEEL_ROWS: isize = 7;
 /// The furthest the chat can be scrolled: more than the 100 messages kept.
 pub(super) const CHAT_SCROLL_MAX: isize = 2_000;
 
+/// The partial command name when `text` is `/` followed by letters only: the one
+/// shape of line whose completions can include a command of a mod (arguments are
+/// the server's business).
+fn command_prefix(text: &str) -> Option<&str> {
+    let partial = text.strip_prefix('/')?;
+    (!partial.contains(char::is_whitespace)).then_some(partial)
+}
+
+/// The server's completions plus the names of the mods' commands (`local`, without
+/// the slash), sorted and without duplicates so the Tab cycle is stable. The server's
+/// list is returned untouched when no mod has a matching command.
+fn merge_completions(server: Vec<String>, local: Vec<String>) -> Vec<String> {
+    if local.is_empty() {
+        return server;
+    }
+    let mut merged = server;
+    merged.extend(local.into_iter().map(|name| format!("/{name}")));
+    merged.sort_by_key(|name| name.to_lowercase());
+    merged.dedup();
+    merged
+}
+
 /// Puts `text` on the clipboard, leaving it untouched when `text` is empty
 /// (copying an empty selection must not wipe what the user had copied).
 fn copy_to_clipboard(text: &str) {
@@ -156,6 +178,17 @@ impl App {
     pub(super) fn scroll_chat(&mut self, rows: isize) {
         self.chat.scroll = (self.chat.scroll as isize + rows).clamp(0, CHAT_SCROLL_MAX) as usize;
     }
+    /// Adds the commands of the mods to the server's answer when the typed line is a
+    /// command name being completed.
+    fn with_mod_commands(&self, server: Vec<String>) -> Vec<String> {
+        let text = self.chat.input.text();
+        let local = match (command_prefix(&text), &self.external_mods) {
+            (Some(partial), Some(mods)) => mods.complete_commands(partial),
+            _ => Vec::new(),
+        };
+        merge_completions(server, local)
+    }
+
     /// Hands a new tab-completion answer to the chat input.
     pub(super) fn process_completions(&mut self) {
         let Some(world) = self.world.as_ref() else {
@@ -165,12 +198,41 @@ impl App {
         if serial == self.chat.seen_completions {
             return;
         }
-        let matches = world.hud().completions.clone();
+        let matches = self.with_mod_commands(world.hud().completions.clone());
         self.chat.seen_completions = serial;
         if self.screen == Screen::Chat {
             if let Some(listing) = self.chat.input.on_completions(&matches) {
                 self.send_event(GameEvent::LocalChat(listing));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn only_a_bare_command_name_is_completed_with_the_mods() {
+        assert_eq!(command_prefix("/he"), Some("he"));
+        assert_eq!(command_prefix("/"), Some(""));
+        assert_eq!(command_prefix("/give Ste"), None);
+        assert_eq!(command_prefix("hello"), None);
+    }
+
+    #[test]
+    fn local_names_are_merged_sorted_and_deduplicated() {
+        let merged = merge_completions(names(&["/help", "/hat"]), names(&["hello", "help"]));
+        assert_eq!(merged, names(&["/hat", "/hello", "/help"]));
+    }
+
+    #[test]
+    fn the_servers_answer_is_kept_as_is_without_local_commands() {
+        let server = names(&["/tp", "/give"]);
+        assert_eq!(merge_completions(server.clone(), Vec::new()), server);
     }
 }

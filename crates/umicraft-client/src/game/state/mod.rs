@@ -21,6 +21,7 @@ use umicraft_game::shapes::selection_shape;
 use umicraft_game::traffic::ServerView;
 use umicraft_game::view::Perspective;
 use umicraft_game::GameState;
+use umicraft_modhost::CommandTable;
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::{HudState, OutlineBox};
 use umicraft_world::{BlockPos, ChunkPos, World};
@@ -174,6 +175,8 @@ pub(super) struct Game {
     pub(super) metrics: TickMetrics,
     /// The mod events of this thread (ADR-0086); empty without external mods.
     pub(super) bus: EventBus,
+    /// The client commands of the mods (`/name`), run before a line is sent.
+    pub(super) commands: Option<CommandTable>,
 }
 
 impl Game {
@@ -231,6 +234,7 @@ impl Game {
             server: ServerState::new(),
             metrics: TickMetrics::default(),
             bus: EventBus::default(),
+            commands: None,
         }
     }
 

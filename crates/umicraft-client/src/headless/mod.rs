@@ -90,7 +90,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
             decline_server_packs: true,
             account_skin: false,
         },
-        umicraft_core::events::EventBus::default(),
+        crate::game::GameMods::default(),
     )?;
 
     let mut script = Script::new(phases(&args.script));

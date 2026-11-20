@@ -147,7 +147,7 @@ impl App {
         self.stop_session("");
         let pack_mode = self.menu.pack_mode_for(address);
         let config = network_config(&self.args, &self.options, address, pack_mode, identity);
-        match Session::start(config, self.game_bus()) {
+        match Session::start(config, self.game_mods()) {
             Ok(session) => {
                 self.emit_connected(&address.to_string());
                 self.server_pack.set_mode(pack_mode);

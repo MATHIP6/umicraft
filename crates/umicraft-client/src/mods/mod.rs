@@ -5,6 +5,8 @@
 //! (ADR-0086).
 
 pub(crate) mod external;
+pub(crate) mod external_config;
+pub(crate) mod external_menu;
 pub(crate) mod facts;
 pub(crate) mod hud;
 pub(crate) mod hud_editor;

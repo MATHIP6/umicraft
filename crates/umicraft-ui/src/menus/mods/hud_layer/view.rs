@@ -42,9 +42,13 @@ pub struct HudEditorView {
 /// One mod that has a HUD widget, as the list of the HUD editor shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HudEntryView {
-    /// The id of the mod.
+    /// The id of the widget, which the outcomes of the editor name.
     pub id: String,
-    /// The translated name of the mod.
+    /// The id of the card of the mod that owns the widget, whose settings the
+    /// editor and the gear of the widget open. It is the widget's own id when the
+    /// mod has one widget named after it; a mod with several widgets shares one card.
+    pub card: String,
+    /// The translated name of the widget.
     pub name: String,
     /// Whether the mod is on, so its widget is drawn.
     pub enabled: bool,

@@ -24,7 +24,9 @@ use crate::resources::terrain::TerrainTextures;
 use crate::resources::texture_animator::TextureAnimator;
 use crate::scene::entity::EntityTextures;
 use crate::scene::map::MapTextures;
-use crate::screens::options::{Catalog, Outcome as OptionsOutcome, Page};
+use crate::screens::options::{
+    Catalog, ModKey, ModKeyChange, ModKeyGroup, Outcome as OptionsOutcome, Page,
+};
 use crate::screens::Screen;
 
 impl App {
@@ -35,7 +37,7 @@ impl App {
             return;
         };
         let pressed = event.state == ElementState::Pressed && !event.repeat;
-        if self.options_menu.screen.capturing().is_some() {
+        if self.options_menu.screen.is_capturing() {
             if pressed {
                 if code == KeyCode::Escape {
                     self.options_menu.screen.cancel_capture();
@@ -54,6 +56,36 @@ impl App {
         self.ui_input.key(code, event.state, event.text.as_deref());
     }
 
+    /// Gives the controls page the key bindings of the enabled external mods. Built
+    /// only while that page is shown, because it runs every frame.
+    pub(super) fn sync_mod_keys(&mut self) {
+        let groups = match &self.external_mods {
+            Some(mods) if self.options_menu.screen.page() == Page::Controls => {
+                mods.host().map_or_else(Vec::new, mod_key_groups)
+            }
+            _ => Vec::new(),
+        };
+        self.options_menu.screen.set_mod_keys(groups);
+    }
+
+    /// Writes what the player rebound on the controls page to the mods and saves
+    /// each mod's choices. A binding the host refuses is logged.
+    fn apply_mod_key_changes(&mut self) {
+        let changes = self.options_menu.screen.take_mod_key_changes();
+        let Some(mods) = &self.external_mods else {
+            return;
+        };
+        let Some(host) = mods.host() else {
+            return;
+        };
+        for change in changes {
+            match set_mod_key(host, &change) {
+                Ok(id) => mods.save_config(&id),
+                Err(error) => tracing::warn!(%error, "ignored a key binding change"),
+            }
+        }
+    }
+
     /// Binds a mouse button pressed while the controls page waits for a key
     /// (`GuiControls.mouseClicked`). Returns whether the click was taken.
     pub(super) fn capture_mouse_binding(
@@ -64,7 +96,7 @@ impl App {
     ) -> bool {
         if screen != Screen::Options
             || state != ElementState::Pressed
-            || self.options_menu.screen.capturing().is_none()
+            || !self.options_menu.screen.is_capturing()
         {
             return false;
         }
@@ -139,6 +171,7 @@ impl App {
 
     /// Applies what the options screen reported in its last frame.
     pub(super) fn apply_options_outcome(&mut self, outcome: OptionsOutcome) {
+        self.apply_mod_key_changes();
         if outcome.language_changed {
             self.reload_language();
         }
@@ -218,4 +251,45 @@ impl App {
         }
         tracing::info!("resource packs reloaded");
     }
+}
+
+/// The bindings of the enabled mods, one group per mod, named after it. A mod that
+/// is off or failed has no row: its keys do nothing, so they would only mislead.
+fn mod_key_groups(host: &umicraft_modhost::ModHost) -> Vec<ModKeyGroup> {
+    host.mods()
+        .filter(|view| view.enabled && !view.failed)
+        .map(|view| ModKeyGroup {
+            name: view.name.to_owned(),
+            keys: view
+                .keys()
+                .map(|key| ModKey {
+                    mod_id: key.mod_id.to_string(),
+                    key: key.key.to_owned(),
+                    label: key.label.to_owned(),
+                    default: key.default_binding.to_owned(),
+                    current: key.current,
+                })
+                .collect(),
+        })
+        .filter(|group| !group.keys.is_empty())
+        .collect()
+}
+
+/// Why a rebinding could not be applied.
+#[derive(Debug, thiserror::Error)]
+enum KeyChangeError {
+    #[error(transparent)]
+    Id(#[from] umicraft_modhost::IdError),
+    #[error(transparent)]
+    Configure(#[from] umicraft_modhost::ConfigureError),
+}
+
+/// Applies one rebinding to its mod and returns the mod, so its file is saved.
+fn set_mod_key(
+    host: &umicraft_modhost::ModHost,
+    change: &ModKeyChange,
+) -> Result<umicraft_modhost::ModId, KeyChangeError> {
+    let id: umicraft_modhost::ModId = change.mod_id.parse()?;
+    host.set_key(&id, &change.key, &change.binding)?;
+    Ok(id)
 }

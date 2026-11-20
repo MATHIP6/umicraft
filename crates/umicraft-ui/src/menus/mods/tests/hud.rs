@@ -125,16 +125,14 @@ fn the_panel_says_how_to_move_widgets_only_when_there_is_one() {
     assert!(!has_text(&none, "umicraft.mods.editor.hint"), "{none:?}");
 }
 
-#[test]
-fn the_gear_of_a_widget_opens_the_settings_of_its_mod() {
-    // The widget stands left of the panel; its mod is the first card.
-    let position = [2.0, 40.0];
-    let view = view_with(vec![widget("fps", position)]);
+/// Clicks the gear of the widget at `position` (left of the panel) and returns the
+/// page the menu is on afterwards.
+fn page_after_gear_click(view: &ModsView, position: [f32; 2]) -> Page {
     let mut screen = on_list();
     // The pointer over the widget makes the gear appear.
     show_view(
         &mut screen,
-        &view,
+        view,
         UiInput::new(vec![moved(inside(position))]),
     );
     let font = FontAtlas::fallback();
@@ -153,9 +151,37 @@ fn the_gear_of_a_widget_opens_the_settings_of_its_mod() {
     ];
     let outcome = show_view(
         &mut screen,
-        &view,
+        view,
         UiInput::new(vec![moved(at), pressed(at), released(at)]),
     );
     assert_eq!(outcome, None, "the menu keeps this one for itself");
-    assert_eq!(screen.page, Page::Settings("fps".into()));
+    screen.page
+}
+
+#[test]
+fn the_gear_of_a_widget_opens_the_settings_of_its_mod() {
+    let position = [2.0, 40.0];
+    let view = view_with(vec![widget("fps", position)]);
+    assert_eq!(
+        page_after_gear_click(&view, position),
+        Page::Settings("fps".into())
+    );
+}
+
+#[test]
+fn the_gear_opens_the_card_an_entry_names_when_it_is_not_the_widgets_own() {
+    // A mod with several widgets: the widget ids differ from the card id.
+    let position = [2.0, 40.0];
+    let mut view = view_with(vec![widget("ext:hello:main", position)]);
+    view.hud.entries.push(HudEntryView {
+        id: "ext:hello:main".into(),
+        card: "ext:hello".into(),
+        name: "Main".into(),
+        enabled: true,
+        locked: false,
+    });
+    assert_eq!(
+        page_after_gear_click(&view, position),
+        Page::Settings("ext:hello".into())
+    );
 }

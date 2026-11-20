@@ -28,6 +28,7 @@ fn widget(id: &str, position: [f32; 2]) -> HudWidgetView {
 fn entry(id: &str, enabled: bool, locked: bool) -> HudEntryView {
     HudEntryView {
         id: id.into(),
+        card: id.into(),
         name: id.to_uppercase(),
         enabled,
         locked,

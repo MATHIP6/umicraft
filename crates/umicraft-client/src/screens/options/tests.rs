@@ -227,7 +227,7 @@ fn the_key_list_follows_the_translated_order() {
         .into_iter()
         .filter_map(|entry| match entry {
             controls_page::KeyEntry::Category(key) => Some(key),
-            controls_page::KeyEntry::Key(_) => None,
+            _ => None,
         })
         .collect();
     assert_eq!(

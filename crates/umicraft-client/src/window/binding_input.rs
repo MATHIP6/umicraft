@@ -56,7 +56,8 @@ impl App {
         self.presses.hotbar_keys = [0; 9];
     }
 
-    /// Runs the actions bound to a key or button that was just pressed.
+    /// Runs the actions bound to a key or button that was just pressed, then
+    /// tells the mods whose key binding it is.
     pub(super) fn press_binding(&mut self, binding: Binding) {
         let actions: Vec<Action> = self.options.keys.actions_for(binding).collect();
         for action in actions {
@@ -65,6 +66,11 @@ impl App {
                 break;
             }
             self.run_action(action);
+        }
+        // The keys of the mods fire too, unless an action opened a screen first:
+        // a mod binding on the chat key must not act behind the open chat.
+        if self.screen() == crate::screens::Screen::None {
+            self.emit_key_pressed(binding);
         }
     }
 

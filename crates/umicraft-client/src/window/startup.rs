@@ -187,8 +187,13 @@ impl App {
         crate::screens::tooltip::set_advanced(options.controls.advanced_tooltips);
         let last_server = options.multiplayer.last_server.clone();
         let ui_viewport = Rect::new(0.0, 0.0, args.width as f32, args.height as f32);
-        let external_mods =
-            umicraft_assets::cache::data_dir().map(|dir| ExternalMods::start(&dir, args.safe_mode));
+        // The mods' choices live next to `options.toml`, not in it, so a mod can be
+        // removed without leaving anything in the options.
+        let config_dir = options_path
+            .as_deref()
+            .and_then(crate::mods::external_config::config_dir);
+        let external_mods = umicraft_assets::cache::data_dir()
+            .map(|dir| ExternalMods::start(&dir, config_dir, args.safe_mode));
         let render_bus = external_mods
             .as_ref()
             .map(|mods| mods.bus(EventThread::Render))

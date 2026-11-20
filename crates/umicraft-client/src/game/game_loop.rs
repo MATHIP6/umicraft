@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use umicraft_assets::profile_textures::AccountSkinFetcher;
-use umicraft_core::events::EventBus;
 use umicraft_game::chat::commands;
 
 use super::actions::handle_input;
@@ -20,7 +19,7 @@ use super::container_events::apply_container_action;
 use super::creative_events::apply_creative_event;
 use super::inventory_events::{apply_inventory_action, report_inventory_opened};
 use super::messages::{GameEvent, RenderEvent};
-use super::mod_events::{outgoing_chat, run_tick};
+use super::mod_events::{run_tick, typed_chat, GameMods};
 use super::net::handle_net;
 use super::publish::{publish_inventory, publish_look, publish_status};
 use super::session::GameChannels;
@@ -36,7 +35,7 @@ pub(super) fn run(
     stop: Arc<AtomicBool>,
     own_name: String,
     account_skin: Option<AccountSkinFetcher>,
-    bus: EventBus,
+    mods: GameMods,
 ) {
     let GameChannels {
         inputs,
@@ -54,7 +53,8 @@ pub(super) fn run(
     game.own_name = own_name;
     game.e1 = crate::demos::e1::take();
     game.account_skin = account_skin;
-    game.bus = bus;
+    game.bus = mods.bus;
+    game.commands = mods.commands;
     // The first event of the queue, which is still empty: the render thread
     // reads the mouse look from this slot, never from the queue.
     let _ = frames.try_send(RenderEvent::LookSlot(Arc::clone(&game.look)));
@@ -253,7 +253,7 @@ pub(super) fn handle_event(
             false
         }
         GameEvent::Chat(message) => {
-            if let Some(message) = outgoing_chat(&mut game.bus, message) {
+            if let Some(message) = typed_chat(game, message) {
                 queue.push(ClientCommand::Chat { message });
             }
             false

@@ -33,6 +33,7 @@ mod controls_page;
 mod language_page;
 mod layout;
 mod main_page;
+mod mod_keys;
 mod packs_page;
 mod skin_page;
 mod snooper_page;
@@ -44,6 +45,7 @@ mod video_page;
 
 pub use catalog::Catalog;
 use layout::Gui;
+pub use mod_keys::{ModKey, ModKeyChange, ModKeyGroup};
 
 /// One page of the options screens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +95,12 @@ pub struct Outcome {
 pub struct OptionsScreen {
     page: Page,
     capturing: Option<Action>,
+    /// The binding of a mod waiting for its key; never set together with `capturing`.
+    mod_capture: Option<mod_keys::ModCapture>,
+    /// The bindings of the enabled mods, listed on the controls page.
+    mod_keys: Vec<ModKeyGroup>,
+    /// What the player rebound among them, until the window takes it.
+    mod_key_changes: Vec<ModKeyChange>,
     /// The pack waiting for the answer of the "made for another version"
     /// dialog, and the dialog.
     pack_confirm: Option<(String, umicraft_ui::menus::ConfirmScreen)>,
@@ -134,6 +142,9 @@ impl OptionsScreen {
         Self {
             page: Page::Main,
             capturing: None,
+            mod_capture: None,
+            mod_keys: Vec::new(),
+            mod_key_changes: Vec::new(),
             pack_confirm: None,
             scroll: 0.0,
             scroll_bar: Default::default(),
@@ -194,12 +205,13 @@ impl OptionsScreen {
     /// Gives up a rebinding without changing the key.
     pub fn cancel_capture(&mut self) {
         self.capturing = None;
+        self.mod_capture = None;
     }
 
     /// Goes back to the hub page, as when the screen is opened again.
     pub fn reset(&mut self) {
         self.page = Page::Main;
-        self.capturing = None;
+        self.cancel_capture();
         self.scroll = 0.0;
     }
 
@@ -216,7 +228,7 @@ impl OptionsScreen {
     /// binding changed.
     pub fn capture(&mut self, options: &mut Options, binding: Binding) -> bool {
         let Some(action) = self.capturing else {
-            return false;
+            return self.capture_mod(binding);
         };
         if options.keys.set(action, binding) {
             self.capturing = None;
@@ -300,7 +312,7 @@ impl OptionsScreen {
     fn back(&mut self, ui: &mut Ui, atlas: &FontAtlas, rect: Rect, lang: &Lang) {
         if self.button(ui, atlas, "done", rect, lang.tr("gui.done"), true, None) {
             self.page = Page::Main;
-            self.capturing = None;
+            self.cancel_capture();
             self.scroll = 0.0;
         }
     }

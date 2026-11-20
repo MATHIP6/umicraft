@@ -9,12 +9,15 @@
 
 use std::path::{Path, PathBuf};
 
+use crossbeam_channel::Receiver;
 use umicraft_core::events::EventBus;
 use umicraft_modapi_sys::UMI_API_VERSION;
 use umicraft_modhost::{
-    discover, resolve, ApiVersion, Candidate, CrashSentinel, Discovered, EventThread, ModHost,
-    SentinelGuard, TrustList,
+    discover, resolve, ApiVersion, Candidate, CommandTable, CrashSentinel, Discovered, EventThread,
+    ModHost, ModId, SentinelGuard, TrustList,
 };
+
+use super::external_config;
 
 /// Folder of the installed mods, inside the data directory.
 const MODS_FOLDER: &str = "mods";
@@ -63,15 +66,25 @@ fn safe_mode_reason(flag: bool, crashed: bool) -> Option<SafeModeReason> {
 pub(crate) struct ExternalMods {
     host: Option<ModHost>,
     sentinel: Option<SentinelGuard>,
+    /// Where each mod's choices are saved; `None` when the options folder is unknown.
+    config_dir: Option<PathBuf>,
+    /// The local chat lines the mods print, read each frame by the window.
+    outbox: Option<Receiver<String>>,
 }
 
 impl ExternalMods {
     /// Arms the sentinel and, outside safe mode, loads every installed mod.
     ///
-    /// `data_dir` is the Umicraft data directory. Per-mod enable switches and the
-    /// trust confirmation dialog arrive with F3.8, so for now every discovered mod is
-    /// enabled and an untrusted library is refused with instructions in the log.
-    pub(crate) fn start(data_dir: &Path, safe_mode_flag: bool) -> Self {
+    /// `data_dir` is the Umicraft data directory and `config_dir` the folder of the
+    /// per-mod choice files (see [`external_config`]); the saved choices, switch
+    /// included, are applied right after loading, so a mod the player switched off
+    /// still loads and can be switched back on. The trust confirmation dialog arrives
+    /// with F3.8: an untrusted library is refused with instructions in the log.
+    pub(crate) fn start(
+        data_dir: &Path,
+        config_dir: Option<PathBuf>,
+        safe_mode_flag: bool,
+    ) -> Self {
         let sentinel_file = sentinel_path(data_dir);
         let reason = safe_mode_reason(safe_mode_flag, CrashSentinel::armed(&sentinel_file));
         // Armed in every case, so a crash in this run is detected at the next start.
@@ -83,7 +96,16 @@ impl ExternalMods {
             }
             None => Some(load_mods(data_dir)),
         };
-        Self { host, sentinel }
+        if let (Some(host), Some(dir)) = (&host, &config_dir) {
+            external_config::load_all(host, dir);
+        }
+        let outbox = host.as_ref().map(ModHost::chat_outbox);
+        Self {
+            host,
+            sentinel,
+            config_dir,
+            outbox,
+        }
     }
 
     /// A bus with the subscriptions of the mods that live on `thread`.
@@ -115,9 +137,32 @@ impl ExternalMods {
     }
 
     /// The loaded host, `None` in safe mode.
-    #[cfg(test)]
-    fn host(&self) -> Option<&ModHost> {
+    pub(crate) fn host(&self) -> Option<&ModHost> {
         self.host.as_ref()
+    }
+
+    /// The command table for the game thread of a session, `None` in safe mode.
+    pub(crate) fn commands(&self) -> Option<CommandTable> {
+        self.host.as_ref().map(ModHost::commands)
+    }
+
+    /// Takes the local chat lines the mods printed since the last call.
+    pub(crate) fn drain_chat(&self) -> impl Iterator<Item = String> + '_ {
+        self.outbox.iter().flat_map(Receiver::try_iter)
+    }
+
+    /// The names of the mods' commands that start with `partial`, for tab completion.
+    pub(crate) fn complete_commands(&self, partial: &str) -> Vec<String> {
+        self.host
+            .as_ref()
+            .map_or_else(Vec::new, |host| host.commands().complete(partial))
+    }
+
+    /// Saves the choices of mod `id`; a failure is logged.
+    pub(crate) fn save_config(&self, id: &ModId) {
+        if let (Some(host), Some(dir)) = (&self.host, &self.config_dir) {
+            external_config::save(host, dir, id);
+        }
     }
 }
 
@@ -146,7 +191,11 @@ fn log_safe_mode(reason: SafeModeReason) {
 /// Discovers, resolves and loads the mods under `<data_dir>/mods`.
 fn load_mods(data_dir: &Path) -> ModHost {
     let mods_dir = mods_dir(data_dir);
-    let candidates = discover(&mods_dir).into_iter().filter_map(log_discovery);
+    let builtin = builtin_ids();
+    let candidates = discover(&mods_dir)
+        .into_iter()
+        .filter_map(log_discovery)
+        .filter(|candidate| !clashes_with_builtin(candidate, &builtin));
     let host_api = ApiVersion {
         major: UMI_API_VERSION.major,
         minor: UMI_API_VERSION.minor,
@@ -180,6 +229,29 @@ fn load_mods(data_dir: &Path) -> ModHost {
     }
     tracing::info!(count = host.enabled().count(), "external mods loaded");
     host
+}
+
+/// The ids of the built-in mods, which an external mod may not take: both would
+/// claim the same `[mods.<id>]` table and the same menu entry.
+fn builtin_ids() -> Vec<&'static str> {
+    umicraft_builtin_mods::mods::all()
+        .iter()
+        .map(|builtin| builtin.meta().id.as_str())
+        .collect()
+}
+
+/// Whether `candidate` has the id of a built-in mod; it is then refused, with a
+/// warning that names both sides of the clash.
+fn clashes_with_builtin(candidate: &Candidate, builtin: &[&str]) -> bool {
+    let id = candidate.manifest.id.as_str();
+    let clash = builtin.contains(&id);
+    if clash {
+        tracing::warn!(
+            mod_id = id,
+            "external mod not loaded: its id is the one of a built-in mod, rename it in mod.toml"
+        );
+    }
+    clash
 }
 
 /// Turns a discovery result into a candidate, logging a manifest that cannot be used.
@@ -229,7 +301,7 @@ mod tests {
     #[test]
     fn a_clean_run_arms_the_sentinel_and_shutdown_removes_it() {
         let dir = scratch("clean");
-        let mods = ExternalMods::start(&dir, false);
+        let mods = ExternalMods::start(&dir, None, false);
         assert!(mods.host().is_some());
         assert!(CrashSentinel::armed(&sentinel_path(&dir)));
         mods.shutdown();
@@ -240,7 +312,7 @@ mod tests {
     fn a_leftover_sentinel_means_safe_mode_and_stays_armed() {
         let dir = scratch("crashed");
         std::fs::write(sentinel_path(&dir), "1").expect("leftover sentinel");
-        let mods = ExternalMods::start(&dir, false);
+        let mods = ExternalMods::start(&dir, None, false);
         assert!(mods.host().is_none());
         assert!(CrashSentinel::armed(&sentinel_path(&dir)));
         drop(mods);
@@ -253,7 +325,7 @@ mod tests {
     #[test]
     fn a_run_without_mods_builds_empty_buses() {
         let dir = scratch("buses");
-        let mods = ExternalMods::start(&dir, true);
+        let mods = ExternalMods::start(&dir, None, true);
         for thread in [EventThread::Game, EventThread::Render] {
             let bus = mods.bus(thread);
             assert!(!bus.has_subscribers::<umicraft_modhost::PreTick>());
@@ -261,10 +333,37 @@ mod tests {
         mods.shutdown();
     }
 
+    fn candidate(id: &str) -> Candidate {
+        let text = format!(
+            "[mod]\nid = \"{id}\"\nname = \"X\"\nversion = \"1.0.0\"\nauthors = []\napi_version = \"0.3\"\n"
+        );
+        Candidate {
+            manifest: umicraft_modhost::Manifest::parse(&text).expect("a valid manifest"),
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn a_mod_with_a_builtin_id_is_refused_and_others_are_kept() {
+        let builtin = builtin_ids();
+        assert!(builtin.contains(&"fps"), "the list comes from the registry");
+        assert!(clashes_with_builtin(&candidate("fps"), &builtin));
+        assert!(!clashes_with_builtin(&candidate("hello_hud"), &builtin));
+    }
+
+    #[test]
+    fn a_run_without_mods_has_no_commands_and_no_chat() {
+        let dir = scratch("commands");
+        let mods = ExternalMods::start(&dir, None, true);
+        assert!(mods.commands().is_none());
+        assert_eq!(mods.drain_chat().count(), 0);
+        mods.shutdown();
+    }
+
     #[test]
     fn the_flag_forces_safe_mode() {
         let dir = scratch("flag");
-        let mods = ExternalMods::start(&dir, true);
+        let mods = ExternalMods::start(&dir, None, true);
         assert!(mods.host().is_none());
         mods.shutdown();
         assert!(!CrashSentinel::armed(&sentinel_path(&dir)));

@@ -8,11 +8,26 @@
 //! A child of [`super`] so it reaches the window state without widening its
 //! visibility.
 
-use umicraft_core::events::EventBus;
-use umicraft_modhost::{Connected, Disconnected, EventThread, ScreenClosed, ScreenOpened};
+use umicraft_modhost::{
+    Connected, Disconnected, EventThread, KeyBinding, KeyPressed, ScreenClosed, ScreenOpened,
+};
 
 use super::App;
+use crate::game::{GameEvent, GameMods};
+use crate::mods::external::ExternalMods;
+use crate::options::Binding;
 use crate::screens::Screen;
+
+/// The bindings among `bindings` that `pressed` triggers, in load order.
+///
+/// A switched-off mod is listed too (its bindings stay on the controls page); the
+/// host drops an event aimed at it, so it receives nothing.
+fn triggered<'a>(
+    bindings: impl Iterator<Item = KeyBinding<'a>>,
+    pressed: Binding,
+) -> impl Iterator<Item = KeyBinding<'a>> {
+    bindings.filter(move |binding| Binding::from_name(&binding.current) == Some(pressed))
+}
 
 /// The names of the screen events a change from `old` to `new` fires: the old
 /// screen closes, then the new one opens. [`Screen::None`] is "no screen" and
@@ -29,13 +44,47 @@ pub(super) fn screen_events(
 }
 
 impl App {
-    /// The bus of the game thread of a new session, with the mods' game-thread
-    /// subscriptions. It moves into that thread through `Session::start`.
-    pub(super) fn game_bus(&self) -> EventBus {
-        self.external_mods
-            .as_ref()
-            .map(|mods| mods.bus(EventThread::Game))
-            .unwrap_or_default()
+    /// The bus and the client commands of the game thread of a new session. They
+    /// move into that thread through `Session::start`.
+    pub(super) fn game_mods(&self) -> GameMods {
+        GameMods {
+            bus: self
+                .external_mods
+                .as_ref()
+                .map(|mods| mods.bus(EventThread::Game))
+                .unwrap_or_default(),
+            commands: self.external_mods.as_ref().and_then(ExternalMods::commands),
+        }
+    }
+
+    /// Hands the local chat lines the mods printed to the game thread, which shows
+    /// them in the chat. Called every frame so the outbox never fills up; without a
+    /// session there is no chat to show them in, so they are dropped.
+    pub(super) fn forward_mod_chat(&self) {
+        let Some(mods) = &self.external_mods else {
+            return;
+        };
+        for line in mods.drain_chat() {
+            self.send_event(GameEvent::LocalChat(line));
+        }
+    }
+
+    /// Tells the mods a key binding of theirs was pressed: every enabled mod whose
+    /// binding is `pressed`, if any. A key that is also bound to a built-in action
+    /// fires both, as two vanilla bindings on one key do.
+    pub(super) fn emit_key_pressed(&mut self, pressed: Binding) {
+        if !self.render_bus.has_subscribers::<KeyPressed>() {
+            return;
+        }
+        let Some(host) = self.external_mods.as_ref().and_then(ExternalMods::host) else {
+            return;
+        };
+        let events: Vec<KeyPressed> = triggered(host.key_bindings(), pressed)
+            .map(|binding| KeyPressed::new(binding.mod_id.clone(), binding.key))
+            .collect();
+        for mut event in events {
+            self.render_bus.dispatch(&mut event);
+        }
     }
 
     /// Tells the mods a session to `address` was started.
@@ -70,7 +119,40 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use umicraft_modhost::ModId;
+    use winit::keyboard::KeyCode;
+
     use super::*;
+
+    fn binding<'a>(mod_id: &'a ModId, key: &'a str, current: &str) -> KeyBinding<'a> {
+        KeyBinding {
+            mod_id,
+            key,
+            label: "",
+            default_binding: "",
+            current: current.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_press_triggers_every_binding_on_that_key_and_no_other() {
+        let (a, b): (ModId, ModId) = ("a".parse().expect("id"), "b".parse().expect("id"));
+        let all = vec![
+            binding(&a, "toggle", "KeyG"),
+            binding(&a, "other", "KeyH"),
+            binding(&b, "go", "KeyG"),
+            binding(&b, "mouse", "Mouse4"),
+            binding(&b, "unbound", ""),
+        ];
+        let keys = |pressed| -> Vec<&str> {
+            triggered(all.clone().into_iter(), pressed)
+                .map(|found| found.key)
+                .collect()
+        };
+        assert_eq!(keys(Binding::Key(KeyCode::KeyG)), ["toggle", "go"]);
+        assert_eq!(keys(Binding::Mouse(3)), ["mouse"]);
+        assert!(keys(Binding::Key(KeyCode::KeyZ)).is_empty());
+    }
 
     #[test]
     fn an_unchanged_screen_fires_nothing() {

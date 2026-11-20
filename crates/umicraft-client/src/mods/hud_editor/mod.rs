@@ -21,7 +21,9 @@ use umicraft_ui::menus::{
 };
 use umicraft_ui::{FontAtlas, Rect};
 
-use crate::mods::hud::mod_widget_views;
+use crate::mods::hud::{item_of, mod_widget_views};
+
+pub(crate) mod external;
 use crate::mods::icons::ModIcons;
 
 /// The colour of the label a widget shows while its mod has nothing to say yet.
@@ -52,6 +54,14 @@ fn preview(registry: &ModRegistry, id: &str) -> Option<HudContent> {
         .then(|| registry.preview(id, &test_effect_context()))
         .flatten()
         .filter(|content| !content.is_empty())
+}
+
+/// What an empty widget called `name` shows in the menu: its name, so it can still
+/// be grabbed.
+pub(crate) fn placeholder(name: &str) -> HudContent {
+    let mut content = HudContent::default();
+    content.line(PLACEHOLDER_COLOR).push_str(name);
+    content
 }
 
 /// The widgets of the enabled HUD mods on a window of `display` pixels.
@@ -86,13 +96,8 @@ pub fn build(
         .hud_widgets()
         .map(|widget| {
             widget.content.is_empty().then(|| {
-                preview(registry, widget.id.as_str()).unwrap_or_else(|| {
-                    let mut content = HudContent::default();
-                    content
-                        .line(PLACEHOLDER_COLOR)
-                        .push_str(&name_of(widget.id.as_str()));
-                    content
-                })
+                preview(registry, widget.id.as_str())
+                    .unwrap_or_else(|| placeholder(&name_of(widget.id.as_str())))
             })
         })
         .collect();
@@ -103,7 +108,7 @@ pub fn build(
             content: placeholder.as_ref().unwrap_or(widget.content),
             ..widget
         });
-    let views = mod_widget_views(widgets, font, display, icons);
+    let views = mod_widget_views(widgets.map(item_of), font, display, icons);
     let scale = gui_scale(display.0, display.1) as f32;
     HudEditorView {
         widgets: registry
@@ -123,6 +128,7 @@ pub fn build(
             .filter(|view| view.placement.is_some())
             .map(|view| HudEntryView {
                 id: view.meta.id.as_str().to_owned(),
+                card: view.meta.id.as_str().to_owned(),
                 name: name_of(view.meta.id.as_str()),
                 enabled: view.enabled,
                 locked: view.locked,
@@ -139,6 +145,12 @@ pub fn build(
 pub fn snap(rect: Rect, screen: [f32; 2]) -> Rect {
     let snapped = snap_rect(to_hud_rect(rect), (screen[0], screen[1]));
     Rect::new(snapped.x, snapped.y, snapped.w, snapped.h)
+}
+
+/// The placement of a widget dropped on `rect` at `scale` on a screen of
+/// `screen` GUI units.
+pub(crate) fn placement_of(rect: Rect, scale: f32, screen: [f32; 2]) -> HudPlacement {
+    HudPlacement::from_rect(to_hud_rect(rect), (screen[0], screen[1]), scale)
 }
 
 fn to_hud_rect(rect: Rect) -> HudRect {
@@ -173,9 +185,7 @@ pub fn apply(
             scale,
             screen,
         } => {
-            let placement =
-                HudPlacement::from_rect(to_hud_rect(*rect), (screen[0], screen[1]), *scale);
-            registry.set_placement(id, placement)?;
+            registry.set_placement(id, placement_of(*rect, *scale, *screen))?;
         }
         // The menu opens the settings page itself; there is nothing to apply.
         HudEditorOutcome::OpenSettings { .. } => return Ok(false),

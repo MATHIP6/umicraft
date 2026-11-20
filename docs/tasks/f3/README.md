@@ -12,7 +12,7 @@ Design: ADR-0086 (architecture), ADR-0087 (C ABI contract). Roadmap: F3 in
 | F3.1 | `umicraft-modapi-sys` (core ABI types, layout tests, header script); `umicraft-modhost` manifests and resolver (pure code) | unit and property tests of the resolver | done (header generation waits for cbindgen to be installed) |
 | F3.2 | Loader (`libloading`), `umi_mod_init`/`shutdown`, `log`, panic → disable, `--safe-mode`, crash sentinel, SHA-256 trust list; `umicraft-modapi` with `Mod` and `umicraft_mod!` | `hello` and `panicking` example cdylibs load in an integration test | done |
 | F3.3 | Per-thread `EventBus` in `umicraft-core`, wired in the client: lifecycle, chat, input, screens; observe channel and mod worker | criterion bench of the dispatch in `docs/perf-log.md`; no cost with no mod | done |
-| F3.4 | HUD widgets, schema settings, open key bindings, client commands; external mods in the mods menu | `hud` example | todo |
+| F3.4 | HUD widgets, schema settings, open key bindings, client commands; external mods in the mods menu | `hud` example | done |
 | F3.5 | Raw packet hooks on the network thread, validated injection, permission gating, server-compat mode, "alters packets/movement" badge | `packet-logger` example | todo |
 | F3.6 | Services (`player_physics` wrap/replace), conflict detection at load, read-only world and entity queries | `physics-tweak` example; trajectories unchanged with no mod (ADR-0076) | todo |
 | F3.7 | Post-process chain with naga-validated WGSL | `shader-pass` example | todo |
