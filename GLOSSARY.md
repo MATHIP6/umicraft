@@ -84,5 +84,11 @@ the event, within a time budget, and may cancel or modify it. ADR-0086.
 **Observe** — a mod handler that receives a copy of the event on the mod's
 worker thread; it cannot cancel and never delays the owning thread. ADR-0086.
 
+**Packet injection** — a serverbound packet a mod queues with `packet_send`; the
+client writes it only if its own decoder accepts the body. ADR-0086, F3.5.
+
+**Server-compatible mode** — a client switch that keeps off every external mod
+declaring the `network_packets` or `movement` permission. ADR-0086, F3.5.
+
 **Resolution** — the outcome of checking every candidate mod's manifest: the
 load order and, for each mod that will not load, the reason. ADR-0086.

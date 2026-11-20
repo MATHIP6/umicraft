@@ -1,6 +1,6 @@
 # Mod events
 
-Events a native mod can subscribe to (API 0.2, ADR-0086). Handlers run on the thread
+Events a native mod can subscribe to (API 0.4, ADR-0086). Handlers run on the thread
 shown below; an event nobody subscribes to costs nothing.
 
 | Event | Id | Thread | Payload | Cancellable | Mutable | Fires |
@@ -13,8 +13,11 @@ shown below; an event nobody subscribes to costs nothing.
 | `DISCONNECTED` | 6 | render | `reason: str` | no | no | When that session ends; `reason` is the kick or error text, empty when the player left. Always paired with one `CONNECTED` |
 | `SCREEN_OPENED` | 7 | render | `name: str` | no | no | After the screen changed to a new one |
 | `SCREEN_CLOSED` | 8 | render | `name: str` | no | no | When the screen changes away from one, before `SCREEN_OPENED` of the next |
+| `KEY_PRESSED` | 9 | render | `key: str` | no | no | When one of the mod's own key bindings is pressed with no screen open; only that mod receives it (see `ui.md`) |
+| `PACKET_RECEIVED` | 10 | network | `id: u32`, `data: bytes` | yes: the client never sees it (not `Set Compression` 0x46 nor `Disconnect` 0x40) | no | For every play packet read from the server, before the client decodes it. Needs `network_packets` (see `packets.md`) |
+| `PACKET_SEND` | 11 | network | `id: u32`, `data: bytes` | yes: nothing is written | no | For every play packet about to be written: the client's own, its automatic replies (keepalives) and injected ones. Needs `network_packets` |
 
-Every string is borrowed for the duration of the call: copy it to keep it.
+Every string and byte view is borrowed for the duration of the call: copy it to keep it.
 
 ## Screen names
 

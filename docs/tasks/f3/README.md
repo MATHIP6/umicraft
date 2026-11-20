@@ -13,7 +13,7 @@ Design: ADR-0086 (architecture), ADR-0087 (C ABI contract). Roadmap: F3 in
 | F3.2 | Loader (`libloading`), `umi_mod_init`/`shutdown`, `log`, panic → disable, `--safe-mode`, crash sentinel, SHA-256 trust list; `umicraft-modapi` with `Mod` and `umicraft_mod!` | `hello` and `panicking` example cdylibs load in an integration test | done |
 | F3.3 | Per-thread `EventBus` in `umicraft-core`, wired in the client: lifecycle, chat, input, screens; observe channel and mod worker | criterion bench of the dispatch in `docs/perf-log.md`; no cost with no mod | done |
 | F3.4 | HUD widgets, schema settings, open key bindings, client commands; external mods in the mods menu | `hud` example | done |
-| F3.5 | Raw packet hooks on the network thread, validated injection, permission gating, server-compat mode, "alters packets/movement" badge | `packet-logger` example | todo |
+| F3.5 | Raw packet hooks on the network thread, validated injection, permission gating, server-compat mode, "alters packets/movement" badge | `packet_logger` example | done |
 | F3.6 | Services (`player_physics` wrap/replace), conflict detection at load, read-only world and entity queries | `physics-tweak` example; trajectories unchanged with no mod (ADR-0076) | todo |
 | F3.7 | Post-process chain with naga-validated WGSL | `shader-pass` example | todo |
 | F3.8 | Per-mod profiler in the Umicraft debug overlay, budget auto-disable, mod manager (permissions, hash, enable/disable), `docs/modding/` guide and template | former M15 acceptance criteria | todo |
@@ -303,3 +303,89 @@ run by the `CommandTable` on the game thread before `ChatSend`; tab
 completion merges local command names. Each mod's choices persist in
 `<options dir>/mods/<id>.toml`. A mod id equal to a built-in mod id is
 refused at load.
+
+## F3.5 interface (frozen before the work is split)
+
+API **0.4**. Packets cross the ABI as raw `id` + body bytes (protocol 47 play
+state, no length prefix, no compression).
+
+| Event | Thread | Cancellable | Mutable |
+|---|---|---|---|
+| `PACKET_RECEIVED` (10) | network | yes (the session never sees it) | no |
+| `PACKET_SEND` (11) | network | yes (nothing written) | no |
+
+Neither event is mutable in v1: a clientbound body cannot be validated before
+the session handles it (most ids are decoded only there, and a bad body ends
+the session), and a serverbound packet is changed by cancelling it and
+injecting the replacement, which `packet_send` validates. `Set Compression`
+(0x46) and `Disconnect` (0x40) are never dropped: dropping them would break
+the framing or hide the kick reason.
+
+### `umicraft-modapi-sys`
+
+- `UmiBytes { ptr: *const u8, len: usize }` (borrowed bytes, any content).
+- `UmiPacket { header, id: u32, data: UmiBytes }`, payload of both events.
+- `UmiStatus::BUSY` (7): a bounded queue is full, try again later.
+- `UmiHost::packet_send(me, id: u32, data: UmiBytes) -> UmiStatus`, appended.
+- `UMI_API_VERSION` = `0.4`.
+
+### `umicraft-net` (files `crates/umicraft-net/**`, callers in `umicraft-testkit`)
+
+- `trait PacketFilter` in `play`: `receive(&mut self, id: u8, body: &[u8]) ->
+  bool` (false drops a clientbound packet before `PlaySession::handle`, except
+  0x46 and 0x40, which `drive` always keeps), `send(&mut self, packet:
+  &PlayServerbound) -> bool` (false drops a serverbound packet: commands,
+  replies and injections alike), `inject(&mut self, out: &mut
+  Vec<PlayServerbound>)` (appends packets to write; `drive` calls it after
+  every loop turn, runs them through `send` and writes them). All three have
+  pass-through defaults; `NoFilter` is the unit implementation.
+- `drive(connection, session, commands, counters, filter: &mut impl
+  PacketFilter, on_event)`. `packets_received` still counts dropped packets;
+  `packets_sent` counts written ones only.
+- Injection latency: one loop turn, which the game thread's movement packets
+  bound to a tick.
+
+### `umicraft-modhost`
+
+- `EventThread::Network`; host events `PacketReceived` and `PacketSend`
+  (`new(id: u8, body: &[u8])`, `id() -> u8`, `data() -> &[u8]`, `Clone`
+  repoints the payload, `Send` in `ffi/event.rs`).
+- `ModContext` keeps the manifest's `Permissions` (`with_shared(id,
+  permissions, shared)`; `ModContext::new` keeps none). `subscribe` to a
+  packet event without `network_packets` → `DENIED`.
+- **Server-compat mode** (`HostShared` atomic, `ModHost::set_server_compat(bool)`,
+  `server_compat()`): while on, a mod whose manifest declares
+  `network_packets` or `movement` is not enabled. `ModContext::alters_game()`.
+  `is_enabled = wanted && !failed && !(compat && alters_game)`.
+- `install_mod` skips failed mods only (a mod the player switched off before
+  the bus was built must still work when switched back on; regression).
+- **Injection**: `packet_send` (any thread, after init): `DENIED` without the
+  permission or when the mod is not enabled; `INVALID_ARGUMENT` for an id
+  above 0xff, a body that `PlayServerbound::decode` refuses or does not
+  consume entirely; `BUSY` when the shared queue (64 packets) is full. Accepted
+  packets go to `ModHost::packet_outbox() -> PacketOutbox` (`Send + Clone`,
+  `drain(&mut Vec<PlayServerbound>)`, `clear()`). Stats count injected packets.
+  New dependency: `umicraft-protocol` (no auth, no I/O).
+- `ModView` (or the mods listing) exposes the permissions for the badge.
+
+### `umicraft-modapi`
+
+Views `PacketReceived` and `PacketSend` (`id() -> u8`, `data() -> &[u8]`);
+`InitCx::packets() -> Packets` (`Copy + Send + Sync`, `send(id: u8, body:
+&[u8]) -> Result<(), ModError>`, `BUSY` mapped to a distinct `ModError`).
+
+### Example `mods/examples/packet_logger`
+
+Declares `network_packets = true`; observes both events and logs one line per
+packet id per second with its count and bytes; a HUD widget shows packets/s
+in and out; `/swing` injects an Animation (0x0A, empty body).
+
+### Client
+
+The network thread gets a `NetMods { bus, outbox }` and a `ModPacketFilter`
+(zero cost without subscribers: `has_subscribers` before copying a body,
+`outbox` drained only when non-empty); the outbox is cleared when a session
+starts, so a stale injection never reaches another server. Server-compat
+mode is an option (`multiplayer.mod_server_compat`) shown as a switch in the External
+category of the mods menu; cards of mods that declare `network_packets` or
+`movement` carry an "alters packets/movement" badge.

@@ -20,14 +20,17 @@ Rules (restated):
 | Audio threads (`umicraft-audio`, `umicraft-audio-decode`, cpal device) | Sound index, PCM cache, 20 Hz sound tick, Ogg Vorbis background music stream decoder, and lock-free realtime cpal mixer | Game and render threads via bounded `sync_channel(256)` (`try_send` drop-on-full) |
 | Background I/O workers (`texture-fetch`, `umicraft-ping`, `umicraft-pack`, `umicraft-screenshot`) | Concurrent HTTP skin/cape downloads (`JoinSet` cap 6), server list pings (`JoinSet` cap 5), verified server resource pack downloads, and offloaded PNG screenshot encoding | Render and game threads via bounded channels |
 
-### Mod events (ADR-0086, F3.3)
+### Mod events (ADR-0086, F3.3, F3.5)
 
 The game thread owns its own mod `EventBus` (built per session, moved in through
-`Session::start`) and the render thread owns another (built at startup); neither is
-shared, so dispatch takes no lock. Intercept handlers of external mods run on the
+`Session::start`), the network thread another (also per session, inside its
+`PacketFilter`) and the render thread a third (built at startup); none is shared, so
+dispatch takes no lock. Packets injected by mods cross a bounded queue of 64
+(`PacketOutbox`, any thread → network thread) that the play loop drains after each turn;
+a full queue answers `BUSY` to the mod. Intercept handlers of external mods run on the
 dispatching thread under a 1 ms budget; observe-only events go to one worker per mod,
 `umicraft-mod-<id>`, through a bounded queue of 256 that drops (and counts) when full.
-Exit order: drop the session (joins the game thread), drop the render bus, only then
+Exit order: drop the session (joins the game and network threads), drop the render bus, only then
 `ExternalMods::shutdown` (quiescence rule). See `docs/modding/events.md`.
 
 The game thread is the only owner of the world: the render thread never

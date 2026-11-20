@@ -109,7 +109,7 @@ and systems are out of v1 and may be reopened in a later API major.
 | Chat | game | `ChatReceived` (mutable), `ChatSend` (cancellable), client commands |
 | Input and screens | render | `KeyInput`, `ScreenOpen`, `ScreenClose`, open key bindings |
 | HUD and UI | render | HUD widgets placed with `HudPlacement`, schema settings in the mods menu |
-| Packets | network | raw in/out (`id` + bytes) intercept and observe; injection re-validated by `PlayServerbound::decode` |
+| Packets | network | raw in/out (`id` + bytes) intercept (cancel) and observe; injection re-validated by `PlayServerbound::decode` (F3.5 amendment) |
 | Services | game | `player_physics` |
 | World | game | read-only block and entity queries |
 | Rendering | render | a post-process chain of naga-validated WGSL |
@@ -138,3 +138,10 @@ screens, ECS components.
 - **2026-11-19, F3.3 — disable is a flag.** `ModHost::disable` only flips the
   mod's flag; `umi_mod_shutdown` runs once, in `shutdown_all`, after every
   dispatching thread has stopped (`docs/tasks/f3/README.md`, quiescence rule).
+- **2026-11-19, F3.5 — packets are read and dropped, not rewritten.** The two packet
+  events are cancellable but not mutable: most clientbound bodies are decoded only when
+  the session handles them and a bad one ends the session, so a replacement could not
+  be validated first. A mod changes an outgoing packet by cancelling it and injecting
+  the replacement through `packet_send`, which the client's own decoder validates.
+  `Set Compression` and `Disconnect` are never dropped. Server-compatible mode is one
+  client switch (`multiplayer.mod_server_compat`), not a per-server setting.
