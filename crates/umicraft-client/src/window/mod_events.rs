@@ -66,13 +66,21 @@ impl App {
     }
 
     /// Hands the local chat lines the mods printed to the game thread, which shows
-    /// them in the chat. Called every frame so the outbox never fills up; without a
-    /// session there is no chat to show them in, so they are dropped.
-    pub(super) fn forward_mod_chat(&self) {
-        let Some(mods) = &self.external_mods else {
+    /// them in the chat, plus one notice naming each mod that stopped working. Called
+    /// every frame so the outbox never fills up; without a session there is no chat
+    /// to show them in, so they are dropped.
+    pub(super) fn forward_mod_chat(&mut self) {
+        let Some(mods) = &mut self.external_mods else {
             return;
         };
-        for line in mods.drain_chat() {
+        let lang = crate::language::current();
+        let mut lines: Vec<String> = mods.drain_chat().collect();
+        lines.extend(
+            mods.take_stopped()
+                .iter()
+                .map(|name| lang.tr_args("umicraft.mods.external.stopped", &[name])),
+        );
+        for line in lines {
             self.send_event(GameEvent::LocalChat(line));
         }
     }

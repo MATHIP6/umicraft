@@ -513,5 +513,10 @@ fn a_layer_slow_on_its_own_time_is_failed_after_a_streak() {
         run(&chain);
     }
     assert!(cx.is_failed());
+    let reason = cx.failure().unwrap();
+    assert!(
+        reason.ends_with("in its `player_physics` layer"),
+        "{reason}"
+    );
     assert!(cx.physics_stats().overruns >= crate::MAX_CONSECUTIVE_OVERRUNS);
 }

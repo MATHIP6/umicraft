@@ -181,3 +181,81 @@ fn applying_the_compatible_mode_switches_the_host_and_changes_no_mod_file() {
     );
     assert!(host.server_compat());
 }
+
+/// The shipped English texts, so the tests read what the player reads.
+fn english() -> Lang {
+    Lang::from_texts(
+        "en_US",
+        None,
+        Some(include_str!(
+            "../../../../umicraft-assets/client-pack/umicraft/lang/en_US.lang"
+        )),
+    )
+}
+
+fn untrusted(trusted: bool) -> UntrustedMod {
+    UntrustedMod {
+        id: "hello".parse().expect("valid id"),
+        name: "Hello".to_owned(),
+        version: "1.2.0".to_owned(),
+        permissions: Permissions {
+            movement: true,
+            network_http: true,
+            ..Permissions::default()
+        },
+        hash: "0123456789abcdef".repeat(4),
+        trusted,
+    }
+}
+
+#[test]
+fn turning_an_untrusted_card_on_asks_to_trust_it_and_off_is_dropped() {
+    let on = toggle("ext-untrusted:hello");
+    let routed = route(&on);
+    assert!(!routed.builtin);
+    assert_eq!(routed.external, Some(Request::Trust { mod_id: "hello" }));
+    let off = ModsOutcome::Toggle {
+        id: "ext-untrusted:hello".into(),
+        enabled: false,
+    };
+    assert_eq!(route(&off), Route::external(None));
+    // Its id cannot be read as a loaded mod's card.
+    assert_eq!(parse("ext-untrusted:hello"), None);
+}
+
+#[test]
+fn the_untrusted_card_shows_the_hash_and_what_the_mod_asks_for() {
+    let lang = english();
+    let card = untrusted_card(&untrusted(false), &lang);
+    assert_eq!(card.id, "ext-untrusted:hello");
+    assert_eq!(card.name, "Hello");
+    assert!(!card.enabled);
+    assert!(card.description.contains("#0123456789ab"));
+    assert!(card.description.contains(&"0123456789abcdef".repeat(4)));
+    assert!(card.description.contains("v1.2.0"));
+    assert!(untrusted_card(&untrusted(true), &lang).enabled);
+}
+
+#[test]
+fn only_the_declared_permissions_are_listed() {
+    let lang = english();
+    let words = permission_words(untrusted(false).permissions, &lang);
+    assert_eq!(words.len(), 2);
+    assert!(permission_words(Permissions::default(), &lang).is_empty());
+}
+
+#[test]
+fn a_failure_reason_comes_after_the_details() {
+    let lang = english();
+    let text = details(
+        "1.0.0",
+        &["Ana".to_owned()],
+        Permissions::default(),
+        Some(&"f".repeat(64)),
+        Some("panicked in its handler for event 3"),
+        &lang,
+    );
+    assert!(text.starts_with("v1.0.0"));
+    assert!(text.contains("#ffffffffffff |"));
+    assert!(text.ends_with("panicked in its handler for event 3"));
+}

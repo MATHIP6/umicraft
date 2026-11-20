@@ -24,6 +24,11 @@
 //! F3.6 adds the `player_physics` service ([`PhysicsChain`], built by
 //! [`ModHost::physics`]) and read-only world queries ([`WorldQuery`], lent to the game
 //! thread with [`with_world`]).
+//!
+//! F3.8 adds what the client needs to show mods honestly: [`ModHost::profile`]
+//! (counters and [`ModState`], with the first failure's reason), the manager data of
+//! [`ModView`] and [`LoadFailure::manifest`], [`TrustList::trust`], and a per-instance
+//! [`CrashSentinel`] built on a file lock.
 
 mod budget;
 mod context;
@@ -40,6 +45,7 @@ mod packets;
 mod physics;
 mod post;
 mod post_pass;
+mod profile;
 pub mod resolve;
 mod sentinel;
 mod trust;
@@ -69,8 +75,9 @@ pub use packets::{PacketOutbox, MAX_PACKET_BODY_BYTES};
 pub use physics::PhysicsChain;
 pub use post::{compose, validate, PostShaderError, MAX_SOURCE_BYTES, PRELUDE};
 pub use post_pass::{PostPassView, MAX_POST_PASSES};
+pub use profile::{ModProfile, ModState};
 pub use resolve::{resolve, Candidate, RejectReason, Rejection, Resolution};
-pub use sentinel::{CrashSentinel, SentinelGuard};
+pub use sentinel::{Arming, CrashSentinel, SentinelGuard};
 pub use trust::{sha256_file, TrustList};
 pub use ui::commands::{CommandOutcome, CommandTable};
 pub use ui::config::ExternalModConfig;

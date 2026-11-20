@@ -5,7 +5,7 @@ version = "0.1.0"
 authors = ["Umicraft contributors"]
 api_version = "0.6"
 license = "MIT"
-description = "Teaching example: wraps the player's physics step to slow falling with a slider, and reads the block under you and the nearest player with the world queries."
+description = "Teaching example: wraps the player's physics step only to measure your speed and last jump height (it changes nothing), and reads the block under you and the nearest player with the world queries."
 library = "physics_tweak"
 
 [permissions]

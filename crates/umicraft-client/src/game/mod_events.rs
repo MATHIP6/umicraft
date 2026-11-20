@@ -22,7 +22,6 @@ use umicraft_modhost::{
     ChatReceived, ChatSend, CommandOutcome, CommandTable, PhysicsChain, PostTick, PreTick,
 };
 
-use super::chat::{local_chat_line, push_chat};
 use super::commands::CommandQueue;
 use super::messages::{ChunkEvent, RenderEvent};
 use super::mod_world::lend;
@@ -126,18 +125,19 @@ pub(super) fn outgoing_chat(bus: &mut EventBus, message: String) -> Option<Strin
 enum LineAction {
     /// Not a client command: on to the `ChatSend` mods and the server.
     Send,
-    /// A client command handled it, or refused its arguments: nothing is sent.
+    /// A command handled it, refused its arguments or broke its mod: nothing is
+    /// sent. The window tells the player which mod stopped working, once, whatever
+    /// broke it.
     Swallow,
-    /// A command broke its mod: nothing is sent and the player is told.
-    SwallowAndWarn,
 }
 
 /// The fate of a line given what [`CommandTable::run`] did with it.
 const fn line_action(outcome: CommandOutcome) -> LineAction {
     match outcome {
         CommandOutcome::NotACommand => LineAction::Send,
-        CommandOutcome::Ran | CommandOutcome::Rejected => LineAction::Swallow,
-        CommandOutcome::Failed => LineAction::SwallowAndWarn,
+        CommandOutcome::Ran | CommandOutcome::Rejected | CommandOutcome::Failed => {
+            LineAction::Swallow
+        }
     }
 }
 
@@ -156,14 +156,6 @@ pub(super) fn typed_chat(game: &mut Game, message: String) -> Option<String> {
             outgoing_chat(&mut game.bus, message)
         }),
         LineAction::Swallow => None,
-        LineAction::SwallowAndWarn => {
-            let lang = crate::hud::chat::lang();
-            push_chat(
-                game,
-                local_chat_line(lang.tr("umicraft.mods.external.disabled")),
-            );
-            None
-        }
     }
 }
 
@@ -206,10 +198,7 @@ mod tests {
         assert_eq!(line_action(CommandOutcome::NotACommand), LineAction::Send);
         assert_eq!(line_action(CommandOutcome::Ran), LineAction::Swallow);
         assert_eq!(line_action(CommandOutcome::Rejected), LineAction::Swallow);
-        assert_eq!(
-            line_action(CommandOutcome::Failed),
-            LineAction::SwallowAndWarn
-        );
+        assert_eq!(line_action(CommandOutcome::Failed), LineAction::Swallow);
     }
 
     #[test]

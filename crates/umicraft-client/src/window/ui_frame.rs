@@ -195,6 +195,10 @@ impl App {
             }
         }
         let chatting = self.screen == Screen::Chat;
+        let mod_lines: &[String] = match self.external_mods.as_ref().and_then(ExternalMods::host) {
+            Some(host) if self.show_f3 => self.mod_profiler.lines(host, Instant::now()),
+            _ => &[],
+        };
         let debug_f3 = self.show_f3.then(|| {
             let (mean_allocs, mean_bytes) = self.clock.metrics_window.mean_allocs_per_frame();
             crate::debug::f3::build_live(
@@ -210,6 +214,7 @@ impl App {
                     display: (width, height),
                     camera: &self.camera,
                     input_latency: self.clock.metrics_window.input_latency(),
+                    mod_lines,
                 },
             )
         });
@@ -383,11 +388,7 @@ impl App {
                 let stats = self.world.as_ref().map_or(&[][..], WorldView::stats);
                 let mods_view = mods_menu::view_for(
                     screen,
-                    (
-                        &self.mods,
-                        self.external_mods.as_ref().and_then(ExternalMods::host),
-                        &self.lang,
-                    ),
+                    (&self.mods, self.external_mods.as_ref(), &self.lang),
                     (atlas, (width, height)),
                     &self.mod_icons(),
                 );

@@ -4,7 +4,7 @@
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 
 use umicraft_modapi_sys::{
     UmiEventId, UmiHandlerFn, UmiLevel, UmiMode, UmiPhysicsFn, UmiServiceMode, UmiStatus,
@@ -56,6 +56,8 @@ pub struct ModContext {
     init_done: AtomicBool,
     wanted: AtomicBool,
     failed: AtomicBool,
+    /// Why the mod first failed, for the mod manager; the first reason wins.
+    failure: OnceLock<String>,
     /// Set once `umi_mod_init` succeeded; cleared by whoever calls `umi_mod_shutdown`.
     shutdown_due: AtomicBool,
     stats: Stats,
@@ -112,6 +114,7 @@ impl ModContext {
             init_done: AtomicBool::new(false),
             wanted: AtomicBool::new(false),
             failed: AtomicBool::new(false),
+            failure: OnceLock::new(),
             shutdown_due: AtomicBool::new(false),
             stats: Stats::default(),
             physics: PhysicsSlot::new(load, permissions.movement),
@@ -257,19 +260,30 @@ impl ModContext {
             self.shutdown_due.store(true, Ordering::Release);
             self.wanted.store(true, Ordering::Release);
         } else {
-            self.failed.store(true, Ordering::Release);
+            self.fail("its init function reported an error");
             self.lock().clear();
             self.shared.remove_commands(&withdrawn);
         }
     }
 
-    /// Fails the mod because it misbehaved and logs `reason` once, however many
-    /// handlers fail at the same time. The dispatcher skips it from now on.
+    /// Fails the mod because it misbehaved, keeps `reason` as [`failure`](Self::failure)
+    /// if it is the first and logs it once, however many handlers fail at the same
+    /// time. The dispatcher skips the mod from now on.
+    ///
+    /// The reason is stored before the flag flips, so anyone who sees the mod failed
+    /// can read why (except after [`retire`](Self::retire), which has none).
     pub(crate) fn fail(&self, reason: &str) {
+        let _ = self.failure.set(reason.to_owned());
         if !self.failed.swap(true, Ordering::AcqRel) {
             let mod_id = &self.id;
             tracing::error!(%mod_id, "mod disabled: {reason}");
         }
+    }
+
+    /// Why the mod first failed, in words for the player ("panicked in its handler
+    /// for event 3"); `None` while it has not failed, or if it was only retired at exit.
+    pub fn failure(&self) -> Option<String> {
+        self.failure.get().cloned()
     }
 
     /// Marks the mod as finished for good, silently: used at exit so nothing

@@ -1,0 +1,48 @@
+# The manifest the client reads before it loads your library. The folder this
+# file sits in must be named exactly like `id` below.
+[mod]
+# Unique name of the mod: a lowercase letter, then lowercase letters, digits
+# or `_`, at most 64 characters.
+id = "my_mod"
+# The name players see in the mods menu. Must not be empty.
+name = "My mod"
+# Your mod's own version, in semantic versioning (major.minor.patch).
+version = "0.1.0"
+# Who wrote it, as plain names.
+authors = ["Your name"]
+# The mod API this library was built for. While the API is 0.x the client
+# demands the exact same minor: "0.6" loads only on a client that offers 0.6.
+api_version = "0.6"
+# Optional: an SPDX license expression.
+license = "MIT"
+# Optional: one line shown in the mods menu.
+description = "A minimal mod to copy: one setting, one tick observer, a shutdown message."
+# Optional: the library file name without `lib` or the extension. It defaults
+# to the id; letters, digits, `_` and `-` only. Must match `[lib] name`.
+library = "my_mod"
+
+# Other mods this one needs, as `id = "version requirement"`. A missing or
+# wrongly versioned dependency keeps this mod from loading. The default is none.
+# [dependencies]
+# other_mod = ">=0.2, <1.0"
+
+[load]
+# Lower loads earlier, among mods with no dependency between them. Default 0.
+priority = 0
+# Services this mod replaces entirely; at most one mod may replace each.
+# Default: none. The only service is "player_physics" (needs `movement`).
+replaces = []
+# Services this mod wraps; any number of mods may. Default: none.
+wraps = []
+
+[permissions]
+# What the mod asks for. The client shows these; the packet and movement
+# ones are also checked by the host. All default to false.
+# Read or inject network packets (and subscribe to packet events).
+network_packets = false
+# Wrap or replace the player's movement (`player_physics`).
+movement = false
+# Shown to the player as "uses files". Not enforced: native code can open files anyway.
+filesystem = false
+# Shown to the player as "uses http". Not enforced.
+network_http = false

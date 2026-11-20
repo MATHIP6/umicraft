@@ -22,6 +22,7 @@ use crate::accounts::AccountsFlow;
 use crate::args::Args;
 use crate::audio_bridge::AudioBridge;
 use crate::debug::cpu_split::CpuSplit;
+use crate::debug::mod_profile::ModProfiler;
 use crate::error::ClientError;
 use crate::hud::cache::HudCache;
 use crate::hud::dials::DialAnimator;
@@ -215,6 +216,7 @@ impl App {
             lang,
             mods: ModsRuntime::new(&options.mods),
             external_mods,
+            mod_profiler: ModProfiler::default(),
             render_bus,
             releasing: Vec::new(),
             post_frames: Vec::new(),

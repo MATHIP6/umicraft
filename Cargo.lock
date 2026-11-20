@@ -4434,6 +4434,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-mod-template"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-modapi"
 version = "0.1.0"
 dependencies = [

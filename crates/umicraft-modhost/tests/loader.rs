@@ -129,6 +129,8 @@ fn untrusted_library_is_refused_and_not_remembered() {
     let mut trust = TrustList::default();
     let (_, failures) = ModHost::load(&resolution_of("hud"), tmp.path(), &mut trust, |_, _| false);
     assert!(matches!(failures[0].reason, LoadError::Untrusted { .. }));
+    let manifest = failures[0].manifest.as_ref().unwrap();
+    assert_eq!(manifest.id, mod_id("hud"));
     assert_eq!(trust, TrustList::default());
 }
 

@@ -103,6 +103,10 @@ fn a_broken_command_fails_its_mod_and_reports_failed() {
     assert_eq!(table.run("/crash"), CommandOutcome::Failed);
 
     assert!(broken.is_failed());
+    assert_eq!(
+        broken.failure().as_deref(),
+        Some("panicked in its command `/crash`")
+    );
     assert_eq!(table.run("/crash"), CommandOutcome::NotACommand);
 }
 

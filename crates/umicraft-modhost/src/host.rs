@@ -21,6 +21,7 @@ use crate::ffi::{exports_of, handle_of, host_table, open_library};
 use crate::load::{authorize, locate_library};
 use crate::manifest::{Manifest, ModId};
 use crate::physics::PhysicsChain;
+use crate::profile::ModProfile;
 use crate::resolve::Resolution;
 use crate::trust::TrustList;
 use crate::ui::shared::HostShared;
@@ -33,6 +34,8 @@ use crate::ui::shared::HostShared;
 /// thread; unmapping the library or freeing the context could then crash the client.
 struct LoadedMod {
     manifest: Manifest,
+    /// Lowercase hex SHA-256 of the loaded library.
+    sha256: String,
     context: Arc<ModContext>,
     shutdown: UmiModShutdownFn,
     _library: Library,
@@ -81,6 +84,7 @@ impl ModHost {
                 failures.push(LoadFailure {
                     id: manifest.id.clone(),
                     reason,
+                    manifest: Some(manifest.clone()),
                 });
             }
         }
@@ -100,7 +104,7 @@ impl ModHost {
             });
         }
         let path = locate_library(manifest, mods_dir)?;
-        authorize(manifest, &path, trust, confirm)?;
+        let sha256 = authorize(manifest, &path, trust, confirm)?;
         let library = open_library(&path)?;
         let exports = exports_of(&library)?;
         let module = (exports.api_version)();
@@ -120,6 +124,7 @@ impl ModHost {
         context.finish_init(status.is_ok());
         self.mods.push(LoadedMod {
             manifest: manifest.clone(),
+            sha256,
             context,
             shutdown: exports.shutdown,
             _library: library,
@@ -177,6 +182,15 @@ impl ModHost {
         self.mods
             .iter()
             .map(|m| (m.context.id().clone(), m.context.stats()))
+            .collect()
+    }
+
+    /// The cumulative counters and state of every mod, in load order, for the profiler
+    /// and the mod manager. Take two snapshots to get rates.
+    pub fn profile(&self) -> Vec<ModProfile> {
+        self.mods
+            .iter()
+            .map(|m| ModProfile::of(&m.manifest, &m.context))
             .collect()
     }
 

@@ -140,7 +140,7 @@ impl WidgetSlot {
             owner,
             owner.hud_counters(),
             HUD_BUDGET,
-            format_args!("its draw function for widget `{}`", self.key),
+            format_args!("its widget `{}`", self.key),
             || with_hud_cx(&mut content, |cx| (self.draw)(cx, self.user.as_ptr())),
         )
     }

@@ -16,13 +16,16 @@ use crate::budget::{should_log, Stats, Verdict, MAX_CONSECUTIVE_OVERRUNS};
 use crate::context::ModContext;
 
 /// Fails the mod and returns `false` unless `status` is `OK`; `what` names the hook
-/// for the log line ("its handler for event 3", "its command `/hi`").
+/// for the failure reason ("its handler for event 3", "its command `/hi`").
+///
+/// Every way a mod is failed for misbehaving goes through this module, so the first
+/// reason kept by [`ModContext::fail`] always names the hook that broke.
 pub(crate) fn check_status(context: &ModContext, what: impl Display, status: UmiStatus) -> bool {
     if !status.is_ok() {
         if status == UmiStatus::PANICKED {
-            context.fail(&format!("{what} panicked"));
+            context.fail(&format!("panicked in {what}"));
         } else {
-            context.fail(&format!("{what} returned status {}", status.0));
+            context.fail(&format!("returned status {} from {what}", status.0));
         }
     }
     status.is_ok()
@@ -59,7 +62,7 @@ pub(crate) fn run_hook_excluding(
     let started = Instant::now();
     let (status, excluded) = call();
     let elapsed = started.elapsed().saturating_sub(excluded);
-    if !check_status(context, what, status) {
+    if !check_status(context, &what, status) {
         return false;
     }
     match stats.record_call(elapsed, budget) {
@@ -70,7 +73,7 @@ pub(crate) fn run_hook_excluding(
             }
         }
         Verdict::Exhausted => context.fail(&format!(
-            "{MAX_CONSECUTIVE_OVERRUNS} calls in a row over the {budget:?} budget"
+            "over its {budget:?} time budget {MAX_CONSECUTIVE_OVERRUNS} times in a row in {what}"
         )),
     }
     true

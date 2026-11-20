@@ -21,7 +21,7 @@ impl ModHost {
     pub fn mods(&self) -> impl Iterator<Item = ModView<'_>> {
         self.mods
             .iter()
-            .map(|m| ModView::new(&m.manifest, &m.context))
+            .map(|m| ModView::new(&m.manifest, &m.sha256, &m.context))
     }
 
     /// The key bindings of every mod that has not failed, for the controls page.
@@ -31,7 +31,7 @@ impl ModHost {
         self.mods
             .iter()
             .filter(|m| !m.context.is_failed())
-            .flat_map(|m| ModView::new(&m.manifest, &m.context).keys())
+            .flat_map(|m| ModView::new(&m.manifest, &m.sha256, &m.context).keys())
     }
 
     /// Calls the draw function of every widget of every enabled mod.

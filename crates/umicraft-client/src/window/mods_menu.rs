@@ -71,7 +71,7 @@ pub(super) fn hud_widgets(
 /// reads it.
 pub(super) fn view_for(
     screen: Screen,
-    (mods, external, lang): (&ModsRuntime, Option<&ModHost>, &Lang),
+    (mods, external, lang): (&ModsRuntime, Option<&ExternalMods>, &Lang),
     (font, display): (&FontAtlas, (u32, u32)),
     icons: &ModIcons<'_>,
 ) -> ModsView {
@@ -82,8 +82,10 @@ pub(super) fn view_for(
             hud,
             ..menu::build(mods.registry(), lang)
         };
-        if let Some(host) = external {
-            external_menu::extend(&mut view, host, lang);
+        if let Some((host, untrusted)) =
+            external.and_then(|mods| Some((mods.host()?, mods.untrusted())))
+        {
+            external_menu::extend(&mut view, host, untrusted, lang);
             hud_editor::external::extend(&mut view.hud, host, font, display, icons);
         }
         view
@@ -217,6 +219,12 @@ impl App {
     /// Carries out a change of the menu for an external mod and saves that mod's
     /// choices. A refused change (a failed mod's switch, an unknown key) is logged.
     fn apply_external_change(&mut self, request: external_menu::Request<'_>) {
+        if let external_menu::Request::Trust { mod_id } = request {
+            if let Some(mods) = &mut self.external_mods {
+                mods.trust(mod_id);
+            }
+            return;
+        }
         let Some(mods) = &self.external_mods else {
             return;
         };

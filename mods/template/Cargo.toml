@@ -1,0 +1,23 @@
+# The Cargo manifest of the template mod. Copy the whole folder, then rename
+# the package and the library (see README.md).
+[package]
+name = "umicraft-mod-template"
+description = "Template for Umicraft mods: copy it, rename it, build on it."
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+# A mod is installed by hand, never published to crates.io.
+publish = false
+
+[lib]
+# The name of the library file the client loads; it must equal `library` in
+# mod.toml (here the mod id). On Linux the file is `libmy_mod.so`.
+name = "my_mod"
+# `cdylib` is the native library the client loads; `rlib` lets `cargo test`
+# and other crates link the same code.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The only dependency a mod needs. Outside the Umicraft repository, change the
+# path to where `crates/umicraft-modapi` lives on your disk.
+umicraft-modapi = { path = "../../crates/umicraft-modapi" }

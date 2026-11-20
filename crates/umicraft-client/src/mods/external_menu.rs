@@ -13,13 +13,14 @@ use thiserror::Error;
 use umicraft_builtin_mods::{HudPlacement, SettingValue};
 use umicraft_core::lang::Lang;
 use umicraft_modhost::{
-    ConfigureError, EnableError, IdError, ModHost, ModId, ModView, SettingSpecKind,
+    ConfigureError, EnableError, IdError, ModHost, ModId, ModView, Permissions, SettingSpecKind,
     SettingView as ExternalSetting,
 };
 use umicraft_ui::menus::{
     HudEditorOutcome, ModCardView, ModsOutcome, ModsView, SettingControl, SettingView,
 };
 
+use crate::mods::external::UntrustedMod;
 use crate::mods::hud_editor::placement_of;
 use crate::mods::menu::setting_value;
 
@@ -30,6 +31,14 @@ const PREFIX: &str = "ext:";
 /// hyphen, so no mod's card can take it.
 const COMPAT_CARD: &str = "ext:server-compat";
 
+/// What the id of the card of an untrusted mod starts with. It does not start with
+/// `ext:`, so [`route`] and [`parse`] never mistake it for a loaded mod's card.
+const UNTRUSTED_PREFIX: &str = "ext-untrusted:";
+
+/// How many hex digits of a hash the cards show; the full hash is in the description
+/// of an untrusted mod's card.
+const SHORT_HASH: usize = 12;
+
 /// The id of the card of mod `mod_id`.
 pub(crate) fn card_id(mod_id: &ModId) -> String {
     format!("{PREFIX}{mod_id}")
@@ -38,6 +47,11 @@ pub(crate) fn card_id(mod_id: &ModId) -> String {
 /// The id of the HUD widget `widget` of mod `mod_id`.
 pub(crate) fn widget_id(mod_id: &ModId, widget: &str) -> String {
     format!("{PREFIX}{mod_id}:{widget}")
+}
+
+/// The id of the card of the untrusted mod `mod_id`.
+fn untrusted_card_id(mod_id: &ModId) -> String {
+    format!("{UNTRUSTED_PREFIX}{mod_id}")
 }
 
 /// Splits `ext:<mod>[:<widget>]`; `None` for an id of a built-in mod. A mod id never
@@ -73,6 +87,9 @@ pub(crate) enum Request<'a> {
     ResetAll,
     /// The switch of the server-compatible mode (F3.5).
     ServerCompat { enabled: bool },
+    /// The switch of an untrusted mod turned on: trust its library for the next
+    /// start. Turning it off is dropped by [`route`] (see `ExternalMods::trust`).
+    Trust { mod_id: &'a str },
 }
 
 /// Who an outcome of the menu is for.
@@ -105,6 +122,13 @@ impl<'a> Route<'a> {
 pub(crate) fn route(change: &ModsOutcome) -> Route<'_> {
     use HudEditorOutcome::{Lock, OpenSettings, Placed, Reset, ResetAll, Scaled};
     match change {
+        ModsOutcome::Toggle { id, enabled } if id.starts_with(UNTRUSTED_PREFIX) => {
+            let request = id
+                .strip_prefix(UNTRUSTED_PREFIX)
+                .filter(|_| *enabled)
+                .map(|mod_id| Request::Trust { mod_id });
+            Some(Route::external(request))
+        }
         ModsOutcome::Toggle { id, enabled } if id == COMPAT_CARD => {
             Some(Route::external(Some(Request::ServerCompat {
                 enabled: *enabled,
@@ -208,6 +232,8 @@ pub(crate) fn apply(host: &ModHost, request: Request<'_>) -> Result<Vec<ModId>, 
             host.set_server_compat(enabled);
             Ok(Vec::new())
         }
+        // Not a loaded mod: the caller hands it to `ExternalMods::trust`.
+        Request::Trust { .. } => Ok(Vec::new()),
     }
 }
 
@@ -244,17 +270,18 @@ fn reset_all(host: &ModHost) -> Result<Vec<ModId>, ChangeError> {
     Ok(changed)
 }
 
-/// Adds the extra category of the external mods and one card per mod to `view`.
-/// Nothing is added when no external mod is loaded, so the menu shows no empty tab.
-/// The switch of the server-compatible mode comes first when a mod alters packets
-/// or movement, the only mods it affects.
-pub(crate) fn extend(view: &mut ModsView, host: &ModHost, lang: &Lang) {
+/// Adds the extra category of the external mods, one card per loaded mod and one per
+/// untrusted mod, to `view`. Nothing is added when there are neither, so the menu
+/// shows no empty tab. The switch of the server-compatible mode comes first when a
+/// mod alters packets or movement, the only mods it affects.
+pub(crate) fn extend(view: &mut ModsView, host: &ModHost, untrusted: &[UntrustedMod], lang: &Lang) {
     let mut cards: Vec<ModCardView> = host.mods().map(|mod_view| card(&mod_view, lang)).collect();
-    if cards.is_empty() {
-        return;
-    }
     if host.mods().any(|mod_view| mod_view.alters_game) {
         cards.insert(0, compat_card(host, lang));
+    }
+    cards.extend(untrusted.iter().map(|entry| untrusted_card(entry, lang)));
+    if cards.is_empty() {
+        return;
     }
     let category = view.categories.len();
     view.categories
@@ -280,10 +307,32 @@ fn compat_card(host: &ModHost, lang: &Lang) -> ModCardView {
     }
 }
 
+/// The card of an untrusted mod: off until the player trusts the file, then on with
+/// the note that it loads at the next start. The manager shows one line of the
+/// description, so the hash and the instruction come first and the full hash last.
+fn untrusted_card(entry: &UntrustedMod, lang: &Lang) -> ModCardView {
+    let short = short_hash(&entry.hash);
+    let description = if entry.trusted {
+        lang.tr_args("umicraft.mods.external.trusted", &[short])
+    } else {
+        lang.tr_args("umicraft.mods.external.untrusted", &[short, &entry.hash])
+    };
+    let details = details(&entry.version, &[], entry.permissions, None, None, lang);
+    ModCardView {
+        id: untrusted_card_id(&entry.id),
+        name: entry.name.clone(),
+        description: format!("{description} | {details}"),
+        category: 0,
+        enabled: entry.trusted,
+        settings: Vec::new(),
+    }
+}
+
 /// The card of one external mod. A failed mod shows as off with the failure as its
 /// description, so the player sees why its switch does nothing; so does a mod held
 /// off by the server-compatible mode. A mod that alters packets or movement says so
-/// before its description, whatever its state.
+/// before its description, whatever its state. Version, authors, permissions, hash
+/// and the failure reason follow after a bar.
 fn card(view: &ModView<'_>, lang: &Lang) -> ModCardView {
     let description = if view.failed {
         lang.tr("umicraft.mods.external.failed")
@@ -292,15 +341,23 @@ fn card(view: &ModView<'_>, lang: &Lang) -> ModCardView {
     } else {
         view.description.unwrap_or_default()
     };
-    let description = if view.alters_game {
-        format!("{} {description}", lang.tr("umicraft.mods.external.alters"))
+    let details = details(
+        &view.version.to_string(),
+        view.authors,
+        view.permissions,
+        Some(view.sha256),
+        view.failure.as_deref().filter(|_| view.failed),
+        lang,
+    );
+    let prefix = if view.alters_game {
+        format!("{} ", lang.tr("umicraft.mods.external.alters"))
     } else {
-        description.to_owned()
+        String::new()
     };
     ModCardView {
         id: card_id(view.id),
         name: view.name.to_owned(),
-        description,
+        description: format!("{prefix}{description} | {details}"),
         category: 0,
         enabled: view.enabled && !view.failed && !view.held_by_compat,
         settings: view
@@ -308,6 +365,57 @@ fn card(view: &ModView<'_>, lang: &Lang) -> ModCardView {
             .map(|setting| setting_view(&setting))
             .collect(),
     }
+}
+
+/// The first digits of a hash, enough to tell two files apart.
+fn short_hash(hash: &str) -> &str {
+    hash.get(..SHORT_HASH).unwrap_or(hash)
+}
+
+/// The second part of a card's description: version, authors, the permissions the
+/// mod declared, `#<short hash>` (when known) and, for a failed mod, the host's reason (literal
+/// text, after the translated "stopped working").
+fn details(
+    version: &str,
+    authors: &[String],
+    permissions: Permissions,
+    sha256: Option<&str>,
+    failure: Option<&str>,
+    lang: &Lang,
+) -> String {
+    let mut parts = vec![format!("v{version}")];
+    if !authors.is_empty() {
+        let names = authors.join(", ");
+        parts.push(lang.tr_args("umicraft.mods.external.by", &[&names]));
+    }
+    let words = permission_words(permissions, lang);
+    if !words.is_empty() {
+        parts.push(lang.tr_args("umicraft.mods.external.permissions", &[&words.join(", ")]));
+    }
+    if let Some(hash) = sha256 {
+        parts.push(format!("#{}", short_hash(hash)));
+    }
+    if let Some(reason) = failure {
+        parts.push(reason.to_owned());
+    }
+    parts.join(" | ")
+}
+
+/// The words of the permissions a mod declared, in a fixed order.
+fn permission_words(permissions: Permissions, lang: &Lang) -> Vec<&str> {
+    [
+        (
+            permissions.network_packets,
+            "umicraft.mods.external.perm.packets",
+        ),
+        (permissions.movement, "umicraft.mods.external.perm.movement"),
+        (permissions.filesystem, "umicraft.mods.external.perm.files"),
+        (permissions.network_http, "umicraft.mods.external.perm.http"),
+    ]
+    .into_iter()
+    .filter(|(declared, _)| *declared)
+    .map(|(_, key)| lang.tr(key))
+    .collect()
 }
 
 fn setting_view(setting: &ExternalSetting<'_>) -> SettingView {

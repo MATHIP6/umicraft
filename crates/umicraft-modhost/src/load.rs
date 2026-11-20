@@ -31,7 +31,7 @@ pub fn locate_library(manifest: &Manifest, mods_dir: &Path) -> Result<PathBuf, L
 }
 
 /// Accepts the library at `path` if its hash is trusted, or if `confirm` accepts it
-/// (the hash is then added to `trust`).
+/// (the hash is then added to `trust`). Returns the hash (lowercase hex SHA-256).
 ///
 /// The file is hashed and later opened by path, so it could be swapped in between;
 /// closing that window needs the library opened from the hashed descriptor, which
@@ -46,15 +46,15 @@ pub fn authorize(
     path: &Path,
     trust: &mut TrustList,
     confirm: &mut dyn FnMut(&Manifest, &str) -> bool,
-) -> Result<(), LoadError> {
+) -> Result<String, LoadError> {
     let sha256 = sha256_file(path).map_err(LoadError::Hash)?;
     if trust.is_trusted(&manifest.id, &sha256) {
-        return Ok(());
+        return Ok(sha256);
     }
     if confirm(manifest, &sha256) {
         trust.trust(&manifest.id, &sha256);
-        Ok(())
+        Ok(sha256)
     } else {
-        Err(LoadError::Untrusted { sha256 })
+        Err(LoadError::Untrusted { hash: sha256 })
     }
 }

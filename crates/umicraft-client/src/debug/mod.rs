@@ -8,5 +8,6 @@ pub(crate) mod f3;
 pub(crate) mod fps_meter;
 pub(crate) mod lines;
 pub mod metrics;
+pub(crate) mod mod_profile;
 pub(crate) mod process_memory;
 pub(crate) mod world;

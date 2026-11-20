@@ -24,6 +24,7 @@ use winit::window::Window;
 use crate::args::Args;
 use crate::audio_bridge::AudioBridge;
 use crate::debug::cpu_split::CpuSplit;
+use crate::debug::mod_profile::ModProfiler;
 use crate::discord::Presence;
 use crate::error::ClientError;
 use crate::game::Session;
@@ -223,6 +224,8 @@ struct App {
     mods: ModsRuntime,
     /// The external native mods and the crash sentinel; shut down on a clean exit.
     external_mods: Option<ExternalMods>,
+    /// The per-mod lines of the F3 screen, recomputed once a second.
+    mod_profiler: ModProfiler,
     /// The mod events of the render thread (connection and screens). Dropped
     /// before `external_mods` shuts down: its handlers call into the mods.
     render_bus: EventBus,

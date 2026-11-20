@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use umicraft_modapi_sys::{UmiStatus, UmiVersion};
 
-use crate::manifest::{ApiVersionError, ModId, ServiceId};
+use crate::manifest::{ApiVersionError, Manifest, ModId, ServiceId};
 use crate::post::PostShaderError;
 
 /// An identifier that does not match its grammar.
@@ -89,10 +89,10 @@ pub enum LoadError {
         path: PathBuf,
     },
     /// The library's hash is not trusted and the player did not accept it.
-    #[error("library with SHA-256 {sha256} is not trusted")]
+    #[error("library with SHA-256 {hash} is not trusted")]
     Untrusted {
-        /// Lowercase hex SHA-256 of the library.
-        sha256: String,
+        /// Lowercase hex SHA-256 of the library, to show and to trust.
+        hash: String,
     },
     /// The library could not be read to compute its hash.
     #[error("cannot hash the library: {0}")]
@@ -142,6 +142,10 @@ pub struct LoadFailure {
     /// Why it failed.
     #[source]
     pub reason: LoadError,
+    /// The mod's manifest, for what the mod manager shows (name, version,
+    /// permissions). Always set by [`ModHost::load`](crate::ModHost::load); `None`
+    /// is for failures made where no manifest is known.
+    pub manifest: Option<Manifest>,
 }
 
 /// Why the trust list could not be read or written.

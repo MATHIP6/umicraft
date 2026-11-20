@@ -209,6 +209,11 @@ fn hello_declares_settings_a_widget_a_key_and_a_command() {
         (view.name, view.enabled, view.failed),
         ("Hello", true, false)
     );
+    assert_eq!(view.sha256.len(), 64);
+    assert_eq!(view.failure, None);
+    let profile = host.profile();
+    assert_eq!(profile[0].id, hello);
+    assert_eq!(profile[0].state, umicraft_modhost::ModState::Enabled);
     let keys: Vec<_> = view.settings().map(|s| s.spec.key.clone()).collect();
     assert_eq!(keys, ["show_ticks", "tick_color"]);
     let bindings: Vec<_> = host.key_bindings().collect();
@@ -329,8 +334,7 @@ fn falling(y: f64) -> UmiPlayerPhysics {
     }
 }
 
-/// The real `physics_tweak`: untouched at its default, scales the fall when set,
-/// and reads the world from its game-thread callbacks into its widget.
+/// The real `physics_tweak`: wraps the step without changing it, and reads the world from its game-thread callbacks into its widget.
 #[test]
 fn physics_tweak_wraps_the_step_and_queries_the_world() {
     let tmp = TempDir::new();
@@ -356,38 +360,38 @@ fn physics_tweak_wraps_the_step_and_queries_the_world() {
     let mut vanilla_runs = 0;
     let mut vanilla = |state: &mut UmiPlayerPhysics| {
         vanilla_runs += 1;
+        state.position[0] += 0.2;
         state.position[1] += state.velocity[1];
     };
 
-    // At the default fall speed the wrapper only runs the inner step.
+    // The wrapper only measures: after each step the state is what vanilla made of it.
     let mut state = falling(70.0);
-    with_world(&FlatWorld, || chain.step(&mut state, &input, &mut vanilla));
-    assert_eq!(state.velocity, [0.0, -1.0, 0.0]);
-    assert_eq!(state.position[1], 69.0);
-
-    host.set_setting(
-        &id("physics_tweak"),
-        "fall_speed",
-        &SettingValue::Number(0.5),
-    )
-    .unwrap();
-    let mut state = falling(70.0);
-    with_world(&FlatWorld, || chain.step(&mut state, &input, &mut vanilla));
-    assert_eq!(state.velocity, [0.0, -0.5, 0.0]);
-    assert_eq!(vanilla_runs, 2);
-
-    // The PostTick intercept queries the world (lent on this thread) for the widget.
     let mut game = EventBus::default();
     host.install(&mut game, EventThread::Game);
-    let mut state = falling(64.0);
     with_world(&FlatWorld, || {
-        chain.step(&mut state, &input, &mut |_| {});
+        for step in 1..=2 {
+            chain.step(&mut state, &input, &mut vanilla);
+            assert_eq!(state.velocity, [0.0, -1.0, 0.0]);
+            assert_eq!(state.position[1], 70.0 - f64::from(step));
+            assert!((state.position[0] - 0.2 * f64::from(step)).abs() < 1e-9);
+        }
+        // The PostTick intercept queries the world (lent on this thread) for the widget.
         game.dispatch(&mut PostTick::new(1));
     });
+    assert_eq!(vanilla_runs, 2);
     host.draw_widgets();
     let mut lines = Vec::new();
     host.visit_widgets(|w| lines.extend(w.content.lines().iter().map(|l| l.text.clone())));
-    assert_eq!(lines, ["under you: 1:0", "nearest player: Steve (5.0 m)"]);
+    // Feet at (0.4, 68, 0): air below, Steve at (3, 64, 4) is 6.2 m away.
+    assert_eq!(
+        lines,
+        [
+            "speed: 4.0 blocks/s",
+            "last jump: none",
+            "under you: 0:0",
+            "nearest player: Steve (6.2 m)"
+        ]
+    );
 
     // The server-compatible mode holds a movement mod off.
     host.set_server_compat(true);

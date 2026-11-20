@@ -103,6 +103,11 @@ fn a_failed_mod_stays_off_whatever_the_player_wants() {
     cx.fail("test");
     cx.fail("again, logged once");
     assert!(cx.is_failed() && cx.is_wanted() && !cx.is_enabled());
+    assert_eq!(
+        cx.failure().as_deref(),
+        Some("test"),
+        "the first reason wins"
+    );
     assert!(!cx.set_wanted(true));
     assert!(!cx.is_enabled());
 }
@@ -120,7 +125,9 @@ fn shutdown_is_owed_once_and_only_after_a_successful_init() {
     assert!(!cx.take_shutdown_due());
 
     let failed = context();
+    assert_eq!(failed.failure(), None);
     failed.finish_init(false);
+    assert!(failed.failure().unwrap().contains("init"));
     assert!(!failed.take_shutdown_due());
 }
 

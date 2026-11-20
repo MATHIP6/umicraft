@@ -88,6 +88,8 @@ fn an_error_or_a_panic_status_fails_the_mod() {
         let cx = with_widget(draw);
         cx.draw_widgets();
         assert!(cx.is_failed() && !cx.is_enabled());
+        let reason = cx.failure().unwrap();
+        assert!(reason.contains("its widget `"), "{reason}");
     }
 }
 
@@ -100,6 +102,11 @@ fn fifty_overruns_of_the_half_millisecond_budget_fail_the_mod() {
     assert!(cx.is_enabled(), "49 overruns are tolerated");
     cx.draw_widgets();
     assert!(cx.is_failed());
+    let reason = cx.failure().unwrap();
+    assert!(
+        reason.contains("time budget 50 times in a row in its widget `"),
+        "{reason}"
+    );
     let stats = cx.hud_stats();
     assert_eq!(stats.overruns, MAX_CONSECUTIVE_OVERRUNS);
     assert_eq!(cx.stats().calls, 0, "event counters are separate");

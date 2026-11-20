@@ -57,11 +57,17 @@ pub struct ModView<'a> {
     pub description: Option<&'a str>,
     /// The mod's own version.
     pub version: &'a Version,
+    /// Author names from `mod.toml`, as written.
+    pub authors: &'a [String],
+    /// Lowercase hex SHA-256 of the loaded library, for the manager's hash line.
+    pub sha256: &'a str,
     /// The player's switch (what the menu's toggle shows); the mod only runs when
     /// this is true, `failed` is false and `held_by_compat` is false.
     pub enabled: bool,
     /// Whether the mod failed and stays off until the client restarts.
     pub failed: bool,
+    /// Why the mod failed (the first reason), if it did.
+    pub failure: Option<String>,
     /// What the mod's manifest asks for, for the menu's badges.
     pub permissions: Permissions,
     /// Whether the mod may change packets or movement (`network_packets` or
@@ -73,14 +79,17 @@ pub struct ModView<'a> {
 }
 
 impl<'a> ModView<'a> {
-    pub(crate) fn new(manifest: &'a Manifest, context: &'a ModContext) -> Self {
+    pub(crate) fn new(manifest: &'a Manifest, sha256: &'a str, context: &'a ModContext) -> Self {
         Self {
             id: &manifest.id,
             name: &manifest.name,
             description: manifest.description.as_deref(),
             version: &manifest.version,
+            authors: &manifest.authors,
+            sha256,
             enabled: context.is_wanted(),
             failed: context.is_failed(),
+            failure: context.failure(),
             permissions: context.permissions(),
             alters_game: context.alters_game(),
             held_by_compat: context.is_held_by_compat(),

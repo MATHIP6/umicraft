@@ -110,6 +110,8 @@ pub struct F3Frame<'a> {
     pub frame_pacing: FramePacingStats,
     /// Snapshot publication pacing metrics.
     pub snapshot_pacing: SnapshotPacingStats,
+    /// The profiler lines of the external mods; empty without any.
+    pub mod_lines: &'a [String],
 }
 
 /// What only the window knows when F3 is drawn.
@@ -133,6 +135,8 @@ pub struct Live<'a> {
     pub camera: &'a Camera,
     /// Detailed latency metrics for the input subsystem.
     pub input_latency: InputLatencyMetrics,
+    /// The profiler lines of the external mods; empty without any.
+    pub mod_lines: &'a [String],
 }
 
 /// Builds the F3 columns from the live renderer and world, falling back to
@@ -172,6 +176,7 @@ pub fn build_live(
             SnapshotPacingStats::default,
             WorldView::snapshot_pacing_stats,
         ),
+        mod_lines: live.mod_lines,
     })
 }
 
@@ -221,6 +226,7 @@ pub fn build(frame: &F3Frame<'_>) -> DebugF3View {
     let mut right = lines.right;
     right.push(frame.gpu.line());
     right.push(CpuReading::line(frame.cpu));
+    right.extend_from_slice(frame.mod_lines);
     if let Some(dist) = frame.frame_dist {
         right.push(dist.f3_line());
     }
@@ -321,6 +327,7 @@ mod tests {
             surface_info: None,
             frame_pacing: FramePacingStats::default(),
             snapshot_pacing: SnapshotPacingStats::default(),
+            mod_lines: &[],
         }
     }
 

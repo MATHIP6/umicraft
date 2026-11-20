@@ -188,7 +188,7 @@ impl Layer {
             &self.context,
             self.context.physics_counters(),
             BUDGET,
-            "its physics layer",
+            "its `player_physics` layer",
             || {
                 let status = with_physics_cx(&mut run, |cx| {
                     (self.spec.step)(cx, state, input, self.spec.user.as_ptr())
