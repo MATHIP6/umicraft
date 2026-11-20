@@ -1,6 +1,6 @@
 # Mod events
 
-Events a native mod can subscribe to (API 0.4, ADR-0086). Handlers run on the thread
+Events a native mod can subscribe to (API 1.0, ADR-0086). Handlers run on the thread
 shown below; an event nobody subscribes to costs nothing.
 
 | Event | Id | Thread | Payload | Cancellable | Mutable | Fires |
@@ -16,6 +16,7 @@ shown below; an event nobody subscribes to costs nothing.
 | `KEY_PRESSED` | 9 | render | `key: str` | no | no | When one of the mod's own key bindings is pressed with no screen open; only that mod receives it (see `ui.md`) |
 | `PACKET_RECEIVED` | 10 | network | `id: u32`, `data: bytes` | yes: the client never sees it (not `Set Compression` 0x46 nor `Disconnect` 0x40) | no | For every play packet read from the server, before the client decodes it. Needs `network_packets` (see `packets.md`) |
 | `PACKET_SEND` | 11 | network | `id: u32`, `data: bytes` | yes: nothing is written | no | For every play packet about to be written: the client's own, its automatic replies (keepalives) and injected ones. Needs `network_packets` |
+| `FRAME` | 12 | render | `now_ms`, feet `position`, `fps`, `frame_ms`, `yaw`, `pitch`, `left_clicks`/`right_clicks` since the last frame, `ping_ms` (`-1` unknown), `sprinting` | no | no | Once per drawn frame, before the HUD; the snapshot the built-in mods read, without the key state |
 
 The intercept handlers of the game-thread events may query the world (`world.md`).
 

@@ -17,7 +17,7 @@ Design: ADR-0086 (architecture), ADR-0087 (C ABI contract). Roadmap: F3 in
 | F3.6 | Services (`player_physics` wrap/replace), conflict detection at load, read-only world and entity queries | `physics_tweak` example; trajectories unchanged with no mod (ADR-0076) | done |
 | F3.7 | Post-process chain with naga-validated WGSL | `shader_pass` example | done |
 | F3.8 | Per-mod profiler in the Umicraft debug overlay, budget auto-disable, mod manager (permissions, hash, enable/disable), `docs/modding/` guide and template | former M15 acceptance criteria | done |
-| F3.9 | Built-in mods on the same bus (`ModContext` → `FrameEvent`); API frozen as `1.0` | no regression of the 16 built-in mods | todo |
+| F3.9 | Built-in mods on the same bus (`ModContext` → `FrameEvent`); API frozen as `1.0` | no regression of the 16 built-in mods | done |
 
 ## F3.1 interface (frozen before the work is split, spec §14 rule 11)
 
@@ -633,3 +633,36 @@ pages per area), `mods/template` (minimal mod, workspace member). Spec §10
 forbids official examples whose main purpose is an advantage: `physics_tweak`
 stops changing the fall and only measures (speed in blocks/s and the last jump
 height) through its wrapper, leaving the state untouched.
+
+## F3.9 interface (frozen before the work is split)
+
+API **1.0**, the freeze: from now on the ABI only grows by appending (struct
+fields behind `size`, host functions at the end of `UmiHost`, new event ids,
+new status values) with a minor bump; nothing is removed, renamed or reordered
+within major 1. A host of 1.x loads a mod built for 1.y when y ≤ x.
+
+- `UmiEventId::FRAME` (12), payload `UmiFrame` (render thread, not
+  cancellable, not mutable): now_ms, feet position, fps, frame_ms, yaw, pitch,
+  clicks since the previous frame, ping (`-1` unknown), sprinting. No key state:
+  mods never see the player's keys (F3.4 amendment).
+- **One snapshot**: the client builds the built-in mods' `ModContext` once per
+  frame and derives the `Frame` host event from it (`frame_event(&ModContext)`
+  in the client), dispatched on the render bus right before the built-in
+  registry updates. Built-in Rust modules may subscribe to `Frame` on the core
+  bus too. The built-in registry itself stays a direct call: moving its storage
+  behind the bus would put a lock on every HUD draw (ADR-0086 amendment).
+
+### `umicraft-modhost`
+
+Host event `Frame` (`new(now_ms, position, fps, frame_ms, yaw, pitch,
+left_clicks, right_clicks, ping_ms: Option<u32>, sprinting)` or a small
+`FrameFacts` struct, accessors), `is_known`, `register`, `Send` (it holds no
+pointer: plain `Copy` payload). Tests and benches updated for API 1.0
+(`ApiVersion { major: 1, minor: 0 }`), including `tests/real_mods.rs`. A bench
+`frame_no_subscriber`.
+
+### `umicraft-modapi`
+
+`Frame` event view with the accessors (`ping_ms() -> Option<u32>`).
+Every `mods/examples/*/mod.toml` and `mods/template/mod.toml` declare
+`api_version = "1.0"`.

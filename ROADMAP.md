@@ -58,7 +58,7 @@ Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
 | M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); accounts not started | P10 (rest of menus), F1 (accounts) |
 | M13 Premium authentication | Session join and encryption done in P12 (launcher session, ADR-0053/0054; tested against a fake server, owner check with a real token open); Microsoft login, keychain and isolation in F1 | P12, F1 |
 | M14 Performance pass | Started early as F2 (ADR-0058): audit and plan in `docs/tasks/f2/README.md`, nothing implemented yet | F2 |
-| M15 Modding API v1 | Started as F3 (ADR-0086/0087, `docs/tasks/f3/README.md`) | F3 |
+| M15 Modding API v1 | F3.0–F3.9 done on `feat/modding-api` (ADR-0086/0087, `docs/tasks/f3/README.md`), API frozen as 1.0; a manual pass in a real window is pending | F3 |
 | M16 Hardening & v1.0 | Not started | P12 (proxies), F4 |
 
 ## 4. Order and dependencies

@@ -77,3 +77,13 @@ crates may use `unsafe`.
 - A field added to `UmiHost` during `0.x` breaks every mod built for the
   previous minor: acceptable before the `1.0` freeze, and the reason the
   freeze is the last step of F3.
+
+## Amendments
+
+- **2026-11-19, F3.9 — frozen as 1.0.** `UMI_API_VERSION` is `1.0`. Within major 1:
+  structs grow only by appending fields covered by their `size`, `UmiHost` only by
+  appending function pointers, event ids and status values are only added, and every
+  addition bumps the minor; nothing is removed, renamed or reordered. The layout tests
+  of `umicraft-modapi-sys/tests/abi.rs` pin every offset of 1.0 and must not be edited
+  except to add assertions. A break needs major 2 (and a new ADR). The generated
+  header `include/umicraft.h` is the C view of the same contract.

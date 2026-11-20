@@ -164,3 +164,9 @@ screens, ECS components.
   held while the client runs: a leftover file that can be locked is a crash, a locked
   one is another running instance. Spec §10: the official examples measure or show,
   they do not give an advantage (`physics_tweak` no longer changes the fall).
+- **2026-11-19, F3.9 — one frame snapshot, the registry stays direct.** The built-in
+  mods' `ModContext` and the `FRAME` event are built from one snapshot per frame and
+  emitted at one place (the `Frame` event first, on the render bus). The built-in
+  registry keeps its direct calls instead of becoming a bus subscriber: as a handler
+  it would have to live behind a lock that every HUD draw and menu call takes, for no
+  gain on one thread. The key state stays out of `FRAME` (F3.4 amendment).
