@@ -6,12 +6,15 @@ use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
-use umicraft_modapi_sys::{UmiEventId, UmiHandlerFn, UmiLevel, UmiMode, UmiStatus};
+use umicraft_modapi_sys::{
+    UmiEventId, UmiHandlerFn, UmiLevel, UmiMode, UmiPhysicsFn, UmiServiceMode, UmiStatus,
+};
 
 use crate::budget::{ModStats, Stats};
 use crate::events::is_known;
 use crate::ffi::UserPtr;
-use crate::manifest::{ModId, Permissions};
+use crate::manifest::{Load, ModId, Permissions};
+use crate::physics::{PhysicsLayer, PhysicsSlot};
 use crate::ui::shared::HostShared;
 use crate::ui::state::UiState;
 use crate::worker::WorkerSlot;
@@ -56,6 +59,7 @@ pub struct ModContext {
     /// Set once `umi_mod_init` succeeded; cleared by whoever calls `umi_mod_shutdown`.
     shutdown_due: AtomicBool,
     stats: Stats,
+    physics: PhysicsSlot,
     worker: WorkerSlot,
     pub(crate) ui: UiState,
     pub(crate) shared: Arc<HostShared>,
@@ -90,6 +94,17 @@ impl ModContext {
     /// Returns an `Arc` because the command table needs a weak pointer back to the
     /// context that registered a command.
     pub fn with_shared(id: ModId, permissions: Permissions, shared: Arc<HostShared>) -> Arc<Self> {
+        Self::with_services(id, permissions, &Load::default(), shared)
+    }
+
+    /// Like [`with_shared`](Self::with_shared) for a mod whose manifest has `load`:
+    /// its `wraps` and `replaces` lists decide which services it may register for.
+    pub fn with_services(
+        id: ModId,
+        permissions: Permissions,
+        load: &Load,
+        shared: Arc<HostShared>,
+    ) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             id,
             permissions,
@@ -99,6 +114,7 @@ impl ModContext {
             failed: AtomicBool::new(false),
             shutdown_due: AtomicBool::new(false),
             stats: Stats::default(),
+            physics: PhysicsSlot::new(load, permissions.movement),
             worker: WorkerSlot::default(),
             ui: UiState::default(),
             shared,
@@ -214,11 +230,28 @@ impl ModContext {
         UmiStatus::OK
     }
 
+    /// Registers the mod's `player_physics` layer.
+    ///
+    /// Refuses with `INVALID_ARGUMENT` a null function or an unknown mode, with
+    /// `DENIED` a mod without the `movement` permission, one whose `mod.toml` does
+    /// not list `player_physics` under `wraps` (for `WRAP`) or `replaces` (for
+    /// `REPLACE`), or any call after `init` returned, and with `CONFLICT` a second
+    /// layer: a mod has one.
+    pub fn register_physics(
+        &self,
+        mode: UmiServiceMode,
+        step: Option<UmiPhysicsFn>,
+        user: UserPtr,
+    ) -> UmiStatus {
+        self.physics.register(mode, step, user)
+    }
+
     /// Closes the registration window once `umi_mod_init` returned. On success the
     /// mod becomes enabled and owes a `umi_mod_shutdown`; on failure it is marked
     /// failed and its partial registrations, commands included, are dropped.
     pub fn finish_init(&self, succeeded: bool) {
         self.init_done.store(true, Ordering::Release);
+        self.physics.seal(succeeded);
         let withdrawn = self.ui.seal(succeeded);
         if succeeded {
             self.shutdown_due.store(true, Ordering::Release);
@@ -254,6 +287,20 @@ impl ModContext {
     /// The mod's time and drop counters, for the profiler.
     pub fn stats(&self) -> ModStats {
         self.stats.snapshot()
+    }
+
+    /// Counters of the mod's physics layer (budget [`BUDGET`](crate::BUDGET), the time
+    /// inside `physics_next` excluded).
+    pub fn physics_stats(&self) -> ModStats {
+        self.physics.stats().snapshot()
+    }
+
+    pub(crate) fn physics_counters(&self) -> &Stats {
+        self.physics.stats()
+    }
+
+    pub(crate) fn physics_layer(&self) -> Option<PhysicsLayer> {
+        self.physics.layer()
     }
 
     pub(crate) fn counters(&self) -> &Stats {

@@ -5,8 +5,9 @@
 use core::ffi::c_void;
 
 use crate::{
-    UmiBytes, UmiCommandFn, UmiEventHeader, UmiEventId, UmiHudCx, UmiHudDrawFn, UmiHudPlacement,
-    UmiModHandle, UmiSettingDef, UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
+    UmiBytes, UmiCommandFn, UmiEntityVisitFn, UmiEventHeader, UmiEventId, UmiHudCx, UmiHudDrawFn,
+    UmiHudPlacement, UmiModHandle, UmiPhysicsCx, UmiPhysicsFn, UmiServiceMode, UmiSettingDef,
+    UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
 };
 
 /// How a handler takes part in an event.
@@ -159,4 +160,31 @@ pub struct UmiHost {
     /// disabled, `INVALID_ARGUMENT` for a body the client would not send
     /// itself, `BUSY` when the queue is full. Added in API 0.4.
     pub packet_send: extern "C" fn(me: UmiModHandle, id: u32, data: UmiBytes) -> UmiStatus,
+    /// Wraps or replaces the `player_physics` service (during `umi_mod_init`
+    /// only). `DENIED` without the `movement` permission or when `mod.toml` does
+    /// not declare the service in `wraps` (or `replaces`), `CONFLICT` for a
+    /// second layer of the same mod. Added in API 0.5.
+    pub register_physics: extern "C" fn(
+        me: UmiModHandle,
+        mode: UmiServiceMode,
+        step: Option<UmiPhysicsFn>,
+        user: *mut c_void,
+    ) -> UmiStatus,
+    /// Runs the inner layers (and the built-in step) on the state the running
+    /// wrapper was given, once. `UNSUPPORTED` for a replacing layer, `DENIED`
+    /// for a second call. Added in API 0.5.
+    pub physics_next: extern "C" fn(cx: *mut UmiPhysicsCx) -> UmiStatus,
+    /// Reads the block at `(x, y, z)` into `out` as `id << 4 | metadata`.
+    /// Only on the game thread, inside a callback (a game-event intercept
+    /// handler, a command or a physics layer), else `UNSUPPORTED`;
+    /// `UNAVAILABLE` for a chunk that is not loaded. Added in API 0.5.
+    pub world_block:
+        extern "C" fn(me: UmiModHandle, x: i32, y: i32, z: i32, out: *mut u32) -> UmiStatus,
+    /// Calls `visit` for every entity of the world but the local player; same
+    /// thread rule as `world_block`. Added in API 0.5.
+    pub world_entities: extern "C" fn(
+        me: UmiModHandle,
+        visit: Option<UmiEntityVisitFn>,
+        user: *mut c_void,
+    ) -> UmiStatus,
 }

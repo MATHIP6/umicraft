@@ -87,7 +87,7 @@ pub use entity::{
     EntityRenderSnapshot, EntityStore,
 };
 pub use input::InputIntent;
-pub use physics::Player;
+pub use physics::{PhysicsOverride, Player};
 pub use prediction::{PendingTick, PredictionHistory};
 pub use shapes::{Aabb, BlockSource};
 
@@ -173,7 +173,6 @@ pub struct RenderState {
 ///
 /// The state is not shared: it lives on the game thread and the render thread
 /// only ever receives [`RenderState`] snapshots.
-#[derive(Debug, Clone)]
 pub struct GameState {
     player: Player,
     previous_position: DVec3,
@@ -181,6 +180,22 @@ pub struct GameState {
     history: PredictionHistory,
     stepper: sound::step::Stepper,
     sounds: sound::queue::SoundQueue,
+    /// Wraps or replaces the walking step when a mod asks for it.
+    physics: Option<Box<dyn PhysicsOverride>>,
+}
+
+impl std::fmt::Debug for GameState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GameState")
+            .field("player", &self.player)
+            .field("previous_position", &self.previous_position)
+            .field("tick", &self.tick)
+            .field("history", &self.history)
+            .field("stepper", &self.stepper)
+            .field("sounds", &self.sounds)
+            .field("physics_override", &self.physics.is_some())
+            .finish()
+    }
 }
 
 impl GameState {
@@ -194,6 +209,25 @@ impl GameState {
             history: PredictionHistory::new(),
             stepper: sound::step::Stepper::new(),
             sounds: sound::queue::SoundQueue::new(),
+            physics: None,
+        }
+    }
+
+    /// Installs (or removes, with `None`) the [`PhysicsOverride`] that wraps
+    /// the walking step of [`Self::tick`] and of the replay of
+    /// [`Self::apply_correction`].
+    pub fn set_physics(&mut self, physics: Option<Box<dyn PhysicsOverride>>) {
+        self.physics = physics;
+    }
+
+    /// One walking step: the override when set, `physics::step` directly
+    /// otherwise.
+    fn step_player<S: BlockSource + ?Sized>(&mut self, intent: &InputIntent, world: &S) {
+        match self.physics.as_mut() {
+            None => physics::step(&mut self.player, intent, world),
+            Some(over) => over.step(&mut self.player, intent, &mut |player| {
+                physics::step(player, intent, world);
+            }),
         }
     }
 
@@ -211,7 +245,7 @@ impl GameState {
     /// Only a sound cue allocates (its name), once per footstep.
     pub fn tick<S: BlockSource + ?Sized>(&mut self, intent: &InputIntent, world: &S) {
         self.previous_position = self.player.position;
-        physics::step(&mut self.player, intent, world);
+        self.step_player(intent, world);
         self.sounds.record_steps(
             &mut self.stepper,
             &self.player,
@@ -320,7 +354,7 @@ impl GameState {
                         break;
                     };
                     previous = self.player.position;
-                    physics::step(&mut self.player, &tick.intent, world);
+                    self.step_player(&tick.intent, world);
                     replayed.push(PendingTick {
                         intent: tick.intent,
                         position: self.player.position,
@@ -803,5 +837,123 @@ mod tests {
         assert!((middle.z - (previous.z + current.z) / 2.0).abs() < 1e-5);
         // The eye sits 1.62 above the feet.
         assert!((current.y - (1.0 + physics::EYE_HEIGHT)).abs() < 1e-9);
+    }
+
+    /// A few hundred ticks of walking, sprint-jumping and turning.
+    fn mixed_intents() -> Vec<InputIntent> {
+        (0..300_u16)
+            .map(|tick| {
+                input::RawInput {
+                    forward: if tick % 50 < 40 { 1.0 } else { 0.0 },
+                    strafe: if tick % 7 == 3 { 1.0 } else { 0.0 },
+                    jump: tick % 11 < 3,
+                    sprint: tick % 100 > 20,
+                    yaw: f32::from(tick) * 2.5,
+                    ..input::RawInput::default()
+                }
+                .to_intent()
+            })
+            .collect()
+    }
+
+    fn run_trajectory(
+        physics: Option<Box<dyn PhysicsOverride>>,
+        world: &TestBlocks,
+    ) -> Vec<(DVec3, DVec3)> {
+        let mut state = GameState::new(DVec3::new(0.5, 1.0, 0.5));
+        state.set_physics(physics);
+        mixed_intents()
+            .iter()
+            .map(|intent| {
+                state.tick(intent, world);
+                (state.position(), state.player().velocity)
+            })
+            .collect()
+    }
+
+    /// Calls the vanilla step once and counts its own calls.
+    #[derive(Default)]
+    struct Identity {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl PhysicsOverride for Identity {
+        fn step(
+            &mut self,
+            player: &mut Player,
+            _intent: &InputIntent,
+            vanilla: &mut dyn FnMut(&mut Player),
+        ) {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            vanilla(player);
+        }
+    }
+
+    struct Frozen;
+
+    impl PhysicsOverride for Frozen {
+        fn step(&mut self, _: &mut Player, _: &InputIntent, _: &mut dyn FnMut(&mut Player)) {}
+    }
+
+    struct Scaled;
+
+    impl PhysicsOverride for Scaled {
+        fn step(
+            &mut self,
+            player: &mut Player,
+            _: &InputIntent,
+            vanilla: &mut dyn FnMut(&mut Player),
+        ) {
+            vanilla(player);
+            player.velocity.x *= 0.5;
+            player.velocity.z *= 0.5;
+        }
+    }
+
+    #[test]
+    fn an_identity_override_is_bit_identical_to_none() {
+        let world = TestBlocks::flat();
+        let plain = run_trajectory(None, &world);
+        let wrapped = run_trajectory(Some(Box::new(Identity::default())), &world);
+        assert_eq!(plain, wrapped);
+    }
+
+    #[test]
+    fn an_override_that_skips_vanilla_freezes_the_player() {
+        let world = TestBlocks::flat();
+        let trajectory = run_trajectory(Some(Box::new(Frozen)), &world);
+        assert!(trajectory
+            .iter()
+            .all(|(position, _)| *position == DVec3::new(0.5, 1.0, 0.5)));
+    }
+
+    #[test]
+    fn an_override_that_scales_velocity_changes_the_trajectory() {
+        let world = TestBlocks::flat();
+        assert_ne!(
+            run_trajectory(None, &world),
+            run_trajectory(Some(Box::new(Scaled)), &world)
+        );
+    }
+
+    #[test]
+    fn the_replay_of_a_correction_uses_the_override() {
+        let world = TestBlocks::flat();
+        let identity = Identity::default();
+        let calls = identity.calls.clone();
+        let mut state = GameState::new(DVec3::new(0.0, 1.0, 0.0));
+        state.set_physics(Some(Box::new(identity)));
+        let intent = InputIntent::walking(0.0);
+        for _ in 0..10 {
+            state.tick(&intent, &world);
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 10);
+
+        let base = state.history().get(5).expect("a recorded tick").position;
+        let correction = ServerCorrection::new(base.x, base.y, base.z, 0.0, 0.0, true);
+        state.apply_correction(&correction, &world);
+        // The four ticks after the confirmed one are replayed.
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 10 + 4);
     }
 }

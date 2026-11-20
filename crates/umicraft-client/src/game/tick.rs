@@ -25,6 +25,7 @@ use super::combat;
 use super::commands::{command_of, CommandQueue};
 use super::hud::tick_hud_view;
 use super::messages::{ChunkEvent, RenderEvent};
+use super::mod_world::lend;
 use super::movement::report_movement;
 use super::particles::{spawn_ambient_particles, spawn_local_crumbs, spawn_mob_particles};
 use super::publish::{
@@ -190,16 +191,19 @@ pub(super) fn tick(
     if let (Some(state), Some(world)) = (game.state.as_mut(), game.world.as_ref()) {
         match seat {
             Some(feet) => state.ride(feet),
-            None => state.tick(
-                &intent,
-                &WithMovingBlocks {
-                    world: &WithEntities {
-                        world,
-                        boxes: &game.solid_entities,
+            // The mods' physics layers may query the world (F3.6).
+            None => lend(Some(world), &game.entities, || {
+                state.tick(
+                    &intent,
+                    &WithMovingBlocks {
+                        world: &WithEntities {
+                            world,
+                            boxes: &game.solid_entities,
+                        },
+                        moving: game.server.moving_blocks(),
                     },
-                    moving: game.server.moving_blocks(),
-                },
-            ),
+                )
+            }),
         }
     }
     if let (Some(run), Some(state)) = (game.e1.as_mut(), game.state.as_ref()) {

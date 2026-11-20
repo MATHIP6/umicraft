@@ -15,6 +15,7 @@
 mod events;
 mod exports;
 mod host;
+mod services;
 mod types;
 mod ui;
 
@@ -29,6 +30,11 @@ pub use exports::{
     UMI_MOD_INIT_SYMBOL, UMI_MOD_SHUTDOWN_SYMBOL,
 };
 pub use host::{UmiHandlerFn, UmiHost, UmiLevel, UmiMode};
+pub use services::{
+    UmiEntity, UmiEntityVisitFn, UmiPhysicsCx, UmiPhysicsFn, UmiPhysicsInput, UmiPlayerPhysics,
+    UmiServiceMode, UMI_INPUT_JUMP, UMI_INPUT_SNEAK, UMI_INPUT_SPRINT, UMI_PHYSICS_FLYING,
+    UMI_PHYSICS_IN_WATER, UMI_PHYSICS_ON_GROUND, UMI_PHYSICS_SNEAKING, UMI_PHYSICS_SPRINTING,
+};
 pub use types::{
     UmiBytes, UmiModContext, UmiModHandle, UmiStatus, UmiStr, UmiVersion, UMI_API_VERSION,
 };

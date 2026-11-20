@@ -55,6 +55,7 @@ pub(super) fn run(
     game.account_skin = account_skin;
     game.bus = mods.bus;
     game.commands = mods.commands;
+    game.physics = mods.physics;
     // The first event of the queue, which is still empty: the render thread
     // reads the mouse look from this slot, never from the queue.
     let _ = frames.try_send(RenderEvent::LookSlot(Arc::clone(&game.look)));

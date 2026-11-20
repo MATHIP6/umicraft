@@ -20,6 +20,7 @@ use crate::error::{EnableError, LoadError, LoadFailure};
 use crate::ffi::{exports_of, handle_of, host_table, open_library};
 use crate::load::{authorize, locate_library};
 use crate::manifest::{Manifest, ModId};
+use crate::physics::PhysicsChain;
 use crate::resolve::Resolution;
 use crate::trust::TrustList;
 use crate::ui::shared::HostShared;
@@ -93,6 +94,11 @@ impl ModHost {
         trust: &mut TrustList,
         confirm: &mut dyn FnMut(&Manifest, &str) -> bool,
     ) -> Result<(), LoadError> {
+        if let Some(service) = manifest.load.unknown_service() {
+            return Err(LoadError::UnknownService {
+                service: service.clone(),
+            });
+        }
         let path = locate_library(manifest, mods_dir)?;
         authorize(manifest, &path, trust, confirm)?;
         let library = open_library(&path)?;
@@ -104,9 +110,10 @@ impl ModHost {
                 module,
             });
         }
-        let context = ModContext::with_shared(
+        let context = ModContext::with_services(
             manifest.id.clone(),
             manifest.permissions,
+            &manifest.load,
             Arc::clone(&self.shared),
         );
         let status = (exports.init)(&*self.table, handle_of(&context));
@@ -156,6 +163,13 @@ impl ModHost {
         for loaded in &self.mods {
             install_mod(bus, thread, &loaded.context);
         }
+    }
+
+    /// The `player_physics` layers of the loaded mods, or `None` when no mod
+    /// registered one. Build it once after loading; the chain consults each mod's
+    /// switch per step.
+    pub fn physics(&self) -> Option<PhysicsChain> {
+        PhysicsChain::new(self.mods.iter().map(|m| &m.context))
     }
 
     /// The counters of every mod, in load order, for the profiler.

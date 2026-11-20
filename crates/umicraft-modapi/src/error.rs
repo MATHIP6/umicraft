@@ -18,6 +18,10 @@ pub enum ModError {
     /// valid and may succeed if retried later. Only
     /// [`Packets::send`](crate::Packets::send) can fail this way.
     Busy,
+    /// The chunk asked about is not loaded (`UmiStatus::UNAVAILABLE`). Only
+    /// [`World::block`](crate::World::block) can fail this way; the answer may
+    /// change once the chunk arrives.
+    Unavailable,
     /// A mod-defined failure, typically from [`Mod::init`](crate::Mod::init).
     Message(String),
 }
@@ -30,13 +34,16 @@ impl ModError {
 }
 
 impl ModError {
-    /// Maps a host status to `Ok` for `OK`, to [`ModError::Busy`] for `BUSY`
-    /// and to a refusal otherwise.
+    /// Maps a host status to `Ok` for `OK`, to [`ModError::Busy`] for `BUSY`,
+    /// to [`ModError::Unavailable`] for `UNAVAILABLE` and to a refusal
+    /// otherwise.
     pub(crate) fn check(status: UmiStatus) -> Result<(), Self> {
         if status.is_ok() {
             Ok(())
         } else if status == UmiStatus::BUSY {
             Err(Self::Busy)
+        } else if status == UmiStatus::UNAVAILABLE {
+            Err(Self::Unavailable)
         } else {
             Err(Self::HostRefused(status))
         }
@@ -50,6 +57,7 @@ impl fmt::Display for ModError {
                 write!(f, "host refused the request (status {})", status.0)
             }
             Self::Busy => f.write_str("the host is busy, try again later"),
+            Self::Unavailable => f.write_str("the chunk is not loaded"),
             Self::Message(text) => f.write_str(text),
         }
     }

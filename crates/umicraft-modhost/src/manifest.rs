@@ -22,6 +22,14 @@ pub use platform::{library_file_name, platform_dir, Arch, Os};
 
 use crate::error::ManifestError;
 
+/// The one service v1 lets a mod wrap or replace: the step that moves the local player.
+pub const PLAYER_PHYSICS: &str = "player_physics";
+
+/// Every service a manifest may name in `wraps` or `replaces`; the loader refuses
+/// anything else ([`LoadError::UnknownService`](crate::LoadError::UnknownService)) so a
+/// typo is reported instead of silently doing nothing.
+pub const KNOWN_SERVICES: &[&str] = &[PLAYER_PHYSICS];
+
 /// The `[load]` table: ordering hints and service hooks.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -32,6 +40,26 @@ pub struct Load {
     pub replaces: Vec<ServiceId>,
     /// Services this mod wraps; any number of mods may, chained in load order.
     pub wraps: Vec<ServiceId>,
+}
+
+impl Load {
+    /// The first service in `replaces` or `wraps` that the host does not offer.
+    pub fn unknown_service(&self) -> Option<&ServiceId> {
+        let named = self.replaces.iter().chain(&self.wraps);
+        named
+            .into_iter()
+            .find(|s| !KNOWN_SERVICES.contains(&s.as_str()))
+    }
+
+    /// Whether `service` is in `wraps`.
+    pub fn wraps_service(&self, service: &str) -> bool {
+        self.wraps.iter().any(|s| s.as_str() == service)
+    }
+
+    /// Whether `service` is in `replaces`.
+    pub fn replaces_service(&self, service: &str) -> bool {
+        self.replaces.iter().any(|s| s.as_str() == service)
+    }
 }
 
 /// The `[permissions]` table: what the mod asks for, shown to the user.

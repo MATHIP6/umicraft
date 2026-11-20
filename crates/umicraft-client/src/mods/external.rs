@@ -14,7 +14,7 @@ use umicraft_core::events::EventBus;
 use umicraft_modapi_sys::UMI_API_VERSION;
 use umicraft_modhost::{
     discover, resolve, ApiVersion, Candidate, CommandTable, CrashSentinel, Discovered, EventThread,
-    ModHost, ModId, PacketOutbox, SentinelGuard, TrustList,
+    ModHost, ModId, PacketOutbox, PhysicsChain, SentinelGuard, TrustList,
 };
 
 use super::external_config;
@@ -125,6 +125,12 @@ impl ExternalMods {
     /// `None` in safe mode.
     pub(crate) fn packet_outbox(&self) -> Option<PacketOutbox> {
         self.host.as_ref().map(ModHost::packet_outbox)
+    }
+
+    /// The mods' `player_physics` layers for the game thread of a new session;
+    /// `None` in safe mode or when no mod registered one.
+    pub(crate) fn physics(&self) -> Option<PhysicsChain> {
+        self.host.as_ref().and_then(ModHost::physics)
     }
 
     /// Turns the server-compatible mode on or off: while on, the mods that alter

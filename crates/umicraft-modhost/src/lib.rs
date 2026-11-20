@@ -20,6 +20,10 @@
 //! F3.4 adds what the player sees ([`ui`]): schema settings, HUD widgets, key bindings and
 //! client commands that mods declare during init, plus the [`ModHost`] methods the mods
 //! menu, the HUD, the controls page and the chat use.
+//!
+//! F3.6 adds the `player_physics` service ([`PhysicsChain`], built by
+//! [`ModHost::physics`]) and read-only world queries ([`WorldQuery`], lent to the game
+//! thread with [`with_world`]).
 
 mod budget;
 mod context;
@@ -33,11 +37,13 @@ mod host;
 mod load;
 pub mod manifest;
 mod packets;
+mod physics;
 pub mod resolve;
 mod sentinel;
 mod trust;
 pub mod ui;
 mod worker;
+mod world;
 
 pub use budget::{ModStats, BUDGET, HUD_BUDGET, LOG_EVERY, MAX_CONSECUTIVE_OVERRUNS};
 pub use context::{ModContext, Subscription};
@@ -55,9 +61,10 @@ pub use ffi::{host_table, UserPtr};
 pub use host::ModHost;
 pub use manifest::{
     library_file_name, platform_dir, ApiVersion, ApiVersionError, Arch, Load, Manifest, ModId, Os,
-    Permissions, ServiceId,
+    Permissions, ServiceId, KNOWN_SERVICES, PLAYER_PHYSICS,
 };
 pub use packets::{PacketOutbox, MAX_PACKET_BODY_BYTES};
+pub use physics::PhysicsChain;
 pub use resolve::{resolve, Candidate, RejectReason, Rejection, Resolution};
 pub use sentinel::{CrashSentinel, SentinelGuard};
 pub use trust::{sha256_file, TrustList};
@@ -68,3 +75,4 @@ pub use ui::settings::{SettingSpec, SettingSpecKind};
 pub use ui::shared::HostShared;
 pub use ui::view::{KeyBinding, ModView, SettingView, WidgetView};
 pub use worker::QUEUE_CAPACITY;
+pub use world::{with_world, EntityView, WorldQuery};

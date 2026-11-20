@@ -180,3 +180,36 @@ fn one_failure_does_not_stop_the_others() {
     let ids: Vec<_> = failures.iter().map(|f| f.id.as_str()).collect();
     assert_eq!(ids, ["one", "two"]);
 }
+
+#[test]
+fn an_unknown_service_fails_the_mod_before_its_library_is_touched() {
+    let tmp = TempDir::new();
+    for list in ["wraps", "replaces"] {
+        let text = format!(
+            "{}[load]\n{list} = [\"player_physics\", \"chunk_mesher\"]\n",
+            manifest_text("svc")
+        );
+        let resolution = Resolution {
+            order: vec![Manifest::parse(&text).unwrap()],
+            rejected: Vec::new(),
+        };
+        // No library on disk: `LibraryMissing` would come first if the check were later.
+        let mut confirmed = false;
+        let (host, failures) = ModHost::load(
+            &resolution,
+            tmp.path(),
+            &mut TrustList::default(),
+            |_, _| {
+                confirmed = true;
+                true
+            },
+        );
+        assert_eq!(failures.len(), 1, "{list}");
+        assert!(
+            matches!(&failures[0].reason, LoadError::UnknownService { service } if service.as_str() == "chunk_mesher"),
+            "{list}: {:?}",
+            failures[0].reason
+        );
+        assert!(!confirmed && host.physics().is_none());
+    }
+}

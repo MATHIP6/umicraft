@@ -166,7 +166,7 @@ fn the_compatible_mode_card_is_its_own_request_not_a_mod() {
 fn applying_the_compatible_mode_switches_the_host_and_changes_no_mod_file() {
     let nothing = umicraft_modhost::resolve(
         std::iter::empty(),
-        umicraft_modhost::ApiVersion { major: 0, minor: 4 },
+        umicraft_modhost::ApiVersion { major: 0, minor: 5 },
     );
     let dir = std::env::temp_dir();
     let (host, _) = ModHost::load(

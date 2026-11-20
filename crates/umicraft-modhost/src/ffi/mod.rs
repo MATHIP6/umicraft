@@ -11,11 +11,17 @@
 mod event;
 mod hud;
 mod packet;
+mod physics;
 mod ui;
+mod world;
 
 #[cfg(test)]
 pub(crate) use event::testing;
 pub(crate) use hud::with_hud_cx;
+#[cfg(test)]
+pub(crate) use physics::testing as physics_testing;
+pub(crate) use physics::{with_physics_cx, StatePtr};
+pub(crate) use world::lend_world;
 
 use core::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -154,6 +160,10 @@ pub fn host_table() -> UmiHost {
         register_command: ui::host_register_command,
         chat_print: ui::host_chat_print,
         packet_send: packet::host_packet_send,
+        register_physics: physics::host_register_physics,
+        physics_next: physics::host_physics_next,
+        world_block: world::host_world_block,
+        world_entities: world::host_world_entities,
     }
 }
 

@@ -484,6 +484,30 @@ fn bounds_at(position: DVec3) -> Aabb {
     )
 }
 
+/// A hook that wraps or replaces the walking step of the local player.
+///
+/// [`crate::GameState`] calls [`PhysicsOverride::step`] instead of
+/// [`step`] for every walking tick, and again for every past tick that is
+/// replayed when a server correction is applied. The override must therefore
+/// be a function of the player and the intent only (plus its own settings):
+/// a hidden counter or clock would make the replay diverge from the first
+/// run.
+///
+/// `vanilla` runs the unmodified 1.8 step ([`step`]) against the world of the
+/// tick. An override may call it once, not at all (it then replaces the
+/// physics) or around its own changes to `player`. Without an override
+/// nothing changes: the step is called directly and stays bit for bit the
+/// one of ADR-0076.
+pub trait PhysicsOverride: Send {
+    /// Advances `player` by one tick for `intent`.
+    fn step(
+        &mut self,
+        player: &mut Player,
+        intent: &InputIntent,
+        vanilla: &mut dyn FnMut(&mut Player),
+    );
+}
+
 /// Advances the player by exactly one tick.
 ///
 /// The function is pure with respect to the world: it only reads blocks, and

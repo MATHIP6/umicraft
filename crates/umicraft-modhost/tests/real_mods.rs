@@ -2,7 +2,8 @@
 
 //! Loads the real `hello` and `panicking` example cdylibs (F3.2 acceptance test) and
 //! dispatches events to them through a core `EventBus` (F3.3); `packet_logger`
-//! observes and injects packets (F3.5).
+//! observes and injects packets (F3.5); `physics_tweak` wraps the player physics and
+//! queries the world (F3.6).
 //!
 //! The libraries are built once per test binary with `cargo build --offline`. The
 //! target directory is `CARGO_TARGET_DIR` when set, otherwise it is derived from the
@@ -19,11 +20,11 @@ use std::time::Duration;
 
 use umicraft_builtin_mods::SettingValue;
 use umicraft_core::EventBus;
-use umicraft_modapi_sys::{UmiEventId, UmiMode, UmiStatus};
+use umicraft_modapi_sys::{UmiEventId, UmiMode, UmiPhysicsInput, UmiPlayerPhysics, UmiStatus};
 use umicraft_modhost::{
-    discover, library_file_name, platform_dir, resolve, ApiVersion, Arch, Candidate, ChatSend,
-    CommandOutcome, EventThread, KeyPressed, LoadError, ModHost, ModId, Os, PacketReceived,
-    PostTick, PreTick, TrustList,
+    discover, library_file_name, platform_dir, resolve, with_world, ApiVersion, Arch, Candidate,
+    ChatSend, CommandOutcome, EntityView, EventThread, KeyPressed, LoadError, ModHost, ModId, Os,
+    PacketReceived, PostTick, PreTick, TrustList, WorldQuery,
 };
 
 /// The directory holding the built example libraries (`<target>/<profile>`).
@@ -39,6 +40,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-panicking",
                 "-p",
                 "umicraft-example-packet-logger",
+                "-p",
+                "umicraft-example-physics-tweak",
                 "--offline",
             ])
             .status()
@@ -111,7 +114,7 @@ fn hello_loads_panicking_fails_and_handlers_run() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 4 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 5 });
     assert_eq!(resolution.order.len(), 2);
 
     let mut trust = TrustList::default();
@@ -192,7 +195,7 @@ fn hello_declares_settings_a_widget_a_key_and_a_command() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 4 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 5 });
     let (host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -262,7 +265,7 @@ fn packet_logger_observes_injects_and_yields_to_the_compatible_mode() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 4 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 5 });
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -288,5 +291,103 @@ fn packet_logger_observes_injects_and_yields_to_the_compatible_mode() {
     assert_eq!(host.commands().run("/swing"), CommandOutcome::NotACommand);
     host.set_server_compat(false);
     assert_eq!(host.commands().run("/swing"), CommandOutcome::Ran);
+    host.shutdown_all();
+}
+
+/// A flat world of stone (id 1) below y = 64 with one other player.
+struct FlatWorld;
+
+impl WorldQuery for FlatWorld {
+    fn block(&self, _x: i32, y: i32, _z: i32) -> Option<u16> {
+        Some(if y < 64 { 1 << 4 } else { 0 })
+    }
+
+    fn visit_entities(&self, visit: &mut dyn FnMut(&EntityView<'_>) -> bool) {
+        visit(&EntityView {
+            id: 7,
+            kind: "player",
+            position: [3.0, 64.0, 4.0],
+            yaw: 0.0,
+            pitch: 0.0,
+            name: "Steve",
+        });
+    }
+}
+
+fn falling(y: f64) -> UmiPlayerPhysics {
+    UmiPlayerPhysics {
+        size: std::mem::size_of::<UmiPlayerPhysics>() as u32,
+        flags: 0,
+        position: [0.0, y, 0.0],
+        velocity: [0.0, -1.0, 0.0],
+        yaw: 0.0,
+        pitch: 0.0,
+        fall_distance: 0.0,
+    }
+}
+
+/// The real `physics_tweak`: untouched at its default, scales the fall when set,
+/// and reads the world from its game-thread callbacks into its widget.
+#[test]
+fn physics_tweak_wraps_the_step_and_queries_the_world() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "physics_tweak");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 5 });
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let chain = host.physics().unwrap();
+    assert!(chain.is_active());
+    let input = UmiPhysicsInput {
+        size: std::mem::size_of::<UmiPhysicsInput>() as u32,
+        flags: 0,
+        forward: 0.0,
+        strafe: 0.0,
+        yaw: 0.0,
+        pitch: 0.0,
+    };
+    let mut vanilla_runs = 0;
+    let mut vanilla = |state: &mut UmiPlayerPhysics| {
+        vanilla_runs += 1;
+        state.position[1] += state.velocity[1];
+    };
+
+    // At the default fall speed the wrapper only runs the inner step.
+    let mut state = falling(70.0);
+    with_world(&FlatWorld, || chain.step(&mut state, &input, &mut vanilla));
+    assert_eq!(state.velocity, [0.0, -1.0, 0.0]);
+    assert_eq!(state.position[1], 69.0);
+
+    host.set_setting(
+        &id("physics_tweak"),
+        "fall_speed",
+        &SettingValue::Number(0.5),
+    )
+    .unwrap();
+    let mut state = falling(70.0);
+    with_world(&FlatWorld, || chain.step(&mut state, &input, &mut vanilla));
+    assert_eq!(state.velocity, [0.0, -0.5, 0.0]);
+    assert_eq!(vanilla_runs, 2);
+
+    // The PostTick intercept queries the world (lent on this thread) for the widget.
+    let mut game = EventBus::default();
+    host.install(&mut game, EventThread::Game);
+    let mut state = falling(64.0);
+    with_world(&FlatWorld, || {
+        chain.step(&mut state, &input, &mut |_| {});
+        game.dispatch(&mut PostTick::new(1));
+    });
+    host.draw_widgets();
+    let mut lines = Vec::new();
+    host.visit_widgets(|w| lines.extend(w.content.lines().iter().map(|l| l.text.clone())));
+    assert_eq!(lines, ["under you: 1:0", "nearest player: Steve (5.0 m)"]);
+
+    // The server-compatible mode holds a movement mod off.
+    host.set_server_compat(true);
+    assert!(!chain.is_active());
     host.shutdown_all();
 }

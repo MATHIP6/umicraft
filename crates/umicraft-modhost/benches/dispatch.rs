@@ -12,10 +12,13 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use umicraft_builtin_mods::HudPlacement;
 use umicraft_core::module::ModuleId;
 use umicraft_core::EventBus;
-use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiHudCx, UmiMode, UmiStatus, UmiStr};
+use umicraft_modapi_sys::{
+    UmiEventHeader, UmiEventId, UmiHudCx, UmiMode, UmiPhysicsCx, UmiPhysicsInput, UmiPlayerPhysics,
+    UmiServiceMode, UmiStatus, UmiStr,
+};
 use umicraft_modhost::{
-    host_table, install_mod, ChatSend, EventThread, ModContext, PacketReceived, Permissions,
-    PreTick, UserPtr,
+    host_table, install_mod, ChatSend, EventThread, Load, ModContext, PacketReceived, Permissions,
+    PhysicsChain, PreTick, ServiceId, UserPtr,
 };
 
 extern "C" fn noop(_: *mut UmiEventHeader, _: *mut c_void) -> UmiStatus {
@@ -141,5 +144,66 @@ fn draw_widgets(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, dispatch, draw_widgets);
+/// A wrapper that only calls `next`: the floor cost of having a layer.
+extern "C" fn identity_layer(
+    cx: *mut UmiPhysicsCx,
+    _: *mut UmiPlayerPhysics,
+    _: *const UmiPhysicsInput,
+    _: *mut c_void,
+) -> UmiStatus {
+    (host_table().physics_next)(cx)
+}
+
+fn physics_chain_with_identity_wrapper() -> (PhysicsChain, Arc<ModContext>) {
+    let permissions = Permissions {
+        movement: true,
+        ..Permissions::default()
+    };
+    let load = Load {
+        wraps: vec![ServiceId::try_from("player_physics".to_owned()).unwrap()],
+        ..Load::default()
+    };
+    let context = ModContext::with_services(
+        "bench".to_owned().try_into().unwrap(),
+        permissions,
+        &load,
+        Arc::default(),
+    );
+    let user = UserPtr::new(std::ptr::null_mut());
+    let status = context.register_physics(UmiServiceMode::WRAP, Some(identity_layer), user);
+    assert_eq!(status, UmiStatus::OK);
+    context.finish_init(true);
+    let chain = PhysicsChain::new([&context]).unwrap();
+    (chain, context)
+}
+
+fn physics(c: &mut Criterion) {
+    let (chain, _context) = physics_chain_with_identity_wrapper();
+    let input = UmiPhysicsInput {
+        size: core::mem::size_of::<UmiPhysicsInput>() as u32,
+        flags: 0,
+        forward: 1.0,
+        strafe: 0.0,
+        yaw: 0.0,
+        pitch: 0.0,
+    };
+    let mut state = UmiPlayerPhysics {
+        size: core::mem::size_of::<UmiPlayerPhysics>() as u32,
+        flags: 0,
+        position: [0.0; 3],
+        velocity: [0.0; 3],
+        yaw: 0.0,
+        pitch: 0.0,
+        fall_distance: 0.0,
+    };
+    c.bench_function("modhost_physics/physics_chain_one_identity_wrapper", |b| {
+        b.iter(|| {
+            chain.step(black_box(&mut state), black_box(&input), &mut |s| {
+                s.velocity[1] += 0.08;
+            });
+        });
+    });
+}
+
+criterion_group!(benches, dispatch, draw_widgets, physics);
 criterion_main!(benches);

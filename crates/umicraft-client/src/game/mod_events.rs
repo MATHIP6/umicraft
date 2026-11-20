@@ -18,11 +18,14 @@ use umicraft_game::chat::{commands, Position};
 use umicraft_modapi_sys::{
     UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
 };
-use umicraft_modhost::{ChatReceived, ChatSend, CommandOutcome, CommandTable, PostTick, PreTick};
+use umicraft_modhost::{
+    ChatReceived, ChatSend, CommandOutcome, CommandTable, PhysicsChain, PostTick, PreTick,
+};
 
 use super::chat::{local_chat_line, push_chat};
 use super::commands::CommandQueue;
 use super::messages::{ChunkEvent, RenderEvent};
+use super::mod_world::lend;
 use super::state::Game;
 use super::tick::tick;
 
@@ -45,6 +48,8 @@ pub struct GameMods {
     pub bus: EventBus,
     /// The commands of the mods (`/name`); `None` without mods.
     pub commands: Option<CommandTable>,
+    /// The mods' `player_physics` layers; `None` when no mod registered one.
+    pub physics: Option<PhysicsChain>,
 }
 
 /// Runs one game tick between its [`PreTick`] and [`PostTick`] events.
@@ -60,11 +65,15 @@ pub(super) fn run_tick(
 ) {
     let number = game.status_data.ticks;
     if game.bus.has_subscribers::<PreTick>() {
-        game.bus.dispatch(&mut PreTick::new(number));
+        lend(game.world.as_ref(), &game.entities, || {
+            game.bus.dispatch(&mut PreTick::new(number))
+        });
     }
     tick(game, queue, frames, chunks, tick_time);
     if game.bus.has_subscribers::<PostTick>() {
-        game.bus.dispatch(&mut PostTick::new(number));
+        lend(game.world.as_ref(), &game.entities, || {
+            game.bus.dispatch(&mut PostTick::new(number))
+        });
     }
 }
 
@@ -139,9 +148,13 @@ pub(super) fn typed_chat(game: &mut Game, message: String) -> Option<String> {
     let outcome = game
         .commands
         .as_ref()
-        .map_or(CommandOutcome::NotACommand, |table| table.run(&message));
+        .map_or(CommandOutcome::NotACommand, |table| {
+            lend(game.world.as_ref(), &game.entities, || table.run(&message))
+        });
     match line_action(outcome) {
-        LineAction::Send => outgoing_chat(&mut game.bus, message),
+        LineAction::Send => lend(game.world.as_ref(), &game.entities, || {
+            outgoing_chat(&mut game.bus, message)
+        }),
         LineAction::Swallow => None,
         LineAction::SwallowAndWarn => {
             let lang = crate::hud::chat::lang();

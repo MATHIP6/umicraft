@@ -48,7 +48,7 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (136, 8));
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (168, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -75,7 +75,7 @@ fn version_compatibility_rules() {
         assert_eq!(host.accepts(module), expected, "{host:?} vs {module:?}");
     }
     assert!(UMI_API_VERSION.accepts(UMI_API_VERSION));
-    assert_eq!(UMI_API_VERSION, v(0, 4));
+    assert_eq!(UMI_API_VERSION, v(0, 5));
 }
 
 #[test]
@@ -207,4 +207,28 @@ fn packet_payload_layout() {
     assert_eq!(UmiEventId::PACKET_RECEIVED, UmiEventId(10));
     assert_eq!(UmiEventId::PACKET_SEND, UmiEventId(11));
     assert_eq!(UmiStatus::BUSY, UmiStatus(7));
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn service_and_world_layouts() {
+    assert_eq!(offset_of!(UmiPlayerPhysics, flags), 4);
+    assert_eq!(offset_of!(UmiPlayerPhysics, position), 8);
+    assert_eq!(offset_of!(UmiPlayerPhysics, velocity), 32);
+    assert_eq!(offset_of!(UmiPlayerPhysics, yaw), 56);
+    assert_eq!(offset_of!(UmiPlayerPhysics, fall_distance), 64);
+    assert_eq!(size_of::<UmiPlayerPhysics>(), 72);
+    assert_eq!(offset_of!(UmiPhysicsInput, forward), 8);
+    assert_eq!(size_of::<UmiPhysicsInput>(), 24);
+    assert_eq!(offset_of!(UmiEntity, kind), 8);
+    assert_eq!(offset_of!(UmiEntity, position), 24);
+    assert_eq!(offset_of!(UmiEntity, yaw), 48);
+    assert_eq!(offset_of!(UmiEntity, name), 56);
+    assert_eq!(size_of::<UmiEntity>(), 72);
+    assert_eq!(offset_of!(UmiHost, register_physics), 136);
+    assert_eq!(offset_of!(UmiHost, physics_next), 144);
+    assert_eq!(offset_of!(UmiHost, world_block), 152);
+    assert_eq!(offset_of!(UmiHost, world_entities), 160);
+    assert_eq!(UmiStatus::UNAVAILABLE, UmiStatus(8));
+    assert_eq!(UmiServiceMode::REPLACE, UmiServiceMode(1));
 }

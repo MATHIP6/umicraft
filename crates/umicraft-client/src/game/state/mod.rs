@@ -21,7 +21,7 @@ use umicraft_game::shapes::selection_shape;
 use umicraft_game::traffic::ServerView;
 use umicraft_game::view::Perspective;
 use umicraft_game::GameState;
-use umicraft_modhost::CommandTable;
+use umicraft_modhost::{CommandTable, PhysicsChain};
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::{HudState, OutlineBox};
 use umicraft_world::{BlockPos, ChunkPos, World};
@@ -177,6 +177,9 @@ pub(super) struct Game {
     pub(super) bus: EventBus,
     /// The client commands of the mods (`/name`), run before a line is sent.
     pub(super) commands: Option<CommandTable>,
+    /// The mods' `player_physics` layers, set on every new player state; `None`
+    /// when no mod registered one (F3.6).
+    pub(super) physics: Option<PhysicsChain>,
 }
 
 impl Game {
@@ -235,6 +238,7 @@ impl Game {
             metrics: TickMetrics::default(),
             bus: EventBus::default(),
             commands: None,
+            physics: None,
         }
     }
 

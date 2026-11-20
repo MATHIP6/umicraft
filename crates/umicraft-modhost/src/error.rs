@@ -119,6 +119,13 @@ pub enum LoadError {
         /// The version the library reports.
         module: UmiVersion,
     },
+    /// The manifest wraps or replaces a service the host does not offer. Checked
+    /// before the library is opened, so nothing of the mod runs.
+    #[error("the manifest names an unknown service `{service}` in `wraps` or `replaces`")]
+    UnknownService {
+        /// The service as written in `mod.toml`.
+        service: ServiceId,
+    },
     /// `umi_mod_init` returned a status other than `OK` (a Rust mod reports a
     /// caught panic as `PANICKED`).
     #[error("`umi_mod_init` failed with status {}", .0.0)]

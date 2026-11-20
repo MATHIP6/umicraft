@@ -30,6 +30,16 @@
 //! [`KeyPressed`]; [`InitCx::command`] adds a `/command`; [`InitCx::chat`]
 //! gives a [`Chat`] to print local lines.
 //!
+//! # Physics and world queries
+//!
+//! A mod with `movement = true` and `wraps = ["player_physics"]` (or
+//! `replaces`) in `mod.toml` can take part in the player's movement step:
+//! [`InitCx::wrap_physics`] and [`InitCx::replace_physics`] register a closure
+//! that gets a [`Physics`]. It runs on the game thread under a time budget and
+//! runs again for past ticks when the server corrects the position, so keep it
+//! a function of state and input. [`InitCx::world`] gives a [`World`] to read
+//! blocks and entities, answered only on the game thread inside a callback.
+//!
 //! Setters work only inside [`InitCx::intercept`] handlers; observers get a
 //! copy and the host answers `DENIED`.
 //!
@@ -56,9 +66,11 @@ mod hud;
 mod init;
 mod logger;
 mod packets;
+mod physics;
 #[doc(hidden)]
 pub mod private;
 mod setting;
+mod world;
 
 pub use chat::Chat;
 pub use error::ModError;
@@ -70,7 +82,9 @@ pub use hud::{Anchor, Hud, Placement};
 pub use init::{InitCx, Mod};
 pub use logger::Logger;
 pub use packets::Packets;
+pub use physics::{Input, Physics, PlayerState};
 pub use setting::Setting;
+pub use world::{Block, Entity, World};
 
 /// Exports `umi_mod_api_version`, `umi_mod_init` and `umi_mod_shutdown` for a
 /// type implementing [`Mod`]; use it once per mod library.

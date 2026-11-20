@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
-    umicraft_mod, Anchor, Chat, ChatReceived, ChatSend, Connected, Disconnected, InitCx,
-    KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Placement, PostTick, PreTick,
-    ScreenClosed, ScreenOpened, Setting,
+    umicraft_mod, Anchor, Block, Chat, ChatReceived, ChatSend, Connected, Disconnected, InitCx,
+    KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Physics, Placement, PostTick,
+    PreTick, ScreenClosed, ScreenOpened, Setting, World,
 };
 use umicraft_modapi_sys::*;
 
@@ -36,6 +36,13 @@ static FAIL_INIT: AtomicBool = AtomicBool::new(false);
 static PANIC_ON_TICK: AtomicBool = AtomicBool::new(false);
 static REFUSE_SUBSCRIBE: AtomicBool = AtomicBool::new(false);
 static REFUSE_HUD: AtomicBool = AtomicBool::new(false);
+/// Make the physics layer fail, or register it as a replacing layer.
+static FAIL_PHYSICS: AtomicBool = AtomicBool::new(false);
+static REPLACE_PHYSICS: AtomicBool = AtomicBool::new(false);
+/// Calls of the fake `physics_next`.
+static NEXT_CALLS: AtomicUsize = AtomicUsize::new(0);
+/// The physics layers the fake host registered, with their mode.
+static LAYERS: Mutex<Vec<Layer>> = Mutex::new(Vec::new());
 /// Setting definitions the fake host received, one `kind:key:label:details` each.
 static DEFS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// The values `setting_get` answers with, by key; a missing key is unknown.
@@ -62,6 +69,14 @@ struct Ui {
     unknown: Setting<u32>,
     chat: Chat,
     packets: Packets,
+    world: World,
+}
+
+#[derive(Clone, Copy)]
+struct Layer {
+    mode: UmiServiceMode,
+    step: UmiPhysicsFn,
+    user: usize,
 }
 
 struct Widget {
@@ -137,6 +152,7 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
         unknown: cx.color("other", "Other", 7)?,
         chat: cx.chat(),
         packets: cx.packets(),
+        world: cx.world(),
     };
     *UI.lock().unwrap() = Some(ui);
     let placement = Placement::new(Anchor::BottomRight)
@@ -165,6 +181,43 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
     })
 }
 
+/// Reads the input, changes the writable state and runs the inner layers.
+fn physics_layer(physics: &mut Physics<'_>) -> Result<(), ModError> {
+    let input = physics.input();
+    see(format!(
+        "input {} {} {} {} {} {} {}",
+        input.forward(),
+        input.strafe(),
+        input.jump(),
+        input.sneak(),
+        input.sprint(),
+        input.yaw(),
+        input.pitch()
+    ));
+    assert!(!FAIL_PHYSICS.load(SeqCst), "layer failed");
+    physics.state_mut().set_on_ground(true);
+    physics.state_mut().set_sprinting(false);
+    physics.state_mut().set_fall_distance(2.5);
+    let result = physics.next();
+    let state = physics.state();
+    see(format!(
+        "state {:?} {:?} {} {} {} {} {} {} {}",
+        state.position(),
+        state.velocity(),
+        state.on_ground(),
+        state.sprinting(),
+        state.sneaking(),
+        state.flying(),
+        state.in_water(),
+        state.yaw(),
+        state.pitch()
+    ));
+    see(format!("fall {}", state.fall_distance()));
+    physics.state_mut().set_velocity([1.0, 2.0, 3.0]);
+    physics.state_mut().set_position([4.0, 5.0, 6.0]);
+    result
+}
+
 struct TestMod;
 
 impl Mod for TestMod {
@@ -183,6 +236,11 @@ impl Mod for TestMod {
         })?;
         register_view_handlers(cx)?;
         register_ui(cx)?;
+        if REPLACE_PHYSICS.load(SeqCst) {
+            cx.replace_physics(physics_layer)?;
+        } else {
+            cx.wrap_physics(physics_layer)?;
+        }
         if FAIL_INIT.load(SeqCst) {
             return Err(ModError::msg("nope"));
         }
@@ -426,6 +484,78 @@ extern "C" fn fake_packet_send(_me: UmiModHandle, id: u32, data: UmiBytes) -> Um
     *PACKET_STATUS.lock().unwrap()
 }
 
+extern "C" fn fake_register_physics(
+    _me: UmiModHandle,
+    mode: UmiServiceMode,
+    step: Option<UmiPhysicsFn>,
+    user: *mut c_void,
+) -> UmiStatus {
+    LAYERS.lock().unwrap().push(Layer {
+        mode,
+        step: step.expect("trampoline is never null"),
+        user: user as usize,
+    });
+    UmiStatus::OK
+}
+
+/// Like the host: a replacing layer has nothing inside; the state gains 1 in y.
+extern "C" fn fake_physics_next(cx: *mut UmiPhysicsCx) -> UmiStatus {
+    assert!(!cx.is_null());
+    if REPLACE_PHYSICS.load(SeqCst) {
+        return UmiStatus::UNSUPPORTED;
+    }
+    NEXT_CALLS.fetch_add(1, SeqCst);
+    // SAFETY: the test passes this cx pointer to the state it owns (see
+    // `run_layer`), as the real host does.
+    unsafe { (*cx.cast::<UmiPlayerPhysics>()).velocity[1] += 1.0 };
+    UmiStatus::OK
+}
+
+/// `x == 0` is stone with metadata 3, `x == 1` an unloaded chunk, else refused.
+extern "C" fn fake_world_block(
+    _me: UmiModHandle,
+    x: i32,
+    _y: i32,
+    _z: i32,
+    out: *mut u32,
+) -> UmiStatus {
+    match x {
+        0 => {
+            // SAFETY: the module under test passes a writable `u32`.
+            unsafe { *out = 1 << 4 | 3 };
+            UmiStatus::OK
+        }
+        1 => UmiStatus::UNAVAILABLE,
+        _ => UmiStatus::UNSUPPORTED,
+    }
+}
+
+/// Visits three entities; a non-`OK` answer stops and is returned, as the
+/// real host does.
+extern "C" fn fake_world_entities(
+    _me: UmiModHandle,
+    visit: Option<UmiEntityVisitFn>,
+    user: *mut c_void,
+) -> UmiStatus {
+    let visit = visit.expect("trampoline is never null");
+    for (id, kind, name) in [(7, "player", "Ann"), (8, "zombie", ""), (9, "item", "x")] {
+        let entity = UmiEntity {
+            size: size_of::<UmiEntity>() as u32,
+            id,
+            kind: text(kind),
+            position: [f64::from(id), 64.0, -1.5],
+            yaw: 90.0,
+            pitch: -10.0,
+            name: text(name),
+        };
+        let status = visit(&entity, user);
+        if status != UmiStatus::OK {
+            return status;
+        }
+    }
+    UmiStatus::OK
+}
+
 fn host() -> UmiHost {
     UmiHost {
         size: size_of::<UmiHost>(),
@@ -445,6 +575,10 @@ fn host() -> UmiHost {
         register_command: fake_register_command,
         chat_print: fake_chat_print,
         packet_send: fake_packet_send,
+        register_physics: fake_register_physics,
+        physics_next: fake_physics_next,
+        world_block: fake_world_block,
+        world_entities: fake_world_entities,
     }
 }
 
@@ -465,6 +599,8 @@ fn fresh() -> MutexGuard<'static, ()> {
     }
     WIDGETS.lock().unwrap().clear();
     COMMANDS.lock().unwrap().clear();
+    LAYERS.lock().unwrap().clear();
+    NEXT_CALLS.store(0, SeqCst);
     INJECTED.lock().unwrap().clear();
     *PACKET_STATUS.lock().unwrap() = UmiStatus::OK;
     *VALUES.lock().unwrap() = Some(HashMap::new());
@@ -473,7 +609,14 @@ fn fresh() -> MutexGuard<'static, ()> {
     for counter in [&DROPS, &SHUTDOWNS] {
         counter.store(0, SeqCst);
     }
-    for flag in [&FAIL_INIT, &PANIC_ON_TICK, &REFUSE_SUBSCRIBE, &REFUSE_HUD] {
+    for flag in [
+        &FAIL_INIT,
+        &PANIC_ON_TICK,
+        &REFUSE_SUBSCRIBE,
+        &REFUSE_HUD,
+        &FAIL_PHYSICS,
+        &REPLACE_PHYSICS,
+    ] {
         flag.store(false, SeqCst);
     }
     guard
@@ -1159,4 +1302,184 @@ fn packets_send_maps_host_statuses_to_errors() {
         *PACKET_STATUS.lock().unwrap() = status;
         assert_eq!(ui().packets.send(0xFF, &[1]), Err(expected));
     }
+}
+
+fn physics_state() -> UmiPlayerPhysics {
+    UmiPlayerPhysics {
+        size: size_of::<UmiPlayerPhysics>() as u32,
+        flags: UMI_PHYSICS_SPRINTING | UMI_PHYSICS_SNEAKING | UMI_PHYSICS_IN_WATER,
+        position: [1.0, 2.0, 3.0],
+        velocity: [0.0; 3],
+        yaw: 30.0,
+        pitch: 40.0,
+        fall_distance: 0.5,
+    }
+}
+
+fn physics_input() -> UmiPhysicsInput {
+    UmiPhysicsInput {
+        size: size_of::<UmiPhysicsInput>() as u32,
+        flags: UMI_INPUT_JUMP | UMI_INPUT_SPRINT,
+        forward: 1.0,
+        strafe: -1.0,
+        yaw: 30.0,
+        pitch: 40.0,
+    }
+}
+
+/// Calls the registered layer on `state`; the fake host's `cx` is the state.
+fn run_layer(state: &mut UmiPlayerPhysics, input: &UmiPhysicsInput) -> UmiStatus {
+    let layer = LAYERS.lock().unwrap()[0];
+    let cx: *mut UmiPhysicsCx = (state as *mut UmiPlayerPhysics).cast();
+    (layer.step)(cx, state, input, layer.user as *mut c_void)
+}
+
+#[test]
+fn wrapper_is_registered_and_runs_with_views_and_next() {
+    let _guard = fresh();
+    init_ok();
+    assert_eq!(LAYERS.lock().unwrap()[0].mode, UmiServiceMode::WRAP);
+    let mut state = physics_state();
+    assert_eq!(run_layer(&mut state, &physics_input()), UmiStatus::OK);
+    assert_eq!(NEXT_CALLS.load(SeqCst), 1);
+    assert_eq!(
+        seen(),
+        [
+            "input 1 -1 true false true 30 40",
+            // after next(): velocity y +1; flags: on ground set, sprint off,
+            // read-only flags untouched
+            "state [1.0, 2.0, 3.0] [0.0, 1.0, 0.0] true false true false true 30 40",
+            "fall 2.5",
+        ]
+    );
+    assert_eq!(state.velocity, [1.0, 2.0, 3.0]);
+    assert_eq!(state.position, [4.0, 5.0, 6.0]);
+    assert_eq!(
+        state.flags,
+        UMI_PHYSICS_ON_GROUND | UMI_PHYSICS_SNEAKING | UMI_PHYSICS_IN_WATER
+    );
+    assert_eq!((state.yaw, state.pitch), (30.0, 40.0));
+}
+
+#[test]
+fn replacing_layer_registers_as_replace_and_next_is_refused() {
+    let _guard = fresh();
+    REPLACE_PHYSICS.store(true, SeqCst);
+    init_ok();
+    assert_eq!(LAYERS.lock().unwrap()[0].mode, UmiServiceMode::REPLACE);
+    let mut state = physics_state();
+    // `next` is refused, the closure passes that error on: the layer fails.
+    assert_eq!(run_layer(&mut state, &physics_input()), UmiStatus::ERROR);
+    assert_eq!(NEXT_CALLS.load(SeqCst), 0);
+}
+
+#[test]
+fn physics_layer_error_and_panic_map_to_statuses() {
+    let _guard = fresh();
+    init_ok();
+    FAIL_PHYSICS.store(true, SeqCst);
+    let mut state = physics_state();
+    assert_eq!(run_layer(&mut state, &physics_input()), UmiStatus::PANICKED);
+}
+
+#[test]
+fn physics_layer_refuses_bad_pointers_and_small_structs() {
+    let _guard = fresh();
+    init_ok();
+    let layer = LAYERS.lock().unwrap()[0];
+    let user = layer.user as *mut c_void;
+    let (mut state, input) = (physics_state(), physics_input());
+    let cx: *mut UmiPhysicsCx = (&mut state as *mut UmiPlayerPhysics).cast();
+    assert_eq!(
+        (layer.step)(cx, std::ptr::null_mut(), &input, user),
+        UmiStatus::INVALID_ARGUMENT
+    );
+    assert_eq!(
+        (layer.step)(cx, &mut state, std::ptr::null(), user),
+        UmiStatus::INVALID_ARGUMENT
+    );
+    assert_eq!(
+        (layer.step)(cx, &mut state, &input, std::ptr::null_mut()),
+        UmiStatus::INVALID_ARGUMENT
+    );
+    let small = UmiPhysicsInput { size: 4, ..input };
+    assert_eq!(
+        (layer.step)(cx, &mut state, &small, user),
+        UmiStatus::INVALID_ARGUMENT
+    );
+    let small = UmiPlayerPhysics {
+        size: 4,
+        ..physics_state()
+    };
+    let mut small = small;
+    assert_eq!(
+        (layer.step)(cx, &mut small, &input, user),
+        UmiStatus::INVALID_ARGUMENT
+    );
+    assert_eq!(NEXT_CALLS.load(SeqCst), 0);
+}
+
+#[test]
+fn world_block_decodes_the_wire_state_and_maps_statuses() {
+    let _guard = fresh();
+    init_ok();
+    let world = ui().world;
+    assert_eq!(world.block(0, 64, 0), Ok(Block { id: 1, meta: 3 }));
+    assert_eq!(world.block(1, 64, 0), Err(ModError::Unavailable));
+    assert_eq!(
+        world.block(2, 64, 0),
+        Err(ModError::HostRefused(UmiStatus::UNSUPPORTED))
+    );
+}
+
+#[test]
+fn world_entities_visits_all_and_exposes_the_views() {
+    let _guard = fresh();
+    init_ok();
+    let mut lines = Vec::new();
+    ui().world
+        .entities(|e| {
+            lines.push(format!(
+                "{} {} {:?} {} {} [{}]",
+                e.id(),
+                e.kind(),
+                e.position(),
+                e.yaw(),
+                e.pitch(),
+                e.name()
+            ));
+            true
+        })
+        .unwrap();
+    assert_eq!(
+        lines,
+        [
+            "7 player [7.0, 64.0, -1.5] 90 -10 [Ann]",
+            "8 zombie [8.0, 64.0, -1.5] 90 -10 []",
+            "9 item [9.0, 64.0, -1.5] 90 -10 [x]",
+        ]
+    );
+}
+
+#[test]
+fn world_entities_stops_when_the_visitor_says_so_or_panics() {
+    let _guard = fresh();
+    init_ok();
+    let mut visited = 0;
+    let result = ui().world.entities(|_| {
+        visited += 1;
+        false
+    });
+    assert_eq!((result, visited), (Ok(()), 1));
+    let mut visited = 0;
+    let result = ui().world.entities(|_| {
+        visited += 1;
+        panic!("visitor boom");
+    });
+    assert_eq!((result, visited), (Ok(()), 1));
+}
+
+#[test]
+fn unavailable_has_a_message() {
+    assert_eq!(ModError::Unavailable.to_string(), "the chunk is not loaded");
 }

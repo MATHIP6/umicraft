@@ -76,8 +76,9 @@ pub struct UmiVersion {
 /// 0.2 added the chat, connection and screen events, `UMI_EVENT_MUTABLE` and
 /// `UmiHost::event_set_text` (F3.3); 0.3 added settings, HUD widgets, key
 /// bindings, client commands and `KEY_PRESSED` (F3.4); 0.4 added the packet
-/// events, `UmiBytes`, `UmiStatus::BUSY` and `UmiHost::packet_send` (F3.5).
-pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 4 };
+/// events, `UmiBytes`, `UmiStatus::BUSY` and `UmiHost::packet_send` (F3.5); 0.5
+/// added the `player_physics` service and the world queries (F3.6).
+pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 5 };
 
 impl UmiVersion {
     /// Whether a host of version `self` can load a mod built for `mod_version`.
@@ -122,6 +123,10 @@ impl UmiStatus {
     pub const CONFLICT: Self = Self(6);
     /// A bounded queue is full; the request may succeed later. Added in API 0.4.
     pub const BUSY: Self = Self(7);
+    /// What was asked is not available here: a world query outside a
+    /// game-thread callback, or a block of a chunk that is not loaded. Added in
+    /// API 0.5.
+    pub const UNAVAILABLE: Self = Self(8);
 
     /// Whether the status is [`UmiStatus::OK`].
     pub const fn is_ok(self) -> bool {

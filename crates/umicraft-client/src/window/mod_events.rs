@@ -56,6 +56,7 @@ impl App {
             game: GameMods {
                 bus: mods.bus(EventThread::Game),
                 commands: mods.commands(),
+                physics: mods.physics(),
             },
             network: NetMods {
                 bus: mods.bus(EventThread::Network),

@@ -4395,6 +4395,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-example-physics-tweak"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-game"
 version = "0.1.0"
 dependencies = [

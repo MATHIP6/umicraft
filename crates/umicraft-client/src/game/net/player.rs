@@ -28,6 +28,7 @@ use super::wire::VELOCITY_UNITS;
 use crate::game::abilities::{apply_mode_rules, set_gamemode};
 use crate::game::commands::{command_of, CommandQueue};
 use crate::game::messages::{RenderEvent, ViewAngle};
+use crate::game::mod_world::ModPhysics;
 use crate::game::particles::particle_filter;
 use crate::game::publish::{publish_inventory, publish_status};
 use crate::game::state::Game;
@@ -96,7 +97,11 @@ pub(in crate::game) fn apply_placement(
 
     match game.state.as_mut() {
         None => {
-            game.state = Some(GameState::new(position));
+            let mut state = GameState::new(position);
+            if let Some(chain) = &game.physics {
+                state.set_physics(Some(Box::new(ModPhysics::new(chain.clone()))));
+            }
+            game.state = Some(state);
             game.status_data.placed = true;
             game.yaw = yaw;
             game.pitch = pitch;

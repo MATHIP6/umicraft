@@ -134,6 +134,75 @@ pub enum EntityKind {
 }
 
 impl EntityKind {
+    /// The stable snake_case name of the kind, for mods and logs.
+    ///
+    /// One name per variant, never reused. [`Self::Other`] is `"other"`
+    /// whatever its raw id.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Player => "player",
+            Self::Zombie => "zombie",
+            Self::Skeleton => "skeleton",
+            Self::Creeper => "creeper",
+            Self::Cow => "cow",
+            Self::Pig => "pig",
+            Self::Sheep => "sheep",
+            Self::Chicken => "chicken",
+            Self::Spider => "spider",
+            Self::CaveSpider => "cave_spider",
+            Self::Enderman => "enderman",
+            Self::Slime => "slime",
+            Self::MagmaCube => "magma_cube",
+            Self::ZombiePigman => "zombie_pigman",
+            Self::Giant => "giant",
+            Self::Villager => "villager",
+            Self::ZombieVillager => "zombie_villager",
+            Self::Witch => "witch",
+            Self::IronGolem => "iron_golem",
+            Self::Snowman => "snowman",
+            Self::Wolf => "wolf",
+            Self::Mooshroom => "mooshroom",
+            Self::Squid => "squid",
+            Self::Bat => "bat",
+            Self::Blaze => "blaze",
+            Self::Dragon => "dragon",
+            Self::Endermite => "endermite",
+            Self::Ghast => "ghast",
+            Self::Guardian => "guardian",
+            Self::Horse => "horse",
+            Self::Ocelot => "ocelot",
+            Self::Rabbit => "rabbit",
+            Self::Silverfish => "silverfish",
+            Self::Wither => "wither",
+            Self::Item => "item",
+            Self::Arrow => "arrow",
+            Self::ItemFrame => "item_frame",
+            Self::ArmorStand => "armor_stand",
+            Self::FishHook => "fish_hook",
+            Self::Boat => "boat",
+            Self::Minecart => "minecart",
+            Self::PrimedTnt => "primed_tnt",
+            Self::EnderCrystal => "ender_crystal",
+            Self::Snowball => "snowball",
+            Self::Egg => "egg",
+            Self::LargeFireball => "large_fireball",
+            Self::SmallFireball => "small_fireball",
+            Self::EnderPearl => "ender_pearl",
+            Self::WitherSkull => "wither_skull",
+            Self::FallingBlock => "falling_block",
+            Self::EyeOfEnder => "eye_of_ender",
+            Self::Potion => "potion",
+            Self::ExpBottle => "exp_bottle",
+            Self::FireworkRocket => "firework_rocket",
+            Self::LeashKnot => "leash_knot",
+            Self::XpOrb => "xp_orb",
+            Self::Painting => "painting",
+            Self::Lightning => "lightning",
+            Self::Other(_) => "other",
+        }
+    }
+
     /// The height of the hitbox in blocks (MCP `Entity.height`), which puts
     /// the name tag above the head. Unlisted kinds count as player-high.
     #[must_use]
@@ -292,6 +361,156 @@ impl EntityKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every variant once; the exhaustive match breaks the build when a
+    /// variant is added without being listed here.
+    fn all_kinds() -> Vec<EntityKind> {
+        let all = vec![
+            EntityKind::Player,
+            EntityKind::Zombie,
+            EntityKind::Skeleton,
+            EntityKind::Creeper,
+            EntityKind::Cow,
+            EntityKind::Pig,
+            EntityKind::Sheep,
+            EntityKind::Chicken,
+            EntityKind::Spider,
+            EntityKind::CaveSpider,
+            EntityKind::Enderman,
+            EntityKind::Slime,
+            EntityKind::MagmaCube,
+            EntityKind::ZombiePigman,
+            EntityKind::Giant,
+            EntityKind::Villager,
+            EntityKind::ZombieVillager,
+            EntityKind::Witch,
+            EntityKind::IronGolem,
+            EntityKind::Snowman,
+            EntityKind::Wolf,
+            EntityKind::Mooshroom,
+            EntityKind::Squid,
+            EntityKind::Bat,
+            EntityKind::Blaze,
+            EntityKind::Dragon,
+            EntityKind::Endermite,
+            EntityKind::Ghast,
+            EntityKind::Guardian,
+            EntityKind::Horse,
+            EntityKind::Ocelot,
+            EntityKind::Rabbit,
+            EntityKind::Silverfish,
+            EntityKind::Wither,
+            EntityKind::Item,
+            EntityKind::Arrow,
+            EntityKind::ItemFrame,
+            EntityKind::ArmorStand,
+            EntityKind::FishHook,
+            EntityKind::Boat,
+            EntityKind::Minecart,
+            EntityKind::PrimedTnt,
+            EntityKind::EnderCrystal,
+            EntityKind::Snowball,
+            EntityKind::Egg,
+            EntityKind::LargeFireball,
+            EntityKind::SmallFireball,
+            EntityKind::EnderPearl,
+            EntityKind::WitherSkull,
+            EntityKind::FallingBlock,
+            EntityKind::EyeOfEnder,
+            EntityKind::Potion,
+            EntityKind::ExpBottle,
+            EntityKind::FireworkRocket,
+            EntityKind::LeashKnot,
+            EntityKind::XpOrb,
+            EntityKind::Painting,
+            EntityKind::Lightning,
+            EntityKind::Other(0),
+        ];
+        for kind in &all {
+            match kind {
+                EntityKind::Player
+                | EntityKind::Zombie
+                | EntityKind::Skeleton
+                | EntityKind::Creeper
+                | EntityKind::Cow
+                | EntityKind::Pig
+                | EntityKind::Sheep
+                | EntityKind::Chicken
+                | EntityKind::Spider
+                | EntityKind::CaveSpider
+                | EntityKind::Enderman
+                | EntityKind::Slime
+                | EntityKind::MagmaCube
+                | EntityKind::ZombiePigman
+                | EntityKind::Giant
+                | EntityKind::Villager
+                | EntityKind::ZombieVillager
+                | EntityKind::Witch
+                | EntityKind::IronGolem
+                | EntityKind::Snowman
+                | EntityKind::Wolf
+                | EntityKind::Mooshroom
+                | EntityKind::Squid
+                | EntityKind::Bat
+                | EntityKind::Blaze
+                | EntityKind::Dragon
+                | EntityKind::Endermite
+                | EntityKind::Ghast
+                | EntityKind::Guardian
+                | EntityKind::Horse
+                | EntityKind::Ocelot
+                | EntityKind::Rabbit
+                | EntityKind::Silverfish
+                | EntityKind::Wither
+                | EntityKind::Item
+                | EntityKind::Arrow
+                | EntityKind::ItemFrame
+                | EntityKind::ArmorStand
+                | EntityKind::FishHook
+                | EntityKind::Boat
+                | EntityKind::Minecart
+                | EntityKind::PrimedTnt
+                | EntityKind::EnderCrystal
+                | EntityKind::Snowball
+                | EntityKind::Egg
+                | EntityKind::LargeFireball
+                | EntityKind::SmallFireball
+                | EntityKind::EnderPearl
+                | EntityKind::WitherSkull
+                | EntityKind::FallingBlock
+                | EntityKind::EyeOfEnder
+                | EntityKind::Potion
+                | EntityKind::ExpBottle
+                | EntityKind::FireworkRocket
+                | EntityKind::LeashKnot
+                | EntityKind::XpOrb
+                | EntityKind::Painting
+                | EntityKind::Lightning
+                | EntityKind::Other(_) => {}
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn names_are_unique_snake_case() {
+        let mut seen = std::collections::HashSet::new();
+        for kind in all_kinds() {
+            let name = kind.name();
+            let mut chars = name.chars();
+            assert!(
+                chars.next().is_some_and(|c| c.is_ascii_lowercase()),
+                "{name}"
+            );
+            assert!(
+                chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "{name}"
+            );
+            assert!(seen.insert(name), "duplicate name {name}");
+        }
+        assert_eq!(EntityKind::CaveSpider.name(), "cave_spider");
+        assert_eq!(EntityKind::ZombiePigman.name(), "zombie_pigman");
+    }
 
     #[test]
     fn heights_put_the_tag_above_the_head() {

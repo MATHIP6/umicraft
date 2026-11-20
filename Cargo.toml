@@ -23,6 +23,7 @@ members = [
     "mods/examples/hello",
     "mods/examples/packet_logger",
     "mods/examples/panicking",
+    "mods/examples/physics_tweak",
 ]
 
 [workspace.package]

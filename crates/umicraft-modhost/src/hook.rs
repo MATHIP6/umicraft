@@ -40,9 +40,25 @@ pub(crate) fn run_hook(
     what: impl Display,
     call: impl FnOnce() -> UmiStatus,
 ) -> bool {
+    run_hook_excluding(context, stats, budget, what, || (call(), Duration::ZERO))
+}
+
+/// Like [`run_hook`], for a call that runs other code on the mod's behalf: `call`
+/// also returns the time spent in that code, which is not charged to the mod.
+///
+/// A physics layer that calls `physics_next` runs the inner layers and the vanilla
+/// step inside its own call; charging that time to it would fail a mod for the
+/// slowness of its neighbours.
+pub(crate) fn run_hook_excluding(
+    context: &ModContext,
+    stats: &Stats,
+    budget: Duration,
+    what: impl Display,
+    call: impl FnOnce() -> (UmiStatus, Duration),
+) -> bool {
     let started = Instant::now();
-    let status = call();
-    let elapsed = started.elapsed();
+    let (status, excluded) = call();
+    let elapsed = started.elapsed().saturating_sub(excluded);
     if !check_status(context, what, status) {
         return false;
     }

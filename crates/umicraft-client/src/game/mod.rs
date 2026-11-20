@@ -47,6 +47,7 @@ mod inventory_events;
 mod look;
 mod messages;
 mod mod_events;
+mod mod_world;
 mod movement;
 mod net;
 mod particles;

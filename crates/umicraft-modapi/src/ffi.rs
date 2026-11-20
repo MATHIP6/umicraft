@@ -7,14 +7,16 @@
 use core::ffi::c_void;
 use std::mem::size_of;
 
+use core::ptr::NonNull;
 use umicraft_modapi_sys::{
-    UmiBytes, UmiEventHeader, UmiHost, UmiHudCx, UmiModHandle, UmiStatus, UmiStr,
-    UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED,
+    UmiBytes, UmiEntity, UmiEventHeader, UmiHost, UmiHudCx, UmiModHandle, UmiPhysicsCx,
+    UmiPhysicsInput, UmiPlayerPhysics, UmiStatus, UmiStr, UMI_EVENT_CANCELLABLE,
+    UMI_EVENT_CANCELLED,
 };
 
 use crate::event::{Control, Event};
 use crate::private::guarded;
-use crate::{host, Hud, ModError};
+use crate::{host, Entity, Hud, Input, ModError, Physics, PlayerState};
 
 /// A mod handle that can be shared across threads.
 #[derive(Debug, Clone, Copy)]
@@ -204,6 +206,129 @@ pub(crate) extern "C" fn command_trampoline(args: UmiStr, user: *mut c_void) -> 
         with_user(user, |run: &mut CommandHandler| match run(str_of(&args)) {
             Ok(()) => UmiStatus::OK,
             Err(_) => UmiStatus::ERROR,
+        })
+        .unwrap_or(UmiStatus::INVALID_ARGUMENT)
+    })
+}
+
+/// The boxed closure type behind a physics layer's `user` pointer.
+pub(crate) type PhysicsHandler = Box<dyn FnMut(&mut Physics<'_>) -> Result<(), ModError> + Send>;
+
+/// The player state the host lent for one physics call.
+///
+/// Holds a raw pointer, not a reference, because the host writes through the
+/// same memory during `physics_next`: a reference kept across that call would
+/// alias. Every access re-borrows through `&self`/`&mut self`, so the borrow
+/// checker keeps `next` and the state accessors apart.
+#[derive(Debug)]
+pub(crate) struct StatePtr(NonNull<PlayerState>);
+
+impl StatePtr {
+    /// # Safety
+    /// `ptr` must point to a valid, host-owned player state that stays valid
+    /// and is not accessed by anything else, except the host during
+    /// `physics_next`, while the returned value (or any copy of the borrow it
+    /// hands out) lives.
+    pub(crate) unsafe fn new(ptr: NonNull<UmiPlayerPhysics>) -> Self {
+        Self(ptr.cast())
+    }
+
+    pub(crate) fn get(&self) -> &PlayerState {
+        // SAFETY: `new` guarantees validity; the `&self` borrow bounds the
+        // reference and excludes `get_mut` meanwhile.
+        unsafe { self.0.as_ref() }
+    }
+
+    pub(crate) fn get_mut(&mut self) -> &mut PlayerState {
+        // SAFETY: as in `get`; `&mut self` makes the borrow unique.
+        unsafe { self.0.as_mut() }
+    }
+}
+
+/// The physics callback of every layer: validates the lent state and input,
+/// then runs the closure on a [`Physics`] that lives for this call only.
+pub(crate) extern "C" fn physics_trampoline(
+    cx: *mut UmiPhysicsCx,
+    state: *mut UmiPlayerPhysics,
+    input: *const UmiPhysicsInput,
+    user: *mut c_void,
+) -> UmiStatus {
+    guarded(|| {
+        let (Some(state), Some(input)) = (NonNull::new(state), NonNull::new(input.cast_mut()))
+        else {
+            return UmiStatus::INVALID_ARGUMENT;
+        };
+        // SAFETY: non-null and, per the ABI, valid for reads of its `size`
+        // field's first bytes; `size` is the first field of every version.
+        let sizes = unsafe { (state.as_ref().size, input.as_ref().size) };
+        if (sizes.0 as usize) < size_of::<UmiPlayerPhysics>()
+            || (sizes.1 as usize) < size_of::<UmiPhysicsInput>()
+        {
+            return UmiStatus::INVALID_ARGUMENT;
+        }
+        // SAFETY: the sizes cover the structs; the host keeps the input valid
+        // and unmodified for the call.
+        let input: &Input = unsafe { &*input.as_ptr().cast::<Input>() };
+        with_user(user, |layer: &mut PhysicsHandler| {
+            // SAFETY: the host lends the state exclusively for this call and
+            // only touches it again inside `physics_next`.
+            let state = unsafe { StatePtr::new(state) };
+            match layer(&mut Physics::new(cx, state, input)) {
+                Ok(()) => UmiStatus::OK,
+                Err(_) => UmiStatus::ERROR,
+            }
+        })
+        .unwrap_or(UmiStatus::INVALID_ARGUMENT)
+    })
+}
+
+/// A visitor closure and whether it asked to stop.
+pub(crate) struct Visit<'a> {
+    visitor: &'a mut dyn FnMut(&Entity<'_>) -> bool,
+    stopped: bool,
+}
+
+impl<'a> Visit<'a> {
+    pub(crate) fn new(visitor: &'a mut dyn FnMut(&Entity<'_>) -> bool) -> Self {
+        Self {
+            visitor,
+            stopped: false,
+        }
+    }
+
+    /// Whether the visitor returned `false` or panicked.
+    pub(crate) fn stopped(&self) -> bool {
+        self.stopped
+    }
+}
+
+/// The visit callback of `world_entities`; any non-`OK` status stops the
+/// host's loop, and a panic counts as a stop.
+pub(crate) extern "C" fn entity_trampoline(
+    entity: *const UmiEntity,
+    user: *mut c_void,
+) -> UmiStatus {
+    guarded(|| {
+        if entity.is_null() {
+            return UmiStatus::INVALID_ARGUMENT;
+        }
+        // SAFETY: non-null; the host passes a live entity valid for the call
+        // and `size` is the first field of every version.
+        if (unsafe { (*entity).size } as usize) < size_of::<UmiEntity>() {
+            return UmiStatus::INVALID_ARGUMENT;
+        }
+        // SAFETY: the size check shows the whole struct is there; `UmiEntity`
+        // is `Copy`, and its strings stay valid for this call.
+        let raw = unsafe { entity.read() };
+        with_user(user, |visit: &mut Visit<'_>| {
+            // Set before the call so a panic leaves the visit stopped.
+            visit.stopped = true;
+            if (visit.visitor)(&Entity::new(raw)) {
+                visit.stopped = false;
+                UmiStatus::OK
+            } else {
+                UmiStatus::ERROR
+            }
         })
         .unwrap_or(UmiStatus::INVALID_ARGUMENT)
     })

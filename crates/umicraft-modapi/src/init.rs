@@ -5,17 +5,17 @@
 use core::ffi::c_void;
 
 use umicraft_modapi_sys::{
-    UmiHost, UmiModHandle, UmiMode, UmiSettingDef, UmiSettingKind, UmiStatus,
+    UmiHost, UmiModHandle, UmiMode, UmiServiceMode, UmiSettingDef, UmiSettingKind, UmiStatus,
 };
 
 use crate::event::{Control, Event};
 use crate::ffi::{
-    command_trampoline, draw_trampoline, trampoline, CommandHandler, DrawHandler, Handler,
-    OwnedUser,
+    command_trampoline, draw_trampoline, physics_trampoline, trampoline, CommandHandler,
+    DrawHandler, Handler, OwnedUser, PhysicsHandler,
 };
 use crate::host::utf8;
 use crate::setting::{definition, utf8_all};
-use crate::{Chat, Hud, Logger, ModError, Packets, Placement, Setting};
+use crate::{Chat, Hud, Logger, ModError, Packets, Physics, Placement, Setting, World};
 
 /// A mod: built once by the host, told when it is shut down.
 pub trait Mod: Send + Sized + 'static {
@@ -67,6 +67,12 @@ impl<'a> InitCx<'a> {
     /// needs `network_packets = true` in `mod.toml`.
     pub fn packets(&self) -> Packets {
         Packets
+    }
+
+    /// A handle for reading blocks and entities, valid after `init` returns.
+    /// The host only answers on the game thread inside a callback.
+    pub fn world(&self) -> World {
+        World
     }
 
     /// Watches events of type `E`; lower `priority` runs first.
@@ -244,6 +250,61 @@ impl<'a> InitCx<'a> {
         let (host, me) = (self.host, self.me);
         self.keep(run, |user| {
             (host.register_command)(me, utf8(name), utf8(usage), Some(command_trampoline), user)
+        })
+    }
+
+    /// Wraps the player's movement step: `layer` runs around the inner layers
+    /// and the built-in step, which it reaches with [`Physics::next`].
+    ///
+    /// Needs `movement = true` and `wraps = ["player_physics"]` in `mod.toml`.
+    /// `layer` runs on the game thread under a time budget, and again for past
+    /// ticks when the server corrects the position, so keep it a function of
+    /// the state and input. A wrapper that leaves the state untouched leaves
+    /// the vanilla step bit for bit as it was. An `Err` fails the mod.
+    ///
+    /// ```ignore
+    /// cx.wrap_physics(|physics| {
+    ///     physics.next()?;
+    ///     let [x, y, z] = physics.state().velocity();
+    ///     physics.state_mut().set_velocity([x, y * 0.9, z]);
+    ///     Ok(())
+    /// })?;
+    /// ```
+    ///
+    /// # Errors
+    /// [`ModError::HostRefused`]: `DENIED` without the permission or the
+    /// `wraps` entry, `CONFLICT` for a second layer of this mod.
+    pub fn wrap_physics(
+        &mut self,
+        layer: impl FnMut(&mut Physics<'_>) -> Result<(), ModError> + Send + 'static,
+    ) -> Result<(), ModError> {
+        self.register_physics(UmiServiceMode::WRAP, Box::new(layer))
+    }
+
+    /// Replaces the built-in movement step with `layer`; at most one mod may.
+    ///
+    /// Needs `movement = true` and `replaces = ["player_physics"]` in
+    /// `mod.toml`. Same call rules as [`wrap_physics`](Self::wrap_physics), but
+    /// [`Physics::next`] is refused: there is nothing inside to run.
+    ///
+    /// # Errors
+    /// [`ModError::HostRefused`]: `DENIED` without the permission or the
+    /// `replaces` entry, `CONFLICT` for a second layer of this mod.
+    pub fn replace_physics(
+        &mut self,
+        layer: impl FnMut(&mut Physics<'_>) -> Result<(), ModError> + Send + 'static,
+    ) -> Result<(), ModError> {
+        self.register_physics(UmiServiceMode::REPLACE, Box::new(layer))
+    }
+
+    fn register_physics(
+        &mut self,
+        mode: UmiServiceMode,
+        layer: PhysicsHandler,
+    ) -> Result<(), ModError> {
+        let (host, me) = (self.host, self.me);
+        self.keep(layer, |user| {
+            (host.register_physics)(me, mode, Some(physics_trampoline), user)
         })
     }
 
