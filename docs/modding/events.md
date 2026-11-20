@@ -17,6 +17,8 @@ shown below; an event nobody subscribes to costs nothing.
 | `PACKET_RECEIVED` | 10 | network | `id: u32`, `data: bytes` | yes: the client never sees it (not `Set Compression` 0x46 nor `Disconnect` 0x40) | no | For every play packet read from the server, before the client decodes it. Needs `network_packets` (see `packets.md`) |
 | `PACKET_SEND` | 11 | network | `id: u32`, `data: bytes` | yes: nothing is written | no | For every play packet about to be written: the client's own, its automatic replies (keepalives) and injected ones. Needs `network_packets` |
 
+The intercept handlers of the game-thread events may query the world (`world.md`).
+
 Every string and byte view is borrowed for the duration of the call: copy it to keep it.
 
 ## Screen names

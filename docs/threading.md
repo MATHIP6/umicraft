@@ -27,7 +27,9 @@ The game thread owns its own mod `EventBus` (built per session, moved in through
 `PacketFilter`) and the render thread a third (built at startup); none is shared, so
 dispatch takes no lock. Packets injected by mods cross a bounded queue of 64
 (`PacketOutbox`, any thread → network thread) that the play loop drains after each turn;
-a full queue answers `BUSY` to the mod. Intercept handlers of external mods run on the
+a full queue answers `BUSY` to the mod. The game thread lends its world to the mods'
+queries (`with_world`) only while it runs their callbacks, so a query never crosses
+a thread and takes no lock (F3.6). Intercept handlers of external mods run on the
 dispatching thread under a 1 ms budget; observe-only events go to one worker per mod,
 `umicraft-mod-<id>`, through a bounded queue of 256 that drops (and counts) when full.
 Exit order: drop the session (joins the game and network threads), drop the render bus, only then

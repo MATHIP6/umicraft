@@ -84,6 +84,9 @@ the event, within a time budget, and may cancel or modify it. ADR-0086.
 **Observe** — a mod handler that receives a copy of the event on the mod's
 worker thread; it cannot cancel and never delays the owning thread. ADR-0086.
 
+**Physics layer** — a mod's wrapper or replacement of the `player_physics` service,
+run on the game thread around (or instead of) the vanilla step. ADR-0086, F3.6.
+
 **Packet injection** — a serverbound packet a mod queues with `packet_send`; the
 client writes it only if its own decoder accepts the body. ADR-0086, F3.5.
 

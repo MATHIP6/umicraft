@@ -111,7 +111,7 @@ and systems are out of v1 and may be reopened in a later API major.
 | HUD and UI | render | HUD widgets placed with `HudPlacement`, schema settings in the mods menu |
 | Packets | network | raw in/out (`id` + bytes) intercept (cancel) and observe; injection re-validated by `PlayServerbound::decode` (F3.5 amendment) |
 | Services | game | `player_physics` |
-| World | game | read-only block and entity queries |
+| World | game | read-only block and entity queries, game thread only (F3.6 amendment) |
 | Rendering | render | a post-process chain of naga-validated WGSL |
 | Data | — | `config/mods/<id>.toml`, `data/` overrides by priority |
 
@@ -145,3 +145,10 @@ screens, ECS components.
   the replacement through `packet_send`, which the client's own decoder validates.
   `Set Compression` and `Disconnect` are never dropped. Server-compatible mode is one
   client switch (`multiplayer.mod_server_compat`), not a per-server setting.
+- **2026-11-19, F3.6 — world queries without a snapshot.** Mods read the world through
+  host functions that answer only on the game thread inside one of their callbacks
+  (game-event intercept handlers, commands, physics layers); elsewhere they are
+  `UNSUPPORTED`. A `#[repr(C)]` snapshot for the workers is deferred until a mod needs
+  one. Service layers are registered per service with `register_physics` (one typed
+  function per service, not a generic string-keyed registry), and a replacing layer
+  always sits inside every wrapper.

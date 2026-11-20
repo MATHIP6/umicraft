@@ -14,7 +14,7 @@ Design: ADR-0086 (architecture), ADR-0087 (C ABI contract). Roadmap: F3 in
 | F3.3 | Per-thread `EventBus` in `umicraft-core`, wired in the client: lifecycle, chat, input, screens; observe channel and mod worker | criterion bench of the dispatch in `docs/perf-log.md`; no cost with no mod | done |
 | F3.4 | HUD widgets, schema settings, open key bindings, client commands; external mods in the mods menu | `hud` example | done |
 | F3.5 | Raw packet hooks on the network thread, validated injection, permission gating, server-compat mode, "alters packets/movement" badge | `packet_logger` example | done |
-| F3.6 | Services (`player_physics` wrap/replace), conflict detection at load, read-only world and entity queries | `physics-tweak` example; trajectories unchanged with no mod (ADR-0076) | todo |
+| F3.6 | Services (`player_physics` wrap/replace), conflict detection at load, read-only world and entity queries | `physics_tweak` example; trajectories unchanged with no mod (ADR-0076) | done |
 | F3.7 | Post-process chain with naga-validated WGSL | `shader-pass` example | todo |
 | F3.8 | Per-mod profiler in the Umicraft debug overlay, budget auto-disable, mod manager (permissions, hash, enable/disable), `docs/modding/` guide and template | former M15 acceptance criteria | todo |
 | F3.9 | Built-in mods on the same bus (`ModContext` → `FrameEvent`); API frozen as `1.0` | no regression of the 16 built-in mods | todo |
@@ -389,3 +389,93 @@ starts, so a stale injection never reaches another server. Server-compat
 mode is an option (`multiplayer.mod_server_compat`) shown as a switch in the External
 category of the mods menu; cards of mods that declare `network_packets` or
 `movement` carry an "alters packets/movement" badge.
+
+## F3.6 interface (frozen before the work is split)
+
+API **0.5** (types already in `umicraft-modapi-sys/src/services.rs`):
+`UmiServiceMode { WRAP, REPLACE }`, `UmiPlayerPhysics` (flags `ON_GROUND` and
+`SPRINTING` writable, `SNEAKING`/`FLYING`/`IN_WATER` read-only; position,
+velocity, fall distance writable; yaw/pitch read-only), `UmiPhysicsInput`,
+opaque `UmiPhysicsCx`, `UmiPhysicsFn`, `UmiEntity`, `UmiEntityVisitFn`,
+`UmiStatus::UNAVAILABLE` (8) and the host functions `register_physics`,
+`physics_next`, `world_block`, `world_entities`.
+
+### `umicraft-game` (files `crates/umicraft-game/**`)
+
+- `pub trait PhysicsOverride: Send { fn step(&mut self, player: &mut Player,
+  intent: &InputIntent, vanilla: &mut dyn FnMut(&mut Player)); }` in
+  `physics.rs` (or a new `physics/override.rs`). `vanilla` runs
+  `physics::step` with the tick's world.
+- `GameState::set_physics(&mut self, physics: Option<Box<dyn PhysicsOverride>>)`;
+  `tick` and the replay of `apply_correction` call the override when set,
+  `physics::step` directly otherwise (no indirection, no allocation: the
+  trajectory with no override is bit for bit the ADR-0076 one; the existing
+  `physics` bench must not move).
+- `EntityKind::name(self) -> &'static str`: stable snake_case names, one per
+  variant, never reused.
+
+### `umicraft-modhost`
+
+- **Physics layers**: `register_physics` during init only; `DENIED` without
+  the `movement` permission or when the mode's list in `mod.toml` (`wraps` for
+  `WRAP`, `replaces` for `REPLACE`) lacks `player_physics`; `CONFLICT` for a
+  second layer of the same mod; `INVALID_ARGUMENT` for a null fn or an unknown
+  mode. At load, a manifest naming a service other than `player_physics` in
+  `wraps`/`replaces` fails that mod (`LoadError::UnknownService`) before init.
+- `ModHost::physics() -> Option<PhysicsChain>` (`None` when no mod registered
+  a layer). `PhysicsChain: Send + Clone`; `is_active(&self) -> bool` (some
+  layer enabled now); `step(&self, state: &mut UmiPlayerPhysics, input:
+  &UmiPhysicsInput, vanilla: &mut dyn FnMut(&mut UmiPlayerPhysics))`.
+  Wrappers nest in load order (first loaded = outermost) around the base: the
+  enabled replacing layer, else `vanilla`. A disabled layer is skipped (its
+  `next` is called for it). `physics_next` runs the rest of the chain on the
+  same state, once (`DENIED` the second time; `UNSUPPORTED` in a replacing
+  layer). A layer is budgeted like an intercept handler (`BUDGET`) on its own
+  time, the time inside `physics_next` excluded. A layer that fails (panic,
+  non-`OK`, budget) fails its mod and its own changes are discarded: if it had
+  called `physics_next`, the state is restored to what the inner chain produced
+  (snapshot right after `physics_next` returned), so the player still moves by
+  vanilla and the inner layers that tick; if it had not, the state is restored to
+  what the layer received and the rest of the chain runs on it. Replacing layers
+  sit inside all wrappers, whatever the load order. Stats count calls.
+- **World queries**: `pub trait WorldQuery { fn block(&self, x: i32, y: i32,
+  z: i32) -> Option<u16>; fn visit_entities(&self, visit: &mut dyn
+  FnMut(&EntityView<'_>) -> bool); }` (`block`: wire state `id << 4 | meta`,
+  `None` when the chunk is not loaded; `visit` returns false to stop) and
+  `EntityView<'a> { id: i32, kind: &'a str, position: [f64; 3], yaw: f32,
+  pitch: f32, name: &'a str }`. `pub fn with_world<R>(world: &dyn WorldQuery,
+  f: impl FnOnce() -> R) -> R` lends the world to the current thread for `f`
+  (restored on unwind, nestable). `world_block`/`world_entities` answer only
+  inside such a scope (`UNSUPPORTED` elsewhere, e.g. on a worker or the
+  render thread), `UNAVAILABLE` for an unloaded chunk, `INVALID_ARGUMENT` for
+  null pointers. No permission (read-only, ADR-0086).
+
+### `umicraft-modapi`
+
+`InitCx::wrap_physics(FnMut(&mut Physics<'_>) -> Result<(), ModError> + Send)`
+and `InitCx::replace_physics(…)`; `Physics::{state(), state_mut(), input(),
+next()}` with views `PlayerState` (position, velocity, on_ground, sprinting,
+fall_distance getters and setters; sneaking, flying, in_water, yaw, pitch
+getters) and `Input` (forward, strafe, jump, sneak, sprint, yaw, pitch).
+`InitCx::world() -> World` (`Copy + Send + Sync`): `block(x, y, z) ->
+Result<Block { id: u16, meta: u8 }, ModError>`, `entities(FnMut(&Entity<'_>)
+-> bool) -> Result<(), ModError>` with `Entity::{id, kind, position, yaw,
+pitch, name}`. `ModError::Unavailable` for `UNAVAILABLE`.
+
+### Example `mods/examples/physics_tweak`
+
+`movement = true`, `wraps = ["player_physics"]`. A slider "Fall speed" (0.5
+to 1.0, default 1.0: at the default the step is untouched): after `next()`,
+a falling player's downward velocity is scaled. In its `PostTick`
+intercept it reads the block under the feet and the nearest other player
+with the world queries and stores them for a HUD widget ("Physics tweak":
+block under you, nearest player and distance).
+
+### Client
+
+`GameMods` gains `physics: Option<PhysicsChain>`. A `ModPhysics` adapter
+implements `PhysicsOverride` (Player ↔ `UmiPlayerPhysics`, writing back only
+changed fields) and is set on every new `GameState` when the chain exists;
+with no active layer it calls `vanilla` straight away. The game thread lends
+a `WorldQuery` over `World` and `EntityStore` (`with_world`) around the game
+tick (physics included), the tick events, the chat events and the commands.
