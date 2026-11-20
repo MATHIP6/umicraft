@@ -48,7 +48,7 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (168, 8));
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (184, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -75,7 +75,7 @@ fn version_compatibility_rules() {
         assert_eq!(host.accepts(module), expected, "{host:?} vs {module:?}");
     }
     assert!(UMI_API_VERSION.accepts(UMI_API_VERSION));
-    assert_eq!(UMI_API_VERSION, v(0, 5));
+    assert_eq!(UMI_API_VERSION, v(0, 6));
 }
 
 #[test]
@@ -229,6 +229,8 @@ fn service_and_world_layouts() {
     assert_eq!(offset_of!(UmiHost, physics_next), 144);
     assert_eq!(offset_of!(UmiHost, world_block), 152);
     assert_eq!(offset_of!(UmiHost, world_entities), 160);
+    assert_eq!(offset_of!(UmiHost, register_post_pass), 168);
+    assert_eq!(offset_of!(UmiHost, post_set_param), 176);
     assert_eq!(UmiStatus::UNAVAILABLE, UmiStatus(8));
     assert_eq!(UmiServiceMode::REPLACE, UmiServiceMode(1));
 }

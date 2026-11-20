@@ -41,6 +41,7 @@ use crate::outline::{LineRenderer, MAX_DEBUG_LINES, SELECTION_EDGES};
 use crate::overlays::{ScreenOverlays, ScreenRenderer};
 use crate::panorama::PanoramaRenderer;
 use crate::particles::ParticleRenderer;
+use crate::post_chain::PostChain;
 use crate::scene_blur::SceneBlur;
 use crate::sky::SkyRenderer;
 use crate::texture::{fallback_texture_data, TEXTURE_SIZE};
@@ -331,6 +332,7 @@ impl Renderer {
         };
         let depth_view = create_depth(&device, width, height);
         let scene_blur = SceneBlur::new(&device, &queue, (width, height), format);
+        let post_chain = PostChain::new(&device, format, (width, height));
 
         let icon_atlas = IconAtlas::new(&device, &queue, format);
         let icon_pipeline = create_terrain_pipeline(
@@ -479,6 +481,7 @@ impl Renderer {
             scene_blur,
             motion_blur: MotionBlur::new(format),
             background_blur: false,
+            post_chain,
             fullbright: false,
             entity_batches: BatchBuffer::default(),
             additive_batches: BatchBuffer::default(),

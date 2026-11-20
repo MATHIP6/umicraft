@@ -8,6 +8,7 @@ use super::settings::{SettingSlot, SettingSpec};
 use super::validate::check_room;
 use super::{MAX_COMMANDS, MAX_KEYS, MAX_SETTINGS, MAX_WIDGETS};
 use crate::error::DeclareError;
+use crate::post_pass::{PostPassSlot, MAX_POST_PASSES};
 
 /// Everything a mod declared: settings, widgets, key bindings and command names.
 ///
@@ -19,6 +20,7 @@ pub(crate) struct Declared {
     widgets: Vec<WidgetSlot>,
     keys: Vec<KeySlot>,
     commands: Vec<String>,
+    post_passes: Vec<PostPassSlot>,
 }
 
 fn duplicate(what: &'static str, key: &str) -> DeclareError {
@@ -36,6 +38,7 @@ impl Declared {
             widgets: Vec::new(),
             keys: Vec::new(),
             commands: Vec::new(),
+            post_passes: Vec::new(),
         }
     }
 
@@ -57,6 +60,16 @@ impl Declared {
             return Err(duplicate("widget key", widget.key()));
         }
         self.widgets.push(widget);
+        Ok(())
+    }
+
+    /// Adds a post-process pass.
+    pub(crate) fn add_post_pass(&mut self, pass: PostPassSlot) -> Result<(), DeclareError> {
+        check_room("post passes", self.post_passes.len(), MAX_POST_PASSES)?;
+        if self.post_pass(pass.key()).is_some() {
+            return Err(duplicate("post pass key", pass.key()));
+        }
+        self.post_passes.push(pass);
         Ok(())
     }
 
@@ -92,6 +105,14 @@ impl Declared {
 
     pub(crate) fn widgets(&self) -> &[WidgetSlot] {
         &self.widgets
+    }
+
+    pub(crate) fn post_passes(&self) -> &[PostPassSlot] {
+        &self.post_passes
+    }
+
+    pub(crate) fn post_pass(&self, key: &str) -> Option<&PostPassSlot> {
+        self.post_passes.iter().find(|p| p.key() == key)
     }
 
     pub(crate) fn keys(&self) -> &[KeySlot] {

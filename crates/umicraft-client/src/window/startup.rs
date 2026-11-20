@@ -217,6 +217,7 @@ impl App {
             external_mods,
             render_bus,
             releasing: Vec::new(),
+            post_frames: Vec::new(),
             options,
             audio,
             window: None,

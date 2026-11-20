@@ -77,8 +77,9 @@ pub struct UmiVersion {
 /// `UmiHost::event_set_text` (F3.3); 0.3 added settings, HUD widgets, key
 /// bindings, client commands and `KEY_PRESSED` (F3.4); 0.4 added the packet
 /// events, `UmiBytes`, `UmiStatus::BUSY` and `UmiHost::packet_send` (F3.5); 0.5
-/// added the `player_physics` service and the world queries (F3.6).
-pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 5 };
+/// added the `player_physics` service and the world queries (F3.6); 0.6 added
+/// the post-process passes (F3.7).
+pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 6 };
 
 impl UmiVersion {
     /// Whether a host of version `self` can load a mod built for `mod_version`.

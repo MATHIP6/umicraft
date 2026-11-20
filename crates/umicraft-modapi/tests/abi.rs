@@ -14,8 +14,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
     umicraft_mod, Anchor, Block, Chat, ChatReceived, ChatSend, Connected, Disconnected, InitCx,
-    KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Physics, Placement, PostTick,
-    PreTick, ScreenClosed, ScreenOpened, Setting, World,
+    KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Physics, Placement, PostPass,
+    PostTick, PreTick, ScreenClosed, ScreenOpened, Setting, World,
 };
 use umicraft_modapi_sys::*;
 
@@ -57,6 +57,12 @@ static CHAT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static INJECTED: Mutex<Vec<(u32, Vec<u8>)>> = Mutex::new(Vec::new());
 /// The status `packet_send` answers with.
 static PACKET_STATUS: Mutex<UmiStatus> = Mutex::new(UmiStatus::OK);
+/// Post passes the fake host accepted, as `key:label:wgsl`.
+static POST_PASSES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Every `post_set_param` call, as `key:index:x,y,z,w`.
+static POST_PARAMS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// What the fake host answered a refused `post_pass` with.
+static POST_REFUSALS: Mutex<Vec<Result<PostPass, ModError>>> = Mutex::new(Vec::new());
 /// What the mod registered, for the tests to read through.
 static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
@@ -70,6 +76,7 @@ struct Ui {
     chat: Chat,
     packets: Packets,
     world: World,
+    post: PostPass,
 }
 
 #[derive(Clone, Copy)]
@@ -153,7 +160,13 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
         chat: cx.chat(),
         packets: cx.packets(),
         world: cx.world(),
+        post: cx.post_pass("tint", "Tint", "fn fs_main() {}")?,
     };
+    let mut refusals = POST_REFUSALS.lock().unwrap();
+    refusals.push(cx.post_pass("tint", "Again", "fn fs_main() {}"));
+    refusals.push(cx.post_pass("broken", "Broken", "broken"));
+    refusals.push(cx.post_pass(&"k".repeat(65), "Long", "fn fs_main() {}"));
+    drop(refusals);
     *UI.lock().unwrap() = Some(ui);
     let placement = Placement::new(Anchor::BottomRight)
         .offset(2.0, 3.0)
@@ -556,6 +569,46 @@ extern "C" fn fake_world_entities(
     UmiStatus::OK
 }
 
+extern "C" fn fake_register_post_pass(
+    _me: UmiModHandle,
+    key: UmiStr,
+    label: UmiStr,
+    wgsl: UmiStr,
+) -> UmiStatus {
+    let mut passes = POST_PASSES.lock().unwrap();
+    let entry = format!("{}:{}:{}", text_of(key), text_of(label), text_of(wgsl));
+    if passes
+        .iter()
+        .any(|p| p.starts_with(&format!("{}:", text_of(key))))
+    {
+        return UmiStatus::CONFLICT;
+    }
+    if text_of(wgsl) == "broken" {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    passes.push(entry);
+    UmiStatus::OK
+}
+
+extern "C" fn fake_post_set_param(
+    _me: UmiModHandle,
+    key: UmiStr,
+    index: u32,
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
+) -> UmiStatus {
+    if index > 3 {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    POST_PARAMS
+        .lock()
+        .unwrap()
+        .push(format!("{}:{index}:{x},{y},{z},{w}", text_of(key)));
+    UmiStatus::OK
+}
+
 fn host() -> UmiHost {
     UmiHost {
         size: size_of::<UmiHost>(),
@@ -579,6 +632,8 @@ fn host() -> UmiHost {
         physics_next: fake_physics_next,
         world_block: fake_world_block,
         world_entities: fake_world_entities,
+        register_post_pass: fake_register_post_pass,
+        post_set_param: fake_post_set_param,
     }
 }
 
@@ -602,6 +657,10 @@ fn fresh() -> MutexGuard<'static, ()> {
     LAYERS.lock().unwrap().clear();
     NEXT_CALLS.store(0, SeqCst);
     INJECTED.lock().unwrap().clear();
+    for list in [&POST_PASSES, &POST_PARAMS] {
+        list.lock().unwrap().clear();
+    }
+    POST_REFUSALS.lock().unwrap().clear();
     *PACKET_STATUS.lock().unwrap() = UmiStatus::OK;
     *VALUES.lock().unwrap() = Some(HashMap::new());
     *UI.lock().unwrap() = None;
@@ -750,6 +809,8 @@ fn init_error_maps_to_error_and_is_logged() {
     assert_eq!(*LOGS.lock().unwrap(), ["3:hello", "1:nope"]);
     // The failed init left no instance behind, so a retry is not a conflict.
     FAIL_INIT.store(false, SeqCst);
+    // A real host drops a failed mod's passes; the fake keeps them.
+    POST_PASSES.lock().unwrap().clear();
     init_ok();
 }
 
@@ -1482,4 +1543,39 @@ fn world_entities_stops_when_the_visitor_says_so_or_panics() {
 #[test]
 fn unavailable_has_a_message() {
     assert_eq!(ModError::Unavailable.to_string(), "the chunk is not loaded");
+}
+
+#[test]
+fn post_pass_registers_and_maps_refusals() {
+    let _guard = fresh();
+    init_ok();
+    assert_eq!(
+        *POST_PASSES.lock().unwrap(),
+        ["tint:Tint:fn fs_main() {}".to_owned()]
+    );
+    let refusals = POST_REFUSALS.lock().unwrap();
+    assert_eq!(
+        *refusals,
+        [
+            Err(ModError::HostRefused(UmiStatus::CONFLICT)),
+            Err(ModError::HostRefused(UmiStatus::INVALID_ARGUMENT)),
+            Err(ModError::HostRefused(UmiStatus::INVALID_ARGUMENT)),
+        ]
+    );
+}
+
+#[test]
+fn post_pass_sets_params_by_key_and_reports_a_bad_index() {
+    let _guard = fresh();
+    init_ok();
+    let post = ui().post;
+    assert_eq!(post.set_param(2, [1.0, 0.5, 0.0, -1.0]), Ok(()));
+    assert_eq!(
+        *POST_PARAMS.lock().unwrap(),
+        ["tint:2:1,0.5,0,-1".to_owned()]
+    );
+    assert_eq!(
+        post.set_param(4, [0.0; 4]),
+        Err(ModError::HostRefused(UmiStatus::INVALID_ARGUMENT))
+    );
 }

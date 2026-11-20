@@ -246,6 +246,7 @@ impl Drop for ModHost {
     }
 }
 
+mod post;
 mod ui;
 
 #[cfg(test)]

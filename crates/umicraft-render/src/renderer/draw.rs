@@ -7,6 +7,7 @@ use super::pipelines::draw_gpu_pass;
 use super::Renderer;
 use crate::gpu_timer::DrawCallStats;
 use crate::overlay::Overlay;
+use crate::post_chain::plan;
 use crate::sky::SkyState;
 use crate::ui_pass::UiBatchKind;
 
@@ -40,7 +41,10 @@ impl Renderer {
         // With a motion blur, the world goes to the texture too, and the hand and
         // the HUD are drawn over the blurred picture, sharp.
         let motion = self.motion_blur.is_active();
-        let world_view = if blur || motion {
+        // The post passes of the mods filter the picture of the world, hand
+        // included, before any blur; they too work on the texture.
+        let post = self.post_chain.is_active();
+        let world_view = if plan::world_to_scene(post, motion, blur) {
             self.scene_blur.scene_view()
         } else {
             view
@@ -146,36 +150,23 @@ impl Renderer {
         }
         self.stamp(&mut pass, 4);
 
-        if motion {
-            // The hand goes into the picture that is blurred: it trails when it
-            // moves. The overlays and the HUD come after, sharp.
-            self.draw_hand(&mut pass);
-            // The world is done: blur it, lay it over the screen, and draw the
-            // overlays and the HUD sharp on top. The depth buffer is kept.
+        // The hand is part of the picture that is filtered or blurred: it trails
+        // when it moves. The overlays and the HUD come after, sharp.
+        self.draw_hand(&mut pass);
+        let hand_in_scene = motion || post;
+        if hand_in_scene {
+            // The world is done: filter and blur it, lay it over the screen, and
+            // draw the overlays and the HUD sharp on top. The depth buffer is kept.
             drop(pass);
-            self.motion_blur.run(encoder);
-            pass = composite_pass(
-                encoder,
-                view,
-                &self.depth_view,
-                "motion blur composite pass",
-                wgpu::LoadOp::Load,
-            );
-            self.motion_blur.blit(&mut pass);
-            // Sharp, and still tested against the depth buffer of the world.
-            self.nametags
-                .draw(&mut pass, &self.overlay_pipeline, &self.ui_bind_group);
-        }
-
-        if !motion {
-            self.draw_hand(&mut pass);
+            pass = self.composite_scene(encoder, view, post, motion, blur);
         }
 
         // `renderOverlays` follows the hand; the GUI's vignette, pumpkin and
         // portal come before the hotbar.
         self.screen.draw(&mut pass, &self.terrain_bind_group);
 
-        if blur {
+        // With post passes the blur was done by `composite_scene`.
+        if blur && !hand_in_scene {
             // The world is done: smooth it, lay it over the screen, and draw
             // the HUD and the menu sharp on top.
             drop(pass);
@@ -193,6 +184,65 @@ impl Renderer {
         draw_stats.ui += self.draw_ui(&mut pass, overlay);
         self.last_draw_calls.set(draw_stats);
         self.stamp(&mut pass, 5);
+    }
+
+    /// Runs the post passes over the finished world in the scene texture, then
+    /// opens the pass over the screen with the picture laid on it: blurred by
+    /// the motion blur, or by the menu blur, or sharp. The motion blur and the
+    /// menu blur never run in the same frame (the motion blur yields to a menu).
+    fn composite_scene<'a>(
+        &'a self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        view: &'a wgpu::TextureView,
+        post: bool,
+        motion: bool,
+        blur: bool,
+    ) -> wgpu::RenderPass<'a> {
+        if post {
+            self.post_chain.run(
+                encoder,
+                (
+                    self.scene_blur.scene_texture(),
+                    self.scene_blur.scene_view(),
+                ),
+            );
+        }
+        if motion {
+            self.motion_blur.run(encoder);
+            let mut pass = composite_pass(
+                encoder,
+                view,
+                &self.depth_view,
+                "motion blur composite pass",
+                wgpu::LoadOp::Load,
+            );
+            self.motion_blur.blit(&mut pass);
+            // Sharp, and still tested against the depth buffer of the world.
+            self.nametags
+                .draw(&mut pass, &self.overlay_pipeline, &self.ui_bind_group);
+            pass
+        } else if blur {
+            self.scene_blur.blur(encoder);
+            let mut pass = composite_pass(
+                encoder,
+                view,
+                &self.depth_view,
+                "blurred pass",
+                wgpu::LoadOp::Clear(1.0),
+            );
+            self.scene_blur.blit(&mut pass);
+            pass
+        } else {
+            let mut pass = composite_pass(
+                encoder,
+                view,
+                &self.depth_view,
+                "post composite pass",
+                wgpu::LoadOp::Load,
+            );
+            self.scene_blur.blit_scene(&mut pass);
+            pass
+        }
     }
 
     /// The opaque terrain, nearest chunk first: the SOLID quads (no alpha

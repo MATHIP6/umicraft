@@ -4402,6 +4402,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-example-shader-pass"
+version = "0.1.0"
+dependencies = [
+ "naga",
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-game"
 version = "0.1.0"
 dependencies = [
@@ -4453,6 +4461,7 @@ dependencies = [
  "criterion",
  "crossbeam-channel",
  "libloading",
+ "naga",
  "proptest",
  "semver",
  "serde",

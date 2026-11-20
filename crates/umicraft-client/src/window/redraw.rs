@@ -239,6 +239,7 @@ impl App {
         self.send_scene(&mut renderer, now, environment, elapsed, (width, height));
         self.upload_entities(&mut renderer, now, partial_tick);
         self.draw_portrait(&mut renderer);
+        self.update_post_passes(&mut renderer);
         let renderer = self.renderer.insert(renderer);
         if let (Some(frame), Some(items), Some(textures)) = (
             ui_frame.as_ref(),

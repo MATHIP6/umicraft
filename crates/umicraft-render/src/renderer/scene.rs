@@ -19,6 +19,7 @@ use crate::nametag::Nametag;
 use crate::outline::{DebugLine, OutlineBox};
 use crate::overlays::{Pictures, ScreenOverlays};
 use crate::particles::ParticleSprite;
+use crate::post_chain::{PostPassFrame, PostPassSource};
 use crate::sky::{SkyImage, SkyTextures};
 use crate::weather::PrecipitationField;
 
@@ -219,6 +220,24 @@ impl Renderer {
     pub fn set_background_blur(&mut self, strength: f32) {
         self.background_blur = strength > 0.0;
         self.scene_blur.set_strength(&self.queue, strength);
+    }
+
+    /// Replaces the post-processing passes of the mods (the shader contract of
+    /// the modding API). Each source is compiled once, inside a validation
+    /// error scope; the result has one entry per source, `Err` with the GPU
+    /// message for a shader that was refused. A refused pass is kept but never
+    /// drawn. Passes start disabled until [`Renderer::update_post`] enables them.
+    pub fn set_post_passes(&mut self, passes: &[PostPassSource]) -> Vec<Result<(), String>> {
+        self.post_chain
+            .set_passes(&self.device, self.scene_blur.scene_view(), passes)
+    }
+
+    /// Enables the post passes and hands them their parameters for this frame,
+    /// one entry per pass in the order of [`Renderer::set_post_passes`]; extra
+    /// or missing entries mean disabled. The window calls this every frame;
+    /// it does not allocate. With no enabled pass a frame costs nothing extra.
+    pub fn update_post(&mut self, frames: &[PostPassFrame]) {
+        self.post_chain.update(&self.queue, frames);
     }
 
     /// Replaces the name tags drawn in the world pass of the next frames; an

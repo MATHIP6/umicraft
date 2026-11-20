@@ -14,8 +14,9 @@ use crate::ffi::{
     DrawHandler, Handler, OwnedUser, PhysicsHandler,
 };
 use crate::host::utf8;
+use crate::post::key_too_long;
 use crate::setting::{definition, utf8_all};
-use crate::{Chat, Hud, Logger, ModError, Packets, Physics, Placement, Setting, World};
+use crate::{Chat, Hud, Logger, ModError, Packets, Physics, Placement, PostPass, Setting, World};
 
 /// A mod: built once by the host, told when it is shut down.
 pub trait Mod: Send + Sized + 'static {
@@ -73,6 +74,29 @@ impl<'a> InitCx<'a> {
     /// The host only answers on the game thread inside a callback.
     pub fn world(&self) -> World {
         World
+    }
+
+    /// Adds a post-process pass over the picture of the world.
+    ///
+    /// `wgsl` is the mod's fragment shader: an `fs_main` plus helpers, written
+    /// against the host's prelude (`umi_scene`, `umi_sampler`, `umi.params`,
+    /// `UmiVertexOut`). The host validates it with naga before accepting it.
+    /// `label` is shown to the player. See `docs/modding/post.md` for the full
+    /// contract. No permission is needed.
+    ///
+    /// # Errors
+    /// [`ModError::HostRefused`] with `INVALID_ARGUMENT` for an invalid key or
+    /// a shader that breaks the contract (the naga message is in the log), and
+    /// with `CONFLICT` for a key this mod already used.
+    pub fn post_pass(&mut self, key: &str, label: &str, wgsl: &str) -> Result<PostPass, ModError> {
+        let pass = PostPass::new(key).ok_or_else(key_too_long)?;
+        ModError::check((self.host.register_post_pass)(
+            self.me,
+            utf8(key),
+            utf8(label),
+            utf8(wgsl),
+        ))?;
+        Ok(pass)
     }
 
     /// Watches events of type `E`; lower `priority` runs first.

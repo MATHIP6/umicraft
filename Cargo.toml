@@ -24,6 +24,7 @@ members = [
     "mods/examples/packet_logger",
     "mods/examples/panicking",
     "mods/examples/physics_tweak",
+    "mods/examples/shader_pass",
 ]
 
 [workspace.package]
@@ -39,6 +40,7 @@ crossbeam-channel = "0.5"
 flate2 = "1.0"
 fontdue = "0.9"
 libloading = "0.8"
+naga = { version = "30.0.1", features = ["wgsl-in"] }
 jpeg-decoder = { version = "0.3", default-features = false }
 num-bigint = "0.5"
 png = "0.18"

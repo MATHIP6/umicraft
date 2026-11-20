@@ -185,8 +185,10 @@ impl SceneBlur {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format,
+                // `COPY_DST`: an odd post chain copies its result back into the scene.
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -264,6 +266,11 @@ impl SceneBlur {
         &self.targets.scene.1
     }
 
+    /// The texture behind [`SceneBlur::scene_view`], for texture copies.
+    pub(crate) fn scene_texture(&self) -> &wgpu::Texture {
+        &self.targets.scene.0
+    }
+
     /// Blurs the scene: two rounds of a horizontal and a vertical pass.
     pub(crate) fn blur(&self, encoder: &mut wgpu::CommandEncoder) {
         let targets = &self.targets;
@@ -296,12 +303,17 @@ impl SceneBlur {
         }
     }
 
-    /// Draws the sharp scene over the target of `pass`, then the blurred one
-    /// over it as opaque as the strength says.
-    pub(crate) fn blit<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+    /// Draws the sharp scene alone over the target of `pass`.
+    pub(crate) fn blit_scene<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         pass.set_pipeline(&self.blit_pipeline);
         pass.set_bind_group(0, &self.targets.scene_group, &[]);
         pass.draw(0..3, 0..1);
+    }
+
+    /// Draws the sharp scene over the target of `pass`, then the blurred one
+    /// over it as opaque as the strength says.
+    pub(crate) fn blit<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        self.blit_scene(pass);
         pass.set_pipeline(&self.mix_pipeline);
         pass.set_bind_group(0, &self.targets.blurred_group, &[]);
         pass.draw(0..3, 0..1);

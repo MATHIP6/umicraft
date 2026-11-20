@@ -129,6 +129,8 @@ impl Renderer {
         self.depth_view = create_depth(&self.device, width, height);
         self.scene_blur
             .resize(&self.device, &self.queue, (width, height));
+        self.post_chain
+            .resize(&self.device, self.scene_blur.scene_view(), (width, height));
         self.motion_blur.invalidate();
         self.ui_pass.resize(width, height);
         if self.offscreen.is_some() {

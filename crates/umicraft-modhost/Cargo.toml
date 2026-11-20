@@ -12,6 +12,7 @@ crossbeam-channel.workspace = true
 umicraft-builtin-mods.workspace = true
 umicraft-core.workspace = true
 libloading.workspace = true
+naga.workspace = true
 sha2.workspace = true
 tracing.workspace = true
 umicraft-modapi-sys.workspace = true

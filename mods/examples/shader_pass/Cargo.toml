@@ -1,0 +1,22 @@
+[package]
+name = "umicraft-example-shader-pass"
+description = "Example Umicraft mod: post-process shader pass (F3.7)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "shader_pass"
+crate-type = ["cdylib"]
+
+[dependencies]
+umicraft-modapi.workspace = true
+
+[dev-dependencies]
+# Dev-only: validates the shader the way the host does, never shipped in the mod.
+naga = { version = "30.0.1", features = ["wgsl-in"] }
+
+[lints]
+workspace = true

@@ -103,6 +103,7 @@ impl ApplicationHandler for App {
         renderer.use_procedural_blocks();
         upload_sky_textures(&mut renderer);
 
+        self.install_post_passes(&mut renderer);
         self.renderer = Some(renderer);
         self.window = Some(window.clone());
         event_loop.listen_device_events(DeviceEvents::Always);

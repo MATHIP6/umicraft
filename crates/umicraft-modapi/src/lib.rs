@@ -40,6 +40,12 @@
 //! a function of state and input. [`InitCx::world`] gives a [`World`] to read
 //! blocks and entities, answered only on the game thread inside a callback.
 //!
+//! # Post-process passes
+//!
+//! [`InitCx::post_pass`] registers a WGSL fragment shader that the host runs
+//! over the world picture; the returned [`PostPass`] sets its parameters with
+//! [`PostPass::set_param`]. The contract is in `docs/modding/post.md`.
+//!
 //! Setters work only inside [`InitCx::intercept`] handlers; observers get a
 //! copy and the host answers `DENIED`.
 //!
@@ -67,6 +73,7 @@ mod init;
 mod logger;
 mod packets;
 mod physics;
+mod post;
 #[doc(hidden)]
 pub mod private;
 mod setting;
@@ -83,6 +90,7 @@ pub use init::{InitCx, Mod};
 pub use logger::Logger;
 pub use packets::Packets;
 pub use physics::{Input, Physics, PlayerState};
+pub use post::PostPass;
 pub use setting::Setting;
 pub use world::{Block, Entity, World};
 

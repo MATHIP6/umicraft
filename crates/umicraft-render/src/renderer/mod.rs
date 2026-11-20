@@ -47,6 +47,7 @@ use crate::outline::LineRenderer;
 use crate::overlays::{ScreenOverlays, ScreenRenderer};
 use crate::panorama::PanoramaRenderer;
 use crate::particles::{ParticleRenderer, ParticleSprite};
+use crate::post_chain::PostChain;
 use crate::scene_blur::SceneBlur;
 use crate::sky::SkyRenderer;
 use crate::ui_pass::UiPass;
@@ -375,6 +376,8 @@ pub struct Renderer {
     /// The motion blur of the world (the Motion Blur mod).
     motion_blur: MotionBlur,
     background_blur: bool,
+    /// The post-processing passes of the mods, run on the scene texture.
+    post_chain: PostChain,
     /// Every light level is full: the Fullbright mod.
     fullbright: bool,
     entity_batches: BatchBuffer,

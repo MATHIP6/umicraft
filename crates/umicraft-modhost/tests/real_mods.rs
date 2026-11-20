@@ -3,7 +3,8 @@
 //! Loads the real `hello` and `panicking` example cdylibs (F3.2 acceptance test) and
 //! dispatches events to them through a core `EventBus` (F3.3); `packet_logger`
 //! observes and injects packets (F3.5); `physics_tweak` wraps the player physics and
-//! queries the world (F3.6).
+//! queries the world (F3.6); `shader_pass` registers a validated post-process pass
+//! (F3.7).
 //!
 //! The libraries are built once per test binary with `cargo build --offline`. The
 //! target directory is `CARGO_TARGET_DIR` when set, otherwise it is derived from the
@@ -42,6 +43,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-packet-logger",
                 "-p",
                 "umicraft-example-physics-tweak",
+                "-p",
+                "umicraft-example-shader-pass",
                 "--offline",
             ])
             .status()
@@ -114,7 +117,7 @@ fn hello_loads_panicking_fails_and_handlers_run() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 5 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
     assert_eq!(resolution.order.len(), 2);
 
     let mut trust = TrustList::default();
@@ -195,7 +198,7 @@ fn hello_declares_settings_a_widget_a_key_and_a_command() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 5 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
     let (host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -265,7 +268,7 @@ fn packet_logger_observes_injects_and_yields_to_the_compatible_mode() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 5 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -336,7 +339,7 @@ fn physics_tweak_wraps_the_step_and_queries_the_world() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 5 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -389,5 +392,52 @@ fn physics_tweak_wraps_the_step_and_queries_the_world() {
     // The server-compatible mode holds a movement mod off.
     host.set_server_compat(true);
     assert!(!chain.is_active());
+    host.shutdown_all();
+}
+
+/// The real `shader_pass`: its WGSL passes the host's validation and its
+/// `PreTick` observer pushes the settings into the pass parameters.
+#[test]
+fn shader_pass_registers_a_valid_pass_and_feeds_its_params() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "shader_pass");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let passes: Vec<_> = host
+        .post_passes()
+        .map(|p| (p.mod_id.to_string(), p.key.to_owned(), p.enabled))
+        .collect();
+    assert_eq!(
+        passes,
+        [("shader_pass".to_owned(), "sepia".to_owned(), true)]
+    );
+    assert!(host
+        .post_passes()
+        .next()
+        .unwrap()
+        .wgsl
+        .contains("fn umi_vs"));
+
+    host.set_setting(&id("shader_pass"), "strength", &SettingValue::Number(0.25))
+        .unwrap();
+    let mut game = EventBus::default();
+    host.install(&mut game, EventThread::Game);
+    game.dispatch(&mut PreTick::new(0));
+    // The observer runs on the mod's worker; wait for the parameter to land.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while host.post_passes().next().unwrap().params()[0][0] != 0.25 {
+        assert!(std::time::Instant::now() < deadline, "params never set");
+        std::thread::yield_now();
+    }
+    assert_eq!(host.post_passes().next().unwrap().params()[0][1], 1.0);
+
+    host.refuse_post_pass(&id("shader_pass"), "sepia", "test");
+    assert!(!host.post_passes().next().unwrap().enabled);
     host.shutdown_all();
 }

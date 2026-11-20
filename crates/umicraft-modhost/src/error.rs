@@ -8,6 +8,7 @@ use thiserror::Error;
 use umicraft_modapi_sys::{UmiStatus, UmiVersion};
 
 use crate::manifest::{ApiVersionError, ModId, ServiceId};
+use crate::post::PostShaderError;
 
 /// An identifier that does not match its grammar.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -221,6 +222,14 @@ pub enum DeclareError {
         what: &'static str,
         /// What is wrong with it.
         why: &'static str,
+    },
+    /// A post-process shader breaks the contract (naga's message inside).
+    #[error("post pass `{key}`: {source}")]
+    PostShader {
+        /// The pass's key.
+        key: String,
+        /// What is wrong with the shader.
+        source: PostShaderError,
     },
     /// The mod declared more of something than the host accepts.
     #[error("at most {max} {what} may be registered")]

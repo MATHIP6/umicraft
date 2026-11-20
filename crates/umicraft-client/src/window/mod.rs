@@ -61,6 +61,7 @@ mod inventory_control;
 mod keyboard;
 mod menu_screens;
 mod mod_events;
+mod mod_post;
 mod mods_menu;
 mod options_control;
 mod player_input;
@@ -228,5 +229,8 @@ struct App {
     /// The threads still dropping stopped sessions; joined at exit before the
     /// mods shut down, because their game threads may still dispatch.
     releasing: Vec<std::thread::JoinHandle<()>>,
+    /// Which post-process passes of the mods run this frame, kept for its buffer;
+    /// without capacity when no mod has a pass (F3.7).
+    post_frames: Vec<umicraft_render::PostPassFrame>,
     exit_error: Option<String>,
 }

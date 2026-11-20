@@ -184,3 +184,55 @@ fn the_terrain_shader_is_valid_wgsl() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_post_pass_filters_the_picture_and_a_bad_one_is_refused() {
+    use crate::post_chain::{PostPassFrame, PostPassSource};
+
+    // A pass that writes the red channel to all three, and one that is not WGSL.
+    let grey = "struct UmiPost { resolution: vec2<f32>, time: f32, frame: u32, \
+        params: array<vec4<f32>, 4>, };\n\
+        @group(0) @binding(0) var umi_scene: texture_2d<f32>;\n\
+        @group(0) @binding(1) var umi_sampler: sampler;\n\
+        @group(0) @binding(2) var<uniform> umi: UmiPost;\n\
+        struct UmiVertexOut { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32>, };\n\
+        @vertex fn umi_vs(@builtin(vertex_index) index: u32) -> UmiVertexOut {\n\
+            let uv = vec2<f32>(f32((index << 1u) & 2u), f32(index & 2u));\n\
+            var out: UmiVertexOut;\n\
+            out.position = vec4<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);\n\
+            out.uv = uv;\n\
+            return out;\n\
+        }\n\
+        @fragment fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {\n\
+            let c = textureSample(umi_scene, umi_sampler, in.uv);\n\
+            return vec4<f32>(c.r, c.r, c.r, 1.0);\n\
+        }\n";
+    let sources = [
+        PostPassSource {
+            label: "grey".into(),
+            wgsl: grey.into(),
+        },
+        PostPassSource {
+            label: "broken".into(),
+            wgsl: "not wgsl".into(),
+        },
+    ];
+    let mut renderer = Renderer::new_offscreen(32, 32).expect("offscreen renderer");
+    let results = renderer.set_post_passes(&sources);
+    assert!(results[0].is_ok());
+    assert!(results[1].is_err());
+    let on = PostPassFrame {
+        enabled: true,
+        ..PostPassFrame::default()
+    };
+    renderer.update_post(&[on, on]);
+    renderer
+        .render(&Camera::default(), &Overlay::new(32, 32))
+        .expect("render");
+    let image = renderer.read_pixels().expect("readback");
+    assert!(image
+        .rgba
+        .chunks_exact(4)
+        .all(|pixel| pixel[0] == pixel[1] && pixel[1] == pixel[2]));
+}

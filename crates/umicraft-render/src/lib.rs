@@ -42,6 +42,7 @@ mod overlay;
 mod overlays;
 mod panorama;
 mod particles;
+mod post_chain;
 mod renderer;
 mod scene_blur;
 mod sky;
@@ -80,6 +81,7 @@ pub use outline::{edge_vertices, DebugLine, OutlineBox, MAX_DEBUG_LINES, OUTLINE
 pub use overlay::{Overlay, OverlayVertex};
 pub use overlays::{Portal, ScreenOverlays, Underwater};
 pub use particles::{ParticleSprite, MAX_SPRITES};
+pub use post_chain::{PostPassFrame, PostPassSource, POST_PRELUDE};
 pub use renderer::{Image, Renderer};
 pub use sky::{SkyImage, SkyState, SkyTextures};
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};

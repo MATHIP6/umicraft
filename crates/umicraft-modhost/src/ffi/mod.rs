@@ -12,6 +12,7 @@ mod event;
 mod hud;
 mod packet;
 mod physics;
+mod post;
 mod ui;
 mod world;
 
@@ -164,6 +165,8 @@ pub fn host_table() -> UmiHost {
         physics_next: physics::host_physics_next,
         world_block: world::host_world_block,
         world_entities: world::host_world_entities,
+        register_post_pass: post::host_register_post_pass,
+        post_set_param: post::host_post_set_param,
     }
 }
 

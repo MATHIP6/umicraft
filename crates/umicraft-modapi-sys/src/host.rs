@@ -187,4 +187,22 @@ pub struct UmiHost {
         visit: Option<UmiEntityVisitFn>,
         user: *mut c_void,
     ) -> UmiStatus,
+    /// Adds a post-process pass over the world picture (during `umi_mod_init`
+    /// only): `wgsl` is a fragment shader `fs_main` written against the
+    /// prelude of `docs/modding/post.md`, validated with naga before it is
+    /// accepted (`INVALID_ARGUMENT`, the reason in the log). `CONFLICT` for a
+    /// key the mod already used. Added in API 0.6.
+    pub register_post_pass:
+        extern "C" fn(me: UmiModHandle, key: UmiStr, label: UmiStr, wgsl: UmiStr) -> UmiStatus,
+    /// Sets `umi.params[index]` (0..=3) of the mod's pass `key`, from any
+    /// thread; the next frame uses it. Added in API 0.6.
+    pub post_set_param: extern "C" fn(
+        me: UmiModHandle,
+        key: UmiStr,
+        index: u32,
+        x: f32,
+        y: f32,
+        z: f32,
+        w: f32,
+    ) -> UmiStatus,
 }

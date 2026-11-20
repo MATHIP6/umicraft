@@ -38,6 +38,8 @@ mod load;
 pub mod manifest;
 mod packets;
 mod physics;
+mod post;
+mod post_pass;
 pub mod resolve;
 mod sentinel;
 mod trust;
@@ -65,6 +67,8 @@ pub use manifest::{
 };
 pub use packets::{PacketOutbox, MAX_PACKET_BODY_BYTES};
 pub use physics::PhysicsChain;
+pub use post::{compose, validate, PostShaderError, MAX_SOURCE_BYTES, PRELUDE};
+pub use post_pass::{PostPassView, MAX_POST_PASSES};
 pub use resolve::{resolve, Candidate, RejectReason, Rejection, Resolution};
 pub use sentinel::{CrashSentinel, SentinelGuard};
 pub use trust::{sha256_file, TrustList};
