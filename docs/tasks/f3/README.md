@@ -16,7 +16,7 @@ Design: ADR-0086 (architecture), ADR-0087 (C ABI contract). Roadmap: F3 in
 | F3.5 | Raw packet hooks on the network thread, validated injection, permission gating, server-compat mode, "alters packets/movement" badge | `packet_logger` example | done |
 | F3.6 | Services (`player_physics` wrap/replace), conflict detection at load, read-only world and entity queries | `physics_tweak` example; trajectories unchanged with no mod (ADR-0076) | done |
 | F3.7 | Post-process chain with naga-validated WGSL | `shader_pass` example | done |
-| F3.8 | Per-mod profiler in the Umicraft debug overlay, budget auto-disable, mod manager (permissions, hash, enable/disable), `docs/modding/` guide and template | former M15 acceptance criteria | todo |
+| F3.8 | Per-mod profiler in the Umicraft debug overlay, budget auto-disable, mod manager (permissions, hash, enable/disable), `docs/modding/` guide and template | former M15 acceptance criteria | done |
 | F3.9 | Built-in mods on the same bus (`ModContext` → `FrameEvent`); API frozen as `1.0` | no regression of the 16 built-in mods | todo |
 
 ## F3.1 interface (frozen before the work is split, spec §14 rule 11)
@@ -138,8 +138,9 @@ thread, after the mod's worker has drained), or at client exit.
 
 - The crash sentinel is one file per data directory: a second client started
   while the first runs sees it and starts in safe mode, and the first one's
-  clean exit removes it while the second still runs. F3.8 makes it a
-  per-instance lock.
+  clean exit removes it while the second still runs. Fixed in F3.8: the
+  sentinel is a per-instance file lock (`CrashSentinel::arm` returns
+  `Arming::AnotherInstance` for a second client).
 - An untrusted library is refused with its SHA-256 and the line to add to
   `trusted.toml` in the log; the confirmation dialog comes with the mod
   manager. Every discovered mod is enabled until then.
@@ -576,3 +577,59 @@ At startup, after the mods load, the client hands `ModHost::post_passes` to
 `Renderer::set_post_passes` and logs (and marks failed via the host) a pass the
 GPU refused; every frame it fills a reused `Vec<PostPassFrame>` from the views
 and calls `update_post`.
+
+## F3.8 interface (frozen before the work is split)
+
+No ABI change (API stays 0.6).
+
+### `umicraft-modhost`
+
+- **Profile**: `ModHost::profile(&self) -> Vec<ModProfile>` in load order;
+  `ModProfile { id: ModId, name: String, version: String, state: ModState,
+  events: ModStats, widgets: ModStats, commands: ModStats, physics: ModStats }`
+  (cumulative counters; the client turns two snapshots into rates) with
+  `ModProfile::total(&self) -> ModStats`. `ModState { Enabled, SwitchedOff,
+  HeldByCompat, Failed }`.
+- **Failure reason**: the first failure of a mod is kept as text (`"panicked in
+  its handler for event 3"`, `"over its time budget 50 times in a row in its
+  widget `ticks`"`, …), from the one place mods are failed (`hook.rs`);
+  `ModContext::failure(&self) -> Option<String>`, `ModView::failure`,
+  `ModProfile` carries it in `ModState::Failed(String)`.
+- **Manager data**: `ModView` gains `version`, `authors`, `sha256` (hex of the
+  loaded library) and keeps `permissions`. `LoadFailure` for an untrusted
+  library carries what the manager shows: `LoadError::Untrusted { hash }` plus
+  the manifest's name, version and permissions (`LoadFailure::manifest:
+  Option<Manifest>`). `TrustList::trust(&mut self, id, hash)` + `save`.
+- **Sentinel per instance** (std `File::try_lock`, Rust ≥ 1.89):
+  `CrashSentinel::arm(path) -> io::Result<Arming>` with `Arming { Armed {
+  guard: SentinelGuard, previous_crash: bool }, AnotherInstance }`. The file
+  stays locked while the client runs; a leftover file that can be locked means
+  the last run crashed; a file locked by someone else means another instance
+  runs (no safe mode, no sentinel for this one). `disarm` unlocks and removes.
+  `armed(path)` is removed.
+
+### Client
+
+- **Profiler** on the F3 screen (right column, after the CPU/GPU lines), one
+  line per external mod: `mod <id>: <calls/s> calls, <mean µs> µs avg, <max µs>
+  max, <overruns> over, <dropped> dropped[, off|held|failed]`, rates from
+  snapshots one second apart; nothing without external mods.
+- **Mod manager** (the External cards): description gains version, authors,
+  permissions (`packets`, `movement`, `files`, `http`), the first 12 hex digits
+  of the hash and, for a failed mod, its reason. Untrusted mods get a card
+  ("Not trusted: <hash 12>", the full hash in the description) whose switch
+  trusts the file (written to `trusted.toml`) and says it loads at the next
+  start.
+- **Notices name the mod**: a command or handler failure prints
+  `<mod name> stopped working and was switched off.`
+- **Logs list the mods**: one line at startup with every loaded mod and its
+  version (crash reports themselves are F4).
+
+### Docs and examples
+
+`docs/modding/README.md` (guide: getting started from `mods/template`,
+manifest reference, lifecycle, threads and budgets, safety and fair play, the
+pages per area), `mods/template` (minimal mod, workspace member). Spec §10
+forbids official examples whose main purpose is an advantage: `physics_tweak`
+stops changing the fall and only measures (speed in blocks/s and the last jump
+height) through its wrapper, leaving the state untouched.

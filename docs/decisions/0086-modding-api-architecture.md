@@ -157,3 +157,10 @@ screens, ECS components.
   four `vec4` parameters) and validated with naga at registration; the composed module
   may declare no other resource or entry point. Passes run after the world and the
   hand, before the blurs and the HUD, ping-ponging through the scene texture.
+- **2026-11-19, F3.8 — trust from the mods menu, sentinel per instance.** An untrusted
+  library is not loaded; the mods menu lists it with its SHA-256 and its switch adds the
+  hash to `trusted.toml`, so it loads at the next start (loading after the buses are
+  built would miss the threads already running). The crash sentinel is an OS file lock
+  held while the client runs: a leftover file that can be locked is a crash, a locked
+  one is another running instance. Spec §10: the official examples measure or show,
+  they do not give an advantage (`physics_tweak` no longer changes the fall).
