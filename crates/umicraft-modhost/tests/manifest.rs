@@ -13,7 +13,7 @@ id = "example_hud"
 name = "Example HUD"
 version = "0.1.0"
 authors = ["Someone"]
-api_version = "0.1"
+api_version = "1.0"
 license = "MIT"
 description = "A HUD."
 library = "example_hud_lib"
@@ -57,7 +57,7 @@ fn parses_the_full_example() {
     assert_eq!(m.name, "Example HUD");
     assert_eq!(m.version.to_string(), "0.1.0");
     assert_eq!(m.authors, ["Someone"]);
-    assert_eq!(m.api_version, ApiVersion { major: 0, minor: 1 });
+    assert_eq!(m.api_version, ApiVersion { major: 1, minor: 0 });
     assert_eq!(m.license.as_deref(), Some("MIT"));
     assert_eq!(m.description.as_deref(), Some("A HUD."));
     assert_eq!(m.library, "example_hud_lib");
@@ -199,8 +199,8 @@ fn error_messages_name_the_problem() {
 #[test]
 fn api_version_parsing() {
     assert_eq!(
-        "0.1".parse::<ApiVersion>().unwrap(),
-        ApiVersion { major: 0, minor: 1 }
+        "1.0".parse::<ApiVersion>().unwrap(),
+        ApiVersion { major: 1, minor: 0 }
     );
     assert_eq!("12.34".parse::<ApiVersion>().unwrap().to_string(), "12.34");
     for bad in [
@@ -215,6 +215,9 @@ fn api_version_acceptance_table() {
     let v = |major, minor| ApiVersion { major, minor };
     // (host, required, accepted)
     let table = [
+        (v(1, 0), v(1, 1), false),
+        (v(1, 2), v(1, 0), true),
+        (v(1, 0), v(2, 0), false),
         (v(0, 1), v(0, 1), true),
         (v(0, 2), v(0, 1), false),
         (v(0, 1), v(0, 2), false),

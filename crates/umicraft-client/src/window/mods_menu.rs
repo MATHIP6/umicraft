@@ -128,7 +128,8 @@ impl App {
     }
 
     /// Feeds the mods once per frame with what the window knows: the built-in ones
-    /// get their context, the external ones draw their widgets (so they are drawn
+    /// get their context and the external ones the `Frame` event made from it, the
+    /// external ones draw their widgets (so they are drawn
     /// once per frame whether the HUD or the HUD editor shows them), and the chat
     /// lines the external mods printed go to the game.
     pub(super) fn update_mods(&mut self, now: Instant) {
@@ -147,35 +148,38 @@ impl App {
             let selected = hud.map_or(0, |hud| hud.selected_slot);
             crate::mods::facts::equipment(slots, selected)
         });
-        self.mods.update(&FrameInput {
-            now_ms: u64::try_from(now.duration_since(self.clock.started).as_millis())
-                .unwrap_or(u64::MAX),
-            fps: self.clock.fps.round() as u32,
-            frame_ms: self.clock.frame_ms,
-            eye: [eye.x, eye.y, eye.z],
-            yaw_radians: self.camera.yaw,
-            pitch_radians: self.camera.pitch,
-            sprinting: self.held(Action::Sprint),
-            ping_ms: hud.and_then(|hud| hud.ping_ms),
-            keys: KeyState {
-                forward: self.held(Action::Forward),
-                left: self.held(Action::Left),
-                back: self.held(Action::Back),
-                right: self.held(Action::Right),
-                jump: self.held(Action::Jump),
-                attack: self.held(Action::Attack),
-                use_item: self.held(Action::Use),
+        self.mods.update(
+            &FrameInput {
+                now_ms: u64::try_from(now.duration_since(self.clock.started).as_millis())
+                    .unwrap_or(u64::MAX),
+                fps: self.clock.fps.round() as u32,
+                frame_ms: self.clock.frame_ms,
+                eye: [eye.x, eye.y, eye.z],
+                yaw_radians: self.camera.yaw,
+                pitch_radians: self.camera.pitch,
+                sprinting: self.held(Action::Sprint),
+                ping_ms: hud.and_then(|hud| hud.ping_ms),
+                keys: KeyState {
+                    forward: self.held(Action::Forward),
+                    left: self.held(Action::Left),
+                    back: self.held(Action::Back),
+                    right: self.held(Action::Right),
+                    jump: self.held(Action::Jump),
+                    attack: self.held(Action::Attack),
+                    use_item: self.held(Action::Use),
+                },
+                combat: hud.map_or(CombatInfo::default(), |hud| CombatInfo {
+                    hits: hud.combat.0,
+                    hurts: hud.combat.1,
+                }),
+                armor,
+                held,
+                effects: hud.map_or([None; MAX_EFFECTS], |hud| {
+                    crate::mods::facts::effects(&hud.active_effects)
+                }),
             },
-            combat: hud.map_or(CombatInfo::default(), |hud| CombatInfo {
-                hits: hud.combat.0,
-                hurts: hud.combat.1,
-            }),
-            armor,
-            held,
-            effects: hud.map_or([None; MAX_EFFECTS], |hud| {
-                crate::mods::facts::effects(&hud.active_effects)
-            }),
-        });
+            &mut self.render_bus,
+        );
     }
 
     /// Opens the mods menu over the game, or closes it when it is open.
@@ -294,10 +298,13 @@ mod tests {
         let mut mods = ModsRuntime::new(&crate::options::ModsOptions::default());
         // The mod is on and has run once, so it has a line to draw.
         assert!(mods.registry_mut().set_enabled("fps", true).is_ok());
-        mods.update(&FrameInput {
-            fps: 60,
-            ..FrameInput::default()
-        });
+        mods.update(
+            &FrameInput {
+                fps: 60,
+                ..FrameInput::default()
+            },
+            &mut umicraft_core::events::EventBus::default(),
+        );
         let font = FontAtlas::fallback();
         let on_hud = hud_widgets(
             Screen::None,

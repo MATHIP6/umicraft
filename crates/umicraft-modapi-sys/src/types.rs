@@ -78,8 +78,10 @@ pub struct UmiVersion {
 /// bindings, client commands and `KEY_PRESSED` (F3.4); 0.4 added the packet
 /// events, `UmiBytes`, `UmiStatus::BUSY` and `UmiHost::packet_send` (F3.5); 0.5
 /// added the `player_physics` service and the world queries (F3.6); 0.6 added
-/// the post-process passes (F3.7).
-pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 6 };
+/// the post-process passes (F3.7); 1.0 added `FRAME` and froze the ABI (F3.9):
+/// from now on fields and functions are only appended, with a minor bump, and
+/// nothing is removed or reordered within major 1 (ADR-0087).
+pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 1, minor: 0 };
 
 impl UmiVersion {
     /// Whether a host of version `self` can load a mod built for `mod_version`.

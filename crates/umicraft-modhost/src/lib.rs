@@ -62,8 +62,8 @@ pub use error::{
     LoadFailure, ManifestError, TrustError,
 };
 pub use events::{
-    ChatReceived, ChatSend, Connected, Disconnected, EventThread, HostEvent, KeyPressed,
-    PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
+    ChatReceived, ChatSend, Connected, Disconnected, EventThread, Frame, FrameFacts, HostEvent,
+    KeyPressed, PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
 };
 pub use ffi::{host_table, UserPtr};
 pub use host::ModHost;

@@ -10,9 +10,10 @@ name = "My mod"
 version = "0.1.0"
 # Who wrote it, as plain names.
 authors = ["Your name"]
-# The mod API this library was built for. While the API is 0.x the client
-# demands the exact same minor: "0.6" loads only on a client that offers 0.6.
-api_version = "0.6"
+# The mod API this library was built for. A client of the same major and an
+# equal or newer minor loads it: "1.0" loads on a 1.0, 1.1 or 1.2 client, not on
+# a 2.0 client or on a 1.0 client when you wrote "1.1".
+api_version = "1.0"
 # Optional: an SPDX license expression.
 license = "MIT"
 # Optional: one line shown in the mods menu.

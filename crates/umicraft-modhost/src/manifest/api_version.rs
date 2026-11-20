@@ -10,7 +10,7 @@ use thiserror::Error;
 
 /// A malformed `major.minor` text.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("`{0}` is not an API version, expected `major.minor` such as `0.1`")]
+#[error("`{0}` is not an API version, expected `major.minor` such as `1.0`")]
 pub struct ApiVersionError(String);
 
 /// The modding API version, `major.minor`.

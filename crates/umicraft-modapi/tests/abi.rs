@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
-    umicraft_mod, Anchor, Block, Chat, ChatReceived, ChatSend, Connected, Disconnected, InitCx,
-    KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Physics, Placement, PostPass,
-    PostTick, PreTick, ScreenClosed, ScreenOpened, Setting, World,
+    umicraft_mod, Anchor, Block, Chat, ChatReceived, ChatSend, Connected, Disconnected, Frame,
+    InitCx, KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Physics, Placement,
+    PostPass, PostTick, PreTick, ScreenClosed, ScreenOpened, Setting, World,
 };
 use umicraft_modapi_sys::*;
 
@@ -145,6 +145,21 @@ fn register_view_handlers(cx: &mut InitCx<'_>) -> Result<(), ModError> {
     })?;
     cx.observe::<Connected>(0, |e| see(format!("connected={}", e.address())))?;
     cx.observe::<Disconnected>(0, |e| see(format!("disconnected={}", e.reason())))?;
+    cx.observe::<Frame>(0, |e| {
+        see(format!(
+            "frame={} {:?} fps={} ms={} yaw={} pitch={} clicks={}/{} ping={:?} sprint={}",
+            e.now_ms(),
+            e.position(),
+            e.fps(),
+            e.frame_ms(),
+            e.yaw(),
+            e.pitch(),
+            e.left_clicks(),
+            e.right_clicks(),
+            e.ping_ms(),
+            e.sprinting()
+        ));
+    })?;
     cx.observe::<ScreenOpened>(0, |e| see(format!("opened={}", e.name())))?;
     cx.observe::<ScreenClosed>(0, |e| see(format!("closed={}", e.name())))
 }
@@ -767,7 +782,7 @@ fn init_registers_the_subscriptions_and_logs() {
     let _guard = fresh();
     init_ok();
     let subs = SUBS.lock().unwrap();
-    assert_eq!(subs.len(), 12);
+    assert_eq!(subs.len(), 13);
     assert_eq!(
         (subs[0].event, subs[0].mode, subs[0].priority),
         (UmiEventId::PRE_TICK, UmiMode::OBSERVE, 5)
@@ -1001,6 +1016,50 @@ fn connection_and_screen_views_read_their_text() {
             "closed=chat"
         ]
     );
+}
+
+fn frame_payload(ping_ms: i32, sprinting: u8) -> UmiFrame {
+    UmiFrame {
+        header: header(UmiEventId::FRAME, size_of::<UmiFrame>(), 0),
+        now_ms: 5000,
+        position: [1.5, 64.0, -2.0],
+        fps: 120,
+        frame_ms: 8.5,
+        yaw: -90.0,
+        pitch: 10.0,
+        left_clicks: 3,
+        right_clicks: 1,
+        ping_ms,
+        sprinting,
+    }
+}
+
+#[test]
+fn frame_view_reads_every_field() {
+    let _guard = fresh();
+    init_ok();
+    let sub = sub_for(UmiEventId::FRAME);
+    assert_eq!(call(sub, &mut frame_payload(42, 1)), UmiStatus::OK);
+    assert_eq!(call(sub, &mut frame_payload(-1, 0)), UmiStatus::OK);
+    assert_eq!(
+        seen(),
+        [
+            "frame=5000 [1.5, 64.0, -2.0] fps=120 ms=8.5 yaw=-90 pitch=10 clicks=3/1 ping=Some(42) sprint=true",
+            "frame=5000 [1.5, 64.0, -2.0] fps=120 ms=8.5 yaw=-90 pitch=10 clicks=3/1 ping=None sprint=false",
+        ]
+    );
+}
+
+#[test]
+fn the_frame_view_refuses_another_payload() {
+    let _guard = fresh();
+    init_ok();
+    let mut tick = pre_tick(1);
+    assert_eq!(
+        call(sub_for(UmiEventId::FRAME), &mut tick),
+        UmiStatus::INVALID_ARGUMENT
+    );
+    assert!(seen().is_empty());
 }
 
 #[test]

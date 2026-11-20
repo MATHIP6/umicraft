@@ -17,8 +17,8 @@ use umicraft_modapi_sys::{
     UmiServiceMode, UmiStatus, UmiStr,
 };
 use umicraft_modhost::{
-    host_table, install_mod, ChatSend, EventThread, Load, ModContext, PacketReceived, Permissions,
-    PhysicsChain, PreTick, ServiceId, UserPtr,
+    host_table, install_mod, ChatSend, EventThread, Frame, FrameFacts, Load, ModContext,
+    PacketReceived, Permissions, PhysicsChain, PreTick, ServiceId, UserPtr,
 };
 
 extern "C" fn noop(_: *mut UmiEventHeader, _: *mut c_void) -> UmiStatus {
@@ -56,8 +56,8 @@ fn foreign_bus() -> EventBus {
     bus
 }
 
-/// A bus with one foreign observer of `PACKET_RECEIVED` on the network thread.
-fn packet_observer_bus() -> (EventBus, Arc<ModContext>) {
+/// A bus on `thread` with one foreign observer of `event`; the mod may use packets.
+fn observer_bus(event: UmiEventId, thread: EventThread) -> (EventBus, Arc<ModContext>) {
     let permissions = Permissions {
         network_packets: true,
         ..Permissions::default()
@@ -68,17 +68,11 @@ fn packet_observer_bus() -> (EventBus, Arc<ModContext>) {
         Arc::default(),
     );
     let user = UserPtr::new(std::ptr::null_mut());
-    let status = context.subscribe(
-        UmiEventId::PACKET_RECEIVED,
-        UmiMode::OBSERVE,
-        0,
-        Some(noop),
-        user,
-    );
+    let status = context.subscribe(event, UmiMode::OBSERVE, 0, Some(noop), user);
     assert_eq!(status, UmiStatus::OK);
     context.finish_init(true);
     let mut bus = EventBus::default();
-    install_mod(&mut bus, EventThread::Network, &context);
+    install_mod(&mut bus, thread, &context);
     (bus, context)
 }
 
@@ -118,15 +112,35 @@ fn dispatch(c: &mut Criterion) {
             empty.dispatch(&mut event)
         });
     });
-    let (mut observed, context) = packet_observer_bus();
+    let (mut observed, context) = observer_bus(UmiEventId::PACKET_RECEIVED, EventThread::Network);
     group.bench_function("packet_received_one_foreign_observer", |b| {
         b.iter(|| {
             let mut event = PacketReceived::new(black_box(0x21), black_box(&body));
             observed.dispatch(&mut event)
         });
     });
+
+    let facts = FrameFacts {
+        now_ms: 1,
+        position: [0.0, 64.0, 0.0],
+        fps: 144,
+        frame_ms: 6.9,
+        yaw: 0.0,
+        pitch: 0.0,
+        left_clicks: 0,
+        right_clicks: 0,
+        ping_ms: Some(30),
+        sprinting: false,
+    };
+    group.bench_function("frame_no_subscriber", |b| {
+        b.iter(|| empty.dispatch(black_box(&mut Frame::new(black_box(facts)))));
+    });
+    let (mut frame_observed, frame_context) = observer_bus(UmiEventId::FRAME, EventThread::Render);
+    group.bench_function("frame_one_foreign_observer", |b| {
+        b.iter(|| frame_observed.dispatch(black_box(&mut Frame::new(black_box(facts)))));
+    });
     group.finish();
-    drop(context);
+    drop((context, frame_context));
 }
 
 fn draw_widgets(c: &mut Criterion) {

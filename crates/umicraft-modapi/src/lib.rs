@@ -17,6 +17,7 @@
 //! | [`ScreenOpened`], [`ScreenClosed`] | render | no | no |
 //! | [`KeyPressed`] | render | no | no |
 //! | [`PacketReceived`], [`PacketSend`] | network | yes | no |
+//! | [`Frame`] | render | no | no |
 //!
 //! The packet events and [`InitCx::packets`] need `network_packets = true` in
 //! the mod's `mod.toml`; without it the host answers `DENIED`.
@@ -82,8 +83,8 @@ mod world;
 pub use chat::Chat;
 pub use error::ModError;
 pub use event::{
-    ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event, KeyPressed,
-    PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
+    ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event, Frame,
+    KeyPressed, PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
 };
 pub use hud::{Anchor, Hud, Placement};
 pub use init::{InitCx, Mod};

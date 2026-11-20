@@ -26,7 +26,7 @@ use umicraft_modapi_sys::{
 use crate::budget::BUDGET;
 use crate::context::{ModContext, Subscription};
 use crate::events::{
-    ChatReceived, ChatSend, Connected, Disconnected, EventThread, HostEvent, KeyPressed,
+    ChatReceived, ChatSend, Connected, Disconnected, EventThread, Frame, HostEvent, KeyPressed,
     PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
 };
 use crate::ffi::UserPtr;
@@ -68,6 +68,7 @@ fn register(
         UmiEventId::KEY_PRESSED => adapt::<KeyPressed>(bus, thread, context, subscription),
         UmiEventId::PACKET_RECEIVED => adapt::<PacketReceived>(bus, thread, context, subscription),
         UmiEventId::PACKET_SEND => adapt::<PacketSend>(bus, thread, context, subscription),
+        UmiEventId::FRAME => adapt::<Frame>(bus, thread, context, subscription),
         // `subscribe` refuses unknown ids, so nothing else can be recorded.
         _ => {}
     }

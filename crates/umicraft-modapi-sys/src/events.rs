@@ -45,6 +45,10 @@ impl UmiEventId {
     /// thread. Cancellable (nothing is written). Needs the `network_packets`
     /// permission. Added in API 0.4.
     pub const PACKET_SEND: Self = Self(11);
+    /// Once per drawn frame, before the HUD is built; payload [`UmiFrame`],
+    /// render thread. The same snapshot the built-in mods read. Not
+    /// cancellable, not mutable. Added in API 1.0.
+    pub const FRAME: Self = Self(12);
 }
 
 /// `UmiEventHeader::flags` bit: a handler may cancel the event.
@@ -172,4 +176,32 @@ pub struct UmiPacket {
     pub id: u32,
     /// The packet body: no length prefix, never compressed.
     pub data: UmiBytes,
+}
+
+/// Payload of [`UmiEventId::FRAME`]: what the player sees this frame.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UmiFrame {
+    /// Common header.
+    pub header: UmiEventHeader,
+    /// Monotonic time in milliseconds.
+    pub now_ms: u64,
+    /// Feet position, in blocks.
+    pub position: [f64; 3],
+    /// Frames drawn during the last second.
+    pub fps: u32,
+    /// Smoothed duration of a frame, in milliseconds.
+    pub frame_ms: f32,
+    /// View angle in degrees (Minecraft yaw).
+    pub yaw: f32,
+    /// View angle in degrees, positive looks down.
+    pub pitch: f32,
+    /// Left clicks since the previous frame.
+    pub left_clicks: u32,
+    /// Right clicks since the previous frame.
+    pub right_clicks: u32,
+    /// Round trip to the server in milliseconds, `-1` when not measured.
+    pub ping_ms: i32,
+    /// `1` while the player sprints, else `0`.
+    pub sprinting: u8,
 }

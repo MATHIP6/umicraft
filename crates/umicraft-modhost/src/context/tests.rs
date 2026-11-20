@@ -132,16 +132,16 @@ fn shutdown_is_owed_once_and_only_after_a_successful_init() {
 }
 
 #[test]
-fn subscribe_accepts_the_nine_open_events_and_refuses_unknown_ids() {
+fn subscribe_accepts_the_ten_open_events_and_refuses_unknown_ids() {
     let cx = context();
-    for id in 1..=9 {
+    for id in (1..=9).chain([12]) {
         assert_eq!(subscribe(&cx, UmiEventId(id), Some(noop)), UmiStatus::OK);
     }
     assert_eq!(
-        subscribe(&cx, UmiEventId(12), Some(noop)),
+        subscribe(&cx, UmiEventId(13), Some(noop)),
         UmiStatus::INVALID_ARGUMENT
     );
-    assert_eq!(cx.all_subscriptions().len(), 9);
+    assert_eq!(cx.all_subscriptions().len(), 10);
 }
 
 fn with_permissions(id: &str, permissions: Permissions) -> Arc<ModContext> {

@@ -13,8 +13,10 @@ use umicraft_builtin_mods::{
     mods, ArmorPiece, CombatInfo, EffectInfo, History, HudWidget, KeyState, ModContext, ModInput,
     ModRegistry, ModsConfig, RegistryError, MAX_EFFECTS,
 };
+use umicraft_core::events::EventBus;
 use umicraft_game::legacy::LegacyAnimations;
 use umicraft_model::entity::BipedStyle;
+use umicraft_modhost::{Frame, FrameFacts};
 use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
 use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 
@@ -124,10 +126,17 @@ impl ModsRuntime {
     }
 
     /// Updates every enabled mod for this frame and resets the click counters.
-    pub fn update(&mut self, frame: &FrameInput) {
+    ///
+    /// The frame's snapshot is built once: the [`Frame`] event the external mods
+    /// (and any Rust module) receive on `bus` is derived from the very context the
+    /// built-in mods read, and dispatched first, so both see the same frame (F3.9).
+    pub fn update(&mut self, frame: &FrameInput, bus: &mut EventBus) {
         let ctx = self.context(frame);
         self.left_clicks = 0;
         self.right_clicks = 0;
+        if bus.has_subscribers::<Frame>() {
+            bus.dispatch(&mut frame_event(&ctx));
+        }
         self.registry.update(&ctx);
     }
 
@@ -344,6 +353,23 @@ impl ModsRuntime {
     }
 }
 
+/// The external mods' view of the built-in context (spec §8.4 item 1, ADR-0086
+/// F3.9): the same frame, without the key state, which mods never see.
+fn frame_event(ctx: &ModContext) -> Frame {
+    Frame::new(FrameFacts {
+        now_ms: ctx.now_ms,
+        position: ctx.position,
+        fps: ctx.fps,
+        frame_ms: ctx.frame_ms,
+        yaw: ctx.yaw,
+        pitch: ctx.pitch,
+        left_clicks: ctx.left_clicks,
+        right_clicks: ctx.right_clicks,
+        ping_ms: ctx.ping_ms,
+        sprinting: ctx.sprinting,
+    })
+}
+
 /// What a change is about, for the history to merge the frames of one slider
 /// drag into one step; empty for a change that is a step of its own.
 fn history_tag(change: &ModsOutcome) -> String {
@@ -364,6 +390,33 @@ mod tests {
             yaw_radians: std::f32::consts::PI,
             ..FrameInput::default()
         }
+    }
+
+    #[test]
+    fn the_frame_event_is_the_snapshot_the_builtin_mods_read() {
+        use std::sync::{Arc, Mutex};
+        use umicraft_core::module::ModuleId;
+        let mut runtime = runtime();
+        runtime.note_click(true);
+        let seen = Arc::new(Mutex::new(None));
+        let mut bus = EventBus::default();
+        let sink = Arc::clone(&seen);
+        bus.on::<Frame, _>(ModuleId::new("test"), 0, move |event, _| {
+            *sink.lock().expect("not poisoned") = Some(event.facts());
+        });
+        let input = frame();
+        let ctx = runtime.context(&input);
+        runtime.update(&input, &mut bus);
+        let facts = seen
+            .lock()
+            .expect("not poisoned")
+            .expect("the bus saw the frame");
+        assert_eq!(facts.position, ctx.position);
+        assert_eq!(
+            (facts.yaw, facts.pitch, facts.fps),
+            (ctx.yaw, ctx.pitch, ctx.fps)
+        );
+        assert_eq!((facts.left_clicks, facts.ping_ms), (1, ctx.ping_ms));
     }
 
     #[test]
@@ -398,7 +451,7 @@ mod tests {
         runtime.note_click(false);
         let ctx = runtime.context(&frame());
         assert_eq!((ctx.left_clicks, ctx.right_clicks), (2, 1));
-        runtime.update(&frame());
+        runtime.update(&frame(), &mut EventBus::default());
         let ctx = runtime.context(&frame());
         assert_eq!((ctx.left_clicks, ctx.right_clicks), (0, 0));
     }

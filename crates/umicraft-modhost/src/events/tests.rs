@@ -18,6 +18,7 @@ fn events_are_send() {
     assert_send::<KeyPressed>();
     assert_send::<PacketReceived>();
     assert_send::<PacketSend>();
+    assert_send::<Frame>();
 }
 
 #[test]
@@ -119,9 +120,9 @@ fn table_matches_the_documented_threads_and_flags() {
 }
 
 #[test]
-fn known_ids_are_one_to_eleven() {
-    assert!((1..=11).all(|id| is_known(UmiEventId(id))));
-    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(12)));
+fn known_ids_are_one_to_twelve() {
+    assert!((1..=12).all(|id| is_known(UmiEventId(id))));
+    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(13)));
 }
 
 #[test]
@@ -168,4 +169,73 @@ fn key_pressed_is_aimed_at_one_mod_and_the_others_at_everyone() {
     assert_eq!(KeyPressed::THREAD, EventThread::Render);
     assert_eq!(PreTick::new(1).target(), None);
     assert_eq!(ChatSend::new("x").target(), None);
+}
+
+fn facts() -> FrameFacts {
+    FrameFacts {
+        now_ms: 123_456,
+        position: [1.5, 64.0, -3.25],
+        fps: 144,
+        frame_ms: 6.9,
+        yaw: -90.0,
+        pitch: 12.5,
+        left_clicks: 2,
+        right_clicks: 1,
+        ping_ms: Some(42),
+        sprinting: true,
+    }
+}
+
+#[test]
+fn frame_fills_header_payload_and_accessors() {
+    let frame = Frame::new(facts());
+    assert_eq!(frame.header().id, UmiEventId::FRAME);
+    assert_eq!(frame.header().flags, 0);
+    assert_eq!(
+        frame.header().size as usize,
+        size_of::<umicraft_modapi_sys::UmiFrame>()
+    );
+    assert_eq!(frame.facts(), facts());
+    assert_eq!(frame.now_ms(), 123_456);
+    assert_eq!(frame.position(), [1.5, 64.0, -3.25]);
+    assert_eq!((frame.fps(), frame.frame_ms()), (144, 6.9));
+    assert_eq!((frame.yaw(), frame.pitch()), (-90.0, 12.5));
+    assert_eq!((frame.left_clicks(), frame.right_clicks()), (2, 1));
+    assert_eq!(frame.ping_ms(), Some(42));
+    assert!(frame.sprinting());
+    assert_eq!(frame.raw.sprinting, 1);
+}
+
+#[test]
+fn frame_ping_unknown_is_minus_one_in_the_payload() {
+    let unknown = Frame::new(FrameFacts {
+        ping_ms: None,
+        sprinting: false,
+        ..facts()
+    });
+    assert_eq!(unknown.raw.ping_ms, -1);
+    assert_eq!(unknown.raw.sprinting, 0);
+    assert_eq!(unknown.ping_ms(), None);
+    assert!(!unknown.sprinting());
+
+    let huge = Frame::new(FrameFacts {
+        ping_ms: Some(u32::MAX),
+        ..facts()
+    });
+    assert_eq!(
+        huge.raw.ping_ms, -1,
+        "a ping the ABI cannot hold is unknown"
+    );
+    let zero = Frame::new(FrameFacts {
+        ping_ms: Some(0),
+        ..facts()
+    });
+    assert_eq!(zero.ping_ms(), Some(0));
+}
+
+#[test]
+fn frame_is_a_render_event_that_mods_cannot_cancel_or_change() {
+    assert_eq!(Frame::THREAD, EventThread::Render);
+    const { assert!(!Frame::CANCELLABLE && !Frame::MUTABLE) };
+    assert_eq!(Frame::ID, UmiEventId::FRAME);
 }

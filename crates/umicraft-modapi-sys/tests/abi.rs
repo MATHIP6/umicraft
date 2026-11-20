@@ -75,7 +75,7 @@ fn version_compatibility_rules() {
         assert_eq!(host.accepts(module), expected, "{host:?} vs {module:?}");
     }
     assert!(UMI_API_VERSION.accepts(UMI_API_VERSION));
-    assert_eq!(UMI_API_VERSION, v(0, 6));
+    assert_eq!(UMI_API_VERSION, v(1, 0));
 }
 
 #[test]
@@ -233,4 +233,21 @@ fn service_and_world_layouts() {
     assert_eq!(offset_of!(UmiHost, post_set_param), 176);
     assert_eq!(UmiStatus::UNAVAILABLE, UmiStatus(8));
     assert_eq!(UmiServiceMode::REPLACE, UmiServiceMode(1));
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn frame_payload_layout() {
+    assert_eq!(UmiEventId::FRAME, UmiEventId(12));
+    assert_eq!(offset_of!(UmiFrame, now_ms), 16);
+    assert_eq!(offset_of!(UmiFrame, position), 24);
+    assert_eq!(offset_of!(UmiFrame, fps), 48);
+    assert_eq!(offset_of!(UmiFrame, frame_ms), 52);
+    assert_eq!(offset_of!(UmiFrame, yaw), 56);
+    assert_eq!(offset_of!(UmiFrame, pitch), 60);
+    assert_eq!(offset_of!(UmiFrame, left_clicks), 64);
+    assert_eq!(offset_of!(UmiFrame, right_clicks), 68);
+    assert_eq!(offset_of!(UmiFrame, ping_ms), 72);
+    assert_eq!(offset_of!(UmiFrame, sprinting), 76);
+    assert_eq!(size_of::<UmiFrame>(), 80);
 }

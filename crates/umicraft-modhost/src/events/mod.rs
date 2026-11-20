@@ -13,6 +13,7 @@
 //! Built-in Rust modules subscribe to these same types on the core `EventBus`.
 
 mod chat;
+mod frame;
 mod key;
 mod packet;
 mod screen;
@@ -26,6 +27,7 @@ use umicraft_modapi_sys::{UmiBytes, UmiEventHeader, UmiEventId, UmiStr, UMI_EVEN
 use crate::manifest::ModId;
 
 pub use chat::{ChatReceived, ChatSend};
+pub use frame::{Frame, FrameFacts};
 pub use key::KeyPressed;
 pub use packet::{PacketReceived, PacketSend};
 pub use screen::{ScreenClosed, ScreenOpened};
@@ -47,7 +49,7 @@ pub enum EventThread {
 
 /// What the dispatcher needs to know about an ABI event type.
 ///
-/// Implemented by the eleven event types of this module only: the `Send` impls and
+/// Implemented by the twelve event types of this module only: the `Send` impls and
 /// `event_set_text` rely on the host being the sole builder of these events.
 pub trait HostEvent: Clone + Send + 'static {
     /// The event id of the payload.
@@ -102,6 +104,7 @@ pub(crate) fn is_known(id: UmiEventId) -> bool {
             | UmiEventId::KEY_PRESSED
             | UmiEventId::PACKET_RECEIVED
             | UmiEventId::PACKET_SEND
+            | UmiEventId::FRAME
     )
 }
 

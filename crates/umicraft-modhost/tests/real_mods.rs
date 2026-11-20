@@ -117,7 +117,7 @@ fn hello_loads_panicking_fails_and_handlers_run() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
+    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
     assert_eq!(resolution.order.len(), 2);
 
     let mut trust = TrustList::default();
@@ -198,7 +198,7 @@ fn hello_declares_settings_a_widget_a_key_and_a_command() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
+    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
     let (host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -273,7 +273,7 @@ fn packet_logger_observes_injects_and_yields_to_the_compatible_mode() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
+    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -343,7 +343,7 @@ fn physics_tweak_wraps_the_step_and_queries_the_world() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
+    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -409,7 +409,7 @@ fn shader_pass_registers_a_valid_pass_and_feeds_its_params() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 6 });
+    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");

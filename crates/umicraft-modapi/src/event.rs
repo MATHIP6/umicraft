@@ -4,8 +4,8 @@
 
 use umicraft_modapi_sys::{
     UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader, UmiEventId,
-    UmiKeyPressed, UmiPacket, UmiPostTick, UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR,
-    UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
+    UmiFrame, UmiKeyPressed, UmiPacket, UmiPostTick, UmiPreTick, UmiScreen,
+    UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
 };
 
 use crate::ffi::{bytes_of, str_of};
@@ -145,6 +145,14 @@ view!(
     UmiPacket,
     UmiEventId::PACKET_SEND
 );
+view!(
+    /// One rendered frame: what the player sees right now. Render thread;
+    /// read-only and not cancellable. It carries no key state, so a mod
+    /// cannot read what the player types (ADR-0086).
+    Frame,
+    UmiFrame,
+    UmiEventId::FRAME
+);
 
 /// Where a received chat line shows (the protocol's position byte).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,6 +193,59 @@ impl PreTick {
     /// The index of the tick about to run.
     pub fn tick(&self) -> u64 {
         self.0.tick
+    }
+}
+
+impl Frame {
+    /// Monotonic time in milliseconds.
+    pub fn now_ms(&self) -> u64 {
+        self.0.now_ms
+    }
+
+    /// The player's feet position, in blocks.
+    pub fn position(&self) -> [f64; 3] {
+        self.0.position
+    }
+
+    /// Frames drawn during the last second.
+    pub fn fps(&self) -> u32 {
+        self.0.fps
+    }
+
+    /// Smoothed duration of a frame, in milliseconds.
+    pub fn frame_ms(&self) -> f32 {
+        self.0.frame_ms
+    }
+
+    /// The view yaw in degrees (Minecraft yaw).
+    pub fn yaw(&self) -> f32 {
+        self.0.yaw
+    }
+
+    /// The view pitch in degrees; positive looks down.
+    pub fn pitch(&self) -> f32 {
+        self.0.pitch
+    }
+
+    /// Left clicks since the previous frame.
+    pub fn left_clicks(&self) -> u32 {
+        self.0.left_clicks
+    }
+
+    /// Right clicks since the previous frame.
+    pub fn right_clicks(&self) -> u32 {
+        self.0.right_clicks
+    }
+
+    /// The round trip to the server in milliseconds, `None` while it has not
+    /// been measured (singleplayer or just connected).
+    pub fn ping_ms(&self) -> Option<u32> {
+        u32::try_from(self.0.ping_ms).ok()
+    }
+
+    /// Whether the player is sprinting.
+    pub fn sprinting(&self) -> bool {
+        self.0.sprinting != 0
     }
 }
 

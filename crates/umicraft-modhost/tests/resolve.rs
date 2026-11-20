@@ -7,12 +7,12 @@ use umicraft_modhost::{
     resolve, ApiVersion, Candidate, Manifest, ModId, RejectReason, Resolution, ServiceId,
 };
 
-const HOST: ApiVersion = ApiVersion { major: 0, minor: 3 };
+const HOST: ApiVersion = ApiVersion { major: 1, minor: 2 };
 
 /// Builds a manifest from compact parts: dependencies as `(id, requirement)`.
 fn manifest(id: &str, deps: &[(&str, &str)], priority: i32) -> Manifest {
     let mut text = format!(
-        "[mod]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nauthors = []\napi_version = \"0.3\"\n\
+        "[mod]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nauthors = []\napi_version = \"1.0\"\n\
          [dependencies]\n"
     );
     for (dep, req) in deps {
@@ -85,17 +85,50 @@ fn disabled_and_incompatible_api() {
         enabled: false,
     };
     let mut old = manifest("old", &[], 0);
-    old.api_version = ApiVersion { major: 0, minor: 2 };
+    old.api_version = ApiVersion { major: 0, minor: 9 };
     let r = resolve([off, on(old), on(manifest("ok", &[], 0))], HOST);
     assert_eq!(order(&r), ["ok"]);
     assert_eq!(reason(&r, "off"), &RejectReason::Disabled);
     assert_eq!(
         reason(&r, "old"),
         &RejectReason::IncompatibleApi {
-            required: ApiVersion { major: 0, minor: 2 },
+            required: ApiVersion { major: 0, minor: 9 },
             host: HOST
         }
     );
+}
+
+#[test]
+fn major_one_hosts_load_older_minors_and_refuse_newer_ones() {
+    let mut same = manifest("same", &[], 0);
+    same.api_version = ApiVersion { major: 1, minor: 2 };
+    let mut newer = manifest("newer", &[], 0);
+    newer.api_version = ApiVersion { major: 1, minor: 3 };
+    let mut next_major = manifest("next_major", &[], 0);
+    next_major.api_version = ApiVersion { major: 2, minor: 0 };
+    // `manifest` declares 1.0, which the 1.2 host still loads.
+    let r = resolve(
+        [
+            on(manifest("older", &[], 0)),
+            on(same),
+            on(newer),
+            on(next_major),
+        ],
+        HOST,
+    );
+    assert_eq!(order(&r), ["older", "same"]);
+    for (id, required) in [("newer", (1, 3)), ("next_major", (2, 0))] {
+        assert_eq!(
+            reason(&r, id),
+            &RejectReason::IncompatibleApi {
+                required: ApiVersion {
+                    major: required.0,
+                    minor: required.1
+                },
+                host: HOST
+            }
+        );
+    }
 }
 
 #[test]
