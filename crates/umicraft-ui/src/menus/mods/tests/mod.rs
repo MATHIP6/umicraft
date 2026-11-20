@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Tests of the mods menu: the helpers and the layout of the panel pages. The
-//! list is in `list`, the settings page in `settings`, the page flow in `flow`
+//! landing page is in `landing`, the list is in `list`, the settings page in `settings`, the page flow in `flow`
 //! and the HUD layer inside the menu in `hud`.
 
 mod editor;
 mod flow;
 mod hud;
+mod landing;
 mod list;
 mod settings;
 

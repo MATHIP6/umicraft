@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The panel pages of the mods menu: the list of cards and the settings of one
-//! mod, under a header with the logo, the title and the cross that closes the
-//! menu.
+//! mod, under a header with the logo, the title and the cross that goes back to
+//! the landing page.
 
 use umicraft_core::lang::Lang;
 
@@ -38,7 +38,7 @@ impl ModsScreen {
     }
 
     /// The panel with its header and cross, and the page inside it. The cross
-    /// closes the menu.
+    /// goes back to the landing page.
     pub(super) fn panel_page(
         &mut self,
         ui: &mut Ui,
@@ -125,7 +125,8 @@ impl ModsScreen {
             None => self.list_page(ui, paint, lang, view, &layout),
         };
         if close.clicked {
-            return Some(ModsOutcome::Close);
+            self.page = Page::Landing;
+            return None;
         }
         page
     }

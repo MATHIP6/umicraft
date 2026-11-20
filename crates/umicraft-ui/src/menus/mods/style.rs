@@ -19,6 +19,17 @@ pub(super) const PANEL: Color = [0.085, 0.09, 0.10, 0.8];
 pub(super) const PANEL_RIM: Color = [1.0, 1.0, 1.0, 0.07];
 /// Size of a mod name and of the title of a page, in GUI units.
 pub(super) const NAME_SIZE: f32 = 6.0;
+/// Width of the rim of the Mods button, in GUI units.
+pub(super) const RIM_WIDTH: f32 = 0.5;
+/// The rim of the Mods button at rest and under the pointer (the accent).
+pub(super) const RIM: Color = [1.0, 1.0, 1.0, 0.14];
+pub(super) const RIM_HOVER: Color = [0.36, 0.55, 1.0, 0.70];
+/// Edge of the grid icon of the Mods button, in GUI units.
+pub(super) const ICON_SIZE: f32 = 7.0;
+/// Gap between that icon and the label.
+pub(super) const ICON_GAP: f32 = 5.0;
+/// Space between the capitals of the label, as a share of their size.
+pub(super) const LABEL_TRACKING: f32 = 0.25;
 /// A row at rest: nothing, it is the panel.
 pub(super) const CARD: Color = [1.0, 1.0, 1.0, 0.0];
 /// A row under the pointer.
