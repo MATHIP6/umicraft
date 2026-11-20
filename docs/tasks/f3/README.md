@@ -15,7 +15,7 @@ Design: ADR-0086 (architecture), ADR-0087 (C ABI contract). Roadmap: F3 in
 | F3.4 | HUD widgets, schema settings, open key bindings, client commands; external mods in the mods menu | `hud` example | done |
 | F3.5 | Raw packet hooks on the network thread, validated injection, permission gating, server-compat mode, "alters packets/movement" badge | `packet_logger` example | done |
 | F3.6 | Services (`player_physics` wrap/replace), conflict detection at load, read-only world and entity queries | `physics_tweak` example; trajectories unchanged with no mod (ADR-0076) | done |
-| F3.7 | Post-process chain with naga-validated WGSL | `shader-pass` example | todo |
+| F3.7 | Post-process chain with naga-validated WGSL | `shader_pass` example | done |
 | F3.8 | Per-mod profiler in the Umicraft debug overlay, budget auto-disable, mod manager (permissions, hash, enable/disable), `docs/modding/` guide and template | former M15 acceptance criteria | todo |
 | F3.9 | Built-in mods on the same bus (`ModContext` → `FrameEvent`); API frozen as `1.0` | no regression of the 16 built-in mods | todo |
 
@@ -479,3 +479,100 @@ changed fields) and is set on every new `GameState` when the chain exists;
 with no active layer it calls `vanilla` straight away. The game thread lends
 a `WorldQuery` over `World` and `EntityStore` (`with_world`) around the game
 tick (physics included), the tick events, the chat events and the commands.
+
+## F3.7 interface (frozen before the work is split)
+
+API **0.6**: host functions `register_post_pass(me, key, label, wgsl)` (init
+only; key `^[a-z][a-z0-9_]{0,63}$`; `CONFLICT` for a key the mod already used;
+`INVALID_ARGUMENT` with the naga error in the log for a shader that breaks the
+contract) and `post_set_param(me, key, index 0..=3, x, y, z, w)` (any thread).
+No permission: a pass only transforms the picture of the world it is given.
+
+### The shader contract (owned by `umicraft-modhost`, implemented by `umicraft-render`)
+
+The host prepends this prelude, verbatim, to the mod's source:
+
+```wgsl
+struct UmiPost {
+    resolution: vec2<f32>,
+    time: f32,
+    frame: u32,
+    params: array<vec4<f32>, 4>,
+};
+@group(0) @binding(0) var umi_scene: texture_2d<f32>;
+@group(0) @binding(1) var umi_sampler: sampler;
+@group(0) @binding(2) var<uniform> umi: UmiPost;
+
+struct UmiVertexOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn umi_vs(@builtin(vertex_index) index: u32) -> UmiVertexOut {
+    let uv = vec2<f32>(f32((index << 1u) & 2u), f32(index & 2u));
+    var out: UmiVertexOut;
+    out.position = vec4<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
+    out.uv = uv;
+    return out;
+}
+```
+
+The mod supplies `@fragment fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32>`
+and helpers. The composed module must parse and validate with naga
+(`ValidationFlags::all()`, default capabilities), have exactly the two entry points
+`umi_vs` (vertex) and `fs_main` (fragment), and declare no resource beyond the
+three of the prelude. Source at most 64 KiB. The uniform is 80 bytes
+(`resolution` in pixels, `time` in seconds since the client started, `frame` a
+counter, `params` set by the mod, zero until set). The pass draws one triangle
+(3 vertices, no vertex buffer) into a target of the scene's format; `uv` is 0..1,
+y down; the sampler is linear, clamp to edge.
+
+### `umicraft-render` (files `crates/umicraft-render/**`)
+
+- `post_chain.rs`: `PostPassSource { label: String, wgsl: String }`,
+  `PostPassFrame { enabled: bool, params: [[f32; 4]; 4] }`,
+  `Renderer::set_post_passes(&mut self, passes: &[PostPassSource]) ->
+  Vec<Result<(), String>>` (compiles once, inside a wgpu validation error
+  scope; a pass that fails is kept but never drawn, its error returned),
+  `Renderer::update_post(&mut self, frames: &[PostPassFrame])` (per frame, no
+  allocation; extra or missing entries mean disabled).
+- In `draw`: when at least one pass is enabled, the world is drawn into the
+  scene texture (as for the blurs), the hand is drawn into it, then the passes
+  run in order, ping-ponging between the scene and one extra full-size target so
+  that the result ends in the scene texture; motion blur and the menu blur then
+  read it as today, and without them the scene is copied to the screen before the
+  screen overlays and the HUD, which stay sharp. With no enabled pass the frame is
+  exactly as before (no extra pass, no allocation, no texture while the chain is
+  empty).
+
+### `umicraft-modhost`
+
+`src/post.rs`: `PRELUDE` (the text above), `compose(source) -> String`,
+`validate(source) -> Result<String /*composed*/, PostShaderError>` (typed
+error: too long, not UTF-8, parse, validation, entry points, extra resources;
+naga messages kept), registration in the mod context (sealed at init like the UI
+declarations), params in a lock-free or short-lock store readable from the render
+thread, `ModHost::post_passes(&self) -> impl Iterator<Item = PostPassView<'_>>` in
+load then registration order (`mod_id`, `key`, `label`, `wgsl` composed, `enabled`
+= mod enabled) and `PostPassView::params(&self) -> [[f32; 4]; 4]`. New
+dependency: `naga` (workspace version of the renderer, `wgsl-in`).
+
+### `umicraft-modapi`
+
+`InitCx::post_pass(key, label, wgsl) -> Result<PostPass, ModError>`;
+`PostPass: Copy + Send + Sync`, `set_param(index: u32, value: [f32; 4]) ->
+Result<(), ModError>`. Doc points to `docs/modding/post.md`.
+
+### Example `mods/examples/shader_pass`
+
+A sepia/greyscale pass with a slider "Strength" (0 to 1, default 0.5) and a
+choice "Tone" (grey, sepia), pushed into `params[0]` from a `PreTick` observer;
+a strength of 0 returns the picture unchanged.
+
+### Client
+
+At startup, after the mods load, the client hands `ModHost::post_passes` to
+`Renderer::set_post_passes` and logs (and marks failed via the host) a pass the
+GPU refused; every frame it fills a reused `Vec<PostPassFrame>` from the views
+and calls `update_post`.

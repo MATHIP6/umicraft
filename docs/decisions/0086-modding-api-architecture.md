@@ -112,7 +112,7 @@ and systems are out of v1 and may be reopened in a later API major.
 | Packets | network | raw in/out (`id` + bytes) intercept (cancel) and observe; injection re-validated by `PlayServerbound::decode` (F3.5 amendment) |
 | Services | game | `player_physics` |
 | World | game | read-only block and entity queries, game thread only (F3.6 amendment) |
-| Rendering | render | a post-process chain of naga-validated WGSL |
+| Rendering | render | a post-process chain of naga-validated WGSL, fixed prelude (F3.7 amendment) |
 | Data | — | `config/mods/<id>.toml`, `data/` overrides by priority |
 
 Out of v1: replacing the mesher, a general render graph (RND-12), whole new
@@ -152,3 +152,8 @@ screens, ECS components.
   one. Service layers are registered per service with `register_physics` (one typed
   function per service, not a generic string-keyed registry), and a replacing layer
   always sits inside every wrapper.
+- **2026-11-19, F3.7 — post-process contract.** A pass is a fragment shader `fs_main`
+  composed with a fixed host prelude (one texture, one sampler, an 80-byte uniform with
+  four `vec4` parameters) and validated with naga at registration; the composed module
+  may declare no other resource or entry point. Passes run after the world and the
+  hand, before the blurs and the HUD, ping-ponging through the scene texture.
