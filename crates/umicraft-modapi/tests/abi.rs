@@ -14,7 +14,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
     umicraft_mod, Anchor, Chat, ChatReceived, ChatSend, Connected, Disconnected, InitCx,
-    KeyPressed, Mod, ModError, Placement, PostTick, PreTick, ScreenClosed, ScreenOpened, Setting,
+    KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Placement, PostTick, PreTick,
+    ScreenClosed, ScreenOpened, Setting,
 };
 use umicraft_modapi_sys::*;
 
@@ -45,6 +46,10 @@ static HUD_CALLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static COMMANDS: Mutex<Vec<Command>> = Mutex::new(Vec::new());
 static CHAT: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Packets the fake host was asked to inject, as `(id, body)`.
+static INJECTED: Mutex<Vec<(u32, Vec<u8>)>> = Mutex::new(Vec::new());
+/// The status `packet_send` answers with.
+static PACKET_STATUS: Mutex<UmiStatus> = Mutex::new(UmiStatus::OK);
 /// What the mod registered, for the tests to read through.
 static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
@@ -56,6 +61,7 @@ struct Ui {
     mode: Setting<u32>,
     unknown: Setting<u32>,
     chat: Chat,
+    packets: Packets,
 }
 
 struct Widget {
@@ -109,6 +115,12 @@ fn register_view_handlers(cx: &mut InitCx<'_>) -> Result<(), ModError> {
         see(format!("chat_after={}", e.json()));
         SET_RESULTS.lock().unwrap().push(result);
     })?;
+    cx.observe::<PacketReceived>(0, |e| {
+        see(format!("rx={:#04x} {:?}", e.id(), e.data()));
+    })?;
+    cx.observe::<PacketSend>(0, |e| {
+        see(format!("tx={:#04x} {:?}", e.id(), e.data()));
+    })?;
     cx.observe::<Connected>(0, |e| see(format!("connected={}", e.address())))?;
     cx.observe::<Disconnected>(0, |e| see(format!("disconnected={}", e.reason())))?;
     cx.observe::<ScreenOpened>(0, |e| see(format!("opened={}", e.name())))?;
@@ -124,6 +136,7 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
         mode: cx.choice("mode", "Mode", &["a", "b", "c"], 1)?,
         unknown: cx.color("other", "Other", 7)?,
         chat: cx.chat(),
+        packets: cx.packets(),
     };
     *UI.lock().unwrap() = Some(ui);
     let placement = Placement::new(Anchor::BottomRight)
@@ -401,6 +414,18 @@ extern "C" fn fake_chat_print(_me: UmiModHandle, text: UmiStr) -> UmiStatus {
     UmiStatus::OK
 }
 
+extern "C" fn fake_packet_send(_me: UmiModHandle, id: u32, data: UmiBytes) -> UmiStatus {
+    let body = if data.ptr.is_null() {
+        assert_eq!(data.len, 0, "a null pointer carries no bytes");
+        Vec::new()
+    } else {
+        // SAFETY: the module under test passes a live slice for the call.
+        unsafe { std::slice::from_raw_parts(data.ptr, data.len) }.to_vec()
+    };
+    INJECTED.lock().unwrap().push((id, body));
+    *PACKET_STATUS.lock().unwrap()
+}
+
 fn host() -> UmiHost {
     UmiHost {
         size: size_of::<UmiHost>(),
@@ -419,6 +444,7 @@ fn host() -> UmiHost {
         register_key: fake_register_key,
         register_command: fake_register_command,
         chat_print: fake_chat_print,
+        packet_send: fake_packet_send,
     }
 }
 
@@ -439,6 +465,8 @@ fn fresh() -> MutexGuard<'static, ()> {
     }
     WIDGETS.lock().unwrap().clear();
     COMMANDS.lock().unwrap().clear();
+    INJECTED.lock().unwrap().clear();
+    *PACKET_STATUS.lock().unwrap() = UmiStatus::OK;
     *VALUES.lock().unwrap() = Some(HashMap::new());
     *UI.lock().unwrap() = None;
     SET_RESULTS.lock().unwrap().clear();
@@ -537,7 +565,7 @@ fn init_registers_the_subscriptions_and_logs() {
     let _guard = fresh();
     init_ok();
     let subs = SUBS.lock().unwrap();
-    assert_eq!(subs.len(), 10);
+    assert_eq!(subs.len(), 12);
     assert_eq!(
         (subs[0].event, subs[0].mode, subs[0].priority),
         (UmiEventId::PRE_TICK, UmiMode::OBSERVE, 5)
@@ -1060,4 +1088,75 @@ fn chat_handle_prints_through_the_host() {
     init_ok();
     ui().chat.print("local line");
     assert_eq!(*CHAT.lock().unwrap(), ["local line"]);
+}
+
+fn packet(id: UmiEventId, packet_id: u32, data: UmiBytes) -> UmiPacket {
+    UmiPacket {
+        header: header(id, size_of::<UmiPacket>(), UMI_EVENT_CANCELLABLE),
+        id: packet_id,
+        data,
+    }
+}
+
+#[test]
+fn packet_views_read_id_and_body() {
+    let _guard = fresh();
+    init_ok();
+    let body = [1_u8, 2, 3];
+    let bytes = UmiBytes {
+        ptr: body.as_ptr(),
+        len: body.len(),
+    };
+    let mut rx = packet(UmiEventId::PACKET_RECEIVED, 0x21, bytes);
+    let sub = sub_for(UmiEventId::PACKET_RECEIVED);
+    assert_eq!(call(sub, &mut rx), UmiStatus::OK);
+    let mut tx = packet(UmiEventId::PACKET_SEND, 0x0A, UmiBytes::EMPTY);
+    let sub = sub_for(UmiEventId::PACKET_SEND);
+    assert_eq!(call(sub, &mut tx), UmiStatus::OK);
+    assert_eq!(seen(), ["rx=0x21 [1, 2, 3]", "tx=0x0a []"]);
+}
+
+#[test]
+fn packet_view_survives_a_null_pointer_with_a_length_and_a_wide_id() {
+    let _guard = fresh();
+    init_ok();
+    let hostile = UmiBytes {
+        ptr: std::ptr::null(),
+        len: 9,
+    };
+    let mut rx = packet(UmiEventId::PACKET_RECEIVED, 0x1_0000, hostile);
+    assert_eq!(
+        call(sub_for(UmiEventId::PACKET_RECEIVED), &mut rx),
+        UmiStatus::OK
+    );
+    assert_eq!(seen(), ["rx=0xff []"]);
+}
+
+#[test]
+fn packets_send_passes_id_and_body_to_the_host() {
+    let _guard = fresh();
+    init_ok();
+    assert_eq!(ui().packets.send(0x0A, &[]), Ok(()));
+    assert_eq!(ui().packets.send(0x09, &[0, 4]), Ok(()));
+    assert_eq!(
+        *INJECTED.lock().unwrap(),
+        [(0x0A, vec![]), (0x09, vec![0, 4])]
+    );
+}
+
+#[test]
+fn packets_send_maps_host_statuses_to_errors() {
+    let _guard = fresh();
+    init_ok();
+    for (status, expected) in [
+        (UmiStatus::BUSY, ModError::Busy),
+        (UmiStatus::DENIED, ModError::HostRefused(UmiStatus::DENIED)),
+        (
+            UmiStatus::INVALID_ARGUMENT,
+            ModError::HostRefused(UmiStatus::INVALID_ARGUMENT),
+        ),
+    ] {
+        *PACKET_STATUS.lock().unwrap() = status;
+        assert_eq!(ui().packets.send(0xFF, &[1]), Err(expected));
+    }
 }

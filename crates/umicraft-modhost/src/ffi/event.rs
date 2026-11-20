@@ -11,7 +11,8 @@ use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiStatus, UmiStr, UMI_EVE
 
 use super::bytes_of;
 use crate::events::{
-    ChatReceived, ChatSend, Connected, Disconnected, KeyPressed, ScreenClosed, ScreenOpened,
+    ChatReceived, ChatSend, Connected, Disconnected, KeyPressed, PacketReceived, PacketSend,
+    ScreenClosed, ScreenOpened,
 };
 
 /// Declares host events `Send`: the raw pointers in their payload target the `String`
@@ -35,6 +36,19 @@ send_events!(
     ScreenOpened,
     ScreenClosed
 );
+
+/// Declares the packet events `Send`: like the string events, with a `Vec<u8>`.
+macro_rules! send_packet_events {
+    ($($name:ty),+) => {$(
+        // SAFETY: the only `!Send` part is the `UmiBytes` in the payload, whose pointer
+        // targets the heap buffer of a `Vec<u8>` owned by the same value. That buffer
+        // moves with the value and nothing else aliases it, so sending the value
+        // sends everything its pointer reaches.
+        unsafe impl Send for $name {}
+    )+};
+}
+
+send_packet_events!(PacketReceived, PacketSend);
 
 /// Reborrows the host event of type `T` that `header` points at.
 ///

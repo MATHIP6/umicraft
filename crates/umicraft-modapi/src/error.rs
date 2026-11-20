@@ -14,6 +14,10 @@ use umicraft_modapi_sys::UmiStatus;
 pub enum ModError {
     /// The host answered a request with a non-OK status.
     HostRefused(UmiStatus),
+    /// The host's bounded queue is full (`UmiStatus::BUSY`): the request is
+    /// valid and may succeed if retried later. Only
+    /// [`Packets::send`](crate::Packets::send) can fail this way.
+    Busy,
     /// A mod-defined failure, typically from [`Mod::init`](crate::Mod::init).
     Message(String),
 }
@@ -26,10 +30,13 @@ impl ModError {
 }
 
 impl ModError {
-    /// Maps a host status to `Ok` for `OK` and to a refusal otherwise.
+    /// Maps a host status to `Ok` for `OK`, to [`ModError::Busy`] for `BUSY`
+    /// and to a refusal otherwise.
     pub(crate) fn check(status: UmiStatus) -> Result<(), Self> {
         if status.is_ok() {
             Ok(())
+        } else if status == UmiStatus::BUSY {
+            Err(Self::Busy)
         } else {
             Err(Self::HostRefused(status))
         }
@@ -42,6 +49,7 @@ impl fmt::Display for ModError {
             Self::HostRefused(status) => {
                 write!(f, "host refused the request (status {})", status.0)
             }
+            Self::Busy => f.write_str("the host is busy, try again later"),
             Self::Message(text) => f.write_str(text),
         }
     }

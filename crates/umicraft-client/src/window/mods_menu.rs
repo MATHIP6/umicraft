@@ -223,9 +223,17 @@ impl App {
         let Some(host) = mods.host() else {
             return;
         };
+        let compat = match request {
+            external_menu::Request::ServerCompat { enabled } => Some(enabled),
+            _ => None,
+        };
         match external_menu::apply(host, request) {
             Ok(changed) => changed.iter().for_each(|id| mods.save_config(id)),
             Err(error) => tracing::warn!(%error, "ignored a change of the mods menu"),
+        }
+        if let Some(enabled) = compat {
+            self.options.multiplayer.mod_server_compat = enabled;
+            self.save_options();
         }
     }
 

@@ -194,6 +194,9 @@ impl App {
             .and_then(crate::mods::external_config::config_dir);
         let external_mods = umicraft_assets::cache::data_dir()
             .map(|dir| ExternalMods::start(&dir, config_dir, args.safe_mode));
+        if let Some(mods) = &external_mods {
+            mods.set_server_compat(options.multiplayer.mod_server_compat);
+        }
         let render_bus = external_mods
             .as_ref()
             .map(|mods| mods.bus(EventThread::Render))

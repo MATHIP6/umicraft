@@ -11,11 +11,14 @@
 //!
 //! - [`command`] — the commands and their wire packets.
 //! - [`thread`] — the thread, the runtime and the connect/login/play flow.
+//! - [`mod_filter`] — the packet hooks of the external mods (F3.5).
 
 mod command;
+mod mod_filter;
 mod thread;
 
 pub use command::ClientCommand;
+pub use mod_filter::NetMods;
 pub use thread::spawn;
 
 /// The number of serverbound packets that may be queued for the socket.

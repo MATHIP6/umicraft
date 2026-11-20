@@ -90,7 +90,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
             decline_server_packs: true,
             account_skin: false,
         },
-        crate::game::GameMods::default(),
+        crate::game::SessionMods::default(),
     )?;
 
     let mut script = Script::new(phases(&args.script));

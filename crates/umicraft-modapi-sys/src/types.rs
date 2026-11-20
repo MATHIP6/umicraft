@@ -33,6 +33,34 @@ impl UmiStr {
     }
 }
 
+/// Borrowed bytes of any content, valid for the duration of the call only.
+///
+/// `ptr` may be null when `len` is 0. Added in API 0.4 for packet bodies.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UmiBytes {
+    /// First byte, or null when `len` is 0.
+    pub ptr: *const u8,
+    /// Length in bytes.
+    pub len: usize,
+}
+
+impl UmiBytes {
+    /// No bytes (null pointer, zero length).
+    pub const EMPTY: Self = Self {
+        ptr: core::ptr::null(),
+        len: 0,
+    };
+
+    /// Borrows a `'static` byte slice without `unsafe`.
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
+        Self {
+            ptr: bytes.as_ptr(),
+            len: bytes.len(),
+        }
+    }
+}
+
 /// The API version a host implements or a mod was built for.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,8 +75,9 @@ pub struct UmiVersion {
 ///
 /// 0.2 added the chat, connection and screen events, `UMI_EVENT_MUTABLE` and
 /// `UmiHost::event_set_text` (F3.3); 0.3 added settings, HUD widgets, key
-/// bindings, client commands and `KEY_PRESSED` (F3.4).
-pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 3 };
+/// bindings, client commands and `KEY_PRESSED` (F3.4); 0.4 added the packet
+/// events, `UmiBytes`, `UmiStatus::BUSY` and `UmiHost::packet_send` (F3.5).
+pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 0, minor: 4 };
 
 impl UmiVersion {
     /// Whether a host of version `self` can load a mod built for `mod_version`.
@@ -91,6 +120,8 @@ impl UmiStatus {
     pub const DENIED: Self = Self(5);
     /// The request conflicts with existing state (e.g. duplicate id).
     pub const CONFLICT: Self = Self(6);
+    /// A bounded queue is full; the request may succeed later. Added in API 0.4.
+    pub const BUSY: Self = Self(7);
 
     /// Whether the status is [`UmiStatus::OK`].
     pub const fn is_ok(self) -> bool {

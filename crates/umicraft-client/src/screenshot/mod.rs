@@ -56,7 +56,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
             decline_server_packs: true,
             account_skin: false,
         },
-        crate::game::GameMods::default(),
+        crate::game::SessionMods::default(),
     )?;
 
     let deadline = Instant::now() + args.collect;

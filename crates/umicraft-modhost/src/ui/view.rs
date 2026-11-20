@@ -7,7 +7,7 @@ use umicraft_builtin_mods::{HudPlacement, SettingValue};
 
 use super::settings::SettingSpec;
 use crate::context::ModContext;
-use crate::manifest::{Manifest, ModId};
+use crate::manifest::{Manifest, ModId, Permissions};
 
 /// A declared setting and its current value.
 #[derive(Debug, Clone)]
@@ -58,10 +58,17 @@ pub struct ModView<'a> {
     /// The mod's own version.
     pub version: &'a Version,
     /// The player's switch (what the menu's toggle shows); the mod only runs when
-    /// this is true and `failed` is false.
+    /// this is true, `failed` is false and `held_by_compat` is false.
     pub enabled: bool,
     /// Whether the mod failed and stays off until the client restarts.
     pub failed: bool,
+    /// What the mod's manifest asks for, for the menu's badges.
+    pub permissions: Permissions,
+    /// Whether the mod may change packets or movement (`network_packets` or
+    /// `movement`); the menu badges it.
+    pub alters_game: bool,
+    /// Whether server-compat mode holds the mod off, so its switch has no effect.
+    pub held_by_compat: bool,
     context: &'a ModContext,
 }
 
@@ -74,6 +81,9 @@ impl<'a> ModView<'a> {
             version: &manifest.version,
             enabled: context.is_wanted(),
             failed: context.is_failed(),
+            permissions: context.permissions(),
+            alters_game: context.alters_game(),
+            held_by_compat: context.is_held_by_compat(),
             context,
         }
     }

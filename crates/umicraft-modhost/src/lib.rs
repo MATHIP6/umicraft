@@ -32,6 +32,7 @@ mod hook;
 mod host;
 mod load;
 pub mod manifest;
+mod packets;
 pub mod resolve;
 mod sentinel;
 mod trust;
@@ -47,8 +48,8 @@ pub use error::{
     LoadFailure, ManifestError, TrustError,
 };
 pub use events::{
-    ChatReceived, ChatSend, Connected, Disconnected, EventThread, HostEvent, KeyPressed, PostTick,
-    PreTick, ScreenClosed, ScreenOpened,
+    ChatReceived, ChatSend, Connected, Disconnected, EventThread, HostEvent, KeyPressed,
+    PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
 };
 pub use ffi::{host_table, UserPtr};
 pub use host::ModHost;
@@ -56,6 +57,7 @@ pub use manifest::{
     library_file_name, platform_dir, ApiVersion, ApiVersionError, Arch, Load, Manifest, ModId, Os,
     Permissions, ServiceId,
 };
+pub use packets::{PacketOutbox, MAX_PACKET_BODY_BYTES};
 pub use resolve::{resolve, Candidate, RejectReason, Rejection, Resolution};
 pub use sentinel::{CrashSentinel, SentinelGuard};
 pub use trust::{sha256_file, TrustList};

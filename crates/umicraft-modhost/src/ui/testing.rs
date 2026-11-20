@@ -13,7 +13,7 @@ use umicraft_modapi_sys::{UmiHudCx, UmiStatus, UmiStr};
 use super::settings::{SettingSpec, SettingSpecKind};
 use crate::context::ModContext;
 use crate::ffi::{host_table, testing, UserPtr};
-use crate::manifest::ModId;
+use crate::manifest::{ModId, Permissions};
 use crate::ui::shared::HostShared;
 
 thread_local! {
@@ -33,7 +33,7 @@ pub(crate) fn user() -> UserPtr {
 
 /// A not yet initialised mod inside the host-wide state `shared`.
 pub(crate) fn fresh(id: &str, shared: &Arc<HostShared>) -> Arc<ModContext> {
-    ModContext::with_shared(mod_id(id), Arc::clone(shared))
+    ModContext::with_shared(mod_id(id), Permissions::default(), Arc::clone(shared))
 }
 
 pub(crate) fn toggle(key: &str) -> SettingSpec {

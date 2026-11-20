@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 use umicraft_net::login::login_offline;
-use umicraft_net::play::{drive, PlayEvent, PlayOptions, PlaySession, SessionCounters, SessionEnd};
+use umicraft_net::play::{
+    drive, NoFilter, PlayEvent, PlayOptions, PlaySession, SessionCounters, SessionEnd,
+};
 use umicraft_net::{ping::ping, Connection, NetError};
 use umicraft_protocol::framing::MAX_PACKET_LEN;
 use umicraft_protocol::packets::play::serverbound::Chat;
@@ -50,11 +52,13 @@ async fn play(conn: &mut Connection, stay: Duration) -> Result<Played, NetError>
         end: None,
         counters: SessionCounters::default(),
     };
+    let mut filter = NoFilter;
     let run = drive(
         conn,
         &mut session,
         &mut commands,
         &played.counters,
+        &mut filter,
         |event| {
             if let PlayEvent::Placement(placement) = &event {
                 let _ = acks.try_send(placement.acknowledgement(true));
@@ -243,7 +247,14 @@ async fn commands_and_keepalives_interleave_under_compression() {
     let counters = SessionCounters::default();
     let end = tokio::time::timeout(
         Duration::from_secs(10),
-        drive(&mut conn, &mut session, &mut commands, &counters, |_| {}),
+        drive(
+            &mut conn,
+            &mut session,
+            &mut commands,
+            &counters,
+            &mut NoFilter,
+            |_| {},
+        ),
     )
     .await
     .expect("the session ends when the producer is done")

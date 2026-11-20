@@ -4381,6 +4381,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-example-packet-logger"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-example-panicking"
 version = "0.1.0"
 dependencies = [
@@ -4449,6 +4456,7 @@ dependencies = [
  "umicraft-builtin-mods",
  "umicraft-core",
  "umicraft-modapi-sys",
+ "umicraft-protocol",
 ]
 
 [[package]]

@@ -14,7 +14,7 @@ use umicraft_core::events::EventBus;
 use umicraft_modapi_sys::UMI_API_VERSION;
 use umicraft_modhost::{
     discover, resolve, ApiVersion, Candidate, CommandTable, CrashSentinel, Discovered, EventThread,
-    ModHost, ModId, SentinelGuard, TrustList,
+    ModHost, ModId, PacketOutbox, SentinelGuard, TrustList,
 };
 
 use super::external_config;
@@ -119,6 +119,20 @@ impl ExternalMods {
             host.install(&mut bus, thread);
         }
         bus
+    }
+
+    /// The packets the mods injected, for the network thread of a new session;
+    /// `None` in safe mode.
+    pub(crate) fn packet_outbox(&self) -> Option<PacketOutbox> {
+        self.host.as_ref().map(ModHost::packet_outbox)
+    }
+
+    /// Turns the server-compatible mode on or off: while on, the mods that alter
+    /// packets or movement stay off (ADR-0086).
+    pub(crate) fn set_server_compat(&self, on: bool) {
+        if let Some(host) = &self.host {
+            host.set_server_compat(on);
+        }
     }
 
     /// Shuts every mod down, then disarms the sentinel. Call on a clean exit only,

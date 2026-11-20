@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The multiplayer options: the address of the last direct connection
-//! (`GameSettings.lastServer`) and the client brand announced to servers.
+//! (`GameSettings.lastServer`), the client brand announced to servers and the
+//! server-compatible mode of the external mods.
 
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,11 @@ pub struct MultiplayerOptions {
     /// anti-cheats log it; set it to `vanilla` to announce what the vanilla
     /// client does. Empty or blank falls back to the default.
     pub brand: String,
+    /// Server-compatible mode: the external mods that declare the
+    /// `network_packets` or `movement` permission stay off, so the client
+    /// behaves like an unmodified one on a server with an anti-cheat
+    /// (ADR-0086). Off by default.
+    pub mod_server_compat: bool,
 }
 
 impl Default for MultiplayerOptions {
@@ -35,6 +41,7 @@ impl Default for MultiplayerOptions {
             last_server: String::new(),
             snooper: false,
             brand: umicraft_net::play::DEFAULT_BRAND.to_owned(),
+            mod_server_compat: false,
         }
     }
 }
@@ -67,6 +74,14 @@ mod tests {
     #[test]
     fn the_snooper_is_off_by_default() {
         assert!(!MultiplayerOptions::default().snooper);
+    }
+
+    #[test]
+    fn the_server_compatible_mode_is_off_by_default_and_kept() {
+        assert!(!MultiplayerOptions::default().mod_server_compat);
+        let options: MultiplayerOptions =
+            toml::from_str("mod_server_compat = true").expect("parses");
+        assert!(options.mod_server_compat);
     }
 
     #[test]

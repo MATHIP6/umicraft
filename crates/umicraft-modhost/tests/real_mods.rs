@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Loads the real `hello` and `panicking` example cdylibs (F3.2 acceptance test) and
-//! dispatches events to them through a core `EventBus` (F3.3).
+//! dispatches events to them through a core `EventBus` (F3.3); `packet_logger`
+//! observes and injects packets (F3.5).
 //!
 //! The libraries are built once per test binary with `cargo build --offline`. The
 //! target directory is `CARGO_TARGET_DIR` when set, otherwise it is derived from the
@@ -21,8 +22,8 @@ use umicraft_core::EventBus;
 use umicraft_modapi_sys::{UmiEventId, UmiMode, UmiStatus};
 use umicraft_modhost::{
     discover, library_file_name, platform_dir, resolve, ApiVersion, Arch, Candidate, ChatSend,
-    CommandOutcome, EventThread, KeyPressed, LoadError, ModHost, ModId, Os, PostTick, PreTick,
-    TrustList,
+    CommandOutcome, EventThread, KeyPressed, LoadError, ModHost, ModId, Os, PacketReceived,
+    PostTick, PreTick, TrustList,
 };
 
 /// The directory holding the built example libraries (`<target>/<profile>`).
@@ -36,6 +37,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-hello",
                 "-p",
                 "umicraft-example-panicking",
+                "-p",
+                "umicraft-example-packet-logger",
                 "--offline",
             ])
             .status()
@@ -108,7 +111,7 @@ fn hello_loads_panicking_fails_and_handlers_run() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 3 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 4 });
     assert_eq!(resolution.order.len(), 2);
 
     let mut trust = TrustList::default();
@@ -189,7 +192,7 @@ fn hello_declares_settings_a_widget_a_key_and_a_command() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 3 });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 4 });
     let (host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -247,4 +250,43 @@ fn hello_declares_settings_a_widget_a_key_and_a_command() {
         .is_ok_and(|line| line.starts_with("Usage: /hello")));
     assert_eq!(host.set_enabled(&hello, true), Ok(()));
     assert!(host.enabled().any(|id| id == &hello));
+}
+
+/// The real `packet_logger`: it observes packets on the network bus, `/swing`
+/// injects a validated Animation, and the server-compatible mode holds it off.
+#[test]
+fn packet_logger_observes_injects_and_yields_to_the_compatible_mode() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "packet_logger");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, ApiVersion { major: 0, minor: 4 });
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let view = host.mods().next().unwrap();
+    assert!(view.alters_game && view.enabled && !view.held_by_compat);
+
+    let mut network = EventBus::default();
+    host.install(&mut network, EventThread::Network);
+    assert!(network.has_subscribers::<PacketReceived>());
+    assert!(!network.dispatch(&mut PacketReceived::new(0x03, &[0; 16])));
+
+    let outbox = host.packet_outbox();
+    let chat = host.chat_outbox();
+    assert_eq!(host.commands().run("/swing"), CommandOutcome::Ran);
+    assert_eq!(chat.try_recv().as_deref(), Ok("swing sent"));
+    let mut injected = Vec::new();
+    outbox.drain(&mut injected);
+    assert_eq!(injected.len(), 1);
+    assert_eq!(injected[0].packet_id(), 0x0A);
+
+    host.set_server_compat(true);
+    assert!(host.mods().next().unwrap().held_by_compat);
+    assert_eq!(host.commands().run("/swing"), CommandOutcome::NotACommand);
+    host.set_server_compat(false);
+    assert_eq!(host.commands().run("/swing"), CommandOutcome::Ran);
+    host.shutdown_all();
 }

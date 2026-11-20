@@ -1,0 +1,18 @@
+[package]
+name = "umicraft-example-packet-logger"
+description = "Example Umicraft mod: packet logger (F3.5)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "packet_logger"
+crate-type = ["cdylib"]
+
+[dependencies]
+umicraft-modapi.workspace = true
+
+[lints]
+workspace = true

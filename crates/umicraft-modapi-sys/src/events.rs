@@ -5,7 +5,7 @@
 //! Strings in payloads are borrowed from the host for the duration of the
 //! handler call only; a mod that keeps one must copy it.
 
-use crate::UmiStr;
+use crate::{UmiBytes, UmiStr};
 
 /// Stable event id; ids are never reused (ADR-0087).
 #[repr(transparent)]
@@ -35,6 +35,16 @@ impl UmiEventId {
     /// open; payload [`UmiKeyPressed`]. Delivered only to the mod that
     /// registered the key: mods never see the player's other keystrokes.
     pub const KEY_PRESSED: Self = Self(9);
+    /// A play packet arrived from the server, before the client handles it;
+    /// payload [`UmiPacket`], network thread. Cancellable (the client never
+    /// sees it), except `Set Compression` and `Disconnect`. Needs the
+    /// `network_packets` permission. Added in API 0.4.
+    pub const PACKET_RECEIVED: Self = Self(10);
+    /// A play packet is about to be written to the server (the client's own,
+    /// automatic replies and injected ones); payload [`UmiPacket`], network
+    /// thread. Cancellable (nothing is written). Needs the `network_packets`
+    /// permission. Added in API 0.4.
+    pub const PACKET_SEND: Self = Self(11);
 }
 
 /// `UmiEventHeader::flags` bit: a handler may cancel the event.
@@ -147,4 +157,19 @@ pub struct UmiKeyPressed {
     pub header: UmiEventHeader,
     /// The key id the mod gave to `register_key`.
     pub key: UmiStr,
+}
+
+/// Payload of [`UmiEventId::PACKET_RECEIVED`] and [`UmiEventId::PACKET_SEND`].
+///
+/// Neither event is mutable: to change a packet the client sends, cancel it
+/// and inject the replacement with `UmiHost::packet_send`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UmiPacket {
+    /// Common header.
+    pub header: UmiEventHeader,
+    /// The play-state packet id (protocol 47).
+    pub id: u32,
+    /// The packet body: no length prefix, never compressed.
+    pub data: UmiBytes,
 }

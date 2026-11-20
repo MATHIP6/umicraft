@@ -59,3 +59,5 @@ pub const MAX_HUD_TEXT_BYTES: usize = 256;
 pub const MAX_HUD_ITEMS: usize = 256;
 /// Local chat lines that may wait for the client before new ones are dropped.
 pub const OUTBOX_CAPACITY: usize = 64;
+/// Injected packets that may wait for the network thread before `packet_send` answers `BUSY`.
+pub const PACKET_OUTBOX_CAPACITY: usize = 64;

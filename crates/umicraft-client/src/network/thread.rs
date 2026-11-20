@@ -13,6 +13,7 @@ use umicraft_net::Connection;
 use umicraft_protocol::PlayServerbound;
 use umicraft_ui::menus::ConnectStage;
 
+use super::mod_filter::{ModPacketFilter, NetMods};
 use super::NetworkConfig;
 use crate::error::ClientError;
 use crate::game::GameEvent;
@@ -23,6 +24,8 @@ use crate::screens::connection_end::{ConnectionEnd, EndPhase};
 /// The thread exits when the connection fails, the server disconnects, or the
 /// command channel is closed (which happens when the game thread stops). A
 /// failure or a kick reaches the game thread as [`GameEvent::Disconnected`].
+/// `mods` carries the packet hooks of the external mods; they move into the
+/// thread, which alone dispatches on them.
 ///
 /// # Errors
 /// [`ClientError::Network`] when the OS refuses to start the thread.
@@ -31,10 +34,11 @@ pub fn spawn(
     events: crossbeam_channel::Sender<GameEvent>,
     commands: CommandReceiver<PlayServerbound>,
     counters: Arc<SessionCounters>,
+    mods: NetMods,
 ) -> Result<JoinHandle<()>, ClientError> {
     let handle = std::thread::Builder::new()
         .name("umicraft-net".to_string())
-        .spawn(move || run_thread(config, events, commands, &counters))
+        .spawn(move || run_thread(config, events, commands, &counters, mods))
         .map_err(|error| ClientError::Network(format!("spawn network thread: {error}")))?;
     Ok(handle)
 }
@@ -44,6 +48,7 @@ fn run_thread(
     events: crossbeam_channel::Sender<GameEvent>,
     commands: CommandReceiver<PlayServerbound>,
     counters: &SessionCounters,
+    mods: NetMods,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -58,7 +63,7 @@ fn run_thread(
             return;
         }
     };
-    let ended = runtime.block_on(run_session(&config, &events, commands, counters));
+    let ended = runtime.block_on(run_session(&config, &events, commands, counters, mods));
     if let Some(reason) = ended {
         let _ = events.send(GameEvent::Disconnected(reason));
     }
@@ -73,6 +78,7 @@ async fn run_session(
     events: &crossbeam_channel::Sender<GameEvent>,
     mut commands: CommandReceiver<PlayServerbound>,
     counters: &SessionCounters,
+    mods: NetMods,
 ) -> Option<ConnectionEnd> {
     let mut connection = match Connection::connect(&config.host, config.port).await {
         Ok(connection) => connection,
@@ -126,11 +132,13 @@ async fn run_session(
     let forward = |event| {
         let _ = events.send(GameEvent::Net(event));
     };
+    let mut filter = ModPacketFilter::new(mods);
     match drive(
         &mut connection,
         &mut session,
         &mut commands,
         counters,
+        &mut filter,
         forward,
     )
     .await

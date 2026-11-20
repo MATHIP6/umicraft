@@ -26,8 +26,8 @@ use umicraft_modapi_sys::{
 use crate::budget::BUDGET;
 use crate::context::{ModContext, Subscription};
 use crate::events::{
-    ChatReceived, ChatSend, Connected, Disconnected, EventThread, HostEvent, KeyPressed, PostTick,
-    PreTick, ScreenClosed, ScreenOpened,
+    ChatReceived, ChatSend, Connected, Disconnected, EventThread, HostEvent, KeyPressed,
+    PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
 };
 use crate::ffi::UserPtr;
 use crate::hook::{check_status, run_hook, warn_sparse};
@@ -35,10 +35,13 @@ use crate::worker::{Job, Submit};
 
 /// Registers every subscription of `context` that belongs to `thread` on `bus`.
 ///
-/// A disabled mod registers nothing. Handlers keep the mod's `Arc`, so the context
+/// A failed mod registers nothing. A mod the player switched off still registers: the
+/// client applies the saved choices before it builds the buses, and the per-call
+/// `is_enabled` check keeps the handlers idle until the player switches it on.
+/// Handlers keep the mod's `Arc`, so the context
 /// outlives every closure that can reach it.
 pub fn install_mod(bus: &mut EventBus, thread: EventThread, context: &Arc<ModContext>) {
-    if !context.is_enabled() {
+    if context.is_failed() {
         return;
     }
     for subscription in context.all_subscriptions() {
@@ -63,6 +66,8 @@ fn register(
         UmiEventId::SCREEN_OPENED => adapt::<ScreenOpened>(bus, thread, context, subscription),
         UmiEventId::SCREEN_CLOSED => adapt::<ScreenClosed>(bus, thread, context, subscription),
         UmiEventId::KEY_PRESSED => adapt::<KeyPressed>(bus, thread, context, subscription),
+        UmiEventId::PACKET_RECEIVED => adapt::<PacketReceived>(bus, thread, context, subscription),
+        UmiEventId::PACKET_SEND => adapt::<PacketSend>(bus, thread, context, subscription),
         // `subscribe` refuses unknown ids, so nothing else can be recorded.
         _ => {}
     }

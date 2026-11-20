@@ -10,6 +10,7 @@
 
 mod event;
 mod hud;
+mod packet;
 mod ui;
 
 #[cfg(test)]
@@ -152,6 +153,7 @@ pub fn host_table() -> UmiHost {
         register_key: ui::host_register_key,
         register_command: ui::host_register_command,
         chat_print: ui::host_chat_print,
+        packet_send: packet::host_packet_send,
     }
 }
 
@@ -205,7 +207,7 @@ fn symbol<T: Copy>(library: &Library, name: &[u8], label: &'static str) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use umicraft_modapi_sys::UmiEventHeader;
+    use umicraft_modapi_sys::{UmiBytes, UmiEventHeader};
 
     use super::*;
 
@@ -262,6 +264,66 @@ mod tests {
         assert_eq!(
             call(null, UmiEventId::PRE_TICK),
             UmiStatus::INVALID_ARGUMENT
+        );
+    }
+
+    fn permitted() -> std::sync::Arc<ModContext> {
+        let permissions = crate::manifest::Permissions {
+            network_packets: true,
+            ..Default::default()
+        };
+        let cx = ModContext::with_shared(
+            "net".to_owned().try_into().unwrap(),
+            permissions,
+            std::sync::Arc::default(),
+        );
+        cx.finish_init(true);
+        cx
+    }
+
+    #[test]
+    fn packet_send_through_the_table_reaches_the_outbox() {
+        let cx = permitted();
+        let table = host_table();
+        // Animation (0x0A) has an empty body, given as null, empty and non-null views.
+        for data in [UmiBytes::EMPTY, UmiBytes::from_static(&[])] {
+            assert_eq!(
+                (table.packet_send)(handle_of(&cx), 0x0A, data),
+                UmiStatus::OK
+            );
+        }
+        assert_eq!(cx.stats().injected, 2);
+
+        let junk = UmiBytes::from_static(&[1]);
+        assert_eq!(
+            (table.packet_send)(handle_of(&cx), 0x0A, junk),
+            UmiStatus::INVALID_ARGUMENT
+        );
+        let huge = UmiBytes {
+            ptr: junk.ptr,
+            len: usize::MAX,
+        };
+        assert_eq!(
+            (table.packet_send)(handle_of(&cx), 0x0A, huge),
+            UmiStatus::INVALID_ARGUMENT
+        );
+        // Regression: a null pointer with a length is refused, not read as empty.
+        let dangling = UmiBytes {
+            ptr: core::ptr::null(),
+            len: 3,
+        };
+        assert_eq!(
+            (table.packet_send)(handle_of(&cx), 0x0A, dangling),
+            UmiStatus::INVALID_ARGUMENT
+        );
+        let null = UmiModHandle(core::ptr::null_mut());
+        assert_eq!(
+            (table.packet_send)(null, 0x0A, UmiBytes::EMPTY),
+            UmiStatus::INVALID_ARGUMENT
+        );
+        assert_eq!(
+            (table.packet_send)(handle_of(&context()), 0x0A, UmiBytes::EMPTY),
+            UmiStatus::DENIED
         );
     }
 

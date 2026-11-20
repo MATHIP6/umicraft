@@ -26,8 +26,19 @@ use super::messages::{ChunkEvent, RenderEvent};
 use super::state::Game;
 use super::tick::tick;
 
+/// What the mods give a new session: the game thread's part and the network
+/// thread's part. Bundled so `Session::start` takes one parameter for all of it;
+/// `SessionMods::default()` is a session without mods.
+#[derive(Default)]
+pub struct SessionMods {
+    /// The bus and the commands of the game thread.
+    pub game: GameMods,
+    /// The packet hooks and injections of the network thread (F3.5).
+    pub network: crate::network::NetMods,
+}
+
 /// What the mods give the game thread of a session: its event bus and the client
-/// commands. Bundled so `Session::start` takes one parameter for all of it.
+/// commands.
 #[derive(Default)]
 pub struct GameMods {
     /// The subscriptions of the mods that live on the game thread; empty without mods.

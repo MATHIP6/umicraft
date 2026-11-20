@@ -104,7 +104,11 @@ impl ModHost {
                 module,
             });
         }
-        let context = ModContext::with_shared(manifest.id.clone(), Arc::clone(&self.shared));
+        let context = ModContext::with_shared(
+            manifest.id.clone(),
+            manifest.permissions,
+            Arc::clone(&self.shared),
+        );
         let status = (exports.init)(&*self.table, handle_of(&context));
         context.finish_init(status.is_ok());
         self.mods.push(LoadedMod {

@@ -11,7 +11,7 @@ use umicraft_modapi_sys::{UmiEventId, UmiHandlerFn, UmiLevel, UmiMode, UmiStatus
 use crate::budget::{ModStats, Stats};
 use crate::events::is_known;
 use crate::ffi::UserPtr;
-use crate::manifest::ModId;
+use crate::manifest::{ModId, Permissions};
 use crate::ui::shared::HostShared;
 use crate::ui::state::UiState;
 use crate::worker::WorkerSlot;
@@ -41,12 +41,14 @@ pub struct Subscription {
 /// **Enable model** (F3.4): a mod is enabled when the player wants it
 /// ([`ModContext::is_wanted`], set by the player's switch) and it has not failed
 /// ([`ModContext::is_failed`], set by the host for a panic, an error status, an
-/// exhausted budget or a failed init, never cleared). Switching a mod off and on
+/// exhausted budget or a failed init, never cleared). In server-compat mode a mod
+/// that [`alters_game`](ModContext::alters_game) is held off as well. Switching a mod off and on
 /// again is safe because nothing is freed until `umi_mod_shutdown` at exit; a
 /// failed mod stays off because its state may be broken.
 #[derive(Debug)]
 pub struct ModContext {
     id: ModId,
+    permissions: Permissions,
     subscriptions: Mutex<Vec<Subscription>>,
     init_done: AtomicBool,
     wanted: AtomicBool,
@@ -69,20 +71,28 @@ fn log_text(bytes: &[u8]) -> Cow<'_, str> {
     String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_LOG_BYTES)])
 }
 
+/// Whether `event` is one of the two network events, which need `network_packets`.
+fn is_packet_event(event: UmiEventId) -> bool {
+    matches!(event, UmiEventId::PACKET_RECEIVED | UmiEventId::PACKET_SEND)
+}
+
 impl ModContext {
-    /// Creates the context of mod `id`: not initialised, not enabled, with a command
-    /// table and chat outbox of its own (for tests and benchmarks).
+    /// Creates the context of mod `id`: not initialised, not enabled, without
+    /// permissions, with a command table and outboxes of its own (for tests and
+    /// benchmarks).
     pub fn new(id: ModId) -> Arc<Self> {
-        Self::with_shared(id, Arc::default())
+        Self::with_shared(id, Permissions::default(), Arc::default())
     }
 
-    /// Creates the context of mod `id` inside a host whose mods share `shared`.
+    /// Creates the context of mod `id`, which holds `permissions` (its manifest's),
+    /// inside a host whose mods share `shared`.
     ///
     /// Returns an `Arc` because the command table needs a weak pointer back to the
     /// context that registered a command.
-    pub fn with_shared(id: ModId, shared: Arc<HostShared>) -> Arc<Self> {
+    pub fn with_shared(id: ModId, permissions: Permissions, shared: Arc<HostShared>) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             id,
+            permissions,
             subscriptions: Mutex::new(Vec::new()),
             init_done: AtomicBool::new(false),
             wanted: AtomicBool::new(false),
@@ -101,9 +111,27 @@ impl ModContext {
         &self.id
     }
 
-    /// Whether the mod runs: the player wants it and it has not failed.
+    /// The permissions the mod's manifest declared.
+    pub fn permissions(&self) -> Permissions {
+        self.permissions
+    }
+
+    /// Whether the mod may change what the server sees: it declared `network_packets`
+    /// or `movement`. Server-compat mode holds such a mod off.
+    pub fn alters_game(&self) -> bool {
+        self.permissions.network_packets || self.permissions.movement
+    }
+
+    /// Whether server-compat mode holds this mod off: the mode is on and the mod
+    /// [`alters_game`](Self::alters_game).
+    pub fn is_held_by_compat(&self) -> bool {
+        self.alters_game() && self.shared.server_compat()
+    }
+
+    /// Whether the mod runs: the player wants it, it has not failed and server-compat
+    /// mode is not holding it off.
     pub fn is_enabled(&self) -> bool {
-        self.is_wanted() && !self.is_failed()
+        self.is_wanted() && !self.is_failed() && !self.is_held_by_compat()
     }
 
     /// The player's switch: on after a successful init, until the player turns it off.
@@ -153,8 +181,9 @@ impl ModContext {
     /// Records a handler.
     ///
     /// Refuses with `INVALID_ARGUMENT` a null handler, an unknown event or an
-    /// unknown mode, and with `DENIED` any call after `init` returned: the
-    /// dispatcher reads the lists without coordinating with late registrations.
+    /// unknown mode, and with `DENIED` a packet event without the `network_packets`
+    /// permission or any call after `init` returned: the dispatcher reads the lists
+    /// without coordinating with late registrations.
     pub fn subscribe(
         &self,
         event: UmiEventId,
@@ -168,6 +197,9 @@ impl ModContext {
         let Some(handler) = handler.filter(|_| known_event && known_mode) else {
             return UmiStatus::INVALID_ARGUMENT;
         };
+        if is_packet_event(event) && !self.permissions.network_packets {
+            return UmiStatus::DENIED;
+        }
         if self.init_done.load(Ordering::Acquire) {
             return UmiStatus::DENIED;
         }

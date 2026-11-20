@@ -146,3 +146,38 @@ fn a_slider_and_a_toggle_show_their_values() {
         SettingControl::Toggle(true)
     );
 }
+
+#[test]
+fn the_compatible_mode_card_is_its_own_request_not_a_mod() {
+    let change = toggle(COMPAT_CARD);
+    let routed = route(&change);
+    assert!(!routed.builtin);
+    assert_eq!(
+        routed.external,
+        Some(Request::ServerCompat { enabled: true })
+    );
+    // A mod id never contains a hyphen, so no mod card can collide with it.
+    assert!(COMPAT_CARD
+        .strip_prefix(PREFIX)
+        .is_some_and(|rest| rest.parse::<ModId>().is_err()));
+}
+
+#[test]
+fn applying_the_compatible_mode_switches_the_host_and_changes_no_mod_file() {
+    let nothing = umicraft_modhost::resolve(
+        std::iter::empty(),
+        umicraft_modhost::ApiVersion { major: 0, minor: 4 },
+    );
+    let dir = std::env::temp_dir();
+    let (host, _) = ModHost::load(
+        &nothing,
+        &dir,
+        &mut umicraft_modhost::TrustList::default(),
+        |_, _| false,
+    );
+    assert_eq!(
+        apply(&host, Request::ServerCompat { enabled: true }).ok(),
+        Some(Vec::new())
+    );
+    assert!(host.server_compat());
+}

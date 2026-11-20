@@ -13,8 +13,9 @@ use umicraft_modhost::{
 };
 
 use super::App;
-use crate::game::{GameEvent, GameMods};
+use crate::game::{GameEvent, GameMods, SessionMods};
 use crate::mods::external::ExternalMods;
+use crate::network::NetMods;
 use crate::options::Binding;
 use crate::screens::Screen;
 
@@ -44,16 +45,22 @@ pub(super) fn screen_events(
 }
 
 impl App {
-    /// The bus and the client commands of the game thread of a new session. They
-    /// move into that thread through `Session::start`.
-    pub(super) fn game_mods(&self) -> GameMods {
-        GameMods {
-            bus: self
-                .external_mods
-                .as_ref()
-                .map(|mods| mods.bus(EventThread::Game))
-                .unwrap_or_default(),
-            commands: self.external_mods.as_ref().and_then(ExternalMods::commands),
+    /// The mods of a new session: the bus and the client commands of its game
+    /// thread, the bus and the injected packets of its network thread. They move
+    /// into those threads through `Session::start`.
+    pub(super) fn session_mods(&self) -> SessionMods {
+        let Some(mods) = &self.external_mods else {
+            return SessionMods::default();
+        };
+        SessionMods {
+            game: GameMods {
+                bus: mods.bus(EventThread::Game),
+                commands: mods.commands(),
+            },
+            network: NetMods {
+                bus: mods.bus(EventThread::Network),
+                outbox: mods.packet_outbox(),
+            },
         }
     }
 

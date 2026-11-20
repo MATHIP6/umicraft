@@ -8,8 +8,8 @@ use core::ffi::c_void;
 use std::mem::size_of;
 
 use umicraft_modapi_sys::{
-    UmiEventHeader, UmiHost, UmiHudCx, UmiModHandle, UmiStatus, UmiStr, UMI_EVENT_CANCELLABLE,
-    UMI_EVENT_CANCELLED,
+    UmiBytes, UmiEventHeader, UmiHost, UmiHudCx, UmiModHandle, UmiStatus, UmiStr,
+    UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED,
 };
 
 use crate::event::{Control, Event};
@@ -114,6 +114,20 @@ pub(crate) fn str_of(text: &UmiStr) -> &str {
     // payload's lifetime, which the borrow of `text` stays within (ADR-0087).
     let bytes = unsafe { core::slice::from_raw_parts(text.ptr, text.len) };
     core::str::from_utf8(bytes).unwrap_or("")
+}
+
+/// Reads host bytes as `&[u8]`; the borrow of `bytes` bounds the lifetime,
+/// matching the ABI rule that payload bytes live for the handler call.
+///
+/// Null and empty both read as an empty slice, so a non-conforming host that
+/// sends a null pointer with a length cannot make a mod read address zero.
+pub(crate) fn bytes_of(bytes: &UmiBytes) -> &[u8] {
+    if bytes.ptr.is_null() || bytes.len == 0 {
+        return &[];
+    }
+    // SAFETY: non-null with `len` bytes the host promises are readable for the
+    // payload's lifetime, which the borrow of `bytes` stays within (ADR-0087).
+    unsafe { core::slice::from_raw_parts(bytes.ptr, bytes.len) }
 }
 
 /// Validates the host table: non-null and large enough for every field this

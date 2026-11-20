@@ -5,7 +5,7 @@
 use core::ffi::c_void;
 
 use crate::{
-    UmiCommandFn, UmiEventHeader, UmiEventId, UmiHudCx, UmiHudDrawFn, UmiHudPlacement,
+    UmiBytes, UmiCommandFn, UmiEventHeader, UmiEventId, UmiHudCx, UmiHudDrawFn, UmiHudPlacement,
     UmiModHandle, UmiSettingDef, UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
 };
 
@@ -153,4 +153,10 @@ pub struct UmiHost {
     /// Shows `text` as a local chat line (never sent); callable from any
     /// thread.
     pub chat_print: extern "C" fn(me: UmiModHandle, text: UmiStr) -> UmiStatus,
+    /// Queues the serverbound play packet `id` with body `data` (no length
+    /// prefix) for the network thread; callable from any thread after init.
+    /// `DENIED` without the `network_packets` permission or while the mod is
+    /// disabled, `INVALID_ARGUMENT` for a body the client would not send
+    /// itself, `BUSY` when the queue is full. Added in API 0.4.
+    pub packet_send: extern "C" fn(me: UmiModHandle, id: u32, data: UmiBytes) -> UmiStatus,
 }

@@ -14,18 +14,20 @@
 
 mod chat;
 mod key;
+mod packet;
 mod screen;
 mod session;
 mod tick;
 
 use std::mem::size_of;
 
-use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiStr, UMI_EVENT_CANCELLED};
+use umicraft_modapi_sys::{UmiBytes, UmiEventHeader, UmiEventId, UmiStr, UMI_EVENT_CANCELLED};
 
 use crate::manifest::ModId;
 
 pub use chat::{ChatReceived, ChatSend};
 pub use key::KeyPressed;
+pub use packet::{PacketReceived, PacketSend};
 pub use screen::{ScreenClosed, ScreenOpened};
 pub use session::{Connected, Disconnected};
 pub use tick::{PostTick, PreTick};
@@ -39,11 +41,13 @@ pub enum EventThread {
     Game,
     /// The render thread, which never waits for a mod.
     Render,
+    /// The network thread, which reads and writes the connection.
+    Network,
 }
 
 /// What the dispatcher needs to know about an ABI event type.
 ///
-/// Implemented by the nine event types of this module only: the `Send` impls and
+/// Implemented by the eleven event types of this module only: the `Send` impls and
 /// `event_set_text` rely on the host being the sole builder of these events.
 pub trait HostEvent: Clone + Send + 'static {
     /// The event id of the payload.
@@ -96,6 +100,8 @@ pub(crate) fn is_known(id: UmiEventId) -> bool {
             | UmiEventId::SCREEN_OPENED
             | UmiEventId::SCREEN_CLOSED
             | UmiEventId::KEY_PRESSED
+            | UmiEventId::PACKET_RECEIVED
+            | UmiEventId::PACKET_SEND
     )
 }
 
@@ -113,6 +119,18 @@ pub(crate) fn umi_str(text: &str) -> UmiStr {
     UmiStr {
         ptr: text.as_ptr(),
         len: text.len(),
+    }
+}
+
+/// An ABI view of `bytes`, valid while `bytes` is not changed or dropped. An empty
+/// slice becomes the null view the ABI documents for zero bytes.
+pub(crate) fn umi_bytes(bytes: &[u8]) -> UmiBytes {
+    if bytes.is_empty() {
+        return UmiBytes::EMPTY;
+    }
+    UmiBytes {
+        ptr: bytes.as_ptr(),
+        len: bytes.len(),
     }
 }
 

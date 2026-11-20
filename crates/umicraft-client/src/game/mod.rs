@@ -63,7 +63,7 @@ pub use look::{camera_angles, AtomicLookSlot, Look, LookSlot};
 pub use messages::{
     ChunkEvent, Frame, GameEvent, GameStatus, RenderEvent, TextScreenRequest, ViewAngle,
 };
-pub use mod_events::GameMods;
+pub use mod_events::{GameMods, SessionMods};
 pub use session::Session;
 
 /// The tick period of the simulation: 20 Hz, as the 1.8 server (spec GAM-1).

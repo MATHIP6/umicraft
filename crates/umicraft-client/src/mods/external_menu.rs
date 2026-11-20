@@ -26,6 +26,10 @@ use crate::mods::menu::setting_value;
 /// What an id of the menu starts with when it names an external mod.
 const PREFIX: &str = "ext:";
 
+/// The id of the card of the server-compatible mode. A mod id never contains a
+/// hyphen, so no mod's card can take it.
+const COMPAT_CARD: &str = "ext:server-compat";
+
 /// The id of the card of mod `mod_id`.
 pub(crate) fn card_id(mod_id: &ModId) -> String {
     format!("{PREFIX}{mod_id}")
@@ -67,6 +71,8 @@ pub(crate) enum Request<'a> {
     ResetWidget { mod_id: &'a str, widget: &'a str },
     /// Every widget back to the place its mod suggests.
     ResetAll,
+    /// The switch of the server-compatible mode (F3.5).
+    ServerCompat { enabled: bool },
 }
 
 /// Who an outcome of the menu is for.
@@ -99,6 +105,11 @@ impl<'a> Route<'a> {
 pub(crate) fn route(change: &ModsOutcome) -> Route<'_> {
     use HudEditorOutcome::{Lock, OpenSettings, Placed, Reset, ResetAll, Scaled};
     match change {
+        ModsOutcome::Toggle { id, enabled } if id == COMPAT_CARD => {
+            Some(Route::external(Some(Request::ServerCompat {
+                enabled: *enabled,
+            })))
+        }
         ModsOutcome::Toggle { id, enabled } => parse(id).map(|(mod_id, _)| {
             Route::external(Some(Request::Enable {
                 mod_id,
@@ -192,6 +203,11 @@ pub(crate) fn apply(host: &ModHost, request: Request<'_>) -> Result<Vec<ModId>, 
             Ok(vec![id])
         }
         Request::ResetAll => reset_all(host),
+        // No mod's file changes: the mode is a client option, saved by the caller.
+        Request::ServerCompat { enabled } => {
+            host.set_server_compat(enabled);
+            Ok(Vec::new())
+        }
     }
 }
 
@@ -230,32 +246,63 @@ fn reset_all(host: &ModHost) -> Result<Vec<ModId>, ChangeError> {
 
 /// Adds the extra category of the external mods and one card per mod to `view`.
 /// Nothing is added when no external mod is loaded, so the menu shows no empty tab.
+/// The switch of the server-compatible mode comes first when a mod alters packets
+/// or movement, the only mods it affects.
 pub(crate) fn extend(view: &mut ModsView, host: &ModHost, lang: &Lang) {
-    let mut cards = host.mods().map(|mod_view| card(&mod_view, lang)).peekable();
-    if cards.peek().is_none() {
+    let mut cards: Vec<ModCardView> = host.mods().map(|mod_view| card(&mod_view, lang)).collect();
+    if cards.is_empty() {
         return;
+    }
+    if host.mods().any(|mod_view| mod_view.alters_game) {
+        cards.insert(0, compat_card(host, lang));
     }
     let category = view.categories.len();
     view.categories
         .push(lang.tr("umicraft.mods.category.external").to_owned());
-    view.cards
-        .extend(cards.map(|card| ModCardView { category, ..card }));
+    view.cards.extend(
+        cards
+            .into_iter()
+            .map(|card| ModCardView { category, ..card }),
+    );
+}
+
+/// The card whose switch is the server-compatible mode.
+fn compat_card(host: &ModHost, lang: &Lang) -> ModCardView {
+    ModCardView {
+        id: COMPAT_CARD.to_owned(),
+        name: lang.tr("umicraft.mods.external.compat").to_owned(),
+        description: lang
+            .tr("umicraft.mods.external.compat.description")
+            .to_owned(),
+        category: 0,
+        enabled: host.server_compat(),
+        settings: Vec::new(),
+    }
 }
 
 /// The card of one external mod. A failed mod shows as off with the failure as its
-/// description, so the player sees why its switch does nothing.
+/// description, so the player sees why its switch does nothing; so does a mod held
+/// off by the server-compatible mode. A mod that alters packets or movement says so
+/// before its description, whatever its state.
 fn card(view: &ModView<'_>, lang: &Lang) -> ModCardView {
     let description = if view.failed {
         lang.tr("umicraft.mods.external.failed")
+    } else if view.held_by_compat {
+        lang.tr("umicraft.mods.external.held")
     } else {
         view.description.unwrap_or_default()
+    };
+    let description = if view.alters_game {
+        format!("{} {description}", lang.tr("umicraft.mods.external.alters"))
+    } else {
+        description.to_owned()
     };
     ModCardView {
         id: card_id(view.id),
         name: view.name.to_owned(),
-        description: description.to_owned(),
+        description,
         category: 0,
-        enabled: view.enabled && !view.failed,
+        enabled: view.enabled && !view.failed && !view.held_by_compat,
         settings: view
             .settings()
             .map(|setting| setting_view(&setting))

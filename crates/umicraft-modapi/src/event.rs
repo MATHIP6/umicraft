@@ -4,11 +4,11 @@
 
 use umicraft_modapi_sys::{
     UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader, UmiEventId,
-    UmiKeyPressed, UmiPostTick, UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR,
+    UmiKeyPressed, UmiPacket, UmiPostTick, UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR,
     UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
 };
 
-use crate::ffi::str_of;
+use crate::ffi::{bytes_of, str_of};
 use crate::{host, ModError};
 
 mod sealed {
@@ -126,6 +126,24 @@ view!(
     ScreenClosed,
     UmiScreen,
     UmiEventId::SCREEN_CLOSED
+);
+view!(
+    /// A play packet arrived from the server, before the client handles it.
+    /// Cancellable (the client never sees it), except `Set Compression` and
+    /// `Disconnect`, which the host always keeps. Network thread; needs
+    /// `network_packets = true` in `mod.toml`.
+    PacketReceived,
+    UmiPacket,
+    UmiEventId::PACKET_RECEIVED
+);
+view!(
+    /// A play packet is about to be written to the server: the client's own,
+    /// its automatic replies and packets injected with
+    /// [`Packets::send`](crate::Packets::send). Cancellable (nothing is
+    /// written). Network thread; needs `network_packets = true` in `mod.toml`.
+    PacketSend,
+    UmiPacket,
+    UmiEventId::PACKET_SEND
 );
 
 /// Where a received chat line shows (the protocol's position byte).
@@ -248,3 +266,28 @@ macro_rules! screen_name {
 }
 
 screen_name!(ScreenOpened, ScreenClosed);
+
+/// Declares `id()` and `data()` on a packet view; both packet events share one
+/// payload.
+macro_rules! packet_fields {
+    ($($view:ident),+) => {$(
+        impl $view {
+            /// The play-state packet id (protocol 47). A host sending a value
+            /// above 255, which no packet has, reads as `u8::MAX`: that is a
+            /// wrong id either way, and it never aliases a real low id the way
+            /// truncation would.
+            pub fn id(&self) -> u8 {
+                u8::try_from(self.0.id).unwrap_or(u8::MAX)
+            }
+
+            /// The packet body: no id and no length prefix, never compressed.
+            /// Borrowed from the event, so copy it to keep it. Empty for a
+            /// packet without a body.
+            pub fn data(&self) -> &[u8] {
+                bytes_of(&self.0.data)
+            }
+        }
+    )+};
+}
+
+packet_fields!(PacketReceived, PacketSend);

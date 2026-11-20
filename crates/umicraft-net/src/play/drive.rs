@@ -6,12 +6,15 @@
 //! involves cancel-safe futures (`Connection::read_packet` and
 //! `Receiver::recv`); every write happens after the `select!` released the
 //! connection, so a command arriving never interrupts a half-written frame.
+//! A [`PacketFilter`] may drop packets in both directions and inject new
+//! ones; its calls are synchronous and happen outside the race.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::mpsc::Receiver;
 use umicraft_protocol::PlayServerbound;
 
+use super::filter::{is_protected, PacketFilter};
 use super::session::{PlayEvent, PlaySession};
 use crate::connection::Connection;
 use crate::error::NetError;
@@ -105,8 +108,10 @@ pub async fn drive(
     session: &mut PlaySession,
     commands: &mut Receiver<PlayServerbound>,
     counters: &SessionCounters,
+    filter: &mut impl PacketFilter,
     mut on_event: impl FnMut(PlayEvent),
 ) -> Result<SessionEnd, NetError> {
+    let mut injected = Vec::new();
     loop {
         // The read future borrows the connection, so nothing is written
         // until the select released it.
@@ -129,16 +134,22 @@ pub async fn drive(
                         Err(_) => break,
                     }
                 }
-                counters
-                    .sent
-                    .fetch_add(batch.len() as u64, Ordering::Relaxed);
-                connection.write_packets(&batch).await?;
+                batch.retain(|packet| filter.send(packet));
+                write_commands(connection, counters, &batch).await?;
             }
             Incoming::Packet(id, body) => {
                 let start = std::time::Instant::now();
                 counters.received.fetch_add(1, Ordering::Relaxed);
+                if !filter.receive(id, &body) && !is_protected(id) {
+                    counters
+                        .processing_nanos
+                        .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    inject(connection, counters, filter, &mut injected).await?;
+                    continue;
+                }
                 let reaction = session.handle(id, &body)?;
-                let replies: Vec<_> = reaction.replies().collect();
+                let mut replies: Vec<_> = reaction.replies().collect();
+                replies.retain(|reply| filter.send(reply));
                 if !replies.is_empty() {
                     for reply in &replies {
                         if matches!(reply, PlayServerbound::KeepAlive(_)) {
@@ -167,7 +178,39 @@ pub async fn drive(
                     .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
         }
+        inject(connection, counters, filter, &mut injected).await?;
     }
+}
+
+/// Counts and writes serverbound packets that passed the filter.
+async fn write_commands(
+    connection: &mut Connection,
+    counters: &SessionCounters,
+    packets: &[PlayServerbound],
+) -> Result<(), NetError> {
+    if packets.is_empty() {
+        return Ok(());
+    }
+    counters
+        .sent
+        .fetch_add(packets.len() as u64, Ordering::Relaxed);
+    connection.write_packets(packets).await
+}
+
+/// Collects the filter's injected packets, filters them and writes them.
+///
+/// `injected` is cleared on return so its allocation serves the next turn.
+async fn inject(
+    connection: &mut Connection,
+    counters: &SessionCounters,
+    filter: &mut impl PacketFilter,
+    injected: &mut Vec<PlayServerbound>,
+) -> Result<(), NetError> {
+    filter.inject(injected);
+    injected.retain(|packet| filter.send(packet));
+    let written = write_commands(connection, counters, injected).await;
+    injected.clear();
+    written
 }
 
 #[cfg(test)]
@@ -175,7 +218,7 @@ mod tests {
     use std::io::Write;
 
     use super::*;
-    use crate::play::PlayOptions;
+    use crate::play::{NoFilter, PlayOptions};
     use std::time::Duration;
 
     use tokio::net::{TcpListener, TcpSocket};
@@ -246,6 +289,7 @@ mod tests {
             &mut session,
             &mut commands,
             &counters,
+            &mut NoFilter,
             |event| {
                 events.push(event);
                 // The caller leaves once it saw the clock.
@@ -290,9 +334,16 @@ mod tests {
         let (_sender, mut commands) = mpsc::channel(4);
         let mut session = PlaySession::new(PlayOptions::default());
         let counters = SessionCounters::default();
-        let end = drive(&mut client, &mut session, &mut commands, &counters, |_| {})
-            .await
-            .expect("clean end");
+        let end = drive(
+            &mut client,
+            &mut session,
+            &mut commands,
+            &counters,
+            &mut NoFilter,
+            |_| {},
+        )
+        .await
+        .expect("clean end");
 
         assert_eq!(end, SessionEnd::Kicked("done".to_string()));
         assert!(matches!(
@@ -322,9 +373,16 @@ mod tests {
             .expect("queue the command");
         let mut session = PlaySession::new(PlayOptions::default());
         let counters = SessionCounters::default();
-        let end = drive(&mut client, &mut session, &mut commands, &counters, |_| {})
-            .await
-            .expect("clean end");
+        let end = drive(
+            &mut client,
+            &mut session,
+            &mut commands,
+            &counters,
+            &mut NoFilter,
+            |_| {},
+        )
+        .await
+        .expect("clean end");
 
         assert_eq!(end, SessionEnd::Kicked("bye".to_string()));
         assert!(matches!(
@@ -333,6 +391,193 @@ mod tests {
         ));
         assert_eq!(counters.packets_sent(), 1);
         assert_eq!(counters.keepalives_answered(), 0);
+    }
+
+    fn chat(message: &str) -> PlayServerbound {
+        PlayServerbound::Chat(Chat {
+            message: message.to_string(),
+        })
+    }
+
+    fn kick(reason: &str) -> PlayClientbound {
+        PlayClientbound::Disconnect(clientbound::Disconnect {
+            reason: format!(r#"{{"text":"{reason}"}}"#),
+        })
+    }
+
+    /// Drops what `drop_receive` and `drop_send` say (nothing by default) and
+    /// injects `inject` once.
+    struct Scripted {
+        drop_receive: fn(u8) -> bool,
+        drop_send: fn(&PlayServerbound) -> bool,
+        inject: Vec<PlayServerbound>,
+        seen_send: Vec<PlayServerbound>,
+    }
+
+    impl Scripted {
+        fn new() -> Self {
+            Self {
+                drop_receive: |_| false,
+                drop_send: |_| false,
+                inject: Vec::new(),
+                seen_send: Vec::new(),
+            }
+        }
+    }
+
+    impl PacketFilter for Scripted {
+        fn receive(&mut self, id: u8, _body: &[u8]) -> bool {
+            !(self.drop_receive)(id)
+        }
+
+        fn send(&mut self, packet: &PlayServerbound) -> bool {
+            self.seen_send.push(packet.clone());
+            !(self.drop_send)(packet)
+        }
+
+        fn inject(&mut self, out: &mut Vec<PlayServerbound>) {
+            out.append(&mut self.inject);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_dropped_clientbound_packet_is_counted_but_not_forwarded() {
+        let (mut client, mut server) = pair().await;
+        let server = tokio::spawn(async move {
+            let time = PlayClientbound::TimeUpdate(clientbound::TimeUpdate {
+                world_age: 1,
+                time_of_day: 6_000,
+            });
+            server.write_packet(&time).await.expect("write");
+            server.write_packet(&kick("done")).await.expect("write");
+        });
+        let (_sender, mut commands) = mpsc::channel(1);
+        let mut session = PlaySession::new(PlayOptions::default());
+        let counters = SessionCounters::default();
+        let mut filter = Scripted::new();
+        filter.drop_receive = |id| id == clientbound::TimeUpdate::ID;
+        let mut events = 0;
+        let end = drive(
+            &mut client,
+            &mut session,
+            &mut commands,
+            &counters,
+            &mut filter,
+            |_| events += 1,
+        )
+        .await
+        .expect("clean end");
+        server.await.expect("server task");
+
+        assert_eq!(end, SessionEnd::Kicked("done".to_string()));
+        assert_eq!(events, 0);
+        assert_eq!(counters.packets_received(), 2);
+    }
+
+    #[tokio::test]
+    async fn set_compression_and_disconnect_survive_a_filter_dropping_everything() {
+        let (mut client, mut server) = pair().await;
+        let server = tokio::spawn(async move {
+            let compress =
+                PlayClientbound::SetCompression(clientbound::SetCompression { threshold: 16 });
+            server.write_packet(&compress).await.expect("write");
+            server.set_compression_threshold(16);
+            server.write_packet(&kick("kept")).await.expect("write");
+        });
+        let (_sender, mut commands) = mpsc::channel(1);
+        let mut session = PlaySession::new(PlayOptions::default());
+        let mut filter = Scripted::new();
+        filter.drop_receive = |_| true;
+        filter.drop_send = |_| true;
+        let end = drive(
+            &mut client,
+            &mut session,
+            &mut commands,
+            &SessionCounters::default(),
+            &mut filter,
+            |_| {},
+        )
+        .await
+        .expect("the framing stayed in sync");
+        server.await.expect("server task");
+
+        assert_eq!(end, SessionEnd::Kicked("kept".to_string()));
+    }
+
+    #[tokio::test]
+    async fn a_dropped_command_is_never_written_nor_counted() {
+        let (mut client, mut server) = pair().await;
+        let server = tokio::spawn(async move {
+            let first = read_serverbound(&mut server).await;
+            server.write_packet(&kick("bye")).await.expect("write");
+            first
+        });
+        let (sender, mut commands) = mpsc::channel(4);
+        sender.send(chat("secret")).await.expect("queue");
+        sender.send(chat("public")).await.expect("queue");
+        let mut session = PlaySession::new(PlayOptions::default());
+        let counters = SessionCounters::default();
+        let mut filter = Scripted::new();
+        filter.drop_send =
+            |packet| matches!(packet, PlayServerbound::Chat(c) if c.message == "secret");
+        let end = drive(
+            &mut client,
+            &mut session,
+            &mut commands,
+            &counters,
+            &mut filter,
+            |_| {},
+        )
+        .await
+        .expect("clean end");
+
+        assert_eq!(end, SessionEnd::Kicked("bye".to_string()));
+        assert!(matches!(
+            server.await.expect("server task"),
+            PlayServerbound::Chat(c) if c.message == "public"
+        ));
+        assert_eq!(counters.packets_sent(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_injected_packet_is_filtered_counted_and_written() {
+        let (mut client, mut server) = pair().await;
+        let server = tokio::spawn(async move {
+            let first = read_serverbound(&mut server).await;
+            server.write_packet(&kick("bye")).await.expect("write");
+            first
+        });
+        let (sender, mut commands) = mpsc::channel(4);
+        let mut session = PlaySession::new(PlayOptions::default());
+        let counters = SessionCounters::default();
+        let mut filter = Scripted::new();
+        filter.inject = vec![chat("drop me"), chat("injected")];
+        // A command makes the loop take a turn before the server answers.
+        sender.send(chat("kick-start")).await.expect("queue");
+        filter.drop_send = |packet| matches!(packet, PlayServerbound::Chat(c) if c.message == "kick-start" || c.message == "drop me");
+        let end = drive(
+            &mut client,
+            &mut session,
+            &mut commands,
+            &counters,
+            &mut filter,
+            |_| {},
+        )
+        .await
+        .expect("clean end");
+
+        assert_eq!(end, SessionEnd::Kicked("bye".to_string()));
+        assert!(matches!(
+            server.await.expect("server task"),
+            PlayServerbound::Chat(c) if c.message == "injected"
+        ));
+        assert_eq!(counters.packets_sent(), 1);
+        let seen: Vec<_> = filter
+            .seen_send
+            .iter()
+            .filter(|p| matches!(p, PlayServerbound::Chat(c) if c.message == "drop me"))
+            .collect();
+        assert_eq!(seen.len(), 1, "the injection went through send");
     }
 
     /// A `Time Update` (0x03) whose body stops after 4 of its 16 bytes.
@@ -364,6 +609,7 @@ mod tests {
             &mut session,
             &mut commands,
             &SessionCounters::default(),
+            &mut NoFilter,
             |_| {},
         )
         .await;
@@ -427,7 +673,14 @@ mod tests {
         let counters = SessionCounters::default();
         let end = tokio::time::timeout(
             Duration::from_secs(5),
-            drive(&mut client, &mut session, &mut commands, &counters, |_| {}),
+            drive(
+                &mut client,
+                &mut session,
+                &mut commands,
+                &counters,
+                &mut NoFilter,
+                |_| {},
+            ),
         )
         .await
         .expect("no answer or command may be lost")

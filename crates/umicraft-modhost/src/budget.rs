@@ -47,8 +47,11 @@ pub struct ModStats {
     pub max_ns: u64,
     /// Calls over the budget.
     pub overruns: u64,
-    /// Observed events dropped because the mod's queue was full or closed.
+    /// Observed events dropped because the mod's queue was full or closed, plus
+    /// injected packets refused with `BUSY`.
     pub dropped: u64,
+    /// Packets accepted by `packet_send`.
+    pub injected: u64,
 }
 
 /// The live counters of one mod.
@@ -60,6 +63,7 @@ pub(crate) struct Stats {
     overruns: AtomicU64,
     consecutive_overruns: AtomicU64,
     dropped: AtomicU64,
+    injected: AtomicU64,
 }
 
 /// Whether the `count`th occurrence of a repeated condition is worth a log line.
@@ -97,6 +101,11 @@ impl Stats {
         self.dropped.fetch_add(1, Ordering::Relaxed) + 1
     }
 
+    /// Records a packet accepted by `packet_send`.
+    pub(crate) fn record_injection(&self) {
+        self.injected.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// A consistent-enough copy of the counters (each is read atomically).
     pub(crate) fn snapshot(&self) -> ModStats {
         ModStats {
@@ -105,6 +114,7 @@ impl Stats {
             max_ns: self.max_ns.load(Ordering::Relaxed),
             overruns: self.overruns.load(Ordering::Relaxed),
             dropped: self.dropped.load(Ordering::Relaxed),
+            injected: self.injected.load(Ordering::Relaxed),
         }
     }
 }
@@ -181,7 +191,8 @@ mod tests {
                 total_ns: 1200,
                 max_ns: 900,
                 overruns: 0,
-                dropped: 1
+                dropped: 1,
+                injected: 0,
             }
         );
     }

@@ -48,7 +48,7 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (128, 8));
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (136, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -75,7 +75,7 @@ fn version_compatibility_rules() {
         assert_eq!(host.accepts(module), expected, "{host:?} vs {module:?}");
     }
     assert!(UMI_API_VERSION.accepts(UMI_API_VERSION));
-    assert_eq!(UMI_API_VERSION, v(0, 3));
+    assert_eq!(UMI_API_VERSION, v(0, 4));
 }
 
 #[test]
@@ -191,4 +191,20 @@ fn ui_layouts() {
         .map(|k| k.0),
         [1, 2, 3, 4]
     );
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn packet_payload_layout() {
+    assert_eq!((size_of::<UmiBytes>(), align_of::<UmiBytes>()), (16, 8));
+    assert_eq!(offset_of!(UmiBytes, ptr), 0);
+    assert_eq!(offset_of!(UmiBytes, len), 8);
+    assert_eq!(offset_of!(UmiPacket, header), 0);
+    assert_eq!(offset_of!(UmiPacket, id), 12);
+    assert_eq!(offset_of!(UmiPacket, data), 16);
+    assert_eq!(size_of::<UmiPacket>(), 32);
+    assert_eq!(offset_of!(UmiHost, packet_send), 128);
+    assert_eq!(UmiEventId::PACKET_RECEIVED, UmiEventId(10));
+    assert_eq!(UmiEventId::PACKET_SEND, UmiEventId(11));
+    assert_eq!(UmiStatus::BUSY, UmiStatus(7));
 }

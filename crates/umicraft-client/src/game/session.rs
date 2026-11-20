@@ -17,7 +17,7 @@ use umicraft_protocol::PlayServerbound;
 
 use super::game_loop::run;
 use super::messages::{ChunkEvent, GameEvent, RenderEvent};
-use super::mod_events::GameMods;
+use super::mod_events::{GameMods, SessionMods};
 use crate::error::ClientError;
 use crate::input::InputUpdate;
 use crate::network::{self, NetworkConfig};
@@ -76,13 +76,14 @@ impl Session {
     /// Starts the network thread and the game thread.
     ///
     /// `mods` carries the mod subscriptions and the client commands of the game
-    /// thread; they move into that thread, which alone dispatches on them. Pass
-    /// `GameMods::default()` for a session without mods.
+    /// thread and the packet hooks of the network thread; each part moves into
+    /// its thread, which alone dispatches on it. Pass `SessionMods::default()`
+    /// for a session without mods.
     ///
     /// # Errors
     /// [`ClientError::Network`] or [`ClientError::Worker`] when a thread
     /// cannot be spawned.
-    pub fn start(config: NetworkConfig, mods: GameMods) -> Result<Self, ClientError> {
+    pub fn start(config: NetworkConfig, mods: SessionMods) -> Result<Self, ClientError> {
         let (inputs_tx, inputs_rx) = crossbeam_channel::bounded(INPUT_CAPACITY);
         let (events_tx, events_rx) = crossbeam_channel::bounded(INBOX_CAPACITY);
         let (frames_tx, frames_rx) = mpsc::sync_channel(FRAME_CAPACITY);
@@ -103,6 +104,7 @@ impl Session {
             events_tx.clone(),
             commands_rx,
             Arc::clone(&counters),
+            mods.network,
         )?;
         let frame_micros = Arc::new(AtomicU32::new(DEFAULT_FRAME_MICROS));
         let game = spawn_game_thread(
@@ -117,7 +119,7 @@ impl Session {
             Arc::clone(&stop),
             own_name,
             account_skin,
-            mods,
+            mods.game,
         )?;
 
         Ok(Self {

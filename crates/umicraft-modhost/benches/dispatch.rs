@@ -14,7 +14,8 @@ use umicraft_core::module::ModuleId;
 use umicraft_core::EventBus;
 use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiHudCx, UmiMode, UmiStatus, UmiStr};
 use umicraft_modhost::{
-    host_table, install_mod, ChatSend, EventThread, ModContext, PreTick, UserPtr,
+    host_table, install_mod, ChatSend, EventThread, ModContext, PacketReceived, Permissions,
+    PreTick, UserPtr,
 };
 
 extern "C" fn noop(_: *mut UmiEventHeader, _: *mut c_void) -> UmiStatus {
@@ -52,6 +53,32 @@ fn foreign_bus() -> EventBus {
     bus
 }
 
+/// A bus with one foreign observer of `PACKET_RECEIVED` on the network thread.
+fn packet_observer_bus() -> (EventBus, Arc<ModContext>) {
+    let permissions = Permissions {
+        network_packets: true,
+        ..Permissions::default()
+    };
+    let context = ModContext::with_shared(
+        "bench".to_owned().try_into().unwrap(),
+        permissions,
+        Arc::default(),
+    );
+    let user = UserPtr::new(std::ptr::null_mut());
+    let status = context.subscribe(
+        UmiEventId::PACKET_RECEIVED,
+        UmiMode::OBSERVE,
+        0,
+        Some(noop),
+        user,
+    );
+    assert_eq!(status, UmiStatus::OK);
+    context.finish_init(true);
+    let mut bus = EventBus::default();
+    install_mod(&mut bus, EventThread::Network, &context);
+    (bus, context)
+}
+
 fn dispatch(c: &mut Criterion) {
     let mut group = c.benchmark_group("modhost_dispatch");
 
@@ -79,7 +106,24 @@ fn dispatch(c: &mut Criterion) {
             empty.dispatch(&mut event)
         });
     });
+
+    // A typical chunk-sized body, to make the copy for the observer visible.
+    let body = vec![0u8; 256];
+    group.bench_function("packet_received_no_subscriber", |b| {
+        b.iter(|| {
+            let mut event = PacketReceived::new(black_box(0x21), black_box(&body));
+            empty.dispatch(&mut event)
+        });
+    });
+    let (mut observed, context) = packet_observer_bus();
+    group.bench_function("packet_received_one_foreign_observer", |b| {
+        b.iter(|| {
+            let mut event = PacketReceived::new(black_box(0x21), black_box(&body));
+            observed.dispatch(&mut event)
+        });
+    });
     group.finish();
+    drop(context);
 }
 
 fn draw_widgets(c: &mut Criterion) {

@@ -15,7 +15,7 @@ use crate::ffi::{
 };
 use crate::host::utf8;
 use crate::setting::{definition, utf8_all};
-use crate::{Chat, Hud, Logger, ModError, Placement, Setting};
+use crate::{Chat, Hud, Logger, ModError, Packets, Placement, Setting};
 
 /// A mod: built once by the host, told when it is shut down.
 pub trait Mod: Send + Sized + 'static {
@@ -61,6 +61,12 @@ impl<'a> InitCx<'a> {
     /// A handle for printing local chat lines, valid after `init` returns.
     pub fn chat(&self) -> Chat {
         Chat
+    }
+
+    /// A handle for injecting packets, valid after `init` returns. Using it
+    /// needs `network_packets = true` in `mod.toml`.
+    pub fn packets(&self) -> Packets {
+        Packets
     }
 
     /// Watches events of type `E`; lower `priority` runs first.

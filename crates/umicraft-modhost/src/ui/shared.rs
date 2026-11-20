@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! State shared by every mod of a host: the command table and the chat outbox.
+//! State shared by every mod of a host: the command table, the chat outbox, the
+//! packet outbox and the server-compat switch.
 //!
 //! [`ModHost::load`](crate::ModHost::load) creates one [`HostShared`] and gives it to
 //! every [`ModContext`](crate::ModContext). The client takes the other ends: the
 //! [`CommandTable`] for the game thread and the receiver of the chat outbox.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 
+use umicraft_protocol::PlayServerbound;
+
 use super::commands::{CommandEntry, CommandTable};
-use super::OUTBOX_CAPACITY;
+use super::{OUTBOX_CAPACITY, PACKET_OUTBOX_CAPACITY};
 use crate::error::DeclareError;
 
-/// The command table and the chat outbox of one host.
+/// The command table, the chat outbox, the packet outbox and the server-compat
+/// switch of one host.
 ///
 /// `Default` builds an empty one, which is what a context created without a host
 /// (tests, benchmarks) gets.
@@ -26,16 +30,23 @@ pub struct HostShared {
     outbox: Sender<String>,
     inbox: Receiver<String>,
     dropped: AtomicU64,
+    packets: Sender<PlayServerbound>,
+    packet_inbox: Receiver<PlayServerbound>,
+    server_compat: AtomicBool,
 }
 
 impl Default for HostShared {
     fn default() -> Self {
         let (outbox, inbox) = bounded(OUTBOX_CAPACITY);
+        let (packets, packet_inbox) = bounded(PACKET_OUTBOX_CAPACITY);
         Self {
             commands: Mutex::default(),
             outbox,
             inbox,
             dropped: AtomicU64::new(0),
+            packets,
+            packet_inbox,
+            server_compat: AtomicBool::new(false),
         }
     }
 }
@@ -69,6 +80,29 @@ impl HostShared {
                 Some(self.dropped.fetch_add(1, Ordering::Relaxed) + 1)
             }
         }
+    }
+
+    /// Whether server-compat mode is on: mods that alter packets or movement are held off.
+    pub fn server_compat(&self) -> bool {
+        self.server_compat.load(Ordering::Acquire)
+    }
+
+    /// Turns server-compat mode on or off; takes effect at once on every thread.
+    pub fn set_server_compat(&self, on: bool) {
+        self.server_compat.store(on, Ordering::Release);
+    }
+
+    /// The receiving end of the packets mods inject; all receivers share one queue.
+    pub(crate) fn packet_inbox(&self) -> Receiver<PlayServerbound> {
+        self.packet_inbox.clone()
+    }
+
+    /// Queues `packet` without blocking; hands it back when the queue is full.
+    pub(crate) fn queue_packet(&self, packet: PlayServerbound) -> Result<(), PlayServerbound> {
+        self.packets.try_send(packet).map_err(|error| match error {
+            // Disconnected cannot happen while `packet_inbox` lives in this struct.
+            TrySendError::Full(packet) | TrySendError::Disconnected(packet) => packet,
+        })
     }
 
     pub(crate) fn table(&self) -> MutexGuard<'_, BTreeMap<String, CommandEntry>> {

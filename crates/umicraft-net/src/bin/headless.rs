@@ -17,8 +17,8 @@ use tracing_subscriber::EnvFilter;
 use umicraft_net::login::login_offline;
 use umicraft_net::ping::ping;
 use umicraft_net::play::{
-    drive, JoinGameInfo, PlayEvent, PlayOptions, PlaySession, PlayerPlacement, SessionCounters,
-    SessionEnd,
+    drive, JoinGameInfo, NoFilter, PlayEvent, PlayOptions, PlaySession, PlayerPlacement,
+    SessionCounters, SessionEnd,
 };
 use umicraft_net::{Connection, NetError};
 use umicraft_protocol::ProtocolError;
@@ -187,29 +187,39 @@ async fn hold_play(conn: &mut Connection, stay: Duration) -> Result<Held, Sessio
         chat_messages: 0,
         counters: SessionCounters::default(),
     };
-    let play = drive(conn, &mut session, &mut commands, &held.counters, |event| {
-        match event {
-            PlayEvent::JoinGame(info) => held.join = Some(info),
-            PlayEvent::Placement(placement) => {
-                // A full queue only delays the answer to the next placement.
-                let _ = acks.try_send(placement.acknowledgement(true));
-                held.placement = Some(placement);
+    let mut filter = NoFilter;
+    let play = drive(
+        conn,
+        &mut session,
+        &mut commands,
+        &held.counters,
+        &mut filter,
+        |event| {
+            match event {
+                PlayEvent::JoinGame(info) => held.join = Some(info),
+                PlayEvent::Placement(placement) => {
+                    // A full queue only delays the answer to the next placement.
+                    let _ = acks.try_send(placement.acknowledgement(true));
+                    held.placement = Some(placement);
+                }
+                // The session does not answer transactions: the reply shares the
+                // queue of the position reply, so they leave in packet order.
+                PlayEvent::ConfirmTransaction(packet)
+                    if !packet.accepted && packet.window_id == 0 =>
+                {
+                    let _ = acks.try_send(umicraft_protocol::PlayServerbound::ConfirmTransaction(
+                        umicraft_protocol::packets::play::serverbound::ConfirmTransaction {
+                            window_id: 0,
+                            action_number: packet.action_number,
+                            accepted: true,
+                        },
+                    ));
+                }
+                PlayEvent::Chat(_) | PlayEvent::SystemChat(_) => held.chat_messages += 1,
+                _ => {}
             }
-            // The session does not answer transactions: the reply shares the
-            // queue of the position reply, so they leave in packet order.
-            PlayEvent::ConfirmTransaction(packet) if !packet.accepted && packet.window_id == 0 => {
-                let _ = acks.try_send(umicraft_protocol::PlayServerbound::ConfirmTransaction(
-                    umicraft_protocol::packets::play::serverbound::ConfirmTransaction {
-                        window_id: 0,
-                        action_number: packet.action_number,
-                        accepted: true,
-                    },
-                ));
-            }
-            PlayEvent::Chat(_) | PlayEvent::SystemChat(_) => held.chat_messages += 1,
-            _ => {}
-        }
-    });
+        },
+    );
     match tokio::time::timeout(stay, play).await {
         Ok(Ok(SessionEnd::Kicked(reason))) => Err(NetError::KickedAtPlay { reason }.into()),
         Ok(Ok(SessionEnd::CommandsClosed)) | Err(_) => Ok(held),

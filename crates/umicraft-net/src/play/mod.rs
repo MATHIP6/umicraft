@@ -8,9 +8,11 @@
 //!   writes its replies and the caller's commands.
 
 mod drive;
+mod filter;
 mod session;
 
 pub use drive::{drive, SessionCounters, SessionEnd};
+pub use filter::{NoFilter, PacketFilter};
 
 pub use session::{
     JoinGameInfo, PlayEvent, PlayOptions, PlaySession, PlayerPlacement, RawPlacement, Reaction,

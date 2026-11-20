@@ -5,6 +5,7 @@ use core::ffi::c_void;
 use umicraft_modapi_sys::UmiEventHeader;
 
 use super::*;
+use crate::ui::shared::HostShared;
 
 extern "C" fn noop(_: *mut UmiEventHeader, _: *mut c_void) -> UmiStatus {
     UmiStatus::OK
@@ -124,16 +125,94 @@ fn shutdown_is_owed_once_and_only_after_a_successful_init() {
 }
 
 #[test]
-fn subscribe_accepts_the_nine_events_of_api_0_3() {
+fn subscribe_accepts_the_nine_open_events_and_refuses_unknown_ids() {
     let cx = context();
     for id in 1..=9 {
         assert_eq!(subscribe(&cx, UmiEventId(id), Some(noop)), UmiStatus::OK);
     }
     assert_eq!(
-        subscribe(&cx, UmiEventId(10), Some(noop)),
+        subscribe(&cx, UmiEventId(12), Some(noop)),
         UmiStatus::INVALID_ARGUMENT
     );
     assert_eq!(cx.all_subscriptions().len(), 9);
+}
+
+fn with_permissions(id: &str, permissions: Permissions) -> Arc<ModContext> {
+    ModContext::with_shared(
+        id.to_owned().try_into().unwrap(),
+        permissions,
+        Arc::default(),
+    )
+}
+
+const PACKETS: Permissions = Permissions {
+    network_packets: true,
+    movement: false,
+    filesystem: false,
+    network_http: false,
+};
+const MOVEMENT: Permissions = Permissions {
+    network_packets: false,
+    movement: true,
+    filesystem: false,
+    network_http: false,
+};
+
+#[test]
+fn packet_events_need_the_network_packets_permission() {
+    let plain = context();
+    for event in [UmiEventId::PACKET_RECEIVED, UmiEventId::PACKET_SEND] {
+        assert_eq!(subscribe(&plain, event, Some(noop)), UmiStatus::DENIED);
+    }
+    assert!(plain.all_subscriptions().is_empty());
+
+    let allowed = with_permissions("net", PACKETS);
+    for event in [UmiEventId::PACKET_RECEIVED, UmiEventId::PACKET_SEND] {
+        assert_eq!(subscribe(&allowed, event, Some(noop)), UmiStatus::OK);
+    }
+    // Argument validation comes first: a null handler is not a permission question.
+    assert_eq!(
+        subscribe(&plain, UmiEventId::PACKET_SEND, None),
+        UmiStatus::INVALID_ARGUMENT
+    );
+}
+
+#[test]
+fn permissions_are_kept_and_alter_game_follows_packets_and_movement() {
+    assert!(!context().alters_game());
+    assert_eq!(context().permissions(), Permissions::default());
+    assert!(with_permissions("net", PACKETS).alters_game());
+    assert!(with_permissions("mv", MOVEMENT).alters_game());
+    let http = Permissions {
+        network_http: true,
+        filesystem: true,
+        ..Permissions::default()
+    };
+    assert!(!with_permissions("http", http).alters_game());
+}
+
+#[test]
+fn server_compat_holds_off_only_mods_that_alter_the_game() {
+    let shared = Arc::<HostShared>::default();
+    let make = |id: &str, permissions| {
+        let cx = ModContext::with_shared(
+            id.to_owned().try_into().unwrap(),
+            permissions,
+            shared.clone(),
+        );
+        cx.finish_init(true);
+        cx
+    };
+    let altering = make("net", PACKETS);
+    let harmless = make("plain", Permissions::default());
+
+    shared.set_server_compat(true);
+    assert!(!altering.is_enabled() && altering.is_held_by_compat());
+    assert!(altering.is_wanted(), "the player's switch is untouched");
+    assert!(harmless.is_enabled() && !harmless.is_held_by_compat());
+
+    shared.set_server_compat(false);
+    assert!(altering.is_enabled() && !altering.is_held_by_compat());
 }
 
 #[test]

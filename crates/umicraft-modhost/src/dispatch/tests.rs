@@ -15,6 +15,8 @@ use umicraft_modapi_sys::{UmiEventHeader, UmiStatus, UmiStr, UMI_EVENT_CANCELLED
 use super::*;
 use crate::budget::MAX_CONSECUTIVE_OVERRUNS;
 use crate::ffi::{host_table, testing};
+use crate::manifest::Permissions;
+use crate::ui::shared::HostShared;
 use crate::worker::QUEUE_CAPACITY;
 
 thread_local! {
@@ -305,13 +307,132 @@ fn only_the_subscriptions_of_the_installed_thread_are_registered() {
 }
 
 #[test]
-fn a_disabled_mod_registers_nothing() {
-    let cx = mod_with("off", &[intercepting(UmiEventId::PRE_TICK, 0, record, 1)]);
-    cx.set_wanted(false);
+fn a_failed_mod_registers_nothing() {
+    let cx = mod_with("bad", &[intercepting(UmiEventId::PRE_TICK, 0, record, 1)]);
+    cx.fail("test");
 
     let bus = install(&[&cx], EventThread::Game);
 
     assert!(!bus.has_subscribers::<PreTick>());
+}
+
+/// Regression: the client applies the saved config (possibly `enabled = false`)
+/// before it builds the buses, so a mod switched off at start must still be wired
+/// and work once the player switches it on.
+#[test]
+fn a_mod_switched_off_before_install_works_when_switched_on() {
+    let cx = mod_with("off", &[intercepting(UmiEventId::PRE_TICK, 0, record, 11)]);
+    cx.set_wanted(false);
+
+    let mut bus = install(&[&cx], EventThread::Game);
+    assert!(bus.has_subscribers::<PreTick>());
+    bus.dispatch(&mut PreTick::new(0));
+    assert!(!ran().contains(&11), "off: the handler stays idle");
+
+    cx.set_wanted(true);
+    bus.dispatch(&mut PreTick::new(1));
+    assert!(ran().contains(&11));
+}
+
+fn packet_mod(
+    id: &str,
+    handlers: &[(UmiEventId, UmiMode, i32, UmiHandlerFn, usize)],
+) -> Arc<ModContext> {
+    let permissions = Permissions {
+        network_packets: true,
+        ..Permissions::default()
+    };
+    let context = ModContext::with_shared(
+        id.to_owned().try_into().unwrap(),
+        permissions,
+        Arc::default(),
+    );
+    for &(event, mode, priority, handler, token) in handlers {
+        let user = UserPtr::new(token as *mut c_void);
+        assert_eq!(
+            context.subscribe(event, mode, priority, Some(handler), user),
+            UmiStatus::OK
+        );
+    }
+    context.finish_init(true);
+    context
+}
+
+#[test]
+fn packet_events_dispatch_on_the_network_bus_and_cancel() {
+    let cx = packet_mod(
+        "sniffer",
+        &[
+            intercepting(UmiEventId::PACKET_RECEIVED, 0, cancel, 21),
+            intercepting(UmiEventId::PACKET_SEND, 0, record, 22),
+        ],
+    );
+    let game = install(&[&cx], EventThread::Game);
+    let mut bus = install(&[&cx], EventThread::Network);
+    assert!(!game.has_subscribers::<PacketReceived>());
+    assert!(bus.has_subscribers::<PacketReceived>() && bus.has_subscribers::<PacketSend>());
+
+    let mut received = PacketReceived::new(0x02, b"hi");
+    assert!(bus.dispatch(&mut received), "cancelled");
+    assert!(received.is_cancelled());
+    let mut sent = PacketSend::new(0x0A, &[]);
+    assert!(!bus.dispatch(&mut sent));
+    assert_eq!(ran(), [21, 22]);
+}
+
+#[test]
+fn packet_observers_get_a_copy_without_capabilities() {
+    let cx = packet_mod(
+        "watcher",
+        &[(
+            UmiEventId::PACKET_SEND,
+            UmiMode::OBSERVE,
+            0,
+            observe as UmiHandlerFn,
+            7101,
+        )],
+    );
+    let mut bus = install(&[&cx], EventThread::Network);
+    let mut event = PacketSend::new(0x0A, &[]);
+
+    assert!(!bus.dispatch(&mut event));
+    cx.worker().stop();
+
+    let seen = observed(7101);
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].1, 0, "no MUTABLE, no CANCELLABLE");
+    assert_eq!(seen[0].2, UmiStatus::DENIED.0);
+}
+
+#[test]
+fn server_compat_stops_dispatch_to_a_packet_mod_at_once() {
+    let shared = Arc::<HostShared>::default();
+    let permissions = Permissions {
+        network_packets: true,
+        ..Permissions::default()
+    };
+    let cx = ModContext::with_shared(
+        "net".to_owned().try_into().unwrap(),
+        permissions,
+        shared.clone(),
+    );
+    cx.subscribe(
+        UmiEventId::PACKET_SEND,
+        UmiMode::INTERCEPT,
+        0,
+        Some(cancel),
+        UserPtr::new(31 as *mut c_void),
+    );
+    cx.finish_init(true);
+    let mut bus = install(&[&cx], EventThread::Network);
+
+    shared.set_server_compat(true);
+    assert!(
+        !bus.dispatch(&mut PacketSend::new(1, &[])),
+        "held off: not cancelled"
+    );
+    shared.set_server_compat(false);
+    assert!(bus.dispatch(&mut PacketSend::new(1, &[])));
 }
 
 #[test]

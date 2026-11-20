@@ -16,6 +16,8 @@ fn events_are_send() {
     assert_send::<ScreenOpened>();
     assert_send::<ScreenClosed>();
     assert_send::<KeyPressed>();
+    assert_send::<PacketReceived>();
+    assert_send::<PacketSend>();
 }
 
 #[test]
@@ -117,9 +119,42 @@ fn table_matches_the_documented_threads_and_flags() {
 }
 
 #[test]
-fn known_ids_are_one_to_nine() {
-    assert!((1..=9).all(|id| is_known(UmiEventId(id))));
-    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(10)));
+fn known_ids_are_one_to_eleven() {
+    assert!((1..=11).all(|id| is_known(UmiEventId(id))));
+    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(12)));
+}
+
+#[test]
+fn packet_events_carry_id_and_body_and_clone_repoints() {
+    let original = PacketReceived::new(0x0A, &[1, 2, 3]);
+    assert_eq!(original.id(), 0x0A);
+    assert_eq!(original.data(), [1, 2, 3]);
+    assert_eq!(original.header().id, UmiEventId::PACKET_RECEIVED);
+    assert_eq!(
+        original.header().size as usize,
+        size_of::<umicraft_modapi_sys::UmiPacket>()
+    );
+    assert_eq!(original.raw.data.ptr, original.data().as_ptr());
+    assert_eq!(original.raw.data.len, 3);
+
+    let copy = original.clone();
+    assert_ne!(copy.raw.data.ptr, original.raw.data.ptr);
+    assert_eq!(copy.raw.data.ptr, copy.data().as_ptr());
+    assert_eq!(copy.data(), [1, 2, 3]);
+
+    let send = PacketSend::new(0x01, &[]);
+    assert_eq!(send.header().id, UmiEventId::PACKET_SEND);
+    assert!(send.raw.data.ptr.is_null() && send.raw.data.len == 0);
+    assert!(send.data().is_empty());
+}
+
+#[test]
+fn packet_events_are_cancellable_immutable_network_events() {
+    assert_eq!(PacketReceived::THREAD, EventThread::Network);
+    assert_eq!(PacketSend::THREAD, EventThread::Network);
+    const { assert!(PacketReceived::CANCELLABLE && PacketSend::CANCELLABLE) };
+    const { assert!(!PacketReceived::MUTABLE && !PacketSend::MUTABLE) };
+    assert_eq!(PacketSend::new(1, &[]).target(), None);
 }
 
 #[test]

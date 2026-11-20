@@ -16,6 +16,10 @@
 //! | [`Connected`], [`Disconnected`] | render | no | no |
 //! | [`ScreenOpened`], [`ScreenClosed`] | render | no | no |
 //! | [`KeyPressed`] | render | no | no |
+//! | [`PacketReceived`], [`PacketSend`] | network | yes | no |
+//!
+//! The packet events and [`InitCx::packets`] need `network_packets = true` in
+//! the mod's `mod.toml`; without it the host answers `DENIED`.
 //!
 //! # Settings, HUD, keys and commands
 //!
@@ -51,6 +55,7 @@ mod host;
 mod hud;
 mod init;
 mod logger;
+mod packets;
 #[doc(hidden)]
 pub mod private;
 mod setting;
@@ -59,11 +64,12 @@ pub use chat::Chat;
 pub use error::ModError;
 pub use event::{
     ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event, KeyPressed,
-    PostTick, PreTick, ScreenClosed, ScreenOpened,
+    PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
 };
 pub use hud::{Anchor, Hud, Placement};
 pub use init::{InitCx, Mod};
 pub use logger::Logger;
+pub use packets::Packets;
 pub use setting::Setting;
 
 /// Exports `umi_mod_api_version`, `umi_mod_init` and `umi_mod_shutdown` for a

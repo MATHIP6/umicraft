@@ -9,6 +9,7 @@ use umicraft_builtin_mods::{HudPlacement, SettingValue};
 use super::ModHost;
 use crate::error::ConfigureError;
 use crate::manifest::ModId;
+use crate::packets::PacketOutbox;
 use crate::ui::commands::CommandTable;
 use crate::ui::config::ExternalModConfig;
 use crate::ui::hud::DrawnWidget;
@@ -68,6 +69,23 @@ impl ModHost {
     /// the render thread and shows each line as local chat.
     pub fn chat_outbox(&self) -> Receiver<String> {
         self.shared.chat_outbox()
+    }
+
+    /// The packets mods injected with `packet_send`, for the network thread to drain.
+    pub fn packet_outbox(&self) -> PacketOutbox {
+        PacketOutbox::new(self.shared.packet_inbox())
+    }
+
+    /// Turns server-compat mode on or off: while on, a mod that declared
+    /// `network_packets` or `movement` is not enabled. Takes effect at once on every
+    /// thread, because handlers consult the state per call.
+    pub fn set_server_compat(&self, on: bool) {
+        self.shared.set_server_compat(on);
+    }
+
+    /// Whether server-compat mode is on.
+    pub fn server_compat(&self) -> bool {
+        self.shared.server_compat()
     }
 
     /// The current choices of mod `id`, for saving; `None` for an unknown mod.
