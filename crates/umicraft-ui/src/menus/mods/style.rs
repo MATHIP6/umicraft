@@ -13,8 +13,9 @@ use crate::text::FontAtlas;
 /// A light dark sheet over the blurred game, so the menu reads well on bright
 /// worlds.
 pub(super) const BACKDROP: Color = [0.0, 0.0, 0.0, 0.25];
-/// The panel behind everything (`#101014` at 78 %).
-pub(super) const PANEL: Color = [0.063, 0.063, 0.078, 0.78];
+/// The panel behind everything (`#101014` at 94 %: the design asks for 78 %, but
+/// the game showed through too much).
+pub(super) const PANEL: Color = [0.063, 0.063, 0.078, 0.94];
 /// The one-pixel line around the panel.
 pub(super) const PANEL_RIM: Color = [1.0, 1.0, 1.0, 0.09];
 /// The sidebar, a faint veil over the panel.
