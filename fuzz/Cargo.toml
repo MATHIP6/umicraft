@@ -56,6 +56,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "pack_ctm"
+path = "fuzz_targets/pack_ctm.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "pack_properties"
 path = "fuzz_targets/pack_properties.rs"
 test = false

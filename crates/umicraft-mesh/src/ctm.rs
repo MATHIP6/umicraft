@@ -28,7 +28,7 @@ use umicraft_packext::ctm::{
 use umicraft_world::BlockState;
 
 use crate::models::{select_variant, ModelMeshContext};
-use crate::{actual_state, BlockSource, ConnectedTextures};
+use crate::{actual_state, BlockSource};
 
 /// Block ids that count as glass for `connect=material`: glass, stained
 /// glass, glass pane, stained glass pane.
@@ -285,22 +285,37 @@ fn side_of(face: Face) -> Side {
     }
 }
 
-/// The layer a quad of block `state` at `position` should show on `face`,
-/// given the sprite `layer` it shows now. Returns `layer` itself when no rule
-/// applies. `mode` must not be [`ConnectedTextures::Off`].
+/// The quad being textured: its block and position.
+#[derive(Clone, Copy)]
+pub(crate) struct Site<'a> {
+    pub(crate) position: [i32; 3],
+    pub(crate) state: BlockState,
+    pub(crate) quad: &'a ModelQuad,
+}
+
+/// The layer `quad` of block `state` at `position` should show, given the
+/// sprite `layer` it shows now. Returns `layer` itself when no rule applies.
+/// `fancy` turns on the corner tests. It checks the cheap
+/// per-sprite and per-block tables before it looks at the quad.
 pub(crate) fn connected_layer<S: BlockSource + ?Sized>(
     source: &S,
     context: &ModelMeshContext,
     table: &CtmTable,
-    position: [i32; 3],
-    state: BlockState,
-    face: Face,
+    site: Site<'_>,
     layer: u32,
-    mode: ConnectedTextures,
+    fancy: bool,
 ) -> u32 {
+    let Site {
+        position,
+        state,
+        quad,
+    } = site;
     if !table.may_apply(state.id(), layer) {
         return layer;
     }
+    let Some(face) = quad_face(quad) else {
+        return layer;
+    };
     let pass = |icon: u32, check_blocks: bool| {
         single_pass(
             source,
@@ -309,7 +324,7 @@ pub(crate) fn connected_layer<S: BlockSource + ?Sized>(
             (position, state, face),
             icon,
             check_blocks,
-            mode == ConnectedTextures::Fancy,
+            fancy,
         )
     };
     let Some(first) = pass(layer, true) else {

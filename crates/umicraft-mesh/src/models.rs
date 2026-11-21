@@ -401,18 +401,16 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
             None => (quad.texture.as_str(), quad.tint.is_some()),
         };
         let mut layer = context.atlas.layer(texture).unwrap_or(0);
-        if let (Some(table), Some(face)) = (&context.ctm, ctm::quad_face(quad)) {
-            if placement.settings.connected_textures != ConnectedTextures::Off {
-                layer = ctm::connected_layer(
-                    source,
-                    context,
-                    table,
+        if let Some(table) = context.ctm.as_deref() {
+            let mode = placement.settings.connected_textures;
+            if mode != ConnectedTextures::Off {
+                let fancy = mode == ConnectedTextures::Fancy;
+                let site = ctm::Site {
                     position,
                     state,
-                    face,
-                    layer,
-                    placement.settings.connected_textures,
-                );
+                    quad,
+                };
+                layer = ctm::connected_layer(source, context, table, site, layer, fancy);
             }
         }
         let tint = if tinted {

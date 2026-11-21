@@ -163,6 +163,22 @@ fn tile_names_cover_ranges_names_and_paths() {
 }
 
 #[test]
+fn hostile_numbers_neither_panic_nor_allocate_without_bound() {
+    assert!(matches!(
+        one("method=random\ntiles=0-4294967295"),
+        Err(CtmError::InvalidTile(_))
+    ));
+    let weights =
+        "method=random\nmatchBlocks=glass\ntiles=0-1\nweights=4294967295 4294967295 4294967295";
+    assert!(one(weights).is_ok());
+    assert!(one("matchBlocks=1-2147483647\ntiles=0-46").is_ok());
+    assert!(matches!(
+        one("matchBlocks=1-4294967295\ntiles=0-46"),
+        Err(CtmError::BadBlockMatch(_))
+    ));
+}
+
+#[test]
 fn tile_counts_are_checked_per_method() {
     let cases = [
         ("ctm", 46, false),

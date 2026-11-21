@@ -14,6 +14,10 @@ use super::{
 };
 use crate::{BiomeFilter, Properties, RangeList};
 
+/// The most tiles one `a-b` interval may expand to; a longer one is a typo or
+/// an attack, and no method uses that many.
+const MAX_INTERVAL: u32 = 4096;
+
 /// The most pattern cells a `repeat` rule may have along one side.
 const MAX_REPEAT: i64 = 16;
 
@@ -247,7 +251,10 @@ fn parse_weights(text: &str, tiles: usize) -> Option<Weights> {
     if weights.is_empty() {
         return None;
     }
-    let average = weights.iter().sum::<u32>() / weights.len() as u32;
+    let sum = weights
+        .iter()
+        .fold(0u32, |sum, weight| sum.saturating_add(*weight));
+    let average = sum / weights.len() as u32;
     weights.resize(tiles, average);
     let mut total = 0u32;
     let cumulative = weights
@@ -311,7 +318,7 @@ fn parse_block_entry(
         let list = RangeList::parse(block_part).ok()?;
         list.ranges()
             .iter()
-            .flat_map(|range| range.min..=range.max)
+            .flat_map(|range| range.min..=range.max.min(u32::from(u16::MAX)))
             .filter_map(|id| u16::try_from(id).ok())
             .collect()
     } else {
@@ -353,7 +360,10 @@ fn parse_tile_names(text: &str, base: &str) -> Result<Vec<String>, CtmError> {
     let mut names = Vec::new();
     for token in text.split([' ', ',']).filter(|token| !token.is_empty()) {
         match expand_interval(token) {
-            Some(Ok(range)) => names.extend(range.map(|n| n.to_string())),
+            Some(Ok(range)) if *range.end() - *range.start() < MAX_INTERVAL => {
+                names.extend(range.map(|n| n.to_string()));
+            }
+            Some(Ok(_)) => return Err(CtmError::InvalidTile(token.to_string())),
             // A reversed interval is skipped, as OptiFine warns and moves on.
             Some(Err(())) => tracing::warn!(token, "ignoring a reversed tile interval"),
             None => names.push(token.to_string()),
@@ -417,7 +427,7 @@ fn tile_key(name: &str, base: &str) -> Result<String, CtmError> {
 fn metadata_max(metadata: Option<&RangeList>, blocks: Option<&[BlockMatch]>) -> i32 {
     let max_of = |list: Option<&RangeList>| {
         list.and_then(|list| list.ranges().iter().map(|range| range.max).max())
-            .map_or(-1, |max| max as i32)
+            .map_or(-1, |max| i32::try_from(max).unwrap_or(i32::MAX))
     };
     blocks
         .into_iter()
