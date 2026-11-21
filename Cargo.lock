@@ -4350,6 +4350,7 @@ dependencies = [
  "umicraft-mesh",
  "umicraft-model",
  "umicraft-net",
+ "umicraft-packext",
  "umicraft-protocol",
  "umicraft-render",
  "umicraft-ui",
@@ -4392,6 +4393,7 @@ dependencies = [
  "criterion",
  "glam",
  "umicraft-model",
+ "umicraft-packext",
  "umicraft-world",
 ]
 
@@ -4402,6 +4404,7 @@ dependencies = [
  "glam",
  "serde_json",
  "thiserror 2.0.21",
+ "umicraft-packext",
  "umicraft-world",
 ]
 
@@ -4456,6 +4459,7 @@ dependencies = [
  "umicraft-core",
  "umicraft-game",
  "umicraft-mesh",
+ "umicraft-packext",
  "umicraft-ui",
  "umicraft-world",
  "wgpu",

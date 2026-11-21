@@ -677,6 +677,28 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         quality.better_snow,
         ReMesh
     ),
+    toggle!(
+        "customSky",
+        "umicraft.options.customSky",
+        Quality,
+        quality.custom_sky,
+        Immediate
+    ),
+    toggle!(
+        "customEntityModels",
+        "umicraft.options.customEntityModels",
+        Quality,
+        quality.custom_entity_models,
+        Immediate
+    ),
+    choice!(
+        "connectedTextures",
+        "umicraft.options.connectedTextures",
+        Quality,
+        OffFastFancy,
+        quality.connected_textures,
+        ReMesh
+    ),
     // Performance.
     toggle!(
         "caveCulling",

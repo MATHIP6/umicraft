@@ -247,8 +247,8 @@ pub fn fog_start_step(start: f32) -> usize {
     (step.max(0.0) as usize).min(FOG_STARTS.len() - 1)
 }
 
-/// `[video.quality]`: texture quality.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// `[video.quality]`: texture quality and the resource-pack features.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct QualityOptions {
     /// The sides of grass, mycelium and podzol take the top texture where it
@@ -257,6 +257,26 @@ pub struct QualityOptions {
     pub better_grass: OffFastFancy,
     /// Blocks next to snow layers are drawn as covered by snow.
     pub better_snow: bool,
+    /// Packs may replace the sky with their `sky/world<N>` layers.
+    pub custom_sky: bool,
+    /// Packs may replace entity models with their `cem/*.jem` files.
+    pub custom_entity_models: bool,
+    /// Packs may connect block textures with their `ctm/**` rules: Fast
+    /// checks the four sides, Fancy also the corners.
+    pub connected_textures: OffFastFancy,
+}
+
+impl Default for QualityOptions {
+    /// OptiFine's defaults: the pack features on, connected textures Fast.
+    fn default() -> Self {
+        Self {
+            better_grass: OffFastFancy::Off,
+            better_snow: false,
+            custom_sky: true,
+            custom_entity_models: true,
+            connected_textures: OffFastFancy::Fast,
+        }
+    }
 }
 
 /// `[video.animations]`: animated textures and particle kinds. All on by

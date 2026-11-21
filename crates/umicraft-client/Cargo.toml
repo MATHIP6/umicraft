@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+umicraft-packext.workspace = true
 base64 = "0.23"
 crossbeam-channel.workspace = true
 glam = "0.34"

@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+umicraft-packext.workspace = true
 bytemuck.workspace = true
 glam = "0.34"
 umicraft-model.workspace = true

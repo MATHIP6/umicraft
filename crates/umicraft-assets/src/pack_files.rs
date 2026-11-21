@@ -125,6 +125,37 @@ impl PackFiles {
     }
 }
 
+impl PackFiles {
+    /// Every pack-feature file under the folder `relative_dir` (for example
+    /// `cem/` or `ctm/`), at any depth, as [`FeatureFile`]s. A relative path
+    /// present in several packs or in both feature folders is listed once, with
+    /// the file [`PackFiles::feature`] would pick. Sorted by relative path.
+    #[must_use]
+    pub fn list_feature(&self, relative_dir: &str) -> Vec<(String, FeatureFile<'_>)> {
+        let mut relatives: Vec<String> = self
+            .layers
+            .iter()
+            .flat_map(|layer| layer.keys())
+            .filter_map(|path| {
+                FEATURE_FOLDERS
+                    .iter()
+                    .find_map(|folder| path.strip_prefix(folder))
+                    .filter(|rest| rest.starts_with(relative_dir))
+                    .map(str::to_string)
+            })
+            .collect();
+        relatives.sort();
+        relatives.dedup();
+        relatives
+            .into_iter()
+            .filter_map(|relative| {
+                let file = self.feature(&relative)?;
+                Some((relative, file))
+            })
+            .collect()
+    }
+}
+
 /// Whether the full virtual `path` falls in one of the [`KEPT_PREFIXES`].
 fn is_kept(path: &str) -> bool {
     path.strip_prefix("assets/minecraft/")
@@ -212,6 +243,33 @@ mod tests {
                 .map(|file| file.bytes),
             Some(&b"high"[..])
         );
+    }
+
+    #[test]
+    fn listing_a_feature_folder_merges_packs_and_folders() {
+        let files = PackFiles::from_packs([
+            pack(
+                "low",
+                &[
+                    ("mcpatcher/ctm/glass/glass.properties", b"low"),
+                    ("mcpatcher/ctm/stone.properties", b"stone"),
+                ],
+            ),
+            pack("high", &[("optifine/ctm/glass/glass.properties", b"high")]),
+        ]);
+        let listed: Vec<_> = files
+            .list_feature("ctm/")
+            .into_iter()
+            .map(|(relative, file)| (relative, file.bytes))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("ctm/glass/glass.properties".to_string(), &b"high"[..]),
+                ("ctm/stone.properties".to_string(), &b"stone"[..]),
+            ]
+        );
+        assert!(files.list_feature("cem/").is_empty());
     }
 
     #[test]
