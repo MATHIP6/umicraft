@@ -5,19 +5,29 @@
 # Umicraft
 
 An independent Rust client for Minecraft: Java Edition 1.8.x servers
-(protocol 47). Umicraft is not affiliated with Mojang Studios or Microsoft.
+(protocol 47).
 
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+[![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/7EwBaNDag2)
+
+[Status](#status) · [Workspace](#workspace) · [Getting started](#getting-started) ·
+[Development](#development) · [Documentation](#documentation)
+
+</div>
+
+> [!NOTE]
+> Umicraft is not affiliated with Mojang Studios or Microsoft.
+
+> [!IMPORTANT]
 > **Work in progress.** Umicraft is under active development and is not ready
 > for everyday play. Expect missing features, bugs and breaking changes.
->
-> **Anti-cheat warning.** Umicraft is not the vanilla client. We try to make
-> its packets, timings and movement as close to vanilla as possible, but the
-> match is not perfect yet, so server anti-cheats can still flag it, kick you
-> or ban you. **Do not connect to large public servers.** Use it on your own
-> server or on servers where you have permission, and at your own risk.
 
-**Community:** join the [Discord server](https://discord.gg/7EwBaNDag2) to chat,
-report bugs and follow progress.
+> [!WARNING]
+> **Anti-cheat.** Umicraft is not the vanilla client. Its packets, timings and
+> movement are as close to vanilla as we can make them, but the match is not
+> perfect yet, so server anti-cheats can still flag it, kick you or ban you.
+> **Do not connect to large public servers.** Use it on your own server or on
+> servers where you have permission, and at your own risk.
 
 ## Status
 
@@ -26,21 +36,28 @@ vanilla 1.8.8 client. We are roughly at **F2**, the performance pass (started
 early, see ADR-0058 and `docs/tasks/f2/README.md`), while the remaining parity
 phases (P-series) are still being completed.
 
-Already working:
+**Already working**
 
-- Offline-mode login and a streaming play session.
-- Chunk and block decoding, with chunk meshing on worker threads.
-- Real 1.8 block models, textures, smooth lighting and ambient occlusion.
-- Sky, sun, moon, clouds, fog and translucent water, glass and leaves.
-- Official asset setup with SHA-1 verification, plus resource pack layering and
-  hot reloading.
-- Player simulation, block breaking and placing, and chat.
-- Player skins and first entity models (partial, being reworked in P5).
-- A custom UI layer with a title screen and a server list.
+- [x] Offline-mode login and a streaming play session
+- [x] Chunk and block decoding, with chunk meshing on worker threads
+- [x] Real 1.8 block models, textures, smooth lighting and ambient occlusion
+- [x] Sky, sun, moon, clouds, fog and translucent water, glass and leaves
+- [x] Official asset setup with SHA-1 verification, plus resource pack layering
+      and hot reloading
+- [x] Player simulation, block breaking and placing, and chat
+- [x] Player skins and first entity models (partial, being reworked in P5)
+- [x] A custom UI layer with a title screen and a server list
 
-Still to come: items and inventory, full entity support, combat, particles,
-HUD and options screens, audio and online-mode login. See the roadmap for the
-full list.
+**Still to come**
+
+- [ ] Items and inventory
+- [ ] Full entity support and combat
+- [ ] Particles
+- [ ] HUD and options screens
+- [ ] Audio
+- [ ] Online-mode login
+
+See the roadmap for the full list.
 
 ## Workspace
 
@@ -58,7 +75,9 @@ full list.
 | `umicraft-client` | Windowed play, headless session, screenshots and demos |
 | `umicraft-testkit` | Fake server, packet capture/replay, test utilities |
 
-## Prerequisites
+## Getting started
+
+### Prerequisites
 
 - A current stable Rust toolchain (edition 2021).
 - A working wgpu backend: Vulkan on Linux, Metal on macOS, DX12 on Windows.
@@ -66,7 +85,7 @@ full list.
   screenshot path.
 - An offline-mode 1.8.x server to connect to.
 
-## Download the official assets (first run)
+### Download the official assets (first run)
 
 Umicraft ships no Mojang asset. Before the first launch, download and verify
 the official 1.8.8 client jar and assets once (SHA-1 checked, resumable):
@@ -81,7 +100,7 @@ first and this step is not needed. Without assets the client falls back to
 original procedural textures and font. No Mojang asset is stored in this
 repository or in a release.
 
-## Run the graphical client
+### Run the graphical client
 
 ```sh
 cargo run --release -p umicraft-client
@@ -92,14 +111,21 @@ Without a host and port the window opens on the title screen, where
 Multiplayer lists your saved servers. With a host and port it connects at
 start. Always use `--release`: a debug build is several times slower.
 
-Controls:
+**Controls**
 
-- **WASD** move, **Space** jump, **Shift** sneak, **Ctrl** sprint.
-- **Left click** capture the mouse, then break a block; **right click** place
-  a block; **1-9** select the hotbar slot; **T** open the chat.
-- **Esc** release the mouse, or quit when the mouse is not captured.
+| Input | Action |
+| --- | --- |
+| `W` `A` `S` `D` | Move |
+| `Space` | Jump |
+| `Shift` | Sneak |
+| `Ctrl` | Sprint |
+| Left click | Capture the mouse, then break a block |
+| Right click | Place a block |
+| `1`–`9` | Select the hotbar slot |
+| `T` | Open the chat |
+| `Esc` | Release the mouse, or quit when the mouse is not captured |
 
-## Other modes
+### Other modes
 
 ```sh
 # Render one offscreen frame to a PNG (no window needed)
@@ -127,13 +153,15 @@ GPU smoke tests are opt-in because they need a working adapter:
 
 ## Documentation
 
-- [`ROADMAP.md`](ROADMAP.md) — the path to parity with the vanilla client.
-- `UMICRAFT_SPEC.md` — requirements and clean-room rules.
-- `docs/threading.md` — thread boundaries and queue sizes.
-- `docs/sources.md` — provenance for protocol and behavior facts.
-- `docs/perf-log.md` — benchmark baselines.
-- `docs/decisions/` — architecture decision records.
-- `docs/backlog.md` — known gaps and follow-ups.
+| Document | Contents |
+| --- | --- |
+| [`ROADMAP.md`](ROADMAP.md) | The path to parity with the vanilla client |
+| [`UMICRAFT_SPEC.md`](UMICRAFT_SPEC.md) | Requirements and clean-room rules |
+| [`docs/threading.md`](docs/threading.md) | Thread boundaries and queue sizes |
+| [`docs/sources.md`](docs/sources.md) | Provenance for protocol and behavior facts |
+| [`docs/perf-log.md`](docs/perf-log.md) | Benchmark baselines |
+| [`docs/decisions/`](docs/decisions/) | Architecture decision records |
+| [`docs/backlog.md`](docs/backlog.md) | Known gaps and follow-ups |
 
 ## License
 
