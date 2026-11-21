@@ -16,8 +16,6 @@ use umicraft_packext::sky::Blend as PackBlend;
 use super::plan::Blend;
 use super::vertex::{quad, SkyVertex};
 
-/// Vertices of the cube (six quads of two triangles).
-pub(super) const CUBE_VERTICES: usize = 36;
 /// Half the cube side, in blocks.
 const HALF: f32 = 100.0;
 /// GL's default alpha function of `GlStateManager` is `GREATER 0.1`; the
@@ -105,7 +103,7 @@ mod tests {
     #[test]
     fn the_cube_has_six_faces_at_distance_100_with_distinct_cells() {
         let vertices = cube();
-        assert_eq!(vertices.len(), CUBE_VERTICES);
+        assert_eq!(vertices.len(), 36);
         for axis in 0..3 {
             for sign in [-HALF, HALF] {
                 let on_face = vertices
