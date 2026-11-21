@@ -4,12 +4,17 @@
 //! meshes handed to a [`MeshTarget`] within an upload budget.
 
 use std::sync::Arc;
+use std::time::Instant;
+
+use glam::Vec2;
 
 use umicraft_mesh::{BlockEntityRef, Mesh, Vertex};
 use umicraft_render::{Camera, Renderer};
 use umicraft_world::ChunkPos;
 
+use super::stillness::dynamic_budget;
 use super::WorldView;
+use crate::debug::lagometer::Lagometer;
 use crate::meshing::pool::{MeshPool, MeshResult};
 use crate::resources::terrain::InstalledTerrain;
 use crate::scene::block_entity::push_pot_plants;
@@ -143,11 +148,18 @@ impl WorldView {
     }
 
     pub(super) fn collect(&mut self, target: &mut impl MeshTarget) {
+        let started = Instant::now();
         let mut uploaded = 0_usize;
+        self.meshes_uploaded = 0;
         // The budget is checked before taking a result, so one mesh always
         // goes through and the rest wait in the lock-free channel for the next
         // frame, naturally pacing worker dispatch with the GPU upload budget.
-        while uploaded < self.upload_budget {
+        let budget = dynamic_budget(
+            self.upload_budget,
+            self.dynamic_updates,
+            self.stillness.still_for(Instant::now()),
+        );
+        while uploaded < budget {
             let Some(MeshResult {
                 pos,
                 generation,
@@ -178,7 +190,21 @@ impl WorldView {
             uploaded += (mesh.vertices.len() + mesh.transparent_vertices.len())
                 * std::mem::size_of::<Vertex>();
             target.upload_mesh(pos, &mesh);
+            self.meshes_uploaded += 1;
         }
+        self.lagometer.upload.push(started.elapsed());
+    }
+
+    /// The timers the Lagometer graphs.
+    #[must_use]
+    pub(crate) fn lagometer(&self) -> &Lagometer {
+        &self.lagometer
+    }
+
+    /// How many chunk meshes the last sync uploaded (the `U` of Show FPS).
+    #[must_use]
+    pub fn meshes_uploaded(&self) -> usize {
+        self.meshes_uploaded
     }
 
     /// Hands the waiting chunks to the workers, nearest first, keeping only a
@@ -208,5 +234,10 @@ impl WorldView {
     /// with the camera.
     pub fn focus_on(&mut self, camera: &Camera) {
         self.queue.focus_on(camera.eye(), camera.yaw);
+        self.stillness.observe(
+            camera.eye(),
+            Vec2::new(camera.yaw, camera.pitch),
+            Instant::now(),
+        );
     }
 }

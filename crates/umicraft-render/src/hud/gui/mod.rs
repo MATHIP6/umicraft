@@ -35,7 +35,7 @@ use action_bar::draw_action_bar;
 use boss_bar::draw_boss_bar;
 use chat::draw_chat;
 pub use chat::{chat_input_hit, chat_run_at, InputHit};
-use debug_f3::draw_debug_f3;
+use debug_f3::{draw_debug_f3, draw_fps_line, draw_lagometer};
 use held_name::draw_held_name;
 use hotbar::draw_hotbar;
 use icons::{draw_icons_layer, Canvas};
@@ -120,6 +120,17 @@ fn draw_social_overlays(
     }
     if let Some(view) = &state.debug_f3 {
         draw_debug_f3(list, view, size.0, sf, font);
+    } else if let Some(line) = &state.fps_line {
+        draw_fps_line(list, line, sf, font);
+    }
+    if let Some(lagometer) = &state.lagometer {
+        draw_lagometer(
+            list,
+            lagometer,
+            size.1,
+            sf,
+            (size.0 - 4.0).max(0.0) as usize,
+        );
     }
 }
 

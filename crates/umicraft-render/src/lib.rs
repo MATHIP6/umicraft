@@ -70,8 +70,8 @@ pub use hud::{
 };
 pub use hud::{
     plain_text, ActionBarView, BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle,
-    DebugF3View, HudState, SidebarLineView, SidebarView, TabEntryView, TabListView, TabValueStyle,
-    TitleView,
+    DebugF3View, HudState, LagometerView, SidebarLineView, SidebarView, TabEntryView, TabListView,
+    TabValueStyle, TitleView,
 };
 pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{

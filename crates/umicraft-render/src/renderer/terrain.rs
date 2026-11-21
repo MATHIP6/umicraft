@@ -518,4 +518,12 @@ impl Renderer {
     pub fn mesh_count(&self) -> usize {
         self.chunks.len()
     }
+
+    /// Number of chunk columns with opaque geometry in view in the last
+    /// frame (the `C` of Show FPS). A column is in the solid or the cutout
+    /// list, never both; columns with only water or glass are not counted.
+    #[must_use]
+    pub fn visible_chunk_count(&self) -> usize {
+        self.visible_solid.len() + self.visible_cutout.len()
+    }
 }
