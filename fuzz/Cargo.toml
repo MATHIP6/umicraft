@@ -61,3 +61,10 @@ path = "fuzz_targets/pack_properties.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pack_sky"
+path = "fuzz_targets/pack_sky.rs"
+test = false
+doc = false
+bench = false

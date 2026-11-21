@@ -24,7 +24,7 @@ use umicraft_world::{BlockPos, LightLevel, World};
 use super::look::Look;
 use super::messages::{ChunkEvent, Frame, RenderEvent, TextScreenRequest};
 use super::state::Game;
-use super::view::{debug_world, player_view, sky_temperature};
+use super::view::{biome_at, debug_world, player_view, sky_temperature};
 use crate::pack_offer::ServerPackRequest;
 use crate::scene::fog::fog_context;
 
@@ -144,6 +144,7 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
         block_entity_data: game.server.block_entities().entity_table(),
         signs: game.server.block_entities().sign_table(),
         sky_temperature: sky_temperature(game, view.position),
+        sky_biome: biome_at(game, view.position),
         fog: fog_context(
             game.world.as_ref(),
             game.server.effects(),

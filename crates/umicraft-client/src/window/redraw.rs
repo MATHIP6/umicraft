@@ -27,6 +27,7 @@ use crate::options::video_sections::FogChoice;
 use crate::options::video_spec::Effect;
 use crate::options::{self};
 use crate::resources::item_icons::IconSource;
+use crate::resources::sky::CustomSkyFrame;
 use crate::scene::block_entity::{mesh_block_entities, BlockEntityScene};
 use crate::scene::item_world::{entity_items, push_held_item, WorldItems};
 use crate::scene::map::map_id_of;
@@ -322,6 +323,30 @@ impl App {
         self.clock.schedule_next(budget, Instant::now());
     }
 
+    /// Evaluates the pack's custom sky layers for this frame and hands them to
+    /// the renderer. The Custom Sky option off (or no world) gives the vanilla
+    /// sky.
+    fn update_custom_sky(
+        &mut self,
+        renderer: &mut Renderer,
+        environment: RenderEnvironment,
+        elapsed: f32,
+    ) {
+        let frame = CustomSkyFrame {
+            dimension: i32::from(environment.dimension),
+            world_time: environment.world_time,
+            celestial_angle: SkyState::at(environment).celestial_angle,
+            rain: environment.rain_strength,
+            thunder: environment.thunder_strength,
+            biome_id: self.world.as_ref().and_then(WorldView::sky_biome),
+            eye_block_y: self.camera.eye().y.floor() as i64,
+            frame_seconds: elapsed,
+        };
+        let enabled = self.world.is_some() && self.options.video.quality.custom_sky;
+        let (has_layers, frames) = self.assets.custom_sky.evaluate(enabled, &frame);
+        renderer.set_custom_sky(has_layers, frames);
+    }
+
     /// Hands the renderer what this frame shows besides the entities: the
     /// environment, the clouds, rain and particles, the screen overlays, the
     /// border, the animated textures, the selection, the blurs, the name tags,
@@ -337,6 +362,7 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+        self.update_custom_sky(renderer, environment, elapsed);
         renderer.set_cloud_mode(self.options.video.cloud_mode());
         // 20 client ticks per second drive the cloud drift.
         renderer.set_cloud_ticks((now - self.clock.started).as_secs_f64() * 20.0);

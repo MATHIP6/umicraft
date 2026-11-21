@@ -13,7 +13,8 @@ use winit::event::{ElementState, KeyEvent, MouseButton};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use super::startup::{
-    load_packs_and_terrain, upload_glint_texture, upload_gui_atlas, upload_sky_textures,
+    load_packs_and_terrain, upload_custom_sky, upload_glint_texture, upload_gui_atlas,
+    upload_sky_textures,
 };
 use super::App;
 use crate::game::GameEvent;
@@ -244,6 +245,7 @@ impl App {
         self.options_menu.screen.assign_pack_icon_sheets(&gui_atlas);
         upload_glint_texture(renderer, installed.glint_texture());
         upload_sky_textures(renderer, &self.assets.files);
+        self.assets.custom_sky = upload_custom_sky(renderer, &self.assets.files);
         self.assets.gui_atlas = Some(gui_atlas);
         self.hud_cache.invalidate();
         self.server_icons_revision = u64::MAX;

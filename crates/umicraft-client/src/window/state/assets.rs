@@ -8,6 +8,7 @@ use umicraft_ui::FontAtlas;
 
 use crate::resources::game_files::GameFiles;
 use crate::resources::item_icons::ItemResources;
+use crate::resources::sky::CustomSky;
 use crate::resources::texture_animator::TextureAnimator;
 use crate::resources::theme_font::FontChoice;
 use crate::resources::ui_font::LoadedFont;
@@ -44,6 +45,8 @@ pub(in crate::window) struct Assets {
     pub(in crate::window) texture_animator: TextureAnimator,
     /// Entity textures bound for GPU rendering.
     pub(in crate::window) entity_textures: Option<EntityTextures>,
+    /// The pack-defined sky layers (Custom Sky) and their per-frame state.
+    pub(in crate::window) custom_sky: CustomSky,
     /// The textures of filled maps, created with the entity textures.
     pub(in crate::window) map_textures: Option<MapTextures>,
 }
