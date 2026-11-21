@@ -274,7 +274,7 @@ fn face_layer<S: BlockSource + ?Sized>(
     context.atlas.layer(&quad.texture)
 }
 
-fn side_of(face: Face) -> Side {
+pub(crate) fn side_of(face: Face) -> Side {
     match face {
         Face::Down => Side::Down,
         Face::Up => Side::Up,

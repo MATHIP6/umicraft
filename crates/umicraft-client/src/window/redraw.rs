@@ -248,6 +248,11 @@ impl App {
             .unwrap_or_default();
         environment.gamma = self.options.video.gamma;
         apply_details(&mut environment, &self.options.video);
+        environment.colors = self.assets.world_colors.overrides(
+            self.world.is_some(),
+            self.world.as_ref().and_then(WorldView::sky_biome),
+            self.camera.eye().y as f32,
+        );
         // The camera is where it stays for this frame: the entities are made once.
         if let Some(world) = self.world.as_ref() {
             world.entities_into(now, self.camera.render_origin(), &mut self.frame.entities);

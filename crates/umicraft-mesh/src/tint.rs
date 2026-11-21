@@ -54,6 +54,15 @@ pub fn biome_temperature(biome: u8) -> f32 {
     CLIMATE.get(usize::from(biome)).map_or(0.5, |&(t, _)| t)
 }
 
+/// The base temperature and rainfall of a biome (`BiomeGenBase`), which index
+/// the `vanilla` colormap format. Mutated ids (`128..=167`) take their base
+/// biome's climate and unknown ids the plains', as [`BiomeTints::color`] does.
+#[must_use]
+pub fn biome_climate(biome: u8) -> (f32, f32) {
+    let base = usize::from(biome & 127);
+    CLIMATE.get(base).copied().unwrap_or(CLIMATE[1])
+}
+
 /// Biome temperature and rainfall of the 1.8 base biomes, indexed by id.
 ///
 /// Values come from `BiomeGenBase`'s registration and the `BiomeGen*`
@@ -390,7 +399,7 @@ pub(crate) fn biome_tint<S: BlockSource + ?Sized>(
 }
 
 /// Packs an RGB triple into the vertex tint layout.
-const fn pack(rgb: [u8; 3]) -> u32 {
+pub(crate) const fn pack(rgb: [u8; 3]) -> u32 {
     (rgb[0] as u32) << 16 | (rgb[1] as u32) << 8 | rgb[2] as u32
 }
 

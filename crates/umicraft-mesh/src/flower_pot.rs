@@ -136,6 +136,8 @@ mod tests {
             atlas: Arc::new(AtlasLayout::from_keys(["blocks/flower_rose"])),
             tints: None,
             ctm: None,
+            natural: None,
+            custom_colors: None,
         }
     }
 

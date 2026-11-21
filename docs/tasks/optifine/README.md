@@ -135,8 +135,8 @@ CEM mob yet (the tests check the produced layers).
 | 7.2 | Custom Items, `type=item` (**done**; armor and enchantment rules parsed but not drawn, `texture.<key>` ignored) | Unit tests |
 | 7.3 | Custom Fonts (**done**; `width.N` overrides not read) | Unit tests |
 | 7.4 | Custom GUIs (**done**; creative screen not wired, biome and block-state conditions unknown) | Unit tests |
-| 7.5 | Natural Textures | Unit tests, mesh bench |
-| 7.6 | Custom Colors (colormaps, fixed colours, lightmaps) | Unit tests |
+| 7.5 | Natural Textures (**done**) | Unit tests, mesh bench |
+| 7.6 | Custom Colors: block, sky, fog and liquid colormaps, `fog.*`/`sky.end`, lightmaps (**done**; `particle.*` and `text.*` keys parsed, not drawn yet) | Unit tests |
 | 7.7 | Custom texture animations (`anim/*.properties`) | Unit tests |
 | 7.8 | Dynamic Lights | Unit tests |
 

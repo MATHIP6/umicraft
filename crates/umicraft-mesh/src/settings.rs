@@ -74,6 +74,9 @@ pub struct MeshSettings {
     pub better_snow: bool,
     /// Connected Textures mode.
     pub connected_textures: ConnectedTextures,
+    /// Whether faces of textures with a natural rule turn or mirror
+    /// (`Config.isNaturalTextures`).
+    pub natural_textures: bool,
 }
 
 impl MeshSettings {
@@ -100,6 +103,7 @@ impl Default for MeshSettings {
             better_grass: BetterGrass::Off,
             better_snow: false,
             connected_textures: ConnectedTextures::Off,
+            natural_textures: false,
         }
     }
 }

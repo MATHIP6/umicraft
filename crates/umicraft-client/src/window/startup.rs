@@ -201,6 +201,8 @@ impl App {
             None,
         );
         let features = PackFeatures::from_quality(&options.video.quality);
+        // The pack loader reads options that shape the loaded resources.
+        crate::meshing::settings::store(&options.video);
         let (asset_tx, asset_rx) = std::sync::mpsc::channel();
         let loader_thread = std::thread::Builder::new()
             .name("AssetLoader".to_string())
@@ -293,6 +295,7 @@ impl App {
                 entity_textures: None,
                 map_textures: None,
                 custom_sky: CustomSky::default(),
+                world_colors: Default::default(),
             },
             chat: ChatUi {
                 input: ChatInput::new(""),
@@ -398,6 +401,8 @@ impl App {
         self.assets.files = assets.files;
         upload_sky_textures(renderer, &self.assets.files);
         self.assets.custom_sky = upload_custom_sky(renderer, &self.assets.files);
+        self.assets.world_colors =
+            crate::resources::custom_colors::WorldColors::upload(renderer, &self.assets.files);
         self.panorama = upload_panorama(renderer);
         self.assets.gui_atlas = Some(gui_atlas);
         self.server_icons_revision = u64::MAX;

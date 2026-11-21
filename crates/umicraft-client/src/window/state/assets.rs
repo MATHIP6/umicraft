@@ -47,6 +47,8 @@ pub(in crate::window) struct Assets {
     pub(in crate::window) entity_textures: Option<EntityTextures>,
     /// The pack-defined sky layers (Custom Sky) and their per-frame state.
     pub(in crate::window) custom_sky: CustomSky,
+    /// The pack's custom sky, fog and lightmap colours.
+    pub(in crate::window) world_colors: crate::resources::custom_colors::WorldColors,
     /// The textures of filled maps, created with the entity textures.
     pub(in crate::window) map_textures: Option<MapTextures>,
 }

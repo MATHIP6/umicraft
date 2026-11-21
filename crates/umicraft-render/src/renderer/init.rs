@@ -432,6 +432,7 @@ impl Renderer {
             clouds,
             cloud_ticks: 0.0,
             torch_flicker: TorchFlicker::new(),
+            custom_lightmaps: None,
             weather,
             particles,
             particle_sprites: Vec::new(),

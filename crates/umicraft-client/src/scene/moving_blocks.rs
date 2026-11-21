@@ -181,6 +181,8 @@ mod tests {
             atlas: Arc::new(AtlasLayout::from_keys(["blocks/t"])),
             tints: None,
             ctm: None,
+            natural: None,
+            custom_colors: None,
         }
     }
 

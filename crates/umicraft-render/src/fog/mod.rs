@@ -265,7 +265,13 @@ fn mode(environment: &RenderEnvironment, sky: bool) -> FogMode {
 /// the eye light, the void, Blindness and Night Vision.
 fn final_color(base: [f32; 3], environment: &RenderEnvironment) -> [f32; 3] {
     let context = &environment.fog;
+    let liquid = match context.medium {
+        FogMedium::Water => environment.colors.underwater,
+        FogMedium::Lava => environment.colors.underlava,
+        FogMedium::Air => None,
+    };
     let mut color = match context.medium {
+        _ if liquid.is_some() => liquid.unwrap_or(base),
         FogMedium::Air => base,
         FogMedium::Water => {
             // Water Breathing lightens the water: `f12 * 0.3 + 0.6` with no

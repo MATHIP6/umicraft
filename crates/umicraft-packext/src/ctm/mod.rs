@@ -24,6 +24,8 @@ use crate::{BiomeFilter, RangeList};
 use thiserror::Error;
 
 pub use parse::parse_rules;
+pub(crate) use parse::{block_id_from_name, parse_match_blocks};
+pub(crate) use select::position_hash;
 pub use select::{pillar_axis_and_metadata, CtmNeighbours};
 
 /// Why a connected-texture file was dropped.

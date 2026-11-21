@@ -116,11 +116,11 @@ impl Renderer {
             lightmap: if self.fullbright {
                 lightmap::unlit()
             } else {
-                lightmap::colors(&LightmapParams::of(
+                lightmap::frame_colors(
+                    &LightmapParams::of(&self.environment, sky.sun_brightness, flicker),
                     &self.environment,
-                    sky.sun_brightness,
-                    flicker,
-                ))
+                    self.custom_lightmaps.as_deref(),
+                )
             },
         };
         let uniform_bytes = bytemuck::bytes_of(&uniform);

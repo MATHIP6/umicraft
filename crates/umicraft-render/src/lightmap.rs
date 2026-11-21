@@ -12,6 +12,8 @@
 //! plus the flicker), the night sky is bluish, and nothing is darker than
 //! `0.03`.
 
+use umicraft_packext::colors::lightmap::{DimensionLightmaps, LightmapInput};
+
 use crate::environment::RenderEnvironment;
 use crate::fog::night_vision_brightness;
 
@@ -119,6 +121,35 @@ pub(crate) fn colors(params: &LightmapParams) -> [[f32; 4]; ENTRIES] {
     colors
 }
 
+/// The colours of a frame: the pack's lightmap of the dimension when it has
+/// one that serves the frame, else the computed ones ([`colors`]). The Nether
+/// and the End have no weather, so only the overworld blends the rain and
+/// thunder pictures.
+pub(crate) fn frame_colors(
+    params: &LightmapParams,
+    environment: &RenderEnvironment,
+    custom: Option<&DimensionLightmaps>,
+) -> [[f32; 4]; ENTRIES] {
+    let from_pack = custom
+        .and_then(|maps| maps.get(i32::from(params.dimension)))
+        .and_then(|pack| {
+            let input = LightmapInput {
+                sun_brightness: params.sun_brightness,
+                lightning: params.lightning,
+                torch_flicker: params.torch_flicker,
+                gamma: params.gamma,
+                night_vision: params.night_vision.is_some(),
+            };
+            let weather = (params.dimension == 0)
+                .then_some((environment.rain_strength, environment.thunder_strength));
+            pack.colors(&input, weather)
+        });
+    match from_pack {
+        Some(custom) => custom.map(|[r, g, b]| [r, g, b, 1.0]),
+        None => colors(params),
+    }
+}
+
 /// Every entry white: the GUI draws items without the lightmap.
 pub(crate) const fn unlit() -> [[f32; 4]; ENTRIES] {
     [[1.0; 4]; ENTRIES]
@@ -188,6 +219,37 @@ mod tests {
     fn at(colors: &[[f32; 4]; ENTRIES], sky: usize, block: usize) -> [f32; 3] {
         let [r, g, b, _] = colors[sky * LEVELS + block];
         [r, g, b]
+    }
+
+    fn flat_pack(value: u8) -> umicraft_packext::colors::lightmap::LightmapPack {
+        use umicraft_packext::colors::lightmap::{Lightmap, LightmapPack};
+        let pixels: Vec<u8> = (0..16 * 32)
+            .flat_map(|_| [value, value, value, 255])
+            .collect();
+        LightmapPack::new(
+            Lightmap::from_rgba(16, 32, &pixels).expect("lightmap"),
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn a_custom_lightmap_replaces_the_computed_one_of_its_dimension_only() {
+        let mut maps = DimensionLightmaps::default();
+        maps.insert(0, flat_pack(51));
+        let environment = RenderEnvironment::DEFAULT;
+        let overworld = frame_colors(&day(), &environment, Some(&maps));
+        // Two flat pictures add: 51 + 51 = 102 of 255.
+        assert!((overworld[0][0] - 0.4).abs() < 1e-5, "{:?}", overworld[0]);
+        let nether = LightmapParams {
+            dimension: -1,
+            ..day()
+        };
+        assert_eq!(
+            frame_colors(&nether, &environment, Some(&maps)),
+            colors(&nether)
+        );
+        assert_eq!(frame_colors(&day(), &environment, None), colors(&day()));
     }
 
     #[test]
