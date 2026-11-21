@@ -6,6 +6,7 @@
 pub(crate) mod block_entity;
 pub(crate) mod border;
 pub(crate) mod cracks;
+pub mod dynamic_lights;
 pub mod entity;
 pub(crate) mod fog;
 pub(crate) mod item_world;

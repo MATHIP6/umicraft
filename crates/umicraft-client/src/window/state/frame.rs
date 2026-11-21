@@ -19,6 +19,8 @@ pub(in crate::window) struct FrameScratch {
     /// The entities of this frame, interpolated once: the tab list, the name tags and
     /// the scene all read them (perf 2, B4).
     pub(in crate::window) entities: Vec<umicraft_game::entity::EntityRenderSnapshot>,
+    /// The Dynamic Lights of the entities, refreshed on OptiFine's schedule.
+    pub(in crate::window) dynamic_lights: crate::scene::dynamic_lights::DynamicLightCollector,
     /// The particle quads of the frame, rebuilt in place.
     pub(in crate::window) particle_sprites: Vec<umicraft_render::ParticleSprite>,
     /// The name tags of the frame, drawn by the renderer in the world pass.

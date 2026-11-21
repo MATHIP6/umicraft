@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::hint::black_box;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use glam::{DVec3, Vec3};
@@ -17,8 +17,11 @@ use umicraft_client::game::{AtomicLookSlot, Look};
 use umicraft_client::hud::cache::HudCache;
 use umicraft_client::input::{InputState, InputUpdate};
 use umicraft_client::resources::ui_font;
+use umicraft_client::scene::dynamic_lights::{DynamicLightCollector, OffFastFancy};
 use umicraft_client::scene::entity::{mesh_entities, mesh_entities_into};
-use umicraft_game::entity::{EntityId, EntityKind, EntityRecord, EntityRenderSnapshot};
+use umicraft_game::entity::{
+    EntityFlags, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
+};
 use umicraft_game::view::ViewEffects;
 use umicraft_game::RenderState;
 use umicraft_mesh::Vertex;
@@ -290,6 +293,31 @@ fn quads_over_layers(quads: u32, layers: u32) -> Vec<Vertex> {
 /// Smart Animations (F6 phase 3): the layer set of a mesh is built once per
 /// upload (about one upload budget of vertices per frame at most) and the sets
 /// of the visible chunks are joined when the visible lists change.
+/// The per-frame light search over 256 entities, a tenth of them lit, with the
+/// list rebuilt every call (the Fancy worst case).
+fn bench_dynamic_lights(criterion: &mut Criterion) {
+    let mut entities = sample_entities(256);
+    for entity in entities.iter_mut().step_by(10) {
+        entity.flags = EntityFlags::new(0x01, 0);
+    }
+    let mut collector = DynamicLightCollector::default();
+    let eye = DVec3::new(0.0, 64.0, 0.0);
+    let start = Instant::now();
+    let mut frame = 0u32;
+    criterion.bench_function("dynamic_lights_collect_256_entities", |bencher| {
+        bencher.iter(|| {
+            frame += 1;
+            let now = start + Duration::from_millis(u64::from(frame) * 50);
+            black_box(
+                collector
+                    .update(OffFastFancy::Fancy, now, black_box(&entities), eye, false)
+                    .as_slice()
+                    .len(),
+            )
+        });
+    });
+}
+
 fn bench_layer_set(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("client/layer_set");
     // 1 MiB of vertices (the default upload budget of a frame) is 23 831 of 44 bytes.
@@ -316,6 +344,7 @@ fn bench_layer_set(criterion: &mut Criterion) {
 criterion_group!(
     benches,
     bench_layer_set,
+    bench_dynamic_lights,
     bench_entity_meshing,
     bench_hud_clone_and_cache,
     bench_frame_distribution_1000,

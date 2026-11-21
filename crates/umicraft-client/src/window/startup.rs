@@ -321,6 +321,7 @@ impl App {
                 hud_revision: 0,
                 hud_chat: None,
                 entities: Vec::new(),
+                dynamic_lights: Default::default(),
                 particle_sprites: Vec::new(),
                 nametags: Vec::new(),
                 placed_tags: Vec::new(),
