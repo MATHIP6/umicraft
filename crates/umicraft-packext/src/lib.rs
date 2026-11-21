@@ -26,10 +26,14 @@
 
 pub mod cem;
 pub mod filters;
+pub mod int_list;
 pub mod properties;
+pub mod random_entities;
 pub mod ranges;
 pub mod sky;
+pub mod text_match;
 
 pub use filters::{BiomeFilter, WeatherSet};
 pub use properties::{Properties, PropertiesError};
 pub use ranges::{Range, RangeError, RangeList};
+pub use text_match::{TextMatch, TextMatchError};
