@@ -500,3 +500,12 @@ Reference: the behaviour of the Fabric mod "Capes" (LGPL-2.1, read only, no code
 | Date | Area | Source | Notes |
 |---|---|---|---|
 | 2026-11-18 | Rich Presence over IPC | `discord-rich-presence` 1.1.0 (MIT) docs and source: `DiscordIpcClient::new(id)`, `connect`, `set_activity(Activity::new().details(..).timestamps(..))` | The application id is public. Retry interval (15 s) is our choice. |
+
+## OptiFine features (ADR-0088)
+
+Reference: the public OptiFine documentation (OptiFineDoc) first, then the
+decompiled OptiFine 1.8.9 tree in `../optifine/` (read only, never committed,
+no code taken). Each row names the document or the class.
+
+| Date | Area | Source | Notes |
+|---|---|---|---|
