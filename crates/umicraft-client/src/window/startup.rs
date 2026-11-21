@@ -35,7 +35,7 @@ use crate::mods::zoom::Zoom;
 use crate::options::effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options::Options;
 use crate::resources::entity_icons::EntityIcons;
-use crate::resources::game_files::{load_packs, GameFiles};
+use crate::resources::game_files::{load_packs, GameFiles, PackFeatures};
 use crate::resources::panorama::load_panorama_faces;
 use crate::resources::sky::{load_border_texture, load_sky_textures, CustomSky};
 use crate::resources::terrain::TerrainTextures;
@@ -65,11 +65,15 @@ pub(super) struct AsyncLoadedAssets {
 /// Reads the packs at `paths` once and builds from them both the terrain
 /// (atlases and models) and the [`GameFiles`] the other textures are read
 /// from, over the verified jar.
-pub(super) fn load_packs_and_terrain(paths: &[PathBuf]) -> (TerrainTextures, GameFiles) {
+pub(super) fn load_packs_and_terrain(
+    paths: &[PathBuf],
+    features: PackFeatures,
+) -> (TerrainTextures, GameFiles) {
     let packs = load_packs(paths);
     let terrain = TerrainTextures::from_packs(&packs);
     let jar = crate::resources::official::find_verified_jar().ok();
-    (terrain, GameFiles::new(PackFiles::from_packs(packs), jar))
+    let files = GameFiles::new(PackFiles::from_packs(packs), jar).with_features(features);
+    (terrain, files)
 }
 
 /// Starts the thread that pings the saved servers. Without it the list still
@@ -181,12 +185,13 @@ impl App {
             packs_folder().as_deref(),
             None,
         );
+        let features = PackFeatures::from_quality(&options.video.quality);
         let (asset_tx, asset_rx) = std::sync::mpsc::channel();
         let loader_thread = std::thread::Builder::new()
             .name("AssetLoader".to_string())
             .spawn(move || {
                 let font = ui_font::load();
-                let (terrain, files) = load_packs_and_terrain(&packs);
+                let (terrain, files) = load_packs_and_terrain(&packs, features);
                 let _ = asset_tx.send(AsyncLoadedAssets {
                     font,
                     terrain,

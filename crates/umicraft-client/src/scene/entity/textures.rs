@@ -29,6 +29,7 @@ use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
 use super::mobs::skin_slot;
 use super::player::has_slim_arms;
+use super::random_entities::RandomEntities;
 use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
 use crate::scene::map::{map_arm_vertices, MapBatch};
@@ -84,6 +85,8 @@ pub struct EntityTextures {
     capes: RefCell<CapeSet>,
     /// The custom entity models of the packs (ADR-0089).
     custom_models: CustomModels,
+    /// The alternative mob textures of the packs (ADR-0089).
+    random_entities: RandomEntities,
     /// The composed banner designs among `textures`.
     banners: RefCell<BannerCache>,
     /// The font atlas the sign text texture was made from: the glyph UVs of
@@ -143,9 +146,19 @@ impl EntityTextures {
             let texture = renderer.create_entity_texture(&image.rgba, image.width, image.height);
             textures.insert(image.slot, texture);
         }
+        let (random_entities, images) = RandomEntities::load(&files);
+        for image in images {
+            let texture = if image.repeats {
+                renderer.create_repeating_entity_texture(&image.rgba, image.width, image.height)
+            } else {
+                renderer.create_entity_texture(&image.rgba, image.width, image.height)
+            };
+            textures.insert(image.slot, texture);
+        }
         Self {
             textures: RefCell::new(textures),
             custom_models,
+            random_entities,
             files,
             skins: RefCell::new(SkinSet::new()),
             capes: RefCell::new(CapeSet::new()),
@@ -413,6 +426,7 @@ impl EntityTextures {
             pitch: self.view_pitch.get(),
             hand_swing: self.hand_swing.get(),
         };
+        self.random_entities.observe(snapshots, |_, _| None);
         let mut meshed = mesh_entities_with(
             snapshots,
             self,
@@ -579,6 +593,10 @@ impl SkinLookup for EntityTextures {
 
     fn custom_models(&self) -> Option<&CustomModels> {
         Some(&self.custom_models)
+    }
+
+    fn random_entities(&self) -> Option<&RandomEntities> {
+        Some(&self.random_entities)
     }
 }
 

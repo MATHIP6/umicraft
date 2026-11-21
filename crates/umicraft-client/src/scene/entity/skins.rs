@@ -16,6 +16,7 @@ use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, Renderer};
 
 use super::custom_models::CustomModels;
+use super::random_entities::RandomEntities;
 
 /// What a mesher may ask about downloaded textures.
 pub(crate) trait SkinLookup {
@@ -32,6 +33,11 @@ pub(crate) trait SkinLookup {
     /// The custom entity models of the packs (ADR-0089). None by default:
     /// only the world's textures hold them.
     fn custom_models(&self) -> Option<&CustomModels> {
+        None
+    }
+    /// The alternative mob textures of the packs (Random Entities). None by
+    /// default: only the world's textures hold them.
+    fn random_entities(&self) -> Option<&RandomEntities> {
         None
     }
 }

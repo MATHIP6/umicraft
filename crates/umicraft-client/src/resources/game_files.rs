@@ -17,12 +17,55 @@ use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::skin::decode_png_bytes;
 use umicraft_assets::{PackFiles, ResourcePack};
 
+/// Which pack features are on, read from the options when the resources are
+/// (re)loaded. Changing one of the options reloads the resources
+/// (`Effect::ReloadResources`), so a feature never needs a runtime switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackFeatures {
+    /// Alternative mob textures (`mob/**`, `random/**`).
+    pub random_entities: bool,
+    /// Item textures by item, damage or NBT (`cit/**`).
+    pub custom_items: bool,
+    /// Font replacements (`font/**`).
+    pub custom_fonts: bool,
+    /// Container screen replacements (`gui/container/**`).
+    pub custom_guis: bool,
+}
+
+impl PackFeatures {
+    /// Every feature on, the default of the options.
+    pub const ALL: Self = Self {
+        random_entities: true,
+        custom_items: true,
+        custom_fonts: true,
+        custom_guis: true,
+    };
+
+    /// The switches of the "Quality" options.
+    #[must_use]
+    pub fn from_quality(quality: &crate::options::video_sections::QualityOptions) -> Self {
+        Self {
+            random_entities: quality.random_entities,
+            custom_items: quality.custom_items,
+            custom_fonts: quality.custom_fonts,
+            custom_guis: quality.custom_guis,
+        }
+    }
+}
+
+impl Default for PackFeatures {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
 /// The active packs over the verified jar. Cheap to clone: the pack files are
 /// shared and the jar is a path.
 #[derive(Debug, Clone, Default)]
 pub struct GameFiles {
     packs: Arc<PackFiles>,
     jar: Option<ClientJar>,
+    features: PackFeatures,
 }
 
 impl GameFiles {
@@ -32,7 +75,21 @@ impl GameFiles {
         Self {
             packs: Arc::new(packs),
             jar,
+            features: PackFeatures::ALL,
         }
+    }
+
+    /// These files with the pack features set to `features`.
+    #[must_use]
+    pub fn with_features(mut self, features: PackFeatures) -> Self {
+        self.features = features;
+        self
+    }
+
+    /// Which pack features are on.
+    #[must_use]
+    pub fn features(&self) -> PackFeatures {
+        self.features
     }
 
     /// The verified jar alone, for demos, tests and the first frames before

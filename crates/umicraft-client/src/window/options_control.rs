@@ -24,6 +24,7 @@ use crate::meshing::pool::worker_count;
 use crate::options::effects::{open_folder, pack_paths, packs_folder, ServerSettings};
 use crate::options::video_sections::AnimationOptions;
 use crate::options::Binding;
+use crate::resources::game_files::PackFeatures;
 use crate::resources::texture_animator::{AnimationFilter, TextureAnimator};
 use crate::scene::entity::EntityTextures;
 use crate::scene::map::MapTextures;
@@ -227,12 +228,15 @@ impl App {
     /// re-meshing all loaded chunk columns.
     pub(super) fn reload_resources(&mut self) {
         tracing::info!("reloading resource packs...");
-        let (terrain, files) = load_packs_and_terrain(&pack_paths(
-            &self.args.resource_packs,
-            &self.options,
-            packs_folder().as_deref(),
-            self.server_pack.active_path(),
-        ));
+        let (terrain, files) = load_packs_and_terrain(
+            &pack_paths(
+                &self.args.resource_packs,
+                &self.options,
+                packs_folder().as_deref(),
+                self.server_pack.active_path(),
+            ),
+            PackFeatures::from_quality(&self.options.video.quality),
+        );
         self.assets.files = files;
         let Some(renderer) = self.renderer.as_mut() else {
             return;
