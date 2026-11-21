@@ -27,6 +27,7 @@
 pub mod cem;
 pub mod cit;
 pub mod filters;
+pub mod guis;
 pub mod int_list;
 pub mod properties;
 pub mod random_entities;

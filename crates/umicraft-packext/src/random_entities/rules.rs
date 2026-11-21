@@ -44,7 +44,7 @@ pub struct Profession {
 impl Profession {
     /// Parses one `profession[:career,career]` entry; `None` when a name is
     /// unknown (OptiFine `ConnectedParser.parseProfession`).
-    fn parse(entry: &str) -> Option<Self> {
+    pub fn parse(entry: &str) -> Option<Self> {
         let entry = entry.to_lowercase();
         let mut parts = entry.split(':');
         let id = profession_id(parts.next()?)?;
@@ -58,7 +58,10 @@ impl Profession {
         parts.next().is_none().then_some(Self { id, careers })
     }
 
-    fn matches(&self, profession: i32, career: Option<i32>) -> bool {
+    /// Whether the villager with this `profession` and, when known, `career`
+    /// is one of the professions the entry names.
+    #[must_use]
+    pub fn matches(&self, profession: i32, career: Option<i32>) -> bool {
         self.id == profession
             && (self.careers.is_empty() || career.is_some_and(|c| self.careers.contains(&c)))
     }
