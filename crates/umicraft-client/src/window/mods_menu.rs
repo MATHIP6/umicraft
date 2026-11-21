@@ -14,7 +14,7 @@ use winit::keyboard::KeyCode;
 
 use umicraft_builtin_mods::{CombatInfo, KeyState, MAX_EFFECTS};
 use umicraft_core::lang::Lang;
-use umicraft_render::{BackgroundBlur, ModWidgetView};
+use umicraft_render::ModWidgetView;
 use umicraft_ui::menus::{ModsOutcome, ModsView};
 use umicraft_ui::FontAtlas;
 
@@ -30,16 +30,12 @@ use crate::resources::item_icons::ItemView;
 use crate::screens::menu_flow::MenuFlow;
 use crate::screens::Screen;
 
-/// How the game behind the current screen is blurred: the mods menu blurs it
-/// (and the blur fades in while the menu opens), the landing page a little
-/// less than the pages.
-pub(super) fn background_blur(screen: Screen, menu: &MenuFlow) -> BackgroundBlur {
+/// How blurred the game behind the current screen is, `0.0` to `1.0`: the
+/// mods menu blurs it (and the blur fades in while the menu opens).
+pub(super) fn background_blur(screen: Screen, menu: &MenuFlow) -> f32 {
     match screen {
         Screen::Mods => menu.mods_blur(),
-        _ => BackgroundBlur {
-            strength: 0.0,
-            overlay: false,
-        },
+        _ => 0.0,
     }
 }
 

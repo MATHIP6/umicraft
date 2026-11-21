@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// Blur of the rendered game behind a menu: a dual filter (Kawase). Each
-// downsample takes five taps of the larger picture, each upsample eight taps of
-// the smaller one; the blurred picture is then graded (darker, a little less
-// saturated, with a vignette on the overlay) over the sharp one.
+// Blur of the rendered game behind a menu: a separable nine-tap Gaussian along
+// one axis per pass, then a plain copy of the result onto the screen.
 
 struct Params {
-    // xy: half a texel of the source, in texture coordinates; z: strength of
-    // the blurred picture over the sharp one; w: tap offset of the filter.
+    // xy: one texel step along the blurred axis, in texture coordinates.
     values: vec4<f32>,
-    // x: brightness; y: saturation; z: vignette (0 or 1).
-    grade: vec4<f32>,
 };
 
 @group(0) @binding(0) var src: texture_2d<f32>;
@@ -32,33 +27,20 @@ fn vs_full(@builtin(vertex_index) index: u32) -> VertexOut {
     return out;
 }
 
-fn at(uv: vec2<f32>, offset: vec2<f32>) -> vec3<f32> {
-    return textureSample(src, samp, uv + offset).rgb;
+fn tap(uv: vec2<f32>, offset: vec2<f32>, weight: f32) -> vec3<f32> {
+    return (textureSample(src, samp, uv + offset).rgb
+        + textureSample(src, samp, uv - offset).rgb) * weight;
 }
 
 @fragment
-fn fs_down(in: VertexOut) -> @location(0) vec4<f32> {
-    let h = params.values.xy * params.values.w;
-    var sum = at(in.uv, vec2<f32>(0.0)) * 4.0;
-    sum += at(in.uv, -h);
-    sum += at(in.uv, h);
-    sum += at(in.uv, vec2<f32>(h.x, -h.y));
-    sum += at(in.uv, vec2<f32>(-h.x, h.y));
-    return vec4<f32>(sum / 8.0, 1.0);
-}
-
-@fragment
-fn fs_up(in: VertexOut) -> @location(0) vec4<f32> {
-    let h = params.values.xy * params.values.w;
-    var sum = at(in.uv, vec2<f32>(-h.x * 2.0, 0.0));
-    sum += at(in.uv, vec2<f32>(-h.x, h.y)) * 2.0;
-    sum += at(in.uv, vec2<f32>(0.0, h.y * 2.0));
-    sum += at(in.uv, vec2<f32>(h.x, h.y)) * 2.0;
-    sum += at(in.uv, vec2<f32>(h.x * 2.0, 0.0));
-    sum += at(in.uv, vec2<f32>(h.x, -h.y)) * 2.0;
-    sum += at(in.uv, vec2<f32>(0.0, -h.y * 2.0));
-    sum += at(in.uv, vec2<f32>(-h.x, -h.y)) * 2.0;
-    return vec4<f32>(sum / 12.0, 1.0);
+fn fs_blur(in: VertexOut) -> @location(0) vec4<f32> {
+    let step = params.values.xy;
+    var color = textureSample(src, samp, in.uv).rgb * 0.2270270270;
+    color += tap(in.uv, step * 1.0, 0.1945945946);
+    color += tap(in.uv, step * 2.0, 0.1216216216);
+    color += tap(in.uv, step * 3.0, 0.0540540541);
+    color += tap(in.uv, step * 4.0, 0.0162162162);
+    return vec4<f32>(color, 1.0);
 }
 
 @fragment
@@ -66,17 +48,9 @@ fn fs_blit(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(textureSample(src, samp, in.uv).rgb, 1.0);
 }
 
-// The blurred picture, graded, over the sharp one as opaque as `values.z`: the
-// blur fades in and out with it.
+// The blurred picture over the sharp one, as opaque as `values.z`: the blur
+// fades in and out with it.
 @fragment
 fn fs_blit_mix(in: VertexOut) -> @location(0) vec4<f32> {
-    var color = textureSample(src, samp, in.uv).rgb;
-    let grey = vec3<f32>(dot(color, vec3<f32>(0.2126, 0.7152, 0.0722)));
-    color = mix(grey, color, params.grade.y) * params.grade.x;
-    // The vignette of the overlay: from 10 % of a dark tint at the centre
-    // (50 %, 45 %) to 50 % at three quarters of the way to the edge.
-    let reach = clamp(length(in.uv - vec2<f32>(0.5, 0.45)) / 0.75, 0.0, 1.0);
-    let scrim = mix(0.10, 0.50, reach) * params.grade.z;
-    color = mix(color, vec3<f32>(0.039, 0.047, 0.055), scrim);
-    return vec4<f32>(color, params.values.z);
+    return vec4<f32>(textureSample(src, samp, in.uv).rgb, params.values.z);
 }

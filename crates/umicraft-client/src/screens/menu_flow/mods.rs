@@ -8,21 +8,16 @@ use umicraft_core::lang::Lang;
 use umicraft_ui::menus::ModsOutcome;
 use umicraft_ui::{FontAtlas, Ui};
 
-use umicraft_render::BackgroundBlur;
-
 use super::{MenuCommand, MenuContext, MenuFlow};
 use crate::mods::hud_editor::snap;
 use crate::screens::Screen;
 
 impl MenuFlow {
-    /// How the game behind the mods menu is blurred: the strength fades in
-    /// while the menu opens, and the landing page has its own look.
+    /// How blurred the game behind the mods menu is, `0.0` to `1.0`: it fades
+    /// in while the menu opens.
     #[must_use]
-    pub fn mods_blur(&self) -> BackgroundBlur {
-        BackgroundBlur {
-            strength: self.mods.blur_strength(self.partial_tick()),
-            overlay: self.mods.is_overlay(),
-        }
+    pub fn mods_blur(&self) -> f32 {
+        self.mods.blur_strength(self.partial_tick())
     }
 
     /// Ends the entrance animation of the mods menu page at once, for the

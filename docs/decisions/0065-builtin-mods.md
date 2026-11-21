@@ -79,11 +79,8 @@ feature must not grow them.
   "Edit HUD" button, a header with the title and "n enabled", a search box with an
   All / Enabled control, a grid of cards (icon tile, switch, name, two-line description,
   category tag, gear) and a settings page in one grouped box with a band for the mod. The
-  accent is the violet `#7C3AED` (`modern::theme::ACCENT`) in every menu. The blur behind
-  the menu is a dual Kawase filter (down to an eighth of the screen and back, `scene_blur.rs`):
-  8 px, brightness x0.62 and a vignette on the landing, 10 px and x0.55 on the pages, saturation
-  x0.85, fading in over 150 ms; its size follows the window like the design (0.75 to 2). Not
-  done yet from the spec: dimming the hotbar, Inter and Space Grotesk, the live preview, the
+  accent is the violet `#7C3AED` (`modern::theme::ACCENT`) in every menu. Not done yet from the
+  spec: the Kawase blur and its grading, Inter and Space Grotesk, the live preview, the
   `section`/`helper`/`depends_on` fields of a setting, Reset with Undo, keyboard focus and
   clicking the body of a card to open it. Sizes are GUI units (half a logical pixel of the
   1280 x 720 reference), so the panel follows the GUI scale option.

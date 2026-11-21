@@ -3,7 +3,6 @@
 //! What the next frame shows: the environment, the sky, the weather and the
 //! world-space extras the window hands over before drawing.
 
-use crate::scene_blur::BackgroundBlur;
 use std::sync::Arc;
 
 use umicraft_mesh::item::ItemMesh;
@@ -212,15 +211,14 @@ impl Renderer {
         self.motion_blur.set_hand_moving(moving);
     }
 
-    /// Blurs the game behind the HUD and the UI (the mods menu): `blur.strength`
-    /// is `0.0` (sharp) to `1.0` (fully blurred) and a menu raises it over its
-    /// opening to fade the blur in; `blur.overlay` picks the look of the overlay
-    /// over that of the pages. The window calls this every frame; a frame with
-    /// any blur costs two extra full-screen copies and five passes at a half
-    /// of the screen or less, a sharp one costs nothing.
-    pub fn set_background_blur(&mut self, blur: BackgroundBlur) {
-        self.background_blur = blur.strength > 0.0;
-        self.scene_blur.set_look(&self.queue, blur);
+    /// Blurs the game behind the HUD and the UI (the mods menu) by `strength`,
+    /// `0.0` (sharp) to `1.0` (fully blurred); a menu raises it over its
+    /// opening to fade the blur in. The window calls this every frame; a frame
+    /// with any blur costs two extra full-screen copies and four
+    /// half-resolution passes, a sharp one costs nothing.
+    pub fn set_background_blur(&mut self, strength: f32) {
+        self.background_blur = strength > 0.0;
+        self.scene_blur.set_strength(&self.queue, strength);
     }
 
     /// Replaces the name tags drawn in the world pass of the next frames; an
