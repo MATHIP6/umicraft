@@ -22,6 +22,6 @@ mod animator;
 mod model;
 mod parse;
 
-pub use animator::{CemAnimator, CemState, EntityInputs, PartPose};
+pub use animator::{CemAnimator, CemState, EntityInputs, PartPose, RootDelta};
 pub use model::{BoxUv, CemAnimation, CemBox, CemEntry, CemModel, CemPart, PackPath};
 pub use parse::{parse_jem, resolve_path, CemError, Loader};
