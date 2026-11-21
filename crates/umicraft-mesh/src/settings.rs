@@ -1,11 +1,42 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The video options that change what the mesher emits: `Smooth Lighting`
-//! and `Other Block Variants` (`GameSettings.allowBlockAlternatives`).
+//! The video options that change what the mesher emits: `Smooth Lighting`,
+//! `Other Block Variants` (`GameSettings.allowBlockAlternatives`) and the
+//! OptiFine-style trees, biome colour, Better Grass and Better Snow options
+//! (ADR-0089).
 
 use umicraft_model::{BlockModel, ModelVariant};
 
+use crate::tint::TintMode;
 use crate::Lighting;
+
+/// How leaf blocks are meshed (OptiFine "Trees", `BlockLeaves` / `SmartLeaves`).
+///
+/// The mesher keeps the leaf texture cut out in every mode: opaque Fast
+/// leaves (transparent texels drawn solid) are a shader concern and not part
+/// of the geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leaves {
+    /// Faces between two leaf blocks are culled (`isCullFacesLeaves` with
+    /// Fast graphics).
+    Fast,
+    /// Cut-out leaves with the faces between two leaf blocks culled.
+    Smart,
+    /// Cut-out leaves, every face drawn (vanilla fancy leaves).
+    Fancy,
+}
+
+/// OptiFine "Better Grass": grass-like side faces show the top texture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BetterGrass {
+    /// Vanilla side textures.
+    Off,
+    /// Every side shows the top texture.
+    Fast,
+    /// Only a side whose neighbour column continues the same block below
+    /// shows the top texture.
+    Fancy,
+}
 
 /// What the player's options ask of the mesher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,14 +47,44 @@ pub struct MeshSettings {
     /// position (`allowBlockAlternatives`, "Other Block Variants"). Off, every
     /// block of the state uses the same variant, see [`base_variant`].
     pub block_alternatives: bool,
+    /// How leaves are culled ([`Leaves`]).
+    pub leaves: Leaves,
+    /// Whether the swamp tints grass, foliage and water its own way
+    /// (`Config.isSwampColors`).
+    pub swamp_colors: bool,
+    /// Whether biome colours are averaged over 3×3 columns
+    /// (`Config.isSmoothBiomes`).
+    pub smooth_biomes: bool,
+    /// Better Grass mode.
+    pub better_grass: BetterGrass,
+    /// Whether plants and fences next to snow layers get a snow layer of
+    /// their own (`BetterSnow`).
+    pub better_snow: bool,
+}
+
+impl MeshSettings {
+    /// The biome-colour switches, for [`crate::tint`].
+    pub(crate) const fn tint_mode(self) -> TintMode {
+        TintMode {
+            swamp_colors: self.swamp_colors,
+            smooth_biomes: self.smooth_biomes,
+        }
+    }
 }
 
 impl Default for MeshSettings {
-    /// The reference defaults: smooth lighting and block alternatives on.
+    /// The reference (vanilla) defaults: smooth lighting, block alternatives,
+    /// swamp colours and smooth biomes on, fancy leaves, no Better Grass or
+    /// Better Snow. The client picks its own defaults (Smart trees).
     fn default() -> Self {
         Self {
             lighting: Lighting::Smooth,
             block_alternatives: true,
+            leaves: Leaves::Fancy,
+            swamp_colors: true,
+            smooth_biomes: true,
+            better_grass: BetterGrass::Off,
+            better_snow: false,
         }
     }
 }

@@ -155,6 +155,7 @@ pub(crate) fn push_variant(
         ],
         cull: false,
         lighting: crate::Lighting::Smooth,
+        settings: crate::MeshSettings::default(),
     };
     emit_model_quads(mesh, &source, context, state, variant, placement);
 }
