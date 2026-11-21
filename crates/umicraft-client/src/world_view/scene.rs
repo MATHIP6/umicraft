@@ -61,9 +61,9 @@ impl WorldView {
     }
 
     /// The full-screen overlays of the frame at `now`, for
-    /// `Renderer::set_screen_overlays`. `fancy` is the graphics setting, which
-    /// the vignette needs.
-    pub fn screen_overlays(&mut self, now: Instant, fancy: bool) -> ScreenOverlays {
+    /// `Renderer::set_screen_overlays`. `vignette` says whether the vignette is
+    /// drawn (the Vignette option resolved against Graphics).
+    pub fn screen_overlays(&mut self, now: Instant, vignette: bool) -> ScreenOverlays {
         let Some(state) = self.view.sample(now) else {
             return ScreenOverlays::default();
         };
@@ -75,7 +75,7 @@ impl WorldView {
             pitch_degrees: state.pitch.to_degrees(),
             partial_tick: self.view.partial_tick(now),
         };
-        let vignette = fancy.then(|| {
+        let vignette = vignette.then(|| {
             self.view
                 .vignette
                 .step(fog.light_brightness, inputs.border_danger)

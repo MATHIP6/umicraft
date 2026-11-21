@@ -269,6 +269,7 @@ impl SkyRenderer {
             view_proj: camera.view_projection_around_eye(),
             eye_y: camera.eye().y as f32,
             flat_world: environment.flat_world,
+            details: environment.sky_details,
         };
         plan::build(&mut self.layers, &input);
 

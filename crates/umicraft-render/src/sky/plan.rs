@@ -13,6 +13,7 @@ use glam::{Mat4, Vec4};
 use super::celestial;
 use super::dome;
 use super::state::{SkyKind, SkyState};
+use crate::SkyDetails;
 
 /// Maximum layers one frame can hold: dome, fan, sun, moon, stars, black
 /// plane, black box and void plane (the End needs one).
@@ -99,6 +100,8 @@ pub(super) struct PlanInput<'a> {
     pub eye_y: f32,
     /// Whether the world is a superflat one, whose horizon is at `y = 0`.
     pub flat_world: bool,
+    /// Which parts of the sky the user wants drawn.
+    pub details: SkyDetails,
 }
 
 /// Appends the layers of the frame to `layers` (cleared first), in draw order.
@@ -106,7 +109,11 @@ pub(super) fn build(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
     layers.clear();
     match input.kind {
         SkyKind::Nether => {}
-        SkyKind::End => layers.push(end_layer(input)),
+        SkyKind::End => {
+            if input.details.sky {
+                layers.push(end_layer(input));
+            }
+        }
         SkyKind::Overworld => overworld_layers(layers, input),
     }
 }
@@ -128,16 +135,19 @@ fn end_layer(input: &PlanInput<'_>) -> Layer {
 fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
     let state = input.state;
     let [r, g, b] = state.sky_color;
-    layers.push(layer(
-        input,
-        Blend::Opaque,
-        Image::White,
-        Mesh::Grid,
-        dome::sky_model(),
-        [r, g, b, 1.0],
-        true,
-    ));
-    if state.sunrise.is_some() {
+    let details = input.details;
+    if details.sky {
+        layers.push(layer(
+            input,
+            Blend::Opaque,
+            Image::White,
+            Mesh::Grid,
+            dome::sky_model(),
+            [r, g, b, 1.0],
+            true,
+        ));
+    }
+    if details.sky && state.sunrise.is_some() {
         let model = celestial::sunrise_model(state.celestial_angle);
         layers.push(layer(
             input,
@@ -151,26 +161,28 @@ fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
     }
     let turn = celestial::sky_turn(state.celestial_angle);
     let dim = [1.0, 1.0, 1.0, state.rain_dim];
-    layers.push(layer(
-        input,
-        Blend::Additive,
-        Image::Sun,
-        Mesh::Sun,
-        turn,
-        dim,
-        false,
-    ));
-    layers.push(layer(
-        input,
-        Blend::Additive,
-        Image::Moon,
-        Mesh::Moon(state.moon_phase),
-        turn,
-        dim,
-        false,
-    ));
+    if details.sun_moon {
+        layers.push(layer(
+            input,
+            Blend::Additive,
+            Image::Sun,
+            Mesh::Sun,
+            turn,
+            dim,
+            false,
+        ));
+        layers.push(layer(
+            input,
+            Blend::Additive,
+            Image::Moon,
+            Mesh::Moon(state.moon_phase),
+            turn,
+            dim,
+            false,
+        ));
+    }
     let stars = state.star_brightness * state.rain_dim;
-    if stars > 0.0 {
+    if details.stars && stars > 0.0 {
         layers.push(layer(
             input,
             Blend::Additive,
@@ -250,7 +262,12 @@ fn layer(
                 0.0,
                 0.0,
             ],
-            fog: [fog_start, fog_end, fog_density, 0.0],
+            fog: [
+                fog_start,
+                fog_end,
+                fog_density,
+                f32::from(u8::from(input.state.fog.planar)),
+            ],
             _pad: [0.0; 16],
         },
     }
@@ -259,7 +276,7 @@ fn layer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RenderEnvironment;
+    use crate::{RenderEnvironment, SkyDetails};
 
     fn plan(environment: RenderEnvironment, eye_y: f32) -> Vec<Layer> {
         let state = SkyState::at(environment);
@@ -269,6 +286,7 @@ mod tests {
             view_proj: Mat4::IDENTITY,
             eye_y,
             flat_world: environment.flat_world,
+            details: environment.sky_details,
         };
         let mut layers = Vec::new();
         build(&mut layers, &input);
@@ -277,6 +295,100 @@ mod tests {
 
     fn meshes(layers: &[Layer]) -> Vec<Mesh> {
         layers.iter().map(|l| l.mesh).collect()
+    }
+
+    fn plan_with(details: SkyDetails, environment: RenderEnvironment) -> Vec<Mesh> {
+        meshes(&plan(
+            RenderEnvironment {
+                sky_details: details,
+                ..environment
+            },
+            80.0,
+        ))
+    }
+
+    const NIGHT: RenderEnvironment = RenderEnvironment {
+        world_time: 18_000,
+        ..RenderEnvironment::DEFAULT
+    };
+
+    #[test]
+    fn every_part_is_drawn_by_default() {
+        let drawn = plan_with(SkyDetails::ALL, NIGHT);
+        assert!(drawn.contains(&Mesh::Stars));
+        assert!(drawn.contains(&Mesh::Sun));
+        assert!(drawn.iter().any(|mesh| matches!(mesh, Mesh::Moon(_))));
+        assert_eq!(drawn[0], Mesh::Grid);
+    }
+
+    #[test]
+    fn sky_off_skips_the_dome_but_keeps_the_sun_moon_and_stars() {
+        let drawn = plan_with(
+            SkyDetails {
+                sky: false,
+                ..SkyDetails::ALL
+            },
+            NIGHT,
+        );
+        // Only the void plane remains of the grids.
+        assert_eq!(drawn.iter().filter(|m| **m == Mesh::Grid).count(), 1);
+        assert!(drawn.contains(&Mesh::Stars) && drawn.contains(&Mesh::Sun));
+    }
+
+    #[test]
+    fn stars_off_skips_the_stars() {
+        let drawn = plan_with(
+            SkyDetails {
+                stars: false,
+                ..SkyDetails::ALL
+            },
+            NIGHT,
+        );
+        assert!(!drawn.contains(&Mesh::Stars) && drawn.contains(&Mesh::Sun));
+    }
+
+    #[test]
+    fn sun_and_moon_off_skips_both_quads() {
+        let drawn = plan_with(
+            SkyDetails {
+                sun_moon: false,
+                ..SkyDetails::ALL
+            },
+            NIGHT,
+        );
+        assert!(!drawn.contains(&Mesh::Sun));
+        assert!(!drawn.iter().any(|mesh| matches!(mesh, Mesh::Moon(_))));
+        assert!(drawn.contains(&Mesh::Stars));
+    }
+
+    #[test]
+    fn the_end_sky_follows_the_sky_option() {
+        let end = RenderEnvironment {
+            dimension: 1,
+            ..RenderEnvironment::DEFAULT
+        };
+        assert_eq!(plan_with(SkyDetails::ALL, end), [Mesh::EndCube]);
+        let off = SkyDetails {
+            sky: false,
+            ..SkyDetails::ALL
+        };
+        assert!(plan_with(off, end).is_empty());
+    }
+
+    #[test]
+    fn the_fog_mode_reaches_the_slot() {
+        let environment = RenderEnvironment {
+            fog_settings: crate::FogSettings {
+                kind: crate::FogKind::Fast,
+                start: 0.8,
+            },
+            ..RenderEnvironment::DEFAULT
+        };
+        assert_eq!(plan(environment, 80.0)[0].uniform.fog[3], 1.0);
+        assert_eq!(
+            plan(RenderEnvironment::DEFAULT, 80.0)[0].uniform.fog[3],
+            0.0
+        );
     }
 
     #[test]

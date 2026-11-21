@@ -30,7 +30,7 @@ fn camera_uniform_is_pod_and_aligned() {
         fog_end: 128.0,
         gamma: 0.5,
         fog_density: 0.1,
-        _pad: 0.0,
+        fog_planar: 0.0,
         origin: [0.0; 3],
         _pad_origin: 0.0,
         lightmap: lightmap::unlit(),

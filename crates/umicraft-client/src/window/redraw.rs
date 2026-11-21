@@ -7,7 +7,10 @@ use std::time::{Duration, Instant};
 
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_mesh::item::ItemMesh;
-use umicraft_render::{NoIcons, RenderEnvironment, Renderer, ScreenOverlays, SkyState};
+use umicraft_render::{
+    FogKind, FogSettings, NoIcons, RenderEnvironment, Renderer, ScreenOverlays, SkyDetails,
+    SkyState,
+};
 use winit::event_loop::ActiveEventLoop;
 
 use super::mods_menu;
@@ -20,6 +23,7 @@ use crate::debug::cpu_split::Stage;
 use crate::debug::metrics::InputLatencyMetrics;
 use crate::game::GameEvent;
 use crate::hud::dials::DialInputs;
+use crate::options::video_sections::FogChoice;
 use crate::options::video_spec::Effect;
 use crate::options::{self};
 use crate::resources::item_icons::IconSource;
@@ -44,6 +48,30 @@ pub(super) fn frame_cap(max_fps: u32, focused: bool) -> u32 {
 fn held_stack(world: &WorldView) -> Option<&umicraft_protocol::packets::play::ItemStack> {
     let selected = usize::from(world.hud().selected_slot).min(8);
     world.window_view().player_slots[HOTBAR_START + selected].as_ref()
+}
+
+/// Blocks the clouds rise at full Cloud Height (OptiFine's `ofCloudsHeight * 128`).
+const CLOUD_LIFT_RANGE: f32 = 128.0;
+
+/// Copies the Details options that shape the sky, fog, clouds and rain into
+/// the frame's environment, where the render passes read them.
+fn apply_details(environment: &mut RenderEnvironment, video: &options::VideoOptions) {
+    let details = &video.details;
+    environment.sky_details = SkyDetails {
+        sky: details.sky,
+        stars: details.stars,
+        sun_moon: details.sun_moon,
+    };
+    environment.fog_settings = FogSettings {
+        kind: match details.fog {
+            FogChoice::Fast => FogKind::Fast,
+            FogChoice::Fancy => FogKind::Fancy,
+            FogChoice::Off => FogKind::Off,
+        },
+        start: details.fog_start,
+    };
+    environment.cloud_lift = details.cloud_height * CLOUD_LIFT_RANGE;
+    environment.draw_precipitation = details.rain.fancy(video.fancy_graphics).is_some();
 }
 
 impl App {
@@ -180,6 +208,7 @@ impl App {
             .map(|world| world.environment(now, self.options.video.render_distance))
             .unwrap_or_default();
         environment.gamma = self.options.video.gamma;
+        apply_details(&mut environment, &self.options.video);
         // The camera is where it stays for this frame: the entities are made once.
         if let Some(world) = self.world.as_ref() {
             world.entities_into(now, self.camera.render_origin(), &mut self.frame.entities);
@@ -310,7 +339,9 @@ impl App {
         // 20 client ticks per second drive the cloud drift.
         renderer.set_cloud_ticks((now - self.clock.started).as_secs_f64() * 20.0);
         if let Some(world) = self.world.as_ref() {
-            renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
+            let video = &self.options.video;
+            let fancy = video.details.rain.fancy(video.fancy_graphics);
+            renderer.set_precipitation(world.precipitation(), fancy.unwrap_or(false));
             world.particle_sprites_into(
                 &mut self.frame.particle_sprites,
                 environment.partial_tick,
@@ -319,13 +350,13 @@ impl App {
             );
             renderer.set_particles(&self.frame.particle_sprites);
         }
-        renderer.set_screen_overlays(
-            self.world
-                .as_mut()
-                .map_or_else(ScreenOverlays::default, |world| {
-                    world.screen_overlays(now, self.options.video.fancy_graphics)
-                }),
-        );
+        renderer.set_screen_overlays(self.world.as_mut().map_or_else(
+            ScreenOverlays::default,
+            |world| {
+                let video = &self.options.video;
+                world.screen_overlays(now, video.details.vignette.is_fancy(video.fancy_graphics))
+            },
+        ));
         renderer.set_world_border(
             self.world.as_ref().and_then(WorldView::border),
             (now - self.clock.started).as_secs_f64(),
@@ -567,5 +598,53 @@ impl App {
                 input_to_frame_ms,
                 presentation_time_ms: present_us as f32 / 1000.0,
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::options::video_sections::RainChoice;
+    use crate::options::VideoOptions;
+
+    fn applied(video: &VideoOptions) -> RenderEnvironment {
+        let mut environment = RenderEnvironment::DEFAULT;
+        apply_details(&mut environment, video);
+        environment
+    }
+
+    #[test]
+    fn the_defaults_draw_everything_with_the_optifine_fog() {
+        let environment = applied(&VideoOptions::default());
+        assert_eq!(environment.sky_details, SkyDetails::ALL);
+        assert_eq!(environment.fog_settings.kind, FogKind::Fast);
+        assert_eq!(environment.fog_settings.start, 0.8);
+        assert_eq!(environment.cloud_lift, 0.0);
+        assert!(environment.draw_precipitation);
+    }
+
+    #[test]
+    fn the_details_reach_the_environment() {
+        let mut video = VideoOptions::default();
+        video.details.sky = false;
+        video.details.stars = false;
+        video.details.sun_moon = false;
+        video.details.fog = FogChoice::Off;
+        video.details.fog_start = 0.4;
+        video.details.cloud_height = 0.5;
+        video.details.rain = RainChoice::Off;
+        let environment = applied(&video);
+        assert_eq!(
+            environment.sky_details,
+            SkyDetails {
+                sky: false,
+                stars: false,
+                sun_moon: false
+            }
+        );
+        assert_eq!(environment.fog_settings.kind, FogKind::Off);
+        assert_eq!(environment.fog_settings.start, 0.4);
+        assert_eq!(environment.cloud_lift, 64.0);
+        assert!(!environment.draw_precipitation);
     }
 }

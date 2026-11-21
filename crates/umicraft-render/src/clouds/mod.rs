@@ -209,7 +209,8 @@ impl CloudRenderer {
             return;
         }
         let eye = camera.eye().to_array();
-        let Some(placement) = drift::placement(self.mode, eye, ticks) else {
+        let Some(placement) = drift::placement(self.mode, eye, ticks, environment.cloud_lift)
+        else {
             return;
         };
         let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
@@ -230,14 +231,19 @@ impl CloudRenderer {
                 OPACITY,
             ],
             fog_color: [sky.fog.color[0], sky.fog.color[1], sky.fog.color[2], 1.0],
-            fog: [fog_start, fog_end, fog_density, 0.0],
+            fog: [
+                fog_start,
+                fog_end,
+                fog_density,
+                f32::from(u8::from(sky.fog.planar)),
+            ],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
         let fancy = self.mode == CloudMode::Fancy;
         self.plan = Some(FramePlan {
             prepass: fancy,
             // `entity.posY + eyeHeight < 128` draws before the translucent terrain.
-            above: eye[1] >= drift::CLOUD_HEIGHT,
+            above: eye[1] >= drift::altitude(environment.cloud_lift),
             ranges: if fancy {
                 geometry::visible_ranges(&self.fancy, placement.shift[1])
             } else {

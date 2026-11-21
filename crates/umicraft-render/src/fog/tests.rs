@@ -289,3 +289,89 @@ fn the_fog_of_the_largest_render_distance_ends_inside_the_far_plane() {
     assert_eq!(far_plane(32), MAX_FAR_PLANE);
     assert!(far_plane(32) < crate::camera::FAR);
 }
+
+fn with_settings(kind: FogKind, start: f32) -> RenderEnvironment {
+    RenderEnvironment {
+        fog_settings: FogSettings { kind, start },
+        ..RenderEnvironment::DEFAULT
+    }
+}
+
+#[test]
+fn the_fog_start_scales_the_terrain_fog_only() {
+    let fog = FogParams::new(BASE, &with_settings(FogKind::Fast, 0.4));
+    assert_eq!(
+        fog.world,
+        FogMode::Linear {
+            start: 51.2,
+            end: 128.0
+        }
+    );
+    // The dome keeps its own range.
+    assert_eq!(
+        fog.sky,
+        FogMode::Linear {
+            start: 0.0,
+            end: 128.0
+        }
+    );
+}
+
+#[test]
+fn the_fog_start_leaves_the_nether_range_alone() {
+    let mut environment = with_settings(FogKind::Fancy, 0.2);
+    environment.dimension = -1;
+    assert_eq!(
+        FogParams::new(BASE, &environment).world,
+        FogMode::Linear {
+            start: 6.4,
+            end: 64.0
+        }
+    );
+}
+
+#[test]
+fn only_fast_measures_the_fog_by_depth() {
+    assert!(FogParams::new(BASE, &with_settings(FogKind::Fast, 0.8)).planar);
+    assert!(!FogParams::new(BASE, &with_settings(FogKind::Fancy, 0.8)).planar);
+    assert!(!FogParams::new(BASE, &RenderEnvironment::DEFAULT).planar);
+}
+
+#[test]
+fn fog_off_shows_no_fog_in_air_but_keeps_the_liquids_and_blindness() {
+    let off = with_settings(FogKind::Off, 0.8);
+    for dimension in [0, -1, 1] {
+        let fog = FogParams::new(BASE, &RenderEnvironment { dimension, ..off });
+        for mode in [fog.world, fog.sky] {
+            let FogMode::Linear { start, .. } = mode else {
+                panic!("air fog is linear");
+            };
+            assert!(start > MAX_FAR_PLANE * 100.0);
+        }
+    }
+    let water = RenderEnvironment {
+        fog: FogContext {
+            medium: FogMedium::Water,
+            ..FogContext::DEFAULT
+        },
+        ..off
+    };
+    assert_eq!(
+        FogParams::new(BASE, &water).world,
+        FogMode::Exp { density: 0.1 }
+    );
+    let blind = RenderEnvironment {
+        fog: FogContext {
+            blindness_ticks: Some(100),
+            ..FogContext::DEFAULT
+        },
+        ..off
+    };
+    assert_eq!(
+        FogParams::new(BASE, &blind).world,
+        FogMode::Linear {
+            start: 1.25,
+            end: 5.0
+        }
+    );
+}
