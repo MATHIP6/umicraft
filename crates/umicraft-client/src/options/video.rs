@@ -13,6 +13,8 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use umicraft_render::CloudMode;
 
+use super::video_sections::{lenient, AnimationOptions, DetailOptions, QualityOptions};
+
 /// The render distance range, in chunks. Vanilla stops at 16; OptiFine, and
 /// Umicraft (ADR-0089), go to 32. A server sends no more than its own view
 /// distance, so the extra range only matters where the server allows it.
@@ -93,6 +95,16 @@ pub struct VideoOptions {
     /// cave visibility graph of ADR-0062). Off draws every section in the
     /// frustum, which is only useful to compare.
     pub cave_culling: bool,
+    /// `[video.details]`. The subsections come last: TOML writes plain
+    /// values before tables.
+    #[serde(deserialize_with = "lenient")]
+    pub details: DetailOptions,
+    /// `[video.quality]`.
+    #[serde(deserialize_with = "lenient")]
+    pub quality: QualityOptions,
+    /// `[video.animations]`.
+    #[serde(deserialize_with = "lenient")]
+    pub animations: AnimationOptions,
 }
 
 /// Reads the cloud setting as a number, or as the boolean of the files that
@@ -158,6 +170,7 @@ impl VideoOptions {
         } else {
             defaults.gamma
         };
+        self.details.clamp();
     }
 }
 
@@ -182,6 +195,9 @@ impl Default for VideoOptions {
             entity_shadows: true,
             mesh_threads: 0,
             cave_culling: true,
+            details: DetailOptions::default(),
+            quality: QualityOptions::default(),
+            animations: AnimationOptions::default(),
         }
     }
 }

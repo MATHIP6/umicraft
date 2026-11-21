@@ -545,6 +545,13 @@ fn the_open_folder_button_raises_its_flag() {
     assert!(click_widget(&mut screen, &mut options, "open_folder").open_packs_folder);
 }
 
+/// Scrolls the list of the page as far down as it goes.
+fn scroll_to_bottom(screen: &mut OptionsScreen, options: &mut Options) {
+    for _ in 0..40 {
+        frame(screen, options, vec![InputEvent::Wheel { delta: 1.0 }]);
+    }
+}
+
 /// Opens the video page `page` (the navigation itself is tested by
 /// `a_sub_page_opens_from_the_root_and_done_goes_back_to_it`).
 fn open_video(screen: &mut OptionsScreen, options: &mut Options, page: VideoPage) {
@@ -566,8 +573,16 @@ fn the_video_buttons_cycle_and_toggle_their_options() {
     assert_eq!(options.video.gui_scale, 1);
 
     open_video(&mut screen, &mut options, VideoPage::Animations);
-    click_widget(&mut screen, &mut options, "video:particles");
-    assert_eq!(options.video.particles, 1);
+    click_widget(&mut screen, &mut options, "video:animatedWater");
+    assert!(!options.video.animations.water);
+
+    open_video(&mut screen, &mut options, VideoPage::Details);
+    click_widget(&mut screen, &mut options, "video:trees");
+    assert_eq!(
+        options.video.details.trees,
+        crate::options::video_sections::TreesChoice::Fancy,
+        "Smart, the default, cycles to Fancy"
+    );
 
     open_video(&mut screen, &mut options, VideoPage::Other);
     click_widget(&mut screen, &mut options, "video:fullscreen");
@@ -619,6 +634,7 @@ fn all_off_and_all_on_set_the_animations() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
     open_video(&mut screen, &mut options, VideoPage::Animations);
+    scroll_to_bottom(&mut screen, &mut options);
     assert!(click_widget(&mut screen, &mut options, "video:allOff").changed);
     assert_eq!(options.video.particles, 2);
     click_widget(&mut screen, &mut options, "video:allOn");

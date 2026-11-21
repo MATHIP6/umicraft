@@ -27,6 +27,9 @@ use super::video::{
     VideoOptions, MAX_CLOUD_SETTING, MAX_FPS, MAX_GUI_SCALE, MAX_MESH_THREADS,
     MAX_PARTICLE_SETTING, MAX_SMOOTH_LIGHTING, MIPMAP_LEVELS, RENDER_DISTANCE, UNLIMITED_FPS,
 };
+use super::video_sections::{
+    fog_start_step, FogChoice, GraphicsChoice, OffFastFancy, RainChoice, TreesChoice, FOG_STARTS,
+};
 
 /// A page of the video settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -280,21 +283,145 @@ fn mesh_threads_value(lang: &Lang, video: &VideoOptions) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Enum choices
+// ---------------------------------------------------------------------------
+
+/// An option whose values are the variants of an enum, cycled in `ALL`
+/// order.
+trait Choice: Copy + PartialEq + 'static {
+    /// Every value, in cycle order.
+    const ALL: &'static [Self];
+    /// The language key of the value's text.
+    fn lang_key(self) -> &'static str;
+}
+
+/// The position of `value` in its `ALL` (0 if missing, which cannot happen
+/// for a well-formed `ALL`).
+fn position_of<T: Choice>(value: T) -> u32 {
+    T::ALL.iter().position(|&v| v == value).unwrap_or(0) as u32
+}
+
+/// The value at `position`, clamped to the last one.
+fn choice_at<T: Choice>(position: u32) -> T {
+    T::ALL[(position as usize).min(T::ALL.len() - 1)]
+}
+
+const DEFAULT_KEY: &str = "umicraft.options.choice.default";
+const FAST_KEY: &str = "options.graphics.fast";
+const FANCY_KEY: &str = "options.graphics.fancy";
+const OFF_KEY: &str = "options.off";
+
+impl Choice for GraphicsChoice {
+    const ALL: &'static [Self] = &GraphicsChoice::ALL;
+    fn lang_key(self) -> &'static str {
+        match self {
+            Self::Default => DEFAULT_KEY,
+            Self::Fast => FAST_KEY,
+            Self::Fancy => FANCY_KEY,
+        }
+    }
+}
+
+impl Choice for TreesChoice {
+    const ALL: &'static [Self] = &TreesChoice::ALL;
+    fn lang_key(self) -> &'static str {
+        match self {
+            Self::Default => DEFAULT_KEY,
+            Self::Fast => FAST_KEY,
+            Self::Smart => "umicraft.options.choice.smart",
+            Self::Fancy => FANCY_KEY,
+        }
+    }
+}
+
+impl Choice for RainChoice {
+    const ALL: &'static [Self] = &RainChoice::ALL;
+    fn lang_key(self) -> &'static str {
+        match self {
+            Self::Default => DEFAULT_KEY,
+            Self::Fast => FAST_KEY,
+            Self::Fancy => FANCY_KEY,
+            Self::Off => OFF_KEY,
+        }
+    }
+}
+
+impl Choice for FogChoice {
+    const ALL: &'static [Self] = &FogChoice::ALL;
+    fn lang_key(self) -> &'static str {
+        match self {
+            Self::Fast => FAST_KEY,
+            Self::Fancy => FANCY_KEY,
+            Self::Off => OFF_KEY,
+        }
+    }
+}
+
+impl Choice for OffFastFancy {
+    const ALL: &'static [Self] = &OffFastFancy::ALL;
+    fn lang_key(self) -> &'static str {
+        match self {
+            Self::Off => OFF_KEY,
+            Self::Fast => FAST_KEY,
+            Self::Fancy => FANCY_KEY,
+        }
+    }
+}
+
+/// The cloud height slider: one position per percent; 0 reads "Off" (the
+/// vanilla altitude).
+const CLOUD_HEIGHT_POSITIONS: u32 = 101;
+
+fn percent_or_off(lang: &Lang, fraction: f32) -> String {
+    match (fraction * 100.0).round() as u32 {
+        0 => lang.tr(OFF_KEY).to_string(),
+        percent => format!("{percent}%"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The table
 // ---------------------------------------------------------------------------
 
-/// A two-position option over a boolean field.
+/// A two-position option over a boolean field (`toggle!(id, label, page,
+/// field.path, effect)`). A trailing `all` puts it under the Animations
+/// page's "All ON" / "All OFF" buttons.
 macro_rules! toggle {
-    ($id:literal, $label:literal, $page:ident, $field:ident, $effect:ident) => {
+    ($id:literal, $label:literal, $page:ident, $($field:ident).+, $effect:ident) => {
+        toggle!(@spec $id, $label, $page, $($field).+, $effect, None)
+    };
+    ($id:literal, $label:literal, $page:ident, $($field:ident).+, $effect:ident, all) => {
+        toggle!(@spec $id, $label, $page, $($field).+, $effect, Some([0, 1]))
+    };
+    (@spec $id:literal, $label:literal, $page:ident, $($field:ident).+, $effect:ident, $all:expr) => {
         OptionSpec {
             id: $id,
             label: $label,
             page: VideoPage::$page,
             control: Control::Button,
             positions: 2,
-            get: |video| u32::from(video.$field),
-            set: |video, position| video.$field = position == 1,
-            value: |lang, video| on_off(lang, video.$field),
+            get: |video| u32::from(video.$($field).+),
+            set: |video, position| video.$($field).+ = position == 1,
+            value: |lang, video| on_off(lang, video.$($field).+),
+            effect: Effect::$effect,
+            all: $all,
+        }
+    };
+}
+
+/// A button that cycles through the values of a [`Choice`] enum
+/// (`choice!(id, label, page, Type, field.path, effect)`).
+macro_rules! choice {
+    ($id:literal, $label:literal, $page:ident, $ty:ty, $($field:ident).+, $effect:ident) => {
+        OptionSpec {
+            id: $id,
+            label: $label,
+            page: VideoPage::$page,
+            control: Control::Button,
+            positions: <$ty as Choice>::ALL.len() as u32,
+            get: |video| position_of(video.$($field).+),
+            set: |video, position| video.$($field).+ = choice_at(position),
+            value: |lang, video| lang.tr(video.$($field).+.lang_key()).to_string(),
             effect: Effect::$effect,
             all: None,
         }
@@ -406,7 +533,7 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         dynamic_fov,
         Immediate
     ),
-    // Details.
+    // Details, in OptiFine's order.
     OptionSpec {
         id: "clouds",
         label: "options.renderClouds",
@@ -419,11 +546,112 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         effect: Effect::Immediate,
         all: None,
     },
+    OptionSpec {
+        id: "cloudHeight",
+        label: "umicraft.options.cloudHeight",
+        page: VideoPage::Details,
+        control: Control::Slider,
+        positions: CLOUD_HEIGHT_POSITIONS,
+        get: |video| (video.details.cloud_height * 100.0).round() as u32,
+        set: |video, position| video.details.cloud_height = position as f32 / 100.0,
+        value: |lang, video| percent_or_off(lang, video.details.cloud_height),
+        effect: Effect::Immediate,
+        all: None,
+    },
+    choice!(
+        "trees",
+        "umicraft.options.trees",
+        Details,
+        TreesChoice,
+        details.trees,
+        ReMesh
+    ),
+    choice!(
+        "rain",
+        "umicraft.options.rain",
+        Details,
+        RainChoice,
+        details.rain,
+        Immediate
+    ),
+    toggle!(
+        "sky",
+        "umicraft.options.sky",
+        Details,
+        details.sky,
+        Immediate
+    ),
+    toggle!(
+        "stars",
+        "umicraft.options.stars",
+        Details,
+        details.stars,
+        Immediate
+    ),
+    toggle!(
+        "sunMoon",
+        "umicraft.options.sunMoon",
+        Details,
+        details.sun_moon,
+        Immediate
+    ),
+    choice!(
+        "fog",
+        "umicraft.options.fog",
+        Details,
+        FogChoice,
+        details.fog,
+        Immediate
+    ),
+    OptionSpec {
+        id: "fogStart",
+        label: "umicraft.options.fogStart",
+        page: VideoPage::Details,
+        control: Control::Button,
+        positions: FOG_STARTS.len() as u32,
+        get: |video| fog_start_step(video.details.fog_start) as u32,
+        set: |video, position| {
+            video.details.fog_start = FOG_STARTS[(position as usize).min(FOG_STARTS.len() - 1)];
+        },
+        value: |_, video| format!("{:.1}", video.details.fog_start),
+        effect: Effect::Immediate,
+        all: None,
+    },
+    choice!(
+        "droppedItems",
+        "umicraft.options.droppedItems",
+        Details,
+        GraphicsChoice,
+        details.dropped_items,
+        Immediate
+    ),
     toggle!(
         "entityShadows",
         "options.entityShadows",
         Details,
         entity_shadows,
+        Immediate
+    ),
+    toggle!(
+        "swampColors",
+        "umicraft.options.swampColors",
+        Details,
+        details.swamp_colors,
+        ReMesh
+    ),
+    toggle!(
+        "smoothBiomes",
+        "umicraft.options.smoothBiomes",
+        Details,
+        details.smooth_biomes,
+        ReMesh
+    ),
+    choice!(
+        "vignette",
+        "umicraft.options.vignette",
+        Details,
+        GraphicsChoice,
+        details.vignette,
         Immediate
     ),
     // Quality.
@@ -442,6 +670,21 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         effect: Effect::ReloadResources,
         all: None,
     },
+    choice!(
+        "betterGrass",
+        "umicraft.options.betterGrass",
+        Quality,
+        OffFastFancy,
+        quality.better_grass,
+        ReMesh
+    ),
+    toggle!(
+        "betterSnow",
+        "umicraft.options.betterSnow",
+        Quality,
+        quality.better_snow,
+        ReMesh
+    ),
     // Performance.
     toggle!(
         "caveCulling",
@@ -463,7 +706,135 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         effect: Effect::ReloadResources,
         all: None,
     },
-    // Animations.
+    // Animations, in OptiFine's order.
+    toggle!(
+        "animatedWater",
+        "umicraft.options.animatedWater",
+        Animations,
+        animations.water,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "animatedLava",
+        "umicraft.options.animatedLava",
+        Animations,
+        animations.lava,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "animatedFire",
+        "umicraft.options.animatedFire",
+        Animations,
+        animations.fire,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "animatedPortal",
+        "umicraft.options.animatedPortal",
+        Animations,
+        animations.portal,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "redstoneParticles",
+        "umicraft.options.redstoneParticles",
+        Animations,
+        animations.redstone_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "explosionParticles",
+        "umicraft.options.explosionParticles",
+        Animations,
+        animations.explosion_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "flameParticles",
+        "umicraft.options.flameParticles",
+        Animations,
+        animations.flame_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "smokeParticles",
+        "umicraft.options.smokeParticles",
+        Animations,
+        animations.smoke_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "voidParticles",
+        "umicraft.options.voidParticles",
+        Animations,
+        animations.void_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "waterParticles",
+        "umicraft.options.waterParticles",
+        Animations,
+        animations.water_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "rainSplash",
+        "umicraft.options.rainSplash",
+        Animations,
+        animations.rain_splash,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "portalParticles",
+        "umicraft.options.portalParticles",
+        Animations,
+        animations.portal_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "potionParticles",
+        "umicraft.options.potionParticles",
+        Animations,
+        animations.potion_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "drippingParticles",
+        "umicraft.options.drippingParticles",
+        Animations,
+        animations.dripping_particles,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "animatedTerrain",
+        "umicraft.options.animatedTerrain",
+        Animations,
+        animations.terrain,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "fireworkParticles",
+        "umicraft.options.fireworkParticles",
+        Animations,
+        animations.firework_particles,
+        Immediate,
+        all
+    ),
     OptionSpec {
         id: "particles",
         label: "options.particles",
@@ -580,8 +951,13 @@ mod tests {
         let mut video = VideoOptions::default();
         set_all(&mut video, false);
         assert_eq!(video.particles, MAX_PARTICLE_SETTING);
+        assert!(!video.animations.water && !video.animations.firework_particles);
         set_all(&mut video, true);
         assert_eq!(video.particles, 0);
+        assert_eq!(
+            video.animations,
+            super::super::video_sections::AnimationOptions::default()
+        );
     }
 
     #[test]

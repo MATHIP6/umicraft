@@ -74,13 +74,29 @@ Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 
 ### Phase 2: details and animations
 
+The options live in `[video.details]`, `[video.quality]` and
+`[video.animations]` (`options/video_sections.rs`). Each subsection falls back
+to its defaults alone when it does not parse. `GraphicsChoice` resolves
+"Default" against Graphics.
+
 | Step | Content | Done when |
 |---|---|---|
-| 2.1 | Sky, Stars, Sun & Moon; Fog Fast/Fancy/Off; Fog Start; Cloud Height | Unit tests on `RenderEnvironment` |
-| 2.2 | Trees Default/Fast/Smart/Fancy (Smart: baked leaves without inner faces); Rain & Snow; Dropped Items; Vignette; Translucent Blocks | Mesh tests on leaves; screenshots |
-| 2.3 | Clear Water, Better Grass/Snow, Swamp Colors, Smooth Biomes | Mesh tests |
-| 2.4 | One toggle per animated sprite category (water, lava, fire, portal, redstone, terrain, textures) | Unit tests on `TextureAnimator` |
-| 2.5 | Per-type particle filters, rejected before spawn | Unit tests; no allocation on the rejection path |
+| 2.0 | Subsections, `GraphicsChoice`, `TreesChoice`, `RainChoice`, `FogChoice`, `OffFastFancy`; the P2 entries of the option table (**done**) | Unit tests; round trip of `options.toml` |
+| 2.1 | Sky, Stars, Sun & Moon; Fog Fast/Fancy/Off; Fog Start; Cloud Height (+0 to 128 blocks); Rain & Snow Default/Fast/Fancy/Off; Vignette | Unit tests on the render inputs; screenshots |
+| 2.2 | Trees Default/Fast/Smart/Fancy (Smart: transparent leaves, faces between two leaf blocks culled) | Mesh tests on leaves; mesh bench Fancy vs Smart |
+| 2.3 | Better Grass Off/Fast/Fancy, Better Snow, Swamp Colors, Smooth Biomes | Mesh tests |
+| 2.4 | One toggle per animated texture: water, lava, fire, portal, other terrain | Unit tests on `TextureAnimator` |
+| 2.5 | Per-kind particle toggles, rejected before spawn: redstone, explosion, flame, smoke, void, water, rain splash, portal, potion, dripping, firework | Unit tests; no allocation on the rejection path |
+| 2.6 | Dropped Items Default/Fast/Fancy | Unit tests |
+
+Not offered, because they would have no meaningful effect in Umicraft:
+- **Translucent Blocks**: OptiFine's Fast skips a GL blending mode; our
+  translucent pass is already one sorted pass.
+- **Clear Water**: it changes the light opacity of water, which is world
+  lighting received from the server.
+- **Textures Animated**: compass and clock always turn, as in OptiFine, and
+  there is no other animated item texture yet. It comes with custom
+  animations (phase 7).
 
 ### Phase 3: performance (every item: a criterion bench and `docs/perf-log.md`)
 

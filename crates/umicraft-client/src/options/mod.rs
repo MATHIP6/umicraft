@@ -30,6 +30,7 @@ mod sound;
 #[cfg(test)]
 mod tests;
 mod video;
+pub mod video_sections;
 pub mod video_spec;
 
 pub use chat::{ChatOptions, ChatVisibility};
