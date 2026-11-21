@@ -224,13 +224,14 @@ impl ModelResources {
         let atlas = resources.atlas().layout().clone();
         let ctm = ctm_table(packs, &atlas);
         let natural = natural_table(packs, &atlas);
+        let custom_colors = custom_block_colors(packs);
         let context = Arc::new(ModelMeshContext {
             models: Arc::clone(&models),
             atlas: Arc::new(atlas),
             tints,
             ctm,
             natural,
-            custom_colors: None,
+            custom_colors,
         });
         tracing::info!(
             blockstates = models.blockstate_count(),
@@ -238,6 +239,7 @@ impl ModelResources {
             layers = resources.atlas().layers(),
             biome_tints = context.tints.is_some(),
             ctm_rules = context.ctm.as_ref().map_or(0, |table| table.len()),
+            custom_colors = context.custom_colors.is_some(),
             natural_rules = context.natural.as_ref().map_or(0, |table| table.len()),
             packs = packs.len(),
             "loaded 1.8 block models, atlas and resource packs"
@@ -347,7 +349,7 @@ fn ctm_table(
 ///
 /// It reads the packs in place instead of going through `PackFiles`, which
 /// would copy every kept file.
-fn feature_files<'a>(
+pub(super) fn feature_files<'a>(
     packs: &'a [umicraft_assets::ResourcePack],
     prefix: &str,
 ) -> BTreeMap<&'a str, &'a [u8]> {
@@ -366,6 +368,19 @@ fn feature_files<'a>(
         }
     }
     files
+}
+
+/// The custom block colours of `packs`, or `None` when the Custom Colors
+/// option is off or the packs customise nothing.
+fn custom_block_colors(
+    packs: &[umicraft_assets::ResourcePack],
+) -> Option<Arc<umicraft_mesh::custom_colors::CustomColors>> {
+    if !crate::meshing::settings::custom_colors_enabled() {
+        return None;
+    }
+    let mut files = feature_files(packs, "colormap/");
+    files.extend(feature_files(packs, "color.properties"));
+    super::custom_colors::mesh_colors(&files, &block_id)
 }
 
 /// Parses `natural.properties` of `packs` and resolves it against `atlas`.
@@ -392,7 +407,7 @@ fn natural_table(
 
 /// The id of the block called `name` (`minecraft:glass`); other domains name
 /// no block.
-fn block_id(name: &str) -> Option<u16> {
+pub(super) fn block_id(name: &str) -> Option<u16> {
     let name = name.strip_prefix("minecraft:")?;
     definitions()
         .iter()

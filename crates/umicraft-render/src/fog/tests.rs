@@ -375,3 +375,27 @@ fn fog_off_shows_no_fog_in_air_but_keeps_the_liquids_and_blindness() {
         }
     );
 }
+
+#[test]
+fn liquid_palettes_replace_the_underwater_and_underlava_colours() {
+    let colors = crate::ColorOverrides {
+        underwater: Some([0.4, 0.5, 0.6]),
+        underlava: Some([0.9, 0.8, 0.7]),
+        ..crate::ColorOverrides::default()
+    };
+    let color = |medium| {
+        let environment = RenderEnvironment {
+            colors,
+            fog: FogContext {
+                medium,
+                ..FogContext::DEFAULT
+            },
+            view_distance: 32,
+            ..RenderEnvironment::DEFAULT
+        };
+        FogParams::new([0.0; 3], &environment).color
+    };
+    assert_eq!(color(FogMedium::Water), [0.4, 0.5, 0.6]);
+    assert_eq!(color(FogMedium::Lava), [0.9, 0.8, 0.7]);
+    assert_eq!(color(FogMedium::Air), [0.0; 3]);
+}

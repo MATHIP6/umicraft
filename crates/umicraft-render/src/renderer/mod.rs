@@ -289,6 +289,9 @@ pub struct Renderer {
     cloud_ticks: f64,
     /// The torch flicker of the lightmap, stepped once per client tick.
     torch_flicker: TorchFlicker,
+    /// The pack's lightmaps by dimension, which replace the computed ones.
+    custom_lightmaps:
+        Option<std::sync::Arc<umicraft_packext::colors::lightmap::DimensionLightmaps>>,
     /// Rain and snow, drawn before the translucent terrain.
     weather: WeatherRenderer,
     particles: ParticleRenderer,

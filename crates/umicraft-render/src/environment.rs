@@ -53,6 +53,30 @@ pub struct RenderEnvironment {
     /// Whether falling rain and snow are drawn (splashes and sounds are not
     /// part of this pass).
     pub draw_precipitation: bool,
+    /// Colours the resource packs replace (Custom Colors).
+    pub colors: ColorOverrides,
+}
+
+/// Sky and fog colours from the packs' `color.properties` and colormaps, in
+/// linear `0..=1`. Each `None` keeps the computed vanilla colour.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ColorOverrides {
+    /// `sky0.png` sampled at the eye. The sky colour becomes this times the
+    /// computed colour over the plains-noon colour `(0.5, 0.66275, 1)`, so
+    /// day, night and weather still darken it (`getSkyColor`).
+    pub sky_palette: Option<[f32; 3]>,
+    /// `fog0.png`, scaled by the computed fog over `(0.753, 0.8471, 1)`.
+    pub fog_palette: Option<[f32; 3]>,
+    /// `fog.nether`: replaces the Nether fog.
+    pub nether_fog: Option<[f32; 3]>,
+    /// `fog.end`: replaces the End fog.
+    pub end_fog: Option<[f32; 3]>,
+    /// `sky.end`: the End sky colour the fog blends toward.
+    pub end_sky: Option<[f32; 3]>,
+    /// `underwater.png`: the fog colour inside water.
+    pub underwater: Option<[f32; 3]>,
+    /// `underlava.png`: the fog colour inside lava.
+    pub underlava: Option<[f32; 3]>,
 }
 
 /// Which parts of the sky are drawn (OptiFine's Sky, Stars and Sun & Moon).
@@ -99,6 +123,15 @@ impl RenderEnvironment {
         sky_details: SkyDetails::ALL,
         cloud_lift: 0.0,
         draw_precipitation: true,
+        colors: ColorOverrides {
+            sky_palette: None,
+            fog_palette: None,
+            nether_fog: None,
+            end_fog: None,
+            end_sky: None,
+            underwater: None,
+            underlava: None,
+        },
     };
 
     /// `BiomeGenBase.plains` temperature, the default sky tint.

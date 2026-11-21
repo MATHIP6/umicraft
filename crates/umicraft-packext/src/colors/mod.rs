@@ -21,6 +21,19 @@ mod properties;
 pub use palette::{Climate, Format, Palette, PaletteError, PaletteSpec};
 pub use properties::{ColorProperties, Rgb};
 
+use crate::ctm::BlockMatch;
+
+/// Parses a `blocks` value (`stone grass:1-3`, ids or names) into the blocks it
+/// names. Entries that name no known block are skipped; `None` when none is
+/// left. `block_id` resolves a name such as `minecraft:stone`.
+#[must_use]
+pub fn parse_block_list(
+    text: &str,
+    block_id: &dyn Fn(&str) -> Option<u16>,
+) -> Option<Vec<BlockMatch>> {
+    crate::ctm::parse_match_blocks(text, block_id).ok()
+}
+
 /// Resolves a path written in a colour file to a feature-relative one
 /// (`colormap/blocks/grass.png`), the way `TextureUtils.fixResourcePath`
 /// does. `base` is the feature-relative folder of the file that wrote it.

@@ -21,6 +21,7 @@ use crate::overlays::{Pictures, ScreenOverlays};
 use crate::particles::ParticleSprite;
 use crate::sky::{SkyImage, SkyTextures};
 use crate::weather::PrecipitationField;
+use umicraft_packext::colors::lightmap::DimensionLightmaps;
 use umicraft_packext::sky::LayerFrame;
 
 impl Renderer {
@@ -31,6 +32,13 @@ impl Renderer {
     /// plain data and does not allocate.
     pub fn set_environment(&mut self, environment: RenderEnvironment) {
         self.environment = environment;
+    }
+
+    /// Sets the pack's custom lightmaps, which replace the computed light
+    /// colours of the dimensions they cover (OptiFine Custom Colors). `None`
+    /// restores the vanilla lightmap everywhere.
+    pub fn set_custom_lightmaps(&mut self, maps: Option<Arc<DimensionLightmaps>>) {
+        self.custom_lightmaps = maps;
     }
 
     /// Replaces the sun, moon and End sky images (`textures/environment/`).

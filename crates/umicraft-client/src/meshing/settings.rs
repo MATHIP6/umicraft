@@ -34,6 +34,9 @@ static BETTER_SNOW: AtomicBool = AtomicBool::new(false);
 static CONNECTED_TEXTURES: AtomicU8 = AtomicU8::new(1);
 /// The `Natural Textures` option the workers mesh with.
 static NATURAL_TEXTURES: AtomicBool = AtomicBool::new(false);
+/// The `Custom Colors` option. Resources read it when they load, so a change
+/// takes effect with the resource reload (`Effect::ReloadResources`).
+static CUSTOM_COLORS: AtomicBool = AtomicBool::new(true);
 
 const LEAVES_FAST: u8 = 0;
 const LEAVES_SMART: u8 = 1;
@@ -95,6 +98,13 @@ pub fn store(video: &VideoOptions) {
         Ordering::Relaxed,
     );
     NATURAL_TEXTURES.store(video.quality.natural_textures, Ordering::Relaxed);
+    CUSTOM_COLORS.store(video.quality.custom_colors, Ordering::Relaxed);
+}
+
+/// Whether the packs' custom colours are on.
+#[must_use]
+pub fn custom_colors_enabled() -> bool {
+    CUSTOM_COLORS.load(Ordering::Relaxed)
 }
 
 /// The settings the mesh workers use right now.
