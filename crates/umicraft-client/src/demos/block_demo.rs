@@ -1086,6 +1086,7 @@ scene blocks      : stone, dirt, oak stairs
             models: Arc::new(models),
             atlas: Arc::new(AtlasLayout::from_keys([texture])),
             tints: None,
+            ctm: None,
         }
     }
 

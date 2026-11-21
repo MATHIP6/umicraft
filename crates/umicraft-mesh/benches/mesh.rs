@@ -106,6 +106,7 @@ fn model_context() -> ModelMeshContext {
         models: Arc::new(set),
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/stone"])),
         tints: None,
+        ctm: None,
     }
 }
 
@@ -283,6 +284,7 @@ fn dense_grass() -> DenseGrass {
                     |_, _| [0x59, 0xAE, 0x30],
                 ))
             }),
+            ctm: None,
         }
     };
     let plain = model_context(false);
@@ -396,6 +398,7 @@ fn mesh_leaves_modes(criterion: &mut Criterion) {
         ),
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/leaves"])),
         tints: None,
+        ctm: None,
     };
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     for y in 0..16 {

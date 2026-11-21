@@ -91,6 +91,7 @@ fn fence_context() -> ModelMeshContext {
         models: Arc::new(set),
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/t"])),
         tints: None,
+        ctm: None,
     }
 }
 

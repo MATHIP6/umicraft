@@ -4392,6 +4392,7 @@ dependencies = [
  "bytemuck",
  "criterion",
  "glam",
+ "tracing",
  "umicraft-model",
  "umicraft-packext",
  "umicraft-world",

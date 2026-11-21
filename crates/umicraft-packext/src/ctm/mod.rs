@@ -265,6 +265,15 @@ pub struct CtmRule {
 }
 
 impl CtmRule {
+    /// Whether the block `id` is one the rule names (`matchBlocks`), any
+    /// block when the rule names none.
+    #[must_use]
+    pub fn matches_block_id(&self, id: u16) -> bool {
+        self.match_blocks
+            .as_ref()
+            .is_none_or(|blocks| blocks.iter().any(|entry| entry.id == id))
+    }
+
     /// Whether the block `id` with `metadata` passes the block and metadata
     /// filters of the rule.
     #[must_use]

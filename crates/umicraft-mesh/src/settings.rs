@@ -38,6 +38,18 @@ pub enum BetterGrass {
     Fancy,
 }
 
+/// OptiFine "Connected Textures": block faces take the tiles of the pack's
+/// CTM rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectedTextures {
+    /// The vanilla textures.
+    Off,
+    /// Rules apply; the 47-tile method tests only the four edge neighbours.
+    Fast,
+    /// Rules apply; the 47-tile method also tests the four corners.
+    Fancy,
+}
+
 /// What the player's options ask of the mesher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeshSettings {
@@ -60,6 +72,8 @@ pub struct MeshSettings {
     /// Whether plants and fences next to snow layers get a snow layer of
     /// their own (`BetterSnow`).
     pub better_snow: bool,
+    /// Connected Textures mode.
+    pub connected_textures: ConnectedTextures,
 }
 
 impl MeshSettings {
@@ -85,6 +99,7 @@ impl Default for MeshSettings {
             smooth_biomes: true,
             better_grass: BetterGrass::Off,
             better_snow: false,
+            connected_textures: ConnectedTextures::Off,
         }
     }
 }
