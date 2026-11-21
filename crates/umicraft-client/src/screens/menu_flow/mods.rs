@@ -64,7 +64,7 @@ impl MenuFlow {
 #[cfg(test)]
 mod tests {
     use umicraft_ui::menus::{
-        mods_layout, HudEditorOutcome, HudEditorView, HudWidgetView, ModsView, TitleStyle,
+        landing_layout, HudEditorOutcome, HudEditorView, HudWidgetView, ModsView, TitleStyle,
     };
     use umicraft_ui::mod_widget::{ModLine, ModWidgetView};
     use umicraft_ui::{InputEvent, PointerButton, Rect};
@@ -126,16 +126,16 @@ mod tests {
     }
 
     #[test]
-    fn the_cross_of_the_panel_closes_the_menu() {
+    fn the_cross_of_the_landing_closes_the_menu() {
         let (mut flow, _) = flow_with("mods-close", &[]);
-        let cross = middle(mods_layout(VIEWPORT).close);
+        let cross = middle(landing_layout(VIEWPORT).close);
         let command = frame(&mut flow, click(cross), &ModsView::default());
         assert_eq!(command, Some(MenuCommand::GoTo(Screen::None)));
     }
 
     #[test]
-    fn the_menu_opens_on_the_list_where_escape_closes_it() {
-        let (flow, _) = flow_with("mods-list", &[]);
+    fn the_menu_opens_on_the_landing_where_escape_closes_it() {
+        let (flow, _) = flow_with("mods-landing", &[]);
         assert!(!flow.mods_can_go_back());
     }
 

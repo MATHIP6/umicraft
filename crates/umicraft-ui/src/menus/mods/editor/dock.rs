@@ -15,7 +15,7 @@ use crate::text::FontAtlas;
 
 use super::super::button::icon_button;
 use super::super::hud_layer::{HudEditorOutcome, HudEntryView, HudPresetKind};
-use super::super::style::{hover_level, Paint, NAME_SIZE, TILE_ON};
+use super::super::style::{hover_level, Paint, ACCENT_TINT, NAME_SIZE};
 use super::super::view::{ModsOutcome, ModsView};
 use super::super::{ModsScreen, BLINK_TICKS};
 use super::{draw_panel, DockLayout, ACTION, GAP, TAB_SETTINGS, TAB_WIDGETS};
@@ -258,7 +258,7 @@ impl ModsScreen {
                 .motion
                 .hover(&format!("editor/row/{}", entry.id), ui.is_hovered(row));
             let fill = if selected {
-                with_opacity(TILE_ON, 2.2)
+                with_opacity(ACCENT_TINT, 1.5)
             } else {
                 [1.0, 1.0, 1.0, 0.05 * hover]
             };

@@ -17,7 +17,6 @@ fn the_menu_opens_on_the_landing_page_not_the_list() {
         "the landing is the root: Escape closes"
     );
     let names = texts(&mut screen, &view());
-    assert!(has_text(&names, "umicraft.mods.hint"), "{names:?}");
     assert!(!has_text(&names, "FPS"), "the cards are not shown yet");
 }
 

@@ -16,7 +16,6 @@
 mod dock;
 mod inspect;
 
-pub(super) use dock::chip;
 #[cfg(test)]
 pub(super) use dock::{action_row, list_row, row_toggle, split};
 

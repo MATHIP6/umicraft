@@ -11,7 +11,10 @@ use crate::modern::theme::{mix, with_opacity};
 use crate::modern::{draw_icon, draw_text, measure_text, theme, Align};
 use crate::text::FontAtlas;
 
-use super::style::{ICON_GAP, ICON_SIZE, LABEL_TRACKING, RIM, RIM_HOVER, RIM_WIDTH};
+use super::style::{
+    bordered, GLASS, GLASS_BORDER, GLASS_HIGHLIGHT, GLASS_HOVER, ICON_GAP, ICON_SIZE,
+    LABEL_TRACKING,
+};
 
 /// A square button with only an icon, for the close cross and the settings of a
 /// row: a faint tile that appears under the pointer, the icon brighter. `fade`
@@ -36,12 +39,12 @@ pub(super) fn icon_button(
     response
 }
 
-/// Draws the Mods button and reports its interaction state: a dark rounded
-/// card with a thin rim that lights up in the accent colour under the
-/// pointer, a small grid of modules and the label in tracked capitals.
+/// Draws the Mods button and reports its interaction state: a glass pill, a
+/// faint fill with a thin light border and a brighter line along its top
+/// edge, a gear and the label in tracked capitals, centred together.
 ///
 /// `target` is the widget id and the rectangle, `look` the GUI scale and the
-/// hover fade of the button.
+/// hover level of the button.
 pub(super) fn mods_button(
     ui: &mut Ui,
     brand: &FontAtlas,
@@ -56,23 +59,18 @@ pub(super) fn mods_button(
         ui.note_button_press();
     }
 
-    // The rim is the whole card in its colour; the fill goes over it, one rim
-    // width in from every edge.
-    let radius = theme::RADIUS * scale;
-    let rim = mix(RIM, RIM_HOVER, fade);
-    ui.draw().rounded_rect(rect, radius, rim);
-    let inset = (RIM_WIDTH * scale).max(1.0);
-    let inner = Rect::new(
-        rect.x + inset,
-        rect.y + inset,
-        rect.width - 2.0 * inset,
-        rect.height - 2.0 * inset,
+    let radius = 7.0 * scale;
+    bordered(
+        ui,
+        rect,
+        radius,
+        (mix(GLASS, GLASS_HOVER, fade), GLASS_BORDER),
     );
-    let fill = mix(theme::SURFACE, theme::SURFACE_HOVER, fade);
-    ui.draw()
-        .rounded_rect(inner, (radius - inset).max(0.0), fill);
+    // The inner highlight: one pixel under the top border, between the corners.
+    let inset = radius.min(rect.width * 0.5);
+    let highlight = Rect::new(rect.x + inset, rect.y + 1.0, rect.width - 2.0 * inset, 1.0);
+    ui.draw().rect(highlight, GLASS_HIGHLIGHT);
 
-    // The icon and the label are centred together.
     let label = label.to_uppercase();
     let size = theme::TEXT_SIZE_BODY * scale;
     let gap = size * LABEL_TRACKING;
@@ -88,18 +86,8 @@ pub(super) fn mods_button(
     let left = rect.x + (rect.width - group) * 0.5;
     let middle = rect.y + rect.height * 0.5;
 
-    let cell = icon * 3.0 / 7.0;
-    let step = icon - cell;
-    let icon_colour = with_opacity(theme::TEXT, 0.9);
-    for (column, row) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
-        let square = Rect::new(
-            left + column * step,
-            middle - icon * 0.5 + row * step,
-            cell,
-            cell,
-        );
-        ui.draw().rounded_rect(square, cell * 0.25, icon_colour);
-    }
+    let icon_centre = (left + icon * 0.5, middle);
+    draw_icon(ui, brand, Icon::Gear, icon_centre, (icon, theme::TEXT));
     let mut x = left + icon + ICON_GAP * scale;
     for (letter, width) in label.chars().zip(glyph_widths) {
         let glyph = letter.encode_utf8(&mut buffer);

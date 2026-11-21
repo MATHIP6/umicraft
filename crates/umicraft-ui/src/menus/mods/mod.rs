@@ -8,8 +8,9 @@
 //!    button over the game, with a close cross in the top right corner of the
 //!    screen. It is what the menu opens on, so the HUD widgets can be moved
 //!    with nothing in the way;
-//! 2. the **list**: a panel with a search box, one tab per category and a row
-//!    per mod, each with an on/off switch and a button that opens
+//! 2. the **list**: a panel with a sidebar of categories, a search box, an
+//!    All / Enabled filter and a grid of cards, each with an on/off switch and
+//!    a gear that opens
 //! 3. the **settings** page of that mod, generated from its [`SettingView`]s.
 //!
 //! Escape and the cross of the panel step back to the landing page (Escape
@@ -37,7 +38,9 @@ mod motion;
 mod pages;
 mod scrollbar;
 mod search;
+mod segmented;
 mod settings_panel;
+mod sidebar;
 mod style;
 #[cfg(test)]
 mod tests;
@@ -74,7 +77,7 @@ enum Page {
     /// The logo, the Mods button and the cross.
     #[default]
     Landing,
-    /// The panel with the search box, the tabs and the cards.
+    /// The panel with the sidebar, the search box and the cards.
     List,
     /// The settings of the mod with this id.
     Settings(String),
@@ -94,6 +97,8 @@ pub struct ModsScreen {
     query: String,
     /// `ALL_TAB`, or the index of the selected category plus one.
     tab: usize,
+    /// Whether the list keeps only the mods that are on.
+    only_enabled: bool,
     scroll: f32,
     /// Scroll offset of the settings page, in GUI units.
     settings_scroll: f32,
@@ -168,10 +173,7 @@ impl ModsScreen {
             Page::Settings(_) => Page::List,
             Page::List | Page::Landing | Page::HudEditor => Page::Landing,
         };
-        self.settings_scroll = 0.0;
-        self.motion.settle("settings_scroll");
-        self.drag = SliderDrag::default();
-        self.bar = BarGrab::default();
+        self.reset_settings_view();
     }
 
     /// Draws one frame of the menu over `view` and returns what the player
@@ -231,7 +233,7 @@ impl ModsScreen {
 
         ui.push_id("mods_menu");
         let page = if on_landing {
-            self.landing_page(ui, brand, lang, view, (&landing, partial_tick))
+            self.landing_page(ui, brand, lang, (&landing, partial_tick))
         } else {
             let opacity = self.motion.panel_opacity();
             ui.draw().set_opacity(opacity);
@@ -244,11 +246,7 @@ impl ModsScreen {
             self.go_back();
         }
         if let Some(id) = opened {
-            self.page = Page::Settings(id);
-            self.settings_scroll = 0.0;
-            self.motion.settle("settings_scroll");
-            self.drag = SliderDrag::default();
-            self.bar = BarGrab::default();
+            self.open_settings(id);
         }
         // A new page plays its entrance, from the next frame.
         if self.entered != self.page {

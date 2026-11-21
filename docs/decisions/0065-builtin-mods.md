@@ -70,12 +70,20 @@ feature must not grow them.
   lenient reading as the settings, keys append-only) and the window saves the options as soon
   as a mod reports a change, not only from the menu. Toggle sprint uses it for its switch
   (`toggled`), so sprint is still toggled after a restart.
-- **Amended: the landing page is gone.** The Mods button of the landing only opened the
-  list, one click for nothing, so the menu now opens on the list (`ModsScreen` has the
-  pages list and settings). Escape steps back from the settings and closes the menu from the
-  list; the cross of the panel closes it. The logo moved into the panel header and the line
-  on how to move the widgets sits above the panel, only while a HUD widget is on. The reset
-  bar stays under the panel. `--hud-view mods_list` is kept as another name for `mods`.
+- **Amended: the landing page is back, with a new look.** Dropping the landing made the menu
+  open on the list and covered the HUD widgets, so it opens on the landing again (logo,
+  wordmark and one glass Mods button, nothing else; the move hint and the reset line are not
+  drawn there). The Mods button opens the list; Escape and the cross of the panel go back one
+  page (settings, list, landing); the cross of the landing and Escape on it close the menu.
+  The panel pages follow the design spec: a sidebar with a count per category and the
+  "Edit HUD" button, a header with the title and "n enabled", a search box with an
+  All / Enabled control, a grid of cards (icon tile, switch, name, two-line description,
+  category tag, gear) and a settings page in one grouped box with a band for the mod. The
+  accent is the violet `#7C3AED` (`modern::theme::ACCENT`) in every menu. Not done yet from the
+  spec: the Kawase blur and its grading, Inter and Space Grotesk, the live preview, the
+  `section`/`helper`/`depends_on` fields of a setting, Reset with Undo, keyboard focus and
+  clicking the body of a card to open it. Sizes are GUI units (half a logical pixel of the
+  1280 x 720 reference), so the panel follows the GUI scale option.
 - **HUD widgets move directly in the mods menu.** There is no editor screen. The widgets of
   the enabled HUD mods are drawn by the menu (`menus/mods/hud_layer`, `HudLayer`) over the
   dark sheet and under the panel, on every page, and are dragged with the mouse anywhere

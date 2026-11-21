@@ -17,8 +17,8 @@ pub const SURFACE: Color = [0.07, 0.08, 0.10, 0.55];
 pub const SURFACE_HOVER: Color = [0.20, 0.23, 0.30, 0.78];
 /// Fill of a disabled button.
 pub const SURFACE_DISABLED: Color = [0.07, 0.08, 0.10, 0.30];
-/// The highlight colour of the brand.
-pub const ACCENT: Color = [0.36, 0.55, 1.00, 1.0];
+/// The highlight colour of the brand: violet `#7C3AED`.
+pub const ACCENT: Color = [0.486, 0.227, 0.929, 1.0];
 /// Primary text.
 pub const TEXT: Color = [0.96, 0.97, 0.98, 1.0];
 /// Secondary text.

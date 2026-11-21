@@ -138,11 +138,7 @@ fn wheel_over(area: Rect, delta: f32) -> UiInput {
 
 /// The settings page area, as the page lays it out.
 fn page_area() -> Rect {
-    let layout = mods_layout(VIEWPORT);
-    Rect {
-        y: layout.tabs.y,
-        ..layout.detail
-    }
+    mods_layout(VIEWPORT).detail
 }
 
 #[test]

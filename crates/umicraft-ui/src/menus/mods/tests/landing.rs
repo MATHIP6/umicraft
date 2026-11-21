@@ -20,16 +20,15 @@ fn the_group_is_centred_on_the_screen() {
         );
     }
     let middle = VIEWPORT.y + VIEWPORT.height * 0.5;
-    assert!(layout.logo.y < middle && layout.hint[1] > middle);
+    assert!(layout.logo.y < middle && layout.mods.bottom() > middle);
 }
 
 #[test]
-fn the_parts_stack_from_the_logo_down_to_the_hint() {
+fn the_parts_stack_from_the_logo_down_to_the_button() {
     let layout = landing_layout(VIEWPORT);
     let bottom = |rect: Rect| rect.y + rect.height;
     assert!(bottom(layout.logo) <= layout.wordmark.y);
     assert!(bottom(layout.wordmark) <= layout.mods.y);
-    assert!(bottom(layout.mods) <= layout.hint[1]);
 }
 
 #[test]
@@ -37,7 +36,7 @@ fn the_menu_is_small() {
     // The group is much smaller than the screen and its button is smaller
     // than a title-screen button (160 x 22 units).
     let layout = landing_layout(VIEWPORT);
-    let group = layout.hint[1] - layout.logo.y;
+    let group = layout.mods.bottom() - layout.logo.y;
     assert!(group < VIEWPORT.height * 0.5, "{group}");
     assert!(layout.mods.width < 160.0 * Gui::new(VIEWPORT).scale);
 }
@@ -69,9 +68,10 @@ fn a_click_beside_the_buttons_does_nothing() {
     assert!(!screen.can_go_back(), "still on the landing page");
 }
 
+/// The design draws nothing but the logo, the wordmark and the button.
 #[test]
-fn the_landing_keeps_its_group_and_adds_one_muted_line() {
-    let layout = landing_layout(VIEWPORT);
-    assert!(layout.tip[1] > layout.hint[1]);
-    assert!(layout.tip[1] < VIEWPORT.height);
+fn the_landing_shows_no_hint_text() {
+    let names = texts(&mut ModsScreen::new(), &view());
+    assert!(!has_text(&names, "umicraft.mods.hint"), "{names:?}");
+    assert!(!has_text(&names, "umicraft.mods.editor.empty"), "{names:?}");
 }
