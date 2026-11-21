@@ -95,6 +95,23 @@ impl PackFiles {
         Self { layers }
     }
 
+    /// [`Self::from_packs`] for packs that stay in use: only the kept files are
+    /// copied.
+    #[must_use]
+    pub fn from_pack_refs(packs: &[ResourcePack]) -> Self {
+        let layers = packs
+            .iter()
+            .map(|pack| {
+                pack.files()
+                    .iter()
+                    .filter(|(path, _)| is_kept(path))
+                    .map(|(path, bytes)| (path.clone(), bytes.clone()))
+                    .collect()
+            })
+            .collect();
+        Self { layers }
+    }
+
     /// Whether no active pack has a kept file.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -200,6 +217,25 @@ mod tests {
         assert!(files
             .get("assets/minecraft/models/block/stone.json")
             .is_none());
+    }
+
+    #[test]
+    fn borrowed_packs_keep_the_same_files_as_owned_ones() {
+        let packs = [pack(
+            "a",
+            &[
+                ("textures/environment/sun.png", b"sun"),
+                ("textures/blocks/stone.png", b"stone"),
+            ],
+        )];
+        let borrowed = PackFiles::from_pack_refs(&packs);
+        assert!(borrowed
+            .get("assets/minecraft/textures/environment/sun.png")
+            .is_some());
+        assert!(borrowed
+            .get("assets/minecraft/textures/blocks/stone.png")
+            .is_none());
+        assert_eq!(packs[0].file_count(), 2, "the packs are untouched");
     }
 
     #[test]

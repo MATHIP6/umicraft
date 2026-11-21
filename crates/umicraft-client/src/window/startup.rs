@@ -34,6 +34,7 @@ use crate::mods::runtime::ModsRuntime;
 use crate::mods::zoom::Zoom;
 use crate::options::effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options::Options;
+use crate::resources::custom_guis::CustomGuis;
 use crate::resources::entity_icons::EntityIcons;
 use crate::resources::game_files::{load_packs, GameFiles, PackFeatures};
 use crate::resources::panorama::load_panorama_faces;
@@ -69,10 +70,17 @@ pub(super) fn load_packs_and_terrain(
     paths: &[PathBuf],
     features: PackFeatures,
 ) -> (TerrainTextures, GameFiles) {
-    let packs = load_packs(paths);
+    let mut packs = load_packs(paths);
+    let pack_files = PackFiles::from_pack_refs(&packs);
+    // The pictures of the custom container screens ride in a synthetic pack on
+    // top, so the GUI atlas holds them as regions.
+    let (guis, guis_pack) = CustomGuis::scan(&pack_files, features);
+    packs.extend(guis_pack);
     let terrain = TerrainTextures::from_packs(&packs);
     let jar = crate::resources::official::find_verified_jar().ok();
-    let files = GameFiles::new(PackFiles::from_packs(packs), jar).with_features(features);
+    let files = GameFiles::new(pack_files, jar)
+        .with_features(features)
+        .with_custom_guis(guis);
     (terrain, files)
 }
 

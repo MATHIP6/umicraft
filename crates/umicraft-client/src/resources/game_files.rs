@@ -17,6 +17,8 @@ use umicraft_assets::client_jar::ClientJar;
 use umicraft_assets::skin::decode_png_bytes;
 use umicraft_assets::{PackFiles, ResourcePack};
 
+use super::custom_guis::CustomGuis;
+
 /// Which pack features are on, read from the options when the resources are
 /// (re)loaded. Changing one of the options reloads the resources
 /// (`Effect::ReloadResources`), so a feature never needs a runtime switch.
@@ -66,6 +68,7 @@ pub struct GameFiles {
     packs: Arc<PackFiles>,
     jar: Option<ClientJar>,
     features: PackFeatures,
+    custom_guis: Arc<CustomGuis>,
 }
 
 impl GameFiles {
@@ -76,7 +79,22 @@ impl GameFiles {
             packs: Arc::new(packs),
             jar,
             features: PackFeatures::ALL,
+            custom_guis: Arc::default(),
         }
+    }
+
+    /// These files with the replacements of the container screens read from
+    /// the packs.
+    #[must_use]
+    pub fn with_custom_guis(mut self, guis: CustomGuis) -> Self {
+        self.custom_guis = Arc::new(guis);
+        self
+    }
+
+    /// The container screen replacements of the packs.
+    #[must_use]
+    pub fn custom_guis(&self) -> &CustomGuis {
+        &self.custom_guis
     }
 
     /// These files with the pack features set to `features`.
