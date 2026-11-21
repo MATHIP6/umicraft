@@ -142,6 +142,7 @@ impl App {
                 self.server_pack.set_mode(pack_mode);
                 self.session = Some(session);
                 self.send_particle_setting();
+                self.send_particle_categories();
                 self.send_legacy_animations();
                 self.set_screen(Screen::Connecting);
             }
