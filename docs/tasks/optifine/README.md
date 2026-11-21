@@ -1,6 +1,6 @@
 # F6: pack features and OptiFine-style video settings: plan
 
-Status: **phases 0 to 2 done**; next is phase 4 (custom sky). Branch `feat/optifine-features`.
+Status: **phases 0, 1, 2 and 4 done**; phases 3, 5 and 6 in progress. Branch `feat/optifine-features`.
 Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 (reference policy) and ADR-0089 (architecture). Roadmap entry: F6.
 
@@ -57,10 +57,10 @@ Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 
 | Step | Content | Done when |
 |---|---|---|
-| 4.1 | `packext::sky` parsing. Files: `sky/world<N>/sky<K>.properties`; the scan stops at the first missing K. Keys: `HH:MM` fades; `startFadeOut` derived when absent; the 24000-tick check; `blend`, `rotate`, `speed`, `axis`, `days`, `daysLoop`, `weather`, `biomes`, `heights`, `transition` | Table tests on fades, day loops and invalid layers |
-| 4.2 | Per-frame `SkyFrame` evaluation, with no allocation: brightness = position × weather × fade; transition smoothing | Bench and unit tests |
-| 4.3 | Render: a cube with half-size 100 and a 3×2 texture layout; 9 blend modes as pre-built wgpu pipelines; rotation about the permuted axis | Offscreen screenshot with an original test pack |
-| 4.4 | Option "Custom Sky" (default on, `Effect::ReloadSky`) | |
+| 4.1 | `packext::sky` parsing. Files: `sky/world<N>/sky<K>.properties`; the scan stops at the first missing K. Keys: `HH:MM` fades; `startFadeOut` derived when absent; the 24000-tick check; `blend`, `rotate`, `speed`, `axis`, `days`, `daysLoop`, `weather`, `biomes`, `heights`, `transition` (**done**) | Table tests on fades, day loops and invalid layers |
+| 4.2 | Per-frame `SkyFrame` evaluation, with no allocation: brightness = position × weather × fade; transition smoothing (**done**) | Bench and unit tests |
+| 4.3 | Render: a cube with half-size 100 and a 3×2 texture layout; 9 blend modes as pre-built wgpu pipelines; rotation about the permuted axis (**done**) | Offscreen screenshot with an original test pack |
+| 4.4 | Option "Custom Sky" (default on, `Effect::ReloadSky`) (**done**) | |
 
 ### Phase 5: custom entity models (CEM)
 

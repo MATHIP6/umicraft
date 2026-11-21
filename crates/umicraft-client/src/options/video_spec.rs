@@ -527,6 +527,14 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         block_alternatives,
         ReMesh
     ),
+    choice!(
+        "dynamicLights",
+        "umicraft.options.dynamicLights",
+        Root,
+        OffFastFancy,
+        dynamic_lights,
+        Immediate
+    ),
     toggle!(
         "dynamicFov",
         "umicraft.options.dynamicFov",
@@ -700,6 +708,48 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         quality.connected_textures,
         ReMesh
     ),
+    toggle!(
+        "randomEntities",
+        "umicraft.options.randomEntities",
+        Quality,
+        quality.random_entities,
+        ReloadResources
+    ),
+    toggle!(
+        "customColors",
+        "umicraft.options.customColors",
+        Quality,
+        quality.custom_colors,
+        ReloadResources
+    ),
+    toggle!(
+        "naturalTextures",
+        "umicraft.options.naturalTextures",
+        Quality,
+        quality.natural_textures,
+        ReMesh
+    ),
+    toggle!(
+        "customItems",
+        "umicraft.options.customItems",
+        Quality,
+        quality.custom_items,
+        ReloadResources
+    ),
+    toggle!(
+        "customFonts",
+        "umicraft.options.customFonts",
+        Quality,
+        quality.custom_fonts,
+        ReloadResources
+    ),
+    toggle!(
+        "customGuis",
+        "umicraft.options.customGuis",
+        Quality,
+        quality.custom_guis,
+        ReloadResources
+    ),
     // Performance.
     toggle!(
         "caveCulling",
@@ -867,6 +917,14 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         "umicraft.options.animatedTerrain",
         Animations,
         animations.terrain,
+        Immediate,
+        all
+    ),
+    toggle!(
+        "animatedTextures",
+        "umicraft.options.animatedTextures",
+        Animations,
+        animations.textures,
         Immediate,
         all
     ),

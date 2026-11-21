@@ -14,7 +14,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use umicraft_render::CloudMode;
 
 use super::video_sections::{
-    lenient, AnimationOptions, DetailOptions, OtherOptions, PerformanceOptions, QualityOptions,
+    lenient, AnimationOptions, DetailOptions, OffFastFancy, OtherOptions, PerformanceOptions,
+    QualityOptions,
 };
 
 /// The render distance range, in chunks. Vanilla stops at 16; OptiFine, and
@@ -97,6 +98,10 @@ pub struct VideoOptions {
     /// cave visibility graph of ADR-0062). Off draws every section in the
     /// frustum, which is only useful to compare.
     pub cave_culling: bool,
+    /// Light carried by entities (OptiFine's Dynamic Lights): a held torch,
+    /// a burning mob. Off is vanilla; Fast updates the light less often than
+    /// Fancy.
+    pub dynamic_lights: OffFastFancy,
     /// `[video.details]`. The subsections come last: TOML writes plain
     /// values before tables.
     #[serde(deserialize_with = "lenient")]
@@ -204,6 +209,7 @@ impl Default for VideoOptions {
             entity_shadows: true,
             mesh_threads: 0,
             cave_culling: true,
+            dynamic_lights: OffFastFancy::Off,
             details: DetailOptions::default(),
             quality: QualityOptions::default(),
             animations: AnimationOptions::default(),

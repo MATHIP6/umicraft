@@ -264,6 +264,20 @@ pub struct QualityOptions {
     /// Packs may connect block textures with their `ctm/**` rules: Fast
     /// checks the four sides, Fancy also the corners.
     pub connected_textures: OffFastFancy,
+    /// Packs may give mobs alternative textures (`mob/**`, `random/**`).
+    pub random_entities: bool,
+    /// Packs may recolour blocks, sky, fog, water and text
+    /// (`color.properties`, `colormap/**`, `lightmap/**`).
+    pub custom_colors: bool,
+    /// Packs may turn and flip block textures per position
+    /// (`natural.properties`).
+    pub natural_textures: bool,
+    /// Packs may replace item textures by item, damage or NBT (`cit/**`).
+    pub custom_items: bool,
+    /// Packs may replace the fonts (`font/**`).
+    pub custom_fonts: bool,
+    /// Packs may replace container screens (`gui/container/**`).
+    pub custom_guis: bool,
 }
 
 impl Default for QualityOptions {
@@ -275,6 +289,12 @@ impl Default for QualityOptions {
             custom_sky: true,
             custom_entity_models: true,
             connected_textures: OffFastFancy::Fast,
+            random_entities: true,
+            custom_colors: true,
+            natural_textures: false,
+            custom_items: true,
+            custom_fonts: true,
+            custom_guis: true,
         }
     }
 }
@@ -316,6 +336,8 @@ pub struct AnimationOptions {
     pub dripping_particles: bool,
     /// Firework sparks.
     pub firework_particles: bool,
+    /// The texture animations of packs (`anim/*.properties`).
+    pub textures: bool,
 }
 
 impl Default for AnimationOptions {
@@ -337,6 +359,7 @@ impl Default for AnimationOptions {
             potion_particles: true,
             dripping_particles: true,
             firework_particles: true,
+            textures: true,
         }
     }
 }
