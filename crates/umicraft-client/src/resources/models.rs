@@ -18,10 +18,12 @@
 //! at runtime. No Mojang asset is embedded in this crate or copied into the
 //! repository/release.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use thiserror::Error;
 use umicraft_assets::{AssetsError, BlockAtlas, ClientResources};
+use umicraft_mesh::ctm::CtmTable;
 use umicraft_mesh::tint::BiomeTints;
 use umicraft_mesh::ModelMeshContext;
 use umicraft_model::{definitions, BlockModelSet, ModelError, ResourceSource};
@@ -217,16 +219,20 @@ impl ModelResources {
                 |temperature, rainfall| maps.foliage.sample(temperature, rainfall),
             ))
         });
+        let atlas = resources.atlas().layout().clone();
+        let ctm = ctm_table(packs, &atlas);
         let context = Arc::new(ModelMeshContext {
             models: Arc::clone(&models),
-            atlas: Arc::new(resources.atlas().layout().clone()),
+            atlas: Arc::new(atlas),
             tints,
+            ctm,
         });
         tracing::info!(
             blockstates = models.blockstate_count(),
             source_models = models.source_model_count(),
             layers = resources.atlas().layers(),
             biome_tints = context.tints.is_some(),
+            ctm_rules = context.ctm.as_ref().map_or(0, |table| table.len()),
             packs = packs.len(),
             "loaded 1.8 block models, atlas and resource packs"
         );
@@ -309,6 +315,51 @@ impl ModelResources {
 const MAX_DOCUMENT_RETRIES: usize = 16;
 
 /// Bakes the block and item models of `resources`.
+/// The pack-feature folders, lowest priority first within one pack.
+const FEATURE_FOLDERS: [&str; 2] = ["assets/minecraft/mcpatcher/", "assets/minecraft/optifine/"];
+
+/// Parses the `ctm/**/*.properties` files of `packs` (ascending priority) and
+/// resolves them against `atlas`. The higher pack wins for one relative path,
+/// and within a pack `optifine/` wins over `mcpatcher/`, as
+/// [`umicraft_assets::PackFiles::feature`] does. `None` when no rule is left.
+///
+/// It reads the packs in place instead of going through `PackFiles`, which
+/// would copy every kept file.
+fn ctm_table(
+    packs: &[umicraft_assets::ResourcePack],
+    atlas: &umicraft_model::AtlasLayout,
+) -> Option<Arc<CtmTable>> {
+    let mut files: BTreeMap<&str, &[u8]> = BTreeMap::new();
+    for pack in packs {
+        for (path, bytes) in pack.files() {
+            let relative = FEATURE_FOLDERS
+                .iter()
+                .find_map(|folder| path.strip_prefix(folder))
+                .filter(|relative| relative.starts_with("ctm/"));
+            if let Some(relative) = relative {
+                // `pack.files()` is sorted, so `mcpatcher/` is inserted
+                // before `optifine/` and the later one replaces it.
+                files.insert(relative, bytes);
+            }
+        }
+    }
+    if files.is_empty() {
+        return None;
+    }
+    let rules = umicraft_packext::ctm::parse_rules(files, &block_id);
+    CtmTable::build(&rules, atlas, &umicraft_game::debug_f3::biomes::biome_name).map(Arc::new)
+}
+
+/// The id of the block called `name` (`minecraft:glass`); other domains name
+/// no block.
+fn block_id(name: &str) -> Option<u16> {
+    let name = name.strip_prefix("minecraft:")?;
+    definitions()
+        .iter()
+        .find(|definition| definition.name == name)
+        .map(|definition| definition.id)
+}
+
 fn bake(resources: &ClientResources) -> Result<(BlockModelSet, ItemResources), ModelError> {
     Ok((
         BlockModelSet::build(resources, definitions())?,

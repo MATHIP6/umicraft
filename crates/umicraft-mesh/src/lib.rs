@@ -65,6 +65,7 @@ mod better_grass;
 mod better_snow;
 mod block_entity;
 pub mod climate;
+pub mod ctm;
 mod face;
 mod flower_pot;
 pub mod fluid;
@@ -88,7 +89,7 @@ pub use lighting::Lighting;
 pub use mesh::{Mesh, SectionSpan, VertexSpan};
 pub use models::{mesh_chunk_with_models, mesh_chunk_with_settings, ModelMeshContext};
 pub use moving::{push_moving_block, push_piston_head, PistonHead};
-pub use settings::{BetterGrass, Leaves, MeshSettings};
+pub use settings::{BetterGrass, ConnectedTextures, Leaves, MeshSettings};
 pub use source::{BlockSource, ChunkSnapshot};
 pub use vertex::{Vertex, VertexLight};
 

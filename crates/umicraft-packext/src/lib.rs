@@ -20,11 +20,13 @@
 //! Features:
 //! - [`sky`]: custom sky layers;
 //! - [`cem`]: custom entity models (`.jem`/`.jpm`) and their animation
-//!   expressions.
+//!   expressions;
+//! - [`ctm`]: connected textures.
 //!
 //! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
 
 pub mod cem;
+pub mod ctm;
 pub mod filters;
 pub mod properties;
 pub mod ranges;

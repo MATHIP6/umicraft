@@ -413,6 +413,7 @@ mod tests {
                 models: Arc::new(models),
                 atlas: Arc::new(layout),
                 tints: None,
+                ctm: None,
             }),
             gui_atlas: GuiAtlas::empty(),
             glint: None,

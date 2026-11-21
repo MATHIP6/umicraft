@@ -1,6 +1,6 @@
 # F6: pack features and OptiFine-style video settings: plan
 
-Status: **phases 0, 1, 2, 4 and 5 done**; phases 3 and 6 in progress, then 7. Branch `feat/optifine-features`.
+Status: **phases 0, 1, 2, 4, 5 and 6 done**; phase 3 merging, then 7. Branch `feat/optifine-features`.
 Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 (reference policy) and ADR-0089 (architecture). Roadmap entry: F6.
 
@@ -122,10 +122,10 @@ CEM mob yet (the tests check the produced layers).
 
 | Step | Content | Done when |
 |---|---|---|
-| 6.1 | `packext::ctm` parsing. Keys: `matchBlocks`, `matchTiles`, `metadata`, `method`, `tiles` (ranges and paths), `connect`, `faces`, `biomes`, `heights`, `width` / `height`, `weights`, `symmetry`, `linked` | Unit tests |
-| 6.2 | Methods `ctm` (the 47-tile table), `horizontal`, `vertical`, `h+v`, `v+h`, `top`, `random`, `repeat`, `fixed` | One table test per method |
-| 6.3 | Tiles added to the block atlas or `hires_blocks`; tile chosen per quad in the mesher through `BlockSource` | Mesh bench before and after; screenshot |
-| 6.4 | Option Off/Fast/Fancy (default Fast) | |
+| 6.1 | `packext::ctm` parsing. Keys: `matchBlocks`, `matchTiles`, `metadata`, `method`, `tiles` (ranges and paths), `connect`, `faces`, `biomes`, `heights`, `width` / `height`, `weights`, `symmetry`, `linked` (**done**) | Unit tests |
+| 6.2 | Methods `ctm` (the 47-tile table), `horizontal`, `vertical`, `h+v`, `v+h`, `top`, `random`, `repeat`, `fixed` (**done**) | One table test per method |
+| 6.3 | Tiles added to the block atlas or `hires_blocks`; tile chosen per quad in the mesher through `BlockSource` (**done**) | Mesh bench before and after; screenshot |
+| 6.4 | Option Off/Fast/Fancy (default Fast) (**done**) | |
 
 ### Phase 7: remaining pack features (one sub-phase each)
 

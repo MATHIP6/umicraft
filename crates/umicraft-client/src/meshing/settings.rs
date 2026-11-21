@@ -9,7 +9,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use umicraft_mesh::{BetterGrass, Leaves, Lighting, MeshSettings};
+use umicraft_mesh::{BetterGrass, ConnectedTextures, Leaves, Lighting, MeshSettings};
 
 use crate::options::video_sections::{LeavesMode, OffFastFancy};
 use crate::options::{VideoOptions, MAX_SMOOTH_LIGHTING};
@@ -25,10 +25,13 @@ static LEAVES: AtomicU8 = AtomicU8::new(LEAVES_SMART);
 static SWAMP_COLORS: AtomicBool = AtomicBool::new(true);
 /// The `Smooth Biomes` option the workers mesh with.
 static SMOOTH_BIOMES: AtomicBool = AtomicBool::new(true);
-/// The `Better Grass` option, as [`grass_to_u8`] encodes it.
+/// The `Better Grass` option, as [`choice_to_u8`] encodes it.
 static BETTER_GRASS: AtomicU8 = AtomicU8::new(0);
 /// The `Better Snow` option the workers mesh with.
 static BETTER_SNOW: AtomicBool = AtomicBool::new(false);
+
+/// The `Connected Textures` option, as [`choice_to_u8`] encodes it.
+static CONNECTED_TEXTURES: AtomicU8 = AtomicU8::new(1);
 
 const LEAVES_FAST: u8 = 0;
 const LEAVES_SMART: u8 = 1;
@@ -50,7 +53,7 @@ const fn leaves_from_u8(value: u8) -> Leaves {
     }
 }
 
-const fn grass_to_u8(choice: OffFastFancy) -> u8 {
+const fn choice_to_u8(choice: OffFastFancy) -> u8 {
     match choice {
         OffFastFancy::Off => 0,
         OffFastFancy::Fast => 1,
@@ -66,6 +69,14 @@ const fn grass_from_u8(value: u8) -> BetterGrass {
     }
 }
 
+const fn connected_from_u8(value: u8) -> ConnectedTextures {
+    match value {
+        1 => ConnectedTextures::Fast,
+        2 => ConnectedTextures::Fancy,
+        _ => ConnectedTextures::Off,
+    }
+}
+
 /// Stores the mesh-affecting options of `video`. Whether to re-mesh is
 /// decided by the option table (`video_spec`, `Effect::ReMesh`).
 pub fn store(video: &VideoOptions) {
@@ -75,8 +86,12 @@ pub fn store(video: &VideoOptions) {
     LEAVES.store(leaves_to_u8(leaves), Ordering::Relaxed);
     SWAMP_COLORS.store(video.details.swamp_colors, Ordering::Relaxed);
     SMOOTH_BIOMES.store(video.details.smooth_biomes, Ordering::Relaxed);
-    BETTER_GRASS.store(grass_to_u8(video.quality.better_grass), Ordering::Relaxed);
+    BETTER_GRASS.store(choice_to_u8(video.quality.better_grass), Ordering::Relaxed);
     BETTER_SNOW.store(video.quality.better_snow, Ordering::Relaxed);
+    CONNECTED_TEXTURES.store(
+        choice_to_u8(video.quality.connected_textures),
+        Ordering::Relaxed,
+    );
 }
 
 /// The settings the mesh workers use right now.
@@ -90,6 +105,7 @@ pub fn current() -> MeshSettings {
         smooth_biomes: SMOOTH_BIOMES.load(Ordering::Relaxed),
         better_grass: grass_from_u8(BETTER_GRASS.load(Ordering::Relaxed)),
         better_snow: BETTER_SNOW.load(Ordering::Relaxed),
+        connected_textures: connected_from_u8(CONNECTED_TEXTURES.load(Ordering::Relaxed)),
     }
 }
 
@@ -105,6 +121,7 @@ mod tests {
             current(),
             MeshSettings {
                 leaves: Leaves::Smart,
+                connected_textures: ConnectedTextures::Fast,
                 ..MeshSettings::default()
             }
         );
@@ -134,7 +151,14 @@ mod tests {
             (OffFastFancy::Fast, BetterGrass::Fast),
             (OffFastFancy::Fancy, BetterGrass::Fancy),
         ] {
-            assert_eq!(grass_from_u8(grass_to_u8(choice)), expected);
+            assert_eq!(grass_from_u8(choice_to_u8(choice)), expected);
+        }
+        for (choice, expected) in [
+            (OffFastFancy::Off, ConnectedTextures::Off),
+            (OffFastFancy::Fast, ConnectedTextures::Fast),
+            (OffFastFancy::Fancy, ConnectedTextures::Fancy),
+        ] {
+            assert_eq!(connected_from_u8(choice_to_u8(choice)), expected);
         }
     }
 }

@@ -435,6 +435,12 @@ impl ClientResources {
                     raw_colormaps.insert(path.clone(), bytes.clone());
                 } else if is_gui_texture(path) {
                     raw_gui.insert(path.clone(), bytes.clone());
+                } else if let Some(tile) = ctm_tile_path(path) {
+                    if has_texture_shape(bytes) {
+                        files.insert(tile, bytes.clone());
+                    } else {
+                        tracing::warn!(pack = pack.id(), path, "ignoring an invalid CTM tile");
+                    }
                 } else if texture_key(path).is_some() {
                     // A texture of the wrong shape would fail the whole load:
                     // keep the one underneath instead.
@@ -662,6 +668,23 @@ fn is_json_resource(path: &str) -> bool {
 fn is_texture_metadata(path: &str) -> bool {
     path.ends_with(".mcmeta")
         && (path.starts_with(BLOCK_TEXTURES_PREFIX) || path.starts_with(ITEM_TEXTURES_PREFIX))
+}
+
+/// The pack-feature folders that may hold connected-texture tiles.
+const CTM_FOLDERS: [&str; 2] = ["assets/minecraft/optifine/", "assets/minecraft/mcpatcher/"];
+
+/// Where a connected-texture tile PNG joins the block textures: a pack file
+/// `optifine/ctm/glass/0.png` (or `mcpatcher/`) becomes the block texture
+/// `textures/blocks/ctm/glass/0.png`, so it gets the atlas key
+/// `blocks/ctm/glass/0` that the CTM rules name (ADR-0089). `None` for any
+/// other path. Within one pack `optifine/` wins over `mcpatcher/` because the
+/// map is sorted and the later insert replaces the earlier one.
+fn ctm_tile_path(path: &str) -> Option<String> {
+    let relative = CTM_FOLDERS
+        .iter()
+        .find_map(|folder| path.strip_prefix(folder))?;
+    (relative.starts_with("ctm/") && relative.ends_with(".png"))
+        .then(|| format!("{BLOCK_TEXTURES_PREFIX}{relative}"))
 }
 
 /// The atlas key of a block or item PNG, or `None` for any other path.
@@ -1109,6 +1132,30 @@ mod tests {
         );
         assert_eq!(
             texture_key("assets/minecraft/models/block/stone.json"),
+            None
+        );
+    }
+
+    #[test]
+    fn ctm_tiles_map_to_block_texture_paths() {
+        assert_eq!(
+            ctm_tile_path("assets/minecraft/optifine/ctm/glass/0.png").as_deref(),
+            Some("assets/minecraft/textures/blocks/ctm/glass/0.png")
+        );
+        assert_eq!(
+            ctm_tile_path("assets/minecraft/mcpatcher/ctm/glass/0.png").as_deref(),
+            Some("assets/minecraft/textures/blocks/ctm/glass/0.png")
+        );
+        assert_eq!(
+            texture_key("assets/minecraft/textures/blocks/ctm/glass/0.png").as_deref(),
+            Some("blocks/ctm/glass/0")
+        );
+        assert_eq!(
+            ctm_tile_path("assets/minecraft/optifine/ctm/glass.properties"),
+            None
+        );
+        assert_eq!(
+            ctm_tile_path("assets/minecraft/optifine/sky/world0/sky1.png"),
             None
         );
     }

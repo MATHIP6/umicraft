@@ -94,3 +94,4 @@ Four gaps exist today:
   culling (`cave_culling`, new) and the mesh threads, until then file-only,
   are on the Performance page. Option tooltips use the language keys
   `umicraft.options.tooltip.<id>.N`, with original texts.
+- 2026-11-21 (phases 4 to 6): custom sky textures are uploaded as their own sky images and drawn by one pre-built pipeline per blend mode; CEM textures use `TextureSlot::Cem(i)` and a replaced part keeps the vanilla motion (rest pose plus the vanilla delta); CTM tiles join the block atlas as `blocks/ctm/<dir>/<n>` and `ModelMeshContext` carries the resolved `CtmTable`.

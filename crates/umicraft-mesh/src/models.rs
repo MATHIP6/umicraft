@@ -41,9 +41,10 @@ use crate::fluid::{self, FluidLayers};
 use crate::actual_state;
 use crate::better_grass::{self, SideTexture};
 use crate::better_snow;
+use crate::ctm::{self, CtmTable};
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, mesh_sections, occludes};
 use crate::lighting::{quad_light, Lighting};
-use crate::settings::{base_variant, Leaves, MeshSettings};
+use crate::settings::{base_variant, ConnectedTextures, Leaves, MeshSettings};
 use crate::{tint, BlockEntityKind, BlockEntityRef, BlockSource, Mesh, Vertex};
 
 /// The baked models and the texture layers the model mesher reads.
@@ -64,6 +65,8 @@ pub struct ModelMeshContext {
     pub atlas: Arc<AtlasLayout>,
     /// Per-biome grass/foliage/water colours, or `None` for untinted output.
     pub tints: Option<Arc<tint::BiomeTints>>,
+    /// The resolved connected-texture rules, or `None` when no pack has any.
+    pub ctm: Option<Arc<CtmTable>>,
 }
 
 /// Builds the mesh for one chunk column from baked block models.
@@ -397,7 +400,19 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
             },
             None => (quad.texture.as_str(), quad.tint.is_some()),
         };
-        let layer = context.atlas.layer(texture).unwrap_or(0);
+        let mut layer = context.atlas.layer(texture).unwrap_or(0);
+        if let Some(table) = context.ctm.as_deref() {
+            let mode = placement.settings.connected_textures;
+            if mode != ConnectedTextures::Off {
+                let fancy = mode == ConnectedTextures::Fancy;
+                let site = ctm::Site {
+                    position,
+                    state,
+                    quad,
+                };
+                layer = ctm::connected_layer(source, context, table, site, layer, fancy);
+            }
+        }
         let tint = if tinted {
             *block_tint.get_or_insert_with(|| {
                 tint::state_tint(

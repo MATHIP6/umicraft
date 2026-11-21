@@ -7,10 +7,11 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use umicraft_mesh::ctm::CtmTable;
 use umicraft_mesh::tint::BiomeTints;
 use umicraft_mesh::{
-    mesh_chunk, mesh_chunk_with_models, mesh_chunk_with_settings, ChunkSnapshot, Leaves,
-    MeshSettings, ModelMeshContext,
+    mesh_chunk, mesh_chunk_with_models, mesh_chunk_with_settings, ChunkSnapshot, ConnectedTextures,
+    Leaves, MeshSettings, ModelMeshContext,
 };
 use umicraft_model::{
     AtlasLayout, BlockDefinition, BlockModelSet, ModelError, ModelResult, ResourceSource, StateDef,
@@ -106,6 +107,7 @@ fn model_context() -> ModelMeshContext {
         models: Arc::new(set),
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/stone"])),
         tints: None,
+        ctm: None,
     }
 }
 
@@ -283,6 +285,7 @@ fn dense_grass() -> DenseGrass {
                     |_, _| [0x59, 0xAE, 0x30],
                 ))
             }),
+            ctm: None,
         }
     };
     let plain = model_context(false);
@@ -396,6 +399,7 @@ fn mesh_leaves_modes(criterion: &mut Criterion) {
         ),
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/leaves"])),
         tints: None,
+        ctm: None,
     };
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     for y in 0..16 {
@@ -431,6 +435,76 @@ fn mesh_leaves_modes(criterion: &mut Criterion) {
     }
 }
 
+/// Phase 6: a column of dirt planes with air between them, so every plane
+/// exposes two full faces. The variants compare the mesher with no connected
+/// textures, a table whose rule is for another block (the fast path), and a
+/// rule that matches every face in Fast and Fancy.
+fn mesh_connected_textures(criterion: &mut Criterion) {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/dirt").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let models = Arc::new(
+        BlockModelSet::build(&Memory(files), CUBE_DEFS)
+            .expect("the synthetic connected-texture model set must build"),
+    );
+    let tiles = (0..47).map(|n| format!("blocks/ctm/dirt/{n}"));
+    let atlas = Arc::new(AtlasLayout::from_keys(
+        tiles.chain(["blocks/dirt".to_string()]),
+    ));
+    let table = |block: u16| {
+        let text = format!("matchBlocks={block}\nmethod=ctm\ntiles=0-46\n");
+        let rules = umicraft_packext::ctm::parse_rules(
+            [("ctm/dirt/dirt.properties", text.as_bytes())],
+            &|_| None,
+        );
+        CtmTable::build(&rules, &atlas, &|_| None).map(Arc::new)
+    };
+    let context = |ctm| ModelMeshContext {
+        models: Arc::clone(&models),
+        atlas: Arc::clone(&atlas),
+        tints: None,
+        ctm,
+    };
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in (0..16).step_by(2) {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(3, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    let variants = [
+        ("none", context(None), ConnectedTextures::Fancy),
+        ("off", context(table(3)), ConnectedTextures::Off),
+        ("other_block", context(table(7)), ConnectedTextures::Fancy),
+        ("fast", context(table(3)), ConnectedTextures::Fast),
+        ("fancy", context(table(3)), ConnectedTextures::Fancy),
+    ];
+    for (name, context, mode) in variants {
+        let settings = MeshSettings {
+            connected_textures: mode,
+            ..MeshSettings::default()
+        };
+        criterion.bench_function(&format!("mesh/ctm_{name}"), |bencher| {
+            bencher.iter(|| {
+                black_box(mesh_chunk_with_settings(
+                    ChunkPos::new(0, 0),
+                    black_box(&snapshot),
+                    black_box(&context),
+                    settings,
+                ))
+            });
+        });
+    }
+}
+
 criterion_group!(
     benches,
     mesh_flat_chunk,
@@ -441,6 +515,7 @@ criterion_group!(
     mesh_dense_tinted_grass,
     mesh_lit_cave,
     mesh_water_checkerboard,
-    mesh_leaves_modes
+    mesh_leaves_modes,
+    mesh_connected_textures
 );
 criterion_main!(benches);
