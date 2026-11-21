@@ -17,6 +17,7 @@ use super::startup::upload_sky_textures;
 use super::App;
 use crate::discord::Status;
 use crate::error::ClientError;
+use crate::resources::game_files::GameFiles;
 use crate::resources::ui_font::{self};
 use crate::screens::Screen;
 
@@ -100,7 +101,8 @@ impl ApplicationHandler for App {
 
         // Minimal procedural fallback setup & sky textures for instant responsive frame
         renderer.use_procedural_blocks();
-        upload_sky_textures(&mut renderer);
+        // The packs are not loaded yet: the jar's sky until they are.
+        upload_sky_textures(&mut renderer, &GameFiles::jar_only());
 
         self.renderer = Some(renderer);
         self.window = Some(window.clone());

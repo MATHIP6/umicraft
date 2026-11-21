@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use umicraft_ui::FontAtlas;
 
+use crate::resources::game_files::GameFiles;
 use crate::resources::item_icons::ItemResources;
 use crate::resources::texture_animator::TextureAnimator;
 use crate::resources::theme_font::FontChoice;
@@ -19,6 +20,9 @@ use crate::window::startup::AsyncLoadedAssets;
 pub(in crate::window) struct Assets {
     /// The font loaded at startup, before the renderer exists.
     pub(in crate::window) font: LoadedFont,
+    /// The active packs over the jar, which the sky, entity and map
+    /// textures are read from.
+    pub(in crate::window) files: GameFiles,
     /// Background asset loader channel receiver.
     pub(in crate::window) receiver: Option<std::sync::mpsc::Receiver<AsyncLoadedAssets>>,
     /// The atlas the renderer accepted; the UI metrics must match it.

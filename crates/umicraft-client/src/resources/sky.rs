@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The sky pictures of the user's client jar (P7e).
+//! The sky pictures of the active packs and the user's client jar (P7e).
 //!
 //! `sun.png`, `moon_phases.png`, `end_sky.png`, `clouds.png`, `rain.png`, `snow.png`, the particle sheet
-//! and the overlay pictures (`underwater.png`, `pumpkinblur.png`, `vignette.png`) are read at runtime from the
-//! verified jar and never stored in the repository (spec §3). A picture the jar
-//! lacks, or that does not decode, stays `None` and the renderer draws its
-//! original stand-in.
+//! and the overlay pictures (`underwater.png`, `pumpkinblur.png`, `vignette.png`) are read at runtime
+//! through [`GameFiles`] (packs first, then the verified jar) and never stored in the repository
+//! (spec §3). A picture that neither has, or that does not decode, stays `None` and the renderer
+//! draws its original stand-in.
 
-use umicraft_assets::client_jar::ClientJar;
-use umicraft_assets::skin::decode_png_bytes;
 use umicraft_render::{SkyImage, SkyTextures};
+
+use super::game_files::GameFiles;
 
 /// Jar path of the sun.
 const SUN: &str = "assets/minecraft/textures/environment/sun.png";
@@ -25,10 +25,9 @@ const CLOUDS: &str = "assets/minecraft/textures/environment/clouds.png";
 /// Jar path of the world border's force field.
 const FORCEFIELD: &str = "assets/minecraft/textures/misc/forcefield.png";
 
-/// Reads and decodes one picture of `jar`; `None` when absent or malformed.
-fn read_image(jar: Option<&ClientJar>, path: &str) -> Option<SkyImage> {
-    let bytes = jar?.read_entry(path).ok()?;
-    let (rgba, width, height) = decode_png_bytes(&bytes).ok()?;
+/// Reads and decodes one picture; `None` when absent or malformed.
+fn read_image(files: &GameFiles, path: &str) -> Option<SkyImage> {
+    let (rgba, width, height) = files.read_png(path)?;
     Some(SkyImage {
         width,
         height,
@@ -36,11 +35,11 @@ fn read_image(jar: Option<&ClientJar>, path: &str) -> Option<SkyImage> {
     })
 }
 
-/// Reads the world border picture of `jar`; `None` keeps the renderer's
-/// original fallback.
+/// Reads the world border picture; `None` keeps the renderer's original
+/// fallback.
 #[must_use]
-pub fn load_border_texture(jar: Option<&ClientJar>) -> Option<SkyImage> {
-    read_image(jar, FORCEFIELD)
+pub fn load_border_texture(files: &GameFiles) -> Option<SkyImage> {
+    read_image(files, FORCEFIELD)
 }
 
 /// Jar path of the rain streaks.
@@ -58,10 +57,10 @@ const PUMPKIN_BLUR: &str = "assets/minecraft/textures/misc/pumpkinblur.png";
 /// Jar path of the shade of the screen edges.
 const VIGNETTE: &str = "assets/minecraft/textures/misc/vignette.png";
 
-/// Reads the sky pictures of `jar`; every missing or undecodable one is `None`.
+/// Reads the sky pictures; every missing or undecodable one is `None`.
 #[must_use]
-pub fn load_sky_textures(jar: Option<&ClientJar>) -> SkyTextures {
-    let read = |path: &str| read_image(jar, path);
+pub fn load_sky_textures(files: &GameFiles) -> SkyTextures {
+    let read = |path: &str| read_image(files, path);
     SkyTextures {
         sun: read(SUN),
         moon_phases: read(MOON_PHASES),
@@ -82,7 +81,7 @@ mod tests {
 
     #[test]
     fn without_a_jar_every_picture_is_left_to_the_fallback() {
-        let textures = load_sky_textures(None);
+        let textures = load_sky_textures(&GameFiles::default());
         assert!(textures.sun.is_none());
         assert!(textures.moon_phases.is_none());
         assert!(textures.end_sky.is_none());
@@ -93,6 +92,22 @@ mod tests {
         assert!(textures.underwater.is_none());
         assert!(textures.pumpkin_blur.is_none());
         assert!(textures.vignette.is_none());
-        assert!(load_border_texture(None).is_none());
+        assert!(load_border_texture(&GameFiles::default()).is_none());
+    }
+
+    /// Regression: the sky pictures were read from the jar alone, so a pack's
+    /// `sun.png` was ignored.
+    #[test]
+    fn a_pack_sun_is_used() {
+        let files = crate::resources::game_files::test_support::files_with(
+            SUN,
+            crate::resources::game_files::test_support::png(32, 32),
+        );
+        let textures = load_sky_textures(&files);
+        assert_eq!(
+            textures.sun.map(|sun| (sun.width, sun.height)),
+            Some((32, 32))
+        );
+        assert!(textures.moon_phases.is_none());
     }
 }

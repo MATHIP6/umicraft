@@ -12,7 +12,9 @@ use std::sync::Arc;
 use winit::event::{ElementState, KeyEvent, MouseButton};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use super::startup::{upload_glint_texture, upload_gui_atlas, upload_sky_textures};
+use super::startup::{
+    load_packs_and_terrain, upload_glint_texture, upload_gui_atlas, upload_sky_textures,
+};
 use super::App;
 use crate::game::GameEvent;
 use crate::hud::dials::DialAnimator;
@@ -20,7 +22,6 @@ use crate::language;
 use crate::meshing::pool::worker_count;
 use crate::options::effects::{open_folder, pack_paths, packs_folder, ServerSettings};
 use crate::options::Binding;
-use crate::resources::terrain::TerrainTextures;
 use crate::resources::texture_animator::TextureAnimator;
 use crate::scene::entity::EntityTextures;
 use crate::scene::map::MapTextures;
@@ -180,12 +181,13 @@ impl App {
     /// re-meshing all loaded chunk columns.
     pub(super) fn reload_resources(&mut self) {
         tracing::info!("reloading resource packs...");
-        let terrain = TerrainTextures::load_with_packs(&pack_paths(
+        let (terrain, files) = load_packs_and_terrain(&pack_paths(
             &self.args.resource_packs,
             &self.options,
             packs_folder().as_deref(),
             self.server_pack.active_path(),
         ));
+        self.assets.files = files;
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -196,7 +198,7 @@ impl App {
         upload_gui_atlas(renderer, Some(&gui_atlas));
         self.options_menu.screen.assign_pack_icon_sheets(&gui_atlas);
         upload_glint_texture(renderer, installed.glint_texture());
-        upload_sky_textures(renderer);
+        upload_sky_textures(renderer, &self.assets.files);
         self.assets.gui_atlas = Some(gui_atlas);
         self.hud_cache.invalidate();
         self.server_icons_revision = u64::MAX;
@@ -206,8 +208,9 @@ impl App {
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
             self.assets.ui_atlas.as_ref(),
+            self.assets.files.clone(),
         ));
-        self.assets.map_textures = Some(MapTextures::load(renderer));
+        self.assets.map_textures = Some(MapTextures::load(renderer, &self.assets.files));
         if let Some(world) = self.world.as_mut() {
             world.reload_terrain(
                 &installed,

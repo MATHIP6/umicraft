@@ -112,10 +112,11 @@ pub enum TerrainTextures {
 }
 
 impl TerrainTextures {
-    /// Loads the official set with optional resource packs, or falls back to procedural.
+    /// Loads the official set with the loaded resource `packs` (ascending
+    /// priority), or falls back to procedural.
     #[must_use]
-    pub fn load_with_packs(paths: &[std::path::PathBuf]) -> Self {
-        match ModelResources::load_with_pack_paths(paths) {
+    pub fn from_packs(packs: &[umicraft_assets::ResourcePack]) -> Self {
+        match ModelResources::load_with_packs(packs) {
             Ok(resources) => Self::official(&resources),
             Err(error) => {
                 tracing::warn!(
@@ -154,7 +155,7 @@ impl TerrainTextures {
     /// environment, or picks the procedural set with exactly one warning.
     #[must_use]
     pub fn load() -> Self {
-        Self::load_with_packs(&[])
+        Self::from_packs(&[])
     }
 
     /// The official set of already loaded resources.

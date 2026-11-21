@@ -1543,32 +1543,30 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
     camera.set_aspect(args.width, args.height);
 
     // Look for verified official jar
-    let verified_jar = crate::resources::official::find_verified_jar().ok();
-    let is_official = verified_jar.is_some();
+    let files = crate::resources::game_files::GameFiles::jar_only();
+    let is_official = files.has_jar();
 
     if let Some(snapshots) = all_mobs {
         let entity_textures = EntityTextures::load(&renderer);
         entity_textures.mesh_and_upload(&snapshots, &mut renderer);
     } else {
         // 1. Steve texture
-        let (steve_rgba, sw, sh) = load_or_fallback(
-            verified_jar.as_ref(),
-            "assets/minecraft/textures/entity/steve.png",
-            || (procedural_fallback_skin(SkinModel::Classic), 64, 64),
-        );
+        let (steve_rgba, sw, sh) =
+            load_or_fallback(&files, "assets/minecraft/textures/entity/steve.png", || {
+                (procedural_fallback_skin(SkinModel::Classic), 64, 64)
+            });
         let steve_tex = renderer.create_entity_texture(&steve_rgba, sw, sh);
 
         // 2. Alex texture
-        let (alex_rgba, aw, ah) = load_or_fallback(
-            verified_jar.as_ref(),
-            "assets/minecraft/textures/entity/alex.png",
-            || (procedural_fallback_skin(SkinModel::Slim), 64, 64),
-        );
+        let (alex_rgba, aw, ah) =
+            load_or_fallback(&files, "assets/minecraft/textures/entity/alex.png", || {
+                (procedural_fallback_skin(SkinModel::Slim), 64, 64)
+            });
         let alex_tex = renderer.create_entity_texture(&alex_rgba, aw, ah);
 
         // 3. Zombie texture
         let (zombie_rgba, zw, zh) = load_or_fallback(
-            verified_jar.as_ref(),
+            &files,
             "assets/minecraft/textures/entity/zombie/zombie.png",
             || (procedural_zombie_skin(), 64, 64),
         );
@@ -1576,18 +1574,17 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
         // 4. Cow texture (64×32)
         let (cow_rgba, cw, ch) = load_or_fallback(
-            verified_jar.as_ref(),
+            &files,
             "assets/minecraft/textures/entity/cow/cow.png",
             || (procedural_cow_texture(), 64, 32),
         );
         let cow_tex = renderer.create_entity_texture(&cow_rgba, cw, ch);
 
         // 5. Dropped item texture (dirt 16×16)
-        let (item_rgba, iw, ih) = load_or_fallback(
-            verified_jar.as_ref(),
-            "assets/minecraft/textures/blocks/dirt.png",
-            || (procedural_dirt_texture(), 16, 16),
-        );
+        let (item_rgba, iw, ih) =
+            load_or_fallback(&files, "assets/minecraft/textures/blocks/dirt.png", || {
+                (procedural_dirt_texture(), 16, 16)
+            });
         let item_tex = renderer.create_entity_texture(&item_rgba, iw, ih);
 
         // Upload distinct batches so each entity uses its own texture bind group

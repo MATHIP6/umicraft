@@ -16,8 +16,8 @@ mod geometry;
 
 use std::collections::HashMap;
 
+use crate::resources::game_files::GameFiles;
 use glam::{Mat4, Vec3};
-use umicraft_assets::client_jar::ClientJar;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_game::hand::HandPose;
 use umicraft_game::server::maps::{MapData, MapStore};
@@ -68,20 +68,15 @@ pub struct MapTextures {
 }
 
 impl MapTextures {
-    /// Loads the paper and the marker sheet from the official jar, with a
-    /// plain paper colour and no markers when the jar is missing.
+    /// Loads the paper and the marker sheet from `files` (packs, then the
+    /// jar), with a plain paper colour and no markers when neither has them.
     #[must_use]
-    pub fn load(renderer: &Renderer) -> Self {
-        let jar = crate::resources::official::find_verified_jar().ok();
-        Self::from_jar(jar.as_ref(), renderer)
-    }
-
-    fn from_jar(jar: Option<&ClientJar>, renderer: &Renderer) -> Self {
+    pub fn load(renderer: &Renderer, files: &GameFiles) -> Self {
         let paper = || (vec![214, 190, 140, 255], 1, 1);
         let nothing = || (vec![0, 0, 0, 0], 1, 1);
-        let (rgba, w, h) = load_or_fallback(jar, BACKGROUND_PATH, paper);
+        let (rgba, w, h) = load_or_fallback(files, BACKGROUND_PATH, paper);
         let background = renderer.create_entity_texture(&rgba, w, h);
-        let (rgba, w, h) = load_or_fallback(jar, ICONS_PATH, nothing);
+        let (rgba, w, h) = load_or_fallback(files, ICONS_PATH, nothing);
         let icons = renderer.create_entity_texture(&rgba, w, h);
         Self {
             background,

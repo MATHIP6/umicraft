@@ -509,3 +509,5 @@ no code taken). Each row names the document or the class.
 
 | Date | Area | Source | Notes |
 |---|---|---|---|
+| 2026-11-21 | Feature folders | decompiled OptiFine 1.8.9 (`ResUtils`, `CustomSky`, `ConnectedTextures`: `mcpatcher/` only); public OptiFineDoc (`optifine/` is the current folder, `mcpatcher/` still read) | `PackFiles::feature` tries `optifine/` then `mcpatcher/` within each pack, highest pack first (our order). |
+| 2026-11-21 | Pack over jar for sky and entity textures | MCP 1.8.8 `FallbackResourceManager.getResource` (top pack first, default pack last) | `GameFiles` reads the packs, then the jar; a pack picture that does not decode falls through. |

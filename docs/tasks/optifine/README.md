@@ -1,6 +1,6 @@
 # F6: pack features and OptiFine-style video settings: plan
 
-Status: **plan written**, nothing implemented yet. Branch `feat/optifine-features`.
+Status: **phase 0 in progress** (0.1 to 0.4 done). Branch `feat/optifine-features`.
 Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 (reference policy) and ADR-0089 (architecture). Roadmap entry: F6.
 
@@ -37,9 +37,9 @@ Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 | Step | Content | Done when |
 |---|---|---|
 | 0.1 | ADR-0088, ADR-0089, this plan, ROADMAP F6 (**done**) | |
-| 0.2 | `PackFiles` view over the resource stack for `optifine/**`, `mcpatcher/**`, `textures/environment/**` and `textures/entity/**`, trying `optifine/` before `mcpatcher/` | Unit tests on the stack order and the folder precedence |
-| 0.3 | Sky, cloud and weather textures read through the packs (bug: jar only) | Regression test: a pack `sun.png` wins over the jar |
-| 0.4 | Entity textures read through the packs (verify first, fix if needed) | Regression test with a pack creeper texture |
+| 0.2 | `PackFiles` view over the resource stack for `optifine/**`, `mcpatcher/**`, `textures/environment/**` and `textures/entity/**`, trying `optifine/` before `mcpatcher/` (**done**) | Unit tests on the stack order and the folder precedence |
+| 0.3 | Sky, cloud and weather textures read through the packs (bug: jar only) (**done**) | Regression test: a pack `sun.png` wins over the jar |
+| 0.4 | Entity, armour, banner, horse and map textures read through the packs (they were jar only) (**done**) | Regression test with a pack armour texture |
 | 0.5 | `umicraft-packext` crate: `properties` (typed errors), `ranges` (`0-3 5`), `filters` (biomes, heights, weather) | Unit tests and a fuzz target for `properties` |
 
 ### Phase 1: video settings menu

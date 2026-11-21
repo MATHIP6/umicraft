@@ -4,9 +4,11 @@
 //! background and the textures uploaded once they arrive.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use umicraft_assets::PackFiles;
 use umicraft_core::lang::Lang;
 use umicraft_game::chat::{ChatInput, SentHistory};
 use umicraft_render::{Camera, HudState, Overlay, Renderer};
@@ -33,6 +35,7 @@ use crate::mods::zoom::Zoom;
 use crate::options::effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options::Options;
 use crate::resources::entity_icons::EntityIcons;
+use crate::resources::game_files::{load_packs, GameFiles};
 use crate::resources::panorama::load_panorama_faces;
 use crate::resources::sky::{load_border_texture, load_sky_textures};
 use crate::resources::terrain::TerrainTextures;
@@ -56,6 +59,17 @@ use crate::world_view::WorldView;
 pub(super) struct AsyncLoadedAssets {
     pub(super) font: LoadedFont,
     pub(super) terrain: TerrainTextures,
+    pub(super) files: GameFiles,
+}
+
+/// Reads the packs at `paths` once and builds from them both the terrain
+/// (atlases and models) and the [`GameFiles`] the other textures are read
+/// from, over the verified jar.
+pub(super) fn load_packs_and_terrain(paths: &[PathBuf]) -> (TerrainTextures, GameFiles) {
+    let packs = load_packs(paths);
+    let terrain = TerrainTextures::from_packs(&packs);
+    let jar = crate::resources::official::find_verified_jar().ok();
+    (terrain, GameFiles::new(PackFiles::from_packs(packs), jar))
 }
 
 /// Starts the thread that pings the saved servers. Without it the list still
@@ -101,10 +115,9 @@ pub(super) fn upload_gui_atlas(
 }
 
 /// Uploads the sun, moon and End sky pictures of the verified jar.
-pub(super) fn upload_sky_textures(renderer: &mut Renderer) {
-    let jar = crate::resources::official::find_verified_jar().ok();
-    renderer.set_sky_textures(&load_sky_textures(jar.as_ref()));
-    if let Some(forcefield) = load_border_texture(jar.as_ref()) {
+pub(super) fn upload_sky_textures(renderer: &mut Renderer, files: &GameFiles) {
+    renderer.set_sky_textures(&load_sky_textures(files));
+    if let Some(forcefield) = load_border_texture(files) {
         renderer.set_border_texture(&forcefield);
     }
 }
@@ -165,8 +178,12 @@ impl App {
             .name("AssetLoader".to_string())
             .spawn(move || {
                 let font = ui_font::load();
-                let terrain = TerrainTextures::load_with_packs(&packs);
-                let _ = asset_tx.send(AsyncLoadedAssets { font, terrain });
+                let (terrain, files) = load_packs_and_terrain(&packs);
+                let _ = asset_tx.send(AsyncLoadedAssets {
+                    font,
+                    terrain,
+                    files,
+                });
             });
         if let Err(error) = loader_thread {
             tracing::error!(%error, "Failed to spawn background asset loader thread");
@@ -236,6 +253,7 @@ impl App {
             assets: Assets {
                 font,
                 receiver: Some(asset_rx),
+                files: GameFiles::default(),
                 ui_atlas: None,
                 font_choice: FontChoice::Game,
                 brand_atlas: None,
@@ -347,7 +365,8 @@ impl App {
         let gui_atlas = crate::resources::official::grow_atlas(terrain.gui_atlas(), &[]);
         upload_gui_atlas(renderer, Some(&gui_atlas));
         upload_glint_texture(renderer, terrain.glint_texture());
-        upload_sky_textures(renderer);
+        self.assets.files = assets.files;
+        upload_sky_textures(renderer, &self.assets.files);
         self.panorama = upload_panorama(renderer);
         self.assets.gui_atlas = Some(gui_atlas);
         self.server_icons_revision = u64::MAX;
@@ -365,8 +384,9 @@ impl App {
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
             self.assets.ui_atlas.as_ref(),
+            self.assets.files.clone(),
         ));
-        self.assets.map_textures = Some(MapTextures::load(renderer));
+        self.assets.map_textures = Some(MapTextures::load(renderer, &self.assets.files));
 
         if self.screen == Screen::Loading {
             if self.args.server().is_some() {

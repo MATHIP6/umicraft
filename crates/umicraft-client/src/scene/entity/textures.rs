@@ -9,11 +9,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::resources::game_files::GameFiles;
 use crate::scene::block_entity::BannerDesign;
 use crate::scene::block_entity::{BannerDesigns, BlockEntityMeshes};
 use glam::{Mat4, Vec3};
-use umicraft_assets::client_jar::ClientJar;
-use umicraft_assets::skin::decode_png_bytes;
 use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_game::hand::HandPose;
 use umicraft_mesh::item::ItemMesh;
@@ -33,23 +32,13 @@ use super::skins::{SkinKind, SkinLookup, SkinSet};
 use super::specs::texture_specs;
 use crate::scene::map::{map_arm_vertices, MapBatch};
 
-/// Loads official textures from the jar if available, or falls back to procedural assets.
-pub fn load_or_fallback<F>(
-    jar: Option<&ClientJar>,
-    jar_path: &str,
-    fallback_fn: F,
-) -> (Vec<u8>, u32, u32)
+/// Loads the picture at `path` from the packs or the jar, or falls back to
+/// the procedural one.
+pub fn load_or_fallback<F>(files: &GameFiles, path: &str, fallback_fn: F) -> (Vec<u8>, u32, u32)
 where
     F: FnOnce() -> (Vec<u8>, u32, u32),
 {
-    if let Some(jar) = jar {
-        if let Ok(bytes) = jar.read_entry(jar_path) {
-            if let Ok(decoded) = decode_png_bytes(&bytes) {
-                return decoded;
-            }
-        }
-    }
-    fallback_fn()
+    files.read_png(path).unwrap_or_else(fallback_fn)
 }
 
 /// Procedural dirt texture (16×16) used as a clean-room fallback for dropped blocks.
@@ -86,8 +75,8 @@ fn needs_sign_font(current: Option<&Arc<FontAtlas>>, wanted: &Arc<FontAtlas>) ->
 pub struct EntityTextures {
     /// The textures of the table, and the horse coats seen so far.
     textures: RefCell<HashMap<TextureSlot, EntityTexture>>,
-    /// The jar the coats are composed from.
-    jar: Option<ClientJar>,
+    /// The packs and the jar the coats, armour and banners are composed from.
+    files: GameFiles,
     /// The skins and capes of players.
     skins: RefCell<SkinSet>,
     /// The third-party capes of players (ADR-0081).
@@ -123,13 +112,20 @@ pub struct EntityTextures {
 }
 
 impl EntityTextures {
-    /// Loads all entity textures from the verified jar or procedural fallbacks.
+    /// Loads all entity textures from the verified jar or procedural
+    /// fallbacks, without resource packs (demos and tests).
     #[must_use]
     pub fn load(renderer: &Renderer) -> Self {
-        let jar = crate::resources::official::find_verified_jar().ok();
+        Self::from_files(renderer, GameFiles::jar_only())
+    }
+
+    /// Loads all entity textures from `files` (packs, then the jar) or
+    /// procedural fallbacks.
+    #[must_use]
+    pub fn from_files(renderer: &Renderer, files: GameFiles) -> Self {
         let mut textures = HashMap::new();
         for spec in texture_specs() {
-            let (rgba, w, h) = load_or_fallback(jar.as_ref(), spec.jar_path, spec.fallback);
+            let (rgba, w, h) = load_or_fallback(&files, spec.jar_path, spec.fallback);
             // The glowing layers and the guardian beam scroll their
             // coordinates past the edge.
             let texture = if spec.slot.repeats() {
@@ -141,7 +137,7 @@ impl EntityTextures {
         }
         Self {
             textures: RefCell::new(textures),
-            jar,
+            files,
             skins: RefCell::new(SkinSet::new()),
             capes: RefCell::new(CapeSet::new()),
             banners: RefCell::default(),
@@ -159,10 +155,15 @@ impl EntityTextures {
         }
     }
 
-    /// [`Self::load`] plus the sign text texture of `font`, if there is one.
+    /// [`Self::from_files`] plus the sign text texture of `font`, if there is
+    /// one.
     #[must_use]
-    pub fn load_with_font(renderer: &Renderer, font: Option<&Arc<FontAtlas>>) -> Self {
-        let textures = Self::load(renderer);
+    pub fn load_with_font(
+        renderer: &Renderer,
+        font: Option<&Arc<FontAtlas>>,
+        files: GameFiles,
+    ) -> Self {
+        let textures = Self::from_files(renderer, files);
         if let Some(font) = font {
             textures.sync_sign_font(renderer, font);
         }
@@ -323,7 +324,7 @@ impl EntityTextures {
         self.banners.borrow_mut().ensure(
             &designs,
             &mut self.textures.borrow_mut(),
-            self.jar.as_ref(),
+            &self.files,
             renderer,
         );
     }
@@ -509,12 +510,13 @@ impl EntityTextures {
                 continue;
             }
             let (rgba, w, h) = match *slot {
-                TextureSlot::HorseCoat(variant) => horse_coat(self.jar.as_ref(), variant),
+                TextureSlot::HorseCoat(variant) => horse_coat(&self.files, variant),
                 // A missing armour texture leaves the piece undrawn.
                 TextureSlot::Armor { .. }
                 | TextureSlot::LeatherArmor { .. }
-                | TextureSlot::LeatherOverlay { .. } => armor_texture(self.jar.as_ref(), *slot)
-                    .unwrap_or((vec![0; 64 * 32 * 4], 64, 32)),
+                | TextureSlot::LeatherOverlay { .. } => {
+                    armor_texture(&self.files, *slot).unwrap_or((vec![0; 64 * 32 * 4], 64, 32))
+                }
                 _ => continue,
             };
             let texture = renderer.create_entity_texture(&rgba, w, h);

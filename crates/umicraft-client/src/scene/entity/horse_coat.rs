@@ -3,8 +3,8 @@
 //! Horse coats: a base colour with an optional marking drawn over it
 //! (MCP `EntityHorse.getHorseTexturePaths`, `LayeredTexture`).
 
-use umicraft_assets::client_jar::ClientJar;
-use umicraft_assets::skin::{decode_png_bytes, procedural_horse_texture};
+use crate::resources::game_files::GameFiles;
+use umicraft_assets::skin::procedural_horse_texture;
 
 /// Base colour textures by the low byte of the variant (`0..=6`).
 const BASES: [&str; 7] = [
@@ -63,14 +63,12 @@ fn composite(under: &mut [u8], over: &[u8]) {
     }
 }
 
-/// The RGBA texture of a coat, from the jar or the procedural horse.
+/// The RGBA texture of a coat, from the packs or the jar, or the procedural
+/// horse.
 #[must_use]
-pub(super) fn horse_coat(jar: Option<&ClientJar>, variant: u16) -> (Vec<u8>, u32, u32) {
+pub(super) fn horse_coat(files: &GameFiles, variant: u16) -> (Vec<u8>, u32, u32) {
     let (base, marking) = names(variant);
-    let read = |name: &str| {
-        jar.and_then(|jar| jar.read_entry(&path(name)).ok())
-            .and_then(|bytes| decode_png_bytes(&bytes).ok())
-    };
+    let read = |name: &str| files.read_png(&path(name));
     let Some((mut rgba, width, height)) = read(base) else {
         return (procedural_horse_texture(), 128, 128);
     };
@@ -87,9 +85,7 @@ pub(super) fn horse_coat(jar: Option<&ClientJar>, variant: u16) -> (Vec<u8>, u32
         .filter(|name| !name.is_empty())
     {
         let armor_path = format!("assets/minecraft/textures/entity/horse/armor/{armor}.png");
-        let over = jar
-            .and_then(|jar| jar.read_entry(&armor_path).ok())
-            .and_then(|bytes| decode_png_bytes(&bytes).ok());
+        let over = files.read_png(&armor_path);
         if let Some((over, _, _)) = over.filter(|(_, w, h)| (*w, *h) == (width, height)) {
             composite(&mut rgba, &over);
         }
@@ -134,7 +130,7 @@ mod tests {
 
     #[test]
     fn without_a_jar_the_procedural_horse_is_used() {
-        let (rgba, width, height) = horse_coat(None, 0x0102);
+        let (rgba, width, height) = horse_coat(&GameFiles::default(), 0x0102);
         assert_eq!((width, height), (128, 128));
         assert_eq!(rgba.len(), 128 * 128 * 4);
     }
