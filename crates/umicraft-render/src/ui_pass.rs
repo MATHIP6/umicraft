@@ -563,7 +563,7 @@ impl UiPass {
         let (Some(rect), Some(clip)) = (drawable(rect), self.clip) else {
             return;
         };
-        if !(width > 0.0) {
+        if width.is_nan() || width <= 0.0 {
             return;
         }
         let shape = RoundedShape::new(rect, radius);
