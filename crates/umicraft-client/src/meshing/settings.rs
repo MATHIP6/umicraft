@@ -18,14 +18,11 @@ static SMOOTH_LIGHTING: AtomicU8 = AtomicU8::new(MAX_SMOOTH_LIGHTING);
 /// The `Other Block Variants` option the workers mesh with.
 static BLOCK_ALTERNATIVES: AtomicBool = AtomicBool::new(true);
 
-/// Stores the mesh-affecting options of `video`. Returns whether any value
-/// changed, so the caller re-meshes only then.
-pub fn store(video: &VideoOptions) -> bool {
-    let lighting =
-        SMOOTH_LIGHTING.swap(video.smooth_lighting, Ordering::Relaxed) != video.smooth_lighting;
-    let alternatives = BLOCK_ALTERNATIVES.swap(video.block_alternatives, Ordering::Relaxed)
-        != video.block_alternatives;
-    lighting || alternatives
+/// Stores the mesh-affecting options of `video`. Whether to re-mesh is
+/// decided by the option table (`video_spec`, `Effect::ReMesh`).
+pub fn store(video: &VideoOptions) {
+    SMOOTH_LIGHTING.store(video.smooth_lighting, Ordering::Relaxed);
+    BLOCK_ALTERNATIVES.store(video.block_alternatives, Ordering::Relaxed);
 }
 
 /// The settings the mesh workers use right now.

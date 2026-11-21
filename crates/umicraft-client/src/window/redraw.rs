@@ -20,6 +20,7 @@ use crate::debug::cpu_split::Stage;
 use crate::debug::metrics::InputLatencyMetrics;
 use crate::game::GameEvent;
 use crate::hud::dials::DialInputs;
+use crate::options::video_spec::Effect;
 use crate::options::{self};
 use crate::resources::item_icons::IconSource;
 use crate::scene::block_entity::{mesh_block_entities, BlockEntityScene};
@@ -219,16 +220,18 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        let effects = self.options_menu.video_applier.apply(
+        let effect = self.options_menu.video_applier.apply(
             &self.options.video,
             self.window.as_deref(),
             renderer,
             self.assets.entity_textures.as_ref(),
         );
-        if effects.reload_atlas {
-            self.reload_resources();
-        } else if effects.remesh {
-            self.send_event(GameEvent::ReMeshAll);
+        match effect {
+            Effect::ReloadResources => self.reload_resources(),
+            Effect::ReMesh => {
+                self.send_event(GameEvent::ReMeshAll);
+            }
+            Effect::Immediate => {}
         }
         // The renderer leaves `self` while the scene is handed to it, so the
         // steps can read the rest of the window state alongside it.

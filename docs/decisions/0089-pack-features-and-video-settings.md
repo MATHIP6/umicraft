@@ -83,3 +83,14 @@ Four gaps exist today:
 - Every claimed optimisation needs a criterion benchmark and before/after
   numbers in `docs/perf-log.md`. An optimisation with no measured gain is not
   kept.
+
+## Amendments
+
+- 2026-11-21 (phase 1): `Effect` has the three variants that have a consumer
+  today (`Immediate`, `ReMesh`, `ReloadResources`). `ReloadSky` and
+  `ResetClouds` come with the features that need them. VSync is no longer a
+  separate button: as in OptiFine, it is the left end of the Max Framerate
+  slider (`vsync` and `max_fps` stay two fields in `options.toml`). Cave
+  culling (`cave_culling`, new) and the mesh threads, until then file-only,
+  are on the Performance page. Option tooltips use the language keys
+  `umicraft.options.tooltip.<id>.N`, with original texts.

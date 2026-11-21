@@ -185,7 +185,10 @@ mod tests {
 
     #[test]
     fn the_render_distance_stops_at_the_ends_of_its_range() {
-        assert_eq!(stepped_render_distance(*RENDER_DISTANCE.end(), false), 16);
+        assert_eq!(
+            stepped_render_distance(*RENDER_DISTANCE.end(), false),
+            *RENDER_DISTANCE.end()
+        );
         assert_eq!(stepped_render_distance(*RENDER_DISTANCE.start(), true), 2);
     }
 }

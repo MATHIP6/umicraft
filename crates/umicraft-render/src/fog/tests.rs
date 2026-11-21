@@ -281,3 +281,11 @@ fn fog_wgsl_is_valid() {
     .validate(&module)
     .expect("the shader validates");
 }
+
+#[test]
+fn the_fog_of_the_largest_render_distance_ends_inside_the_far_plane() {
+    // 32 chunks is 512 blocks: fog must end before the camera far plane clips
+    // the terrain, or the clipped edge would show.
+    assert_eq!(far_plane(32), MAX_FAR_PLANE);
+    assert!(far_plane(32) < crate::camera::FAR);
+}

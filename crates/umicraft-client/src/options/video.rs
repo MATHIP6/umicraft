@@ -5,14 +5,18 @@
 //! brightness, view bobbing, mipmaps, vsync, fullscreen, block alternatives
 //! and entity shadows.
 //!
-//! Defaults and ranges follow MCP `GameSettings`. Which of them drive the
-//! renderer and which are only stored is listed in `docs/parity.md`.
+//! Defaults and ranges follow MCP `GameSettings`, except the render distance,
+//! which goes up to 32 chunks as in OptiFine (ADR-0089). Which of them drive
+//! the renderer and which are only stored is listed in `docs/parity.md`. How
+//! each one is shown and applied is described by `video_spec`.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use umicraft_render::CloudMode;
 
-/// The render distance range, in chunks.
-pub const RENDER_DISTANCE: std::ops::RangeInclusive<u8> = 2..=16;
+/// The render distance range, in chunks. Vanilla stops at 16; OptiFine, and
+/// Umicraft (ADR-0089), go to 32. A server sends no more than its own view
+/// distance, so the extra range only matters where the server allows it.
+pub const RENDER_DISTANCE: std::ops::RangeInclusive<u8> = 2..=32;
 /// The field-of-view range, in degrees.
 pub const FOV: std::ops::RangeInclusive<f32> = 30.0..=110.0;
 /// The frame-rate cap range; the top value means "unlimited".
@@ -83,9 +87,12 @@ pub struct VideoOptions {
     /// `GameSettings.field_181151_V` ("Entity Shadows").
     pub entity_shadows: bool,
     /// Threads that mesh the chunks: `0` picks all cores but one (at least one),
-    /// anything else is used as given, up to [`MAX_MESH_THREADS`]. Only in
-    /// `options.toml`, there is no menu entry.
+    /// anything else is used as given, up to [`MAX_MESH_THREADS`].
     pub mesh_threads: u8,
+    /// Whether the sections hidden behind solid terrain are skipped (the
+    /// cave visibility graph of ADR-0062). Off draws every section in the
+    /// frustum, which is only useful to compare.
+    pub cave_culling: bool,
 }
 
 /// Reads the cloud setting as a number, or as the boolean of the files that
@@ -174,6 +181,7 @@ impl Default for VideoOptions {
             block_alternatives: true,
             entity_shadows: true,
             mesh_threads: 0,
+            cave_culling: true,
         }
     }
 }

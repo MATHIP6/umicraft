@@ -30,6 +30,7 @@ mod sound;
 #[cfg(test)]
 mod tests;
 mod video;
+pub mod video_spec;
 
 pub use chat::{ChatOptions, ChatVisibility};
 pub use controls::ControlOptions;
@@ -41,10 +42,7 @@ pub use multiplayer::MultiplayerOptions;
 pub use packs::{ResourcePackOptions, PACKS_FOLDER};
 pub use skin::{SkinOptions, SkinPart};
 pub use sound::{CategoryLabel, SoundCategory, SoundOptions};
-pub use video::{
-    VideoOptions, FOV, MAX_CLOUD_SETTING, MAX_FPS, MAX_GUI_SCALE, MAX_PARTICLE_SETTING,
-    MAX_SMOOTH_LIGHTING, MIPMAP_LEVELS, RENDER_DISTANCE, UNLIMITED_FPS,
-};
+pub use video::{VideoOptions, FOV, MAX_SMOOTH_LIGHTING, RENDER_DISTANCE, UNLIMITED_FPS};
 
 pub(crate) mod effects;
 

@@ -1,6 +1,6 @@
 # F6: pack features and OptiFine-style video settings: plan
 
-Status: **phase 0 done**; next is phase 1 (video settings menu). Branch `feat/optifine-features`.
+Status: **phases 0 and 1 done**; next is phase 4 (custom sky). Branch `feat/optifine-features`.
 Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 (reference policy) and ADR-0089 (architecture). Roadmap entry: F6.
 
@@ -46,12 +46,12 @@ Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 
 | Step | Content | Done when |
 |---|---|---|
-| 1.1 | `VideoOptions` subsections; `GraphicsChoice`; render distance 2..=32 (fog range, mesh queue and cloud cutoff follow) | Round trip of `options.toml`; an old file still loads |
-| 1.2 | `OptionSpec` table, with `Effect` derived from the changed options, replacing `VideoEffects` | Unit tests: each effect is triggered by its options only |
-| 1.3 | Root page in the OptiFine order. Sub-page buttons: Quality, Details, Performance, Animations, Other. Shaders is not shown | Screen tests |
-| 1.4 | Tooltips after 700 ms of a still mouse (a move of more than 5 px resets the timer); lines from `<key>.tooltip.N`; a line ending in `!` is red | Unit test of the hover timer |
-| 1.5 | Animations "All ON" and "All OFF" buttons; Other "Reset video settings" with confirmation | Screen tests |
-| 1.6 | Existing knobs placed on their pages: max fps, vsync, mipmaps, clouds, mesh threads, cave culling ("Advanced occlusion"), entity shadows | Language keys exist in `en_US` and `fr_FR` (existing test) |
+| 1.1 | Render distance 2..=32 (fog range, mesh queue and cloud cutoff follow) (**done**; the `VideoOptions` subsections and `GraphicsChoice` move to phase 2, with the first options that need them) | Round trip of `options.toml`; an old file still loads |
+| 1.2 | `OptionSpec` table, with `Effect` derived from the changed options, replacing `VideoEffects` (**done**) | Unit tests: each effect is triggered by its options only |
+| 1.3 | Root page in the OptiFine order. Sub-page buttons: Quality, Details, Performance, Animations, Other. Shaders is not shown (**done**) | Screen tests |
+| 1.4 | Tooltips after 700 ms of a still mouse (a move of more than 5 px resets the timer); lines from `<key>.tooltip.N`; a line ending in `!` is red (**done**) | Unit test of the hover timer |
+| 1.5 | Animations "All ON" and "All OFF" buttons; Other "Reset video settings" with confirmation (**done**) | Screen tests |
+| 1.6 | Existing knobs placed on their pages: max fps, vsync, mipmaps, clouds, mesh threads, cave culling ("Advanced occlusion"), entity shadows (**done**) | Language keys exist in `en_US` and `fr_FR` (existing test) |
 
 ### Phase 4: custom sky (after phase 1, by owner order)
 

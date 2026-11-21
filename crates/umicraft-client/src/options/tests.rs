@@ -139,7 +139,7 @@ fn out_of_range_numbers_are_clamped() {
     )
     .unwrap();
     let loaded = Options::load(&path);
-    assert_eq!(loaded.video.render_distance, 16);
+    assert_eq!(loaded.video.render_distance, *super::RENDER_DISTANCE.end());
     assert_eq!(loaded.video.fov, 110.0);
     assert_eq!(loaded.video.max_fps, 10);
     assert_eq!(loaded.controls.mouse_sensitivity, 1.0);

@@ -1,94 +1,88 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The video settings page (`GuiVideoSettings`).
+//! The video settings pages, laid out like OptiFine's (ADR-0089).
+//!
+//! The root page holds the main options and one button per sub-page
+//! (Quality, Details, Performance, Animations, Other). Every page is built
+//! from the option table `options::video_spec`:
+//! - its options come from that table, in table order, two per row;
+//! - its extra buttons follow (the sub-page buttons on the root page, "All ON"
+//!   and "All OFF" on Animations, "Reset Video Settings..." on Other);
+//! - the tooltip of an option appears once the pointer rests on it
+//!   ([`HoverDelay`]). Its lines are the language keys
+//!   `umicraft.options.tooltip.<id>.1`, `.2`, and so on.
+//!
+//! The vanilla page (`GuiVideoSettings`) is replaced: its options are spread
+//! over these pages as OptiFine spreads them.
 
 use umicraft_core::lang::Lang;
+use umicraft_ui::menus::{ConfirmOutcome, ConfirmScreen};
+use umicraft_ui::widgets::tooltip::{tooltip, TooltipRow};
 use umicraft_ui::{FontAtlas, Rect, Ui};
 
 use super::layout::{Gui, BUTTON_H, HALF_W, VIDEO_ROW};
-use super::{on_off, option_label, OptionsScreen, Outcome};
-use crate::options::{
-    Options, VideoOptions, MAX_CLOUD_SETTING, MAX_FPS, MAX_GUI_SCALE, MAX_PARTICLE_SETTING,
-    MAX_SMOOTH_LIGHTING, MIPMAP_LEVELS, RENDER_DISTANCE, UNLIMITED_FPS,
-};
+use super::{option_label, OptionsScreen, Outcome, Page};
+use crate::options::video_spec::{set_all, specs_on, Control, OptionSpec, VideoPage};
+use crate::options::{Options, VideoOptions};
 
-/// The unit vanilla appends to the render distance (`GameSettings`
-/// hard-codes `" chunks"`; there is no language key for it).
-const CHUNKS_UNIT: &str = " chunks";
-/// The unit vanilla appends to the frame rate limit (hard-coded `" fps"`).
-const FPS_UNIT: &str = " fps";
+/// The colour of a tooltip line (OptiFine's light grey).
+const TOOLTIP_RGB: u32 = 0xDC_DC_DC;
+/// The colour of a tooltip line ending in `!`, a warning.
+const WARNING_RGB: u32 = 0xFF_55_55;
+/// The most lines a tooltip reads.
+const MAX_TOOLTIP_LINES: usize = 10;
 
-/// One entry of `GuiVideoSettings.videoOptions`.
-///
-/// The list is the vanilla one without the two entries that have no meaning
-/// here: "3D Anaglyph" (not offered, ADR-0043) and "Use VBOs", which vanilla
-/// itself hides when the driver has no vertex buffer objects (wgpu has no
-/// such switch), and with "Dynamic FOV" at the end, which is Umicraft's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VideoEntry {
-    Graphics,
-    RenderDistance,
-    SmoothLighting,
-    MaxFps,
-    ViewBobbing,
-    GuiScale,
-    Brightness,
-    Clouds,
-    Particles,
-    Fullscreen,
-    Vsync,
-    Mipmaps,
-    BlockAlternatives,
-    EntityShadows,
-    DynamicFov,
+/// One button of a video page.
+#[derive(Debug, Clone, Copy)]
+enum Item {
+    /// An option of the table.
+    Option(&'static OptionSpec),
+    /// A button to a sub-page.
+    Open(VideoPage),
+    /// "All ON" / "All OFF" of the Animations page.
+    All { on: bool },
+    /// "Reset Video Settings..." of the Other page.
+    Reset,
 }
 
-/// The entries in the order of `GuiVideoSettings.videoOptions`, two per row.
-const VIDEO_ENTRIES: [VideoEntry; 15] = [
-    VideoEntry::Graphics,
-    VideoEntry::RenderDistance,
-    VideoEntry::SmoothLighting,
-    VideoEntry::MaxFps,
-    VideoEntry::ViewBobbing,
-    VideoEntry::GuiScale,
-    VideoEntry::Brightness,
-    VideoEntry::Clouds,
-    VideoEntry::Particles,
-    VideoEntry::Fullscreen,
-    VideoEntry::Vsync,
-    VideoEntry::Mipmaps,
-    VideoEntry::BlockAlternatives,
-    VideoEntry::EntityShadows,
-    VideoEntry::DynamicFov,
-];
+impl Item {
+    /// The widget id, stable across frames and versions.
+    fn id(self) -> String {
+        match self {
+            Self::Option(spec) => format!("video:{}", spec.id),
+            Self::Open(page) => format!("video-nav:{}", page.name()),
+            Self::All { on: true } => "video:allOn".to_string(),
+            Self::All { on: false } => "video:allOff".to_string(),
+            Self::Reset => "video:reset".to_string(),
+        }
+    }
+}
 
-/// The language keys of the three values of an option that cycles
-/// (`GameSettings.AMBIENT_OCCLUSIONS` and `field_181149_aW`).
-const SMOOTH_LIGHTING_KEYS: [&str; 3] = ["options.ao.off", "options.ao.min", "options.ao.max"];
-const CLOUD_KEYS: [&str; 3] = [
-    "options.off",
-    "options.graphics.fast",
-    "options.graphics.fancy",
-];
-/// `GameSettings.GUISCALES`.
-const GUI_SCALE_KEYS: [&str; 4] = [
-    "options.guiScale.auto",
-    "options.guiScale.small",
-    "options.guiScale.normal",
-    "options.guiScale.large",
-];
+/// The buttons of `page`: its options, then its extra buttons.
+fn items(page: VideoPage) -> Vec<Item> {
+    let mut items: Vec<Item> = specs_on(page).map(Item::Option).collect();
+    match page {
+        VideoPage::Root => items.extend(VideoPage::SUB_PAGES.map(Item::Open)),
+        VideoPage::Animations => {
+            items.extend([Item::All { on: true }, Item::All { on: false }]);
+        }
+        VideoPage::Other => items.push(Item::Reset),
+        VideoPage::Details | VideoPage::Quality | VideoPage::Performance => {}
+    }
+    items
+}
 
-/// Where one entry is drawn and whether a click on it counts.
+/// Where one button is drawn and whether a click on it counts.
 #[derive(Clone, Copy)]
 struct Slot {
-    index: usize,
     rect: Rect,
     /// The row lies fully inside the list area, so it can be clicked.
     inside: bool,
 }
 
 impl OptionsScreen {
-    /// `GuiVideoSettings`.
+    /// One video page.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn show_video(
         &mut self,
         ui: &mut Ui,
@@ -97,168 +91,178 @@ impl OptionsScreen {
         gui: Gui,
         lang: &Lang,
         outcome: &mut Outcome,
+        page: VideoPage,
     ) {
+        if let Some(confirm) = self.video_reset.take() {
+            self.show_reset_confirm(ui, atlas, options, lang, outcome, confirm);
+            return;
+        }
         let (top, bottom) = (32.0, gui.height - 32.0);
         let cx = gui.cx();
-        let rows = VIDEO_ENTRIES.len().div_ceil(2);
-        let content = rows as f32 * VIDEO_ROW;
+        let items = items(page);
+        let content = items.len().div_ceil(2) as f32 * VIDEO_ROW;
         self.scroll_list(ui, gui, (cx + 156.0, top, bottom), (content, VIDEO_ROW));
         Self::list_container(ui, gui, (0.0, gui.width), (top, bottom), self.scroll);
 
         // The list is clipped to its area; a row is only clickable while it
         // lies inside.
+        let mut hovered = None;
         ui.push_clip(gui.rect(0.0, top, gui.width, bottom - top));
-        for (index, entry) in VIDEO_ENTRIES.into_iter().enumerate() {
+        for (index, item) in items.into_iter().enumerate() {
             let x = cx - 155.0 + (index % 2) as f32 * 160.0;
             let y = top + 4.0 - self.scroll + (index / 2) as f32 * VIDEO_ROW;
             let slot = Slot {
-                index,
                 rect: gui.rect(x, y, HALF_W, BUTTON_H),
                 inside: y >= top && y + BUTTON_H <= bottom,
             };
-            self.video_entry(ui, atlas, options, lang, entry, slot, outcome);
+            if let Item::Option(spec) = item {
+                if slot.inside && ui.is_hovered(slot.rect) {
+                    hovered = Some(spec.id);
+                }
+            }
+            self.video_item(ui, atlas, options, lang, item, slot, outcome);
         }
         ui.pop_clip();
         Self::list_overlay(ui, gui, (0.0, gui.width), (top, bottom));
         Self::scrollbar(ui, gui, cx + 156.0, (top, bottom), content, self.scroll);
 
-        Self::title(ui, atlas, gui, lang.tr("options.videoTitle"), 5.0);
+        let title = match page {
+            VideoPage::Root => lang.tr("options.videoTitle").to_string(),
+            sub => lang
+                .tr(&format!("umicraft.options.video.{}.title", sub.name()))
+                .to_string(),
+        };
+        Self::title(ui, atlas, gui, &title, 5.0);
         let done = gui.rect(cx - 100.0, gui.height - 27.0, 200.0, BUTTON_H);
         self.back(ui, atlas, done, lang);
+        self.video_tooltip(ui, atlas, gui, lang, hovered);
     }
 
-    /// Draws one entry and applies a click on it.
+    /// Draws one button and applies a click on it.
     #[allow(clippy::too_many_arguments)]
-    fn video_entry(
+    fn video_item(
         &mut self,
         ui: &mut Ui,
         atlas: &FontAtlas,
         options: &mut Options,
         lang: &Lang,
-        entry: VideoEntry,
+        item: Item,
         slot: Slot,
         outcome: &mut Outcome,
     ) {
-        let video = &mut options.video;
-        let id = format!("video:{}", slot.index);
-        if let Some((name_key, flag)) = on_off_option(video, entry) {
-            if self.live_toggle(ui, atlas, lang, name_key, &id, slot, flag) {
+        let id = item.id();
+        match item {
+            Item::Option(spec) => {
+                self.video_option(
+                    ui,
+                    atlas,
+                    &mut options.video,
+                    lang,
+                    spec,
+                    &id,
+                    slot,
+                    outcome,
+                );
+            }
+            Item::Open(page) => {
+                let key = format!("umicraft.options.video.{}", page.name());
+                let label = lang.tr(&key).to_string();
+                if self.live_button(ui, atlas, &id, slot, &label) {
+                    self.page = Page::Video(page);
+                    self.scroll = 0.0;
+                }
+            }
+            Item::All { on } => {
+                let key = if on {
+                    "umicraft.options.video.allOn"
+                } else {
+                    "umicraft.options.video.allOff"
+                };
+                if self.live_button(ui, atlas, &id, slot, lang.tr(key)) {
+                    set_all(&mut options.video, on);
+                    outcome.changed = true;
+                }
+            }
+            Item::Reset => {
+                let label = lang.tr("umicraft.options.video.reset");
+                if self.live_button(ui, atlas, &id, slot, label) {
+                    self.video_reset = Some(ConfirmScreen::new(
+                        "umicraft.options.video.reset.title",
+                        lang.tr("umicraft.options.video.reset.message"),
+                        "gui.yes",
+                        "gui.no",
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Draws one option as its button or slider and applies a change.
+    #[allow(clippy::too_many_arguments)]
+    fn video_option(
+        &mut self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        video: &mut VideoOptions,
+        lang: &Lang,
+        spec: &OptionSpec,
+        id: &str,
+        slot: Slot,
+        outcome: &mut Outcome,
+    ) {
+        let label = option_label(lang, spec.label, &(spec.value)(lang, video));
+        let position = match spec.control {
+            Control::Button => self
+                .live_button(ui, atlas, id, slot, &label)
+                .then(|| spec.next(video)),
+            Control::Slider => self
+                .live_slider(ui, atlas, id, slot, &label, spec.fraction(video))
+                .map(|fraction| spec.position_at(fraction)),
+        };
+        if let Some(position) = position.filter(|&position| position != (spec.get)(video)) {
+            (spec.set)(video, position);
+            outcome.changed = true;
+        }
+    }
+
+    /// The reset question; Yes puts every video option back to its default.
+    fn show_reset_confirm(
+        &mut self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        options: &mut Options,
+        lang: &Lang,
+        outcome: &mut Outcome,
+        confirm: ConfirmScreen,
+    ) {
+        match confirm.show(ui, atlas, lang) {
+            Some(ConfirmOutcome::Yes) => {
+                options.video = VideoOptions::default();
                 outcome.changed = true;
             }
+            Some(ConfirmOutcome::No) => {}
+            None => self.video_reset = Some(confirm),
+        }
+    }
+
+    /// The tooltip of the option the pointer rests on, if any.
+    fn video_tooltip(
+        &mut self,
+        ui: &mut Ui,
+        atlas: &FontAtlas,
+        gui: Gui,
+        lang: &Lang,
+        hovered: Option<&'static str>,
+    ) {
+        let (Some(now), Some(pointer)) = (self.clock, ui.pointer()) else {
             return;
-        }
-        match entry {
-            VideoEntry::RenderDistance => {
-                let span = f32::from(RENDER_DISTANCE.end() - RENDER_DISTANCE.start());
-                let distance = video.render_distance;
-                let label = option_label(
-                    lang,
-                    "options.renderDistance",
-                    &format!("{distance}{CHUNKS_UNIT}"),
-                );
-                let fraction = f32::from(distance - RENDER_DISTANCE.start()) / span;
-                if let Some(value) = self.live_slider(ui, atlas, "distance", slot, &label, fraction)
-                {
-                    video.render_distance = RENDER_DISTANCE.start() + (value * span).round() as u8;
-                    outcome.changed = true;
-                }
-            }
-            VideoEntry::MaxFps => {
-                let span = (MAX_FPS.end() - MAX_FPS.start()) as f32;
-                let fps = video.max_fps;
-                let value = if fps >= UNLIMITED_FPS {
-                    lang.tr("options.framerateLimit.max").to_string()
-                } else {
-                    format!("{fps}{FPS_UNIT}")
-                };
-                let label = option_label(lang, "options.framerateLimit", &value);
-                let fraction = (fps - MAX_FPS.start()) as f32 / span;
-                if let Some(value) = self.live_slider(ui, atlas, "fps", slot, &label, fraction) {
-                    // `GameSettings.snapToStep`: steps of 10.
-                    let steps = (value * span / 10.0).round() as u32;
-                    video.max_fps = MAX_FPS.start() + steps * 10;
-                    outcome.changed = true;
-                }
-            }
-            VideoEntry::Brightness => {
-                let label = option_label(lang, "options.gamma", &gamma_value(lang, video.gamma));
-                if let Some(value) = self.live_slider(ui, atlas, "gamma", slot, &label, video.gamma)
-                {
-                    video.gamma = value;
-                    outcome.changed = true;
-                }
-            }
-            VideoEntry::Mipmaps => {
-                let span = f32::from(MIPMAP_LEVELS.end() - MIPMAP_LEVELS.start());
-                let levels = video.mipmap_levels;
-                let value = if levels == 0 {
-                    lang.tr("options.off").to_string()
-                } else {
-                    levels.to_string()
-                };
-                let label = option_label(lang, "options.mipmapLevels", &value);
-                let fraction = f32::from(levels - MIPMAP_LEVELS.start()) / span;
-                if let Some(value) = self.live_slider(ui, atlas, "mipmap", slot, &label, fraction) {
-                    video.mipmap_levels = MIPMAP_LEVELS.start() + (value * span).round() as u8;
-                    outcome.changed = true;
-                }
-            }
-            VideoEntry::Graphics => {
-                let value = lang.tr(if video.fancy_graphics {
-                    "options.graphics.fancy"
-                } else {
-                    "options.graphics.fast"
-                });
-                let label = option_label(lang, "options.graphics", value);
-                if self.live_button(ui, atlas, &id, slot, &label) {
-                    video.fancy_graphics = !video.fancy_graphics;
-                    outcome.changed = true;
-                }
-            }
-            VideoEntry::SmoothLighting => {
-                let label = cycle_label(
-                    lang,
-                    "options.ao",
-                    &SMOOTH_LIGHTING_KEYS,
-                    video.smooth_lighting,
-                );
-                if self.live_button(ui, atlas, &id, slot, &label) {
-                    video.smooth_lighting = (video.smooth_lighting + 1) % (MAX_SMOOTH_LIGHTING + 1);
-                    outcome.changed = true;
-                }
-            }
-            VideoEntry::GuiScale => {
-                let label = cycle_label(lang, "options.guiScale", &GUI_SCALE_KEYS, video.gui_scale);
-                if self.live_button(ui, atlas, &id, slot, &label) {
-                    // `GameSettings.setOptionValue(GUI_SCALE)`: `+ 1 & 3`.
-                    video.gui_scale = (video.gui_scale + 1) % (MAX_GUI_SCALE + 1);
-                    outcome.changed = true;
-                }
-            }
-            VideoEntry::Clouds => {
-                let label = cycle_label(lang, "options.renderClouds", &CLOUD_KEYS, video.clouds);
-                if self.live_button(ui, atlas, &id, slot, &label) {
-                    video.clouds = (video.clouds + 1) % (MAX_CLOUD_SETTING + 1);
-                    outcome.changed = true;
-                }
-            }
-            VideoEntry::Particles => {
-                // `GameSettings.setOptionValue(PARTICLES)`: cycles 0, 1, 2.
-                let setting = lang.tr(video.particle_setting().lang_key());
-                let label = option_label(lang, "options.particles", setting);
-                if self.live_button(ui, atlas, &id, slot, &label) {
-                    video.particles = (video.particles + 1) % (MAX_PARTICLE_SETTING + 1);
-                    outcome.changed = true;
-                }
-            }
-            // The on/off entries were handled above.
-            VideoEntry::ViewBobbing
-            | VideoEntry::Fullscreen
-            | VideoEntry::Vsync
-            | VideoEntry::BlockAlternatives
-            | VideoEntry::EntityShadows
-            | VideoEntry::DynamicFov => {}
-        }
+        };
+        let in_gui = [pointer[0] / gui.scale, pointer[1] / gui.scale];
+        let Some(&id) = self.video_hover.update(hovered, in_gui, now) else {
+            return;
+        };
+        let rows = tooltip_rows(lang, id);
+        tooltip(ui, atlas, ui.viewport(), gui.scale, pointer, &rows);
     }
 
     /// A button of the list; true when it was clicked while fully visible.
@@ -271,26 +275,6 @@ impl OptionsScreen {
         label: &str,
     ) -> bool {
         self.button(ui, atlas, id, slot.rect, label, true, None) && slot.inside
-    }
-
-    /// An on/off button of the list; true when its value flipped.
-    #[allow(clippy::too_many_arguments)]
-    fn live_toggle(
-        &mut self,
-        ui: &mut Ui,
-        atlas: &FontAtlas,
-        lang: &Lang,
-        name_key: &str,
-        id: &str,
-        slot: Slot,
-        value: &mut bool,
-    ) -> bool {
-        let label = option_label(lang, name_key, on_off(lang, *value));
-        let clicked = self.live_button(ui, atlas, id, slot, &label);
-        if clicked {
-            *value = !*value;
-        }
-        clicked
     }
 
     /// A slider of the list; its new fraction when it moved. A row that is
@@ -313,36 +297,78 @@ impl OptionsScreen {
     }
 }
 
-/// The name key and the flag of an entry that is a plain on/off button.
-fn on_off_option(video: &mut VideoOptions, entry: VideoEntry) -> Option<(&'static str, &mut bool)> {
-    Some(match entry {
-        VideoEntry::ViewBobbing => ("options.viewBobbing", &mut video.view_bobbing),
-        VideoEntry::Fullscreen => ("options.fullscreen", &mut video.fullscreen),
-        VideoEntry::Vsync => ("options.vsync", &mut video.vsync),
-        VideoEntry::BlockAlternatives => {
-            ("options.blockAlternatives", &mut video.block_alternatives)
+/// The lines of the tooltip of option `id`: `umicraft.options.tooltip.<id>.N`
+/// from 1 until the first missing key. A line ending in `!` is a warning,
+/// drawn red as OptiFine does.
+fn tooltip_rows(lang: &Lang, id: &str) -> Vec<TooltipRow> {
+    (1..=MAX_TOOLTIP_LINES)
+        .map_while(|line| lang.get(&format!("umicraft.options.tooltip.{id}.{line}")))
+        .map(|text| TooltipRow {
+            rgb: if text.ends_with('!') {
+                WARNING_RGB
+            } else {
+                TOOLTIP_RGB
+            },
+            text: text.to_string(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::options::video_spec::VIDEO_SPECS;
+
+    #[test]
+    fn every_page_lists_its_options_then_its_extra_buttons() {
+        let root = items(VideoPage::Root);
+        assert!(matches!(root.first(), Some(Item::Option(spec)) if spec.id == "graphics"));
+        assert!(matches!(root.last(), Some(Item::Open(VideoPage::Other))));
+        assert!(matches!(
+            items(VideoPage::Animations).last(),
+            Some(Item::All { on: false })
+        ));
+        assert!(matches!(items(VideoPage::Other).last(), Some(Item::Reset)));
+    }
+
+    #[test]
+    fn every_option_is_on_exactly_one_page() {
+        let pages = [VideoPage::Root].into_iter().chain(VideoPage::SUB_PAGES);
+        let listed: usize = pages
+            .map(|page| {
+                items(page)
+                    .iter()
+                    .filter(|item| matches!(item, Item::Option(_)))
+                    .count()
+            })
+            .sum();
+        assert_eq!(listed, VIDEO_SPECS.len());
+    }
+
+    #[test]
+    fn every_option_has_a_tooltip_in_both_languages() {
+        for code in ["en_US", "fr_FR"] {
+            let lang = Lang::from_texts(code, None, None)
+                .with_client_layer(None, umicraft_assets::client_pack::lang(code));
+            for spec in VIDEO_SPECS {
+                let rows = tooltip_rows(&lang, spec.id);
+                assert!(!rows.is_empty(), "{code}: no tooltip for {}", spec.id);
+            }
         }
-        VideoEntry::EntityShadows => ("options.entityShadows", &mut video.entity_shadows),
-        VideoEntry::DynamicFov => ("umicraft.options.dynamicFov", &mut video.dynamic_fov),
-        _ => return None,
-    })
-}
+    }
 
-/// "Name: value" for an option whose value is one of `keys`
-/// (`GameSettings.getTranslation`: an index out of range reads as 0).
-fn cycle_label(lang: &Lang, name_key: &str, keys: &[&str], value: u8) -> String {
-    let key = keys.get(usize::from(value)).unwrap_or(&keys[0]);
-    option_label(lang, name_key, lang.tr(key))
-}
-
-/// The value of the brightness slider (`GameSettings.getKeyBinding(GAMMA)`):
-/// "Moody" at 0, "Bright" at 1, else "+N%".
-pub(super) fn gamma_value(lang: &Lang, gamma: f32) -> String {
-    if gamma == 0.0 {
-        lang.tr("options.gamma.min").to_string()
-    } else if gamma == 1.0 {
-        lang.tr("options.gamma.max").to_string()
-    } else {
-        format!("+{}%", (gamma * 100.0) as i32)
+    #[test]
+    fn a_line_ending_in_a_bang_is_red() {
+        let lang = Lang::from_texts(
+            "en_US",
+            Some(
+                "umicraft.options.tooltip.x.1=Plain\numicraft.options.tooltip.x.2=Careful!\n\
+                 umicraft.options.tooltip.x.4=Unreachable",
+            ),
+            None,
+        );
+        let rows = tooltip_rows(&lang, "x");
+        assert_eq!(rows.len(), 2, "the lines stop at the first gap");
+        assert_eq!((rows[0].rgb, rows[1].rgb), (TOOLTIP_RGB, WARNING_RGB));
     }
 }

@@ -304,6 +304,9 @@ impl App {
                 self.menu_action = self.game_menu.show(&mut self.ui, atlas, &self.lang)
             }
             Screen::Options => {
+                self.options_menu
+                    .screen
+                    .set_clock(std::time::Instant::now());
                 self.options_menu.outcome = self.options_menu.screen.show(
                     &mut self.ui,
                     atlas,
