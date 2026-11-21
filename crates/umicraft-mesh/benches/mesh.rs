@@ -8,7 +8,10 @@ use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use umicraft_mesh::tint::BiomeTints;
-use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, ModelMeshContext};
+use umicraft_mesh::{
+    mesh_chunk, mesh_chunk_with_models, mesh_chunk_with_settings, ChunkSnapshot, Leaves,
+    MeshSettings, ModelMeshContext,
+};
 use umicraft_model::{
     AtlasLayout, BlockDefinition, BlockModelSet, ModelError, ModelResult, ResourceSource, StateDef,
 };
@@ -368,6 +371,66 @@ fn mesh_water_checkerboard(criterion: &mut Criterion) {
     });
 }
 
+/// A dense 16³ block of leaves (id 18) meshed with each Trees mode: Fancy
+/// draws the faces between leaves, Smart and Fast cull them. The bench
+/// prints the emitted quad counts once so the time can be read against them.
+fn mesh_leaves_modes(criterion: &mut Criterion) {
+    const LEAVES_DEFS: &[BlockDefinition] = &[BlockDefinition {
+        id: 18,
+        name: "leaves",
+        states: CUBE_STATES,
+    }];
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/leaves").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let context = ModelMeshContext {
+        models: Arc::new(
+            BlockModelSet::build(&Memory(files), LEAVES_DEFS)
+                .expect("the synthetic leaves model set must build"),
+        ),
+        atlas: Arc::new(AtlasLayout::from_keys(["blocks/leaves"])),
+        tints: None,
+    };
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in 0..16 {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(18, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    for (name, leaves) in [
+        ("fancy", Leaves::Fancy),
+        ("smart", Leaves::Smart),
+        ("fast", Leaves::Fast),
+    ] {
+        let settings = MeshSettings {
+            leaves,
+            ..MeshSettings::default()
+        };
+        let quads = mesh_chunk_with_settings(ChunkPos::new(0, 0), &snapshot, &context, settings)
+            .face_count();
+        println!("mesh/leaves_{name}: {quads} quads");
+        criterion.bench_function(&format!("mesh/leaves_{name}"), |bencher| {
+            bencher.iter(|| {
+                black_box(mesh_chunk_with_settings(
+                    ChunkPos::new(0, 0),
+                    black_box(&snapshot),
+                    black_box(&context),
+                    settings,
+                ))
+            });
+        });
+    }
+}
+
 criterion_group!(
     benches,
     mesh_flat_chunk,
@@ -377,6 +440,7 @@ criterion_group!(
     mesh_dense_models,
     mesh_dense_tinted_grass,
     mesh_lit_cave,
-    mesh_water_checkerboard
+    mesh_water_checkerboard,
+    mesh_leaves_modes
 );
 criterion_main!(benches);
