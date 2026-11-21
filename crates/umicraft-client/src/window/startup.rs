@@ -34,6 +34,7 @@ use crate::mods::runtime::ModsRuntime;
 use crate::mods::zoom::Zoom;
 use crate::options::effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options::Options;
+use crate::resources::custom_animations::{self, CustomAnimation};
 use crate::resources::custom_guis::CustomGuis;
 use crate::resources::custom_items::CustomItems;
 use crate::resources::entity_icons::EntityIcons;
@@ -62,6 +63,7 @@ pub(super) struct AsyncLoadedAssets {
     pub(super) font: LoadedFont,
     pub(super) terrain: TerrainTextures,
     pub(super) files: GameFiles,
+    pub(super) custom_animations: Vec<CustomAnimation>,
 }
 
 /// Reads the packs at `paths` once and builds from them both the terrain
@@ -70,7 +72,7 @@ pub(super) struct AsyncLoadedAssets {
 pub(super) fn load_packs_and_terrain(
     paths: &[PathBuf],
     features: PackFeatures,
-) -> (TerrainTextures, GameFiles) {
+) -> (TerrainTextures, GameFiles, Vec<CustomAnimation>) {
     let mut packs = load_packs(paths);
     let pack_files = PackFiles::from_pack_refs(&packs);
     // The pictures of the custom container screens ride in a synthetic pack on
@@ -88,7 +90,14 @@ pub(super) fn load_packs_and_terrain(
     let files = GameFiles::new(pack_files, jar)
         .with_features(features)
         .with_custom_guis(guis);
-    (terrain, files)
+    let custom = terrain
+        .animation_layout()
+        .map(|(context, layer_size)| {
+            let layer_of = |key: &str| context.atlas.layer(key);
+            custom_animations::load(&files, &packs, &layer_of, layer_size)
+        })
+        .unwrap_or_default();
+    (terrain, files, custom)
 }
 
 /// Starts the thread that pings the saved servers. Without it the list still
@@ -207,12 +216,13 @@ impl App {
         let loader_thread = std::thread::Builder::new()
             .name("AssetLoader".to_string())
             .spawn(move || {
-                let (terrain, files) = load_packs_and_terrain(&packs, features);
+                let (terrain, files, custom_animations) = load_packs_and_terrain(&packs, features);
                 let font = ui_font::load_with(&files);
                 let _ = asset_tx.send(AsyncLoadedAssets {
                     font,
                     terrain,
                     files,
+                    custom_animations,
                 });
             });
         if let Err(error) = loader_thread {
@@ -311,6 +321,7 @@ impl App {
                 hud_revision: 0,
                 hud_chat: None,
                 entities: Vec::new(),
+                dynamic_lights: Default::default(),
                 particle_sprites: Vec::new(),
                 nametags: Vec::new(),
                 placed_tags: Vec::new(),
@@ -412,7 +423,8 @@ impl App {
         self.assets.texture_animator = TextureAnimator::for_terrain(
             &terrain,
             super::options_control::animation_filter(&self.options.video.animations),
-        );
+        )
+        .with_custom(assets.custom_animations);
 
         match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
             Ok(world) => self.world = Some(world),

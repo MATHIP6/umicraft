@@ -33,6 +33,7 @@ use crate::cave_graph::CaveGraph;
 use crate::chunk_pass::QuadIndices;
 use crate::clouds::CloudRenderer;
 use crate::dynamic_blocks::MovingBlocksPass;
+use crate::dynamic_lights::{DynamicLightSet, GpuLight, MAX_DYNAMIC_LIGHTS};
 use crate::entity_pass::EntityRenderer;
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
@@ -137,9 +138,12 @@ pub(crate) struct CameraUniform {
     /// Integer world offset the matrix is relative to: shaders subtract it
     /// from every position, which keeps f32 exact far from the origin.
     origin: [f32; 3],
-    _pad_origin: f32,
+    /// How many of `lights` are on (`0` with Dynamic Lights off).
+    light_count: u32,
     /// The vanilla lightmap, `[sky * 16 + block]` (see [`crate::lightmap`]).
     lightmap: [[f32; 4]; lightmap::ENTRIES],
+    /// The dynamic lights of the frame, relative to `origin`.
+    lights: [GpuLight; MAX_DYNAMIC_LIGHTS],
 }
 
 impl CameraUniform {
@@ -162,9 +166,10 @@ impl CameraUniform {
             fog_density: 0.0,
             fog_planar: 0.0,
             origin: [0.0; 3],
-            _pad_origin: 0.0,
+            light_count: 0,
             // GUI items are drawn without the lightmap.
             lightmap: lightmap::unlit(),
+            lights: [GpuLight::NONE; MAX_DYNAMIC_LIGHTS],
         }
     }
 }
@@ -292,6 +297,8 @@ pub struct Renderer {
     /// The pack's lightmaps by dimension, which replace the computed ones.
     custom_lightmaps:
         Option<std::sync::Arc<umicraft_packext::colors::lightmap::DimensionLightmaps>>,
+    /// The dynamic lights of the frame (empty with the option off).
+    dynamic_lights: DynamicLightSet,
     /// Rain and snow, drawn before the translucent terrain.
     weather: WeatherRenderer,
     particles: ParticleRenderer,

@@ -27,6 +27,7 @@ use crate::cave_graph::CaveGraph;
 use crate::chunk_pass::{cutout_layers, QuadIndices};
 use crate::clouds::CloudRenderer;
 use crate::dynamic_blocks::MovingBlocksPass;
+use crate::dynamic_lights::DynamicLightSet;
 use crate::entity_pass::EntityRenderer;
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
@@ -433,6 +434,7 @@ impl Renderer {
             cloud_ticks: 0.0,
             torch_flicker: TorchFlicker::new(),
             custom_lightmaps: None,
+            dynamic_lights: DynamicLightSet::default(),
             weather,
             particles,
             particle_sprites: Vec::new(),

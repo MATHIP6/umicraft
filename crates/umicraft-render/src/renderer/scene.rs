@@ -24,6 +24,8 @@ use crate::weather::PrecipitationField;
 use umicraft_packext::colors::lightmap::DimensionLightmaps;
 use umicraft_packext::sky::LayerFrame;
 
+use crate::dynamic_lights::DynamicLightSet;
+
 impl Renderer {
     /// Sets the world clock and dimension used by the sky and fog passes.
     ///
@@ -32,6 +34,13 @@ impl Renderer {
     /// plain data and does not allocate.
     pub fn set_environment(&mut self, environment: RenderEnvironment) {
         self.environment = environment;
+    }
+
+    /// Sets the dynamic lights of the next frames (OptiFine Dynamic Lights).
+    /// The set is copied, a fixed-size array, so this allocates nothing. An
+    /// empty set switches the lights off.
+    pub fn set_dynamic_lights(&mut self, lights: &DynamicLightSet) {
+        self.dynamic_lights = *lights;
     }
 
     /// Sets the pack's custom lightmaps, which replace the computed light

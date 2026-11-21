@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_mesh::item::ItemMesh;
 use umicraft_render::{
-    FogKind, FogSettings, NoIcons, RenderEnvironment, Renderer, ScreenOverlays, SkyDetails,
-    SkyState,
+    FogKind, FogMedium, FogSettings, NoIcons, RenderEnvironment, Renderer, ScreenOverlays,
+    SkyDetails, SkyState,
 };
 use winit::event_loop::ActiveEventLoop;
 
@@ -405,6 +405,13 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+        renderer.set_dynamic_lights(self.frame.dynamic_lights.update(
+            self.options.video.dynamic_lights,
+            now,
+            &self.frame.entities,
+            self.camera.eye(),
+            environment.fog.medium == FogMedium::Water,
+        ));
         self.update_custom_sky(renderer, environment, elapsed);
         renderer.set_cloud_mode(self.options.video.cloud_mode());
         // 20 client ticks per second drive the cloud drift.

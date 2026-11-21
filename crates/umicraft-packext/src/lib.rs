@@ -23,10 +23,12 @@
 //!   expressions;
 //! - [`ctm`]: connected textures;
 //! - [`colors`]: custom colours (`color.properties`, colormaps, lightmaps);
-//! - [`natural`]: natural textures (turned and mirrored faces).
+//! - [`natural`]: natural textures (turned and mirrored faces);
+//! - [`anim`]: custom texture animations (`anim/*.properties`).
 //!
 //! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
 
+pub mod anim;
 pub mod cem;
 pub mod cit;
 pub mod colors;
