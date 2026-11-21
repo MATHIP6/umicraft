@@ -96,6 +96,12 @@ impl CitSet {
         self.use_glint
     }
 
+    /// Whether some item or armour rule names `item_id`.
+    #[must_use]
+    pub fn has_item(&self, item_id: u16) -> bool {
+        self.by_item.contains_key(&item_id)
+    }
+
     /// Whether there is no rule at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {

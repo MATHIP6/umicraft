@@ -162,7 +162,7 @@ fn push_dropped_item(
     item: &EntityItem,
     resources: &ItemResources,
 ) {
-    let Some((model, quads)) = sprite_model(resources, item.item_id, item.damage) else {
+    let Some((model, quads)) = entity_stack_model(resources, item) else {
         return;
     };
     let tints = resources.tints(item.item_id, item.damage, item.nbt.as_deref());
@@ -228,7 +228,7 @@ fn push_item_frame(
     let Some(item) = framed.filter(|_| !holds_map) else {
         return;
     };
-    let Some((model, quads)) = sprite_model(resources, item.item_id, item.damage) else {
+    let Some((model, quads)) = entity_stack_model(resources, item) else {
         return;
     };
     let pose = framed_pose(entity, model);
@@ -272,7 +272,7 @@ pub fn push_held_item(
     (bob, light): (Mat4, LightLevel),
     resources: &ItemResources,
 ) {
-    let Some((model, quads)) = held_model(resources, item_id, damage, hand) else {
+    let Some((model, quads)) = held_model(resources, (item_id, damage, nbt), hand) else {
         return;
     };
     let tints = resources.tints(item_id, damage, nbt);
@@ -310,15 +310,16 @@ fn first_person_pose(model: &ItemModel, item_id: i16, hand: &HandPose) -> Mat4 {
 /// is out (MCP `RenderItem.renderItemModelForEntity`).
 fn held_model<'a>(
     resources: &'a ItemResources,
-    item_id: i16,
-    damage: i16,
+    (item_id, damage, nbt): (i16, i16, Option<&[u8]>),
     hand: &HandPose,
 ) -> Option<(&'a ItemModel, &'a [ModelQuad])> {
     let special =
         hand_model_name(item_id, hand).and_then(|name| resources.models().model_by_name(name));
     match special {
         Some(model) => quads_of(model),
-        None => sprite_model(resources, item_id, damage),
+        // The first-person hand does not know the stack size: a rule on it
+        // sees one item.
+        None => stack_model(resources, (item_id, damage, 1, nbt)),
     }
 }
 
@@ -331,6 +332,30 @@ fn hand_model_name(item_id: i16, hand: &HandPose) -> Option<&'static str> {
     hand.item_use
         .filter(|view| view.action == UseAction::Bow && item_id == BOW)
         .and_then(|view| bow_model_name(view.ticks_used))
+}
+
+/// The model and quads of a stack: the picture a Custom Items rule gives it
+/// (`ItemResources::custom_model`), else its usual model.
+fn stack_model<'a>(
+    resources: &'a ItemResources,
+    stack: (i16, i16, u8, Option<&[u8]>),
+) -> Option<(&'a ItemModel, &'a [ModelQuad])> {
+    let (item_id, damage, count, nbt) = stack;
+    resources
+        .custom_model(item_id, damage, count, nbt)
+        .and_then(quads_of)
+        .or_else(|| sprite_model(resources, item_id, damage))
+}
+
+/// [`stack_model`] of an entity's stack.
+fn entity_stack_model<'a>(
+    resources: &'a ItemResources,
+    item: &EntityItem,
+) -> Option<(&'a ItemModel, &'a [ModelQuad])> {
+    stack_model(
+        resources,
+        (item.item_id, item.damage, item.count, item.nbt.as_deref()),
+    )
 }
 
 /// The model and quads of an item that is drawn from a sprite or blocks.

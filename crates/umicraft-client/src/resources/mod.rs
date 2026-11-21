@@ -5,6 +5,7 @@
 //! the sky pictures.
 
 pub mod custom_guis;
+pub mod custom_items;
 pub(crate) mod entity_icons;
 pub mod game_files;
 pub(crate) mod item_icons;

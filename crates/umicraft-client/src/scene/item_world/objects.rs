@@ -11,7 +11,7 @@ use umicraft_mesh::item::ItemStyle;
 use umicraft_model::display::DisplayContext;
 use umicraft_model::item::pose::context_pose;
 
-use super::{sprite_model, world_light, ItemLayers};
+use super::{entity_stack_model, world_light, ItemLayers};
 use crate::resources::item_icons::ItemResources;
 use crate::scene::entity::vehicles::wobble;
 
@@ -69,7 +69,7 @@ pub(super) fn push(
     let Some((item, pose)) = placed(entity, view) else {
         return;
     };
-    let Some((model, quads)) = sprite_model(resources, item.item_id, item.damage) else {
+    let Some((model, quads)) = entity_stack_model(resources, &item) else {
         return;
     };
     let matrix = match pose {

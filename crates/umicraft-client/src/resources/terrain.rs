@@ -173,6 +173,15 @@ impl TerrainTextures {
         }
     }
 
+    /// The baked item models, `None` for the procedural set.
+    #[must_use]
+    pub fn items(&self) -> Option<&Arc<ItemResources>> {
+        match self {
+            Self::Official { items, .. } => Some(items),
+            Self::Procedural => None,
+        }
+    }
+
     /// Binds this set's array on `target` and returns the matching mesher.
     ///
     /// A rejected official array logs one warning and installs the

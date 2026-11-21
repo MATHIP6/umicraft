@@ -14,20 +14,21 @@
 //! clock are static.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use umicraft_assets::ClientResources;
 use umicraft_game::inventory::tooltip::potion_has_effects;
 use umicraft_game::item_nbt::ItemDisplay;
 
 use crate::hud::dials::{is_dial, DialFrames};
+use crate::resources::custom_items::CustomItems;
 use crate::resources::item_tints::{item_grass_color, layer_tints, nbt_color};
 use crate::scene::block_entity::is_entity_item;
 use umicraft_game::items;
 use umicraft_mesh::item::{ItemMesh, ItemStyle};
 use umicraft_mesh::VertexLight;
 use umicraft_model::item::pose::gui_pose;
-use umicraft_model::item::{ItemModelSet, SpriteMask};
+use umicraft_model::item::{ItemModel, ItemModelSet, SpriteMask};
 use umicraft_model::{AtlasLayout, ModelResult};
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::IconProvider;
@@ -42,6 +43,12 @@ const COLOR_SHIFT: u32 = 32;
 /// Skull and banner stacks remembered at most; the keys are built again on
 /// the next frame that shows them.
 const MAX_ENTITY_STACKS: usize = 1024;
+
+/// The item id field of the icon key of a stack a Custom Items rule replaced;
+/// the damage field then holds the rule index.
+const CUSTOM_ID: u16 = u16::MAX;
+/// Rule indices above this cannot be keyed.
+const MAX_CUSTOM_RULES: usize = u16::MAX as usize;
 
 const GOLDEN_APPLE: i16 = 322;
 /// `Items.potionitem`.
@@ -60,6 +67,8 @@ pub struct ItemResources {
     /// The NBT of the skull and banner stacks behind the icon keys handed
     /// out, which the key only identifies by a hash.
     entity_stacks: Mutex<HashMap<u64, Option<Vec<u8>>>>,
+    /// The Custom Items rules of the packs, set once after loading.
+    custom: OnceLock<Arc<CustomItems>>,
 }
 
 impl ItemResources {
@@ -80,12 +89,50 @@ impl ItemResources {
             SpriteMask::from_rgba(width, height, pixels)
         };
         let grass_color = resources.colormaps().map(item_grass_color);
+        let mut models = ItemModelSet::build(resources, &masks)?;
+        add_custom_models(&mut models, resources, &masks);
         Ok(Self {
-            models: ItemModelSet::build(resources, &masks)?,
+            models,
             atlas: atlas.layout().clone(),
             grass_color,
             entity_stacks: Mutex::default(),
+            custom: OnceLock::new(),
         })
+    }
+
+    /// Hands over the Custom Items rules whose models [`Self::load`] baked.
+    /// Only the first call counts; the rules never change after loading.
+    pub fn set_custom_items(&self, custom: Arc<CustomItems>) {
+        if !custom.is_empty() {
+            // A second call would carry the same rules; ignoring it is right.
+            let _ = self.custom.set(custom);
+        }
+    }
+
+    /// The model a Custom Items rule gives a stack, `None` for the usual one.
+    /// The first thing it does is look for a rule of the item, so it costs
+    /// one `Option` check without packs that bring rules.
+    #[must_use]
+    pub fn custom_model(
+        &self,
+        item_id: i16,
+        damage: i16,
+        count: u8,
+        nbt: Option<&[u8]>,
+    ) -> Option<&ItemModel> {
+        let custom = self.custom.get()?;
+        let index = custom.matching(item_id, damage, count, nbt)?;
+        self.models.model_by_name(custom.model_name(index)?)
+    }
+
+    /// The rule index behind the icon key of a stack, when one replaces it.
+    fn custom_rule(&self, stack: &ItemStack) -> Option<u16> {
+        let custom = self.custom.get()?;
+        let count = u8::try_from(stack.stack_size).unwrap_or(0);
+        let index = custom.matching(stack.item_id, stack.damage, count, stack.nbt.as_deref())?;
+        u16::try_from(index)
+            .ok()
+            .filter(|_| index < MAX_CUSTOM_RULES)
     }
 
     /// Resources without any model, for tests that bind a texture set.
@@ -96,6 +143,7 @@ impl ItemResources {
             atlas: AtlasLayout::default(),
             grass_color: None,
             entity_stacks: Mutex::default(),
+            custom: OnceLock::new(),
         }
     }
 
@@ -178,8 +226,11 @@ impl ItemResources {
             .unwrap_or_default();
         let color = nbt_color(stack.item_id, stack.nbt.as_deref())
             .or_else(|| self.entity_stack_hash(stack));
+        let key = self
+            .custom_rule(stack)
+            .map_or_else(|| icon_key(stack, definition, color, dials), custom_key);
         SlotItem {
-            key: icon_key(stack, definition, color, dials),
+            key,
             count: u8::try_from(stack.stack_size).unwrap_or(0),
             damage: stack.damage,
             max_durability: definition
@@ -236,6 +287,9 @@ impl ItemResources {
     /// item has no sprite model.
     fn build_icon(&self, key: u64, mesh: &mut ItemMesh) -> bool {
         let (item_id, key_damage, color) = unpack_key(key);
+        if item_id as u16 == CUSTOM_ID {
+            return self.build_custom_icon(key_damage as u16, mesh);
+        }
         let damageable =
             items::lookup(i32::from(item_id)).is_some_and(items::ItemDef::is_damageable);
         // A dial's key holds its frame in the damage field; its model has none.
@@ -262,6 +316,61 @@ impl ItemResources {
             mesh.push_quads(quads, &pose, &style);
         }
         !mesh.is_empty()
+    }
+}
+
+impl ItemResources {
+    /// Fills `mesh` with the icon of the model rule `index` of the Custom
+    /// Items rules generated, untinted.
+    fn build_custom_icon(&self, index: u16, mesh: &mut ItemMesh) -> bool {
+        let Some(custom) = self.custom.get() else {
+            return false;
+        };
+        let Some(model) = custom
+            .model_name(usize::from(index))
+            .and_then(|name| self.models.model_by_name(name))
+        else {
+            return false;
+        };
+        let umicraft_model::item::ItemGeometry::Quads(quads) = &model.geometry else {
+            return false;
+        };
+        let tints = layer_tints(0, 0, None, None);
+        let style = ItemStyle {
+            atlas: &self.atlas,
+            light: VertexLight::new(0, 15, 15, false),
+            tints: &tints,
+        };
+        mesh.push_quads(quads, &gui_pose(model), &style);
+        !mesh.is_empty()
+    }
+}
+
+/// The icon key of the stack that Custom Items rule `index` replaced.
+fn custom_key(index: u16) -> u64 {
+    (u64::from(CUSTOM_ID) << ID_SHIFT) | (u64::from(index) << DAMAGE_SHIFT)
+}
+
+/// Bakes the generated models of the Custom Items rules, which the packs
+/// carry as `models/item/optifine_cit_<n>.json`. One that does not bake is
+/// skipped with a warning: its rule then never matches.
+fn add_custom_models(
+    models: &mut ItemModelSet,
+    resources: &ClientResources,
+    masks: &dyn Fn(&str) -> Option<SpriteMask>,
+) {
+    use umicraft_model::ResourceSource;
+    const PREFIX: &str = "assets/minecraft/models/item/optifine_cit_";
+    for path in resources.list(PREFIX) {
+        let Some(name) = path
+            .strip_prefix("assets/minecraft/models/item/")
+            .and_then(|rest| rest.strip_suffix(".json"))
+        else {
+            continue;
+        };
+        if let Err(error) = models.add_named(resources, masks, name) {
+            tracing::warn!(%name, %error, "custom item model ignored");
+        }
     }
 }
 
@@ -467,5 +576,44 @@ mod render_tests {
                 .and_then(|mut writer| writer.write_image_data(&image.rgba))
                 .expect("png");
         }
+    }
+
+    #[test]
+    fn a_custom_items_rule_gives_the_stack_its_own_icon_key() {
+        use crate::resources::game_files::test_support::png;
+        use crate::resources::game_files::PackFeatures;
+        let files = [
+            (
+                "optifine/cit/blade.properties",
+                b"items=276\ntexture=pic\n".to_vec(),
+            ),
+            ("optifine/cit/pic.png", png(16, 16)),
+        ]
+        .into_iter()
+        .map(|(path, bytes)| (format!("assets/minecraft/{path}"), bytes))
+        .collect();
+        let pack = umicraft_assets::ResourcePack::from_parts("cit", None, None, files);
+        let packs = umicraft_assets::PackFiles::from_packs([pack]);
+        let (custom, _) = CustomItems::scan(&packs, PackFeatures::ALL);
+
+        let resources = ItemResources::empty();
+        let plain = resources.slot_item(&stack(276, 0), DialFrames::default());
+        resources.set_custom_items(Arc::new(custom));
+        let replaced = resources.slot_item(&stack(276, 0), DialFrames::default());
+        let other = resources.slot_item(&stack(280, 0), DialFrames::default());
+
+        assert_ne!(plain.key, replaced.key);
+        assert_eq!(unpack_key(replaced.key).0 as u16, CUSTOM_ID);
+        assert_eq!(unpack_key(replaced.key).1, 0, "rule index 0");
+        assert_eq!(
+            other.key,
+            resources
+                .slot_item(&stack(280, 0), DialFrames::default())
+                .key
+        );
+        assert_eq!(
+            replaced.damage, 0,
+            "the durability bar still reads the damage"
+        );
     }
 }
