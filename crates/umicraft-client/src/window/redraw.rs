@@ -97,6 +97,7 @@ impl App {
         ) else {
             return;
         };
+        world.set_upload_budget(self.options.video.performance.upload_budget_bytes());
         world.sync(session.frames(), session.chunks(), renderer);
         let video = &self.options.video;
         world.update_camera(

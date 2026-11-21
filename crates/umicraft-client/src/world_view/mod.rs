@@ -298,6 +298,12 @@ impl WorldView {
         }
     }
 
+    /// Sets how many vertex bytes one frame uploads at most: the Chunk
+    /// Updates option (ADR-0089, phase 3).
+    pub fn set_upload_budget(&mut self, bytes: usize) {
+        self.upload_budget = bytes;
+    }
+
     /// Forgets everything of a finished session: the meshes, the camera
     /// history, the HUD, the inventory, the statistics and the end reason.
     /// The mesh workers and the terrain stay, so the next session starts
