@@ -8,6 +8,7 @@ use umicraft_ui::DrawList;
 use super::Renderer;
 use super::{CameraUniform, HAND_FOG_FREE, OVERLAY_MIN_BYTES};
 use crate::camera::Camera;
+use crate::dynamic_lights;
 use crate::error::RenderError;
 use crate::items::IconProvider;
 use crate::lightmap::{self, LightmapParams};
@@ -101,6 +102,7 @@ impl Renderer {
     fn write_camera(&mut self, camera: &Camera, sky: &SkyState, flicker: f32) {
         let [fog_start, fog_end, fog_density] = sky.fog.world.uniform();
         let origin = camera.render_origin();
+        let (lights, light_count) = dynamic_lights::pack(&self.dynamic_lights, origin);
         let uniform = CameraUniform {
             view_proj: camera.view_projection_from(origin).to_cols_array_2d(),
             camera_pos: camera.relative_eye().to_array(),
@@ -112,7 +114,7 @@ impl Renderer {
             fog_density,
             fog_planar: f32::from(u8::from(sky.fog.planar)),
             origin: origin.as_vec3().to_array(),
-            _pad_origin: 0.0,
+            light_count,
             lightmap: if self.fullbright {
                 lightmap::unlit()
             } else {
@@ -122,6 +124,7 @@ impl Renderer {
                     self.custom_lightmaps.as_deref(),
                 )
             },
+            lights,
         };
         let uniform_bytes = bytemuck::bytes_of(&uniform);
         if self
@@ -158,6 +161,9 @@ impl Renderer {
             fog_end: HAND_FOG_FREE * 2.0,
             fog_density: 0.0,
             origin: [0.0; 3],
+            // The hand lives in camera space, where the lights' offsets from
+            // the render origin mean nothing.
+            light_count: 0,
             ..uniform
         };
         let hand_bytes = bytemuck::bytes_of(&hand_uniform);

@@ -20,8 +20,13 @@ struct Camera {
     // GPU relative to it (`view_proj` is built for that origin), so f32
     // keeps its precision far from the world origin.
     origin: vec3<f32>,
+    // How many of `lights` are on (`dynamic_lights.wgsl`); 0 when Dynamic
+    // Lights is off.
+    light_count: u32,
     // The vanilla lightmap, `[sky * 16 + block]` (`lightmap.rs`).
     lightmap: array<vec4<f32>, 256>,
+    // The dynamic lights of the frame, the first `light_count` of them.
+    lights: array<DynamicLight, 16>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -110,7 +115,10 @@ fn entity_vertex(in: VertexIn) -> VertexOut {
     out.uv = in.uv;
 
     // Unpack light nibbles: bits 0..=3 block, 4..=7 sky
-    out.light = lightmap_sample(f32(in.light & 0x0Fu), f32((in.light >> 4u) & 0x0Fu));
+    out.light = lightmap_sample(
+        dynamic_block_light(f32(in.light & 0x0Fu), out.world_position),
+        f32((in.light >> 4u) & 0x0Fu),
+    );
     out.shade = face_shade(in.normal);
     // Bit 8: hurt tint. Bits 9..=12: white flash level (the creeper fuse).
     // Bit 13: dye tint, bits 14..=17 the dye (a chat colour with bit 18).
