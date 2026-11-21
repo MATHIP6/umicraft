@@ -17,11 +17,15 @@
 //! - [`ranges`]: integer range lists such as `0-3 5`;
 //! - [`filters`]: the biome, height and weather conditions.
 //!
+//! Features:
+//! - [`sky`]: custom sky layers.
+//!
 //! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
 
 pub mod filters;
 pub mod properties;
 pub mod ranges;
+pub mod sky;
 
 pub use filters::{BiomeFilter, WeatherSet};
 pub use properties::{Properties, PropertiesError};
