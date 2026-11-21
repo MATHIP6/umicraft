@@ -14,6 +14,7 @@ use umicraft_model::entity::{
 };
 
 use super::animals::with_eyes;
+use super::custom_models::mesh_with_custom;
 use super::dragon_death;
 use super::glow::{glowing, Glow, UvMap};
 use super::mobs::{one, EntityLayer, Pose};
@@ -230,14 +231,22 @@ fn squash(vertices: &mut [ModelVertex], ent: &EntityRenderSnapshot) {
 pub(super) fn creeper_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Vec<EntityLayer> {
     let mut model = CreeperModel::new();
     model.set_angles(pose.swing, pose.amount, pose.head_yaw, pose.head_pitch);
-    let mut vertices = model.emit_mesh();
+    let mut meshes = mesh_with_custom(
+        pose.custom,
+        ent,
+        "creeper",
+        TextureSlot::Creeper,
+        &mut model,
+        &CreeperModel::new(),
+        CreeperModel::emit_mesh,
+    );
     let (wide, tall) = creeper_swell(ent.fuse_flash);
-    for vertex in &mut vertices {
+    meshes.for_each_vertex(|vertex| {
         vertex.position[0] *= wide;
         vertex.position[1] *= tall;
         vertex.position[2] *= wide;
-    }
-    let mut layers = one(TextureSlot::Creeper, vertices);
+    });
+    let mut layers = meshes.into_layers(TextureSlot::Creeper);
     // A creeper struck by lightning is wrapped in a swirling shell inflated by
     // 2 pixels (MCP `LayerCreeperCharge`).
     if matches!(&ent.meta.variant, Variant::Creeper(creeper) if creeper.powered) {
@@ -285,6 +294,7 @@ mod tests {
             head_yaw: 0.0,
             head_pitch: 0.0,
             age: 0.0,
+            custom: None,
         };
         for kind in [
             EntityKind::Blaze,

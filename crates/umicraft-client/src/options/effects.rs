@@ -172,6 +172,7 @@ impl VideoApplier {
         renderer.set_cave_culling(video.cave_culling);
         if let Some(entities) = entities {
             entities.set_shadows_enabled(video.entity_shadows);
+            entities.set_custom_models_enabled(video.quality.custom_entity_models);
         }
         if let (Some(window), Some(fullscreen)) = (window, self.fullscreen_change(video.fullscreen))
         {

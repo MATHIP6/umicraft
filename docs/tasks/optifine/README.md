@@ -1,6 +1,6 @@
 # F6: pack features and OptiFine-style video settings: plan
 
-Status: **phases 0, 1, 2 and 4 done**; phases 3, 5 and 6 in progress. Branch `feat/optifine-features`.
+Status: **phases 0, 1, 2, 4 and 5 done**; phases 3 and 6 in progress, then 7. Branch `feat/optifine-features`.
 Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 (reference policy) and ADR-0089 (architecture). Roadmap entry: F6.
 
@@ -66,11 +66,11 @@ Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 
 | Step | Content | Done when |
 |---|---|---|
-| 5.1 | `.jem` / `.jpm` parsing: `models`, `baseId`, `model`, `part`, `attach`, `translate`, `rotate`, `scale`, `invertAxis`, `mirrorTexture`, `boxes` (`coordinates`, `textureOffset`, `sizeAdd`, per-face UVs), `sprites`, `submodel(s)`; the path rules `./` and `~/` | Unit tests; fuzz target |
-| 5.2 | Per-mob part-name table mapping CEM names to the `ModelPart` fields of the hard-coded models (source: public CEM documentation) | One test per covered mob |
-| 5.3 | Expression engine: lexer → parser → compilation to bytecode with slot-indexed variables, evaluated in `f32` with no allocation. Covers the precedence table, the functions, `if`, `between`, `in`, `smooth` and `random` | Table tests; criterion bench of the evaluation |
-| 5.4 | Animation variables (`limb_swing`, `head_yaw`, ...), mapped from `EntityRenderSnapshot` (source: public documentation) | Unit tests |
-| 5.5 | Hook in `scene/entity/mobs.rs`, falling back to the hard-coded model. Option "Custom Entity Models" (default on) | Offscreen screenshot of an original CEM creeper |
+| 5.1 | `.jem` / `.jpm` parsing: `models`, `baseId`, `model`, `part`, `attach`, `translate`, `rotate`, `scale`, `invertAxis`, `mirrorTexture`, `boxes` (`coordinates`, `textureOffset`, `sizeAdd`, per-face UVs), `sprites`, `submodel(s)`; the path rules `./` and `~/` (**done**) | Unit tests; fuzz target |
+| 5.2 | Per-mob part-name table mapping CEM names to the `ModelPart` fields of the hard-coded models (source: public CEM documentation) (**done**) | One test per covered mob |
+| 5.3 | Expression engine: lexer → parser → compilation to bytecode with slot-indexed variables, evaluated in `f32` with no allocation. Covers the precedence table, the functions, `if`, `between`, `in`, `smooth` and `random` (**done**) | Table tests; criterion bench of the evaluation |
+| 5.4 | Animation variables (`limb_swing`, `head_yaw`, ...), mapped from `EntityRenderSnapshot` (source: public documentation) (**done**) | Unit tests |
+| 5.5 | Hook in `scene/entity/mobs.rs`, falling back to the hard-coded model. Option "Custom Entity Models" (default on) (**done**) | Offscreen screenshot of an original CEM creeper |
 
 ### Phase 2: details and animations
 
@@ -111,6 +111,12 @@ Not offered, because they would have no meaningful effect in Umicraft:
 | 3.5 | Smart animations: upload only the sprites drawn last frame | Bench |
 | 3.6 | "Chunk Updates" and "Dynamic Updates" mapped onto the mesh queue budget | Bench at every setting |
 | 3.7 | Lagometer (512-entry ring buffers of section timers) and the compact "Show FPS" line | Unit tests of the ring buffer |
+
+CEM covers creeper, zombie, zombie pigman, skeleton, wither skeleton,
+spider, cow, pig, sheep, chicken, wolf, enderman, villager and iron golem.
+Not yet: slime, snow golem, horse, the babies and the other mobs; sprites,
+per-part textures and `mirrorTexture` on `v`. No offscreen screenshot of a
+CEM mob yet (the tests check the produced layers).
 
 ### Phase 6: connected textures (CTM)
 

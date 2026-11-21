@@ -11,6 +11,7 @@ use umicraft_model::entity::{
     WolfModel,
 };
 
+use super::custom_models::mesh_with_custom;
 use super::glow::{glowing, Glow};
 use super::mobs::{one, EntityLayer, Pose};
 use super::mushrooms::mushroom_vertices;
@@ -58,6 +59,25 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
             };
             one($slot, mesh)
         }};
+        // The same, for a mob a custom entity model may replace parts of.
+        ($model:expr, $slot:expr, $name:literal, $rest:expr) => {
+            ageable!($model, $slot, $name, $rest, |model| {
+                model.set_angles(swing, amount, head_yaw, head_pitch);
+            })
+        };
+        ($model:expr, $slot:expr, $name:literal, $rest:expr, |$posed:ident| $pose:block) => {{
+            let mut $posed = $model;
+            $pose
+            let mut model = $posed;
+            mesh_with_custom(pose.custom, ent, $name, $slot, &mut model, &$rest, |model| {
+                if baby {
+                    model.emit_child_mesh()
+                } else {
+                    model.emit_mesh()
+                }
+            })
+            .into_layers($slot)
+        }};
     }
     // A model that is only scaled down when young.
     macro_rules! walker {
@@ -70,7 +90,12 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
         }};
     }
     Some(match ent.kind {
-        EntityKind::Cow => ageable!(QuadrupedModel::cow(), TextureSlot::Cow),
+        EntityKind::Cow => ageable!(
+            QuadrupedModel::cow(),
+            TextureSlot::Cow,
+            "cow",
+            QuadrupedModel::cow()
+        ),
         EntityKind::Mooshroom => {
             let mut model = QuadrupedModel::cow();
             model.set_angles(swing, amount, head_yaw, head_pitch);
@@ -90,7 +115,12 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
             layers
         }
         EntityKind::Pig => {
-            let mut layers = ageable!(QuadrupedModel::pig(), TextureSlot::Pig);
+            let mut layers = ageable!(
+                QuadrupedModel::pig(),
+                TextureSlot::Pig,
+                "pig",
+                QuadrupedModel::pig()
+            );
             if matches!(ent.meta.variant, Variant::Pig { saddled: true }) {
                 layers.extend(ageable!(
                     QuadrupedModel::pig_saddle(),
@@ -99,12 +129,18 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
             }
             layers
         }
-        EntityKind::Chicken => ageable!(ChickenModel::new(), TextureSlot::Chicken, |model| {
-            model.set_angles(swing, amount, head_yaw, head_pitch);
-            if let MobPose::Chicken { flap } = ent.mob {
-                model.set_wings(flap);
+        EntityKind::Chicken => ageable!(
+            ChickenModel::new(),
+            TextureSlot::Chicken,
+            "chicken",
+            ChickenModel::new(),
+            |model| {
+                model.set_angles(swing, amount, head_yaw, head_pitch);
+                if let MobPose::Chicken { flap } = ent.mob {
+                    model.set_wings(flap);
+                }
             }
-        }),
+        ),
         EntityKind::Sheep => sheep_layers(ent, pose),
         EntityKind::Wolf => wolf_layers(ent, pose),
         EntityKind::Ocelot => {
@@ -146,12 +182,23 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
                 Variant::Villager { profession } => variants::villager(profession),
                 _ => TextureSlot::Villager,
             };
-            walker!(
-                VillagerModel::villager(),
+            let mut model = VillagerModel::villager();
+            model.set_angles(swing, amount, head_yaw, head_pitch);
+            let mut meshes = mesh_with_custom(
+                pose.custom,
+                ent,
+                "villager",
                 slot,
-                VILLAGER_SCALE,
+                &mut model,
+                &VillagerModel::villager(),
+                VillagerModel::emit_mesh,
+            );
+            meshes.scale(if baby {
                 VILLAGER_SCALE * 0.5
-            )
+            } else {
+                VILLAGER_SCALE
+            });
+            meshes.into_layers(slot)
         }
         EntityKind::Witch => {
             let mut witch = VillagerModel::witch();
@@ -162,11 +209,20 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
         EntityKind::Spider => {
             let mut model = SpiderModel::new();
             model.set_angles(swing, amount, head_yaw, head_pitch);
-            with_eyes(
+            let mut meshes = mesh_with_custom(
+                pose.custom,
+                ent,
+                "spider",
                 TextureSlot::Spider,
-                TextureSlot::SpiderEyes,
-                model.emit_mesh(),
-            )
+                &mut model,
+                &SpiderModel::new(),
+                SpiderModel::emit_mesh,
+            );
+            let custom = meshes.custom_layer();
+            let mut layers =
+                with_eyes(TextureSlot::Spider, TextureSlot::SpiderEyes, meshes.vanilla);
+            layers.extend(custom);
+            layers
         }
         EntityKind::CaveSpider => {
             let mut model = SpiderModel::with_scale(0.7);
@@ -184,11 +240,23 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
                 model.is_attacking = enderman.screaming;
             }
             model.set_pose(&humanoid_pose(ent, false));
-            with_eyes(
+            let mut meshes = mesh_with_custom(
+                pose.custom,
+                ent,
+                "enderman",
+                TextureSlot::Enderman,
+                &mut model,
+                &EndermanModel::new(),
+                EndermanModel::emit_mesh,
+            );
+            let custom = meshes.custom_layer();
+            let mut layers = with_eyes(
                 TextureSlot::Enderman,
                 TextureSlot::EndermanEyes,
-                model.emit_mesh(),
-            )
+                meshes.vanilla,
+            );
+            layers.extend(custom);
+            layers
         }
         EntityKind::IronGolem => {
             let mut model = IronGolemModel::new();
@@ -196,7 +264,16 @@ pub(super) fn animal_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Option<Ve
             if let MobPose::IronGolem(arms) = ent.mob {
                 model.set_action(golem_action(arms));
             }
-            one(TextureSlot::IronGolem, model.emit_mesh())
+            mesh_with_custom(
+                pose.custom,
+                ent,
+                "iron_golem",
+                TextureSlot::IronGolem,
+                &mut model,
+                &IronGolemModel::new(),
+                IronGolemModel::emit_mesh,
+            )
+            .into_layers(TextureSlot::IronGolem)
         }
         _ => return None,
     })
@@ -231,12 +308,28 @@ fn sheep_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Vec<EntityLayer> {
     if let MobPose::Sheep(graze) = ent.mob {
         model.set_graze(graze.lowered, graze.angle);
     }
-    let (body, wool) = if ent.meta.baby {
-        (model.emit_child_body_mesh(), model.emit_child_wool_mesh())
+    let baby = ent.meta.baby;
+    let body = mesh_with_custom(
+        pose.custom,
+        ent,
+        "sheep",
+        TextureSlot::Sheep,
+        &mut model,
+        &SheepModel::new(),
+        |model| {
+            if baby {
+                model.emit_child_body_mesh()
+            } else {
+                model.emit_body_mesh()
+            }
+        },
+    );
+    let wool = if baby {
+        model.emit_child_wool_mesh()
     } else {
-        (model.emit_body_mesh(), model.emit_wool_mesh())
+        model.emit_wool_mesh()
     };
-    let mut layers = one(TextureSlot::Sheep, body);
+    let mut layers = body.into_layers(TextureSlot::Sheep);
     if let Variant::Sheep(sheep) = ent.meta.variant {
         if sheep.sheared {
             return layers;
@@ -266,10 +359,23 @@ fn wolf_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Vec<EntityLayer> {
             model.emit_mesh()
         }
     };
-    let Variant::Wolf(wolf) = ent.meta.variant else {
-        return one(TextureSlot::Wolf, mesh(&model));
+    let slot = match ent.meta.variant {
+        Variant::Wolf(wolf) => variants::wolf(wolf),
+        _ => TextureSlot::Wolf,
     };
-    let mut layers = one(variants::wolf(wolf), mesh(&model));
+    let body = mesh_with_custom(
+        pose.custom,
+        ent,
+        "wolf",
+        slot,
+        &mut model,
+        &WolfModel::new(),
+        mesh,
+    );
+    let Variant::Wolf(wolf) = ent.meta.variant else {
+        return body.into_layers(slot);
+    };
+    let mut layers = body.into_layers(slot);
     if wolf.tamed {
         // The collar entry is the dye damage; the palette is by metadata.
         layers.push(EntityLayer::new(TextureSlot::WolfCollar, mesh(&model)).dyed(15 - wolf.collar));
@@ -354,6 +460,7 @@ mod tests {
             head_yaw: 0.0,
             head_pitch: 0.0,
             age: ent.age,
+            custom: None,
         };
         let layers = |ent: &EntityRenderSnapshot| horse_layers(ent, pose(ent));
         let calm = horse_at(1, 0.0, 0);
