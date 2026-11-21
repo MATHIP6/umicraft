@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use umicraft_mesh::tint::{BiomeTints, WHITE};
 use umicraft_mesh::{
-    mesh_chunk, mesh_chunk_with_models, mesh_chunk_with_settings, BlockSource, ChunkSnapshot,
-    Lighting, Mesh, MeshSettings, ModelMeshContext, Vertex, VertexLight,
+    mesh_chunk, mesh_chunk_with_models, mesh_chunk_with_settings, BetterGrass, BlockSource,
+    ChunkSnapshot, Leaves, Lighting, Mesh, MeshSettings, ModelMeshContext, Vertex, VertexLight,
 };
 use umicraft_model::{
     AtlasLayout, BlockDefinition, BlockModelSet, ModelError, ModelResult, ResourceSource, StateDef,
@@ -667,6 +667,7 @@ fn without_block_alternatives_every_position_uses_the_heaviest_variant() {
     let settings = MeshSettings {
         lighting: Lighting::Smooth,
         block_alternatives: false,
+        ..MeshSettings::default()
     };
     for x in 0..16 {
         for z in 0..16 {
@@ -921,4 +922,255 @@ fn the_water_fallback_uses_the_swamp_water_tint() {
         &context,
     );
     assert_eq!(surface_tint(&swamp), Some(0xE0_FF_AE));
+}
+
+// ---- OptiFine-style video options (ADR-0089) ----
+
+const LEAVES_STATES: &[StateDef] = &[StateDef {
+    mask: 0,
+    value: 0,
+    blockstate: "leaves",
+    variant: "normal",
+}];
+const LEAVES: BlockDefinition = BlockDefinition {
+    id: 18,
+    name: "leaves",
+    states: LEAVES_STATES,
+};
+const SNOW_STATES: &[StateDef] = &[StateDef {
+    mask: 0,
+    value: 0,
+    blockstate: "snow_layer",
+    variant: "normal",
+}];
+const SNOW_LAYER: BlockDefinition = BlockDefinition {
+    id: 78,
+    name: "snow_layer",
+    states: SNOW_STATES,
+};
+static OPTION_DEFS: &[BlockDefinition] = &[STONE, LEAVES, GRASS, PLANT, SNOW_LAYER];
+
+/// A grass block with a plain side quad and a tinted overlay quad on the four
+/// sides, like `grass_normal`.
+const GRASS_SIDES_JSON: &str = r##"{
+  "textures": { "particle": "blocks/grass_side" },
+  "elements": [
+    {
+      "from": [0, 0, 0], "to": [16, 16, 16],
+      "faces": {
+        "down":  { "texture": "blocks/grass_side", "cullface": "down" },
+        "up":    { "texture": "blocks/grass_top", "cullface": "up", "tintindex": 0 },
+        "north": { "texture": "blocks/grass_side", "cullface": "north" },
+        "south": { "texture": "blocks/grass_side", "cullface": "south" },
+        "west":  { "texture": "blocks/grass_side", "cullface": "west" },
+        "east":  { "texture": "blocks/grass_side", "cullface": "east" }
+      }
+    },
+    {
+      "from": [0, 0, 0], "to": [16, 16, 16],
+      "faces": {
+        "north": { "texture": "blocks/grass_side_overlay", "cullface": "north", "tintindex": 0 },
+        "south": { "texture": "blocks/grass_side_overlay", "cullface": "south", "tintindex": 0 },
+        "west":  { "texture": "blocks/grass_side_overlay", "cullface": "west", "tintindex": 0 },
+        "east":  { "texture": "blocks/grass_side_overlay", "cullface": "east", "tintindex": 0 }
+      }
+    }
+  ]
+}"##;
+
+/// Every model the option tests need: stone, leaves, grass, a cross plant and
+/// a half-height snow layer.
+fn options_context(tints: Option<BiomeTints>) -> ModelMeshContext {
+    let source = Memory::new()
+        .model("stone", &CUBE_JSON.replace("#all", "blocks/stone"))
+        .model("leaves", &CUBE_JSON.replace("#all", "blocks/leaves"))
+        .model("grass", GRASS_SIDES_JSON)
+        .model("cross", &CROSS_JSON.replace("#cross", "blocks/plant"))
+        .model("snow", &SLAB_JSON.replace("#all", "blocks/snow"))
+        .blockstate("stone", &blockstate("stone"))
+        .blockstate("leaves", &blockstate("leaves"))
+        .blockstate("grass", &blockstate("grass"))
+        .blockstate("tall_grass", &blockstate("cross"))
+        .blockstate("snow_layer", &blockstate("snow"));
+    let mut context = context(
+        BlockModelSet::build(&source, OPTION_DEFS).expect("synthetic option model set"),
+        &[
+            "blocks/stone",
+            "blocks/leaves",
+            "blocks/grass_top",
+            "blocks/grass_side",
+            "blocks/grass_side_overlay",
+            "blocks/plant",
+            "blocks/snow",
+        ],
+    );
+    context.tints = tints.map(Arc::new);
+    context
+}
+
+fn mesh_with(scene: &Scene, context: &ModelMeshContext, settings: MeshSettings) -> Mesh {
+    mesh_chunk_with_settings(ChunkPos::new(0, 0), scene, context, settings)
+}
+
+#[test]
+fn leaf_faces_between_leaves_follow_the_trees_option() {
+    let context = options_context(None);
+    let scene = Scene::new(&[
+        ([0, 0, 0], BlockState::new(18, 0)),
+        ([1, 0, 0], BlockState::new(18, 1)),
+    ]);
+    let faces = |leaves| {
+        let settings = MeshSettings {
+            leaves,
+            ..MeshSettings::default()
+        };
+        mesh_with(&scene, &context, settings).face_count()
+    };
+    assert_eq!(faces(Leaves::Fancy), 12, "every face is drawn");
+    assert_eq!(faces(Leaves::Smart), 10, "the shared faces are culled");
+    assert_eq!(faces(Leaves::Fast), 10, "the shared faces are culled");
+}
+
+#[test]
+fn an_opaque_neighbour_hides_a_leaf_face_in_every_mode() {
+    let context = options_context(None);
+    let scene = Scene::new(&[
+        ([0, 0, 0], BlockState::new(18, 0)),
+        ([1, 0, 0], BlockState::new(1, 0)),
+    ]);
+    for leaves in [Leaves::Fast, Leaves::Smart, Leaves::Fancy] {
+        let settings = MeshSettings {
+            leaves,
+            ..MeshSettings::default()
+        };
+        let mesh = mesh_with(&scene, &context, settings);
+        let leaf_layer = layer(&context, "blocks/leaves");
+        let leaf_faces = quads(&mesh)
+            .filter(|quad| quad[0].layer == leaf_layer)
+            .count();
+        assert_eq!(leaf_faces, 5, "{leaves:?}");
+    }
+}
+
+/// A grass colormap that gives every climate the same colour, so the swamp
+/// override is the only thing that can differ.
+fn swamp_tints() -> BiomeTints {
+    BiomeTints::from_samplers(|_, _| [0x11, 0x22, 0x33], |_, _| [0; 3])
+}
+
+#[test]
+fn swamp_colors_off_tint_the_swamp_like_any_biome() {
+    let context = options_context(Some(swamp_tints()));
+    let scene = Scene::new(&[([0, 0, 0], BlockState::new(2, 0))]).in_biome(6);
+    let top_tint = |swamp_colors| {
+        let settings = MeshSettings {
+            swamp_colors,
+            ..MeshSettings::default()
+        };
+        let mesh = mesh_with(&scene, &context, settings);
+        quad_with(&mesh, [0.0, 1.0, 0.0])[0].tint
+    };
+    assert_eq!(top_tint(true), 0x6A_70_39, "vanilla swamp green");
+    assert_eq!(top_tint(false), 0x11_22_33, "the plain colormap colour");
+}
+
+#[test]
+fn smooth_biomes_off_use_the_blocks_own_column() {
+    struct Border;
+    impl BlockSource for Border {
+        fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+            if (x, y, z) == (0, 0, 0) {
+                BlockState::new(2, 0)
+            } else {
+                BlockState::AIR
+            }
+        }
+
+        fn biome(&self, x: i32, _z: i32) -> Option<u8> {
+            Some(if x < 0 { 2 } else { 1 })
+        }
+    }
+    let tints = BiomeTints::from_samplers(
+        |temperature, _| if temperature > 1.0 { [0; 3] } else { [90; 3] },
+        |_, _| [0; 3],
+    );
+    let context = options_context(Some(tints));
+    let top_tint = |smooth_biomes| {
+        let settings = MeshSettings {
+            smooth_biomes,
+            ..MeshSettings::default()
+        };
+        let mesh = mesh_chunk_with_settings(ChunkPos::new(0, 0), &Border, &context, settings);
+        quad_with(&mesh, [0.0, 1.0, 0.0])[0].tint
+    };
+    assert_eq!(top_tint(true), 0x3C_3C_3C);
+    assert_eq!(top_tint(false), 0x5A_5A_5A);
+}
+
+/// The layers of the side quads of the grass block at the origin, as
+/// `(layer, tint)` per quad with a horizontal normal `normal`.
+fn side_quads(mesh: &Mesh, normal: [f32; 3]) -> Vec<(u32, u32)> {
+    quads(mesh)
+        .filter(|quad| quad[0].normal == normal)
+        .map(|quad| (quad[0].layer, quad[0].tint))
+        .collect()
+}
+
+#[test]
+fn better_grass_swaps_the_side_quads_for_the_tinted_top() {
+    let tints = BiomeTints::from_samplers(|_, _| [0x79, 0xC0, 0x5A], |_, _| [0; 3]);
+    let context = options_context(Some(tints));
+    let top = layer(&context, "blocks/grass_top");
+    let side = layer(&context, "blocks/grass_side");
+    let overlay = layer(&context, "blocks/grass_side_overlay");
+    let scene = Scene::new(&[
+        ([0, 0, 0], BlockState::new(2, 0)),
+        ([1, -1, 0], BlockState::new(2, 0)),
+    ])
+    .in_biome(1);
+    let east = [1.0, 0.0, 0.0];
+    let west = [-1.0, 0.0, 0.0];
+    let sides = |better_grass, normal| {
+        let settings = MeshSettings {
+            better_grass,
+            ..MeshSettings::default()
+        };
+        let mut sides = side_quads(&mesh_with(&scene, &context, settings), normal);
+        sides.sort_unstable();
+        sides
+    };
+
+    let mut vanilla = vec![(side, WHITE), (overlay, 0x79_C0_5A)];
+    vanilla.sort_unstable();
+    assert_eq!(sides(BetterGrass::Off, east), vanilla);
+    assert_eq!(sides(BetterGrass::Fast, east), vec![(top, 0x79_C0_5A)]);
+    assert_eq!(sides(BetterGrass::Fast, west), vec![(top, 0x79_C0_5A)]);
+    // Fancy: only the east side has grass diagonally below.
+    assert_eq!(sides(BetterGrass::Fancy, east), vec![(top, 0x79_C0_5A)]);
+    assert_eq!(sides(BetterGrass::Fancy, west), vanilla);
+}
+
+#[test]
+fn better_snow_adds_a_snow_layer_under_a_plant_beside_snow() {
+    let context = options_context(None);
+    let scene = Scene::new(&[
+        ([0, 0, 0], BlockState::new(31, 1)),
+        ([0, -1, 0], BlockState::new(1, 0)),
+        ([1, 0, 0], BlockState::new(78, 0)),
+    ]);
+    let snow = layer(&context, "blocks/snow");
+    let snow_quads = |better_snow| {
+        let settings = MeshSettings {
+            better_snow,
+            ..MeshSettings::default()
+        };
+        let mesh = mesh_with(&scene, &context, settings);
+        // The layer beside the plant always exists; count the extra one.
+        quads(&mesh).filter(|quad| quad[0].layer == snow).count()
+    };
+    let without = snow_quads(false);
+    assert!(
+        snow_quads(true) > without,
+        "a layer is drawn in the plant's cell"
+    );
 }

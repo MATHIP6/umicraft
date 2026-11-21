@@ -108,6 +108,9 @@ const CLIMATE: [(f32, f32); BASE_BIOMES] = [
     (2.0, 0.0),
 ];
 
+/// Base biome id of the swamp.
+const SWAMP: usize = 6;
+
 /// Swamp grass/foliage colour (`BiomeGenSwamp.func_180627_b`/`_c`).
 ///
 /// 1.8 picks between this and `0x4C763C` with a per-position noise; the
@@ -128,6 +131,24 @@ const MESA_BIOMES: std::ops::RangeInclusive<usize> = 37..=39;
 const ROOFED_MASK: u32 = 0x00FE_FEFE;
 const ROOFED_OFFSET: u32 = 0x0028_340A;
 
+/// The biome-colour options the tint functions honour (OptiFine
+/// `Config.isSwampColors` / `Config.isSmoothBiomes`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TintMode {
+    /// Off, the swamp uses the plain colormap colours of any other biome.
+    pub swamp_colors: bool,
+    /// Off, only the block's own column is sampled instead of the 3×3 average.
+    pub smooth_biomes: bool,
+}
+
+impl TintMode {
+    /// Vanilla: swamp colours and smooth biome blending on.
+    pub const VANILLA: Self = Self {
+        swamp_colors: true,
+        smooth_biomes: true,
+    };
+}
+
 /// Per-biome tint colours for the three colormaps.
 ///
 /// The table is immutable and small enough to live in an `Arc` shared by every
@@ -138,6 +159,9 @@ pub struct BiomeTints {
     grass: [[u8; 3]; BASE_BIOMES],
     foliage: [[u8; 3]; BASE_BIOMES],
     water: [[u8; 3]; BASE_BIOMES],
+    /// The swamp's grass and foliage colours before the vanilla override, for
+    /// `swamp_colors = false`.
+    plain_swamp: [[u8; 3]; 2],
 }
 
 impl BiomeTints {
@@ -163,16 +187,18 @@ impl BiomeTints {
             grass: [[0xFF; 3]; BASE_BIOMES],
             foliage: [[0xFF; 3]; BASE_BIOMES],
             water: [[0xFF; 3]; BASE_BIOMES],
+            plain_swamp: [[0xFF; 3]; 2],
         };
         for (id, &(temperature, rainfall)) in CLIMATE.iter().enumerate() {
             tints.grass[id] = grass(temperature, rainfall);
             tints.foliage[id] = foliage(temperature, rainfall);
         }
 
+        tints.plain_swamp = [tints.grass[SWAMP], tints.foliage[SWAMP]];
         // Vanilla overrides, applied after the colormap sampling.
-        tints.grass[6] = SWAMP_GRASS;
-        tints.foliage[6] = SWAMP_GRASS;
-        tints.water[6] = SWAMP_WATER;
+        tints.grass[SWAMP] = SWAMP_GRASS;
+        tints.foliage[SWAMP] = SWAMP_GRASS;
+        tints.water[SWAMP] = SWAMP_WATER;
         tints.grass[29] = unpack(roofed(pack(tints.grass[29])));
         for id in MESA_BIOMES {
             tints.grass[id] = MESA_GRASS;
@@ -187,12 +213,27 @@ impl BiomeTints {
     /// fall back to plains (1), and [`TintClass::Untinted`] is always white.
     #[must_use]
     pub fn color(&self, class: TintClass, biome: u8) -> [u8; 3] {
+        self.color_with(class, biome, true)
+    }
+
+    /// [`color`](Self::color), with the swamp override switched by
+    /// `swamp_colors`: off, the swamp shows what its climate samples from the
+    /// colormaps and plain white water, like every other biome.
+    #[must_use]
+    pub fn color_with(&self, class: TintClass, biome: u8, swamp_colors: bool) -> [u8; 3] {
         let base = if biome < MUTATED_BIOMES {
             usize::from(biome)
         } else {
             usize::from(biome & 127)
         };
         let base = if base < BASE_BIOMES { base } else { 1 };
+        if !swamp_colors && base == SWAMP {
+            return match class {
+                TintClass::Grass => self.plain_swamp[0],
+                TintClass::Foliage => self.plain_swamp[1],
+                TintClass::Untinted | TintClass::Water => [0xFF; 3],
+            };
+        }
         match class {
             TintClass::Untinted => [0xFF; 3],
             TintClass::Grass => self.grass[base],
@@ -234,12 +275,13 @@ pub(crate) fn state_tint<S: BlockSource + ?Sized>(
     x: i32,
     z: i32,
     tints: Option<&BiomeTints>,
+    mode: TintMode,
 ) -> u32 {
     if let Some(rgb) = fixed_color(state) {
         return pack(rgb);
     }
     tints.map_or(WHITE, |tints| {
-        biome_tint(source, tint_class(state), x, z, tints)
+        biome_tint(source, tint_class(state), (x, z), tints, mode)
     })
 }
 
@@ -304,7 +346,8 @@ fn redstone_color(power: u8) -> [u8; 3] {
     [red, green, blue].map(|channel| (channel * 255.0) as u8)
 }
 
-/// Samples the 3×3 biome-colour average at a block column.
+/// Samples the biome colour at a block column: the 3×3 average, or only the
+/// block's own column when `mode.smooth_biomes` is off.
 ///
 /// Vanilla `BiomeColorHelper` averages the colours of the nine columns around
 /// the rendered block, which is what makes a biome border blend instead of
@@ -314,21 +357,22 @@ fn redstone_color(power: u8) -> [u8; 3] {
 pub(crate) fn biome_tint<S: BlockSource + ?Sized>(
     source: &S,
     class: TintClass,
-    x: i32,
-    z: i32,
+    (x, z): (i32, i32),
     tints: &BiomeTints,
+    mode: TintMode,
 ) -> u32 {
     if class == TintClass::Untinted {
         return WHITE;
     }
+    let radius = i32::from(mode.smooth_biomes);
     let mut channels = [0u32; 3];
     let mut samples = 0u32;
-    for dz in -1..=1 {
-        for dx in -1..=1 {
+    for dz in -radius..=radius {
+        for dx in -radius..=radius {
             let Some(biome) = source.biome(x + dx, z + dz) else {
                 continue;
             };
-            let [red, green, blue] = tints.color(class, biome);
+            let [red, green, blue] = tints.color_with(class, biome, mode.swamp_colors);
             channels[0] += u32::from(red);
             channels[1] += u32::from(green);
             channels[2] += u32::from(blue);
@@ -483,16 +527,35 @@ mod tests {
     fn wire_tint_ignores_missing_colormaps() {
         let grid = BiomeGrid { biome: 1 };
         assert_eq!(
-            state_tint(&grid, BlockState::new(55, 15), 0, 0, None),
+            state_tint(
+                &grid,
+                BlockState::new(55, 15),
+                0,
+                0,
+                None,
+                TintMode::VANILLA
+            ),
             0x00FF_3200
         );
-        assert_eq!(state_tint(&grid, BlockState::new(1, 0), 0, 0, None), WHITE);
+        assert_eq!(
+            state_tint(&grid, BlockState::new(1, 0), 0, 0, None, TintMode::VANILLA),
+            WHITE
+        );
     }
 
     #[test]
     fn fixed_colours_ignore_the_biome_and_the_colormaps() {
         let grid = BiomeGrid { biome: 1 };
-        let tint = |id, meta| state_tint(&grid, BlockState::new(id, meta), 0, 0, None);
+        let tint = |id, meta| {
+            state_tint(
+                &grid,
+                BlockState::new(id, meta),
+                0,
+                0,
+                None,
+                TintMode::VANILLA,
+            )
+        };
         assert_eq!(tint(18, 1), 0x0061_9961);
         assert_eq!(tint(18, 2 | 8), 0x0080_A755);
         assert_eq!(tint(18, 0), WHITE);
@@ -531,7 +594,7 @@ mod tests {
         let tints = BiomeTints::from_samplers(|_, _| [0x10, 0x20, 0x30], |_, _| [0; 3]);
         let source = BiomeGrid { biome: 1 };
         assert_eq!(
-            biome_tint(&source, TintClass::Grass, 0, 0, &tints),
+            biome_tint(&source, TintClass::Grass, (0, 0), &tints, TintMode::VANILLA),
             pack([0x10, 0x20, 0x30])
         );
 
@@ -563,7 +626,13 @@ mod tests {
         };
         // At x=0, three of the nine columns (x = -1) are desert.
         assert_eq!(
-            biome_tint(&border, TintClass::Grass, 0, 0, &border.tints),
+            biome_tint(
+                &border,
+                TintClass::Grass,
+                (0, 0),
+                &border.tints,
+                TintMode::VANILLA
+            ),
             pack([60, 60, 60])
         );
     }
@@ -577,6 +646,55 @@ mod tests {
             }
         }
         let tints = climate_tints();
-        assert_eq!(biome_tint(&NoBiomes, TintClass::Grass, 0, 0, &tints), WHITE);
+        assert_eq!(
+            biome_tint(
+                &NoBiomes,
+                TintClass::Grass,
+                (0, 0),
+                &tints,
+                TintMode::VANILLA
+            ),
+            WHITE
+        );
+    }
+
+    #[test]
+    fn swamp_colors_off_use_the_plain_colormap_colours() {
+        let tints = climate_tints();
+        let plain_swamp = [80, 90, 0];
+        assert_eq!(tints.color_with(TintClass::Grass, 6, false), plain_swamp);
+        assert_eq!(tints.color_with(TintClass::Foliage, 6, false), [80, 90, 1]);
+        assert_eq!(tints.color_with(TintClass::Water, 6, false), [0xFF; 3]);
+        // Other biomes and the vanilla setting are untouched.
+        assert_eq!(
+            tints.color_with(TintClass::Grass, 1, false),
+            tints.color(TintClass::Grass, 1)
+        );
+        assert_eq!(tints.color_with(TintClass::Grass, 6, true), SWAMP_GRASS);
+    }
+
+    #[test]
+    fn smooth_biomes_off_samples_only_the_own_column() {
+        struct Border;
+        impl BlockSource for Border {
+            fn block(&self, _x: i32, _y: i32, _z: i32) -> BlockState {
+                BlockState::AIR
+            }
+
+            fn biome(&self, x: i32, _z: i32) -> Option<u8> {
+                Some(if x < 0 { 2 } else { 1 })
+            }
+        }
+        let tints = BiomeTints::from_samplers(
+            |temperature, _| if temperature > 1.0 { [0; 3] } else { [90; 3] },
+            |_, _| [0; 3],
+        );
+        let sharp = TintMode {
+            smooth_biomes: false,
+            ..TintMode::VANILLA
+        };
+        let tint = |mode| biome_tint(&Border, TintClass::Grass, (0, 0), &tints, mode);
+        assert_eq!(tint(sharp), pack([90; 3]), "the centre column only");
+        assert_eq!(tint(TintMode::VANILLA), pack([60; 3]), "the 3x3 average");
     }
 }

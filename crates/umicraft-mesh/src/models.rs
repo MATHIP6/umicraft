@@ -39,9 +39,11 @@ use umicraft_world::{light_emission, BlockState, ChunkPos};
 use crate::fluid::{self, FluidLayers};
 
 use crate::actual_state;
+use crate::better_grass::{self, SideTexture};
+use crate::better_snow;
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, mesh_sections, occludes};
 use crate::lighting::{quad_light, Lighting};
-use crate::settings::{base_variant, MeshSettings};
+use crate::settings::{base_variant, Leaves, MeshSettings};
 use crate::{tint, BlockEntityKind, BlockEntityRef, BlockSource, Mesh, Vertex};
 
 /// The baked models and the texture layers the model mesher reads.
@@ -118,7 +120,14 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
             }
         }
         if let Some(liquid) = Liquid::of(state) {
-            let tint = tint::state_tint(source, state, wx, wz, context.tints.as_deref());
+            let tint = tint::state_tint(
+                source,
+                state,
+                wx,
+                wz,
+                context.tints.as_deref(),
+                settings.tint_mode(),
+            );
             let layers = match liquid {
                 Liquid::Water => water,
                 Liquid::Lava => lava,
@@ -136,16 +145,44 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
             Lighting::Flat
         };
         if let Some(variant) = variant {
-            let placement = Placement::in_world(position).lit(lighting);
+            let placement = Placement::in_world(position, settings).lit(lighting);
             emit_model_quads(mesh, source, context, state, variant, placement);
+            if settings.better_snow && better_snow::needs_layer(source, position, state) {
+                emit_snow_layer(mesh, source, context, placement, settings);
+            }
         } else if state.is_renderable() {
-            let tint = tint::state_tint(source, state, wx, wz, context.tints.as_deref());
+            let tint = tint::state_tint(
+                source,
+                state,
+                wx,
+                wz,
+                context.tints.as_deref(),
+                settings.tint_mode(),
+            );
             // No model and not a liquid: the checker, never a procedural
             // layer index (ADR-0012).
             let missing = context.atlas.missing_layer();
             emit_legacy_faces_with(mesh, source, position, (state, lighting), tint, |_| missing);
         }
     })
+}
+
+/// Draws the snow layer `Better Snow` adds in the cell of a plant.
+fn emit_snow_layer<S: BlockSource + ?Sized>(
+    mesh: &mut Mesh,
+    source: &S,
+    context: &ModelMeshContext,
+    placement: Placement,
+    settings: MeshSettings,
+) {
+    let state = better_snow::LAYER_STATE;
+    let variant = context
+        .models
+        .model(state)
+        .and_then(|model| pick_variant(model, placement.position, settings.block_alternatives));
+    if let Some(variant) = variant {
+        emit_model_quads(mesh, source, context, state, variant, placement);
+    }
 }
 
 /// The still and flowing layers of a liquid in the atlas
@@ -275,16 +312,19 @@ pub(crate) struct Placement {
     pub(crate) cull: bool,
     /// How the quads are lit.
     pub(crate) lighting: Lighting,
+    /// The options that decide leaf culling, tint and Better Grass.
+    pub(crate) settings: MeshSettings,
 }
 
 impl Placement {
     /// A block standing in the world: no shift, hidden faces culled.
-    fn in_world(position: [i32; 3]) -> Self {
+    fn in_world(position: [i32; 3], settings: MeshSettings) -> Self {
         Self {
             position,
             shift: [0.0; 3],
             cull: true,
             lighting: Lighting::Smooth,
+            settings,
         }
     }
 
@@ -292,6 +332,19 @@ impl Placement {
     fn lit(self, lighting: Lighting) -> Self {
         Self { lighting, ..self }
     }
+}
+
+/// Whether `neighbour` hides the `cullface` quad of `state`.
+///
+/// Leaves follow the Trees option instead of the same-state rule
+/// (`BlockLeavesBase.shouldSideBeRendered`): Fancy draws every face between
+/// leaf blocks, Fast and Smart cull a face against another block of the same
+/// leaf id. An opaque neighbour hides a leaf face in every mode.
+fn hides(neighbour: BlockState, state: BlockState, leaves: Leaves) -> bool {
+    if !matches!(state.id(), 18 | 161) {
+        return occludes(neighbour, state);
+    }
+    neighbour.is_opaque() || (leaves != Leaves::Fancy && neighbour.id() == state.id())
 }
 
 /// Emits every quad of `variant` at the placement's cell, offset by the block
@@ -323,15 +376,38 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
         if let Some(cullface) = quad.cullface.filter(|_| placement.cull) {
             let offset = cullface.offset();
             let neighbour = source.block(x + offset[0], y + offset[1], z + offset[2]);
-            if occludes(neighbour, state) {
+            if hides(neighbour, state, placement.settings.leaves) {
                 continue;
             }
         }
 
-        let layer = context.atlas.layer(&quad.texture).unwrap_or(0);
-        let tint = if quad.tint.is_some() {
+        let side = quad.cullface.and_then(|face| {
+            better_grass::side_texture(
+                source,
+                position,
+                state,
+                face,
+                placement.settings.better_grass,
+            )
+        });
+        let (texture, tinted) = match side {
+            Some(side) => match side.replace(&quad.texture) {
+                Some(SideTexture { key, tinted }) => (key, tinted),
+                None => continue,
+            },
+            None => (quad.texture.as_str(), quad.tint.is_some()),
+        };
+        let layer = context.atlas.layer(texture).unwrap_or(0);
+        let tint = if tinted {
             *block_tint.get_or_insert_with(|| {
-                tint::state_tint(source, state, x, z, context.tints.as_deref())
+                tint::state_tint(
+                    source,
+                    state,
+                    x,
+                    z,
+                    context.tints.as_deref(),
+                    placement.settings.tint_mode(),
+                )
             })
         } else {
             tint::WHITE
