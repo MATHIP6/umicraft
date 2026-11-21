@@ -190,8 +190,8 @@ impl App {
         let loader_thread = std::thread::Builder::new()
             .name("AssetLoader".to_string())
             .spawn(move || {
-                let font = ui_font::load();
                 let (terrain, files) = load_packs_and_terrain(&packs, features);
+                let font = ui_font::load_with(&files);
                 let _ = asset_tx.send(AsyncLoadedAssets {
                     font,
                     terrain,

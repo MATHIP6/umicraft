@@ -26,6 +26,8 @@ use crate::options::video_sections::AnimationOptions;
 use crate::options::Binding;
 use crate::resources::game_files::PackFeatures;
 use crate::resources::texture_animator::{AnimationFilter, TextureAnimator};
+use crate::resources::theme_font::FontChoice;
+use crate::resources::ui_font;
 use crate::scene::entity::EntityTextures;
 use crate::scene::map::MapTextures;
 use crate::screens::options::{Catalog, Outcome as OptionsOutcome, Page};
@@ -241,6 +243,16 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
+        self.assets.font = ui_font::load_with(&self.assets.files);
+        match ui_font::install(renderer, &self.assets.font.atlas) {
+            Ok(installed) => {
+                // The game font is bound now: the theme font is swapped in
+                // again by the next frame if the theme wants it.
+                self.assets.font_choice = FontChoice::Game;
+                self.assets.ui_atlas = Some(Arc::new(installed.atlas));
+            }
+            Err(error) => tracing::warn!(%error, "could not install the pack font"),
+        }
         let installed = terrain.install(renderer);
         // The packs page can be opened again without a new catalog: keep its icons.
         let icons = self.options_menu.screen.pack_icon_images();
