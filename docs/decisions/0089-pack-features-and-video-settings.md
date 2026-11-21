@@ -52,13 +52,13 @@ Four gaps exist today:
     apply step are all derived from this table.
   - On a change, the strongest effect among the changed options wins. This
     replaces the hand-written `VideoEffects` code.
-- **Defaults follow OptiFine** (owner, 2026-11-21): for example Connected
-  Textures Fast, Custom Sky / Custom Colors / Random Entities / Custom Items on,
-  and Fog Fast.
-  - There is one exception. Where an OptiFine default would make Umicraft
-    slower than it is today, the default stays at Umicraft's tuned value, and
-    the deviation is listed in the plan. The case known today is "Chunk
-    Updates = 1": our mesher is multithreaded and budgeted by upload bytes.
+- **Defaults follow OptiFine**, except where a faster choice costs nothing or
+  almost nothing on screen (owner, 2026-11-21; the deviations are listed in the
+  plan, section "Defaults"). OptiFine defaults include Connected Textures
+  Fast, Custom Sky / Custom Colors / Random Entities / Custom Items on, and
+  Fog Fast. The deviations include Trees Smart, Dynamic Updates on, and Chunk
+  Updates following the current multithreaded mesh budget instead of one
+  section per frame.
   - Parity screenshot tests pin vanilla-equivalent settings explicitly, so
     they stay independent of these defaults.
 - **"Default" values.** `GraphicsChoice { Default, Fast, Fancy }` resolves

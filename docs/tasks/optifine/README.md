@@ -115,11 +115,23 @@ P0 → P1 → P4 → P5 → P2 → P3 → P6 → P7.
 
 ## Defaults
 
-OptiFine defaults apply (owner, 2026-11-21), with these deviations:
+OptiFine defaults, except where a faster choice costs nothing or almost nothing
+on screen. The owner delegated this choice on 2026-11-21. Options not listed
+here take the OptiFine default.
 
 | Option | OptiFine | Umicraft | Why |
 |---|---|---|---|
-| Chunk Updates | 1 | follows the current budget | One section per frame would be slower than today's multithreaded queue |
+| Chunk Updates | 1 | follows the current mesh budget | One section per frame would be slower than today's multithreaded queue |
+| Dynamic Updates | Off | On | More sections are meshed while the player stands still; no visual cost |
+| Trees | Default (Fancy) | Smart | Same look as Fancy without the hidden inner faces of leaves |
+| Smart Animations | n/a in the 1.8.9 build | On | Only sprites drawn last frame are uploaded; no visual change |
+| Advanced occlusion (cave culling) | n/a | On | Already the Umicraft behaviour (ADR-0062) |
+| Connected Textures | Fast | Fast | Kept: Fancy adds 4 diagonal neighbour tests per face |
+| Better Grass, Natural Textures | Off | Off | Kept: extra work in the mesher |
+| Fog | Fast | Fast | Kept |
+
+Optimisations with no visible effect (3.1 to 3.4) are always on and have no
+option.
 
 ## Not in scope
 
