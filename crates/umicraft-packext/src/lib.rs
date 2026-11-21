@@ -26,12 +26,18 @@
 //! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
 
 pub mod cem;
+pub mod cit;
 pub mod ctm;
 pub mod filters;
+pub mod guis;
+pub mod int_list;
 pub mod properties;
+pub mod random_entities;
 pub mod ranges;
 pub mod sky;
+pub mod text_match;
 
 pub use filters::{BiomeFilter, WeatherSet};
 pub use properties::{Properties, PropertiesError};
 pub use ranges::{Range, RangeError, RangeList};
+pub use text_match::{TextMatch, TextMatchError};

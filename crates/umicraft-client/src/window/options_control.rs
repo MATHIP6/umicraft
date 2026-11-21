@@ -24,7 +24,10 @@ use crate::meshing::pool::worker_count;
 use crate::options::effects::{open_folder, pack_paths, packs_folder, ServerSettings};
 use crate::options::video_sections::AnimationOptions;
 use crate::options::Binding;
+use crate::resources::game_files::PackFeatures;
 use crate::resources::texture_animator::{AnimationFilter, TextureAnimator};
+use crate::resources::theme_font::FontChoice;
+use crate::resources::ui_font;
 use crate::scene::entity::EntityTextures;
 use crate::scene::map::MapTextures;
 use crate::screens::options::{Catalog, Outcome as OptionsOutcome, Page};
@@ -227,16 +230,29 @@ impl App {
     /// re-meshing all loaded chunk columns.
     pub(super) fn reload_resources(&mut self) {
         tracing::info!("reloading resource packs...");
-        let (terrain, files) = load_packs_and_terrain(&pack_paths(
-            &self.args.resource_packs,
-            &self.options,
-            packs_folder().as_deref(),
-            self.server_pack.active_path(),
-        ));
+        let (terrain, files) = load_packs_and_terrain(
+            &pack_paths(
+                &self.args.resource_packs,
+                &self.options,
+                packs_folder().as_deref(),
+                self.server_pack.active_path(),
+            ),
+            PackFeatures::from_quality(&self.options.video.quality),
+        );
         self.assets.files = files;
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
+        self.assets.font = ui_font::load_with(&self.assets.files);
+        match ui_font::install(renderer, &self.assets.font.atlas) {
+            Ok(installed) => {
+                // The game font is bound now: the theme font is swapped in
+                // again by the next frame if the theme wants it.
+                self.assets.font_choice = FontChoice::Game;
+                self.assets.ui_atlas = Some(Arc::new(installed.atlas));
+            }
+            Err(error) => tracing::warn!(%error, "could not install the pack font"),
+        }
         let installed = terrain.install(renderer);
         // The packs page can be opened again without a new catalog: keep its icons.
         let icons = self.options_menu.screen.pack_icon_images();

@@ -4,6 +4,8 @@
 //! or built in: the terrain array, the block models, the fonts, the icons and
 //! the sky pictures.
 
+pub mod custom_guis;
+pub mod custom_items;
 pub(crate) mod entity_icons;
 pub mod game_files;
 pub(crate) mod item_icons;

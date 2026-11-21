@@ -207,3 +207,36 @@ fn the_item_frame_models_are_baked_for_the_entity_renderer() {
     assert_ne!(set.frame_quads(false), set.frame_quads(true));
     assert!(set.texture_keys().contains("blocks/planks_oak"));
 }
+
+#[test]
+fn a_pack_model_outside_the_name_table_is_baked_on_demand() {
+    let mut set = set();
+    let before = set.model_count();
+    assert!(set.model_by_name("optifine_cit_0").is_none());
+    set.add_named(&source(), &sprites, "optifine_cit_0")
+        .expect("the fallback generated model bakes");
+    let model = set.model_by_name("optifine_cit_0").expect("added");
+    assert!(matches!(model.geometry, ItemGeometry::Quads(_)));
+    assert_eq!(set.model_count(), before + 1);
+}
+
+#[test]
+fn a_pack_model_that_does_not_bake_leaves_the_set_unchanged() {
+    struct Nothing;
+    impl ResourceSource for Nothing {
+        fn read(&self, path: &str) -> ModelResult<Vec<u8>> {
+            Err(ModelError::Resource {
+                path: path.to_string(),
+                message: "nothing here".to_string(),
+            })
+        }
+
+        fn list(&self, _prefix: &str) -> Vec<String> {
+            Vec::new()
+        }
+    }
+    let mut set = set();
+    let before = set.model_count();
+    assert!(set.add_named(&Nothing, &sprites, "optifine_cit_1").is_err());
+    assert_eq!(set.model_count(), before);
+}

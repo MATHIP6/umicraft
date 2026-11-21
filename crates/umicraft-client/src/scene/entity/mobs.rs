@@ -141,6 +141,9 @@ pub(super) fn build_entity_layers_for(
     layers.extend(skull_layers(ent, skins));
     // Arrows in the body are drawn on an invisible player too.
     layers.extend(arrow_layers(ent, viewer.style));
+    if let Some(random) = skins.random_entities() {
+        random.retarget(ent, &mut layers);
+    }
     layers
 }
 

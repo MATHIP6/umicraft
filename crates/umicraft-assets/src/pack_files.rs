@@ -10,6 +10,7 @@
 //! - the entity and armour textures (`textures/entity`,
 //!   `textures/models/armor`);
 //! - the map pictures (`textures/map`);
+//! - the font pictures (`textures/font`);
 //! - the pack features of milestone F6 (`optifine/`, `mcpatcher/`; ADR-0089).
 //!
 //! [`PackFiles`] keeps exactly those files of the active packs. It keeps them
@@ -27,7 +28,7 @@ use std::collections::BTreeMap;
 use crate::resource_pack::ResourcePack;
 
 /// The path classes kept, relative to `assets/minecraft/`.
-pub const KEPT_PREFIXES: [&str; 8] = [
+pub const KEPT_PREFIXES: [&str; 9] = [
     "optifine/",
     "mcpatcher/",
     "textures/environment/",
@@ -36,6 +37,7 @@ pub const KEPT_PREFIXES: [&str; 8] = [
     "textures/particle/",
     "textures/map/",
     "textures/models/armor/",
+    "textures/font/",
 ];
 
 /// Folders searched for a pack-feature file, in the order they are tried
@@ -87,6 +89,23 @@ impl PackFiles {
                 pack.into_files()
                     .into_iter()
                     .filter(|(path, _)| is_kept(path))
+                    .collect()
+            })
+            .collect();
+        Self { layers }
+    }
+
+    /// [`Self::from_packs`] for packs that stay in use: only the kept files are
+    /// copied.
+    #[must_use]
+    pub fn from_pack_refs(packs: &[ResourcePack]) -> Self {
+        let layers = packs
+            .iter()
+            .map(|pack| {
+                pack.files()
+                    .iter()
+                    .filter(|(path, _)| is_kept(path))
+                    .map(|(path, bytes)| (path.clone(), bytes.clone()))
                     .collect()
             })
             .collect();
@@ -198,6 +217,42 @@ mod tests {
         assert!(files
             .get("assets/minecraft/models/block/stone.json")
             .is_none());
+    }
+
+    #[test]
+    fn borrowed_packs_keep_the_same_files_as_owned_ones() {
+        let packs = [pack(
+            "a",
+            &[
+                ("textures/environment/sun.png", b"sun"),
+                ("textures/blocks/stone.png", b"stone"),
+            ],
+        )];
+        let borrowed = PackFiles::from_pack_refs(&packs);
+        assert!(borrowed
+            .get("assets/minecraft/textures/environment/sun.png")
+            .is_some());
+        assert!(borrowed
+            .get("assets/minecraft/textures/blocks/stone.png")
+            .is_none());
+        assert_eq!(packs[0].file_count(), 2, "the packs are untouched");
+    }
+
+    #[test]
+    fn the_font_pictures_are_kept() {
+        let files = PackFiles::from_packs([pack(
+            "font",
+            &[
+                ("textures/font/ascii.png", b"grid"),
+                ("textures/font/unicode_page_00.png", b"page"),
+            ],
+        )]);
+        assert!(files
+            .get("assets/minecraft/textures/font/ascii.png")
+            .is_some());
+        assert!(files
+            .get("assets/minecraft/textures/font/unicode_page_00.png")
+            .is_some());
     }
 
     #[test]

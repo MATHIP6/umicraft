@@ -34,8 +34,10 @@ use crate::mods::runtime::ModsRuntime;
 use crate::mods::zoom::Zoom;
 use crate::options::effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options::Options;
+use crate::resources::custom_guis::CustomGuis;
+use crate::resources::custom_items::CustomItems;
 use crate::resources::entity_icons::EntityIcons;
-use crate::resources::game_files::{load_packs, GameFiles};
+use crate::resources::game_files::{load_packs, GameFiles, PackFeatures};
 use crate::resources::panorama::load_panorama_faces;
 use crate::resources::sky::{load_border_texture, load_sky_textures, CustomSky};
 use crate::resources::terrain::TerrainTextures;
@@ -65,11 +67,28 @@ pub(super) struct AsyncLoadedAssets {
 /// Reads the packs at `paths` once and builds from them both the terrain
 /// (atlases and models) and the [`GameFiles`] the other textures are read
 /// from, over the verified jar.
-pub(super) fn load_packs_and_terrain(paths: &[PathBuf]) -> (TerrainTextures, GameFiles) {
-    let packs = load_packs(paths);
+pub(super) fn load_packs_and_terrain(
+    paths: &[PathBuf],
+    features: PackFeatures,
+) -> (TerrainTextures, GameFiles) {
+    let mut packs = load_packs(paths);
+    let pack_files = PackFiles::from_pack_refs(&packs);
+    // The pictures of the custom container screens ride in a synthetic pack on
+    // top, so the GUI atlas holds them as regions.
+    let (guis, guis_pack) = CustomGuis::scan(&pack_files, features);
+    packs.extend(guis_pack);
+    // The same for the pictures and generated models of the custom items.
+    let (items, items_pack) = CustomItems::scan(&pack_files, features);
+    packs.extend(items_pack);
     let terrain = TerrainTextures::from_packs(&packs);
+    if let Some(resources) = terrain.items() {
+        resources.set_custom_items(Arc::new(items));
+    }
     let jar = crate::resources::official::find_verified_jar().ok();
-    (terrain, GameFiles::new(PackFiles::from_packs(packs), jar))
+    let files = GameFiles::new(pack_files, jar)
+        .with_features(features)
+        .with_custom_guis(guis);
+    (terrain, files)
 }
 
 /// Starts the thread that pings the saved servers. Without it the list still
@@ -181,12 +200,13 @@ impl App {
             packs_folder().as_deref(),
             None,
         );
+        let features = PackFeatures::from_quality(&options.video.quality);
         let (asset_tx, asset_rx) = std::sync::mpsc::channel();
         let loader_thread = std::thread::Builder::new()
             .name("AssetLoader".to_string())
             .spawn(move || {
-                let font = ui_font::load();
-                let (terrain, files) = load_packs_and_terrain(&packs);
+                let (terrain, files) = load_packs_and_terrain(&packs, features);
+                let font = ui_font::load_with(&files);
                 let _ = asset_tx.send(AsyncLoadedAssets {
                     font,
                     terrain,

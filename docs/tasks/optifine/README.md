@@ -127,11 +127,18 @@ CEM mob yet (the tests check the produced layers).
 | 6.3 | Tiles added to the block atlas or `hires_blocks`; tile chosen per quad in the mesher through `BlockSource` (**done**) | Mesh bench before and after; screenshot |
 | 6.4 | Option Off/Fast/Fancy (default Fast) (**done**) | |
 
-### Phase 7: remaining pack features (one sub-phase each)
+### Phase 7: remaining pack features
 
-Random entities (UUID-based, then rules and weights), Custom Colors
-(`color.properties`, colormaps, lightmaps), Natural Textures, Custom Items
-(CIT), Custom Fonts, Custom GUIs, custom texture animations, and Dynamic Lights.
+| Step | Content | Done when |
+|---|---|---|
+| 7.1 | Random Entities (`mob/`, `random/entity/`, rules and weights) (**done**; biome rules wait for the biome at the entity, villager careers are unknown) | Unit tests |
+| 7.2 | Custom Items, `type=item` (**done**; armor and enchantment rules parsed but not drawn, `texture.<key>` ignored) | Unit tests |
+| 7.3 | Custom Fonts (**done**; `width.N` overrides not read) | Unit tests |
+| 7.4 | Custom GUIs (**done**; creative screen not wired, biome and block-state conditions unknown) | Unit tests |
+| 7.5 | Natural Textures | Unit tests, mesh bench |
+| 7.6 | Custom Colors (colormaps, fixed colours, lightmaps) | Unit tests |
+| 7.7 | Custom texture animations (`anim/*.properties`) | Unit tests |
+| 7.8 | Dynamic Lights | Unit tests |
 
 ## Order
 

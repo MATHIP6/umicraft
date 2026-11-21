@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+regex = "1"
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror.workspace = true
 tracing.workspace = true

@@ -41,6 +41,7 @@ mod mushrooms;
 mod paintings;
 mod player;
 mod pose;
+mod random_entities;
 mod rope;
 mod shadow;
 mod skins;
