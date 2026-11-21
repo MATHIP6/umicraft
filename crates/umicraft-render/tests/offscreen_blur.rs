@@ -11,7 +11,7 @@
 //! `cargo test -p umicraft-render --test offscreen_blur -- --ignored`
 //! on a machine with a wgpu adapter.
 
-use umicraft_render::{Camera, Image, Overlay, RenderEnvironment, Renderer};
+use umicraft_render::{BackgroundBlur, Camera, Image, Overlay, RenderEnvironment, Renderer};
 
 const WIDTH: u32 = 128;
 const HEIGHT: u32 = 96;
@@ -51,19 +51,27 @@ fn the_background_blur_runs_keeps_the_colours_and_turns_off() {
     camera.set_aspect(WIDTH, HEIGHT);
 
     let plain = frame(&mut renderer, &camera);
-    renderer.set_background_blur(1.0);
+    renderer.set_background_blur(BackgroundBlur {
+        strength: 1.0,
+        overlay: false,
+    });
     let blurred = frame(&mut renderer, &camera);
-    renderer.set_background_blur(0.0);
+    renderer.set_background_blur(BackgroundBlur {
+        strength: 0.0,
+        overlay: false,
+    });
     let again = frame(&mut renderer, &camera);
 
-    // A picture that is not black went through the four passes and the copy.
+    // A picture that is not black went through the five passes and the copy.
     assert!(plain.rgba.iter().any(|&byte| byte > 40), "the scene is lit");
-    // The blur adds or loses no light: every channel keeps its average. (A
-    // pixel can move more, where the picture had a gradient.)
+    // The filter adds or loses no light; the grading of a page then dims the
+    // picture to about 0.55 of it (and the saturation moves each channel a
+    // little). A pixel can move more, where the picture had a gradient.
     for channel in 0..3 {
         let (before, after) = (mean(&plain, channel), mean(&blurred, channel));
+        let ratio = after / before;
         assert!(
-            (before - after).abs() < 3.0,
+            (0.45..0.65).contains(&ratio),
             "channel {channel} went from {before:.1} to {after:.1}"
         );
     }

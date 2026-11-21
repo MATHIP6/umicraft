@@ -132,6 +132,13 @@ impl ModsScreen {
         self.page != Page::Landing
     }
 
+    /// Whether the menu is on its landing page, the overlay: the game behind it
+    /// is blurred less and given a vignette there.
+    #[must_use]
+    pub fn is_overlay(&self) -> bool {
+        self.page == Page::Landing
+    }
+
     /// Ends the entrance of the page at once: the panel is fully there and the
     /// rows are in place. A capture of a single frame needs it, the game does
     /// not.
