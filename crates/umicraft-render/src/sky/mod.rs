@@ -26,6 +26,7 @@
 
 mod celestial;
 mod cloud_color;
+mod custom;
 mod dome;
 mod end;
 mod gpu;
@@ -38,7 +39,8 @@ mod vertex;
 use std::ops::Range;
 
 use crate::{Camera, RenderEnvironment};
-use plan::{Blend, Layer, Mesh, PlanInput, MAX_LAYERS};
+use plan::{Blend, Image, Layer, Mesh, PlanInput, MAX_CUSTOM_LAYERS, MAX_LAYERS};
+use umicraft_packext::sky::LayerFrame;
 
 pub(crate) use gpu::{sampler, upload};
 pub(crate) use state::{skylight_subtracted, SkyKind};
@@ -58,6 +60,7 @@ struct MeshTable {
     moons: Range<u32>,
     stars: Range<u32>,
     end_cube: Range<u32>,
+    cube: Range<u32>,
     fan: Range<u32>,
 }
 
@@ -78,6 +81,7 @@ impl MeshTable {
             moons: push(&celestial::moons()),
             stars: push(&stars::vertices()),
             end_cube: push(&end::cube()),
+            cube: push(&custom::cube()),
             fan: push(&[SkyVertex::plain([0.0; 3]); celestial::FAN_VERTICES]),
         };
         (table, vertices)
@@ -95,6 +99,7 @@ impl MeshTable {
             }
             Mesh::Stars => self.stars.clone(),
             Mesh::EndCube => self.end_cube.clone(),
+            Mesh::Cube => self.cube.clone(),
             Mesh::Fan => self.fan.clone(),
         }
     }
@@ -105,7 +110,7 @@ impl MeshTable {
 /// The renderer calls [`SkyRenderer::update`] once per frame, then
 /// [`SkyRenderer::draw`] first inside the main render pass.
 pub(crate) struct SkyRenderer {
-    pipelines: [wgpu::RenderPipeline; 3],
+    pipelines: [wgpu::RenderPipeline; Blend::ALL.len()],
     layout: wgpu::BindGroupLayout,
     samplers: [wgpu::Sampler; 2],
     uniform_buffer: wgpu::Buffer,
@@ -115,6 +120,12 @@ pub(crate) struct SkyRenderer {
     bind_groups: [wgpu::BindGroup; 4],
     /// The layers of the current frame, reused to stay allocation-free.
     layers: Vec<Layer>,
+    /// One bind group per custom sky picture, in the plan's flat order.
+    custom_groups: Vec<wgpu::BindGroup>,
+    /// The custom layers of the current frame, copied from the client.
+    custom_frames: Vec<LayerFrame>,
+    /// Whether the dimension has custom layers (they replace the stars).
+    custom_replaces_stars: bool,
 }
 
 impl SkyRenderer {
@@ -134,8 +145,8 @@ impl SkyRenderer {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipelines = [Blend::Opaque, Blend::Alpha, Blend::Additive]
-            .map(|blend| gpu::pipeline(device, &pipeline_layout, &shader, format, blend));
+        let pipelines =
+            Blend::ALL.map(|blend| gpu::pipeline(device, &pipeline_layout, &shader, format, blend));
 
         let (meshes, vertices) = MeshTable::build();
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -147,7 +158,7 @@ impl SkyRenderer {
         queue.write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(&vertices));
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sky uniforms"),
-            size: (MAX_LAYERS * plan::SLOT_STRIDE) as u64,
+            size: ((MAX_LAYERS + MAX_CUSTOM_LAYERS) * plan::SLOT_STRIDE) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -171,7 +182,10 @@ impl SkyRenderer {
             vertex_buffer,
             meshes,
             bind_groups,
-            layers: Vec::with_capacity(MAX_LAYERS),
+            layers: Vec::with_capacity(MAX_LAYERS + MAX_CUSTOM_LAYERS),
+            custom_groups: Vec::new(),
+            custom_frames: Vec::with_capacity(MAX_CUSTOM_LAYERS),
+            custom_replaces_stars: false,
         }
     }
 
@@ -207,32 +221,82 @@ impl SkyRenderer {
             ),
         ];
         images.map(|(image, sampler)| {
-            let view = gpu::upload(device, queue, &image);
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("sky bind group"),
-                layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: uniforms,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(
-                                std::mem::size_of::<plan::SlotUniform>() as u64
-                            ),
-                        }),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(sampler),
-                    },
-                ],
-            })
+            Self::bind_group(device, queue, layout, uniforms, sampler, &image)
         })
+    }
+
+    /// One bind group: the shared dynamic uniform slot, `image` and `sampler`.
+    fn bind_group(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        uniforms: &wgpu::Buffer,
+        sampler: &wgpu::Sampler,
+        image: &SkyImage,
+    ) -> wgpu::BindGroup {
+        let view = gpu::upload(device, queue, image);
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sky bind group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: uniforms,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(
+                            std::mem::size_of::<plan::SlotUniform>() as u64
+                        ),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        })
+    }
+
+    /// Uploads the pictures of the custom sky layers (the plan's flat order).
+    /// A malformed picture gets a transparent one so indices stay aligned.
+    pub(crate) fn set_custom_textures(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        images: &[SkyImage],
+    ) {
+        let blank = SkyImage {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        };
+        self.custom_groups = images
+            .iter()
+            .map(|image| {
+                let image = if image.is_valid() { image } else { &blank };
+                Self::bind_group(
+                    device,
+                    queue,
+                    &self.layout,
+                    &self.uniform_buffer,
+                    &self.samplers[0],
+                    image,
+                )
+            })
+            .collect();
+    }
+
+    /// Sets this frame's custom layers. `has_layers` is whether the current
+    /// dimension has any, even if all are faded out: they replace the stars.
+    pub(crate) fn set_custom_frame(&mut self, has_layers: bool, frames: &[LayerFrame]) {
+        self.custom_replaces_stars = has_layers;
+        self.custom_frames.clear();
+        self.custom_frames
+            .extend(frames.iter().take(MAX_CUSTOM_LAYERS).copied());
     }
 
     /// Replaces the sun, moon and End images; absent or malformed ones keep
@@ -270,6 +334,8 @@ impl SkyRenderer {
             eye_y: camera.eye().y as f32,
             flat_world: environment.flat_world,
             details: environment.sky_details,
+            custom: &self.custom_frames,
+            custom_replaces_stars: self.custom_replaces_stars,
         };
         plan::build(&mut self.layers, &input);
 
@@ -288,6 +354,17 @@ impl SkyRenderer {
         }
     }
 
+    /// The bind group of `image`; `None` for a custom picture never uploaded.
+    fn bind_group_of(&self, image: Image) -> Option<&wgpu::BindGroup> {
+        match image {
+            Image::White => Some(&self.bind_groups[0]),
+            Image::Sun => Some(&self.bind_groups[1]),
+            Image::Moon => Some(&self.bind_groups[2]),
+            Image::EndSky => Some(&self.bind_groups[3]),
+            Image::Custom(index) => self.custom_groups.get(usize::from(index)),
+        }
+    }
+
     /// Draws the planned layers inside the main render pass.
     pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if self.layers.is_empty() {
@@ -297,11 +374,10 @@ impl SkyRenderer {
         for (index, layer) in self.layers.iter().enumerate() {
             // The enums are fieldless and declared in pipeline / bind group order.
             pass.set_pipeline(&self.pipelines[layer.blend as usize]);
-            pass.set_bind_group(
-                0,
-                &self.bind_groups[layer.image as usize],
-                &[gpu::slot_offset(index)],
-            );
+            let Some(group) = self.bind_group_of(layer.image) else {
+                continue;
+            };
+            pass.set_bind_group(0, group, &[gpu::slot_offset(index)]);
             pass.draw(self.meshes.range(layer.mesh), 0..1);
         }
     }

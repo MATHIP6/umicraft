@@ -11,13 +11,17 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec4};
 
 use super::celestial;
+use super::custom;
 use super::dome;
 use super::state::{SkyKind, SkyState};
 use crate::SkyDetails;
+use umicraft_packext::sky::LayerFrame;
 
 /// Maximum layers one frame can hold: dome, fan, sun, moon, stars, black
 /// plane, black box and void plane (the End needs one).
 pub(super) const MAX_LAYERS: usize = 8;
+/// Custom sky layers drawn in one frame; further ones are dropped.
+pub(super) const MAX_CUSTOM_LAYERS: usize = 32;
 /// Bytes between two uniform slots (the dynamic-offset alignment).
 pub(super) const SLOT_STRIDE: usize = 256;
 
@@ -30,6 +34,33 @@ pub(super) enum Blend {
     Alpha,
     /// `SRC_ALPHA, ONE` (`tryBlendFuncSeparate(770, 1, 1, 0)`).
     Additive,
+    /// `ONE_MINUS_DST_COLOR, ZERO` (custom sky `subtract`).
+    Subtract,
+    /// `DST_COLOR, ONE_MINUS_SRC_ALPHA` (custom sky `multiply`).
+    Multiply,
+    /// `ONE, ONE` (custom sky `dodge`).
+    Dodge,
+    /// `ZERO, ONE_MINUS_SRC_COLOR` (custom sky `burn`).
+    Burn,
+    /// `ONE, ONE_MINUS_SRC_COLOR` (custom sky `screen`).
+    Screen,
+    /// `DST_COLOR, SRC_COLOR` (custom sky `overlay`).
+    Overlay,
+}
+
+impl Blend {
+    /// Every mode, in declaration order: the index of its pipeline.
+    pub(super) const ALL: [Self; 9] = [
+        Self::Opaque,
+        Self::Alpha,
+        Self::Additive,
+        Self::Subtract,
+        Self::Multiply,
+        Self::Dodge,
+        Self::Burn,
+        Self::Screen,
+        Self::Overlay,
+    ];
 }
 
 /// The image a layer samples.
@@ -43,6 +74,8 @@ pub(super) enum Image {
     Moon,
     /// `environment/end_sky.png`.
     EndSky,
+    /// The picture of custom sky layer `n` (a flat index over the plan).
+    Custom(u16),
 }
 
 /// The mesh a layer draws.
@@ -62,6 +95,8 @@ pub(super) enum Mesh {
     VoidBox,
     /// The End cube.
     EndCube,
+    /// The cube of a custom sky layer.
+    Cube,
 }
 
 /// One uniform slot, padded to [`SLOT_STRIDE`]; mirrors `Slot` in `sky.wgsl`.
@@ -102,6 +137,11 @@ pub(super) struct PlanInput<'a> {
     pub flat_world: bool,
     /// Which parts of the sky the user wants drawn.
     pub details: SkyDetails,
+    /// The custom sky layers to draw this frame, in order.
+    pub custom: &'a [LayerFrame],
+    /// Whether the dimension has custom layers, which replace the stars
+    /// (`!CustomSky.hasSkyLayers`) even while all of them are faded out.
+    pub custom_replaces_stars: bool,
 }
 
 /// Appends the layers of the frame to `layers` (cleared first), in draw order.
@@ -161,6 +201,7 @@ fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
             false,
         ));
     }
+    custom_layers(layers, input);
     let turn = celestial::sky_turn(state.celestial_angle);
     let dim = [1.0, 1.0, 1.0, state.rain_dim];
     if details.sun_moon {
@@ -184,7 +225,7 @@ fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
         ));
     }
     let stars = state.star_brightness * state.rain_dim;
-    if details.stars && stars > 0.0 {
+    if details.stars && stars > 0.0 && !input.custom_replaces_stars {
         layers.push(layer(
             input,
             Blend::Additive,
@@ -196,6 +237,31 @@ fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
         ));
     }
     void_layers(layers, input);
+}
+
+/// The pack's sky layers, between the sunrise fan and the sun
+/// (`CustomSky.renderSky` runs there). The tint carries the brightness the
+/// way the reference's `GlStateManager.color` does for each blend mode.
+fn custom_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
+    for frame in input.custom.iter().take(MAX_CUSTOM_LAYERS) {
+        let (blend, alpha_test) = custom::blend(frame.blend);
+        let Ok(index) = u16::try_from(frame.index) else {
+            continue;
+        };
+        let mut drawn = layer(
+            input,
+            blend,
+            Image::Custom(index),
+            Mesh::Cube,
+            custom::model(frame.rotation, frame.axis),
+            frame.blend.color(frame.brightness),
+            false,
+        );
+        if alpha_test {
+            drawn.uniform.params[2] = custom::ALPHA_TEST;
+        }
+        layers.push(drawn);
+    }
 }
 
 /// The void below the horizon: the black plane and box while the eye is under
@@ -294,6 +360,8 @@ mod tests {
             eye_y,
             flat_world: environment.flat_world,
             details: environment.sky_details,
+            custom: &[],
+            custom_replaces_stars: false,
         };
         let mut layers = Vec::new();
         build(&mut layers, &input);
@@ -479,5 +547,89 @@ mod tests {
         assert_eq!(layers[0].uniform.params[..2], [0.0, 1.0]);
         assert_eq!(layers[1].uniform.params[..2], [1.0, 0.0]);
         assert_eq!(layers[0].uniform.fog[..3], [0.0, 128.0, 0.0]);
+    }
+
+    fn plan_custom(
+        environment: RenderEnvironment,
+        custom: &[LayerFrame],
+        replaces_stars: bool,
+    ) -> Vec<Layer> {
+        let state = SkyState::at(environment);
+        let input = PlanInput {
+            kind: SkyKind::of(environment.dimension),
+            state: &state,
+            view_proj: Mat4::IDENTITY,
+            eye_y: 80.0,
+            flat_world: false,
+            details: environment.sky_details,
+            custom,
+            custom_replaces_stars: replaces_stars,
+        };
+        let mut layers = Vec::new();
+        build(&mut layers, &input);
+        layers
+    }
+
+    fn frame(index: usize, blend: umicraft_packext::sky::Blend) -> LayerFrame {
+        LayerFrame {
+            index,
+            blend,
+            brightness: 0.5,
+            rotation: None,
+            axis: [0.0, 0.0, -1.0],
+        }
+    }
+
+    #[test]
+    fn custom_layers_sit_between_the_fan_and_the_sun_in_order() {
+        use umicraft_packext::sky::Blend as B;
+        let sunrise = RenderEnvironment {
+            world_time: 23_000,
+            ..RenderEnvironment::DEFAULT
+        };
+        let layers = plan_custom(sunrise, &[frame(3, B::Add), frame(4, B::Screen)], true);
+        let order = meshes(&layers);
+        let fan = order.iter().position(|m| *m == Mesh::Fan).expect("fan");
+        assert_eq!(order[fan + 1..fan + 3], [Mesh::Cube, Mesh::Cube]);
+        assert_eq!(order[fan + 3], Mesh::Sun);
+        assert_eq!(layers[fan + 1].image, Image::Custom(3));
+        assert_eq!(layers[fan + 2].blend, Blend::Screen);
+    }
+
+    #[test]
+    fn custom_layers_replace_the_stars_even_when_faded_out() {
+        let night = RenderEnvironment {
+            world_time: 18_000,
+            ..RenderEnvironment::DEFAULT
+        };
+        assert!(meshes(&plan_custom(night, &[], false)).contains(&Mesh::Stars));
+        assert!(!meshes(&plan_custom(night, &[], true)).contains(&Mesh::Stars));
+    }
+
+    #[test]
+    fn the_tint_follows_the_blend_and_replace_alpha_tests() {
+        use umicraft_packext::sky::Blend as B;
+        let layers = plan_custom(
+            RenderEnvironment::DEFAULT,
+            &[
+                frame(0, B::Multiply),
+                frame(1, B::Replace),
+                frame(2, B::Alpha),
+            ],
+            true,
+        );
+        let cubes: Vec<_> = layers.iter().filter(|l| l.mesh == Mesh::Cube).collect();
+        assert_eq!(cubes[0].uniform.tint, [0.5; 4]);
+        assert_eq!(cubes[0].uniform.params[2], 0.0);
+        assert_eq!(cubes[1].blend, Blend::Opaque);
+        assert_eq!(cubes[1].uniform.params[2], 0.1);
+        assert_eq!(cubes[2].uniform.tint, [1.0, 1.0, 1.0, 0.5]);
+        assert_eq!(cubes[2].uniform.params[..2], [1.0, 0.0], "textured, no fog");
+    }
+
+    #[test]
+    fn the_end_draws_no_custom_layers_it_has_none_of() {
+        let end = plan_custom(RenderEnvironment::new(1, 0, 0.0, 8), &[], false);
+        assert_eq!(meshes(&end), [Mesh::EndCube]);
     }
 }

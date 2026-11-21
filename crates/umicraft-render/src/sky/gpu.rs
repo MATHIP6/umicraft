@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! wgpu objects of the sky pass: the bind layout, the three blend pipelines
+//! wgpu objects of the sky pass: the bind layout, the blend pipelines
 //! and the texture upload.
 
 use super::plan::{Blend, SlotUniform, SLOT_STRIDE};
@@ -107,8 +107,19 @@ fn blend_state(blend: Blend) -> wgpu::BlendState {
         operation: wgpu::BlendOperation::Add,
     };
     let alpha = colour(wgpu::BlendFactor::One, wgpu::BlendFactor::Zero);
+    let colour_only = |src, dst| wgpu::BlendState {
+        color: colour(src, dst),
+        alpha,
+    };
+    use wgpu::BlendFactor as F;
     match blend {
         Blend::Opaque => wgpu::BlendState::REPLACE,
+        Blend::Subtract => colour_only(F::OneMinusDst, F::Zero),
+        Blend::Multiply => colour_only(F::Dst, F::OneMinusSrcAlpha),
+        Blend::Dodge => colour_only(F::One, F::One),
+        Blend::Burn => colour_only(F::Zero, F::OneMinusSrc),
+        Blend::Screen => colour_only(F::One, F::OneMinusSrc),
+        Blend::Overlay => colour_only(F::Dst, F::Src),
         Blend::Alpha => wgpu::BlendState {
             color: colour(
                 wgpu::BlendFactor::SrcAlpha,

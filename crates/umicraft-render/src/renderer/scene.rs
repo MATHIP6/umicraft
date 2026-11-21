@@ -21,6 +21,7 @@ use crate::overlays::{Pictures, ScreenOverlays};
 use crate::particles::ParticleSprite;
 use crate::sky::{SkyImage, SkyTextures};
 use crate::weather::PrecipitationField;
+use umicraft_packext::sky::LayerFrame;
 
 impl Renderer {
     /// Sets the world clock and dimension used by the sky and fog passes.
@@ -53,6 +54,21 @@ impl Renderer {
                 vignette: textures.vignette.as_ref(),
             },
         );
+    }
+
+    /// Uploads the pictures of the pack's custom sky layers, in the flat
+    /// order the frames' `index` refers to. An empty slice clears them.
+    pub fn set_custom_sky_textures(&mut self, images: &[SkyImage]) {
+        self.sky
+            .set_custom_textures(&self.device, &self.queue, images);
+    }
+
+    /// Sets the custom sky layers of the next frame, already evaluated by the
+    /// client (`SkyPlan::evaluate`, indices offset into the uploaded
+    /// pictures). `has_layers` says whether the current dimension has any
+    /// layer, active or not: they replace the stars as in OptiFine.
+    pub fn set_custom_sky(&mut self, has_layers: bool, frames: &[LayerFrame]) {
+        self.sky.set_custom_frame(has_layers, frames);
     }
 
     /// Replaces the rain and snow pictures (`textures/environment/rain.png`,

@@ -15,7 +15,7 @@ struct Slot {
     tint: vec4<f32>,
     // rgb fog colour.
     fog_color: vec4<f32>,
-    // x textured (1/0), y fog on (1/0).
+    // x textured (1/0), y fog on (1/0), z alpha-test threshold (0 = off).
     params: vec4<f32>,
     // x fog start, y fog end in blocks, z exponential density (`fog_amount`),
     // w 1 to measure the fog by depth (`fog_distance`).
@@ -59,6 +59,9 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     var color = in.color;
     if (slot.params.x > 0.5) {
         color = color * texel;
+    }
+    if (slot.params.z > 0.0 && color.a <= slot.params.z) {
+        discard;
     }
     if (slot.params.y > 0.5) {
         // `setupFog(-1)`: the dome's own range, or the medium's exponential fog.
