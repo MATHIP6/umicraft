@@ -13,6 +13,7 @@ use umicraft_world::ChunkPos;
 use super::Renderer;
 use crate::camera::{Camera, Frustum};
 use crate::chunk_pass::{create_chunk_pass, ChunkPass, Group, SECTIONS};
+use crate::layer_set::LayerSet;
 
 /// GPU buffers for one chunk column mesh.
 ///
@@ -25,6 +26,8 @@ pub(super) struct GpuMesh {
     /// Which faces of each section see each other, for cave culling; all open
     /// for a mesh that came without sections.
     pub(super) connectivity: [Connectivity; SECTIONS],
+    /// The atlas layers the mesh draws, for Smart Animations.
+    pub(super) layers: LayerSet,
 }
 
 /// One chunk queued for a sorted pass: opaque ones go near to far (less
@@ -391,6 +394,29 @@ impl Renderer {
                     .push(PreparedChunkDraw { slot: c.slot, runs });
             }
         }
+        self.collect_visible_layers();
+    }
+
+    /// Joins the layer sets of the chunks of the visible lists.
+    fn collect_visible_layers(&mut self) {
+        self.visible_layers.clear();
+        let lists = [
+            &self.visible_solid,
+            &self.visible_cutout,
+            &self.visible_transparent,
+        ];
+        for draw in lists.into_iter().flatten() {
+            if let Some(Some(slot)) = self.mesh_slots.get(draw.slot as usize) {
+                self.visible_layers.union_with(&slot.mesh.layers);
+            }
+        }
+    }
+
+    /// Whether a chunk drawn in the last frame uses atlas `layer`: the question
+    /// Smart Animations asks before it uploads a new picture of the layer.
+    #[must_use]
+    pub fn layer_in_view(&self, layer: u32) -> bool {
+        self.visible_layers.contains(layer)
     }
 
     /// Replaces the GPU mesh for `pos`, or removes it when both passes are
@@ -459,10 +485,12 @@ impl Renderer {
                 .get(i)
                 .map_or(Connectivity::OPEN, |section| section.connectivity)
         });
+        let layers = LayerSet::of_vertices(&[&mesh.vertices, &mesh.transparent_vertices]);
         let mesh = GpuMesh {
             opaque,
             transparent,
             connectivity,
+            layers,
         };
         match self.chunks.entry(pos) {
             Entry::Occupied(entry) => {

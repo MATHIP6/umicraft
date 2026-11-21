@@ -428,11 +428,17 @@ impl App {
             (now - self.clock.started).as_secs_f64(),
         );
         renderer.set_glint_time((now - self.clock.started).as_secs_f32());
-        self.assets
-            .texture_animator
-            .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
+        // Smart Animations: with the world on screen, only the textures of the
+        // chunks drawn last frame are uploaded. A screen over the world (the
+        // inventory shows block icons) keeps them all running.
+        let smart = self.options.video.performance.smart_animations && self.screen == Screen::None;
+        self.assets.texture_animator.advance(
+            Duration::from_secs_f32(elapsed),
+            |layer| !smart || renderer.layer_in_view(layer),
+            |layer, pixels| {
                 renderer.write_block_layer(layer, pixels);
-            });
+            },
+        );
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
         renderer.set_debug_lines(&self.debug_lines());
         // The mods menu blurs the game behind it to keep the focus on itself.

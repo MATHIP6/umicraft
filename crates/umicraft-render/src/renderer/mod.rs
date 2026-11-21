@@ -40,6 +40,7 @@ use crate::frame_pacing::FramePacingTracker;
 use crate::gpu_timer::{DrawCallStats, GpuTimer};
 use crate::hires_blocks::HiresBlocks;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, WorldGlint};
+use crate::layer_set::LayerSet;
 use crate::lightmap::{self, TorchFlicker};
 use crate::motion_blur::MotionBlur;
 use crate::nametag::NametagRenderer;
@@ -242,6 +243,8 @@ pub struct Renderer {
     /// What the visible lists were last built from: the view, the loaded meshes and
     /// the options, so a frame where none changed keeps them (perf 2, D1).
     visible_key: Option<(glam::Mat4, glam::DVec3, u64, i32, bool)>,
+    /// The atlas layers drawn by the visible chunks, built with the lists.
+    visible_layers: LayerSet,
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
     terrain_transparent_pipeline: wgpu::RenderPipeline,

@@ -33,6 +33,7 @@ mod hires_blocks;
 pub mod hud;
 pub mod hud_hearts;
 mod items;
+mod layer_set;
 mod lightmap;
 mod mipmap;
 mod motion_blur;
@@ -77,6 +78,7 @@ pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{
     IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE, PORTRAIT_KEY, PORTRAIT_SIZE,
 };
+pub use layer_set::LayerSet;
 pub use motion_blur::{MotionBlurSettings, MotionBlurVersion};
 pub use nametag::Nametag;
 pub use outline::{edge_vertices, DebugLine, OutlineBox, MAX_DEBUG_LINES, OUTLINE_GROWTH};

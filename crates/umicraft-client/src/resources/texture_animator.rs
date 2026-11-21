@@ -154,8 +154,19 @@ impl TextureAnimator {
     }
 
     /// Runs the ticks that `elapsed` completes and calls `write(layer, pixels)`
-    /// for every layer whose picture changed (once per tick at most).
-    pub fn advance(&mut self, elapsed: Duration, mut write: impl FnMut(u32, &[u8])) {
+    /// for every layer whose picture changed (once per tick at most) and that
+    /// `in_view` accepts.
+    ///
+    /// Smart Animations passes the layers drawn last frame as `in_view`. A layer
+    /// out of view still steps, so every animation keeps its phase; it only
+    /// skips the upload and shows the picture it has when it comes back until
+    /// its next step.
+    pub fn advance(
+        &mut self,
+        elapsed: Duration,
+        in_view: impl Fn(u32) -> bool,
+        mut write: impl FnMut(u32, &[u8]),
+    ) {
         if self.animations.is_empty() {
             return;
         }
@@ -175,7 +186,9 @@ impl TextureAnimator {
                 }
                 let layer = entry.animation.layer();
                 if let Some(pixels) = entry.animation.tick() {
-                    write(layer, pixels);
+                    if in_view(layer) {
+                        write(layer, pixels);
+                    }
                 }
             }
         }
@@ -213,9 +226,11 @@ mod tests {
 
     fn run(animator: &mut TextureAnimator, elapsed: Duration) -> Vec<(u32, Vec<u8>)> {
         let mut writes = Vec::new();
-        animator.advance(elapsed, |layer, pixels| {
-            writes.push((layer, pixels.to_vec()))
-        });
+        animator.advance(
+            elapsed,
+            |_| true,
+            |layer, pixels| writes.push((layer, pixels.to_vec())),
+        );
         writes
     }
 
@@ -274,6 +289,23 @@ mod tests {
         let writes = run(&mut animator, Duration::from_millis(100));
         assert!(writes.iter().all(|(layer, _)| *layer == 2));
         assert_eq!(writes.len(), 2);
+    }
+
+    #[test]
+    fn a_layer_out_of_view_steps_but_uploads_nothing() {
+        let mut animator = animator(&[1, 2], AnimationFilter::default());
+        let mut writes = Vec::new();
+        animator.advance(
+            Duration::from_millis(100),
+            |layer| layer == 2,
+            |layer, _| writes.push(layer),
+        );
+        assert_eq!(writes, [2, 2]);
+        // Layer 1 kept its phase: two steps later it shows the first frame
+        // again, so the next tick is the second frame once more.
+        let writes = run(&mut animator, Duration::from_millis(50));
+        assert_eq!(writes.len(), 2);
+        assert_eq!(writes[0], (1, vec![2, 2, 2, 255]));
     }
 
     #[test]
