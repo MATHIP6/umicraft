@@ -1,6 +1,6 @@
 # F6: pack features and OptiFine-style video settings: plan
 
-Status: **phases 0, 1, 2, 4, 5 and 6 done**; phase 3 merging, then 7. Branch `feat/optifine-features`.
+Status: **phases 0 to 6 done**; phase 7 in progress. Branch `feat/optifine-features`.
 Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 (reference policy) and ADR-0089 (architecture). Roadmap entry: F6.
 
@@ -104,13 +104,13 @@ Not offered, because they would have no meaningful effect in Umicraft:
 
 | Step | Content | Done when |
 |---|---|---|
-| 3.1 | Priority lane for near and player-edited sections; synchronous fast path for empty sections | Bench of the edit-to-visible latency |
-| 3.2 | Skip the visibility search when the camera and the sections are unchanged | Bench; screenshots unchanged |
-| 3.3 | Side lists for sections with entities or block entities | Bench |
-| 3.4 | Cached cloud mesh (rebuild every 20 ticks, on a colour change > 0.003, or when crossing cloud height; scroll by uniform) | Bench |
-| 3.5 | Smart animations: upload only the sprites drawn last frame | Bench |
-| 3.6 | "Chunk Updates" and "Dynamic Updates" mapped onto the mesh queue budget | Bench at every setting |
-| 3.7 | Lagometer (512-entry ring buffers of section timers) and the compact "Show FPS" line | Unit tests of the ring buffer |
+| 3.1 | Priority lane for near and player-edited sections; synchronous fast path for empty sections (**done**, ADR-0090) | Bench of the edit-to-visible latency |
+| 3.2 | Skip the visibility search when the camera and the sections are unchanged (**done**, ADR-0090) | Bench; screenshots unchanged |
+| 3.3 | Side lists for sections with entities or block entities (**done**, ADR-0090) | Bench |
+| 3.4 | Cached cloud mesh (rebuild every 20 ticks, on a colour change > 0.003, or when crossing cloud height; scroll by uniform) (**done**, ADR-0090) | Bench |
+| 3.5 | Smart animations: upload only the sprites drawn last frame (**done**, ADR-0090) | Bench |
+| 3.6 | "Chunk Updates" and "Dynamic Updates" mapped onto the mesh queue budget (**done**, ADR-0090) | Bench at every setting |
+| 3.7 | Lagometer (512-entry ring buffers of section timers) and the compact "Show FPS" line (**done**, ADR-0090) | Unit tests of the ring buffer |
 
 CEM covers creeper, zombie, zombie pigman, skeleton, wither skeleton,
 spider, cow, pig, sheep, chicken, wolf, enderman, villager and iron golem.
