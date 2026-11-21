@@ -12,11 +12,17 @@
 //! (OptiFine `TextureMap.updateAnimations` / `isTerrainAnimationActive`). The
 //! group of each layer is decided once, when the animator is built, so a frame
 //! only tests one flag per animation.
+//!
+//! The custom animations of the packs (`anim/*.properties`, see
+//! [`super::custom_animations`]) run on the same clock and are one more group:
+//! the Animated Textures switch (OptiFine `Config.isAnimatedTextures` guards
+//! `TextureAnimations.updateAnimations`).
 
 use std::time::Duration;
 
 use umicraft_assets::TextureAnimation;
 
+use super::custom_animations::CustomAnimation;
 use super::terrain::InstalledTerrain;
 
 /// Length of a game tick.
@@ -62,6 +68,8 @@ pub struct AnimationFilter {
     pub portal: bool,
     /// Every other animated block texture.
     pub terrain: bool,
+    /// The custom animations of the resource packs.
+    pub custom: bool,
 }
 
 impl Default for AnimationFilter {
@@ -72,6 +80,7 @@ impl Default for AnimationFilter {
             fire: true,
             portal: true,
             terrain: true,
+            custom: true,
         }
     }
 }
@@ -99,6 +108,7 @@ struct Layer {
 #[derive(Debug, Default)]
 pub struct TextureAnimator {
     animations: Vec<Layer>,
+    custom: Vec<CustomAnimation>,
     filter: AnimationFilter,
     /// Frame time not yet turned into a tick.
     pending: Duration,
@@ -127,9 +137,17 @@ impl TextureAnimator {
             .collect();
         Self {
             animations,
+            custom: Vec::new(),
             filter,
             pending: Duration::ZERO,
         }
+    }
+
+    /// This animator with the custom animations of the packs added.
+    #[must_use]
+    pub fn with_custom(mut self, custom: Vec<CustomAnimation>) -> Self {
+        self.custom = custom;
+        self
     }
 
     /// An animator for the animated layers of `terrain`; the procedural set
@@ -150,7 +168,7 @@ impl TextureAnimator {
     #[must_use]
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
-        self.animations.is_empty()
+        self.animations.is_empty() && self.custom.is_empty()
     }
 
     /// Runs the ticks that `elapsed` completes and calls `write(layer, pixels)`
@@ -167,7 +185,7 @@ impl TextureAnimator {
         in_view: impl Fn(u32) -> bool,
         mut write: impl FnMut(u32, &[u8]),
     ) {
-        if self.animations.is_empty() {
+        if self.animations.is_empty() && self.custom.is_empty() {
             return;
         }
         self.pending += elapsed;
@@ -186,6 +204,17 @@ impl TextureAnimator {
                 }
                 let layer = entry.animation.layer();
                 if let Some(pixels) = entry.animation.tick() {
+                    if in_view(layer) {
+                        write(layer, pixels);
+                    }
+                }
+            }
+            if !self.filter.custom {
+                continue;
+            }
+            for entry in &mut self.custom {
+                let layer = entry.layer();
+                if let Some(pixels) = entry.tick() {
                     if in_view(layer) {
                         write(layer, pixels);
                     }

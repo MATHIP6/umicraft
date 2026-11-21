@@ -182,6 +182,19 @@ impl TerrainTextures {
         }
     }
 
+    /// The layer lookup and the layer size of the official array, which the
+    /// custom animations of the packs are laid out against; `None` for the
+    /// procedural set.
+    #[must_use]
+    pub fn animation_layout(&self) -> Option<(&ModelMeshContext, (u32, u32))> {
+        match self {
+            Self::Official { atlas, context, .. } => {
+                Some((context.as_ref(), (atlas.width(), atlas.height())))
+            }
+            Self::Procedural => None,
+        }
+    }
+
     /// Binds this set's array on `target` and returns the matching mesher.
     ///
     /// A rejected official array logs one warning and installs the

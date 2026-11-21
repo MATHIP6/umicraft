@@ -43,6 +43,7 @@ pub(super) fn animation_filter(animations: &AnimationOptions) -> AnimationFilter
         fire: animations.fire,
         portal: animations.portal,
         terrain: animations.terrain,
+        custom: animations.textures,
     }
 }
 
@@ -230,7 +231,7 @@ impl App {
     /// re-meshing all loaded chunk columns.
     pub(super) fn reload_resources(&mut self) {
         tracing::info!("reloading resource packs...");
-        let (terrain, files) = load_packs_and_terrain(
+        let (terrain, files, custom_animations) = load_packs_and_terrain(
             &pack_paths(
                 &self.args.resource_packs,
                 &self.options,
@@ -273,7 +274,8 @@ impl App {
         self.assets.texture_animator = TextureAnimator::for_terrain(
             &installed,
             animation_filter(&self.options.video.animations),
-        );
+        )
+        .with_custom(custom_animations);
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
             self.assets.ui_atlas.as_ref(),
