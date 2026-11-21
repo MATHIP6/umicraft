@@ -126,11 +126,13 @@ pub(crate) struct CameraUniform {
     fog_end: f32,
     /// 1.8 brightness gamma in `0..=1` (Moody → Bright).
     gamma: f32,
-    /// Explicit tail padding: the WGSL `Camera` struct is 112 bytes.
     /// Exponential fog density (water, lava); above zero it replaces the
     /// linear band (`fog_amount` in `fog.wgsl`).
     fog_density: f32,
-    _pad: f32,
+    /// `1.0` when the fog is measured by depth along the view instead of the
+    /// distance to the eye (`FogParams::planar`); fills the 112-byte WGSL
+    /// `Camera` struct.
+    fog_planar: f32,
     /// Integer world offset the matrix is relative to: shaders subtract it
     /// from every position, which keeps f32 exact far from the origin.
     origin: [f32; 3],
@@ -157,7 +159,7 @@ impl CameraUniform {
             fog_end: HAND_FOG_FREE * 2.0,
             gamma: 0.0,
             fog_density: 0.0,
-            _pad: 0.0,
+            fog_planar: 0.0,
             origin: [0.0; 3],
             _pad_origin: 0.0,
             // GUI items are drawn without the lightmap.

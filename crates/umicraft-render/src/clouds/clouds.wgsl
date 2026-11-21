@@ -19,7 +19,8 @@ struct Clouds {
     tint: vec4<f32>,
     // rgb fog colour.
     fog_color: vec4<f32>,
-    // x fog start, y fog end in blocks, z exponential density (`fog_amount`).
+    // x fog start, y fog end in blocks, z exponential density (`fog_amount`),
+    // w 1 to measure the fog by depth (`fog_distance`).
     fog: vec4<f32>,
 };
 
@@ -53,7 +54,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.position = clouds.view_proj * vec4<f32>(relative, 1.0);
     out.uv = in.uv + clouds.uv_offset.xy;
     out.shade = in.shade.rgb;
-    out.eye_distance = length(relative);
+    out.eye_distance = fog_distance(length(relative), 1.0 / out.position.w, clouds.fog.w);
     return out;
 }
 

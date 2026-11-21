@@ -6,7 +6,7 @@
 //! render thread adds the sub-tick interpolation before handing it to the
 //! renderer. Keeping it `Copy` avoids a lock or allocation on the frame path.
 
-use crate::fog::FogContext;
+use crate::fog::{FogContext, FogSettings};
 
 /// World clock, dimension and view distance for one rendered frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,6 +43,42 @@ pub struct RenderEnvironment {
     /// is at `y = 0` instead of 63 (`World.getHorizon`) and the void fog does
     /// not darken the fog near the ground (`WorldProvider.getVoidFogYFactor`).
     pub flat_world: bool,
+    /// How the distance fog is measured and where it starts.
+    pub fog_settings: FogSettings,
+    /// Which parts of the sky are drawn.
+    pub sky_details: SkyDetails,
+    /// Blocks the clouds are lifted above their vanilla altitude
+    /// (OptiFine's "Cloud Height", `0..=128`).
+    pub cloud_lift: f32,
+    /// Whether falling rain and snow are drawn (splashes and sounds are not
+    /// part of this pass).
+    pub draw_precipitation: bool,
+}
+
+/// Which parts of the sky are drawn (OptiFine's Sky, Stars and Sun & Moon).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkyDetails {
+    /// The dome and the sunrise glow.
+    pub sky: bool,
+    /// The star field.
+    pub stars: bool,
+    /// The sun and the moon.
+    pub sun_moon: bool,
+}
+
+impl SkyDetails {
+    /// Everything drawn, as in the reference.
+    pub const ALL: Self = Self {
+        sky: true,
+        stars: true,
+        sun_moon: true,
+    };
+}
+
+impl Default for SkyDetails {
+    fn default() -> Self {
+        Self::ALL
+    }
 }
 
 impl RenderEnvironment {
@@ -59,6 +95,10 @@ impl RenderEnvironment {
         lightning_ticks: 0,
         fog: FogContext::DEFAULT,
         flat_world: false,
+        fog_settings: FogSettings::DEFAULT,
+        sky_details: SkyDetails::ALL,
+        cloud_lift: 0.0,
+        draw_precipitation: true,
     };
 
     /// `BiomeGenBase.plains` temperature, the default sky tint.

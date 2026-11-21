@@ -110,7 +110,7 @@ impl Renderer {
             fog_end,
             gamma: self.environment.gamma,
             fog_density,
-            _pad: 0.0,
+            fog_planar: f32::from(u8::from(sky.fog.planar)),
             origin: origin.as_vec3().to_array(),
             _pad_origin: 0.0,
             lightmap: if self.fullbright {

@@ -55,9 +55,12 @@ pub use border::{BorderStatus, BorderView};
 pub use camera::{Camera, Frustum};
 pub use clouds::CloudMode;
 pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
-pub use environment::RenderEnvironment;
+pub use environment::{RenderEnvironment, SkyDetails};
 pub use error::RenderError;
-pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
+pub use fog::{
+    light_brightness, FogContext, FogKind, FogMedium, FogMode, FogParams, FogSettings,
+    VANILLA_FOG_START,
+};
 pub use frame_pacing::{FramePacingStats, FramePacingTracker, SurfaceInfo};
 pub use gpu_timer::{DrawCallStats, GpuTimings, VramStats, GROUP_NAMES};
 pub use hud::{

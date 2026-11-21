@@ -37,7 +37,8 @@ struct Camera {
     fog_density: f32,
     // Explicit tail padding keeps the Rust `CameraUniform` and this struct at
     // the same 112-byte, 16-byte-aligned layout.
-    _pad1: f32,
+    // 1 when the fog is measured by depth instead of distance (`fog_distance`).
+    fog_planar: f32,
     // Integer world offset of the render origin: positions are sent to the
     // GPU relative to it (`view_proj` is built for that origin), so f32
     // keeps its precision far from the world origin.
@@ -134,7 +135,11 @@ fn shade_fragment(in: VertexOut, texel: vec4<f32>) -> vec3<f32> {
     let light = lightmap_sample(in.levels.x, in.levels.y);
     let lit = texel.rgb * in.tint * light * in.ao * in.shade;
     let fog_target = camera.fog_color * (0.15 + 0.85 * light);
-    let distance = distance(in.world_position, camera.camera_pos);
+    let distance = fog_distance(
+        distance(in.world_position, camera.camera_pos),
+        in.clip_position.w,
+        camera.fog_planar,
+    );
     let fog = fog_amount(distance, camera.fog_start, camera.fog_end, camera.fog_density);
     return mix(lit, fog_target, fog);
 }

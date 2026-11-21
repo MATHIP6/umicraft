@@ -17,7 +17,8 @@ struct Slot {
     fog_color: vec4<f32>,
     // x textured (1/0), y fog on (1/0).
     params: vec4<f32>,
-    // x fog start, y fog end in blocks, z exponential density (`fog_amount`).
+    // x fog start, y fog end in blocks, z exponential density (`fog_amount`),
+    // w 1 to measure the fog by depth (`fog_distance`).
     fog: vec4<f32>,
 };
 
@@ -46,7 +47,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.position = slot.view_proj * relative;
     out.uv = in.uv;
     out.color = in.color * slot.tint;
-    out.eye_distance = length(relative.xyz);
+    out.eye_distance = fog_distance(length(relative.xyz), 1.0 / out.position.w, slot.fog.w);
     return out;
 }
 
