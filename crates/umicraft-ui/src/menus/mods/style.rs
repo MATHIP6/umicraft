@@ -97,9 +97,9 @@ pub(super) fn hover_level(ui: &Ui, rect: Rect) -> f32 {
 
 /// Draws `rect` with `fill`, then a one-pixel `border` along its edge.
 ///
-/// The border is only drawn on the four edge strips, not under the whole
-/// rectangle: both are translucent, so a border laid under the fill would add
-/// to it and make every card and field lighter than the design.
+/// The border is a stroke, not a rectangle laid under the fill: both are
+/// translucent, so a border laid under the fill would add to it and make every
+/// card and field lighter than the design.
 pub(super) fn bordered(ui: &mut Ui, rect: Rect, radius: f32, (fill, border): (Color, Color)) {
     ui.draw().rounded_rect(rect, radius, fill);
     outline(ui, rect, radius, border);
@@ -107,18 +107,7 @@ pub(super) fn bordered(ui: &mut Ui, rect: Rect, radius: f32, (fill, border): (Co
 
 /// Draws a one-pixel `border` along the edge of a rounded `rect`.
 pub(super) fn outline(ui: &mut Ui, rect: Rect, radius: f32, border: Color) {
-    let rim = 1.0;
-    let strips = [
-        Rect::new(rect.x, rect.y, rect.width, rim),
-        Rect::new(rect.x, rect.bottom() - rim, rect.width, rim),
-        Rect::new(rect.x, rect.y, rim, rect.height),
-        Rect::new(rect.right() - rim, rect.y, rim, rect.height),
-    ];
-    for strip in strips {
-        ui.draw().push_clip(strip);
-        ui.draw().rounded_rect(rect, radius, border);
-        ui.draw().pop_clip();
-    }
+    ui.draw().rounded_ring(rect, radius, 1.0, border);
 }
 
 /// The fill and the border of a mod card at the given hover and on levels

@@ -158,6 +158,22 @@ pub enum DrawCommand {
         /// Straight-alpha RGBA colour.
         color: Color,
     },
+    /// Stroke the edge of a rounded rectangle, `width` pixels thick and
+    /// inwards from the edge, leaving the inside untouched.
+    ///
+    /// Unlike a rounded fill drawn under another one, it does not add to a
+    /// translucent fill laid over it, so a card keeps the colour of its fill
+    /// and gets a border of its own.
+    RoundedRing {
+        /// Rectangle whose edge is stroked, in physical pixels.
+        rect: Rect,
+        /// Corner radius in physical pixels, clamped to half the shorter side.
+        radius: f32,
+        /// Thickness of the stroke in physical pixels.
+        width: f32,
+        /// Straight-alpha RGBA colour.
+        color: Color,
+    },
     /// Fill a rectangle with a vertical gradient from `top` to `bottom`.
     ///
     /// The renderer interpolates the colours per vertex, so the gradient has
@@ -328,6 +344,18 @@ impl DrawList {
         self.commands.push(DrawCommand::RoundedRect {
             rect,
             radius,
+            color,
+        });
+    }
+
+    /// Appends the stroke of a rounded rectangle's edge: `width` pixels thick,
+    /// inwards from the edge, with corners rounded by `radius` pixels.
+    pub fn rounded_ring(&mut self, rect: Rect, radius: f32, width: f32, color: Color) {
+        let color = self.faded(color);
+        self.commands.push(DrawCommand::RoundedRing {
+            rect,
+            radius,
+            width,
             color,
         });
     }
