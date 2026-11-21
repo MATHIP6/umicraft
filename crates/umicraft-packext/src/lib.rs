@@ -18,10 +18,12 @@
 //! - [`filters`]: the biome, height and weather conditions.
 //!
 //! Features:
-//! - [`sky`]: custom sky layers.
+//! - [`sky`]: custom sky layers;
+//! - [`ctm`]: connected textures.
 //!
 //! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
 
+pub mod ctm;
 pub mod filters;
 pub mod properties;
 pub mod ranges;
