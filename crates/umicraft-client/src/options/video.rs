@@ -13,7 +13,9 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use umicraft_render::CloudMode;
 
-use super::video_sections::{lenient, AnimationOptions, DetailOptions, QualityOptions};
+use super::video_sections::{
+    lenient, AnimationOptions, DetailOptions, OtherOptions, PerformanceOptions, QualityOptions,
+};
 
 /// The render distance range, in chunks. Vanilla stops at 16; OptiFine, and
 /// Umicraft (ADR-0089), go to 32. A server sends no more than its own view
@@ -105,6 +107,12 @@ pub struct VideoOptions {
     /// `[video.animations]`.
     #[serde(deserialize_with = "lenient")]
     pub animations: AnimationOptions,
+    /// `[video.performance]`.
+    #[serde(deserialize_with = "lenient")]
+    pub performance: PerformanceOptions,
+    /// `[video.other]`.
+    #[serde(deserialize_with = "lenient")]
+    pub other: OtherOptions,
 }
 
 /// Reads the cloud setting as a number, or as the boolean of the files that
@@ -171,6 +179,7 @@ impl VideoOptions {
             defaults.gamma
         };
         self.details.clamp();
+        self.performance.clamp();
     }
 }
 
@@ -198,6 +207,8 @@ impl Default for VideoOptions {
             details: DetailOptions::default(),
             quality: QualityOptions::default(),
             animations: AnimationOptions::default(),
+            performance: PerformanceOptions::default(),
+            other: OtherOptions::default(),
         }
     }
 }

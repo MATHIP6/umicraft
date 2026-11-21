@@ -28,7 +28,8 @@ use super::video::{
     MAX_PARTICLE_SETTING, MAX_SMOOTH_LIGHTING, MIPMAP_LEVELS, RENDER_DISTANCE, UNLIMITED_FPS,
 };
 use super::video_sections::{
-    fog_start_step, FogChoice, GraphicsChoice, OffFastFancy, RainChoice, TreesChoice, FOG_STARTS,
+    fog_start_step, FogChoice, GraphicsChoice, OffFastFancy, RainChoice, TreesChoice,
+    CHUNK_UPDATES, FOG_STARTS,
 };
 
 /// A page of the video settings.
@@ -720,6 +721,34 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         effect: Effect::ReloadResources,
         all: None,
     },
+    OptionSpec {
+        id: "chunkUpdates",
+        label: "umicraft.options.chunkUpdates",
+        page: VideoPage::Performance,
+        control: Control::Button,
+        positions: (*CHUNK_UPDATES.end() - *CHUNK_UPDATES.start()) as u32 + 1,
+        get: |video| u32::from(video.performance.chunk_updates - CHUNK_UPDATES.start()),
+        set: |video, position| {
+            video.performance.chunk_updates = CHUNK_UPDATES.start() + position as u8;
+        },
+        value: |_, video| video.performance.chunk_updates.to_string(),
+        effect: Effect::Immediate,
+        all: None,
+    },
+    toggle!(
+        "dynamicUpdates",
+        "umicraft.options.dynamicUpdates",
+        Performance,
+        performance.dynamic_updates,
+        Immediate
+    ),
+    toggle!(
+        "smartAnimations",
+        "umicraft.options.smartAnimations",
+        Performance,
+        performance.smart_animations,
+        Immediate
+    ),
     // Animations, in OptiFine's order.
     toggle!(
         "animatedWater",
@@ -863,6 +892,20 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         all: Some([MAX_PARTICLE_SETTING as u32, 0]),
     },
     // Other.
+    toggle!(
+        "lagometer",
+        "umicraft.options.lagometer",
+        Other,
+        other.lagometer,
+        Immediate
+    ),
+    toggle!(
+        "showFps",
+        "umicraft.options.showFps",
+        Other,
+        other.show_fps,
+        Immediate
+    ),
     toggle!(
         "fullscreen",
         "options.fullscreen",

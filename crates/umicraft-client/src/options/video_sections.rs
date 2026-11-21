@@ -341,9 +341,77 @@ impl Default for AnimationOptions {
     }
 }
 
+/// The range of the Chunk Updates option: how much finished chunk geometry
+/// one frame uploads, in steps of [`CHUNK_UPDATE_STEP_BYTES`].
+pub const CHUNK_UPDATES: std::ops::RangeInclusive<u8> = 1..=5;
+/// The upload budget of one Chunk Updates step. Step 4 is the 1 MiB budget
+/// Umicraft used before the option existed (ADR-0063).
+pub const CHUNK_UPDATE_STEP_BYTES: usize = 256 * 1024;
+
+/// `[video.performance]`: the speed knobs of phase 3.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PerformanceOptions {
+    /// How much chunk geometry one frame may upload, `CHUNK_UPDATES` steps
+    /// of [`CHUNK_UPDATE_STEP_BYTES`]. OptiFine counts chunks per frame
+    /// (default 1); Umicraft's meshing is multithreaded and budgeted by
+    /// bytes, so the default keeps today's budget (step 4).
+    pub chunk_updates: u8,
+    /// Upload more per frame while the player stands still.
+    pub dynamic_updates: bool,
+    /// Only the animated textures drawn last frame are stepped.
+    pub smart_animations: bool,
+}
+
+impl Default for PerformanceOptions {
+    fn default() -> Self {
+        Self {
+            chunk_updates: 4,
+            dynamic_updates: true,
+            smart_animations: true,
+        }
+    }
+}
+
+impl PerformanceOptions {
+    /// Puts the numbers back in range.
+    pub(super) fn clamp(&mut self) {
+        self.chunk_updates = self
+            .chunk_updates
+            .clamp(*CHUNK_UPDATES.start(), *CHUNK_UPDATES.end());
+    }
+
+    /// The upload budget of one frame, in bytes.
+    #[must_use]
+    pub fn upload_budget_bytes(&self) -> usize {
+        usize::from(self.chunk_updates) * CHUNK_UPDATE_STEP_BYTES
+    }
+}
+
+/// `[video.other]`: debugging aids of OptiFine's Other page.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OtherOptions {
+    /// The frame-time graph of OptiFine's Lagometer, shown with F3.
+    pub lagometer: bool,
+    /// A compact "fps, chunks, entities, updates" line without F3.
+    pub show_fps: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_chunk_updates_keep_the_old_budget() {
+        assert_eq!(PerformanceOptions::default().upload_budget_bytes(), 1 << 20);
+        let mut performance = PerformanceOptions {
+            chunk_updates: 99,
+            ..PerformanceOptions::default()
+        };
+        performance.clamp();
+        assert_eq!(performance.chunk_updates, 5);
+    }
 
     #[test]
     fn default_follows_graphics() {
