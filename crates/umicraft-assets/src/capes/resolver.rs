@@ -30,8 +30,13 @@ const QUEUE_CAPACITY: usize = 256;
 const MAX_CONCURRENT_QUERIES: usize = 4;
 /// Largest PNG accepted, in bytes.
 const MAX_IMAGE_BYTES: usize = 1 << 20;
-/// Largest JSON answer accepted, in bytes.
-const MAX_JSON_BYTES: usize = 64 << 10;
+/// Largest JSON answer accepted, in bytes: room for the base64 copy of the
+/// largest image accepted, plus the other fields.
+///
+/// A MinecraftCapes profile looked up by UUID still carries the deprecated
+/// `textures.cape` base64 copy next to `cape_url`; for an HD cape (2048x1024)
+/// the answer is about 460 KB (observed traffic, `docs/sources.md`, "Capes").
+const MAX_JSON_BYTES: usize = MAX_IMAGE_BYTES.div_ceil(3) * 4 + (64 << 10);
 /// Redirects followed before giving up.
 const MAX_REDIRECTS: usize = 5;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);

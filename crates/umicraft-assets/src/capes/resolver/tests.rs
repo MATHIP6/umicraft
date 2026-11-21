@@ -185,6 +185,30 @@ fn a_json_provider_downloads_the_image_it_names() {
     assert_eq!(found.image.frames.len(), 3);
 }
 
+/// Regression: a MinecraftCapes profile of an HD cape, looked up by UUID,
+/// also carries the deprecated base64 copy (~460 KB for 2048x1024), which
+/// the old 64 KiB JSON limit refused, so the cape never showed.
+#[test]
+fn a_json_answer_with_the_base64_copy_of_a_large_image_is_accepted() {
+    let cape = rgba_png(64, 32, &solid(64, 32, [9, 9, 9, 255]));
+    let legacy_copy = "A".repeat(MAX_IMAGE_BYTES.div_ceil(3) * 4);
+    let server = TestServer::start(|origin| {
+        let json = format!(
+            r#"{{"cape_url":"{origin}/capes/hd","textures":{{"_IMPORTANT":"x","cape":"{legacy_copy}"}}}}"#
+        );
+        vec![
+            route(MC_PATH, Reply::ok(json)),
+            route("/capes/hd", Reply::ok(cape)),
+        ]
+    });
+    let providers = [CapeProvider::MinecraftCapes];
+    let found = resolve(&server, query(UUID, "Steve", &providers)).cape;
+    assert_eq!(
+        found.map(|c| c.provider),
+        Some(CapeProvider::MinecraftCapes)
+    );
+}
+
 #[test]
 fn a_json_provider_can_carry_the_image_inline() {
     let inline = base64_encode(&rgba_png(8, 4, &solid(8, 4, [1, 2, 3, 255])));
