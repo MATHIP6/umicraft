@@ -3,7 +3,6 @@
 //! Tests of the list page of the mods menu: the cards, the search and the tabs.
 
 use super::*;
-use crate::modern::theme;
 
 #[test]
 fn the_cards_name_every_mod_and_the_tabs_name_the_categories() {
@@ -134,24 +133,43 @@ fn a_search_without_result_says_so() {
 }
 
 #[test]
-fn a_category_tab_keeps_only_its_mods() {
+fn a_category_in_the_sidebar_keeps_only_its_mods() {
     let layout = mods_layout(VIEWPORT);
     let mut screen = on_list();
-    // The tabs are laid out left to right: All, HUD, Gameplay. Gameplay is
-    // the last, so a click near the right end of the labels finds it.
-    let gameplay = {
-        let atlas = FontAtlas::fallback();
-        let size = theme::TEXT_SIZE_SMALL * layout.scale;
-        let pad = 5.0 * layout.scale;
-        let gap = 2.0 * layout.scale;
-        let width = |text: &str| modern::measure_text(&atlas, text, size) + 2.0 * pad;
-        layout.tabs.x + width("umicraft.mods.tab.all") + width("HUD") + 2.0 * gap + 4.0
-    };
-    let click = crate::menus::common::testing::click_point([gameplay, layout.tabs.y + 4.0]);
-    show(&mut screen, click);
+    // The items are: All, HUD, Gameplay.
+    let gameplay = item_rect(layout.items, layout.scale, 2);
+    show(&mut screen, click_at(gameplay));
     let names = texts(&mut screen, &view());
     assert!(has_text(&names, "Toggle Sprint"));
     assert!(!has_text(&names, "FPS"));
+}
+
+#[test]
+fn the_enabled_filter_keeps_the_mods_that_are_on() {
+    let mut screen = on_list();
+    let mut on = view();
+    on.cards[1].enabled = true;
+    let enabled = mods_layout(VIEWPORT).filter;
+    // The second half of the control is "Enabled".
+    let right = Rect::new(
+        enabled.x + enabled.width * 0.75,
+        enabled.y,
+        4.0,
+        enabled.height,
+    );
+    show_view(&mut screen, &on, click_at(right));
+    let names = texts(&mut screen, &on);
+    assert!(has_text(&names, "Coordinates"));
+    assert!(!has_text(&names, "FPS"));
+}
+
+#[test]
+fn the_header_counts_the_mods_that_are_on() {
+    let mut on = view();
+    on.cards[0].enabled = true;
+    on.cards[2].enabled = true;
+    let names = texts(&mut on_list(), &on);
+    assert!(has_text(&names, "2 umicraft.mods.enabled"), "{names:?}");
 }
 
 #[test]

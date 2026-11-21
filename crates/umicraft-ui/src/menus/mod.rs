@@ -49,9 +49,9 @@ pub use connecting::{connecting_cancel_rect, ConnectStage, ConnectingOutcome, Co
 pub use disconnected::{DisconnectedOutcome, DisconnectedScreen};
 pub use loading::LoadingScreen;
 pub use mods::{
-    mods_layout, HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, HudWidgetView,
-    ModCardView, ModValue, ModsLayout, ModsOutcome, ModsScreen, ModsView, SettingControl,
-    SettingView, Snap,
+    landing_layout, mods_layout, HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind,
+    HudWidgetView, ModCardView, ModValue, ModsLayout, ModsOutcome, ModsScreen, ModsView,
+    SettingControl, SettingView, Snap,
 };
 pub use pack_mode::ResourcePackMode;
 pub use panorama::{

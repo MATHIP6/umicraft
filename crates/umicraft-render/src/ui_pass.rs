@@ -377,6 +377,19 @@ impl UiPass {
                     );
                     self.push_rounded_rect(*rect, *radius, *color, atlas);
                 }
+                DrawCommand::RoundedRing {
+                    rect,
+                    radius,
+                    width,
+                    color,
+                } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Font,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_rounded_ring(*rect, (*radius, *width), *color, atlas);
+                }
                 DrawCommand::VerticalGradient { rect, top, bottom } => {
                     self.flush_batch_if_needed(
                         UiBatchKind::Font,
@@ -533,6 +546,61 @@ impl UiPass {
                 uv,
                 clip,
             );
+        }
+    }
+
+    /// Tessellates the stroke of a rounded rectangle: a band `width` pixels
+    /// thick inwards from the edge, with a one-pixel antialiasing ramp on both
+    /// of its sides, so the inside of the shape is left alone. A stroke
+    /// thinner than a pixel is drawn one pixel thick, as faint as it is thin.
+    fn push_rounded_ring(
+        &mut self,
+        rect: Rect,
+        (radius, width): (f32, f32),
+        color: [f32; 4],
+        atlas: &FontAtlas,
+    ) {
+        let (Some(rect), Some(clip)) = (drawable(rect), self.clip) else {
+            return;
+        };
+        if width.is_nan() || width <= 0.0 {
+            return;
+        }
+        let shape = RoundedShape::new(rect, radius);
+        let uv = white_texel_uv(atlas);
+        let edge = -FRINGE;
+        let band = -(width.max(2.0 * FRINGE)) + FRINGE;
+        let vertex = |index: usize, offset: f32, opaque: bool| {
+            let position = shape.outline_point(index, offset);
+            if opaque {
+                FringeVertex::opaque_at(position)
+            } else {
+                FringeVertex::clear_at(position)
+            }
+        };
+        let count = shape.outline_len();
+        for index in 0..count {
+            let next = (index + 1) % count;
+            let rows = [
+                (FRINGE, false),
+                (edge, true),
+                (band, true),
+                (band - 2.0 * FRINGE, false),
+            ];
+            for pair in rows.windows(2) {
+                let (from, to) = (pair[0], pair[1]);
+                self.emit_polygon(
+                    &[
+                        vertex(index, from.0, from.1),
+                        vertex(index, to.0, to.1),
+                        vertex(next, to.0, to.1),
+                        vertex(next, from.0, from.1),
+                    ],
+                    color,
+                    uv,
+                    clip,
+                );
+            }
         }
     }
 
@@ -1411,6 +1479,53 @@ mod tests {
                 count: 180
             }]
         );
+    }
+
+    /// The pixel position of a vertex of a pass drawn on a 100 x 100 target.
+    fn pixel(vertex: &OverlayVertex) -> [f32; 2] {
+        [
+            (vertex.position[0] + 1.0) * 50.0,
+            (1.0 - vertex.position[1]) * 50.0,
+        ]
+    }
+
+    /// Regression: the border of a card was drawn as clipped strips, which left
+    /// the corners without an arc. The ring follows the rounded outline all the
+    /// way round and leaves the inside alone.
+    #[test]
+    fn a_rounded_ring_follows_the_corners_and_leaves_the_inside_empty() {
+        let mut list = DrawList::new();
+        list.rounded_ring(Rect::new(10.0, 10.0, 40.0, 30.0), 4.0, 1.0, COLOR);
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+        // 20 outline points, three bands of two triangles each.
+        assert_eq!(pass.vertex_count(), 20 * 3 * 6);
+        // Signed distance to the rounded rectangle: every vertex is within the
+        // stroke and its ramps, none deeper inside.
+        let sdf = |[x, y]: [f32; 2]| {
+            let (cx, cy) = (30.0, 25.0);
+            let (qx, qy) = ((x - cx).abs() - (20.0 - 4.0), (y - cy).abs() - (15.0 - 4.0));
+            qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - 4.0
+        };
+        for vertex in pass.vertices() {
+            let distance = sdf(pixel(vertex));
+            assert!((-1.6..=0.6).contains(&distance), "{distance}");
+        }
+        // The arc of the top-left corner is there: a vertex on it, off both
+        // straight edges.
+        let on_arc = pass.vertices().iter().map(pixel).any(|[x, y]| {
+            x > 10.5 && x < 13.0 && y > 10.5 && y < 13.0 && (x - 14.0).hypot(y - 14.0) > 3.0
+        });
+        assert!(on_arc, "the corner has its arc");
+    }
+
+    #[test]
+    fn a_ring_without_width_draws_nothing() {
+        let mut list = DrawList::new();
+        list.rounded_ring(Rect::new(10.0, 10.0, 40.0, 30.0), 4.0, 0.0, COLOR);
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+        assert_eq!(pass.vertex_count(), 0);
     }
 
     #[test]

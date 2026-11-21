@@ -418,6 +418,7 @@ fn menu_scene(
         ui.recycle_output(output);
     }
     match view {
+        "mods_list" => flow.open_mods_list(),
         "hud-editor" => flow.open_hud_editor(Some("cps")),
         "hud-editor-list" => flow.open_hud_editor(None),
         _ => {}

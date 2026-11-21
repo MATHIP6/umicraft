@@ -1,32 +1,40 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The panel pages of the mods menu: the list of cards and the settings of one
-//! mod, under a header with the logo, the title and the cross that closes the
-//! menu.
+//! mod, in a panel with the sidebar of categories on its left and a header with
+//! the cross that goes back to the landing page.
 
 use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
 use crate::geom::Rect;
 use crate::icons::Icon;
-use crate::menus::title::modern::wordmark::draw_logo;
-use crate::modern::theme;
-use crate::modern::{self, fit_text, measure_text, search_field, Align, ModernButton, SliderDrag};
+use crate::modern::theme::{self, with_opacity};
+use crate::modern::{
+    fit_text, measure_text, search_field, toggle, Align, SliderDrag, TOGGLE_HEIGHT, TOGGLE_WIDTH,
+};
 use crate::text::FontAtlas;
 
 use super::button::icon_button;
-use super::editor::chip;
+use super::card::{icon_tile, CardAction};
 use super::layout::{mods_layout, ModsLayout};
 use super::list::{list, wheel_scrolled};
 use super::scrollbar::{draw_scroll_bar, scroll_input, BarGrab};
-use super::search::visible;
+use super::search::{visible, ALL_TAB};
+use super::segmented::segmented;
 use super::settings_panel::{content_height, settings_panel};
-use super::style::{hover_level, Paint, NAME_SIZE, PANEL, PANEL_RIM};
+use super::sidebar::SidebarAction;
+use super::style::{
+    bordered, hover_level, outline, Paint, DESC_SIZE, FIELD_BORDER, PANEL, PANEL_RIM, TITLE_SIZE,
+    TOGGLE_SCALE,
+};
 use super::view::{ModCardView, ModsOutcome, ModsView};
-use super::{card, ModsScreen, Page, BLINK_TICKS};
+use super::{ModsScreen, Page, BLINK_TICKS};
 
-/// Width of the button that opens the HUD editor, in GUI units.
-const EDIT_WIDTH: f32 = 46.0;
+/// Edge of the icon tile in the band of a mod, in GUI units.
+const MOD_TILE: f32 = 23.0;
+/// Space between that tile and the name.
+const TILE_GAP: f32 = 7.0;
 
 impl ModsScreen {
     /// The mod whose settings page is open, if it still exists.
@@ -37,8 +45,22 @@ impl ModsScreen {
         view.cards.iter().find(|card| card.id == *id)
     }
 
-    /// The panel with its header and cross, and the page inside it. The cross
-    /// closes the menu.
+    /// Opens the settings page of the mod `id`, scrolled to the top.
+    pub(super) fn open_settings(&mut self, id: String) {
+        self.page = Page::Settings(id);
+        self.reset_settings_view();
+    }
+
+    /// Puts the settings page back at its top with no drag in progress.
+    pub(super) fn reset_settings_view(&mut self) {
+        self.settings_scroll = 0.0;
+        self.motion.settle("settings_scroll");
+        self.drag = SliderDrag::default();
+        self.bar = BarGrab::default();
+    }
+
+    /// The panel with its sidebar, header and cross, and the page inside it.
+    /// The cross goes back to the landing page.
     pub(super) fn panel_page(
         &mut self,
         ui: &mut Ui,
@@ -51,67 +73,18 @@ impl ModsScreen {
             brand,
             scale: layout.scale,
         };
-        let radius = theme::RADIUS * paint.scale * 1.5;
-        let rim = paint.scale.max(1.0);
-        ui.draw().rounded_rect(layout.panel, radius, PANEL_RIM);
-        let inner = Rect::new(
-            layout.panel.x + rim,
-            layout.panel.y + rim,
-            layout.panel.width - 2.0 * rim,
-            layout.panel.height - 2.0 * rim,
+        bordered(ui, layout.panel, 10.0 * paint.scale, (PANEL, PANEL_RIM));
+        let open = self.open_card(view);
+        let active = open.map_or(self.tab, |card| card.category + 1);
+        let action = self.sidebar(ui, paint, (lang, view, &layout), active);
+        let hint = (
+            theme::TEXT_SIZE_SMALL,
+            with_opacity(theme::TEXT, 0.6),
+            Align::Center,
         );
-        ui.draw().rounded_rect(inner, radius - rim, PANEL);
-        let title = (NAME_SIZE * 1.3, theme::TEXT, Align::Left);
-        let middle = layout.header.y + layout.header.height * 0.5;
-        let title_key = if self.open_card(view).is_some() {
-            "umicraft.mods.settings"
-        } else {
-            "umicraft.mods.title"
-        };
-        let logo_box = Rect::new(
-            layout.header.x,
-            layout.header.y,
-            layout.header.height,
-            layout.header.height,
-        );
-        let logo = ui.menu_art().brand.logo;
-        draw_logo(ui, logo, logo_box, 1.0);
-        let title_x = layout.header.x + (layout.header.height + 4.0 * paint.scale);
-        paint.text(ui, lang.tr(title_key), (title_x, middle), title);
-        if !view.hud.widgets.is_empty() {
-            // How to move the widgets, above the panel, on a dark pill so it
-            // reads over a bright world.
-            let text = lang.tr("umicraft.mods.editor.hint");
-            let size = theme::TEXT_SIZE_SMALL * paint.scale;
-            let width = measure_text(brand, text, size) + 10.0 * paint.scale;
-            let height = 9.0 * paint.scale;
-            let middle_x = layout.panel.x + layout.panel.width * 0.5;
-            let top = layout.panel.y - height - 3.0 * paint.scale;
-            let pill = Rect::new(middle_x - width * 0.5, top, width, height);
-            ui.draw()
-                .rounded_rect(pill, height * 0.5, [0.0, 0.0, 0.0, 0.4]);
-            let tip = (theme::TEXT_SIZE_SMALL, theme::TEXT, Align::Center);
-            paint.text(ui, text, (middle_x, top + height * 0.5), tip);
-        }
-        let hint = (theme::TEXT_SIZE_SMALL, theme::TEXT_MUTED, Align::Center);
         let hint_at = (layout.hint[0], layout.hint[1]);
         paint.text(ui, lang.tr("umicraft.mods.hint"), hint_at, hint);
 
-        // The way into the HUD editor, left of the cross, while a mod has a
-        // widget to place.
-        let edit = Rect::new(
-            layout.close.x - (EDIT_WIDTH + 4.0) * paint.scale,
-            layout.header.y,
-            EDIT_WIDTH * paint.scale,
-            layout.header.height,
-        );
-        let on_list = self.open_card(view).is_none();
-        if on_list && !view.hud.entries.is_empty() {
-            let label = ("edit_hud", lang.tr("umicraft.mods.editor.open"));
-            if chip(ui, paint, edit, label, (true, true)) {
-                self.open_editor();
-            }
-        }
         let close_id = ui.id("close");
         let close_fade = hover_level(ui, layout.close);
         let close = icon_button(
@@ -120,17 +93,33 @@ impl ModsScreen {
             (close_id, layout.close),
             (Icon::Close, paint.scale, close_fade),
         );
-        let page = match self.open_card(view) {
+        let page = match open {
             Some(card) => self.settings_page(ui, paint, lang, &layout, card),
             None => self.list_page(ui, paint, lang, view, &layout),
         };
         if close.clicked {
-            return Some(ModsOutcome::Close);
+            self.page = Page::Landing;
+            return None;
         }
-        page
+        match action {
+            Some(SidebarAction::Select(tab)) => {
+                self.tab = tab;
+                self.scroll = 0.0;
+                if matches!(self.page, Page::Settings(_)) {
+                    self.page = Page::List;
+                    self.reset_settings_view();
+                }
+                None
+            }
+            Some(SidebarAction::EditHud) => {
+                self.open_editor();
+                None
+            }
+            None => page,
+        }
     }
 
-    /// The search box, the tabs and the cards.
+    /// The header, the search box, the All / Enabled control and the cards.
     pub(super) fn list_page(
         &mut self,
         ui: &mut Ui,
@@ -139,6 +128,13 @@ impl ModsScreen {
         view: &ModsView,
         layout: &ModsLayout,
     ) -> Option<ModsOutcome> {
+        let title = if self.tab == ALL_TAB {
+            lang.tr("umicraft.mods.all_mods")
+        } else {
+            view.categories.get(self.tab - 1).map_or("", String::as_str)
+        };
+        self.list_header(ui, paint, lang, view, (layout, title));
+
         let blink_on = (self.blink / BLINK_TICKS).is_multiple_of(2);
         let placeholder = lang.tr("umicraft.mods.search");
         let fields = (&mut self.query, placeholder);
@@ -151,45 +147,60 @@ impl ModsScreen {
         ) {
             self.scroll = 0.0;
         }
-        let all = lang.tr("umicraft.mods.tab.all");
-        let labels: Vec<&str> = std::iter::once(all)
-            .chain(view.categories.iter().map(String::as_str))
-            .collect();
-        let selected = self.tab.min(labels.len() - 1);
-        // The line under the selected tab springs from one tab to the next.
-        let line = self.motion.spring("tabs", selected as f32).0;
-        let tabs = (selected, line);
-        if let Some(tab) = modern::tabs(ui, paint.brand, layout.tabs, &labels, tabs, paint.scale) {
-            self.tab = tab;
+        outline(ui, layout.search, theme::RADIUS * paint.scale, FIELD_BORDER);
+        let filters = [
+            lang.tr("umicraft.mods.filter.all"),
+            lang.tr("umicraft.mods.filter.enabled"),
+        ];
+        let selected = usize::from(self.only_enabled);
+        if let Some(chosen) = segmented(ui, paint, layout.filter, &filters, selected) {
+            self.only_enabled = chosen == 1;
             self.scroll = 0.0;
         }
-        let shown = visible(view, &self.query, self.tab);
+
+        let shown = visible(view, (&self.query, self.tab), self.only_enabled);
         let empty = lang.tr("umicraft.mods.empty");
         let clicked = list(
             ui,
             paint,
             layout.list,
             (view, &shown),
-            (&mut self.scroll, empty, lang.tr("umicraft.mods.settings")),
+            (&mut self.scroll, empty),
             (&mut self.motion, &mut self.bar),
         )?;
         match clicked.action {
-            card::CardAction::Toggle(enabled) => Some(ModsOutcome::Toggle {
+            CardAction::Toggle(enabled) => Some(ModsOutcome::Toggle {
                 id: clicked.id,
                 enabled,
             }),
-            card::CardAction::OpenSettings => {
-                self.page = Page::Settings(clicked.id);
-                self.settings_scroll = 0.0;
-                self.motion.settle("settings_scroll");
-                self.drag = SliderDrag::default();
-                self.bar = BarGrab::default();
+            CardAction::OpenSettings => {
+                self.open_settings(clicked.id);
                 None
             }
         }
     }
 
-    /// The back button, the name of the mod and its settings rows.
+    /// The title of the list, the category shown, and how many mods are on.
+    fn list_header(
+        &self,
+        ui: &mut Ui,
+        paint: Paint<'_>,
+        lang: &Lang,
+        view: &ModsView,
+        (layout, title): (&ModsLayout, &str),
+    ) {
+        let middle = layout.header.y + layout.header.height * 0.5;
+        let at = (layout.header.x, middle);
+        paint.text(ui, title, at, (TITLE_SIZE, theme::TEXT, Align::Left));
+        let width = measure_text(paint.brand, title, TITLE_SIZE * paint.scale);
+        let on = view.cards.iter().filter(|card| card.enabled).count();
+        let count = format!("{on} {}", lang.tr("umicraft.mods.enabled"));
+        let count_at = (at.0 + width + 8.0 * paint.scale, middle);
+        let muted = (DESC_SIZE, theme::TEXT_MUTED, Align::Left);
+        paint.text(ui, &count, count_at, muted);
+    }
+
+    /// The back button, the band of the mod and its settings rows.
     pub(super) fn settings_page(
         &mut self,
         ui: &mut Ui,
@@ -198,53 +209,15 @@ impl ModsScreen {
         layout: &ModsLayout,
         card: &ModCardView,
     ) -> Option<ModsOutcome> {
-        let back_id = ui.id("back");
-        let fade = hover_level(ui, layout.back);
-        let back = ModernButton::new(back_id, layout.back, lang.tr("umicraft.mods.back")).show(
-            ui,
-            paint.brand,
-            paint.scale,
-            fade,
-        );
-        let name_at = (
-            layout.back.right() + 6.0 * paint.scale,
-            layout.back.y + layout.back.height * 0.5,
-        );
-        paint.text(
-            ui,
-            &card.name,
-            name_at,
-            (theme::TEXT_SIZE_BODY, theme::TEXT, Align::Left),
-        );
-        // What the mod does, muted, after its name.
-        let name_width = measure_text(paint.brand, &card.name, theme::TEXT_SIZE_BODY * paint.scale);
-        let desc_x = name_at.0 + name_width + 6.0 * paint.scale;
-        let room = layout.close.x - desc_x - 4.0 * paint.scale;
-        let desc = fit_text(
-            paint.brand,
-            &card.description,
-            theme::TEXT_SIZE_SMALL * paint.scale,
-            room,
-        );
-        paint.text(
-            ui,
-            &desc,
-            (desc_x, name_at.1),
-            (theme::TEXT_SIZE_SMALL, theme::TEXT_MUTED, Align::Left),
-        );
-        let area = Rect {
-            y: layout.tabs.y,
-            ..layout.detail
-        };
+        let back = self.breadcrumb(ui, paint, lang, layout, &card.name);
+        let flipped = self.mod_band(ui, paint, layout, card);
+
+        let area = layout.detail;
         let edit = if card.settings.is_empty() {
             let empty = lang.tr("umicraft.mods.no_settings");
             let at = (area.x + area.width * 0.5, area.y + 12.0 * paint.scale);
-            paint.text(
-                ui,
-                empty,
-                at,
-                (theme::TEXT_SIZE_BODY, theme::TEXT_MUTED, Align::Center),
-            );
+            let muted = (theme::TEXT_SIZE_BODY, theme::TEXT_MUTED, Align::Center);
+            paint.text(ui, empty, at, muted);
             None
         } else {
             let height = content_height(card.settings.len());
@@ -263,14 +236,115 @@ impl ModsScreen {
             draw_scroll_bar(ui, area, height, shown, (self.bar, &mut self.motion));
             edit
         };
-        if back.clicked {
-            self.go_back();
+        if back {
+            self.page = Page::List;
+            self.reset_settings_view();
             return None;
+        }
+        if let Some(enabled) = flipped {
+            return Some(ModsOutcome::Toggle {
+                id: card.id.clone(),
+                enabled,
+            });
         }
         edit.map(|(key, value)| ModsOutcome::Set {
             id: card.id.clone(),
             key,
             value,
         })
+    }
+
+    /// The back button, a slash and the name of the mod at the left of the
+    /// header; whether the button was clicked.
+    fn breadcrumb(
+        &self,
+        ui: &mut Ui,
+        paint: Paint<'_>,
+        lang: &Lang,
+        layout: &ModsLayout,
+        name: &str,
+    ) -> bool {
+        let scale = paint.scale;
+        let id = ui.id("back");
+        let response = ui.response(id, layout.back);
+        if response.clicked {
+            ui.note_button_press();
+        }
+        let fill = with_opacity(theme::TEXT, 0.06 + 0.05 * hover_level(ui, layout.back));
+        ui.draw().rounded_rect(layout.back, 4.0 * scale, fill);
+        let middle = layout.back.y + layout.back.height * 0.5;
+        let label = fit_text(
+            paint.brand,
+            lang.tr("umicraft.mods.back"),
+            theme::TEXT_SIZE_BODY * scale,
+            layout.back.width - 12.0 * scale,
+        );
+        let centre = (layout.back.x + layout.back.width * 0.5, middle);
+        paint.text(
+            ui,
+            &label,
+            centre,
+            (theme::TEXT_SIZE_BODY, theme::TEXT, Align::Center),
+        );
+        let slash_at = (layout.back.right() + 6.0 * scale, middle);
+        let faint = with_opacity(theme::TEXT, 0.45);
+        paint.text(
+            ui,
+            "/",
+            slash_at,
+            (theme::TEXT_SIZE_BODY, faint, Align::Center),
+        );
+        let name_at = (slash_at.0 + 6.0 * scale, middle);
+        let soft = with_opacity(theme::TEXT, 0.8);
+        paint.text(
+            ui,
+            name,
+            name_at,
+            (theme::TEXT_SIZE_BODY, soft, Align::Left),
+        );
+        response.clicked
+    }
+
+    /// The band of the mod: its tile, its name and what it does, and its
+    /// switch at the right. Returns the state the switch asks for.
+    fn mod_band(
+        &mut self,
+        ui: &mut Ui,
+        paint: Paint<'_>,
+        layout: &ModsLayout,
+        card: &ModCardView,
+    ) -> Option<bool> {
+        let scale = paint.scale;
+        let band = layout.mod_header;
+        let (on, speed) = self.motion.level(&format!("on/{}", card.id), card.enabled);
+        let tile = Rect::new(band.x, band.y, MOD_TILE * scale, MOD_TILE * scale);
+        icon_tile(ui, paint, tile, (&card.id, on));
+
+        let switch = Rect::new(
+            band.right() - TOGGLE_WIDTH * TOGGLE_SCALE * scale,
+            band.y + (MOD_TILE - TOGGLE_HEIGHT * TOGGLE_SCALE) * 0.5 * scale,
+            TOGGLE_WIDTH * TOGGLE_SCALE * scale,
+            TOGGLE_HEIGHT * TOGGLE_SCALE * scale,
+        );
+        let left = tile.right() + TILE_GAP * scale;
+        let room = switch.x - left - 8.0 * scale;
+        let name = fit_text(paint.brand, &card.name, TITLE_SIZE * scale, room);
+        let name_at = (left, band.y + 7.0 * scale);
+        paint.text(ui, &name, name_at, (TITLE_SIZE, theme::TEXT, Align::Left));
+        let desc = fit_text(paint.brand, &card.description, DESC_SIZE * scale, room);
+        let desc_at = (left, band.y + 17.0 * scale);
+        paint.text(
+            ui,
+            &desc,
+            desc_at,
+            (DESC_SIZE, theme::TEXT_MUTED, Align::Left),
+        );
+
+        ui.push_id("band");
+        let switch_id = ui.id("switch");
+        let look = (hover_level(ui, switch), on, speed);
+        let flipped = toggle(ui, switch_id, switch, card.enabled, look);
+        ui.pop_id();
+        flipped
     }
 }

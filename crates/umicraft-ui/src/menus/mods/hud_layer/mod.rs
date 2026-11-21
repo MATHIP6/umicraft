@@ -21,7 +21,6 @@ mod paint;
 mod shield;
 #[cfg(test)]
 mod tests;
-mod toolbar;
 mod view;
 
 pub use view::{HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, HudWidgetView, Snap};
@@ -31,8 +30,6 @@ pub use view::{HudEditorOutcome, HudEditorView, HudEntryView, HudPresetKind, Hud
 pub(super) fn gear_rect_for_tests(rect: crate::geom::Rect) -> crate::geom::Rect {
     gear::gear_rect(rect, [427.0, 240.0])
 }
-
-use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
 use crate::geom::Rect;
@@ -46,7 +43,6 @@ use drag::{hit_widget, on_handle, wheel_resize, Bounds, Drag, Grab};
 use frame::frame_rect;
 use gear::gear_rect;
 use shield::Shield;
-use toolbar::ToolbarAction;
 
 /// Where the layer must leave the pointer to the rest of the menu.
 #[derive(Clone, Copy)]
@@ -56,8 +52,6 @@ pub struct HudZones<'a> {
     /// Rectangles (physical pixels) a press must not grab a widget through:
     /// the buttons of the page and its panel.
     pub blocked: &'a [Rect],
-    /// Whether the reset bar is shown; it blocks the pointer too.
-    pub bar: bool,
     /// The step of the grid a moved widget sticks to, in GUI units, if any.
     pub grid: Option<f32>,
 }
@@ -96,7 +90,6 @@ impl HudLayer {
         &mut self,
         ui: &mut Ui,
         (font, brand): (&FontAtlas, &FontAtlas),
-        lang: &Lang,
         view: &HudEditorView,
         zones: HudZones<'_>,
     ) -> Option<HudEditorOutcome> {
@@ -108,8 +101,7 @@ impl HudLayer {
             snap: zones.snap,
             grid: zones.grid,
         };
-        let bar = toolbar::layout(viewport);
-        let shield = Shield::new(zones.blocked, zones.bar.then_some(bar.bar));
+        let shield = Shield::new(zones.blocked);
         let rects: Vec<Rect> = view
             .widgets
             .iter()
@@ -121,19 +113,7 @@ impl HudLayer {
         self.draw_widgets(ui, &gui, font, view);
         self.draw_overlay(ui, &gui, (view, &rects), &shield);
         self.draw_gears(ui, brand, &gui, (view, &rects), &shield);
-        if !zones.bar {
-            return placed;
-        }
-        let selected = self.selected_index(view);
-        self.draw_readout(ui, &gui, brand, view);
-        let action = toolbar::show(
-            ui,
-            brand,
-            lang,
-            &bar,
-            (selected.is_some(), !view.widgets.is_empty()),
-        );
-        placed.or_else(|| Self::toolbar_outcome(action, selected.map(|i| &view.widgets[i])))
+        placed
     }
 
     /// Applies this frame's input events; returns the placement a drop or a
@@ -273,18 +253,6 @@ impl HudLayer {
             scale,
             screen: view.screen,
         })
-    }
-
-    /// The outcome of a bar button: the reset of the selected widget, or the
-    /// reset of all.
-    fn toolbar_outcome(
-        action: Option<ToolbarAction>,
-        selected: Option<&HudWidgetView>,
-    ) -> Option<HudEditorOutcome> {
-        match action? {
-            ToolbarAction::Reset => selected.map(|w| HudEditorOutcome::Reset { id: w.id.clone() }),
-            ToolbarAction::ResetAll => Some(HudEditorOutcome::ResetAll),
-        }
     }
 }
 

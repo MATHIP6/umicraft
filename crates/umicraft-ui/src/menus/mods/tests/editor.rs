@@ -120,12 +120,7 @@ fn key(key: Key) -> UiInput {
 fn the_button_of_the_list_opens_the_editor_and_escape_leaves_it() {
     let mut screen = on_list();
     let layout = mods_layout(VIEWPORT);
-    let edit = Rect::new(
-        layout.close.x - 50.0 * layout.scale,
-        layout.header.y,
-        46.0 * layout.scale,
-        layout.header.height,
-    );
+    let edit = layout.edit;
     assert_eq!(show_view(&mut screen, &editor_view(), click_at(edit)), None);
     assert_eq!(screen.page, Page::HudEditor);
     assert!(

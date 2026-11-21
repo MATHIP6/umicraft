@@ -10,20 +10,16 @@ use crate::geom::Rect;
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Shield<'a> {
     blocked: &'a [Rect],
-    bar: Option<Rect>,
 }
 
 impl<'a> Shield<'a> {
-    /// A shield over `blocked` and, when the reset bar is shown, over `bar`.
-    pub(super) fn new(blocked: &'a [Rect], bar: Option<Rect>) -> Self {
-        Self { blocked, bar }
+    /// A shield over `blocked`.
+    pub(super) fn new(blocked: &'a [Rect]) -> Self {
+        Self { blocked }
     }
 
     /// Whether `point` (physical pixels) is on a protected part.
     pub(super) fn covers(&self, point: [f32; 2]) -> bool {
-        self.blocked
-            .iter()
-            .chain(self.bar.as_ref())
-            .any(|rect| rect.contains(point))
+        self.blocked.iter().any(|rect| rect.contains(point))
     }
 }

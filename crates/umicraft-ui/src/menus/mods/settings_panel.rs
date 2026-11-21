@@ -12,24 +12,24 @@ use crate::modern::{TOGGLE_HEIGHT, TOGGLE_WIDTH};
 
 use super::color::{parse_hex, same_color, PRESETS};
 use super::motion::Motion;
-use super::style::{card_fill, hover_level, Paint};
+use super::style::{bordered, hover_level, Paint, DIVIDER, ROW_DIVIDER, SURFACE_1, TOGGLE_SCALE};
 use super::view::{ModValue, SettingControl, SettingView};
 
 /// Height of one row, in GUI units.
-pub(super) const ROW_HEIGHT: f32 = 20.0;
+pub(super) const ROW_HEIGHT: f32 = 26.0;
 /// Space between two rows, in GUI units.
-const ROW_GAP: f32 = 2.0;
+const ROW_GAP: f32 = 0.0;
 /// Space between the row edge and its content.
-const PAD: f32 = 5.0;
+const PAD: f32 = 7.0;
 /// Width of the slider track.
-const SLIDER_WIDTH: f32 = 90.0;
+const SLIDER_WIDTH: f32 = 100.0;
 /// Width reserved for the value shown next to a slider.
-const VALUE_WIDTH: f32 = 22.0;
+const VALUE_WIDTH: f32 = 26.0;
 /// Width of the button that cycles through the options of a choice.
 const CHOICE_WIDTH: f32 = 84.0;
 /// Edge of a color swatch and the space between two.
-const SWATCH: f32 = 9.0;
-const SWATCH_GAP: f32 = 2.0;
+const SWATCH: f32 = 11.0;
+const SWATCH_GAP: f32 = 3.0;
 
 /// The digits after the point needed to show multiples of `step`, at most 3.
 fn decimals(step: f32) -> usize {
@@ -79,7 +79,12 @@ fn at_right(row: Rect, scale: f32, (width, height): (f32, f32), shift: f32) -> R
 
 /// The switch of a toggle row.
 pub(super) fn toggle_track(row: Rect, scale: f32) -> Rect {
-    at_right(row, scale, (TOGGLE_WIDTH, TOGGLE_HEIGHT), 0.0)
+    at_right(
+        row,
+        scale,
+        (TOGGLE_WIDTH * TOGGLE_SCALE, TOGGLE_HEIGHT * TOGGLE_SCALE),
+        0.0,
+    )
 }
 
 /// The track of a slider row, left of its value.
@@ -115,6 +120,12 @@ pub(super) fn settings_panel(
         ..area
     };
     ui.push_clip(area);
+    let group = Rect {
+        height: content_height(settings.len()) * paint.scale,
+        ..top
+    };
+    let group_colors = (SURFACE_1, DIVIDER);
+    bordered(ui, group, 6.0 * paint.scale, group_colors);
     for (index, setting) in settings.iter().enumerate() {
         let mut row = row_rect(top, paint.scale, index);
         // The rows come in one after the other, rising into place.
@@ -124,8 +135,15 @@ pub(super) fn settings_panel(
             continue;
         }
         ui.draw().set_opacity(opacity);
-        ui.draw()
-            .rounded_rect(row, theme::RADIUS * paint.scale, card_fill(0.0));
+        if index > 0 {
+            let line = Rect::new(
+                row.x + PAD * paint.scale,
+                row.y,
+                row.width - 2.0 * PAD * paint.scale,
+                1.0,
+            );
+            ui.draw().rect(line, ROW_DIVIDER);
+        }
         ui.push_id(&setting.key);
         let key = format!("set/{mod_id}/{}", setting.key);
         let value = control(ui, paint, row, setting, (drag, (&key, &mut *motion)));
@@ -214,10 +232,10 @@ fn swatches(ui: &mut Ui, paint: Paint<'_>, row: Rect, current: &str) -> Option<M
                 rect.width + 2.0 * scale,
                 rect.height + 2.0 * scale,
             );
-            ui.draw().rounded_rect(ring, 2.0 * scale, theme::TEXT);
+            ui.draw().rounded_rect(ring, 3.0 * scale, theme::ACCENT);
         }
         let fill = parse_hex(preset).unwrap_or(theme::TEXT);
-        ui.draw().rounded_rect(rect, 1.5 * scale, fill);
+        ui.draw().rounded_rect(rect, 2.0 * scale, fill);
         if response.clicked {
             ui.note_button_press();
             picked = Some(ModValue::Text((*preset).to_owned()));

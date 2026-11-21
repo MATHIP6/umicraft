@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Tests of the mods menu: the helpers and the layout of the panel pages. The
-//! list is in `list`, the settings page in `settings`, the page flow in `flow`
+//! landing page is in `landing`, the list is in `list`, the settings page in `settings`, the page flow in `flow`
 //! and the HUD layer inside the menu in `hud`.
 
 mod editor;
 mod flow;
 mod hud;
+mod landing;
 mod list;
 mod settings;
 
 use super::card::controls;
-use super::layout::{card_rect, columns};
+use super::layout::{card_rect, columns, item_rect};
 use super::settings_panel::{choice_button, row_rect, slider_track, swatch_rect, toggle_track};
 use super::*;
 use crate::draw::DrawCommand;
@@ -19,7 +20,6 @@ use crate::geom::Rect;
 use crate::input::{InputEvent, Key, PointerButton, UiInput};
 use crate::menus::common::testing::{click_at, frame, VIEWPORT};
 use crate::mod_widget::{ModLine, ModWidgetView};
-use crate::modern;
 
 fn card(id: &str, name: &str, category: usize, settings: Vec<SettingView>) -> ModCardView {
     ModCardView {
@@ -161,19 +161,30 @@ fn the_panel_is_centred_and_holds_every_part() {
     let half_unit = layout.scale * 0.5;
     assert!((layout.panel.x + layout.panel.width * 0.5 - centre).abs() <= half_unit);
     for part in [
+        layout.sidebar,
+        layout.edit,
         layout.header,
         layout.close,
         layout.search,
+        layout.filter,
         layout.back,
-        layout.tabs,
+        layout.mod_header,
         layout.list,
         layout.detail,
     ] {
         assert!(part.x >= layout.panel.x && part.right() <= layout.panel.right() + 1e-3);
         assert!(part.y >= layout.panel.y && part.bottom() <= layout.panel.bottom() + 1e-3);
     }
-    assert!(layout.search.bottom() <= layout.tabs.y);
-    assert!(layout.tabs.bottom() <= layout.list.y);
+    assert!(layout.search.bottom() <= layout.list.y);
+    assert!(layout.search.right() <= layout.filter.x);
+    assert!(layout.mod_header.bottom() <= layout.detail.y);
+}
+
+#[test]
+fn the_panel_stays_above_the_hotbar() {
+    // The hotbar is 22 GUI units tall at the bottom of the screen.
+    let layout = mods_layout(VIEWPORT);
+    assert!(layout.panel.bottom() <= VIEWPORT.bottom() - 22.0 * layout.scale);
 }
 
 #[test]

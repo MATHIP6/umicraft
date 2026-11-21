@@ -3,10 +3,10 @@
 //! The scrollbar of the lists of the mods menu: a slim thumb in the margin right
 //! of the list, which the pointer can grab and drag, or click on its track to jump.
 
+use super::layout::menu_gui;
 use crate::context::Ui;
 use crate::geom::Rect;
 use crate::input::{InputEvent, PointerButton};
-use crate::menus::common::Gui;
 
 use super::motion::Motion;
 
@@ -72,7 +72,7 @@ pub(super) fn scroll_input(
     offset: f32,
     grab: &mut BarGrab,
 ) -> f32 {
-    let scale = Gui::new(ui.viewport()).scale;
+    let scale = menu_gui(ui.viewport()).scale;
     let Some(bar) = geometry(area, height, scale) else {
         grab.0 = None;
         return offset;
@@ -120,7 +120,7 @@ pub(super) fn draw_scroll_bar(
     offset: f32,
     (grab, motion): (BarGrab, &mut Motion),
 ) {
-    let scale = Gui::new(ui.viewport()).scale;
+    let scale = menu_gui(ui.viewport()).scale;
     let Some(bar) = geometry(area, height, scale) else {
         return;
     };
@@ -173,13 +173,13 @@ mod tests {
 
     #[test]
     fn content_that_fits_has_no_bar() {
-        assert!(geometry(area(), 50.0, 3.0).is_none());
-        assert!(geometry(area(), 200.0, 3.0).is_some());
+        assert!(geometry(area(), 50.0, 2.0).is_none());
+        assert!(geometry(area(), 200.0, 2.0).is_some());
     }
 
     #[test]
     fn a_press_on_the_track_jumps_there_and_a_drag_follows_the_pointer() {
-        let bar = geometry(area(), 200.0, 3.0).expect("a bar");
+        let bar = geometry(area(), 200.0, 2.0).expect("a bar");
         let x = bar.track.x + 2.0;
         let mut grab = BarGrab::default();
         // The middle of the track puts the thumb in the middle: half of the offset.
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn the_thumb_keeps_where_it_was_caught() {
-        let bar = geometry(area(), 200.0, 3.0).expect("a bar");
+        let bar = geometry(area(), 200.0, 2.0).expect("a bar");
         let x = bar.track.x + 2.0;
         let mut grab = BarGrab::default();
         // The thumb is at the top; it is caught 10 pixels below its top edge.

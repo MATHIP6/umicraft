@@ -4,12 +4,13 @@
 
 use crate::context::Ui;
 use crate::geom::Rect;
-use crate::menus::common::{wheel_scrolled_by, Gui};
-use crate::modern::theme;
-use crate::modern::Align;
+use crate::icons::Icon;
+use crate::menus::common::wheel_scrolled_by;
+use crate::modern::theme::{self, with_opacity};
+use crate::modern::{draw_icon, Align};
 
 use super::card::{card, CardAction};
-use super::layout::{card_rect, columns, content_height};
+use super::layout::{card_rect, columns, content_height, menu_gui};
 use super::motion::Motion;
 use super::scrollbar::{draw_scroll_bar, scroll_input, BarGrab};
 use super::style::Paint;
@@ -35,17 +36,22 @@ pub(super) fn list(
     paint: Paint<'_>,
     area: Rect,
     (view, shown): (&ModsView, &[usize]),
-    (offset, empty, options): (&mut f32, &str, &str),
+    (offset, empty): (&mut f32, &str),
     (motion, bar): (&mut Motion, &mut BarGrab),
 ) -> Option<ListAction> {
     if shown.is_empty() {
-        let at = (area.x + area.width * 0.5, area.y + 12.0 * paint.scale);
-        paint.text(
+        let centre = (area.x + area.width * 0.5, area.y + area.height * 0.4);
+        let size = theme::TEXT_SIZE_BODY * 1.1;
+        let muted = with_opacity(theme::TEXT, 0.65);
+        draw_icon(
             ui,
-            empty,
-            at,
-            (theme::TEXT_SIZE_BODY, theme::TEXT_MUTED, Align::Center),
+            paint.brand,
+            Icon::Search,
+            centre,
+            (14.0 * paint.scale, muted),
         );
+        let text_at = (centre.0, centre.1 + 14.0 * paint.scale);
+        paint.text(ui, empty, text_at, (size, muted, Align::Center));
         return None;
     }
     let columns = columns(area.width / paint.scale);
@@ -68,7 +74,11 @@ pub(super) fn list(
             continue;
         };
         ui.draw().set_opacity(opacity);
-        if let Some(action) = card(ui, paint, rect, (item, &mut *motion), options) {
+        let tag = view
+            .categories
+            .get(item.category)
+            .map_or("", String::as_str);
+        if let Some(action) = card(ui, paint, rect, (item, &mut *motion), tag) {
             result = Some(ListAction {
                 id: item.id.clone(),
                 action,
@@ -87,7 +97,7 @@ pub(super) fn list(
 pub(super) fn wheel_scrolled(ui: &Ui, area: Rect, height: f32, offset: f32) -> f32 {
     wheel_scrolled_by(
         ui,
-        &Gui::new(ui.viewport()),
+        &menu_gui(ui.viewport()),
         area,
         height,
         offset,

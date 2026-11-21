@@ -12,11 +12,10 @@ use crate::mod_widget::draw_mod_widgets;
 use crate::text::FontAtlas;
 
 use super::drag::{hit_widget, Drag};
-use super::frame::{draw_frame, draw_label, frame_rect, FrameKind};
+use super::frame::{draw_frame, frame_rect, FrameKind};
 use super::gear::{draw_gear, gear_rect};
 use super::guides::draw_guides;
 use super::shield::Shield;
-use super::toolbar;
 use super::{HudEditorView, HudLayer};
 
 impl HudLayer {
@@ -101,23 +100,6 @@ impl HudLayer {
             let rect = gear_rect(rects[index], view.screen);
             let hovered = pointer.is_some_and(|p| rect.contains(p));
             draw_gear(ui, brand, gui, rect, hovered);
-        }
-    }
-
-    /// Draws the name and scale of the selected widget above the bar.
-    pub(super) fn draw_readout(
-        &self,
-        ui: &mut Ui,
-        gui: &Gui,
-        brand: &FontAtlas,
-        view: &HudEditorView,
-    ) {
-        if let Some(index) = self.selected_index(view) {
-            let widget = &view.widgets[index];
-            let scale = self.dragged().map_or(widget.widget.scale, |d| d.scale);
-            let readout = format!("{} - x{scale:.1}", widget.name);
-            let above_bar = gui.rect(gui.cx(), toolbar::top(gui) - 9.0, 0.0, 0.0);
-            draw_label(ui, brand, gui, &readout, [above_bar.x, above_bar.y]);
         }
     }
 }

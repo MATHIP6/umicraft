@@ -13,21 +13,58 @@ use crate::text::FontAtlas;
 /// A light dark sheet over the blurred game, so the menu reads well on bright
 /// worlds.
 pub(super) const BACKDROP: Color = [0.0, 0.0, 0.0, 0.25];
-/// The panel behind everything: darker than a button so the cards stand out.
-pub(super) const PANEL: Color = [0.085, 0.09, 0.10, 0.8];
+/// The panel behind everything (`#101014` at 94 %: the design asks for 78 %, but
+/// the game showed through too much).
+pub(super) const PANEL: Color = [0.063, 0.063, 0.078, 0.94];
 /// The one-pixel line around the panel.
-pub(super) const PANEL_RIM: Color = [1.0, 1.0, 1.0, 0.07];
-/// Size of a mod name and of the title of a page, in GUI units.
+pub(super) const PANEL_RIM: Color = [1.0, 1.0, 1.0, 0.09];
+/// The sidebar, a faint veil over the panel.
+pub(super) const SIDEBAR: Color = [1.0, 1.0, 1.0, 0.02];
+/// Lines between the sidebar and the page, and around cards and groups.
+pub(super) const DIVIDER: Color = [1.0, 1.0, 1.0, 0.07];
+/// Lines between the rows of a settings group.
+pub(super) const ROW_DIVIDER: Color = [1.0, 1.0, 1.0, 0.06];
+/// Cards and settings groups.
+pub(super) const SURFACE_1: Color = [1.0, 1.0, 1.0, 0.035];
+/// Small buttons, tags and the icon tile of a mod that is off.
+pub(super) const SURFACE_2: Color = [1.0, 1.0, 1.0, 0.06];
+/// The active segment of a segmented control.
+pub(super) const SURFACE_3: Color = [1.0, 1.0, 1.0, 0.12];
+/// The search field and the segmented control: their border.
+pub(super) const FIELD_BORDER: Color = [1.0, 1.0, 1.0, 0.10];
+/// A sidebar item under the pointer.
+pub(super) const ITEM_HOVER: Color = [1.0, 1.0, 1.0, 0.04];
+/// The active sidebar item: the accent at 22 %.
+pub(super) const ACCENT_SOFT: Color = [0.486, 0.227, 0.929, 0.22];
+/// An enabled card: the accent at 10 % and its border at 55 %.
+pub(super) const ACCENT_TINT: Color = [0.486, 0.227, 0.929, 0.10];
+pub(super) const ACCENT_BORDER: Color = [0.486, 0.227, 0.929, 0.55];
+/// The accent of a button under the pointer (`#8B5CF6`).
+pub(super) const ACCENT_HOVER: Color = [0.545, 0.361, 0.965, 1.0];
+/// Width of the rim of the Mods button, in GUI units.
+pub(super) const RIM_WIDTH: f32 = 0.5;
+/// The rim of the Mods button at rest and under the pointer (the accent).
+pub(super) const RIM: Color = [1.0, 1.0, 1.0, 0.14];
+pub(super) const RIM_HOVER: Color = [0.486, 0.227, 0.929, 0.70];
+/// How much larger than the shared switch the switches of this menu are: the
+/// design's is 40 x 24 px, 20 x 12 units.
+pub(super) const TOGGLE_SCALE: f32 = 1.5;
+/// Size of a name in the HUD editor, in GUI units.
 pub(super) const NAME_SIZE: f32 = 6.0;
-/// A row at rest: nothing, it is the panel.
-pub(super) const CARD: Color = [1.0, 1.0, 1.0, 0.0];
-/// A row under the pointer.
-pub(super) const CARD_HOVER: Color = [1.0, 1.0, 1.0, 0.05];
-/// A mod card at rest, under the pointer, and the tint a mod that is on adds: a
-/// dark inset in the panel, not a light veil over it.
-pub(super) const TILE: Color = [0.03, 0.035, 0.045, 0.55];
-pub(super) const TILE_HOVER: Color = [0.075, 0.08, 0.095, 0.68];
-pub(super) const TILE_ON: Color = [0.36, 0.55, 1.0, 0.07];
+/// Size of a mod name on a card and of a page title (15 and 20 px at the
+/// reference size of the design).
+pub(super) const MOD_NAME_SIZE: f32 = 7.5;
+pub(super) const TITLE_SIZE: f32 = 10.0;
+/// Edge of the gear icon of the Mods button, in GUI units.
+pub(super) const ICON_SIZE: f32 = 7.0;
+/// Gap between that icon and the label.
+pub(super) const ICON_GAP: f32 = 5.0;
+/// Space between the capitals of the label, as a share of their size.
+pub(super) const LABEL_TRACKING: f32 = 0.25;
+/// Size of a description (12.5 px).
+pub(super) const DESC_SIZE: f32 = 6.25;
+/// Size of a section label, a tag and a count (11 px).
+pub(super) const LABEL_SIZE: f32 = 5.5;
 
 /// What every part needs to draw: the brand atlas and the pixels per GUI unit.
 #[derive(Debug, Clone, Copy)]
@@ -58,28 +95,28 @@ pub(super) fn hover_level(ui: &Ui, rect: Rect) -> f32 {
     f32::from(u8::from(ui.is_hovered(rect)))
 }
 
-/// The fill of a mod card: lifted under the pointer and tinted while the mod is
-/// on. `hover` and `on` are levels, `0.0` to `1.0`.
-pub(super) fn tile_fill(hover: f32, on: f32) -> Color {
-    let base = mix(TILE, TILE_HOVER, hover);
-    let tint = TILE_ON[3] * on.clamp(0.0, 1.0);
-    // The accent is laid over the base: the alphas add up, the colour follows
-    // the share each one holds.
-    let alpha = base[3] + tint * (1.0 - base[3]);
-    let share = if alpha > 0.0 {
-        tint * (1.0 - base[3]) / alpha
-    } else {
-        0.0
-    };
-    [
-        base[0] + (TILE_ON[0] - base[0]) * share,
-        base[1] + (TILE_ON[1] - base[1]) * share,
-        base[2] + (TILE_ON[2] - base[2]) * share,
-        alpha,
-    ]
+/// Draws `rect` with `fill`, then a one-pixel `border` along its edge.
+///
+/// The border is a stroke, not a rectangle laid under the fill: both are
+/// translucent, so a border laid under the fill would add to it and make every
+/// card and field lighter than the design.
+pub(super) fn bordered(ui: &mut Ui, rect: Rect, radius: f32, (fill, border): (Color, Color)) {
+    ui.draw().rounded_rect(rect, radius, fill);
+    outline(ui, rect, radius, border);
 }
 
-/// The fill of a card or a row at the given hover level.
-pub(super) fn card_fill(hover: f32) -> Color {
-    mix(CARD, CARD_HOVER, hover)
+/// Draws a one-pixel `border` along the edge of a rounded `rect`.
+pub(super) fn outline(ui: &mut Ui, rect: Rect, radius: f32, border: Color) {
+    ui.draw().rounded_ring(rect, radius, 1.0, border);
+}
+
+/// The fill and the border of a mod card at the given hover and on levels
+/// (`0.0` to `1.0`): lifted under the pointer, tinted with the accent while
+/// the mod is on.
+pub(super) fn card_colors(hover: f32, on: f32) -> (Color, Color) {
+    let lifted = mix(SURFACE_1, [1.0, 1.0, 1.0, 0.06], hover);
+    (
+        mix(lifted, ACCENT_TINT, on),
+        mix(DIVIDER, ACCENT_BORDER, on),
+    )
 }
