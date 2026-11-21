@@ -22,11 +22,13 @@
 //! - [`cem`]: custom entity models (`.jem`/`.jpm`) and their animation
 //!   expressions;
 //! - [`ctm`]: connected textures;
+//! - [`colors`]: custom colours (`color.properties`, colormaps, lightmaps);
 //! - [`natural`]: natural textures (turned and mirrored faces).
 //!
 //! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
 
 pub mod cem;
+pub mod colors;
 pub mod ctm;
 pub mod filters;
 pub mod natural;

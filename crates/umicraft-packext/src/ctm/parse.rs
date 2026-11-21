@@ -271,7 +271,7 @@ fn parse_weights(text: &str, tiles: usize) -> Option<Weights> {
 }
 
 /// The `block<ID>` file-name convention (`detectMatchBlockIds`).
-fn block_id_from_name(name: &str) -> Option<Vec<BlockMatch>> {
+pub(crate) fn block_id_from_name(name: &str) -> Option<Vec<BlockMatch>> {
     let digits = name.strip_prefix("block")?;
     let digits = digits.split(|c: char| !c.is_ascii_digit()).next()?;
     let id = digits.parse().ok()?;
@@ -281,7 +281,7 @@ fn block_id_from_name(name: &str) -> Option<Vec<BlockMatch>> {
 /// `matchBlocks`: entries separated by spaces. An entry that names no known
 /// block is skipped with a warning, as OptiFine does; a list left empty
 /// invalidates the rule.
-fn parse_match_blocks(
+pub(crate) fn parse_match_blocks(
     text: &str,
     block_id: &dyn Fn(&str) -> Option<u16>,
 ) -> Result<Vec<BlockMatch>, CtmError> {
