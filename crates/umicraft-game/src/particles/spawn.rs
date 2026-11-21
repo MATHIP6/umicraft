@@ -101,6 +101,11 @@ impl ParticleEngine {
         filter: &SpawnFilter,
         adjust: impl FnOnce(Particle, &mut JavaRandom) -> Particle,
     ) -> bool {
+        // Before any random draw or allocation: a switched-off category costs
+        // one bit test (`RenderGlobal.spawnEffectParticle`).
+        if !self.categories().allows_kind(request.kind) {
+            return false;
+        }
         if !request.ignore_range {
             let setting = match filter.setting {
                 ParticleSetting::Decreased if self.rng().next_int(3) == 0 => {
@@ -250,6 +255,27 @@ mod tests {
 
     fn live(engine: &ParticleEngine) -> usize {
         engine.len()
+    }
+
+    #[test]
+    fn a_switched_off_category_creates_nothing_even_when_forced() {
+        use crate::particles::{ParticleCategory, ParticleFilter};
+        let mut engine = ParticleEngine::new(1);
+        engine.set_categories(ParticleFilter::default().with(ParticleCategory::Smoke, false));
+        let at = DVec3::new(0.0, 64.0, 0.0);
+        let smoke = |ignore_range| SpawnRequest {
+            kind: ParticleKind::Smoke,
+            arguments: &[],
+            ignore_range,
+            position: at,
+            velocity: DVec3::ZERO,
+        };
+        let filter = filter(at, ParticleSetting::All);
+        assert!(!engine.spawn(&smoke(false), &filter));
+        assert!(!engine.spawn(&smoke(true), &filter));
+        assert!(engine.is_empty());
+        engine.set_categories(ParticleFilter::default());
+        assert!(engine.spawn(&smoke(false), &filter));
     }
 
     #[test]
