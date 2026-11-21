@@ -229,8 +229,13 @@ impl Renderer {
             .elapsed()
             .as_micros()
             .min(u128::from(u32::MAX)) as u32;
+        // A suboptimal texture (X11 reports it for a surface that no longer
+        // matches the window) is still drawn and presented; the surface is
+        // reconfigured after the present, once no texture of it is alive.
+        let suboptimal = matches!(frame, wgpu::CurrentSurfaceTexture::Suboptimal(_));
         match frame {
-            wgpu::CurrentSurfaceTexture::Success(frame) => {
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 let encode_start = std::time::Instant::now();
                 let view = frame
                     .texture
@@ -268,11 +273,10 @@ impl Renderer {
                     submit_us,
                     present_us,
                 );
-                Ok(())
-            }
-            wgpu::CurrentSurfaceTexture::Suboptimal(_) => {
-                self.frame_pacing.suboptimal_count += 1;
-                self.reconfigure_surface()?;
+                if suboptimal {
+                    self.frame_pacing.suboptimal_count += 1;
+                    self.reconfigure_surface()?;
+                }
                 Ok(())
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
