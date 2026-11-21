@@ -5,6 +5,7 @@
 use umicraft_core::java_random::JavaRandom;
 
 use super::behaviours::TickContext;
+use super::filter::ParticleFilter;
 use super::particle::{Layer, Particle};
 use crate::shapes::BlockSource;
 
@@ -24,6 +25,7 @@ pub struct ParticleEngine {
     migrating: Vec<Particle>,
     spawned: Vec<Particle>,
     rng: JavaRandom,
+    categories: ParticleFilter,
 }
 
 /// The bucket of a particle: `layer * 2 + (opaque ? 1 : 0)` like `fxLayers`.
@@ -40,6 +42,7 @@ impl ParticleEngine {
             migrating: Vec::new(),
             spawned: Vec::new(),
             rng: JavaRandom::new(seed),
+            categories: ParticleFilter::default(),
         }
     }
 
@@ -48,8 +51,24 @@ impl ParticleEngine {
         &mut self.rng
     }
 
-    /// Adds a particle; a full bucket drops its oldest first.
+    /// Sets which particle categories may be created (the Animations page).
+    /// Particles already alive are left to finish.
+    pub fn set_categories(&mut self, categories: ParticleFilter) {
+        self.categories = categories;
+    }
+
+    /// The categories that may create particles.
+    #[must_use]
+    pub fn categories(&self) -> ParticleFilter {
+        self.categories
+    }
+
+    /// Adds a particle; a full bucket drops its oldest first. Firework sparks
+    /// are dropped when their category is off (`EffectRenderer.addEffect`).
     pub fn add(&mut self, particle: Particle) {
+        if !self.categories.allows_behaviour(particle.behaviour) {
+            return;
+        }
         let bucket = &mut self.buckets[bucket_of(&particle)];
         if bucket.len() >= MAX_PER_BUCKET {
             bucket.remove(0);

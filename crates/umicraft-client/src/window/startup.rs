@@ -372,7 +372,10 @@ impl App {
         self.server_icons_revision = u64::MAX;
         self.assets.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());
-        self.assets.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
+        self.assets.texture_animator = TextureAnimator::for_terrain(
+            &terrain,
+            super::options_control::animation_filter(&self.options.video.animations),
+        );
 
         match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
             Ok(world) => self.world = Some(world),

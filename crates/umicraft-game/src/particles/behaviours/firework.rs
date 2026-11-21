@@ -146,6 +146,22 @@ mod tests {
     }
 
     #[test]
+    fn a_firework_spark_is_not_added_when_its_category_is_off() {
+        use crate::particles::{ParticleCategory, ParticleFilter};
+        let (mut engine, _) = engine_with(SparkStyle::default());
+        engine.clear();
+        engine.set_categories(ParticleFilter::default().with(ParticleCategory::Firework, false));
+        let spark = spark(
+            DVec3::ZERO,
+            DVec3::ZERO,
+            SparkStyle::default(),
+            &mut JavaRandom::new(4),
+        );
+        engine.add(spark);
+        assert!(engine.is_empty());
+    }
+
+    #[test]
     fn a_spark_lives_48_to_59_ticks() {
         let (engine, life) = engine_with(SparkStyle::default());
         assert!((48..60).contains(&life));

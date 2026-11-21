@@ -21,12 +21,26 @@ use crate::hud::dials::DialAnimator;
 use crate::language;
 use crate::meshing::pool::worker_count;
 use crate::options::effects::{open_folder, pack_paths, packs_folder, ServerSettings};
+use crate::options::video_sections::AnimationOptions;
 use crate::options::Binding;
-use crate::resources::texture_animator::TextureAnimator;
+use crate::resources::texture_animator::{AnimationFilter, TextureAnimator};
 use crate::scene::entity::EntityTextures;
 use crate::scene::map::MapTextures;
 use crate::screens::options::{Catalog, Outcome as OptionsOutcome, Page};
 use crate::screens::Screen;
+use umicraft_game::particles::{ParticleCategory, ParticleFilter};
+
+/// The animated block textures the Animations page leaves running. A free
+/// function so it can be called while the renderer is borrowed from the window.
+pub(super) fn animation_filter(animations: &AnimationOptions) -> AnimationFilter {
+    AnimationFilter {
+        water: animations.water,
+        lava: animations.lava,
+        fire: animations.fire,
+        portal: animations.portal,
+        terrain: animations.terrain,
+    }
+}
 
 impl App {
     /// Handles a key while the options screen is open. While a key binding
@@ -86,6 +100,29 @@ impl App {
             }
         }
         self.options_menu.saved = self.options.clone();
+    }
+
+    /// Tells the game thread which particle categories may be created.
+    pub(super) fn send_particle_categories(&self) {
+        let animations = &self.options.video.animations;
+        let categories = [
+            (ParticleCategory::Redstone, animations.redstone_particles),
+            (ParticleCategory::Explosion, animations.explosion_particles),
+            (ParticleCategory::Flame, animations.flame_particles),
+            (ParticleCategory::Smoke, animations.smoke_particles),
+            (ParticleCategory::Void, animations.void_particles),
+            (ParticleCategory::Water, animations.water_particles),
+            (ParticleCategory::RainSplash, animations.rain_splash),
+            (ParticleCategory::Portal, animations.portal_particles),
+            (ParticleCategory::Potion, animations.potion_particles),
+            (ParticleCategory::Dripping, animations.dripping_particles),
+            (ParticleCategory::Firework, animations.firework_particles),
+        ]
+        .into_iter()
+        .fold(ParticleFilter::default(), |filter, (category, on)| {
+            filter.with(category, on)
+        });
+        self.send_event(GameEvent::ParticleCategories(categories));
     }
 
     /// Tells the game thread how many particles to create.
@@ -167,9 +204,17 @@ impl App {
         let particles_changed =
             self.options.video.particles != self.options_menu.saved.video.particles;
         let settings = ServerSettings::of(&self.options);
+        let animations_changed =
+            self.options.video.animations != self.options_menu.saved.video.animations;
         self.save_options();
         if particles_changed {
             self.send_particle_setting();
+        }
+        if animations_changed {
+            self.assets
+                .texture_animator
+                .set_filter(animation_filter(&self.options.video.animations));
+            self.send_particle_categories();
         }
         if changed {
             self.send_event(settings.event());
@@ -204,7 +249,10 @@ impl App {
         self.server_icons_revision = u64::MAX;
         self.assets.items = installed.items();
         self.dials = DialAnimator::new(installed.dials());
-        self.assets.texture_animator = TextureAnimator::new(installed.animations().to_vec());
+        self.assets.texture_animator = TextureAnimator::for_terrain(
+            &installed,
+            animation_filter(&self.options.video.animations),
+        );
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
             self.assets.ui_atlas.as_ref(),

@@ -12,7 +12,7 @@ use glam::DVec3;
 use umicraft_game::particles::ambient::{
     rain_splashes, running_dust, sample_around, RainView, Requests, RunningBody, Weather,
 };
-use umicraft_game::particles::{ParticleEngine, ParticleSetting, SpawnFilter};
+use umicraft_game::particles::{ParticleCategory, ParticleEngine, ParticleSetting, SpawnFilter};
 use umicraft_game::sound::cue::SoundCue;
 use umicraft_game::sound::weather::RainSound;
 use umicraft_mesh::climate::biome_climate;
@@ -111,7 +111,9 @@ impl AmbientSpawner {
             &mut self.requests,
         );
         let mut rain = None;
-        if rain_strength > 0.0 {
+        // OptiFine's rain splash switch gates the whole rain routine, the
+        // sound included (`EntityRenderer.addRainParticles`).
+        if rain_strength > 0.0 && engine.categories().allows(ParticleCategory::RainSplash) {
             let view = RainView {
                 strength: rain_strength,
                 // The video options live on the render thread; fancy is the
@@ -164,6 +166,7 @@ fn spawn_dust(engine: &mut ParticleEngine, world: &World, viewer: &Viewer, filte
 #[cfg(test)]
 mod tests {
     use super::*;
+    use umicraft_game::particles::ParticleFilter;
 
     #[test]
     fn nothing_happens_in_an_empty_world_without_rain_or_sprint() {
@@ -217,5 +220,56 @@ mod tests {
             );
         }
         assert!(!engine.is_empty(), "a torch smokes now and then");
+    }
+
+    /// Counts the particles 100 rainy ticks leave over a stone floor.
+    fn rain_particles(categories: ParticleFilter) -> usize {
+        let mut engine = ParticleEngine::new(1);
+        engine.set_categories(categories);
+        let mut world = World::new(0);
+        let payload = vec![0u8; 8192 + 2048 + 2048 + 256];
+        world
+            .apply_chunk(
+                umicraft_world::ChunkPos::new(0, 0),
+                umicraft_world::ChunkPayload {
+                    primary_bit_mask: 1,
+                    ground_up: true,
+                    data: &payload,
+                },
+            )
+            .expect("an empty column loads");
+        for x in 0..16 {
+            for z in 0..16 {
+                world.set_block(
+                    BlockPos::new(x, 4, z),
+                    umicraft_world::BlockState::new(1, 0),
+                );
+            }
+        }
+        let viewer = Viewer {
+            position: DVec3::new(8.5, 5.0, 8.5),
+            motion: DVec3::ZERO,
+            running: false,
+            sees_barriers: false,
+        };
+        let mut spawner = AmbientSpawner::default();
+        for tick in 0..100 {
+            spawner.tick(
+                &mut engine,
+                &world,
+                &viewer,
+                1.0,
+                tick,
+                ParticleSetting::All,
+            );
+        }
+        engine.len()
+    }
+
+    #[test]
+    fn the_rain_splash_switch_stops_the_splashes() {
+        assert!(rain_particles(ParticleFilter::default()) > 0);
+        let off = ParticleFilter::default().with(ParticleCategory::RainSplash, false);
+        assert_eq!(rain_particles(off), 0);
     }
 }
