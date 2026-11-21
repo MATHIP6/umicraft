@@ -281,11 +281,10 @@ impl ModsScreen {
             } else {
                 &dock_only
             },
-            bar: false,
             grid: self.editor.grid.then_some(GRID_STEP),
         };
         let before = self.hud.selected().map(str::to_owned);
-        let mut placed = self.hud.show(ui, fonts, lang, &shown, zones);
+        let mut placed = self.hud.show(ui, fonts, &shown, zones);
         // The gear of a widget, or a click on another widget, opens its
         // settings in the dock.
         if let Some(HudEditorOutcome::OpenSettings { id }) = &placed {

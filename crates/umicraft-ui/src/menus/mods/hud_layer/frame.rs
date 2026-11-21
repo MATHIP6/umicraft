@@ -7,19 +7,13 @@ use crate::context::Ui;
 use crate::draw::Color;
 use crate::geom::Rect;
 use crate::menus::common::Gui;
-use crate::modern::theme::{with_opacity, RADIUS, TEXT, TEXT_SIZE_BODY};
-use crate::modern::{draw_text, measure_text, Align};
-use crate::text::FontAtlas;
+use crate::modern::theme::{with_opacity, TEXT};
 
 use super::drag::{clamp_into, handle_rect};
 
 /// Thickness of the frame lines, in physical pixels: thin enough to stay out of
 /// the way, thick enough to read on the sky.
 const EDGE_PIXELS: f32 = 2.0;
-/// The plate behind the texts of the layer, so they read on any scenery.
-pub(super) const LABEL_FILL: Color = [0.05, 0.06, 0.08, 0.72];
-/// Space between a label and the edge of its plate, in GUI units.
-const LABEL_PAD: f32 = 3.0;
 
 /// Air between the text of a widget and its frame, in GUI units.
 pub(super) const MARGIN: f32 = 1.0;
@@ -95,15 +89,4 @@ pub(super) fn draw_frame(ui: &mut Ui, gui: &Gui, rect: Rect, kind: FrameKind) {
         gui.rect(handle.x, handle.y, handle.width, handle.height),
         color,
     );
-}
-
-/// Draws `text` centred on `at` (physical pixels) over a dark plate.
-pub(super) fn draw_label(ui: &mut Ui, brand: &FontAtlas, gui: &Gui, text: &str, at: [f32; 2]) {
-    let size = TEXT_SIZE_BODY * gui.scale;
-    let width = measure_text(brand, text, size) + 2.0 * LABEL_PAD * gui.scale;
-    let height = size + 2.0 * LABEL_PAD * gui.scale;
-    let plate = Rect::new(at[0] - width * 0.5, at[1] - height * 0.5, width, height);
-    ui.draw()
-        .rounded_rect(plate, RADIUS * gui.scale, LABEL_FILL);
-    draw_text(ui, brand, text, (at[0], at[1]), (size, TEXT, Align::Center));
 }

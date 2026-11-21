@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Tests of the wheel, the corner handle, the bar and the readout of the layer.
+//! Tests of the wheel, the corner handle and the drop of the layer.
 
 use super::*;
 
@@ -52,66 +52,6 @@ fn the_corner_handle_resizes_and_reports_on_release() {
 }
 
 #[test]
-fn the_bar_resets_the_selection_or_everything() {
-    let view = view();
-    let bar = toolbar::layout(VIEWPORT);
-    let [reset, reset_all] = bar.buttons;
-    let mut screen = HudLayer::default();
-    assert_eq!(
-        show(&mut screen, &view, click_at(reset)),
-        None,
-        "no selection"
-    );
-    assert_eq!(
-        show(&mut screen, &view, click_at(reset_all)),
-        Some(HudEditorOutcome::ResetAll)
-    );
-    let at = middle(rect_of(&view, 1));
-    show(
-        &mut screen,
-        &view,
-        UiInput::new(vec![pressed(at), released(at)]),
-    );
-    assert_eq!(
-        show(&mut screen, &view, click_at(reset)),
-        Some(HudEditorOutcome::Reset { id: "cps".into() })
-    );
-}
-
-#[test]
-fn a_click_on_the_bar_does_not_start_a_drag() {
-    let mut view = view();
-    let bar = toolbar::layout(VIEWPORT);
-    let under = middle(bar.bar);
-    let gui = [under[0] / SCALE, under[1] / SCALE];
-    view.widgets[0].widget.position = [gui[0] - 5.0, gui[1] - 3.0];
-    let mut screen = HudLayer::default();
-    show(
-        &mut screen,
-        &view,
-        click_at(Rect::new(under[0], bar.bar.y + 1.0, 0.0, 0.0)),
-    );
-    assert!(screen.drag.is_none());
-}
-
-#[test]
-fn the_readout_names_the_selection_and_nothing_is_said_otherwise() {
-    let view = view();
-    let mut screen = HudLayer::default();
-    assert!(texts(&mut screen, &view)
-        .iter()
-        .all(|t| !t.contains(" - x")));
-    let at = middle(rect_of(&view, 0));
-    show(
-        &mut screen,
-        &view,
-        UiInput::new(vec![pressed(at), released(at)]),
-    );
-    let names = texts(&mut screen, &view);
-    assert!(names.iter().any(|t| t == "Name fps - x1.0"), "{names:?}");
-}
-
-#[test]
 fn the_widget_is_drawn_where_it_is_dropped_in_the_frame_of_the_drop() {
     let view = view();
     let start = rect_of(&view, 0);
@@ -128,10 +68,9 @@ fn the_widget_is_drawn_where_it_is_dropped_in_the_frame_of_the_drop() {
         let zones = HudZones {
             snap: &snap,
             blocked: &[],
-            bar: true,
             grid: None,
         };
-        screen.show(ui, (&font, &font), &Lang::builtin(), &view, zones);
+        screen.show(ui, (&font, &font), &view, zones);
         ui.draw().commands().iter().find_map(|c| match c {
             DrawCommand::RoundedRect { rect, .. } if rect.width < 200.0 * SCALE => Some(rect.x),
             _ => None,

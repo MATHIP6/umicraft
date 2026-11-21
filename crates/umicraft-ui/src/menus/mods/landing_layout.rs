@@ -6,22 +6,22 @@
 
 use crate::geom::Rect;
 
-use super::layout::menu_gui;
+use crate::menus::common::Gui;
 
 /// Edge of the square logo box, in GUI units.
-const LOGO_SIZE: f32 = 36.0;
+const LOGO_SIZE: f32 = 30.0;
 /// Gap between the logo and the wordmark.
-const LOGO_GAP: f32 = 8.0;
+const LOGO_GAP: f32 = 2.0;
 /// Height of the wordmark band.
-const WORDMARK_HEIGHT: f32 = 14.0;
+const WORDMARK_HEIGHT: f32 = 12.0;
 /// The wordmark is drawn at this share of its title-screen size.
-pub(super) const WORDMARK_SCALE: f32 = 0.6;
+pub(super) const WORDMARK_SCALE: f32 = 0.55;
 /// Gap between the wordmark and the button.
-const SECTION_GAP: f32 = 17.0;
+const SECTION_GAP: f32 = 8.0;
 /// Width of the Mods button.
-const BUTTON_WIDTH: f32 = 110.0;
+const BUTTON_WIDTH: f32 = 112.0;
 /// Height of the Mods button.
-const BUTTON_HEIGHT: f32 = 25.0;
+const BUTTON_HEIGHT: f32 = 20.0;
 /// Edge of the square close cross.
 const CLOSE_SIZE: f32 = 14.0;
 /// Distance of the close cross from the top and right edges.
@@ -44,7 +44,7 @@ pub struct LandingLayout {
 /// is centred on the screen.
 #[must_use]
 pub fn landing_layout(viewport: Rect) -> LandingLayout {
-    let gui = menu_gui(viewport);
+    let gui = Gui::new(viewport);
     let cx = gui.width * 0.5;
     let block = LOGO_SIZE + LOGO_GAP + WORDMARK_HEIGHT + SECTION_GAP + BUTTON_HEIGHT;
     let top = ((gui.height - block) * 0.5).floor();

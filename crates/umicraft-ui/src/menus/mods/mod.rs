@@ -228,10 +228,9 @@ impl ModsScreen {
         let zones = HudZones {
             snap,
             blocked,
-            bar: true,
             grid: None,
         };
-        let hud = self.hud.show(ui, fonts, lang, &view.hud, zones);
+        let hud = self.hud.show(ui, fonts, &view.hud, zones);
         // The gear of a widget opens the settings of its mod; the client never sees it.
         let opened = match &hud {
             Some(HudEditorOutcome::OpenSettings { id }) => Some(id.clone()),

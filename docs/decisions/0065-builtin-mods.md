@@ -73,7 +73,8 @@ feature must not grow them.
 - **Amended: the landing page is back, with a new look.** Dropping the landing made the menu
   open on the list and covered the HUD widgets, so it opens on the landing again (logo,
   wordmark and one glass Mods button, nothing else; the move hint and the reset line are not
-  drawn there). The Mods button opens the list; Escape and the cross of the panel go back one
+  drawn there, and the "Reset" / "Reset all" bar under the panel is gone: the HUD editor has
+  its own resets; the Mods button keeps its dark card with the accent rim and a gear). The Mods button opens the list; Escape and the cross of the panel go back one
   page (settings, list, landing); the cross of the landing and Escape on it close the menu.
   The panel pages follow the design spec: a sidebar with a count per category and the
   "Edit HUD" button, a header with the title and "n enabled", a search box with an
@@ -92,7 +93,8 @@ feature must not grow them.
   value in range) and a wheel notch is 0.05; the sheet and the blur are the
   menu's own. Changes leave as `ModsOutcome::Hud(..)` (`Placed`, `Reset`, `ResetAll`) and
   are applied by `hud_editor_view.rs`; the options are saved on a drop or a scale step, not
-  per drag frame. A small bar with "Reset" and "Reset all" shows on the landing only. The
+  per drag frame. The HUD editor page resets widgets (the bar that used to show "Reset" and "Reset all"
+  on the landing is gone). The
   normal HUD leaves the mod widgets out while `Screen::Mods` is open.
 - **A look shared by the HUD mods.** Every HUD mod lists, after its own options, seven
   shared ones (`mods/hud_style.rs`, language keys `umicraft.mods.hud.*`): background on or

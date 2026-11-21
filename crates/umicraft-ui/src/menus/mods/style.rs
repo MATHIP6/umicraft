@@ -41,11 +41,11 @@ pub(super) const ACCENT_TINT: Color = [0.486, 0.227, 0.929, 0.10];
 pub(super) const ACCENT_BORDER: Color = [0.486, 0.227, 0.929, 0.55];
 /// The accent of a button under the pointer (`#8B5CF6`).
 pub(super) const ACCENT_HOVER: Color = [0.545, 0.361, 0.965, 1.0];
-/// The glass button of the landing page: fill, border and its lit border.
-pub(super) const GLASS: Color = [1.0, 1.0, 1.0, 0.08];
-pub(super) const GLASS_HOVER: Color = [1.0, 1.0, 1.0, 0.13];
-pub(super) const GLASS_BORDER: Color = [1.0, 1.0, 1.0, 0.22];
-pub(super) const GLASS_HIGHLIGHT: Color = [1.0, 1.0, 1.0, 0.12];
+/// Width of the rim of the Mods button, in GUI units.
+pub(super) const RIM_WIDTH: f32 = 0.5;
+/// The rim of the Mods button at rest and under the pointer (the accent).
+pub(super) const RIM: Color = [1.0, 1.0, 1.0, 0.14];
+pub(super) const RIM_HOVER: Color = [0.486, 0.227, 0.929, 0.70];
 /// How much larger than the shared switch the switches of this menu are: the
 /// design's is 40 x 24 px, 20 x 12 units.
 pub(super) const TOGGLE_SCALE: f32 = 1.5;
@@ -56,11 +56,11 @@ pub(super) const NAME_SIZE: f32 = 6.0;
 pub(super) const MOD_NAME_SIZE: f32 = 7.5;
 pub(super) const TITLE_SIZE: f32 = 10.0;
 /// Edge of the gear icon of the Mods button, in GUI units.
-pub(super) const ICON_SIZE: f32 = 9.0;
+pub(super) const ICON_SIZE: f32 = 7.0;
 /// Gap between that icon and the label.
-pub(super) const ICON_GAP: f32 = 6.0;
+pub(super) const ICON_GAP: f32 = 5.0;
 /// Space between the capitals of the label, as a share of their size.
-pub(super) const LABEL_TRACKING: f32 = 0.18;
+pub(super) const LABEL_TRACKING: f32 = 0.25;
 /// Size of a description (12.5 px).
 pub(super) const DESC_SIZE: f32 = 6.25;
 /// Size of a section label, a tag and a count (11 px).

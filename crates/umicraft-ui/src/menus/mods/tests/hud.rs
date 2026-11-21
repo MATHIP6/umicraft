@@ -110,13 +110,6 @@ fn a_widget_beside_the_open_panel_is_still_movable() {
 }
 
 #[test]
-fn the_reset_bar_is_under_the_panel() {
-    let view = view_with(vec![widget("fps", [20.0, 20.0])]);
-    let list = texts(&mut on_list(), &view);
-    assert!(has_text(&list, "umicraft.mods.editor.reset_all"));
-}
-
-#[test]
 fn the_gear_of_a_widget_opens_the_settings_of_its_mod() {
     // The widget stands left of the panel; its mod is the first card.
     let position = [2.0, 40.0];
