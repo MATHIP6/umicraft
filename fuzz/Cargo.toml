@@ -61,3 +61,10 @@ path = "fuzz_targets/pack_properties.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pack_cem"
+path = "fuzz_targets/pack_cem.rs"
+test = false
+doc = false
+bench = false
