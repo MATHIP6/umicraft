@@ -217,8 +217,15 @@ pub struct Renderer {
     terrain_solid_pipeline: wgpu::RenderPipeline,
     /// The index buffer every chunk pass is drawn with (F2-2d).
     quad_indices: QuadIndices,
-    /// Which layers of the bound block array need the alpha test.
+    /// Which layers of the bound block array need the alpha test: the
+    /// texture's own flags (`atlas_cutout`) minus `opaque_layers`.
     cutout: Vec<bool>,
+    /// Which layers of the bound block array have a texel under the alpha
+    /// test, as read from the pixels.
+    atlas_cutout: Vec<bool>,
+    /// Layers drawn without the alpha test whatever their texels: the leaves
+    /// of the "Trees: Fast" option (ADR-0089).
+    opaque_layers: Vec<u32>,
     /// Bumped whenever `cutout` changes; chunk passes sorted with an older
     /// one are drawn whole with the alpha test until they are uploaded again.
     cutout_epoch: u32,

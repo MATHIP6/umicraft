@@ -249,6 +249,7 @@ impl App {
         self.server_icons_revision = u64::MAX;
         self.assets.items = installed.items();
         self.dials = DialAnimator::new(installed.dials());
+        self.assets.leaf_layers = installed.leaf_layers();
         self.assets.texture_animator = TextureAnimator::for_terrain(
             &installed,
             animation_filter(&self.options.video.animations),

@@ -195,8 +195,6 @@ pub struct DetailOptions {
     /// Where the fog starts, as a fraction of its end distance; one of
     /// [`FOG_STARTS`].
     pub fog_start: f32,
-    /// Whether dropped items are drawn the fancy way.
-    pub dropped_items: GraphicsChoice,
     /// Whether the dark edges of the screen are drawn.
     pub vignette: GraphicsChoice,
     /// Whether the swamp tints grass, leaves and water its own way.
@@ -217,7 +215,6 @@ impl Default for DetailOptions {
             sun_moon: true,
             fog: FogChoice::default(),
             fog_start: FOG_STARTS[3],
-            dropped_items: GraphicsChoice::default(),
             vignette: GraphicsChoice::default(),
             swamp_colors: true,
             smooth_biomes: true,

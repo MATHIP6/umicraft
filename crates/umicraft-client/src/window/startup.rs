@@ -254,6 +254,7 @@ impl App {
                 font,
                 receiver: Some(asset_rx),
                 files: GameFiles::default(),
+                leaf_layers: Vec::new(),
                 ui_atlas: None,
                 font_choice: FontChoice::Game,
                 brand_atlas: None,
@@ -372,6 +373,7 @@ impl App {
         self.server_icons_revision = u64::MAX;
         self.assets.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());
+        self.assets.leaf_layers = terrain.leaf_layers();
         self.assets.texture_animator = TextureAnimator::for_terrain(
             &terrain,
             super::options_control::animation_filter(&self.options.video.animations),

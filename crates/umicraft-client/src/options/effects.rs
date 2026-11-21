@@ -15,6 +15,7 @@ use umicraft_render::Renderer;
 use winit::window::{Fullscreen, Window};
 
 use crate::game::GameEvent;
+use crate::options::video_sections::LeavesMode;
 use crate::options::video_spec::{effect_of_change, Effect};
 use crate::options::{Options, VideoOptions, PACKS_FOLDER};
 use crate::scene::entity::EntityTextures;
@@ -152,7 +153,8 @@ impl VideoApplier {
     }
 
     /// Applies `video` for this frame: the GUI scale, vsync, fullscreen, the
-    /// entity shadows, the mip levels, cave culling and the mesh options.
+    /// entity shadows, the mip levels, cave culling, the opaque leaves of
+    /// "Trees: Fast" (`leaf_layers`) and the mesh options.
     /// Brightness, bobbing and the cloud mode are read where they are used
     /// (the render environment, the camera and the cloud pass). Returns what
     /// the window has to redo.
@@ -163,6 +165,7 @@ impl VideoApplier {
         window: Option<&Window>,
         renderer: &mut Renderer,
         entities: Option<&EntityTextures>,
+        leaf_layers: &[u32],
     ) -> Effect {
         umicraft_ui::set_gui_scale_option(u32::from(video.gui_scale));
         renderer.set_vsync(video.vsync);
@@ -177,6 +180,8 @@ impl VideoApplier {
             window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
         }
         renderer.set_mipmap_levels(u32::from(video.mipmap_levels));
+        let fast_leaves = video.details.trees.resolve(video.fancy_graphics) == LeavesMode::Fast;
+        renderer.set_opaque_layers(if fast_leaves { leaf_layers } else { &[] });
         crate::meshing::settings::store(video);
         self.change(video)
     }

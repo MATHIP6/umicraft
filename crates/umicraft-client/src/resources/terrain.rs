@@ -260,6 +260,16 @@ pub struct InstalledTerrain {
     dials: Vec<DialSprite>,
 }
 
+/// The leaf textures of 1.8 (`BlockOldLeaf`, `BlockNewLeaf`).
+const LEAF_TEXTURES: [&str; 6] = [
+    "blocks/leaves_oak",
+    "blocks/leaves_spruce",
+    "blocks/leaves_birch",
+    "blocks/leaves_jungle",
+    "blocks/leaves_acacia",
+    "blocks/leaves_big_oak",
+];
+
 impl InstalledTerrain {
     /// Whether the official 1.8.8 array is bound.
     #[must_use]
@@ -278,6 +288,19 @@ impl InstalledTerrain {
     #[must_use]
     pub fn animations(&self) -> &[TextureAnimation] {
         &self.animations
+    }
+
+    /// The block-array layers of the leaf textures, which "Trees: Fast" draws
+    /// opaque. Empty for the procedural set.
+    #[must_use]
+    pub fn leaf_layers(&self) -> Vec<u32> {
+        let Some(context) = self.mesher.model_context() else {
+            return Vec::new();
+        };
+        LEAF_TEXTURES
+            .iter()
+            .filter_map(|key| context.atlas.layer(key))
+            .collect()
     }
 
     /// The compass and clock sprites, empty for the procedural set.

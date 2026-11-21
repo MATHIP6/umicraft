@@ -147,7 +147,9 @@ fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
             true,
         ));
     }
-    if details.sky && state.sunrise.is_some() {
+    // OptiFine gates the sunrise fan with Sun & Moon, not with Sky
+    // (`RenderGlobal.renderSky`, `isSunMoonEnabled` around the fan).
+    if details.sun_moon && state.sunrise.is_some() {
         let model = celestial::sunrise_model(state.celestial_angle);
         layers.push(layer(
             input,
@@ -220,6 +222,11 @@ fn void_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
             black,
             true,
         ));
+    }
+    // Sky off also drops this horizon plane (`glSkyList2` under
+    // `isSkyEnabled`); the black plane and box above stay, as in OptiFine.
+    if !input.details.sky {
+        return;
     }
     let [r, g, b] = input.state.sky_color;
     let tint = [r * 0.2 + 0.04, g * 0.2 + 0.04, b * 0.6 + 0.1, 1.0];
@@ -322,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn sky_off_skips_the_dome_but_keeps_the_sun_moon_and_stars() {
+    fn sky_off_skips_the_dome_and_horizon_but_keeps_the_sun_moon_and_stars() {
         let drawn = plan_with(
             SkyDetails {
                 sky: false,
@@ -330,8 +337,8 @@ mod tests {
             },
             NIGHT,
         );
-        // Only the void plane remains of the grids.
-        assert_eq!(drawn.iter().filter(|m| **m == Mesh::Grid).count(), 1);
+        // Above the horizon no grid remains: no dome, no horizon plane.
+        assert_eq!(drawn.iter().filter(|m| **m == Mesh::Grid).count(), 0);
         assert!(drawn.contains(&Mesh::Stars) && drawn.contains(&Mesh::Sun));
     }
 
@@ -359,6 +366,12 @@ mod tests {
         assert!(!drawn.contains(&Mesh::Sun));
         assert!(!drawn.iter().any(|mesh| matches!(mesh, Mesh::Moon(_))));
         assert!(drawn.contains(&Mesh::Stars));
+        let sunrise = RenderEnvironment::new(0, 23_000, 0.0, 8);
+        let no_bodies = SkyDetails {
+            sun_moon: false,
+            ..SkyDetails::ALL
+        };
+        assert!(!plan_with(no_bodies, sunrise).contains(&Mesh::Fan));
     }
 
     #[test]

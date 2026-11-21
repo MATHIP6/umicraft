@@ -401,6 +401,8 @@ impl Renderer {
                 (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize,
             ),
             cutout: cutout_layers(&block_data, (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize),
+            atlas_cutout: cutout_layers(&block_data, (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize),
+            opaque_layers: Vec::new(),
             cutout_epoch: 0,
             cave_graph: CaveGraph::default(),
             cave_culling: true,

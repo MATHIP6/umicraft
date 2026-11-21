@@ -617,14 +617,6 @@ pub static VIDEO_SPECS: &[OptionSpec] = &[
         effect: Effect::Immediate,
         all: None,
     },
-    choice!(
-        "droppedItems",
-        "umicraft.options.droppedItems",
-        Details,
-        GraphicsChoice,
-        details.dropped_items,
-        Immediate
-    ),
     toggle!(
         "entityShadows",
         "options.entityShadows",

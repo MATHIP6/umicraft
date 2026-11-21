@@ -254,6 +254,7 @@ impl App {
             self.window.as_deref(),
             renderer,
             self.assets.entity_textures.as_ref(),
+            &self.assets.leaf_layers,
         );
         match effect {
             Effect::ReloadResources => self.reload_resources(),

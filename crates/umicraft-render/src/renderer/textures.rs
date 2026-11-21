@@ -335,10 +335,31 @@ impl Renderer {
         // The large textures of the previous array belong to it.
         self.hires = HiresBlocks::none(&self.device, &self.queue);
         self.rebind_block_groups(&view);
-        self.cutout = cutout_layers(pixels, width as usize * height as usize * 4);
-        self.cutout_epoch += 1;
+        self.atlas_cutout = cutout_layers(pixels, width as usize * height as usize * 4);
+        self.apply_opaque_layers();
         self.official_blocks = Some((texture, width, height));
         Ok(())
+    }
+
+    /// Draws the block-array `layers` as opaque: their quads skip the alpha
+    /// test, so transparent texels show their colour. "Trees: Fast" passes the
+    /// leaf textures, as vanilla's fast leaves are drawn in the SOLID layer
+    /// (MCP `BlockLeaves.getBlockLayer`, OptiFine `Config.isTreesFancy`). An
+    /// empty slice restores the textures' own flags. Meshes uploaded before
+    /// the change are drawn with the alpha test until they are uploaded again.
+    pub fn set_opaque_layers(&mut self, layers: &[u32]) {
+        if self.opaque_layers == layers {
+            return;
+        }
+        self.opaque_layers.clear();
+        self.opaque_layers.extend_from_slice(layers);
+        self.apply_opaque_layers();
+    }
+
+    /// Rebuilds `cutout` from the texture flags and the forced opaque layers.
+    fn apply_opaque_layers(&mut self) {
+        effective_cutout(&self.atlas_cutout, &self.opaque_layers, &mut self.cutout);
+        self.cutout_epoch += 1;
     }
 
     /// Sets how many mip levels below the base the next
@@ -491,8 +512,8 @@ impl Renderer {
     /// fresh renderer changes nothing.
     pub fn use_procedural_blocks(&mut self) {
         self.official_blocks = None;
-        self.cutout.clone_from(&self.procedural_cutout);
-        self.cutout_epoch += 1;
+        self.atlas_cutout.clone_from(&self.procedural_cutout);
+        self.apply_opaque_layers();
         self.hires = HiresBlocks::none(&self.device, &self.queue);
         let view = self.procedural_blocks.clone();
         self.rebind_block_groups(&view);
@@ -605,5 +626,32 @@ impl Renderer {
             &self.hires,
         );
         self.icon_atlas.invalidate();
+    }
+}
+
+/// Writes into `out` the alpha-test flag of every layer: the texture's own
+/// flag, except for the `opaque` layers, which never take the test. Layers out
+/// of range are ignored.
+fn effective_cutout(atlas: &[bool], opaque: &[u32], out: &mut Vec<bool>) {
+    out.clear();
+    out.extend_from_slice(atlas);
+    for &layer in opaque {
+        if let Some(flag) = out.get_mut(layer as usize) {
+            *flag = false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod opaque_layer_tests {
+    use super::effective_cutout;
+
+    #[test]
+    fn opaque_layers_skip_the_alpha_test_and_others_keep_their_flag() {
+        let mut out = Vec::new();
+        effective_cutout(&[true, true, false], &[1, 9], &mut out);
+        assert_eq!(out, [true, false, false]);
+        effective_cutout(&[true, true, false], &[], &mut out);
+        assert_eq!(out, [true, true, false]);
     }
 }

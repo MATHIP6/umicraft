@@ -23,6 +23,8 @@ pub(in crate::window) struct Assets {
     /// The active packs over the jar, which the sky, entity and map
     /// textures are read from.
     pub(in crate::window) files: GameFiles,
+    /// The block-array layers of the leaf textures ("Trees: Fast").
+    pub(in crate::window) leaf_layers: Vec<u32>,
     /// Background asset loader channel receiver.
     pub(in crate::window) receiver: Option<std::sync::mpsc::Receiver<AsyncLoadedAssets>>,
     /// The atlas the renderer accepted; the UI metrics must match it.

@@ -1,6 +1,6 @@
 # F6: pack features and OptiFine-style video settings: plan
 
-Status: **phases 0 and 1 done**; next is phase 4 (custom sky). Branch `feat/optifine-features`.
+Status: **phases 0 to 2 done**; next is phase 4 (custom sky). Branch `feat/optifine-features`.
 Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 (reference policy) and ADR-0089 (architecture). Roadmap entry: F6.
 
@@ -82,14 +82,16 @@ to its defaults alone when it does not parse. `GraphicsChoice` resolves
 | Step | Content | Done when |
 |---|---|---|
 | 2.0 | Subsections, `GraphicsChoice`, `TreesChoice`, `RainChoice`, `FogChoice`, `OffFastFancy`; the P2 entries of the option table (**done**) | Unit tests; round trip of `options.toml` |
-| 2.1 | Sky, Stars, Sun & Moon; Fog Fast/Fancy/Off; Fog Start; Cloud Height (+0 to 128 blocks); Rain & Snow Default/Fast/Fancy/Off; Vignette | Unit tests on the render inputs; screenshots |
-| 2.2 | Trees Default/Fast/Smart/Fancy (Smart: transparent leaves, faces between two leaf blocks culled) | Mesh tests on leaves; mesh bench Fancy vs Smart |
-| 2.3 | Better Grass Off/Fast/Fancy, Better Snow, Swamp Colors, Smooth Biomes | Mesh tests |
-| 2.4 | One toggle per animated texture: water, lava, fire, portal, other terrain | Unit tests on `TextureAnimator` |
-| 2.5 | Per-kind particle toggles, rejected before spawn: redstone, explosion, flame, smoke, void, water, rain splash, portal, potion, dripping, firework | Unit tests; no allocation on the rejection path |
-| 2.6 | Dropped Items Default/Fast/Fancy | Unit tests |
+| 2.1 | Sky, Stars, Sun & Moon; Fog Fast/Fancy/Off; Fog Start; Cloud Height (+0 to 128 blocks); Rain & Snow Default/Fast/Fancy/Off; Vignette (**done**) | Unit tests on the render inputs; screenshots |
+| 2.2 | Trees Default/Fast/Smart/Fancy (Smart: transparent leaves, faces between two leaf blocks culled) (**done**) | Mesh tests on leaves; mesh bench Fancy vs Smart |
+| 2.3 | Better Grass Off/Fast/Fancy, Better Snow, Swamp Colors, Smooth Biomes (**done**) | Mesh tests |
+| 2.4 | One toggle per animated texture: water, lava, fire, portal, other terrain (**done**) | Unit tests on `TextureAnimator` |
+| 2.5 | Per-kind particle toggles, rejected before spawn: redstone, explosion, flame, smoke, void, water, rain splash, portal, potion, dripping, firework (**done**) | Unit tests; no allocation on the rejection path |
 
 Not offered, because they would have no meaningful effect in Umicraft:
+- **Dropped Items**: in 1.8 neither `RenderEntityItem` nor OptiFine reads
+  `fancyGraphics` for item entities (the copy count depends on the stack
+  size only), so Fast and Fancy look the same.
 - **Translucent Blocks**: OptiFine's Fast skips a GL blending mode; our
   translucent pass is already one sorted pass.
 - **Clear Water**: it changes the light opacity of water, which is world
@@ -140,6 +142,7 @@ here take the OptiFine default.
 | Chunk Updates | 1 | follows the current mesh budget | One section per frame would be slower than today's multithreaded queue |
 | Dynamic Updates | Off | On | More sections are meshed while the player stands still; no visual cost |
 | Trees | Default (Fancy) | Smart | Same look as Fancy without the hidden inner faces of leaves |
+| Fog | Fast | Fast (planar, start 0.8) | Kept; before F6 the renderer was radial (now Fancy) |
 | Smart Animations | n/a in the 1.8.9 build | On | Only sprites drawn last frame are uploaded; no visual change |
 | Advanced occlusion (cave culling) | n/a | On | Already the Umicraft behaviour (ADR-0062) |
 | Connected Textures | Fast | Fast | Kept: Fancy adds 4 diagonal neighbour tests per face |
