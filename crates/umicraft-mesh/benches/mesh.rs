@@ -108,6 +108,7 @@ fn model_context() -> ModelMeshContext {
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/stone"])),
         tints: None,
         ctm: None,
+        natural: None,
     }
 }
 
@@ -286,6 +287,7 @@ fn dense_grass() -> DenseGrass {
                 ))
             }),
             ctm: None,
+            natural: None,
         }
     };
     let plain = model_context(false);
@@ -400,6 +402,7 @@ fn mesh_leaves_modes(criterion: &mut Criterion) {
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/leaves"])),
         tints: None,
         ctm: None,
+        natural: None,
     };
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     for y in 0..16 {
@@ -470,6 +473,7 @@ fn mesh_connected_textures(criterion: &mut Criterion) {
         atlas: Arc::clone(&atlas),
         tints: None,
         ctm,
+        natural: None,
     };
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     for y in (0..16).step_by(2) {
@@ -505,6 +509,65 @@ fn mesh_connected_textures(criterion: &mut Criterion) {
     }
 }
 
+/// Natural textures: a dense dirt section with no table, with a table and the
+/// option off, and with the rule applied to every face.
+fn mesh_natural_textures(criterion: &mut Criterion) {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/dirt").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let models = Arc::new(
+        BlockModelSet::build(&Memory(files), CUBE_DEFS)
+            .expect("the synthetic natural-texture model set must build"),
+    );
+    let atlas = Arc::new(AtlasLayout::from_keys(["blocks/dirt"]));
+    let rules = umicraft_packext::natural::NaturalRules::parse(b"dirt=4F")
+        .expect("the synthetic natural rules must parse");
+    let table = umicraft_mesh::natural::NaturalTable::build(&rules, &atlas).map(Arc::new);
+    let context = |natural| ModelMeshContext {
+        models: Arc::clone(&models),
+        atlas: Arc::clone(&atlas),
+        tints: None,
+        ctm: None,
+        natural,
+    };
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in (0..16).step_by(2) {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(3, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    let variants = [
+        ("none", context(None), true),
+        ("off", context(table.clone()), false),
+        ("on", context(table), true),
+    ];
+    for (name, context, natural_textures) in variants {
+        let settings = MeshSettings {
+            natural_textures,
+            ..MeshSettings::default()
+        };
+        criterion.bench_function(&format!("mesh/natural_{name}"), |bencher| {
+            bencher.iter(|| {
+                black_box(mesh_chunk_with_settings(
+                    ChunkPos::new(0, 0),
+                    black_box(&snapshot),
+                    black_box(&context),
+                    settings,
+                ))
+            });
+        });
+    }
+}
+
 criterion_group!(
     benches,
     mesh_flat_chunk,
@@ -516,6 +579,7 @@ criterion_group!(
     mesh_lit_cave,
     mesh_water_checkerboard,
     mesh_leaves_modes,
-    mesh_connected_textures
+    mesh_connected_textures,
+    mesh_natural_textures
 );
 criterion_main!(benches);

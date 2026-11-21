@@ -123,6 +123,7 @@ fn context(rule_files: &[(&str, &str)]) -> ModelMeshContext {
         atlas: Arc::new(atlas),
         tints: None,
         ctm,
+        natural: None,
     }
 }
 

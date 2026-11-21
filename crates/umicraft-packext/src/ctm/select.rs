@@ -286,7 +286,7 @@ fn int_hash(x: i32) -> i32 {
 }
 
 /// OptiFine's `Config.getRandom(pos, face)`.
-fn position_hash([x, y, z]: [i32; 3], face: i32) -> i32 {
+pub(crate) fn position_hash([x, y, z]: [i32; 3], face: i32) -> i32 {
     let mut hash = int_hash(face.wrapping_add(37));
     hash = int_hash(hash.wrapping_add(x));
     hash = int_hash(hash.wrapping_add(z));

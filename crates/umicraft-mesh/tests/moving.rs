@@ -101,6 +101,7 @@ fn context() -> ModelMeshContext {
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/t"])),
         tints: None,
         ctm: None,
+        natural: None,
     }
 }
 

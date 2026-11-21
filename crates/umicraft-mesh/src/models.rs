@@ -44,6 +44,7 @@ use crate::better_snow;
 use crate::ctm::{self, CtmTable};
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, mesh_sections, occludes};
 use crate::lighting::{quad_light, Lighting};
+use crate::natural::{self, NaturalTable};
 use crate::settings::{base_variant, ConnectedTextures, Leaves, MeshSettings};
 use crate::{tint, BlockEntityKind, BlockEntityRef, BlockSource, Mesh, Vertex};
 
@@ -67,6 +68,8 @@ pub struct ModelMeshContext {
     pub tints: Option<Arc<tint::BiomeTints>>,
     /// The resolved connected-texture rules, or `None` when no pack has any.
     pub ctm: Option<Arc<CtmTable>>,
+    /// The natural-texture rules, or `None` when no pack has any.
+    pub natural: Option<Arc<NaturalTable>>,
 }
 
 /// Builds the mesh for one chunk column from baked block models.
@@ -439,6 +442,12 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
             quad.shade,
             placement.lighting,
         );
+        let uvs = match context.natural.as_deref() {
+            Some(table) if placement.settings.natural_textures => {
+                natural::natural_uvs(table, position, quad, layer)
+            }
+            _ => quad.uvs,
+        };
         let vertices = std::array::from_fn(|index| {
             let corner = quad.positions[index];
             Vertex {
@@ -448,7 +457,7 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
                     z as f32 + corner[2] + oz,
                 ],
                 normal: quad.normal,
-                uv: quad.uvs[index],
+                uv: uvs[index],
                 layer,
                 light: lights[index].pack(),
                 tint,

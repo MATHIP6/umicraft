@@ -283,6 +283,7 @@ fn context(set: BlockModelSet, keys: &[&str]) -> ModelMeshContext {
         atlas: Arc::new(AtlasLayout::from_keys(keys.iter().copied())),
         tints: None,
         ctm: None,
+        natural: None,
     }
 }
 
@@ -556,6 +557,7 @@ fn modelless_states_keep_the_legacy_cube_but_only_atlas_layers() {
         atlas: Arc::new(atlas),
         tints: None,
         ctm: None,
+        natural: None,
     };
     let blocks = Scene::new(&[
         ([0, 0, 0], BlockState::new(1, 0)),
@@ -821,6 +823,7 @@ fn grass_context(tints: Option<BiomeTints>) -> ModelMeshContext {
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/grass_top"])),
         tints: tints.map(Arc::new),
         ctm: None,
+        natural: None,
     }
 }
 
@@ -902,6 +905,7 @@ fn the_water_fallback_uses_the_swamp_water_tint() {
         atlas: Arc::new(AtlasLayout::default()),
         tints: Some(Arc::new(tints)),
         ctm: None,
+        natural: None,
     };
     let water = [([0, 0, 0], BlockState::new(8, 0))];
 

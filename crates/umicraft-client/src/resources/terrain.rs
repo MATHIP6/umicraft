@@ -414,6 +414,7 @@ mod tests {
                 atlas: Arc::new(layout),
                 tints: None,
                 ctm: None,
+                natural: None,
             }),
             gui_atlas: GuiAtlas::empty(),
             glint: None,

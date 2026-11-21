@@ -75,6 +75,7 @@ mod lighting;
 mod mesh;
 pub mod models;
 mod moving;
+pub mod natural;
 mod settings;
 mod source;
 pub mod tint;

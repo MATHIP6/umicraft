@@ -26,6 +26,7 @@ fn context() -> ModelMeshContext {
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/stone"])),
         tints: None,
         ctm: None,
+        natural: None,
     }
 }
 
