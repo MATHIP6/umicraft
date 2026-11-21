@@ -95,3 +95,4 @@ Four gaps exist today:
   are on the Performance page. Option tooltips use the language keys
   `umicraft.options.tooltip.<id>.N`, with original texts.
 - 2026-11-21 (phases 4 to 6): custom sky textures are uploaded as their own sky images and drawn by one pre-built pipeline per blend mode; CEM textures use `TextureSlot::Cem(i)` and a replaced part keeps the vanilla motion (rest pose plus the vanilla delta); CTM tiles join the block atlas as `blocks/ctm/<dir>/<n>` and `ModelMeshContext` carries the resolved `CtmTable`.
+- 2026-11-21 (phase 7): Dynamic Lights are applied in the terrain and entity shaders from up to 16 per-frame lights in the camera uniform, not by relighting chunk meshes: a moving light then costs no re-mesh. Pack features that need block textures not kept by `PackFiles` (custom animations, CIT, custom GUIs) are read from the full packs in `load_packs_and_terrain`, which injects one synthetic pack on top for the generated pictures and models.

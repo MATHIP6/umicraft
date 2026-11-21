@@ -1,6 +1,6 @@
 # F6: pack features and OptiFine-style video settings: plan
 
-Status: **phases 0 to 6 done**; phase 7 in progress. Branch `feat/optifine-features`.
+Status: **phases 0 to 7 done** (2026-11-21); not yet tried in a real window nor with real packs. Branch `feat/optifine-features`.
 Phases may get their own `feat/<phase>` branches off it. Design: ADR-0088
 (reference policy) and ADR-0089 (architecture). Roadmap entry: F6.
 
@@ -137,8 +137,8 @@ CEM mob yet (the tests check the produced layers).
 | 7.4 | Custom GUIs (**done**; creative screen not wired, biome and block-state conditions unknown) | Unit tests |
 | 7.5 | Natural Textures (**done**) | Unit tests, mesh bench |
 | 7.6 | Custom Colors: block, sky, fog and liquid colormaps, `fog.*`/`sky.end`, lightmaps (**done**; `particle.*` and `text.*` keys parsed, not drawn yet) | Unit tests |
-| 7.7 | Custom texture animations (`anim/*.properties`) | Unit tests |
-| 7.8 | Dynamic Lights | Unit tests |
+| 7.7 | Custom texture animations (`anim/*.properties`) (**done**; block-atlas targets only) | Unit tests |
+| 7.8 | Dynamic Lights (**done**; shader-based, up to 16 lights, Fast 500 ms / Fancy 50 ms) | Unit tests |
 
 ## Order
 
