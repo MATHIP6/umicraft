@@ -82,7 +82,7 @@ impl ModsScreen {
             section,
         );
 
-        let all = lang.tr("umicraft.mods.tab.all");
+        let all = lang.tr("umicraft.mods.all_mods");
         let labels = std::iter::once(all).chain(view.categories.iter().map(String::as_str));
         let mut action = None;
         ui.push_id("sidebar");

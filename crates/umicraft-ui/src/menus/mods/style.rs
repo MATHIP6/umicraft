@@ -46,6 +46,9 @@ pub(super) const GLASS: Color = [1.0, 1.0, 1.0, 0.08];
 pub(super) const GLASS_HOVER: Color = [1.0, 1.0, 1.0, 0.13];
 pub(super) const GLASS_BORDER: Color = [1.0, 1.0, 1.0, 0.22];
 pub(super) const GLASS_HIGHLIGHT: Color = [1.0, 1.0, 1.0, 0.12];
+/// How much larger than the shared switch the switches of this menu are: the
+/// design's is 40 x 24 px, 20 x 12 units.
+pub(super) const TOGGLE_SCALE: f32 = 1.5;
 /// Size of a name in the HUD editor, in GUI units.
 pub(super) const NAME_SIZE: f32 = 6.0;
 /// Size of a mod name on a card and of a page title (15 and 20 px at the
@@ -92,17 +95,30 @@ pub(super) fn hover_level(ui: &Ui, rect: Rect) -> f32 {
     f32::from(u8::from(ui.is_hovered(rect)))
 }
 
-/// Draws `rect` with a one-pixel `border` around its `fill`.
+/// Draws `rect` with `fill`, then a one-pixel `border` along its edge.
+///
+/// The border is only drawn on the four edge strips, not under the whole
+/// rectangle: both are translucent, so a border laid under the fill would add
+/// to it and make every card and field lighter than the design.
 pub(super) fn bordered(ui: &mut Ui, rect: Rect, radius: f32, (fill, border): (Color, Color)) {
+    ui.draw().rounded_rect(rect, radius, fill);
+    outline(ui, rect, radius, border);
+}
+
+/// Draws a one-pixel `border` along the edge of a rounded `rect`.
+pub(super) fn outline(ui: &mut Ui, rect: Rect, radius: f32, border: Color) {
     let rim = 1.0;
-    ui.draw().rounded_rect(rect, radius, border);
-    let inner = Rect::new(
-        rect.x + rim,
-        rect.y + rim,
-        rect.width - 2.0 * rim,
-        rect.height - 2.0 * rim,
-    );
-    ui.draw().rounded_rect(inner, (radius - rim).max(0.0), fill);
+    let strips = [
+        Rect::new(rect.x, rect.y, rect.width, rim),
+        Rect::new(rect.x, rect.bottom() - rim, rect.width, rim),
+        Rect::new(rect.x, rect.y, rim, rect.height),
+        Rect::new(rect.right() - rim, rect.y, rim, rect.height),
+    ];
+    for strip in strips {
+        ui.draw().push_clip(strip);
+        ui.draw().rounded_rect(rect, radius, border);
+        ui.draw().pop_clip();
+    }
 }
 
 /// The fill and the border of a mod card at the given hover and on levels

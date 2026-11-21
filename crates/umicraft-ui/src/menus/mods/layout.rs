@@ -13,6 +13,9 @@ use crate::menus::common::Gui;
 const PANEL_WIDTH: f32 = 500.0;
 /// Height of the panel when the screen is tall enough.
 const PANEL_HEIGHT: f32 = 295.0;
+/// Where the panel's top edge sits when the screen is tall enough (56 px in
+/// the design).
+const PANEL_TOP: f32 = 28.0;
 /// Room kept free under the panel for the hotbar and a gap above it, so the
 /// panel never covers the hotbar.
 const HOTBAR_ROOM: f32 = 31.0;
@@ -53,11 +56,29 @@ pub(super) const ITEM_GAP: f32 = 2.0;
 /// Height of the button that opens the HUD editor.
 const EDIT_HEIGHT: f32 = 22.0;
 /// Height of a mod card.
-pub(super) const CARD_HEIGHT: f32 = 92.0;
+pub(super) const CARD_HEIGHT: f32 = 96.0;
 /// List width, in GUI units, from which the cards go in three columns, and in
 /// two; below, in one.
 const THREE_COLUMNS_FROM: f32 = 280.0;
 const TWO_COLUMNS_FROM: f32 = 180.0;
+
+/// The size the design was drawn for, in pixels, and how far the menu may
+/// scale from it.
+const REFERENCE: (f32, f32) = (1280.0, 720.0);
+const SCALE_RANGE: (f32, f32) = (0.75, 2.0);
+/// Pixels per GUI unit at the reference size: a unit is half a logical pixel
+/// of the design.
+const REFERENCE_UNIT: f32 = 2.0;
+
+/// The GUI space of the mods menu: the design's own scale, `min(w / 1280,
+/// h / 720)` within 0.75 to 2, instead of the GUI scale option, so the panel
+/// takes the same share of the window at any size.
+#[must_use]
+pub(super) fn menu_gui(viewport: Rect) -> Gui {
+    let ratio = (viewport.width / REFERENCE.0).min(viewport.height / REFERENCE.1);
+    let ratio = ratio.clamp(SCALE_RANGE.0, SCALE_RANGE.1);
+    Gui::with_scale(viewport, REFERENCE_UNIT * ratio)
+}
 
 /// The rectangles of the panel pages (list and settings), in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,11 +120,14 @@ pub struct ModsLayout {
 /// Computes the layout for `viewport`.
 #[must_use]
 pub fn mods_layout(viewport: Rect) -> ModsLayout {
-    let gui = Gui::new(viewport);
+    let gui = menu_gui(viewport);
     let width = PANEL_WIDTH.min(gui.width - 2.0 * SCREEN_MARGIN);
     let height = PANEL_HEIGHT.min(gui.height - SCREEN_MARGIN - HOTBAR_ROOM);
     let left = ((gui.width - width) * 0.5).floor();
-    let top = (((gui.height - HOTBAR_ROOM - height) * 0.5).max(SCREEN_MARGIN)).floor();
+    let top = PANEL_TOP
+        .min(gui.height - HOTBAR_ROOM - height)
+        .max(SCREEN_MARGIN)
+        .floor();
     let sidebar_width = SIDEBAR_WIDTH.min(width * 0.4);
 
     let side_x = left + SIDEBAR_PAD;
@@ -116,7 +140,7 @@ pub fn mods_layout(viewport: Rect) -> ModsLayout {
     let inner = width - sidebar_width - 2.0 * PAGE_PAD_X;
     let header_y = top + PAGE_PAD_Y;
     let row_y = header_y + HEADER_HEIGHT + GAP;
-    let bottom = top + height - PAGE_PAD_Y - FOOTER_HEIGHT;
+    let bottom = top + height - PAGE_PAD_Y - FOOTER_HEIGHT - GAP * 0.5;
     let list_y = row_y + ROW_HEIGHT + GAP;
     let mod_y = header_y + HEADER_HEIGHT + GAP;
     let detail_y = mod_y + MOD_HEADER_HEIGHT + GAP;

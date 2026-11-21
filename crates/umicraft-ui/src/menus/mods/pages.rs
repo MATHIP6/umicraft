@@ -25,7 +25,8 @@ use super::segmented::segmented;
 use super::settings_panel::{content_height, settings_panel};
 use super::sidebar::SidebarAction;
 use super::style::{
-    bordered, hover_level, Paint, DESC_SIZE, FIELD_BORDER, PANEL, PANEL_RIM, TITLE_SIZE,
+    bordered, hover_level, outline, Paint, DESC_SIZE, FIELD_BORDER, PANEL, PANEL_RIM, TITLE_SIZE,
+    TOGGLE_SCALE,
 };
 use super::view::{ModCardView, ModsOutcome, ModsView};
 use super::{ModsScreen, Page, BLINK_TICKS};
@@ -34,8 +35,6 @@ use super::{ModsScreen, Page, BLINK_TICKS};
 const MOD_TILE: f32 = 23.0;
 /// Space between that tile and the name.
 const TILE_GAP: f32 = 7.0;
-/// The switch of the band of a mod is this many times the standard one.
-const BAND_TOGGLE: f32 = 1.5;
 
 impl ModsScreen {
     /// The mod whose settings page is open, if it still exists.
@@ -130,21 +129,12 @@ impl ModsScreen {
         layout: &ModsLayout,
     ) -> Option<ModsOutcome> {
         let title = if self.tab == ALL_TAB {
-            lang.tr("umicraft.mods.tab.all")
+            lang.tr("umicraft.mods.all_mods")
         } else {
             view.categories.get(self.tab - 1).map_or("", String::as_str)
         };
         self.list_header(ui, paint, lang, view, (layout, title));
 
-        // The border of the field, one pixel around it.
-        let rim = Rect::new(
-            layout.search.x - 1.0,
-            layout.search.y - 1.0,
-            layout.search.width + 2.0,
-            layout.search.height + 2.0,
-        );
-        ui.draw()
-            .rounded_rect(rim, theme::RADIUS * paint.scale + 1.0, FIELD_BORDER);
         let blink_on = (self.blink / BLINK_TICKS).is_multiple_of(2);
         let placeholder = lang.tr("umicraft.mods.search");
         let fields = (&mut self.query, placeholder);
@@ -157,6 +147,7 @@ impl ModsScreen {
         ) {
             self.scroll = 0.0;
         }
+        outline(ui, layout.search, theme::RADIUS * paint.scale, FIELD_BORDER);
         let filters = [
             lang.tr("umicraft.mods.filter.all"),
             lang.tr("umicraft.mods.filter.enabled"),
@@ -330,10 +321,10 @@ impl ModsScreen {
         icon_tile(ui, paint, tile, (&card.id, on));
 
         let switch = Rect::new(
-            band.right() - TOGGLE_WIDTH * BAND_TOGGLE * scale,
-            band.y + (MOD_TILE - TOGGLE_HEIGHT * BAND_TOGGLE) * 0.5 * scale,
-            TOGGLE_WIDTH * BAND_TOGGLE * scale,
-            TOGGLE_HEIGHT * BAND_TOGGLE * scale,
+            band.right() - TOGGLE_WIDTH * TOGGLE_SCALE * scale,
+            band.y + (MOD_TILE - TOGGLE_HEIGHT * TOGGLE_SCALE) * 0.5 * scale,
+            TOGGLE_WIDTH * TOGGLE_SCALE * scale,
+            TOGGLE_HEIGHT * TOGGLE_SCALE * scale,
         );
         let left = tile.right() + TILE_GAP * scale;
         let room = switch.x - left - 8.0 * scale;

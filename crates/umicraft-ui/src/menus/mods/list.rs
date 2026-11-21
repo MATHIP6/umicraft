@@ -5,12 +5,12 @@
 use crate::context::Ui;
 use crate::geom::Rect;
 use crate::icons::Icon;
-use crate::menus::common::{wheel_scrolled_by, Gui};
+use crate::menus::common::wheel_scrolled_by;
 use crate::modern::theme::{self, with_opacity};
 use crate::modern::{draw_icon, Align};
 
 use super::card::{card, CardAction};
-use super::layout::{card_rect, columns, content_height};
+use super::layout::{card_rect, columns, content_height, menu_gui};
 use super::motion::Motion;
 use super::scrollbar::{draw_scroll_bar, scroll_input, BarGrab};
 use super::style::Paint;
@@ -97,7 +97,7 @@ pub(super) fn list(
 pub(super) fn wheel_scrolled(ui: &Ui, area: Rect, height: f32, offset: f32) -> f32 {
     wheel_scrolled_by(
         ui,
-        &Gui::new(ui.viewport()),
+        &menu_gui(ui.viewport()),
         area,
         height,
         offset,

@@ -86,6 +86,18 @@ impl Gui {
         }
     }
 
+    /// The GUI space of `viewport` at a given `scale`, not rounded to the
+    /// whole numbers of the GUI scale option: the mods menu draws at a size that
+    /// follows the window instead.
+    pub(crate) fn with_scale(viewport: Rect, scale: f32) -> Self {
+        Self {
+            scale,
+            width: viewport.width / scale,
+            height: viewport.height / scale,
+            origin: [viewport.x, viewport.y],
+        }
+    }
+
     /// A physical position as GUI units.
     pub(crate) fn to_gui(self, position: [f32; 2]) -> [f32; 2] {
         [

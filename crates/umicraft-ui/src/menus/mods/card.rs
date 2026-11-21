@@ -18,6 +18,7 @@ use super::button::icon_button;
 use super::motion::Motion;
 use super::style::{
     bordered, card_colors, hover_level, Paint, DESC_SIZE, LABEL_SIZE, MOD_NAME_SIZE, SURFACE_2,
+    TOGGLE_SCALE,
 };
 use super::view::ModCardView;
 
@@ -75,10 +76,10 @@ pub(super) fn mod_icon(id: &str) -> Icon {
 /// right.
 pub(super) fn controls(rect: Rect, scale: f32) -> (Rect, Rect) {
     let switch = Rect::new(
-        rect.right() - (PAD + TOGGLE_WIDTH) * scale,
-        rect.y + (PAD + (TILE - TOGGLE_HEIGHT) * 0.5) * scale,
-        TOGGLE_WIDTH * scale,
-        TOGGLE_HEIGHT * scale,
+        rect.right() - (PAD + TOGGLE_WIDTH * TOGGLE_SCALE) * scale,
+        rect.y + (PAD + (TILE - TOGGLE_HEIGHT * TOGGLE_SCALE) * 0.5) * scale,
+        TOGGLE_WIDTH * TOGGLE_SCALE * scale,
+        TOGGLE_HEIGHT * TOGGLE_SCALE * scale,
     );
     let gear = Rect::new(
         rect.right() - (PAD + GEAR) * scale,

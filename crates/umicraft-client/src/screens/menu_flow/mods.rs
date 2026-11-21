@@ -38,6 +38,12 @@ impl MenuFlow {
         self.mods.open_hud_editor(selected);
     }
 
+    /// Opens the mods menu on its list of mods, for the single-frame captures
+    /// of `--hud-demo`.
+    pub fn open_mods_list(&mut self) {
+        self.mods.open_list();
+    }
+
     /// Whether Escape steps back inside the mods menu (settings to list)
     /// instead of closing it.
     #[must_use]

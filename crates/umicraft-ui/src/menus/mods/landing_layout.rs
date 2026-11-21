@@ -5,7 +5,8 @@
 //! cross in the top right corner.
 
 use crate::geom::Rect;
-use crate::menus::common::Gui;
+
+use super::layout::menu_gui;
 
 /// Edge of the square logo box, in GUI units.
 const LOGO_SIZE: f32 = 36.0;
@@ -43,7 +44,7 @@ pub struct LandingLayout {
 /// is centred on the screen.
 #[must_use]
 pub fn landing_layout(viewport: Rect) -> LandingLayout {
-    let gui = Gui::new(viewport);
+    let gui = menu_gui(viewport);
     let cx = gui.width * 0.5;
     let block = LOGO_SIZE + LOGO_GAP + WORDMARK_HEIGHT + SECTION_GAP + BUTTON_HEIGHT;
     let top = ((gui.height - block) * 0.5).floor();

@@ -12,7 +12,7 @@ use crate::modern::{TOGGLE_HEIGHT, TOGGLE_WIDTH};
 
 use super::color::{parse_hex, same_color, PRESETS};
 use super::motion::Motion;
-use super::style::{bordered, hover_level, Paint, DIVIDER, ROW_DIVIDER, SURFACE_1};
+use super::style::{bordered, hover_level, Paint, DIVIDER, ROW_DIVIDER, SURFACE_1, TOGGLE_SCALE};
 use super::view::{ModValue, SettingControl, SettingView};
 
 /// Height of one row, in GUI units.
@@ -79,7 +79,12 @@ fn at_right(row: Rect, scale: f32, (width, height): (f32, f32), shift: f32) -> R
 
 /// The switch of a toggle row.
 pub(super) fn toggle_track(row: Rect, scale: f32) -> Rect {
-    at_right(row, scale, (TOGGLE_WIDTH, TOGGLE_HEIGHT), 0.0)
+    at_right(
+        row,
+        scale,
+        (TOGGLE_WIDTH * TOGGLE_SCALE, TOGGLE_HEIGHT * TOGGLE_SCALE),
+        0.0,
+    )
 }
 
 /// The track of a slider row, left of its value.

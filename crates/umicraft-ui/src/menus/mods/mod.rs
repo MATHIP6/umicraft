@@ -132,6 +132,13 @@ impl ModsScreen {
         self.page != Page::Landing
     }
 
+    /// Opens the list at once, with nothing to click: what a capture of a
+    /// single frame needs.
+    pub fn open_list(&mut self) {
+        self.page = Page::List;
+        self.entered = Page::List;
+    }
+
     /// Whether the menu is on its landing page, the overlay: the game behind it
     /// is blurred less and given a vignette there.
     #[must_use]

@@ -10,7 +10,6 @@ use umicraft_core::lang::Lang;
 
 use crate::context::Ui;
 use crate::icons::Icon;
-use crate::menus::common::Gui;
 use crate::menus::title::modern::wordmark::{draw_logo, draw_wordmark};
 use crate::menus::title::modern::{lowered, scaled};
 use crate::text::FontAtlas;
@@ -18,6 +17,7 @@ use crate::text::FontAtlas;
 use super::animation::{LOGO, LOGO_RISE, LOGO_START_SCALE};
 use super::button::{icon_button, mods_button};
 use super::landing_layout::{LandingLayout, WORDMARK_SCALE};
+use super::layout::menu_gui;
 use super::style::hover_level;
 use super::view::ModsOutcome;
 use super::{ModsScreen, Page};
@@ -32,7 +32,7 @@ impl ModsScreen {
         lang: &Lang,
         (layout, partial_tick): (&LandingLayout, f32),
     ) -> Option<ModsOutcome> {
-        let gui = Gui::new(ui.viewport());
+        let gui = menu_gui(ui.viewport());
         let logo_in = LOGO.at(self.elapsed(partial_tick));
         let logo_box = lowered(layout.logo, LOGO_RISE, gui.scale, logo_in);
         let logo_box = scaled(
