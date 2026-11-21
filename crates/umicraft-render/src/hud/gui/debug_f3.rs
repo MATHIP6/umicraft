@@ -12,7 +12,7 @@
 
 use umicraft_ui::{Color, DrawList, FontAtlas, Rect, TextStyle};
 
-use crate::hud::DebugF3View;
+use crate::hud::{DebugF3View, LagometerView};
 
 /// `FontRenderer.FONT_HEIGHT`, the row pitch of both columns.
 const LINE_HEIGHT: f32 = 9.0;
@@ -38,6 +38,76 @@ pub(super) fn draw_debug_f3(
     }
     for (row, line) in view.right.iter().enumerate() {
         draw_line(list, font, line, row, sf, |width| gw - 2.0 - width);
+    }
+}
+
+/// Draws the one-line Show FPS readout where the F3 screen starts.
+pub(super) fn draw_fps_line(list: &mut DrawList, line: &str, sf: f32, font: &FontAtlas) {
+    draw_line(list, font, line, 0, sf, |_| 2.0);
+}
+
+/// Height of the Lagometer graph in GUI units.
+const GRAPH_HEIGHT: f32 = 60.0;
+/// Microseconds that fill the graph: 33.3 ms, two 60 Hz frames.
+const GRAPH_FULL_US: f32 = 33_333.0;
+/// Frame bars of a frame within 60 Hz.
+const FRAME_OK: Color = [85.0 / 255.0, 1.0, 85.0 / 255.0, 0.8];
+/// Frame bars that missed 60 Hz.
+const FRAME_SLOW: Color = [1.0, 85.0 / 255.0, 85.0 / 255.0, 0.8];
+/// The sync share of a frame.
+const SYNC: Color = [1.0, 1.0, 85.0 / 255.0, 0.9];
+/// The mesh upload share of the sync.
+const UPLOAD: Color = [85.0 / 255.0, 85.0 / 255.0, 1.0, 0.9];
+/// Microseconds of a 60 Hz frame.
+const FRAME_60_US: u32 = 16_667;
+
+/// Draws the Lagometer graph in the bottom-left corner: one column per
+/// sample, newest on the right, as tall as the timer (full height 33 ms).
+/// Each column shows the frame, with the sync and the upload drawn over it.
+pub(super) fn draw_lagometer(
+    list: &mut DrawList,
+    view: &LagometerView,
+    gh: f32,
+    sf: f32,
+    max_columns: usize,
+) {
+    let columns = view.frame.len().min(max_columns);
+    if columns == 0 {
+        return;
+    }
+    let base = gh - 2.0;
+    list.rect(
+        Rect::new(
+            sf,
+            (base - GRAPH_HEIGHT - 1.0) * sf,
+            (columns as f32 + 2.0) * sf,
+            (GRAPH_HEIGHT + 2.0) * sf,
+        ),
+        BAND,
+    );
+    let first = view.frame.len() - columns;
+    for (column, &frame) in view.frame[first..].iter().enumerate() {
+        let x = (2 + column) as f32 * sf;
+        let colour = if frame > FRAME_60_US {
+            FRAME_SLOW
+        } else {
+            FRAME_OK
+        };
+        bar(list, x, base, sf, frame, colour);
+        let at = first + column;
+        for (timer, colour) in [(&view.sync, SYNC), (&view.upload, UPLOAD)] {
+            if let Some(&us) = timer.get(at) {
+                bar(list, x, base, sf, us, colour);
+            }
+        }
+    }
+}
+
+/// One column of `us` microseconds standing on `base` (GUI units).
+fn bar(list: &mut DrawList, x: f32, base: f32, sf: f32, us: u32, colour: Color) {
+    let height = (us as f32 / GRAPH_FULL_US).min(1.0) * GRAPH_HEIGHT;
+    if height > 0.0 {
+        list.rect(Rect::new(x, (base - height) * sf, sf, height * sf), colour);
     }
 }
 
@@ -127,6 +197,55 @@ mod tests {
         );
         assert!(colour_runs("").is_empty());
         assert_eq!(colour_runs("x: \u{a7}cfalse")[1].1, RED);
+    }
+
+    #[test]
+    fn the_lagometer_draws_one_column_per_sample_up_to_the_width() {
+        let mut list = DrawList::new();
+        let view = LagometerView {
+            frame: vec![5_000; 10],
+            sync: vec![0; 10],
+            upload: vec![0; 10],
+        };
+        draw_lagometer(&mut list, &view, 200.0, 1.0, 4);
+        // The backdrop plus four frame bars; zero timers draw nothing.
+        assert_eq!(rects(&list).len(), 5);
+    }
+
+    #[test]
+    fn a_slow_frame_is_red_and_the_bar_stops_at_the_graph_top() {
+        let mut list = DrawList::new();
+        let view = LagometerView {
+            frame: vec![1_000_000],
+            ..LagometerView::default()
+        };
+        draw_lagometer(&mut list, &view, 200.0, 1.0, 8);
+        let bars = rects(&list);
+        assert_eq!(bars[1].height, GRAPH_HEIGHT);
+        let colours: Vec<Color> = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Rect { color, .. } => Some(*color),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(colours[1], FRAME_SLOW);
+    }
+
+    #[test]
+    fn an_empty_lagometer_draws_nothing() {
+        let mut list = DrawList::new();
+        draw_lagometer(&mut list, &LagometerView::default(), 200.0, 1.0, 8);
+        assert!(rects(&list).is_empty());
+    }
+
+    #[test]
+    fn the_fps_line_sits_on_the_first_row() {
+        let font = FontAtlas::fallback();
+        let mut list = DrawList::new();
+        draw_fps_line(&mut list, "60 fps", 1.0, &font);
+        assert_eq!(rects(&list)[0].y, 1.0);
     }
 
     #[test]

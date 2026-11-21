@@ -20,6 +20,7 @@ use super::BACKGROUND_FPS;
 use crate::audio_bridge::listener::listener_of;
 use crate::audio_bridge::music::MusicWorld;
 use crate::debug::cpu_split::Stage;
+use crate::debug::lagometer::compact_line;
 use crate::debug::metrics::InputLatencyMetrics;
 use crate::game::GameEvent;
 use crate::hud::dials::DialInputs;
@@ -98,7 +99,9 @@ impl App {
         ) else {
             return;
         };
-        world.set_upload_budget(self.options.video.performance.upload_budget_bytes());
+        let performance = &self.options.video.performance;
+        world.set_upload_budget(performance.upload_budget_bytes());
+        world.set_dynamic_updates(performance.dynamic_updates);
         world.sync(session.frames(), session.chunks(), renderer);
         let video = &self.options.video;
         world.update_camera(
@@ -160,6 +163,37 @@ impl App {
         }
     }
 
+    /// Fills the HUD data of the Show FPS line and the Lagometer, or clears
+    /// it. The graph is a part of the F3 screen; the line shows without it.
+    fn update_perf_hud(&mut self) {
+        let other = &self.options.video.other;
+        let (Some(world), true) = (self.world.as_ref(), self.world_visible()) else {
+            self.frame.hud.fps_line = None;
+            self.frame.hud.lagometer = None;
+            return;
+        };
+        self.frame.hud.fps_line = other.show_fps.then(|| {
+            let chunks = self
+                .renderer
+                .as_ref()
+                .map_or(0, Renderer::visible_chunk_count);
+            compact_line(
+                self.clock.fps,
+                chunks,
+                world.drawn_counts().0,
+                world.meshes_uploaded(),
+            )
+        });
+        self.frame.hud.lagometer = (other.lagometer && self.show_f3).then(|| {
+            let timers = world.lagometer();
+            let mut view = self.frame.hud.lagometer.take().unwrap_or_default();
+            timers.frame.copy_into(&mut view.frame);
+            timers.sync.copy_into(&mut view.sync);
+            timers.upload.copy_into(&mut view.upload);
+            view
+        });
+    }
+
     /// Steps the compass and the clock and writes their new frames into the
     /// block array.
     fn advance_dials(&mut self, elapsed: Duration, environment: RenderEnvironment) {
@@ -190,6 +224,9 @@ impl App {
         let now = Instant::now();
         self.cpu.start(now);
         let elapsed = self.clock.tick(now, self.show_overlay);
+        if let Some(world) = self.world.as_mut() {
+            world.note_frame(Duration::from_secs_f32(elapsed));
+        }
         // Phase E.9: the game thread takes network events once per frame.
         if let Some(session) = self.session.as_ref() {
             session.note_frame(Duration::from_secs_f32(elapsed));
@@ -223,6 +260,7 @@ impl App {
         self.update_death_screen(now);
         self.update_container_cursor();
         self.build_overlay();
+        self.update_perf_hud();
 
         if self.exit_error.is_some() {
             // The session ended (the server disconnected): leave the loop.
@@ -390,11 +428,17 @@ impl App {
             (now - self.clock.started).as_secs_f64(),
         );
         renderer.set_glint_time((now - self.clock.started).as_secs_f32());
-        self.assets
-            .texture_animator
-            .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
+        // Smart Animations: with the world on screen, only the textures of the
+        // chunks drawn last frame are uploaded. A screen over the world (the
+        // inventory shows block icons) keeps them all running.
+        let smart = self.options.video.performance.smart_animations && self.screen == Screen::None;
+        self.assets.texture_animator.advance(
+            Duration::from_secs_f32(elapsed),
+            |layer| !smart || renderer.layer_in_view(layer),
+            |layer, pixels| {
                 renderer.write_block_layer(layer, pixels);
-            });
+            },
+        );
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
         renderer.set_debug_lines(&self.debug_lines());
         // The mods menu blurs the game behind it to keep the focus on itself.

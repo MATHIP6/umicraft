@@ -33,6 +33,7 @@ mod hires_blocks;
 pub mod hud;
 pub mod hud_hearts;
 mod items;
+mod layer_set;
 mod lightmap;
 mod mipmap;
 mod motion_blur;
@@ -70,13 +71,14 @@ pub use hud::{
 };
 pub use hud::{
     plain_text, ActionBarView, BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle,
-    DebugF3View, HudState, SidebarLineView, SidebarView, TabEntryView, TabListView, TabValueStyle,
-    TitleView,
+    DebugF3View, HudState, LagometerView, SidebarLineView, SidebarView, TabEntryView, TabListView,
+    TabValueStyle, TitleView,
 };
 pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{
     IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE, PORTRAIT_KEY, PORTRAIT_SIZE,
 };
+pub use layer_set::LayerSet;
 pub use motion_blur::{MotionBlurSettings, MotionBlurVersion};
 pub use nametag::Nametag;
 pub use outline::{edge_vertices, DebugLine, OutlineBox, MAX_DEBUG_LINES, OUTLINE_GROWTH};

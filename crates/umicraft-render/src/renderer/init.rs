@@ -34,6 +34,7 @@ use crate::frame_pacing::FramePacingTracker;
 use crate::gpu_timer::{DrawCallStats, GpuTimer};
 use crate::hires_blocks::HiresBlocks;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, WorldGlint};
+use crate::layer_set::LayerSet;
 use crate::lightmap::TorchFlicker;
 use crate::motion_blur::MotionBlur;
 use crate::nametag::NametagRenderer;
@@ -408,6 +409,7 @@ impl Renderer {
             cave_culling: true,
             chunks_version: 0,
             visible_key: None,
+            visible_layers: LayerSet::default(),
             chunk_scratch: Vec::new(),
             terrain_transparent_pipeline,
             crack_pipeline,
