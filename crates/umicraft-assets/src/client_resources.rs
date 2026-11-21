@@ -70,6 +70,13 @@ const HIRES_BUDGET_BYTES: usize = 128 * 1024 * 1024;
 /// A normal source derives the edge from its largest frame (32 for 1.8.8).
 const DEFAULT_FRAME_SIZE: u32 = 16;
 
+/// The most layers the block atlas may have. A texture array larger than the
+/// device limit is rejected by the renderer, which then falls back to the
+/// procedural textures, so the pack would not show at all. 2048 is wgpu's
+/// default `max_texture_array_layers` and what desktop D3D12, Vulkan and
+/// Metal devices report.
+pub const MAX_ATLAS_LAYERS: usize = 2048;
+
 /// One decoded PNG before it is cropped and copied into the atlas.
 #[derive(Debug)]
 pub(crate) struct DecodedPng {
@@ -454,6 +461,7 @@ impl ClientResources {
                 }
             }
         }
+        drop_ctm_tiles_over_budget(&mut files, MAX_ATLAS_LAYERS);
         Self::build_internal(files, raw_colormaps, raw_gui, raw_glint, Some(self))
     }
 
@@ -685,6 +693,58 @@ fn ctm_tile_path(path: &str) -> Option<String> {
         .find_map(|folder| path.strip_prefix(folder))?;
     (relative.starts_with("ctm/") && relative.ends_with(".png"))
         .then(|| format!("{BLOCK_TEXTURES_PREFIX}{relative}"))
+}
+
+/// Keeps the atlas within `max_layers`: when the block and item textures plus
+/// the missing-texture layer would not fit, whole CTM tile folders
+/// (`textures/blocks/ctm/<folder>/`) are dropped, last in path order first,
+/// until they do. The CTM rules whose tiles are gone are dropped by the
+/// mesher, so only those blocks lose their connected textures; without this,
+/// a pack with many tiles (an HD pack with 800+) would lose every texture.
+fn drop_ctm_tiles_over_budget(files: &mut BTreeMap<String, Vec<u8>>, max_layers: usize) {
+    let layers = 1 + files
+        .keys()
+        .filter(|path| texture_key(path).is_some())
+        .count();
+    let mut excess = layers.saturating_sub(max_layers);
+    if excess == 0 {
+        return;
+    }
+    let ctm_prefix = format!("{BLOCK_TEXTURES_PREFIX}ctm/");
+    let mut folders: BTreeMap<String, usize> = BTreeMap::new();
+    for path in files.keys().filter(|path| path.ends_with(".png")) {
+        if let Some((folder, _)) = path
+            .strip_prefix(&ctm_prefix)
+            .and_then(|rest| rest.rsplit_once('/'))
+        {
+            *folders.entry(folder.to_string()).or_default() += 1;
+        }
+    }
+    let mut dropped = Vec::new();
+    for (folder, count) in folders.iter().rev() {
+        if excess == 0 {
+            break;
+        }
+        dropped.push(folder.clone());
+        excess = excess.saturating_sub(*count);
+    }
+    files.retain(|path, _| {
+        path.strip_prefix(&ctm_prefix)
+            .and_then(|rest| rest.rsplit_once('/'))
+            .is_none_or(|(folder, _)| !dropped.contains(&folder.to_string()))
+    });
+    tracing::warn!(
+        layers,
+        max_layers,
+        folders = ?dropped,
+        "too many textures for one block atlas; these connected-texture folders are left out"
+    );
+    if excess > 0 {
+        tracing::warn!(
+            excess,
+            "the atlas is still over its limit without connected textures"
+        );
+    }
 }
 
 /// The atlas key of a block or item PNG, or `None` for any other path.
@@ -1158,6 +1218,29 @@ mod tests {
             ctm_tile_path("assets/minecraft/optifine/sky/world0/sky1.png"),
             None
         );
+    }
+
+    #[test]
+    fn ctm_folders_are_dropped_until_the_atlas_fits() {
+        let png = vec![0u8];
+        let mut files: BTreeMap<String, Vec<u8>> = [
+            "assets/minecraft/textures/blocks/stone.png",
+            "assets/minecraft/textures/blocks/ctm/glass/0.png",
+            "assets/minecraft/textures/blocks/ctm/glass/1.png",
+            "assets/minecraft/textures/blocks/ctm/sandstone/0.png",
+            "assets/minecraft/textures/blocks/ctm/sandstone/1.png",
+        ]
+        .into_iter()
+        .map(|path| (path.to_string(), png.clone()))
+        .collect();
+        // 1 missing + 5 textures = 6 layers; a budget of 4 drops one folder.
+        drop_ctm_tiles_over_budget(&mut files, 4);
+        assert!(files.contains_key("assets/minecraft/textures/blocks/stone.png"));
+        assert!(files.contains_key("assets/minecraft/textures/blocks/ctm/glass/1.png"));
+        assert!(!files.contains_key("assets/minecraft/textures/blocks/ctm/sandstone/0.png"));
+        let before = files.clone();
+        drop_ctm_tiles_over_budget(&mut files, 64);
+        assert_eq!(files, before, "nothing dropped when it fits");
     }
 
     fn png_bytes(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {

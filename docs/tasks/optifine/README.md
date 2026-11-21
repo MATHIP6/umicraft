@@ -125,7 +125,7 @@ CEM mob yet (the tests check the produced layers).
 | 6.1 | `packext::ctm` parsing. Keys: `matchBlocks`, `matchTiles`, `metadata`, `method`, `tiles` (ranges and paths), `connect`, `faces`, `biomes`, `heights`, `width` / `height`, `weights`, `symmetry`, `linked` (**done**) | Unit tests |
 | 6.2 | Methods `ctm` (the 47-tile table), `horizontal`, `vertical`, `h+v`, `v+h`, `top`, `random`, `repeat`, `fixed` (**done**) | One table test per method |
 | 6.3 | Tiles added to the block atlas or `hires_blocks`; tile chosen per quad in the mesher through `BlockSource` (**done**) | Mesh bench before and after; screenshot |
-| 6.4 | Option Off/Fast/Fancy (default Fast) (**done**) | |
+| 6.4 | Option Off/Fast/Fancy (default Fast). The block atlas is capped at `MAX_ATLAS_LAYERS` (2048): when a pack's CTM tiles would exceed it, whole tile folders are left out (last in path order first) instead of losing every pack texture (**done**) | |
 
 ### Phase 7: remaining pack features
 
