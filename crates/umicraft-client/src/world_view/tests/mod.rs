@@ -172,6 +172,7 @@ fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Box<Frame
         moving_blocks: Arc::default(),
         block_entity_data: Arc::default(),
         sky_temperature: umicraft_render::RenderEnvironment::PLAINS_TEMPERATURE,
+        sky_biome: None,
         fog: FogContext::DEFAULT,
         border: crate::scene::border::border_view(&Border::default()),
         weather: crate::scene::weather::WeatherView::default(),

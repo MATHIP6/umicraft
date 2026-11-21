@@ -199,6 +199,9 @@ pub struct Frame {
     pub signs: Arc<SignTable>,
     /// Base temperature of the biome at the player, which tints the sky.
     pub sky_temperature: f32,
+    /// The biome id at the player (`None` while the column is not loaded),
+    /// which the custom sky layers filter on.
+    pub sky_biome: Option<u8>,
     /// The medium at the eye and the effects that shape the fog (P7g).
     pub fog: FogContext,
     /// The world border of the dimension (P7g).

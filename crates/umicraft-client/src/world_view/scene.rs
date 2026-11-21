@@ -27,6 +27,13 @@ impl WorldView {
         Arc::clone(&self.view.weather.precipitation)
     }
 
+    /// The id of the biome at the player in the newest frame, `None` while
+    /// its column is not loaded (the custom sky filters on it).
+    #[must_use]
+    pub fn sky_biome(&self) -> Option<u8> {
+        self.view.sky_biome
+    }
+
     /// How far through its life the elder guardian apparition is at
     /// `partial_ticks` into the tick (`0..=1`), `None` while there is none
     /// (MCP `MobAppearance.renderParticle`: `(age + partial) / maxAge`).

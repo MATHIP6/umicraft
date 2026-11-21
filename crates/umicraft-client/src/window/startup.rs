@@ -37,7 +37,7 @@ use crate::options::Options;
 use crate::resources::entity_icons::EntityIcons;
 use crate::resources::game_files::{load_packs, GameFiles};
 use crate::resources::panorama::load_panorama_faces;
-use crate::resources::sky::{load_border_texture, load_sky_textures};
+use crate::resources::sky::{load_border_texture, load_sky_textures, CustomSky};
 use crate::resources::terrain::TerrainTextures;
 use crate::resources::texture_animator::TextureAnimator;
 use crate::resources::theme_font::FontChoice;
@@ -120,6 +120,14 @@ pub(super) fn upload_sky_textures(renderer: &mut Renderer, files: &GameFiles) {
     if let Some(forcefield) = load_border_texture(files) {
         renderer.set_border_texture(&forcefield);
     }
+}
+
+/// Loads the pack-defined sky layers and uploads their pictures. Called with
+/// the sky pictures, at startup and on every resource reload.
+pub(super) fn upload_custom_sky(renderer: &mut Renderer, files: &GameFiles) -> CustomSky {
+    let (sky, images) = CustomSky::load(files);
+    renderer.set_custom_sky_textures(&images);
+    sky
 }
 
 /// Uploads the six title panorama faces of the verified jar; `None` keeps the
@@ -264,6 +272,7 @@ impl App {
                 texture_animator: TextureAnimator::default(),
                 entity_textures: None,
                 map_textures: None,
+                custom_sky: CustomSky::default(),
             },
             chat: ChatUi {
                 input: ChatInput::new(""),
@@ -368,6 +377,7 @@ impl App {
         upload_glint_texture(renderer, terrain.glint_texture());
         self.assets.files = assets.files;
         upload_sky_textures(renderer, &self.assets.files);
+        self.assets.custom_sky = upload_custom_sky(renderer, &self.assets.files);
         self.panorama = upload_panorama(renderer);
         self.assets.gui_atlas = Some(gui_atlas);
         self.server_icons_revision = u64::MAX;
