@@ -182,6 +182,7 @@ mod tests {
             tints: None,
             ctm: None,
             natural: None,
+            custom_colors: None,
         }
     }
 

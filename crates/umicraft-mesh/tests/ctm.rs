@@ -124,6 +124,7 @@ fn context(rule_files: &[(&str, &str)]) -> ModelMeshContext {
         tints: None,
         ctm,
         natural: None,
+        custom_colors: None,
     }
 }
 

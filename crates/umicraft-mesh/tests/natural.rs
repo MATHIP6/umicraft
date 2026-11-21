@@ -89,6 +89,7 @@ fn context(rules: &str) -> ModelMeshContext {
         tints: None,
         ctm: None,
         natural,
+        custom_colors: None,
     }
 }
 

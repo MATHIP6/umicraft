@@ -1088,6 +1088,7 @@ scene blocks      : stone, dirt, oak stairs
             tints: None,
             ctm: None,
             natural: None,
+            custom_colors: None,
         }
     }
 

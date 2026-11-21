@@ -42,6 +42,7 @@ use crate::actual_state;
 use crate::better_grass::{self, SideTexture};
 use crate::better_snow;
 use crate::ctm::{self, CtmTable};
+use crate::custom_colors::CustomColors;
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, mesh_sections, occludes};
 use crate::lighting::{quad_light, Lighting};
 use crate::natural::{self, NaturalTable};
@@ -70,6 +71,9 @@ pub struct ModelMeshContext {
     pub ctm: Option<Arc<CtmTable>>,
     /// The natural-texture rules, or `None` when no pack has any.
     pub natural: Option<Arc<NaturalTable>>,
+    /// The custom block colours, or `None` when the packs have none or the
+    /// option is off.
+    pub custom_colors: Option<Arc<CustomColors>>,
 }
 
 /// Builds the mesh for one chunk column from baked block models.
@@ -126,14 +130,7 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
             }
         }
         if let Some(liquid) = Liquid::of(state) {
-            let tint = tint::state_tint(
-                source,
-                state,
-                wx,
-                wz,
-                context.tints.as_deref(),
-                settings.tint_mode(),
-            );
+            let tint = resolve_tint(source, context, state, position, true, settings);
             let layers = match liquid {
                 Liquid::Water => water,
                 Liquid::Lava => lava,
@@ -157,19 +154,34 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
                 emit_snow_layer(mesh, source, context, placement, settings);
             }
         } else if state.is_renderable() {
-            let tint = tint::state_tint(
-                source,
-                state,
-                wx,
-                wz,
-                context.tints.as_deref(),
-                settings.tint_mode(),
-            );
+            let tint = resolve_tint(source, context, state, position, true, settings);
             // No model and not a liquid: the checker, never a procedural
             // layer index (ADR-0012).
             let missing = context.atlas.missing_layer();
             emit_legacy_faces_with(mesh, source, position, (state, lighting), tint, |_| missing);
         }
+    })
+}
+
+/// The tint of a face of `state`: the custom colours of the packs when they
+/// cover it, else the vanilla biome tint.
+fn resolve_tint<S: BlockSource + ?Sized>(
+    source: &S,
+    context: &ModelMeshContext,
+    state: BlockState,
+    position: [i32; 3],
+    tinted: bool,
+    settings: MeshSettings,
+) -> u32 {
+    let tints = context.tints.as_deref();
+    let mode = settings.tint_mode();
+    let custom = context
+        .custom_colors
+        .as_deref()
+        .and_then(|custom| custom.tint(source, state, position, tinted, (tints, mode)));
+    custom.unwrap_or_else(|| {
+        let [x, _, z] = position;
+        tint::state_tint(source, state, x, z, tints, mode)
     })
 }
 
@@ -376,8 +388,10 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
     ];
     // Tint is constant per block, so compute the 3×3 biome average at most
     // once and reuse it for every tinted quad (grass top + side overlay,
-    // six leaf faces, ...). Untinted quads never sample the colormaps.
-    let mut block_tint = None;
+    // six leaf faces, ...). Untinted quads never sample the colormaps, unless
+    // a custom palette is linked to the block; those get their own cache
+    // slot because a grass side takes the dirt palette.
+    let mut block_tints: [Option<u32>; 2] = [None; 2];
     for quad in &variant.model.quads {
         if let Some(cullface) = quad.cullface.filter(|_| placement.cull) {
             let offset = cullface.offset();
@@ -416,16 +430,13 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
                 layer = ctm::connected_layer(source, context, table, site, layer, fancy);
             }
         }
-        let tint = if tinted {
-            *block_tint.get_or_insert_with(|| {
-                tint::state_tint(
-                    source,
-                    state,
-                    x,
-                    z,
-                    context.tints.as_deref(),
-                    placement.settings.tint_mode(),
-                )
+        let custom_face = context
+            .custom_colors
+            .as_deref()
+            .is_some_and(|custom| custom.tints_face(state.id(), tinted));
+        let tint = if tinted || custom_face {
+            *block_tints[usize::from(tinted)].get_or_insert_with(|| {
+                resolve_tint(source, context, state, position, tinted, placement.settings)
             })
         } else {
             tint::WHITE

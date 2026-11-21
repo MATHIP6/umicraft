@@ -66,6 +66,7 @@ mod better_snow;
 mod block_entity;
 pub mod climate;
 pub mod ctm;
+pub mod custom_colors;
 mod face;
 mod flower_pot;
 pub mod fluid;

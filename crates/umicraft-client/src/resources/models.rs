@@ -230,6 +230,7 @@ impl ModelResources {
             tints,
             ctm,
             natural,
+            custom_colors: None,
         });
         tracing::info!(
             blockstates = models.blockstate_count(),

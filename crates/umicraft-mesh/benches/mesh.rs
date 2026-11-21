@@ -109,6 +109,7 @@ fn model_context() -> ModelMeshContext {
         tints: None,
         ctm: None,
         natural: None,
+        custom_colors: None,
     }
 }
 
@@ -288,6 +289,7 @@ fn dense_grass() -> DenseGrass {
             }),
             ctm: None,
             natural: None,
+            custom_colors: None,
         }
     };
     let plain = model_context(false);
@@ -403,6 +405,7 @@ fn mesh_leaves_modes(criterion: &mut Criterion) {
         tints: None,
         ctm: None,
         natural: None,
+        custom_colors: None,
     };
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     for y in 0..16 {
@@ -474,6 +477,7 @@ fn mesh_connected_textures(criterion: &mut Criterion) {
         tints: None,
         ctm,
         natural: None,
+        custom_colors: None,
     };
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     for y in (0..16).step_by(2) {
@@ -535,6 +539,7 @@ fn mesh_natural_textures(criterion: &mut Criterion) {
         tints: None,
         ctm: None,
         natural,
+        custom_colors: None,
     };
     let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
     for y in (0..16).step_by(2) {
@@ -567,6 +572,73 @@ fn mesh_natural_textures(criterion: &mut Criterion) {
         });
     }
 }
+/// Custom colours: a dense dirt section with no palette and with a fixed palette
+/// on the block, which tints every face.
+fn mesh_custom_colors(criterion: &mut Criterion) {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/dirt").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let models = Arc::new(
+        BlockModelSet::build(&Memory(files), CUBE_DEFS)
+            .expect("the synthetic custom-colour model set must build"),
+    );
+    let atlas = Arc::new(AtlasLayout::from_keys(["blocks/dirt"]));
+    let custom = |linked: bool| {
+        let mut colors = umicraft_mesh::custom_colors::CustomColors::default();
+        if linked {
+            let dirt = vec![umicraft_packext::ctm::BlockMatch {
+                id: 3,
+                metadata: None,
+            }];
+            colors.add_block_palette(
+                dirt,
+                &umicraft_packext::colors::Palette::fixed([90, 160, 40]),
+            );
+        }
+        Some(Arc::new(colors))
+    };
+    let context = |custom_colors| ModelMeshContext {
+        models: Arc::clone(&models),
+        atlas: Arc::clone(&atlas),
+        tints: None,
+        ctm: None,
+        natural: None,
+        custom_colors,
+    };
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in (0..16).step_by(2) {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(3, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    let variants = [
+        ("none", context(None)),
+        ("empty", context(custom(false))),
+        ("fixed", context(custom(true))),
+    ];
+    for (name, context) in variants {
+        let settings = MeshSettings::default();
+        criterion.bench_function(&format!("mesh/custom_colors_{name}"), |bencher| {
+            bencher.iter(|| {
+                black_box(mesh_chunk_with_settings(
+                    ChunkPos::new(0, 0),
+                    black_box(&snapshot),
+                    black_box(&context),
+                    settings,
+                ))
+            });
+        });
+    }
+}
 
 criterion_group!(
     benches,
@@ -580,6 +652,7 @@ criterion_group!(
     mesh_water_checkerboard,
     mesh_leaves_modes,
     mesh_connected_textures,
-    mesh_natural_textures
+    mesh_natural_textures,
+    mesh_custom_colors
 );
 criterion_main!(benches);
