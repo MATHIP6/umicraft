@@ -25,6 +25,7 @@
 //! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
 
 pub mod cem;
+pub mod cit;
 pub mod filters;
 pub mod int_list;
 pub mod properties;
