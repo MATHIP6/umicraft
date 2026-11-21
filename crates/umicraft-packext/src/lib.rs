@@ -18,10 +18,13 @@
 //! - [`filters`]: the biome, height and weather conditions.
 //!
 //! Features:
-//! - [`sky`]: custom sky layers.
+//! - [`sky`]: custom sky layers;
+//! - [`cem`]: custom entity models (`.jem`/`.jpm`) and their animation
+//!   expressions.
 //!
 //! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
 
+pub mod cem;
 pub mod filters;
 pub mod properties;
 pub mod ranges;
