@@ -25,6 +25,7 @@ mod bolt;
 mod capes;
 mod creatures;
 mod cull;
+mod custom_models;
 mod dragon_beam;
 mod dragon_death;
 #[cfg(test)]

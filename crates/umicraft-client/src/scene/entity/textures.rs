@@ -23,6 +23,7 @@ use umicraft_ui::FontAtlas;
 use super::armor::armor_texture;
 use super::banner_cache::BannerCache;
 use super::capes::{CapeSet, CapeSettings};
+use super::custom_models::CustomModels;
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
@@ -81,6 +82,8 @@ pub struct EntityTextures {
     skins: RefCell<SkinSet>,
     /// The third-party capes of players (ADR-0081).
     capes: RefCell<CapeSet>,
+    /// The custom entity models of the packs (ADR-0089).
+    custom_models: CustomModels,
     /// The composed banner designs among `textures`.
     banners: RefCell<BannerCache>,
     /// The font atlas the sign text texture was made from: the glyph UVs of
@@ -135,8 +138,14 @@ impl EntityTextures {
             };
             textures.insert(spec.slot, texture);
         }
+        let (custom_models, images) = CustomModels::load(&files);
+        for image in images {
+            let texture = renderer.create_entity_texture(&image.rgba, image.width, image.height);
+            textures.insert(image.slot, texture);
+        }
         Self {
             textures: RefCell::new(textures),
+            custom_models,
             files,
             skins: RefCell::new(SkinSet::new()),
             capes: RefCell::new(CapeSet::new()),
@@ -243,6 +252,12 @@ impl EntityTextures {
     /// upload draws with the entities.
     pub(crate) fn set_block_entities(&self, meshes: BlockEntityMeshes) {
         *self.block_entities.borrow_mut() = meshes;
+    }
+
+    /// Switches the custom entity models of resource packs ("Custom Entity
+    /// Models"); on by default in the options, off until this is called.
+    pub fn set_custom_models_enabled(&self, enabled: bool) {
+        self.custom_models.set_enabled(enabled);
     }
 
     /// Switches the shadows under the entities (`GameSettings` "Entity
@@ -560,6 +575,10 @@ impl SkinLookup for EntityTextures {
 
     fn custom_cape(&self, uuid: u128, name: &str) -> Option<u32> {
         self.capes.borrow_mut().lookup(uuid, name)
+    }
+
+    fn custom_models(&self) -> Option<&CustomModels> {
+        Some(&self.custom_models)
     }
 }
 

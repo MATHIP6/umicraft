@@ -847,6 +847,9 @@ pub enum TextureSlot {
     HorseSkeleton,
     /// The skin of a player, by the index the texture cache gave it.
     Skin(u32),
+    /// The texture of a custom entity model of a resource pack (CEM), by the
+    /// index the model registry gave it.
+    Cem(u32),
     /// The cape of a player, by the index the texture cache gave it.
     Cape(u32),
     /// One frame of a third-party cape (ADR-0081), by the index the cape

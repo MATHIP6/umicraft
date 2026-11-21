@@ -15,6 +15,8 @@ use umicraft_assets::profile_textures::{check_cape_image, skin_from_image, Textu
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, Renderer};
 
+use super::custom_models::CustomModels;
+
 /// What a mesher may ask about downloaded textures.
 pub(crate) trait SkinLookup {
     /// The index of the skin at `url`, once it is ready.
@@ -25,6 +27,11 @@ pub(crate) trait SkinLookup {
     /// player `uuid` named `name` (ADR-0081), asking for the lookup on the
     /// first call. None by default: only the world's textures look capes up.
     fn custom_cape(&self, _uuid: u128, _name: &str) -> Option<u32> {
+        None
+    }
+    /// The custom entity models of the packs (ADR-0089). None by default:
+    /// only the world's textures hold them.
+    fn custom_models(&self) -> Option<&CustomModels> {
         None
     }
 }
