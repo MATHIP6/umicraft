@@ -10,15 +10,16 @@
 use umicraft_assets::GuiAtlas;
 use umicraft_game::entity::EntityId;
 use umicraft_game::inventory::effect_list::EffectLine;
-use umicraft_game::inventory::tooltip::{TooltipColor, TooltipLine, TooltipText};
+use umicraft_game::inventory::tooltip::{effect_name_key, TooltipColor, TooltipLine, TooltipText};
 use umicraft_game::inventory::{
     resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
 };
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::PORTRAIT_KEY;
 use umicraft_ui::screens::{
-    anvil_cost_line, CostText, Hotspot, Label, ScreenKind, ScreenLayout, ScreenState, Sheet,
-    SpriteRect, COST_RIGHT, COST_Y, TRADE_DISABLED_CROSSES, TRADE_OFFER_ITEMS,
+    anvil_cost_line, beacon_tooltip, BeaconTooltip, CostText, Hotspot, Label, ScreenKind,
+    ScreenLayout, ScreenState, Sheet, SpriteRect, COST_RIGHT, COST_Y, TRADE_DISABLED_CROSSES,
+    TRADE_OFFER_ITEMS,
 };
 use umicraft_ui::styled_text::{draw_styled, styled_width, StyledRun};
 use umicraft_ui::widgets::slot;
@@ -517,6 +518,9 @@ pub(crate) fn draw_inventory_overlay(
     if offer.is_none() && state.trade_disabled {
         draw_deprecated_tooltip(ui, atlas, viewport, &layout);
     }
+    if let Some(tooltip) = hover.and_then(|hotspot| beacon_tooltip(hotspot, &state)) {
+        draw_beacon_tooltip(ui, atlas, viewport, &layout, tooltip);
+    }
     // `InventoryEffectRenderer.drawScreen` draws the list after the rest of
     // the screen, the held stack and the tooltip included.
     if kind == ScreenKind::Player {
@@ -606,18 +610,60 @@ fn draw_deprecated_tooltip(ui: &mut Ui, atlas: &FontAtlas, viewport: Rect, layou
         )
         .contains(pointer)
     });
-    if !over_cross {
-        return;
-    }
-    let line = TooltipLine {
-        text: TooltipText::Translation {
+    if over_cross {
+        let text = TooltipText::Translation {
             key: "merchant.deprecated".into(),
             args: Vec::new(),
-        },
+        };
+        draw_text_tooltip(ui, atlas, viewport, layout, text);
+    }
+}
+
+/// Shows the tooltip of a hovered beacon button: the power name, with " II"
+/// on the last tier, or `gui.done` / `gui.cancel` (`GuiBeacon`).
+fn draw_beacon_tooltip(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    viewport: Rect,
+    layout: &ScreenLayout,
+    tooltip: BeaconTooltip,
+) {
+    let key = |key: &str| TooltipText::Translation {
+        key: key.into(),
+        args: Vec::new(),
+    };
+    let text = match tooltip {
+        BeaconTooltip::Done => key("gui.done"),
+        BeaconTooltip::Cancel => key("gui.cancel"),
+        BeaconTooltip::Power { effect, level_two } => {
+            let Some(name) = u8::try_from(effect).ok().and_then(effect_name_key) else {
+                return;
+            };
+            let name = crate::language::current().tr(name).to_string();
+            TooltipText::Literal(if level_two { name + " II" } else { name })
+        }
+    };
+    draw_text_tooltip(ui, atlas, viewport, layout, text);
+}
+
+/// Draws a one-line white tooltip at the pointer
+/// (`GuiScreen.drawCreativeTabHoveringText`).
+fn draw_text_tooltip(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    viewport: Rect,
+    layout: &ScreenLayout,
+    text: TooltipText,
+) {
+    let Some(pointer) = ui.pointer() else {
+        return;
+    };
+    let line = TooltipLine {
+        text,
         color: TooltipColor::White,
         italic: false,
     };
-    draw_tooltip(ui, atlas, viewport, scale, pointer, &[line]);
+    draw_tooltip(ui, atlas, viewport, layout.scale as f32, pointer, &[line]);
 }
 
 /// Draws one texture sub-rectangle.

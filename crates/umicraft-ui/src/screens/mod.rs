@@ -42,7 +42,7 @@ mod screen_layout;
 mod villager;
 
 pub use anvil::{cost_line as anvil_cost_line, CostLine, CostText, COST_RIGHT, COST_Y};
-pub use beacon::effect_of as beacon_effect;
+pub use beacon::{effect_of as beacon_effect, tooltip as beacon_tooltip, BeaconTooltip};
 pub use decoration::{Decoration, Fill, Sheet, SpriteRect};
 pub use enchanting::row_available as enchant_row_available;
 pub use interaction::{Dynamic, Hotspot, HotspotSpec, Label, ScreenState};

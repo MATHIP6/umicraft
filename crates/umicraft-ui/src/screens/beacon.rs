@@ -25,6 +25,49 @@ const TIERS: [&[(i32, u32)]; 4] = [
 ];
 /// The tier whose second button repeats the primary power as a secondary.
 const SECONDARY_TIER: u8 = 3;
+/// Regeneration, the one secondary power whose tooltip has no " II".
+const REGENERATION: i32 = 10;
+
+/// What the tooltip of a hovered beacon button says
+/// (`drawButtonForegroundLayer` of each `GuiBeacon` button).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BeaconTooltip {
+    /// The name of a power; `level_two` appends " II".
+    Power {
+        /// The potion id.
+        effect: i32,
+        /// Whether the button gives the power at level II: every button of
+        /// the last tier but regeneration.
+        level_two: bool,
+    },
+    /// `gui.done`.
+    Done,
+    /// `gui.cancel`.
+    Cancel,
+}
+
+/// The tooltip of `hotspot`, if it is a beacon button that exists: the power
+/// buttons only once the server sent the pyramid levels (`updateScreen`
+/// waits for `getField(0) >= 0`), and the repeat button only with a primary
+/// power. Disabled buttons still show theirs, as `isMouseOver` ignores
+/// `enabled`.
+#[must_use]
+pub fn tooltip(hotspot: Hotspot, state: &ScreenState<'_>) -> Option<BeaconTooltip> {
+    match hotspot {
+        Hotspot::BeaconConfirm => Some(BeaconTooltip::Done),
+        Hotspot::BeaconCancel => Some(BeaconTooltip::Cancel),
+        Hotspot::BeaconPower { tier, slot } => {
+            state.properties.first()?;
+            let primary = state.properties.get(1).map_or(0, |&v| i32::from(v));
+            let effect = effect_of(tier, slot, primary)?;
+            Some(BeaconTooltip::Power {
+                effect,
+                level_two: tier >= SECONDARY_TIER && effect != REGENERATION,
+            })
+        }
+        _ => None,
+    }
+}
 
 /// Builds the beacon screen (230x219): the payment slot, backpack, hotbar.
 pub(super) fn spec() -> ScreenSpec {
@@ -289,5 +332,54 @@ mod tests {
         // Resistance: icon index 14 -> column 6, row 1.
         let resistance = decorations.iter().find(|d| d.dst == (55, 49)).unwrap();
         assert_eq!(resistance.src, (6 * 18, 198 + 18));
+    }
+
+    #[test]
+    fn the_last_tier_reads_level_two_except_regeneration() {
+        let properties = [4, 1, 0];
+        let state = ScreenState {
+            properties: &properties,
+            ..ScreenState::default()
+        };
+        let power = |tier, slot| tooltip(Hotspot::BeaconPower { tier, slot }, &state);
+        assert_eq!(
+            power(0, 0),
+            Some(BeaconTooltip::Power {
+                effect: 1,
+                level_two: false
+            })
+        );
+        assert_eq!(
+            power(3, 0),
+            Some(BeaconTooltip::Power {
+                effect: 10,
+                level_two: false
+            })
+        );
+        // The repeat button gives the primary (speed) at level II.
+        assert_eq!(
+            power(3, 1),
+            Some(BeaconTooltip::Power {
+                effect: 1,
+                level_two: true
+            })
+        );
+    }
+
+    #[test]
+    fn power_tooltips_wait_for_the_levels() {
+        let state = ScreenState::default();
+        assert_eq!(
+            tooltip(Hotspot::BeaconPower { tier: 0, slot: 0 }, &state),
+            None
+        );
+        assert_eq!(
+            tooltip(Hotspot::BeaconConfirm, &state),
+            Some(BeaconTooltip::Done)
+        );
+        assert_eq!(
+            tooltip(Hotspot::BeaconCancel, &state),
+            Some(BeaconTooltip::Cancel)
+        );
     }
 }

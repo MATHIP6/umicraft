@@ -47,8 +47,8 @@ use crate::nbt::Nbt;
 mod banner;
 mod name;
 mod potion;
-pub use potion::has_effects as potion_has_effects;
-pub(crate) use potion::{effect_name_key, elapsed_time};
+pub(crate) use potion::elapsed_time;
+pub use potion::{effect_name_key, has_effects as potion_has_effects};
 
 /// Registry name of the golden apple (`ItemAppleGold`).
 const GOLDEN_APPLE: &str = "golden_apple";
