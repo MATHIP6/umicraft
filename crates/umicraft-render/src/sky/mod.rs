@@ -330,7 +330,8 @@ impl SkyRenderer {
             state,
             // The camera matrix without the eye translation: the sky is
             // drawn around the eye, so it never parallaxes.
-            view_proj: camera.view_projection_around_eye(),
+            view_proj: camera
+                .view_projection_around_eye_within(crate::fog::sky_clip_distance(&environment)),
             eye_y: camera.eye().y as f32,
             flat_world: environment.flat_world,
             details: environment.sky_details,

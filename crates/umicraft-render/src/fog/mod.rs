@@ -206,6 +206,30 @@ pub fn far_plane(view_distance: u8) -> f32 {
     (f32::from(view_distance) * 16.0).clamp(1.0, MAX_FAR_PLANE)
 }
 
+/// The sky pass's far clip distance in blocks (OptiFine's
+/// `EntityRenderer.clipDistance`): twice the far plane, at least 173 blocks
+/// so the custom sky cube (half-size 100) stays whole, and 256 in the End.
+///
+/// The far plane there is the view distance scaled by the fog choice (0.95
+/// for Fancy, 0.83 for Fast). The clip hides the void plane near the horizon,
+/// where the sky behind it, a custom sky in particular, shows instead.
+#[must_use]
+pub fn sky_clip_distance(environment: &RenderEnvironment) -> f32 {
+    /// Smallest clip distance (`clipDistance < 173`).
+    const MIN_CLIP: f32 = 173.0;
+    /// The End's fixed clip distance.
+    const END_CLIP: f32 = 256.0;
+    if environment.dimension == 1 {
+        return END_CLIP;
+    }
+    let scale = match environment.fog_settings.kind {
+        FogKind::Fancy => 0.95,
+        FogKind::Fast => 0.83,
+        FogKind::Off => 1.0,
+    };
+    (f32::from(environment.view_distance) * 16.0 * scale * 2.0).max(MIN_CLIP)
+}
+
 /// `setupFog`: the falloff of the medium, the effects or the dimension.
 /// `sky` selects the `setupFog(-1)` variant used for the dome.
 fn mode(environment: &RenderEnvironment, sky: bool) -> FogMode {

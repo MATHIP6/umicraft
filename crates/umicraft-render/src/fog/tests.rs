@@ -399,3 +399,25 @@ fn liquid_palettes_replace_the_underwater_and_underlava_colours() {
     assert_eq!(color(FogMedium::Lava), [0.9, 0.8, 0.7]);
     assert_eq!(color(FogMedium::Air), [0.0; 3]);
 }
+
+#[test]
+fn the_sky_is_clipped_where_the_reference_clips_it() {
+    // The bug: the sky had the world's 512-block far plane, so the void plane
+    // reached the horizon and hid a custom sky that OptiFine shows there.
+    let with = |view_distance, kind, dimension| {
+        sky_clip_distance(&RenderEnvironment {
+            view_distance,
+            dimension,
+            fog_settings: FogSettings {
+                kind,
+                ..FogSettings::DEFAULT
+            },
+            ..RenderEnvironment::DEFAULT
+        })
+    };
+    assert!(near(with(8, FogKind::Fast, 0), 8.0 * 16.0 * 0.83 * 2.0));
+    assert!(near(with(12, FogKind::Fancy, 0), 12.0 * 16.0 * 0.95 * 2.0));
+    assert!(near(with(32, FogKind::Off, 0), 1024.0));
+    assert!(near(with(2, FogKind::Fast, 0), 173.0));
+    assert!(near(with(32, FogKind::Fast, 1), 256.0));
+}

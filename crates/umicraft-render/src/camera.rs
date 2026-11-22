@@ -271,7 +271,15 @@ impl Camera {
     /// Built from the relative eye so that no large number is multiplied.
     #[must_use]
     pub fn view_projection_around_eye(&self) -> Mat4 {
-        self.view_projection_from(self.render_origin())
+        self.view_projection_around_eye_within(FAR)
+    }
+
+    /// [`Camera::view_projection_around_eye`] with the far plane at `far`
+    /// blocks, for the sky pass, which the reference clips nearer than the
+    /// world (OptiFine's `clipDistance`).
+    #[must_use]
+    pub fn view_projection_around_eye_within(&self, far: f32) -> Mat4 {
+        self.view_projection_to(self.render_origin(), far)
             * Mat4::from_translation(self.relative_eye())
     }
 
@@ -285,6 +293,11 @@ impl Camera {
     /// eye keeps its full precision (F2-1a).
     #[must_use]
     pub fn view_projection_from(&self, origin: DVec3) -> Mat4 {
+        self.view_projection_to(origin, FAR)
+    }
+
+    /// [`Camera::view_projection_from`] with the far plane at `far` blocks.
+    fn view_projection_to(&self, origin: DVec3, far: f32) -> Mat4 {
         // WebGPU NDC is Y-up with Z in 0..1, i.e. the DirectX convention.
         let view = self.view_bob
             * self.view_rotation()
@@ -293,7 +306,7 @@ impl Camera {
             self.fov_y * self.fov_modifier,
             self.aspect,
             NEAR,
-            FAR,
+            far,
         );
         projection * view
     }
