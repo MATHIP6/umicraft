@@ -247,7 +247,7 @@ impl WorldView {
 
     /// The maps the server sent, as of the newest frame.
     #[must_use]
-    pub fn maps(&self) -> &MapStore {
+    pub fn maps(&self) -> &Arc<MapStore> {
         &self.maps
     }
 

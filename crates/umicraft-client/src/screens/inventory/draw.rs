@@ -7,6 +7,8 @@
 //! window slot) and issues the draw calls. It runs on the render thread and
 //! never touches the game state.
 
+use std::sync::Arc;
+
 use umicraft_assets::GuiAtlas;
 use umicraft_game::entity::EntityId;
 use umicraft_game::inventory::effect_list::EffectLine;
@@ -16,6 +18,7 @@ use umicraft_game::inventory::tooltip::{
 use umicraft_game::inventory::{
     resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
 };
+use umicraft_game::server::maps::MapStore;
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::PORTRAIT_KEY;
 use umicraft_ui::screens::{
@@ -122,6 +125,8 @@ pub(crate) struct ScreenFacts {
     pub caret_visible: bool,
     /// The potion effects listed beside the player inventory.
     pub effects: Vec<EffectLine>,
+    /// The maps the server sent, for the advanced tooltip of a filled map.
+    pub maps: Option<Arc<MapStore>>,
     /// The atlas region a pack replaces the picture of the screen with
     /// (Custom GUIs), `None` for the vanilla picture.
     pub custom_texture: Option<String>,
@@ -522,7 +527,13 @@ pub(crate) fn draw_inventory_overlay(
     draw_cursor_item(ui, atlas, layout.scale, cursor, items);
     if view.cursor.is_none() {
         let hovered = hovered_stack(ui, &layout, view, own_len).or(offer);
-        draw_hovered_tooltip(ui, atlas, viewport, &layout, hovered);
+        draw_hovered_tooltip(
+            ui,
+            atlas,
+            viewport,
+            &layout,
+            (hovered, facts.maps.as_deref()),
+        );
     }
     if offer.is_none() && state.trade_disabled {
         draw_deprecated_tooltip(ui, atlas, viewport, &layout);
@@ -597,12 +608,12 @@ fn draw_hovered_tooltip(
     atlas: &FontAtlas,
     viewport: Rect,
     layout: &ScreenLayout,
-    stack: Option<&ItemStack>,
+    (stack, maps): (Option<&ItemStack>, Option<&MapStore>),
 ) {
     let (Some(stack), Some(pointer)) = (stack, ui.pointer()) else {
         return;
     };
-    let lines = crate::screens::tooltip::item_lines(stack);
+    let lines = crate::screens::tooltip::item_lines(stack, maps);
     draw_tooltip(ui, atlas, viewport, layout.scale as f32, pointer, &lines);
 }
 

@@ -32,6 +32,7 @@ pub(super) fn name_line(
     display: &ItemDisplay,
     root: Option<&Nbt>,
     rarity: Rarity,
+    advanced: bool,
 ) -> TooltipLine {
     let colour = rarity.color();
     if let Some(custom) = &display.custom_name {
@@ -61,7 +62,7 @@ pub(super) fn name_line(
         .flatten()
     {
         potion
-    } else if def.name == FILLED_MAP {
+    } else if def.name == FILLED_MAP && !advanced {
         let suffix = TooltipText::literal(format!(" #{}", stack.damage));
         TooltipText::Concat(vec![name, suffix])
     } else if def.name == SPAWN_EGG {

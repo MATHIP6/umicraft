@@ -7,6 +7,7 @@
 //! A child of [`super`] so it reaches the window state without widening its
 //! visibility.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_game::inventory::{drag_preview, DragPreview, WindowKind, WindowView};
@@ -81,6 +82,7 @@ impl App {
                 .world
                 .as_ref()
                 .map_or_else(Vec::new, |world| world.hud().effects.clone()),
+            maps: self.world.as_ref().map(|world| Arc::clone(world.maps())),
             custom_texture: custom_region(
                 self.assets.files.custom_guis(),
                 view,

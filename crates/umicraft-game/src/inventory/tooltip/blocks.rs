@@ -11,8 +11,6 @@ use crate::nbt::Nbt;
 /// `HideFlags` bits of the two lists.
 const HIDE_CAN_DESTROY: i32 = 8;
 const HIDE_CAN_PLACE_ON: i32 = 16;
-/// The highest block id: block items share the block's id below it.
-const LAST_BLOCK_ID: u16 = 255;
 
 /// Both lists, unless `hide` hides them.
 pub(super) fn lines(root: Option<&Nbt>, hide: i32) -> Vec<TooltipLine> {
@@ -50,22 +48,10 @@ fn list(root: Option<&Nbt>, key: &str, heading: &str) -> Vec<TooltipLine> {
 }
 
 /// `Block.getBlockFromName(...).getLocalizedName()`: the name of a block by
-/// registry name (with or without `minecraft:`) or number.
-///
-/// The name comes from the block's item, which carries the block's
-/// unlocalised name; a block without an item (water, fire, portal) is not
-/// found and shows `missingno`, where the reference names it.
+/// registry name or number.
 fn block_name(name: &str) -> Option<TooltipText> {
-    let name = name.strip_prefix("minecraft:").unwrap_or(name);
-    let def = match name.parse::<i32>() {
-        Ok(id) => items::lookup(id),
-        Err(_) => items::lookup_by_name(name),
-    }
-    .filter(|def| def.id <= LAST_BLOCK_ID)?;
-    Some(TooltipText::key(format!(
-        "{}.name",
-        items::block_unlocalized_name(def)
-    )))
+    let key = items::block_unlocalized_name(name)?;
+    Some(TooltipText::key(format!("{key}.name")))
 }
 
 #[cfg(test)]
@@ -81,13 +67,23 @@ mod tests {
 
     #[test]
     fn can_destroy_lists_each_block() {
-        let root = tag("CanDestroy", &["minecraft:stone", "dirt", "unknown"]);
+        let root = tag(
+            "CanDestroy",
+            &["minecraft:stone", "dirt", "unknown", "water", "8"],
+        );
         let lines = lines(Some(&root), 0);
-        assert_eq!(lines.len(), 5);
+        assert_eq!(lines.len(), 7);
         assert_eq!(lines[1].text, TooltipText::key("item.canBreak"));
         assert_eq!(lines[2].text, TooltipText::key("tile.stone.name"));
         assert_eq!(lines[2].color, TooltipColor::DarkGray);
         assert_eq!(lines[4].text, TooltipText::literal("missingno"));
+        // Regression: a block without an item showed `missingno`.
+        assert_eq!(lines[5].text, TooltipText::key("tile.water.name"));
+        assert_eq!(
+            lines[6].text,
+            TooltipText::key("tile.water.name"),
+            "by number"
+        );
     }
 
     #[test]

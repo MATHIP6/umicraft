@@ -386,9 +386,10 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
   table (clue tooltip, galactic names, animated book), the client-side
   prediction of the villager and anvil results (the server never sends the
   result of an accepted click), and the missing tooltip lines (written book,
-  fireworks, `AttributeModifiers`, `CanDestroy` / `CanPlaceOn`). Left: the
-  owner's in-game validation, and the advanced-mode tooltip lines (id,
-  colour, map scale, NBT count).
+  fireworks, `AttributeModifiers`, `CanDestroy` / `CanPlaceOn`). The
+  written book glint and the advanced-mode tooltip lines (id, colour, map
+  scale, registry name, NBT count) followed. Left: the owner's in-game
+  validation.
 
 ### P5 — Entities (finishes M8)
 

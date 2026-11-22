@@ -19,9 +19,9 @@
 //! `AttributeModifiers` or the item's attack damage, in Java hash order),
 //! `Unbreakable`, and the `CanDestroy` / `CanPlaceOn` lists ([`blocks`]). The
 //! `HideFlags` bits 1, 2, 4, 8, 16 and 32 are honoured. [`tooltip_advanced`]
-//! adds the advanced-mode (F3+H) durability line `Durability: x / y` for a
-//! damaged item; the advanced id, colour, map and NBT lines are never
-//! produced.
+//! builds the advanced mode (F3+H, [`advanced`]): the id after the name, the
+//! dye colour in hex, the map scale, then the durability, the registry name
+//! and the tag count.
 //!
 //! ## Limitations
 //!
@@ -29,8 +29,6 @@
 //!   per-damage sub-name (`item.swordDiamond.name`, `tile.cloth.red.name`,
 //!   see [`items::unlocalized_name`]); [`name`] covers the items that build
 //!   their own name (potion, banner, player head, spawn egg, written book).
-//! * A block of `CanDestroy` / `CanPlaceOn` that has no item (water, fire) is
-//!   shown as `missingno`; the reference names it.
 //! * The firework shape name is not trimmed as the reference does; the 1.8
 //!   language files have no spaces around it.
 //! * Potion lines come from [`potion`]. The "When Applied" attribute lines
@@ -44,6 +42,8 @@ use crate::item_nbt::ItemDisplay;
 use crate::items;
 use crate::nbt::Nbt;
 
+mod advanced;
+pub use advanced::Advanced;
 mod attributes;
 mod blocks;
 mod book;
@@ -66,6 +66,8 @@ const GOLDEN_APPLE: &str = "golden_apple";
 const ENCHANTED_BOOK: &str = "enchanted_book";
 /// Registry name of the potion (`ItemPotion`).
 const POTION: &str = "potion";
+/// Registry name of the filled map (`ItemMap`).
+const FILLED_MAP: &str = "filled_map";
 
 const HIDE_ENCHANTMENTS: i32 = 1;
 const HIDE_ATTRIBUTES: i32 = 2;
@@ -257,34 +259,30 @@ impl TooltipLine {
 /// });
 /// ```
 pub fn tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
-    tooltip_advanced(stack, false)
+    build(stack, None)
 }
 
-/// Builds the tooltip of `stack`, with the advanced-mode (F3+H) durability
-/// line when `advanced` is set.
-///
-/// The line (`item.durability`, "Durability: %s / %s") shows the remaining and
-/// the maximum uses of a damaged item, and comes after every other line
+/// Builds the tooltip of `stack`, in advanced mode (F3+H) when `advanced` is
+/// set: the id after the name (` (#0276)`, with the damage for an item with
+/// subtypes), the dye colour in hex instead of "Dyed", the scale of a map,
+/// then at the end the durability of a damaged item (`item.durability`,
+/// "Durability: %s / %s"), the registry name and the tag count
 /// (`ItemStack.getTooltip`).
 ///
 /// ```
-/// use umicraft_game::inventory::tooltip::{tooltip_advanced, TooltipText};
+/// use umicraft_game::inventory::tooltip::{tooltip_advanced, Advanced, TooltipText};
 /// use umicraft_protocol::packets::play::ItemStack;
 ///
 /// let sword = ItemStack { item_id: 276, stack_size: 1, damage: 61, nbt: None };
-/// let lines = tooltip_advanced(&sword, true);
-/// let last = lines.last().expect("lines");
-/// assert_eq!(last.text, TooltipText::Translation {
+/// let lines = tooltip_advanced(&sword, Some(Advanced::default()));
+/// let durability = &lines[lines.len() - 2];
+/// assert_eq!(durability.text, TooltipText::Translation {
 ///     key: "item.durability".into(),
 ///     args: vec![TooltipText::Literal("1500".into()), TooltipText::Literal("1561".into())],
 /// });
 /// ```
-pub fn tooltip_advanced(stack: &ItemStack, advanced: bool) -> Vec<TooltipLine> {
-    let mut lines = base_tooltip(stack);
-    if advanced {
-        lines.extend(durability_line(stack));
-    }
-    lines
+pub fn tooltip_advanced(stack: &ItemStack, advanced: Option<Advanced>) -> Vec<TooltipLine> {
+    build(stack, advanced)
 }
 
 /// `Durability: remaining / max` for a damaged item (`ItemStack.isItemDamaged`).
@@ -304,7 +302,7 @@ fn durability_line(stack: &ItemStack) -> Option<TooltipLine> {
     Some(TooltipLine::plain(text, TooltipColor::Gray))
 }
 
-fn base_tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
+fn build(stack: &ItemStack, advanced: Option<Advanced>) -> Vec<TooltipLine> {
     let bytes = stack.nbt.as_deref();
     let root = bytes.and_then(|b| Nbt::parse(b).ok());
     let display = bytes.map(ItemDisplay::from_nbt).unwrap_or_default();
@@ -315,24 +313,35 @@ fn base_tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
         .unwrap_or(0);
     let def = items::lookup(i32::from(stack.item_id));
 
-    let mut lines = vec![name::name_line(
+    let mut name = name::name_line(
         stack,
         def,
         &display,
         root.as_ref(),
         rarity(stack, def, root.as_ref()),
-    )];
+        advanced.is_some(),
+    );
+    if advanced.is_some() {
+        let suffix = advanced::id_suffix(stack.item_id, stack.damage);
+        name.text = TooltipText::Concat(vec![name.text, suffix]);
+    }
+    let mut lines = vec![name];
     if hide & HIDE_ADDITIONAL == 0 {
         lines.extend(additional_lines(def, stack.damage, root.as_ref()));
+        if let (Some(advanced), Some(FILLED_MAP)) = (advanced, def.map(|d| d.name)) {
+            lines.extend(advanced::map_lines(advanced.map_scale));
+        }
     }
     if hide & HIDE_ENCHANTMENTS == 0 {
         lines.extend(display.enchantments.iter().filter_map(enchantment_line));
     }
-    if has_dyed_colour(root.as_ref()) {
-        lines.push(TooltipLine::italic(
+    match (dyed_colour(root.as_ref()), advanced) {
+        (Some(colour), Some(_)) => lines.push(advanced::colour_line(colour)),
+        (Some(_), None) => lines.push(TooltipLine::italic(
             TooltipText::key("item.dyed"),
             TooltipColor::Gray,
-        ));
+        )),
+        (None, _) => {}
     }
     lines.extend(display.lore.iter().map(|lore| {
         TooltipLine::italic(
@@ -350,6 +359,10 @@ fn base_tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
         ));
     }
     lines.extend(blocks::lines(root.as_ref(), hide));
+    if advanced.is_some() {
+        lines.extend(durability_line(stack));
+        lines.extend(advanced::end_lines(def, root.as_ref()));
+    }
     lines
 }
 
@@ -419,13 +432,12 @@ fn additional_lines(
     }
 }
 
-/// `display.color` is present as a `TAG_Int` (`hasKey("color", 3)`).
-fn has_dyed_colour(root: Option<&Nbt>) -> bool {
-    matches!(
-        root.and_then(|r| r.get("display"))
-            .and_then(|d| d.get("color")),
-        Some(Nbt::Int(_))
-    )
+/// `display.color` when it is a `TAG_Int` (`hasKey("color", 3)`).
+fn dyed_colour(root: Option<&Nbt>) -> Option<i32> {
+    match root?.get("display")?.get("color")? {
+        Nbt::Int(colour) => Some(*colour),
+        _ => None,
+    }
 }
 
 /// `Unbreakable` is a non-zero `TAG_Byte` (`NBTTagCompound.getBoolean`).
@@ -521,8 +533,10 @@ mod tests {
     fn the_durability_line_is_advanced_only_and_needs_damage() {
         let damaged = stack(276, 61, None);
         assert_eq!(tooltip(&damaged).len(), 3);
-        let lines = tooltip_advanced(&damaged, true);
-        assert_eq!(lines.len(), 4);
+        let advanced = Some(Advanced::default());
+        let lines = tooltip_advanced(&damaged, advanced);
+        // Name, blank, attack damage, durability, registry name.
+        assert_eq!(lines.len(), 5);
         assert_eq!(
             lines[3].text,
             TooltipText::Translation {
@@ -530,8 +544,49 @@ mod tests {
                 args: vec![TooltipText::literal("1500"), TooltipText::literal("1561")],
             }
         );
-        assert_eq!(tooltip_advanced(&stack(276, 0, None), true).len(), 3);
-        assert_eq!(tooltip_advanced(&stack(1, 5, None), true).len(), 1);
+        assert_eq!(tooltip_advanced(&stack(276, 0, None), advanced).len(), 4);
+        assert_eq!(tooltip_advanced(&stack(1, 5, None), advanced).len(), 2);
+    }
+
+    #[test]
+    fn advanced_mode_adds_the_id_and_replaces_the_map_number() {
+        let advanced = Some(Advanced { map_scale: Some(1) });
+        let map = stack(358, 7, None);
+        let name = |lines: &[TooltipLine]| lines[0].text.clone();
+        assert_eq!(
+            name(&tooltip(&map)),
+            TooltipText::Concat(vec![
+                TooltipText::key("item.map.name"),
+                TooltipText::literal(" #7"),
+            ])
+        );
+        let lines = tooltip_advanced(&map, advanced);
+        assert_eq!(
+            name(&lines),
+            TooltipText::Concat(vec![
+                TooltipText::key("item.map.name"),
+                TooltipText::literal("§f (#0358/7)"),
+            ])
+        );
+        assert_eq!(lines[1].text, TooltipText::literal("Scaling at 1:2"));
+        assert_eq!(lines[3].text, TooltipText::literal("minecraft:filled_map"));
+    }
+
+    #[test]
+    fn advanced_mode_prints_the_dye_colour() {
+        let dyed = Nbt::Compound(vec![(
+            "display".into(),
+            Nbt::Compound(vec![("color".into(), Nbt::Int(0x00FF_8000))]),
+        )]);
+        let boots = stack(301, 0, dyed.to_root_bytes());
+        let plain = tooltip(&boots);
+        assert_eq!(plain[1].text, TooltipText::key("item.dyed"));
+        let advanced = tooltip_advanced(&boots, Some(Advanced::default()));
+        assert_eq!(advanced[1].text, TooltipText::literal("Color: #FF8000"));
+        assert_eq!(
+            advanced.last().map(|l| l.text.clone()),
+            Some(TooltipText::literal("NBT: 1 tag(s)"))
+        );
     }
 
     #[test]
