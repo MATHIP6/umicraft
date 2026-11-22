@@ -120,14 +120,14 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
         rail_entities(world, &mut entities);
         light_entities(world, &mut entities);
         light_paintings(world, &mut entities);
-        shadow_entities(world, &mut entities, game.world_time);
+        shadow_entities(world, &mut entities, game.clock.time());
         eye_light(world, view.position)
     });
     let _ = frames.try_send(RenderEvent::Frame(Box::new(Frame {
         perspective: game.perspective,
         state: view,
         tick_time,
-        world_time: game.world_time,
+        world_time: game.clock.time(),
         dimension: game.dimension,
         flat_world: game.flat_world,
         gamemode: game.gamemode,
@@ -150,7 +150,7 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
             game.server.effects(),
             view.position,
             game.dimension,
-            game.world_time,
+            game.clock.time(),
         ),
         border: crate::scene::border::border_view(game.server.border()),
         weather: crate::scene::weather::WeatherView::new(

@@ -95,6 +95,8 @@ pub(super) fn tick(
     let tick_start = Instant::now();
     game.metrics.start_tick();
     game.status_data.ticks += 1;
+    // `WorldClient.tick`: the time of day moves on between `Time Update`s.
+    game.clock.tick();
     apply_perspective_presses(game);
     // MCP `Minecraft.runTick`: `updateController` syncs the slot, the hotbar
     // keys then select the next one, the drop key sends its packets, then

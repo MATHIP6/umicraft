@@ -32,6 +32,7 @@ use crate::scene::cracks::Crack;
 use crate::screens::connection_end::ConnectionEnd;
 
 pub(super) mod chat;
+pub(super) mod clock;
 mod combat_log;
 pub(super) mod controls;
 pub(super) mod hotbar;
@@ -84,11 +85,8 @@ pub(super) struct Game {
     /// Whether the world is a superflat one, from the world type the server
     /// names in `Join Game` and in the `Respawn` that changes the dimension.
     pub(super) flat_world: bool,
-    /// The latest signed time of day from `Time Update`.
-    ///
-    /// It is never advanced locally: the server sends updates regularly and a
-    /// negative value means the clock is frozen.
-    pub(super) world_time: i64,
+    /// The time of day: set by `Time Update`, advanced by each tick.
+    pub(super) clock: clock::WorldClock,
     /// Whether the server is in the play state.
     pub(super) playing: bool,
     /// The world spawn point, as the server announced it.
@@ -190,7 +188,7 @@ impl Game {
             account_textures: None,
             dimension: 0,
             flat_world: false,
-            world_time: 0,
+            clock: clock::WorldClock::default(),
             playing: false,
             spawn: None,
             state: None,

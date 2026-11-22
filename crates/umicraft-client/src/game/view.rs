@@ -61,7 +61,7 @@ pub(super) fn debug_world(game: &Game) -> crate::debug::world::DebugWorld {
             target: game.target().map(|hit| hit.block),
             // A client that has not seen the packet assumes normal.
             difficulty: game.server.difficulty().unwrap_or(2),
-            world_time: game.world_time,
+            world_time: game.clock.time(),
             tick_micros: game.metrics.last_tick_micros,
             net_event_micros: game.metrics.last_net_micros,
             input_processing_micros: game.metrics.last_input_processing_us,

@@ -20,13 +20,14 @@ fn a_time_update_sets_the_world_clock_and_the_frame_carries_it() {
         &mut queue,
         &frames,
     );
-    assert_eq!(game.world_time, -6_000);
+    assert_eq!(game.clock.time(), 6_000);
+    assert!(game.clock.frozen());
 
     publish_frame(&game, &frames, Instant::now());
     let RenderEvent::Frame(frame) = received.try_recv().expect("a frame") else {
         panic!("the published event must be a frame");
     };
-    assert_eq!(frame.world_time, -6_000);
+    assert_eq!(frame.world_time, 6_000);
     assert_eq!(frame.dimension, 0);
     // `Frame` is cheap to clone and send across threads without taking locks.
     fn assert_send_sync<T: Send + Sync + Clone + 'static>() {}
@@ -77,7 +78,7 @@ fn a_second_join_game_replaces_the_world_of_the_previous_server() {
 
     assert_eq!(game.entity_id, 99);
     assert_eq!(game.dimension, -1);
-    assert_eq!(game.world_time, 0);
+    assert_eq!(game.clock.time(), 0);
     assert_eq!(game.entities.len(), 0);
     assert!(game
         .world
@@ -110,7 +111,7 @@ fn joining_and_changing_dimension_reset_the_world_clock() {
     };
 
     handle_net(&mut game, PlayEvent::JoinGame(join(0)), &mut queue, &frames);
-    assert_eq!(game.world_time, 0);
+    assert_eq!(game.clock.time(), 0);
     assert_eq!(game.dimension, 0);
 
     handle_net(
@@ -122,7 +123,8 @@ fn joining_and_changing_dimension_reset_the_world_clock() {
         &mut queue,
         &frames,
     );
-    assert_eq!(game.world_time, -6_000);
+    assert_eq!(game.clock.time(), 6_000);
+    assert!(game.clock.frozen());
 
     // A same-dimension respawn keeps the frozen clock.
     handle_net(
@@ -131,7 +133,8 @@ fn joining_and_changing_dimension_reset_the_world_clock() {
         &mut queue,
         &frames,
     );
-    assert_eq!(game.world_time, -6_000);
+    assert_eq!(game.clock.time(), 6_000);
+    assert!(game.clock.frozen());
     assert_eq!(game.dimension, 0);
 
     // A dimension change starts a new clock.
@@ -141,7 +144,7 @@ fn joining_and_changing_dimension_reset_the_world_clock() {
         &mut queue,
         &frames,
     );
-    assert_eq!(game.world_time, 0);
+    assert_eq!(game.clock.time(), 0);
     assert_eq!(game.dimension, -1);
 }
 
