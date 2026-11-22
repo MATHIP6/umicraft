@@ -12,27 +12,27 @@
 //! Line 0 is the display name coloured by rarity (`GuiScreen.renderToolTip`
 //! colours it with `ItemStack.getRarity().rarityColor`; every other line is
 //! gray unless it carries its own colour). Then, in the vanilla order: the
-//! `addInformation` lines (record title, enchanted-book stored enchantments),
-//! the `ench` list, the "Dyed" line, the lore, the attack-damage attribute
-//! block (a blank line plus `+N Attack Damage`, which 1.8 shows in normal
-//! mode), and `Unbreakable`. The `HideFlags` bits 1, 2, 4 and 32 are honoured.
-//! [`tooltip_advanced`] adds the advanced-mode (F3+H) durability line
-//! `Durability: x / y` for a damaged item; the advanced id and NBT lines are
-//! never produced.
+//! `addInformation` lines (record title, enchanted-book stored enchantments,
+//! potion effects, banner layers, written-book author and generation
+//! ([`book`]), firework flight and stars ([`firework`])), the `ench` list, the
+//! "Dyed" line, the lore, the attribute block ([`attributes`]: the stack's
+//! `AttributeModifiers` or the item's attack damage, in Java hash order),
+//! `Unbreakable`, and the `CanDestroy` / `CanPlaceOn` lists ([`blocks`]). The
+//! `HideFlags` bits 1, 2, 4, 8, 16 and 32 are honoured. [`tooltip_advanced`]
+//! adds the advanced-mode (F3+H) durability line `Durability: x / y` for a
+//! damaged item; the advanced id, colour, map and NBT lines are never
+//! produced.
 //!
 //! ## Limitations
 //!
 //! * Item names use the vanilla 1.8 keys: the legacy unlocalised name plus the
 //!   per-damage sub-name (`item.swordDiamond.name`, `tile.cloth.red.name`,
 //!   see [`items::unlocalized_name`]); [`name`] covers the items that build
-//!   their own name (potion, banner, player head, spawn egg).
-//! * Only sword, pickaxe, axe and shovel attack damage is produced (hoes and
-//!   shears have no attribute modifier in 1.8). A stack-level
-//!   `AttributeModifiers` NBT list that replaces the item's own modifiers is
-//!   ignored.
-//! * `CanDestroy` / `CanPlaceOn`, books, maps (apart from the
-//!   ` #<damage>` name suffix) and fireworks add no lines. Banners list their
-//!   pattern layers ([`banner`]).
+//!   their own name (potion, banner, player head, spawn egg, written book).
+//! * A block of `CanDestroy` / `CanPlaceOn` that has no item (water, fire) is
+//!   shown as `missingno`; the reference names it.
+//! * The firework shape name is not trimmed as the reference does; the 1.8
+//!   language files have no spaces around it.
 //! * Potion lines come from [`potion`]. The "When Applied" attribute lines
 //!   keep the order of the effects; the reference iterates a hash multimap.
 //! * The stack NBT is parsed twice (once here, once by [`ItemDisplay`]); a
@@ -40,12 +40,20 @@
 
 use umicraft_protocol::packets::play::ItemStack;
 
-use crate::item_nbt::{Enchantment, ItemDisplay};
-use crate::items::{self, ItemKind, Tier, ToolKind};
+use crate::item_nbt::ItemDisplay;
+use crate::items;
 use crate::nbt::Nbt;
 
+mod attributes;
+mod blocks;
+mod book;
+use attributes::format_amount;
 mod banner;
 mod enchant_clue;
+mod enchantment;
+pub(crate) use enchantment::stored_enchantments;
+use enchantment::{enchantment_line, enchantment_name};
+mod firework;
 mod name;
 mod potion;
 pub use enchant_clue::{enchant_row_lines, EnchantRow};
@@ -58,12 +66,6 @@ const GOLDEN_APPLE: &str = "golden_apple";
 const ENCHANTED_BOOK: &str = "enchanted_book";
 /// Registry name of the potion (`ItemPotion`).
 const POTION: &str = "potion";
-/// Enchantment id of sharpness (`Enchantment.sharpness`).
-const SHARPNESS_ID: i16 = 16;
-/// Extra attack damage per sharpness level (`EnchantmentDamage`, type 0).
-const SHARPNESS_PER_LEVEL: f64 = 1.25;
-/// Highest level that has an `enchantment.level.N` translation.
-const MAX_NAMED_LEVEL: u16 = 10;
 
 const HIDE_ENCHANTMENTS: i32 = 1;
 const HIDE_ATTRIBUTES: i32 = 2;
@@ -339,7 +341,7 @@ fn base_tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
         )
     }));
     if hide & HIDE_ATTRIBUTES == 0 {
-        lines.extend(attack_damage_lines(def, &display));
+        lines.extend(attributes::lines(def, &display, root.as_ref()));
     }
     if hide & HIDE_UNBREAKABLE == 0 && is_unbreakable(root.as_ref()) {
         lines.push(TooltipLine::plain(
@@ -347,6 +349,7 @@ fn base_tooltip(stack: &ItemStack) -> Vec<TooltipLine> {
             TooltipColor::Blue,
         ));
     }
+    lines.extend(blocks::lines(root.as_ref(), hide));
     lines
 }
 
@@ -408,84 +411,12 @@ fn additional_lines(
             .filter_map(enchantment_line)
             .collect();
     }
-    Vec::new()
-}
-
-/// The `StoredEnchantments` list of an enchanted book
-/// (`ItemEnchantedBook.getEnchantments`).
-pub(crate) fn stored_enchantments(root: Option<&Nbt>) -> Vec<Enchantment> {
-    let list = root
-        .and_then(|r| r.get("StoredEnchantments"))
-        .and_then(Nbt::as_list)
-        .unwrap_or_default();
-    list.iter()
-        .map(|entry| {
-            let short = |key| entry.get(key).and_then(Nbt::as_int).unwrap_or(0);
-            Enchantment {
-                id: short("id") as i16,
-                level: short("lvl").clamp(0, i32::from(u16::MAX)) as u16,
-            }
-        })
-        .collect()
-}
-
-/// One enchantment line (`Enchantment.getTranslatedName`), `None` for an id
-/// the 1.8 table does not know (vanilla skips those).
-fn enchantment_line(enchantment: &Enchantment) -> Option<TooltipLine> {
-    let text = enchantment_name(enchantment.id, enchantment.level)?;
-    Some(TooltipLine::plain(text, TooltipColor::Gray))
-}
-
-/// `Enchantment.getTranslatedName(level)`: the name and the level in roman
-/// numerals, `None` for an id the 1.8 table does not know.
-fn enchantment_name(id: i16, level: u16) -> Option<TooltipText> {
-    let key = enchantment_key(id)?;
-    let level = if (1..=MAX_NAMED_LEVEL).contains(&level) {
-        TooltipText::key(format!("enchantment.level.{level}"))
-    } else {
-        TooltipText::literal(level.to_string())
-    };
-    Some(TooltipText::Concat(vec![
-        TooltipText::key(key),
-        TooltipText::literal(" "),
-        level,
-    ]))
-}
-
-/// The language key of an enchantment id (`Enchantment.getName`).
-///
-/// Protection and damage enchantments share a family key per type
-/// (`EnchantmentProtection`, `EnchantmentDamage`), the others use their
-/// `setName` string.
-fn enchantment_key(id: i16) -> Option<&'static str> {
-    Some(match id {
-        0 => "enchantment.protect.all",
-        1 => "enchantment.protect.fire",
-        2 => "enchantment.protect.fall",
-        3 => "enchantment.protect.explosion",
-        4 => "enchantment.protect.projectile",
-        5 => "enchantment.oxygen",
-        6 => "enchantment.waterWorker",
-        7 => "enchantment.thorns",
-        8 => "enchantment.waterWalker",
-        16 => "enchantment.damage.all",
-        17 => "enchantment.damage.undead",
-        18 => "enchantment.damage.arthropods",
-        19 => "enchantment.knockback",
-        20 => "enchantment.fire",
-        21 => "enchantment.lootBonus",
-        32 => "enchantment.digging",
-        33 => "enchantment.untouching",
-        34 => "enchantment.durability",
-        35 => "enchantment.lootBonusDigger",
-        48 => "enchantment.arrowDamage",
-        49 => "enchantment.arrowKnockback",
-        50 => "enchantment.arrowFire",
-        51 => "enchantment.arrowInfinite",
-        61 => "enchantment.lootBonusFishing",
-        62 => "enchantment.fishingSpeed",
-        _ => return None,
-    })
+    match def.name {
+        book::WRITTEN_BOOK => book::lines(root),
+        firework::ROCKET => firework::rocket_lines(root),
+        firework::STAR => firework::star_lines(root),
+        _ => Vec::new(),
+    }
 }
 
 /// `display.color` is present as a `TAG_Int` (`hasKey("color", 3)`).
@@ -503,70 +434,6 @@ fn is_unbreakable(root: Option<&Nbt>) -> bool {
         root.and_then(|r| r.get("Unbreakable")),
         Some(Nbt::Byte(value)) if *value != 0
     )
-}
-
-/// The attribute block of a weapon or tool: a blank line, then
-/// `+N Attack Damage` in blue. The number is the base damage plus the
-/// sharpness bonus (`EnchantmentHelper.func_152377_a`), printed with
-/// `DecimalFormat("#.###")`.
-fn attack_damage_lines(def: Option<&items::ItemDef>, display: &ItemDisplay) -> Vec<TooltipLine> {
-    let Some(base) = def.and_then(|d| base_attack_damage(d.kind)) else {
-        return Vec::new();
-    };
-    let sharpness: f64 = display
-        .enchantments
-        .iter()
-        .filter(|e| e.id == SHARPNESS_ID)
-        .map(|e| f64::from(e.level) * SHARPNESS_PER_LEVEL)
-        .sum();
-    let amount = base + sharpness;
-    if amount <= 0.0 {
-        return Vec::new();
-    }
-    let text = TooltipText::Translation {
-        key: "attribute.modifier.plus.0".into(),
-        args: vec![
-            TooltipText::Literal(format_amount(amount)),
-            TooltipText::key("attribute.name.generic.attackDamage"),
-        ],
-    };
-    vec![
-        TooltipLine::plain(TooltipText::literal(""), TooltipColor::Gray),
-        TooltipLine::plain(text, TooltipColor::Blue),
-    ]
-}
-
-/// The attack damage an item adds to the player's own (`ItemSword.attackDamage`
-/// = 4 + material bonus, `ItemTool.damageVsEntity` = class base + bonus).
-fn base_attack_damage(kind: ItemKind) -> Option<f64> {
-    let ItemKind::Tool(tool, tier) = kind else {
-        return None;
-    };
-    let class_base = match tool {
-        ToolKind::Sword => 4.0,
-        ToolKind::Axe => 3.0,
-        ToolKind::Pickaxe => 2.0,
-        ToolKind::Shovel => 1.0,
-        ToolKind::Hoe | ToolKind::Shears => return None,
-    };
-    Some(class_base + material_bonus(tier))
-}
-
-/// `Item.ToolMaterial.getDamageVsEntity`.
-fn material_bonus(tier: Tier) -> f64 {
-    match tier {
-        Tier::Wood | Tier::Gold => 0.0,
-        Tier::Stone => 1.0,
-        Tier::Iron => 2.0,
-        Tier::Diamond => 3.0,
-    }
-}
-
-/// Formats like `DecimalFormat("#.###")`: up to three decimals, no trailing
-/// zeros and no trailing point.
-fn format_amount(amount: f64) -> String {
-    let fixed = format!("{amount:.3}");
-    fixed.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 #[cfg(test)]
@@ -838,10 +705,11 @@ mod tests {
 
     #[test]
     fn protection_and_damage_use_family_keys() {
-        assert_eq!(enchantment_key(0), Some("enchantment.protect.all"));
-        assert_eq!(enchantment_key(17), Some("enchantment.damage.undead"));
-        assert_eq!(enchantment_key(62), Some("enchantment.fishingSpeed"));
-        assert_eq!(enchantment_key(9), None);
+        let key = |id| crate::enchantments::lookup(id).map(|def| def.key);
+        assert_eq!(key(0), Some("enchantment.protect.all"));
+        assert_eq!(key(17), Some("enchantment.damage.undead"));
+        assert_eq!(key(62), Some("enchantment.fishingSpeed"));
+        assert_eq!(key(9), None);
     }
 
     #[test]

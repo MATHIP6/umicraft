@@ -29,7 +29,7 @@ pub mod tint;
 
 pub use kind::{ArmorMaterial, ArmorSlot, FoodValues, ItemKind, Tier, ToolKind};
 pub(crate) use names::dye_colour;
-pub use names::{spawn_egg_entity, unlocalized_name};
+pub use names::{block_unlocalized_name, spawn_egg_entity, unlocalized_name};
 pub use potion_color::liquid_color as potion_liquid_color;
 pub(crate) use potion_variants::{effects as potion_effects, Effect as PotionEffect};
 pub use potion_variants::{is_instant_potion, potion_creative_damages};
@@ -63,6 +63,13 @@ pub fn lookup(id: i32) -> Option<&'static ItemDef> {
     let id = u16::try_from(id).ok()?;
     let index = table::ITEMS.binary_search_by_key(&id, |def| def.id).ok()?;
     table::ITEMS.get(index)
+}
+
+/// Looks up an item by its registry name without the `minecraft:` prefix
+/// (`Item.getByNameOrId`). A linear search: it serves tooltips, not hot paths.
+#[must_use]
+pub fn lookup_by_name(name: &str) -> Option<&'static ItemDef> {
+    table::ITEMS.iter().find(|def| def.name == name)
 }
 
 /// The food values of an item stack, `None` when the item is not food.

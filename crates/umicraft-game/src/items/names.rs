@@ -132,6 +132,14 @@ fn base_name(def: &ItemDef) -> String {
     }
 }
 
+/// The unlocalised name of a block item without its subtype, such as
+/// `tile.stone` or `tile.cloth`: the `Block.getUnlocalizedName` its
+/// `ItemBlock` reports.
+#[must_use]
+pub fn block_unlocalized_name(def: &ItemDef) -> String {
+    base_name(def)
+}
+
 /// The subtype suffix of the item at `damage`, `None` when the item has no
 /// subtype names or the reference leaves the base name for that damage.
 fn suffix(def: &ItemDef, damage: i16) -> Option<String> {

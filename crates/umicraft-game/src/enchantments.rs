@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The enchantments of 1.8 as the anvil needs them (MCP `Enchantment` and
-//! its subclasses, `EnumEnchantmentType.canEnchantItem`): the highest level,
-//! the weight, which items each applies to and which ones exclude each other.
+//! The enchantments of 1.8 (MCP `Enchantment` and its subclasses,
+//! `EnumEnchantmentType.canEnchantItem`): the language key, the highest
+//! level, the weight, which items each applies to and which ones exclude each
+//! other. Tooltips and the anvil read it.
 
 use crate::items::{self, ArmorSlot, ItemKind, ToolKind};
 
@@ -51,6 +52,9 @@ enum Family {
 pub struct EnchantmentDef {
     /// The id (`effectId`).
     pub id: i16,
+    /// The language key of its name (`getName`): the protection and damage
+    /// enchantments share a family key per type.
+    pub key: &'static str,
     /// `getMaxLevel`.
     pub max_level: i32,
     /// `getWeight`, which prices it on the anvil.
@@ -61,6 +65,7 @@ pub struct EnchantmentDef {
 
 const fn def(
     id: i16,
+    key: &'static str,
     max_level: i32,
     weight: u8,
     target: Target,
@@ -68,6 +73,7 @@ const fn def(
 ) -> EnchantmentDef {
     EnchantmentDef {
         id,
+        key,
         max_level,
         weight,
         target,
@@ -77,19 +83,49 @@ const fn def(
 
 /// `Enchantment.enchantmentsList` of 1.8, by id.
 const ENCHANTMENTS: [EnchantmentDef; 25] = [
-    def(0, 4, 10, Target::Armor, Family::Protection(0)),
-    def(1, 4, 5, Target::Armor, Family::Protection(1)),
+    def(
+        0,
+        "enchantment.protect.all",
+        4,
+        10,
+        Target::Armor,
+        Family::Protection(0),
+    ),
+    def(
+        1,
+        "enchantment.protect.fire",
+        4,
+        5,
+        Target::Armor,
+        Family::Protection(1),
+    ),
     def(
         2,
+        "enchantment.protect.fall",
         4,
         5,
         Target::ArmorPiece(ArmorSlot::Boots),
         Family::Protection(2),
     ),
-    def(3, 4, 2, Target::Armor, Family::Protection(3)),
-    def(4, 4, 5, Target::Armor, Family::Protection(4)),
+    def(
+        3,
+        "enchantment.protect.explosion",
+        4,
+        2,
+        Target::Armor,
+        Family::Protection(3),
+    ),
+    def(
+        4,
+        "enchantment.protect.projectile",
+        4,
+        5,
+        Target::Armor,
+        Family::Protection(4),
+    ),
     def(
         5,
+        "enchantment.oxygen",
         3,
         2,
         Target::ArmorPiece(ArmorSlot::Helmet),
@@ -97,6 +133,7 @@ const ENCHANTMENTS: [EnchantmentDef; 25] = [
     ),
     def(
         6,
+        "enchantment.waterWorker",
         1,
         2,
         Target::ArmorPiece(ArmorSlot::Helmet),
@@ -104,28 +141,141 @@ const ENCHANTMENTS: [EnchantmentDef; 25] = [
     ),
     def(
         7,
+        "enchantment.thorns",
         3,
         1,
         Target::ArmorPiece(ArmorSlot::Chestplate),
         Family::Thorns,
     ),
-    def(8, 3, 2, Target::ArmorPiece(ArmorSlot::Boots), Family::Plain),
-    def(16, 5, 10, Target::Weapon, Family::Damage),
-    def(17, 5, 5, Target::Weapon, Family::Damage),
-    def(18, 5, 5, Target::Weapon, Family::Damage),
-    def(19, 2, 5, Target::Weapon, Family::Plain),
-    def(20, 2, 2, Target::Weapon, Family::Plain),
-    def(21, 3, 2, Target::Weapon, Family::LootBonus),
-    def(32, 5, 10, Target::Digger, Family::Digging),
-    def(33, 1, 1, Target::Digger, Family::SilkTouch),
-    def(34, 3, 5, Target::Breakable, Family::Durability),
-    def(35, 3, 2, Target::Digger, Family::LootBonus),
-    def(48, 5, 10, Target::Bow, Family::Plain),
-    def(49, 2, 2, Target::Bow, Family::Plain),
-    def(50, 1, 2, Target::Bow, Family::Plain),
-    def(51, 1, 1, Target::Bow, Family::Plain),
-    def(61, 3, 2, Target::FishingRod, Family::LootBonus),
-    def(62, 3, 2, Target::FishingRod, Family::Plain),
+    def(
+        8,
+        "enchantment.waterWalker",
+        3,
+        2,
+        Target::ArmorPiece(ArmorSlot::Boots),
+        Family::Plain,
+    ),
+    def(
+        16,
+        "enchantment.damage.all",
+        5,
+        10,
+        Target::Weapon,
+        Family::Damage,
+    ),
+    def(
+        17,
+        "enchantment.damage.undead",
+        5,
+        5,
+        Target::Weapon,
+        Family::Damage,
+    ),
+    def(
+        18,
+        "enchantment.damage.arthropods",
+        5,
+        5,
+        Target::Weapon,
+        Family::Damage,
+    ),
+    def(
+        19,
+        "enchantment.knockback",
+        2,
+        5,
+        Target::Weapon,
+        Family::Plain,
+    ),
+    def(20, "enchantment.fire", 2, 2, Target::Weapon, Family::Plain),
+    def(
+        21,
+        "enchantment.lootBonus",
+        3,
+        2,
+        Target::Weapon,
+        Family::LootBonus,
+    ),
+    def(
+        32,
+        "enchantment.digging",
+        5,
+        10,
+        Target::Digger,
+        Family::Digging,
+    ),
+    def(
+        33,
+        "enchantment.untouching",
+        1,
+        1,
+        Target::Digger,
+        Family::SilkTouch,
+    ),
+    def(
+        34,
+        "enchantment.durability",
+        3,
+        5,
+        Target::Breakable,
+        Family::Durability,
+    ),
+    def(
+        35,
+        "enchantment.lootBonusDigger",
+        3,
+        2,
+        Target::Digger,
+        Family::LootBonus,
+    ),
+    def(
+        48,
+        "enchantment.arrowDamage",
+        5,
+        10,
+        Target::Bow,
+        Family::Plain,
+    ),
+    def(
+        49,
+        "enchantment.arrowKnockback",
+        2,
+        2,
+        Target::Bow,
+        Family::Plain,
+    ),
+    def(
+        50,
+        "enchantment.arrowFire",
+        1,
+        2,
+        Target::Bow,
+        Family::Plain,
+    ),
+    def(
+        51,
+        "enchantment.arrowInfinite",
+        1,
+        1,
+        Target::Bow,
+        Family::Plain,
+    ),
+    def(
+        61,
+        "enchantment.lootBonusFishing",
+        3,
+        2,
+        Target::FishingRod,
+        Family::LootBonus,
+    ),
+    def(
+        62,
+        "enchantment.fishingSpeed",
+        3,
+        2,
+        Target::FishingRod,
+        Family::Plain,
+    ),
 ];
 
 /// Silk touch and fortune, which exclude each other.
