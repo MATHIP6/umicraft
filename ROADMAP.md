@@ -53,7 +53,7 @@ First assessed on `main` at `27838a4` (details in `docs/roadmap-review.md`
 | M6 Lighting, sky, fog, transparency | Partial — vanilla sky, clouds, weather, fog and border done in P7 (not all checked in game); frame time measured by the F2 benchmark scene (`docs/perf-log.md`), the P7 screenshot set is open (P7h) | P7 |
 | M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files used since P9/P10, animated textures to verify (P7h) | P7 |
 | M8 Entities | P5a–P5e done, most of P5f onwards done (armour, layers, light, shadows, objects, vehicles, local body); not verified against vanilla | P5 |
-| M9 Inventory & containers | `Click Window` and item icons done (P3, P4); P4 in progress (survival gaps, live session) | P4 |
+| M9 Inventory & containers | Code complete in P3 and P4 (2026-11-22); owner validation in game open | P4 |
 | M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
 | M11 Audio | Partial — code complete (index, engine, cues, packets, GUI clicks, volumes, music, non-blocking measured); owner validation by ear open | P11 |
 | M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); account manager and chooser code complete in F1 (ADR-0067/0068) | P10 (rest of menus), F1 (accounts) |
@@ -326,7 +326,8 @@ every click mode, no full-window resync caused by a desync occurs over a
 15-minute scripted session, and the trace matches vanilla for the same
 clicks.
 
-**Status (2026-10-28): in progress, not done.** Implemented (ADR-0025,
+**Status (2026-11-22): code complete, owner validation open** (the last gaps
+are listed at the end of this section). Implemented (ADR-0025,
 `docs/parity.md` "Inventory"): click prediction for every mode with rollback of
 a rejected `Confirm Transaction`, `Click Window` from the screens (left, right,
 shift, drag, double click, number keys, Q, creative middle), the armour bar
@@ -375,9 +376,19 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 - **Live-server validation:** the 15-minute scripted session with the trace
   comparison against vanilla (`Click Window` sequence per click mode, no
   desync resync), and the screenshot diff of a reference inventory.
-- **Code hygiene:** `window.rs` (1240 lines), `game.rs` (3490) and
-  `inventory/tooltip.rs` (835) are over the size the project aims for;
-  `docs/roadmap-review.md` §3.4 still lists the M9 defects as open.
+- **Code hygiene (done 2026-11-22):** `window.rs` and `game.rs` were split
+  earlier; `inventory/tooltip.rs` is split into attribute, enchantment,
+  book, firework and block-list modules. `docs/roadmap-review.md` §3.4 marks
+  the M9 defects as fixed.
+- **Finished on 2026-11-22 (branch `p4-finish`):** the click traffic of
+  `GuiContainer` (pick block, outside clicks, drop key), the horse window,
+  the anvil cost line, the villager and beacon details, the enchanting
+  table (clue tooltip, galactic names, animated book), the client-side
+  prediction of the villager and anvil results (the server never sends the
+  result of an accepted click), and the missing tooltip lines (written book,
+  fireworks, `AttributeModifiers`, `CanDestroy` / `CanPlaceOn`). Left: the
+  owner's in-game validation, and the advanced-mode tooltip lines (id,
+  colour, map scale, NBT count).
 
 ### P5 — Entities (finishes M8)
 
