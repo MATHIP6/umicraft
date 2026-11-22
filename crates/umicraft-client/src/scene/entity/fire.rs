@@ -9,30 +9,88 @@
 use std::collections::HashMap;
 
 use glam::Vec3;
+use umicraft_assets::AnimationTimeline;
 use umicraft_game::entity::EntityRenderSnapshot;
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::EntityVertex;
 
-/// Frames in a fire sprite strip (`fire_layer_0.png` is 16 x 512).
-pub(super) const FIRE_FRAMES: f32 = 32.0;
+/// Frames in the vanilla fire sprite strip (`fire_layer_0.png` is 16 x 512),
+/// assumed when no strip was loaded (demos, tests).
+const VANILLA_FIRE_FRAMES: usize = 32;
 /// Full block and sky light: the fire does not depend on the light.
 const FIRE_LIGHT: u32 = 0x0000_00FF;
 
+/// How the flames map one fire sprite strip (`fire_layer_0` or `_1`).
+///
+/// The reference draws the flames with the atlas sprite, so they show the
+/// frame the block animation shows: the strip of the pack, cut in square
+/// frames, played in the order of its `.mcmeta`. A pack strip need not have
+/// the 32 frames of the vanilla one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FireStrip {
+    /// The frames of the strip and their order; `None` for a picture that is
+    /// not animated, which is drawn whole, as the atlas keeps it.
+    animation: Option<(usize, AnimationTimeline)>,
+}
+
+impl FireStrip {
+    /// The strip of a `width` x `height` picture with its `.mcmeta` bytes, if
+    /// any. Without metadata, or when the height is not a whole number of
+    /// square frames, the picture is not animated
+    /// (`TextureAtlasSprite.loadSprite`).
+    #[must_use]
+    pub(crate) fn new(width: u32, height: u32, mcmeta: Option<&[u8]>) -> Self {
+        let frames = (width > 0 && height.is_multiple_of(width)).then(|| (height / width) as usize);
+        let animation = frames.and_then(|frames| {
+            let timeline = AnimationTimeline::from_mcmeta(frames, mcmeta?)?;
+            Some((frames, timeline))
+        });
+        Self { animation }
+    }
+
+    /// The vertical texture span `(v_min, v_max)` of the frame shown `tick`
+    /// ticks into the animation.
+    fn v_span(&self, tick: u32) -> (f32, f32) {
+        let Some((frames, timeline)) = &self.animation else {
+            return (0.0, 1.0);
+        };
+        let frame = timeline.frame_at(tick) as f32;
+        let frames = *frames as f32;
+        (frame / frames, (frame + 1.0) / frames)
+    }
+}
+
+impl Default for FireStrip {
+    /// The vanilla strip: 32 frames, one tick each.
+    fn default() -> Self {
+        Self {
+            animation: AnimationTimeline::in_order(VANILLA_FIRE_FRAMES)
+                .map(|timeline| (VANILLA_FIRE_FRAMES, timeline)),
+        }
+    }
+}
+
+/// The two fire strips, indexed like [`TextureSlot::Fire`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct FireStrips(pub(crate) [FireStrip; 2]);
+
 /// Adds the flames of `ent` to `batches` when it is burning. `view_yaw` is
-/// the yaw of the camera, in the convention of `umicraft_render::Camera`.
+/// the yaw of the camera, in the convention of `umicraft_render::Camera`;
+/// `strips` tells which frame of each sprite shows.
 pub(super) fn add_fire(
     batches: &mut HashMap<TextureSlot, Vec<EntityVertex>>,
     ent: &EntityRenderSnapshot,
     view_yaw: f32,
+    strips: &FireStrips,
 ) {
     if !ent.flags.on_fire() {
         return;
     }
     let forward = Vec3::new(view_yaw.sin(), 0.0, -view_yaw.cos());
     let right = Vec3::new(view_yaw.cos(), 0.0, view_yaw.sin());
-    // Frame of the strip: one per tick, as the atlas animation advances.
-    let frame = (ent.age.floor().max(0.0) % FIRE_FRAMES).floor();
-    let (v_min, v_max) = (frame / FIRE_FRAMES, (frame + 1.0) / FIRE_FRAMES);
+    // One step of the animation per tick, as the atlas animation advances.
+    let tick = ent.age.max(0.0) as u32;
+    let spans = strips.0.each_ref().map(|strip| strip.v_span(tick));
 
     let size = ent.kind.width() * 1.4;
     let mut remaining = ent.kind.height() / size;
@@ -41,7 +99,9 @@ pub(super) fn add_fire(
     let mut depth = -0.3 + (remaining as i32) as f32 * 0.02;
     let mut index = 0u32;
     while remaining > 0.0 {
-        let slot = TextureSlot::Fire((index % 2) as u8);
+        let sprite = (index % 2) as usize;
+        let slot = TextureSlot::Fire(sprite as u8);
+        let (v_min, v_max) = spans[sprite];
         let (mut u_left, mut u_right) = (1.0, 0.0);
         if (index / 2).is_multiple_of(2) {
             (u_left, u_right) = (u_right, u_left);
@@ -89,7 +149,7 @@ mod tests {
 
     fn fire(ent: &EntityRenderSnapshot, view_yaw: f32) -> HashMap<TextureSlot, Vec<EntityVertex>> {
         let mut batches = HashMap::new();
-        add_fire(&mut batches, ent, view_yaw);
+        add_fire(&mut batches, ent, view_yaw, &FireStrips::default());
         batches
     }
 
@@ -162,13 +222,40 @@ mod tests {
         let mut ent = burning(EntityKind::Zombie);
         ent.age = 5.4;
         let batches = fire(&ent, 0.0);
-        let vs: Vec<f32> = batches[&TextureSlot::Fire(0)]
+        let frames = VANILLA_FIRE_FRAMES as f32;
+        assert_eq!(v_values(&batches, 0), [5.0 / frames, 6.0 / frames]);
+    }
+
+    /// The distinct `v` coordinates of the quads of sprite `sprite`.
+    fn v_values(batches: &HashMap<TextureSlot, Vec<EntityVertex>>, sprite: u8) -> Vec<f32> {
+        let mut vs: Vec<f32> = batches[&TextureSlot::Fire(sprite)]
             .iter()
             .map(|v| v.uv[1])
             .collect();
-        let (lo, hi) = (5.0 / FIRE_FRAMES, 6.0 / FIRE_FRAMES);
-        assert!(vs
-            .iter()
-            .all(|&v| (v - lo).abs() < 1e-5 || (v - hi).abs() < 1e-5));
+        vs.sort_by(f32::total_cmp);
+        vs.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        vs
+    }
+
+    #[test]
+    fn a_pack_strip_plays_its_own_frames_in_its_own_order() {
+        // A 16 x 256 pack strip: 16 frames, listed backwards, two ticks each.
+        let mcmeta = br#"{"animation": {"frametime": 2, "frames": [15, 14, 13]}}"#;
+        let strip = FireStrip::new(16, 256, Some(mcmeta));
+        let strips = FireStrips([strip.clone(), strip]);
+        let mut ent = burning(EntityKind::Zombie);
+        ent.age = 3.0;
+        let mut batches = HashMap::new();
+        add_fire(&mut batches, &ent, 0.0, &strips);
+        // Tick 3 is the second frame of the list, 14 of 16.
+        assert_eq!(v_values(&batches, 1), [14.0 / 16.0, 15.0 / 16.0]);
+    }
+
+    #[test]
+    fn a_strip_without_animation_is_drawn_whole() {
+        assert_eq!(FireStrip::new(16, 256, None).v_span(7), (0.0, 1.0));
+        // Not a whole number of square frames.
+        let odd = FireStrip::new(16, 250, Some(br#"{"animation": {}}"#));
+        assert_eq!(odd.v_span(7), (0.0, 1.0));
     }
 }

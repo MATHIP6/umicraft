@@ -44,9 +44,12 @@ pub(super) fn follow_body(game: &mut Game) {
     let Some(state) = game.state.as_ref() else {
         return;
     };
-    // The same bits the server sends for a remote player: sneaking 0x02 and
-    // using the held item 0x10 (the sword blocks, the bow is aimed).
-    let sneaking = if state.player().sneaking { 0x02 } else { 0 }
+    // The same bits the server sends for a remote player: burning 0x01 (the
+    // flames of `Render.renderEntityOnFire` in the second and third person),
+    // sneaking 0x02 and using the held item 0x10 (the sword blocks, the bow is
+    // aimed). Only the burning bit comes from the server's metadata.
+    let flags = u8::from(game.overlays.on_fire())
+        | if state.player().sneaking { 0x02 } else { 0 }
         | if game.item_use.is_using() { 0x10 } else { 0 };
     game.body.id = EntityId(game.entity_id);
     game.body.local = true;
@@ -81,7 +84,7 @@ pub(super) fn follow_body(game: &mut Game) {
         state.position(),
         game.yaw,
         game.pitch,
-        EntityFlags::new(sneaking, 0x7F),
+        EntityFlags::new(flags, 0x7F),
     );
     // The swing of the third person arm advances with the tick, as the
     // animation of every tracked entity does in `EntityStore::tick`.

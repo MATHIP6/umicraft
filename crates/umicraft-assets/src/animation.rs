@@ -73,6 +73,88 @@ impl AnimationMeta {
     }
 }
 
+impl AnimationMeta {
+    /// The timeline of a strip of `frame_count` frames: the listed `frames`,
+    /// or every frame in order for `frametime` ticks each.
+    fn timeline(&self, frame_count: usize) -> Vec<AnimationStep> {
+        if self.steps.is_empty() {
+            (0..frame_count)
+                .map(|frame| AnimationStep {
+                    frame,
+                    ticks: self.frame_time,
+                })
+                .collect()
+        } else {
+            self.steps.clone()
+        }
+    }
+}
+
+/// Which frame of an animated strip shows at a given tick, without the
+/// pixels: for a model that maps the strip itself rather than reading the
+/// atlas layer (the flames on a burning entity).
+///
+/// It follows the same `.mcmeta` timeline as [`TextureAnimation`], but never
+/// blends frames (`interpolate` is ignored).
+///
+/// # Example
+///
+/// ```
+/// use umicraft_assets::AnimationTimeline;
+///
+/// let timeline = AnimationTimeline::from_mcmeta(3, br#"{"animation": {"frames": [2, 0]}}"#)
+///     .expect("an animation section");
+/// assert_eq!([0, 1, 2].map(|tick| timeline.frame_at(tick)), [2, 0, 2]);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnimationTimeline {
+    steps: Vec<AnimationStep>,
+    /// Ticks of one loop of the timeline, at least 1.
+    period: u32,
+}
+
+impl AnimationTimeline {
+    /// The timeline of a strip of `frame_count` frames from the bytes of its
+    /// `.mcmeta` file.
+    ///
+    /// Returns `None` when the metadata has no valid `animation` section or
+    /// names no frame of the strip. Listed frames past the end of the strip
+    /// are dropped.
+    #[must_use]
+    pub fn from_mcmeta(frame_count: usize, mcmeta: &[u8]) -> Option<Self> {
+        let steps: Vec<AnimationStep> = AnimationMeta::parse(mcmeta)?
+            .timeline(frame_count)
+            .into_iter()
+            .filter(|step| step.frame < frame_count)
+            .collect();
+        let period = steps
+            .iter()
+            .fold(0u32, |sum, step| sum.saturating_add(step.ticks));
+        (period > 0).then_some(Self { steps, period })
+    }
+
+    /// Every one of `frame_count` frames in order, one tick each (a strip
+    /// whose `.mcmeta` is `{"animation": {}}`). `None` for an empty strip.
+    #[must_use]
+    pub fn in_order(frame_count: usize) -> Option<Self> {
+        Self::from_mcmeta(frame_count, br#"{"animation": {}}"#)
+    }
+
+    /// The index of the frame shown `tick` ticks after the first frame.
+    #[must_use]
+    pub fn frame_at(&self, tick: u32) -> usize {
+        let mut left = tick % self.period;
+        for step in &self.steps {
+            if left < step.ticks {
+                return step.frame;
+            }
+            left -= step.ticks;
+        }
+        // Unreachable: the ticks of the steps add up to `period`.
+        self.steps.first().map_or(0, |step| step.frame)
+    }
+}
+
 /// A strictly positive tick count that fits a `u32`.
 fn positive(value: &Value) -> Option<u32> {
     u32::try_from(value.as_u64()?).ok().filter(|&n| n > 0)
@@ -107,16 +189,7 @@ impl TextureAnimation {
         if frames.len() < 2 {
             return None;
         }
-        let steps = if meta.steps.is_empty() {
-            (0..frames.len())
-                .map(|frame| AnimationStep {
-                    frame,
-                    ticks: meta.frame_time,
-                })
-                .collect()
-        } else {
-            meta.steps.clone()
-        };
+        let steps = meta.timeline(frames.len());
         let first = steps.first()?.frame;
         if steps.iter().all(|step| step.frame == first) {
             return None;
@@ -240,6 +313,25 @@ mod tests {
         ] {
             assert_eq!(AnimationMeta::parse(json.as_bytes()), None, "{json}");
         }
+    }
+
+    #[test]
+    fn a_timeline_follows_the_listed_frames_and_their_times() {
+        let mcmeta =
+            br#"{"animation": {"frametime": 2, "frames": [1, {"index": 0, "time": 1}, 9]}}"#;
+        let timeline = AnimationTimeline::from_mcmeta(2, mcmeta).expect("animated");
+        // Frame 9 is past the strip and dropped: the loop is 1, 1, 0.
+        let frames: Vec<usize> = (0..6).map(|tick| timeline.frame_at(tick)).collect();
+        assert_eq!(frames, [1, 1, 0, 1, 1, 0]);
+    }
+
+    #[test]
+    fn a_timeline_without_frames_plays_the_strip_in_order() {
+        let timeline = AnimationTimeline::in_order(16).expect("animated");
+        assert_eq!(timeline.frame_at(5), 5);
+        assert_eq!(timeline.frame_at(16 + 3), 3);
+        assert!(AnimationTimeline::in_order(0).is_none());
+        assert!(AnimationTimeline::from_mcmeta(4, b"{}").is_none());
     }
 
     #[test]

@@ -445,3 +445,32 @@ fn the_1_7_sneak_camera_rises_back_over_a_few_ticks() {
     let lowered = vanilla - eye_y(&game);
     assert!((lowered - 0.032).abs() < 1e-6, "{lowered}");
 }
+
+#[test]
+fn the_local_body_burns_when_the_server_sets_its_fire_flag() {
+    use umicraft_protocol::packets::play::clientbound::EntityMetadata;
+    use umicraft_protocol::packets::play::metadata::WatchedObject;
+
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    let (frames, _received) = mpsc::sync_channel(8);
+    game.entity_id = 1;
+    let flags = |value: u8| {
+        PlayEvent::EntityMetadata(EntityMetadata {
+            entity_id: 1,
+            metadata: Metadata {
+                objects: vec![WatchedObject {
+                    type_id: 0,
+                    index: 0,
+                    value: vec![value],
+                }],
+            },
+        })
+    };
+    handle_net(&mut game, flags(0x01), &mut queue, &frames);
+    follow_body(&mut game);
+    assert!(game.body.frame_data().flags.on_fire());
+    handle_net(&mut game, flags(0x00), &mut queue, &frames);
+    follow_body(&mut game);
+    assert!(!game.body.frame_data().flags.on_fire());
+}

@@ -157,6 +157,14 @@ pub(super) fn mesh_entities_with(
     let mut tinted: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut shadows: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
 
+    let vanilla_fire;
+    let fire_strips = match skins.fire_strips() {
+        Some(strips) => strips,
+        None => {
+            vanilla_fire = fire::FireStrips::default();
+            &vanilla_fire
+        }
+    };
     for ent in snapshots {
         // A beam can be in view while its guardian is not
         // (`RenderGuardian.shouldRender`).
@@ -200,7 +208,7 @@ pub(super) fn mesh_entities_with(
                     .map(|vertex| xform.transform(vertex, light)),
             );
         }
-        fire::add_fire(&mut solid, ent, view_yaw);
+        fire::add_fire(&mut solid, ent, view_yaw, fire_strips);
         arrows::add_flying_arrow(&mut solid, ent, light);
         vehicles::add_vehicle(&mut solid, ent, light);
         xp::add_xp_orb(&mut solid, ent, light, view_yaw, view_pitch);

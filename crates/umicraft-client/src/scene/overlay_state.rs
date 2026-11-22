@@ -161,6 +161,12 @@ impl OverlayTracker {
         }
     }
 
+    /// Whether the server says the local player burns (flag 0x01 of watcher 0).
+    #[must_use]
+    pub fn on_fire(&self) -> bool {
+        self.on_fire
+    }
+
     /// Advances one tick.
     pub fn tick(&mut self, facts: &PlayerFacts<'_>) {
         self.portal.tick(facts.nausea_ticks);
