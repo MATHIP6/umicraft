@@ -4,7 +4,8 @@
 
 use std::sync::mpsc::SyncSender;
 
-use umicraft_game::inventory::WindowKind;
+use umicraft_game::entity::EntityId;
+use umicraft_game::inventory::{HorseWindow, WindowKind};
 use umicraft_protocol::packets::play::clientbound::{
     ConfirmTransaction, OpenWindow, SetSlot, WindowItems, WindowProperty,
 };
@@ -47,6 +48,15 @@ pub(super) fn open_window(game: &mut Game, packet: OpenWindow, frames: &SyncSend
     if let Some(kind) = WindowKind::from_type_string(&packet.window_type) {
         game.windows
             .open_window(packet.window_id, kind, packet.title, packet.slot_count);
+        if let Some(entity_id) = packet.entity_id {
+            // `NetHandlerPlayClient.handleOpenWindow` finds the horse by id; an
+            // unknown one keeps the armour slot, as before its metadata came.
+            let horse = game.entities.horse(EntityId(entity_id));
+            game.windows.set_horse(HorseWindow {
+                entity_id,
+                wears_armor: horse.is_none_or(|horse| horse.kind == 0),
+            });
+        }
         publish_inventory(game, frames);
     } else {
         tracing::warn!(

@@ -16,8 +16,10 @@ use super::slot::{container_window_kinds, player_window_kinds, SlotKind};
 use super::space::ClickSpace;
 use super::stack::{from_wire, same_item, to_wire};
 use super::transactions::{Confirmation, Snapshot, Transactions};
-use super::view::{ContainerView, WindowView};
+use super::view::{ContainerView, HorseWindow, WindowView};
 
+/// The armour slot of a horse window (`ContainerHorseInventory`, slot 1).
+const HORSE_ARMOR_SLOT: usize = 1;
 /// The first armour slot of the player window.
 const HELMET_SLOT: usize = 5;
 /// The last armour slot of the player window.
@@ -40,6 +42,8 @@ pub struct ContainerWindow {
     pub trades: Vec<Trade>,
     /// The offer shown in a villager window.
     pub selected_trade: usize,
+    /// The horse of a horse window, see [`WindowManager::set_horse`].
+    pub horse: Option<HorseWindow>,
     kinds: Vec<SlotKind>,
 }
 
@@ -154,9 +158,30 @@ impl WindowManager {
             properties: Vec::new(),
             trades: Vec::new(),
             selected_trade: 0,
+            horse: None,
             kinds: container_window_kinds(kind, own),
         });
         self.reset_transactions();
+    }
+
+    /// Ties the open horse window to its horse. A horse that cannot wear
+    /// armour gets an armour slot that refuses every item, as
+    /// `ContainerHorseInventory`'s slot 1 does (`isItemValid` checks
+    /// `canWearArmor`), so a shift-click does not predict a move there.
+    pub fn set_horse(&mut self, horse: HorseWindow) {
+        let Some(container) = self
+            .container
+            .as_mut()
+            .filter(|container| container.kind == WindowKind::Horse)
+        else {
+            return;
+        };
+        container.horse = Some(horse);
+        if !horse.wears_armor {
+            if let Some(kind) = container.kinds.get_mut(HORSE_ARMOR_SLOT) {
+                *kind = SlotKind::Output;
+            }
+        }
     }
 
     /// Closes a container window and clears the cursor.
@@ -523,6 +548,7 @@ impl WindowManager {
                 properties: c.properties.clone(),
                 trades: c.trades.clone(),
                 selected_trade: c.selected_trade,
+                horse: c.horse,
             }),
             cursor: self.cursor.clone(),
             selected_slot: self.selected_slot,
@@ -573,6 +599,42 @@ mod tests {
         assert_eq!(wm.cursor(), Some(&stack(1, 2)));
         wm.apply_set_slot(-1, -1, ItemStack::EMPTY);
         assert_eq!(wm.cursor(), None);
+    }
+
+    /// A horse window (id 3) with iron horse armour in the first backpack slot.
+    fn horse_window(wears_armor: bool) -> WindowManager {
+        let mut wm = WindowManager::new();
+        wm.open_window(3, WindowKind::Horse, "Horse".into(), 2);
+        wm.set_horse(HorseWindow {
+            entity_id: 9,
+            wears_armor,
+        });
+        let mut items = vec![ItemStack::EMPTY; 38];
+        items[2] = stack(417, 1);
+        wm.apply_window_items(3, &items);
+        wm
+    }
+
+    fn horse_armor_slot(wm: &WindowManager) -> Option<ItemStack> {
+        wm.view()
+            .container
+            .and_then(|c| c.slots[HORSE_ARMOR_SLOT].clone())
+    }
+
+    #[test]
+    fn a_horse_takes_armour_on_a_shift_click() {
+        let mut wm = horse_window(true);
+        wm.click(ClickRequest::shift(2, 0), false);
+        assert_eq!(horse_armor_slot(&wm), Some(stack(417, 1)));
+    }
+
+    #[test]
+    fn a_donkey_refuses_armour_on_a_shift_click() {
+        let mut wm = horse_window(false);
+        wm.click(ClickRequest::shift(2, 0), false);
+        assert_eq!(horse_armor_slot(&wm), None);
+        let horse = wm.view().container.and_then(|c| c.horse);
+        assert_eq!(horse.map(|h| h.wears_armor), Some(false));
     }
 
     fn shift_double(wm: &mut WindowManager, slot: i16) {

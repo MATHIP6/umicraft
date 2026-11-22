@@ -17,6 +17,7 @@ use crate::view::ViewEffects;
 use crate::RenderState;
 
 use super::boat::RiderInput;
+use super::meta::HorseMeta;
 use super::{
     BedPose, BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityRenderSnapshot, MobState, PlayerProfile, Variant,
@@ -77,6 +78,15 @@ impl EntityStore {
     #[must_use]
     pub fn kind(&self, id: EntityId) -> Option<EntityKind> {
         self.entities.get(&id).map(|entity| entity.kind)
+    }
+
+    /// The horse state of a tracked horse, donkey or mule.
+    #[must_use]
+    pub fn horse(&self, id: EntityId) -> Option<HorseMeta> {
+        match self.entities.get(&id)?.meta.variant {
+            Variant::Horse(horse) => Some(horse),
+            _ => None,
+        }
     }
 
     /// Clears all tracked entities.

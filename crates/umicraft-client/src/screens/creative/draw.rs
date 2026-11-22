@@ -360,6 +360,7 @@ pub fn draw_creative_overlay(
             origin: (window.x, window.y),
             gui_scale: layout.scale(),
             placement: portrait::CREATIVE,
+            subject: portrait::Subject::LocalPlayer,
         }
     });
     if let Some(spot) = &spot {

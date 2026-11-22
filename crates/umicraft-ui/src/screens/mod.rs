@@ -83,6 +83,9 @@ pub enum ScreenKind {
     Horse {
         /// Number of window slots before the player part.
         own_slots: u8,
+        /// Whether the horse can wear armour; without it the armour slot is
+        /// neither drawn nor hoverable.
+        armor: bool,
     },
 }
 
@@ -139,7 +142,7 @@ impl ScreenKind {
             Self::Anvil => anvil::spec(),
             Self::Beacon => beacon::spec(),
             Self::Villager => villager::spec(),
-            Self::Horse { own_slots } => horse::spec(usize::from(own_slots)),
+            Self::Horse { own_slots, armor } => horse::spec(usize::from(own_slots), armor),
         }
     }
 
@@ -188,7 +191,10 @@ mod tests {
         ScreenKind::Anvil,
         ScreenKind::Beacon,
         ScreenKind::Villager,
-        ScreenKind::Horse { own_slots: 17 },
+        ScreenKind::Horse {
+            own_slots: 17,
+            armor: true,
+        },
     ];
 
     #[test]

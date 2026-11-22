@@ -32,7 +32,7 @@ use crate::resources::sky::CustomSkyFrame;
 use crate::scene::block_entity::{mesh_block_entities, BlockEntityScene};
 use crate::scene::item_world::{entity_items, push_held_item, WorldItems};
 use crate::scene::map::map_id_of;
-use crate::screens::portrait::{carry, turned_towards};
+use crate::screens::portrait::{carry, turned_towards, Subject};
 use crate::screens::Screen;
 use crate::world_view::WorldView;
 
@@ -634,14 +634,19 @@ impl App {
         }
     }
 
-    /// Draws the player into the portrait of the inventory screen, turned
-    /// towards the mouse.
+    /// Draws the player (or the horse of a horse window) into the portrait of
+    /// the inventory screen, turned towards the mouse.
     fn draw_portrait(&mut self, renderer: &mut Renderer) {
-        if let (Some(spot), Some(textures), Some(body)) = (
-            self.portrait,
-            self.assets.entity_textures.as_ref(),
-            self.world.as_ref().and_then(|world| world.local_body()),
-        ) {
+        let body = self
+            .portrait
+            .zip(self.world.as_ref())
+            .and_then(|(spot, world)| match spot.subject {
+                Subject::LocalPlayer => world.local_body(),
+                Subject::Entity(id) => world.entity_body(id),
+            });
+        if let (Some(spot), Some(textures), Some(body)) =
+            (self.portrait, self.assets.entity_textures.as_ref(), body)
+        {
             let mouse = spot.mouse_offset(self.input.pointer);
             let posed = turned_towards(body, mouse);
             let matrix = spot.placement.matrix(mouse);

@@ -114,6 +114,7 @@ mod tests {
                 properties: Vec::new(),
                 trades: Vec::new(),
                 selected_trade: 0,
+                horse: None,
             }),
             cursor: None,
             selected_slot: 0,

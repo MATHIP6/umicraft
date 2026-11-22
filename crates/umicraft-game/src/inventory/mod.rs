@@ -37,4 +37,4 @@ pub use kind::{
 pub use manager::{ClickCommand, ContainerWindow, WindowManager};
 pub use player::PlayerInventory;
 pub use preview::{drag_preview, DragPreview};
-pub use view::{ContainerView, WindowView};
+pub use view::{ContainerView, HorseWindow, WindowView};

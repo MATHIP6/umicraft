@@ -8,6 +8,7 @@
 //! never touches the game state.
 
 use umicraft_assets::GuiAtlas;
+use umicraft_game::entity::EntityId;
 use umicraft_game::inventory::effect_list::EffectLine;
 use umicraft_game::inventory::{
     resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
@@ -25,7 +26,7 @@ use crate::resources::item_icons::{slot_item, ItemView};
 use crate::screens::anvil_field::FieldView;
 use crate::screens::effect_list::draw_effect_list;
 use crate::screens::inventory::input::Context;
-use crate::screens::portrait::{self, Spot};
+use crate::screens::portrait::{self, Spot, Subject};
 use crate::screens::tooltip::draw_tooltip;
 
 /// Number of backpack and hotbar slots after a container's own slots.
@@ -61,6 +62,7 @@ pub fn screen_kind(container: Option<&ContainerView>) -> ScreenKind {
         WindowKind::Villager => ScreenKind::Villager,
         WindowKind::Horse => ScreenKind::Horse {
             own_slots: u8::try_from(container.slots.len()).unwrap_or(u8::MAX),
+            armor: container.horse.is_none_or(|horse| horse.wears_armor),
         },
         WindowKind::Chest => ScreenKind::Chest {
             rows: rows(container.slots.len()),
@@ -331,12 +333,13 @@ fn rgb(value: u32) -> [f32; 4] {
     [channel(16), channel(8), channel(0), 1.0]
 }
 
-/// The number of slots the container adds in front of the player part.
+/// The number of slots the container adds in front of the player part. A
+/// horse window keeps its armour slot when the layout leaves it out.
 fn own_slot_count(layout: &ScreenLayout, kind: ScreenKind) -> usize {
-    if kind == ScreenKind::Player {
-        0
-    } else {
-        layout.slots.len().saturating_sub(PLAYER_PART_LEN)
+    match kind {
+        ScreenKind::Player => 0,
+        ScreenKind::Horse { own_slots, .. } => usize::from(own_slots),
+        _ => layout.slots.len().saturating_sub(PLAYER_PART_LEN),
     }
 }
 
@@ -350,6 +353,29 @@ fn stack_at(view: &WindowView, own_len: usize, index: usize) -> Option<&ItemStac
         SlotTarget::Container(i) => container.slots.get(i)?.as_ref(),
         SlotTarget::Player(i) => view.player_slots.get(i)?.as_ref(),
     }
+}
+
+/// Where the screen shows a model: the player in the survival inventory,
+/// the horse in a horse window (`GuiScreenHorseInventory`).
+fn portrait_spot(
+    layout: &ScreenLayout,
+    kind: ScreenKind,
+    container: Option<&ContainerView>,
+) -> Option<Spot> {
+    let (placement, subject) = match kind {
+        ScreenKind::Player => (portrait::INVENTORY, Subject::LocalPlayer),
+        ScreenKind::Horse { .. } => {
+            let horse = container?.horse?;
+            (portrait::HORSE, Subject::Entity(EntityId(horse.entity_id)))
+        }
+        _ => return None,
+    };
+    Some(Spot {
+        origin: (layout.background.x, layout.background.y),
+        gui_scale: layout.scale,
+        placement,
+        subject,
+    })
 }
 
 /// Whether window slot `index` of the open screen holds a stack
@@ -407,11 +433,7 @@ pub(crate) fn draw_inventory_overlay(
     if let Some(field) = &facts.anvil {
         draw_name_field(ui, atlas, &layout, field, facts.caret_visible);
     }
-    let spot = (kind == ScreenKind::Player).then_some(Spot {
-        origin: (layout.background.x, layout.background.y),
-        gui_scale: layout.scale,
-        placement: portrait::INVENTORY,
-    });
+    let spot = portrait_spot(&layout, kind, view.container.as_ref());
     if let Some(spot) = &spot {
         ui.draw().item(PORTRAIT_KEY, spot.rect(), false);
     }
@@ -592,6 +614,7 @@ mod tests {
             properties: Vec::new(),
             trades: Vec::new(),
             selected_trade: 0,
+            horse: None,
         }
     }
 
@@ -683,7 +706,10 @@ mod tests {
         assert_eq!(kind(WindowKind::Villager, 3), ScreenKind::Villager);
         assert_eq!(
             kind(WindowKind::Horse, 17),
-            ScreenKind::Horse { own_slots: 17 }
+            ScreenKind::Horse {
+                own_slots: 17,
+                armor: true
+            }
         );
     }
 

@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use umicraft_game::entity::{wrap_degrees, EntityRenderSnapshot};
+use umicraft_game::entity::{wrap_degrees, EntityId, EntityRenderSnapshot};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::piston::MovingBlocks;
 use umicraft_game::server::block_entities::EntityTable;
@@ -197,6 +197,16 @@ impl WorldView {
             }
             snapshot
         }));
+    }
+
+    /// A tracked entity at the newest tick in world coordinates, for a
+    /// portrait such as the horse of a horse window.
+    #[must_use]
+    pub fn entity_body(&self, id: EntityId) -> Option<EntityRenderSnapshot> {
+        self.entities
+            .iter()
+            .find(|entity| entity.id == id)
+            .map(|entity| entity.interpolate(1.0, glam::DVec3::ZERO))
     }
 
     /// The body of the local player at the newest tick, once a frame arrived.
